@@ -23,6 +23,8 @@ import { historicalImage, phrenStoreRoot, TranscriptReader, transcriptPath, visi
 import { dispatch } from "./transport.js";
 import { enrollComputer, publicComputerKey } from "./computers.js";
 
+const hasNodeSqlite = await import("node:sqlite").then(() => true, () => false);
+
 // Run through bridge.test.ts, bridge.2.test.ts and bridge.3.test.ts, each one shard.
 const { it, describe, describeAll } = shard();
 const execFileAsync = promisify(execFile);
@@ -643,7 +645,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
     await writeFile(expired, "{}\n"); await utimes(expired, 1, 1);
     hook = spawn(process.execPath, [hookBundle, "serve"], { env: { ...process.env,
       PATH: `${path.join(root, "bin")}:${process.env.PATH}`, PHREN_PATH: path.join(root, ".phren"),
-      HOME: root, PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex"),
+      HOME: root, XDG_CONFIG_HOME: path.join(root, ".config"), PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex"),
       PHREN_APPROVAL_HOLD_MS: "2500", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
       stdio: ["ignore", "ignore", "pipe"] });
     hook.stderr!.on("data", bytes => log += bytes);
@@ -694,7 +696,7 @@ socket.on('error', () => process.exit(1));
 socket.on('close', () => process.exit(0));
 `, { mode: 0o700 });
     remoteHook = spawn(process.execPath, [hookBundle, "serve"], { env: { ...process.env,
-      HOME: root, PHREN_PATH: path.join(root, "remote-store"), PHREN_BRIDGE_HOME: remoteRoot,
+      HOME: root, XDG_CONFIG_HOME: path.join(root, ".config"), PHREN_PATH: path.join(root, "remote-store"), PHREN_BRIDGE_HOME: remoteRoot,
       PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex") }, stdio: ["ignore", "ignore", "pipe"] });
     remoteHook.stderr!.on("data", bytes => log += bytes);
     await waitFor(() => stat(path.join(remoteRoot, "hook.sock")).catch(() => undefined), 2_000);
@@ -1245,7 +1247,8 @@ schedules:
       cleared.terminate();
     });
 
-    it("carries Codex's queued follow-up question on the overview and answers it with alt+up then the option key", async () => {
+    // The fixture is Codex's SQLite thread store, which needs node:sqlite (Node 22.5+).
+    it.skipIf(!hasNodeSqlite)("carries Codex's queued follow-up question on the overview and answers it with alt+up then the option key", async () => {
       agentStatus = "blocked";
       const sqlite = await import("node:sqlite");
       const historyPath = path.join(root, "codex/thread_history_1.sqlite");

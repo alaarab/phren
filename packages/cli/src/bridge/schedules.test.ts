@@ -53,27 +53,31 @@ function fakePush(values: SchedulePush[]): SchedulePushSender {
   return { notify: async value => { values.push(value); return { notified: true }; } };
 }
 
+// Real time, not event-loop turns: the run record and its push follow file
+// I/O, which a slow CI runner finishes after 20 turns (seen on Linux).
+const pollMs = 5, pollAttempts = 400;
+
 async function waitForStatus(scheduler: Scheduler, status: ScheduleRun["status"]): Promise<ScheduleRun> {
-  for (let attempt = 0; attempt < 20; attempt++) {
+  for (let attempt = 0; attempt < pollAttempts; attempt++) {
     const run = (await scheduler.history())[0];
     if (run?.status === status) return run;
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setTimeout(resolve, pollMs));
   }
   throw new Error(`Schedule run did not reach ${status}.`);
 }
 
 async function waitForPushes(values: SchedulePush[], count: number): Promise<void> {
-  for (let attempt = 0; attempt < 20; attempt++) {
+  for (let attempt = 0; attempt < pollAttempts; attempt++) {
     if (values.length >= count) return;
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setTimeout(resolve, pollMs));
   }
   throw new Error(`Schedule produced ${values.length} of ${count} expected pushes.`);
 }
 
 async function waitForBlockNotified(scheduler: Scheduler): Promise<void> {
-  for (let attempt = 0; attempt < 40; attempt++) {
+  for (let attempt = 0; attempt < pollAttempts; attempt++) {
     if ((await scheduler.history())[0]?.blockNotified) return;
-    await new Promise(resolve => setTimeout(resolve, 5));
+    await new Promise(resolve => setTimeout(resolve, pollMs));
   }
   throw new Error("The blocked-at-startup push result was not recorded.");
 }
