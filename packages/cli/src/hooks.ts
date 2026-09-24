@@ -142,7 +142,7 @@ function isPathLike(token: string): boolean {
  * and every hook then dies with MODULE_NOT_FOUND on every prompt and every
  * Stop — silently, because hook failures are not surfaced.
  */
-export function extractHookScriptPath(command: string): string | null {
+function extractHookScriptPath(command: string): string | null {
   if (!command) return null;
   // `npx` re-resolves the package each run, so it is never stale.
   if (/(^|\s)npx(\.cmd)?(\s|$)/.test(command)) return null;

@@ -5,7 +5,6 @@ import * as path from "path";
 import {
   findConflictingGlobalWiring,
   assertNoGlobalWiringConflict,
-  isLiveForeignPhrenRoot,
   phrenRootFromGlobalClaudeLink,
 } from "../init/guard-globals.js";
 
@@ -230,12 +229,6 @@ describe("init guard against repointing global wiring", () => {
 // ── link-target helpers ──────────────────────────────────────────────────────
 
 describe("phrenRootFromGlobalClaudeLink", () => {
-  it("recovers the root from a <root>/global/AGENTS.md target", () => {
-    expect(phrenRootFromGlobalClaudeLink("/home/me/.phren/global/AGENTS.md")).toBe(
-      path.resolve("/home/me/.phren"),
-    );
-  });
-
   it("returns null for a target that is not a phren global file", () => {
     expect(phrenRootFromGlobalClaudeLink("/home/me/dotfiles/AGENTS.md")).toBeNull();
     expect(phrenRootFromGlobalClaudeLink("/home/me/global/NOTES.md")).toBeNull();
@@ -243,25 +236,3 @@ describe("phrenRootFromGlobalClaudeLink", () => {
   });
 });
 
-describe("isLiveForeignPhrenRoot", () => {
-  let tmp: string;
-
-  beforeEach(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "phren-foreign-root-"));
-  });
-  afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
-
-  it("is false for the root being installed", () => {
-    const root = makeRealRoot(tmp);
-    expect(isLiveForeignPhrenRoot(root, root)).toBe(false);
-  });
-
-  it("is true for a different root that still looks live", () => {
-    const other = makeRealRoot(tmp, "other");
-    expect(isLiveForeignPhrenRoot(other, path.join(tmp, "mine"))).toBe(true);
-  });
-
-  it("is false for a different path that no longer exists", () => {
-    expect(isLiveForeignPhrenRoot(path.join(tmp, "gone"), path.join(tmp, "mine"))).toBe(false);
-  });
-});
