@@ -380,11 +380,14 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
       : `write+read+delete in ${fsMs}ms${fsSlow ? " (slow, check if ~/.phren is on a network mount)" : ""}`,
   });
 
+  // Both generated home files are self-heal surfaces; under a preset without
+  // selfHeal a missing one is expected, not a failure.
+  const notSelfHealed = `not re-created under ${managementPreset} preset`;
   const contextFile = homePath(".phren-context.md");
   checks.push({
     name: "context-file",
-    ok: fs.existsSync(contextFile),
-    detail: fs.existsSync(contextFile) ? contextFile : "missing ~/.phren-context.md",
+    ok: fs.existsSync(contextFile) || !caps.selfHeal,
+    detail: fs.existsSync(contextFile) ? contextFile : caps.selfHeal ? "missing ~/.phren-context.md" : notSelfHealed,
   });
 
   const memoryFile = path.join(
@@ -397,8 +400,8 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   );
   checks.push({
     name: "root-memory",
-    ok: fs.existsSync(memoryFile),
-    detail: fs.existsSync(memoryFile) ? memoryFile : "missing generated MEMORY.md",
+    ok: fs.existsSync(memoryFile) || !caps.selfHeal,
+    detail: fs.existsSync(memoryFile) ? memoryFile : caps.selfHeal ? "missing generated MEMORY.md" : notSelfHealed,
   });
 
   // Under presets that don't symlink into ~/.claude, the "missing" links are
