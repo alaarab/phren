@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { logger } from "../logger.js";
-import { claudeChrome, claudePanePreview, CodexRolloutPreview, readPreviewPane, TranscriptPreviewStream, unwrapTerminalLines } from "./transcript-preview.js";
+import { claudeChrome, claudePanePreview, CodexRolloutPreview, readDeltaPreview, readPreviewPane, TranscriptPreviewStream, unwrapTerminalLines } from "./transcript-preview.js";
 import { TranscriptReader } from "./transcripts.js";
 import type { Target } from "./protocol.js";
 
@@ -27,6 +27,24 @@ describe("live reply previews", () => {
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0][1]).toBe("Preview pane read for default/w1:p-missing failed: Herdr is not reachable on this computer (ENOENT: Herdr is not running).");
     } finally { warn.mockRestore(); }
+  });
+
+  it("bounds OpenCode sidecar bytes while accepting the full escaped text limit", async () => {
+    const file = path.join(await scratch(), "opencode.events.jsonl");
+    const source = { ...target, source: "opencode" as const };
+    const preview = { turnStartedAt: start, text: "\u0000".repeat(32_768) };
+    await writeFile(file + ".preview.json", JSON.stringify(preview));
+    expect(await readDeltaPreview(source, file)).toEqual(preview);
+    await writeFile(file + ".preview.json", JSON.stringify({ turnStartedAt: start, text: "Small text" }) + " ".repeat(1_000_000));
+    expect(await readDeltaPreview(source, file)).toBeNull();
+  });
+
+  it("does not follow an OpenCode preview sidecar symlink", async () => {
+    const root = await scratch(), file = path.join(root, "opencode.events.jsonl");
+    const other = path.join(root, "other.json");
+    await writeFile(other, JSON.stringify({ turnStartedAt: start, text: "Other file" }));
+    await symlink(other, file + ".preview.json");
+    expect(await readDeltaPreview({ ...target, source: "opencode" }, file)).toBeNull();
   });
 
   it("streams growing Claude pane text at most twice a second, and stops at the real entry", async () => {

@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
 import { codexThreadPreview } from "./codex-threads.js";
 import { readPaneText } from "./pane-text.js";
 import { object, objects, type Json, type Target } from "./protocol.js";
@@ -9,6 +10,8 @@ import { stripTerminal } from "../terminal-text.js";
 export interface TranscriptPreview { turnStartedAt: string; text: string }
 export const PREVIEW_INTERVAL_MS = 500;
 const MAX_TEXT = 32_768;
+// A JSON-escaped UTF-16 code unit takes at most six bytes, plus metadata.
+const MAX_PREVIEW_BYTES = MAX_TEXT * 6 + 1_024;
 
 /** Only the last Claude reply after the current prompt is eligible. A missing
  * prompt anchor is deliberately silent: scrollback could belong to an old turn. */
@@ -226,7 +229,18 @@ export async function readDeltaPreview(target: Target, file?: string, rollout?: 
     ?? (file && rollout ? await rollout.read(file).catch(() => null) : null);
   if (target.source !== "opencode" || !file) return null;
   try {
-    const value = object(JSON.parse(await readFile(file + ".preview.json", "utf8")));
+    const handle = await open(file + ".preview.json", constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    let bytes: Buffer;
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size > MAX_PREVIEW_BYTES) return null;
+      // Bound the read too: the file can grow between stat and read.
+      const buffer = Buffer.alloc(MAX_PREVIEW_BYTES + 1);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      if (bytesRead > MAX_PREVIEW_BYTES) return null;
+      bytes = buffer.subarray(0, bytesRead);
+    } finally { await handle.close(); }
+    const value = object(JSON.parse(bytes.toString("utf8")));
     if (typeof value.turnStartedAt !== "string" || !Number.isFinite(Date.parse(value.turnStartedAt))
         || typeof value.text !== "string" || !value.text || value.text.length > MAX_TEXT) return null;
     return { turnStartedAt: value.turnStartedAt, text: value.text };

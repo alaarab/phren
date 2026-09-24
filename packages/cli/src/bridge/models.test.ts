@@ -2,8 +2,16 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { describe, expect, it, vi } from "vitest";
 import { CLAUDE_MENU, claudeName, ModelCatalog, readClaudeModels, readOpenCodeModels } from "./models.js";
+
+vi.mock("node:child_process", async importOriginal => {
+  const original = await importOriginal<typeof import("node:child_process")>();
+  return { ...original, spawn: vi.fn(original.spawn) };
+});
 
 /** The `case "..."` block of a Swift switch, from its first `from` to `to`. */
 function swiftSection(text: string, from: string, to: string): string {
@@ -24,6 +32,28 @@ function swiftDefaults(section: string): string[] {
 }
 
 describe("model catalogue", () => {
+  it("kills a stuck Claude version probe instead of leaving it running after timeout", async () => {
+    const config = await mkdtemp(path.join(tmpdir(), "phren-claude-timeout-"));
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+      kill: vi.fn((signal: string) => {
+        if (signal === "SIGKILL") child.emit("exit", null, signal);
+        return true;
+      }),
+    });
+    vi.mocked(spawn).mockImplementationOnce(() => child as unknown as ReturnType<typeof spawn>);
+    vi.useFakeTimers();
+    try {
+      const result = readClaudeModels(config);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await result).toEqual(CLAUDE_MENU);
+      expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    } finally {
+      vi.useRealTimers(); child.stdout.destroy();
+      await rm(config, { recursive: true, force: true });
+    }
+  });
+
   it("keeps claudeName in step with the menu it titles", () => {
     // claudeName reads menu-shaped ids for bridge step labels; every menu
     // row must spell its own display name.

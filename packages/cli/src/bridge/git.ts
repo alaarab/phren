@@ -330,14 +330,16 @@ async function treeSnapshot(root: string, head: string): Promise<TreeSnapshot> {
       let siblings = levels.get(parent);
       if (!siblings) { siblings = new Map(); levels.set(parent, siblings); }
       let entry = siblings.get(name);
-      if (!entry) {
+      if (!entry || (directory && entry.kind === "file")) {
+        // A deleted tracked file can coexist with untracked descendants at
+        // the same path. Descendants make this a navigable directory.
         entry = { name, path: full, kind: directory ? "dir" : "file", ...(directory ? { fileCount: 0 } : {}) };
         siblings.set(name, entry);
       }
       if (directory) {
         entry.fileCount = (entry.fileCount ?? 0) + 1;
         if (changed.has(file)) entry.status = "changed";
-      } else if (changed.has(file)) entry.status = changed.get(file);
+      } else if (changed.has(file)) entry.status = entry.kind === "dir" ? "changed" : changed.get(file);
       parent = full;
     }
   }

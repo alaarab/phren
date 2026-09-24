@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentHooks } from "./agent-hooks.js";
-import { rpc } from "./herdr.js";
+import { rpc, validateTarget } from "./herdr.js";
 import type { Target } from "./protocol.js";
 
 vi.mock("./herdr.js", async importOriginal => ({
-  ...await importOriginal<typeof import("./herdr.js")>(), rpc: vi.fn(),
+  ...await importOriginal<typeof import("./herdr.js")>(), rpc: vi.fn(), validateTarget: vi.fn(),
 }));
 
 const target: Target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1",
@@ -18,6 +18,7 @@ describe("verified terminal menu navigation", () => {
   beforeEach(() => {
     hooks = new AgentHooks(); highlight = 0; ignored = 0; loseHighlight = false; shortcuts = false;
     title = "Choose permissions"; labels = ["Read only", "Ask for approval", "Full access"];
+    vi.mocked(validateTarget).mockReset().mockResolvedValue({});
     vi.mocked(rpc).mockReset().mockImplementation(async (_server, method, params) => {
       if (method === "agent.read") return { read: { text: title + "\n" + labels.map((label, index) =>
         `${index === highlight ? "›" : " "} ${index + 1}. ${label}${shortcuts ? ` (${index + 1})` : ""}`).join("\n") } };
@@ -70,6 +71,29 @@ describe("verified terminal menu navigation", () => {
     highlight = undefined;
     await hooks.syncTerminalDialog(target, true);
     expect(hooks.terminalPrompt(target)).toBeUndefined();
+    expect(sent()).toEqual([]);
+  });
+
+  it("refuses cursor movement when the pane has changed sessions", async () => {
+    await hooks.syncTerminalDialog(target, true);
+    vi.mocked(validateTarget).mockRejectedValue(new Error("Session changed"));
+    await expect(hooks.dialogAnswerKeys(target, ["3"])).rejects.toThrow("Session changed");
+    expect(sent()).toEqual([]);
+  });
+
+  it("refuses confirmation when the pane changes sessions during cursor movement", async () => {
+    await hooks.syncTerminalDialog(target, true);
+    vi.mocked(validateTarget).mockResolvedValueOnce({}).mockRejectedValue(new Error("Session changed"));
+    await expect(hooks.dialogAnswerKeys(target, ["3"])).rejects.toThrow("Session changed");
+    expect(sent()).toEqual([["down", "down"]]);
+    expect(validateTarget).toHaveBeenLastCalledWith(target, false, true);
+  });
+
+  it("revalidates a shortcut confirmation after waiting for the permissions menu", async () => {
+    title = "Enable full access?"; shortcuts = true;
+    hooks.menuOpened(target, "/permissions");
+    vi.mocked(validateTarget).mockRejectedValue(new Error("Session changed"));
+    await expect(hooks.walkMenuConfirmation(target)).rejects.toThrow("Session changed");
     expect(sent()).toEqual([]);
   });
 
