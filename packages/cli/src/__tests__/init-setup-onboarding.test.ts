@@ -197,7 +197,7 @@ describe("init setup onboarding helpers", () => {
   });
 });
 
-describe.sequential("web-ui onboarding repair", () => {
+describe("web-ui onboarding repair", () => {
   let tmp: { path: string; cleanup: () => void };
   let phrenPath: string;
   let homeDir: string;

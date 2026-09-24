@@ -149,14 +149,14 @@
     "preuninstall": "node scripts/preuninstall.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.30.1",
     "chalk": "^6.0.0",
     "glob": "^13.0.6",
-    "inquirer": "^14.1.0",
-    "js-yaml": "^5.3.0",
+    "inquirer": "^14.2.2",
+    "js-yaml": "^5.4.2",
     "sql.js-fts5": "^1.4.0",
     "ws": "8.21.3",
-    "zod": "^4.4.3"
+    "zod": "^4.6.5"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -177,9 +177,9 @@
   },
   "devDependencies": {
     "3d-force-graph": "^1.80.0",
+    "@phren/code": "workspace:*",
     "@types/ws": "8.18.1",
-    "three": "^0.185.1",
-    "@phren/code": "workspace:*"
+    "three": "^0.186.1"
   },
   "publishConfig": {
     "access": "public"

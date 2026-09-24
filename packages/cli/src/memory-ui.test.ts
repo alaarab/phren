@@ -86,7 +86,7 @@ async function requestForm(
   });
 }
 
-describe.sequential("web-ui server", () => {
+describe("web-ui server", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -322,7 +322,7 @@ describe.sequential("web-ui server", () => {
   });
 });
 
-describe.sequential("web-ui CSRF protection", () => {
+describe("web-ui CSRF protection", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;

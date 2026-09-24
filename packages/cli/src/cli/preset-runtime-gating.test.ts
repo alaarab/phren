@@ -5,7 +5,7 @@ import * as path from "path";
 import { scheduleBackgroundMaintenance } from "./session-background.js";
 import { writeInstallPreferences } from "../init/preferences.js";
 
-describe.sequential("manual preset runtime gating", () => {
+describe("manual preset runtime gating", () => {
   let phrenPath: string;
   let cleanup: () => void;
 

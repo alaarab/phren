@@ -11,7 +11,7 @@ import {
 } from "./preferences.js";
 import { getProjectOwnershipDefault } from "../project-config.js";
 
-describe.sequential("management preset init integration", () => {
+describe("management preset init integration", () => {
   let tmpRoot: string;
   let homeDir: string;
   let cleanup: () => void;

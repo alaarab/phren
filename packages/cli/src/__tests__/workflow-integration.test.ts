@@ -44,7 +44,7 @@ function parseResult(res: { content: { type: string; text: string }[] }) {
   return JSON.parse(res.content[0].text);
 }
 
-describe.sequential("workflow integration", () => {
+describe("workflow integration", () => {
   let tmp: { path: string; cleanup: () => void };
   let priorHome: string | undefined;
   let priorUserProfile: string | undefined;

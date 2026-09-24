@@ -98,7 +98,7 @@ async function httpGet(port: number, path: string): Promise<{ status: number; bo
   });
 }
 
-describe.sequential("web-ui auth token protection", () => {
+describe("web-ui auth token protection", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -152,7 +152,7 @@ describe.sequential("web-ui auth token protection", () => {
   });
 });
 
-describe.sequential("web-ui graph API", () => {
+describe("web-ui graph API", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -300,7 +300,7 @@ describe.sequential("web-ui graph API", () => {
   });
 });
 
-describe.sequential("web-ui profile scoping", () => {
+describe("web-ui profile scoping", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -350,7 +350,7 @@ describe.sequential("web-ui profile scoping", () => {
   });
 });
 
-describe.sequential("web-ui HTML escaping", () => {
+describe("web-ui HTML escaping", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -416,7 +416,7 @@ describe.sequential("web-ui HTML escaping", () => {
   });
 });
 
-describe.sequential("web-ui combined CSRF + auth", () => {
+describe("web-ui combined CSRF + auth", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -489,7 +489,7 @@ describe.sequential("web-ui combined CSRF + auth", () => {
   });
 });
 
-describe.sequential("web-ui removed review queue mutation routes", () => {
+describe("web-ui removed review queue mutation routes", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -565,7 +565,7 @@ describe.sequential("web-ui removed review queue mutation routes", () => {
   });
 });
 
-describe.sequential("web-ui skill-save auth protection (Q13)", () => {
+describe("web-ui skill-save auth protection (Q13)", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -762,7 +762,7 @@ describe.sequential("web-ui skill-save auth protection (Q13)", () => {
 
 });
 
-describe.sequential("web-ui project-content validation", () => {
+describe("web-ui project-content validation", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -838,7 +838,7 @@ describe.sequential("web-ui project-content validation", () => {
   });
 });
 
-describe.sequential("web-ui project topics and reference APIs", () => {
+describe("web-ui project topics and reference APIs", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
@@ -992,7 +992,7 @@ describe.sequential("web-ui project topics and reference APIs", () => {
   });
 });
 
-describe.sequential("web-ui JSON API auth and removed queue routes", () => {
+describe("web-ui JSON API auth and removed queue routes", () => {
   let tmpRoot = "";
   let tmpCleanup: () => void;
   let server: http.Server | null = null;
