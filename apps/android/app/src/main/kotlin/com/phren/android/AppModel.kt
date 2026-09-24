@@ -101,7 +101,8 @@ class AppModel(private val context: Context) {
 
     // Live sessions: saved computers, this device's SSH keys, and the one overview the app keeps live.
     init { com.phren.android.live.LiveCrypto.install() }
-    val livePreferences = com.phren.android.live.LivePreferencesStore.of(context)
+    var livePreferences by mutableStateOf(com.phren.android.live.LivePreferencesStore.of(context))
+        private set
     val deviceKeys = com.phren.android.live.DeviceKeyStore(context)
     var overview by mutableStateOf(com.phren.android.live.SessionOverviewMonitor(scope, deviceKeys, context.cacheDir))
         private set
@@ -311,6 +312,8 @@ class AppModel(private val context: Context) {
             storeContexts += StoreContext(StoreDescriptor.of(owner, "brain", "main", true), store, engine)
         }
         if (agents) {
+            // Fixture computers live in their own store, never among the real ones (iOS UI tests use separate defaults).
+            livePreferences = com.phren.android.live.LivePreferencesStore(context.getSharedPreferences("phren.fixture", Context.MODE_PRIVATE))
             livePreferences.write(com.phren.android.debug.AgentFixtures.preferences())
             overview = com.phren.android.live.SessionOverviewMonitor(scope, deviceKeys, cacheDirectory = null,
                 fixtureFetch = { host, previous -> com.phren.android.debug.AgentFixtures.snapshot(host, previous, offline) }, fixtureOffline = offline)

@@ -390,13 +390,15 @@ class SessionOverviewMonitor(
         return File(dir, "session-overview/$digest.json")
     }
 
-    private var lastWrite = 0L
+    /** Per cache file, as iOS keys it: a different set of computers is a different file. */
+    private val lastWrite = mutableMapOf<String, Long>()
     private fun saveLastKnown(value: Screen) {
         val file = cacheFile(computers.map { it.host }) ?: return
         val now = System.currentTimeMillis()
         // Polls with an unchanged screen still renew its age, at most twice a minute.
-        if (value == screen && now - lastWrite < 30_000) return
-        lastWrite = now
+        val previous = lastWrite[file.name]
+        if (previous != null && value == screen && now - previous < 30_000) return
+        lastWrite[file.name] = now
         val record = buildJsonObject {
             put("version", 1); put("savedAt", now)
             put("hosts", buildJsonArray {
@@ -413,11 +415,10 @@ class SessionOverviewMonitor(
         }
     }
 
-    private suspend fun restoreLastKnown(hosts: List<LiveHost>) {
+    /** Read in place, not on a background thread: the few kilobytes cost less than one frame of spinner. */
+    private fun restoreLastKnown(hosts: List<LiveHost>) {
         val file = cacheFile(hosts) ?: return
-        val record = withContext(Dispatchers.IO) {
-            runCatching { if (file.length() in 1..8_388_608) cacheJson.parseToJsonElement(file.readText()).jsonObject else null }.getOrNull()
-        } ?: return
+        val record = runCatching { if (file.length() in 1..8_388_608) cacheJson.parseToJsonElement(file.readText()).jsonObject else null }.getOrNull() ?: return
         val savedAt = record["version"]?.toString()?.takeIf { it == "1" }?.let { record["savedAt"]?.toString()?.toLongOrNull() } ?: return
         val age = System.currentTimeMillis() - savedAt
         if (age !in 0 until 86_400_000L) return
@@ -442,7 +443,7 @@ class SessionOverviewMonitor(
     }
 
     /** Forgetting a computer drops every cached list that included it. */
-    fun purgeCache() { cacheDirectory?.let { File(it, "session-overview").deleteRecursively() } }
+    fun purgeCache() { lastWrite.clear(); cacheDirectory?.let { File(it, "session-overview").deleteRecursively() } }
 
     private companion object {
         /** Conductors first, then most recently changed, then by computer and workspace so the rest stays stable. */

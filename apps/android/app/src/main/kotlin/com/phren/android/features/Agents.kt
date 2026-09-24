@@ -97,6 +97,8 @@ fun LiveSessionsView() {
     val hosts = preferences?.hosts ?: emptyList()
     val screen = overview.screen
     var refreshing by remember { mutableStateOf(false) }
+    var adding by remember { mutableStateOf(false) }
+    if (adding) com.phren.android.design.PhrenSheet({ adding = false }) { LiveHostEditor(existing = null) }
 
     // The store metadata the monitor needs; the monitor ignores an unchanged value.
     val projects = model.sessionProjects
@@ -189,7 +191,7 @@ fun LiveSessionsView() {
                     if (remaining.isEmpty()) continue
                     item(key = "group:${group.id}") { GroupLabel("${group.title} · ${remaining.size}") }
                     items(remaining, key = { "session:${it.accessibilityKey}" }) { session ->
-                        SessionCard(overview, session, screen, preferences)
+                        SessionCard(overview, session, screen, preferences, groupFresh = group.fresh || group.id == "previous")
                     }
                     if (group.id == "previous") item(key = "previous-note") {
                         Text("phren can't reach these computers right now. Their terminal still opens from their row under Computers.",
@@ -201,7 +203,7 @@ fun LiveSessionsView() {
                     items(screen.computers, key = { "computer:${it.host.id}" }) { computer -> ComputerRow(computer) }
                     item(key = "add-computer") {
                         Box(Modifier.fillMaxWidth().background(PhrenTheme.surface, RoundedCornerShape(PhrenTheme.Radius.questionOption))
-                            .plainClickable { navigator.push("add-computer") { LiveBridge.Pending("Add computer") } }
+                            .plainClickable { adding = true }
                             .padding(horizontal = 12.dp).phrenIdentifier("sessions-add-computer")) {
                             PhrenMenuRow("Add computer", SF("plus"))
                         }
@@ -280,27 +282,32 @@ fun hostColor(host: LiveHost): Color = PhrenTheme.hostColor(host.color ?: LiveHo
 
 /** One session: tap to chat, the ring for details, and a pin (LiveSessionCard). */
 @Composable
-fun SessionCard(overview: SessionOverviewMonitor, session: LiveAgentSession, screen: SessionOverviewMonitor.Screen, preferences: LiveSessionPreferences?) {
+fun SessionCard(overview: SessionOverviewMonitor, session: LiveAgentSession, screen: SessionOverviewMonitor.Screen?, preferences: LiveSessionPreferences?,
+                showHost: Boolean = true, monitorOverride: com.phren.android.live.LiveHostMonitor? = null, groupFresh: Boolean = true) {
     val model = LocalModel.current
     val navigator = LocalNavigator.current
-    val monitor = overview.monitor(session.host)
-    val fresh = monitor?.isLive() == true
+    val monitor = monitorOverride ?: overview.monitor(session.host)
+    // A cold launch's restored list stays greyed until its computer answers.
+    val fresh = monitor?.isLive() == true && groupFresh
     val stale = monitor?.isStale() == true
-    val project = screen.projects[session.id] ?: preferences?.projectMatch(session.host.id, session.tab.cwd, model.sessionProjects)?.project?.name
+    val match = preferences?.projectMatch(session.host.id, session.tab.cwd, model.sessionProjects)
+    val project = (if (showHost) screen?.projects?.get(session.id) else null) ?: match?.project?.name
+    val prefix = if (showHost) "overview" else "live"
     val pinned = preferences?.isPinned(session.id) == true
     Row(Modifier.fillMaxWidth().background(PhrenTheme.surface, RoundedCornerShape(PhrenTheme.Radius.medium)), verticalAlignment = Alignment.CenterVertically) {
         // A computer that isn't live leaves its cards disabled and dimmed.
         Box(Modifier.weight(1f).alpha(if (fresh) 1f else 0.5f).plainClickable(enabled = fresh) {
             navigator.push("chat:${session.accessibilityKey}") { LiveBridge.Pending("Chat") }
-        }.phrenIdentifier("overview-chat:${session.accessibilityKey}")) {
-            SessionCardContent(session, fresh, stale, project, computer = session.host, identifierPrefix = "overview",
+        }.phrenIdentifier(if (showHost) "overview-chat:${session.accessibilityKey}" else "live-chat:${session.workspaceID}:${session.tab.id}")) {
+            SessionCardContent(session, fresh, stale, project, computer = if (showHost) session.host else null, identifierPrefix = prefix,
+                projectStoreId = if (showHost) null else match?.project?.storeID,
                 onDetails = { navigator.push("details:${session.accessibilityKey}") { LiveBridge.Pending("Details") } })
         }
         // The conductor has its own place at the top; pinning cannot move it.
         if (!session.tab.isConductor) {
             Box(Modifier.size(44.dp).plainClickable {
                 runCatching { model.livePreferences.update { LiveSessionPreferences.setPinned(!pinned, session.id, it) } }
-            }.semantics { contentDescription = if (pinned) "Unpin session" else "Pin session" }.phrenIdentifier("overview-pin:${session.accessibilityKey}"),
+            }.semantics { contentDescription = if (pinned) "Unpin session" else "Pin session" }.phrenIdentifier("$prefix-pin:${session.accessibilityKey}"),
                 contentAlignment = Alignment.Center) {
                 Icon(SF(if (pinned) "pin.fill" else "pin"), null, tint = if (pinned) PhrenTheme.cyan else PhrenTheme.textDim, modifier = Modifier.size(17.dp))
             }
@@ -439,7 +446,7 @@ private fun ComputerRow(computer: SessionOverviewMonitor.ComputerRow) {
     val navigator = LocalNavigator.current
     Row(Modifier.fillMaxWidth().background(PhrenTheme.surface, RoundedCornerShape(PhrenTheme.Radius.questionOption)).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.weight(1f).plainClickable { navigator.push("host:${computer.host.id}") { LiveBridge.Pending(computer.host.name) } }
+        Box(Modifier.weight(1f).plainClickable { navigator.push("host:${computer.host.id}") { LiveHostView(computer.host.id) } }
             .phrenIdentifier("live-host:${computer.host.id.toString().uppercase()}")) {
             PhrenMenuRow(computer.host.name, SF("desktopcomputer"), subtitle = if (computer.connecting) "Connecting…" else computer.host.address,
                 titleColor = hostColor(computer.host))
