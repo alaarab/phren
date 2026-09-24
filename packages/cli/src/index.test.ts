@@ -23,61 +23,33 @@ import * as path from "path";
 import * as fs from "fs";
 
 describe("sanitizeFts5Query", () => {
-  it("handles multi-word queries", () => {
-    const result = sanitizeFts5Query("user login");
-    expect(result).toBe("user login");
+  // The whitelist keeps letters, digits, hyphens, * and double-quoted phrases'
+  // words; everything else becomes a space, then spaces collapse.
+  it.each([
+    ["multi-word queries pass through", "user login", "user login"],
+    ["SQL-like strings become plain search terms", "'; DROP TABLE docs--", "DROP TABLE docs--"],
+    ["column filters lose their colon", "type:task", "type task"],
+    ["project filters lose their colon", "project:foo", "project foo"],
+    ["filename filters lose their colon", "filename:bar", "filename bar"],
+    ["URL punctuation is stripped", "https://example.com", "https example com"],
+    ["^ anchors are removed", "^start of phrase", "start of phrase"],
+    ["double quotes are stripped", '"exact phrase"', "exact phrase"],
+    ["empty input stays empty", "", ""],
+    ["whitespace-only input becomes empty", "   ", ""],
+    ["combined injection attempts are neutralised", '^content:"secret" OR filename:hack\0', "content secret OR filename hack"],
+    ["null bytes are stripped", "foo\0bar", "foo bar"],
+    ["operator words are kept as plain words", "foo AND bar OR baz NOT qux NEAR quux", "foo AND bar OR baz NOT qux NEAR quux"],
+    ["punctuation goes but hyphens inside words stay", "rate-limit @#$ test!", "rate-limit test"],
+    ["runs of spaces collapse", "  foo    bar   ", "foo bar"],
+    ["the * wildcard survives", "foo*", "foo*"],
+    ["braces, brackets and parens are stripped", "foo {bar} [baz] (qux)", "foo bar baz qux"],
+    ["apostrophes and underscores become spaces", "it's a test-case with under_score", "it s a test-case with under score"],
+  ])("%s", (_label, input, expected) => {
+    expect(sanitizeFts5Query(input)).toBe(expected);
   });
 
-  it("normalizes SQL-like strings into plain search terms", () => {
-    const result = sanitizeFts5Query("'; DROP TABLE docs--");
-    // Whitelist sanitizer strips semicolons but preserves apostrophes
-    expect(result).not.toContain(";");
-    expect(result).toContain("DROP");
-  });
-
-  it("removes all known column filters", () => {
-    // Whitelist strips colons, so "type:task" -> "type task"
-    expect(sanitizeFts5Query("type:task")).toContain("task");
-    expect(sanitizeFts5Query("type:task")).not.toContain(":");
-    expect(sanitizeFts5Query("project:foo")).toContain("foo");
-    expect(sanitizeFts5Query("project:foo")).not.toContain(":");
-    expect(sanitizeFts5Query("filename:bar")).toContain("bar");
-    expect(sanitizeFts5Query("filename:bar")).not.toContain(":");
-  });
-
-  it("preserves URL words (dots are stripped by whitelist)", () => {
-    const result = sanitizeFts5Query("https://example.com");
-    expect(result).toContain("https");
-    // Dots are stripped by whitelist sanitizer
-    expect(result).not.toContain(".");
-    expect(result).not.toContain("//");
-  });
-
-  it("removes FTS5 ^ anchors", () => {
-    const result = sanitizeFts5Query("^start of phrase");
-    expect(result).toBe("start of phrase");
-  });
-
-  it("strips double quotes from quoted phrases", () => {
-    const result = sanitizeFts5Query('"exact phrase"');
-    expect(result).toBe("exact phrase");
-  });
-
-  it("returns empty string for empty or whitespace-only input", () => {
-    expect(sanitizeFts5Query("")).toBe("");
-    expect(sanitizeFts5Query("   ")).toBe("");
-  });
-
-  it("handles combined injection attempts", () => {
-    const result = sanitizeFts5Query('^content:"secret" OR filename:hack\0');
-    expect(result).not.toContain("^");
-    expect(result).not.toContain("\0");
-    expect(result).not.toContain(":");
-    // Double quotes are now preserved for quoted phrase support
-    // Whitelist sanitizer keeps letters-only words; OR word may remain
-    expect(result).toContain("content");
-    expect(result).toContain("secret");
-    expect(result).toContain("hack");
+  it("truncates input longer than 500 characters", () => {
+    expect(sanitizeFts5Query("a".repeat(600))).toHaveLength(500);
   });
 });
 
