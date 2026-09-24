@@ -37,6 +37,9 @@ const APPROVAL_HOLD_MS = (() => {
 })();
 /** A pane's terminal dialog is read at most once per this window. */
 const DIALOG_READ_MS = intervalFromEnv("PHREN_DIALOG_THROTTLE_MS", 3_000);
+const AGENT_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode", copilot: "Copilot", phren: "phren" };
+/** How long a pushed terminal dialog can be answered from its notification. */
+const DIALOG_PUSH_MS = 10 * 60_000;
 const FANOUT_SWEEP_MS = 5_000;
 const FANOUT_ARCHIVE_MS = 60 * 60 * 1000;
 
@@ -111,6 +114,10 @@ export class AgentHooks {
   readonly overview = new ApprovalWatchLeases();
   private server?: Server;
   private pushBindings = new PushBindingStore();
+  /** Terminal dialogs pushed to phones: by pane, the dialog last pushed; by
+   * action, what an answer from the notification types. */
+  private dialogPushes = new Map<string, { action: string; title: string }>();
+  private dialogActions = new Map<string, { target: Target; choice: TerminalChoice; expiresAt: number }>();
   /** opencode permission asks seen on disk, by request id. */
   private opencode = new Map<string, OpencodeHeld>();
   private closed = false;
@@ -616,12 +623,71 @@ export class AgentHooks {
     if (!linked) throw new BridgeError(409, "This approval is no longer pending.");
     const pending = this.pending.get(linked.action);
     if (pending) { await this.answer(pending.target, linked.action, decision); return; }
+    if (this.dialogActions.has(linked.action)) { await this.answerDialog(linked.action, decision as "approve" | "deny"); return; }
     const held = this.opencode.get(linked.action);
     // The binding is the single-use proof for a worker's ask, whose parent
     // may not be in any pane the Hook can see.
     if (held?.fanout) { await this.answerFanout(linked.action, held, decision); return; }
     if (held?.target) { await this.answer(held.target, linked.action, decision); return; }
     throw new BridgeError(409, "This approval is no longer pending.");
+  }
+  /** Every waiting pane on this computer, each Hook tick, whether or not a
+   * phone watches: an approval an agent draws as a numbered dialog in its
+   * terminal (Claude's fallback prompts, Codex, OpenCode, Copilot) has no
+   * hook behind it, so this is the only way it reaches a phone with phren
+   * closed. Each dialog is pushed once; a pane that stops waiting drops it. */
+  async observeWaitingPanes(server: string, panes: Json[], resolve: (pane: Json) => Promise<Target | undefined>): Promise<void> {
+    const waiting = new Set<string>();
+    if (this.push.available) {
+      for (const pane of panes) {
+        if (!pane.agent || !["waiting", "blocked"].includes(String(pane.agent_status))) continue;
+        const target = await resolve(pane).catch(() => undefined);
+        if (!target) continue;
+        const key = JSON.stringify(target);
+        waiting.add(key);
+        // A request its own hook already holds was pushed on arrival.
+        if ([...this.pending.values()].some(held => JSON.stringify(held.target) === key)) continue;
+        await this.syncTerminalDialog(target, true).catch(() => {});
+        const entry = this.terminalPrompts.get(key);
+        const title = entry?.dialog ? entry.choice?.title : undefined;
+        if (!entry?.choice || !title) { this.dropDialogPush(key); continue; }
+        if (this.dialogPushes.get(key)?.title === title) continue;
+        this.dropDialogPush(key);
+        const action = `dialog-${randomUUID()}`, binding = randomUUID(), expiresAt = Date.now() + DIALOG_PUSH_MS;
+        this.dialogPushes.set(key, { action, title });
+        this.dialogActions.set(action, { target, choice: entry.choice, expiresAt });
+        this.pushBindings.add(binding, { action, expiresAt });
+        void this.push.notify({ binding, provider: target.source, question: false, expiresAt: new Date(expiresAt).toISOString(),
+          title: `${AGENT_NAMES[target.source] ?? "An agent"} needs your approval`, message: title.slice(0, 1_000) })
+          .then(delivered => { if (!delivered) this.dropDialogPush(key); }).catch(() => this.dropDialogPush(key));
+      }
+    }
+    for (const [key, pushed] of this.dialogPushes) {
+      if (!waiting.has(key) && JSON.parse(key).server === server) { this.dialogActions.delete(pushed.action); this.dropPushBindings(pushed.action); this.dialogPushes.delete(key); }
+    }
+  }
+  private dropDialogPush(key: string) {
+    const pushed = this.dialogPushes.get(key);
+    if (!pushed) return;
+    this.dialogActions.delete(pushed.action); this.dropPushBindings(pushed.action); this.dialogPushes.delete(key);
+  }
+  /** Approve picks the dialog's yes/allow row (else its first), Deny its
+   * no/deny row (else Escape), typed as the pane's own keys. */
+  private async answerDialog(action: string, decision: "approve" | "deny") {
+    const dialog = this.dialogActions.get(action);
+    if (!dialog || dialog.expiresAt <= Date.now()) throw new BridgeError(409, "This approval is no longer pending.");
+    const key = JSON.stringify(dialog.target);
+    await validateTarget(dialog.target, false, true);
+    const live = this.terminalPrompts.get(key)?.choice;
+    if (!live || live.title !== dialog.choice.title) { this.dropDialogPush(key); throw new BridgeError(409, "That question in the terminal has changed. Open phren to answer it."); }
+    const option = decision === "approve"
+      ? live.options.find(row => /^(yes|allow|approve|proceed|continue|run)\b/i.test(row.label)) ?? live.options[0]
+      : live.options.find(row => /^(no|deny|reject|don'?t|cancel|skip)\b/i.test(row.label));
+    const keys = option ? await this.dialogAnswerKeys(dialog.target, [option.key]) : ["Escape"];
+    await rpc(dialog.target.server, "agent.send_keys", { target: dialog.target.pane,
+      keys: keys.map(key => key === "Enter" ? "enter" : key === "Escape" ? "esc" : key.toLowerCase()) });
+    this.clearTerminalPrompt(dialog.target);
+    this.dropDialogPush(key);
   }
   private dropPushBindings(action: string) {
     this.pushBindings.dropAction(action);

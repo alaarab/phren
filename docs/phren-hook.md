@@ -288,6 +288,18 @@ an existing pane and never touches schedules or tasks. The Hook runs it once a
 day when `PHREN_CANARY_DAILY=1` is in its environment or after
 `phren canary --daily on` (`--daily off` stops it).
 
+### Terminal approvals reach a closed phone
+
+Some approvals have no hook behind them: an agent draws a numbered dialog in
+its terminal (Claude Code's fallback prompts, Codex's command approvals,
+OpenCode and Copilot dialogs). Every five seconds the Hook looks at each pane
+that is waiting or blocked; when push is configured it reads that pane's
+dialog and sends one notification per dialog ("Codex needs your approval"
+with the dialog's text), whether or not a phone is watching. Approve from the
+notification types the dialog's yes or allow row, Deny its no or deny row (or
+Escape), after checking the pane still shows the same dialog. A pane that stops
+waiting withdraws its notification; an answer after that is refused.
+
 ### Spoken replies for talk mode
 
 The phone's talk mode reads an agent's replies aloud. `POST /v1/speech` with
