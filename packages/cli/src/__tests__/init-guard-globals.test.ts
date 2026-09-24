@@ -235,4 +235,3 @@ describe("phrenRootFromGlobalClaudeLink", () => {
     expect(phrenRootFromGlobalClaudeLink("/home/me/.phren/AGENTS.md")).toBeNull();
   });
 });
-

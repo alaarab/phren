@@ -117,4 +117,3 @@ describe("cross-platform path normalization", () => {
     }
   });
 });
-
