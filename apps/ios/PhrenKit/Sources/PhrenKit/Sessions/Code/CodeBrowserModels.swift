@@ -53,26 +53,107 @@ public struct CodeUsagePage: Decodable, Equatable, Sendable {
     }
 }
 
-public struct CodeRecentSymbol: Decodable, Equatable, Sendable, Identifiable {
-    public let symbol: CodeSymbol
-    public let indexedAt: Double
-    public var id: Int { symbol.id }
-    public init(symbol: CodeSymbol, indexedAt: Double) { self.symbol = symbol; self.indexedAt = indexedAt }
-    public init(from decoder: Decoder) throws {
-        symbol = try CodeSymbol(from: decoder)
-        indexedAt = try decoder.container(keyedBy: CodingKeys.self).decode(Double.self, forKey: .indexedAt)
+/// What a person names in their code: functions (methods included), types
+/// (classes, structs, enums, interfaces, type aliases) and variables.
+public enum CodeFamily: String, Decodable, Sendable, CaseIterable {
+    case function, type, variable
+
+    public static func of(kind: String) -> CodeFamily? {
+        switch kind {
+        case "function", "method": return .function
+        case "class", "struct", "enum", "interface", "type": return .type
+        case "variable": return .variable
+        default: return nil
+        }
     }
-    private enum CodingKeys: CodingKey { case indexedAt }
+    public var plural: String {
+        switch self { case .function: "Functions"; case .type: "Types"; case .variable: "Variables" }
+    }
+    public var singular: String {
+        switch self { case .function: "function"; case .type: "type"; case .variable: "variable" }
+    }
 }
 
-public struct CodeRecentResults: Decodable, Sendable {
-    public let entries: [CodeRecentSymbol]
-    public static func read(_ data: Data) throws -> [CodeRecentSymbol] {
-        guard data.count <= 1_048_576 else { throw PhrenKitError.validation("The recent symbols are too large.") }
+/// A function, type or variable an agent's work touched.
+public struct CodeChangedItem: Decodable, Equatable, Sendable, Identifiable {
+    public let name: String
+    public let kind: String
+    public let family: CodeFamily
+    public let file: String
+    public let line: Int
+    public let endLine: Int
+    public let parent: String?
+    /// Every line of it was added.
+    public let isNew: Bool
+    public let uses: Int
+    public var id: String { "\(file):\(line):\(name)" }
+    public var qualifiedName: String { "\(file)::\(parent.map { $0 + "." } ?? "")\(name)" }
+    public init(name: String, kind: String, family: CodeFamily, file: String, line: Int, endLine: Int,
+                parent: String?, isNew: Bool, uses: Int) {
+        self.name = name; self.kind = kind; self.family = family; self.file = file; self.line = line
+        self.endLine = endLine; self.parent = parent; self.isNew = isNew; self.uses = uses
+    }
+}
+
+/// One file's changed functions, types and variables.
+public struct CodeChangedFile: Decodable, Equatable, Sendable, Identifiable {
+    public let path: String
+    public let items: [CodeChangedItem]
+    public var id: String { path }
+    public init(path: String, items: [CodeChangedItem]) { self.path = path; self.items = items }
+}
+
+/// What changed: today's agent sessions and the last 10 commits, by file.
+public struct CodeChangedResults: Decodable, Sendable {
+    public let files: [CodeChangedFile]
+    public static func read(_ data: Data) throws -> [CodeChangedFile] {
+        guard data.count <= 2_097_152 else { throw PhrenKitError.validation("What changed is too large to show.") }
         let value = try JSONDecoder().decode(Self.self, from: data)
-        guard value.entries.count <= 100, value.entries.allSatisfy({ $0.indexedAt >= 0 }) else {
-            throw PhrenKitError.validation("The recent symbols are invalid.")
+        guard value.files.allSatisfy({ file in file.items.allSatisfy { $0.line > 0 && $0.endLine >= $0.line && $0.uses >= 0 } }) else {
+            throw PhrenKitError.validation("What changed came back invalid.")
         }
+        return value.files
+    }
+}
+
+/// A Changes tree chip: the functions and types a file's working-tree
+/// changes edit or add. Variables stay out to keep the chip short.
+public struct CodeChangeCount: Decodable, Equatable, Sendable, Identifiable {
+    public struct Tally: Decodable, Equatable, Sendable {
+        public let changed: Int
+        public let added: Int
+        public init(changed: Int, added: Int) { self.changed = changed; self.added = added }
+    }
+    public let path: String
+    public let functions: Tally
+    public let types: Tally
+    /// The first function or type, to open when the chip is tapped.
+    public let first: String?
+    public var id: String { path }
+    public init(path: String, functions: Tally, types: Tally, first: String?) {
+        self.path = path; self.functions = functions; self.types = types; self.first = first
+    }
+
+    /// "2 functions changed · 1 new type"; nil when nothing counts.
+    public var label: String? {
+        func count(_ n: Int, _ noun: String) -> String { "\(n) \(noun)\(n == 1 ? "" : "s")" }
+        var parts: [String] = []
+        if functions.changed > 0 { parts.append("\(count(functions.changed, "function")) changed") }
+        if functions.added > 0 { parts.append(functions.added == 1 ? "1 new function" : "\(functions.added) new functions") }
+        if types.changed > 0 { parts.append("\(count(types.changed, "type")) changed") }
+        if types.added > 0 { parts.append(types.added == 1 ? "1 new type" : "\(types.added) new types") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+public struct CodeChangeCountResults: Decodable, Sendable {
+    public let entries: [CodeChangeCount]
+    public static func read(_ data: Data) throws -> [CodeChangeCount] {
+        guard data.count <= 1_048_576 else { throw PhrenKitError.validation("The change counts are too large.") }
+        let value = try JSONDecoder().decode(Self.self, from: data)
+        guard value.entries.count <= 200, value.entries.allSatisfy({
+            [$0.functions.changed, $0.functions.added, $0.types.changed, $0.types.added].allSatisfy { $0 >= 0 }
+        }) else { throw PhrenKitError.validation("The change counts are invalid.") }
         return value.entries
     }
 }

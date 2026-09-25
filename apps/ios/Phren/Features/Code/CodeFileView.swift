@@ -107,7 +107,7 @@ struct CodeFileView: View {
         .phrenActionSheet(isPresented: $showOutline, title: name, actions: outlineActions, identifier: "code-outline",
                           searchPlaceholder: outlineRows.count > 8 ? "Filter symbols" : nil)
         .sheet(item: $dossier) { target in
-            CodeSymbolDossier(storeId: context.storeId, project: context.project, symbol: target.name,
+            CodeItemDossier(storeId: context.storeId, project: context.project, name: target.name,
                               hosts: context.host.map { [$0] } ?? [], origin: context.origin) { file, line in
                 dossier = nil
                 go(file, line)

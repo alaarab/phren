@@ -392,5 +392,6 @@ final class WorkingTreeState {
     var tree: GitWorkingTree?
     var children: [String: GitWorkingTree] = [:]
     var expanded: Set<String> = []
-    var summaries: [String: CodeOutlineSummary] = [:]
+    /// Functions and types each path's working-tree changes edit or add.
+    var summaries: [String: CodeChangeCount] = [:]
 }

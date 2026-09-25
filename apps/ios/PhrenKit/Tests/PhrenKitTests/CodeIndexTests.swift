@@ -117,12 +117,15 @@ extension CodeIndexTests {
         XCTAssertEqual(body["store"] as? String, "sam/brain")
         XCTAssertEqual(body["target"] as? [String: String], ["session": "session-one"])
     }
-    func testDecodesBatchedOutlineCountsAndRejectsInvalidCounts() throws {
-        let json = #"{"entries":[{"path":"Sources","symbols":7,"kinds":[{"kind":"method","count":4}]},{"path":"Sources/App.swift","symbols":3,"kinds":[],"symbol":"Sources/App.swift::App"}]}"#
-        let entries = try CodeOutlineSummaryResults.read(Data(json.utf8))
-        XCTAssertEqual(entries[0].symbols, 7)
-        XCTAssertEqual(entries[1].symbol, "Sources/App.swift::App")
-        XCTAssertThrowsError(try CodeOutlineSummaryResults.read(Data(json.replacingOccurrences(of: "\"symbols\":7", with: "\"symbols\":-1").utf8)))
+    func testChangeCountsDecodeTheHookShapeAndReadAsChips() throws {
+        // The shape /v1/code/change-counts returns (packages/cli code-routes.test.ts).
+        let json = #"{"project":"fixture","entries":[{"path":"typescript/app.ts","functions":{"changed":1,"added":0},"types":{"changed":0,"added":0},"first":"typescript/app.ts::add"},{"path":"typescript/extra.ts","functions":{"changed":0,"added":1},"types":{"changed":0,"added":1},"first":"typescript/extra.ts::Extra"},{"path":"README.md","functions":{"changed":0,"added":0},"types":{"changed":0,"added":0}}]}"#
+        let entries = try CodeChangeCountResults.read(Data(json.utf8))
+        XCTAssertEqual(entries.map(\.label), ["1 function changed", "1 new function · 1 new type", nil])
+        XCTAssertEqual(entries[0].first, "typescript/app.ts::add")
+        let many = CodeChangeCount(path: "a.swift", functions: .init(changed: 2, added: 3), types: .init(changed: 2, added: 0), first: nil)
+        XCTAssertEqual(many.label, "2 functions changed · 3 new functions · 2 types changed")
+        XCTAssertThrowsError(try CodeChangeCountResults.read(Data(json.replacingOccurrences(of: "\"changed\":1", with: "\"changed\":-1").utf8)))
     }
     func testApprovalKeepsProviderOptionOrderAndCommandSeparate() throws {
         let data = Data(#"{"actionId":"ask","message":"{\"command\":\"pnpm test\",\"justification\":\"Check the change\"}","options":[{"label":"Yes","decision":"approve"},{"label":"Yes and allow this project","decision":"allow-project"},{"label":"No","decision":"deny"}]}"#.utf8)
@@ -159,11 +162,14 @@ extension CodeIndexTests {
         XCTAssertFalse(empty.hasPrevious)
     }
 
-    func testDecodesRecentObservationTimeAndQualifiedMembers() throws {
-        let recentSymbol = symbol.dropLast() + #", "indexedAt":1758460000000}"#
-        let rows = try CodeRecentResults.read(Data(#"{"entries":[\#(recentSymbol)]}"#.utf8))
-        XCTAssertEqual(rows[0].symbol.name, "greet")
-        XCTAssertEqual(rows[0].indexedAt, 1758460000000)
+    func testWhatChangedDecodesTheHookShapeByFileAndFamily() throws {
+        // The shape /v1/code/changed returns (packages/cli code-routes.test.ts).
+        let json = #"{"project":"fixture","files":[{"path":"typescript/app.ts","items":[{"name":"add","kind":"function","family":"function","file":"typescript/app.ts","line":2,"endLine":4,"parent":null,"isNew":false,"uses":3},{"name":"length","kind":"method","family":"function","file":"typescript/app.ts","line":11,"endLine":13,"parent":"Point","isNew":true,"uses":0}]}]}"#
+        let files = try CodeChangedResults.read(Data(json.utf8))
+        XCTAssertEqual(files.map(\.path), ["typescript/app.ts"])
+        XCTAssertEqual(files[0].items.map(\.qualifiedName), ["typescript/app.ts::add", "typescript/app.ts::Point.length"])
+        XCTAssertEqual(files[0].items.map(\.isNew), [false, true])
+        XCTAssertThrowsError(try CodeChangedResults.read(Data(json.replacingOccurrences(of: "\"endLine\":4", with: "\"endLine\":1").utf8)))
         let member = try JSONDecoder().decode(CodeSymbol.self, from: Data(symbol.replacingOccurrences(of: "null", with: "\"Helpers\"").utf8))
         XCTAssertEqual(member.qualifiedName, "python/helpers.py::Helpers.greet")
     }

@@ -1,7 +1,7 @@
 import XCTest
 
-/// The Code screen from the project page: search a fixed index, open a
-/// symbol's dossier. Runs against `--code-fixture`, so no Hook is needed.
+/// The Code screen from the project page: what changed, the files, search and
+/// a function's or type's details. Runs against `--code-fixture`, so no Hook is needed.
 final class CodeTests: XCTestCase {
     @MainActor
     func testSearchShowsRowsAndOpensTheDossier() {
@@ -20,7 +20,8 @@ final class CodeTests: XCTestCase {
         field.typeText("po")
 
         let row = app.buttons["code-row:2"]
-        XCTAssertTrue(row.waitForExistence(timeout: 8), "the Point symbol is listed")
+        XCTAssertTrue(row.waitForExistence(timeout: 8), "the Point class is listed")
+        XCTAssertTrue(app.staticTexts["Types"].exists, "Results are grouped by what they are")
         capture(app, "Code search")
 
         row.tap()
@@ -35,12 +36,19 @@ final class CodeTests: XCTestCase {
     }
 
     @MainActor
-    func testCodeOpensOnTheCheckoutAndFileNamesReachDossier() {
+    func testCodeOpensOnWhatChangedAndFileNamesReachDetails() {
         let app = launch()
         tap(app.buttons["project:sample/brain:demo"])
         let codeCell = app.buttons["project-code-row"]
         XCTAssertTrue(codeCell.waitForExistence(timeout: 8))
         codeCell.tap()
+        // The page leads with what the agents changed, by file.
+        let parse = app.buttons["code-changed:swift/Service.swift::parse"]
+        XCTAssertTrue(parse.waitForExistence(timeout: 8), "What changed is the first thing on the page")
+        XCTAssertTrue(parse.label.contains("new function"), parse.label)
+        XCTAssertTrue(app.buttons["code-changed:typescript/app.ts::Point.length"].exists)
+        capture(app, "Code what changed")
+        tap(app.buttons["code-mode:files"])
         let folder = app.buttons["code-tree:typescript"]
         XCTAssertTrue(folder.waitForExistence(timeout: 8))
         XCTAssertTrue(app.buttons["code-tree:README.md"].exists, "Files the index never reads are listed too")
@@ -75,6 +83,7 @@ final class CodeTests: XCTestCase {
         let codeCell = app.buttons["project-code-row"]
         XCTAssertTrue(codeCell.waitForExistence(timeout: 8))
         codeCell.tap()
+        tap(app.buttons["code-mode:files"])
 
         // An unindexed file two folders down opens read-only.
         tap(app.buttons["code-tree:docs"])
@@ -109,14 +118,16 @@ final class CodeTests: XCTestCase {
     }
 
     @MainActor
-    func testRecentOpensTheFileAtTheSymbolAndMediaKeepsTheFileViewer() {
+    func testWhatChangedOpensDetailsAndFileAndMediaKeepsTheFileViewer() {
         let app = launch()
         tap(app.buttons["project:sample/brain:demo"])
         let codeCell = app.buttons["project-code-row"]
         XCTAssertTrue(codeCell.waitForExistence(timeout: 8))
         codeCell.tap()
-        tap(app.buttons["code-mode:recent"])
-        tap(app.buttons["code-row:12"])
+        tap(app.buttons["code-changed:swift/Service.swift::parse"])
+        XCTAssertTrue(app.descendants(matching: .any)["code-dossier"].firstMatch.waitForExistence(timeout: 8), "A changed function opens its details")
+        app.buttons["Close"].firstMatch.tap()
+        tap(app.buttons["code-changed-file:swift/Service.swift"])
         XCTAssertTrue(app.descendants(matching: .any)["code-file:swift/Service.swift"].firstMatch.waitForExistence(timeout: 8))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "func parse")).firstMatch.waitForExistence(timeout: 5))
         app.navigationBars.buttons.element(boundBy: 0).tap()
@@ -147,6 +158,7 @@ final class CodeTests: XCTestCase {
         review.tap()
         let chosen = NSPredicate(format: "label CONTAINS %@", "/home/sam/Projects/demo-review")
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: chosen, object: place)], timeout: 5), .completed, place.label)
+        tap(app.buttons["code-mode:files"])
         XCTAssertTrue(app.buttons["code-tree:typescript"].waitForExistence(timeout: 8), "The chosen checkout's files are listed")
         tap(app.buttons["code-tree:README.md"])
         XCTAssertTrue(app.descendants(matching: .any)["code-file:README.md"].firstMatch.waitForExistence(timeout: 8))
@@ -168,7 +180,7 @@ final class CodeTests: XCTestCase {
     }
 
     @MainActor
-    func testUsagePagesThroughMiddleAndHotColdJumpWithinRanking() {
+    func testMostUsedPagesThroughMiddleAndJumpsBetweenMostAndLeastUsed() {
         let app = launch()
         tap(app.buttons["project:sample/brain:demo"])
         let codeCell = app.buttons["project-code-row"]
@@ -226,7 +238,7 @@ final class CodeTests: XCTestCase {
         codeCell.tap()
         let turnOn = app.buttons["code-turn-on"]
         XCTAssertTrue(turnOn.waitForExistence(timeout: 8), "An unindexed project offers to turn code intelligence on")
-        XCTAssertFalse(app.textFields["code-search"].exists, "Symbol search waits for the index")
+        XCTAssertFalse(app.textFields["code-search"].exists, "Search waits for the index")
         XCTAssertFalse(app.staticTexts["code-error"].exists, "No raw error text or HTTP status")
         XCTAssertTrue(app.buttons["code-tree:typescript"].exists, "Files stay browsable without an index")
         capture(app, "Code intelligence off")
