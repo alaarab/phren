@@ -150,6 +150,7 @@ describe("handleBackgroundSync recovery", () => {
     const remote = path.join(tmp.path, "remote-manual.git");
     const repoA = path.join(tmp.path, "repo-manual-a");
     const repoB = path.join(tmp.path, "repo-manual-b");
+    // CLAUDE.md has no conflict strategy (summary.md takes the incoming side), so this needs a person.
 
     execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
     execFileSync("git", ["clone", remote, repoA], { stdio: "ignore" });
@@ -161,19 +162,19 @@ describe("handleBackgroundSync recovery", () => {
     initTestPhrenRoot(repoA);
 
     fs.mkdirSync(path.join(repoA, "demo"), { recursive: true });
-    fs.writeFileSync(path.join(repoA, "demo", "summary.md"), "# summary\n\nshared line\n");
+    fs.writeFileSync(path.join(repoA, "demo", "CLAUDE.md"), "# summary\n\nshared line\n");
     execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "base"], { cwd: repoA, stdio: "ignore" });
     const primaryBranch = currentBranch(repoA);
     execFileSync("git", ["push", "-u", "origin", primaryBranch], { cwd: repoA, stdio: "ignore" });
     checkoutRemoteBranch(repoB, primaryBranch);
 
-    fs.writeFileSync(path.join(repoA, "demo", "summary.md"), "# summary\n\nremote change\n");
+    fs.writeFileSync(path.join(repoA, "demo", "CLAUDE.md"), "# summary\n\nremote change\n");
     execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "remote"], { cwd: repoA, stdio: "ignore" });
     execFileSync("git", ["push"], { cwd: repoA, stdio: "ignore" });
 
-    fs.writeFileSync(path.join(repoB, "demo", "summary.md"), "# summary\n\nlocal conflicting change\n");
+    fs.writeFileSync(path.join(repoB, "demo", "CLAUDE.md"), "# summary\n\nlocal conflicting change\n");
     execFileSync("git", ["add", "."], { cwd: repoB, stdio: "ignore" });
     execFileSync("git", ["commit", "-m", "local"], { cwd: repoB, stdio: "ignore" });
 
@@ -184,8 +185,8 @@ describe("handleBackgroundSync recovery", () => {
     expect(git(repoB, ["log", "--oneline", "-1"], "utf8")).toContain("local");
     expect(fs.existsSync(path.join(repoB, ".git", "rebase-merge"))).toBe(false);
     expect(fs.existsSync(path.join(repoB, ".runtime", "background-sync.lock"))).toBe(false);
-    expect(fs.readFileSync(path.join(repoB, "demo", "summary.md"), "utf8")).toContain("local conflicting change");
-    expect(fs.readFileSync(path.join(repoB, "demo", "summary.md"), "utf8")).not.toContain("<<<<<<<");
+    expect(fs.readFileSync(path.join(repoB, "demo", "CLAUDE.md"), "utf8")).toContain("local conflicting change");
+    expect(fs.readFileSync(path.join(repoB, "demo", "CLAUDE.md"), "utf8")).not.toContain("<<<<<<<");
 
     // The failure keeps its reason and counts, in the log and where doctor reads them.
     const runtime = JSON.parse(fs.readFileSync(path.join(repoB, ".runtime", "runtime-health.json"), "utf8"));
