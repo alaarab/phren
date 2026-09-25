@@ -62,6 +62,21 @@ it("lists registered computers that are not linked and how long each session has
   } finally { vi.useRealTimers(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }
 });
 
+it("names workers in the conductor's workspace by their own tab, never as the conductor", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "phren-live-"));
+  vi.stubEnv("PHREN_BRIDGE_HOME", root);
+  try {
+    const tab = (id: string, extra: Record<string, unknown>) => ({ id, agent: "claude", cwd: "/home/sam/Projects", ...extra });
+    vi.mocked(hookRequest).mockResolvedValueOnce({ computer: { name: "Desk" } }).mockResolvedValueOnce({ groups: [{ label: "Conductor", children: [
+      tab("w2:t1", { label: "1", role: "conductor" }), tab("w2:t2", { label: "phone-fixes" }), tab("w2:t3", { label: "3" }),
+    ] }, { label: "Workers", children: [tab("w3:t1", { label: "1" })] }] });
+    const live = await listLiveSessions({ store: null });
+    expect(live.sessions.map(session => [session.label, session.role])).toEqual([
+      ["Conductor", "conductor"], ["phone-fixes", undefined], [undefined, undefined], ["Workers", undefined],
+    ]);
+  } finally { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }
+});
+
 it("counts a computer linked under any of its names: hostname label, Bonjour name or a peer's address", async () => {
   const store = await mkdtemp(path.join(tmpdir(), "phren-names-"));
   try {

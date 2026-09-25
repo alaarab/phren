@@ -2,12 +2,12 @@ import { spawn } from "node:child_process";
 import { lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Duplex } from "node:stream";
-import { load } from "js-yaml";
+import { dump, load } from "js-yaml";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { hookRequest } from "./client.js";
 import { computerName, dispatchKeyPath, publicComputerKey } from "./computers.js";
-import { BridgeError, bridgeRoot, serverName, type Json } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, serverName, type Json } from "./protocol.js";
 
 const peerSchema = z.object({
   name: computerName,
@@ -30,6 +30,26 @@ export async function hookPeers(root = bridgeRoot()): Promise<HookPeer[]> {
   const { computers } = z.object({ version: z.literal(1), computers: z.array(peerSchema).max(32) }).strict().parse(load(await readFile(file, "utf8")));
   if (new Set(computers.map(peer => peer.name)).size !== computers.length) throw new BridgeError(409, "hooks.yaml has duplicate computer names.");
   return computers;
+}
+
+/**
+ * Adds one verified peer to hooks.yaml, creating the file (0600) if needed.
+ * Linking again with the same details is a no-op; a different computer under
+ * the same name or address is refused rather than replaced.
+ */
+export async function addHookPeer(input: unknown, root = bridgeRoot()): Promise<{ added: boolean; peer: HookPeer }> {
+  const peer = peerSchema.parse(input);
+  const existing = await hookPeers(root).catch(error => {
+    if (error instanceof BridgeError && error.details?.hooksYaml === "missing") return [];
+    throw error;
+  });
+  const same = (other: HookPeer) => JSON.stringify(peerSchema.parse(other)) === JSON.stringify(peer);
+  if (existing.some(same)) return { added: false, peer };
+  const clash = existing.find(other => other.name === peer.name || (other.address === peer.address && other.port === peer.port && other.server === peer.server));
+  if (clash) throw new BridgeError(409, `hooks.yaml already has ${clash.name} at ${clash.address}; remove that entry first to link it differently.`);
+  if (existing.length >= 32) throw new BridgeError(409, "hooks.yaml already has 32 computers.");
+  await atomic(path.join(root, "hooks.yaml"), dump({ version: 1, computers: [...existing, peer] }, { lineWidth: -1 }));
+  return { added: true, peer };
 }
 
 /**

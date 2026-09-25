@@ -39,7 +39,7 @@ import { healthDetails, listsCaller } from "./health.js";
 import { defaultPhrenPath } from "../shared.js";
 import { loadCodePackage, loadedFrom } from "../modules/code-package.js";
 import { gitRepository, paneRoute, uploadBody } from "./server-pane-routes.js";
-import { launchSession, workspaceAction } from "./server-launch.js";
+import { launchSession, localConductor, workspaceAction } from "./server-launch.js";
 import type { TranscriptStreams } from "./server-stream.js";
 import { hookMetrics } from "./metrics.js";
 import { streamSpeech } from "./speech.js";
@@ -253,6 +253,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           }
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
           case "/v1/conductor/grants": result = { grants: await listGrants() }; break;
+          // Asked by linked peers before they start a conductor: one per connected group.
+          case "/v1/conductor": result = { computer: info.computer, conductor: await localConductor() ?? null }; break;
           case "/v1/dispatch/capacity": {
             const live = await servers();
             const snapshots = await Promise.all(live.map(server => snapshot(String(server.session))));

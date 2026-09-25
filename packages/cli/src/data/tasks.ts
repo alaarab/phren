@@ -38,6 +38,8 @@ export interface TaskItem {
   pinned?: boolean;
   githubIssue?: number;
   githubUrl?: string;
+  /** The computer (and optionally the session) that took this task; see claimTask. */
+  claim?: TaskClaim;
   rank?: number;
   lastActivity?: string;
   createdAt?: string;
@@ -46,6 +48,20 @@ export interface TaskItem {
   childFindings?: string[];
   speculative?: boolean;
   parentFinding?: string;
+}
+
+/**
+ * A conductor's claim on a task, written under it in tasks.md as
+ * `  Claimed: <computer> <ISO time> [session:<id>]`. Conductors that are not
+ * linked coordinate through the synced store: a claimed task is Active and
+ * belongs to the claiming computer until it is done or released.
+ */
+export interface TaskClaim { computer: string; at: string; session?: string }
+
+const CLAIM_LINE = /^Claimed:\s+([A-Za-z0-9][A-Za-z0-9._-]{0,252})\s+(\d{4}-\d{2}-\d{2}T[0-9:.]+Z)(?:\s+session:([A-Za-z0-9._:-]{1,128}))?$/;
+
+function formatClaim(claim: TaskClaim): string {
+  return `Claimed: ${claim.computer} ${claim.at}${claim.session ? ` session:${claim.session}` : ""}`;
 }
 
 export interface TaskDoc {
@@ -129,9 +145,11 @@ function parseContinuation(lines: string[], idx: number): {
   context?: string;
   githubIssue?: number;
   githubUrl?: string;
+  claim?: TaskClaim;
   linesToSkip: number;
 } {
   let context: string | undefined;
+  let claim: TaskClaim | undefined;
   let githubIssue: number | undefined;
   let githubUrl: string | undefined;
   let linesToSkip = 0;
@@ -149,6 +167,12 @@ function parseContinuation(lines: string[], idx: number): {
       linesToSkip++;
       continue;
     }
+    const claimed = CLAIM_LINE.exec(trimmed);
+    if (claimed) {
+      claim = { computer: claimed[1], at: claimed[2], ...(claimed[3] ? { session: claimed[3] } : {}) };
+      linesToSkip++;
+      continue;
+    }
     if (trimmed.startsWith("GitHub:")) {
       const parsed = parseGitHubIssueReference(trimmed.slice("GitHub:".length));
       githubIssue = parsed.githubIssue;
@@ -159,7 +183,7 @@ function parseContinuation(lines: string[], idx: number): {
     break;
   }
 
-  return { context, githubIssue, githubUrl, linesToSkip };
+  return { context, githubIssue, githubUrl, claim, linesToSkip };
 }
 
 /** Pattern that matches the task metadata comment embedded in task item lines.
@@ -309,6 +333,7 @@ function parseTaskContent(project: string, taskPath: string, content: string): T
       pinned: pinned || undefined,
       githubIssue: continuation.githubIssue,
       githubUrl: continuation.githubUrl,
+      claim: continuation.claim,
     });
     i += continuation.linesToSkip;
   }
@@ -336,6 +361,7 @@ function renderTask(doc: TaskDoc): string {
       if (item.context) out.push(`  Context: ${item.context}`);
       const githubRef = formatGitHubIssueReference(item);
       if (githubRef) out.push(`  GitHub: ${githubRef}`);
+      if (item.claim) out.push(`  ${formatClaim(item.claim)}`);
     }
     out.push("");
   }
@@ -569,6 +595,7 @@ export function completeTasks(phrenPath: string, project: string, matches: strin
       const [item] = parsed.data.items[found.match.section].splice(found.match.index, 1);
       item.section = "Done";
       item.checked = true;
+      item.claim = undefined;
       parsed.data.items.Done.unshift(item);
       completed.push(item.line);
     }
@@ -594,6 +621,7 @@ export function completeTask(phrenPath: string, project: string, match: string):
     const [item] = parsed.data.items[found.match.section].splice(found.match.index, 1);
     item.section = "Done";
     item.checked = true;
+    item.claim = undefined;
     parsed.data.items.Done.unshift(item);
     writeTaskDoc(parsed.data);
     return phrenOk(`Marked done in ${project}: ${item.line}`);
@@ -878,6 +906,57 @@ export function promoteTask(phrenPath: string, project: string, match: string, m
       parsed.data.items.Active.unshift(item);
     }
 
+    writeTaskDoc(parsed.data);
+    return phrenOk(item);
+  });
+}
+
+/** A claim this old may be taken over with `force`: its conductor has likely gone. */
+export const STALE_CLAIM_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Takes a task for `claim.computer`: moves it to Active and records the claim.
+ * Refuses a task another computer holds unless `force` is set and that claim
+ * is stale; claiming again from the same computer refreshes it. With
+ * `release`, clears this computer's claim and returns the task to the Queue.
+ */
+export function claimTask(phrenPath: string, project: string, match: string, claim: TaskClaim,
+  opts: { release?: boolean; force?: boolean; now?: number } = {}): PhrenResult<TaskItem> {
+  const bPath = canonicalTaskFilePath(phrenPath, project);
+  if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
+  const preCheck = ensureProject(phrenPath, project);
+  if (!preCheck.ok) return forwardErr(preCheck);
+
+  return withSafeLock(bPath, () => {
+    const parsed = readTasks(phrenPath, project);
+    if (!parsed.ok) return forwardErr(parsed);
+    const found = findItemByMatch(parsed.data, match);
+    if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
+    if (!found.match) return taskItemNotFound(project, match);
+    const item = parsed.data.items[found.match.section][found.match.index];
+    if (item.section === "Done") return phrenErr(`This task is already done: ${item.line}`, PhrenError.VALIDATION_ERROR);
+    const held = item.claim && item.claim.computer !== claim.computer ? item.claim : undefined;
+    if (held) {
+      const stale = (opts.now ?? Date.now()) - Date.parse(held.at) > STALE_CLAIM_MS;
+      if (!opts.force || !stale) {
+        return phrenErr(`${held.computer} claimed this task at ${held.at}${stale ? "; the claim is over a day old, so force can take it over" : ""}.`, PhrenError.PERMISSION_DENIED);
+      }
+    }
+    if (opts.release) {
+      if (!item.claim) return phrenErr(`This task is not claimed: ${item.line}`, PhrenError.VALIDATION_ERROR);
+      item.claim = undefined;
+      parsed.data.items[item.section].splice(found.match.index, 1);
+      item.section = "Queue";
+      parsed.data.items.Queue.unshift(item);
+    } else {
+      item.claim = claim;
+      if (item.section !== "Active") {
+        parsed.data.items[item.section].splice(found.match.index, 1);
+        item.section = "Active";
+        item.checked = false;
+        parsed.data.items.Active.unshift(item);
+      }
+    }
     writeTaskDoc(parsed.data);
     return phrenOk(item);
   });

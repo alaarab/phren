@@ -59,7 +59,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     schemaVersion: 1, name: "tasks", version: VERSION, defaultEnabled: false, requires: ["memory"],
     tools: [
       ...core(["get_tasks", "add_task", "manage_task"]),
-      ...full(["complete_task", "remove_task", "update_task", "tidy_done_tasks", "pin_task"]),
+      ...full(["complete_task", "remove_task", "update_task", "tidy_done_tasks", "pin_task", "claim_task"]),
     ],
     cliCommands: ["task", "tasks", "config task-mode", "config proactivity.tasks"], agentHooks: [], hookRoutes: [], capabilities: ["tasks"],
     storeFiles: ["<project>/tasks.md", ".sessions/checkpoint-*.json"], localFiles: [],
@@ -130,7 +130,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
   {
     schemaVersion: 1, name: "conductor", version: VERSION, defaultEnabled: false, requires: ["memory", "hook"],
     tools: full(["dispatch", "dispatch_returns", "hand_off", "live_sessions"]), cliCommands: ["dispatch", "dispatch status", "dispatch returns", "dispatch sessions", "hand-off", "conductor", "conductor grants", "bridge enroll-computer"], agentHooks: [],
-    hookRoutes: [...routes("GET", ["/v1/dispatch", "/v1/dispatch/capacity", "/v1/conductor/grants"]),
+    hookRoutes: [...routes("GET", ["/v1/dispatch", "/v1/dispatch/capacity", "/v1/conductor", "/v1/conductor/grants"]),
       ...routes("POST", ["/v1/dispatch", "/v1/dispatch/workers", "/v1/dispatch/returns", "/v1/conductor/grants"]), ...routes("DELETE", ["/v1/conductor/grants"])],
     capabilities: ["dispatch"], storeFiles: ["global/skills/conductor/**"],
     localFiles: ["<bridge>/hooks.yaml", "<bridge>/conductor.yaml", "<bridge>/dispatches/*.json"], phoneScreens: [], skills: ["conductor"],

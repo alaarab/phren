@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 70 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 71 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -13,7 +13,7 @@ Phren exposes 70 MCP tools across 16 modules in the bundled implementation catal
 | `revise_finding` | `action`: supersede, retract, edit, remove, link, resolve_contradiction, pin, feedback | `supersede_finding`, `retract_finding`, `edit_finding`, `remove_finding`, `link_findings`, `resolve_contradiction`, `pin_memory`, `memory_feedback` |
 | `get_tasks` | List tasks | None |
 | `add_task` | Add a task | None |
-| `manage_task` | `action`: complete, update, remove, pin, tidy | `complete_task`, `update_task`, `remove_task`, `pin_task`, `tidy_done_tasks` |
+| `manage_task` | `action`: complete, update, remove, pin, claim, tidy | `complete_task`, `update_task`, `remove_task`, `pin_task`, `claim_task`, `tidy_done_tasks` |
 | `session` | `action`: start, end, context, history | `session_start`, `session_end`, `session_context`, `session_history` |
 | `phren_admin` | `action`: any remaining tool by name, or `list_actions` | skills, hooks, config, notes, review queue, export/import, doctor, health, stores, projects, fragment graph, extraction, topic summaries (`get_topic_summaries`, `set_topic_summary`), code index (`code_search`, `code_definition`, `code_references`, `code_outline`, `code_usage`), dispatch and hand-off |
 
@@ -435,6 +435,18 @@ Pin or unpin a task. Pinned tasks always appear in hook context regardless of pr
 | `project` | string | yes | Project name. |
 | `item` | string | yes | Partial text or task ID (A1, Q3) to match. |
 | `unpin` | boolean | no | If true, unpin instead of pin. |
+
+### `claim_task`
+
+Claim a task for this computer, so conductors that are not linked through the Hook do not take the same work. Syncs the store, moves the task to Active with a `Claimed: <computer> <ISO time> [session:<id>]` line under it, then commits and pushes. A task another computer holds is refused; when two claims race, the one that reached the store's remote first wins and the other call returns `heldBy`. Completing a task clears its claim. Conductors skip tasks claimed by other computers.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `item` | string | yes | Task to claim: `bid:XXXXXXXX`, a positional ID (Q3) or its text. |
+| `session` | string | no | The claiming conductor's session id, recorded with the claim. |
+| `release` | boolean | no | Release this computer's claim and return the task to the Queue. |
+| `force` | boolean | no | Take over another computer's claim once it is more than a day old. |
 
 ---
 

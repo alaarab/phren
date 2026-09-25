@@ -5,6 +5,8 @@ import { z } from "zod";
 import { homeDir } from "../home-paths.js";
 import { agentNames, findPane, isConductorName, paneAgentName, paneChatState, paneIdentity, rpc, servers, snapshot } from "./herdr.js";
 import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from "./launch-worktree.js";
+import { groupConductor } from "./conductor-group.js";
+import { optionalHookPeers } from "./peers.js";
 import { atomic, BridgeError, bridgeRoot, id, type Json, objects, provider } from "./protocol.js";
 
 /** Starting agents in Herdr from the phone: the launch route's harness
@@ -75,6 +77,19 @@ async function targetForPane(server: string, pane: Json): Promise<Json | undefin
   return chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
 }
 
+/** The live conductor on this computer, on any Herdr server, as a target.
+ * `known` reuses a snapshot the caller already took. */
+export async function localConductor(known?: { server: string; snapshot: Json }): Promise<{ server: string; target?: Json } | undefined> {
+  const names = [...new Set([...(known ? [known.server] : []), ...(await servers()).map(item => String(item.session))])];
+  for (const name of names) {
+    const value = known && name === known.server ? known.snapshot : await snapshot(name);
+    const existing = objects(value.panes).find(pane => isConductorName(paneAgentName(value, pane))
+      && provider.safeParse(pane.agent).success && !["completed", "exited", "failed", "stopped"].includes(String(pane.agent_status)));
+    if (existing) return { server: name, target: await targetForPane(name, existing) };
+  }
+  return undefined;
+}
+
 /** The Herdr agent-name slug for a human label: "Conductor smoke 4" becomes "conductor-smoke-4". */
 export function herdrAgentName(label: string): string {
   const slug = label.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[^a-z]+/, "").replace(/-+$/, "").slice(0, 32).replace(/-+$/, "");
@@ -103,10 +118,13 @@ export async function launchSession(server: string, data: Json, options: { canar
   // "Conductor" stays "conductor", never "conductor-conductor".
   // The canary's conductor is not the store's conductor: it keeps its own
   // name, so the phone never pins it and a real conductor is never refused.
-  const wanted = options.canary ? "phren-canary" : role === "conductor" ? (baseName === "conductor" || baseName.startsWith("conductor-") ? baseName : herdrAgentName(`conductor-${baseName}`)) : baseName;
+  // A worker never takes a conductor's name, whatever its label says:
+  // "Conductor voice fluency" would otherwise read as role=conductor.
+  const wanted = options.canary ? "phren-canary" : role === "conductor" ? (isConductorName(baseName) ? baseName : herdrAgentName(`conductor-${baseName}`))
+    : isConductorName(baseName) ? herdrAgentName(`worker-${baseName}`) : baseName;
   const model = typeof data.model === "string" && data.model.trim() ? plainText(200).parse(data.model.trim()) : undefined;
   const modelFlag: Partial<Record<(typeof launchKinds)[number], string>> = { codex: "--model", claude: "--model", opencode: "--model" };
-  const workspace = data.workspaceId === undefined ? undefined : id.parse(data.workspaceId);
+  let workspace = data.workspaceId === undefined ? undefined : id.parse(data.workspaceId);
   // Herdr 0.9.1 refuses a start timeout of 3000 ms or less (invalid_agent_timeout).
   const timeout = Math.min(120_000, Math.max(3_001, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
   const before = await snapshot(server);
@@ -115,15 +133,19 @@ export async function launchSession(server: string, data: Json, options: { canar
   const taken = agentNames(before);
   let name = wanted;
   for (let n = 2; taken.has(name) && n < 100; n++) name = `${wanted.slice(0, 32 - String(n).length - 1)}-${n}`;
+  // One conductor per connected group: this computer and every linked peer.
+  let unchecked: { computer: string; error: string }[] = [];
   if (role === "conductor" && !options.canary) {
-    const otherServers = (await servers()).map(item => String(item.session)).filter(name => name !== server);
-    const overviews = [{ name: server, value: before }, ...await Promise.all(otherServers.map(async name => ({ name, value: await snapshot(name) })))];
-    for (const overview of overviews) {
-      const existing = objects(overview.value.panes).find(pane => isConductorName(paneAgentName(overview.value, pane))
-        && provider.safeParse(pane.agent).success && !["completed", "exited", "failed", "stopped"].includes(String(pane.agent_status)));
-      if (existing) throw new BridgeError(409, "A conductor is already running for this store.", { target: await targetForPane(overview.name, existing) });
-    }
+    const existing = await localConductor({ server, snapshot: before });
+    if (existing) throw new BridgeError(409, "A conductor is already running on this computer.", { target: existing.target });
+    const group = await groupConductor((await optionalHookPeers()).peers);
+    if (group.found) throw new BridgeError(409, `A conductor is already running on ${group.found.computer}, which is linked with this computer. A connected group shares one conductor.`,
+      { computer: group.found.computer, target: group.found.target });
+    unchecked = group.unchecked;
   }
+  // A worker opened in the conductor's workspace would be listed under the
+  // conductor's name; it gets its own workspace instead.
+  if (role === "agent" && workspace && objects(before.panes).some(pane => pane.workspace_id === workspace && isConductorName(paneAgentName(before, pane)))) workspace = undefined;
   const args = role === "conductor" ? await prepareConductor(kind, effort, model)
     : [...(model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort))];
   if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
@@ -170,7 +192,7 @@ export async function launchSession(server: string, data: Json, options: { canar
   const binding = { server, workspace: created.workspaceId, tab: created.tabId, pane: created.paneId, source: kind };
   const target = sessionId ? { ...binding, session: sessionId }
     : chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
-  return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target,
+  return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(unchecked.length ? { unchecked } : {}),
     ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}) };
 }
 export async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {
