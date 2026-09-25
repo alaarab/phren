@@ -200,6 +200,15 @@ const TEAM_SUBCOMMANDS: Subcommand[] = [
 
 export const REGISTRY: Command[] = [
   {
+    name: "pair", topic: "setup", usage: "phren pair [--minutes <1-30>] [--port <n>] [--no-install]",
+    summary: "Connect your phone: show a pairing QR code and authorize the phone that scans it",
+    run: async args => {
+      const { runPair } = await import("./bridge/pair.js");
+      const { VERSION } = await import("./package-metadata.js");
+      return runPair(args, VERSION);
+    },
+  },
+  {
     name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall|enroll-computer|discover|link|fanouts archive|speech-key set>",
     summary: "Install Phren Hook and enroll phone or computer connections",
     subcommands: [
@@ -245,7 +254,7 @@ export const REGISTRY: Command[] = [
   {
     name: "init",
     topic: "setup",
-    usage: "phren init [--preset managed|assisted|manual] [--mode shared|project-local] [--machine <n>] [--profile <n>] [--dry-run] [-y]",
+    usage: "phren init [--advanced] [--preset managed|assisted|manual] [--mode shared|project-local] [--machine <n>] [--profile <n>] [--dry-run] [-y]",
     cheatUsage: "phren init",
     summary: "Set up phren",
     featured: true,

@@ -143,12 +143,17 @@ describe("built-in registration declarations", () => {
     expect(new Set(identities).size).toBe(identities.length);
     const server = source("bridge/server-routes.ts");
     const getBlock = server.slice(server.indexOf('if (request.method === "GET")'), server.indexOf('} else if (request.method === "POST")'));
-    const currentGets = [...getBlock.matchAll(/case "(\/v1\/[^\"]+)"/g)].map(match => match[1]);
+    // The phone's memory routes live in memory-store.ts behind one /v1/store/ prefix check.
+    const store = source("bridge/memory-store.ts");
+    const storeRoutes = (method: string) => [...store.matchAll(new RegExp(`method === "${method}" && url.pathname === STORE_ROUTES\\.(\\w+)`, "g"))]
+      .map(match => `/v1/store/${match[1]}`);
+    const currentGets = [...[...getBlock.matchAll(/case "(\/v1\/[^\"]+)"/g)].map(match => match[1]), ...storeRoutes("GET")];
     expect(declared.filter(route => route.method === "GET").map(route => route.path).sort()).toEqual(currentGets.sort());
     const postBlock = server.slice(server.indexOf('} else if (request.method === "POST")'), server.indexOf('} else throw new BridgeError(405'))
       + source("bridge/server-pane-routes.ts");
     const currentPosts = new Set([...postBlock.matchAll(/url.pathname === "(\/v1\/[^\"]+)"/g)].map(match => match[1]));
     for (const operation of ["create", "focus", "rename", "close"]) currentPosts.add(`/v1/workspaces/${operation}`);
+    for (const route of storeRoutes("POST")) currentPosts.add(route);
     expect(declared.filter(route => route.method === "POST").map(route => route.path).sort()).toEqual([...currentPosts].sort());
     expect(declared.filter(route => route.method === "WS").map(route => route.path)).toEqual(["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe"]);
   });

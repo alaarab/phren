@@ -214,6 +214,10 @@ export interface WalkthroughResult {
   findingSensitivity: "minimal" | "conservative" | "balanced" | "aggressive";
   githubUsername?: string;
   githubRepo?: string;
+  /** Create the private repo with gh and push, instead of printing the steps. */
+  githubCreate?: boolean;
+  /** Install Phren Hook and show the pairing QR code once setup finishes. */
+  connectPhone?: boolean;
   cloneUrl?: string;
   domain: InitProjectDomain;
   inferredScaffold?: InferredInitScaffold;
@@ -222,6 +226,21 @@ export interface WalkthroughResult {
 export interface WalkthroughOptions {
   /** When true, skip the express prompt and use recommended defaults immediately */
   express?: boolean;
+  /** When true, skip the express prompt and ask about every setting */
+  advanced?: boolean;
+  /** The signed-in GitHub login from gh, for the sync offer; injectable for tests */
+  githubLogin?: () => Promise<string | undefined>;
+}
+
+/** The login gh is signed in as, or undefined when gh is missing or signed out. */
+export async function ghLogin(): Promise<string | undefined> {
+  const { execFile } = await import("child_process");
+  return new Promise(resolve => {
+    execFile("gh", ["api", "user", "--jq", ".login"], { timeout: 8000 }, (error, stdout) => {
+      const login = String(stdout ?? "").trim();
+      resolve(!error && /^[A-Za-z0-9-]{1,39}$/.test(login) ? login : undefined);
+    });
+  });
 }
 
 // Interactive walkthrough for first-time init
@@ -253,7 +272,7 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
 
   // Express mode: skip the entire walkthrough with recommended defaults
   const useExpress = options?.express === true
-    || (options?.express !== false && await prompts.confirm(
+    || (options?.express !== false && options?.advanced !== true && await prompts.confirm(
       "Use recommended settings? (global storage, MCP on, hooks on, auto tasks)",
       true
     ));
@@ -290,6 +309,19 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
       "Task mode: auto",
       "Domain: software",
     ]);
+    // Only a live terminal gets the follow-up offers; --express stays silent.
+    if (options?.express !== true) {
+      const login = await (options?.githubLogin ?? ghLogin)();
+      if (login && await prompts.confirm(`Sync memory to a private GitHub repo (${login}/my-phren)?`, true)) {
+        expressResult.githubUsername = login;
+        expressResult.githubRepo = "my-phren";
+        expressResult.githubCreate = true;
+      }
+      if (["darwin", "linux"].includes(process.platform)
+          && await prompts.confirm("Connect your phone now? (shows a QR code to scan in the Phren app)", false)) {
+        expressResult.connectPhone = true;
+      }
+    }
     return expressResult;
   }
 

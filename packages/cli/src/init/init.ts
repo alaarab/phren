@@ -194,6 +194,8 @@ export interface InitOptions {
   yes?: boolean;
   /** Skip walkthrough entirely with recommended defaults (express mode) */
   express?: boolean;
+  /** Ask about every setting instead of offering recommended defaults */
+  advanced?: boolean;
   /**
    * Allow init to repoint global wiring (~/.local/bin/phren wrapper and
    * Claude settings.json hooks/mcpServers.phren) at a different phren root
@@ -208,7 +210,9 @@ export interface InitOptions {
   /** Set by walkthrough to pass project name to init logic */
   _walkthroughProject?: string;
   /** Set by walkthrough for personalized GitHub next-steps output */
-  _walkthroughGithub?: { username?: string; repo: string };
+  _walkthroughGithub?: { username?: string; repo: string; create?: boolean };
+  /** Set by walkthrough when the user wants the phone connected right away */
+  _walkthroughPair?: boolean;
   /** Set by walkthrough to seed project docs/topics by domain */
   _walkthroughDomain?: InitProjectDomain;
   /** Set by walkthrough to seed adaptive project scaffold from current repo content */
@@ -233,6 +237,31 @@ export interface InitOptions {
   _walkthroughStoragePath?: string;
   /** Set by walkthrough when project-local storage is chosen */
   _walkthroughStorageRepoRoot?: string;
+}
+
+function hasGitRemote(phrenPath: string): boolean {
+  try {
+    return execFileSync("git", ["-C", phrenPath, "remote"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env: nonInteractiveGitEnv() }).trim() !== "";
+  } catch { return false; }
+}
+
+/** Commit the new store and publish it as a private repo with gh. Returns whether it is now synced. */
+async function createGithubStore(phrenPath: string, username: string, repo: string): Promise<boolean> {
+  const git = (args: string[]) => execFileSync("git", ["-C", phrenPath, ...args], { stdio: ["ignore", "pipe", "pipe"], env: nonInteractiveGitEnv() });
+  try {
+    git(["add", "-A"]);
+    try { git(["commit", "-q", "-m", "Initial phren setup"]); } catch { /* nothing new to commit */ }
+    log(`\nCreating private repo ${username}/${repo} and pushing your memory…`);
+    execFileSync("gh", ["repo", "create", `${username}/${repo}`, "--private", `--source=${phrenPath}`, "--remote=origin", "--push"],
+      { stdio: ["ignore", "pipe", "pipe"], timeout: 120_000 });
+    writeInstallPreferences(phrenPath, { syncIntent: "sync" });
+    log(`  Synced: https://github.com/${username}/${repo} (private). Hooks pull and push it after each session.`);
+    return true;
+  } catch (err: unknown) {
+    const stderr = String((err as { stderr?: Buffer | string }).stderr ?? "").trim().split("\n")[0];
+    log(`  Couldn't create the GitHub repo${stderr ? `: ${stderr}` : ""}. Your memory is safe locally.`);
+    return false;
+  }
 }
 
 function normalizedBootstrapProjectName(projectPath: string): string {
@@ -327,7 +356,7 @@ export async function runInit(opts: InitOptions = {}) {
   // --express bypasses the TTY check since it skips all interactive prompts
   const isTTY = process.stdin.isTTY && process.stdout.isTTY;
   if (!hasExistingInstall && !dryRun && !opts.yes && (isTTY || opts.express)) {
-    const answers = await runWalkthrough(phrenPath, { express: opts.express });
+    const answers = await runWalkthrough(phrenPath, { express: opts.express, advanced: opts.advanced });
     opts._walkthroughStorageChoice = answers.storageChoice;
     opts._walkthroughStoragePath = answers.storagePath;
     opts._walkthroughStorageRepoRoot = answers.storageRepoRoot;
@@ -348,8 +377,9 @@ export async function runInit(opts: InitOptions = {}) {
       opts._walkthroughCloneUrl = answers.cloneUrl;
     }
     if (answers.githubRepo) {
-      opts._walkthroughGithub = { username: answers.githubUsername, repo: answers.githubRepo };
+      opts._walkthroughGithub = { username: answers.githubUsername, repo: answers.githubRepo, create: answers.githubCreate };
     }
+    opts._walkthroughPair = answers.connectPhone;
     opts._walkthroughDomain = answers.domain;
     if (answers.inferredScaffold) {
       opts._walkthroughInferredScaffold = answers.inferredScaffold;
@@ -841,43 +871,29 @@ export async function runInit(opts: InitOptions = {}) {
   }
 
   log(`\n\x1b[95m◆\x1b[0m phren initialized`);
-  log(`\nNext steps:`);
-  let step = 1;
-  log(`  ${step++}. Start a new Claude session in your project directory — phren injects context automatically`);
-  log(`  ${step++}. Run \`phren doctor\` to verify everything is wired correctly`);
-  log(`  ${step++}. Change defaults anytime: \`phren config project-ownership\`, \`phren config workflow\`, \`phren config proactivity.findings\`, \`phren config proactivity.tasks\``);
 
   const gh = opts._walkthroughGithub;
-  if (gh) {
-    const remote = gh.username
-      ? `git@github.com:${gh.username}/${gh.repo}.git`
-      : `git@github.com:YOUR_USERNAME/${gh.repo}.git`;
-    log(`  ${step++}. Push your phren to GitHub (private repo recommended):`);
-    log(`     cd ${phrenPath}`);
-    log(`     git add . && git commit -m "Initial phren setup"`);
-    if (gh.username) {
-      log(`     gh repo create ${gh.username}/${gh.repo} --private --source=. --push`);
-      log(`     # or manually: git remote add origin ${remote} && git push -u origin main`);
-    } else {
-      log(`     git remote add origin ${remote}`);
-      log(`     git push -u origin main`);
-    }
-  } else {
-    log(`  ${step++}. Push to GitHub for cross-machine sync (private repo recommended):`);
-    log(`     cd ${phrenPath}`);
-    log(`     git add . && git commit -m "Initial phren setup"`);
-    log(`     git remote add origin git@github.com:YOUR_USERNAME/my-phren.git`);
-    log(`     git push -u origin main`);
+  let synced = hasGitRemote(phrenPath);
+  if (!synced && gh?.create && gh.username) synced = await createGithubStore(phrenPath, gh.username, gh.repo);
+  let paired = false;
+  if (opts._walkthroughPair) {
+    const { enableHookForPhone } = await import("../modules/config.js");
+    const { runPair } = await import("../bridge/pair.js");
+    enableHookForPhone(phrenPath);
+    try { paired = await runPair([], VERSION) === 0; }
+    catch (err: unknown) { log(`  Phone pairing didn't finish: ${errorMessage(err)}`); }
   }
 
-  log(`  ${step++}. Add more projects: cd ~/your-project && phren add`);
-
-  if (!mcpEnabled) {
-    log(`  ${step++}. Turn MCP on: phren mcp-mode on`);
+  log(`\nNext:`);
+  let step = 1;
+  log(`  ${step++}. Start a new agent session (Claude, Codex, Copilot…) in a project. Phren loads its memory automatically.`);
+  if (!paired) log(`  ${step++}. Connect your phone any time: phren pair`);
+  if (!synced) {
+    const repo = gh ? `${gh.username ? `${gh.username}/` : ""}${gh.repo}` : "my-phren";
+    log(`  ${step++}. Sync across computers: cd ${phrenPath} && gh repo create ${repo} --private --source=. --push`);
   }
-  log(`  ${step++}. After your first week, run phren-discover to surface gaps in your project knowledge`);
-  log(`  ${step++}. After working across projects, run phren-consolidate to find cross-project patterns`);
-  log(`\n  Read ${phrenPath}/README.md for a guided tour of each file.`);
+  if (!mcpEnabled) log(`  ${step++}. Turn MCP on: phren mcp-mode on`);
+  log(`  Settings: phren config · Health check: phren doctor`);
 
   log(``);
 }

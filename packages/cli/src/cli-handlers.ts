@@ -165,10 +165,16 @@ export async function runInitCommand(args: string[]): Promise<number> {
       dryRun: args.includes("--dry-run"),
       yes: args.includes("--yes") || args.includes("-y"),
       express: args.includes("--express"),
+      advanced: args.includes("--advanced"),
       force: args.includes("--force"),
       _walkthroughCloneUrl: cloneUrl,
     });
   } catch (err: unknown) {
+    // Ctrl-C inside a prompt: say so plainly instead of Inquirer's internals.
+    if (err instanceof Error && err.name === "ExitPromptError") {
+      console.error("\nSetup cancelled. Run phren init again any time.");
+      return 130;
+    }
     console.error(errorMessage(err));
     return 1;
   }

@@ -1,4 +1,5 @@
 import { activateModules, moduleSnapshot, type ModuleSnapshot } from "./modules/runtime.js";
+import { enableHookForPhone } from "./modules/config.js";
 import { disabledCommand } from "./cli-registry.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -192,6 +193,11 @@ export async function runTopLevelCommand(
     const store = findPhrenPath() ?? defaultPhrenPath();
     snapshot = ["modules", "init", "quickstart", "verify", "uninstall", "doctor"].includes(cmd.name) || argv.includes("--help") || argv.includes("-h")
       ? moduleSnapshot(store) : activateModules(store);
+    const wantsHook = cmd.name === "pair" || (cmd.name === "bridge" && argv[1] === "install");
+    if (wantsHook && !snapshot.has("hook") && !argv.includes("--help") && !argv.includes("-h")) {
+      if (enableHookForPhone(store)) console.log("Turned on the Hook module for this store (phren modules disable hook turns it off).");
+      snapshot = activateModules(store, undefined, true);
+    }
     const unavailable = disabledCommand([cmd.name, ...argv.slice(1)].join(" "), snapshot);
     if (unavailable) { console.error(unavailable); return finish(1); }
   } catch (error) {

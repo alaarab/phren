@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- `phren pair` connects a phone in one scan. It turns on the Hook module, installs Phren Hook if needed, and prints a QR code (plus an address and six-character code for typing by hand). The phone sends its public key with an HMAC proof of the code and gets back an HMAC over the SSH host fingerprint, so it pins the right host key either way; this computer then adds one restricted `phren-iphone` line to `~/.ssh/authorized_keys`. The listener (port 47291) takes one phone, closes after five wrong codes, and times out after five minutes.
+- Hook: `/v1/store/head|tree|blob` and `/v1/store/file|delete` serve the store's working tree to the phone in git terms (tree and blob shas, compare-and-swap writes), advertised as `memoryStore`. The phone's Projects, Tasks and Memory tabs can read a paired computer's memory without GitHub. Ignored files stay off the phone.
+
+### Changed
+
+- `phren init` asks one question (recommended settings), then offers to sync memory to a private GitHub repo when `gh` is signed in (it creates `<login>/my-phren` and pushes) and to connect your phone. `--advanced` goes straight to every setting. The closing "Next steps" list is down to what is left to do, and Ctrl-C in a prompt says "Setup cancelled" instead of Inquirer's error.
+- `phren bridge install` turns the Hook module on instead of refusing with "module hook is disabled", which is what the phone's own setup command hit on a fresh store.
+
 ### Changed
 
 - Hook: the ElevenLabs key for spoken replies and Scribe dictation is phren's own machine config, no longer `~/.config/mina-trailer.json`. The Hook reads `ELEVENLABS_API_KEY` first (ElevenLabs' own variable, shared with its SDKs and MCP server), then `~/.local/share/phren/bridge/elevenlabs.json` (`{"apiKey": …}`, mode 600, never synced; a file other users can read is ignored). `phren bridge speech-key set` stores it from stdin. When that file is missing and `mina-trailer.json` has `elevenlabs_api_key`, the Hook copies it once with mode 600 and then reads only the new file; `mina-trailer.json` is left alone. `phren doctor` (`speech-key`) and `phren bridge doctor` (`speechKey`) say whether the computer has a key without showing it.
