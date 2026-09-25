@@ -81,7 +81,7 @@ the core profile reaches enabled tools through `phren_admin`. Hook adds JSON
 routes for indexed files, scoped search, paged usage, what changed, per-file
 change counts, one file's resolved references, reindexing and notes. The MCP
 tools and Hook routes take `name`; the older `symbol` spelling is accepted until
-0.2.18. See the complete
+0.3.1. See the complete
 [route table](api-reference.md#hook-routes).
 
 ## Refresh and phone

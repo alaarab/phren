@@ -448,7 +448,7 @@ Record a single insight to a project's FINDINGS.md. Call this the moment you dis
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `finding` | string or string[] | yes | The insight, as a single bullet point (or an array of bullet points for batch capture). Be specific enough to act on without extra context. |
-| `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, name?, task_item? }`. `name` links the finding to a function, type or variable; the older `symbol` spelling is accepted until 0.2.18. |
+| `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, name?, task_item? }`. `name` links the finding to a function, type or variable; the older `symbol` spelling is accepted until 0.3.1. |
 | `sessionId` | string | no | Optional session ID from `session_start`. Pass it if you want session metrics to include this write. |
 | `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `bug`. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
@@ -1003,7 +1003,7 @@ Go to where a function, method, type or variable is defined. Accepts `Foo`, `Foo
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name, optionally store-qualified. |
-| `name` | string | yes | What to look up: `Foo`, `Foo.bar` or `bar()`. The older `symbol` spelling is accepted until 0.2.18. |
+| `name` | string | yes | What to look up: `Foo`, `Foo.bar` or `bar()`. The older `symbol` spelling is accepted until 0.3.1. |
 
 ### `code_references`
 
@@ -1012,7 +1012,7 @@ Every place a function, method, type or variable is used, grouped by file, with 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name, optionally store-qualified. |
-| `name` | string | yes | What to look up: `Foo`, `Foo.bar` or `bar()`. The older `symbol` spelling is accepted until 0.2.18. |
+| `name` | string | yes | What to look up: `Foo`, `Foo.bar` or `bar()`. The older `symbol` spelling is accepted until 0.3.1. |
 | `limit` | number | no | Maximum reference lines (1-500, default 200). |
 
 ### `code_outline`

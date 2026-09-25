@@ -167,7 +167,7 @@ async function handleAddFinding(
 ) {
   const { finding, sessionId, findingType, scope } = params;
   // `name` is the citation's code link (a function, type or variable);
-  // `symbol` is its deprecated spelling, accepted until 0.2.18. The stored
+  // `symbol` is its deprecated spelling, accepted until 0.3.1. The stored
   // citation keeps its existing key.
   const { name: citedName, ...citationRest } = params.citation ?? {};
   const citation = params.citation
@@ -840,7 +840,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           repo: z.string().optional().describe("Git repository root path for citation validation."),
           commit: z.string().optional().describe("Git commit SHA that supports this finding."),
           name: z.string().optional().describe("The function, type or variable this finding is about: Name, Type.member or name(). Validated against the project's code index; stored unresolved when it does not resolve."),
-          symbol: z.string().optional().describe("Deprecated: use name. Accepted until @phren/cli 0.2.18."),
+          symbol: z.string().optional().describe("Deprecated: use name. Accepted until @phren/cli 0.3.1."),
           supersedes: z.string().optional().describe("First 60 chars of the old finding this one replaces. The old entry will be marked as superseded."),
           task_item: z.string().optional().describe("Task item stable ID like bid:abcd1234, positional ID like A1, or item text to link this finding to."),
         }).optional().describe("Optional source citation for traceability (only used when finding is a single string)."),

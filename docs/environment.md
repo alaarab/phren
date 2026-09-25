@@ -69,7 +69,7 @@ These control how much context the UserPromptSubmit hook injects into each promp
 A finding can carry a source citation in a `<!-- phren:cite {json} -->` comment.
 Besides `file`, `line`, `repo` and `commit`, the object may link the finding to a
 function, type or variable as `name: "Name"`, `name: "Type.member"` or
-`name: "name()"` (the older `symbol` spelling is accepted until 0.2.18). When the project
+`name: "name()"` (the older `symbol` spelling is accepted until 0.3.1). When the project
 has a code index (the `code` module), a finding whose text names exactly one
 function, type or variable the index resolves, at least four characters long
 and not a local variable unless exported, gets that link attached

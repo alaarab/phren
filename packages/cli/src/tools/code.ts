@@ -86,7 +86,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       inputSchema: z.object({
         project: z.string().describe("Project name, optionally store-qualified."),
         name: z.string().optional().describe("What to look up: Foo, Foo.bar or bar()."),
-        symbol: z.string().optional().describe("Deprecated: use name. Accepted until @phren/cli 0.2.18."),
+        symbol: z.string().optional().describe("Deprecated: use name. Accepted until @phren/cli 0.3.1."),
       }),
     },
     async ({ project: projectInput, name: nameInput, symbol: legacyName }) => {
@@ -123,7 +123,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       inputSchema: z.object({
         project: z.string().describe("Project name, optionally store-qualified."),
         name: z.string().optional().describe("What to look up: Foo, Foo.bar or bar()."),
-        symbol: z.string().optional().describe("Deprecated: use name. Accepted until @phren/cli 0.2.18."),
+        symbol: z.string().optional().describe("Deprecated: use name. Accepted until @phren/cli 0.3.1."),
         limit: z.number().int().min(1).max(500).optional().describe("Maximum reference lines. Defaults to 200."),
       }),
     },

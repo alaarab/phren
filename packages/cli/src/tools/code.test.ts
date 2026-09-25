@@ -99,7 +99,7 @@ describe("code MCP tool results", () => {
     expect(text).toMatch(/\nleast used\n/);
   });
 
-  it("still takes the deprecated symbol parameter until 0.2.18", async () => {
+  it("still takes the deprecated symbol parameter until 0.3.1", async () => {
     const text = await toolText("code_definition", { project: "fixture", symbol: "Point.length" });
     expect(text).toMatch(/typescript\/app\.ts:\d+-\d+ method length/);
   });
