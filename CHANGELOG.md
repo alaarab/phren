@@ -5,9 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-25
+
 ### Added
 
 - Hook: `/v1/speech` with `"timestamps": true` (the `speechTimestamps` capability) answers JSON with the audio and ElevenLabs' character alignment instead of streaming, so talk mode can highlight each word as it is read. The alignment covers the spoken text after markdown is stripped.
+
+### Fixed
+
+- `phren store sync` pushes after it merges. A writable store now pushes whatever the sync leaves ahead of the remote, including a merge commit that resolved conflicts; before, the store sat commits ahead of origin until a manual `git push`. A failed push prints `PUSH FAILED` with Git's reason. On the primary store the push is recorded in runtime health, so `phren doctor`'s runtime-auto-save check clears after a good sync.
 
 ## [0.3.2] - 2026-09-24
 
