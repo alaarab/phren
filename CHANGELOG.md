@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `phren doctor` reports `@path` import lines in store-managed `AGENTS.md`/`CLAUDE.md` (`context-imports`). The repo file is a symlink into the store, so Claude Code resolves those imports to `~/.phren/<project>/...` and blocks on its "Allow external CLAUDE.md file imports?" dialog; `--fix` rewrites each run as a plain reference list.
 - `phren uninstall` without a terminal (an agent shell, a CI step, a pipe) no longer counts as consent: it refuses, deletes nothing and says to re-run with `--yes`. Before, a non-interactive run deleted the whole store with nothing to confirm.
 - Retention prune (`phren maintain prune` and background maintenance) reads `retentionDays` and `ttlDays` per project. It used the global window for every project, so a project's longer retention override was ignored and its findings were deleted on the global schedule.
 - `phren config policy set` and `phren config workflow set` take only `--key=value`. A bare value (`set ttlDays 90`) or a flag without `=` (`set --ttlDays 90`) now exits 1 and writes nothing; before, it wrote the config unchanged and printed it as if the change had applied. `docs/governance.md` shows the real flag form and the three real roles (admin, contributor, reader).
