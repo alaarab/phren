@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - Hook: a Claude Code skill's chat chip shows what the skill loaded. Claude Code answers a Skill call with only "Launching skill: <name>" and writes the skill's text as a hidden row pointing back at the call; the Hook now sends that one row as the call's second result. Other hidden rows stay private.
+- Hook: OpenCode's permission prompt in the terminal ("Permission required", Allow once / Allow always / Reject) reaches the phone as a card with the request and its patterns. Allow once moves OpenCode's cursor there (read from the prompt's colors) and confirms it; Reject presses Escape. Allow always stays in the terminal, where OpenCode asks to confirm it.
 - Hook: OpenCode chat works on a computer without Herdr's OpenCode integration. phren's OpenCode plugin records which conversation each OpenCode process is showing (subagent sessions excluded), and the Hook binds the pane from that when Herdr reports no session. Restart OpenCode sessions started before this update so they load the new plugin.
 
 ## [0.3.4] - 2026-09-25
