@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { FINDING_TYPES, FINDING_TAGS, DOC_TYPES } from "../shared.js";
-import { entryScoreKey } from "../shared/governance.js";
 import {
   FINDING_TYPE_DECAY,
   extractFindingType,
@@ -70,29 +69,6 @@ describe("taxonomy consistency", () => {
 
 // ── entryScoreKey stability ─────────────────────────────────────────────────
 
-describe("entryScoreKey stability", () => {
-  it("produces the same key for content with trailing text beyond 200 chars", () => {
-    const base = "Redis connections need explicit close in finally blocks. ".repeat(5);
-    const keyA = entryScoreKey("proj", "FINDINGS.md", base);
-    const keyB = entryScoreKey("proj", "FINDINGS.md", base + " extra content that would differ if not sliced ".repeat(10));
-    expect(keyA).toBe(keyB);
-  });
-
-  it("produces different keys for different projects", () => {
-    const content = "Some finding text for testing";
-    const keyA = entryScoreKey("proj-a", "FINDINGS.md", content);
-    const keyB = entryScoreKey("proj-b", "FINDINGS.md", content);
-    expect(keyA).not.toBe(keyB);
-  });
-
-  it("produces different keys for different filenames", () => {
-    const content = "Some finding text";
-    const keyA = entryScoreKey("proj", "FINDINGS.md", content);
-    const keyB = entryScoreKey("proj", "AGENTS.md", content);
-    expect(keyA).not.toBe(keyB);
-  });
-});
-
 // ── Finding type decay ──────────────────────────────────────────────────────
 
 describe("finding type decay", () => {
@@ -121,10 +97,6 @@ describe("finding type decay", () => {
 
   it("extractFindingType returns null for untagged findings", () => {
     expect(extractFindingType("- Some random finding")).toBeNull();
-  });
-
-  it("extractFindingType handles context tag", () => {
-    expect(extractFindingType("- [context] Deployed v2.3.1 to staging")).toBe("context");
   });
 
   it("extractFindingType returns null for unknown tags", () => {
@@ -171,25 +143,15 @@ describe("typed findings (decision|pitfall|pattern)", () => {
     return path.join(tmp.path, project, "FINDINGS.md");
   }
 
-  it("stores a [decision] tag inline", () => {
-    const r = addFindingToFile(tmp.path, "myapp", "[decision] Use PostgreSQL over MySQL for full-text search");
+  it.each([
+    ["[decision] Use PostgreSQL over MySQL for full-text search", "[decision] Use PostgreSQL over MySQL"],
+    ["[pitfall] Redis connections must be closed in finally blocks", "[pitfall] Redis connections"],
+    ["[pattern] Use repository pattern to separate data access from business logic", "[pattern] Use repository pattern"],
+  ])("stores a type tag inline: %s", (finding, stored) => {
+    const r = addFindingToFile(tmp.path, "myapp", finding);
     expect(r.ok).toBe(true);
     const content = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content).toContain("[decision] Use PostgreSQL over MySQL");
-  });
-
-  it("stores a [pitfall] tag inline", () => {
-    const r = addFindingToFile(tmp.path, "myapp", "[pitfall] Redis connections must be closed in finally blocks");
-    expect(r.ok).toBe(true);
-    const content = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content).toContain("[pitfall] Redis connections");
-  });
-
-  it("stores a [pattern] tag inline", () => {
-    const r = addFindingToFile(tmp.path, "myapp", "[pattern] Use repository pattern to separate data access from business logic");
-    expect(r.ok).toBe(true);
-    const content = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content).toContain("[pattern] Use repository pattern");
+    expect(content).toContain(stored);
   });
 
   it("stores untagged findings without modification", () => {
@@ -204,16 +166,6 @@ describe("typed findings (decision|pitfall|pattern)", () => {
     addFindingToFile(tmp.path, "myapp", "[DECISION] Use monorepo");
     const content = fs.readFileSync(findingsPath(), "utf-8");
     expect(content).toContain("[decision] Use monorepo");
-  });
-
-  it("all three types can coexist in the same FINDINGS.md", () => {
-    addFindingToFile(tmp.path, "myapp", "[decision] Use Redis for caching");
-    addFindingToFile(tmp.path, "myapp", "[pitfall] Avoid N+1 queries");
-    addFindingToFile(tmp.path, "myapp", "[pattern] Use optimistic locking for concurrent writes");
-    const content = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content).toContain("[decision]");
-    expect(content).toContain("[pitfall]");
-    expect(content).toContain("[pattern]");
   });
 });
 

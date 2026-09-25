@@ -167,6 +167,16 @@ describe("web-ui server", () => {
     });
     expect(res.status).toBe(404);
     expect(res.body).toBe("Not found");
+
+    const post = await new Promise<number>((resolve, reject) => {
+      const req = http.request({ host: "127.0.0.1", port, path: "/unknown-action", method: "POST" }, (res) => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode || 0));
+      });
+      req.on("error", reject);
+      req.end("project=demo");
+    });
+    expect(post).toBe(404);
   });
 
   it("serves a resolved config view with schema via /api/config/view", async () => {

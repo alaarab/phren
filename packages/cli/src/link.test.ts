@@ -640,38 +640,13 @@ describe("link", () => {
       tmpCleanup();
     });
 
-    it("returns DoctorResult with checks array", async () => {
+    it("returns a DoctorResult carrying the core checks", async () => {
       const result = await runDoctor(phrenPath);
       expect(result).toHaveProperty("ok");
-      expect(result).toHaveProperty("checks");
-      expect(Array.isArray(result.checks)).toBe(true);
-      expect(result.checks.length).toBeGreaterThan(0);
-    });
-
-    it("checks include machine-registered", async () => {
-      const result = await runDoctor(phrenPath);
-      const machineCheck = result.checks.find(c => c.name === "machine-registered");
-      expect(machineCheck).toBeDefined();
-    });
-
-    it("checks include fts-index", async () => {
-      const result = await runDoctor(phrenPath);
-      const ftsCheck = result.checks.find(c => c.name === "fts-index");
-      expect(ftsCheck).toBeDefined();
-    });
-
-    it("checks include claude-hooks and lifecycle-hooks", async () => {
-      const result = await runDoctor(phrenPath);
-      const hookCheck = result.checks.find(c => c.name === "claude-hooks");
-      const lifecycleCheck = result.checks.find(c => c.name === "lifecycle-hooks");
-      expect(hookCheck).toBeDefined();
-      expect(lifecycleCheck).toBeDefined();
-    });
-
-    it("checks include runtime-health-file", async () => {
-      const result = await runDoctor(phrenPath);
-      const runtimeCheck = result.checks.find(c => c.name === "runtime-health-file");
-      expect(runtimeCheck).toBeDefined();
+      const names = result.checks.map(c => c.name);
+      for (const name of ["machine-registered", "fts-index", "claude-hooks", "lifecycle-hooks", "runtime-health-file"]) {
+        expect(names, name).toContain(name);
+      }
     });
 
     it("does not require project symlinks for detached projects", async () => {

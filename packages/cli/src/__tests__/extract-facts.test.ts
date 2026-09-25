@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir, initTestPhrenRoot } from "../test-helpers.js";
@@ -38,22 +38,14 @@ afterEach(() => {
 // ── readExtractedFacts ───────────────────────────────────────────────────────
 
 describe("readExtractedFacts", () => {
-  it("returns empty array when preferences.json does not exist", () => {
-    fs.mkdirSync(path.join(phrenPath, "testproj"), { recursive: true });
-    expect(readExtractedFacts(phrenPath, "testproj")).toEqual([]);
-  });
-
-  it("returns empty array for corrupt JSON", () => {
+  it.each([
+    ["is missing", null],
+    ["is corrupt JSON", "NOT JSON AT ALL"],
+    ["holds an object instead of an array", '{"key": "value"}'],
+  ])("returns empty array when preferences.json %s", (_label, content) => {
     const dir = path.join(phrenPath, "testproj");
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, "preferences.json"), "NOT JSON AT ALL");
-    expect(readExtractedFacts(phrenPath, "testproj")).toEqual([]);
-  });
-
-  it("returns empty array when JSON is an object instead of array", () => {
-    const dir = path.join(phrenPath, "testproj");
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, "preferences.json"), '{"key": "value"}');
+    if (content !== null) fs.writeFileSync(path.join(dir, "preferences.json"), content);
     expect(readExtractedFacts(phrenPath, "testproj")).toEqual([]);
   });
 
@@ -75,24 +67,6 @@ describe("readExtractedFacts", () => {
 });
 
 // ── writeExtractedFacts (tested indirectly via readExtractedFacts round-trip) ─
-
-describe("writeExtractedFacts (indirect via round-trip)", () => {
-  it("respects MAX_FACTS cap of 50", () => {
-    const dir = path.join(phrenPath, "testproj");
-    fs.mkdirSync(dir, { recursive: true });
-    // Write 60 facts directly to preferences.json
-    const facts: ExtractedFact[] = Array.from({ length: 60 }, (_, i) => ({
-      fact: `fact-${i}`,
-      source: `source-${i}`,
-      at: new Date().toISOString(),
-    }));
-    fs.writeFileSync(path.join(dir, "preferences.json"), JSON.stringify(facts));
-
-    // Reading returns all 60 (readExtractedFacts doesn't cap)
-    const read = readExtractedFacts(phrenPath, "testproj");
-    expect(read).toHaveLength(60);
-  });
-});
 
 // ── extractFactFromFinding feature flag ──────────────────────────────────────
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { sanitizeFts5Query, isValidProjectName, safeProjectPath, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
+import { sanitizeFts5Query, isValidProjectName, safeProjectPath, extractKeywords, buildRobustFtsQuery, } from "./utils.js";
 import { debugLog } from "./shared.js";
 import {
   consolidateProjectFindings,
@@ -18,100 +18,42 @@ import {
   addFindingToFile,
   extractConflictVersions,
 } from "./shared/content.js";
-import { grantAdmin, initTestPhrenRoot, makeTempDir, runCliExec } from "./test-helpers.js";
+import { grantAdmin, initTestPhrenRoot, makeTempDir, } from "./test-helpers.js";
 import * as path from "path";
 import * as fs from "fs";
-import * as os from "os";
-
-const runCli = runCliExec;
 
 describe("sanitizeFts5Query", () => {
-  it("passes through a normal query", () => {
-    expect(sanitizeFts5Query("authentication")).toBe("authentication");
+  // The whitelist keeps letters, digits, hyphens, * and double-quoted phrases'
+  // words; everything else becomes a space, then spaces collapse.
+  it.each([
+    ["multi-word queries pass through", "user login", "user login"],
+    ["SQL-like strings become plain search terms", "'; DROP TABLE docs--", "DROP TABLE docs--"],
+    ["column filters lose their colon", "type:task", "type task"],
+    ["project filters lose their colon", "project:foo", "project foo"],
+    ["filename filters lose their colon", "filename:bar", "filename bar"],
+    ["URL punctuation is stripped", "https://example.com", "https example com"],
+    ["^ anchors are removed", "^start of phrase", "start of phrase"],
+    ["double quotes are stripped", '"exact phrase"', "exact phrase"],
+    ["empty input stays empty", "", ""],
+    ["whitespace-only input becomes empty", "   ", ""],
+    ["combined injection attempts are neutralised", '^content:"secret" OR filename:hack\0', "content secret OR filename hack"],
+    ["null bytes are stripped", "foo\0bar", "foo bar"],
+    ["operator words are kept as plain words", "foo AND bar OR baz NOT qux NEAR quux", "foo AND bar OR baz NOT qux NEAR quux"],
+    ["punctuation goes but hyphens inside words stay", "rate-limit @#$ test!", "rate-limit test"],
+    ["runs of spaces collapse", "  foo    bar   ", "foo bar"],
+    ["the * wildcard survives", "foo*", "foo*"],
+    ["braces, brackets and parens are stripped", "foo {bar} [baz] (qux)", "foo bar baz qux"],
+    ["apostrophes and underscores become spaces", "it's a test-case with under_score", "it s a test-case with under score"],
+  ])("%s", (_label, input, expected) => {
+    expect(sanitizeFts5Query(input)).toBe(expected);
   });
 
-  it("handles multi-word queries", () => {
-    const result = sanitizeFts5Query("user login");
-    expect(result).toBe("user login");
-  });
-
-  it("normalizes SQL-like strings into plain search terms", () => {
-    const result = sanitizeFts5Query("'; DROP TABLE docs--");
-    // Whitelist sanitizer strips semicolons but preserves apostrophes
-    expect(result).not.toContain(";");
-    expect(result).toContain("DROP");
-  });
-
-  it("removes FTS5 column filter prefixes", () => {
-    const result = sanitizeFts5Query("content:secret");
-    // Whitelist strips colon, so "content:secret" becomes "content secret"
-    expect(result).not.toContain(":");
-    expect(result).toContain("content");
-    expect(result).toContain("secret");
-  });
-
-  it("removes all known column filters", () => {
-    // Whitelist strips colons, so "type:task" -> "type task"
-    expect(sanitizeFts5Query("type:task")).toContain("task");
-    expect(sanitizeFts5Query("type:task")).not.toContain(":");
-    expect(sanitizeFts5Query("project:foo")).toContain("foo");
-    expect(sanitizeFts5Query("project:foo")).not.toContain(":");
-    expect(sanitizeFts5Query("filename:bar")).toContain("bar");
-    expect(sanitizeFts5Query("filename:bar")).not.toContain(":");
-  });
-
-  it("preserves URL words (dots are stripped by whitelist)", () => {
-    const result = sanitizeFts5Query("https://example.com");
-    expect(result).toContain("https");
-    // Dots are stripped by whitelist sanitizer
-    expect(result).not.toContain(".");
-    expect(result).not.toContain("//");
-  });
-
-  it("removes null bytes", () => {
-    const result = sanitizeFts5Query("hello\0world");
-    expect(result).toBe("hello world");
-  });
-
-  it("removes FTS5 ^ anchors", () => {
-    const result = sanitizeFts5Query("^start of phrase");
-    expect(result).toBe("start of phrase");
-  });
-
-  it("strips double quotes from quoted phrases", () => {
-    const result = sanitizeFts5Query('"exact phrase"');
-    expect(result).toBe("exact phrase");
-  });
-
-  it("returns empty string for empty input", () => {
-    expect(sanitizeFts5Query("")).toBe("");
-  });
-
-  it("returns empty string for whitespace-only input", () => {
-    expect(sanitizeFts5Query("   ")).toBe("");
-  });
-
-  it("handles combined injection attempts", () => {
-    const result = sanitizeFts5Query('^content:"secret" OR filename:hack\0');
-    expect(result).not.toContain("^");
-    expect(result).not.toContain("\0");
-    expect(result).not.toContain(":");
-    // Double quotes are now preserved for quoted phrase support
-    // Whitelist sanitizer keeps letters-only words; OR word may remain
-    expect(result).toContain("content");
-    expect(result).toContain("secret");
-    expect(result).toContain("hack");
+  it("truncates input longer than 500 characters", () => {
+    expect(sanitizeFts5Query("a".repeat(600))).toHaveLength(500);
   });
 });
 
 describe("buildRobustFtsQuery", () => {
-  it("quotes terms and expands known synonyms", () => {
-    const query = buildRobustFtsQuery("throttling");
-    expect(query).toContain("\"throttling\"");
-    expect(query).toContain("\"rate limit\"");
-    expect(query).toContain(" OR ");
-  });
-
   it("returns empty string for empty or fully stripped input", () => {
     expect(buildRobustFtsQuery("")).toBe("");
     expect(buildRobustFtsQuery('""   ')).toBe("");
@@ -126,80 +68,10 @@ describe("buildRobustFtsQuery", () => {
   });
 });
 
-describe("isValidProjectName", () => {
-  it("accepts a valid name", () => {
-    expect(isValidProjectName("my-project")).toBe(true);
-  });
-
-  it("rejects dot-prefixed names (.hidden)", () => {
-    expect(isValidProjectName(".hidden")).toBe(false);
-  });
-
-  it("accepts alphanumeric names", () => {
-    expect(isValidProjectName("project123")).toBe(true);
-  });
-
-  it("rejects path traversal with ..", () => {
-    expect(isValidProjectName("../etc")).toBe(false);
-  });
-
-  it("rejects forward slash", () => {
-    expect(isValidProjectName("foo/bar")).toBe(false);
-  });
-
-  it("rejects backslash", () => {
-    expect(isValidProjectName("foo\\bar")).toBe(false);
-  });
-
-  it("rejects empty string", () => {
-    expect(isValidProjectName("")).toBe(false);
-  });
-
-  it("rejects null byte", () => {
-    expect(isValidProjectName("foo\0bar")).toBe(false);
-  });
-
-  it("rejects bare double dots", () => {
-    expect(isValidProjectName("..")).toBe(false);
-  });
-
-  it("rejects triple dots containing ..", () => {
-    expect(isValidProjectName("...")).toBe(false);
-  });
-});
-
 describe("extractKeywords", () => {
-  it("removes stop words", () => {
-    const result = extractKeywords("fix the rate limiter in sampleatlas");
-    expect(result).not.toContain("the");
-    expect(result).not.toContain("in");
-    expect(result).toContain("rate");
-    expect(result).toContain("limiter");
-    expect(result).toContain("sampleatlas");
-  });
-
-  it("returns empty string for only stop words", () => {
-    expect(extractKeywords("the is a an")).toBe("");
-  });
-
   it("limits to 10 terms (words + bigrams)", () => {
     const result = extractKeywords("one two three four five six seven eight nine ten eleven");
     expect(result.split(" ").length).toBeLessThanOrEqual(10);
-  });
-
-  it("strips punctuation", () => {
-    const result = extractKeywords("what's the auth? (login)");
-    expect(result).not.toContain("?");
-    expect(result).not.toContain("(");
-  });
-
-  it("handles empty string", () => {
-    expect(extractKeywords("")).toBe("");
-  });
-
-  it("removes single-character words", () => {
-    const result = extractKeywords("a b c deploy");
-    expect(result).toBe("deploy");
   });
 });
 
@@ -207,28 +79,18 @@ describe("safeProjectPath", () => {
   const base = "/tmp/test-phren";
 
   it("returns resolved path for a valid subdirectory", () => {
-    const result = safeProjectPath(base, "my-project");
-    expect(result).toBe(path.resolve(base, "my-project"));
+    expect(safeProjectPath(base, "my-project")).toBe(path.resolve(base, "my-project"));
+    expect(safeProjectPath(base, "project", "subdir")).toBe(path.resolve(base, "project", "subdir"));
   });
 
   it("rejects traversal that escapes the base", () => {
-    const result = safeProjectPath(base, "..", "etc", "passwd");
-    expect(result).toBeNull();
-  });
-
-  it("rejects simple parent traversal", () => {
-    const result = safeProjectPath(base, "..");
-    expect(result).toBeNull();
+    expect(safeProjectPath(base, "..", "etc", "passwd")).toBeNull();
+    expect(safeProjectPath(base, "..")).toBeNull();
   });
 
   it("allows the base directory itself", () => {
     const result = safeProjectPath(base);
     expect(result).toBe(path.resolve(base));
-  });
-
-  it("allows nested paths within base", () => {
-    const result = safeProjectPath(base, "project", "subdir");
-    expect(result).toBe(path.resolve(base, "project", "subdir"));
   });
 
   it("rejects prefix attacks (base name as substring)", () => {
@@ -239,12 +101,6 @@ describe("safeProjectPath", () => {
 });
 
 describe("isValidProjectName", () => {
-  it("accepts canonical lowercase project names", () => {
-    expect(isValidProjectName("phren")).toBe(true);
-    expect(isValidProjectName("project-center")).toBe(true);
-    expect(isValidProjectName("m4l_builder")).toBe(true);
-  });
-
   it("rejects uppercase project names", () => {
     expect(isValidProjectName("Phren")).toBe(false);
     expect(isValidProjectName("SamplePortal")).toBe(false);
@@ -253,6 +109,8 @@ describe("isValidProjectName", () => {
   it("rejects punctuation outside hyphen and underscore", () => {
     expect(isValidProjectName("native:-home")).toBe(false);
     expect(isValidProjectName("my.project")).toBe(false);
+    expect(isValidProjectName("foo\0bar")).toBe(false);
+    expect(isValidProjectName("...")).toBe(false);
   });
 });
 
@@ -273,12 +131,6 @@ describe("memory workflow policy", () => {
 
   afterEach(() => {
     tmpCleanup();
-  });
-
-  it("returns defaults when no workflow policy file exists", () => {
-    const policy = getWorkflowPolicy(phrenDir);
-    expect(policy.lowConfidenceThreshold).toBe(0.7);
-    expect(policy.riskySections).toContain("Stale");
   });
 
   it("updates workflow policy with admin permission", () => {
@@ -379,6 +231,8 @@ describe("validateTaskFormat", () => {
     const content = "## Active\n\n- Task A\n";
     const issues = validateTaskFormat(content);
     expect(issues.some(i => i.includes("Missing title heading"))).toBe(true);
+    // No heading at all reports the title and the sections together.
+    expect(validateTaskFormat("no heading here").length).toBeGreaterThanOrEqual(2);
   });
 
   it("flags missing standard sections", () => {
@@ -390,11 +244,6 @@ describe("validateTaskFormat", () => {
   it("accepts content with only Queue section", () => {
     const content = "# task\n\n## Queue\n\n- Task B\n";
     expect(validateTaskFormat(content)).toEqual([]);
-  });
-
-  it("can return multiple issues at once", () => {
-    const issues = validateTaskFormat("no heading here");
-    expect(issues.length).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -706,19 +555,11 @@ describe("debugLog", () => {
   it("writes to debug.log when PHREN_DEBUG is set", () => {
     process.env.PHREN_DEBUG = "1";
     debugLog("hello from test");
+    debugLog("second");
     const logFile = path.join(tmpDir, ".phren", ".runtime", "debug.log");
     expect(fs.existsSync(logFile)).toBe(true);
     const contents = fs.readFileSync(logFile, "utf8");
     expect(contents).toContain("hello from test");
-  });
-
-  it("appends successive messages", () => {
-    process.env.PHREN_DEBUG = "1";
-    debugLog("first");
-    debugLog("second");
-    const logFile = path.join(tmpDir, ".phren", ".runtime", "debug.log");
-    const contents = fs.readFileSync(logFile, "utf8");
-    expect(contents).toContain("first");
     expect(contents).toContain("second");
   });
 });

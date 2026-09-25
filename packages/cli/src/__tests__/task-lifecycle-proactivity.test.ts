@@ -6,38 +6,24 @@ import { readTasks } from "../data/access.js";
 import { hasSuppressTaskIntent, hasCodeChangeContext } from "../proactivity.js";
 
 describe("hasSuppressTaskIntent", () => {
-  it("detects straight-apostrophe don't create a task", () => {
-    expect(hasSuppressTaskIntent("don't create a task for this")).toBe(true);
-  });
-
-  it("detects curly-apostrophe don\u2019t add to task", () => {
-    expect(hasSuppressTaskIntent("don\u2019t add that to task")).toBe(true);
-  });
-
-  it("detects no task signal", () => {
-    expect(hasSuppressTaskIntent("no task needed here")).toBe(true);
-  });
-
-  it("does not match normal actionable prompts", () => {
-    expect(hasSuppressTaskIntent("implement the feature")).toBe(false);
+  it.each([
+    ["don't create a task for this", true],
+    ["don\u2019t add that to task", true],
+    ["no task needed here", true],
+    ["implement the feature", false],
+  ])("%s -> %s", (prompt, expected) => {
+    expect(hasSuppressTaskIntent(prompt)).toBe(expected);
   });
 });
 
 describe("hasCodeChangeContext", () => {
-  it("detects git diff command", () => {
-    expect(hasCodeChangeContext("git diff shows the changes")).toBe(true);
-  });
-
-  it("detects npm run command", () => {
-    expect(hasCodeChangeContext("run npm run build to compile")).toBe(true);
-  });
-
-  it("detects explicit file edit language", () => {
-    expect(hasCodeChangeContext("edit the file to fix the bug")).toBe(true);
-  });
-
-  it("does not match pure brainstorming", () => {
-    expect(hasCodeChangeContext("let's brainstorm ideas for the feature")).toBe(false);
+  it.each([
+    ["git diff shows the changes", true],
+    ["run npm run build to compile", true],
+    ["edit the file to fix the bug", true],
+    ["let's brainstorm ideas for the feature", false],
+  ])("%s -> %s", (prompt, expected) => {
+    expect(hasCodeChangeContext(prompt)).toBe(expected);
   });
 });
 
@@ -68,35 +54,17 @@ describe("task lifecycle suppression", () => {
     tmp.cleanup();
   });
 
-  it("suppresses task when prompt contains don't create a task", () => {
+  it.each([
+    "implement the feature but don't create a task for this",
+    "no task, just fix the lint warning in utils.ts",
+  ])("suppresses task when prompt says %s", (prompt) => {
     process.env.PHREN_PROACTIVITY_TASKS = "high";
 
     const result = handleTaskPromptLifecycle({
       phrenPath: tmp.path,
-      prompt: "implement the feature but don't create a task for this",
+      prompt,
       project,
       sessionId: "session-suppress-1",
-      intent: "build",
-      taskLevel: "high",
-    });
-
-    expect(result.mode).toBe("auto");
-    expect(result.noticeLines).toEqual([]);
-
-    const tasks = readTasks(tmp.path, project);
-    expect(tasks.ok).toBe(true);
-    if (!tasks.ok) return;
-    expect(tasks.data.items.Active).toHaveLength(0);
-  });
-
-  it("suppresses task when prompt contains no task", () => {
-    process.env.PHREN_PROACTIVITY_TASKS = "high";
-
-    const result = handleTaskPromptLifecycle({
-      phrenPath: tmp.path,
-      prompt: "no task, just fix the lint warning in utils.ts",
-      project,
-      sessionId: "session-suppress-2",
       intent: "build",
       taskLevel: "high",
     });
@@ -261,30 +229,16 @@ describe("task lifecycle task proactivity gating", () => {
     });
   }
 
-  it("substance gate accepts a real ticket-referenced prompt", () => {
+  it.each([
+    "Investigate ticket 43062 — Power Portal reports tile not loading",
+    "Update the regex in src/utils.ts to handle empty input",
+  ])("substance gate accepts a real prompt: %s", (prompt) => {
     process.env.PHREN_PROACTIVITY_TASKS = "high";
     const result = handleTaskPromptLifecycle({
       phrenPath: tmp.path,
-      prompt: "Investigate ticket 43062 — Power Portal reports tile not loading",
+      prompt,
       project,
       sessionId: "session-real-ticket",
-      intent: "general",
-      taskLevel: "high",
-    });
-    const tasks = readTasks(tmp.path, project);
-    expect(tasks.ok).toBe(true);
-    if (!tasks.ok) return;
-    expect(tasks.data.items.Queue).toHaveLength(1);
-    expect(result.noticeLines.join("\n")).toContain("Queued task");
-  });
-
-  it("substance gate accepts a file-path-referenced prompt", () => {
-    process.env.PHREN_PROACTIVITY_TASKS = "high";
-    const result = handleTaskPromptLifecycle({
-      phrenPath: tmp.path,
-      prompt: "Update the regex in src/utils.ts to handle empty input",
-      project,
-      sessionId: "session-real-path",
       intent: "general",
       taskLevel: "high",
     });

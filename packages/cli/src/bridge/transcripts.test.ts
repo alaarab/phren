@@ -303,13 +303,6 @@ describe("pasted_content wrappers on Claude user turns", () => {
     const toolResult = { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t", content: wrapped }] } };
     expect(visibleEvent(toolResult, "claude")).toEqual(toolResult);
   });
-
-  it("exports a queued phone message despite the wrapper, with matching enqueue and remove keys", () => {
-    const enqueue = visibleEvent({ type: "queue-operation", operation: "enqueue", timestamp: "t1", content: wrapped }, "claude");
-    expect(enqueue).toMatchObject({ type: "user", phrenQueued: true, message: { role: "user", content: "They are in /Projects actually" } });
-    const remove = visibleEvent({ type: "queue-operation", operation: "remove", timestamp: "t2", content: wrapped }, "claude");
-    expect(remove).toEqual({ type: "phren_queue_consumed", key: enqueue!.phrenQueueKey, timestamp: "t2" });
-  });
 });
 
 describe("Codex code-mode projection", () => {

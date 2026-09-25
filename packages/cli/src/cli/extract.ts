@@ -302,7 +302,7 @@ function shortHash(hash: string): string {
  * commit message under a new hash (observed pairs 0a918619/c55f38fa and 6b9a2ab9/9479d2ad),
  * so the same finding still arrives twice.
  */
-export function extractSubjectKey(text: string): string {
+function extractSubjectKey(text: string): string {
   return text
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(new RegExp(SOURCE_COMMIT_MARKER.source, "gi"), " ")

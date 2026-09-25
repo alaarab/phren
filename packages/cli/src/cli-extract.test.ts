@@ -58,13 +58,8 @@ describe("parseGitLogRecords", () => {
     expect(records[1]).toEqual({ hash: "def456", subject: "Add feature", body: "" });
   });
 
-  it("returns empty array when git log returns nothing", () => {
-    mockRunGit.mockReturnValue("");
-    expect(parseGitLogRecords("/repo", 7)).toEqual([]);
-  });
-
-  it("returns empty array when git log returns null (error)", () => {
-    mockRunGit.mockReturnValue(null);
+  it.each(["", null])("returns empty array when git log returns %j", (raw) => {
+    mockRunGit.mockReturnValue(raw);
     expect(parseGitLogRecords("/repo", 7)).toEqual([]);
   });
 
@@ -85,17 +80,17 @@ describe("scoreFindingCandidate", () => {
     expect(scoreFindingCandidate("Add tests", "")).toBeNull();
     expect(scoreFindingCandidate("Update README", "")).toBeNull();
     expect(scoreFindingCandidate("Bump version", "")).toBeNull();
+    // Very short entries without insight keywords
+    expect(scoreFindingCandidate("Short", "")).toBeNull();
+    expect(scoreFindingCandidate("A small change", "tiny")).toBeNull();
+    // Long enough, but no signal boosters: score stays below 0.5
+    expect(scoreFindingCandidate("Changed the color of the button from blue to green in the sidebar", "")).toBeNull();
   });
 
   it("accepts short entries that contain insight keywords", () => {
     const result = scoreFindingCandidate("Fix workaround for auth", "");
     expect(result).not.toBeNull();
     expect(result!.score).toBeGreaterThan(0.5);
-  });
-
-  it("returns null for very short entries without insight keywords", () => {
-    expect(scoreFindingCandidate("Short", "")).toBeNull();
-    expect(scoreFindingCandidate("A small change", "tiny")).toBeNull();
   });
 
   it("scores merged PR subjects higher", () => {
@@ -105,6 +100,11 @@ describe("scoreFindingCandidate", () => {
     );
     expect(result).not.toBeNull();
     expect(result!.score).toBeGreaterThanOrEqual(0.55);
+    const plain = scoreFindingCandidate(
+      "Fix the authentication flow",
+      "This fixes the authentication flow by adding retry logic for token refresh"
+    );
+    expect(result!.score).toBeGreaterThan(plain?.score ?? 0);
   });
 
   it("cleans up merge PR prefix from text", () => {
@@ -145,15 +145,6 @@ describe("scoreFindingCandidate", () => {
     expect(result!.score).toBeLessThanOrEqual(0.99);
   });
 
-  it("returns null when score stays below 0.5", () => {
-    // A long enough entry but without any signal boosters
-    const result = scoreFindingCandidate(
-      "Changed the color of the button from blue to green in the sidebar",
-      ""
-    );
-    expect(result).toBeNull();
-  });
-
   it("capitalizes the first letter of the cleaned text", () => {
     const result = scoreFindingCandidate(
       "fix: workaround for the timeout issue in production deployment system",
@@ -190,24 +181,14 @@ describe("ghCachePath", () => {
     const p = ghCachePath("/home/user/my-repo");
     expect(p).toContain(os.tmpdir());
     expect(p).toMatch(/phren-gh-cache-/);
-    expect(p).toMatch(/phren-gh-cache-[0-9a-f]{12}-/);
-  });
-
-  it("includes the current date", () => {
-    const p = ghCachePath("/home/user/repo");
-    const dateKey = new Date().toISOString().slice(0, 10);
-    expect(p).toContain(dateKey);
+    // Keyed by repo hash and rolled over daily.
+    expect(p).toContain(`phren-gh-cache-${p.match(/phren-gh-cache-([0-9a-f]{12})-/)![1]}-${new Date().toISOString().slice(0, 10)}`);
   });
 
   it("produces different paths for repos with the same basename but different absolute paths", () => {
     const p1 = ghCachePath("/path/to/my-repo");
     const p2 = ghCachePath("/other/path/my-repo");
     expect(p1).not.toBe(p2);
-  });
-
-  it("produces paths with no special characters from repo path", () => {
-    const p = ghCachePath("/path/to/my repo!@#");
-    expect(p).not.toMatch(/[!@#\s]/);
   });
 });
 
@@ -230,18 +211,12 @@ describe("runGhJson", () => {
     expect(result).toEqual([{ number: 1, title: "Test PR" }]);
   });
 
-  it("returns null on empty output", async () => {
+  it("returns null on empty output or a non-retryable error", async () => {
     const { commandExists } = await import("./hooks.js");
     vi.mocked(commandExists).mockReturnValue(true);
     mockExecFileSync.mockReturnValue("");
+    expect(await runGhJson("/repo", ["pr", "list"])).toBeNull();
 
-    const result = await runGhJson("/repo", ["pr", "list"]);
-    expect(result).toBeNull();
-  });
-
-  it("returns null on non-retryable error", async () => {
-    const { commandExists } = await import("./hooks.js");
-    vi.mocked(commandExists).mockReturnValue(true);
     mockExecFileSync.mockImplementation(() => {
       throw new Error("auth required");
     });

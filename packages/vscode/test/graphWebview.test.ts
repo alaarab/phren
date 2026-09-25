@@ -58,6 +58,10 @@ describe("isValidProjectName", () => {
     expect(isValidProjectName("a/b")).toBe(false);
     expect(isValidProjectName("a\\b")).toBe(false);
     expect(isValidProjectName("a\0b")).toBe(false);
+    expect(isValidProjectName("..")).toBe(false);
+    expect(isValidProjectName(".")).toBe(false);
+    expect(isValidProjectName("MyProject")).toBe(false);
+    expect(isValidProjectName("-project")).toBe(false);
   });
 
   it("rejects names that don't start with a lowercase letter or digit", () => {

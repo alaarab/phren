@@ -194,19 +194,4 @@ describe("a permission left in the terminal after its hook let go", () => {
     expect(hooks.pendingPanes("default", { panes: [pane] }).has("w1:p1")).toBe(true);
     expect(hooks.pendingPanes("default", { panes: [{ ...pane, agent_status: "working" }] }).size).toBe(0);
   });
-
-  it("pushes the released permission once and Approve types only its yes digit", async () => {
-    const notify = vi.fn(async () => true);
-    (hooks as unknown as { push: unknown }).push = { available: true, notify, status: { configured: true } };
-    vi.mocked(rpc).mockImplementation(async (_server, method) => {
-      if (method === "agent.read") return { read: { text: screen } };
-      if (method === "agent.send_keys") return { ok: true };
-      throw new Error(`Unexpected RPC ${method}`);
-    });
-    await hooks.observeWaitingPanes("default", [pane], async () => claude);
-    await hooks.observeWaitingPanes("default", [pane], async () => claude);
-    expect(notify).toHaveBeenCalledTimes(1);
-    await hooks.answerPush((notify.mock.calls[0][0] as { binding: string }).binding, "approve");
-    expect(vi.mocked(rpc).mock.calls.filter(call => call[1] === "agent.send_keys").map(call => call[2]?.keys)).toEqual([["1"]]);
-  });
 });

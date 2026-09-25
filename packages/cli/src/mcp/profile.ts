@@ -352,15 +352,3 @@ export function buildCompositeTools(catalog: Catalog): BuiltTool[] {
   }
   return out;
 }
-
-/** Rough size of what a client downloads for a set of tools, for tests and doctor. */
-export function schemaWeight(entries: Iterable<{ config: ToolConfig }>): number {
-  let chars = 0;
-  for (const { config } of entries) {
-    chars += (config.title ?? "").length + (config.description ?? "").length;
-    const raw = config.inputSchema;
-    const schema = raw instanceof z.ZodObject ? raw : raw && typeof raw === "object" ? z.object(raw as z.ZodRawShape) : null;
-    if (schema) for (const [k, t] of Object.entries(schema.shape)) chars += k.length + ((t as z.ZodTypeAny).description ?? "").length + 24;
-  }
-  return chars;
-}

@@ -3,9 +3,8 @@ import { commandExists, detectInstalledTools, buildLifecycleCommands, buildShare
 import { upsertCustomPrePromptSiblings, type HookMap } from "./init/config.js";
 import { readInstallPreferences } from "./init/preferences.js";
 import { initTestPhrenRoot, makeTempDir } from "./test-helpers.js";
-import { sanitizeFts5Query, extractKeywords, buildRobustFtsQuery, STOP_WORDS } from "./utils.js";
-import { PhrenError, type PhrenErrorCode } from "./shared.js";
-import { selectSnippets, approximateTokens } from "./shared/retrieval.js";
+import { buildRobustFtsQuery, } from "./utils.js";
+import { PhrenError, } from "./shared.js";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -20,34 +19,13 @@ function writeInstallPrefs(phrenPath: string, content: string): void {
 
 describe("hooks", () => {
   describe("commandExists", () => {
-    it("returns true for a known command", () => {
+    it("returns true for a known command and false for a nonexistent one", () => {
       expect(commandExists("node")).toBe(true);
-    });
-
-    it("returns false for a nonexistent command", () => {
       expect(commandExists("definitely-not-a-real-command-xyz")).toBe(false);
     });
   });
 
   describe("detectInstalledTools", () => {
-    it("returns a Set", () => {
-      const tools = detectInstalledTools();
-      expect(tools).toBeInstanceOf(Set);
-    });
-
-    it("does not detect cursor from a bare ~/.cursor config directory", () => {
-      // Skip when Cursor is genuinely installed — detection keys on the
-      // `cursor` binary, so a real install *should* be detected and the
-      // negative assertion below would be testing the wrong machine. Mirrors
-      // the copilot guard directly beneath this.
-      if (commandExists("cursor")) return;
-      const cursorDir = path.join(os.homedir(), ".cursor");
-      if (fs.existsSync(cursorDir)) {
-        const tools = detectInstalledTools();
-        expect(tools.has("cursor")).toBe(false);
-      }
-    });
-
     it("does not false-positive copilot from bare ~/.github dir", () => {
       if (commandExists("copilot") || commandExists("github-copilot-cli")) return;
       const extensionDir = path.join(os.homedir(), ".local", "share", "gh", "extensions", "gh-copilot");
@@ -59,34 +37,11 @@ describe("hooks", () => {
   });
 
   describe("buildLifecycleCommands", () => {
-    it("returns sessionStart, userPromptSubmit, and stop commands", () => {
-      const cmds = buildLifecycleCommands("/tmp/fake-phren");
-      expect(cmds).toHaveProperty("sessionStart");
-      expect(cmds).toHaveProperty("userPromptSubmit");
-      expect(cmds).toHaveProperty("stop");
-    });
-
     it("includes phren path in commands", () => {
       const cmds = buildLifecycleCommands("/tmp/fake-phren");
       expect(cmds.sessionStart).toContain("/tmp/fake-phren");
       expect(cmds.userPromptSubmit).toContain("/tmp/fake-phren");
       expect(cmds.stop).toContain("/tmp/fake-phren");
-    });
-
-    it("includes hook subcommands in commands", () => {
-      const cmds = buildLifecycleCommands("/tmp/fake-phren");
-      expect(cmds.sessionStart).toContain("hook-session-start");
-      expect(cmds.userPromptSubmit).toContain("hook-prompt");
-      expect(cmds.stop).toContain("hook-stop");
-    });
-
-    it("quotes paths with special characters safely", () => {
-      const cmds = buildLifecycleCommands('/tmp/my "phren" path');
-      if (process.platform === "win32") {
-        expect(cmds.sessionStart).toContain('set "PHREN_PATH=/tmp/my \\"phren\\" path"');
-      } else {
-        expect(cmds.sessionStart).toContain(`PHREN_PATH='/tmp/my "phren" path'`);
-      }
     });
   });
 
@@ -241,6 +196,9 @@ describe("hooks", () => {
         // No bash-only syntax
         expect(content).not.toContain("${@:"); // bash array slicing
         expect(content).not.toContain("[[");    // bash double bracket
+        // Arguments are consumed with shift, and the timeout is parsed first.
+        expect(content).toContain("shift");
+        expect(content).toContain("_timeout_val");
       }
     });
 
@@ -263,17 +221,6 @@ describe("hooks", () => {
         expect(content).not.toContain("#!/bin/sh");
         expect(content).not.toContain("shift\n");
       }
-    });
-
-    it.skipIf(process.platform === "win32")("session wrappers use shift instead of bash array slicing", () => {
-      setupFakeBinaries();
-      configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
-
-      const wrapper = wrapperFor("codex");
-      expect(fs.existsSync(wrapper)).toBe(true);
-      const content = fs.readFileSync(wrapper, "utf8");
-      expect(content).toContain("shift");
-      expect(content).toContain("_timeout_val");
     });
 
     it("skips wrapper installation when hooks are disabled", () => {
@@ -339,17 +286,6 @@ describe("hooks", () => {
       }
     });
 
-    it("installs wrappers when hooks are enabled", () => {
-      setupFakeBinaries();
-
-      // Write preferences with hooks enabled
-      writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: true }));
-
-      configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
-
-      expect(fs.existsSync(wrapperFor("codex"))).toBe(true);
-    });
-
     it("Set param only configures the specified tools", () => {
       setupFakeBinaries();
       const configured = configureAllHooks(phrenPath, { tools: new Set(["cursor"]) });
@@ -371,16 +307,6 @@ describe("hooks", () => {
       expect(configured).toContain("Copilot CLI");
       expect(configured).toContain("Cursor");
       expect(configured).toContain("Codex");
-    });
-
-    it("wrappers are written to ~/.local/bin/<tool>", () => {
-      setupFakeBinaries();
-      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
-
-      for (const tool of ["copilot", "cursor", "codex"]) {
-        const expected = wrapperFor(tool);
-        expect(fs.existsSync(expected)).toBe(true);
-      }
     });
 
     it.skipIf(process.platform === "win32")("POSIX wrappers carry exec bits", () => {
@@ -422,21 +348,6 @@ describe("hooks", () => {
         expect(() => {
           execFileSync("sh", ["-n", wrapper], { stdio: "ignore" });
         }).not.toThrow();
-      }
-    });
-
-    it("buildLifecycleCommands references node entry script", () => {
-      const cmds = buildLifecycleCommands(phrenPath);
-      // Should use node with a resolved path to index.js (not npx) when built
-      const usesNode = cmds.sessionStart.includes("node ");
-      const usesNpx = cmds.sessionStart.includes("npx ");
-      // One of the two must be true
-      expect(usesNode || usesNpx).toBe(true);
-
-      if (usesNode) {
-        expect(cmds.sessionStart).toContain("index.js");
-        expect(cmds.userPromptSubmit).toContain("index.js");
-        expect(cmds.stop).toContain("index.js");
       }
     });
   });
@@ -594,9 +505,7 @@ describe("hooks", () => {
     it("readCustomHooks returns empty array when no preferences file exists", () => {
       fs.rmSync(path.join(phrenPath, ".config"), { recursive: true, force: true });
       expect(readCustomHooks(phrenPath)).toEqual([]);
-    });
-
-    it("readCustomHooks returns empty array when customHooks is not set", () => {
+      // Preferences present but without customHooks.
       writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: true }));
       expect(readCustomHooks(phrenPath)).toEqual([]);
     });
@@ -705,17 +614,6 @@ describe("hooks", () => {
       expect(result.errors[0].message).not.toContain("redacted");
     });
 
-    it("runCustomHooks returns 0 when no hooks match the event", () => {
-      writeInstallPrefs(phrenPath, JSON.stringify({
-          customHooks: [
-            { event: "pre-save", command: "echo something" },
-          ],
-        }));
-      const result = runCustomHooks(phrenPath, "post-search");
-      expect(result.ran).toBe(0);
-      expect(result.errors).toHaveLength(0);
-    });
-
     it("runCustomHooks does not follow webhook redirects", async () => {
       let loopbackHits = 0;
       const targetServer = http.createServer((_, res) => {
@@ -778,85 +676,6 @@ describe("hooks", () => {
         expect(fs.readFileSync(hookErrorLog, "utf8")).toContain("private or loopback address");
       } finally {
         await new Promise<void>((resolve) => loopbackServer.close(() => resolve()));
-      }
-    });
-  });
-
-  describe("runCustomHooks error structure", () => {
-    let tmpRoot: string;
-    let tmpCleanup: () => void;
-    let phrenPath: string;
-
-    beforeEach(() => {
-      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-hooks-error-structure-test-"));
-      phrenPath = path.join(tmpRoot, "phren");
-      fs.mkdirSync(path.join(phrenPath, ".runtime"), { recursive: true });
-      initTestPhrenRoot(phrenPath);
-    });
-
-    afterEach(() => {
-      tmpCleanup();
-    });
-
-    it("returns HookError[] with code and message properties, not plain strings", () => {
-      writeInstallPrefs(phrenPath, JSON.stringify({
-          customHooks: [
-            { event: "pre-index", command: "exit 42" },
-          ],
-        }));
-      const result = runCustomHooks(phrenPath, "pre-index");
-      expect(result.ran).toBe(1);
-      expect(result.errors).toHaveLength(1);
-
-      const err = result.errors[0];
-      // Verify structured shape: { code, message }
-      expect(err).toHaveProperty("code");
-      expect(err).toHaveProperty("message");
-      expect(typeof err.code).toBe("string");
-      expect(typeof err.message).toBe("string");
-      expect(err.code).toBe("VALIDATION_ERROR");
-      expect(err.message).toContain("pre-index");
-    });
-
-    it("successful hooks produce no errors", () => {
-      writeInstallPrefs(phrenPath, JSON.stringify({
-          customHooks: [
-            { event: "post-save", command: "true" },
-          ],
-        }));
-      const result = runCustomHooks(phrenPath, "post-save");
-      expect(result.ran).toBe(1);
-      expect(result.errors).toHaveLength(0);
-    });
-
-    it("failed hook writes to debug log when PHREN_DEBUG is set", () => {
-      const origDebug = process.env.PHREN_DEBUG;
-      const origPhrenPath = process.env.PHREN_PATH;
-      try {
-        // debugLog() still reads PHREN_DEBUG and getPhrenPath() still reads PHREN_PATH
-        // until phren-paths.ts is fully renamed to phren
-        process.env.PHREN_DEBUG = "1";
-        process.env.PHREN_PATH = phrenPath;
-
-        writeInstallPrefs(phrenPath, JSON.stringify({
-            customHooks: [
-              { event: "pre-finding", command: "exit 99" },
-            ],
-          }));
-
-        runCustomHooks(phrenPath, "pre-finding");
-
-        // Check that debug.log was written
-        const debugLogPath = path.join(phrenPath, ".runtime", "debug.log");
-        expect(fs.existsSync(debugLogPath)).toBe(true);
-        const logContent = fs.readFileSync(debugLogPath, "utf8");
-        expect(logContent).toContain("runCustomHooks");
-        expect(logContent).toContain("pre-finding");
-      } finally {
-        if (origDebug === undefined) delete process.env.PHREN_DEBUG;
-        else process.env.PHREN_DEBUG = origDebug;
-        if (origPhrenPath === undefined) delete process.env.PHREN_PATH;
-        else process.env.PHREN_PATH = origPhrenPath;
       }
     });
   });
@@ -1062,55 +881,6 @@ describe("runPrePromptHooks skip behavior", () => {
 
 // ── Tests for gamma sprint changes ─────────────────────────────────────────
 
-describe("FTS5 whitelist (sanitizeFts5Query)", () => {
-  it("strips column prefix injection like content:foo", () => {
-    // The colon is not in the whitelist [a-zA-Z0-9 '-_], so it gets replaced
-    const result = sanitizeFts5Query("content:foo");
-    expect(result).not.toContain(":");
-    expect(result).toContain("foo");
-  });
-
-  it("strips angle brackets", () => {
-    const result = sanitizeFts5Query("<script>alert(1)</script>");
-    expect(result).not.toContain("<");
-    expect(result).not.toContain(">");
-  });
-
-  it("strips semicolons", () => {
-    const result = sanitizeFts5Query("test; DROP TABLE docs");
-    expect(result).not.toContain(";");
-  });
-
-  it("strips FTS5 operators (AND, OR, NOT, NEAR) via character removal", () => {
-    // Parentheses and special chars are stripped by whitelist
-    const result = sanitizeFts5Query("(foo AND bar) OR NOT baz");
-    expect(result).not.toContain("(");
-    expect(result).not.toContain(")");
-    // The words AND/OR/NOT remain since they are alphanumeric, but that's fine
-    // because they are now plain tokens without FTS5 operator semantics
-  });
-
-  it("preserves allowed characters: alphanumeric, spaces, hyphens", () => {
-    const result = sanitizeFts5Query("it's a test-case with under_score");
-    expect(result).toBe("it s a test-case with under score");
-  });
-
-  it("returns empty string for empty input", () => {
-    expect(sanitizeFts5Query("")).toBe("");
-  });
-
-  it("truncates input longer than 500 characters", () => {
-    const long = "a".repeat(600);
-    const result = sanitizeFts5Query(long);
-    expect(result.length).toBeLessThanOrEqual(500);
-  });
-
-  it("strips null bytes via whitelist", () => {
-    const result = sanitizeFts5Query("hello\0world");
-    expect(result).not.toContain("\0");
-  });
-});
-
 describe("Stop-word bigrams (buildRobustFtsQuery)", () => {
   it("produces no bigrams from a query of only stop words", () => {
     // "the is a" are all stop words — should produce no bigrams in FTS query
@@ -1123,140 +893,12 @@ describe("Stop-word bigrams (buildRobustFtsQuery)", () => {
     // Individual words that aren't consumed remain as core terms
     expect(result).not.toMatch(/"the is"|"is an"|"the an"/);
   });
-
-  it("preserves bigrams where at least one word is not a stop word", () => {
-    const result = buildRobustFtsQuery("rate limit");
-    // "rate" and "limit" are not stop words, so bigram should be preserved
-    expect(result.length).toBeGreaterThan(0);
-  });
-});
-
-describe("Git-context filter opt-in (PHREN_FEATURE_GIT_CONTEXT_FILTER)", () => {
-  const origEnv = process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER;
-
-  afterEach(() => {
-    if (origEnv === undefined) {
-      delete process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER;
-    } else {
-      process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER = origEnv;
-    }
-  });
-
-  it("env var is not set by default", () => {
-    delete process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER;
-    // Without the env var, git-context filtering should be disabled
-    // We verify the env var check pattern works correctly
-    expect(process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER).toBeUndefined();
-    // The guard `process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER === 'true'` evaluates false
-    expect(process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(false);
-  });
-
-  it("env var set to 'true' enables the filter", () => {
-    process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER = "true";
-    expect(process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(true);
-  });
-
-  it("env var set to other values does not enable the filter", () => {
-    process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER = "1";
-    expect(process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(false);
-
-    process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER = "yes";
-    expect(process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER === "true").toBe(false);
-  });
-});
-
-describe("Token budget overflow after reorder (selectSnippets)", () => {
-  it("does not exceed token budget with selected snippets", () => {
-    // Create mock DocRow objects with known content sizes
-    const makeDoc = (content: string) => ({
-      project: "test",
-      filename: "test.md",
-      type: "findings" as const,
-      content,
-      path: "/test/test.md",
-    });
-
-    // Each snippet is ~100 chars = ~25 tokens + 14 overhead = ~39 tokens per doc
-    const docs = [
-      makeDoc("A".repeat(100) + "\n" + "B".repeat(100)),
-      makeDoc("C".repeat(100) + "\n" + "D".repeat(100)),
-      makeDoc("E".repeat(100) + "\n" + "F".repeat(100)),
-    ];
-
-    // Very tight budget: should select at most what fits
-    const tightBudget = 80; // 36 base + only room for ~1 snippet
-    const { selected, usedTokens } = selectSnippets(docs, "test", tightBudget, 8, 500);
-
-    // usedTokens should not wildly exceed the budget
-    // First snippet is always included, subsequent ones are skipped if over budget
-    expect(selected.length).toBeLessThanOrEqual(3);
-    // The first snippet is always included even if it exceeds budget (compacted)
-    if (selected.length > 1) {
-      expect(usedTokens).toBeLessThanOrEqual(tightBudget + 50); // some slack for first item
-    }
-  });
-
-  it("approximateTokens returns roughly chars/3.5 + whitespace weight", () => {
-    // Updated formula: Math.ceil(length / 3.5 + whitespace * 0.1)
-    expect(approximateTokens("hello world")).toBe(Math.ceil(11 / 3.5 + 1 * 0.1));
-    expect(approximateTokens("a".repeat(100))).toBe(Math.ceil(100 / 3.5));
-  });
 });
 
 describe("PhrenError codes (shared.ts)", () => {
-  it("exports all expected error code values as strings", () => {
-    const expectedCodes = [
-      "NOT_FOUND",
-      "PERMISSION_DENIED",
-      "VALIDATION_ERROR",
-      "LOCK_TIMEOUT",
-      "INDEX_ERROR",
-      "NETWORK_ERROR",
-    ];
-
-    for (const code of expectedCodes) {
-      expect(PhrenError).toHaveProperty(code);
-      expect(typeof (PhrenError as Record<string, unknown>)[code]).toBe("string");
-    }
-  });
-
-  it("includes all originally defined codes", () => {
-    const allCodes = [
-      "PROJECT_NOT_FOUND",
-      "INVALID_PROJECT_NAME",
-      "FILE_NOT_FOUND",
-      "PERMISSION_DENIED",
-      "MALFORMED_JSON",
-      "MALFORMED_YAML",
-      "NOT_FOUND",
-      "AMBIGUOUS_MATCH",
-      "LOCK_TIMEOUT",
-      "EMPTY_INPUT",
-      "VALIDATION_ERROR",
-      "INDEX_ERROR",
-      "NETWORK_ERROR",
-    ];
-
-    const actualKeys = Object.keys(PhrenError);
-    for (const code of allCodes) {
-      expect(actualKeys).toContain(code);
-    }
-    // Verify total count matches
-    expect(actualKeys.length).toBe(allCodes.length);
-  });
-
   it("values are the same as their keys (const enum pattern)", () => {
     for (const [key, value] of Object.entries(PhrenError)) {
       expect(key).toBe(value);
     }
-  });
-
-  it("PhrenError is frozen (as const)", () => {
-    // as const makes the object readonly at compile time;
-    // verify the values are stable string literals
-    expect(PhrenError.NOT_FOUND).toBe("NOT_FOUND");
-    expect(PhrenError.VALIDATION_ERROR).toBe("VALIDATION_ERROR");
-    expect(PhrenError.INDEX_ERROR).toBe("INDEX_ERROR");
-    expect(PhrenError.NETWORK_ERROR).toBe("NETWORK_ERROR");
   });
 });

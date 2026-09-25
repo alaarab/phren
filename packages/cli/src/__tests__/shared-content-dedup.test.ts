@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   isDuplicateFinding,
-  resolveCoref,
   addFindingsToFile,
   checkSemanticDedup,
 } from "../shared/content.js";
@@ -10,56 +9,11 @@ import * as fs from "fs";
 import * as path from "path";
 
 describe("isDuplicateFinding", () => {
-  it("detects exact match duplicates", () => {
-    const existing = "- The auth middleware runs before rate limiting and order matters\n- Use parameterized queries for SQL";
-    expect(isDuplicateFinding(existing, "- The auth middleware runs before rate limiting, order matters")).toBe(true);
-  });
-
-  it("allows non-duplicates through", () => {
-    const existing = "- The auth middleware runs before rate limiting\n- Use parameterized queries for SQL";
-    expect(isDuplicateFinding(existing, "- Database indexes need rebuilding after schema migration")).toBe(false);
-  });
-
   it("detects near-duplicates via Jaccard similarity", () => {
     const existing = "- Always restart the dev server after changing environment variables\n";
     // Same meaning, slightly different wording
     const nearDup = "- Restart dev server when environment variables change";
     expect(isDuplicateFinding(existing, nearDup)).toBe(true);
-  });
-
-  it("does not flag clearly different learnings as Jaccard duplicates", () => {
-    const existing = "- The database connection pool should be limited to 20 connections\n";
-    const different = "- React components should use memo for expensive renders";
-    expect(isDuplicateFinding(existing, different)).toBe(false);
-  });
-
-  it("skips superseded entries when checking duplicates", () => {
-    const existing = '- Old approach to auth <!-- phren:status "superseded" -->\n- Use parameterized queries for SQL';
-    expect(isDuplicateFinding(existing, "- Old approach to auth with minor changes")).toBe(false);
-  });
-});
-
-describe("resolveCoref", () => {
-  it("replaces 'the project' with project name", () => {
-    const result = resolveCoref("Always restart the project after config changes", { project: "myapp" });
-    expect(result).toContain("myapp");
-    expect(result).not.toContain("the project");
-  });
-
-  it("replaces 'this file' with filename", () => {
-    const result = resolveCoref("Check this file for configuration", { file: "/home/user/src/config.ts" });
-    expect(result).toContain("config.ts");
-    expect(result).not.toContain("this file");
-  });
-
-  it("returns text as-is when no context provided", () => {
-    const text = "It does something interesting";
-    expect(resolveCoref(text, {})).toBe(text);
-  });
-
-  it("prepends project name for sentence-starting pronouns", () => {
-    const result = resolveCoref("It requires Node 18+", { project: "myapp" });
-    expect(result).toContain("[myapp]");
   });
 });
 

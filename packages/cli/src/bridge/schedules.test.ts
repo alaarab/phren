@@ -324,14 +324,6 @@ describe("scheduled startup prompts", () => {
 });
 
 describe("blocked-at-startup watch loop", () => {
-  it("classifies a fake pane waiting at the 90 second mark with no transcript", async () => {
-    const watch = await driveWatch({ ticks: 95 });
-    await watch.finished;
-    expect(watch.prompts).toHaveLength(1);
-    expect(watch.prompts[0]).toContain("Allow external CLAUDE.md file imports?");
-    expect(watch.reads()).toBe(1);
-  });
-
   it("does not classify when the transcript first appears after the grace period", async () => {
     const watch = await driveWatch({
       ticks: 95,

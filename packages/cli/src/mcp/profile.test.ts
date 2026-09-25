@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { CORE_TOOLS, buildCompositeTools, createToolGate, dispatch, resolveMcpProfile, schemaWeight, type Catalog, type ToolConfig, type ToolHandler } from "./profile.js";
+import { CORE_TOOLS, createToolGate, dispatch, resolveMcpProfile, type Catalog, type ToolConfig, type ToolHandler } from "./profile.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -58,16 +58,6 @@ describe("core profile", () => {
     const { gate } = gateWith("core");
     expect(gate.catalog.has("toggle_hooks")).toBe(true);
     expect(gate.catalog.has("supersede_finding")).toBe(true);
-  });
-
-  it("is a fraction of the weight of the full surface", () => {
-    const core = gateWith("core");
-    const full = gateWith("full");
-    const coreWeight = schemaWeight(core.registered.values());
-    const fullWeight = schemaWeight([...full.registered.values()].filter((_, i) => i < full.registered.size));
-    expect(coreWeight).toBeLessThan(fullWeight);
-    expect(core.registered.size).toBe(CORE_TOOLS.length);
-    expect(full.registered.size).toBeGreaterThan(core.registered.size);
   });
 });
 

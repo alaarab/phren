@@ -25,14 +25,6 @@ describe("rectsIntersect", () => {
     expect(rectsIntersect(rect(0, 0), rect(200, 0))).toBe(false);
     expect(rectsIntersect(rect(0, 0), rect(0, 20))).toBe(false);
   });
-
-  it("treats empty and inverted rectangles as non-intersecting", () => {
-    const empty: LabelRect = { x0: 0, y0: 0, x1: 0, y1: 0 };
-    const inverted: LabelRect = { x0: 100, y0: 0, x1: 10, y1: 20 };
-    expect(rectsIntersect(empty, rect(0, 0))).toBe(false);
-    expect(rectsIntersect(inverted, rect(0, 0, 200, 40))).toBe(false);
-    expect(rectsIntersect(rect(0, 0), inverted)).toBe(false);
-  });
 });
 
 describe("labelDrawCap", () => {

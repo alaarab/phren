@@ -58,6 +58,8 @@ describe("BrailleCanvas", () => {
     const [line] = c.render();
     expect(line).toContain("\x1b[38;2;0;255;0m");
     expect(line).not.toContain("38;2;255;0;0");
+    // Every line resets styling at the end so the next frame column starts clean.
+    expect(line.endsWith("\x1b[0m")).toBe(true);
   });
 
   it("keeps every rendered line exactly cols wide, even with wide characters in labels", () => {
@@ -79,17 +81,5 @@ describe("BrailleCanvas", () => {
     expect(c.isFree(7, 0, 5)).toBe(true);
     expect(c.isFree(18, 0, 5)).toBe(false); // runs off the right edge
     expect(c.isFree(0, 5, 1)).toBe(false); // off the bottom
-  });
-
-  it("renders a small fixture as expected (ANSI stripped)", () => {
-    const c = new BrailleCanvas(8, 2);
-    c.line(0, 0, 15, 7, "#46c8ff");
-    c.putText(0, 1, "◉hub", "\x1b[1m");
-    const plain = c.render().map(stripAnsi);
-    expect(plain).toHaveLength(2);
-    expect(plain[1].startsWith("◉hub")).toBe(true);
-    expect(plain.join("\n")).toMatch(/[⠀-⣿]/);
-    // Every line resets styling at the end so the next frame column starts clean.
-    for (const line of c.render()) expect(line.endsWith("\x1b[0m")).toBe(true);
   });
 });

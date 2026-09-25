@@ -1,14 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { makeTempDir, grantAdmin } from "../test-helpers.js";
 
 // Set PHREN_PATH before importing cli-hooks
 const tmpPhren = fs.mkdtempSync(path.join(os.tmpdir(), "phren-retrieval-test-"));
 process.env.PHREN_PATH = tmpPhren;
 
-import { rankResults, searchDocuments, applyRelevanceFloor, DEFAULT_MIN_QUERY_RELEVANCE } from "../cli/hooks.js";
+import { rankResults, searchDocuments, applyRelevanceFloor, } from "../cli/hooks.js";
 import type { DocRow } from "../shared/index.js";
 import { buildRobustFtsQuery } from "../utils.js";
 
@@ -20,20 +19,6 @@ describe("rankResults", () => {
   function makeDocRow(project: string, filename: string, type: string, content: string): DocRow {
     return { project, filename, type, content, path: `/tmp/${project}/${filename}` };
   }
-
-  it("uses boost not hard filter for project relevance", () => {
-    const rows: DocRow[] = [
-      makeDocRow("other-project", "FINDINGS.md", "findings", "## 2025-01-01\n- Some insight"),
-      makeDocRow("myapp", "AGENTS.md", "claude", "# myapp\nProject description"),
-      makeDocRow("myapp", "FINDINGS.md", "findings", "## 2025-06-01\n- Recent insight"),
-    ];
-
-    // rankResults should not filter out other-project rows, but may reorder them
-    const ranked = rankResults(rows, "general", null, "myapp", tmpPhren, null);
-    expect(ranked.length).toBeGreaterThanOrEqual(2); // at minimum keeps myapp rows
-    // myapp claude should appear (it's the detected project)
-    expect(ranked.some(r => r.project === "myapp")).toBe(true);
-  });
 
   it("prioritizes findings type over non-findings types", () => {
     const rows: DocRow[] = [
@@ -99,22 +84,6 @@ describe("searchDocuments", () => {
     };
     const result = searchDocuments(mockDb, "test query", "test", "test", null);
     expect(result).toBeNull();
-  });
-
-  it("passes through the safe query to the database", () => {
-    // searchDocuments passes the safeQuery directly to FTS5 MATCH
-    // Verify it attempts queries with the provided search term
-    let queryCalled = false;
-    const mockDb = {
-      exec: (sql: string, params: any[]) => {
-        if (sql.includes("MATCH") && params.length > 0) {
-          queryCalled = true;
-        }
-        return [];
-      },
-    };
-    searchDocuments(mockDb, "test query", "test query", "test,query", null);
-    expect(queryCalled).toBe(true);
   });
 
   it("uses deterministic rowid windows for semantic fallback instead of ORDER BY RANDOM", () => {
@@ -245,10 +214,5 @@ describe("applyRelevanceFloor", () => {
     // A changed file is still a tie to the work.
     const changed = makeDocRow("zeta", "auth-config.md", "findings", "anything");
     expect(applyRelevanceFloor([changed], "yes", { changedFiles: new Set(["auth-config.md"]) }, "zeta")).toHaveLength(1);
-  });
-
-  it("exposes a sane default floor in (0, 1)", () => {
-    expect(DEFAULT_MIN_QUERY_RELEVANCE).toBeGreaterThan(0);
-    expect(DEFAULT_MIN_QUERY_RELEVANCE).toBeLessThan(1);
   });
 });

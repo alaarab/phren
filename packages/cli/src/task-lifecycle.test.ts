@@ -494,11 +494,13 @@ describe("progressive task model", () => {
     const result = addTask(tmp.path, project, "Implement rate limiting", {
       createdAt: now,
       sessionId: "sess-abc123",
+      scope: "backend",
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.createdAt).toBe(now);
     expect(result.data.sessionId).toBe("sess-abc123");
+    expect(result.data.scope).toBe("backend");
     expect(result.data.line).toBe("Implement rate limiting");
   });
 

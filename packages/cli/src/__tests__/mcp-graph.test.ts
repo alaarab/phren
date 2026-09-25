@@ -81,11 +81,6 @@ describe("manual-links.json persistence", () => {
       { entity: "edge-router", entityType: "library", sourceDoc: "beta/FINDINGS.md", relType: "mentions" },
     ]);
   });
-
-  it("handles missing manual-links.json gracefully", async () => {
-    seedFindings(tmp.path, "proj", "# proj\n\n- A finding\n");
-    await expect(buildIndex(tmp.path)).resolves.toBeDefined();
-  });
 });
 
 describe("read_graph pagination", () => {

@@ -13,103 +13,49 @@ import {
 // ── stripMetadata ───────────────────────────────────────────────────────────
 
 describe("stripMetadata", () => {
-  it("strips HTML comments", () => {
-    expect(stripMetadata("hello <!-- comment --> world")).toBe("hello  world");
-  });
-
-  it("strips migrated-from annotations", () => {
-    expect(stripMetadata("finding (migrated from old-project)")).toBe("finding ");
-  });
-
-  it("strips leading bullet dash", () => {
-    expect(stripMetadata("- This is a finding")).toBe("This is a finding");
-  });
-
-  it("strips all metadata at once", () => {
-    const input = "- Some finding <!-- ts:123 --> (migrated from legacy)";
-    const result = stripMetadata(input);
-    expect(result).toBe("Some finding  ");
-  });
-
-  it("handles empty string", () => {
-    expect(stripMetadata("")).toBe("");
-  });
-
-  it("handles multiline HTML comments", () => {
-    expect(stripMetadata("before <!-- multi\nline\ncomment --> after")).toBe("before  after");
+  it.each([
+    ["HTML comments", "hello <!-- comment --> world", "hello  world"],
+    ["migrated-from annotations", "finding (migrated from old-project)", "finding "],
+    ["the leading bullet dash", "- This is a finding", "This is a finding"],
+    ["all metadata at once", "- Some finding <!-- ts:123 --> (migrated from legacy)", "Some finding  "],
+    ["nothing from an empty string", "", ""],
+    ["multiline HTML comments", "before <!-- multi\nline\ncomment --> after", "before  after"],
+  ])("strips %s", (_label, input, expected) => {
+    expect(stripMetadata(input)).toBe(expected);
   });
 });
 
 // ── jaccardTokenize ─────────────────────────────────────────────────────────
 
 describe("jaccardTokenize", () => {
-  it("tokenizes and lowercases", () => {
-    const tokens = jaccardTokenize("Hello World Test");
-    expect(tokens.has("hello")).toBe(true);
-    expect(tokens.has("world")).toBe(true);
-    expect(tokens.has("test")).toBe(true);
+  it.each([
+    ["tokenizes and lowercases", "Hello World Test", ["hello", "world", "test"], []],
+    ["removes stop words", "the quick brown fox is a test", ["quick"], ["the", "is", "a"]],
+    ["handles Unicode text", "Python 使用 テスト data", ["python", "data"], []],
+    ["splits on non-word characters", "key=value; foo:bar", ["key", "value", "foo", "bar"], []],
+  ])("%s", (_label, input, present, absent) => {
+    const tokens = jaccardTokenize(input);
+    for (const token of present) expect(tokens.has(token), token).toBe(true);
+    for (const token of absent) expect(tokens.has(token), token).toBe(false);
   });
 
-  it("removes stop words", () => {
-    const tokens = jaccardTokenize("the quick brown fox is a test");
-    expect(tokens.has("the")).toBe(false);
-    expect(tokens.has("is")).toBe(false);
-    expect(tokens.has("a")).toBe(false);
-    expect(tokens.has("quick")).toBe(true);
-  });
-
-  it("handles empty string", () => {
-    const tokens = jaccardTokenize("");
-    expect(tokens.size).toBe(0);
-  });
-
-  it("handles string of only stop words", () => {
-    const tokens = jaccardTokenize("the a an is are was were");
-    expect(tokens.size).toBe(0);
-  });
-
-  it("handles Unicode text", () => {
-    const tokens = jaccardTokenize("Python 使用 テスト data");
-    expect(tokens.has("python")).toBe(true);
-    expect(tokens.has("data")).toBe(true);
-  });
-
-  it("splits on non-word characters", () => {
-    const tokens = jaccardTokenize("key=value; foo:bar");
-    expect(tokens.has("key")).toBe(true);
-    expect(tokens.has("value")).toBe(true);
-    expect(tokens.has("foo")).toBe(true);
-    expect(tokens.has("bar")).toBe(true);
+  it.each(["", "the a an is are was were"])("yields no tokens for %j", (input) => {
+    expect(jaccardTokenize(input).size).toBe(0);
   });
 });
 
 // ── jaccardSimilarity ───────────────────────────────────────────────────────
 
 describe("jaccardSimilarity", () => {
-  it("returns 1 for identical sets", () => {
-    const s = new Set(["a", "b", "c"]);
-    expect(jaccardSimilarity(s, s)).toBe(1);
-  });
-
-  it("returns 0 for disjoint sets", () => {
-    const a = new Set(["a", "b"]);
-    const b = new Set(["c", "d"]);
-    expect(jaccardSimilarity(a, b)).toBe(0);
-  });
-
-  it("returns 1 for two empty sets", () => {
-    expect(jaccardSimilarity(new Set(), new Set())).toBe(1);
-  });
-
-  it("returns 0 when one set is empty and other is not", () => {
-    expect(jaccardSimilarity(new Set(), new Set(["a"]))).toBe(0);
-  });
-
-  it("computes correct partial overlap", () => {
-    const a = new Set(["a", "b", "c"]);
-    const b = new Set(["b", "c", "d"]);
+  it.each([
+    ["identical sets", ["a", "b", "c"], ["a", "b", "c"], 1],
+    ["disjoint sets", ["a", "b"], ["c", "d"], 0],
+    ["two empty sets", [], [], 1],
+    ["one empty set", [], ["a"], 0],
     // intersection=2, union=4
-    expect(jaccardSimilarity(a, b)).toBeCloseTo(0.5);
+    ["partial overlap", ["a", "b", "c"], ["b", "c", "d"], 0.5],
+  ])("scores %s", (_label, a, b, expected) => {
+    expect(jaccardSimilarity(new Set(a), new Set(b))).toBeCloseTo(expected);
   });
 });
 
@@ -241,68 +187,26 @@ describe("detectConflicts", () => {
 // ── normalizeObservationTags ────────────────────────────────────────────────
 
 describe("normalizeObservationTags", () => {
-  it("lowercases known tags", () => {
-    const { text } = normalizeObservationTags("[DECISION] Use Redis");
-    expect(text).toBe("[decision] Use Redis");
-  });
-
-  it("preserves unknown tags and warns", () => {
-    const { text, warning } = normalizeObservationTags("[custom] tag here");
-    expect(text).toBe("[custom] tag here");
-    expect(warning).toContain("Unknown tag");
-  });
-
-  it("handles multiple tags", () => {
-    const { text } = normalizeObservationTags("[PITFALL] and [BUG] combined");
-    expect(text).toBe("[pitfall] and [bug] combined");
-  });
-
-  it("handles no tags", () => {
-    const { text, warning } = normalizeObservationTags("No tags here");
-    expect(text).toBe("No tags here");
-    expect(warning).toBeUndefined();
-  });
-
-  it("handles empty string", () => {
-    const { text, warning } = normalizeObservationTags("");
-    expect(text).toBe("");
-    expect(warning).toBeUndefined();
+  it.each([
+    ["lowercases known tags", "[DECISION] Use Redis", "[decision] Use Redis", undefined],
+    ["preserves unknown tags and warns", "[custom] tag here", "[custom] tag here", "Unknown tag"],
+    ["handles multiple tags", "[PITFALL] and [BUG] combined", "[pitfall] and [bug] combined", undefined],
+    ["handles no tags", "No tags here", "No tags here", undefined],
+    ["handles empty string", "", "", undefined],
+  ])("%s", (_label, input, expected, warning) => {
+    const result = normalizeObservationTags(input);
+    expect(result.text).toBe(expected);
+    if (warning) expect(result.warning).toContain(warning);
+    else expect(result.warning).toBeUndefined();
   });
 });
 
 // ── scanForSecrets ──────────────────────────────────────────────────────────
+// Detector rows live in __tests__/secret-scan-precision.test.ts.
 
 describe("scanForSecrets", () => {
-  it("detects AWS access key", () => {
-    expect(scanForSecrets("key is AKIAIOSFODNN7EXAMPLE")).toBe("AWS access key");
-  });
-
-  it("detects JWT token", () => {
-    expect(scanForSecrets("token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc_def-ghi")).toBe("JWT token");
-  });
-
-  it("detects GitHub PAT", () => {
-    expect(scanForSecrets("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij")).toBe("GitHub personal access token");
-  });
-
-  it("detects connection string with credentials", () => {
-    expect(scanForSecrets("mongodb://admin:password123@host:27017/db")).toBe("connection string with credentials");
-  });
-
-  it("returns null for clean text", () => {
-    expect(scanForSecrets("This is a normal finding about Redis caching")).toBeNull();
-  });
-
-  it("returns null for empty string", () => {
-    expect(scanForSecrets("")).toBeNull();
-  });
-
-  it("detects SSH private key", () => {
-    expect(scanForSecrets("-----BEGIN RSA PRIVATE KEY-----")).toBe("SSH private key");
-  });
-
-  it("detects Anthropic API key", () => {
-    expect(scanForSecrets("sk-ant-api03-abcdefghij1234567890")).toBe("Anthropic API key");
+  it.each(["This is a normal finding about Redis caching", ""])("returns null for clean text %j", (text) => {
+    expect(scanForSecrets(text)).toBeNull();
   });
 });
 
@@ -330,6 +234,6 @@ describe("resolveCoref", () => {
 
   it("prepends context when text has vague pronouns and no concrete nouns", () => {
     const result = resolveCoref("it handles them correctly", { project: "phren" });
-    expect(result).toContain("phren");
+    expect(result).toContain("[phren]");
   });
 });

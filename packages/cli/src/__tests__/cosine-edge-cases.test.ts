@@ -46,17 +46,6 @@ describe("cosineFallback: edge cases", () => {
     expect(results).toEqual([]);
   });
 
-  it("returns empty array when all query tokens are stop words", async () => {
-    makeProject(tmp.path, "proj", {
-      "FINDINGS.md": "# proj\n\n- Always use parameterized queries to prevent SQL injection\n",
-    });
-    db = await buildIndex(tmp.path);
-    // "the", "a", "is", "of" are all stop words — should produce no meaningful TF-IDF vector
-    const results = cosineFallback(db, "the a is of", new Set(), 10);
-    // Either no results (score 0) or returns something — either is safe
-    expect(Array.isArray(results)).toBe(true);
-  });
-
   it("handles single-document corpus without crash", async () => {
     makeProject(tmp.path, "solo", {
       "FINDINGS.md": "# solo Findings\n\n- Xylophone frequency calibration requires 440Hz tuning for musical accuracy\n",

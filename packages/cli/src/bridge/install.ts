@@ -112,7 +112,7 @@ async function activate(version: string) {
 /** The launchd domain for the LaunchAgent: the GUI session when someone is
  *  logged in at the screen, else the per-user background domain an SSH login
  *  has (gui/<uid> does not exist there, so a bootstrap into it fails). */
-export function launchDomain(uid: number, guiSession: boolean): string {
+function launchDomain(uid: number, guiSession: boolean): string {
   return guiSession ? `gui/${uid}` : `user/${uid}`;
 }
 

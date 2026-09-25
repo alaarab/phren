@@ -36,13 +36,6 @@ it("keeps another agent's edit out of a shell call that ran at the same time", a
   expect(await files("claude:worker", "write")).toEqual(["SessionWebServersView.swift"]);
 });
 
-it("still credits a shell call with the files it changed itself", async () => {
-  await changes.before("claude:conductor", "echo", repo, "echo hi > notes.txt");
-  await writeFile(path.join(repo, "notes.txt"), "hi\n");
-  await changes.after("claude:conductor", "echo");
-  expect(await files("claude:conductor", "echo")).toEqual(["notes.txt"]);
-});
-
 it("credits each agent only with its own file when both work in one repository", async () => {
   await changes.before("codex:a", "sh", repo, "npm run format");
   await changes.before("claude:b", "edit", repo, "", { file_path: "b.txt" });

@@ -91,22 +91,15 @@ describe("tree-utils: type coercion helpers", () => {
 });
 
 describe("tree-utils: truncate", () => {
-  it("collapses internal whitespace/newlines before measuring length", () => {
-    expect(truncate("hello   \n\n  world", 20)).toBe("hello world");
-  });
-
-  it("returns the compacted string unchanged when within the limit", () => {
-    expect(truncate("short", 10)).toBe("short");
-  });
-
-  it("truncates and appends an ellipsis, trimming trailing space before it", () => {
-    // "abcdefghij" (10 chars) at maxLength 8 → slice(0,5) = "abcde" + "..."
-    expect(truncate("abcdefghij", 8)).toBe("abcde...");
-  });
-
-  it("never produces a negative slice length for very small maxLength", () => {
-    expect(truncate("abcdefghij", 1)).toBe("...");
-    expect(truncate("abcdefghij", 0)).toBe("...");
+  it.each([
+    ["collapses internal whitespace/newlines before measuring length", "hello   \n\n  world", 20, "hello world"],
+    ["returns the compacted string unchanged when within the limit", "short", 10, "short"],
+    // "abcdefghij" (10 chars) at maxLength 8 -> slice(0,5) = "abcde" + "..."
+    ["truncates and appends an ellipsis, trimming trailing space before it", "abcdefghij", 8, "abcde..."],
+    ["never produces a negative slice length for maxLength 1", "abcdefghij", 1, "..."],
+    ["never produces a negative slice length for maxLength 0", "abcdefghij", 0, "..."],
+  ])("%s", (_label, input, max, expected) => {
+    expect(truncate(input, max)).toBe(expected);
   });
 });
 
@@ -134,27 +127,18 @@ describe("tree-utils: categoryIconId / taskIconId", () => {
     };
   }
 
-  it("prioritizes checked/Done over pinned or section", () => {
+  it("prefers check (checked or Done) over pinned, then falls back to play/clock by section", () => {
     expect(taskIconId(task({ checked: true, section: "Active", pinned: true }))).toBe("check");
     expect(taskIconId(task({ section: "Done", checked: false }))).toBe("check");
-  });
-
-  it("shows pinned icon only when not checked/Done", () => {
     expect(taskIconId(task({ pinned: true, section: "Queue" }))).toBe("pinned");
-  });
-
-  it("falls back to play for Active and clock for Queue otherwise", () => {
     expect(taskIconId(task({ section: "Active" }))).toBe("play");
     expect(taskIconId(task({ section: "Queue" }))).toBe("clock");
   });
 });
 
 describe("tree-utils: date/time formatting", () => {
-  it('formatDateLabel special-cases the literal "unknown" date', () => {
+  it('formatDateLabel special-cases "unknown" and passes an unparseable date through', () => {
     expect(formatDateLabel("unknown")).toBe("Unknown date");
-  });
-
-  it("formatDateLabel returns the raw string for an unparseable date", () => {
     expect(formatDateLabel("not-a-date")).toBe("not-a-date");
   });
 
@@ -188,16 +172,10 @@ describe("tree-utils: date/time formatting", () => {
     expect(formatSessionTimeLabel(new Date().toISOString()).length).toBeGreaterThan(0);
   });
 
-  it("formatRelativeTime returns unknown for an invalid ISO string", () => {
+  it("formatRelativeTime buckets minutes/hours/days/months, never goes negative, and flags invalid input", () => {
     expect(formatRelativeTime("not-a-date")).toBe("unknown");
-  });
-
-  it("formatRelativeTime treats future timestamps as just now instead of negative durations", () => {
-    const future = new Date(Date.now() + 60_000).toISOString();
-    expect(formatRelativeTime(future)).toBe("just now");
-  });
-
-  it("formatRelativeTime buckets minutes/hours/days/months correctly", () => {
+    // A future timestamp is "just now", not a negative duration.
+    expect(formatRelativeTime(new Date(Date.now() + 60_000).toISOString())).toBe("just now");
     const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
     const hoursAgo = (n: number) => new Date(Date.now() - n * 3_600_000).toISOString();
     const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
@@ -216,13 +194,11 @@ describe("tree-utils: themeIcon", () => {
     expect(themeIcon("file")).toBe(vscode.ThemeIcon.File);
   });
 
-  it("wraps a color into a ThemeColor when provided", () => {
-    const icon = themeIcon("warning", "list.warningForeground") as vscode.ThemeIcon;
-    expect(icon.id).toBe("warning");
-    expect((icon.color as vscode.ThemeColor).id).toBe("list.warningForeground");
-  });
+  it("wraps a color into a ThemeColor only when one is provided", () => {
+    const colored = themeIcon("warning", "list.warningForeground") as vscode.ThemeIcon;
+    expect(colored.id).toBe("warning");
+    expect((colored.color as vscode.ThemeColor).id).toBe("list.warningForeground");
 
-  it("omits color entirely when not provided", () => {
     const icon = themeIcon("lightbulb") as vscode.ThemeIcon;
     expect(icon.id).toBe("lightbulb");
     expect(icon.color).toBeUndefined();

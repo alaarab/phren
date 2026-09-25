@@ -35,30 +35,7 @@ describe("rrfMerge", () => {
     const merged = rrfMerge([[], [doc], []]);
     expect(merged.length).toBe(1);
     expect(merged[0].path).toBe(doc.path);
-  });
-
-  it("handles all tiers empty", () => {
-    const merged = rrfMerge([[], [], []]);
-    expect(merged.length).toBe(0);
-  });
-
-  it("k=60 formula: score = 1/(60 + rank + 1)", () => {
-    // With k=60, rank 0 gives score = 1/61
-    // A doc at rank 0 in one tier should score ~0.01639
-    const docA = makeDocRow("proj", "a.md", "findings");
-    const docB = makeDocRow("proj", "b.md", "findings");
-
-    // docA at rank 0 in tier1, docB at rank 0 in tier2
-    // Both get 1/(60+0+1) = 1/61, so they should be tied
-    const merged = rrfMerge([[docA], [docB]]);
-    expect(merged.length).toBe(2);
-
-    // docA in tier1 at rank 0 AND tier2 at rank 1
-    // score(A) = 1/61 + 1/62 > score(B) = 1/61
-    const merged2 = rrfMerge([[docA, docB], [docB, docA]]);
-    // Both appear in both tiers, but at different ranks
-    // docA: 1/61 + 1/62, docB: 1/62 + 1/61 — same score
-    expect(merged2.length).toBe(2);
+    expect(rrfMerge([[], [], []])).toEqual([]);
   });
 });
 

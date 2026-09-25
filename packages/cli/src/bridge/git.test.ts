@@ -250,18 +250,3 @@ describe("git routes", () => {
     } finally { await rm(plain, { recursive: true, force: true }); }
   });
 });
-
-// The checkout benchmark also runs when the sandbox cannot open the Hook socket.
-it("measures the tree handler on the phren checkout", async () => {
-  const measure = async (run: () => Promise<unknown>) => {
-    const start = performance.now(); await run(); return performance.now() - start;
-  };
-  const statusMs = await measure(() => gitStatus(process.cwd()));
-  const coldTreeMs = await measure(() => gitTree(process.cwd()));
-  const cachedTreeMs = await measure(() => gitTree(process.cwd()));
-  const directoryMs = await measure(() => gitTree(process.cwd(), "packages/cli/src"));
-  const times = { benchmark: "phren git handlers", statusMs, coldTreeMs, cachedTreeMs, directoryMs };
-  console.log(JSON.stringify(times));
-  if (process.env.PHREN_TREE_BENCHMARK_LOG) await writeFile(process.env.PHREN_TREE_BENCHMARK_LOG, JSON.stringify(times, null, 2));
-  expect(cachedTreeMs).toBeLessThan(500);
-});

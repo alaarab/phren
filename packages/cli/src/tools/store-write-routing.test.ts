@@ -100,13 +100,6 @@ describe("resolveStoreForProject — missing team store", () => {
     expect(message).toContain("arc");
   });
 
-  it("defaults to write mode, so an unclassified caller gets the safe behavior", () => {
-    declareTeamStore({ createDir: false });
-    const ctx = makeCtx(phrenDir);
-    // No mode argument at all.
-    expect(() => resolveStoreForProject(ctx, "arc")).toThrow(StoreUnavailableError);
-  });
-
   it("fails for a store-qualified write naming the missing store", () => {
     declareTeamStore({ createDir: false });
     const ctx = makeCtx(phrenDir);

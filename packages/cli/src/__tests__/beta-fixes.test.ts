@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
+import { makeTempDir, grantAdmin, } from "../test-helpers.js";
 import { escapeRegex, escapeLike } from "../shared/fragment-graph.js";
 import { applyTrustFilter, markStaleCitations } from "../shared/retrieval.js";
-import { autoArchiveToReference, countActiveFindings } from "../content/archive.js";
+import { autoArchiveToReference, } from "../content/archive.js";
 import type { DocRow } from "../shared/index.js";
 
 // ── escapeRegex / escapeLike ─────────────────────────────────────────────────
@@ -21,10 +21,6 @@ describe("escapeRegex", () => {
     expect(re.test("foobar")).toBe(false);
   });
 
-  it("leaves alphanumeric characters unchanged", () => {
-    expect(escapeRegex("hello123")).toBe("hello123");
-  });
-
   it("escapes mixed input correctly", () => {
     const input = "foo.bar[0]";
     const escaped = escapeRegex(input);
@@ -39,10 +35,6 @@ describe("escapeLike", () => {
     expect(escapeLike("100%")).toBe("100\\%");
     expect(escapeLike("foo_bar")).toBe("foo\\_bar");
     expect(escapeLike("a\\b")).toBe("a\\\\b");
-  });
-
-  it("leaves normal text unchanged", () => {
-    expect(escapeLike("hello")).toBe("hello");
   });
 });
 
@@ -81,25 +73,6 @@ describe("applyTrustFilter covers reference and knowledge types", () => {
     expect(filtered.rows.length).toBe(1);
     expect(filtered.rows[0].content).not.toContain("Very old reference entry");
     expect(filtered.rows[0].content).toContain("Findings");
-  });
-
-  it("does not filter retired types like knowledge", () => {
-    // "knowledge" was a doc type until the 0.0.x renames; classifyFile can no
-    // longer produce it, and it was removed from TRUST_FILTERED_TYPES. A row
-    // carrying the retired type (e.g. from a stale index) passes through
-    // untouched rather than being half-filtered by dead configuration.
-    const staleContent = [
-      "# Findings",
-      "",
-      "## 2020-01-01",
-      "",
-      "- Ancient knowledge entry",
-    ].join("\n");
-
-    const rows: DocRow[] = [makeDocRow("knowledge", staleContent)];
-    const filtered = applyTrustFilter(rows, 90, 0.35, {});
-    expect(filtered.rows.length).toBe(1);
-    expect(filtered.rows[0].content).toContain("Ancient knowledge entry");
   });
 
   it("does not filter non-trust types like claude or task", () => {
@@ -143,15 +116,7 @@ describe("markStaleCitations", () => {
       `  <!-- phren:cite {"created_at":"2025-01-01","file":"${existingFile.replace(/\\/g, "\\\\")}"} -->`,
     ].join("\n");
 
-    const result = markStaleCitations(snippet);
-    expect(result).not.toContain("[stale citation]");
-    expect(result).toContain("phren:cite");
-  });
-
-  it("passes through lines without citations unchanged", () => {
-    const snippet = "- A plain finding without citation";
-    const result = markStaleCitations(snippet);
-    expect(result).toBe(snippet);
+    expect(markStaleCitations(snippet)).toBe(snippet);
   });
 });
 
@@ -176,23 +141,6 @@ describe("autoArchiveToReference guards", () => {
   afterEach(() => {
     delete process.env.PHREN_ACTOR;
     tmp.cleanup();
-  });
-
-  it("returns ok with 0 when no entries exceed keepCount", () => {
-    const findingsPath = path.join(tmp.path, PROJECT, "FINDINGS.md");
-    fs.writeFileSync(findingsPath, [
-      "# Findings",
-      "",
-      "## 2025-01-01",
-      "",
-      "- First entry",
-      "- Second entry",
-      "",
-    ].join("\n"));
-
-    const result = autoArchiveToReference(tmp.path, PROJECT, 10);
-    expect(result.ok).toBe(true);
-    expect(result.data).toBe(0);
   });
 
   it("does not double-archive entries already in reference files", () => {

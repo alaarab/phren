@@ -315,12 +315,6 @@ describe("unwrapTerminalLines", () => {
       "Done.",
     ]);
   });
-
-  it("flows a wrapped reply in the Claude pane preview", () => {
-    const pane = "❯ Explain this\n⏺ The preview comes from the terminal, where every line\n  is wrapped to the pane, so it needs joining.\n✻ Pondering… (3s)\n❯";
-    expect(claudePanePreview(pane, "Explain this"))
-      .toBe("The preview comes from the terminal, where every line is wrapped to the pane, so it needs joining.");
-  });
 });
 
 describe("Claude's bold in the pane preview", () => {

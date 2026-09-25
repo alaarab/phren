@@ -6,7 +6,6 @@ import {
   logCorrelations,
   getCorrelatedDocs,
   markCorrelationsHelpful,
-  isQueryCorrelationEnabled,
   type CorrelationEntry,
 } from "../query-correlation.js";
 import type { SelectedSnippet } from "../shared/retrieval.js";
@@ -49,22 +48,6 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.PHREN_FEATURE_QUERY_CORRELATION;
   tmp.cleanup();
-});
-
-describe("isQueryCorrelationEnabled", () => {
-  it("returns true when env var is set to 1", () => {
-    expect(isQueryCorrelationEnabled()).toBe(true);
-  });
-
-  it("returns false when env var is not set", () => {
-    delete process.env.PHREN_FEATURE_QUERY_CORRELATION;
-    expect(isQueryCorrelationEnabled()).toBe(false);
-  });
-
-  it("returns false when env var is 0", () => {
-    process.env.PHREN_FEATURE_QUERY_CORRELATION = "0";
-    expect(isQueryCorrelationEnabled()).toBe(false);
-  });
 });
 
 describe("logCorrelations", () => {

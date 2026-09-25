@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { FINDING_SENSITIVITY_CONFIG } from "../cli/config.js";
 import { makeTempDir } from "../test-helpers.js";
 
 /** The prompt hook end to end, as Claude Code runs it: {prompt, cwd,
@@ -71,5 +72,6 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt relevance", () => {
     const output = run("how do I deploy alphalens", store);
     expect(injected(output)).toContain("alphalens/FINDINGS.md");
     expect(output).toContain("deploy.sh is the only deploy path");
+    expect(output).toContain(`[phren finding-sensitivity=balanced] ${FINDING_SENSITIVITY_CONFIG.balanced.agentInstruction}`);
   });
 });

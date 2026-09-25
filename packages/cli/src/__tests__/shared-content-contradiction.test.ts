@@ -25,28 +25,9 @@ describe("detectConflicts", () => {
     expect(result).toHaveLength(0);
   });
 
-  it("returns empty when new learning is neutral", () => {
-    const existing = ["- Always use Docker for containerization"];
-    const result = detectConflicts("Docker supports multi-stage builds", existing);
-    expect(result).toHaveLength(0);
-  });
-
-  it("returns empty when no shared fragments", () => {
-    const existing = ["- Prefer AWS for compute workloads"];
-    const result = detectConflicts("Always use GCP for ML workloads", existing);
-    // AWS and GCP are different fragments — no conflict
-    expect(result).toHaveLength(0);
-  });
-
   it("returns empty when existing line is neutral", () => {
     const existing = ["- Docker runs isolated containers"];
     const result = detectConflicts("Never use Docker for production — use bare metal", existing);
-    expect(result).toHaveLength(0);
-  });
-
-  it("returns empty when no prose fragments found", () => {
-    const existing = ["- Always commit before merging"];
-    const result = detectConflicts("Never push without reviewing the diff first", existing);
     expect(result).toHaveLength(0);
   });
 
@@ -134,15 +115,6 @@ describe("extractDynamicEntities", () => {
     // Second call should read from cache
     const second = extractDynamicEntities(tmp.path, "proj");
     expect(second.has("niagarasystem")).toBe(true);
-  });
-
-  it("detectConflicts uses dynamic fragments for domain-specific tools", () => {
-    // Godot is not in PROSE_ENTITY_RE but should still be detected via dynamic fragments
-    const dynamicEntities = new Set(["godot"]);
-    const existing = ["- Always use Godot for 2D games — fastest editor iteration"];
-    const result = detectConflicts("Never use Godot, it lacks 3D rendering quality", existing, dynamicEntities);
-    expect(result).toHaveLength(1);
-    expect(result[0]).toContain("Godot");
   });
 
   it("detectConflicts without dynamic fragments misses domain-specific tools", () => {

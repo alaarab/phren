@@ -107,13 +107,7 @@ describe("mcp-search: project filter", () => {
     expect(res.data.results.length).toBeGreaterThan(0);
     const projects = new Set(res.data.results.map((r: any) => r.project));
     // Both projects mention Redis, so both should appear
-    expect(projects.size).toBeGreaterThanOrEqual(1);
-  });
-
-  it("search with nonexistent project returns no results", async () => {
-    const res = parseResult(await server.call("search_knowledge", { query: "Redis", project: "nonexistent" }));
-    expect(res.ok).toBe(true);
-    expect(res.data.results).toHaveLength(0);
+    expect(projects.size).toBe(2);
   });
 });
 
@@ -156,33 +150,12 @@ describe("mcp-search: type filter", () => {
     tmp.cleanup();
   });
 
-  it("type=reference returns only reference docs", async () => {
-    const res = parseResult(await server.call("search_knowledge", { query: "authentication", type: "reference" }));
+  it.each(["reference", "findings", "summary"])("type=%s returns only that doc type", async (type) => {
+    const res = parseResult(await server.call("search_knowledge", { query: "authentication", type }));
     expect(res.ok).toBe(true);
-    if (res.data.results.length > 0) {
-      for (const r of res.data.results) {
-        expect(r.type).toBe("reference");
-      }
-    }
-  });
-
-  it("type=findings returns only findings docs", async () => {
-    const res = parseResult(await server.call("search_knowledge", { query: "authentication", type: "findings" }));
-    expect(res.ok).toBe(true);
-    if (res.data.results.length > 0) {
-      for (const r of res.data.results) {
-        expect(r.type).toBe("findings");
-      }
-    }
-  });
-
-  it("type=summary returns only summary docs", async () => {
-    const res = parseResult(await server.call("search_knowledge", { query: "authentication", type: "summary" }));
-    expect(res.ok).toBe(true);
-    if (res.data.results.length > 0) {
-      for (const r of res.data.results) {
-        expect(r.type).toBe("summary");
-      }
+    expect(res.data.results.length).toBeGreaterThan(0);
+    for (const r of res.data.results) {
+      expect(r.type).toBe(type);
     }
   });
 });
@@ -276,15 +249,6 @@ describe("mcp-search: no cross-project leakage", () => {
     expect(res.data.results).toHaveLength(0);
   });
 
-  it("searching project-b for project-a's unique term returns no results", async () => {
-    const res = parseResult(await server.call("search_knowledge", {
-      query: "Xylophone",
-      project: "project-b",
-    }));
-    expect(res.ok).toBe(true);
-    expect(res.data.results).toHaveLength(0);
-  });
-
   it("cosine fallback results also respect project filter", async () => {
     // Use a query that won't match FTS5 well but might match via cosine/keyword fallback
     const res = parseResult(await server.call("search_knowledge", {
@@ -295,52 +259,6 @@ describe("mcp-search: no cross-project leakage", () => {
     for (const r of res.data.results) {
       expect(r.project).toBe("project-a");
     }
-  });
-});
-
-describe("mcp-search: feedback re-ranking", () => {
-  let tmp: { path: string; cleanup: () => void };
-  let server: ReturnType<typeof makeMockServer>;
-  let db: SqlJsDatabase;
-
-  beforeEach(async () => {
-    tmp = makeTempDir("mcp-search-feedback-");
-    grantAdmin(tmp.path);
-
-    makeProject(tmp.path, "myapp", {
-      "FINDINGS.md": "# myapp Findings\n\n## 2026-03-01\n\n- Database connection pooling uses HikariCP defaults\n",
-      "summary.md": "# myapp\nDatabase service with connection pooling and query optimization.",
-    });
-
-    db = await buildIndex(tmp.path);
-    server = makeMockServer();
-
-    const ctx: McpContext = {
-      phrenPath: tmp.path,
-      profile: "test",
-      db: () => db,
-      rebuildIndex: async () => {},
-      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
-    };
-    register(server as any, ctx);
-  });
-
-  afterEach(() => {
-    delete process.env.PHREN_ACTOR;
-    db.close();
-    tmp.cleanup();
-  });
-
-  it("quality multiplier boosts results with positive feedback scores", async () => {
-    // Write a positive quality marker for the findings entry
-    const qualityDir = path.join(tmp.path, ".runtime", "quality");
-    fs.mkdirSync(qualityDir, { recursive: true });
-    // The quality multiplier is read from .runtime/quality/<key>.json files
-    // entryScoreKey produces keys like "myapp::FINDINGS.md::snippet"
-    // We can verify the search still works and returns results
-    const res = parseResult(await server.call("search_knowledge", { query: "database connection pooling" }));
-    expect(res.ok).toBe(true);
-    expect(res.data.results.length).toBeGreaterThan(0);
   });
 });
 

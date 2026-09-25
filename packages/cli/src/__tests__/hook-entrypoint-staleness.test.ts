@@ -12,43 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { makeTempDir } from "../test-helpers.js";
-import { extractHookScriptPath, findStaleHookEntrypoints } from "../hooks.js";
-
-describe("extractHookScriptPath", () => {
-  it("pulls the script out of a `node <path>` command", () => {
-    expect(
-      extractHookScriptPath(`PHREN_PATH='/Users/u/.phren' node '/usr/lib/node_modules/@phren/cli/dist/index.js' hook-stop`),
-    ).toBe("/usr/lib/node_modules/@phren/cli/dist/index.js");
-  });
-
-  it("pulls the wrapper out of a wrapper command", () => {
-    expect(
-      extractHookScriptPath(`PHREN_PATH='/Users/u/.phren' '/Users/u/.local/bin/phren' hook-session-start`),
-    ).toBe("/Users/u/.local/bin/phren");
-  });
-
-  it("handles Windows `set VAR=... && node \"...\"` commands", () => {
-    expect(
-      extractHookScriptPath(`set "PHREN_PATH=C:\\Users\\u\\.phren" && node "C:\\npm\\@phren\\cli\\dist\\index.js" hook-prompt`),
-    ).toBe("C:\\npm\\@phren\\cli\\dist\\index.js");
-  });
-
-  it("handles a Windows wrapper command", () => {
-    expect(
-      extractHookScriptPath(`set "PHREN_PATH=C:\\Users\\u\\.phren" && "C:\\Users\\u\\.local\\bin\\phren.cmd" hook-tool`),
-    ).toBe("C:\\Users\\u\\.local\\bin\\phren.cmd");
-  });
-
-  it("returns null for npx commands, which re-resolve every run", () => {
-    expect(extractHookScriptPath("npx -y @phren/cli hook-stop")).toBeNull();
-    expect(extractHookScriptPath("npx -y @phren/cli@0.1.40 hook-prompt")).toBeNull();
-  });
-
-  it("returns null when there is no path to check", () => {
-    expect(extractHookScriptPath("phren hook-stop")).toBeNull();
-    expect(extractHookScriptPath("")).toBeNull();
-  });
-});
+import { findStaleHookEntrypoints } from "../hooks.js";
 
 describe("findStaleHookEntrypoints", () => {
   let tmp: { path: string; cleanup: () => void };
@@ -77,8 +41,20 @@ describe("findStaleHookEntrypoints", () => {
     expect(stale).toEqual([oldEntry]); // deduplicated: one path, not three
   });
 
-  it("ignores npx commands entirely", () => {
-    expect(findStaleHookEntrypoints(["npx -y @phren/cli hook-stop"])).toEqual([]);
+  // Missing Windows paths are reported verbatim on POSIX, so these rows prove
+  // which token each command shape yields as its entrypoint.
+  it.each([
+    ["a missing wrapper", `PHREN_PATH='/x/.phren' '/nonexistent/u/.local/bin/phren' hook-session-start`, ["/nonexistent/u/.local/bin/phren"]],
+    ["a Windows `set VAR=... && node` command", `set "PHREN_PATH=C:\\Users\\u\\.phren" && node "C:\\npm\\@phren\\cli\\dist\\index.js" hook-prompt`, ["C:\\npm\\@phren\\cli\\dist\\index.js"]],
+    ["a Windows wrapper command", `set "PHREN_PATH=C:\\Users\\u\\.phren" && "C:\\Users\\u\\.local\\bin\\phren.cmd" hook-tool`, ["C:\\Users\\u\\.local\\bin\\phren.cmd"]],
+    ["npx, which re-resolves every run", "npx -y @phren/cli hook-stop", []],
+    ["pinned npx", "npx -y @phren/cli@0.1.40 hook-prompt", []],
+    // npx re-resolves each run, so even a path-like argument is never reported.
+    ["npx with a path-like argument", "npx -y /nonexistent/phren/dist/index.js hook-stop", []],
+    ["a bare command with no path", "phren hook-stop", []],
+    ["an empty command", "", []],
+  ])("handles %s", (_label, command, expected) => {
+    expect(findStaleHookEntrypoints([command])).toEqual(expected);
   });
 
   it("separates a stale path from a healthy sibling", () => {

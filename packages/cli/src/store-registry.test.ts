@@ -48,36 +48,23 @@ describe("store-registry", () => {
   // ── generateStoreId ──────────────────────────────────────────────────────
 
   describe("generateStoreId", () => {
-    it("returns 8-char hex string", () => {
-      const id = generateStoreId();
-      expect(id).toMatch(/^[0-9a-f]{8}$/);
-    });
-
-    it("generates unique IDs", () => {
-      const ids = new Set(Array.from({ length: 50 }, () => generateStoreId()));
-      expect(ids.size).toBe(50);
+    it("returns unique 8-char hex strings", () => {
+      const ids = Array.from({ length: 50 }, () => generateStoreId());
+      for (const id of ids) expect(id).toMatch(/^[0-9a-f]{8}$/);
+      expect(new Set(ids).size).toBe(50);
     });
   });
 
   // ── readStoreRegistry ────────────────────────────────────────────────────
 
   describe("readStoreRegistry", () => {
-    it("returns null when stores.yaml does not exist", () => {
-      expect(readStoreRegistry(phrenDir)).toBeNull();
-    });
-
-    it("returns null for invalid YAML", () => {
-      fs.writeFileSync(storesFilePath(phrenDir), "not: valid: yaml: [");
-      expect(readStoreRegistry(phrenDir)).toBeNull();
-    });
-
-    it("returns null for wrong version", () => {
-      fs.writeFileSync(storesFilePath(phrenDir), "version: 2\nstores: []\n");
-      expect(readStoreRegistry(phrenDir)).toBeNull();
-    });
-
-    it("returns null for missing stores array", () => {
-      fs.writeFileSync(storesFilePath(phrenDir), "version: 1\n");
+    it.each([
+      ["does not exist", null],
+      ["is invalid YAML", "not: valid: yaml: ["],
+      ["has the wrong version", "version: 2\nstores: []\n"],
+      ["has no stores array", "version: 1\n"],
+    ])("returns null when stores.yaml %s", (_label, content) => {
+      if (content !== null) fs.writeFileSync(storesFilePath(phrenDir), content);
       expect(readStoreRegistry(phrenDir)).toBeNull();
     });
 
@@ -149,46 +136,20 @@ stores:
       expect(loaded!.stores[1].remote).toBe("git@gh.com:t.git");
     });
 
-    it("rejects registry with no primary store", () => {
-      const registry: StoreRegistry = {
-        version: 1,
-        stores: [
-          { id: "aaa11111", name: "team", path: phrenDir, role: "team", sync: "managed-git" },
-        ],
-      };
-      expect(() => writeStoreRegistry(phrenDir, registry)).toThrow(/exactly one primary/);
-    });
-
-    it("rejects registry with duplicate names", () => {
-      const registry: StoreRegistry = {
-        version: 1,
-        stores: [
-          { id: "aaa11111", name: "same", path: phrenDir, role: "primary", sync: "managed-git" },
-          { id: "bbb22222", name: "same", path: path.join(tmp.path, "x"), role: "team", sync: "managed-git" },
-        ],
-      };
-      expect(() => writeStoreRegistry(phrenDir, registry)).toThrow(/Duplicate store name/);
-    });
-
-    it("rejects registry with duplicate IDs", () => {
-      const registry: StoreRegistry = {
-        version: 1,
-        stores: [
-          { id: "aaa11111", name: "a", path: phrenDir, role: "primary", sync: "managed-git" },
-          { id: "aaa11111", name: "b", path: path.join(tmp.path, "x"), role: "team", sync: "managed-git" },
-        ],
-      };
-      expect(() => writeStoreRegistry(phrenDir, registry)).toThrow(/Duplicate store id/);
-    });
-
-    it("rejects invalid role", () => {
-      const registry: StoreRegistry = {
-        version: 1,
-        stores: [
-          { id: "aaa11111", name: "a", path: phrenDir, role: "admin" as any, sync: "managed-git" },
-        ],
-      };
-      expect(() => writeStoreRegistry(phrenDir, registry)).toThrow(/invalid role/);
+    it.each([
+      ["no primary store", () => [{ id: "aaa11111", name: "team", path: phrenDir, role: "team", sync: "managed-git" }], /exactly one primary/],
+      ["duplicate names", () => [
+        { id: "aaa11111", name: "same", path: phrenDir, role: "primary", sync: "managed-git" },
+        { id: "bbb22222", name: "same", path: path.join(tmp.path, "x"), role: "team", sync: "managed-git" },
+      ], /Duplicate store name/],
+      ["duplicate IDs", () => [
+        { id: "aaa11111", name: "a", path: phrenDir, role: "primary", sync: "managed-git" },
+        { id: "aaa11111", name: "b", path: path.join(tmp.path, "x"), role: "team", sync: "managed-git" },
+      ], /Duplicate store id/],
+      ["an invalid role", () => [{ id: "aaa11111", name: "a", path: phrenDir, role: "admin", sync: "managed-git" }], /invalid role/],
+    ] as [string, () => unknown[], RegExp][])("rejects a registry with %s", (_label, stores, message) => {
+      const registry = { version: 1, stores: stores() } as StoreRegistry;
+      expect(() => writeStoreRegistry(phrenDir, registry)).toThrow(message);
     });
   });
 
@@ -343,20 +304,12 @@ stores:
       expect(primary.path).toBe(phrenDir);
     });
 
-    it("getReadableStores returns all stores", () => {
+    it("getReadableStores returns all stores; getNonPrimaryStores excludes the primary", () => {
       const fedStore = path.join(tmp.path, "fed");
       fs.mkdirSync(fedStore, { recursive: true });
       process.env.PHREN_FEDERATION_PATHS = fedStore;
 
-      const readable = getReadableStores(phrenDir);
-      expect(readable).toHaveLength(2);
-    });
-
-    it("getNonPrimaryStores excludes primary", () => {
-      const fedStore = path.join(tmp.path, "fed");
-      fs.mkdirSync(fedStore, { recursive: true });
-      process.env.PHREN_FEDERATION_PATHS = fedStore;
-
+      expect(getReadableStores(phrenDir)).toHaveLength(2);
       const nonPrimary = getNonPrimaryStores(phrenDir);
       expect(nonPrimary).toHaveLength(1);
       expect(nonPrimary[0].role).toBe("readonly");
@@ -370,9 +323,6 @@ stores:
       const store = findStoreByName(phrenDir, "personal");
       expect(store).toBeDefined();
       expect(store!.role).toBe("primary");
-    });
-
-    it("returns undefined for unknown name", () => {
       expect(findStoreByName(phrenDir, "nonexistent")).toBeUndefined();
     });
   });
@@ -683,7 +633,12 @@ stores:
   // ── readTeamBootstrap ────────────────────────────────────────────────────
 
   describe("readTeamBootstrap", () => {
-    it("returns null when .phren-team.yaml does not exist", () => {
+    it.each([
+      ["does not exist", null],
+      ["is invalid YAML", "bad: yaml: ["],
+      ["has no name", "description: no name\n"],
+    ])("returns null when .phren-team.yaml %s", (_label, content) => {
+      if (content !== null) fs.writeFileSync(path.join(phrenDir, ".phren-team.yaml"), content);
       expect(readTeamBootstrap(phrenDir)).toBeNull();
     });
 
@@ -694,16 +649,6 @@ stores:
       expect(bootstrap!.name).toBe("arc-team");
       expect(bootstrap!.description).toBe("Arc platform team");
       expect(bootstrap!.default_role).toBe("team");
-    });
-
-    it("returns null for invalid YAML", () => {
-      fs.writeFileSync(path.join(phrenDir, ".phren-team.yaml"), "bad: yaml: [");
-      expect(readTeamBootstrap(phrenDir)).toBeNull();
-    });
-
-    it("returns null when name is missing", () => {
-      fs.writeFileSync(path.join(phrenDir, ".phren-team.yaml"), "description: no name\n");
-      expect(readTeamBootstrap(phrenDir)).toBeNull();
     });
   });
 });

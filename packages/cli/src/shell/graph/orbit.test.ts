@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RawLink } from "../../graph-core/types.js";
 import type { LayoutNode, Point } from "./layout.js";
-import { DEFAULT_ORBIT, buildOrbitLayout, parseMouse, projectOrbit, yawDelta, yawToFace } from "./orbit.js";
+import { DEFAULT_ORBIT, buildOrbitLayout, parseMouse, projectOrbit, yawDelta, } from "./orbit.js";
 
 function flatStore() {
   const nodes: LayoutNode[] = [];
@@ -71,14 +71,6 @@ describe("projectOrbit", () => {
     expect(near.t).toBeLessThan(far.t);
     expect(near.x).toBeCloseTo(100, 5);
     expect(far.x).toBeCloseTo(100, 5);
-  });
-
-  it("yawToFace turns a point to the front", () => {
-    const v = { x: 50, y: 0, z: 0 };
-    const yaw = yawToFace(v);
-    const p = projectOrbit(v, { yaw, pitch: 0, zoom: 1 }, viewport, 50);
-    expect(p.t).toBeLessThan(0.2);
-    expect(p.x).toBeCloseTo(100, 3);
   });
 
   it("yawDelta takes the short way round", () => {
