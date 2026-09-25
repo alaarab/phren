@@ -174,7 +174,7 @@ describe("code re-index on change", () => {
 it("saves a symbol note, exposes it in the dossier and sends the bounded brief", async () => {
   const hit = (await routes.definition("fixture", "Point")).definition.symbol;
   let brief = "";
-  const input = { project: "fixture", symbol: "Point", file: hit.file, line: hit.line,
+  const input = { project: "fixture", name: "Point", file: hit.file, line: hit.line,
     text: "Point coordinates must remain immutable while calculating distances.", target: { harness: "codex" } };
   const result = await saveCodeNote(store, input, async (_note, text) => { brief = text; return { ok: true }; });
   expect(result.saved).toBe(true);
@@ -188,6 +188,7 @@ it("saves a symbol note, exposes it in the dossier and sends the bounded brief",
 
 it("preserves a saved note when agent delivery fails", async () => {
   const hit = (await routes.definition("fixture", "Point")).definition.symbol;
+  // An older phone still sends `symbol` (accepted until 0.2.18).
   const result = await saveCodeNote(store, { project: "fixture", symbol: "Point", file: hit.file, line: hit.line,
     text: "Point distance calculations need stable coordinate values throughout the operation.", target: { harness: "codex" } }, async () => { throw new Error("Session went offline"); });
   expect(result).toMatchObject({ saved: true, delivery: { ok: false, message: "Session went offline" } });
@@ -217,7 +218,7 @@ it("keeps a code note addressed to the originating session", async () => {
   const symbol = (await routes.definition("fixture", "typescript/app.ts::Point")).definition.symbol;
   const session = "aaaaaaaa-1111-4111-8111-111111111111";
   let recipient: unknown;
-  const result = await saveCodeNote(store, { project: "fixture", symbol: "typescript/app.ts::Point", file: symbol.file,
+  const result = await saveCodeNote(store, { project: "fixture", name: "typescript/app.ts::Point", file: symbol.file,
     line: symbol.line, text: "Point coordinates must stay stable during distance calculations.", target: { session } },
     async note => { recipient = note.target; return { delivered: true }; });
   expect(result.saved).toBe(true);

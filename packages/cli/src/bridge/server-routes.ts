@@ -392,8 +392,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/code/outline-summary": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).outlineSummary(url.searchParams.get("project"), url.searchParams.get("paths")); break;
           case "/v1/code/file-references": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).fileReferences(url.searchParams.get("project"), url.searchParams.get("path")); break;
           case "/v1/code/outline": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).outline(url.searchParams.get("project"), url.searchParams.get("path")); break;
-          case "/v1/code/definition": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).definition(url.searchParams.get("project"), url.searchParams.get("symbol")); break;
-          case "/v1/code/references": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).references(url.searchParams.get("project"), url.searchParams.get("symbol"), url.searchParams.get("limit")); break;
+          case "/v1/code/definition": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).definition(url.searchParams.get("project"), (url.searchParams.get("name") ?? url.searchParams.get("symbol"))); break;
+          case "/v1/code/references": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).references(url.searchParams.get("project"), (url.searchParams.get("name") ?? url.searchParams.get("symbol")), url.searchParams.get("limit")); break;
           case "/v1/code/usage": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).usage(url.searchParams.get("project"), url.searchParams.get("top")); break;
           default: throw new BridgeError(404, "Unknown Phren Hook route.");
         }

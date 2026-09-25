@@ -264,7 +264,7 @@ export class CodeRoutes {
     const symbol = symbolSchema.parse(symbolValue ?? "");
     const result = await (await requireCodePackage(this.store)).definition(this.store, project, symbol);
     if (!result.available) throw noIndex(project);
-    if (!result.value) throw new BridgeError(404, `No symbol "${symbol}" in ${project}.`);
+    if (!result.value) throw new BridgeError(404, `Nothing named "${symbol}" in ${project}.`);
     return { project, definition: { ...result.value, findings: (await requireCodePackage(this.store)).findingsCitingSymbol(this.store, project, (await requireCodePackage(this.store)).citationSymbolName(result.value.symbol)) } };
   }
 
@@ -274,7 +274,7 @@ export class CodeRoutes {
     const limit = limitValue === null || limitValue === "" ? undefined : limitSchema.parse(limitValue);
     const result = await (await requireCodePackage(this.store)).references(this.store, project, symbol, limit ?? 200);
     if (!result.available) throw noIndex(project);
-    if (!result.value) throw new BridgeError(404, `No symbol "${symbol}" in ${project}.`);
+    if (!result.value) throw new BridgeError(404, `Nothing named "${symbol}" in ${project}.`);
     return { project, references: result.value };
   }
 
@@ -380,7 +380,7 @@ export class CodeReindexer {
     this.running.add(project);
     try {
       const result: IndexResult = await this.index(this.store, project, { full });
-      this.log(`re-indexed ${project}${full ? " (full)" : ""}: ${result.parsed} parsed, ${result.symbols} symbols, ${result.durationMs} ms`);
+      this.log(`re-indexed ${project}${full ? " (full)" : ""}: ${result.parsed} parsed, ${result.symbols} declarations, ${result.durationMs} ms`);
     } catch (error) {
       this.log(`re-index of ${project} failed: ${errorMessage(error)}`);
     } finally {
