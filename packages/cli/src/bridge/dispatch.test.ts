@@ -85,6 +85,35 @@ describe("dispatch receipts and selection", () => {
     await expect(new DispatchService().dispatch({ ...brief, computer: "Desk" })).rejects.toThrow("Herdr is not running");
   });
 
+  // Seen 2026-09-24 on a loaded Mini: a fresh Claude pane read `unknown` to Herdr for
+  // a while, the Hook refused the brief ("needs input in the terminal first") before
+  // typing anything, and the dispatch was left uncertain with no brief sent.
+  function refusingWhileUnknown(statuses: string[]) {
+    let prompts = 0;
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route) => {
+      if (route === "/v1/dispatch/capacity") return { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 };
+      if (route.startsWith("/v1/workspaces/launch")) return { ok: true, target };
+      if (route.startsWith("/v1/workspaces/panes")) return { panes: [{ id: target.pane, label: "1", agent: "codex", starting: true, startingToken: target.startingToken, agentStatus: statuses.shift() ?? "idle" }] };
+      if (route === "/v1/prompt" && prompts++ === 0) throw new BridgeError(409, "This agent needs input in the terminal first.");
+      return { ok: true };
+    });
+    return () => prompts;
+  }
+
+  it("sends the brief once a starting pane Herdr has not classified yet settles", async () => {
+    const prompts = refusingWhileUnknown(["unknown", "idle"]);
+    const result = await new DispatchService().dispatch({ ...brief, computer: "Desk" });
+    expect(result).toMatchObject({ ok: true, state: "accepted" });
+    expect(prompts()).toBe(2);
+  }, 15_000);
+
+  it("leaves a pane that really waits on terminal input to the owner", async () => {
+    const prompts = refusingWhileUnknown(["blocked"]);
+    const result = await new DispatchService().dispatch({ ...brief, computer: "Desk" });
+    expect(result).toMatchObject({ ok: false, state: "uncertain", error: "This agent needs input in the terminal first." });
+    expect(prompts()).toBe(1);
+  }, 15_000);
+
   it("retains ambiguous launches and refuses to prompt a mismatched target", async () => {
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
       ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 }

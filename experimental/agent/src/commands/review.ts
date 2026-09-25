@@ -4,7 +4,8 @@
  *   /review           list pending items
  *   /review go        per-item triage: [y]approve [n]reject [e]edit [s]skip [q]uit
  *   /review auto      the model proposes verdicts, you confirm in one keypress
- *   /review expire N  reject items older than N days (default from env/14)
+ *   /review expire N  drop unreviewed items older than N days (default env/14,
+ *                     0 = never). Dequeues only — findings are never deleted.
  */
 import * as readline from "node:readline";
 import type { CommandContext } from "../commands.js";
@@ -12,6 +13,7 @@ import {
   listQueueItems,
   proposeTriage,
   expireStaleItems,
+  formatExpiryNotice,
   resolveExpireDays,
   type QueueStatusItem,
   type TriageProposal,
@@ -109,9 +111,28 @@ export async function reviewCommand(parts: string[], ctx: CommandContext): Promi
   }
 
   if (sub === "expire") {
-    const days = Number.parseInt(parts[2] ?? "", 10) || resolveExpireDays();
-    const { expired } = expireStaleItems(ctx.phrenCtx, days);
-    process.stderr.write(`${DIM}Expired ${expired} item(s) older than ${days} days.${RESET}\n`);
+    // Explicit parse, not `|| resolveExpireDays()`: `expire 0` means "never expire"
+    // and must not fall through the falsy-OR into the 14-day default.
+    const arg = parts[2]?.trim();
+    let days: number;
+    if (arg === undefined || arg === "") {
+      days = resolveExpireDays();
+    } else {
+      const parsed = Number.parseInt(arg, 10);
+      if (!Number.isFinite(parsed) || parsed < 0 || !/^\d+$/.test(arg)) {
+        process.stderr.write(`${RED}Not a day count: "${arg}". Usage: /review expire [days] (0 = never).${RESET}\n`);
+        return true;
+      }
+      days = parsed;
+    }
+    if (days === 0) {
+      process.stderr.write(`${DIM}Expiry disabled (0 days) — nothing removed.${RESET}\n`);
+      return true;
+    }
+    const result = expireStaleItems(ctx.phrenCtx, days);
+    process.stderr.write(
+      `${DIM}${formatExpiryNotice(result) ?? `No review items older than ${days} days.`}${RESET}\n`,
+    );
     return true;
   }
 

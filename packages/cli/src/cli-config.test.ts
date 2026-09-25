@@ -115,6 +115,34 @@ describe("CLI config: workflow", () => {
   });
 });
 
+describe("CLI config: set rejects values it cannot parse", () => {
+  let phrenDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    ({ phrenDir, cleanup } = setupPhrenDir());
+  });
+  afterEach(() => cleanup());
+
+  // Every set parser skipped tokens without `--key=value`, so these wrote nothing
+  // and still printed the policy as if the change had applied.
+  it.each([
+    ["policy", ["ttlDays", "90"]],
+    ["policy", ["--ttlDays", "90"]],
+    ["policy", ["--ttlDays=90", "--retentionDays", "365"]],
+    ["workflow", ["lowConfidenceThreshold", "0.6"]],
+    ["workflow", ["--project", "demo", "--lowConfidenceThreshold"]],
+  ])("config %s set %j exits 1 and changes nothing", (ns, setArgs) => {
+    const env = { PHREN_PATH: phrenDir, PHREN_ACTOR: "config-test" };
+    const before = runCli(["config", ns, "get"], env).stdout;
+    const result = runCli(["config", ns, "set", ...setArgs], env);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("--key=value");
+    expect(runCli(["config", ns, "get"], env).stdout).toBe(before);
+    expect(fs.existsSync(path.join(phrenDir, "demo", "phren.project.yaml"))).toBe(false);
+  });
+});
+
 describe("CLI config: index", () => {
   let phrenDir: string;
   let cleanup: () => void;
