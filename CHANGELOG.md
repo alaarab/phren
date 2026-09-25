@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-09-25
+
 ### Fixed
 
 - Hook: Copilot CLI's permission dialogs reach the phone as a real choice card. Copilot draws each select inside a box (and a scrollbar beside it), so the dialog's rows were never read and the chat only said "Waiting for your answer". The Hook now strips the frame, shows the whole dialog (title, command, question) and answers by moving Copilot's cursor to the chosen row, as it does for Codex.
