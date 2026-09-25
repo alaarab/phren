@@ -2331,6 +2331,21 @@ schedules:
       expect(commands.filter(c => c.method === "agent.start")).toHaveLength(1);
     });
 
+    it("keeps workers out of the conductor's name and workspace", async () => {
+      const conductor = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Owner", kind: "codex", role: "conductor" });
+      expect(conductor.status).toBe(200);
+      // Asked to open beside the conductor, a worker labelled like one gets its own workspace and a worker's name.
+      const worker = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Conductor voice fluency", kind: "claude", workspaceId: conductor.data.workspaceId });
+      expect(worker.status, JSON.stringify(worker.data)).toBe(200);
+      expect(worker.data.workspaceId).not.toBe(conductor.data.workspaceId);
+      expect(commands.filter(c => c.method === "tab.create")).toHaveLength(0);
+      expect(commands.filter(c => c.method === "agent.start").map(c => c.params.name)).toEqual(["conductor-owner", "worker-conductor-voice-fluency"]);
+      const overview = await api("/v1/workspaces?mux=herdr:default");
+      const roles = overview.data.groups.flatMap((group: any) => group.children.map((tab: any) => [group.id, tab.role]));
+      expect(roles.filter(([, role]: [string, unknown]) => role === "conductor")).toEqual([[conductor.data.workspaceId, "conductor"]]);
+      expect((await api("/v1/conductor")).data.conductor).toMatchObject({ server: "default", target: { workspace: conductor.data.workspaceId, source: "codex" } });
+    });
+
     it("dispatches through a fake SSH pipe to a second Hook and its registered project", async () => {
       await dispatchFixture();
       const sent = await api("/v1/dispatch", { computer: "Linuxbox", project: "phren", harness: "codex", model: "test-model", label: "Worker", prompt: "Run the assigned checks" });

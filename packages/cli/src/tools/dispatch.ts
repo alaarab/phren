@@ -41,9 +41,9 @@ export function register(server: McpServer): void {
     try {
       const result = await listLiveSessions();
       const note = result.peerError ? ` Enrolled computers were skipped: ${result.peerError}`
-        : result.enrolled === 0 && !result.notLinked.length ? " No other computers are enrolled here; run `phren bridge enroll-computer` to add them." : "";
+        : result.enrolled === 0 && !result.notLinked.length ? " No other computers are linked here; `phren bridge discover` lists the ones you already reach over ssh, and `phren bridge link <host>` links one." : "";
       const unlinked = result.notLinked.length
-        ? ` Not linked, so not checked (this does not mean nothing is running there): ${result.notLinked.map(item => item.aliases?.length ? `${item.name} (also ${item.aliases.join(", ")})` : item.name).join("; ")}. Link one with \`phren bridge enroll-computer\`.` : "";
+        ? ` Not linked, so not checked (this does not mean nothing is running there): ${result.notLinked.map(item => item.aliases?.length ? `${item.name} (also ${item.aliases.join(", ")})` : item.name).join("; ")}. If you reach one over ssh, the owner can link it with \`phren bridge link <host>\`; never link a computer without the owner asking.` : "";
       return mcpResponse({ ok: true, data: result, message: `${result.sessions.length} live sessions across ${result.enrolled + 1} computers.${note}${unlinked}` });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not list live sessions." });

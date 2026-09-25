@@ -32,6 +32,7 @@ type RbacAction =
   | "remove_task"
   | "update_task"
   | "pin_task"
+  | "claim_task"
   | "add_note"
   | "edit_note"
   | "remove_note"
@@ -177,6 +178,7 @@ const CONTRIBUTOR_ACTIONS = new Set<RbacAction>([
   "remove_task",
   "update_task",
   "pin_task",
+  "claim_task",
   "add_note",
   "edit_note",
   "remove_note",

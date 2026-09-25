@@ -83,12 +83,16 @@ function sessionsFrom(overview: Json, computer: string, local: boolean, now = Da
   const sessions: LiveSession[] = [];
   for (const group of objects(overview.groups)) for (const tab of objects(group.children)) {
     if (typeof tab.agent !== "string") continue;
+    // A worker opened as a tab in the conductor's workspace is named by its
+    // tab (Herdr's bare tab numbers do not count), never as the conductor.
+    const inConductorWorkspace = tab.role !== "conductor" && objects(group.children).some(other => other.role === "conductor");
+    const label = inConductorWorkspace ? (typeof tab.label === "string" && !/^\d+$/.test(tab.label) ? tab.label : undefined) : group.label;
     const target = targetSchema.safeParse(tab.target);
     const cwd = typeof tab.cwd === "string" ? tab.cwd : "";
     const text = (value: unknown) => typeof value === "string" && value ? value : undefined;
     const changedAt = typeof tab.lastChangedAt === "string" ? Date.parse(tab.lastChangedAt) : NaN;
     // A conductor sits in the store, not a project.
-    sessions.push({ computer, local, project: tab.role === "conductor" ? undefined : text(cwd.split("/").filter(Boolean).at(-1)), label: text(group.label),
+    sessions.push({ computer, local, project: tab.role === "conductor" ? undefined : text(cwd.split("/").filter(Boolean).at(-1)), label: text(label),
       title: text(tab.title), agent: tab.agent, status: text(tab.agentStatus), role: text(tab.role),
       branch: text(tab.branch), model: text(tab.model), ...(target.success ? { target: target.data } : {}),
       ...(Number.isFinite(changedAt) ? { idleFor: Math.max(0, Math.floor((now - changedAt) / 1000)) } : {}) });

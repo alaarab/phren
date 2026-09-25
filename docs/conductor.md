@@ -26,6 +26,21 @@ and Herdr server; a tool argument cannot supply a new connection.
 on the receiving computer. Verify the peer and its host key during setup.
 Phone connections are enrolled separately and do not come from worker reports.
 
+Most owners already reach their computers over plain ssh. `phren bridge
+discover` probes the concrete hosts in `~/.ssh/config` and the names in the
+store's `machines.yaml` with your own ssh login (batch mode, 5 s) and lists the
+ones that run Phren Hook and are not linked yet. It only reports; a reachable
+computer is never treated as linked. `phren bridge link <host>` links one in a
+single step after you confirm (`--yes` skips the question): over that same
+login it enrolls each side's dispatch key on the other, reads each side's
+ed25519 host key (never keyscanned) and pins it in the other's `hooks.yaml`,
+then has each side dial the other to check the link. `--name` sets what this
+computer calls the host, `--as` what the host calls this computer, and
+`--back-address` the address the host dials back (by default, this computer's
+address as the host's ssh session saw it). Rerunning `link` is safe: keys and
+pins that already match are kept. Link a new computer with every computer
+already in the group, so each one reaches the whole group in one hop.
+
 ## Launch a conductor
 
 The phone launch sheet offers an Agent or Conductor role, a harness, model and
@@ -42,11 +57,39 @@ a folder that is not a Git repository and a branch that already exists, with a
 message the phone shows. The worktree then appears in the session's Changes >
 Workers tab, named for the agent working in it.
 
-The Hook checks its Herdr servers for an existing conductor before launching
-another and returns 409 with the existing target when one is found. This is a
-check on that computer's Hook; it is not a distributed lock across computers.
+A computer runs at most one conductor, and a connected group (this computer
+and the peers in its `hooks.yaml`) shares one. Before launching a conductor the
+Hook checks its own Herdr servers, then asks each peer's `GET /v1/conductor`
+over the pinned connection. A live conductor on this computer or any peer
+refuses the launch with 409, naming the computer and the existing target. A
+peer that cannot answer (offline, or a Hook too old to have the route) does not
+block the launch; its name comes back in the launch result's `unchecked` list.
 The phone also offers an existing conductor it can associate with the store.
 Workspace overviews and chat show the conductor role.
+
+Only the session launched as the conductor carries that role. A worker's Herdr
+name never starts with `conductor`, whatever its label says, and a worker asked
+to open in the conductor's workspace gets its own workspace, so it is never
+listed under the conductor's name. `live_sessions` names a worker already in
+the conductor's workspace by its own tab.
+
+Computers that are not linked can each run their own conductor. They
+coordinate through the synced store by claiming tasks: `claim_task` (or
+`manage_task` with `action: "claim"`) pulls the store, moves the task to Active
+with a line under it in `tasks.md`,
+
+```md
+- [ ] Port the parser <!-- bid:aaaa1111 rank:1 -->
+  Claimed: Mini 2026-09-25T04:30:00Z session:w22-p1
+```
+
+then commits and pushes. A task another computer holds is refused. When two
+claims race, the store merge keeps the one that reached the remote first, and
+the other call reports it as `heldBy`. `get_tasks` summaries show
+`[claimed: <computer>]`; conductors skip tasks claimed elsewhere. Completing a
+task clears its claim, `release: true` returns it to the Queue, and `force`
+takes over a claim more than a day old. Phren versions older than claims drop
+the `Claimed:` line when they rewrite `tasks.md`, so update every computer.
 
 On the phone, hold a project or computer for 0.4 seconds to open the computer
 chooser. It lists names, colors, reachability and project session counts, puts
