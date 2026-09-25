@@ -353,6 +353,14 @@ with ElevenLabs' `eleven_flash_v2_5` model and streams the audio back as raw
 pcm_s16le;rate=24000;channels=1`). The Hook advertises it as the `speech`
 capability.
 
+With `"timestamps": true` (the `speechTimestamps` capability) the Hook calls
+ElevenLabs' `with-timestamps` endpoint instead and answers JSON: `{ "audio":
+"<base64 PCM, same format>", "audioFormat": "pcm_s16le;rate=24000;channels=1",
+"alignment": { "characters": [...], "starts": [...], "ends": [...] } }`, the
+times in seconds from the start of the audio, or `alignment: null` when
+ElevenLabs sent none. The phone uses it to highlight the word being read in
+the chat.
+
 The key is this computer's ElevenLabs key (see [the ElevenLabs key](#the-elevenlabs-key)),
 used only in the request to ElevenLabs and never returned, even in errors. The voice is River (calm, neutral); set `PHREN_SPEECH_VOICE` in the
 Hook's environment to another ElevenLabs voice id. Failures answer JSON with a

@@ -2,7 +2,7 @@ import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { BridgeError, type Json } from "./protocol.js";
-import { DEFAULT_SPEECH_VOICE, SPEECH_AUDIO, SPEECH_MODEL, streamSpeech, type SpeechOptions } from "./speech.js";
+import { alignmentOf, DEFAULT_SPEECH_VOICE, SPEECH_AUDIO, SPEECH_MODEL, streamSpeech, type SpeechOptions } from "./speech.js";
 
 const KEY = "sk_test_do_not_leak_0123456789";
 
@@ -119,6 +119,34 @@ describe("speech route", () => {
     expect((await offline.post({ text: "a".repeat(2_001) })).status).toBe(400);
     expect((await offline.post({})).status).toBe(400);
     expect(fetched).toBe(1);
+  });
+
+  it("answers the audio and the character alignment as JSON with timestamps", async () => {
+    const calls: string[] = [];
+    const { server, post } = await hook({
+      key: async () => KEY,
+      fetch: (async (url: string) => {
+        calls.push(url);
+        return new Response(JSON.stringify({
+          audio_base64: Buffer.from([1, 2, 3, 4]).toString("base64"),
+          alignment: { characters: ["H", "i", "."], character_start_times_seconds: [0, 0.1, 0.2], character_end_times_seconds: [0.1, 0.2, 0.3] },
+        }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+    servers.push(server);
+    const reply = await post({ text: "Hi.", timestamps: true });
+    expect(reply.status).toBe(200);
+    expect(calls[0]).toBe(`https://api.elevenlabs.io/v1/text-to-speech/${DEFAULT_SPEECH_VOICE}/with-timestamps?output_format=pcm_24000`);
+    const json = JSON.parse(reply.bytes.toString());
+    expect([...Buffer.from(json.audio, "base64")]).toEqual([1, 2, 3, 4]);
+    expect(json.audioFormat).toBe(SPEECH_AUDIO);
+    expect(json.alignment).toEqual({ characters: ["H", "i", "."], starts: [0, 0.1, 0.2], ends: [0.1, 0.2, 0.3] });
+    expect(reply.bytes.toString()).not.toContain(KEY);
+  });
+
+  it("drops an alignment whose lists don't line up", () => {
+    expect(alignmentOf({ characters: ["a", "b"], character_start_times_seconds: [0], character_end_times_seconds: [0.1, 0.2] })).toBeNull();
+    expect(alignmentOf(null)).toBeNull();
   });
 
   it("cuts the response off when ElevenLabs fails mid-stream", async () => {
