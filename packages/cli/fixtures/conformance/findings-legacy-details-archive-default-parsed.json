@@ -1,0 +1,12 @@
+[
+  {
+    "id": "L1",
+    "stableId": "00001234",
+    "date": "2026-07-24",
+    "text": "Active finding outside any archive block",
+    "status": "active",
+    "status_updated": "2026-07-24",
+    "archived": false,
+    "tier": "current"
+  }
+]

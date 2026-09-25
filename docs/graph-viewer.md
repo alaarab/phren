@@ -96,8 +96,7 @@ before the first selection; stepping between nodes keeps that saved view.
 
 Camera movement takes 0.18 seconds or happens immediately with Reduce Motion.
 Pan, orbit and pinch cancel it, and card resizing does not take control back
-after a gesture. Selecting another node resumes centering. See the phone's
-[graph design](../apps/ios/design/graph.md) for geometry and accessibility.
+after a gesture. Selecting another node resumes centering.
 
 ## Where edits land
 

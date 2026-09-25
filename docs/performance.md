@@ -220,7 +220,7 @@ generous two-second bound for contended CI. Existing transcript metadata,
 context, model, step and child caches remain responsible for freshness.
 
 **Graph download and compilation:** the iOS IIFE fell from 1,999,839 to
-1,409,042 bytes (29.5%). `apps/ios/scripts/bundle-graph.mjs` replaces only the
+1,409,042 bytes (29.5%). The phone app's graph bundler replaces only the
 unused `three/webgpu` import with `browser/graph/webgl-only.ts`. The app already
 uses WebGL and its bloom composer. The replacement deliberately throws if a
 future caller requests WebGPU. A 1,500,000-byte ceiling builds the real app
@@ -242,8 +242,6 @@ share one parse in `LiveWorkspaces.read(..., requiringHook: true)` and
 `PhrenConnection.fetch`. Thirty paired iterations on a 240-tab, 47,176-byte
 response measured 2.06 ms before and 1.58 ms after. The product and protocol
 checks, one-MiB bound, duplicate-ID checks and target checks still apply.
-See [phone performance](../apps/ios/design/performance.md) for transcript
-preparation measurements, decoder fixtures and device-only gaps.
 
 ### Rules that keep the phone path fast
 

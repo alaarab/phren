@@ -1,0 +1,723 @@
+{
+ "entries": [
+  {
+   "line": 6,
+   "raw": {
+    "type": "user.message",
+    "timestamp": "2026-09-22T19:17:08.092Z",
+    "data": {
+     "content": "Sample prompt 1.",
+     "messageId": "e7fb7db6-7676-44d6-85b3-9640f93c78ce"
+    }
+   }
+  },
+  {
+   "line": 12,
+   "raw": {
+    "type": "assistant.turn_start",
+    "timestamp": "2026-09-22T19:17:08.321Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 19,
+   "raw": {
+    "type": "assistant.message",
+    "timestamp": "2026-09-22T19:17:12.575Z",
+    "data": {
+     "messageId": "051171ac-29fd-49e8-8ed6-cedd768eac84",
+     "content": "Sample reply 1.",
+     "phase": "final_answer"
+    }
+   }
+  },
+  {
+   "line": 20,
+   "raw": {
+    "type": "assistant.turn_end",
+    "timestamp": "2026-09-22T19:17:12.578Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 24,
+   "raw": {
+    "type": "user.message",
+    "timestamp": "2026-09-22T19:17:16.411Z",
+    "data": {
+     "content": "Sample prompt 2.",
+     "messageId": "cd61aec1-a911-404e-8c5e-6044d9d15e83"
+    }
+   }
+  },
+  {
+   "line": 27,
+   "raw": {
+    "type": "assistant.turn_start",
+    "timestamp": "2026-09-22T19:17:16.419Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 42,
+   "raw": {
+    "type": "assistant.message",
+    "timestamp": "2026-09-22T19:17:19.044Z",
+    "data": {
+     "messageId": "242fb49f-6264-440a-8e4a-64e8021e3a1c",
+     "content": ""
+    }
+   }
+  },
+  {
+   "line": 43,
+   "raw": {
+    "type": "tool.execution_start",
+    "timestamp": "2026-09-22T19:17:19.046Z",
+    "data": {
+     "toolCallId": "call_0f95e1a6c3ad964a3d2fb706",
+     "toolName": "skill",
+     "arguments": {
+      "skill": "sample"
+     }
+    }
+   }
+  },
+  {
+   "line": 44,
+   "raw": {
+    "type": "tool.execution_complete",
+    "timestamp": "2026-09-22T19:17:19.047Z",
+    "data": {
+     "toolCallId": "call_0f95e1a6c3ad964a3d2fb706",
+     "success": true,
+     "result": {
+      "content": "Sample tool output 1."
+     }
+    }
+   }
+  },
+  {
+   "line": 47,
+   "raw": {
+    "type": "assistant.turn_end",
+    "timestamp": "2026-09-22T19:17:19.056Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 48,
+   "raw": {
+    "type": "assistant.turn_start",
+    "timestamp": "2026-09-22T19:17:19.056Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 49,
+   "raw": {
+    "type": "assistant.message",
+    "timestamp": "2026-09-22T19:17:23.797Z",
+    "data": {
+     "messageId": "2297cb7d-5a9d-4317-8ed0-7b874332a886",
+     "content": ""
+    }
+   }
+  },
+  {
+   "line": 50,
+   "raw": {
+    "type": "assistant.message",
+    "timestamp": "2026-09-22T19:17:23.800Z",
+    "data": {
+     "messageId": "eadd0498-0022-4f99-8741-eba00d0a3077",
+     "content": ""
+    }
+   }
+  },
+  {
+   "line": 51,
+   "raw": {
+    "type": "tool.execution_start",
+    "timestamp": "2026-09-22T19:17:23.802Z",
+    "data": {
+     "toolCallId": "call_d9ce991d67acd37198ee3fe8",
+     "toolName": "phren-get_project_summary",
+     "arguments": {
+      "name": "sample"
+     }
+    }
+   }
+  },
+  {
+   "line": 52,
+   "raw": {
+    "type": "tool.execution_start",
+    "timestamp": "2026-09-22T19:17:23.803Z",
+    "data": {
+     "toolCallId": "call_582074ab11c0cf5db5a043c6",
+     "toolName": "glob",
+     "arguments": {
+      "pattern": "sample",
+      "paths": "sample"
+     }
+    }
+   }
+  },
+  {
+   "line": 53,
+   "raw": {
+    "type": "tool.execution_start",
+    "timestamp": "2026-09-22T19:17:23.803Z",
+    "data": {
+     "toolCallId": "call_d58e177d3002d80b9920d62b",
+     "toolName": "rg",
+     "arguments": {
+      "pattern": "sample",
+      "paths": "sample",
+      "glob": "sample",
+      "output_mode": "sample",
+      "head_limit": 50
+     }
+    }
+   }
+  },
+  {
+   "line": 56,
+   "raw": {
+    "type": "tool.execution_complete",
+    "timestamp": "2026-09-22T19:17:25.592Z",
+    "data": {
+     "toolCallId": "call_d58e177d3002d80b9920d62b",
+     "success": true,
+     "result": {
+      "content": "Sample tool output 2."
+     }
+    }
+   }
+  },
+  {
+   "line": 57,
+   "raw": {
+    "type": "tool.execution_complete",
+    "timestamp": "2026-09-22T19:17:25.596Z",
+    "data": {
+     "toolCallId": "call_582074ab11c0cf5db5a043c6",
+     "success": true,
+     "result": {
+      "content": "Sample tool output 3."
+     }
+    }
+   }
+  },
+  {
+   "line": 58,
+   "raw": {
+    "type": "tool.execution_complete",
+    "timestamp": "2026-09-22T19:17:25.601Z",
+    "data": {
+     "toolCallId": "call_d9ce991d67acd37198ee3fe8",
+     "success": true,
+     "result": {
+      "content": "Sample tool output 4."
+     }
+    }
+   }
+  },
+  {
+   "line": 59,
+   "raw": {
+    "type": "assistant.turn_end",
+    "timestamp": "2026-09-22T19:17:25.611Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 60,
+   "raw": {
+    "type": "assistant.turn_start",
+    "timestamp": "2026-09-22T19:17:25.611Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 62,
+   "raw": {
+    "type": "assistant.message",
+    "timestamp": "2026-09-22T19:17:27.937Z",
+    "data": {
+     "messageId": "a66c2c04-804e-4ff8-8892-b655f5543142",
+     "content": ""
+    }
+   }
+  },
+  {
+   "line": 63,
+   "raw": {
+    "type": "tool.execution_start",
+    "timestamp": "2026-09-22T19:17:27.940Z",
+    "data": {
+     "toolCallId": "call_3fbea6b6ea8d6c13cdf2d62b",
+     "toolName": "view",
+     "arguments": {
+      "path": "/home/sam/Projects/sample"
+     }
+    }
+   }
+  },
+  {
+   "line": 64,
+   "raw": {
+    "type": "tool.execution_complete",
+    "timestamp": "2026-09-22T19:17:27.942Z",
+    "data": {
+     "toolCallId": "call_3fbea6b6ea8d6c13cdf2d62b",
+     "success": true,
+     "result": {
+      "content": "Sample tool output 5.",
+      "detailedContent": "sample"
+     }
+    }
+   }
+  },
+  {
+   "line": 65,
+   "raw": {
+    "type": "assistant.turn_end",
+    "timestamp": "2026-09-22T19:17:27.948Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 66,
+   "raw": {
+    "type": "assistant.turn_start",
+    "timestamp": "2026-09-22T19:17:27.948Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 67,
+   "raw": {
+    "type": "assistant.message",
+    "timestamp": "2026-09-22T19:17:29.627Z",
+    "data": {
+     "messageId": "a8235be3-9442-4781-85a9-0e2284c07cb8",
+     "content": "Sample reply 2.",
+     "phase": "final_answer"
+    }
+   }
+  },
+  {
+   "line": 68,
+   "raw": {
+    "type": "assistant.turn_end",
+    "timestamp": "2026-09-22T19:17:29.628Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 83,
+   "raw": {
+    "type": "user.message",
+    "timestamp": "2026-09-22T19:18:02.948Z",
+    "data": {
+     "content": "Sample prompt 3.",
+     "messageId": "14dc9d4b-3923-4a8f-85d0-d501b022c827"
+    }
+   }
+  },
+  {
+   "line": 89,
+   "raw": {
+    "type": "assistant.turn_start",
+    "timestamp": "2026-09-22T19:18:03.172Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 96,
+   "raw": {
+    "type": "assistant.message",
+    "timestamp": "2026-09-22T19:18:07.249Z",
+    "data": {
+     "messageId": "63a1871f-16b4-49df-815e-51dc5c9868e8",
+     "content": ""
+    }
+   }
+  },
+  {
+   "line": 97,
+   "raw": {
+    "type": "tool.execution_start",
+    "timestamp": "2026-09-22T19:18:07.255Z",
+    "data": {
+     "toolCallId": "call_abd854a7e0036f991682273f",
+     "toolName": "skill",
+     "arguments": {
+      "skill": "sample"
+     }
+    }
+   }
+  },
+  {
+   "line": 98,
+   "raw": {
+    "type": "tool.execution_complete",
+    "timestamp": "2026-09-22T19:18:07.257Z",
+    "data": {
+     "toolCallId": "call_abd854a7e0036f991682273f",
+     "success": true,
+     "result": {
+      "content": "Sample tool output 6."
+     }
+    }
+   }
+  },
+  {
+   "line": 101,
+   "raw": {
+    "type": "assistant.turn_end",
+    "timestamp": "2026-09-22T19:18:07.266Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 102,
+   "raw": {
+    "type": "assistant.turn_start",
+    "timestamp": "2026-09-22T19:18:07.266Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 103,
+   "raw": {
+    "type": "assistant.message",
+    "timestamp": "2026-09-22T19:18:15.901Z",
+    "data": {
+     "messageId": "f2151763-7dee-4631-8849-741c02b452e5",
+     "content": ""
+    }
+   }
+  },
+  {
+   "line": 104,
+   "raw": {
+    "type": "assistant.message",
+    "timestamp": "2026-09-22T19:18:15.904Z",
+    "data": {
+     "messageId": "2ef380d8-bcf0-4477-8d71-276117bbb378",
+     "content": ""
+    }
+   }
+  },
+  {
+   "line": 105,
+   "raw": {
+    "type": "tool.execution_start",
+    "timestamp": "2026-09-22T19:18:15.906Z",
+    "data": {
+     "toolCallId": "call_290bb5d41f5dcefc098db429",
+     "toolName": "ask_user",
+     "arguments": {
+      "message": "sample",
+      "requestedSchema": {
+       "properties": {
+        "scope": {
+         "type": "string",
+         "title": "sample",
+         "oneOf": [
+          {
+           "const": "sample",
+           "title": "sample"
+          },
+          {
+           "const": "sample",
+           "title": "sample"
+          }
+         ],
+         "default": "sample"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "line": 106,
+   "raw": {
+    "type": "tool.execution_complete",
+    "timestamp": "2026-09-22T19:18:18.874Z",
+    "data": {
+     "toolCallId": "call_290bb5d41f5dcefc098db429",
+     "success": true,
+     "result": {
+      "content": "Sample tool output 7.",
+      "detailedContent": "sample"
+     }
+    }
+   }
+  },
+  {
+   "line": 107,
+   "raw": {
+    "type": "assistant.turn_end",
+    "timestamp": "2026-09-22T19:18:18.881Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 108,
+   "raw": {
+    "type": "assistant.turn_start",
+    "timestamp": "2026-09-22T19:18:18.882Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 109,
+   "raw": {
+    "type": "assistant.message",
+    "timestamp": "2026-09-22T19:18:23.880Z",
+    "data": {
+     "messageId": "ce5c14ac-61ea-4a03-8181-9b43d2c204cf",
+     "content": ""
+    }
+   }
+  },
+  {
+   "line": 110,
+   "raw": {
+    "type": "assistant.message",
+    "timestamp": "2026-09-22T19:18:23.884Z",
+    "data": {
+     "messageId": "20bce4d5-6705-43e9-8b1d-e7321e39422d",
+     "content": ""
+    }
+   }
+  },
+  {
+   "line": 111,
+   "raw": {
+    "type": "tool.execution_start",
+    "timestamp": "2026-09-22T19:18:23.887Z",
+    "data": {
+     "toolCallId": "call_a11ffefc2869bc33f295391c",
+     "toolName": "phren-search_knowledge",
+     "arguments": {
+      "project": "sample",
+      "query": "sample",
+      "limit": 5
+     }
+    }
+   }
+  },
+  {
+   "line": 112,
+   "raw": {
+    "type": "tool.execution_start",
+    "timestamp": "2026-09-22T19:18:23.888Z",
+    "data": {
+     "toolCallId": "call_19a8872c5c3dd587557aa6b8",
+     "toolName": "view",
+     "arguments": {
+      "path": "/home/sam/Projects/sample"
+     }
+    }
+   }
+  },
+  {
+   "line": 113,
+   "raw": {
+    "type": "tool.execution_start",
+    "timestamp": "2026-09-22T19:18:23.889Z",
+    "data": {
+     "toolCallId": "call_2b84f12a88828aebcbf29119",
+     "toolName": "rg",
+     "arguments": {
+      "pattern": "sample",
+      "paths": "sample",
+      "glob": "sample",
+      "output_mode": "sample"
+     }
+    }
+   }
+  },
+  {
+   "line": 114,
+   "raw": {
+    "type": "tool.execution_start",
+    "timestamp": "2026-09-22T19:18:23.890Z",
+    "data": {
+     "toolCallId": "call_7f3a33a79c0837fbd8b9da3d",
+     "toolName": "bash",
+     "arguments": {
+      "command": "sample",
+      "description": "sample"
+     }
+    }
+   }
+  },
+  {
+   "line": 115,
+   "raw": {
+    "type": "tool.execution_complete",
+    "timestamp": "2026-09-22T19:18:23.935Z",
+    "data": {
+     "toolCallId": "call_19a8872c5c3dd587557aa6b8",
+     "success": true,
+     "result": {
+      "content": "Sample tool output 8.",
+      "detailedContent": "sample"
+     }
+    }
+   }
+  },
+  {
+   "line": 116,
+   "raw": {
+    "type": "tool.execution_complete",
+    "timestamp": "2026-09-22T19:18:23.938Z",
+    "data": {
+     "toolCallId": "call_2b84f12a88828aebcbf29119",
+     "success": true,
+     "result": {
+      "content": "Sample tool output 9."
+     }
+    }
+   }
+  },
+  {
+   "line": 117,
+   "raw": {
+    "type": "tool.execution_complete",
+    "timestamp": "2026-09-22T19:18:23.943Z",
+    "data": {
+     "toolCallId": "call_7f3a33a79c0837fbd8b9da3d",
+     "success": true,
+     "result": {
+      "content": "Sample tool output 10."
+     }
+    }
+   }
+  },
+  {
+   "line": 118,
+   "raw": {
+    "type": "tool.execution_complete",
+    "timestamp": "2026-09-22T19:18:23.948Z",
+    "data": {
+     "toolCallId": "call_a11ffefc2869bc33f295391c",
+     "success": true,
+     "result": {
+      "content": "Sample tool output 11.",
+      "detailedContent": "sample"
+     }
+    }
+   }
+  },
+  {
+   "line": 119,
+   "raw": {
+    "type": "assistant.turn_end",
+    "timestamp": "2026-09-22T19:18:23.957Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 120,
+   "raw": {
+    "type": "assistant.turn_start",
+    "timestamp": "2026-09-22T19:18:23.957Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 121,
+   "raw": {
+    "type": "assistant.message",
+    "timestamp": "2026-09-22T19:18:28.290Z",
+    "data": {
+     "messageId": "f212e799-195f-4a95-85aa-9a2a5ee7e926",
+     "content": ""
+    }
+   }
+  },
+  {
+   "line": 122,
+   "raw": {
+    "type": "tool.execution_start",
+    "timestamp": "2026-09-22T19:18:28.292Z",
+    "data": {
+     "toolCallId": "call_117e36634cdde437a4499b58",
+     "toolName": "bash",
+     "arguments": {
+      "command": "sample",
+      "description": "sample",
+      "initial_wait": 120,
+      "mode": "sample"
+     }
+    }
+   }
+  },
+  {
+   "line": 123,
+   "raw": {
+    "type": "tool.execution_complete",
+    "timestamp": "2026-09-22T19:18:39.776Z",
+    "data": {
+     "toolCallId": "call_117e36634cdde437a4499b58",
+     "success": true,
+     "result": {
+      "content": "Sample tool output 12."
+     }
+    }
+   }
+  },
+  {
+   "line": 124,
+   "raw": {
+    "type": "assistant.turn_end",
+    "timestamp": "2026-09-22T19:18:39.781Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 125,
+   "raw": {
+    "type": "assistant.turn_start",
+    "timestamp": "2026-09-22T19:18:39.781Z",
+    "data": {}
+   }
+  },
+  {
+   "line": 126,
+   "raw": {
+    "type": "assistant.message",
+    "timestamp": "2026-09-22T19:18:44.971Z",
+    "data": {
+     "messageId": "d8b5d65c-dac8-4841-81b3-84f51d97639e",
+     "content": "Sample reply 3.",
+     "phase": "final_answer"
+    }
+   }
+  },
+  {
+   "line": 127,
+   "raw": {
+    "type": "assistant.turn_end",
+    "timestamp": "2026-09-22T19:18:44.974Z",
+    "data": {}
+   }
+  }
+ ],
+ "totalLines": 130,
+ "startLine": 6,
+ "hasMore": true,
+ "reset": true,
+ "type": "backlog",
+ "source": "copilot",
+ "session": "00000000-0000-4000-8000-000000000187"
+}

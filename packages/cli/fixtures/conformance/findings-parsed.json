@@ -1,0 +1,32 @@
+[
+  {
+    "id": "L1",
+    "stableId": "38209d83",
+    "date": "2026-07-26",
+    "text": "Edited finding text that replaced the plain one",
+    "citation": "<!-- phren:cite {\"created_at\":\"2026-07-26T18:28:11.862Z\"} -->",
+    "citationData": {
+      "created_at": "2026-07-26T18:28:11.862Z"
+    },
+    "status": "active",
+    "status_updated": "2026-07-26",
+    "archived": false,
+    "tier": "current"
+  },
+  {
+    "id": "L2",
+    "stableId": "6957f9f8",
+    "date": "2026-07-26",
+    "text": "[pattern] Always validate JWT expiry before refresh",
+    "citation": "<!-- phren:cite {\"created_at\":\"2026-07-26T18:28:11.853Z\"} -->",
+    "citationData": {
+      "created_at": "2026-07-26T18:28:11.853Z"
+    },
+    "machine": "test-machine",
+    "actor": "tester",
+    "status": "active",
+    "status_updated": "2026-07-26",
+    "archived": false,
+    "tier": "current"
+  }
+]

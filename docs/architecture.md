@@ -323,7 +323,7 @@ chat, transcripts, or persistence for that one). Herdr's public JSON socket supp
 chat mutation revalidates server, workspace, tab, pane, provider, and conversation.
 An agent-only socket registers lifecycle callbacks and explicit permission
 requests; it is inaccessible through the phone dispatcher. No Moshi installation
-or service is required. See [the connection protocol](../apps/ios/AGENT_CONNECTIONS.md).
+or service is required. See [the connection protocol](../packages/cli/src/bridge/AGENT_CONNECTIONS.md).
 
 ## Scheduling
 

@@ -172,8 +172,7 @@ It checks saved computers during a brief background lease and optional iOS
 background refreshes. These need no APNs key or relay, but cannot promise
 delivery while the phone is suspended. Approval IDs are deduplicated on the
 device, and tapping rechecks the live request. Direct APNs remains an optional,
-separate path for owners with their own credentials. See
-[phone notifications](../apps/ios/design/notifications.md).
+separate path for owners with their own credentials.
 
 ### Approval push with your own APNs key
 
@@ -336,7 +335,7 @@ installed Apple voice.
 
 The helper exposes a private Unix socket, not a public HTTP port. SSH keys stay
 in the iPhone Keychain. Images and activity remain local to the computer; see the
-[protocol and storage limits](../apps/ios/AGENT_CONNECTIONS.md).
+[protocol and storage limits](../packages/cli/src/bridge/AGENT_CONNECTIONS.md).
 
 
 ### Dictation through ElevenLabs Scribe

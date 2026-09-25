@@ -9,7 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
  * same lines, event types and field names; neutral text and placeholder ids. */
 const events = path.join(here, "fixtures/copilot/1.0.87/events.jsonl");
 /** The backlog frame PhrenKit decodes in CopilotChatTests. */
-const phoneFixture = path.resolve(here, "../../../../apps/ios/PhrenKit/Tests/PhrenKitTests/Fixtures/copilot-1.0.87-backlog.json");
+const phoneFixture = path.resolve(here, "../../fixtures/conformance/copilot-1.0.87-backlog.json");
 const session = "00000000-0000-4000-8000-000000000187";
 
 describe("Copilot 1.0.87 transcript projection", () => {

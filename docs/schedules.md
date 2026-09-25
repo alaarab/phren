@@ -80,7 +80,7 @@ needs no APNs key or relay and has its own Settings > Notifications switch.
 It is separate from `notify` run-event preferences and does not prove a prompt
 launched. A tap checks fresh history and opens that run's session when available,
 otherwise its schedule history. Background refresh is scheduled by iOS and may
-not run in time. See [phone notifications](../apps/ios/design/notifications.md).
+not run in time.
 
 
 All schedule routes are JSON `POST` requests on the authenticated Hook connection:

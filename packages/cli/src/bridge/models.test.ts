@@ -1,7 +1,6 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
@@ -12,24 +11,6 @@ vi.mock("node:child_process", async importOriginal => {
   const original = await importOriginal<typeof import("node:child_process")>();
   return { ...original, spawn: vi.fn(original.spawn) };
 });
-
-/** The `case "..."` block of a Swift switch, from its first `from` to `to`. */
-function swiftSection(text: string, from: string, to: string): string {
-  const start = text.indexOf(from);
-  expect(start, `missing ${from}`).toBeGreaterThan(-1);
-  const end = text.indexOf(to, start + from.length);
-  return text.slice(start, end < 0 ? text.length : end);
-}
-
-/** `[argument, name]` rows written as `AgentModelChoice(name:..., argument:...)`. */
-function swiftRows(section: string): [string, string][] {
-  return [...section.matchAll(/name: "([^"]+)", argument: "([^"]+)"/g)].map(match => [match[2], match[1]]);
-}
-
-/** The arguments a Swift section marks `isDefault: true`, in list order. */
-function swiftDefaults(section: string): string[] {
-  return [...section.matchAll(/argument: "([^"]+)"[^\n]*isDefault: true/g)].map(match => match[1]);
-}
 
 describe("model catalogue", () => {
   it("kills a stuck Claude version probe instead of leaving it running after timeout", async () => {
@@ -99,28 +80,6 @@ describe("model catalogue", () => {
     expect(models[1].supportedReasoningEfforts).toBeUndefined();
     // A client older than a row's minimum does not see that row.
     expect((await readClaudeModels(config, "2.1.279")).map(model => model.id)).not.toContain("claude-opus-5-5");
-  });
-
-  it("keeps the phone's built-in fallbacks and the chat fixture in step with the menu", async () => {
-    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
-    const [phone, fixture] = await Promise.all([
-      readFile(path.join(root, "apps/ios/PhrenKit/Sources/PhrenKit/Sessions/AgentModelChoice.swift"), "utf8"),
-      readFile(path.join(root, "apps/ios/Phren/Features/Agents/AgentChatFixture.swift"), "utf8"),
-    ]);
-    const menu = CLAUDE_MENU.map(model => [model.id, model.name] as [string, string]);
-    const phoneClaude = swiftSection(phone, 'case "claude":', 'case "codex":');
-    expect(fixture).toContain("AgentModelChoice.choices(source: source)");
-    const phoneCodex = swiftSection(phone, 'case "codex":', "default:");
-
-    expect(swiftRows(phoneClaude)).toEqual(menu);
-    expect([...phoneClaude.matchAll(/description: "([^"]+)"/g)].map(match => match[1])).toEqual(CLAUDE_MENU.map(model => model.description));
-
-    expect(swiftDefaults(phoneClaude)).toEqual(["claude-fable-5-1"]);
-
-    // The Codex built-in mirrors the fixture's app-server shape the same way.
-    expect(swiftRows(phoneCodex).map(([id]) => id)).toEqual(["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra"]);
-    expect(swiftDefaults(phoneCodex)).toEqual(["gpt-6-astra"]);
-
   });
 
   it("caches per source and never lists a provider it does not know", async () => {

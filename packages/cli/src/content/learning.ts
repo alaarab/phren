@@ -51,7 +51,7 @@ const LIFECYCLE_ANNOTATION_RE = METADATA_REGEX.lifecycleAnnotation;
 
 /** Default finding-id source: 8 lowercase hex chars from a CSPRNG. Overridable
  *  via `AddFindingOptions.idSource` for deterministic fixture generation
- *  (apps/ios/scripts/generate-fixtures.mjs) — production callers never set it,
+ *  (the phren apps' generate-fixtures.mjs) — production callers never set it,
  *  so this is the only thing that ever runs outside tests. */
 function defaultFindingIdSource(): string {
   return crypto.randomBytes(4).toString("hex");

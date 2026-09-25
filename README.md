@@ -65,7 +65,7 @@ One store, seven ways in. Every surface reads and writes the same markdown files
 | **Terminal graph** | `phren shell --view graph`, or `g` in the shell | The knowledge graph drawn on a braille canvas: walk it with the arrows, `/` to search and fly, `[ ]` to focus a project, `1`–`9` to jump to a neighbour. Watches live, so nodes light up as phren reads and writes them, and shows the coding agents running on your machine. |
 | **Web UI** | `phren web-ui` | The 3D memory viewer: projects as containment fields, findings/tasks/fragments inside, a contents pane to review, edit, merge, and prune. |
 | **VS Code** | `phren-vscode` from the Marketplace | Sidebar tree for everything phren holds, the same 3D graph as a webview, `Ctrl+Shift+K` search. |
-| **iOS app** | `apps/ios` (SwiftUI, GitHub sign-in) | Findings, notes, tasks, skills, agent instructions, and the memory graph on your phone. Store sync goes directly to GitHub; optional live Herdr status uses your Moshi hook over SSH/Tailscale. Widgets and Siri intents included. |
+| **iOS app** | [phren for iOS](https://alaarab.github.io/phren/ios.html) (closed source) | Findings, notes, tasks, skills, agent instructions, and the memory graph on your phone. Store sync goes directly to GitHub; optional live Herdr status uses your Moshi hook over SSH/Tailscale. Widgets and Siri intents included. |
 | **Herdr plugin** | `herdr plugin install alaarab/phren/integrations/herdr` | A keybinding that pops the shell over your Herdr layout for whatever project the pane is in. |
 | **Omarchy plugin** | `bash integrations/omarchy/install.sh` | A bar widget: projects and counts, recalls as they land, one click into the shell, graph or web viewer. Also puts `phren` in the app launcher. |
 
@@ -139,7 +139,7 @@ A project's `schedules.yaml` runs an agent on an assigned computer at a local ti
 One conversation reads the project's tasks and sends independent briefs to enrolled computers with `phren dispatch`, which places a first prompt over pinned SSH and returns a durable receipt instead of a completion claim ([docs/conductor.md](docs/conductor.md)).
 
 ### iOS app
-[`apps/ios`](apps/ios) is a SwiftUI app for project memory and running agents. GitHub sync keeps findings, notes, tasks and skills on your phone. Phren Hook adds Codex, Claude Code, Copilot and OpenCode chat, terminals, repository changes, the Code index and local app previews over pinned SSH/Tailscale. Steer working agents, remember notes about a function and send them to its agent, and reach a conductor through Siri or the Action button. Memory offers map and list views; local schedule and approval notifications need no relay. [Set up Phren Hook](https://alaarab.github.io/phren/phren-hook.html) on each computer with `npx --yes @phren/cli@0.3.0 bridge install`.
+[phren for iOS](https://alaarab.github.io/phren/ios.html) is a closed-source app for project memory and running agents; its source is not in this repository. GitHub sync keeps findings, notes, tasks and skills on your phone. Phren Hook adds Codex, Claude Code, Copilot and OpenCode chat, terminals, repository changes, the Code index and local app previews over pinned SSH/Tailscale. Steer working agents, remember notes about a function and send them to its agent, and reach a conductor through Siri or the Action button. Memory offers map and list views; local schedule and approval notifications need no relay. [Set up Phren Hook](https://alaarab.github.io/phren/phren-hook.html) on each computer with `npx --yes @phren/cli@0.3.0 bridge install`.
 
 ---
 
@@ -196,7 +196,6 @@ All use the same phren store. No vendor lock-in.
 |---------|-------------|
 | [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (59 commands; 10 MCP tools by default, 61 in the full profile; FTS5, hooks), the interactive shell and terminal graph, the web UI |
 | [`phren-vscode`](packages/vscode) | VS Code extension (sidebar, graph, onboarding) |
-| [`apps/ios`](apps/ios) | phren for iOS: native SwiftUI app + widgets + Siri intents (not on npm; built with XcodeGen) |
 | [`integrations/herdr`](integrations/herdr) | Herdr plugin: keybinding → `phren shell --here` in a pane |
 | [`integrations/omarchy`](integrations/omarchy) | Omarchy plugin: bar widget + app launcher entries for the shell and web viewer |
 | [`experimental/agent`](experimental/agent) | `phren-agent`, an experimental coding agent with phren memory (unpublished) |

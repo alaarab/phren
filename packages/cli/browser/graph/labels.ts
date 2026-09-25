@@ -428,7 +428,7 @@ export function refreshLabels(): void {
 
 /**
  * Time `frames` label ticks end-to-end (pool LOD may or may not fire).
- * Used by apps/ios/scripts/test-graph.mjs for the browser frame budget.
+ * Used by the phone app's graph test (test-graph.mjs) for the browser frame budget.
  */
 export function benchLabelTick(frames = 60): number {
   const t0 = performance.now();

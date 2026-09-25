@@ -8,10 +8,10 @@
 body{margin:0;background:#171a23;color:#eeeaf4;font:17px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:800px;margin:auto;padding:48px 24px 88px}nav{display:flex;gap:24px;margin-bottom:70px;flex-wrap:wrap}a{color:#91d7e1}h1{font-size:clamp(38px,7vw,68px);line-height:1.08;letter-spacing:-.04em;margin:16px 0 28px}h2{font-size:25px;margin-top:44px}h3{font-size:18px;margin:0}p{color:#c4c7d4}pre{padding:20px;border:1px solid #424653;border-radius:16px;background:#20232e;overflow:auto;font-size:14px}code{font-family:ui-monospace,SFMono-Regular,monospace}.eyebrow{color:#a9a1d0;letter-spacing:.12em;font-size:13px;text-transform:uppercase}.lead{font-size:21px;max-width:650px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;margin:36px 0}.grid p{margin:8px 0}.note{padding-left:18px;border-left:2px solid #a9a1d0}.status{display:inline-block;padding:3px 10px;border:1px solid #424653;border-radius:999px;font-size:13px;color:#a9a1d0}footer{margin-top:64px;font-size:14px}li{margin:8px 0}ol,ul{color:#c4c7d4}a:focus-visible{outline:2px solid #91d7e1;outline-offset:5px}
 </style></head><body><main>
 <nav aria-label="Main"><a href="index.html">← phren</a><a href="docs.html">Documentation</a><a href="phren-hook.html">Phren Hook</a><a href="privacy.html">Privacy</a><a href="support.html">Support</a><a href="https://github.com/alaarab/phren">Source</a></nav>
-<div class="eyebrow">Phren for iPhone · open source</div>
+<div class="eyebrow">Phren for iPhone</div>
 <h1>Your memory.<br>Your agents.<br>In your pocket.</h1>
 <p class="lead">A native iPhone app for the phren store you already keep on GitHub — and for the coding agents running on your own computers. Nothing goes through a Phren server, because there isn't one.</p>
-<p><span class="status">Status: direct install and private TestFlight-style delivery from the repo. Not yet on the App Store.</span></p>
+<p><span class="status">Status: private TestFlight-style delivery. Not yet on the App Store.</span></p>
 
 <div class="grid">
 <section><h3>Memory, live</h3><p>Findings, notes, tasks, truths and the review queue from every store you attach, synced straight from GitHub. New findings an agent pushes on another machine show up on the phone within seconds.</p></section>
@@ -53,10 +53,10 @@ body{margin:0;background:#171a23;color:#eeeaf4;font:17px/1.65 -apple-system,Blin
 <p>Charcoal (default), Amethyst, Graphite and Slate, plus custom named themes. The chat transcript reads in plain white and grey in every theme, with the accent kept for Send and Stop. The terminal toolbar and Ctrl-hold panels are yours to arrange. Attach several stores — personal and team — and the tabs show a merged view with a store filter.</p>
 
 <h2>Install</h2>
-<p>The app is built from <a href="https://github.com/alaarab/phren/tree/main/apps/ios">apps/ios</a> in the repo. Today it installs directly on a paired iPhone (<code>python3 apps/ios/scripts/deploy-phone.py</code>) or over a private Tailscale link from your own Mac; the README covers signing, XcodeGen and the OTA installer. An App Store submission is in progress. When it ships, this page and the <a href="support.html">Support</a> page will say so.</p>
+<p>The iPhone app is closed source; its source is not in the public phren repository. The CLI, Phren Hook and everything the app talks to on your computers stay open source. An App Store submission is in progress. When it ships, this page and the <a href="support.html">Support</a> page will say so.</p>
 
 <h2>Where your data goes</h2>
 <p>Store data is read from and written to GitHub with your token. Session data is read from your own computers over SSH. The developer receives nothing — no analytics, no crash reports, no telemetry. The <a href="privacy.html">privacy policy</a> lists, item by item, what the app keeps on the device and what leaves it.</p>
 
-<footer><a href="privacy.html">Privacy</a> · <a href="support.html">Support</a> · <a href="phren-hook.html">Phren Hook</a> · <a href="https://github.com/alaarab/phren/blob/main/apps/ios/README.md">Developer README</a> · <a href="https://github.com/alaarab/phren/blob/main/apps/ios/AGENT_CONNECTIONS.md">Protocol and security details</a></footer>
+<footer><a href="privacy.html">Privacy</a> · <a href="support.html">Support</a> · <a href="phren-hook.html">Phren Hook</a> · <a href="https://github.com/alaarab/phren/blob/main/packages/cli/src/bridge/AGENT_CONNECTIONS.md">Protocol and security details</a></footer>
 </main></body></html>

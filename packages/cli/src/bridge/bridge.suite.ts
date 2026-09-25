@@ -179,7 +179,7 @@ describe("Phren Hook boundaries", () => {
     expect(namedPaths("", { patch: "*** Begin Patch\n*** Update File: ../repo/a.swift\n@@\n-old\n+new\n*** Add File: new.txt\n+x\n*** End Patch" })).toEqual(["../repo/a.swift", "new.txt"]);
   });
   it("exports the shared iPhone lifecycle and usage contract", async () => {
-    const cases = JSON.parse(await readFile(new URL("../../../../apps/ios/PhrenKit/Tests/PhrenKitTests/Fixtures/hook-events.json", import.meta.url), "utf8"));
+    const cases = JSON.parse(await readFile(new URL("../../fixtures/conformance/hook-events.json", import.meta.url), "utf8"));
     for (const fixture of cases) for (const event of fixture.events) {
       expect(visibleEvent(event, fixture.source)).toEqual(event);
     }

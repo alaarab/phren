@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "enabledSkills": {
+    "myproj:audit": false,
+    "global:audit": true
+  }
+}

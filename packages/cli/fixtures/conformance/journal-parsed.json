@@ -1,0 +1,19 @@
+[
+  {
+    "file": "2026-07-28-tester.md",
+    "date": "2026-07-28",
+    "actor": "tester",
+    "entries": [
+      "[decision] Team stores journal their findings instead of splicing FINDINGS.md <!-- source:human machine:test-machine actor:tester -->",
+      "Second entry of the day appends to the same actor file <!-- source:human machine:test-machine actor:tester -->"
+    ]
+  },
+  {
+    "file": "2026-07-28-other-actor.md",
+    "date": "2026-07-28",
+    "actor": "other-actor",
+    "entries": [
+      "Entry written by a different actor on the same day <!-- source:human actor:other-actor -->"
+    ]
+  }
+]
