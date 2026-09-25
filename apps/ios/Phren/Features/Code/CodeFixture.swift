@@ -71,6 +71,18 @@ enum CodeFixture {
             }
     }
 
+    /// What changed: a new function and an edited type in Service.swift, two
+    /// edited functions in app.ts.
+    static var changed: [CodeChangedFile] {
+        func item(_ id: Int, new: Bool) -> CodeChangedItem {
+            let symbol = symbols.first { $0.id == id }!
+            return CodeChangedItem(name: symbol.name, kind: symbol.kind, family: CodeFamily.of(kind: symbol.kind)!, file: symbol.file,
+                                   line: symbol.line, endLine: symbol.endLine, parent: symbol.parent, isNew: new, uses: symbol.uses)
+        }
+        return [CodeChangedFile(path: "swift/Service.swift", items: [item(11, new: false), item(12, new: true)]),
+                CodeChangedFile(path: "typescript/app.ts", items: [item(1, new: false), item(3, new: false)])]
+    }
+
     static func tree(_ directory: String) -> [CodeTreeEntry] {
         let prefix = directory.isEmpty ? "" : directory + "/"
         let files = Set(symbols.map(\.file)).filter { $0.hasPrefix(prefix) }

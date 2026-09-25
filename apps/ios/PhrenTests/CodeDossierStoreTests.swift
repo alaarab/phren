@@ -7,7 +7,7 @@ final class CodeDossierStoreTests: XCTestCase {
     private enum Recorded: Error { case request }
 
     func testProjectDossierKeepsItsStoreWithoutAChatOrigin() async throws {
-        let dossier = CodeSymbolDossier(storeId: "sam/team", project: "demo", symbol: "src/app.ts::run", hosts: [])
+        let dossier = CodeItemDossier(storeId: "sam/team", project: "demo", name: "src/app.ts::run", hosts: [])
         XCTAssertNil(dossier.origin)
         var reads = 0
         do {

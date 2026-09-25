@@ -26,12 +26,14 @@ extension PhrenConnection {
         return try CodeOutlineResults.read(data)
     }
 
-    public static func codeOutlineSummary(host: LiveHost, privateKey: Data, project: String, paths: [String], storeID: String? = nil) async throws -> [CodeOutlineSummary] {
+    /// Per-file chips for the Changes tree: functions and types the working
+    /// tree changed or added.
+    public static func codeChangeCounts(host: LiveHost, privateKey: Data, project: String, paths: [String], storeID: String? = nil) async throws -> [CodeChangeCount] {
         guard (1...200).contains(paths.count) else { throw PhrenKitError.validation("Choose between 1 and 200 paths.") }
         let validated = try paths.map { try codePath($0) }
         let encoded = String(decoding: try JSONEncoder().encode(validated), as: UTF8.self)
-        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/outline-summary", project: project, storeID: storeID, fields: ["paths": encoded])
-        return try CodeOutlineSummaryResults.read(data)
+        let data = try await codeGet(host: host, privateKey: privateKey, path: "/v1/code/change-counts", project: project, storeID: storeID, fields: ["paths": encoded])
+        return try CodeChangeCountResults.read(data)
     }
 
     /// Resolved uses made from one file, for tappable identifiers in the code viewer.
@@ -73,9 +75,10 @@ extension PhrenConnection {
         return try CodeUsagePage.read(await codeGet(host: host, privateKey: privateKey, path: "/v1/code/usage-page", project: project, storeID: storeID, fields: fields))
     }
 
-    public static func codeRecent(host: LiveHost, privateKey: Data, project: String, directory: String = "", storeID: String? = nil) async throws -> [CodeRecentSymbol] {
-        let fields = directory.isEmpty ? [:] : ["directory": try codePath(directory)]
-        return try CodeRecentResults.read(await codeGet(host: host, privateKey: privateKey, path: "/v1/code/recent", project: project, storeID: storeID, fields: fields))
+    /// What changed: the functions, types and variables today's agent
+    /// sessions and the last 10 commits touched, by file.
+    public static func codeChanged(host: LiveHost, privateKey: Data, project: String, storeID: String? = nil) async throws -> [CodeChangedFile] {
+        try CodeChangedResults.read(await codeGet(host: host, privateKey: privateKey, path: "/v1/code/changed", project: project, storeID: storeID, fields: [:]))
     }
 
     public static func codeReindex(host: LiveHost, privateKey: Data, project: String, storeID: String? = nil) async throws -> CodeStatus {

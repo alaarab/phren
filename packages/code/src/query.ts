@@ -557,15 +557,94 @@ export async function treeSummary(store: string, project: string, directory = ""
 
 /** Symbols ordered by the last index run that observed a declaration or body
  * change. Old indexes fall back to file observation time until their next scan. */
-export async function recentSymbols(store: string, project: string, directory?: string, limit = 30) {
+// ── What changed ────────────────────────────────────────────────────────────
+
+/** The families a person names in their code. */
+export type DeclarationFamily = "function" | "type" | "variable";
+
+const FAMILY_BY_KIND: Record<string, DeclarationFamily> = {
+  function: "function", method: "function",
+  class: "type", struct: "type", enum: "type", interface: "type", type: "type",
+  variable: "variable",
+};
+
+export function declarationFamily(kind: string): DeclarationFamily | undefined {
+  return FAMILY_BY_KIND[kind];
+}
+
+export interface ChangedDeclaration {
+  name: string;
+  kind: string;
+  family: DeclarationFamily;
+  file: string;
+  line: number;
+  endLine: number;
+  parent: string | null;
+  /** Every line of it was added: it is new, not edited. */
+  isNew: boolean;
+  uses: number;
+}
+
+/**
+ * Added line numbers (in the new file) per path, from a unified diff: a
+ * `git diff`/`git show` patch or one of the Hook's recorded tool changes.
+ */
+export function addedLinesByFile(patch: string): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  let file: string | undefined;
+  let next = 0;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("+++ ")) {
+      const target = line.slice(4).trim();
+      file = target === "/dev/null" ? undefined : target.replace(/^b\//, "");
+      if (file && !out.has(file)) out.set(file, []);
+      continue;
+    }
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    if (hunk) { next = Number(hunk[1]); continue; }
+    if (!file || !next) continue;
+    if (line.startsWith("+")) { out.get(file)!.push(next); next++; }
+    else if (line.startsWith(" ")) next++;
+    else if (line.startsWith("diff --git ")) { file = undefined; next = 0; }
+  }
+  return out;
+}
+
+/**
+ * The functions, types and variables that added lines fall inside, one per
+ * declaration: each line counts for the innermost one that contains it (a
+ * method, not its class). Variables count only at top level or when exported,
+ * never locals.
+ */
+export async function changedDeclarations(store: string, project: string,
+  added: Map<string, number[]>): Promise<QueryResult<ChangedDeclaration[]>> {
   const result = await withCodeDb(store, project, db => {
-    const conditions = ["1 = 1"];
-    const params: SqlValue[] = [];
-    addCodeFilters(conditions, params, { directory });
-    return rowsOf(db, `SELECT ${SYMBOL_COLUMNS}, COALESCE(c.indexed_at, f.indexed_at) AS changed_at FROM symbols s
-      JOIN files f ON f.path = s.file LEFT JOIN symbol_changes c ON c.symbol_id = s.id WHERE ${conditions.join(" AND ")}
-      ORDER BY changed_at DESC, s.file ASC, s.line ASC, s.id ASC LIMIT ?`, [...params, Math.max(1, Math.min(100, limit))])
-      .map(row => ({ ...mapSymbol(row), indexedAt: numberAt(row, 11) }));
+    const found: ChangedDeclaration[] = [];
+    for (const [file, lines] of added) {
+      if (lines.length === 0) continue;
+      const rows = rowsOf(db, `SELECT ${SYMBOL_COLUMNS} FROM symbols s WHERE s.file = ?`, [file]).map(row => mapSymbol(row))
+        .filter(hit => {
+          const family = declarationFamily(hit.kind);
+          return family !== undefined && (family !== "variable" || hit.parent === null || hit.exported);
+        });
+      const addedSet = new Set(lines);
+      const touched = new Map<number, SymbolHit>();
+      for (const line of lines) {
+        let inner: SymbolHit | undefined;
+        for (const hit of rows) {
+          if (hit.line > line || hit.endLine < line) continue;
+          if (!inner || hit.endLine - hit.line < inner.endLine - inner.line) inner = hit;
+        }
+        if (inner) touched.set(inner.id, inner);
+      }
+      for (const hit of [...touched.values()].sort((a, b) => a.line - b.line)) {
+        let isNew = true;
+        for (let line = hit.line; line <= hit.endLine; line++) if (!addedSet.has(line)) { isNew = false; break; }
+        found.push({ name: hit.name, kind: hit.kind, family: declarationFamily(hit.kind)!, file, line: hit.line,
+          endLine: hit.endLine, parent: hit.parent, isNew, uses: hit.uses });
+      }
+    }
+    return found;
   });
   return { ...result, value: result.value ?? [] };
 }

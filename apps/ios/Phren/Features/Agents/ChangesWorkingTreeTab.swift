@@ -92,7 +92,7 @@ struct ChangesWorkingTreeTab: View {
         .navigationDestination(item: $openedSource) { CodeFileView(context: codeContext, path: $0.path, line: $0.line) }
         .sheet(item: $dossier) { symbol in
             if let origin = codeOrigin {
-                CodeSymbolDossier(storeId: origin.storeID, project: origin.project, symbol: symbol.name,
+                CodeItemDossier(storeId: origin.storeID, project: origin.project, name: symbol.name,
                                   hosts: [origin.host], origin: origin) { file, line in
                     dossier = nil
                     openedSource = CodeFileLocation(path: file, line: line)
@@ -230,13 +230,9 @@ struct ChangesWorkingTreeTab: View {
         guard let origin = codeOrigin, !tree.entries.isEmpty else { return }
         #if DEBUG && targetEnvironment(simulator)
         if CodeFixture.enabled {
-            for entry in tree.entries {
-                let object: [String: Any] = ["path": entry.path, "symbols": entry.isDirectory ? 7 : 3,
-                    "kinds": [["kind": "function", "count": 3]], "symbol": entry.isDirectory ? NSNull() : "Point"]
-                if let data = try? JSONSerialization.data(withJSONObject: object),
-                   let summary = try? JSONDecoder().decode(CodeOutlineSummary.self, from: data) {
-                    model.workingTree.summaries[entry.path] = summary
-                }
+            for entry in tree.entries where !entry.isDirectory {
+                model.workingTree.summaries[entry.path] = CodeChangeCount(path: entry.path, functions: .init(changed: 2, added: 0),
+                                                                          types: .init(changed: 0, added: 1), first: "Point")
             }
             return
         }
@@ -244,7 +240,7 @@ struct ChangesWorkingTreeTab: View {
         do {
             let paths = tree.entries.map(\.path)
             for start in stride(from: 0, to: paths.count, by: 200) {
-                let summaries = try await PhrenConnection.codeOutlineSummary(host: origin.host,
+                let summaries = try await PhrenConnection.codeChangeCounts(host: origin.host,
                     privateKey: DeviceSSHKey.load(origin.host.id), project: origin.project,
                     paths: Array(paths[start..<min(paths.count, start + 200)]), storeID: origin.storeID)
                 try Task.checkCancellation()
@@ -325,7 +321,7 @@ private struct WorkingTreeRow: View {
     let expanded: Set<String>
     let children: [String: GitWorkingTree]
     let loading: Set<String>
-    let summaries: [String: CodeOutlineSummary]
+    let summaries: [String: CodeChangeCount]
     let onSymbol: (String) -> Void
     let onToggle: (GitWorkingTree.Entry) -> Void
     let onOpen: (GitWorkingTree.Entry) -> Void
@@ -340,16 +336,18 @@ private struct WorkingTreeRow: View {
                 .buttonStyle(.plain)
                 .accessibilityValue(entry.isIgnored ? "Ignored" : "")
                 .accessibilityIdentifier("changes-tree-entry:\(entry.path)")
-            if let summary = summaries[entry.path], summary.symbols > 0 {
-                if let symbol = summary.symbol, !entry.isDirectory {
-                    Button { onSymbol(symbol) } label: {
-                        PhrenChip(text: summary.label).frame(minWidth: 44, minHeight: PhrenDensity.treeRowHeight)
+            // "2 functions changed · 1 new type": what this file's changes touch.
+            if let summary = summaries[entry.path], let label = summary.label {
+                if let first = summary.first, !entry.isDirectory {
+                    Button { onSymbol(first) } label: {
+                        PhrenChip(text: label).frame(minWidth: 44, minHeight: PhrenDensity.treeRowHeight)
                             .contentShape(Rectangle().inset(by: -6))
                     }.buttonStyle(.plain)
-                        .accessibilityLabel("\(summary.symbols) symbols, \(summary.kinds.map(\.kind).joined(separator: ", "))")
-                        .accessibilityIdentifier("changes-tree-symbols:\(entry.path)")
+                        .accessibilityLabel(label)
+                        .accessibilityHint("Opens the first one")
+                        .accessibilityIdentifier("changes-tree-chip:\(entry.path)")
                 } else {
-                    PhrenChip(text: "\(summary.symbols) symbols")
+                    PhrenChip(text: label)
                 }
             }
         }

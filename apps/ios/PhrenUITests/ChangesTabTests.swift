@@ -13,9 +13,9 @@ final class ChangesTabTests: XCTestCase {
         app.buttons["changes-tab-tree"].tap()
         let directory = app.buttons["changes-tree-entry:Sources"]
         XCTAssertTrue(directory.waitForExistence(timeout: 8)); directory.tap()
-        let symbol = app.buttons["changes-tree-symbols:Sources/App.swift"]
+        let symbol = app.buttons["changes-tree-chip:Sources/App.swift"]
         XCTAssertTrue(symbol.waitForExistence(timeout: 8))
-        attachUIScreenshot(app, "Working tree symbol summaries")
+        attachUIScreenshot(app, "Working tree change chips")
         app.buttons["changes-tab-history"].tap()
         app.buttons["changes-tab-tree"].tap()
         XCTAssertTrue(symbol.waitForExistence(timeout: 8), "Expanded branches survive tab switches")
@@ -27,8 +27,8 @@ final class ChangesTabTests: XCTestCase {
         let note = app.descendants(matching: .any).matching(identifier: "code-note").firstMatch
         XCTAssertTrue(note.waitForExistence(timeout: 5)); note.tap(); note.typeText("Keep coordinates stable.")
         app.buttons["code-send"].tap()
-        XCTAssertTrue(app.staticTexts["Saved and sent to this session."].waitForExistence(timeout: 8))
-        XCTAssertFalse(app.staticTexts["Send code note"].exists)
+        XCTAssertTrue(app.staticTexts["Remembered and sent to this session."].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.staticTexts["Also tell an agent?"].exists, "A session's own note goes back to it without asking")
         attachUIScreenshot(app, "Code note sent to originating session")
     }
 

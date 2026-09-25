@@ -255,7 +255,7 @@ Search the user's personal project store using FTS5 full-text search with synony
 | `include_history` | boolean | no | Include historical findings (`superseded`, `retracted`). Defaults to `false`. |
 | `synthesize` | boolean | no | Generate a short synthesis paragraph from top hits (requires LLM endpoint/key configuration). |
 
-A findings result carries `symbol` (and `symbols`) when a `symbol:` citation is present, so a client can show which code symbol the finding is about.
+A findings result carries the linked function, type or variable in its `symbol` field (and `symbols`) when the finding has a code link, so a client can show which code the finding is about.
 
 ### `get_project_summary`
 
@@ -286,7 +286,7 @@ List recent findings for a project without requiring a search query.
 | `include_history` | boolean | no | Include historical findings (`superseded`, `retracted`). |
 | `status` | enum | no | Filter by lifecycle status: `active`, `superseded`, `contradicted`, `stale`, `invalid_citation`, `retracted`. |
 
-Each returned finding includes its `citationData` and a top-level `symbol` when it carries a `symbol:` citation.
+Each returned finding includes its `citationData` and, when it is linked to a function, type or variable, that name in a top-level `symbol` field.
 
 ---
 
@@ -448,14 +448,14 @@ Record a single insight to a project's FINDINGS.md. Call this the moment you dis
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
 | `finding` | string or string[] | yes | The insight, as a single bullet point (or an array of bullet points for batch capture). Be specific enough to act on without extra context. |
-| `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, symbol?, task_item? }`. |
+| `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, name?, task_item? }`. `name` links the finding to a function, type or variable; the older `symbol` spelling is accepted until 0.3.1. |
 | `sessionId` | string | no | Optional session ID from `session_start`. Pass it if you want session metrics to include this write. |
 | `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `bug`. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
 
 The finding is always saved as `active`. `add_finding` never auto-marks a finding as `contradicted`: instead it runs cheap lexical heuristics (no extra LLM/API call) and, when an existing finding looks like a possible duplicate or contradiction, returns it in the response as `potentialDuplicates` / `potentialConflicts` for the calling agent to judge. If a returned candidate is a genuine contradiction, resolve it explicitly with `resolve_contradiction` (or `supersede_finding`); if it is unrelated, ignore it. (Opt-in LLM-confirmed contradiction detection is still available via `PHREN_FEATURE_SEMANTIC_CONFLICT`.)
 
-`citation.symbol` names a code symbol as `Name`, `Type.member` or `name()`. When the project has a code index, the finding text is scanned for a symbol that resolves to exactly one declaration (four or more characters, and not a local variable unless exported) and that symbol is attached automatically; the finding text is never rewritten. An explicit `symbol` is validated against the index and stored either way: an unresolved one is kept with `symbol_unresolved` set, the symbol counterpart of an invalid file citation, and the trust filter treats it as `invalid_citation`.
+`citation.name` names the function, type or variable the finding is about, as `Name`, `Type.member` or `name()`. When the project has a code index, the finding text is scanned for a name that resolves to exactly one declaration (four or more characters, and not a local variable unless exported) and that link is attached automatically; the finding text is never rewritten. An explicit `name` is validated against the index and stored either way: an unresolved one is kept and marked unresolved (the stored citation keeps its `symbol` and `symbol_unresolved` keys), the counterpart of an invalid file citation, and the trust filter treats it as `invalid_citation`.
 
 ### `supersede_finding`
 
@@ -983,41 +983,41 @@ Store the paragraph you wrote as the topic's `## Now` block and refresh the proj
 
 ## Code Index
 
-Read tools over the local symbol index the `code` module keeps per project under `<store>/.runtime/code/<project>.sqlite`. The module is off by default; enable it with `phren modules enable code`, then build the index with `phren code index <project>` (`--repo <path>` for a checkout the project does not register). Results are compact text, one line per hit, not JSON. The `/code` skill drives them.
+Read tools over the local code index the `code` module keeps per project under `<store>/.runtime/code/<project>.sqlite`. The module is off by default; enable it with `phren modules enable code`, then build the index with `phren code index <project>` (`--repo <path>` for a checkout the project does not register). Results are compact text, one line per hit, not JSON. The `/code` skill drives them.
 
 ### `code_search`
 
-Ranked symbol search over names, signatures and doc comments. Use it instead of grep when you want a symbol rather than raw text. Ranking is exact name, then prefix, then FTS5 relevance, then usage count.
+Find functions, methods, types and variables by name, signature or doc comment. Use it instead of grep when you want a declaration rather than raw text. Ranking is exact name, then prefix, then FTS5 relevance, then how often it is used.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name, optionally store-qualified. |
-| `query` | string | yes | Symbol name, or words from its signature or doc comment. |
+| `query` | string | yes | A name, or words from its signature or doc comment. |
 | `kind` | enum | no | `function`, `method`, `class`, `struct`, `enum`, `interface`, `type` or `variable`. |
 | `limit` | number | no | Maximum hits (1-100, default 20). |
 
 ### `code_definition`
 
-Go to a symbol's definition. Accepts `Foo`, `Foo.bar` and `bar()`; returns the file and lines, signature, doc, the last change (blame hash and date, never a name) and a source snippet of at most 40 lines. When a common name matches several symbols it prefers an exported, non-variable declaration and reports the candidate count. After the snippet it adds a `Findings` block, one line per finding that cites the symbol (its id and first 160 characters), read from the project's FINDINGS.md and archived topic files.
+Go to where a function, method, type or variable is defined. Accepts `Foo`, `Foo.bar` and `bar()`; returns the file and lines, signature, doc, the last change (blame hash and date, never a name) and a source snippet of at most 40 lines. When a common name matches several declarations it prefers an exported, non-variable one and reports the candidate count. After the snippet it adds a `Findings` block, one line per finding linked to it (its id and first 160 characters), read from the project's FINDINGS.md and archived topic files.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name, optionally store-qualified. |
-| `symbol` | string | yes | A symbol name: `Foo`, `Foo.bar` or `bar()`. |
+| `name` | string | yes | What to look up: `Foo`, `Foo.bar` or `bar()`. The older `symbol` spelling is accepted until 0.3.1. |
 
 ### `code_references`
 
-Every resolved reference to a symbol, grouped by file, with a total and a candidate count when the name is ambiguous. Accepts the same name forms as `code_definition`. Only references the index could resolve to exactly one definition are counted.
+Every place a function, method, type or variable is used, grouped by file, with a total and a candidate count when the name is ambiguous. Accepts the same name forms as `code_definition`. Only uses the index could resolve to exactly one definition are counted.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name, optionally store-qualified. |
-| `symbol` | string | yes | A symbol name: `Foo`, `Foo.bar` or `bar()`. |
+| `name` | string | yes | What to look up: `Foo`, `Foo.bar` or `bar()`. The older `symbol` spelling is accepted until 0.3.1. |
 | `limit` | number | no | Maximum reference lines (1-500, default 200). |
 
 ### `code_outline`
 
-A file's symbols in source order, nested under their parent class or container, with line, signature and doc. Use it before reading a large file.
+A file's functions, types and variables in source order, methods nested under their class or container, with line, signature and doc. Use it before reading a large file.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -1026,14 +1026,14 @@ A file's symbols in source order, nested under their parent class or container, 
 
 ### `code_usage`
 
-The hottest and coldest symbols by resolved-reference count, so cold code is visible too. Local variables are excluded from the hot list so a busy local or a one-letter loop name cannot dominate it.
+The most used and least used functions and types, by how many places use them, so rarely used code is visible too. Local variables are left out of the most-used list so a busy local or a one-letter loop name cannot dominate it.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name, optionally store-qualified. |
-| `top` | number | no | How many hot and how many cold symbols (1-100, default 10). |
+| `top` | number | no | How many most used and how many least used (1-100, default 10). |
 
-CLI equivalents: `phren code search <project> <query> [--kind k] [--limit n]`, `phren code def <project> <symbol>`, `phren code refs <project> <symbol>`, `phren code outline <project> <path>`, `phren code usage <project> [--top n]`.
+CLI equivalents: `phren code search <project> <query> [--kind k] [--limit n]`, `phren code def <project> <name>`, `phren code refs <project> <name>`, `phren code outline <project> <path>`, `phren code usage <project> [--top n]`.
 
 ### Hook routes
 
@@ -1046,21 +1046,22 @@ writes. A missing index returns 404 with the `phren code index` command.
 
 | Method and path | Other inputs | Result |
 | --- | --- | --- |
-| `GET /v1/code/status` | None | File, symbol and reference counts, languages, kinds, last index time and top symbols. |
-| `GET /v1/code/tree` | `directory`, optional relative directory | `{project, directory, entries}`; immediate indexed children with `path`, `directory`, descendant `files`, `symbols` and `languages`. |
-| `GET /v1/code/search` | `q`, optional `kind`, `directory`, `limit` (1-500, default 20) | `{project, query, symbols}` ranked by exact name, prefix, full-text relevance and usage. |
+| `GET /v1/code/status` | None | File, declaration and use counts, languages, counts per kind, last index time and the most used functions and types. |
+| `GET /v1/code/tree` | `directory`, optional relative directory | `{project, directory, entries}`; immediate indexed children with `path`, `directory`, descendant `files`, declaration count (`symbols`) and `languages`. |
+| `GET /v1/code/search` | `q`, optional `kind`, `directory`, `limit` (1-500, default 20) | `{project, query, symbols}`: matching functions, types and variables, ranked by exact name, prefix, full-text relevance and usage. |
 | `GET /v1/code/outline` | `path`, relative file path | `{project, path, entries}` in source order with nested members. |
-| `GET /v1/code/outline-summary` | `paths`, a JSON array of 1-200 relative paths | `{project, entries}` with symbol totals and up to three leading kinds per file or directory, including descendants. Duplicate paths are collapsed. |
-| `GET /v1/code/file-references` | `path`, relative file path | `{project, path, references}`: every resolved use made from that file, in line order, each with `line`, `kind`, `name`, the declaration as a file-qualified `symbol` (`file::Container.name`), its `file`, `targetLine` and `targetKind`. At most 5000 rows. The phone's code viewer makes these names tappable. |
-| `GET /v1/code/definition` | `symbol` | `{project, definition}` with declaration, snippet, last Git change and `findings` citing the symbol. |
-| `GET /v1/code/references` | `symbol`, optional `limit` (1-500, default 200) | `{project, references}` with resolved references grouped by file. |
-| `GET /v1/code/usage` | `top` (1-100, default 10) | `{project, usage: {hot, cold}}`, the older compact ranking. |
-| `GET /v1/code/usage-page` | Optional `kind`, `file`, `directory`, `offset` (default 0), `limit` (1-100, default 50), `end=0\|1` | `{project, entries, total, offset, limit, maxUses}` across all symbols, including variables and zero uses. `end=1` selects the last page. |
-| `GET /v1/code/recent` | Optional `directory` | `{project, entries}` for the 30 most recently changed symbols; `indexedAt` is the millisecond time the index observed the change. |
+| `GET /v1/code/outline-summary` | `paths`, a JSON array of 1-200 relative paths | `{project, entries}` with declaration totals and up to three leading kinds per file or directory, including descendants. Kept for phones older than 1.0.3; newer phones use `change-counts`. |
+| `GET /v1/code/change-counts` | `paths`, a JSON array of 1-200 relative paths | `{project, entries}`, one per path: `functions` and `types`, each `{changed, added}`, from the working-tree diff (an untracked file is new throughout), and `first`, the first function or type to open. The Changes tree's chips read like "2 functions changed · 1 new type". |
+| `GET /v1/code/changed` | None beyond `project` | `{project, files}`: what changed, the functions, types and variables that today's agent sessions (the Hook's recorded edits in this checkout) and the last 10 commits touched, grouped by file, most recent work first. Each item has `name`, `kind`, `family` (`function`, `type` or `variable`), `file`, `line`, `endLine`, `parent`, `isNew` (every line was added) and `uses`. Only top-level or exported variables count. The repository's first commit is left out. |
+| `GET /v1/code/file-references` | `path`, relative file path | `{project, path, references}`: every resolved use made from that file, in line order, each with `line`, `kind`, `name`, the declaration it names as a file-qualified `symbol` (`file::Container.name`), its `file`, `targetLine` and `targetKind`. At most 5000 rows. The phone's code viewer makes these names tappable. |
+| `GET /v1/code/definition` | `name` (older phones send `symbol`) | `{project, definition}` with declaration, snippet, last Git change and the `findings` linked to it. |
+| `GET /v1/code/references` | `name` (older phones send `symbol`), optional `limit` (1-500, default 200) | `{project, references}` with every resolved use, grouped by file. |
+| `GET /v1/code/usage` | `top` (1-100, default 10) | `{project, usage: {hot, cold}}`, the older compact ranking of most and least used. |
+| `GET /v1/code/usage-page` | Optional `kind`, `file`, `directory`, `offset` (default 0), `limit` (1-100, default 50), `end=0\|1` | `{project, entries, total, offset, limit, maxUses}` across every function, type and variable, including zero uses. `end=1` selects the last page. |
 | `POST /v1/code/reindex` | None beyond `project` and optional `store` | Runs an incremental scan and returns status. |
-| `POST /v1/code/note` | `symbol`, `file`, `line`, `text`, optional `target` | Saves a symbol-cited finding, then optionally delivers it to an agent. See below. |
+| `POST /v1/code/note` | `name` (older phones send `symbol`), `file`, `line`, `text`, optional `target` | Remembers the note as a finding linked to that function, type or variable, then optionally delivers it to an agent. See below. |
 
-Hook `kind` accepts the individual symbol kinds above plus `types`, the family
+Hook `kind` accepts the individual kinds above plus `types`, the family
 of class, struct, enum, interface and type declarations. Directory scopes match
 descendants by literal path boundary. Definition and reference queries accept
 `Name`, `Type.member`, `name()` and `file::Type.member` to stay in one file.
@@ -1075,7 +1076,7 @@ Usage pages sort by descending reference count, then name, file, line and ID;
 {
   "store": "personal",
   "project": "demo",
-  "symbol": "src/parser.ts::Parser.parse",
+  "name": "src/parser.ts::Parser.parse",
   "file": "src/parser.ts",
   "line": 42,
   "text": "Keep this empty-input case in the regression tests.",
@@ -1087,7 +1088,7 @@ Omit `target` to save only, or use `{ "harness": "codex" }` to dispatch a new
 worker (`codex`, `claude`, `opencode`). A session target hands off locally;
 a new worker uses conductor placement with `computer: "anywhere"`. Sending
 requires the conductor module. The selected line must still belong to the
-indexed symbol and its returned snippet; otherwise the route returns 409 and
+indexed declaration and its returned snippet; otherwise the route returns 409 and
 asks the caller to refresh. Text is trimmed, nonempty and at most 4500 characters.
 
 The result is `{ok: true, saved: true, findings, delivery?}`. Save happens before
