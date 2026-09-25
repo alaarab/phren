@@ -395,9 +395,10 @@ export class AgentHooks {
       return;
     }
     if (question) { this.terminalPrompts.delete(key); return; }
-    // Codex draws "> 1. Yes, proceed (y)" rows; the other fallbacks number
-    // rows without a key in the label.
-    const dialog = target.source === "codex" ? visibleTerminalChoice(text) : numberedDialog(text);
+    // Codex draws "> 1. Yes, proceed (y)" rows and Copilot a boxed select
+    // with a cursor row, both answered by moving to a row; the other
+    // fallbacks number rows without a key in the label.
+    const dialog = ["codex", "copilot"].includes(target.source) ? visibleTerminalChoice(text) : numberedDialog(text);
     if (entry && !entry.dialog) {
       // The permission the pane still shows after its hook let go: keep the
       // request's own details and answer it with the dialog's rows, so the

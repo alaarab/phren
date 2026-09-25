@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentHooks } from "./agent-hooks.js";
 import { rpc, validateTarget } from "./herdr.js";
-import { codexModelStatus, MODEL_BUSY, ModelSwitcher, refuseWorkingSlash } from "./model-switch.js";
+import { codexModelStatus, MODEL_BUSY, ModelSwitcher, refuseWorkingSlash, SLASH_BUSY } from "./model-switch.js";
 import { codexModels, ModelCatalog } from "./models.js";
 import type { Target } from "./protocol.js";
 
@@ -75,8 +75,9 @@ describe("model switch route transaction", () => {
     await expect(switcher.switch(target, { model: astra.id })).rejects.toThrow("result is unconfirmed");
     expect(sent()).toEqual([["agent.prompt", { target: target.pane, text: "/model" }]]);
   });
-  it.each(["/model gpt-6-astra", " /model", "\n/permissions", "/compact"])("rejects busy slash input %s before delivery", text => {
-    expect(() => refuseWorkingSlash({ agent_status: "working" }, text)).toThrow(MODEL_BUSY);
+  it.each([["/model gpt-6-astra", MODEL_BUSY], [" /model", MODEL_BUSY], ["\n/permissions", SLASH_BUSY], ["/compact", SLASH_BUSY],
+    ["/yolo", SLASH_BUSY], ["/models", SLASH_BUSY]])("rejects busy slash input %j before delivery", (text, message) => {
+    expect(() => refuseWorkingSlash({ agent_status: "working" }, text)).toThrow(message);
     expect(() => refuseWorkingSlash({ agent_status: "idle" }, text)).not.toThrow();
     expect(() => refuseWorkingSlash({ agent_status: "working" }, "Continue with the tests")).not.toThrow();
   });

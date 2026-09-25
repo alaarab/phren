@@ -212,6 +212,25 @@ export function claudeSpinnerVerb(rendered: string): string | undefined {
   return claudeSpinner(rendered)?.verb;
 }
 
+/** Copilot's reasoning state for the running turn, from the headers it draws
+ * above each reasoning block ("⌄ Thought for 16s", "Thinking" while it
+ * streams), newest below the turn's prompt line. Only the header is read:
+ * the reasoning under it ("│ …") never leaves the Hook. */
+export function copilotThinking(rendered: string): ClaudeSpinner | undefined {
+  // Copilot draws a scrollbar down the right edge once the chat overflows.
+  const lines = stripTerminal(rendered).split("\n").map(line => line.replace(/\s*┃\s*$/, ""));
+  let from = 0;
+  lines.forEach((line, index) => { if (/^\s*❯\s+(?!\d+[.)]\s)\S/.test(line)) from = index + 1; });
+  for (let i = lines.length - 1; i >= from; i--) {
+    const header = /^\s*[⌄⌃▾▸›>]?\s*(?:(Thinking)\b.*|Thought for (\S+))\s*$/.exec(lines[i]);
+    if (!header) continue;
+    if (header[1]) return { verb: "Working", thinking: true };
+    const seconds = spinnerSeconds(header[2]);
+    if (seconds !== undefined) return { verb: "Working", thinking: false, thoughtFor: seconds };
+  }
+  return undefined;
+}
+
 export function readPreviewPane(target: Target): Promise<string> {
   // With its styles: Claude's bold becomes Markdown; everything else strips.
   return readPaneText(target.server, target.pane,
@@ -355,6 +374,14 @@ export class TranscriptPreviewStream {
         else if (raw.type === "event_msg" && ["task_complete", "task_completed", "turn_aborted", "task_aborted"].includes(String(payload.type))) this.ended = true;
         continue;
       }
+      if (this.target.source === "copilot") {
+        // A prompt starts the turn; idle or abort ends it (Copilot writes a
+        // turn_start/turn_end pair per model call, not per prompt).
+        if (raw.type === "user.message" && typeof raw.timestamp === "string") {
+          this.startedAt = raw.timestamp; this.ended = false; this.wasWorking = false; this.verb = undefined; this.activity = undefined;
+        } else if (["session.idle", "abort"].includes(String(raw.type))) { this.ended = true; this.verb = undefined; this.activity = undefined; }
+        continue;
+      }
       if (this.target.source !== "claude") continue;
       const message = object(raw.message), blocks = objects(message.content);
       if (raw.type === "user" && !raw.phrenQueued && !raw.isMeta && !blocks.some(b => b.type === "tool_result")) {
@@ -391,8 +418,14 @@ export class TranscriptPreviewStream {
         const spinner = claudeSpinner(pane);
         if (spinner) { this.activity = spinner; this.verb = spinner.verb; }
         if (text) next = { turnStartedAt: this.startedAt, text };
+      } else if (this.target.source === "copilot" && this.startedAt && !this.ended) {
+        // No reply text from the pane: only whether Copilot is thinking.
+        if (readAt - this.lastRead < PREVIEW_INTERVAL_MS) return undefined;
+        this.lastRead = readAt;
+        const thinking = copilotThinking(await this.pane());
+        if (thinking) { this.activity = thinking; this.verb = thinking.verb; }
       }
-    } else if (this.target.source === "claude" && this.wasWorking) { this.landed = true; this.ended = true; this.verb = undefined; this.activity = undefined; }
+    } else if (["claude", "copilot"].includes(this.target.source) && this.wasWorking) { this.landed = true; this.ended = true; this.verb = undefined; this.activity = undefined; }
     const sentAt = now ?? Date.now();
     // The phone ticks the clock itself: only the verb, tokens and thinking
     // state are worth a frame of their own.

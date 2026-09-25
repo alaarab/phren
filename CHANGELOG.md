@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Hook: Copilot CLI's permission dialogs reach the phone as a real choice card. Copilot draws each select inside a box (and a scrollbar beside it), so the dialog's rows were never read and the chat only said "Waiting for your answer". The Hook now strips the frame, shows the whole dialog (title, command, question) and answers by moving Copilot's cursor to the chosen row, as it does for Codex.
+- Hook: the chat shows when Copilot is thinking. While a Copilot turn runs, the Hook reads Copilot's reasoning headers ("Thought for 16s") and sends `thinking` / `thoughtFor` on the activity row, as it does for Claude. The reasoning text itself never leaves the computer.
+- Hook: a slash command sent to a working agent (`/yolo`, `/compact`) is refused with "Slash commands run between turns; send it again when this turn ends." instead of the model-switch message. `/model` keeps its own message.
+
 ## [0.3.3] - 2026-09-25
 
 ### Added
