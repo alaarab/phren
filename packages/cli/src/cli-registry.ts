@@ -186,7 +186,7 @@ const STORE_SUBCOMMANDS: Subcommand[] = [
   { name: "list", usage: "phren store list", summary: "List registered stores" },
   { name: "add", usage: "phren store add <name> --remote <url>", summary: "Add a team store" },
   { name: "remove", usage: "phren store remove <name>", summary: "Remove a store (local only)" },
-  { name: "sync", usage: "phren store sync", summary: "Pull all stores" },
+  { name: "sync", usage: "phren store sync", summary: "Pull and push all stores" },
 ];
 
 const TEAM_SUBCOMMANDS: Subcommand[] = [

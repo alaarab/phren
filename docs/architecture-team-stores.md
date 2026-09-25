@@ -131,7 +131,7 @@ npx @phren/cli store list
 # Remove a store (local only)
 npx @phren/cli store remove arc-team
 
-# Pull all stores
+# Pull all stores, then push writable ones
 npx @phren/cli store sync
 ```
 
