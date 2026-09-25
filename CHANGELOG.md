@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Hook: approval, schedule and fan-out alerts can go through the phren push relay. A phone that registered with the relay sends `{url, relayId, secret, key}` in `POST /v1/push/register` (field `relay`) instead of an APNs token. The Hook encrypts each alert's title, body, category and routing with that phone's key (ChaCha20-Poly1305, CryptoKit's `SealedBox(combined:)` layout), shortens a long body to fit the relay's 2,800-character limit, and signs the send with the phone's secret. The relay can't read the alert. A relay `410` drops the phone until it registers again. A Hook with its own `apns.json` still sends direct, and `approvalPush` reports `relay` when only relay phones are reachable, which `phren bridge doctor` accepts as configured.
+- Hook: `/v1/speech` with `"timestamps": true` (the `speechTimestamps` capability) answers JSON with the audio and ElevenLabs' character alignment instead of streaming, so talk mode can highlight each word as it is read. The alignment covers the spoken text after markdown is stripped.
 
 ### Changed
 
