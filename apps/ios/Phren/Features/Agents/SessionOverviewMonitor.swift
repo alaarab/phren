@@ -156,7 +156,7 @@ final class SessionOverviewMonitor {
         // Only a freshness transition publishes a new screen: each monitor
         // reports its answer aging out through onSnapshotChanged, from a
         // one-shot timer, so no clock polls the computers every second.
-        defer { deadline.cancel(); if generation == run { publication?.cancel() } }
+        defer { deadline.cancel(); if generation == run { publication?.cancel(); publication = nil } }
         await withTaskGroup(of: Void.self) { group in
             for computer in computers {
                 group.addTask {
@@ -194,9 +194,12 @@ final class SessionOverviewMonitor {
 
     private func schedulePublication() {
         guard ready, !refreshingCachedScreen else { return }
-        publication?.cancel()
+        // Coalesce, never postpone: a computer answering faster than this
+        // delay would otherwise push the screen's update back forever.
+        guard publication == nil else { return }
         publication = Task {
             do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
+            publication = nil
             publish()
         }
     }
