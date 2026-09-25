@@ -22,7 +22,7 @@ body{margin:0;background:#171a23;color:#eeeaf4;font:17px/1.65 -apple-system,Blin
 <h2>What you need</h2>
 <ol>
 <li><strong>A phren store on GitHub.</strong> The repo that holds your <code>~/.phren</code> store (<code>phren team init</code> or <code>phren store add --remote &lt;url&gt;</code> from your computer). The app signs in with a fine-grained GitHub token scoped to that repo — see <a href="support.html">Support</a> for the exact permissions.</li>
-<li><strong>Phren Hook on each computer</strong> that runs your agents: <code>npx --yes @phren/cli@0.3.0 bridge install</code>. It is a local helper, not a service in the cloud. Setup and troubleshooting live on the <a href="phren-hook.html">Phren Hook page</a>.</li>
+<li><strong>Phren Hook on each computer</strong> that runs your agents: <code>npx --yes @phren/cli@0.3.1 bridge install</code>. It is a local helper, not a service in the cloud. Setup and troubleshooting live on the <a href="phren-hook.html">Phren Hook page</a>.</li>
 <li><strong>SSH, and Tailscale away from home.</strong> The phone authenticates with a per-computer SSH key it generates itself and verifies the computer's host-key fingerprint the first time. No public port, Funnel or relay.</li>
 </ol>
 <p class="note">Agents and terminals work without a GitHub sign-in. Memory needs one; you can dismiss that setup and come back to it.</p>
