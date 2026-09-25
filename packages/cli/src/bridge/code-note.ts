@@ -9,7 +9,7 @@ export const codeNoteSchema = z.object({
   store: z.string().min(1).max(200).optional(),
   project: projectName,
   // The function, type or variable the note is about; `symbol` is the older
-  // phone's spelling, accepted until 0.2.18.
+  // phone's spelling, accepted until 0.3.1.
   name: z.string().min(1).max(4600).optional(), symbol: z.string().min(1).max(4600).optional(),
   file: z.string().min(1).max(4096).refine(file => !path.isAbsolute(file) && !file.includes("\0") && !file.split(/[\\/]/).includes("..")),
   line: z.number().int().positive(), text: z.string().trim().min(1).max(4500).refine(text => !/[\x00-\x08\x0b-\x1f\x7f]/.test(text)),

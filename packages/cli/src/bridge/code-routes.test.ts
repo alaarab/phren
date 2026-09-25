@@ -188,7 +188,7 @@ it("saves a symbol note, exposes it in the dossier and sends the bounded brief",
 
 it("preserves a saved note when agent delivery fails", async () => {
   const hit = (await routes.definition("fixture", "Point")).definition.symbol;
-  // An older phone still sends `symbol` (accepted until 0.2.18).
+  // An older phone still sends `symbol` (accepted until 0.3.1).
   const result = await saveCodeNote(store, { project: "fixture", symbol: "Point", file: hit.file, line: hit.line,
     text: "Point distance calculations need stable coordinate values throughout the operation.", target: { harness: "codex" } }, async () => { throw new Error("Session went offline"); });
   expect(result).toMatchObject({ saved: true, delivery: { ok: false, message: "Session went offline" } });

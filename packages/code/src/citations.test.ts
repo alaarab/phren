@@ -148,7 +148,7 @@ describe("symbol citations on write", () => {
     expect(validateFindingCitation(citation!)).toBe(true);
   });
 
-  it("still takes the deprecated citation symbol field until 0.2.18", async () => {
+  it("still takes the deprecated citation symbol field until 0.3.1", async () => {
     await addFinding("Older agents cite the double helper", { symbol: "double" });
     const citation = citationFor("Older agents cite the double helper");
     expect(citation?.symbol).toBe("double");
