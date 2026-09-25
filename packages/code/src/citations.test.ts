@@ -141,15 +141,22 @@ describe("symbol citations on write", () => {
   });
 
   it("stores a resolving explicit symbol citation", async () => {
-    await addFinding("Notes about the double helper", { symbol: "double" });
+    await addFinding("Notes about the double helper", { name: "double" });
     const citation = citationFor("Notes about the double helper");
     expect(citation?.symbol).toBe("double");
     expect(citation?.symbol_unresolved).toBeUndefined();
     expect(validateFindingCitation(citation!)).toBe(true);
   });
 
+  it("still takes the deprecated citation symbol field until 0.2.18", async () => {
+    await addFinding("Older agents cite the double helper", { symbol: "double" });
+    const citation = citationFor("Older agents cite the double helper");
+    expect(citation?.symbol).toBe("double");
+    expect(citation?.name).toBeUndefined();
+  });
+
   it("stores an unresolved explicit symbol citation and marks it", async () => {
-    await addFinding("Mentions a symbol the index does not know", { symbol: "NoSuchSymbol" });
+    await addFinding("Mentions a symbol the index does not know", { name: "NoSuchSymbol" });
     const citation = citationFor("Mentions a symbol the index");
     expect(citation?.symbol).toBe("NoSuchSymbol");
     expect(citation?.symbol_unresolved).toBe(true);
@@ -183,7 +190,7 @@ describe("findings that cite a symbol", () => {
   });
 
   it("matches a citation across the Foo.bar and bar() forms", async () => {
-    await addFinding("Point.length is the radius", { symbol: "Point.length" });
+    await addFinding("Point.length is the radius", { name: "Point.length" });
     expect(findingsCitingSymbol(store, PROJECT, "length()")).toHaveLength(1);
     expect(findingsCitingSymbol(store, PROJECT, "Point.length")).toHaveLength(1);
     expect(findingsCitingSymbol(store, PROJECT, "double")).toHaveLength(0);
