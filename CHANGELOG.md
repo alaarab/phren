@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Hook: `/v1/speech` with `"timestamps": true` (the `speechTimestamps` capability) answers JSON with the audio and ElevenLabs' character alignment instead of streaming, so talk mode can highlight each word as it is read. The alignment covers the spoken text after markdown is stripped.
+
 ## [0.3.2] - 2026-09-24
 
 ### Added

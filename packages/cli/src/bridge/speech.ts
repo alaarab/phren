@@ -19,7 +19,16 @@ export const SPEECH_MODEL = "eleven_flash_v2_5";
 export const DEFAULT_SPEECH_VOICE = "SAz9YHcvj6GT2YYXdXww";
 const MAX_TEXT = 2_000;
 
-export const speechRequest = z.object({ text: z.string().trim().min(1).max(MAX_TEXT) });
+export const speechRequest = z.object({
+  text: z.string().trim().min(1).max(MAX_TEXT),
+  /** Answer JSON with the audio and when each character is spoken, so the
+   * phone can highlight the word being read (talk mode's karaoke). */
+  timestamps: z.boolean().optional(),
+});
+
+/** When each character of the voiced text starts and ends, in seconds from
+ * the start of the audio. */
+export interface SpeechAlignment { characters: string[]; starts: number[]; ends: number[] }
 
 export interface SpeechOptions {
   fetch?: typeof fetch;
@@ -77,10 +86,38 @@ export function speakableText(text: string): string {
 
 /** Starts ElevenLabs' streaming synthesis and returns its audio body. */
 export async function synthesizeSpeech(text: string, signal: AbortSignal, options: SpeechOptions = {}): Promise<ReadableStream<Uint8Array>> {
+  const upstream = await elevenLabs("stream", text, signal, options);
+  if (!upstream.body) throw await speechError(upstream);
+  return upstream.body;
+}
+
+/** Voices the text in one piece with ElevenLabs' character alignment. */
+export async function synthesizeTimedSpeech(text: string, signal: AbortSignal, options: SpeechOptions = {}): Promise<{ audio: string; alignment: SpeechAlignment | null }> {
+  const upstream = await elevenLabs("with-timestamps", text, signal, options);
+  let body: { audio_base64?: unknown; alignment?: { characters?: unknown; character_start_times_seconds?: unknown; character_end_times_seconds?: unknown } | null };
+  try {
+    body = (await upstream.json()) as typeof body;
+  } catch {
+    throw new BridgeError(502, "ElevenLabs sent an unreadable reply.", { code: "speech-failed" });
+  }
+  if (typeof body.audio_base64 !== "string") throw new BridgeError(502, "ElevenLabs sent an unreadable reply.", { code: "speech-failed" });
+  return { audio: body.audio_base64, alignment: alignmentOf(body.alignment) };
+}
+
+/** ElevenLabs' alignment, kept only when its three lists line up. */
+export function alignmentOf(raw: { characters?: unknown; character_start_times_seconds?: unknown; character_end_times_seconds?: unknown } | null | undefined): SpeechAlignment | null {
+  const characters = raw?.characters, starts = raw?.character_start_times_seconds, ends = raw?.character_end_times_seconds;
+  if (!Array.isArray(characters) || !Array.isArray(starts) || !Array.isArray(ends)) return null;
+  if (characters.length !== starts.length || characters.length !== ends.length) return null;
+  if (!characters.every(c => typeof c === "string") || ![...starts, ...ends].every(t => typeof t === "number" && Number.isFinite(t))) return null;
+  return { characters: characters as string[], starts: starts as number[], ends: ends as number[] };
+}
+
+async function elevenLabs(endpoint: "stream" | "with-timestamps", text: string, signal: AbortSignal, options: SpeechOptions): Promise<Response> {
   const key = await (options.key ?? readSpeechKey)();
   if (!key) throw new BridgeError(503, "Spoken replies aren't set up on this computer: it has no ElevenLabs key.", { code: "speech-unconfigured" });
   const voice = options.voice ?? process.env.PHREN_SPEECH_VOICE ?? DEFAULT_SPEECH_VOICE;
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}/stream?output_format=${OUTPUT_FORMAT}`;
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}/${endpoint}?output_format=${OUTPUT_FORMAT}`;
   let upstream: Response;
   try {
     upstream = await (options.fetch ?? fetch)(url, {
@@ -91,19 +128,32 @@ export async function synthesizeSpeech(text: string, signal: AbortSignal, option
   } catch {
     throw new BridgeError(502, "Couldn't reach ElevenLabs from this computer.", { code: "speech-unreachable" });
   }
-  if (!upstream.ok || !upstream.body) throw await speechError(upstream);
-  return upstream.body;
+  if (!upstream.ok) throw await speechError(upstream);
+  return upstream;
 }
 
 /** POST /v1/speech: writes the audio to the phone as ElevenLabs produces it.
+ * With `timestamps`, answers JSON instead: `{ audio, audioFormat, alignment }`,
+ * the audio base64 in the same PCM format and the alignment null when
+ * ElevenLabs sent none.
  * Failures before the first byte are thrown for the route's JSON error; a
  * failure mid-stream cuts the response off, which the phone treats as an
  * error. The phone hanging up cancels the ElevenLabs request. */
 export async function streamSpeech(data: Json, response: ServerResponse, options: SpeechOptions = {}): Promise<void> {
-  const text = speakableText(speechRequest.parse(data).text);
+  const request = speechRequest.parse(data);
+  const text = speakableText(request.text);
   if (!text) throw new BridgeError(400, "There is nothing to say in this reply.", { code: "speech-invalid" });
+  // With timestamps, the alignment covers these spoken words, not the markdown.
+  const { timestamps } = request;
   const abort = new AbortController();
   response.once("close", () => { if (!response.writableEnded) abort.abort(); });
+  if (timestamps) {
+    const { audio, alignment } = await synthesizeTimedSpeech(text, abort.signal, options);
+    response.statusCode = 200;
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ audio, audioFormat: SPEECH_AUDIO, alignment }));
+    return;
+  }
   const audio = await synthesizeSpeech(text, abort.signal, options);
   response.statusCode = 200;
   response.setHeader("Content-Type", "application/octet-stream");
