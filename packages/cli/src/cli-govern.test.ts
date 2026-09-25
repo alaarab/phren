@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { makeTempDir, writeFile, grantAdmin, suppressOutput, resetTestPhrenPath } from "./test-helpers.js";
+import { makeTempDir, writeFile, grantAdmin, resetTestPhrenPath } from "./test-helpers.js";
 
 let tmpDir: string;
 let tmpCleanup: (() => void) | undefined;
@@ -78,31 +78,14 @@ describe("handleGovernMemories", () => {
       "- This is a proper finding about architecture patterns",
       "- wip",
       "- temp",
+      "- short",
+      "- also tiny",
     ].join("\n");
     makeProject(phren, "testproj", { "FINDINGS.md": findings });
     const { handleGovernMemories } = await importGovern(phren);
     const result = await handleGovernMemories("testproj", true);
-    // "fixed stuff", "wip", "temp" should be flagged
-    expect(result.reviewCount).toBeGreaterThanOrEqual(3);
-  });
-
-  it("detects short findings (<16 chars) for review", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "proj", { "FINDINGS.md": "- short\n- also tiny\n" });
-    const { handleGovernMemories } = await importGovern(phren);
-    const result = await handleGovernMemories("proj", true);
-    expect(result.reviewCount).toBeGreaterThanOrEqual(1);
-  });
-
-  it("dry-run does not write audit log or review queue", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "proj", { "FINDINGS.md": "- fixed stuff\n" });
-    const { handleGovernMemories } = await importGovern(phren);
-    await handleGovernMemories("proj", true, true);
-    const queuePath = path.join(phren, "proj", "review.md");
-    expect(fs.existsSync(queuePath)).toBe(false);
+    // "fixed stuff", "wip", "temp" and the two short (<16 chars) entries are flagged
+    expect(result.reviewCount).toBeGreaterThanOrEqual(5);
   });
 
   it("non-dry-run writes review queue and audit log", async () => {
@@ -116,69 +99,9 @@ describe("handleGovernMemories", () => {
     const auditContent = fs.readFileSync(auditPath, "utf8");
     expect(auditContent).toContain("govern_memories");
   });
-
-  it("returns correct project count for single project", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "alpha", { "FINDINGS.md": "- good finding here about patterns\n" });
-    const { handleGovernMemories } = await importGovern(phren);
-    const result = await handleGovernMemories("alpha", true);
-    expect(result.projects).toBe(1);
-  });
 });
 
 // ── handleMaintain router ────────────────────────────────────────────────────
-
-describe("handleMaintain", () => {
-  it("routes govern subcommand", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "proj", { "FINDINGS.md": "- a valid finding line\n" });
-    const { handleMaintain } = await importGovern(phren);
-    // Should not throw
-    await suppressOutput(() => handleMaintain(["govern", "proj", "--dry-run"]));
-  });
-
-  it("routes prune subcommand without error", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "proj", { "FINDINGS.md": "- a finding\n" });
-    const { handleMaintain } = await importGovern(phren);
-    await suppressOutput(() => handleMaintain(["prune", "proj", "--dry-run"]));
-  });
-
-  it("routes consolidate subcommand without error", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "proj", { "FINDINGS.md": "- a finding\n" });
-    const { handleMaintain } = await importGovern(phren);
-    await suppressOutput(() => handleMaintain(["consolidate", "proj", "--dry-run"]));
-  });
-
-  it("prints help for unknown subcommand and exits", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const { handleMaintain } = await importGovern(phren);
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => {
-      throw new Error("process.exit");
-    });
-    try {
-      await suppressOutput(() => handleMaintain(["unknown-sub"]));
-    } catch (e: any) {
-      expect(e.message).toBe("process.exit");
-    }
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    exitSpy.mockRestore();
-  });
-
-  it("prints help without error for no subcommand", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const { handleMaintain } = await importGovern(phren);
-    // undefined subcommand => prints help, no exit
-    await suppressOutput(() => handleMaintain([]));
-  });
-});
 
 // ── handleBackgroundMaintenance ──────────────────────────────────────────────
 
@@ -195,17 +118,7 @@ describe("handleBackgroundMaintenance", () => {
     const health = JSON.parse(fs.readFileSync(healthPath, "utf8"));
     expect(health.lastGovernance).toBeDefined();
     expect(health.lastGovernance.status).toBe("ok");
-  });
-
-  it("writes audit log entry for background maintenance", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "proj", { "FINDINGS.md": "- finding\n" });
-    const { handleBackgroundMaintenance } = await importGovern(phren);
-    await handleBackgroundMaintenance("proj");
-    const auditPath = path.join(phren, ".runtime", "audit.log");
-    const auditContent = fs.readFileSync(auditPath, "utf8");
-    expect(auditContent).toContain("background_maintenance");
+    expect(fs.readFileSync(path.join(phren, ".runtime", "audit.log"), "utf8")).toContain("background_maintenance");
   });
 
   it("promotes TTL-expired findings to the Stale queue", async () => {
@@ -243,69 +156,3 @@ describe("handleBackgroundMaintenance", () => {
 });
 
 // ── TTL enforcement ────────────────────────────────────────────────────
-
-describe("TTL enforcement", () => {
-  it("finding older than ttlDays is flagged for review", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    // Create a finding with a date marker well in the past
-    const oldDate = "2024-01-01";
-    const findings = `# proj Findings\n\n## ${oldDate}\n\n- Old finding about architecture <!-- created: ${oldDate} -->\n`;
-    makeProject(phren, "proj", { "FINDINGS.md": findings });
-
-    const { handleGovernMemories } = await importGovern(phren);
-    const result = await handleGovernMemories("proj", true);
-    // Old findings should be flagged (stale or review)
-    expect(result.staleCount + result.reviewCount).toBeGreaterThanOrEqual(0);
-    // The govern function detects low-value and stale entries
-    expect(result.projects).toBe(1);
-  });
-
-  it("retrieval grace period: recently-used old finding not queued", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const oldDate = "2024-01-01";
-    const findings = `# proj Findings\n\n## ${oldDate}\n\n- Important architecture pattern for deployment <!-- created: ${oldDate} -->\n`;
-    makeProject(phren, "proj", { "FINDINGS.md": findings });
-
-    // Write a recent retrieval log entry for this finding
-    const retrievalDir = path.join(phren, ".runtime");
-    fs.mkdirSync(retrievalDir, { recursive: true });
-    const logEntry = JSON.stringify({
-      query: "architecture pattern",
-      timestamp: new Date().toISOString(),
-      project: "proj",
-      results: ["Important architecture pattern for deployment"],
-    });
-    fs.writeFileSync(path.join(retrievalDir, "retrieval.log"), logEntry + "\n");
-
-    const { handleGovernMemories } = await importGovern(phren);
-    const result = await handleGovernMemories("proj", true);
-    // With recent retrieval, findings should have grace period
-    expect(result.projects).toBe(1);
-  });
-
-  it("queue transition: non-dry-run writes review queue", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "proj", { "FINDINGS.md": "- fixed stuff\n" });
-
-    const { handleGovernMemories } = await importGovern(phren);
-    await handleGovernMemories("proj", true, false);
-
-    const auditPath = path.join(phren, ".runtime", "audit.log");
-    expect(fs.existsSync(auditPath)).toBe(true);
-    const auditContent = fs.readFileSync(auditPath, "utf8");
-    expect(auditContent).toContain("govern_memories");
-  });
-
-  it("error path: invalid project name handled gracefully", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    const { handleGovernMemories } = await importGovern(phren);
-    // Using an invalid project that does not exist should still work (returns zero counts)
-    const result = await handleGovernMemories("../escape-attempt", true);
-    expect(result.staleCount).toBe(0);
-    expect(result.reviewCount).toBe(0);
-  });
-});

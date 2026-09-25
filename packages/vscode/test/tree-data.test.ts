@@ -557,4 +557,16 @@ describe("TreeDataSource caching", () => {
     await data.fetchProjects();
     expect(listProjects).toHaveBeenCalledTimes(2);
   });
+
+  it("does not cache a result whose fetch raced a refresh, so the next read refetches", async () => {
+    let data: TreeDataSource;
+    const listProjects = vi.fn(async () => {
+      data.clearCache(); // a refresh lands while this fetch is in flight
+      return ok({ projects: [{ name: "a" }] });
+    });
+    data = new TreeDataSource(fakeClient({ listProjects }), STORE_PATH);
+    await data.fetchProjects();
+    await data.fetchProjects();
+    expect(listProjects).toHaveBeenCalledTimes(2);
+  });
 });

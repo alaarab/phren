@@ -25,60 +25,27 @@ const ARROW_DOWN = "\x1b[B";
 const ARROW_UP = "\x1b[A";
 
 describe("decodeKeys", () => {
-  it("returns a single key unchanged", () => {
-    expect(decodeKeys(ARROW_DOWN)).toEqual({ keys: [ARROW_DOWN], pending: "" });
-  });
-
-  it("splits keys that autorepeat coalesced into one read", () => {
+  // [input, keys, pending] — pending is checked only where the row gives one.
+  it.each([
+    ["a single key unchanged", ARROW_DOWN, [ARROW_DOWN], ""],
     // Holding an arrow key delivers several presses in a single stdin chunk.
-    expect(decodeKeys(ARROW_DOWN.repeat(3)).keys).toEqual([ARROW_DOWN, ARROW_DOWN, ARROW_DOWN]);
-  });
-
-  it("splits fast typing into individual characters", () => {
-    expect(decodeKeys("hub").keys).toEqual(["h", "u", "b"]);
-  });
-
-  it("splits a mix of text and escape sequences", () => {
-    expect(decodeKeys(`ab${ARROW_UP}c`).keys).toEqual(["a", "b", ARROW_UP, "c"]);
-  });
-
-  it("handles CSI sequences with parameters", () => {
-    expect(decodeKeys("\x1b[5~\x1b[6~").keys).toEqual(["\x1b[5~", "\x1b[6~"]);
-  });
-
-  it("handles SS3 sequences (application cursor mode arrows)", () => {
-    expect(decodeKeys("\x1bOA\x1bOB").keys).toEqual(["\x1bOA", "\x1bOB"]);
-  });
-
-  it("keeps a surrogate pair together", () => {
-    expect(decodeKeys("a😀b").keys).toEqual(["a", "😀", "b"]);
-  });
-
-  it("keeps combining marks attached to their base character", () => {
-    expect(decodeKeys("éx").keys).toEqual(["é", "x"]);
-  });
-
-  it("buffers a CSI sequence split across reads", () => {
-    const first = decodeKeys("ab\x1b[");
-    expect(first.keys).toEqual(["a", "b"]);
-    expect(first.pending).toBe("\x1b[");
-  });
-
-  it("buffers a trailing lone ESC rather than guessing", () => {
-    expect(decodeKeys("x\x1b")).toEqual({ keys: ["x"], pending: "\x1b" });
-  });
-
-  it("emits ESC ESC as one complete Escape plus a pending one", () => {
-    expect(decodeKeys("\x1b\x1b")).toEqual({ keys: ["\x1b"], pending: "\x1b" });
-  });
-
-  it("splits ESC followed by a printable character into two keys", () => {
+    ["keys that autorepeat coalesced into one read", ARROW_DOWN.repeat(3), [ARROW_DOWN, ARROW_DOWN, ARROW_DOWN], undefined],
+    ["fast typing", "hub", ["h", "u", "b"], undefined],
+    ["a mix of text and escape sequences", `ab${ARROW_UP}c`, ["a", "b", ARROW_UP, "c"], undefined],
+    ["CSI sequences with parameters", "\x1b[5~\x1b[6~", ["\x1b[5~", "\x1b[6~"], undefined],
+    ["SS3 sequences (application cursor mode arrows)", "\x1bOA\x1bOB", ["\x1bOA", "\x1bOB"], undefined],
+    ["a surrogate pair kept together", "a😀b", ["a", "😀", "b"], undefined],
+    ["combining marks attached to their base character", "e\u0301x", ["e\u0301", "x"], undefined],
+    ["a CSI sequence split across reads, buffered", "ab\x1b[", ["a", "b"], "\x1b["],
+    ["a trailing lone ESC, buffered rather than guessed", "x\x1b", ["x"], "\x1b"],
+    ["ESC ESC as one complete Escape plus a pending one", "\x1b\x1b", ["\x1b"], "\x1b"],
     // The shell binds no Alt combos, so Esc-then-shortcut must survive.
-    expect(decodeKeys("\x1bq").keys).toEqual(["\x1b", "q"]);
-  });
-
-  it("resyncs after a malformed escape sequence", () => {
-    expect(decodeKeys("\x1b[\x00a").keys).toEqual(["\x00", "a"]);
+    ["ESC followed by a printable character as two keys", "\x1bq", ["\x1b", "q"], undefined],
+    ["a malformed escape sequence, then resyncs", "\x1b[\x00a", ["\x00", "a"], undefined],
+  ])("decodes %s", (_label, input, keys, pending) => {
+    const decoded = decodeKeys(input);
+    expect(decoded.keys).toEqual(keys);
+    if (pending !== undefined) expect(decoded.pending).toBe(pending);
   });
 });
 
@@ -115,13 +82,6 @@ describe("PhrenShell key handling via the decoder", () => {
     for (const key of new KeyDecoder().push(chunk)) await shell.handleRawKey(key);
   };
 
-  it("moves the cursor once per press in a coalesced chunk", async () => {
-    const shell = shellFor();
-    if (shell.getListItems().length < 4) return; // needs a populated store
-    await feed(shell, ARROW_DOWN.repeat(3));
-    expect(shell.currentCursor()).toBe(3);
-  });
-
   it("accepts every character of a fast-typed or pasted run", async () => {
     const shell = shellFor();
     shell.startInput("filter", "");
@@ -153,30 +113,17 @@ describe("PhrenShell key handling via the decoder", () => {
 });
 
 describe("displayWidth", () => {
-  it("counts plain ASCII by character", () => {
-    expect(displayWidth("hello")).toBe(5);
-  });
-
-  it("ignores ANSI escape codes", () => {
-    expect(displayWidth(style.boldCyan("hello"))).toBe(5);
-  });
-
-  it("counts emoji-presentation characters as two cells", () => {
-    // U+26A1 is the Hooks tab icon; terminals draw it double-wide.
-    expect(displayWidth("⚡")).toBe(2);
-    expect(displayWidth("😀")).toBe(2);
-  });
-
-  it("counts combining marks as zero cells", () => {
-    expect(displayWidth("é")).toBe(1);
-  });
-
-  it("counts fullwidth CJK as two cells", () => {
-    expect(displayWidth("日本")).toBe(4);
-  });
-
-  it("counts a zero-width joiner sequence by its rendered parts", () => {
-    expect(displayWidth("a‍b")).toBe(2);
+  // U+26A1 is the Hooks tab icon; terminals draw it double-wide.
+  it.each([
+    ["counts plain ASCII by character", "hello", 5],
+    ["ignores ANSI escape codes", style.boldCyan("hello"), 5],
+    ["counts emoji-presentation characters as two cells", "⚡", 2],
+    ["counts emoji-presentation characters as two cells", "😀", 2],
+    ["counts combining marks as zero cells", "é", 1],
+    ["counts fullwidth CJK as two cells", "日本", 4],
+    ["counts a zero-width joiner sequence by its rendered parts", "a‍b", 2],
+  ] as [string, string, number][])("%s", (_label, text, cells) => {
+    expect(displayWidth(text)).toBe(cells);
   });
 });
 

@@ -61,6 +61,7 @@ describe("scanForSecrets — shapes that were previously missed", () => {
     expect(scanForSecrets("token: " + "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc_def-ghi")).toBe("JWT token");
     expect(scanForSecrets("ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij")).toBe("GitHub personal access token");
     expect(scanForSecrets("mongodb://" + "admin:password123@host:27017/db")).toBe("connection string with credentials");
+    expect(scanForSecrets("postgres://" + "user:pass@host/db")).toBe("connection string with credentials");
     expect(scanForSecrets("sk-ant-api03-" + "abcdefghij1234567890")).toBe("Anthropic API key");
   });
 });

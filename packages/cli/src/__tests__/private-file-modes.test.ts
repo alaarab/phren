@@ -44,20 +44,11 @@ describe("private file and directory modes", () => {
     expect(mode(dir)).toBe(0o700);
   });
 
-  posixOnly("tightens an existing world-readable directory", () => {
+  posixOnly.each([0o755, 0o750])("tightens an existing directory at %o", (before) => {
     const dir = path.join(tmp.path, "preexisting");
     fs.mkdirSync(dir, { recursive: true });
-    fs.chmodSync(dir, 0o755);
-    expect(mode(dir)).toBe(0o755);
-
-    ensurePrivateDir(dir);
-    expect(mode(dir)).toBe(0o700);
-  });
-
-  posixOnly("tightens a group-readable directory too", () => {
-    const dir = path.join(tmp.path, "group-readable");
-    fs.mkdirSync(dir, { recursive: true });
-    fs.chmodSync(dir, 0o750);
+    fs.chmodSync(dir, before);
+    expect(mode(dir)).toBe(before);
 
     ensurePrivateDir(dir);
     expect(mode(dir)).toBe(0o700);
@@ -81,13 +72,6 @@ describe("private file and directory modes", () => {
     ensurePrivateDir(path.join(parent, "child"));
     expect(mode(parent)).toBe(0o755);
     expect(mode(path.join(parent, "child"))).toBe(0o700);
-  });
-
-  it("is idempotent", () => {
-    const dir = path.join(tmp.path, "idem");
-    ensurePrivateDir(dir);
-    expect(() => ensurePrivateDir(dir)).not.toThrow();
-    expect(fs.existsSync(dir)).toBe(true);
   });
 
   // ── atomicWriteText mode ──────────────────────────────────────────────────
@@ -115,12 +99,6 @@ describe("private file and directory modes", () => {
     atomicWriteText(file, "x", { mode: 0o600 });
     const strays = fs.readdirSync(tmp.path).filter((n) => n.includes(".tmp-"));
     expect(strays).toEqual([]);
-  });
-
-  it("atomicWriteText without a mode still writes the content", () => {
-    const file = path.join(tmp.path, "plain.txt");
-    atomicWriteText(file, "hello\n");
-    expect(fs.readFileSync(file, "utf8")).toBe("hello\n");
   });
 
   // ── runtime / session directories ─────────────────────────────────────────

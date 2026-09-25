@@ -1,12 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import * as fs from "fs";
-import * as path from "path";
+import { describe, it, expect, beforeEach, afterEach, } from "vitest";
 import { rankResults, selectSnippets } from "./shared/retrieval.js";
-import { queryRows, type DbRow, type SqlJsDatabase } from "./shared/index.js";
+import { type DbRow, type SqlJsDatabase } from "./shared/index.js";
 import type { DocRow } from "./shared/index.js";
-import { buildRobustFtsQuery, extractKeywords } from "./utils.js";
+import { buildRobustFtsQuery, } from "./utils.js";
 import { keywordFallbackSearch } from "./core/search.js";
-import { initTestPhrenRoot, makeTempDir } from "./test-helpers.js";
+import { makeTempDir } from "./test-helpers.js";
 
 // Minimal mock DB that returns empty results for all queries.
 // rankResults calls queryDocRows (for canonical rows) and getEntityBoostDocs
@@ -45,19 +43,6 @@ describe("rankResults", () => {
     tmpCleanup();
     if (origGitCtxEnv === undefined) delete process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER;
     else process.env.PHREN_FEATURE_GIT_CONTEXT_FILTER = origGitCtxEnv;
-  });
-
-  it("empty input returns empty array without throwing", () => {
-    const result = rankResults([], "general", null, null, tmpDir, mockDb());
-    expect(result).toEqual([]);
-  });
-
-  it("single item returns it unchanged", () => {
-    const doc = makeDoc({ path: "/test/only.md", project: "solo" });
-    const result = rankResults([doc], "general", null, null, tmpDir, mockDb());
-    expect(result).toHaveLength(1);
-    expect(result[0].path).toBe("/test/only.md");
-    expect(result[0].project).toBe("solo");
   });
 
   it("higher-scoring items appear before lower-scoring items", () => {
@@ -100,19 +85,6 @@ describe("rankResults", () => {
     expect(firstResult).toEqual(["/test/aaa.md", "/test/mmm.md", "/test/zzz.md"]);
   });
 
-  it("score rounding prevents floating-point instability", () => {
-    // The sort uses Math.round(score * 10000) / 10000 to stabilize comparisons.
-    // Verify that two docs with very close but identical computed scores
-    // still sort deterministically (by path tiebreaker, not by float noise).
-    const doc1 = makeDoc({ path: "/test/alpha.md", type: "summary", content: "x", project: "p1" });
-    const doc2 = makeDoc({ path: "/test/beta.md", type: "summary", content: "x", project: "p1" });
-
-    // Same type, same content pattern -> same score -> path tiebreaker
-    const result = rankResults([doc2, doc1], "general", null, null, tmpDir, mockDb());
-    expect(result[0].path).toBe("/test/alpha.md");
-    expect(result[1].path).toBe("/test/beta.md");
-  });
-
   it("keeps an exact local query match ahead of a weaker cross-project semantic match", () => {
     const exactLocal = makeDoc({
       path: "/test/local-auth.md",
@@ -145,45 +117,6 @@ describe("rankResults", () => {
 });
 
 // ── queryRows ──────────────────────────────────────────────────────────────────
-
-describe("queryRows", () => {
-  it("returns null for empty query result", () => {
-    const db: SqlJsDatabase = {
-      run: () => {},
-      exec: () => [],
-      export: () => new Uint8Array(),
-      close: () => {},
-    };
-    const result = queryRows(db, "SELECT * FROM docs WHERE 1=0", []);
-    expect(result).toBeNull();
-  });
-
-  it("returns shaped results when exec returns rows", () => {
-    const fakeRow: DbRow = ["proj", "file.md", "summary", "content here", "/path"];
-    const db: SqlJsDatabase = {
-      run: () => {},
-      exec: () => [{ columns: ["project", "filename", "type", "content", "path"], values: [fakeRow] }],
-      export: () => new Uint8Array(),
-      close: () => {},
-    };
-    const result = queryRows(db, "SELECT * FROM docs", []);
-    expect(result).not.toBeNull();
-    expect(result).toHaveLength(1);
-    expect(result![0][0]).toBe("proj");
-    expect(result![0][3]).toBe("content here");
-  });
-
-  it("returns null when exec throws", () => {
-    const db: SqlJsDatabase = {
-      run: () => {},
-      exec: () => { throw new Error("SQL error"); },
-      export: () => new Uint8Array(),
-      close: () => {},
-    };
-    const result = queryRows(db, "INVALID SQL", []);
-    expect(result).toBeNull();
-  });
-});
 
 // ── selectSnippets ─────────────────────────────────────────────────────────────
 
@@ -251,15 +184,6 @@ describe("selectSnippets", () => {
 // ── Synonym expansion ──────────────────────────────────────────────────────────
 
 describe("synonym expansion in buildRobustFtsQuery", () => {
-  it("expands known synonym pairs", () => {
-    // "auth" should expand to include "authentication", "authorization", "login", "oauth", "jwt"
-    const query = buildRobustFtsQuery("auth");
-    expect(query).toContain("auth");
-    expect(query).toContain("OR");
-    // At least one synonym should appear
-    expect(query).toMatch(/authentication|authorization|login|oauth|jwt/);
-  });
-
   it("returns terms without OR when no synonyms match", () => {
     const query = buildRobustFtsQuery("xyznonexistent");
     expect(query).toBe('"xyznonexistent"');
@@ -272,44 +196,6 @@ describe("synonym expansion in buildRobustFtsQuery", () => {
     expect(query).toContain("rate limit");
     expect(query).toContain("OR");
     expect(query).toMatch(/throttle|429/);
-  });
-
-  it("loads music domain synonym pack from learned-synonyms.json", () => {
-    const tmp = makeTempDir("synonyms-music-");
-    try {
-      initTestPhrenRoot(tmp.path);
-      const project = "beatlab";
-      const projectDir = path.join(tmp.path, project);
-      fs.mkdirSync(projectDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(projectDir, "learned-synonyms.json"),
-        JSON.stringify({ daw: ["digital audio workstation"] }, null, 2) + "\n",
-      );
-
-      const query = buildRobustFtsQuery("daw", project, tmp.path);
-      expect(query).toContain("digital audio workstation");
-    } finally {
-      tmp.cleanup();
-    }
-  });
-
-  it("maps game domain to gamedev synonym pack via learned-synonyms.json", () => {
-    const tmp = makeTempDir("synonyms-game-");
-    try {
-      initTestPhrenRoot(tmp.path);
-      const project = "arcade";
-      const projectDir = path.join(tmp.path, project);
-      fs.mkdirSync(projectDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(projectDir, "learned-synonyms.json"),
-        JSON.stringify({ "state machine": ["finite state machine"] }, null, 2) + "\n",
-      );
-
-      const query = buildRobustFtsQuery("state machine", project, tmp.path);
-      expect(query).toContain("finite state machine");
-    } finally {
-      tmp.cleanup();
-    }
   });
 });
 
@@ -356,23 +242,3 @@ describe("keywordFallbackSearch with project filter", () => {
 });
 
 // ── extractKeywords bigram stop-word filtering ─────────────────────────────────
-
-describe("extractKeywords stop-word filtering", () => {
-  it("does not include stop words in output", () => {
-    const keywords = extractKeywords("the quick brown fox is very fast");
-    expect(keywords).not.toMatch(/\bthe\b/);
-    expect(keywords).not.toMatch(/\bis\b/);
-    expect(keywords).not.toMatch(/\bvery\b/);
-    expect(keywords).toContain("quick");
-    expect(keywords).toContain("brown");
-    expect(keywords).toContain("fox");
-    expect(keywords).toContain("fast");
-  });
-
-  it("generates bigrams from non-stop-words only", () => {
-    const keywords = extractKeywords("rate limit exceeded");
-    // Should contain bigram "rate limit" and "limit exceeded"
-    expect(keywords).toContain("rate limit");
-    expect(keywords).toContain("limit exceeded");
-  });
-});

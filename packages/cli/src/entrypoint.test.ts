@@ -28,11 +28,11 @@ describe("resolveTopLevelInvocation", () => {
     expect(resolveTopLevelInvocation([])).toEqual({ kind: "manage", argv: [] });
   });
 
-  it("routes legacy management commands to manage mode", () => {
-    expect(resolveTopLevelInvocation(["search", "auth"])).toEqual({
-      kind: "manage",
-      argv: ["search", "auth"],
-    });
+  it.each([
+    ["legacy management commands", ["search", "auth"]],
+    ["unknown commands, for error handling", ["fix", "the", "login", "bug"]],
+  ])("routes %s to manage mode", (_label, argv) => {
+    expect(resolveTopLevelInvocation(argv)).toEqual({ kind: "manage", argv });
   });
 
   it("routes manage and mem aliases to manage mode", () => {
@@ -43,13 +43,6 @@ describe("resolveTopLevelInvocation", () => {
     expect(resolveTopLevelInvocation(["mem", "config", "show"])).toEqual({
       kind: "manage",
       argv: ["config", "show"],
-    });
-  });
-
-  it("routes unknown commands to manage mode for error handling", () => {
-    expect(resolveTopLevelInvocation(["fix", "the", "login", "bug"])).toEqual({
-      kind: "manage",
-      argv: ["fix", "the", "login", "bug"],
     });
   });
 

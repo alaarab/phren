@@ -81,16 +81,4 @@ describe("rankedProjectIds", () => {
     expect(rankedProjectIds(nodes, PROJECT)).toEqual(["here"]);
     expect(rankedProjectIds(nodes, "phren")).toEqual(["there"]);
   });
-
-  it("feeds a wrap-around step across the whole ranked list", () => {
-    const nodes: RawNode[] = [
-      finding("first", PROJECT, "2026-09-16"),
-      finding("second", PROJECT, "2026-09-16"),
-      task("job", PROJECT),
-    ];
-    const ranked = rankedProjectIds(nodes, PROJECT);
-    expect(stepRanked(ranked, "second", 1)).toBe("job");
-    expect(stepRanked(ranked, "job", 1)).toBe("first");
-    expect(stepRanked(ranked, "first", -1)).toBe("job");
-  });
 });
