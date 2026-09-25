@@ -12,6 +12,10 @@ import { initTestPhrenRoot, makeTempDir, writeFile } from "../test-helpers.js";
 import { describeAutoSave } from "./outcome.js";
 import { parsePullInterval, periodicPullEnabled, pollStore, readPollState, type RunGit, resolvePullInterval, runPollGit, startPullPolling } from "./pull.js";
 
+// Every test here drives real Git; the Windows runners need far longer than the 15 s default.
+const windows = process.platform === "win32";
+vi.setConfig({ testTimeout: windows ? 60_000 : 15_000 });
+
 const cleanups: (() => void)[] = [];
 afterEach(() => {
   vi.useRealTimers();
@@ -27,7 +31,7 @@ function temp() {
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-c", "commit.gpgsign=false", ...args], {
-    cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10_000,
+    cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: windows ? 45_000 : 10_000,
   }).trim();
 }
 
