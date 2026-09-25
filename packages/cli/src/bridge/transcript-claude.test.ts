@@ -23,3 +23,19 @@ describe("phren prompt-hook context", () => {
     expect(String(row?.content).length).toBeLessThan(16_500);
   });
 });
+
+describe("skill bodies", () => {
+  const meta = (text: string, extra: Record<string, unknown> = {}) => ({ type: "user", isMeta: true, uuid: "m1", timestamp: "t",
+    sourceToolUseID: "toolu_1", message: { role: "user", content: [{ type: "text", text }] }, ...extra });
+  it("sends the text a Skill call loaded as that call's second result", () => {
+    const body = "Base directory for this skill: /Users/me/.claude/skills/release\n\n# Release a concrete change";
+    expect(visibleClaudeEvent(meta(body))).toEqual({ type: "user", timestamp: "t", uuid: "m1",
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: body, phrenSkillBody: true }] } });
+  });
+  it("keeps every other hidden row private", () => {
+    expect(visibleClaudeEvent(meta("<local-command-caveat>Caveat</local-command-caveat>"))).toBeUndefined();
+    expect(visibleClaudeEvent(meta("Base directory for this skill: x", { sourceToolUseID: undefined }))).toBeUndefined();
+    expect(visibleClaudeEvent(meta("Base directory for this skill: x", { isSidechain: true }))).toBeUndefined();
+    expect(visibleClaudeEvent(meta("Base directory for this skill: x", { isMeta: false }))).not.toMatchObject({ message: { content: [{ phrenSkillBody: true }] } });
+  });
+});

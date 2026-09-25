@@ -187,8 +187,21 @@ function linesFor(session) {
   return lines;
 }
 
+/** Which conversation this OpenCode process is showing, by PID: the Hook
+ * reads it to bind a pane when Herdr reports no session for it. */
+const pidBindingFile = () => path.join(storeRoot(), ".runtime", "sessions", `opencode-pid-${process.pid}.json`);
+function writePidBinding(sessionID) {
+  mkdirSync(path.dirname(pidBindingFile()), { recursive: true });
+  writeJsonAtomic(pidBindingFile(), { session: sessionID, at: new Date().toISOString() });
+}
+
 export const PhrenTranscriptPlugin = async () => {
   const sessions = new Map();
+  // Subagent sessions run inside the same process; the pane shows their parent.
+  const children = new Set();
+  let boundSession;
+  // A reused PID must not inherit an old process's conversation.
+  try { removeFile(pidBindingFile()); } catch {}
   const timers = new Map();
   const written = new Map();
   const pendingApprovals = new Set();
@@ -257,6 +270,9 @@ export const PhrenTranscriptPlugin = async () => {
   return {
     "chat.message": async (input, output) => {
       if (!OPENCODE_SESSION.test(text(input?.sessionID)) || !output?.message) return;
+      if (!process.env.PHREN_FANOUT_JOB && !children.has(input.sessionID) && boundSession !== input.sessionID) {
+        try { writePidBinding(input.sessionID); boundSession = input.sessionID; } catch {}
+      }
       rememberInfo(input.sessionID, output.message);
       for (const part of output.parts ?? []) rememberPart(input.sessionID, output.message.id, part);
     },
@@ -315,6 +331,8 @@ export const PhrenTranscriptPlugin = async () => {
     },
     event: async ({ event }) => {
       const properties = event?.properties ?? {};
+      if ((event?.type === "session.created" || event?.type === "session.updated") && properties.info?.parentID
+        && OPENCODE_SESSION.test(text(properties.info.id))) children.add(properties.info.id);
       const sessionID = typeof properties.sessionID === "string" ? properties.sessionID : properties.info?.sessionID ?? properties.part?.sessionID;
       if (!OPENCODE_SESSION.test(text(sessionID))) return;
       if (event.type === "message.updated") rememberInfo(sessionID, properties.info);

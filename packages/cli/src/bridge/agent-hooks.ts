@@ -17,7 +17,7 @@ import { ensureGrant, listGrants, matchGrant, type Grant } from "./grants.js";
 import { ApprovalPushService } from "./push.js";
 import { intervalFromEnv } from "./limits.js";
 import { answerClaudeQuestionDialog, claudeQuestionDialog, type DialogAnswer, type DialogQuestion } from "./claude-question-dialog.js";
-import { answeredQuestionInput, numberedDialog, passwordLine, permissionPrompt, questionChoice, terminalChoice, terminalQuestions, visibleTerminalChoice,
+import { answeredQuestionInput, numberedDialog, opencodePermissionDialog, passwordLine, permissionPrompt, questionChoice, terminalChoice, terminalQuestions, visibleTerminalChoice,
   type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
 import { directoryNames, opencodeApprovalFile, opencodeRequest, readOpencodeRequest } from "./opencode-approvals.js";
 import { ApprovalWatchLeases, bindingPath, localSocket, PushBindingStore } from "./agent-hook-stores.js";
@@ -398,7 +398,10 @@ export class AgentHooks {
     // Codex draws "> 1. Yes, proceed (y)" rows and Copilot a boxed select
     // with a cursor row, both answered by moving to a row; the other
     // fallbacks number rows without a key in the label.
-    const dialog = ["codex", "copilot"].includes(target.source) ? visibleTerminalChoice(text) : numberedDialog(text);
+    const dialog = ["codex", "copilot"].includes(target.source) ? visibleTerminalChoice(text)
+      // OpenCode's prompt is one row of options; its cursor is only a color.
+      : target.source === "opencode" ? opencodePermissionDialog(await this.paneAnsi(target))?.choice ?? numberedDialog(text)
+      : numberedDialog(text);
     if (entry && !entry.dialog) {
       // The permission the pane still shows after its hook let go: keep the
       // request's own details and answer it with the dialog's rows, so the
@@ -431,6 +434,7 @@ export class AgentHooks {
     return entry?.dialog && digit ? [...keys, "Enter"] : [...keys];
   }
   async moveDialogHighlight(target: Target, expected: TerminalChoice, key: string, beforeKeys?: () => Promise<void>): Promise<void> {
+    if (target.source === "opencode") { await this.selectOpencodeOnce(target, expected, beforeKeys); return; }
     const intended = expected.options.findIndex(option => option.key === key);
     let current = visibleTerminalChoice(await this.paneLines(target));
     // A held permission can expose just the asking sentence from the title.
@@ -456,6 +460,24 @@ export class AgentHooks {
         await validateTarget(target, false, true);
         return;
       }
+    }
+    throw new BridgeError(409, "Could not move and verify the terminal selection. Open terminal to choose this option.");
+  }
+  /** Put OpenCode's cursor on Allow once, the row's first option: ← as many
+   * times as the cursor sits to its right, then read the colors again. The
+   * same prompt must still be showing, or nothing more is sent. */
+  private async selectOpencodeOnce(target: Target, expected: TerminalChoice, beforeKeys?: () => Promise<void>): Promise<void> {
+    const read = async () => opencodePermissionDialog(await this.paneAnsi(target));
+    const current = await read();
+    if (current && current.choice.title === expected.title && current.selected !== undefined) {
+      await validateTarget(target, false, true);
+      if (current.selected > 0) {
+        await beforeKeys?.();
+        await rpc(target.server, "agent.send_keys", { target: target.pane, keys: Array<string>(current.selected).fill("left") });
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
+      const moved = current.selected > 0 ? await read() : current;
+      if (moved && moved.choice.title === expected.title && moved.selected === 0) { await validateTarget(target, false, true); return; }
     }
     throw new BridgeError(409, "Could not move and verify the terminal selection. Open terminal to choose this option.");
   }
@@ -518,6 +540,10 @@ export class AgentHooks {
     return entry && Date.now() - entry.at < 30_000 ? entry.command : undefined;
   }
   menuClosed(target: Target) { this.menus.delete(JSON.stringify(target)); }
+  /** The pane with its colors, for dialogs whose cursor is only a color. */
+  paneAnsi(target: Target): Promise<string> {
+    return readPaneText(target.server, target.pane, { method: "agent.read", source: "visible", lines: 40, stripAnsi: false, format: "ansi", timeoutMs: 2_000 });
+  }
   /** Read what the pane draws, stripping ANSI unless placeholder styling is needed. */
   paneLines(target: Target, stripAnsi = true): Promise<string> {
     return readPaneText(target.server, target.pane, { method: "agent.read", source: "visible", lines: 40, stripAnsi, timeoutMs: 2_000 });

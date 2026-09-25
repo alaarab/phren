@@ -6,13 +6,30 @@ const state = vi.hoisted(() => ({ exec: vi.fn() }));
 vi.mock("node:child_process", async importOriginal => ({ ...await importOriginal<typeof import("node:child_process")>(),
   execFile: Object.assign(() => {}, { [Symbol.for("nodejs.util.promisify.custom")]: state.exec }),
 }));
-import { paneIdentity } from "./herdr.js";
+import { opencodePidSession, paneIdentity } from "./herdr.js";
 import { recordedSession } from "./agent-hooks.js";
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 it("accepts an opencode ses_ session reported by Herdr", async () => {
   const pane = { pane_id: "p1", terminal_id: "term", agent: "opencode",
     agent_session: { kind: "id", agent: "opencode", source: "herdr:opencode", value: "ses_f4a6b5c11ffe6nZrRlGZbXXNli" } };
   expect(await paneIdentity("default", pane)).toBe("ses_f4a6b5c11ffe6nZrRlGZbXXNli");
+});
+it("binds an OpenCode pane from phren's plugin by PID when Herdr reports no session", async () => {
+  const root = await mkdtemp(path.join((await import("node:os")).tmpdir(), "phren-oc-"));
+  const folder = path.join(root, ".runtime", "sessions");
+  await mkdir(folder, { recursive: true });
+  try {
+    await writeFile(path.join(folder, "opencode-pid-10.json"), JSON.stringify({ session: "ses_old1", at: "2026-09-25T10:00:00Z" }));
+    await writeFile(path.join(folder, "opencode-pid-11.json"), JSON.stringify({ session: "ses_new2", at: "2026-09-25T11:00:00Z" }));
+    await writeFile(path.join(folder, "opencode-pid-12.json"), JSON.stringify({ session: "ses_gone3", at: "2026-09-25T12:00:00Z" }));
+    await writeFile(path.join(folder, "opencode-pid-13.json"), "not json");
+    await writeFile(path.join(folder, "opencode-ses_old1.events.jsonl"), "");
+    await writeFile(path.join(folder, "opencode-ses_new2.events.jsonl"), "");
+    // The newest binding with a transcript wins; one whose transcript is missing is skipped.
+    expect(await opencodePidSession([10, 11, 12, 13], root)).toBe("ses_new2");
+    expect(await opencodePidSession([10], root)).toBe("ses_old1");
+    expect(await opencodePidSession([12, 13, 99], root)).toBeUndefined();
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 // Herdr is reached over a Unix domain socket, which Node cannot listen on at a file path on Windows.
 it.skipIf(process.platform === "win32")("caches identity per server, pane, terminal and PID set for two seconds, with fresh bypass", async () => {

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BridgeError, object, objects, type Json } from "./protocol.js";
+import { stripTerminal } from "../terminal-text.js";
 
 /** Reading the question a terminal dialog or held permission is asking:
  * numbered option rows, the highlighted row, password reads, and a released
@@ -136,6 +137,39 @@ export function visibleTerminalChoice(text: string): TerminalChoice | undefined 
   if (!title) return undefined;
   return { title: title.slice(0, 4_000), options: options.slice(0, 12),
     ...(highlightedIndex !== undefined ? { highlightedIndex } : {}) };
+}
+const OPENCODE_OPTIONS = ["Allow once", "Allow always", "Reject"] as const;
+/** OpenCode's permission prompt, read from the pane with its colors:
+ * "△ Permission required", what it asks, then one row "Allow once  Allow
+ * always  Reject" answered with ←/→ and Enter (Escape rejects). The row's
+ * selected option is the one drawn on a background the others don't share.
+ * The phone gets Allow once and Reject: Allow always opens OpenCode's own
+ * second confirmation. `selected` is the cursor's index in the three-option
+ * row; undefined when the colors do not say. */
+export function opencodePermissionDialog(ansi: string): { choice: TerminalChoice; selected?: number } | undefined {
+  const raw = ansi.split(/\r?\n/);
+  const plain = raw.map(line => stripTerminal(line).replace(/\r/g, ""));
+  const content = (line: string) => line.replace(/^\s*[┃│]?/, "");
+  let header = -1;
+  plain.forEach((line, index) => { if (/^\s*△\s*Permission required\s*$/.test(content(line))) header = index; });
+  if (header < 0) return undefined;
+  const row = plain.findIndex((line, index) => index > header && OPENCODE_OPTIONS.every(label => line.includes(label)));
+  if (row < 0 || row - header > 24) return undefined;
+  // Lines pushed far right are OpenCode's status column, not the question.
+  const body = plain.slice(header + 1, row).map(content)
+    .filter(line => line.trim() && !/^\s{24,}/.test(line)).map(line => line.trim());
+  const title = ["Permission required", ...body].join("\n").slice(0, 4_000);
+  const backgrounds = OPENCODE_OPTIONS.map(label => {
+    const at = raw[row].indexOf(label);
+    if (at < 0) return undefined;
+    const before = [...raw[row].slice(0, at).matchAll(/\x1b\[[0-9;]*48;2;(\d+;\d+;\d+)[0-9;]*m/g)];
+    return before.at(-1)?.[1];
+  });
+  const unique = backgrounds.flatMap((background, index) =>
+    background !== undefined && backgrounds.filter(other => other === background).length === 1 ? [index] : []);
+  const selected = unique.length === 1 && backgrounds.every(background => background !== undefined) ? unique[0] : undefined;
+  return { choice: { title, options: [{ label: "Allow once", key: "1", hasKey: false }, { label: "Reject", key: "Escape", hasKey: true }],
+    ...(selected === 0 ? { highlightedIndex: 0 } : {}) }, ...(selected !== undefined ? { selected } : {}) };
 }
 /** The pane's last non-empty line is a password read: sudo's "[sudo] password
  * for user", or any "… Password:" prompt. */
