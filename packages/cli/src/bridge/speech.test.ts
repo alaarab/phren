@@ -2,7 +2,7 @@ import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { BridgeError, type Json } from "./protocol.js";
-import { DEFAULT_SPEECH_VOICE, SPEECH_AUDIO, SPEECH_MODEL, streamSpeech, type SpeechOptions } from "./speech.js";
+import { DEFAULT_SPEECH_VOICE, SPEECH_AUDIO, SPEECH_MODEL, speakableText, streamSpeech, type SpeechOptions } from "./speech.js";
 
 const KEY = "sk_test_do_not_leak_0123456789";
 
@@ -128,5 +128,21 @@ describe("speech route", () => {
     });
     servers.push(server);
     await expect(post({ text: "Hello." })).rejects.toThrow();
+  });
+});
+
+describe("speakable text", () => {
+  it("reads a markdown reply as its words: no symbols, code blocks or URLs", () => {
+    const reply = "## Status\n\n**Two** commits landed in `main`:\n- PR #12 merged\n- see [the run](https://x.y/z)\n\n"
+      + "```ts\nconst a = 1\n```\n| Lane | State |\n|---|---|\n| bridge | done |\nThis sentence\nwraps here. Check https://github.com/a/b now.";
+    expect(speakableText(reply)).toBe("Status. Two commits landed in main: PR #12 merged. see the run. Lane, State. bridge, done. This sentence wraps here. Check a link now.");
+    expect(speakableText("Two commits landed.")).toBe("Two commits landed.");
+    expect(speakableText("```\nonly code\n```")).toBe("");
+  });
+
+  it("refuses a reply with nothing left to say", async () => {
+    const { server, post } = await hook({ key: async () => KEY, fetch: (async () => { throw new Error("not called"); }) as typeof fetch });
+    servers.push(server);
+    expect((await post({ text: "```\nconst a = 1\n```" })).status).toBe(400);
   });
 });

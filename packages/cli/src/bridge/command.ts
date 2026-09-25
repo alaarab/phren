@@ -101,10 +101,12 @@ export async function runBridge(args: string[], version: string): Promise<number
   return 0;
 }
 
-/** Doctor's push check, from the running Hook's own capability: only a Hook
- * that loaded apns.json and its key offers `approvalPush`. */
+/** Doctor's push check, from the running Hook's own capability: a Hook that
+ * loaded apns.json and its key, or one whose phones registered through the
+ * push relay, offers `approvalPush`. */
 export function approvalPushCheck(helper: Json): { configured: boolean; warning?: string } {
-  const configured = object(helper.capabilities).approvalPush === "direct-apns";
+  const capability = object(helper.capabilities).approvalPush;
+  const configured = capability === "direct-apns" || capability === "relay";
   return configured ? { configured } : { configured, warning: apnsSetupSteps() };
 }
 

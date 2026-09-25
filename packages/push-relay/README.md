@@ -20,6 +20,17 @@ It keeps no state and can't read notifications:
   sends a minute per phone are refused. A `410` means Apple no longer knows
   the phone; the Hook stops and the phone registers again.
 
+## The Hook and the phone
+
+The phone registers with the relay itself, makes a 32-byte content key, and
+hands `{url, relayId, secret, key}` to each paired Hook over SSH
+(`POST /v1/push/register`, field `relay`). The Hook encrypts each alert's
+title, body, category and `phren` routing object as JSON with
+ChaCha20-Poly1305 (base64url of nonce, ciphertext and tag, CryptoKit's
+`ChaChaPoly.SealedBox(combined:)` layout), shortening a long body to fit
+2,800 characters. The phone's Notification Service Extension decrypts `e`
+and shows the real text; the Approve and Deny actions work as before.
+
 ## Running it
 
 ```sh

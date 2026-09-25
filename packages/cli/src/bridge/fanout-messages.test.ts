@@ -81,6 +81,17 @@ process.stdin.on('end', () => {
   return { store, directory, worktree, manifest, service, env, child, validate, finish };
 }
 
+// A resumed worker is a real subprocess launched through `nice`; under a loaded
+// full-suite run it can take several seconds, far past vi.waitFor's 1 s default.
+// Wait for the round's receipt and the manifest the launcher writes after it.
+async function finished(list: () => Promise<{ messages: { status: string }[] }>, directory: string) {
+  await vi.waitFor(async () => {
+    const stderr = await readFile(path.join(directory, "stderr.log"), "utf8").catch(() => "");
+    expect((await list()).messages[0]?.status, stderr).toBe("completed");
+    expect(JSON.parse(await readFile(path.join(directory, "manifest.json"), "utf8")).status, stderr).toBe("completed");
+  }, { timeout: 30_000, interval: 100 });
+}
+
 describe("POST /v1/subagents/resume", () => {
   // These two run a real resumed worker. Fan-out launches it through `nice` and
   // stops a served harness by its process group, both POSIX: Windows has no nice
@@ -92,7 +103,7 @@ describe("POST /v1/subagents/resume", () => {
     const result = await f.service.send({ target, child: f.child, text });
     expect(f.validate).toHaveBeenCalledWith(target);
     expect(result).toMatchObject({ ok: true, message: { text, status: "running" } });
-    await vi.waitFor(async () => expect((await f.service.list(target, f.child)).messages[0].status, await readFile(path.join(f.directory, "stderr.log"), "utf8")).toBe("completed"));
+    await finished(() => f.service.list(target, f.child), f.directory);
     const invocation = JSON.parse(await readFile(path.join(f.worktree, "invocation.json"), "utf8"));
     expect(invocation).toMatchObject({ text, cwd: f.worktree });
     expect(invocation.argv).toEqual(provider === "codex"
@@ -107,7 +118,7 @@ describe("POST /v1/subagents/resume", () => {
     expect(JSON.stringify(transcript.entries)).toContain("Original reply");
     expect(JSON.stringify(transcript.entries)).toContain("Resumed reply");
     expect(JSON.stringify(transcript.entries)).toContain("Review the fix");
-  });
+  }, 45_000);
 
   it.skipIf(process.platform === "win32")("durably queues a running worker and resumes after it finishes, even with a new service", async () => {
     const f = await fixture("running");
@@ -118,10 +129,10 @@ describe("POST /v1/subagents/resume", () => {
     expect((await next.list(target, f.child)).messages).toEqual([receipt.message]);
     await f.finish();
     await Promise.all([next.tick(), f.service.tick()]);
-    await vi.waitFor(async () => expect((await next.list(target, f.child)).messages[0].status, await readFile(path.join(f.directory, "stderr.log"), "utf8")).toBe("completed"));
+    await finished(() => next.list(target, f.child), f.directory);
     const events = await readFile(path.join(f.directory, "events.jsonl"), "utf8");
     expect(events.split("phren/fanout-message")).toHaveLength(2);
-  });
+  }, 45_000);
 
   it("refuses a worker from another store even when parent and job ids match", async () => {
     const first = await fixture(), other = await fixture();

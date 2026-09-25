@@ -41,7 +41,7 @@ it("reads beyond 2 GiB without loading the file, and handles an empty file", asy
   expect(Buffer.from(result.data, "base64").toString()).toBe("tail");
   await writeFile(path.join(root, "empty.txt"), "");
   expect(await readFileRange(root, "empty.txt", 0, MAX_FILE_RANGE)).toMatchObject({ total: 0, eof: true, data: "" });
-});
+}, process.platform === "win32" ? 60_000 : 15_000);
 
 it("refuses traversal, outside absolute paths, .git, directories and symlink escapes", async () => {
   await writeFile(path.join(scratch, "secret"), "private");

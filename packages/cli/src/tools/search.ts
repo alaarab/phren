@@ -761,7 +761,7 @@ async function handleGetFindings(
     metadata.push(`status=${entry.status}`);
     if (entry.taskItem) metadata.push(`task=${entry.taskItem}`);
     if (entry.scope) metadata.push(`scope=${entry.scope}`);
-    if (entry.symbol) metadata.push(`symbol=${entry.symbol}`);
+    if (entry.symbol) metadata.push(`name=${entry.symbol}`);
     if (entry.supersedes) metadata.push(`supersedes="${entry.supersedes.slice(0, 30)}"`);
     if (entry.supersededBy) metadata.push(`superseded_by="${entry.supersededBy.slice(0, 30)}"`);
     if (entry.contradicts?.length) metadata.push(`contradicts=${entry.contradicts.length}`);

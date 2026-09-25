@@ -24,7 +24,7 @@ function fixture() {
 }
 
 describe("refreshing existing instruction and skill destinations", () => {
-  it("refreshes generated AGENTS and skill mirrors after skills are added or deleted", () => {
+  it("relinks a generated AGENTS snapshot and refreshes skill mirrors after skills are added or deleted", () => {
     const { store, repo } = fixture();
     const skillsDir = path.join(repo, ".claude", "skills");
     const oldSkill = path.join(store, "demo", "skills", "old.md");
@@ -34,9 +34,8 @@ describe("refreshing existing instruction and skill destinations", () => {
     writeFile(path.join(store, "global", "skills", "review", "SKILL.md"), "---\nname: review\ndescription: Review changes\n---\nUse the checklist.\n");
     writeFile(path.join(store, "global", "skills", "review", "checklist.md"), "Check tests.\n");
     refreshLinkedContext(store, "dev");
-    const agents = fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8");
-    expect(agents).toContain("Updated project instructions");
-    expect(agents).toContain("review");
+    expect(fs.lstatSync(path.join(repo, "AGENTS.md")).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8")).toBe("# Updated project instructions\n");
     expect(fs.existsSync(path.join(skillsDir, "old.md"))).toBe(false);
     expect(fs.readFileSync(path.join(skillsDir, "review", "checklist.md"), "utf8")).toBe("Check tests.\n");
   });
@@ -49,7 +48,7 @@ describe("refreshing existing instruction and skill destinations", () => {
     expect(fs.existsSync(path.join(repo, ".claude"))).toBe(false);
   });
 
-  it("applies phone skill switches to existing mirrors and generated instructions", () => {
+  it("applies phone skill switches to existing mirrors", () => {
     const { store, repo } = fixture();
     writeFile(path.join(store, "demo", "skills", "audit.md"), "# Audit\n");
     const skillsDir = path.join(repo, ".claude", "skills");
@@ -57,7 +56,6 @@ describe("refreshing existing instruction and skill destinations", () => {
     writeFile(path.join(store, ".config", "skill-preferences.json"), JSON.stringify({ schemaVersion: 1, enabledSkills: { "demo:audit": false } }));
     refreshLinkedContext(store, "dev");
     expect(fs.existsSync(path.join(skillsDir, "audit.md"))).toBe(false);
-    expect(fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8")).toContain("Disabled skills:");
     expect(fs.existsSync(path.join(store, "demo", "skills", "audit.md"))).toBe(true);
   });
 

@@ -63,6 +63,9 @@ describe("conflictStrategy", () => {
     expect(conflictStrategy(".config/task-archive/demo.md")).toBe("archive");
     expect(conflictStrategy("demo/reference/topics/sync.md")).toBe("topic");
     expect(conflictStrategy("demo/summary.md")).toBe("summary");
+    expect(conflictStrategy("demo/review.md")).toBe("union");
+    expect(conflictStrategy("demo/notes/2026-09-24.md")).toBe("union");
+    expect(conflictStrategy("demo/journal/2026-09-24-sam.md")).toBe("union");
     expect(conflictStrategy("demo/settings.yaml")).toBeNull();
   });
 });
@@ -109,6 +112,45 @@ describe("store sync conflict resolution with two clones and a bare remote", () 
     expect(recovered.ok).toBe(true);
     git(writer, "pull");
     expect(read(writer, "demo/tasks.md")).toBe(read(local, "demo/tasks.md"));
+  });
+
+  // The MacBook store diverged this way: both machines appended notes, review
+  // items and topic bullets at the same spot and edited the summary's prose.
+  it("unions notes, review items and topic bullets and takes the incoming summary", async () => {
+    const note = (id: string, text: string) => [`## ${id} <!-- nid:${id} -->`, "", text, ""];
+    const review = (items: string[]) => ["# demo Review Queue", "", "## Review", "", ...items, ""].join("\n");
+    const prose = (line: string) => summary("2026-09-20").replace("A sample project.", line);
+    const { local, writer, commit } = fixture({
+      "demo/notes/2026-09-24.md": ["# demo Notes", "", ...note("0001", "Base note")].join("\n"),
+      "demo/review.md": review(["- Base item"]),
+      "demo/reference/topics/sync.md": topic("2026-09-20T00:00:00Z", ["- Base bullet"]),
+      "demo/summary.md": summary("2026-09-20"),
+    });
+    commit(local, {
+      "demo/notes/2026-09-24.md": ["# demo Notes", "", ...note("0001", "Base note"), ...note("0002", "Local note")].join("\n"),
+      "demo/review.md": review(["- Base item", "- Local item"]),
+      "demo/reference/topics/sync.md": topic("2026-09-21T00:00:00Z", ["- Base bullet", "- Local bullet"]),
+      "demo/summary.md": prose("Local prose."),
+    }, "local work");
+    commit(writer, {
+      "demo/notes/2026-09-24.md": ["# demo Notes", "", ...note("0001", "Base note"), ...note("0003", "Remote note")].join("\n"),
+      "demo/review.md": review(["- Base item", "- Remote item"]),
+      "demo/reference/topics/sync.md": topic("2026-09-22T00:00:00Z", ["- Base bullet", "- Remote bullet"]),
+      "demo/summary.md": prose("Remote prose."),
+    }, "remote work");
+    git(writer, "push");
+
+    const result = await pullAtSessionStart(local);
+
+    expect(result.ok).toBe(true);
+    const notes = read(local, "demo/notes/2026-09-24.md");
+    for (const text of ["Base note", "Local note", "Remote note"]) expect(notes).toContain(text);
+    expect(notes).not.toMatch(/^(<<<<<<<|=======|>>>>>>>)/m);
+    expect(read(local, "demo/review.md")).toBe(review(["- Base item", "- Local item", "- Remote item"]));
+    expect(read(local, "demo/reference/topics/sync.md")).toBe(topic("2026-09-22T00:00:00Z", ["- Base bullet", "- Local bullet", "- Remote bullet"]));
+    expect(read(local, "demo/summary.md")).toBe(prose("Remote prose."));
+    expect(git(local, "status", "--porcelain")).toBe("");
+    expect((await recoverPushConflict(local)).ok).toBe(true);
   });
 
   it("aborts on any other conflicted file and logs every conflicted path", async () => {

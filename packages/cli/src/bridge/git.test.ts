@@ -15,6 +15,9 @@ type Log = { commits: Commit[]; uncommitted: { files: number; additions: number;
 type Branches = { current: string | null; local: { name: string }[]; remote: { name: string }[] };
 type Tree = { path: string; version?: string; entries: { name: string; path: string; kind: string; status?: string; fileCount?: number }[] };
 
+// Git on the Windows runners is several times slower than elsewhere; the fixture-heavy tests get room there.
+const windows = process.platform === "win32";
+
 describe("git routes", () => {
   let created: string | undefined;
   afterEach(async () => { if (created) await rm(created, { recursive: true, force: true }); created = undefined; });
@@ -174,8 +177,8 @@ describe("git routes", () => {
     const elapsed = performance.now() - started;
     expect(child.entries).toHaveLength(100);
     expect(child.version).toBe(cold.version);
-    expect(elapsed).toBeLessThan(500);
-  });
+    expect(elapsed).toBeLessThan(windows ? 2_000 : 500);
+  }, windows ? 60_000 : 15_000);
 
   it("refreshes cached children on status, mutations and HEAD changes and counts descendants", async () => {
     const { root, git } = await repository();
