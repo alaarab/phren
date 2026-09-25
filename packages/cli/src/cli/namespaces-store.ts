@@ -14,16 +14,65 @@ import {
   type StoreEntry,
 } from "../store-registry.js";
 import { mergeStoreUpstream, type RunStoreGit } from "../sync/store-merge.js";
+import { aheadBehind, logSyncOutcome } from "../sync/outcome.js";
+import { getRuntimeHealth, updateRuntimeHealth } from "../shared/governance.js";
 
 function printStoreUsage() {
   console.log("Usage:");
   console.log("  phren store list                        List registered stores");
   console.log("  phren store add <name> --remote <url>   Add a team store");
   console.log("  phren store remove <name>               Remove a store (local only)");
-  console.log("  phren store sync                        Pull all stores");
+  console.log("  phren store sync                        Pull and push all stores");
   console.log("  phren store activity [--limit N]         Recent team findings");
   console.log("  phren store subscribe <name> <project...>   Subscribe store to projects");
   console.log("  phren store unsubscribe <name> <project...> Unsubscribe store from projects");
+}
+
+interface StorePushResult { status: "pushed" | "in-sync" | "skipped" | "failed"; detail: string }
+
+/**
+ * Push what a sync left ahead of the upstream: the merge commit and any local
+ * commits. Without this a merge that resolved conflicts stayed local, and the
+ * store sat N commits ahead until someone ran `git push` by hand.
+ */
+async function pushStoreUpstream(store: StoreEntry, git: RunStoreGit): Promise<StorePushResult> {
+  if (store.sync === "pull-only" || store.role === "readonly") return { status: "skipped", detail: "pull-only store" };
+  const counts = await aheadBehind(store.path, git);
+  if (!counts) return { status: "skipped", detail: "no tracking remote" };
+  if (counts.ahead === 0) return { status: "in-sync", detail: "nothing to push" };
+  const branch = await git(store.path, ["symbolic-ref", "--quiet", "HEAD"]);
+  const refs = branch.ok
+    ? await git(store.path, ["for-each-ref", "--format=%(upstream:remotename)%09%(upstream:remoteref)", branch.output])
+    : branch;
+  const [remote, remoteRef] = refs.ok ? refs.output.split("\t") : [];
+  if (!remote || !remoteRef) return { status: "failed", detail: "cannot read the upstream branch" };
+  const pushed = await git(store.path, ["push", "--quiet", "--", remote, `HEAD:${remoteRef}`]);
+  if (!pushed.ok) return { status: "failed", detail: `push failed: ${(pushed.error || "unknown Git error").split("\n")[0]}` };
+  return { status: "pushed", detail: `pushed ${counts.ahead} commit${counts.ahead === 1 ? "" : "s"}` };
+}
+
+/** Record a sync's push on the primary store, so doctor's runtime-auto-save check reflects it. */
+async function recordPrimaryPush(phrenPath: string, push: StorePushResult, git: RunStoreGit): Promise<void> {
+  if (push.status === "skipped") return;
+  const now = new Date().toISOString();
+  const previous = getRuntimeHealth(phrenPath).lastSync;
+  const counts = await aheadBehind(phrenPath, git);
+  const detail = `store sync: ${push.detail}`;
+  const failed = push.status === "failed";
+  updateRuntimeHealth(phrenPath, {
+    lastAutoSave: { at: now, status: failed ? "sync-failed" : "saved-pushed", detail },
+    lastSync: {
+      ...previous,
+      lastPushAt: now,
+      lastPushStatus: failed ? "push-failed" : "saved-pushed",
+      lastPushDetail: detail,
+      unsyncedCommits: counts?.ahead ?? previous?.unsyncedCommits,
+      consecutiveFailures: failed ? (previous?.consecutiveFailures ?? 0) + 1 : 0,
+      ...(failed ? {} : { lastSuccessfulPushAt: now }),
+      ...(counts ?? {}),
+    },
+  });
+  logSyncOutcome(phrenPath, "store-sync", { ok: !failed, detail: push.detail, counts });
 }
 
 function countStoreProjects(store: StoreEntry): number {
@@ -308,7 +357,14 @@ export async function handleStoreNamespace(args: string[]) {
           }
         }
 
-        console.log(`  ${store.name}: ok (${result.detail})`);
+        const push = await pushStoreUpstream(store, git);
+        if (store.role === "primary") await recordPrimaryPush(store.path, push, git);
+        if (push.status === "failed") {
+          console.log(`  ${store.name}: PUSH FAILED (${result.detail} ${push.detail}; the store is still ahead of the remote)`);
+          hasErrors = true;
+        } else {
+          console.log(`  ${store.name}: ok (${result.detail}${push.status === "pushed" ? ` Then ${push.detail}.` : ""})`);
+        }
         if (store.role === "primary") primarySynced = true;
       } catch (err: unknown) {
         console.log(`  ${store.name}: FAILED (${errorMessage(err).split("\n")[0]})`);
