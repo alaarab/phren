@@ -1,0 +1,42 @@
+{
+  "project": "myproj",
+  "title": "# myproj tasks",
+  "items": {
+    "Active": [
+      {
+        "id": "A1",
+        "stableId": "013d708f",
+        "section": "Active",
+        "line": "Investigate flaky sync test on CI [medium]",
+        "checked": false,
+        "priority": "medium",
+        "rank": 3,
+        "createdAt": "2026-07-22T10:00:00.000Z"
+      }
+    ],
+    "Queue": [
+      {
+        "id": "Q1",
+        "stableId": "aa853063",
+        "section": "Queue",
+        "line": "Ship the iOS app [high]",
+        "checked": false,
+        "priority": "high",
+        "rank": 1,
+        "createdAt": "2026-07-20T10:00:00.000Z"
+      }
+    ],
+    "Done": [
+      {
+        "id": "D1",
+        "stableId": "58b9b427",
+        "section": "Done",
+        "line": "Write fixture generator",
+        "checked": true,
+        "rank": 2,
+        "createdAt": "2026-07-21T10:00:00.000Z"
+      }
+    ]
+  },
+  "issues": []
+}

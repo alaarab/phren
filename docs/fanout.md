@@ -117,8 +117,7 @@ does not change the archive rules below or delete the job directory.
 
 With direct APNs configured and a phone registered, the Hook sends one push
 naming the worker and reason. Overlapping notification sweeps are coalesced.
-The phone's local approval and schedule reminders are a separate path; see
-[phone notifications](../apps/ios/design/notifications.md).
+The phone's local approval and schedule reminders are a separate path.
 
 ## Archiving finished jobs
 

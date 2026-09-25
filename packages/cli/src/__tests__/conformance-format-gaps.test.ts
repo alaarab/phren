@@ -12,11 +12,11 @@ import { grantAdmin, makeTempDir, REPO_ROOT } from "../test-helpers.js";
  * cover, each a real rough edge in the format rather than a hypothetical
  * one. This file closes all five on the TypeScript side, reading the same
  * committed fixtures PhrenKitTests/FormatGapsTests.swift reads on the Swift
- * side (apps/ios/PhrenKit/Tests/PhrenKitTests/Fixtures/) so both languages
+ * side (packages/cli/fixtures/conformance/) so both languages
  * are asserting against identical bytes, not independently-authored guesses
  * at the same scenario.
  */
-const FIXTURES_DIR = path.join(REPO_ROOT, "apps/ios/PhrenKit/Tests/PhrenKitTests/Fixtures");
+const FIXTURES_DIR = path.join(REPO_ROOT, "packages/cli/fixtures/conformance");
 const PROJECT = "myproj";
 
 function readFixture(name: string): string {

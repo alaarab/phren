@@ -342,6 +342,6 @@ ROOT.phrenGraph = {
   removeNode,
   updateNode,
   destroy,
-  /** Browser frame-budget probe for apps/ios/scripts/test-graph.mjs. */
+  /** Browser frame-budget probe for the phone app's graph test (test-graph.mjs). */
   benchLabels: (frames?: number) => benchLabelTick(frames),
 };

@@ -1,0 +1,28 @@
+[
+  {
+    "id": "M1",
+    "section": "Review",
+    "date": "2026-07-26",
+    "text": "[pitfall] Session hooks fire twice when both MCP and hooks mode are enabled",
+    "line": "- [2026-07-26] [pitfall] Session hooks fire twice when both MCP and hooks mode are enabled [confidence 0.85]",
+    "confidence": 0.85,
+    "risky": false
+  },
+  {
+    "id": "M2",
+    "section": "Review",
+    "date": "2026-07-26",
+    "text": "Low-confidence auto capture that should look risky",
+    "line": "- [2026-07-26] Low-confidence auto capture that should look risky [confidence 0.4]",
+    "confidence": 0.4,
+    "risky": true
+  },
+  {
+    "id": "M3",
+    "section": "Stale",
+    "date": "2026-07-26",
+    "text": "Finding older than its decay window",
+    "line": "- [2026-07-26] Finding older than its decay window",
+    "risky": true
+  }
+]

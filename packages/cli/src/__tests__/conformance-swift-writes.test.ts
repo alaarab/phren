@@ -7,17 +7,16 @@ import { listNotes } from "../data/notes.js";
 import { grantAdmin, makeTempDir, REPO_ROOT } from "../test-helpers.js";
 
 /**
- * The inverse of apps/ios/scripts/generate-fixtures.mjs: that script proves
+ * The inverse of the apps' generate-fixtures.mjs: that script proves
  * TypeScript writes -> Swift reads. PhrenKit is a full independent writer
  * too (FindingsFile.add/.edit/.remove, TasksFile.add/.complete/.update,
  * ReviewFile.edit/.approve, NotesFile.add/.edit/.markPromoted), and nothing
  * previously proved the CLI's own readers accept what it produces.
  *
- * `SwiftWritesFixturesTests.swift`
- * (apps/ios/PhrenKit/Tests/PhrenKitTests/SwiftWritesFixtures.swift) builds
+ * `SwiftWritesFixturesTests.swift` (in the closed-source phren apps) builds
  * these exact files with PhrenKit's real mutators and, when regenerating
  * (`PHREN_REGENERATE_SWIFT_FIXTURES=1 swift test`), commits them under
- * Fixtures/swift-writes/ alongside the CLI-generated corpus. This file reads
+ * packages/cli/fixtures/conformance/swift-writes/ alongside the CLI-generated corpus. This file reads
  * the committed result with the CLI's real readers and asserts the parsed
  * shape matches what that Swift test intended — the two files together are
  * the whole conformance claim; neither language can invoke the other
@@ -31,7 +30,7 @@ import { grantAdmin, makeTempDir, REPO_ROOT } from "../test-helpers.js";
  */
 const SWIFT_WRITES_DIR = path.join(
   REPO_ROOT,
-  "apps/ios/PhrenKit/Tests/PhrenKitTests/Fixtures/swift-writes",
+  "packages/cli/fixtures/conformance/swift-writes",
 );
 
 const PROJECT = "myproj";

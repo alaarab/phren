@@ -1,0 +1,35 @@
+{
+  "old": {
+    "id": "L2",
+    "stableId": "0000a003",
+    "date": "2026-07-27",
+    "text": "🧵🧵🧵🧵🧵xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxCANARY-MUST-NOT-SURVIVE-60-TRUNCATION",
+    "citation": "<!-- phren:cite {\"created_at\":\"2026-07-27T09:10:00.000Z\"} -->",
+    "citationData": {
+      "created_at": "2026-07-27T09:10:00.000Z"
+    },
+    "supersededBy": "🧵🧵🧵zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "status": "superseded",
+    "status_updated": "2026-07-27",
+    "status_reason": "superseded_by",
+    "status_ref": "🧵🧵🧵zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "archived": false,
+    "tier": "current"
+  },
+  "new": {
+    "id": "L1",
+    "stableId": "0000a004",
+    "date": "2026-07-27",
+    "text": "🧵🧵🧵zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzNEW-FINDING-TAIL",
+    "citation": "<!-- phren:cite {\"created_at\":\"2026-07-27T09:11:00.000Z\",\"supersedes\":\"🧵🧵🧵🧵🧵xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxCANARY-MUST-NOT-SURVIVE-60-TRUNCATION\"} -->",
+    "citationData": {
+      "created_at": "2026-07-27T09:11:00.000Z",
+      "supersedes": "🧵🧵🧵🧵🧵xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxCANARY-MUST-NOT-SURVIVE-60-TRUNCATION"
+    },
+    "supersedes": "🧵🧵🧵🧵🧵xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "status": "active",
+    "status_updated": "2026-07-27",
+    "archived": false,
+    "tier": "current"
+  }
+}

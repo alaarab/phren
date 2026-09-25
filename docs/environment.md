@@ -189,5 +189,4 @@ Workers write manifests, event logs, stderr and exit records under
 
 Phone-local notification switches, the approval dedupe ledger and pending
 schedule reminders live on the iPhone. They require no Hook environment
-setting, APNs key or relay. Optional direct APNs remains separate; see
-[phone notifications](../apps/ios/design/notifications.md).
+setting, APNs key or relay. Optional direct APNs remains separate.
