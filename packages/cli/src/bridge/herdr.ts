@@ -11,6 +11,7 @@ import { recordedSession } from "./agent-hook-stores.js";
 import { tabActivityKey } from "./tab-activity.js";
 import { intervalFromEnv } from "./limits.js";
 import { countHerdr, countIdentity } from "./metrics.js";
+import { phrenStoreRoot } from "./transcripts.js";
 
 const exec = promisify(execFile);
 export function herdrRoot(): string { return process.env.PHREN_HERDR_HOME || path.join(homedir(), ".config/herdr"); }
@@ -313,7 +314,33 @@ export async function copilotForegroundSession(pids: number[], home = copilotHom
   }
   return current;
 }
+/** The conversation phren's OpenCode plugin says this process shows (it
+ * records it by PID on each prompt), when its transcript exists. Herdr's own
+ * OpenCode integration may be missing; this does not depend on it. */
+export async function opencodePidSession(pids: number[], root = phrenStoreRoot()): Promise<string | undefined> {
+  const folder = path.join(root, ".runtime", "sessions");
+  let current: string | undefined, latest = -Infinity;
+  for (const pid of pids) {
+    const file = await open(path.join(folder, `opencode-pid-${pid}.json`), "r").catch(() => undefined);
+    if (!file) continue;
+    try {
+      const { size } = await file.stat();
+      if (size > 4_096) continue;
+      const value = object(JSON.parse((await file.readFile()).toString("utf8")));
+      const session = typeof value.session === "string" && /^ses_[0-9A-Za-z]{1,64}$/.test(value.session) ? value.session : undefined;
+      const at = Date.parse(String(value.at));
+      if (!session || !(at > latest)) continue;
+      if (!(await stat(path.join(folder, `opencode-${session}.events.jsonl`)).catch(() => undefined))) continue;
+      current = session; latest = at;
+    } catch { continue; } finally { await file.close(); }
+  }
+  return current;
+}
 async function identityFromProcesses(server: string, pane: Json, pids: number[]): Promise<PaneIdentity> {
+  if (pane.agent === "opencode") {
+    const bound = await opencodePidSession(pids).catch(() => undefined);
+    if (bound) return { sessionId: bound, noTranscriptLogs: false };
+  }
   if (pane.agent === "copilot") {
     const current = await copilotForegroundSession(pids).catch(() => undefined);
     // A conversation nothing was sent to yet has no transcript: the pane is

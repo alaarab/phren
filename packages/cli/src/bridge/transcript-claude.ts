@@ -233,6 +233,22 @@ export function isNarration(block: Record<string, unknown>): boolean {
 /** The largest injection the phone is sent; the hook's own budget keeps real ones far smaller. */
 const HOOK_CONTEXT_LIMIT = 16_384;
 
+const SKILL_BODY = "Base directory for this skill:";
+/** What a Skill call loaded. Claude Code answers the call itself with only
+ * "Launching skill: <name>" and writes the skill's text as a hidden user row
+ * pointing back at the call (`sourceToolUseID`). That row alone crosses, as a
+ * second result for the same call, so the phone can show what the skill said;
+ * every other hidden row stays private. */
+export function skillBody(raw: Json): Json | undefined {
+  if (raw.type !== "user" || raw.isMeta !== true || raw.isSidechain || typeof raw.sourceToolUseID !== "string" || !raw.sourceToolUseID) return undefined;
+  const content = object(raw.message).content;
+  const text = typeof content === "string" ? content
+    : objects(content).filter(block => block.type === "text").map(block => String(block.text ?? "")).join("\n");
+  if (!text.startsWith(SKILL_BODY)) return undefined;
+  return { type: "user", timestamp: raw.timestamp, ...(typeof raw.uuid === "string" ? { uuid: raw.uuid } : {}),
+    message: { role: "user", content: [{ type: "tool_result", tool_use_id: raw.sourceToolUseID, content: text.slice(0, 32_768), phrenSkillBody: true }] } };
+}
+
 /** A phren UserPromptSubmit injection, as `{ type: "phren_hook_context",
  * parentUuid, content }`, or undefined for any other row. */
 export function phrenHookContext(raw: Json, includeSidechain = false): Json | undefined {
@@ -305,6 +321,8 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false): Json | 
   // phren's own output crosses; other hooks' output stays private.
   const hookContext = phrenHookContext(raw, includeSidechain);
   if (hookContext) return hookContext;
+  const skill = skillBody(raw);
+  if (skill) return skill;
   if (raw.isMeta || (raw.isSidechain && !includeSidechain) || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
   raw = Object.fromEntries(Object.entries(raw).filter(([key]) => CLAUDE_KEYS.has(key)));
   const message = unwrapUserText(object(raw.message));
