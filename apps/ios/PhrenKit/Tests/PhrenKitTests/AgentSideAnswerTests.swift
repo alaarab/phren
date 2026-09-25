@@ -35,11 +35,11 @@ final class AgentSideAnswerTests: XCTestCase {
         XCTAssertNil(AgentSideAnswer.question(source: "claude", text: "/btw"))
         XCTAssertNil(AgentSideAnswer.question(source: "claude", text: "/btwx hi"))
         XCTAssertNil(AgentSideAnswer.question(source: "codex", text: "/btw hi"))
-    }
-
-    func testBtwIsSuggestedForClaude() {
-        XCTAssertEqual(AgentSlashCommand.suggestions(source: "claude", draft: "/b"), ["/btw"])
-        XCTAssertEqual(AgentSlashCommand.menu(source: "claude", draft: "/btw").first?.detail, "Ask a side question while it works")
-        XCTAssertTrue(AgentSlashCommand.suggestions(source: "codex", draft: "/b").isEmpty)
+        // Folded from testBtwIsSuggestedForClaude.
+        do {
+            XCTAssertEqual(AgentSlashCommand.suggestions(source: "claude", draft: "/b"), ["/btw"])
+            XCTAssertEqual(AgentSlashCommand.menu(source: "claude", draft: "/btw").first?.detail, "Ask a side question while it works")
+            XCTAssertTrue(AgentSlashCommand.suggestions(source: "codex", draft: "/b").isEmpty)
+        }
     }
 }

@@ -30,14 +30,4 @@ enum PhrenDensity {
     /// The Working tree row and its indent per level.
     static let treeRowHeight: CGFloat = 32
     static let treeIndent: CGFloat = 12
-
-    /// A collapsed tool row plus the transcript gap that follows it.
-    static var collapsedToolRowPitch: CGFloat { collapsedToolRowHeight + transcriptRowSpacing }
-
-    /// The before/after measure for the density pass: how many fixed-height
-    /// collapsed tool rows fit in a transcript viewport of `height` points.
-    static func collapsedToolRows(inHeight height: CGFloat) -> Int {
-        guard height > 0 else { return 0 }
-        return Int(height / collapsedToolRowPitch)
-    }
 }

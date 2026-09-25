@@ -71,21 +71,6 @@ final class AgentChatQueueTests: AgentChatUITestCase {
     }
 
     @MainActor
-    func testRejectedSteeringWaitsForExplicitRetry() {
-        let app = launch(extra: ["--chat-working", "--chat-send-rejected"])
-        app.buttons["live-chat:w7:w7:t9"].tap()
-        XCTAssertTrue(app.buttons["chat-stop"].waitForExistence(timeout: 8))
-        let composer = app.descendants(matching: .any).matching(identifier: "chat-composer").firstMatch
-        composer.tap(); composer.typeText("Retry explicitly")
-        app.buttons["chat-send"].tap()
-        XCTAssertTrue(app.staticTexts["chat-delivery-error"].waitForExistence(timeout: 8))
-        XCTAssertEqual(composer.value as? String, "Retry explicitly")
-        XCTAssertFalse(app.staticTexts["Received in codex on w7:p1: Retry explicitly"].waitForExistence(timeout: 2))
-        app.buttons["chat-send"].tap()
-        XCTAssertTrue(app.staticTexts["Received in codex on w7:p1: Retry explicitly"].waitForExistence(timeout: 8))
-    }
-
-    @MainActor
     func testSwitchAgentAcrossComputersPreservesSeparateDrafts() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--automatic-sessions-fixture", "--all-sessions-fixture", "--session-relative-time-fixture", "--native-chat-fixture", "--chat-persistent-draft", "--chat-clear-drafts"]

@@ -32,13 +32,6 @@ final class AgentChatTests: XCTestCase {
         XCTAssertEqual(tree.agents[0].children[0].name, "worker")
     }
 
-    func testChildAgentDecodesWithAndWithoutModel() throws {
-        let withModel = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"a","provider":"codex","model":"gpt-5-codex","path":"/root/first","callId":"c1","state":"running","children":[]}"#.utf8))
-        let withoutModel = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"b","provider":"claude","path":"/root/second","callId":"c2","state":"completed","children":[]}"#.utf8))
-        XCTAssertEqual(withModel.model, "gpt-5-codex")
-        XCTAssertNil(withoutModel.model)
-    }
-
     func testBlockedFanoutChildReadsAsRefusedAndNeverCompleted() throws {
         let blocked = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"a","provider":"opencode","path":"Clean the tree","callId":"fanout:a","state":"completed","reason":"blocked: doom_loop glob","children":[]}"#.utf8))
         XCTAssertEqual(blocked.reason, "blocked: doom_loop glob")
@@ -75,6 +68,13 @@ final class AgentChatTests: XCTestCase {
         XCTAssertNil(neither.worktreeName)
         XCTAssertNil(neither.branch)
         XCTAssertNil(neither.checkoutLabel)
+        // Folded from testChildAgentDecodesWithAndWithoutModel.
+        do {
+            let withModel = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"a","provider":"codex","model":"gpt-5-codex","path":"/root/first","callId":"c1","state":"running","children":[]}"#.utf8))
+            let withoutModel = try JSONDecoder().decode(AgentChild.self, from: Data(#"{"id":"b","provider":"claude","path":"/root/second","callId":"c2","state":"completed","children":[]}"#.utf8))
+            XCTAssertEqual(withModel.model, "gpt-5-codex")
+            XCTAssertNil(withoutModel.model)
+        }
     }
 
     func testChildTranscriptReadsSidechainRowsAndRefusesAnotherConversation() throws {

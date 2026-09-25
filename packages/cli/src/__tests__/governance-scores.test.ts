@@ -34,22 +34,12 @@ describe("entryScoreKey", () => {
     expect(a).toBe(b);
   });
 
-  it("differentiates by project", () => {
-    const a = entryScoreKey("proj-a", "FINDINGS.md", "snippet");
-    const b = entryScoreKey("proj-b", "FINDINGS.md", "snippet");
-    expect(a).not.toBe(b);
-  });
-
-  it("differentiates by filename", () => {
-    const a = entryScoreKey("proj", "FINDINGS.md", "snippet");
-    const b = entryScoreKey("proj", "TRUTHS.md", "snippet");
-    expect(a).not.toBe(b);
-  });
-
-  it("differentiates by snippet content", () => {
-    const a = entryScoreKey("proj", "FINDINGS.md", "alpha");
-    const b = entryScoreKey("proj", "FINDINGS.md", "beta");
-    expect(a).not.toBe(b);
+  it.each([
+    ["project", ["proj-a", "FINDINGS.md", "snippet"], ["proj-b", "FINDINGS.md", "snippet"]],
+    ["filename", ["proj", "FINDINGS.md", "snippet"], ["proj", "TRUTHS.md", "snippet"]],
+    ["snippet content", ["proj", "FINDINGS.md", "alpha"], ["proj", "FINDINGS.md", "beta"]],
+  ] as const)("differentiates by %s", (_field, a, b) => {
+    expect(entryScoreKey(...a)).not.toBe(entryScoreKey(...b));
   });
 
   it("truncates long snippets to 200 chars for hashing", () => {
@@ -118,34 +108,18 @@ describe("recordFeedback", () => {
     expect(entry.key).toBe(key);
   });
 
-  it("records helpful feedback in journal", () => {
-    const key = entryScoreKey("proj", "FINDINGS.md", "helpful snippet");
-    recordFeedback(phrenPath, key, "helpful");
+  it.each([
+    ["helpful", "helpful"],
+    ["reprompt", "repromptPenalty"],
+    ["regression", "regressionPenalty"],
+  ] as const)("records %s feedback in journal", (kind, field) => {
+    const key = entryScoreKey("proj", "FINDINGS.md", `${kind} snippet`);
+    recordFeedback(phrenPath, key, kind);
 
     const journalFile = path.join(phrenPath, ".runtime", "scores.jsonl");
     const lines = fs.readFileSync(journalFile, "utf8").trim().split("\n");
     const entry = JSON.parse(lines[lines.length - 1]);
-    expect(entry.delta.helpful).toBe(1);
-  });
-
-  it("records reprompt penalty in journal", () => {
-    const key = entryScoreKey("proj", "FINDINGS.md", "bad snippet");
-    recordFeedback(phrenPath, key, "reprompt");
-
-    const journalFile = path.join(phrenPath, ".runtime", "scores.jsonl");
-    const lines = fs.readFileSync(journalFile, "utf8").trim().split("\n");
-    const entry = JSON.parse(lines[lines.length - 1]);
-    expect(entry.delta.repromptPenalty).toBe(1);
-  });
-
-  it("records regression penalty in journal", () => {
-    const key = entryScoreKey("proj", "FINDINGS.md", "regressed snippet");
-    recordFeedback(phrenPath, key, "regression");
-
-    const journalFile = path.join(phrenPath, ".runtime", "scores.jsonl");
-    const lines = fs.readFileSync(journalFile, "utf8").trim().split("\n");
-    const entry = JSON.parse(lines[lines.length - 1]);
-    expect(entry.delta.regressionPenalty).toBe(1);
+    expect(entry.delta[field]).toBe(1);
   });
 
   it("writes audit log entry", () => {

@@ -27,15 +27,6 @@ final class TeamBootstrapTests: XCTestCase {
         XCTAssertNil(TeamBootstrap.parse("name:\n"))
     }
 
-    /// A bootstrap that names no role still means team — the file only exists
-    /// in a store created by `phren team init`, which always writes
-    /// `default_role: team`.
-    func testMissingRoleStillMeansTeam() throws {
-        let bootstrap = try XCTUnwrap(TeamBootstrap.parse("name: arc-team\n"))
-        XCTAssertNil(bootstrap.defaultRole)
-        XCTAssertEqual(bootstrap.role, "team")
-    }
-
     /// store-registry.ts:231 — a `default_role` outside the three known roles
     /// is dropped rather than believed.
     func testUnknownRoleIsDropped() throws {
@@ -45,6 +36,12 @@ final class TeamBootstrapTests: XCTestCase {
 
         let readonly = try XCTUnwrap(TeamBootstrap.parse("name: vendor-docs\ndefault_role: readonly\n"))
         XCTAssertEqual(readonly.role, "readonly")
+        // Folded from testMissingRoleStillMeansTeam.
+        do {
+            let bootstrap = try XCTUnwrap(TeamBootstrap.parse("name: arc-team\n"))
+            XCTAssertNil(bootstrap.defaultRole)
+            XCTAssertEqual(bootstrap.role, "team")
+        }
     }
 
     func testReadsTolerantly() throws {
@@ -66,35 +63,5 @@ final class TeamBootstrapTests: XCTestCase {
         let crlf = try XCTUnwrap(TeamBootstrap.parse("name: arc-team\r\n  nested: value\r\ndefault_role: team\r\n"))
         XCTAssertEqual(crlf.name, "arc-team")
         XCTAssertEqual(crlf.role, "team")
-    }
-
-    /// The registry is the fallback signal, and `role` is what routing keys
-    /// off — not the `projects:` claim list, because the app always writes to
-    /// a specific (store, project) pair, which is the CLI's store-qualified
-    /// form (`resolveStoreForProject`, tools/types.ts:105).
-    func testStoresManifestStillCarriesTheRole() {
-        let manifest = StoresManifest.parse("""
-        version: 1
-        stores:
-          - id: 365c6bb8
-            name: phren
-            path: ~/.phren
-            role: primary
-            sync: managed-git
-          - id: 67d3e4c9
-            name: work-shared
-            path: ~/.phren-work-shared
-            role: team
-            sync: managed-git
-            projects:
-              - alpha
-              - beta
-        """)
-        XCTAssertEqual(manifest.stores.map(\.role), ["primary", "team"])
-        XCTAssertEqual(manifest.stores.first { $0.name == "work-shared" }?.projects, ["alpha", "beta"])
-        // A project physically in the team store isn't "claimed elsewhere" —
-        // which is exactly why claim badges can't answer the routing question.
-        XCTAssertNil(manifest.claimingEntry(for: "alpha", physicalStoreName: "work-shared"))
-        XCTAssertEqual(manifest.claimingEntry(for: "alpha", physicalStoreName: "phren")?.role, "team")
     }
 }

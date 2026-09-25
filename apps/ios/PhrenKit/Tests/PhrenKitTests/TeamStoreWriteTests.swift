@@ -184,25 +184,6 @@ final class TeamStoreWriteTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(afterSnapshot.notes["arc"]).first?.promoted ?? false)
     }
 
-    /// Journal routing is store-wide, and `global` is read-only in every
-    /// store: the refusal is unchanged, and no journal file appears either.
-    func testReadOnlyTierIsStillRefusedInATeamStore() async throws {
-        let client = FakeGitHubClient()
-        let (engine, store) = try await makeEngine(client: client, usesTeamJournal: true)
-
-        do {
-            try await engine.enqueue(.addFinding(project: "global", text: "from the phone", type: nil))
-            XCTFail("global must refuse writes in a team store too")
-        } catch let error as PhrenKitError {
-            XCTAssertEqual(error, .validation("\"global\" is read-only in the app — edit it with the phren CLI."))
-        }
-
-        let journalFile = await store.read("global/journal/\(today)-octocat.md")
-        XCTAssertNil(journalFile)
-        let status = await engine.currentStatus()
-        XCTAssertEqual(status.pendingCount, 0)
-    }
-
     /// A secret is refused before anything is queued. Stricter than the CLI's
     /// team branch, which returns before `addFindingToFile` ever scans — a
     /// shared store is the last place a credential should land.

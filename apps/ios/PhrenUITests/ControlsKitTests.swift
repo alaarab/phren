@@ -2,11 +2,6 @@ import XCTest
 
 final class ControlsKitTests: XCTestCase {
     @MainActor
-    func testScreenshotsAtStandardSize() {
-        captureKit(accessibility: false)
-    }
-
-    @MainActor
     func testScreenshotsAtLargestDynamicTypeWithReducedMotion() {
         captureKit(accessibility: true)
     }

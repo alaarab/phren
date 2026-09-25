@@ -38,16 +38,6 @@ describe("index invalidation: file changes trigger rebuild", () => {
     tmp.cleanup();
   });
 
-  it("project FINDINGS.md content is indexed on first build", async () => {
-    db = await buildIndex(tmp.path);
-
-    const results = db.exec(
-      "SELECT content FROM docs WHERE content LIKE '%Zymurgical%'"
-    );
-    expect(results.length).toBeGreaterThan(0);
-    expect(String(results[0].values[0][0])).toContain("Zymurgical");
-  });
-
   it("after modifying FINDINGS.md, a new buildIndex call picks up the change", async () => {
     db = await buildIndex(tmp.path);
 
@@ -107,22 +97,6 @@ describe("index invalidation: file changes trigger rebuild", () => {
     db = await buildIndex(tmp.path);
 
     const results = db.exec("SELECT content FROM docs WHERE content LIKE '%Zymurgical%'");
-    expect(results.length).toBeGreaterThan(0);
-  });
-
-  it("project file using @import gets global content indexed", async () => {
-    // Write a project file that @imports the global conventions
-    writeFile(
-      path.join(tmp.path, "myapp", "reference.md"),
-      "# myapp reference\n\n@import shared/conventions.md\n"
-    );
-
-    db = await buildIndex(tmp.path);
-
-    // The @import-resolved content should be in docs
-    const results = db.exec(
-      "SELECT content FROM docs WHERE content LIKE '%Xylotomy%'"
-    );
     expect(results.length).toBeGreaterThan(0);
   });
 

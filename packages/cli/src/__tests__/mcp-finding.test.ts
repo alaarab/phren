@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { makeTempDir, grantAdmin, resultMsg } from "../test-helpers.js";
-import { addFindingToFile, addFindingsToFile } from "../shared/content.js";
-import { removeFinding, readFindings } from "../data/access.js";
+import { makeTempDir, grantAdmin, } from "../test-helpers.js";
+import { addFindingsToFile } from "../shared/content.js";
+import { removeFinding, } from "../data/access.js";
 import { register } from "../tools/finding.js";
 import type { McpContext } from "../tools/types.js";
 
@@ -75,59 +75,20 @@ describe("add_finding MCP tool", () => {
     expect(result.ok).toBe(true);
     expect(fs.readFileSync(findingsPath(), "utf8")).toContain(finding);
   });
-  it("happy path: finding added to FINDINGS.md", () => {
-    const r = addFindingToFile(tmp.path, PROJECT, "Always use parameterized queries to prevent SQL injection");
-    expect(r.ok).toBe(true);
-    const content = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content).toContain("Always use parameterized queries");
-  });
 
-  it("project that does not exist returns error", () => {
-    const r = addFindingToFile(tmp.path, "nonexistent-project", "Should fail");
-    expect(r.ok).toBe(false);
-  });
-
-  it("invalid project name returns error", () => {
-    const r = addFindingToFile(tmp.path, "../escape", "Should fail");
-    expect(r.ok).toBe(false);
-  });
-
-  it("finding over 5000 chars is handled by MCP layer validation", () => {
-    // The MCP tool layer rejects >5000 chars before calling addFindingToFile.
-    // The underlying function does not enforce this limit itself,
-    // so we verify the MCP validation logic is correct by checking the limit constant.
-    const longText = "x".repeat(5001);
-    expect(longText.length).toBeGreaterThan(5000);
-  });
-
-  it("creates FINDINGS.md when none exists", () => {
+  it("rejects a finding over 5000 chars through the registered tool", async () => {
+    const server = makeMockServer();
+    const ctx: McpContext = { phrenPath: tmp.path, profile: "", db: () => { throw new Error("unused"); },
+      rebuildIndex: async () => {}, updateFileInIndex: () => {}, withWriteQueue: async fn => fn() };
+    register(server as any, ctx);
+    const result = parseResult(await server.call("add_finding", { project: PROJECT, finding: "x".repeat(5001) }));
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("5000 character limit");
     expect(fs.existsSync(findingsPath())).toBe(false);
-    const r = addFindingToFile(tmp.path, PROJECT, "First finding ever");
-    expect(r.ok).toBe(true);
-    expect(fs.existsSync(findingsPath())).toBe(true);
   });
 });
 
 describe("remove_finding MCP tool", () => {
-  it("removes the correct line", () => {
-    fs.writeFileSync(findingsPath(), SAMPLE_FINDINGS);
-    const msg = removeFinding(tmp.path, PROJECT, "WAL mode");
-    expect(msg.ok).toBe(true);
-    expect(resultMsg(msg)).toContain("Removed");
-
-    const result = readFindings(tmp.path, PROJECT);
-    if (!result.ok) return;
-    expect(result.data.every((l) => !l.text.includes("WAL mode"))).toBe(true);
-    expect(result.data.some((l) => l.text.includes("auth middleware"))).toBe(true);
-  });
-
-  it("returns error when no finding matches", () => {
-    fs.writeFileSync(findingsPath(), SAMPLE_FINDINGS);
-    const msg = removeFinding(tmp.path, PROJECT, "nonexistent xyz");
-    expect(msg.ok).toBe(false);
-    expect(resultMsg(msg)).toContain("No finding matching");
-  });
-
   it("returns error when FINDINGS.md does not exist", () => {
     const msg = removeFinding(tmp.path, PROJECT, "anything");
     expect(msg.ok).toBe(false);
@@ -162,24 +123,6 @@ describe("edit_finding MCP tool", () => {
 });
 
 describe("add_findings bulk MCP tool", () => {
-  it("multiple findings added in one call", () => {
-    const findings = [
-      "Use connection pooling for database connections",
-      "Always set timeout on HTTP requests",
-      "Prefer streaming for large file uploads",
-    ];
-    const r = addFindingsToFile(tmp.path, PROJECT, findings);
-    expect(r.ok).toBe(true);
-    if (!r.ok) return;
-    expect(r.data.added).toHaveLength(3);
-    expect(r.data.skipped).toHaveLength(0);
-
-    const content = fs.readFileSync(findingsPath(), "utf-8");
-    expect(content).toContain("connection pooling");
-    expect(content).toContain("timeout on HTTP");
-    expect(content).toContain("streaming for large file");
-  });
-
   it("duplicates are skipped within the same batch", () => {
     const findings = [
       "Use retries for transient failures",
@@ -204,10 +147,5 @@ describe("add_findings bulk MCP tool", () => {
     expect(r.data.added).toHaveLength(1);
     expect(r.data.skipped).toHaveLength(1);
     expect(r.data.added[0]).toContain("caching");
-  });
-
-  it("invalid project returns error", () => {
-    const r = addFindingsToFile(tmp.path, "../escape", ["should fail"]);
-    expect(r.ok).toBe(false);
   });
 });

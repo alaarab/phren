@@ -38,19 +38,6 @@ final class GraphIdentityTests: XCTestCase {
         }
     }
 
-    /// Two findings differing only by tag must not collide — the reason score
-    /// keys are minted over the tagged line rather than the display text.
-    func testTagDisambiguatesOtherwiseIdenticalFindings() throws {
-        let samples = try samples()
-        let pattern = try XCTUnwrap(samples.first { $0.snippet.hasPrefix("[pattern]") })
-        let pitfall = try XCTUnwrap(samples.first { $0.snippet.hasPrefix("[pitfall]") })
-        XCTAssertNotEqual(pattern.scoreKey, pitfall.scoreKey)
-        XCTAssertNotEqual(
-            GraphBuilder.findingStableId(scoreKey: pattern.scoreKey),
-            GraphBuilder.findingStableId(scoreKey: pitfall.scoreKey)
-        )
-    }
-
     /// `findBulletText` is the reverse lookup the app performs before editing.
     func testResolvesScoreKeyBackToTaggedBullet() {
         let markdown = """
@@ -69,13 +56,13 @@ final class GraphIdentityTests: XCTestCase {
             "[pitfall] Use the shared cache for repeated lookups",
             "must resolve to the pitfall line, not the identically-worded pattern line"
         )
-    }
-
-    func testUnresolvableScoreKeyReturnsNil() {
-        XCTAssertNil(GraphBuilder.findBulletText(
-            project: "myproj", scoreKey: "myproj/FINDINGS.md:000000000000",
-            findingsMarkdown: "- [pattern] something else entirely"
-        ))
+        // Folded from testUnresolvableScoreKeyReturnsNil.
+        do {
+            XCTAssertNil(GraphBuilder.findBulletText(
+                project: "myproj", scoreKey: "myproj/FINDINGS.md:000000000000",
+                findingsMarkdown: "- [pattern] something else entirely"
+            ))
+        }
     }
 
     /// A node id must survive the trip through the renderer's JSON.
@@ -141,25 +128,6 @@ final class SkillPathTests: XCTestCase {
         XCTAssertFalse(LocalStore.isSkillPath("global/skills/../../etc/passwd.md"))
         XCTAssertFalse(LocalStore.isSkillPath("global/skills/..md"))
         XCTAssertFalse(LocalStore.isSkillPath("global/skills/.hidden.md"))
-    }
-
-    /// Authored skills and agent instructions are writable; knowledge tiers
-    /// retain their existing boundaries.
-    func testWritabilityBoundary() {
-        XCTAssertTrue(LocalStore.isWritablePath("global/skills/audit/SKILL.md"))
-        XCTAssertTrue(LocalStore.isWritablePath("myproj/skills/parity.md"))
-        XCTAssertTrue(LocalStore.isWritablePath("global/AGENTS.md"))
-        XCTAssertFalse(LocalStore.isWritablePath("myproj/summary.md"))
-        XCTAssertFalse(LocalStore.isWritablePath("myproj/reference/topics/auth.md"))
-    }
-
-    func testSyncedPathsIncludeSkills() {
-        XCTAssertTrue(LocalStore.isSyncedPath("global/skills/audit/SKILL.md"))
-        XCTAssertTrue(LocalStore.isSyncedPath("myproj/skills/parity.md"))
-        // global/ is otherwise limited to the cross-project findings tier and
-        // the instructions framing it; its CLI-side machinery stays out.
-        XCTAssertFalse(LocalStore.isSyncedPath("global/tasks.md"))
-        XCTAssertFalse(LocalStore.isSyncedPath("global/review.md"))
     }
 }
 

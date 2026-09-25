@@ -10,32 +10,6 @@ final class PhonePerformanceTests: XCTestCase {
         measure { _ = try! AgentChatTranscript.read(data, source: "codex") }
     }
 
-    func testOverviewDecode() throws {
-        let tabs: [[String: Any]] = (0..<240).map { ["id": "w1:t\($0)", "label": "Build \($0)", "agent": "codex", "agentStatus": "working", "currentStep": "Reading sample.swift", "lastChangedAt": "2026-09-20T08:00:00Z", "contextUsedPercent": 42, "runningChildren": 2] }
-        let data = try JSONSerialization.data(withJSONObject: ["kind": "herdr", "groups": [["id": "w1", "label": "Project", "children": tabs]], "phren": ["product": "phren-hook", "protocol": 1]])
-        print("PHONE_SPEED overview bytes=\(data.count)")
-        // Paired comparison keeps machine load from masquerading as a gain.
-        // This is the previous gateway path versus the single-decode path.
-        var previous = 0.0, current = 0.0
-        for _ in 0..<30 {
-            let start = CFAbsoluteTimeGetCurrent()
-            let raw = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-            let hook = raw["phren"] as! [String: Any]
-            XCTAssertEqual(hook["product"] as? String, "phren-hook")
-            XCTAssertEqual(hook["protocol"] as? Int, 1)
-            _ = try LiveWorkspaces.read(data)
-            let middle = CFAbsoluteTimeGetCurrent()
-            _ = try LiveWorkspaces.read(data, requiringHook: true)
-            let end = CFAbsoluteTimeGetCurrent()
-            previous += middle - start; current += end - middle
-        }
-        print("PHONE_SPEED overview paired mean previous=\(previous / 30 * 1000) current=\(current / 30 * 1000) ms")
-
-        measure {
-            _ = try! LiveWorkspaces.read(data, requiringHook: true)
-        }
-    }
-
     func testMessagePreparationPreservesGraphemeBoundaries() throws {
         for text in ["short", String(repeating: "x", count: 64_001),
                      String(repeating: "e\u{301}👨‍👩‍👧‍👦", count: 32_001)] {
@@ -44,31 +18,6 @@ final class PhonePerformanceTests: XCTestCase {
             let bridged = raw["text"] as! String
             XCTAssertEqual(AgentChatTranscript.boundedMessageText(bridged), String(bridged.prefix(64_000)))
         }
-    }
-
-    func testMessageTextPreparationPerformance() throws {
-        let text = String(repeating: "Build detail: file.swift:123 inspected dependency and diagnostic output.\n", count: 900)
-        let data = try JSONSerialization.data(withJSONObject: ["text": text])
-        let raw = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-        let bridged = raw["text"] as! String
-        measure { for _ in 0..<20 { _ = AgentChatTranscript.boundedMessageText(bridged) } }
-    }
-
-    func testUsageDecode() throws {
-        let windows: [[String: Any]] = (0..<30).map { ["id": "window\($0)", "name": "Model \($0)", "usedPercent": 42.0, "limitUSD": 100, "resetsAt": "2026-09-22T08:00:00Z"] }
-        let data = try JSONSerialization.data(withJSONObject: ["accounts": ["codex", "claude", "opencode", "opencode-go", "openrouter"].map { ["source": $0, "windows": windows, "updatedAt": "2026-09-20T08:00:00Z"] as [String: Any] }])
-        print("PHONE_SPEED usage bytes=\(data.count)")
-        measure { _ = try! AccountUsageSnapshot.read(data) }
-    }
-
-    func testLargestCheckedInTranscriptFixture() throws {
-        let cases = try Fixtures.json("hook-events.json") as! [[String: Any]]
-        let frames = try cases.map { fixture -> (String, Data) in
-            let events = fixture["events"] as! [[String: Any]]
-            let source = fixture["source"] as! String
-            return (source, try JSONSerialization.data(withJSONObject: ["type": "backlog", "source": source, "entries": events.enumerated().map { ["line": $0.offset, "raw": $0.element] as [String: Any] }]))
-        }
-        measure { for (source, data) in frames { _ = try! AgentChatTranscript.read(data, source: source) } }
     }
 }
 

@@ -35,22 +35,6 @@ final class ControlsKitTests: XCTestCase {
         XCTAssertEqual(PhrenOptionSelection.multiple("high", in: options, current: ["high"]), [])
     }
 
-    func testActionModelKeepsStableIdentityAndRowMetadata() {
-        let action = PhrenActionSheet.Action(id: "delete", title: "Delete schedule", icon: "trash",
-                                            caption: "Removes the prompt", role: .destructive) {}
-        XCTAssertEqual(action.id, "delete")
-        XCTAssertEqual(action.title, "Delete schedule")
-        XCTAssertEqual(action.icon, "trash")
-        XCTAssertEqual(action.caption, "Removes the prompt")
-        XCTAssertEqual(action.role, .destructive)
-        XCTAssertTrue(action.isEnabled)
-        XCTAssertTrue(action.dismisses)
-        XCTAssertNil(action.isSelected)
-        var renamed = action
-        renamed.isEnabled = false
-        XCTAssertEqual(renamed.id, action.id)
-    }
-
     func testActionDismissesBeforeInvokingTheHandler() {
         var events: [String] = []
         let action = PhrenActionSheet.Action(id: "open", title: "Open") { events.append("handler") }

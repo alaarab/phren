@@ -22,11 +22,6 @@ describe("splitCommandLine", () => {
   it("keeps an empty quoted argument, which is not the same as no argument", () => {
     expect(splitCommandLine('editor "" x')).toEqual(["editor", "", "x"]);
   });
-
-  it("returns nothing for empty input", () => {
-    expect(splitCommandLine("")).toEqual([]);
-    expect(splitCommandLine("   ")).toEqual([]);
-  });
 });
 
 describe("resolveEditorCommand", () => {

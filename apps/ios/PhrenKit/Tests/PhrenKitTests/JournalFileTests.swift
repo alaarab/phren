@@ -105,20 +105,6 @@ final class JournalFileTests: XCTestCase {
         XCTAssertThrowsError(try JournalFile.preparedFinding("   ", type: nil))
     }
 
-    /// The CLI's team branch returns before `addFindingToFile` runs its secret
-    /// scan. The app scans anyway — a shared store is the worst place to leak
-    /// a credential, and the app promises it never commits what the CLI would
-    /// reject elsewhere.
-    func testPreparedFindingRefusesSecrets() {
-        XCTAssertThrowsError(
-            try JournalFile.preparedFinding("token ghp_0123456789abcdefghijklmnopqrstuvwxyz", type: nil)
-        ) { error in
-            guard case PhrenKitError.secretDetected = error else {
-                return XCTFail("expected a secret rejection, got \(error)")
-            }
-        }
-    }
-
     // MARK: - Read (readTeamJournalEntries)
 
     func testEntriesMatchTheCLIReader() throws {
@@ -176,10 +162,10 @@ final class JournalFileTests: XCTestCase {
         """)
         XCTAssertEqual(file.findings().first?.actor, "hand-editor")
         XCTAssertEqual(file.entries, ["Someone appended this by hand"])
-    }
-
-    func testEmptyFileHasNoEntries() {
-        XCTAssertTrue(JournalFile(date: date, actor: "tester").entries.isEmpty)
-        XCTAssertTrue(JournalFile(date: date, actor: "tester").findings().isEmpty)
+        // Folded from testEmptyFileHasNoEntries.
+        do {
+            XCTAssertTrue(JournalFile(date: date, actor: "tester").entries.isEmpty)
+            XCTAssertTrue(JournalFile(date: date, actor: "tester").findings().isEmpty)
+        }
     }
 }

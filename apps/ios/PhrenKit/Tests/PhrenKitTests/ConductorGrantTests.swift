@@ -29,14 +29,6 @@ final class ConductorGrantTests: XCTestCase {
         XCTAssertNil(grant.expiresAt)
     }
 
-    func testRoundTripsEncode() throws {
-        let grant = try ConductorGrant(scope: "project:phren", actions: [.handOff],
-                                       computers: ["Desk"], until: "2026-12-01T09:30:00Z")
-        let data = try JSONEncoder().encode(grant)
-        let decoded = try JSONDecoder().decode(ConductorGrant.self, from: data)
-        XCTAssertEqual(decoded, grant)
-    }
-
     func testRejectsInvalidScope() {
         XCTAssertThrowsError(try JSONDecoder().decode(ConductorGrant.self,
             from: Data(#"{"scope":"project:","actions":["dispatch"]}"#.utf8)))

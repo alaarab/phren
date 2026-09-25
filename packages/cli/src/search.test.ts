@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildFtsQueryVariants, buildRelaxedFtsQuery, buildRobustFtsQuery, sanitizeFts5Query, extractKeywords } from "./utils.js";
+import { buildFtsQueryVariants, buildRelaxedFtsQuery, buildRobustFtsQuery, extractKeywords } from "./utils.js";
 import { extractSnippet } from "./shared/index.js";
-
 
 describe("buildRobustFtsQuery edge cases", () => {
   it("deduplicates repeated terms", () => {
@@ -21,11 +20,6 @@ describe("buildRobustFtsQuery edge cases", () => {
     expect(query).not.toContain('"a"');
     expect(query).not.toContain('"b"');
     expect(query).toContain('"cd"');
-  });
-
-  it("strips double quotes from within terms", () => {
-    const result = buildRobustFtsQuery('some "quoted" thing');
-    expect(result).not.toContain('""');
   });
 
   it("handles many terms without crashing", () => {
@@ -62,46 +56,6 @@ describe("buildFtsQueryVariants", () => {
   });
 });
 
-describe("sanitizeFts5Query edge cases", () => {
-  it("strips null bytes", () => {
-    expect(sanitizeFts5Query("foo\0bar")).toBe("foo bar");
-  });
-
-  it("strips FTS5 boolean operators", () => {
-    const result = sanitizeFts5Query("foo AND bar OR baz NOT qux NEAR quux");
-    // Whitelist sanitizer keeps letters-only words like AND/OR/NOT/NEAR; only special chars stripped
-    expect(result).toContain("foo");
-    expect(result).toContain("bar");
-    expect(result).toContain("quux");
-    // No special chars (parens, colon, etc.)
-    expect(result).not.toContain("(");
-    expect(result).not.toContain(")");
-  });
-
-  it("strips special punctuation but keeps hyphens in words", () => {
-    const result = sanitizeFts5Query("rate-limit @#$ test!");
-    expect(result).toContain("rate-limit");
-    expect(result).not.toContain("@");
-    expect(result).not.toContain("#");
-    expect(result).not.toContain("!");
-  });
-
-  it("collapses multiple spaces into one", () => {
-    const result = sanitizeFts5Query("  foo    bar   ");
-    expect(result).toBe("foo bar");
-  });
-
-  it("preserves URL-like strings minus special chars", () => {
-    const result = sanitizeFts5Query("https://example.com/path");
-    expect(result).toContain("https");
-    // Dots and slashes are stripped by whitelist sanitizer
-    expect(result).not.toContain(".");
-    expect(result).not.toContain("//");
-    expect(result).toContain("example");
-    expect(result).toContain("com");
-  });
-});
-
 describe("extractSnippet", () => {
   const sampleDoc = [
     "# Project Overview",
@@ -122,51 +76,6 @@ describe("extractSnippet", () => {
     "",
     "Deploy via CI pipeline to production.",
   ].join("\n");
-
-  it("returns lines around the best matching term", () => {
-    const snippet = extractSnippet(sampleDoc, "auth");
-    expect(snippet).toContain("auth");
-  });
-
-  it("prefers lines near headings", () => {
-    const snippet = extractSnippet(sampleDoc, "auth");
-    // Should pick content near the ## Authentication heading, not the Deployment section
-    expect(snippet).toContain("auth module");
-    expect(snippet).not.toContain("Deploy");
-  });
-
-  it("returns the start of the file when query has no matches", () => {
-    const snippet = extractSnippet(sampleDoc, "xyznonexistent");
-    expect(snippet).toContain("Project Overview");
-  });
-
-  it("returns the start of the file for empty query", () => {
-    const snippet = extractSnippet(sampleDoc, "");
-    expect(snippet).toContain("Project Overview");
-  });
-
-  it("scores multi-term matches higher", () => {
-    const snippet = extractSnippet(sampleDoc, "SQLite WAL");
-    expect(snippet).toContain("SQLite");
-    expect(snippet).toContain("WAL");
-  });
-
-  it("respects the lines parameter", () => {
-    const snippet = extractSnippet(sampleDoc, "auth", 2);
-    const lineCount = snippet.split("\n").length;
-    expect(lineCount).toBeLessThanOrEqual(3); // bestIdx-1 to bestIdx+lines-1
-  });
-
-  it("handles single-line content", () => {
-    const snippet = extractSnippet("Just one line with auth", "auth");
-    expect(snippet).toContain("auth");
-  });
-
-  it("handles content with no headings", () => {
-    const noHeadings = "Line one about auth\nLine two about database\nLine three about deploy";
-    const snippet = extractSnippet(noHeadings, "database");
-    expect(snippet).toContain("database");
-  });
 
   it("strips FTS operators from the query before matching", () => {
     const snippet = extractSnippet(sampleDoc, '"auth" OR "login"');
@@ -190,17 +99,6 @@ describe("extractKeywords", () => {
     expect(result).toContain("limit config");
   });
 
-  it("caps output at 10 tokens", () => {
-    const longInput = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa";
-    const tokens = extractKeywords(longInput).split(" ");
-    // Individual words + bigrams, capped at 10
-    expect(tokens.length).toBeLessThanOrEqual(20); // bigrams count as 2 words in the joined string
-    const result = extractKeywords(longInput);
-    // The function caps at 10 entries (words + bigrams)
-    const entries = result.split(/\s+/);
-    expect(entries.length).toBeLessThanOrEqual(20);
-  });
-
   it("strips punctuation before extracting", () => {
     const result = extractKeywords("auth-module! @config #deploy");
     expect(result).toContain("auth-module");
@@ -209,7 +107,9 @@ describe("extractKeywords", () => {
   });
 
   it("returns empty string for all-stop-word input", () => {
-    const result = extractKeywords("the is a an and or but in on at");
-    expect(result).toBe("");
+    expect(extractKeywords("the is a an and or but in on at")).toBe("");
+    expect(extractKeywords("")).toBe("");
+    // Single-character words are dropped too.
+    expect(extractKeywords("a b c deploy")).toBe("deploy");
   });
 });

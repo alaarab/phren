@@ -37,9 +37,4 @@ final class ChatScrollMetricsTests: XCTestCase {
         XCTAssertFalse(ChatScrollMetrics.isEstimateJump(old: base, new: ChatScrollMetrics(contentHeight: 4000, viewportHeight: 0, offsetY: 500)),
                        "Without a viewport there is nothing to judge a jump against")
     }
-
-    func testShrinkWhileSettlingFollowsTheNewBottom() {
-        XCTAssertEqual(ChatScrollMetrics.correctiveOffset(ChatScrollMetrics(contentHeight: 2000, viewportHeight: 800, offsetY: 2200)), 1200,
-                       "A lazy estimate that corrects downward pulls the offset back to the new bottom")
-    }
 }

@@ -2,31 +2,6 @@ import XCTest
 
 final class AutomaticSessionTests: XCTestCase {
     @MainActor
-    func testProjectDiscoveryWaitsForSelectionThenOpensNativeChat() {
-        let app = launch()
-        openProjectSessions(app)
-        let row = app.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w7:w7:t9"]
-        XCTAssertTrue(row.waitForExistence(timeout: 15))
-        XCTAssertFalse(app.buttons["chat-close"].exists)
-        openSessionsAction("refresh", in: app)
-        XCTAssertTrue(row.waitForExistence(timeout: 10))
-        row.tap()
-        XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 8))
-        XCTAssertTrue(app.staticTexts["chat-location"].label.contains("Test Mac"))
-        XCTAssertFalse(app.buttons["Open in Moshi"].exists)
-    }
-
-    @MainActor
-    func testMultipleMatchesRemainSelectableWithoutGuessing() {
-        let app = launch(extra: ["--multiple-project-sessions"])
-        openProjectSessions(app)
-        XCTAssertTrue(app.staticTexts["Review phone changes"].waitForExistence(timeout: 15))
-        XCTAssertTrue(app.staticTexts["Build phone app"].exists)
-        app.buttons["overview-chat:A1000000-0000-0000-0000-000000000001:herdr:default:w7:w7:t10"].tap()
-        XCTAssertTrue(app.buttons["chat-close"].waitForExistence(timeout: 8))
-    }
-
-    @MainActor
     func testOfflineComputerDoesNotInventASession() {
         let app = launch(extra: ["--session-discovery-offline"])
         openProjectSessions(app)

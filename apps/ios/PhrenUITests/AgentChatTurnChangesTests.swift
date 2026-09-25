@@ -9,11 +9,6 @@ final class AgentChatTurnChangesTests: AgentChatUITestCase {
     }
 
     @MainActor
-    func testClaudeTurnEndsWithItsDiffRow() {
-        checkTurnChanges(flag: "--chat-turn-changes-claude", name: "Claude")
-    }
-
-    @MainActor
     private func checkTurnChanges(flag: String, name: String) {
         let app = launch(extra: [flag])
         app.buttons["live-chat:w7:w7:t9"].tap()

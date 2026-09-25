@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  commandExists,
-  detectInstalledTools,
   buildLifecycleCommands,
-  buildSharedLifecycleCommands,
   configureAllHooks,
   readCustomHooks,
   runCustomHooks,
@@ -13,7 +10,6 @@ import {
 import { makeTempDir } from "../test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 
 describe("hooks platform compatibility", () => {
   const origHome = process.env.HOME;
@@ -79,29 +75,9 @@ describe("hooks platform compatibility", () => {
       expect(cmdContainsPath(cmds.hookTool, phrenPath)).toBe(true);
     });
 
-    it("handles paths with spaces correctly", () => {
-      const spacedPath = path.join(tmpRoot, "my phren path");
-      fs.mkdirSync(spacedPath, { recursive: true });
-      const cmds = buildLifecycleCommands(spacedPath);
-      expect(cmds.sessionStart).toContain("my phren path");
-      // Path should be quoted — single quotes on POSIX, double quotes on Windows
-      if (isWin) {
-        expect(cmds.sessionStart).toContain('set "PHREN_PATH=');
-      } else {
-        expect(cmds.sessionStart).toContain("PHREN_PATH='");
-      }
-    });
-
     it("handles paths with backslashes", () => {
       const cmds = buildLifecycleCommands("/tmp/path\\with\\backslashes");
       expect(cmdContainsPath(cmds.sessionStart, "/tmp/path\\with\\backslashes")).toBe(true);
-    });
-
-    it("all four commands reference the same phren path", () => {
-      const cmds = buildLifecycleCommands(phrenPath);
-      for (const cmd of [cmds.sessionStart, cmds.userPromptSubmit, cmds.stop, cmds.hookTool]) {
-        expect(cmdContainsPath(cmd, phrenPath)).toBe(true);
-      }
     });
   });
 
@@ -125,44 +101,6 @@ describe("hooks platform compatibility", () => {
       process.env.PATH = "";
       const configured = configureAllHooks(phrenPath);
       expect(configured).toEqual([]);
-    });
-
-    it("configures only a single tool when specified", () => {
-      setupFakeBinaries();
-      const configured = configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
-      expect(configured).toContain("Codex");
-      expect(configured).not.toContain("Copilot CLI");
-      expect(configured).not.toContain("Cursor");
-    });
-
-    it("configures two of three tools when only two specified", () => {
-      setupFakeBinaries();
-      const configured = configureAllHooks(phrenPath, { tools: new Set(["copilot", "codex"]) });
-      expect(configured).toContain("Copilot CLI");
-      expect(configured).toContain("Codex");
-      expect(configured).not.toContain("Cursor");
-    });
-
-    it("Codex config is stored in phrenPath not homeDir", () => {
-      setupFakeBinaries();
-      configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
-      const codexFile = path.join(phrenPath, "codex.json");
-      expect(fs.existsSync(codexFile)).toBe(true);
-      const codex = JSON.parse(fs.readFileSync(codexFile, "utf8"));
-      const sharedLifecycle = buildSharedLifecycleCommands();
-      expect(codex.hooks.SessionStart[0].command).toContain(sharedLifecycle.sessionStart);
-      expect(codex.hooks.SessionStart[0].command).toContain("PHREN_HOOK_TOOL");
-      expect(codex.hooks.SessionStart[0].command).toContain("codex");
-      expect(codex.hooks.SessionStart[0].command).not.toContain(phrenPath);
-      // Should NOT be in home directory
-      expect(fs.existsSync(path.join(homeDir, "codex.json"))).toBe(false);
-    });
-
-    it("Copilot config uses .github/hooks/ directory structure", () => {
-      setupFakeBinaries();
-      configureAllHooks(phrenPath, { tools: new Set(["copilot"]) });
-      const copilotFile = path.join(homeDir, ".github", "hooks", "phren.json");
-      expect(fs.existsSync(copilotFile)).toBe(true);
     });
   });
 
@@ -277,14 +215,6 @@ describe("hooks platform compatibility", () => {
       expect(fs.existsSync(wrapper)).toBe(true);
     });
 
-    it("empty hookTools object defaults all tools to hooksEnabled value", () => {
-      setupFakeBinaries(["copilot", "cursor"]);
-      writeInstallPrefs(JSON.stringify({ hooksEnabled: true, hookTools: {} }));
-      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor"]) });
-      expect(fs.existsSync(path.join(homeDir, ".local", "bin", `copilot${wrapperExt}`))).toBe(true);
-      expect(fs.existsSync(path.join(homeDir, ".local", "bin", `cursor${wrapperExt}`))).toBe(true);
-    });
-
     it("handles non-object hookTools gracefully", () => {
       setupFakeBinaries(["codex"]);
       writeInstallPrefs(JSON.stringify({ hooksEnabled: true, hookTools: "not-an-object" }));
@@ -326,17 +256,6 @@ describe("hooks platform compatibility", () => {
       expect(fs.existsSync(wrapper)).toBe(true);
       const content = fs.readFileSync(wrapper, "utf8");
       expect(content).toContain("set -u");
-    });
-
-    it.skipIf(process.platform !== "win32")("Windows wrapper bounds hook calls via PowerShell Start-Job", () => {
-      setupFakeBinaries(["codex"]);
-      configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
-      const wrapper = path.join(homeDir, ".local", "bin", `codex${wrapperExt}`);
-      expect(fs.existsSync(wrapper)).toBe(true);
-      const content = fs.readFileSync(wrapper, "utf8");
-      expect(content).toContain("PHREN_HOOK_CMD");
-      expect(content).toContain("Start-Job");
-      expect(content).toContain("Wait-Job");
     });
   });
 

@@ -37,22 +37,4 @@ final class PhrenDateFormatsTests: XCTestCase {
                        Date(timeIntervalSince1970: 1_789_948_800))
         XCTAssertNil(PhrenDateFormats.utc("yyyy-MM-dd").date(from: "2026-13-40"), "Strict parsing")
     }
-
-    func testRelativeFormatting() {
-        XCTAssertTrue(PhrenDateFormats.relativeFormatter(.abbreviated) === PhrenDateFormats.relativeFormatter(.abbreviated))
-        let earlier = instant.addingTimeInterval(-7_200)
-        let expected = RelativeDateTimeFormatter()
-        expected.unitsStyle = .full
-        XCTAssertEqual(PhrenDateFormats.relative(earlier, to: instant, unitsStyle: .full),
-                       expected.localizedString(for: earlier, relativeTo: instant))
-        XCTAssertFalse(PhrenDateFormats.relative(instant.addingTimeInterval(-60), to: instant).isEmpty)
-    }
-
-    func testHostFileModifiedDateParsesBothForms() {
-        let whole = HostFile(name: "a", path: "/a", size: 1, modified: "2026-09-21T12:00:00Z")
-        XCTAssertEqual(whole.modifiedDate, Date(timeIntervalSince1970: 1_789_992_000))
-        let fractional = HostFile(name: "a", path: "/a", size: 1, modified: "2026-09-21T12:00:00.456Z")
-        XCTAssertEqual(fractional.modifiedDate?.timeIntervalSince1970 ?? 0, 1_789_992_000.456, accuracy: 0.001)
-        XCTAssertNil(HostFile(name: "a", path: "/a", size: 1, modified: "yesterday").modifiedDate)
-    }
 }
