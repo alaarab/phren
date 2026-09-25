@@ -140,7 +140,10 @@ Feature flags follow a convention: set to `0`, `false`, `off`, or `no` to disabl
 
 The optional iPhone helper is installed with `phren bridge install`; it uses
 `PHREN_SPEECH_VOICE` to choose the ElevenLabs voice id for talk mode's spoken replies
-(`POST /v1/speech`; the default is River), `PHREN_BRIDGE_HOME` to override `~/.local/share/phren/bridge` for isolated tests,
+(`POST /v1/speech`; the default is River), `ELEVENLABS_API_KEY` for the ElevenLabs key
+behind spoken replies and Scribe dictation (it wins over the stored
+`~/.local/share/phren/bridge/elevenlabs.json`, which `phren bridge speech-key set`
+writes; the Hook service doesn't see shell env, so store the key there too), `PHREN_BRIDGE_HOME` to override `~/.local/share/phren/bridge` for isolated tests,
 and `PHREN_HERDR_HOME` to override `~/.config/herdr`. Normal phone installations
 use the defaults. Transcript and callback settings respect `CODEX_HOME`,
 `CLAUDE_CONFIG_DIR`, and `COPILOT_HOME`. `PHREN_APPROVAL_HOLD_MS` overrides how

@@ -1,5 +1,5 @@
 import { WebSocket } from "ws";
-import { readSpeechKey } from "./speech.js";
+import { readSpeechKey } from "./speech-key.js";
 
 /** Dictation through ElevenLabs Scribe v2 Realtime, for the phone's opt-in
  * Scribe input. The phone streams 16 kHz mono PCM as binary frames; this
