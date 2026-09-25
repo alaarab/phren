@@ -200,10 +200,12 @@ const TEAM_SUBCOMMANDS: Subcommand[] = [
 
 export const REGISTRY: Command[] = [
   {
-    name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall|enroll-computer|fanouts archive|speech-key set>",
+    name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall|enroll-computer|discover|link|fanouts archive|speech-key set>",
     summary: "Install Phren Hook and enroll phone or computer connections",
     subcommands: [
       { name: "enroll-computer", usage: "phren bridge enroll-computer <name> [--accept <public-key-file>]", summary: "Print or accept a restricted computer dispatch key" },
+      { name: "discover", usage: "phren bridge discover", summary: "List computers you already reach over ssh that run Phren Hook and are not linked" },
+      { name: "link", usage: "phren bridge link <ssh-host> [--name <name>] [--as <name>] [--back-address <address>] [--yes]", summary: "Link this computer and an ssh host both ways in one step, after confirming" },
       { name: "fanouts archive", usage: "phren bridge fanouts archive [--dry-run] [--parent <session-id>] [--older-than <minutes>]", summary: "Archive finished fan-out jobs older than 24 hours, or one parent chat's, or older than N minutes" },
       { name: "speech-key set", usage: "phren bridge speech-key set", summary: "Store this computer's ElevenLabs key for spoken replies and dictation (read from stdin, mode 600)" },
     ],

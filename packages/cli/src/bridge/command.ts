@@ -9,7 +9,10 @@ import { apnsSetupSteps } from "./push.js";
 import { speechKeyFile, speechKeyStatus, writeSpeechKey } from "./speech-key.js";
 import { AccountUsageReader, captureClaudeUsage } from "./usage.js";
 import { acceptComputer, enrollComputer } from "./computers.js";
+import { addPeerFromLink, discoverComputers, linkComputer } from "./link.js";
 import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts, FANOUTS_ARCHIVE_USAGE, parseFanoutArchiveFlags } from "./fanouts.js";
+
+const LINK_USAGE = "Usage: phren bridge link <ssh-host> [--name <its name here>] [--as <this computer's name there>] [--back-address <address it dials>] [--yes]";
 
 export async function runBridge(args: string[], version: string): Promise<number> {
   switch (args[0]) {
@@ -19,6 +22,38 @@ export async function runBridge(args: string[], version: string): Promise<number
         await acceptComputer(args[1], await readFile(args[3], "utf8"));
         console.log(`Enrolled ${args[1]} for Phren Hook.`);
       } else throw new Error("Usage: phren bridge enroll-computer <name> [--accept <public-key-file>]");
+      break;
+    }
+    case "discover": {
+      const { reachable, checked } = await discoverComputers();
+      if (!reachable.length) console.log(`No unlinked computers running Phren Hook answered over ssh (checked ${checked.length}: ${checked.join(", ") || "none"}).`);
+      else {
+        console.log("Reachable over ssh, running Phren Hook, and not linked:");
+        for (const item of reachable) console.log(`  ${item.host} (${item.user})  link with: phren bridge link ${item.host}`);
+      }
+      break;
+    }
+    case "link": {
+      const host = args[1];
+      const flag = (name: string) => { const index = args.indexOf(name); return index > 1 ? args[index + 1] : undefined; };
+      if (!host || host.startsWith("-")) throw new Error(LINK_USAGE);
+      if (!args.includes("--yes")) {
+        if (!process.stdin.isTTY) throw new Error(`Linking ${host} lets each computer run agents on the other. Pass --yes to confirm.`);
+        const { createInterface } = await import("node:readline/promises");
+        const prompt = createInterface({ input: process.stdin, output: process.stdout });
+        const answer = await prompt.question(`Link this computer and ${host} both ways, so each can list and start agents on the other? [y/N] `);
+        prompt.close();
+        if (!/^y(es)?$/i.test(answer.trim())) { console.log("Not linked."); return 1; }
+      }
+      const result = await linkComputer(host, { name: flag("--name"), as: flag("--as"), backAddress: flag("--back-address") });
+      console.log(JSON.stringify(result, null, 2));
+      return result.reachable && result.remote.reachable ? 0 : 1;
+    }
+    case "add-peer": {
+      // The receiving half of `phren bridge link`, run by the linking computer over ssh.
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+      console.log(JSON.stringify(await addPeerFromLink(Buffer.concat(chunks).toString("utf8"))));
       break;
     }
     case "fanouts": {
@@ -61,7 +96,7 @@ export async function runBridge(args: string[], version: string): Promise<number
       if (push.warning) console.error(`warning: ${push.warning}`);
       break;
     }
-    default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall|enroll-computer|fanouts archive|speech-key set>");
+    default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall|enroll-computer|discover|link|fanouts archive|speech-key set>");
   }
   return 0;
 }

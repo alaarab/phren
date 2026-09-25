@@ -38,6 +38,8 @@ import { clearTaskCheckpoint } from "../session/checkpoints.js";
 import { incrementSessionTasksCompleted } from "./session.js";
 import { normalizeMemoryScope } from "../shared.js";
 import { permissionDeniedError } from "../governance/rbac.js";
+import { getMachineName } from "../machine-identity.js";
+import { claimTaskSynced } from "../sync/task-claim.js";
 
 type TaskStatus = "all" | "active" | "queue" | "done" | "active+queue";
 
@@ -116,7 +118,8 @@ function buildTaskSummary(doc: TaskDoc, includedSections: TaskSection[]): string
         const prio = item.priority ? ` [${item.priority}]` : "";
         const bidPrefix = item.stableId ? `bid:${item.stableId} ` : "";
         const githubTag = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
-        lines.push(`  - ${bidPrefix}${item.line.slice(0, 80)}${item.line.length > 80 ? "\u2026" : ""}${prio}${githubTag}`);
+        const claimTag = item.claim ? ` [claimed: ${item.claim.computer}]` : "";
+        lines.push(`  - ${bidPrefix}${item.line.slice(0, 80)}${item.line.length > 80 ? "\u2026" : ""}${prio}${githubTag}${claimTag}`);
       }
     if (items.length > 3) lines.push(`  ... and ${items.length - 3} more`);
   }
@@ -601,6 +604,46 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         if (!dry_run) refreshTaskIndex(updateFileInIndex, targetPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, keep: keep ?? 30, dryRun: dry_run ?? false } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "claim_task",
+    {
+      title: "◆ phren · claim task",
+      description:
+        "Claim a task for this computer so conductors that are not linked do not take the same work: " +
+        "syncs the store, moves the task to Active with a `Claimed:` line naming this computer, then commits and pushes. " +
+        "Refuses a task another computer holds. With release, clears this computer's claim and returns the task to the Queue. " +
+        "Conductors skip tasks claimed by other computers.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Task to claim: bid:XXXXXXXX, a positional ID (Q3) or its text."),
+        session: z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/).optional().describe("The claiming conductor's session id, recorded with the claim."),
+        release: z.boolean().optional().describe("Release this computer's claim instead of taking one."),
+        force: z.boolean().optional().describe("Take over another computer's claim once it is more than a day old."),
+      }),
+    },
+    async ({ project: projectInput, item, session, release, force }) => {
+      const resolved = resolveStoreForProject(ctx, projectInput);
+      const project = resolved.project;
+      const targetPath = resolved.phrenPath;
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const denied = permissionDeniedError(targetPath, "claim_task", project);
+      if (denied) return mcpResponse({ ok: false, error: denied });
+
+      return withWriteQueue(async () => {
+        // The Claimed line takes a plain token; a name with spaces would never parse back.
+        const computer = getMachineName().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[^A-Za-z0-9]+/, "") || "computer";
+        const claim = { computer, at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), ...(session ? { session } : {}) };
+        const outcome = await claimTaskSynced(targetPath, project, item, claim, { release, force });
+        if (outcome.error) return mcpResponse({ ok: false, error: outcome.error });
+        refreshTaskIndex(updateFileInIndex, targetPath, project);
+        const message = release ? `Released in ${project}. ${outcome.detail}`
+          : outcome.claimed ? `Claimed for ${claim.computer} in ${project}. ${outcome.detail}` : `Not claimed: ${outcome.detail}`;
+        return mcpResponse({ ok: release ? true : outcome.claimed, message,
+          data: { project, item: outcome.item?.stableId ? `bid:${outcome.item.stableId}` : item, claim: outcome.item?.claim, heldBy: outcome.heldBy, synced: outcome.synced } });
       });
     }
   );
