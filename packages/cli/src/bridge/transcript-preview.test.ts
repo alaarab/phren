@@ -91,6 +91,31 @@ describe("live reply previews", () => {
     }
   });
 
+  it("reports Copilot's thinking from its reasoning headers, never the reasoning itself", async () => {
+    const copilot: Target = { ...target, source: "copilot" };
+    let screen = "  ❯ Is my CI good?   10:38   ┃\n ⌄ Thought for 5s          ┃\n │ An older turn's reasoning  ┃";
+    const pane = vi.fn(async () => screen);
+    const stream = new TranscriptPreviewStream(copilot, pane);
+    stream.observe([{ line: 0, raw: { type: "user.message", timestamp: start, data: { content: "Is my CI good?" } } }]);
+    screen = " ⌄ Thought for 5s  ┃\n  ❯ Is my CI good?   10:38   ┃\n ⌄ Thinking   ┃\n │ private words   ┃";
+    expect(await stream.update("working", undefined, 0)).toEqual({ preview: null });
+    expect(stream.activity).toEqual({ verb: "Working", thinking: true });
+    screen = "  ❯ Is my CI good?   10:38   ┃\n ⌄ Thought for 16s                ┃\n │ private words   ┃\n ● Shell  Run the checks";
+    await stream.update("working", undefined, 600);
+    expect(stream.activity).toEqual({ verb: "Working", thinking: false, thoughtFor: 16 });
+    expect(JSON.stringify(stream.activity)).not.toContain("private");
+    // A dialog's cursor row is not the turn's prompt.
+    screen = "  ❯ Is my CI good?   10:38\n ⌄ Thought for 3s\n │ ❯ 1. Yes │";
+    await stream.update("working", undefined, 1200);
+    expect(stream.activity?.thoughtFor).toBe(3);
+    stream.observe([{ line: 1, raw: { type: "session.idle", timestamp: start, data: {} } }]);
+    expect(stream.activity).toBeUndefined();
+    // One frame clears the phone's status; the pane is not read again.
+    expect(await stream.update("working", undefined, 1800)).toEqual({ preview: null });
+    expect(await stream.update("working", undefined, 2400)).toBeUndefined();
+    expect(pane).toHaveBeenCalledTimes(3);
+  });
+
   it("stops reading a Codex delta source after task_complete until the next turn starts", async () => {
     const codex: Target = { ...target, source: "codex" };
     const delta = vi.fn(async () => ({ turnStartedAt: start, text: "Streaming" }));
