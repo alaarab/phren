@@ -94,8 +94,8 @@ No extra request per iPhone row is needed.
   and unsupported provider interactions open in Phren's terminal.
 - Git diffs, local HTTP app discovery, and SSH browser previews.
 - The project's code index, when the `code` module is on and the project has
-  been indexed: symbol search, file outlines, definitions, references and the
-  hottest and coldest symbols.
+  been indexed: what changed, finding functions and types by name, file outlines,
+  definitions, where each is used, and the most and least used.
 - Local project activity history, retained on the computer.
 
 From a project, the iPhone can open a new session on a computer:
@@ -126,8 +126,8 @@ the store has a remote, a pull and push so the phone can fetch the new project.
 The reply says `store: pushed | committed | unchanged | error`.
 
 The `code` module serves the phone's indexed file tree, search, outlines,
-definitions with cited findings, references, full usage ranking and recent
-symbol changes. Code opens from the project, a session's Changes band or chat
+definitions with linked findings, where each function or type is used, what
+changed, the full most-used ranking and per-file change chips. Code opens from the project, a session's Changes band or chat
 header. Reads accept a registered store selector; notes and reindexing use POST.
 A dossier note saves a finding before optional conductor delivery and retains
 the originating session when opened from chat. Missing indexes return 404 with
@@ -139,7 +139,7 @@ a HEAD change requests a full scan. See [Code index](code-index.md) and the
 2 MiB per file and 500 directory entries. `POST /v1/git/tree` browses one
 directory of a session's working tree, with descendant file counts and a
 snapshot version. Its bounded cache expires after two seconds; status refresh
-and mutations invalidate it. Indexed projects add batched symbol summaries
+and mutations invalidate it. Indexed projects add per-file change chips
 without making an index a requirement for file browsing.
 
 `GET /v1/models?source=claude` reads Claude Code's own cached model catalogue,
