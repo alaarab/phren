@@ -1,10 +1,8 @@
 import { once } from "node:events";
-import { readFile } from "node:fs/promises";
 import type { ServerResponse } from "node:http";
-import path from "node:path";
 import { z } from "zod";
-import { homeDir } from "../home-paths.js";
 import { BridgeError, type Json } from "./protocol.js";
+import { readSpeechKey } from "./speech-key.js";
 
 /** Spoken replies for the phone's talk mode. The phone sends a sentence; the
  * Hook voices it with ElevenLabs and streams the audio back. The API key is
@@ -25,22 +23,9 @@ export const speechRequest = z.object({ text: z.string().trim().min(1).max(MAX_T
 
 export interface SpeechOptions {
   fetch?: typeof fetch;
-  /** Resolves the ElevenLabs key; defaults to ~/.config/mina-trailer.json. */
+  /** Resolves the ElevenLabs key; defaults to ELEVENLABS_API_KEY, then the stored key (speech-key.ts). */
   key?: () => Promise<string | undefined>;
   voice?: string;
-}
-
-export function speechKeyFile(env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(homeDir(env), ".config", "mina-trailer.json");
-}
-
-export async function readSpeechKey(file = speechKeyFile()): Promise<string | undefined> {
-  try {
-    const key = (JSON.parse(await readFile(file, "utf8")) as { elevenlabs_api_key?: unknown }).elevenlabs_api_key;
-    return typeof key === "string" && key.trim() ? key.trim() : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /** A fixed message per ElevenLabs failure: its own response text is never
@@ -60,7 +45,7 @@ export async function speechError(upstream: Response): Promise<BridgeError> {
 
 /** Starts ElevenLabs' streaming synthesis and returns its audio body. */
 export async function synthesizeSpeech(text: string, signal: AbortSignal, options: SpeechOptions = {}): Promise<ReadableStream<Uint8Array>> {
-  const key = await (options.key ?? (() => readSpeechKey()))();
+  const key = await (options.key ?? readSpeechKey)();
   if (!key) throw new BridgeError(503, "Spoken replies aren't set up on this computer: it has no ElevenLabs key.", { code: "speech-unconfigured" });
   const voice = options.voice ?? process.env.PHREN_SPEECH_VOICE ?? DEFAULT_SPEECH_VOICE;
   const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}/stream?output_format=${OUTPUT_FORMAT}`;
