@@ -18,7 +18,7 @@ import com.phren.android.design.PhrenNavigator
  */
 object LiveBridge {
     /** The CLI release the Hook install command names (IntegrationSettingsViews.cliVersion). */
-    const val CLI_VERSION = "0.2.16"
+    const val CLI_VERSION = "0.3.0"
     const val HOOK_INSTALL_COMMAND = "npx --yes @phren/cli@$CLI_VERSION bridge install"
     fun hasComputer(model: AppModel): Boolean = false
     fun allowsSchedules(): Boolean = true

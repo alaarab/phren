@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-24
+
 ### Changed
 
 - Code talks about functions, types and variables, never "symbols". `code_definition` and `code_references` take `name`, and so does the `add_finding` citation. `symbol` is still accepted until 0.3.1, marked deprecated, and a stored citation keeps its `symbol` key. Every `code_*` description, the `/code` skill, the notes sent to agents, `phren code` help and output, and the docs are reworded. `code_usage` and `phren code usage` report the most and least used functions and types instead of hot and cold.

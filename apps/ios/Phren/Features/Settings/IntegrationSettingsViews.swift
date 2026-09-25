@@ -26,7 +26,7 @@ struct PhrenHookSettingsView: View {
             ? "npx --yes @phren/cli@\(Self.cliVersion) bridge install"
             : "# Node 20+ first (nodejs.org or your package manager)\nnpx --yes @phren/cli@\(Self.cliVersion) bridge install"
     }
-    static let cliVersion = "0.2.16"
+    static let cliVersion = "0.3.0"
 
     var body: some View {
         PhrenList {

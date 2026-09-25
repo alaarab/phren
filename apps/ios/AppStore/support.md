@@ -42,8 +42,8 @@ GitHub.
 
 **Agent chat or terminals cannot connect.**
 Keep Tailscale connected on the phone and computer. Install Phren Hook on each
-computer with `npx --yes @phren/cli@0.2.16 bridge install`, then run
-`npx --yes @phren/cli@0.2.16 bridge doctor`. Add the computer in Agents and
+computer with `npx --yes @phren/cli@0.3.0 bridge install`, then run
+`npx --yes @phren/cli@0.3.0 bridge doctor`. Add the computer in Agents and
 authorize its device SSH key. Moshi is not required. See the
 [Phren Hook guide](https://alaarab.github.io/phren/phren-hook.html).
 
