@@ -52,6 +52,8 @@ Set the preset at install (`phren init --preset <name>`), switch it anytime
 - `~/.github/copilot-instructions.md`, `~/.copilot/skills/`, when Copilot is detected.
 - `~/.local/bin/{phren,copilot,cursor,codex}`, CLI and session wrappers.
 - `~/.phren-context.md`, the machine-alias file.
+- `~/.claude/projects/<home-key>/memory/MEMORY.md`, a generated root memory
+  pointing at `~/.phren-context.md`, inside Claude Code's own memory directory.
 - **Windows:** `%USERPROFILE%\.local\bin` may be added to your user PATH.
 
 These are re-created every SessionStart under `managed` (self-heal). Under
@@ -95,7 +97,7 @@ The installer adds `~/Library/LaunchAgents/com.phren.hook.plist` on macOS, or
 into `~/.codex/hooks.json`, `~/.claude/settings.json`, and
 `~/.copilot/hooks/phren.json`. Where an opencode config exists, the installer
 also writes `~/.config/opencode/plugins/phren-transcript.js`, which mirrors
-opencode sessions into the store's `.runtime/sessions`. Recognized `phren-iphone` entries in
+opencode sessions into the store's `.runtime/sessions`. Recognized `phren-iphone` and `phren-android` entries in
 `~/.ssh/authorized_keys` are migrated to the restricted Phren dispatcher with
 PTY support. Other hooks and keys remain intact. Changed settings and key files
 receive sibling `.phren-hook-<timestamp>.bak` backups. Codex requires review of

@@ -162,6 +162,31 @@ final class SyncEngineCoalescingTests: XCTestCase {
 
     """
 
+    private static func liveFindings(_ project: String) -> String {
+        """
+        # \(project) Findings
+
+        ## 2026-07-20
+
+        - First queued finding <!-- fid:0000f001 -->
+        - Second queued finding <!-- fid:0000f002 -->
+        - Third queued finding <!-- fid:0000f003 -->
+        - Fourth queued finding <!-- fid:0000f004 -->
+
+        """
+    }
+
+    private static func withLiveFindings(_ files: [String: String]) -> [String: String] {
+        var files = files
+        for path in files.keys where path.hasSuffix("/review.md") {
+            let project = String(path.dropLast("/review.md".count))
+            if files["\(project)/FINDINGS.md"] == nil {
+                files["\(project)/FINDINGS.md"] = liveFindings(project)
+            }
+        }
+        return files
+    }
+
     private static let firstLine = "- [2026-07-26] First queued finding"
     private static let secondLine = "- [2026-07-26] Second queued finding"
     private static let thirdLine = "- [2026-07-26] Third queued finding"
@@ -179,8 +204,16 @@ final class SyncEngineCoalescingTests: XCTestCase {
     /// Seeds the local cache with `local` (stale blob shas, as if pulled
     /// earlier) and the fake remote with `remote`, then hands back an engine
     /// whose background flush is disabled so the test drives `flushNow()`.
+    ///
+    /// Every seeded review.md gets a FINDINGS.md that already holds its queued
+    /// findings, locally and on any seeded remote. Approve only removes the
+    /// queue line when the finding is already live, so these tests keep
+    /// exercising coalescing over review.md alone; promotion (approve writing
+    /// FINDINGS.md) is covered by ReviewApproveTests.
     private func makeEngine(local: [String: String],
                             remote: [String: String] = [:]) async throws -> (SyncEngine, FakeGitHubClient) {
+        let local = Self.withLiveFindings(local)
+        let remote = Self.withLiveFindings(remote)
         let store = try LocalStore(rootDirectory: directory, owner: "o", repo: "r", branch: "main")
         for (path, content) in local {
             try await store.write(path, content: content, blobSha: "stale-\(path)")
@@ -298,7 +331,9 @@ final class SyncEngineCoalescingTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let store = try LocalStore(rootDirectory: directory, owner: "o", repo: "r", branch: "main")
         try await store.write("myproj/review.md", content: Self.reviewSeed, blobSha: GitBlob.sha(of: pushed))
-        let client = FakeGitHubClient(remote: ["myproj/review.md": pushed])
+        let findings = Self.liveFindings("myproj")
+        try await store.write("myproj/FINDINGS.md", content: findings, blobSha: GitBlob.sha(of: findings))
+        let client = FakeGitHubClient(remote: ["myproj/review.md": pushed, "myproj/FINDINGS.md": findings])
         let engine = SyncEngine(client: client, store: store, stateDirectory: directory)
         await engine.setAutoFlush(false)
 

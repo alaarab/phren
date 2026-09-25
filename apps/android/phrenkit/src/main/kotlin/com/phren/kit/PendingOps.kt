@@ -141,7 +141,8 @@ sealed class PendingOp {
     val editablePaths: List<String>
         get() = when (this) {
             is RejectQueue, is EditQueue -> listOf(primaryPath, "$project/FINDINGS.md")
-            is PromoteNote -> listOf("$project/FINDINGS.md", primaryPath)
+            // Approve promotes a queued finding that is not live yet.
+            is PromoteNote, is ApproveQueue -> listOf("$project/FINDINGS.md", primaryPath)
             else -> listOf(primaryPath)
         }
 

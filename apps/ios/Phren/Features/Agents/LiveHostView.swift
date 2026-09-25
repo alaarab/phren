@@ -130,7 +130,7 @@ struct LiveHostView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Circle().fill(fresh ? PhrenTheme.cyan : PhrenTheme.textDim).frame(width: 5, height: 5)
-                        Text(fresh ? "Live" : monitor.isConnecting ? "Connecting…" : monitor.slowToAnswer ? "Slow to answer" : "Disconnected")
+                        Text(fresh ? "Live" : monitor.busy ? "Busy" : monitor.isConnecting ? "Connecting…" : monitor.slowToAnswer ? "Slow to answer" : "Disconnected")
                         if let date = monitor.lastUpdated {
                             Text("· updated \(date, style: .relative) ago").lineLimit(1)
                         }
@@ -138,6 +138,7 @@ struct LiveHostView: View {
                     if monitor.snapshot != nil {
                         Text(fresh
                              ? "\(sessions.count) tabs · \(sessions.filter { $0.tab.activity == .working }.count) working · \(sessions.filter { $0.tab.activity == .waiting }.count) waiting"
+                             : monitor.busy ? "Answering, but slow to list its sessions. They stay open to you."
                              : monitor.isConnecting ? "Refreshing…" : "Showing previous status")
                     }
                 }.font(.caption).foregroundStyle(PhrenTheme.textMuted)

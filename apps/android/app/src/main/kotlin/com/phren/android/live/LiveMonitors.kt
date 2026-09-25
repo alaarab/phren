@@ -54,6 +54,8 @@ class LiveHostMonitor(
     private val pollInterval: Long = 10_000,
     /** Debug fixtures: a failed read ages the last answer out at once, as iOS's `--all-sessions-offline` does. */
     private val ageOnFailure: Boolean = false,
+    /** Asks the Hook whether it answers at all (`/v1/health`); null never asks. */
+    private val probe: (suspend (LiveHost) -> Unit)? = null,
 ) {
     var snapshot by mutableStateOf<LiveWorkspaces?>(null)
     var lastUpdated by mutableStateOf<Instant?>(null)
@@ -64,6 +66,10 @@ class LiveHostMonitor(
     /** True until this contact period's first request resolves: cached rows stay in the live groups meanwhile. */
     var awaitingAnswer by mutableStateOf(true); private set
     var streaming by mutableStateOf(false); private set
+    /** The Hook answers /v1/health but its overview is slow or timing out: saturated, not unreachable. */
+    var busy by mutableStateOf(false); private set
+    /** When the Hook last answered its health check while the overview did not. */
+    var healthAnsweredAt by mutableStateOf<Instant?>(null); private set
     var onSnapshotChanged: (() -> Unit)? = null
 
     val slowToAnswer: Boolean get() = snapshot?.phren?.slowToAnswer == true
@@ -78,11 +84,13 @@ class LiveHostMonitor(
 
     fun isFresh(at: Instant = Instant.now()) = lastUpdated?.let { Duration.between(it, at).seconds < FRESH_SECONDS } == true
     /** Fresh, or still making first contact since the app became active. */
-    fun isLive(at: Instant = Instant.now()) = isFresh(at) || (awaitingAnswer && message == null)
+    fun isLive(at: Instant = Instant.now()) = isFresh(at) || (awaitingAnswer && message == null) || isBusy(at)
+    /** Answering its health check within the freshness window while the overview lags: its sessions stay usable. */
+    fun isBusy(at: Instant = Instant.now()) = busy && healthAnsweredAt?.let { Duration.between(it, at).seconds < FRESH_SECONDS } == true
     /** A computer that answered and whose answer has aged out. */
     fun isStale(at: Instant = Instant.now()) = !isLive(at) && lastUpdated != null
     /** Reaching this computer, or not heard from yet. A fresh computer is live even while a poll is in flight. */
-    val isConnecting: Boolean get() = !isFresh() && message == null && (refreshing || awaitingAnswer)
+    val isConnecting: Boolean get() = !isFresh() && !busy && message == null && (refreshing || awaitingAnswer)
 
     /** Publishes once more when the answer ages out, so freshness needs no per-second clock. */
     private fun scheduleExpiry() {
@@ -124,6 +132,7 @@ class LiveHostMonitor(
         if (snapshot != value) snapshot = value
         lastUpdated = Instant.now(); scheduleExpiry()
         awaitingAnswer = false; message = null; fingerprint = null
+        busy = false; healthAnsweredAt = null
     }
 
     private fun pushes(value: LiveWorkspaces?) = value?.capabilities?.overviewStream == true
@@ -175,6 +184,20 @@ class LiveHostMonitor(
                     throw error
                 } catch (error: Exception) {
                     if (generation !== run) return
+                    // A Hook that answers its health check is saturated, not gone: keep its
+                    // sessions usable and call it busy, not offline.
+                    val probe = probe
+                    if (worthProbing(error) && probe != null && runCatching { probe(host) }.isSuccess) {
+                        if (generation !== run) return
+                        busy = true; healthAnsweredAt = Instant.now(); message = null
+                        refreshing = false; awaitingAnswer = false
+                        if (first) { first = false; onFirstRefresh?.invoke() }
+                        onSnapshotChanged?.invoke()
+                        refreshRequested = false
+                        withTimeoutOrNull(pollInterval) { wake.receive() }
+                        continue
+                    }
+                    busy = false; healthAnsweredAt = null
                     message = (error as? LiveConnectionError)?.message ?: (error as? PhrenKitError)?.message
                         ?: "Couldn't reach the computer. Check the address, Tailscale, SSH, and Phren Hook."
                     if (error is LiveConnectionError.UntrustedHost) fingerprint = error.fingerprint
@@ -204,6 +227,10 @@ class LiveHostMonitor(
     }
 }
 
+/** Only an unanswered request is worth a health check: a key or trust problem is never "busy". */
+internal fun worthProbing(error: Exception) = error !is LiveConnectionError.UntrustedHost &&
+    error !is LiveConnectionError.ChangedHost && error !is LiveConnectionError.Authentication
+
 /**
  * The one overview the app keeps live (SessionOverviewMonitor.swift): every
  * computer's monitor, revealed together after the first answers (or eight
@@ -221,7 +248,7 @@ class SessionOverviewMonitor(
 ) {
     data class Group(val id: String, val title: String, val sessions: List<LiveAgentSession>, val fresh: Boolean)
     data class ComputerRow(val host: LiveHost, val connecting: Boolean, val fresh: Boolean, val message: String?,
-                           val needsVerification: Boolean, val slow: Boolean = false)
+                           val needsVerification: Boolean, val slow: Boolean = false, val busy: Boolean = false)
     /** One value for the whole screen: header, groups, projects, pins and computer rows never come from different refreshes. */
     data class Screen(
         val groups: List<Group> = emptyList(),
@@ -256,7 +283,8 @@ class SessionOverviewMonitor(
 
     private fun makeMonitor() = fixtureFetch?.let { LiveHostMonitor(scope, it, openStream = null, ageOnFailure = fixtureOffline) } ?: LiveHostMonitor(scope,
         fetchSnapshot = { host, _ -> PhrenConnection.fetch(host, withContext(Dispatchers.IO) { keys.load(host.id) }) },
-        openStream = { host -> PhrenConnection.overviewUpdates(host, keys.load(host.id)) })
+        openStream = { host -> PhrenConnection.overviewUpdates(host, keys.load(host.id)) },
+        probe = { host -> PhrenConnection.computerIdentity(host, withContext(Dispatchers.IO) { keys.load(host.id) }) })
 
     /** Start (or keep) polling these computers from a job this object owns, so no screen's disappearance cancels it. */
     fun ensureRunning(hosts: List<LiveHost>) {
@@ -349,7 +377,8 @@ class SessionOverviewMonitor(
             if (configuration.preferences?.isPinned(session.id) == true) pinned += session.id
         }
         val value = Screen(groups, computers.map {
-            ComputerRow(it.host, it.monitor.isConnecting, it.monitor.isFresh(now), it.monitor.message, it.monitor.fingerprint != null, it.monitor.slowToAnswer)
+            ComputerRow(it.host, it.monitor.isConnecting, it.monitor.isFresh(now), it.monitor.message, it.monitor.fingerprint != null, it.monitor.slowToAnswer,
+                it.monitor.isBusy(now))
         }, projects, pinned, configuration.metadataReady, configuration.memoryConnected, configuration.preferences != null)
         saveLastKnown(value)
         if (first || value != screen) screen = value

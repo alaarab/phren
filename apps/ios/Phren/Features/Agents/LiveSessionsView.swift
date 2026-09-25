@@ -401,8 +401,9 @@ extension LiveSessionsView {
     /// A computer's connection trouble, on its own row: a colored dot and a
     /// word, only when something is wrong.
     @ViewBuilder func connectionStatus(_ computer: SessionOverviewMonitor.ComputerRow) -> some View {
-        if computer.message != nil || computer.slow == true {
-            let label = computer.needsVerification ? "Verify" : computer.message != nil ? "Offline" : "Slow"
+        if computer.message != nil || computer.slow == true || computer.busy == true {
+            // Busy: the Hook answers but its overview lags. Its sessions stay usable.
+            let label = computer.needsVerification ? "Verify" : computer.message != nil ? "Offline" : computer.busy == true ? "Busy" : "Slow"
             HStack(spacing: 5) {
                 Circle().fill(computer.message != nil ? PhrenTheme.warning : PhrenTheme.textMuted).frame(width: 7, height: 7)
                 Text(label).font(PhrenTypography.caption).foregroundStyle(PhrenTheme.warning)

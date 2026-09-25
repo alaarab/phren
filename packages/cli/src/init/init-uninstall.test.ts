@@ -1,4 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+import { makeTempDir, runCliExec } from "../test-helpers.js";
 import { shouldUninstallCurrentGlobalPackage } from "./init-uninstall.js";
 
 // Regression guard: a sandboxed `phren uninstall` (as run by the test harness)
@@ -24,4 +27,28 @@ describe("uninstall: global npm side-effect guard", () => {
     delete process.env.PHREN_SKIP_GLOBAL_NPM_UNINSTALL;
     expect(typeof shouldUninstallCurrentGlobalPackage()).toBe("boolean");
   });
+});
+
+// No TTY used to count as consent, so `phren uninstall` in an agent shell, a CI
+// step or a pipe deleted the whole store. --yes is the explicit opt-in.
+describe("uninstall: non-interactive sessions", () => {
+  it("refuses to delete the store without --yes", () => {
+    const tmp = makeTempDir("phren-uninstall-tty-");
+    try {
+      const home = path.join(tmp.path, "home");
+      const phrenDir = path.join(home, ".phren");
+      fs.mkdirSync(path.join(phrenDir, "keep-me"), { recursive: true });
+      fs.writeFileSync(path.join(phrenDir, "keep-me", "FINDINGS.md"), "# Findings\n- irreplaceable insight\n");
+
+      // runCliExec pipes stdio, so neither stdin nor stdout is a TTY.
+      const { exitCode, stdout } = runCliExec(["uninstall"], { PHREN_PATH: phrenDir, HOME: home, USERPROFILE: home });
+
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("--yes");
+      expect(stdout).toContain("Uninstall cancelled.");
+      expect(fs.readFileSync(path.join(phrenDir, "keep-me", "FINDINGS.md"), "utf8")).toContain("irreplaceable insight");
+    } finally {
+      tmp.cleanup();
+    }
+  }, 30_000);
 });

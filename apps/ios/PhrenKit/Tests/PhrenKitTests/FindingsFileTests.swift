@@ -101,6 +101,35 @@ final class FindingsFileTests: XCTestCase {
         XCTAssertTrue(lines[bulletIdx + 1].hasPrefix("  <!-- phren:cite {\"created_at\":"))
     }
 
+    /// core/finding.ts:16-28 `applyFindingTypePrefix`: the tag test is anchored,
+    /// and any bracketed tag counts. The port used the unanchored, nine-type
+    /// `extractFindingType`, which broke this both ways.
+    func testFindingTypePrefixMatchesCLI() throws {
+        // Already tagged: must not accumulate. `tradeoff` is a FindingType but
+        // not a decay type, which is exactly what the old check missed.
+        var tagged = FindingsFile(content: "")
+        try tagged.add(project: "myproj", text: "[tradeoff] Prefer X over Y",
+                       options: .init(type: .tradeoff))
+        XCTAssertEqual(tagged.content.components(separatedBy: "[tradeoff]").count - 1, 1,
+                       "type prefix accumulated on an already-tagged finding")
+
+        // A bracketed tag mid-sentence must not suppress the caller's type.
+        var midSentence = FindingsFile(content: "")
+        try midSentence.add(project: "myproj", text: "Reproduce with [bug] in the title",
+                            options: .init(type: .pattern))
+        XCTAssertTrue(midSentence.content.contains("- [pattern] Reproduce with [bug] in the title"),
+                      "chosen finding type was dropped")
+
+        // Untagged text still gets the prefix; no type still means no prefix.
+        var plain = FindingsFile(content: "")
+        try plain.add(project: "myproj", text: "Plain finding", options: .init(type: .pitfall))
+        XCTAssertTrue(plain.content.contains("- [pitfall] Plain finding"))
+
+        var untyped = FindingsFile(content: "")
+        try untyped.add(project: "myproj", text: "No type given")
+        XCTAssertTrue(untyped.content.contains("- No type given"))
+    }
+
     func testAddRejectsSecrets() throws {
         var file = FindingsFile(content: "")
         XCTAssertThrowsError(try file.add(project: "myproj", text: "token ghp_" + String(repeating: "a", count: 36))) {

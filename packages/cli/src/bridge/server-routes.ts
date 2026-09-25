@@ -88,6 +88,8 @@ export interface RouteContext {
 }
 
 const CHILD_ACTIVITY_CACHE_MS = 5_000;
+/** How long the overview waits for per-tab git and transcript reads; the phone gives up at 20 s. */
+export const OVERVIEW_ENRICH_BUDGET_MS = 5_000;
 interface ChildActivity { runningChildren: number; childProviders: Provider[] }
 const childActivityCache = new Map<string, { at: number; result: Promise<ChildActivity> }>();
 
@@ -174,42 +176,52 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       agents.push(pane); agentsByTab.set(key, agents);
     }
     const tabs = objects(workspaces.groups).flatMap(group => objects(group.children).map(tab => ({ group, tab })));
+    // What a chat needs to open (the exact conversation) comes straight from the
+    // chat states; everything below it is decoration.
+    for (const { group, tab } of tabs) {
+      const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
+      if (agents.length !== 1) continue;
+      const chat = chatStates.get(agents[0]);
+      if (chat?.starting === true) tab.starting = true;
+      if (typeof chat?.sessionId === "string" && provider.safeParse(agents[0].agent).success) {
+        tab.target = { server, workspace: group.id, tab: tab.id, pane: agents[0].pane_id, source: agents[0].agent, session: chat.sessionId };
+      }
+    }
+    // Branch, model, children and current step read git and transcripts. On a
+    // starved machine (load 230 on 10 cores, 2026-09-24) that took longer than
+    // the phone waits, so the computer read as offline. The overview answers
+    // within its budget with whatever decoration is ready; a later read fills in.
+    let expired = false;
     let nextTab = 0;
-    // Bound transcript and git work across tabs. Each worker owns one
-    // response row; snapshot order and target validation are unchanged.
-    await Promise.all(Array.from({ length: Math.min(4, tabs.length) }, async () => {
-      while (nextTab < tabs.length) {
+    const enrich = Promise.all(Array.from({ length: Math.min(4, tabs.length) }, async () => {
+      while (!expired && nextTab < tabs.length) {
         const { group, tab } = tabs[nextTab++];
         const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
-        if (agents.length === 1) {
-          const chat = chatStates.get(agents[0]);
-          if (chat?.starting === true) tab.starting = true;
-          if (typeof chat?.sessionId === "string" && provider.safeParse(agents[0].agent).success) {
-            tab.target = { server, workspace: group.id, tab: tab.id, pane: agents[0].pane_id,
-              source: agents[0].agent, session: chat.sessionId };
-          }
-        }
-        if (modules.has("git") && typeof tab.cwd === "string" && tab.agent) tab.branch = await repositoryBranch(tab.cwd);
-        // The model the pane's agent is running, and what it is doing
-        // right now, for cards and the lock screen.
+        const found: Json = {};
+        if (modules.has("git") && typeof tab.cwd === "string" && tab.agent) found.branch = await repositoryBranch(tab.cwd);
         if (agents.length === 1 && provider.safeParse(agents[0].agent).success) {
           const session = chatStates.get(agents[0])?.sessionId;
-          tab.runningChildren = 0; tab.childProviders = [];
+          found.runningChildren = 0; found.childProviders = [];
           if (typeof session === "string") {
             const source = agents[0].agent as Provider;
             const [model, children] = await Promise.all([
               currentModel(source, session).catch(() => undefined), childActivity(source, session),
             ]);
-            if (model) tab.model = model;
-            tab.runningChildren = children.runningChildren; tab.childProviders = children.childProviders;
+            if (model) found.model = model;
+            found.runningChildren = children.runningChildren; found.childProviders = children.childProviders;
             if (agents[0].agent_status === "working") {
               const step = await currentStep(source, session).catch(() => undefined);
-              if (step) tab.currentStep = step;
+              if (step) found.currentStep = step;
             }
           }
         }
+        // A row finished after the answer left belongs to the next read.
+        if (!expired) Object.assign(tab, Object.fromEntries(Object.entries(found).filter(([, value]) => value !== undefined)));
       }
     }));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([enrich, new Promise<void>(resolve => { timer = setTimeout(resolve, OVERVIEW_ENRICH_BUDGET_MS); })]);
+    expired = true; clearTimeout(timer);
     return { ...workspaces, phren: info };
   };
 }

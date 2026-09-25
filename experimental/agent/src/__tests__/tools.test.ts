@@ -135,6 +135,39 @@ describe("editFileTool", () => {
     expect(result.is_error).toBe(true);
     expect(result.output).toContain("File not found");
   });
+
+  it("writes $ patterns literally instead of expanding them", async () => {
+    // `$$`, `$&`, `` $` ``, `$'` and `$1` are all replacement patterns to
+    // String.replace — code the model writes must land byte-for-byte.
+    const filePath = path.join(tmpDir, "dollars.sh");
+    fs.writeFileSync(filePath, "PLACEHOLDER\n");
+    const replacement = [
+      'echo "cost: $$${AMOUNT}"',
+      "sed -e 's/x/$&/' <<<\"$1\"",
+      "const s = `$` + $'quoted'",
+      "const re = /(a)(b)/; s.replace(re, '$2$1')",
+    ].join("\n");
+
+    const result = await editFileTool.execute({
+      path: filePath,
+      old_string: "PLACEHOLDER",
+      new_string: replacement,
+    });
+    expect(result.is_error).toBeUndefined();
+    expect(fs.readFileSync(filePath, "utf-8")).toBe(`${replacement}\n`);
+  });
+
+  it("rejects an empty old_string instead of inserting at the start", async () => {
+    const filePath = path.join(tmpDir, "empty-old.txt");
+    fs.writeFileSync(filePath, "");
+    const result = await editFileTool.execute({
+      path: filePath,
+      old_string: "",
+      new_string: "injected",
+    });
+    expect(result.is_error).toBe(true);
+    expect(fs.readFileSync(filePath, "utf-8")).toBe("");
+  });
 });
 
 describe("shellTool", () => {

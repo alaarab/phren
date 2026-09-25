@@ -374,7 +374,7 @@ private fun ConnectionCard(host: LiveHost?, monitor: com.phren.android.live.Live
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(Modifier.size(5.dp).background(if (fresh) PhrenTheme.cyan else PhrenTheme.textDim, CircleShape))
                     Text(when {
-                        fresh -> "Live"; monitor?.isConnecting != false -> "Connecting…"; monitor.slowToAnswer -> "Slow to answer"; else -> "Disconnected"
+                        fresh -> "Live"; monitor?.busy == true -> "Busy"; monitor?.isConnecting != false -> "Connecting…"; monitor.slowToAnswer -> "Slow to answer"; else -> "Disconnected"
                     }, style = PhrenType.caption, color = PhrenTheme.textMuted)
                     monitor?.lastUpdated?.let { updated ->
                         Text("· updated ${relativeAgo(updated, Instant.ofEpochMilli(now))} ago", style = PhrenType.caption, color = PhrenTheme.textMuted, maxLines = 1)
@@ -382,6 +382,7 @@ private fun ConnectionCard(host: LiveHost?, monitor: com.phren.android.live.Live
                 }
                 if (monitor?.snapshot != null) {
                     Text(if (fresh) "${sessions.size} tabs · ${sessions.count { it.tab.activity == LiveWorkspaces.Tab.Activity.WORKING }} working · ${sessions.count { it.tab.activity == LiveWorkspaces.Tab.Activity.WAITING }} waiting"
+                        else if (monitor.busy) "Answering, but slow to list its sessions. They stay open to you."
                         else if (monitor.isConnecting) "Refreshing…" else "Showing previous status", style = PhrenType.caption, color = PhrenTheme.textMuted)
                 }
             }

@@ -73,7 +73,7 @@ final class LiveSessionsTests: XCTestCase {
         let graph = app.buttons["Explore graph"]
         XCTAssertTrue(graph.waitForExistence(timeout: 5))
         graph.tap()
-        XCTAssertTrue(app.webViews.staticTexts["DEMO"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(graphProjectLabel("DEMO", in: app.webViews).waitForExistence(timeout: 20))
         app.buttons["graph-back"].tap()
         app.navigationBars["Session details"].buttons.element(boundBy: 0).tap()
         // A snapshot reads as live for the window after its last successful

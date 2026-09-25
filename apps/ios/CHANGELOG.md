@@ -10,6 +10,7 @@ number counts up on its own.
 
 ### Changed
 
+- A computer that is too busy to list its sessions but still answers now reads "Busy" instead of "Offline". Its sessions stay where they were and still open (chat and terminal), and the details fill in when it catches up. "Offline" now means the computer can't be reached at all.
 - Sending a message (typed, dictated or in talk mode) always scrolls the chat to its end, even when you had scrolled up or were reading an older page of history.
 - The chat options' "Repository changes" row is now "Git", with a commit-graph icon instead of the worktree's branch icon. It opens changes, history, branches, pull requests, the working tree, workers and code.
 - The terminal's shortcut and slash-command palette is denser: no "…" button beside every tile (hold a tile for its actions instead), tiles about a third shorter, and no grey hint when it only repeats the command ("/model" over "model").
@@ -119,6 +120,8 @@ number counts up on its own.
 
 ### Fixed
 
+- Approving a review item saves it as a finding. Items that `phren extract` queued exist only in the review queue, and approving one removed it without writing it anywhere, so approving in Review deleted it. Approve now adds the finding (with where and when it was captured) unless it is already in your findings, then removes it from the queue; in a team store it goes to the journal. If it can't be saved, it stays in the queue.
+- A finding added with a type keeps exactly one type tag, as the computer's phren does. "[tradeoff] Prefer X" added as a tradeoff was saved as "[tradeoff] [tradeoff] Prefer X", and a finding with a bracketed word mid-sentence ("Reproduce with [bug] in the title") lost the type you chose.
 - A long message stays inside the chat's message box. With an attachment above it, the box stayed short while the text grew, so the draft ran above the box's top edge and over the + / terminal / agents / microphone row. The box now grows with the draft to four lines and scrolls inside after that, and it sits a little higher above the keyboard's suggestion bar.
 - A chat attachment that reached the computer reports success. When another request on the same SSH connection failed (a stream that ended, a poll that timed out), the phone closed the connection under the upload, which then said "Attachment upload didn't finish" (tcpShutdown) although the file was already stored. A failed request now only takes its connection out of use: requests already running on it finish first, and new requests open a fresh connection.
 - Focus in the Memory map lands on the focused node. Focus shows the node's neighbourhood, which lays the map out again, and the camera stayed where the node used to be, often leaving it off screen. A tap on the map also selects the node under your finger; it had selected the node under the previous tap, or nothing.
