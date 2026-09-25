@@ -1002,6 +1002,16 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     debugLog(`doctor: context-imports scan failed: ${errorMessage(err)}`);
   }
 
+  // Spoken replies are optional, so only a stored key other users can read,
+  // or a broken file, fails the check. The key itself is never shown.
+  try {
+    const { speechKeyStatus } = await import("../bridge/speech-key.js");
+    const speech = await speechKeyStatus();
+    checks.push({ name: "speech-key", ok: !speech.problem, detail: `${speech.configured ? "configured" : "not configured"}: ${speech.detail}` });
+  } catch (err: unknown) {
+    debugLog(`doctor: speech-key check failed: ${errorMessage(err)}`);
+  }
+
   const ok = checks.every((c) => c.ok);
   return { ok, machine, profile: profile || undefined, checks };
 }

@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- Hook: the ElevenLabs key for spoken replies and Scribe dictation is phren's own machine config, no longer `~/.config/mina-trailer.json`. The Hook reads `ELEVENLABS_API_KEY` first (ElevenLabs' own variable, shared with its SDKs and MCP server), then `~/.local/share/phren/bridge/elevenlabs.json` (`{"apiKey": …}`, mode 600, never synced; a file other users can read is ignored). `phren bridge speech-key set` stores it from stdin. When that file is missing and `mina-trailer.json` has `elevenlabs_api_key`, the Hook copies it once with mode 600 and then reads only the new file; `mina-trailer.json` is left alone. `phren doctor` (`speech-key`) and `phren bridge doctor` (`speechKey`) say whether the computer has a key without showing it.
+
 ## [0.3.0] - 2026-09-24
 
 ### Changed

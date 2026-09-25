@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { readFileSync, realpathSync } from "node:fs";
 import { appendFile, chmod, mkdir, mkdtemp, open, readFile, realpath as realpathAsync, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
-import { request } from "node:http";
+import { createServer as createHttpServer, request, type Server as HttpServer } from "node:http";
 import { createConnection, createServer as createNetServer, type Server, type Socket } from "node:net";
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
@@ -447,6 +447,9 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
   let extraWorkspaces: Record<string, unknown>[] = [], extraTabs: Record<string, unknown>[] = [], extraPanes: Record<string, unknown>[] = [], failAgentStart = false, blockAgentStart = false, promptNotReady = 0;
   let helperPIDs: number[] = [];
   let paneLines = "", drawConfirmation = false;
+  // Outbound HTTPS from the Hook (ElevenLabs) goes to this proxy, which records
+  // the CONNECT target and refuses it, so no test reaches the internet.
+  let egress: HttpServer | undefined, egressTargets: string[] = [];
   let confirmationHasKeys = true;
   let menuHighlight: number | undefined, confirmedMenuRow: number | undefined;
   let ignoredMenuMoves = 0, loseMenuHighlight = false, replaceMenuAfterMove = false;
@@ -540,6 +543,10 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
     await mkdir(path.join(root, "herdr"));
     await mkdir(path.join(root, "codex/sessions/2026/09/10"), { recursive: true });
     await resetRecord();
+    egressTargets = [];
+    egress = createHttpServer();
+    egress.on("connect", (req, socket) => { egressTargets.push(String(req.url)); socket.end("HTTP/1.1 403 Forbidden\r\n\r\n"); });
+    await new Promise<void>(resolve => egress!.listen(0, "127.0.0.1", resolve));
     herdr = createNetServer(socket => {
       herdrSockets.add(socket); socket.on("close", () => herdrSockets.delete(socket));
       socket.on("error", () => { /* A cancelled client may close before the fixture's reply. */ });
@@ -646,6 +653,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
     hook = spawn(process.execPath, [hookBundle, "serve"], { env: { ...process.env,
       PATH: `${path.join(root, "bin")}:${process.env.PATH}`, PHREN_PATH: path.join(root, ".phren"),
       HOME: root, XDG_CONFIG_HOME: path.join(root, ".config"), PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex"),
+      ELEVENLABS_API_KEY: "", NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: `http://127.0.0.1:${(egress!.address() as { port: number }).port}`, NO_PROXY: "localhost,127.0.0.1,::1",
       PHREN_APPROVAL_HOLD_MS: "2500", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
       stdio: ["ignore", "ignore", "pipe"] });
     hook.stderr!.on("data", bytes => log += bytes);
@@ -668,6 +676,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
     // A client that never hung up must not hold the fake Herdr open.
     for (const socket of herdrSockets) socket.destroy();
     if (herdr) await new Promise<void>(resolve => herdr.close(() => resolve()));
+    if (egress) { await new Promise<void>(resolve => egress!.close(() => resolve())); egress = undefined; }
     if (root) await rm(root, { recursive: true, force: true });
   }
   beforeAll(startFixture);
@@ -2356,12 +2365,25 @@ schedules:
       expect((await api("/v1/health/details")).data.peers.computers[0]).toMatchObject({ name: "Linuxbox", reachable: true, listsBack: true });
     });
 
-    it("advertises speech and answers /v1/speech with a coded error when this computer has no ElevenLabs key", async () => {
-      expect((await api("/v1/health")).data.capabilities.speech).toBe(true);
+    it("advertises speech and transcribe, and voices /v1/speech with only bridge/elevenlabs.json as the key", async () => {
+      expect((await api("/v1/health")).data.capabilities).toMatchObject({ speech: true, transcribe: true });
       const reply = await api("/v1/speech", { text: "Hello from the conductor." });
       expect(reply.status).toBe(503);
       expect(reply.data).toMatchObject({ code: "speech-unconfigured" });
       expect((await api("/v1/speech", { text: "" })).status).toBe(400);
+      // Node before 22.21 ignores NODE_USE_ENV_PROXY, and the request would leave the machine.
+      const [major, minor] = process.versions.node.split(".").map(Number);
+      if (major < 22 || (major === 22 && minor < 21) || major === 23) return;
+      const file = path.join(root, "bridge/elevenlabs.json");
+      await writeFile(file, JSON.stringify({ apiKey: "sk_test_do_not_leak_0123456789" }), { mode: 0o600 });
+      try {
+        const keyed = await api("/v1/speech", { text: "Hello from the conductor." });
+        expect(keyed.data).toMatchObject({ code: "speech-unreachable" });
+        expect(JSON.stringify(keyed.data)).not.toContain("sk_test");
+        expect(egressTargets).toEqual(["api.elevenlabs.io:443"]);
+      } finally {
+        await rm(file, { force: true });
+      }
     });
 
     it("leaves approvalPush out and answers registration with configured:false when no APNs key is loaded", async () => {
