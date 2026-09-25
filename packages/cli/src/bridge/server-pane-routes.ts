@@ -94,7 +94,8 @@ export function herdrWorktreeWorkers(s: Json): WorktreeWorker[] {
 const ANSWER_KEYS = ["Escape", "Enter", "Up", "Down", "Tab", "AltUp", "y", "n", "p", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 const HERDR_KEYS: Partial<Record<(typeof ANSWER_KEYS)[number], string>> = { Escape: "esc", Enter: "enter", Up: "up", Down: "down", Tab: "tab", AltUp: "alt+Up" };
 
-const questionText = z.string().trim().min(1).max(4000).refine(t => !/[\x00-\x1f\x7f]/.test(t));
+// A question or label may wrap onto several lines; the pane shows them joined.
+const questionText = z.string().trim().min(1).max(4000).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t));
 const claudeQuestionBody = z.object({
   questions: z.array(z.object({ question: questionText, multiSelect: z.boolean().optional(), options: z.array(questionText).min(1).max(8) })).min(1).max(8),
   answers: z.array(z.object({ optionIndexes: z.array(z.number().int().nonnegative()).max(8),
