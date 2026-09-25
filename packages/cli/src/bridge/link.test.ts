@@ -23,7 +23,9 @@ afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 const key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPKDk8cewh74xDIccwQz/N4V05hPT+bdp5fEii+pzf9B";
 
-it("pins a linked computer in a private hooks.yaml once, and refuses a different computer under its name or address", async () => {
+// hooks.yaml must be mode 0600, and Windows files carry no POSIX mode bits;
+// the Hook supports macOS and Linux only.
+it.skipIf(process.platform === "win32")("pins a linked computer in a private hooks.yaml once, and refuses a different computer under its name or address", async () => {
   const mini = { name: "Mini", address: "squids-mac-mini", username: "squidbot", port: 22, server: "default", hostKey: `${key} root@mini` };
   expect(await addHookPeer(mini, root)).toMatchObject({ added: true });
   // Linking again is a no-op, so an interrupted link can simply be rerun.
