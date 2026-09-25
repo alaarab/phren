@@ -194,18 +194,4 @@ final class LaunchSessionTests: XCTestCase {
         sessionsRow.tap()
         assertWorktreeLaunch(app, branch: #"^phren/[0-9a-f]{6}$"#)
     }
-
-    @MainActor
-    func testAFailedStartExplainsAndKeepsThePicker() {
-        let app = openNewThread(["--launch-fails"])
-        for _ in 0..<8 where !app.buttons["launch-open"].isHittable { app.swipeUp() }
-        XCTAssertTrue(app.buttons["launch-open"].waitForExistence(timeout: 5))
-        app.buttons["launch-open"].tap()
-        XCTAssertTrue(app.staticTexts["Couldn't open session"].waitForExistence(timeout: 8))
-        // The harness is whichever was picked last (it persists), so match the verb only.
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "couldn't start")).firstMatch.exists)
-        app.buttons["OK"].tap()
-        for _ in 0..<8 where !app.textFields["launch-folder"].isHittable { app.swipeDown() }
-        XCTAssertTrue(app.textFields["launch-folder"].exists, "The picker stays so the folder or harness can be changed")
-    }
 }

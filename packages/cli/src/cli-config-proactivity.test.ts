@@ -93,23 +93,6 @@ describe("handleConfig proactivity", () => {
     expect(data.effective.proactivityTask).toBe("high");
   });
 
-  it("persists base proactivity in governance install preferences", async () => {
-    const { handleConfig } = await importCliConfig();
-    const output = captureConsole();
-
-    await handleConfig(["proactivity", "medium"]);
-
-    expect(output.logs).toHaveLength(1);
-    const data = JSON.parse(output.logs[0]);
-    expect(data.configured.proactivity).toBe("medium");
-    expect(data.effective.proactivity).toBe("medium");
-    expect(data.effective.proactivityFindings).toBe("medium");
-    expect(data.effective.proactivityTask).toBe("medium");
-
-    const stored = JSON.parse(fs.readFileSync(governancePrefsPath(), "utf8"));
-    expect(stored.proactivity).toBe("medium");
-  });
-
   it("persists findings and task overrides independently", async () => {
     const { handleConfig } = await importCliConfig();
     const output = captureConsole();

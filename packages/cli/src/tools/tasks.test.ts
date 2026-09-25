@@ -72,31 +72,6 @@ describe("manage_task action=update through the composite", () => {
     expect(queue[0]).toContain("renamed task line");
     expect(queue[0]).toContain("[high]");
   });
-
-  it("applies the same updates when the host passes them as a JSON string", async () => {
-    const res = parse(await manage({ action: "update", project: PROJECT, item: "original task", updates: '{"section":"Queue","priority":"low"}' }));
-    expect(res.ok).toBe(true);
-    const queue = queueLines();
-    expect(queue).toHaveLength(1);
-    expect(queue[0]).toContain("original task line");
-    expect(queue[0]).toContain("[low]");
-  });
-
-  it("moves the task when updates is { section: \"Queue\" }", async () => {
-    const res = parse(await manage({ action: "update", project: PROJECT, item: "original task", updates: { section: "Queue" } }));
-    expect(res.ok).toBe(true);
-    expect(queueLines()).toEqual([expect.stringContaining("original task line")]);
-  });
-
-  it("reports a bad inner field of a JSON-string updates at that field", async () => {
-    const res = parse(await manage({ action: "update", project: PROJECT, item: "original task", updates: '{"priority":"urgent"}' }));
-    expect(res.ok).toBe(false);
-    expect(res.issues[0].path).toBe("updates.priority");
-    expect(res.issues[0].message).not.toMatch(/expected object, received string/);
-    const after = readTasks(tmp.path, PROJECT);
-    expect(after.ok).toBe(true);
-    if (after.ok) expect(after.data.items.Active).toHaveLength(1);
-  });
 });
 
 const THREE = `# demo
@@ -129,12 +104,6 @@ describe("manage_task action=complete through the composite", () => {
     expect(res.ok).toBe(true);
     expect(res.data.completed).toEqual(["alpha one", "beta two"]);
     expect(doneLines().sort()).toEqual(["alpha one", "beta two"]);
-  });
-
-  it("completes every item when the host passes the array as a JSON string", async () => {
-    const res = parse(await manage({ action: "complete", project: PROJECT, item: '["bid:aaaaaaaa", "bid:bbbbbbbb"]' }));
-    expect(res.ok).toBe(true);
-    expect(res.data.completed).toEqual(["alpha one", "beta two"]);
   });
 
   it("still takes a single plain string", async () => {

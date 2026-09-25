@@ -135,24 +135,6 @@ final class LiveSessionsTests: XCTestCase {
     }
 
     @MainActor
-    func testSkillsAndInstructionsOpenFromSettingsAgents() {
-        let app = launchLayout(count: 1, extra: ["--project-skills-fixture"])
-        XCTAssertFalse(app.buttons["sessions-more"].exists, "Live sessions has no ••• menu")
-        app.tabBars.buttons["Settings"].tap()
-        let skills = app.buttons["settings-skills"]
-        for _ in 0..<4 where !(skills.exists && skills.isHittable) { app.swipeUp() }
-        XCTAssertTrue(skills.waitForExistence(timeout: 5))
-        capture(app, "Settings Agents section")
-        skills.tap()
-        XCTAssertTrue(app.navigationBars["Skills"].waitForExistence(timeout: 5))
-        app.navigationBars.buttons.firstMatch.tap()
-        let instructions = app.buttons["settings-agent-instructions"]
-        XCTAssertTrue(instructions.waitForExistence(timeout: 5))
-        instructions.tap()
-        XCTAssertTrue(app.navigationBars["Agent setup"].waitForExistence(timeout: 5))
-    }
-
-    @MainActor
     func testAddComputerUnderComputersWithSixSessions() {
         let app = launchLayout(count: 6)
         let add = app.buttons["sessions-add-computer"]

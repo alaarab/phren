@@ -239,13 +239,6 @@ public actor GitHubClient {
         return (200..<300).contains(http.statusCode)
     }
 
-    /// True when the repo contains `phren.root.yaml` at its root. Retained for
-    /// call sites that only need a yes/no; `probeStore` distinguishes "not a
-    /// store" from "token can't see it".
-    public func isPhrenStore(owner: String, name: String) async -> Bool {
-        await probeStore(owner: owner, name: name, disambiguate404: false) == .isStore
-    }
-
     // MARK: - Git data reads
 
     /// Head commit SHA for a branch. Returns nil when the cached ETag still

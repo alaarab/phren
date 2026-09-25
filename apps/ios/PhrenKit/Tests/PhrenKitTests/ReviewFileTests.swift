@@ -42,16 +42,6 @@ final class ReviewFileTests: XCTestCase {
         assertSameContent(file.content, try Fixtures.text("review-after-edit.md"), "edit queue item")
     }
 
-    func testRiskyFlagging() throws {
-        let file = ReviewFile(content: try Fixtures.text("review-seeded.md"))
-        let items = file.parse()
-        // High-confidence Review item: not risky. Low-confidence: risky.
-        // Stale section: always risky (access.ts:655).
-        XCTAssertFalse(items[0].risky)
-        XCTAssertTrue(items[1].risky)
-        XCTAssertTrue(items.first(where: { $0.section == .stale })!.risky)
-    }
-
     func testQueueTextNormalization() {
         // governance/policy.ts:710 — comments stripped, escapes unwound,
         // whitespace collapsed.

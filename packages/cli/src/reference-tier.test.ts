@@ -61,6 +61,10 @@ describe("countActiveFindings", () => {
 ## 2025-01-10
 
 - Third insight
+
+<details>
+- Second archived block
+</details>
 `;
     expect(countActiveFindings(content)).toBe(3);
   });

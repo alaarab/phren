@@ -24,6 +24,11 @@ final class AgentQueuedQuestionTests: XCTestCase {
         // The phone answers with alt+up first, then the chosen option's key.
         let keys = [AgentAnswerKey.altUp, choice.answerKey(selections: [0])].compactMap { $0 }
         XCTAssertEqual(keys.map(\.rawValue), ["AltUp", "1"])
+        // Folded from testTerminalPromptWithoutQueuedDefaultsToFalse.
+        do {
+            let prompt = try status(terminalPrompt: #"{"toolName":"Shell","message":"{\"command\":\"ls\"}"}"#).terminalPrompt
+            XCTAssertFalse(try XCTUnwrap(prompt).queued)
+        }
     }
     func testMCPApprovalKeepsArgumentsOutOfTheQuestionAndDecodesOptionDescriptions() throws {
         let data = Data(#"""
@@ -63,10 +68,6 @@ final class AgentQueuedQuestionTests: XCTestCase {
         ])
         XCTAssertNil(choice.prompt(id: "choice"))
     }
-    func testTerminalPromptWithoutQueuedDefaultsToFalse() throws {
-        let prompt = try status(terminalPrompt: #"{"toolName":"Shell","message":"{\"command\":\"ls\"}"}"#).terminalPrompt
-        XCTAssertFalse(try XCTUnwrap(prompt).queued)
-    }
     func testReleasedAskUserQuestionDecodesItsQuestionsForTheCard() throws {
         let prompt = try XCTUnwrap(status(terminalPrompt:
             #"{"toolName":"AskUserQuestion","message":"{}","questionIndex":0,"questions":[{"question":"Which accent?","header":"Design","options":[{"label":"Cyan","description":"Keep it"},{"label":"Lavender"}]},{"question":"Which screens?","header":"Scope","multiSelect":true,"options":[{"label":"Chat"},{"label":"Agents"}]}]}"#
@@ -80,13 +81,6 @@ final class AgentQueuedQuestionTests: XCTestCase {
         XCTAssertEqual(card.questions[0].options.map(\.label), ["Cyan", "Lavender"])
         XCTAssertEqual(card.questions[0].options.first?.description, "Keep it")
         XCTAssertEqual(card.questions[1].options.map(\.label), ["Chat", "Agents"])
-    }
-    func testWaitingStatusWithoutATerminalPromptHasNoCard() throws {
-        let json = #"{"agentStatus":{"source":"codex","session":"test-session","status":"blocked"}}"#
-        let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w1", tabID: "t1", paneID: "p1", source: "codex", sessionID: "test-session")
-        let status = try XCTUnwrap(AgentInteractionStatus.read(Data(json.utf8), target: target))
-        XCTAssertNil(status.terminalPrompt)
-        XCTAssertFalse(status.passwordPrompt)
     }
     func testDecodesAPasswordPromptAndATerminalChoice() throws {
         let json = #"""
@@ -103,5 +97,13 @@ final class AgentQueuedQuestionTests: XCTestCase {
         XCTAssertEqual(choice.options.compactMap(\.answerKey), [.yes, .proceedAlways, .escape])
         let card = try XCTUnwrap(choice.prompt(id: "terminal-choice"))
         XCTAssertTrue(try XCTUnwrap(card.questions.first?.question).contains("bun /tmp/x.ts"))
+        // Folded from testWaitingStatusWithoutATerminalPromptHasNoCard.
+        do {
+            let json = #"{"agentStatus":{"source":"codex","session":"test-session","status":"blocked"}}"#
+            let target = try AgentChatTarget(hostID: UUID(), workspaceID: "w1", tabID: "t1", paneID: "p1", source: "codex", sessionID: "test-session")
+            let status = try XCTUnwrap(AgentInteractionStatus.read(Data(json.utf8), target: target))
+            XCTAssertNil(status.terminalPrompt)
+            XCTAssertFalse(status.passwordPrompt)
+        }
     }
 }

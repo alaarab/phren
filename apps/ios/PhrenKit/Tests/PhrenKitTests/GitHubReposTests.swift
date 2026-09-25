@@ -95,19 +95,4 @@ final class GitHubReposTests: XCTestCase {
         XCTAssertEqual(probe, .notStore)
         XCTAssertEqual(StubURLProtocol.requests.count, 1)
     }
-
-    /// The pre-existing boolean wrapper keeps its one-request shape, so the
-    /// current repo picker behaves exactly as before.
-    func testIsPhrenStoreWrapperStillWorks() async {
-        StubURLProtocol.stub("contents/phren.root.yaml", status: 200, body: #"{"sha":"abc"}"#)
-        let yes = await makeClient().isPhrenStore(owner: "octo", name: "phren-store")
-        XCTAssertTrue(yes)
-        XCTAssertEqual(StubURLProtocol.requests.count, 1)
-
-        StubURLProtocol.reset()
-        StubURLProtocol.stub("contents/phren.root.yaml", status: 404, body: #"{"message":"Not Found"}"#)
-        let no = await makeClient().isPhrenStore(owner: "octo", name: "plain")
-        XCTAssertFalse(no)
-        XCTAssertEqual(StubURLProtocol.requests.count, 1)
-    }
 }

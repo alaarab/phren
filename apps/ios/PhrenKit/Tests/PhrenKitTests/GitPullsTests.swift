@@ -19,12 +19,6 @@ final class GitPullsTests: XCTestCase {
         XCTAssertEqual(try GitPulls.read(data).pulls[0].state, .unknown)
     }
 
-    func testUnavailableIsAnEmptyList() throws {
-        let pulls = try GitPulls.read(Data(#"{"available":false,"pulls":[]}"#.utf8))
-        XCTAssertFalse(pulls.available)
-        XCTAssertTrue(pulls.pulls.isEmpty)
-    }
-
     func testCurrentBranchPullCarriesStateAndChecks() throws {
         let data = Data(#"{"available":true,"pulls":[],"branch":"feature/pr","current":{"number":51,"title":"Finish","url":"https://github.com/sam/phren/pull/51","head":"feature/pr","base":"main","draft":true,"state":"OPEN","checks":"failing"}}"#.utf8)
         let pulls = try GitPulls.read(data)
@@ -46,6 +40,12 @@ final class GitPullsTests: XCTestCase {
         let merged = try GitPulls.read(Data(#"{"available":true,"pulls":[],"branch":"x","current":{"number":3,"url":"https://github.com/sam/phren/pull/3","head":"x","state":"MERGED","checks":"queued"}}"#.utf8))
         XCTAssertEqual(merged.current?.stateLabel, "merged")
         XCTAssertNil(merged.current?.checks)
+        // Folded from testUnavailableIsAnEmptyList.
+        do {
+            let pulls = try GitPulls.read(Data(#"{"available":false,"pulls":[]}"#.utf8))
+            XCTAssertFalse(pulls.available)
+            XCTAssertTrue(pulls.pulls.isEmpty)
+        }
     }
 
     func testPublishResultReadsSuccessAndVerbatimFailure() throws {

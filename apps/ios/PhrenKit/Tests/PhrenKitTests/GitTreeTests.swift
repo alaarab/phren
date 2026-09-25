@@ -12,11 +12,11 @@ final class GitTreeTests: XCTestCase {
         XCTAssertEqual(tree.entries[1].status, .modified)
         XCTAssertEqual(tree.entries[2].status, .untracked)
         XCTAssertTrue(tree.entries[0].isDirectory)
-    }
-
-    func testMissingStatusIsNil() throws {
-        let tree = try GitWorkingTree.read(Data(#"{"path":"Sources","entries":[{"name":"App.swift","path":"Sources/App.swift","kind":"file"}]}"#.utf8))
-        XCTAssertNil(tree.entries[0].status)
+        // Folded from testMissingStatusIsNil.
+        do {
+            let tree = try GitWorkingTree.read(Data(#"{"path":"Sources","entries":[{"name":"App.swift","path":"Sources/App.swift","kind":"file"}]}"#.utf8))
+            XCTAssertNil(tree.entries[0].status)
+        }
     }
 
     func testUnknownKindAndStatusAreTolerated() throws {
