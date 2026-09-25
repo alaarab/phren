@@ -1,11 +1,8 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import os from "node:os";
-import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { BridgeError, type Json } from "./protocol.js";
-import { DEFAULT_SPEECH_VOICE, readSpeechKey, SPEECH_AUDIO, SPEECH_MODEL, streamSpeech, type SpeechOptions } from "./speech.js";
+import { DEFAULT_SPEECH_VOICE, SPEECH_AUDIO, SPEECH_MODEL, streamSpeech, type SpeechOptions } from "./speech.js";
 
 const KEY = "sk_test_do_not_leak_0123456789";
 
@@ -131,20 +128,5 @@ describe("speech route", () => {
     });
     servers.push(server);
     await expect(post({ text: "Hello." })).rejects.toThrow();
-  });
-
-  it("reads the key from ~/.config/mina-trailer.json and nothing else", async () => {
-    const home = await mkdtemp(path.join(os.tmpdir(), "phren-speech-"));
-    try {
-      const file = path.join(home, ".config", "mina-trailer.json");
-      expect(await readSpeechKey(file)).toBeUndefined();
-      await mkdir(path.dirname(file), { recursive: true });
-      await writeFile(file, JSON.stringify({ gemini_api_key: "other", elevenlabs_api_key: ` ${KEY} ` }));
-      expect(await readSpeechKey(file)).toBe(KEY);
-      await writeFile(file, "{not json");
-      expect(await readSpeechKey(file)).toBeUndefined();
-    } finally {
-      await rm(home, { recursive: true, force: true });
-    }
   });
 });

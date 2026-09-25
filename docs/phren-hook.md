@@ -322,9 +322,8 @@ with ElevenLabs' `eleven_flash_v2_5` model and streams the audio back as raw
 pcm_s16le;rate=24000;channels=1`). The Hook advertises it as the `speech`
 capability.
 
-The key is read from `elevenlabs_api_key` in `~/.config/mina-trailer.json` on
-this computer, used only in the request to ElevenLabs, and never returned, even
-in errors. The voice is River (calm, neutral); set `PHREN_SPEECH_VOICE` in the
+The key is this computer's ElevenLabs key (see [the ElevenLabs key](#the-elevenlabs-key)),
+used only in the request to ElevenLabs and never returned, even in errors. The voice is River (calm, neutral); set `PHREN_SPEECH_VOICE` in the
 Hook's environment to another ElevenLabs voice id. Failures answer JSON with a
 `code`: `speech-unconfigured` (503, no key), `speech-unreachable` (502),
 `speech-rejected` (502, key refused), `speech-quota` (402), `speech-voice` (502,
@@ -344,7 +343,7 @@ in the iPhone Keychain. Images and activity remain local to the computer; see th
 When the phone's Settings > Voice > Input is ElevenLabs Scribe, dictation goes
 through the computer the chat is on. `WS /v1/speech/transcribe` takes 16 kHz
 mono 16-bit PCM as binary frames and relays it to ElevenLabs' `scribe_v2_realtime`
-model with voice-activity commits, using the same `elevenlabs_api_key` as
+model with voice-activity commits, using the same ElevenLabs key as
 `/v1/speech`. The query can carry `language` (an ISO 639 code) and up to 50
 `keyterm` values, the phone's project vocabulary. The Hook answers with text
 frames `{"type":"partial","text":…}` and `{"type":"committed","text":…}`; the
@@ -354,3 +353,36 @@ messages (`transcribe-unconfigured`, `transcribe-rejected`, `transcribe-quota`,
 `transcribe-busy`, `transcribe-limit`, `transcribe-failed`), never ElevenLabs'
 own text. A socket lasts at most ten minutes. The Hook advertises it as the
 `transcribe` capability; each use is billed to that ElevenLabs account.
+
+### The ElevenLabs key
+
+Spoken replies and Scribe dictation use one ElevenLabs key per computer. The
+Hook looks for it, per request, in this order:
+
+1. `ELEVENLABS_API_KEY` in the Hook's environment. This is ElevenLabs' own
+   variable, which its SDKs and the ElevenLabs MCP server (`elevenlabs-mcp`)
+   read too.
+2. `~/.local/share/phren/bridge/elevenlabs.json`, `{"apiKey": "…"}`, mode 600.
+   Like `apns.json`, it is machine config: it never goes into the synced store,
+   and a file other users can read is ignored.
+3. Once, when that file doesn't exist: `elevenlabs_api_key` in
+   `~/.config/mina-trailer.json`, the old location. The Hook copies it into
+   `elevenlabs.json` with mode 600 and reads only the new file after that. The
+   old file is left as it is.
+
+The Hook runs as a LaunchAgent or systemd service and doesn't see your shell's
+environment, so store the key in the file:
+
+```sh
+phren bridge speech-key set            # paste the key; it isn't echoed
+printf %s "$ELEVENLABS_API_KEY" | phren bridge speech-key set
+```
+
+The key is read from stdin, never from the command line, so it stays out of
+`ps` and shell history. To use one key for phren, the SDKs and an MCP server,
+export `ELEVENLABS_API_KEY` in your shell profile and pipe it into
+`phren bridge speech-key set` once, as above. `phren doctor` (the `speech-key`
+check) and `phren bridge doctor` (`speechKey`) say whether this computer has a
+key and where it comes from, without showing it. Neither route changes the
+`speech` and `transcribe` capabilities: a computer without a key still offers
+them and answers `speech-unconfigured` or `transcribe-unconfigured`.
