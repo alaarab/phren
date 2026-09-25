@@ -499,7 +499,7 @@ export async function runWalkthrough(phrenPath: string, options?: WalkthroughOpt
   printSection("Semantic Search (Optional)");
   log("Phren can use a local embedding model for semantic (fuzzy) search via Ollama.");
   log("  Best fit: paraphrase-heavy or weak-lexical queries.");
-  log("  Skip it if you mostly search by filenames, symbols, commands, or exact phrases.");
+  log("  Skip it if you mostly search by filenames, function names, commands, or exact phrases.");
   log("  - Model: nomic-embed-text (274 MB, one-time download)");
   log("  - Ollama runs locally, no cloud, no cost");
   log("  - Falls back to FTS5 keyword search if disabled or unavailable");

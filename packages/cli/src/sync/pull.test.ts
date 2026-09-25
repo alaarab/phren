@@ -12,6 +12,10 @@ import { initTestPhrenRoot, makeTempDir, writeFile } from "../test-helpers.js";
 import { describeAutoSave } from "./outcome.js";
 import { parsePullInterval, periodicPullEnabled, pollStore, readPollState, type RunGit, resolvePullInterval, runPollGit, startPullPolling } from "./pull.js";
 
+// Every test here drives real Git; the Windows runners need far longer than the 15 s default.
+const windows = process.platform === "win32";
+vi.setConfig({ testTimeout: windows ? 60_000 : 15_000 });
+
 const cleanups: (() => void)[] = [];
 afterEach(() => {
   vi.useRealTimers();
@@ -27,7 +31,7 @@ function temp() {
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", ["-c", "commit.gpgsign=false", ...args], {
-    cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10_000,
+    cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: windows ? 45_000 : 10_000,
   }).trim();
 }
 
@@ -43,15 +47,17 @@ function fixture() {
     git(repo, "config", "user.name", "Poll test");
   }
   writeFile(path.join(writer, ".gitignore"), ".runtime/\n.sessions/\n");
-  writeFile(path.join(writer, "project", "summary.md"), "original\n");
+  writeFile(path.join(writer, "project", "CLAUDE.md"), "original\n");
   git(writer, "add", ".");
   git(writer, "commit", "-m", "initial");
   git(writer, "push", "-u", "origin", "knowledge");
   git(root, "clone", "--origin=cloud", remote, reader);
   git(reader, "config", "user.email", "poll-test@example.com");
   git(reader, "config", "user.name", "Poll test");
-  const commit = (repo: string, text: string) => {
-    writeFile(path.join(repo, "project", "summary.md"), text);
+  // CLAUDE.md has no conflict strategy (summary.md takes the incoming side),
+  // so diverged edits stay a real conflict.
+  const commit =(repo: string, text: string) => {
+    writeFile(path.join(repo, "project", "CLAUDE.md"), text);
     git(repo, "add", ".");
     git(repo, "commit", "-m", text.trim());
     return git(repo, "rev-parse", "HEAD");
@@ -112,7 +118,7 @@ describe("store polling with real Git repositories", () => {
     expect((await pollStore(reader, 60)).status).toBe("updated");
     expect(git(reader, "rev-parse", "HEAD")).toBe(remoteHead);
     // Git may check out CRLF under the Windows runner's core.autocrlf.
-    expect(fs.readFileSync(path.join(reader, "project", "summary.md"), "utf8").replace(/\r\n/g, "\n")).toBe("from phone\n");
+    expect(fs.readFileSync(path.join(reader, "project", "CLAUDE.md"), "utf8").replace(/\r\n/g, "\n")).toBe("from phone\n");
     expect(git(reader, "status", "--porcelain")).toBe("");
   });
 

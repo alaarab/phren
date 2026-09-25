@@ -582,8 +582,12 @@ export async function runLink(phrenPath: string, opts: LinkOptions = {}) {
   }
   log("");
 
-  // Step 7: Context file
-  if (opts.task === "debugging") {
+  // Step 7: Context file. ~/.phren-context.md and the root MEMORY.md in Claude
+  // Code's memory directory are home surfaces: only presets with selfHeal
+  // (managed, or an explicit override) create them, matching repair and doctor.
+  if (!caps.selfHeal) {
+    log("  ~/.phren-context.md and Claude memory skipped (preset without self-heal)");
+  } else if (opts.task === "debugging") {
     writeContextDebugging(machine, profile, mcpStatusForContext, projects, phrenPath);
   } else if (opts.task === "planning") {
     writeContextPlanning(machine, profile, mcpStatusForContext, projects, phrenPath);
@@ -595,7 +599,7 @@ export async function runLink(phrenPath: string, opts: LinkOptions = {}) {
 
   // Step 8: Memory (read back native changes, then rebuild)
   readBackNativeMemory(phrenPath, projects);
-  rebuildMemory(phrenPath, projects);
+  if (caps.selfHeal) rebuildMemory(phrenPath, projects);
 
   log(`\nDone. Profile '${profile}' is active.`);
   if (opts.task) log(`Task mode: ${opts.task}`);

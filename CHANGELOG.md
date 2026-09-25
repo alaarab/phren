@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-24
+
+### Added
+
+- Hook: approval, schedule and fan-out alerts can go through the phren push relay. A phone that registered with the relay sends `{url, relayId, secret, key}` in `POST /v1/push/register` (field `relay`) instead of an APNs token. The Hook encrypts each alert's title, body, category and routing with that phone's key (ChaCha20-Poly1305, CryptoKit's `SealedBox(combined:)` layout), shortens a long body to fit the relay's 2,800-character limit, and signs the send with the phone's secret. The relay can't read the alert. A relay `410` drops the phone until it registers again. A Hook with its own `apns.json` still sends direct, and `approvalPush` reports `relay` when only relay phones are reachable, which `phren bridge doctor` accepts as configured.
+
+### Changed
+
+- Talk mode speaks a reply's words, not its markdown. The Hook reduces emphasis, headings, bullets, tables, links and inline code to plain text before ElevenLabs reads it, skips code blocks, and says "a link" for a bare URL. A reply with nothing speakable left is refused (`speech-invalid`).
+- `get_findings` labels a finding's citation `name=`, not `symbol=`, and the init walkthrough says "function names" instead of "symbols".
+- turbo 2.11.4.
+
+### Fixed
+
+- Hook: the phone's Esc on an AskUserQuestion the Hook is still holding declines it at once, so Claude moves on. Before, the held question had no terminal choice to release, and the terminal stayed frozen until the hold timed out.
+- Store sync no longer aborts on files phren writes in normal use. Notes, journal entries, `review.md` and topic archive bullets merge as a union of both machines' lines, and `summary.md` takes the incoming file when its hand-written part conflicts (the next summarize pass restores anything only this machine had). Before, any of these conflicting aborted the merge, and every later auto-save committed locally and failed to push.
+- `phren store sync` relinks the home and repo mirrors after the primary store pulls, the way SessionStart does, so new skills or a changed global `AGENTS.md` don't show as drift in `phren doctor` until the next session.
+- After a pull, a project `AGENTS.md` that an older release generated as a snapshot is replaced with a symlink to the store's `AGENTS.md`, matching `phren link` and `doctor --fix`. Before, the pull regenerated the snapshot and doctor turned it back, so the file flipped between the two on every run.
+- `phren link` under the assisted and manual presets no longer writes `~/.phren-context.md` or Claude Code's root `MEMORY.md`. Only presets with self-heal create these, as repair and doctor already assumed.
+
 ## [0.3.1] - 2026-09-24
 
 ### Added

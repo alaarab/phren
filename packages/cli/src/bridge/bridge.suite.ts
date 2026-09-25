@@ -2083,6 +2083,30 @@ schedules:
       socket.close(); await once(socket, "close");
     });
 
+    it("declines a held AskUserQuestion on the phone's Esc instead of typing into the frozen pane", async () => {
+      const questions = [{ question: "Which accent?", header: "Design", options: [{ label: "Cyan" }, { label: "Lavender" }] }];
+      const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+      const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
+      await once(socket, "open");
+      await waitFor(() => frames.length, 1_500);
+      const seen = frames.length;
+      const asked = new Promise<any>((resolve, reject) => {
+        const payload = JSON.stringify({ target, event: "PermissionRequest", tool: "AskUserQuestion", input: { questions } });
+        const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
+          headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
+          let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve(JSON.parse(data)));
+        }); req.on("error", reject); req.end(payload);
+      });
+      await waitFor(() => frames.slice(seen).some(f => f.agentStatus?.pendingApproval?.toolName === "AskUserQuestion"), 2_500);
+      const before = commands.filter(c => c.method === "agent.send_keys").length;
+      expect((await api("/v1/keys", { target, keys: ["Escape"] })).status).toBe(200);
+      const decision = (await asked).hookSpecificOutput.decision;
+      expect(decision.behavior).toBe("deny");
+      expect(decision.message).toMatch(/cancelled/);
+      expect(commands.filter(c => c.method === "agent.send_keys").length).toBe(before);
+      socket.close(); await once(socket, "close");
+    });
+
     it("times a held AskUserQuestion out into question cards and walks Claude's dialog for each digit", async () => {
       paneAgent = "claude"; agentStatus = "blocked";
       const claude = { ...target, source: "claude" as const };
