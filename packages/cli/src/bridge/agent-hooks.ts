@@ -671,6 +671,21 @@ export class AgentHooks {
       if (!entry.response.destroyed) entry.response.end("{}");
     }
   }
+  /** The phone's Esc or Cancel on a question the Hook holds. A held
+   * AskUserQuestion has no terminal choice, so `releaseChoice` never lets it
+   * go and the terminal stays frozen until the hold timer; decline it now so
+   * Claude moves on. True when a held question was cancelled. */
+  cancelHeldQuestion(target: Target): boolean {
+    let cancelled = false;
+    for (const [id, entry] of this.pending) {
+      if (entry.tool !== "AskUserQuestion" || JSON.stringify(entry.target) !== JSON.stringify(target)) continue;
+      this.pending.delete(id); this.dropPushBindings(id); clearTimeout(entry.timer);
+      if (!entry.response.destroyed) entry.response.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest",
+        decision: { behavior: "deny", message: "The user cancelled this question in Phren without answering." } } }));
+      cancelled = true;
+    }
+    return cancelled;
+  }
   async answerPush(binding: string, decision: unknown) {
     if (!["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
     const linked = this.pushBindings.consume(binding);

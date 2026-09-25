@@ -328,14 +328,19 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     // not hold) is being answered even when Herdr reads the pane as
     // working or idle; Herdr's status lags the agent's own dialog.
     const holding = menu || !!agentHooks.terminalPrompt(target);
+    // Esc on a question the Hook still holds declines it at once, whatever
+    // Herdr reads the pane as: an esc typed into the held pane does nothing.
+    const cancelled = keys.every(key => key === "Escape") && agentHooks.cancelHeldQuestion(target);
     // Escape interrupts a working agent. Everything else answers a
     // prompt the agent is holding: a menu, a y/n, a trust question.
-    if (!holding && (keys.every(key => key === "Escape") ? !["working", "blocked", "waiting", "unknown"].includes(status)
+    if (!cancelled && !holding && (keys.every(key => key === "Escape") ? !["working", "blocked", "waiting", "unknown"].includes(status)
       : !["blocked", "waiting", "unknown"].includes(status))) throw new BridgeError(409, keys.every(key => key === "Escape") ? "This agent is no longer working." : "This agent is not waiting for an answer.");
+    if (cancelled) {
+      result = { ok: true };
     // An older phone answers a released AskUserQuestion one question at
     // a time with its digits; the Hook walks that question in the pane
     // and submits the set after the last.
-    if (await agentHooks.answerReleasedQuestion(target, keys)) {
+    } else if (await agentHooks.answerReleasedQuestion(target, keys)) {
       result = { ok: true };
     } else {
       // Keyless choices move and verify the highlight before Enter;
