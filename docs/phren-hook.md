@@ -15,10 +15,42 @@ npx --yes @phren/cli@0.3.0 bridge doctor
 ```
 
 Keep Tailscale connected on the iPhone and computer for remote access. Funnel and
-public ports are unnecessary. In Phren, add the computer under Agents, copy its
-SSH authorization line, add it to that user's `~/.ssh/authorized_keys`, then
-verify the computer's SSH fingerprint. Existing Phren device keys are migrated
-with a backup by the installer.
+public ports are unnecessary.
+
+### Connect the phone: `phren pair`
+
+```sh
+phren pair
+```
+
+`phren pair` turns on the Hook module, installs Phren Hook if needed, and prints
+a QR code. In Phren, choose **Agents → Add computer → Scan pairing code**. The
+phone makes its own SSH key and sends the public half to this computer, which
+adds one restricted `phren-iphone` line to `~/.ssh/authorized_keys`. Can't scan?
+Choose **Enter code** and type the address and six-character code the terminal
+shows.
+
+The QR code carries the computer's Tailscale and LAN addresses, the SSH user,
+the SSH host key fingerprint (pinned by the phone) and a one-time code. The code
+never crosses the network: the phone proves it with an HMAC over its public key,
+and the computer answers with an HMAC over its host fingerprint, so a phone that
+typed the code by hand pins the right host key too. The listener (port 47291)
+accepts one phone, closes after five wrong codes, and times out after five
+minutes (`--minutes` up to 30). SSH itself must be on: Remote Login on macOS,
+`sshd` on Linux.
+
+The manual route still works: in Phren, choose **Enter details** under Add
+computer, copy the SSH authorization line into that user's
+`~/.ssh/authorized_keys`, then verify the computer's SSH fingerprint. Existing
+Phren device keys are migrated with a backup by the installer.
+
+### Memory without GitHub
+
+A paired computer also serves its phren store to the phone (`memoryStore` in
+`/v1/health`): the Projects, Tasks and Memory tabs read the store's working tree
+through the Hook, and edits are written back with a compare-and-swap on each
+file's git blob sha. Files the store ignores stay off the phone. GitHub is only
+needed for sync away from the computer and for team stores.
 
 Updated web previews require a helper advertising `webPreview: "ssh-exec"`.
 Released 0.2.14 builds without that capability need an updated CLI build before
