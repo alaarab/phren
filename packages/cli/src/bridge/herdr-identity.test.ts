@@ -56,3 +56,37 @@ it.skipIf(process.platform === "win32")("caches identity per server, pane, termi
     await rm(root, { recursive: true, force: true });
   }
 });
+it.skipIf(process.platform === "win32")("names a Copilot pane by the conversation its process log registered, not Herdr's stale report", async () => {
+  const root = await mkdtemp("/tmp/phren-identity-");
+  vi.stubEnv("PHREN_HERDR_HOME", root); vi.stubEnv("COPILOT_HOME", root + "/copilot");
+  const old = "67fff5f5-131b-4a29-b1fc-6bd7f0fb45e3", fresh = "f27fdb49-70da-4c9d-b8ce-aa52b9dce81d";
+  const server = createServer(socket => {
+    let text = ""; socket.on("data", bytes => {
+      text += bytes; if (!text.includes("\n")) return;
+      const request = JSON.parse(text);
+      socket.end(JSON.stringify({ id: request.id, result: { process_info: { foreground_processes: [{ pid: 4242 }] } } }) + "\n");
+    });
+  });
+  try {
+    await mkdir(root + "/copilot/logs", { recursive: true });
+    await new Promise<void>(resolve => server.listen(path.join(root, "herdr.sock"), resolve));
+    const log = (lines: string[]) => writeFile(root + "/copilot/logs/process-1790311502722-4242.log", lines.map(line => `${line}\n`).join(""));
+    const pane = { pane_id: "cp", terminal_id: "term", agent: "copilot",
+      agent_session: { kind: "id", agent: "copilot", source: "herdr:copilot", value: old } };
+    // With no log for the process, Herdr's report still names the pane.
+    expect(await paneIdentity("default", pane, true)).toBe(old);
+    // /new: Copilot switches conversation in the same process; its sessionStart
+    // hook (and so Herdr's report) waits for the first prompt.
+    await log([`2026-09-25T04:45:03.046Z [INFO] Registering foreground session: ${old}`,
+      `2026-09-25T04:49:28.680Z [INFO] Unregistering foreground session: ${old}`,
+      `2026-09-25T04:49:28.692Z [INFO] Registering foreground session: ${fresh}`]);
+    // Nothing sent there yet: no transcript, so the pane is starting.
+    expect(await paneIdentity("default", pane, true)).toBeUndefined();
+    await mkdir(`${root}/copilot/session-state/${fresh}`, { recursive: true });
+    await writeFile(`${root}/copilot/session-state/${fresh}/events.jsonl`, "{}\n");
+    expect(await paneIdentity("default", pane, true)).toBe(fresh);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});

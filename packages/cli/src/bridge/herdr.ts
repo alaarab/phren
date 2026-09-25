@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { connect } from "node:net";
 import { homedir } from "node:os";
-import { readdir, readlink, realpath, stat } from "node:fs/promises";
+import { open, readdir, readlink, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { BridgeError, id, object, objects, requestID, serverName, provider, sessionId, type Json, type Target, type StartingTarget } from "./protocol.js";
@@ -266,7 +266,9 @@ const identityKey = (server: string, pane: Json, pids: number[]) => JSON.stringi
  * so a caller that also needs them does not ask Herdr a second time. */
 async function resolveIdentity(server: string, pane: Json, fresh: boolean): Promise<{ sessionId?: string; pids?: number[] }> {
   const reported = object(pane.agent_session);
-  if (reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) { countIdentity("reported"); return { sessionId: reported.value }; }
+  // Copilot's report lags a conversation switch (see copilotForegroundSession);
+  // its own process log is read first and the report is the fallback.
+  if (pane.agent !== "copilot" && reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) { countIdentity("reported"); return { sessionId: reported.value }; }
   const pids = await foregroundPids(server, pane);
   const key = identityKey(server, pane, pids);
   const cached = identities.get(key);
@@ -280,7 +282,47 @@ async function resolveIdentity(server: string, pane: Json, fresh: boolean): Prom
 export async function paneIdentity(server: string, pane: Json, fresh = false): Promise<string | undefined> {
   return (await resolveIdentity(server, pane, fresh)).sessionId;
 }
+const copilotHome = () => process.env.COPILOT_HOME || path.join(homedir(), ".copilot");
+/** Copilot CLI changes conversation inside one process (/new, /clear,
+ * /resume) and runs its sessionStart hook only once that conversation's first
+ * prompt is submitted. Until then Herdr's reported session and the recorded
+ * binding still name the previous conversation, so a phone send aimed there
+ * lands in the new one and its UserPromptSubmit check refuses it, every time.
+ * The process log Copilot names by PID records each switch as it happens. */
+export async function copilotForegroundSession(pids: number[], home = copilotHome()): Promise<string | undefined> {
+  if (!pids.length) return undefined;
+  const folder = path.join(home, "logs");
+  const names = await readdir(folder).catch(() => [] as string[]);
+  const logs = names.filter(name => pids.some(pid => name.startsWith("process-") && name.endsWith(`-${pid}.log`)));
+  let current: string | undefined, latest = -1;
+  for (const name of logs) {
+    const file = await open(path.join(folder, name), "r").catch(() => undefined);
+    if (!file) continue;
+    try {
+      // The switch lines are short and rare; the log's tail holds the last one.
+      const { size } = await file.stat(), length = Math.min(size, 262_144);
+      const { buffer, bytesRead } = await file.read(Buffer.alloc(length), 0, length, size - length);
+      const lines = [...buffer.subarray(0, bytesRead).toString("utf8").matchAll(/^(\S+) \[INFO\] (Registering|Unregistering) foreground session: ([0-9a-f-]{36})\s*$/gim)];
+      const last = lines.at(-1);
+      if (!last) continue;
+      const at = Date.parse(last[1]);
+      if (at <= latest) continue;
+      latest = at;
+      current = last[2] === "Registering" && sessionId.safeParse(last[3]).success ? last[3] : undefined;
+    } finally { await file.close(); }
+  }
+  return current;
+}
 async function identityFromProcesses(server: string, pane: Json, pids: number[]): Promise<PaneIdentity> {
+  if (pane.agent === "copilot") {
+    const current = await copilotForegroundSession(pids).catch(() => undefined);
+    // A conversation nothing was sent to yet has no transcript: the pane is
+    // starting, and its first prompt goes through the starting binding.
+    if (current) return await stat(path.join(copilotHome(), "session-state", current, "events.jsonl"))
+      .then(() => ({ sessionId: current, noTranscriptLogs: false }), () => ({ noTranscriptLogs: true }));
+    const reported = object(pane.agent_session);
+    if (reported.kind === "id" && reported.agent === "copilot" && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) return { sessionId: reported.value, noTranscriptLogs: false };
+  }
   const files = await processLogs(pids);
   const candidates = files.flatMap(file => {
     const match = pane.agent === "codex" ? (/rollout-.*-([a-f0-9-]{36})\.jsonl$/i.exec(file) ?? /thread-writer-locks\/([a-f0-9-]{36})\.lock$/i.exec(file))
