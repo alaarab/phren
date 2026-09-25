@@ -381,7 +381,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             result = { ...page, type: "backlog", source, session }; break;
           }
           case "/v1/code/tree": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).tree(url.searchParams.get("project"), url.searchParams.get("directory")); break;
-          case "/v1/code/recent": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).recent(url.searchParams.get("project"), url.searchParams.get("directory")); break;
+          case "/v1/code/changed": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).whatChanged(url.searchParams.get("project")); break;
+          case "/v1/code/change-counts": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).changeCounts(url.searchParams.get("project"), url.searchParams.get("paths")); break;
           case "/v1/code/usage-page": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).usagePage(url.searchParams.get("project"), {
             kind: url.searchParams.get("kind"), file: url.searchParams.get("file"), directory: url.searchParams.get("directory"),
             offset: url.searchParams.get("offset"), limit: url.searchParams.get("limit"), end: url.searchParams.get("end"),
