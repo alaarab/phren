@@ -7,12 +7,16 @@ import { sideQuestionText } from "./side-questions.js";
 import { stripTerminal } from "../terminal-text.js";
 
 export const MODEL_BUSY = "This agent is working. The model switch can happen when the turn ends. Choose Switch after this turn.";
+export const SLASH_BUSY = "This agent is working. Slash commands run between turns; send it again when this turn ends.";
 
 /** Busy slash commands must never enter the harness's text queue. Claude's
- * `/btw` side question is the one made to run beside a working turn. */
+ * `/btw` side question is the one made to run beside a working turn. Only
+ * `/model` is told about the model switch; any other command (`/yolo`,
+ * `/compact`) is told it runs between turns. */
 export function refuseWorkingSlash(pane: Json, text: string, source?: string): void {
   if (source && sideQuestionText(source, text) !== undefined) return;
-  if (pane.agent_status === "working" && /^\s*\//.test(text)) throw new BridgeError(409, MODEL_BUSY);
+  if (pane.agent_status !== "working" || !/^\s*\//.test(text)) return;
+  throw new BridgeError(409, /^\s*\/model(?:\s|$)/.test(text) ? MODEL_BUSY : SLASH_BUSY);
 }
 
 const request = z.object({ model: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._\[\]:/-]{0,99}$/),

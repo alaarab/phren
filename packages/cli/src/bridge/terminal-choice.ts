@@ -88,7 +88,32 @@ function numberedOptions(text: string): (TerminalChoiceOption & { highlighted: b
  * row (the "$ command" line included, the "Press enter" hint dropped), joined
  * with newlines, then one option per row. Keyless rows require exactly one
  * readable cursor so the Hook can navigate without confirming another row. */
+/** Copilot CLI draws each select inside a box, so its rows read
+ * "│ ❯ 1. Yes │". Strip the frame (nested boxes too) so rows and the
+ * question read as bare lines. Inside a box the blank and border lines go,
+ * so the box's whole body (title, command, question) is one block above its
+ * options; the box's own edges become the blank lines around it. Text with
+ * no framed line passes through unchanged. */
+const BAR = "│┃║";
+const framed = new RegExp(`^\\s*[${BAR}] ?(.*?)\\s*[${BAR}]\\s*$`);
+const border = /^[\s╭╮╰╯┌┐└┘├┤─━═│┃║]*$/;
+export function unframed(text: string): string {
+  let lines = text.split(/\r?\n/);
+  // Copilot's scrollbar: a "┃" closing most lines once the chat overflows.
+  const filled = lines.filter(line => line.trim());
+  if (filled.length && filled.filter(line => /┃\s*$/.test(line)).length * 2 > filled.length) {
+    lines = lines.map(line => line.replace(/\s*┃\s*$/, ""));
+  }
+  if (!lines.some(line => framed.test(line))) return lines.join("\n");
+  return lines.flatMap(line => {
+    if (!framed.test(line)) return [border.test(line) ? "" : line];
+    let inner = line, match: RegExpExecArray | null;
+    while ((match = framed.exec(inner))) inner = match[1];
+    return border.test(inner) ? [] : [inner];
+  }).join("\n");
+}
 export function visibleTerminalChoice(text: string): TerminalChoice | undefined {
+  text = unframed(text);
   const parsed = numberedOptions(text);
   const highlights = parsed.flatMap((option, index) => option.highlighted ? [index] : []);
   const highlightedIndex = highlights.length === 1 ? highlights[0] : undefined;
@@ -126,6 +151,7 @@ export function passwordLine(text: string): boolean {
  * " · ", and a footer offering "Esc to cancel" gains the Escape option.
  * Undefined without two numbered rows and a question. */
 export function numberedDialog(text: string): TerminalChoice | undefined {
+  text = unframed(text);
   const row = /^\s*[>❯›▸▶»•*]?\s*(\d+)\.\s+(.+?)\s*$/;
   const lines = text.split(/\r?\n/);
   const first = lines.findIndex(line => row.test(line));

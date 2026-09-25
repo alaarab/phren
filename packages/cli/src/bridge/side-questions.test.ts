@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { rpc, validateTarget } from "./herdr.js";
-import { MODEL_BUSY, refuseWorkingSlash } from "./model-switch.js";
+import { refuseWorkingSlash, SLASH_BUSY } from "./model-switch.js";
 import type { Target } from "./protocol.js";
 import { answerText, panelAsks, scrolledLines, SideQuestions, sidePanel, sideQuestionText } from "./side-questions.js";
 
@@ -54,9 +54,9 @@ describe("the recorded /btw panel", () => {
 
   it("lets only Claude's /btw into a working pane", () => {
     expect(() => refuseWorkingSlash({ agent_status: "working" }, "/btw what is 2+2", "claude")).not.toThrow();
-    expect(() => refuseWorkingSlash({ agent_status: "working" }, "/btw what is 2+2", "codex")).toThrow(MODEL_BUSY);
-    expect(() => refuseWorkingSlash({ agent_status: "working" }, "/compact", "claude")).toThrow(MODEL_BUSY);
-    expect(() => refuseWorkingSlash({ agent_status: "working" }, "/btw", "claude")).toThrow(MODEL_BUSY);
+    expect(() => refuseWorkingSlash({ agent_status: "working" }, "/btw what is 2+2", "codex")).toThrow(SLASH_BUSY);
+    expect(() => refuseWorkingSlash({ agent_status: "working" }, "/compact", "claude")).toThrow(SLASH_BUSY);
+    expect(() => refuseWorkingSlash({ agent_status: "working" }, "/btw", "claude")).toThrow(SLASH_BUSY);
   });
 });
 
