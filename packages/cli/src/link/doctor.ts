@@ -38,6 +38,7 @@ import {
   findProjectDir,
 } from "./link.js";
 import { claudeProjectKey } from "./context.js";
+import { scanContextImports, fixContextImports } from "./context-imports.js";
 import type { DoctorResult } from "./link.js";
 import { getProjectOwnershipMode, readProjectConfig } from "../project-config.js";
 import { readInstallPreferences } from "../init/preferences.js";
@@ -979,6 +980,26 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     }
   } catch (err: unknown) {
     debugLog(`doctor: zombie task scan failed: ${errorMessage(err)}`);
+  }
+
+  // `@path` import lines in store-managed AGENTS.md/CLAUDE.md resolve outside
+  // the repo (the repo file is a symlink into the store), so Claude Code blocks
+  // on its external-imports dialog. With --fix, rewrite them as plain mentions.
+  try {
+    const importHits = scanContextImports(phrenPath);
+    const fixedFiles = importHits.length && fix ? fixContextImports(phrenPath, importHits) : [];
+    const scopes = [...new Set(importHits.map((h) => h.scope))];
+    checks.push({
+      name: "context-imports",
+      ok: importHits.length === 0 || fixedFiles.length > 0,
+      detail: importHits.length === 0
+        ? "no @imports in managed AGENTS.md/CLAUDE.md"
+        : fixedFiles.length
+          ? `rewrote ${importHits.length} @import line(s) as plain references in ${fixedFiles.length} file(s) (${scopes.join(", ")})`
+          : `${importHits.length} @import line(s) in ${scopes.join(", ")} resolve outside the repo and trigger Claude Code's "Allow external CLAUDE.md file imports?" dialog. Run \`phren doctor --fix\` to rewrite them as plain references.`,
+    });
+  } catch (err: unknown) {
+    debugLog(`doctor: context-imports scan failed: ${errorMessage(err)}`);
   }
 
   const ok = checks.every((c) => c.ok);
