@@ -106,6 +106,38 @@ describe("phren store sync with real Git repositories", () => {
     expect(relink.refresh).toHaveBeenCalledWith(local, expect.any(String));
   });
 
+  it("pushes the resolved merge so the store ends in sync and doctor's auto-save check clears", async () => {
+    const rel = "project/FINDINGS.md";
+    const { local, writer } = fixture(rel, "# Project Findings\n\n## 2026-01-01\n\n- Base bullet\n");
+    commit(local, rel, "# Project Findings\n\n## 2026-01-01\n\n- Local bullet\n", "local finding");
+    commit(writer, rel, "# Project Findings\n\n## 2026-01-01\n\n- Remote bullet\n", "remote finding");
+    git(writer, "push");
+
+    const output = await syncOutput();
+
+    expect(output).toContain("pushed 2 commits");
+    expect(git(local, "rev-parse", "HEAD")).toBe(git(writer, "ls-remote", "origin", "refs/heads/main").split("\t")[0]);
+    expect(git(local, "rev-list", "--left-right", "--count", "HEAD...@{u}")).toMatch(/^0\s+0$/);
+    const health = JSON.parse(fs.readFileSync(path.join(local, ".runtime", "runtime-health.json"), "utf8"));
+    expect(health.lastAutoSave.status).toBe("saved-pushed");
+    expect(health.lastSync).toMatchObject({ lastPushStatus: "saved-pushed", consecutiveFailures: 0, ahead: 0, behind: 0 });
+  });
+
+  it("says so when the push after a merge fails", async () => {
+    const rel = "project/FINDINGS.md";
+    const { local } = fixture(rel, "# Project Findings\n\n- Base\n");
+    commit(local, rel, "# Project Findings\n\n- Local\n", "local finding");
+    git(local, "remote", "set-url", "--push", "origin", path.join(path.dirname(local), "missing.git"));
+
+    const output = await syncOutput();
+
+    expect(output).toContain("PUSH FAILED");
+    expect(output).toContain("Some stores failed to sync");
+    const health = JSON.parse(fs.readFileSync(path.join(local, ".runtime", "runtime-health.json"), "utf8"));
+    expect(health.lastAutoSave.status).toBe("sync-failed");
+    expect(health.lastSync.lastPushStatus).toBe("push-failed");
+  });
+
   it("aborts a conflict outside the union set and reports its exact path", async () => {
     const rel = "project/settings.yaml";
     const { local, writer } = fixture(rel, "value: base\n");
