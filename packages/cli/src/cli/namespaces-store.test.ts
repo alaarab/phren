@@ -10,6 +10,11 @@ vi.mock("../shared.js", async () => {
   return { ...actual, getPhrenPath: () => storeRoot.current };
 });
 
+// Relinking after a sync writes home and store files; these tests check the Git side.
+const relink = vi.hoisted(() => ({ repair: vi.fn(), refresh: vi.fn() }));
+vi.mock("../init/setup.js", () => ({ repairPreexistingInstall: relink.repair }));
+vi.mock("../link/refresh.js", () => ({ refreshLinkedContext: relink.refresh }));
+
 import { handleStoreNamespace } from "./namespaces-store.js";
 
 const cleanups: Array<() => void> = [];
@@ -97,6 +102,8 @@ describe("phren store sync with real Git repositories", () => {
     expect(fs.existsSync(path.join(local, ".git", "MERGE_HEAD"))).toBe(false);
     expect(fs.existsSync(path.join(local, ".git", "rebase-merge"))).toBe(false);
     expect(output).toContain("resolved conflicts in project/FINDINGS.md");
+    expect(relink.repair).toHaveBeenCalledWith(local);
+    expect(relink.refresh).toHaveBeenCalledWith(local, expect.any(String));
   });
 
   it("aborts a conflict outside the union set and reports its exact path", async () => {

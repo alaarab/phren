@@ -240,6 +240,7 @@ export async function handleStoreNamespace(args: string[]) {
   if (subcommand === "sync") {
     const stores = resolveAllStores(phrenPath);
     let hasErrors = false;
+    let primarySynced = false;
     const git: RunStoreGit = async (cwd, gitArgs) => {
       try {
         const output = execFileSync("git", gitArgs, {
@@ -308,8 +309,27 @@ export async function handleStoreNamespace(args: string[]) {
         }
 
         console.log(`  ${store.name}: ok (${result.detail})`);
+        if (store.role === "primary") primarySynced = true;
       } catch (err: unknown) {
         console.log(`  ${store.name}: FAILED (${errorMessage(err).split("\n")[0]})`);
+        hasErrors = true;
+      }
+    }
+
+    // A pull can bring new skills or a changed global AGENTS.md. Refresh the
+    // home and repo links the way SessionStart does, so doctor doesn't report
+    // drift until the next session or a `doctor --fix`.
+    if (primarySynced) {
+      try {
+        const [{ repairPreexistingInstall }, { refreshLinkedContext }, { resolveRuntimeProfile }] = await Promise.all([
+          import("../init/setup.js"),
+          import("../link/refresh.js"),
+          import("../runtime-profile.js"),
+        ]);
+        repairPreexistingInstall(phrenPath);
+        refreshLinkedContext(phrenPath, resolveRuntimeProfile(phrenPath));
+      } catch (err: unknown) {
+        console.log(`  relink: FAILED (${errorMessage(err).split("\n")[0]}). Run 'phren doctor --fix'.`);
         hasErrors = true;
       }
     }
