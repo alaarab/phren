@@ -1,8 +1,14 @@
 /**
  * Resolves the content conflicts a store merge can settle without a person:
- * tasks.md per task id against the merge base, generated blocks from the
- * incoming side, and the record-oriented files that already union-merge.
- * Everything else stays conflicted so the caller aborts and names it.
+ * tasks.md per task id against the merge base, generated summaries from the
+ * incoming side, and the append-only record files (findings, notes, journal,
+ * review queue, topic archives) as a union of both sides. Everything else
+ * stays conflicted so the caller aborts and names it.
+ *
+ * Any file left unresolved aborts the whole merge, and every later auto-save
+ * then commits locally and fails to push, so a store drifts further from its
+ * remote each session. Every file phren itself writes during normal use needs
+ * a strategy here.
  */
 import { execFileSync, spawnSync } from "child_process";
 import * as crypto from "crypto";
@@ -19,7 +25,7 @@ import { mergeTasksByBid } from "./task-merge.js";
 
 export interface ConflictResolution { resolved: string[]; unresolved: string[] }
 
-type Strategy = "tasks" | "findings" | "archive" | "topic" | "summary" | null;
+type Strategy = "tasks" | "findings" | "archive" | "topic" | "summary" | "union" | null;
 
 export function conflictStrategy(relFile: string): Strategy {
   const file = relFile.replace(/\\/g, "/");
@@ -29,6 +35,8 @@ export function conflictStrategy(relFile: string): Strategy {
   if (/^\.config\/task-archive\/[^/]+\.md$/i.test(file)) return "archive";
   if (/(^|\/)reference\/topics\/[^/]+\.md$/i.test(file)) return "topic";
   if (name === "summary.md") return "summary";
+  if (name === "review.md") return "union";
+  if (/(^|\/)(notes|journal)\/[^/]+\.md$/i.test(file)) return "union";
   return null;
 }
 
@@ -66,14 +74,32 @@ function mergeText(base: string, ours: string, theirs: string): string | null {
 }
 
 /**
- * Generated blocks regenerate, so the incoming block wins; the rest of the
- * file must still merge line by line.
+ * A line-level three-way merge that keeps both sides of a conflicting hunk,
+ * local lines first (`git merge-file --union`). For append-only records two
+ * machines adding entries at the same spot is not a real conflict.
  */
-function mergeWithGeneratedBlock(base: string, ours: string, theirs: string, start: string, end: string, where: "top" | "bottom"): string | null {
+function unionText(base: string, ours: string, theirs: string): string | null {
+  const clean = mergeText(base, ours, theirs);
+  if (clean !== null) return clean;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-merge-"));
+  try {
+    const [o, b, t] = ["ours", "base", "theirs"].map((name) => path.join(dir, name));
+    fs.writeFileSync(o, ours); fs.writeFileSync(b, base); fs.writeFileSync(t, theirs);
+    const result = spawnSync("git", ["merge-file", "--union", "-p", o, b, t], { encoding: "utf8", env: nonInteractiveGitEnv(), timeout: EXEC_TIMEOUT_MS });
+    return result.status === 0 ? result.stdout : null;
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
+/**
+ * Generated blocks regenerate, so the incoming block wins; the rest of the
+ * file merges with `merge`: a union of both sides by default (a topic
+ * archive's bullets).
+ */
+function mergeWithGeneratedBlock(base: string, ours: string, theirs: string, start: string, end: string, where: "top" | "bottom", merge = unionText): string | null {
   const b = splitBlock(base, start, end);
   const o = splitBlock(ours, start, end);
   const t = splitBlock(theirs, start, end);
-  const rest = mergeText(b.rest, o.rest, t.rest);
+  const rest = merge(b.rest, o.rest, t.rest);
   if (rest === null) return null;
   const block = t.block ?? o.block;
   if (!block) return rest;
@@ -87,7 +113,11 @@ function resolveContent(strategy: Exclude<Strategy, null>, base: string, ours: s
     // Archived tasks only accumulate: keep both sides, the incoming version of any duplicate.
     case "archive": return mergeTask(theirs, ours);
     case "topic": return mergeWithGeneratedBlock(base, ours, theirs, NOW_START, NOW_END, "top");
-    case "summary": return mergeWithGeneratedBlock(base, ours, theirs, KNOWS_START, KNOWS_END, "bottom");
+    // Summaries are regenerated from the store: when the hand-written part
+    // doesn't merge cleanly, take the incoming file whole and let the next
+    // summarize pass fold in anything only this machine had.
+    case "summary": return mergeWithGeneratedBlock(base, ours, theirs, KNOWS_START, KNOWS_END, "bottom", mergeText) ?? theirs;
+    case "union": return unionText(base, ours, theirs);
   }
 }
 
