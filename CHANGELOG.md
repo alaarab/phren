@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Hook: the ElevenLabs key for spoken replies and Scribe dictation is phren's own machine config, no longer `~/.config/mina-trailer.json`. The Hook reads `ELEVENLABS_API_KEY` first (ElevenLabs' own variable, shared with its SDKs and MCP server), then `~/.local/share/phren/bridge/elevenlabs.json` (`{"apiKey": …}`, mode 600, never synced; a file other users can read is ignored). `phren bridge speech-key set` stores it from stdin. When that file is missing and `mina-trailer.json` has `elevenlabs_api_key`, the Hook copies it once with mode 600 and then reads only the new file; `mina-trailer.json` is left alone. `phren doctor` (`speech-key`) and `phren bridge doctor` (`speechKey`) say whether the computer has a key without showing it.
 
+### Fixed
+
+- Hook: phone messages reach a Copilot CLI pane again. Copilot (1.0.88) switches conversation inside one process (`/new`, `/clear`, `/resume`) and runs its `sessionStart` hook only when that conversation's first prompt is submitted, so Herdr's reported session and the Hook's recorded binding kept naming the previous conversation. The phone sent there, the new conversation's `UserPromptSubmit` check refused the text ("Phren sent this message to a different conversation in this pane"), and because the refused prompt never started the conversation, every later send was refused too. The Hook now names a Copilot pane by the last `Registering foreground session` line in Copilot's own process log (`~/.copilot/logs/process-<time>-<pid>.log`, by the pane's foreground PIDs), with Herdr's report as the fallback. A conversation nothing was sent to yet has no transcript, so the pane shows as starting and the phone's first prompt goes through the starting binding.
+
 ## [0.3.0] - 2026-09-24
 
 ### Changed
