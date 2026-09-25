@@ -3,6 +3,7 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 import type { AgentHooks, DeliveryOutcome } from "./agent-hooks.js";
+import type { DialogAnswer, DialogQuestion } from "./claude-question-dialog.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
 import { fanoutWorktrees } from "./fanouts.js";
 import { gitWorktrees, resolveWorktree, type WorktreeWorker } from "./git-worktrees.js";
@@ -92,6 +93,30 @@ export function herdrWorktreeWorkers(s: Json): WorktreeWorker[] {
  * queue, after which the option key (or typed text) is the answer. */
 const ANSWER_KEYS = ["Escape", "Enter", "Up", "Down", "Tab", "AltUp", "y", "n", "p", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 const HERDR_KEYS: Partial<Record<(typeof ANSWER_KEYS)[number], string>> = { Escape: "esc", Enter: "enter", Up: "up", Down: "down", Tab: "tab", AltUp: "alt+Up" };
+
+// A question or label may wrap onto several lines; the pane shows them joined.
+const questionText = z.string().trim().min(1).max(4000).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t));
+const claudeQuestionBody = z.object({
+  questions: z.array(z.object({ question: questionText, multiSelect: z.boolean().optional(), options: z.array(questionText).min(1).max(8) })).min(1).max(8),
+  answers: z.array(z.object({ optionIndexes: z.array(z.number().int().nonnegative()).max(8),
+    text: z.string().max(1000).refine(t => !/[\x00-\x1f\x7f]/.test(t)).optional() })).min(1).max(8),
+});
+/** The phone's answer to Claude's AskUserQuestion: one answer per question,
+ * a single option or a typed answer for a single-select question, any
+ * options plus an optional typed answer for a multi-select one. */
+function claudeQuestionAnswer(data: unknown): { questions: DialogQuestion[]; answers: DialogAnswer[] } {
+  const body = claudeQuestionBody.parse(data);
+  if (body.answers.length !== body.questions.length) throw new BridgeError(400, "Answer every question.");
+  const answers = body.answers.map((answer, index) => {
+    const question = body.questions[index], options = [...new Set(answer.optionIndexes)], text = answer.text?.trim() ?? "";
+    if (options.some(option => option >= question.options.length)) throw new BridgeError(400, "Choose an available answer.");
+    if (question.multiSelect ? !options.length && !text : options.length + (text ? 1 : 0) !== 1) {
+      throw new BridgeError(400, question.multiSelect ? "Choose at least one answer." : "Choose one answer for each question.");
+    }
+    return { options, ...(text ? { text } : {}) };
+  });
+  return { questions: body.questions.map(q => ({ question: q.question, multiSelect: q.multiSelect, options: q.options.map(label => ({ label })) })), answers };
+}
 
 /** A secret typed into a terminal prompt: printable, bounded, never logged. */
 const secretText = z.string().min(1).max(256).refine(t => !/[\x00-\x1f\x7f]/.test(t));
@@ -307,12 +332,10 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     // prompt the agent is holding: a menu, a y/n, a trust question.
     if (!holding && (keys.every(key => key === "Escape") ? !["working", "blocked", "waiting", "unknown"].includes(status)
       : !["blocked", "waiting", "unknown"].includes(status))) throw new BridgeError(409, keys.every(key => key === "Escape") ? "This agent is no longer working." : "This agent is not waiting for an answer.");
-    // A released AskUserQuestion is answered one question at a time:
-    // the Hook sends the chosen digit, then Tab to advance or Enter
-    // after the last, and clears the prompt when the set is done.
-    const question = agentHooks.questionAnswerKeys(target, keys);
-    if (question) {
-      await rpc(target.server, "agent.send_keys", { target: target.pane, keys: question.map(key => HERDR_KEYS[key as (typeof ANSWER_KEYS)[number]] ?? key) });
+    // An older phone answers a released AskUserQuestion one question at
+    // a time with its digits; the Hook walks that question in the pane
+    // and submits the set after the last.
+    if (await agentHooks.answerReleasedQuestion(target, keys)) {
       result = { ok: true };
     } else {
       // Keyless choices move and verify the highlight before Enter;
@@ -397,7 +420,14 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
       : z.string().uuid().parse(data.actionId);
     await agentHooks.answer(target, actionId, data.decision, data.updatedInput); result = { ok: true };
   } else if (url.pathname === "/v1/questions/answer") {
-    await codexQuestions.answer(target, data); result = { ok: true };
+    if (target.source === "claude") {
+      // Claude's AskUserQuestion, answered in its terminal dialog: the
+      // phone names the questions it shows, and the Hook answers only a
+      // pane that is drawing exactly those.
+      const { questions, answers } = claudeQuestionAnswer(data);
+      await agentHooks.answerClaudeQuestions(target, questions, answers);
+    } else await codexQuestions.answer(target, data);
+    result = { ok: true };
   }
   else throw new BridgeError(404, "Unknown Phren Hook route.");
   }

@@ -173,7 +173,10 @@ export function transcriptStreams(ctx: StreamContext) {
               compacting: agentHooks.compacting(target),
               ...(historyHealth.stalled ? { historyStalled: true, historyStalledSince: historyHealth.since } : {}),
               modules: info.modules, store: info.store, profile: info.profile, generation: info.generation,
-              capabilities: { ...activeCapabilities, asyncQuestions: target.source === "codex" && codexQuestions.available }, branch } });
+              capabilities: { ...activeCapabilities, asyncQuestions: target.source === "codex" && codexQuestions.available,
+                // Claude's AskUserQuestion is answered in its terminal dialog
+                // through /v1/questions/answer, whether or not a hold caught it.
+                ...(target.source === "claude" ? { questions: true } : {}) }, branch } });
           }
           if (sideAnswers && sideQuestions) {
             for (const { revision, ...side } of sideQuestions.list(target)) {

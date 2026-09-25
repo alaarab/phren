@@ -22,6 +22,7 @@ import { herdrAgentName, streamCloseReason } from "./server.js";
 import { historicalImage, phrenStoreRoot, TranscriptReader, transcriptPath, visibleEvent } from "./transcripts.js";
 import { dispatch } from "./transport.js";
 import { enrollComputer, publicComputerKey } from "./computers.js";
+import { FakeClaude } from "./__fixtures__/claude-questions/fake-claude.js";
 
 const hasNodeSqlite = await import("node:sqlite").then(() => true, () => false);
 
@@ -450,6 +451,8 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
   // Outbound HTTPS from the Hook (ElevenLabs) goes to this proxy, which records
   // the CONNECT target and refuses it, so no test reaches the internet.
   let egress: HttpServer | undefined, egressTargets: string[] = [];
+  /** Claude's AskUserQuestion dialog, redrawn into the pane after each key. */
+  let fakeClaude: FakeClaude | undefined;
   let confirmationHasKeys = true;
   let menuHighlight: number | undefined, confirmedMenuRow: number | undefined;
   let ignoredMenuMoves = 0, loseMenuHighlight = false, replaceMenuAfterMove = false;
@@ -521,7 +524,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
     paneCwd = undefined; commands = []; current = session; agentStatus = "working"; reportIdentity = true; foregroundPID = process.pid; terminalID = "term-one"; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     replaceBeforeMutation = false; deliveries = [];
     extraWorkspaces = []; extraTabs = []; extraPanes = []; agentNames = new Map(); failAgentStart = false; promptNotReady = 0; helperPIDs = []; remoteHook = undefined;
-    paneLines = ""; drawConfirmation = false; paneAgent = "codex";
+    paneLines = ""; drawConfirmation = false; paneAgent = "codex"; fakeClaude = undefined;
     confirmationHasKeys = true;
     menuHighlight = undefined; confirmedMenuRow = undefined; ignoredMenuMoves = 0; menuPane = permissionsMenu;
     loseMenuHighlight = false; replaceMenuAfterMove = false;
@@ -596,6 +599,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
               : confirmationHasKeys ? keyedFullAccessConfirmation : fullAccessConfirmation;
           }
           if (sent.includes("1")) paneLines = "";
+          if (fakeClaude && req.method === "agent.send_keys") { for (const key of sent) fakeClaude.press(key); paneLines = fakeClaude.render(); }
         }
         // Herdr's create calls answer with the new workspace/tab and its root
         // pane, which also show up in the next snapshot; agent.start answers
@@ -2079,18 +2083,20 @@ schedules:
       socket.close(); await once(socket, "close");
     });
 
-    it("times a held AskUserQuestion out into question cards and answers it with digits, Tab and Enter", async () => {
-      agentStatus = "blocked";
+    it("times a held AskUserQuestion out into question cards and walks Claude's dialog for each digit", async () => {
+      paneAgent = "claude"; agentStatus = "blocked";
+      const claude = { ...target, source: "claude" as const };
       const questions = [
         { question: "Which accent?", header: "Design", options: [{ label: "Cyan", description: "Keep it" }, { label: "Lavender", description: "Softer" }] },
         { question: "Which screens?", header: "Scope", multiSelect: true, options: [{ label: "Chat" }, { label: "Agents" }, { label: "Settings" }] },
       ];
-      const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(target)}`);
+      fakeClaude = new FakeClaude(questions); paneLines = fakeClaude.render();
+      const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(claude)}`);
       const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
       await once(socket, "open");
       await waitFor(() => frames.length, 1_500);
       const reply = new Promise<any>((resolve, reject) => {
-        const payload = JSON.stringify({ target, event: "PermissionRequest", tool: "AskUserQuestion", input: { questions } });
+        const payload = JSON.stringify({ target: claude, event: "PermissionRequest", tool: "AskUserQuestion", input: { questions } });
         const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
           headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
           let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve(JSON.parse(data)));
@@ -2114,21 +2120,54 @@ schedules:
       const first = await prompt(0);
       expect(first).toMatchObject({ toolName: "AskUserQuestion", questionIndex: 0, questions,
         choice: { title: "Which accent?", options: [{ label: "Cyan", key: "1" }, { label: "Lavender", key: "2" }] } });
-      // Answering the first question sends its digit then Tab and moves on.
+      // An older phone answers one question at a time with its digit. A
+      // single-select digit moves Claude to the next tab by itself, so the
+      // Hook sends it alone (a Tab after it skipped the next question).
       const beforeSecond = frames.length;
-      expect((await api("/v1/keys", { target, keys: ["2"] })).status).toBe(200);
-      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys).at(-1)).toEqual(["2", "tab"]);
+      expect((await api("/v1/keys", { target: claude, keys: ["2"] })).status).toBe(200);
+      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys)).toEqual([["2"]]);
       const second = await prompt(beforeSecond);
       expect(second).toMatchObject({ questionIndex: 1,
         choice: { title: "Which screens?", options: [{ label: "Chat", key: "1" }, { label: "Agents", key: "2" },
           { label: "Settings", key: "3" }, { label: "Done", key: "Enter" }] } });
-      // The last question sends its digit then Enter and clears the prompt.
+      // The last question toggles its box, leaves with Tab and submits from
+      // the review, then clears the prompt.
       const beforeCleared = frames.length;
-      expect((await api("/v1/keys", { target, keys: ["1"] })).status).toBe(200);
-      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys).at(-1)).toEqual(["1", "enter"]);
+      expect((await api("/v1/keys", { target: claude, keys: ["1"] })).status).toBe(200);
+      expect(commands.filter(c => c.method === "agent.send_keys").map(c => c.params.keys).slice(1)).toEqual([["1"], ["tab"], ["1"]]);
+      expect(fakeClaude.result).toEqual({ "Which accent?": "Lavender", "Which screens?": ["Chat"] });
       const cleared = () => frames.slice(beforeCleared).some(f => f.agentStatus && f.agentStatus.terminalPrompt === undefined);
       await waitFor(cleared, 5_000);
       expect(cleared()).toBe(true);
+      socket.close(); await once(socket, "close");
+    }, 20_000);
+
+    it("answers Claude's question in its dialog when no hold remembered it", async () => {
+      // Auto mode, an expired hold or a restarted Hook: only the pane and the
+      // transcript know the question. The Hook publishes no numbered dialog
+      // for it, says Claude questions can be answered, and walks the pane.
+      paneAgent = "claude"; agentStatus = "blocked";
+      const claude = { ...target, source: "claude" as const };
+      const questions = [
+        { question: "Which accent?", options: [{ label: "Cyan" }, { label: "Lavender" }] },
+        { question: "Which screens?", multiSelect: true, options: [{ label: "Chat" }, { label: "Agents" }, { label: "Settings" }] },
+      ];
+      fakeClaude = new FakeClaude(questions); paneLines = fakeClaude.render();
+      const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(claude)}`);
+      const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
+      await once(socket, "open");
+      await waitFor(() => frames.some(f => f.agentStatus), 2_000);
+      await sleep(DIALOG_THROTTLE_MS + 400);
+      const status = frames.filter(f => f.agentStatus).at(-1).agentStatus;
+      expect(status.capabilities.questions).toBe(true);
+      expect(status.terminalPrompt).toBeUndefined();
+      // The phone's body: its questions, option indexes and a typed answer.
+      const body = { toolUseId: "toolu_1", questions: questions.map(q => ({ id: "", header: "", question: q.question, multiSelect: !!q.multiSelect, options: q.options.map(o => o.label) })) };
+      expect((await api("/v1/questions/answer", { target: claude, ...body, answers: [{ optionIndexes: [0, 1] }, { optionIndexes: [0] }] })).status).toBe(400);
+      expect((await api("/v1/questions/answer", { target: claude, ...body, questions: body.questions.slice(0, 1), answers: [{ optionIndexes: [0] }] })).status).toBe(409);
+      expect(commands.filter(c => c.method === "agent.send_keys")).toEqual([]);
+      expect((await api("/v1/questions/answer", { target: claude, ...body, answers: [{ optionIndexes: [], text: "Teal" }, { optionIndexes: [0, 2] }] })).status).toBe(200);
+      expect(fakeClaude.result).toEqual({ "Which accent?": "Teal", "Which screens?": ["Chat", "Settings"] });
       socket.close(); await once(socket, "close");
     }, 20_000);
 

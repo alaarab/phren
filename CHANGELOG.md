@@ -9,6 +9,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Hook: the ElevenLabs key for spoken replies and Scribe dictation is phren's own machine config, no longer `~/.config/mina-trailer.json`. The Hook reads `ELEVENLABS_API_KEY` first (ElevenLabs' own variable, shared with its SDKs and MCP server), then `~/.local/share/phren/bridge/elevenlabs.json` (`{"apiKey": …}`, mode 600, never synced; a file other users can read is ignored). `phren bridge speech-key set` stores it from stdin. When that file is missing and `mina-trailer.json` has `elevenlabs_api_key`, the Hook copies it once with mode 600 and then reads only the new file; `mina-trailer.json` is left alone. `phren doctor` (`speech-key`) and `phren bridge doctor` (`speechKey`) say whether the computer has a key without showing it.
 
+### Fixed
+
+- Hook: Claude Code's AskUserQuestion is answered in its terminal dialog by a walk that reads the pane before and after every key. Before, the Hook sent each question's digit then Tab, but a single-select digit already moves to the next question, so the Tab skipped one and the later keys landed on the wrong tab or cancelled the review. A lone multi-select question got a stray Enter that toggled its first box. The dialog was left half-answered with the phone saying "answer in terminal". Several digits sent in one write are also ignored by Claude, so boxes are now toggled one at a time and checked.
+- Hook: `/v1/questions/answer` answers a Claude question for any 1–4 question set, single- or multi-select, with typed "Other" answers, and the status frame reports `capabilities.questions: true` for Claude. The phone no longer depends on the Hook remembering a released hold, so auto mode, a hold that expired after 15 minutes, or a restarted Hook still get choice rows. The Hook answers only a pane showing exactly the questions the phone names, and it no longer publishes Claude's question dialog as a numbered terminal choice.
+
 ## [0.3.0] - 2026-09-24
 
 ### Changed
