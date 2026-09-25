@@ -43,6 +43,38 @@ export async function speechError(upstream: Response): Promise<BridgeError> {
   }
 }
 
+/** A reply as it should sound: markdown the agent wrote for the chat bubble
+ * (emphasis, headings, bullets, links, inline code, tables) is read aloud
+ * literally by ElevenLabs, so it is reduced to its words. A code block is
+ * skipped, a link keeps its text and a bare URL becomes "a link". Empty when
+ * nothing speakable is left. */
+export function speakableText(text: string): string {
+  return text
+    .replace(/```[\s\S]*?(?:```|$)/g, " ")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/https?:\/\/\S+/g, "a link")
+    .replace(/`([^`]*)`/g, "$1")
+    .split(/\r?\n/)
+    .map(line => {
+      // A heading, bullet or table row ends where its line does; a
+      // paragraph's soft-wrapped lines run on.
+      const block = /^\s{0,3}(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|\|)/.test(line);
+      const words = line
+        .replace(/^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/, "")
+        .replace(/^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+(?:\[[ xX]\]\s+)?)/, "")
+        .replace(/\s*\|\s*/g, (bar: string, offset: number, whole: string) => offset === 0 || offset + bar.length === whole.length ? "" : ", ")
+        .replace(/(\*\*|__|~~)(.+?)\1/g, "$2")
+        .replace(/(^|[^\w*])[*_](\S(?:.*?\S)?)[*_](?![\w*])/g, "$1$2")
+        .trim();
+      return block && words && !/[.!?:;,]$/.test(words) ? `${words}.` : words;
+    })
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Starts ElevenLabs' streaming synthesis and returns its audio body. */
 export async function synthesizeSpeech(text: string, signal: AbortSignal, options: SpeechOptions = {}): Promise<ReadableStream<Uint8Array>> {
   const key = await (options.key ?? readSpeechKey)();
@@ -68,7 +100,8 @@ export async function synthesizeSpeech(text: string, signal: AbortSignal, option
  * failure mid-stream cuts the response off, which the phone treats as an
  * error. The phone hanging up cancels the ElevenLabs request. */
 export async function streamSpeech(data: Json, response: ServerResponse, options: SpeechOptions = {}): Promise<void> {
-  const { text } = speechRequest.parse(data);
+  const text = speakableText(speechRequest.parse(data).text);
+  if (!text) throw new BridgeError(400, "There is nothing to say in this reply.", { code: "speech-invalid" });
   const abort = new AbortController();
   response.once("close", () => { if (!response.writableEnded) abort.abort(); });
   const audio = await synthesizeSpeech(text, abort.signal, options);
