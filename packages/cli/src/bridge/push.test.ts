@@ -1,9 +1,10 @@
-import { generateKeyPairSync } from "node:crypto";
+import { createDecipheriv, generateKeyPairSync, randomBytes } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approvalPushCapability, approvalPushPayload, ApprovalPushService, scheduleCollapseId, schedulePushPayload, upsertPushDevice } from "./push.js";
+import { approvalPushCapability, approvalPushPayload, ApprovalPushService, RELAY_MAX_CIPHERTEXT, relayCiphertext, relaySignature, scheduleCollapseId,
+  schedulePushPayload, sendThroughRelay, upsertPushDevice } from "./push.js";
 import { PushBindingStore } from "./agent-hooks.js";
 import { approvalPushCheck } from "./command.js";
 
@@ -117,7 +118,7 @@ describe("push honesty", () => {
     const push = new ApprovalPushService();
     await push.start();
     await push.register(device);
-    expect(push.status).toEqual({ supported: true, configured: false, devices: 1 });
+    expect(push.status).toEqual({ supported: true, configured: false, direct: false, devices: 1, relay: 0 });
     expect(push.available).toBe(false);
     expect(approvalPushCapability(push.status)).toBeUndefined();
     const check = approvalPushCheck({ capabilities: { approvals: true } });
@@ -140,5 +141,39 @@ describe("push honesty", () => {
     expect(push.status.configured).toBe(true);
     expect(approvalPushCapability(push.status)).toBe("direct-apns");
     expect(approvalPushCheck({ capabilities: { approvalPush: "direct-apns" } })).toEqual({ configured: true });
+  });
+
+  it("sends a relay-registered phone's alert encrypted, signed, and drops it when the relay says it's gone", async () => {
+    await bridgeHome();
+    const key = randomBytes(32).toString("base64url");
+    const relay = { url: "https://push.example.com", relayId: "r".repeat(48), secret: "s".repeat(43), key };
+    const push = new ApprovalPushService();
+    await push.start();
+    await push.register({ ...device, token: undefined, relay });
+    expect(push.available).toBe(true);
+    expect(approvalPushCapability(push.status)).toBe("relay");
+
+    const payload = approvalPushPayload({ binding: device.deviceID, provider: "claude", question: false,
+      expiresAt: "2026-09-19T20:00:55.000Z", message: "x".repeat(5_000) }, device.hostID);
+    let sent: { url: string; headers: Record<string, string>; body: string } | undefined;
+    const fetcher = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
+      sent = { url, headers: init.headers, body: init.body };
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    expect(await sendThroughRelay(relay, payload, { expiration: "0", collapseId: "c" }, fetcher, () => 1_000_000)).toBe("sent");
+    expect(sent!.url).toBe("https://push.example.com/v1/send");
+    expect(sent!.headers["x-phren-signature"]).toBe(relaySignature(relay.secret, "1000", sent!.body));
+    const request = JSON.parse(sent!.body) as { ciphertext: string; category: string };
+    expect(request.category).toBe("PHREN_AGENT_APPROVAL");
+    expect(request.ciphertext.length).toBeLessThanOrEqual(RELAY_MAX_CIPHERTEXT);
+    const sealed = Buffer.from(request.ciphertext, "base64url");
+    const decipher = createDecipheriv("chacha20-poly1305", Buffer.from(key, "base64url"), sealed.subarray(0, 12), { authTagLength: 16 });
+    decipher.setAuthTag(sealed.subarray(sealed.length - 16));
+    const content = JSON.parse(Buffer.concat([decipher.update(sealed.subarray(12, sealed.length - 16)), decipher.final()]).toString("utf8"));
+    expect(content).toMatchObject({ t: "Claude needs approval", c: "PHREN_AGENT_APPROVAL", p: { binding: device.deviceID, host: device.hostID } });
+
+    const gone = (async () => new Response("{}", { status: 410 })) as unknown as typeof fetch;
+    expect(await sendThroughRelay(relay, payload, { expiration: "0", collapseId: "c" }, gone)).toBe("gone");
+    expect(relayCiphertext(key, { aps: { alert: { title: "t", body: "b" } } })).not.toBe(relayCiphertext(key, { aps: { alert: { title: "t", body: "b" } } }));
   });
 });

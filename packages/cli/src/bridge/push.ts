@@ -1,17 +1,30 @@
-import { createPrivateKey, sign } from "node:crypto";
+import { createCipheriv, createHmac, createPrivateKey, randomBytes, sign } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { connect } from "node:http2";
 import path from "node:path";
 import { z } from "zod";
 import { atomic, bridgeRoot } from "./protocol.js";
 
+/** A phone registered through the phren push relay: the relay knows where to
+ * deliver, and `key` (32 bytes, base64url) encrypts what the notification says
+ * so only the phone reads it. The phone made the key and sent it over SSH. */
+const relaySchema = z.object({
+  url: z.string().url().refine(value => /^https:\/\//.test(value) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(`${value}/`),
+    "The relay must use https."),
+  relayId: z.string().regex(/^[A-Za-z0-9_-]{40,400}$/),
+  secret: z.string().regex(/^[A-Za-z0-9_-]{20,100}$/),
+  key: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+});
+
 const deviceSchema = z.object({
   deviceID: z.string().uuid(),
   hostID: z.string().uuid(),
-  token: z.string().regex(/^[0-9a-f]{64}$/),
+  /** The APNs token, for a Hook with its own key (apns.json). */
+  token: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  relay: relaySchema.optional(),
   environment: z.enum(["development", "production"]),
   kinds: z.array(z.enum(["approval", "scheduleStarted", "scheduleFinished", "scheduleFailed", "scheduleBlocked"])).max(5).default(["approval"]),
-});
+}).refine(device => device.token !== undefined || device.relay !== undefined, "A phone needs an APNs token or a relay registration.");
 export type PushDevice = z.infer<typeof deviceSchema>;
 
 const configSchema = z.object({
@@ -106,9 +119,11 @@ export function apnsSetupSteps(configFile = process.env.PHREN_APNS_CONFIG || pat
   ].join("\n");
 }
 
-/** The capability a phone reads: only a Hook with a loaded APNs sender offers push. */
-export function approvalPushCapability(status: { configured: boolean }): "direct-apns" | undefined {
-  return status.configured ? "direct-apns" : undefined;
+/** The capability a phone reads: a Hook with its own APNs key sends direct;
+ * one whose phones registered through the relay sends through it. */
+export function approvalPushCapability(status: { configured: boolean; direct?: boolean }): "direct-apns" | "relay" | undefined {
+  if (!status.configured) return undefined;
+  return status.direct === false ? "relay" : "direct-apns";
 }
 
 export function upsertPushDevice(devices: PushDevice[], value: unknown): PushDevice[] {
@@ -117,6 +132,52 @@ export function upsertPushDevice(devices: PushDevice[], value: unknown): PushDev
 }
 
 const base64url = (value: string | Buffer) => Buffer.from(value).toString("base64url");
+
+/** The relay refuses ciphertext longer than this (it keeps the APNs payload under 4 KB). */
+export const RELAY_MAX_CIPHERTEXT = 2_800;
+
+/** What the phone's notification extension shows, encrypted with the phone's
+ * key: ChaCha20-Poly1305, base64url of nonce (12) + ciphertext + tag (16), the
+ * layout CryptoKit's `ChaChaPoly.SealedBox(combined:)` reads. A long body is
+ * shortened until it fits the relay's limit. */
+export function relayCiphertext(key: string, payload: Record<string, unknown>, nonce = randomBytes(12)): string {
+  const aps = (payload.aps ?? {}) as { alert?: { title?: string; body?: string }; category?: string; "interruption-level"?: string };
+  let body = aps.alert?.body ?? "";
+  for (;;) {
+    const content = JSON.stringify({ t: aps.alert?.title ?? "phren", b: body, ...(aps.category ? { c: aps.category } : {}),
+      ...(aps["interruption-level"] ? { i: aps["interruption-level"] } : {}), ...(payload.phren ? { p: payload.phren } : {}) });
+    const cipher = createCipheriv("chacha20-poly1305", Buffer.from(key, "base64url"), nonce, { authTagLength: 16 });
+    const sealed = Buffer.concat([nonce, cipher.update(content, "utf8"), cipher.final(), cipher.getAuthTag()]).toString("base64url");
+    if (sealed.length <= RELAY_MAX_CIPHERTEXT || !body) return sealed;
+    body = body.length > 40 ? `${body.slice(0, Math.floor(body.length * 0.8))}…` : "";
+  }
+}
+
+/** Signs a relay send: base64url HMAC-SHA256 of `${timestamp}.${body}` under the phone's send secret. */
+export function relaySignature(secret: string, timestamp: string, body: string): string {
+  return createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("base64url");
+}
+
+type RelayRegistration = z.infer<typeof relaySchema>;
+/** "gone" means the relay (Apple) no longer knows the phone: stop sending until it registers again. */
+export type RelayResult = "sent" | "failed" | "gone";
+
+export async function sendThroughRelay(relay: RelayRegistration, payload: Record<string, unknown>,
+  headers: { expiration: string; collapseId: string }, fetcher: typeof fetch = fetch, now = Date.now): Promise<RelayResult> {
+  const aps = (payload.aps ?? {}) as { category?: string };
+  const body = JSON.stringify({ kind: "alert", ciphertext: relayCiphertext(relay.key, payload),
+    collapseId: headers.collapseId.slice(0, 64), expiration: Number(headers.expiration) || 0,
+    ...(aps.category ? { category: aps.category } : {}) });
+  const timestamp = String(Math.floor(now() / 1000));
+  try {
+    const response = await fetcher(`${relay.url.replace(/\/+$/, "")}/v1/send`, {
+      method: "POST", body, signal: AbortSignal.timeout(10_000),
+      headers: { "content-type": "application/json", "x-phren-relay": relay.relayId, "x-phren-timestamp": timestamp,
+        "x-phren-signature": relaySignature(relay.secret, timestamp, body) },
+    });
+    return response.status === 410 ? "gone" : response.ok ? "sent" : "failed";
+  } catch { return "failed"; }
+}
 
 class APNsSender {
   private jwt?: { value: string; created: number };
@@ -163,17 +224,34 @@ export class ApprovalPushService {
     const key = await secureFile(keyPath);
     if (key) this.sender = new APNsSender(config, key);
   }
-  get available() { return this.sender !== undefined && this.devices.length > 0; }
-  get status() { return { supported: true, configured: this.sender !== undefined, devices: this.devices.length }; }
+  /** Phones this Hook can reach: through the relay, or direct with its own key. */
+  private get reachable() { return this.devices.filter(device => device.relay || (this.sender && device.token)); }
+  get available() { return this.reachable.length > 0; }
+  get status() {
+    const relay = this.devices.filter(device => device.relay).length;
+    return { supported: true, configured: this.sender !== undefined || relay > 0, direct: this.sender !== undefined,
+      devices: this.devices.length, relay };
+  }
   async register(value: unknown) {
     this.devices = upsertPushDevice(this.devices, value);
     await atomic(this.devicesFile, JSON.stringify(this.devices));
   }
+  /** One phone: the relay when it registered through one, otherwise direct. */
+  private async send(device: PushDevice, payload: Record<string, unknown>, headers: { expiration: string; collapseId: string }): Promise<boolean> {
+    if (device.relay) {
+      const result = await sendThroughRelay(device.relay, payload, headers);
+      if (result === "gone") {
+        this.devices = this.devices.filter(item => item.deviceID !== device.deviceID);
+        await atomic(this.devicesFile, JSON.stringify(this.devices)).catch(() => {});
+      }
+      return result === "sent";
+    }
+    return this.sender && device.token ? this.sender.send(device, payload, headers) : false;
+  }
   async notify(value: ApprovalPush): Promise<boolean> {
-    if (!this.sender || !this.devices.length) return false;
-    const devices = this.devices.filter(device => device.kinds.includes("approval"));
+    const devices = this.reachable.filter(device => device.kinds.includes("approval"));
     if (!devices.length) return false;
-    return (await Promise.all(devices.map(device => this.sender!.send(device, approvalPushPayload(value, device.hostID), {
+    return (await Promise.all(devices.map(device => this.send(device, approvalPushPayload(value, device.hostID), {
       expiration: String(Math.floor(Date.parse(value.expiresAt) / 1000)), collapseId: value.binding,
     })))).some(Boolean);
   }
@@ -181,20 +259,20 @@ export class ApprovalPushService {
    * phones already accept agent alerts; the payload carries the reason so the
    * notification is actionable on its own. */
   async notifyFanoutBlocked(value: FanoutBlockedPush): Promise<boolean> {
-    if (!this.sender || !this.devices.length) return false;
-    const devices = this.devices.filter(device => device.kinds.includes("approval"));
+    const devices = this.reachable.filter(device => device.kinds.includes("approval"));
     if (!devices.length) return false;
-    return (await Promise.all(devices.map(device => this.sender!.send(device, fanoutBlockedPushPayload(value), {
+    return (await Promise.all(devices.map(device => this.send(device, fanoutBlockedPushPayload(value), {
       expiration: "0", collapseId: `fanout-${value.job}`,
     })))).some(Boolean);
   }
   async notifySchedule(value: SchedulePush): Promise<SchedulePushResult> {
-    if (!this.sender) return { notified: false, reason: "no push config" };
-    let devices = this.devices.filter(device => device.kinds.includes(value.kind));
-    if (!devices.length && value.kind === "scheduleBlocked") devices = this.devices.filter(device => device.kinds.includes("scheduleFailed"));
+    const reachable = this.reachable;
+    if (!reachable.length) return { notified: false, reason: this.sender || this.devices.length ? "no registered devices" : "no push config" };
+    let devices = reachable.filter(device => device.kinds.includes(value.kind));
+    if (!devices.length && value.kind === "scheduleBlocked") devices = reachable.filter(device => device.kinds.includes("scheduleFailed"));
     if (!devices.length) return { notified: false, reason: "no registered devices" };
     try {
-      const notified = (await Promise.all(devices.map(device => this.sender!.send(device, schedulePushPayload(value), {
+      const notified = (await Promise.all(devices.map(device => this.send(device, schedulePushPayload(value), {
         expiration: "0", collapseId: scheduleCollapseId(value.kind, value.runId),
       })))).some(Boolean);
       return notified ? { notified: true } : { notified: false, reason: "push delivery failed" };
