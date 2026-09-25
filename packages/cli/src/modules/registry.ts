@@ -43,7 +43,8 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       { agents: ["claude", "codex", "copilot", "cursor"], events: ["Stop"], handler: "phren hook-stop" },
       { agents: ["claude"], events: ["PostToolUse"], handler: "phren hook-tool" },
     ],
-    hookRoutes: [], capabilities: ["memory"],
+    hookRoutes: [...routes("GET", ["/v1/store/head", "/v1/store/tree", "/v1/store/blob"]), ...routes("POST", ["/v1/store/file", "/v1/store/delete"])],
+    capabilities: ["memory", "memoryStore"],
     storeFiles: [
       "phren.root.yaml", "machines.yaml", "profiles/*.yaml", ".config/modules.yaml", ".config/*.json",
       "<project>/AGENTS.md", "<project>/summary.md", "<project>/FINDINGS.md", "<project>/truths.md",
@@ -70,7 +71,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     tools: [],
     cliCommands: [
       "bridge", "bridge install", "bridge update", "bridge uninstall", "bridge rollback", "bridge status",
-      "bridge doctor", "bridge usage", "bridge usage-statusline", "bridge hook", "bridge serve", "bridge ssh",
+      "bridge doctor", "bridge usage", "bridge usage-statusline", "bridge hook", "bridge serve", "bridge ssh", "pair",
       "bridge fanouts archive", "canary",
     ],
     agentHooks: [

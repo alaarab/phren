@@ -65,6 +65,17 @@ export async function acceptComputer(name: string, input: string, sshDirectory =
   const raw = input.trim();
   const publicKey = publicComputerKey(raw.startsWith(prefix) ? raw.slice(prefix.length) : raw);
   const line = computerKeyLine(name, publicKey);
+  const encoded = publicKey.split(" ")[1];
+  await appendAuthorizedKey(line, existing => existing.endsWith(` phren-computer:${name}`) || existing.split(/\s+/).includes(encoded),
+    "This name or key is already enrolled differently. Revoke the old line explicitly first.", sshDirectory);
+}
+
+/**
+ * Append one authorized_keys line under a lock, refusing when `conflicts`
+ * matches an existing line and leaving an identical line in place.
+ */
+export async function appendAuthorizedKey(line: string, conflicts: (existing: string) => boolean, conflictMessage: string,
+  sshDirectory = path.join(homedir(), ".ssh")): Promise<void> {
   const directory = await lstat(sshDirectory).catch(() => undefined);
   if (directory && (!directory.isDirectory() || directory.isSymbolicLink())) throw new BridgeError(409, "Refusing an unexpected SSH directory.");
   await mkdir(sshDirectory, { recursive: true, mode: 0o700 }); await chmod(sshDirectory, 0o700);
@@ -77,10 +88,7 @@ export async function acceptComputer(name: string, input: string, sshDirectory =
     const before = await regularFile(file) ? await readFile(file, "utf8") : "";
     const lines = before.split("\n").filter(Boolean);
     if (lines.includes(line)) { await chmod(file, 0o600); return; }
-    const encoded = publicKey.split(" ")[1];
-    if (lines.some(existing => existing.endsWith(` phren-computer:${name}`) || existing.split(/\s+/).includes(encoded))) {
-      throw new BridgeError(409, "This name or key is already enrolled differently. Revoke the old line explicitly first.");
-    }
+    if (lines.some(conflicts)) throw new BridgeError(409, conflictMessage);
     await writeFile(temporary, before + (before && !before.endsWith("\n") ? "\n" : "") + line + "\n", { mode: 0o600, flag: "wx" });
     const current = await regularFile(file) ? await readFile(file, "utf8") : "";
     if (current !== before) throw new BridgeError(409, "authorized_keys changed during enrollment. Try again.");

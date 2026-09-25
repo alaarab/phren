@@ -62,3 +62,19 @@ export function initializeModules(store: string): void {
     if (!readConfig(store)) atomicWriteText(file, yaml.dump({ version: 1, enabled: Object.fromEntries(BUILTIN_MODULES.map(module => [module.name, module.defaultEnabled])) }, { noRefs: true }));
   });
 }
+
+/**
+ * `phren pair` and `phren bridge install` are how a person asks for the Hook,
+ * so they turn its module on instead of refusing. Returns true when this
+ * call enabled it. Without a store there is nothing to record; the Hook's
+ * legacy default already allows it there.
+ */
+export function enableHookForPhone(store: string): boolean {
+  const hasStore = !!readConfig(store) || fs.existsSync(path.join(store, "phren.root.yaml")) || fs.existsSync(installPreferencesFile(store));
+  if (!hasStore) return false;
+  const config = readConfig(store);
+  if (config?.enabled?.hook === true) return false;
+  migrateModules(store);
+  setModuleEnabled(store, "hook", true);
+  return true;
+}

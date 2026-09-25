@@ -733,8 +733,9 @@ describe("runInit walkthrough integration", () => {
       process.stdout.write = origWrite;
     }
     const output = chunks.join("");
-    expect(output).toContain("Start a new Claude session");
-    expect(output).toContain("Next steps:");
+    expect(output).toContain("Start a new agent session");
+    expect(output).toContain("Next:");
+    expect(output).toContain("Connect your phone any time: phren pair");
     expect(output).not.toContain("Restart your agent");
   });
 
