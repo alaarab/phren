@@ -11,7 +11,7 @@ const indexProject: typeof import("@phren/code").indexProject = async (store, ..
 import { isValidProjectName } from "../utils-paths.js";
 import { errorMessage } from "../utils.js";
 import { logger } from "../logger.js";
-import { BridgeError } from "./protocol.js";
+import { BridgeError, bridgeRoot } from "./protocol.js";
 import type { ChangedFile } from "./changes.js";
 
 export async function requireCodePackage(store?: string): Promise<typeof import("@phren/code")> {
@@ -110,11 +110,104 @@ export class CodeRoutes {
     return { project, ...result.value };
   }
 
-  async recent(projectValue: string | null, directoryValue?: string | null) {
-    const project = projectSchema.parse(projectValue ?? "");
-    const result = await (await requireCodePackage(this.store)).recentSymbols(this.store, project, optionalPath(directoryValue));
+  /** The checkout this computer indexes for `project`, or a 404 naming the project. */
+  private async checkout(project: string): Promise<string> {
+    try { return fs.realpathSync((await requireCodePackage(this.store)).resolveRepoRoot(this.store, project)); }
+    catch { throw new BridgeError(404, `${project} has no checkout on this computer.`); }
+  }
+
+  private async changedIn(project: string, added: Map<string, Set<number>>) {
+    const code = await requireCodePackage(this.store);
+    if (typeof code.changedDeclarations !== "function") throw new BridgeError(503, "Update @phren/code to see what changed.");
+    const result = await code.changedDeclarations(this.store, project,
+      new Map([...added].map(([file, lines]) => [file, [...lines].sort((a, b) => a - b)])));
     if (!result.available) throw noIndex(project);
-    return { project, entries: result.value };
+    return result.value;
+  }
+
+  /**
+   * What changed: the functions, types and variables that today's agent
+   * sessions edited in this project's checkout, and its last 10 commits,
+   * grouped by file, most recent work first. Session edits carry the line
+   * numbers they had when made, so a later edit to the same file can shift one.
+   */
+  async whatChanged(projectValue: string | null, now = new Date()) {
+    const project = projectSchema.parse(projectValue ?? "");
+    const root = await this.checkout(project);
+    const code = await requireCodePackage(this.store);
+    const added = new Map<string, Set<number>>();
+    const take = (patch: string) => {
+      for (const [file, lines] of code.addedLinesByFile(patch)) {
+        const set = added.get(file) ?? new Set<number>();
+        for (const line of lines) set.add(line);
+        added.set(file, set);
+      }
+    };
+    const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
+    const dir = path.join(bridgeRoot(), "changes");
+    const logs = fs.existsSync(dir) ? fs.readdirSync(dir).filter(name => name.endsWith(".jsonl")) : [];
+    const today = logs.map(name => ({ file: path.join(dir, name), at: fs.statSync(path.join(dir, name)).mtimeMs }))
+      .filter(entry => entry.at >= midnight.getTime()).sort((a, b) => b.at - a.at);
+    for (const log of today) {
+      for (const line of fs.readFileSync(log.file, "utf8").split("\n")) {
+        if (!line.trim()) continue;
+        let record: { files?: Array<{ root?: string; patch?: string }> };
+        try { record = JSON.parse(line); } catch { continue; }
+        for (const file of record.files ?? []) {
+          if (typeof file.root !== "string" || typeof file.patch !== "string") continue;
+          let same = false;
+          try { same = fs.realpathSync(file.root) === root; } catch { same = false; }
+          if (same) take(file.patch);
+        }
+      }
+    }
+    // A repository's first commit adds every file; it is the import, not work.
+    try { take(await git(root, "-c", "log.showRoot=false", "log", "-10", "--format=", "-p", "-U0", "--no-color", "--no-ext-diff")); }
+    catch { /* A checkout without commits yet has only its session edits. */ }
+    const items = await this.changedIn(project, added);
+    const files: Array<{ path: string; items: typeof items }> = [];
+    for (const item of items) {
+      let group = files.find(entry => entry.path === item.file);
+      if (!group) { group = { path: item.file, items: [] }; files.push(group); }
+      group.items.push(item);
+    }
+    return { project, files };
+  }
+
+  /**
+   * Per-file counts for the Changes tree's chips: functions and types the
+   * working tree changes or adds (variables stay out to keep a chip short).
+   * An untracked file is new throughout.
+   */
+  async changeCounts(projectValue: string | null, pathsValue: string | null) {
+    const project = projectSchema.parse(projectValue ?? "");
+    let raw: unknown;
+    try { raw = JSON.parse(pathsValue ?? "[]"); }
+    catch { throw new BridgeError(400, "Choose valid paths."); }
+    const paths = [...new Set(z.array(relativePathSchema).min(1).max(200).parse(raw))];
+    const root = await this.checkout(project);
+    const code = await requireCodePackage(this.store);
+    const added = new Map<string, Set<number>>();
+    for (const [file, lines] of code.addedLinesByFile(await git(root, "diff", "HEAD", "-U0", "--no-color", "--no-ext-diff", "--", ...paths).catch(() => "")))
+      added.set(file, new Set(lines));
+    const untracked = (await git(root, "ls-files", "--others", "--exclude-standard", "--", ...paths).catch(() => "")).split("\n").filter(Boolean);
+    for (const file of untracked) {
+      let count = 0;
+      try { count = fs.readFileSync(path.join(root, file), "utf8").split("\n").length; } catch { continue; }
+      added.set(file, new Set(Array.from({ length: count }, (_, index) => index + 1)));
+    }
+    const items = await this.changedIn(project, added);
+    const entries = paths.map(file => {
+      const mine = items.filter(item => item.file === file || item.file.startsWith(file + "/"));
+      const tally = (family: "function" | "type") => ({
+        changed: mine.filter(item => item.family === family && !item.isNew).length,
+        added: mine.filter(item => item.family === family && item.isNew).length,
+      });
+      const first = mine.find(item => item.family !== "variable");
+      return { path: file, functions: tally("function"), types: tally("type"),
+        ...(first ? { first: `${first.file}::${first.parent ? first.parent + "." : ""}${first.name}` } : {}) };
+    });
+    return { project, entries };
   }
 
   /** Turns code intelligence off for a project: its index is deleted, and
@@ -171,7 +264,7 @@ export class CodeRoutes {
     const symbol = symbolSchema.parse(symbolValue ?? "");
     const result = await (await requireCodePackage(this.store)).definition(this.store, project, symbol);
     if (!result.available) throw noIndex(project);
-    if (!result.value) throw new BridgeError(404, `No symbol "${symbol}" in ${project}.`);
+    if (!result.value) throw new BridgeError(404, `Nothing named "${symbol}" in ${project}.`);
     return { project, definition: { ...result.value, findings: (await requireCodePackage(this.store)).findingsCitingSymbol(this.store, project, (await requireCodePackage(this.store)).citationSymbolName(result.value.symbol)) } };
   }
 
@@ -181,7 +274,7 @@ export class CodeRoutes {
     const limit = limitValue === null || limitValue === "" ? undefined : limitSchema.parse(limitValue);
     const result = await (await requireCodePackage(this.store)).references(this.store, project, symbol, limit ?? 200);
     if (!result.available) throw noIndex(project);
-    if (!result.value) throw new BridgeError(404, `No symbol "${symbol}" in ${project}.`);
+    if (!result.value) throw new BridgeError(404, `Nothing named "${symbol}" in ${project}.`);
     return { project, references: result.value };
   }
 
@@ -287,7 +380,7 @@ export class CodeReindexer {
     this.running.add(project);
     try {
       const result: IndexResult = await this.index(this.store, project, { full });
-      this.log(`re-indexed ${project}${full ? " (full)" : ""}: ${result.parsed} parsed, ${result.symbols} symbols, ${result.durationMs} ms`);
+      this.log(`re-indexed ${project}${full ? " (full)" : ""}: ${result.parsed} parsed, ${result.symbols} declarations, ${result.durationMs} ms`);
     } catch (error) {
       this.log(`re-index of ${project} failed: ${errorMessage(error)}`);
     } finally {

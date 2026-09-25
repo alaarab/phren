@@ -72,7 +72,7 @@ describe("code MCP tool results", () => {
   });
 
   it("code_definition prints the location, signature, doc, last change and snippet", async () => {
-    const text = await toolText("code_definition", { project: "fixture", symbol: "Point.length" });
+    const text = await toolText("code_definition", { project: "fixture", name: "Point.length" });
     expect(text).toMatch(/typescript\/app\.ts:\d+-\d+ method length/);
     expect(text).toContain("Distance from the origin");
     expect(text).toContain("last change");
@@ -80,7 +80,7 @@ describe("code MCP tool results", () => {
   });
 
   it("code_references groups by file", async () => {
-    const text = await toolText("code_references", { project: "fixture", symbol: "greet" });
+    const text = await toolText("code_references", { project: "fixture", name: "greet" });
     expect(text).toMatch(/references for greet \(/);
     expect(text).toContain("in");
     expect(text).toMatch(/\n\s+\d+ call/);
@@ -93,11 +93,15 @@ describe("code MCP tool results", () => {
     expect(text).toMatch(/\n {2}\d+ method length/);
   });
 
-  it("code_usage prints hot and cold sections", async () => {
+  it("code_usage prints most used and least used sections", async () => {
     const text = await toolText("code_usage", { project: "fixture", top: 5 });
-    expect(text).toContain("symbols by reference count");
-    expect(text).toContain("hot");
-    expect(text).toContain("cold");
+    expect(text).toMatch(/\nmost used\n/);
+    expect(text).toMatch(/\nleast used\n/);
+  });
+
+  it("still takes the deprecated symbol parameter until 0.3.1", async () => {
+    const text = await toolText("code_definition", { project: "fixture", symbol: "Point.length" });
+    expect(text).toMatch(/typescript\/app\.ts:\d+-\d+ method length/);
   });
 
   it("tells the agent to build an index when none exists", async () => {

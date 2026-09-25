@@ -127,7 +127,7 @@ nothing to that checkout.
 
 ### Optional code and worker state
 
-- `<store>/.runtime/code/<project>.sqlite` holds the rebuildable symbol index,
+- `<store>/.runtime/code/<project>.sqlite` holds the rebuildable code index,
   references, declaration fingerprints and last-observed change times.
 - `<store>/.runtime/packages/` holds optional installed packages, including
   `@phren/code` when it is not linked from the workspace.
@@ -141,7 +141,7 @@ nothing to that checkout.
   `<bridge>/conductor.yaml` holds standing grants and `<bridge>/hooks.yaml`
   holds the verified peer directory.
 
-A Code dossier note writes a symbol-cited finding to the selected store before
+A Code note ("Remember this about …") writes a finding linked to that function or type to the selected store before
 optional agent delivery. Browsing the index itself does not edit source files.
 
 ### On the iPhone

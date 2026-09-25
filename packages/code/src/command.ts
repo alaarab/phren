@@ -84,8 +84,8 @@ const USAGE =
   "       phren code status <project> [--top <n>]\n" +
   "       phren code search <project> <query> [--kind k] [--limit n]\n" +
   "       phren code outline <project> <path>\n" +
-  "       phren code refs <project> <symbol>\n" +
-  "       phren code def <project> <symbol>\n" +
+  "       phren code refs <project> <name>\n" +
+  "       phren code def <project> <name>\n" +
   "       phren code usage <project> [--top n]";
 
 function formatDuration(ms: number): string {
@@ -127,7 +127,7 @@ export async function runCodeCommand(args: string[], ctx: CliContext): Promise<n
     console.log(`Files    ${result.files}`);
     console.log(`Parsed   ${result.parsed}`);
     console.log(`Removed  ${result.removed}`);
-    console.log(`Symbols  ${result.symbols}`);
+    console.log(`Declared ${result.symbols}`);
     console.log(`Refs     ${result.references}`);
     console.log(`Time     ${formatDuration(result.durationMs)}`);
     console.log(`Database ${result.databasePath}`);
@@ -143,7 +143,7 @@ export async function runCodeCommand(args: string[], ctx: CliContext): Promise<n
     }
     console.log(`Project  ${status.project}`);
     console.log(`Files    ${status.files}`);
-    console.log(`Symbols  ${status.symbols}`);
+    console.log(`Declared ${status.symbols}`);
     console.log(`Refs     ${status.references}`);
     console.log(`Last     ${status.lastIndexedAt ? new Date(status.lastIndexedAt).toISOString() : "unknown"}`);
     if (status.languages.length > 0) {
@@ -163,7 +163,7 @@ export async function runCodeCommand(args: string[], ctx: CliContext): Promise<n
     if (!query) { console.error(USAGE); return 1; }
     const result = await search(store, project, query, parsed.kind, parsed.limit ?? 20);
     if (!result.available) { missingIndex(result.databasePath); return; }
-    if (result.value.length === 0) { console.log(`No symbols match "${query}" in ${project}.`); return; }
+    if (result.value.length === 0) { console.log(`Nothing named or described "${query}" in ${project}.`); return; }
     console.log(`${project}: ${result.value.length} match(es) for "${query}"`);
     for (const hit of result.value) console.log(formatSymbolLine(hit));
     return;
@@ -174,7 +174,7 @@ export async function runCodeCommand(args: string[], ctx: CliContext): Promise<n
     if (!filePath) { console.error(USAGE); return 1; }
     const result = await outline(store, project, filePath);
     if (!result.available) { missingIndex(result.databasePath); return; }
-    if (result.value.length === 0) { console.log(`No indexed symbols for ${filePath} in ${project}.`); return; }
+    if (result.value.length === 0) { console.log(`No functions, types or variables indexed for ${filePath} in ${project}.`); return; }
     console.log(`${project}/${filePath}`);
     printOutline(result.value);
     return;
@@ -185,7 +185,7 @@ export async function runCodeCommand(args: string[], ctx: CliContext): Promise<n
     if (!symbol) { console.error(USAGE); return 1; }
     const result = await references(store, project, symbol, parsed.limit ?? 200);
     if (!result.available) { missingIndex(result.databasePath); return; }
-    if (!result.value) { console.log(`No symbol "${symbol}" in ${project}.`); return; }
+    if (!result.value) { console.log(`Nothing named "${symbol}" in ${project}.`); return; }
     const { symbol: hit, candidates, groups, total } = result.value;
     console.log(`references for ${hit.name} (${originSymbol(hit)}), ${total} in ${groups.length} file(s)`);
     if (candidates > 1) console.log(`${candidates} candidates shared this name; showing the best.`);
@@ -202,7 +202,7 @@ export async function runCodeCommand(args: string[], ctx: CliContext): Promise<n
     if (!symbol) { console.error(USAGE); return 1; }
     const result = await definition(store, project, symbol);
     if (!result.available) { missingIndex(result.databasePath); return; }
-    if (!result.value) { console.log(`No symbol "${symbol}" in ${project}.`); return; }
+    if (!result.value) { console.log(`Nothing named "${symbol}" in ${project}.`); return; }
     const { symbol: hit, candidates, snippet, blame } = result.value;
     console.log(`${hit.file}:${hit.line}-${hit.endLine} ${hit.kind} ${hit.name}${hit.exported ? " (exported)" : ""}`);
     if (hit.signature) console.log(hit.signature);
@@ -223,11 +223,11 @@ export async function runCodeCommand(args: string[], ctx: CliContext): Promise<n
     const result = await usage(store, project, parsed.top ?? 10);
     if (!result.available) { missingIndex(result.databasePath); return; }
     const { top: hot, bottom: cold } = result.value;
-    console.log(`${project} symbols by reference count`);
-    console.log("hot");
+    console.log(`${project} functions and types by how many places use them`);
+    console.log("most used");
     if (hot.length === 0) console.log("  none");
     for (const entry of hot) console.log(`  ${entry.name} ${entry.kind} ${entry.uses} ${entry.file}:${entry.line}`);
-    console.log("cold");
+    console.log("least used");
     if (cold.length === 0) console.log("  none");
     for (const entry of cold) console.log(`  ${entry.name} ${entry.kind} ${entry.uses} ${entry.file}:${entry.line}`);
     return;

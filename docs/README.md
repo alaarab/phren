@@ -23,7 +23,7 @@ tectonic docs/whitepaper.tex --outdir docs
 - `docs/performance.md`: Retrieval and indexing performance notes.
 - `docs/shell.md`: Interactive shell user guide: views, keyboard shortcuts, palette commands, the terminal Graph view, the splash.
 - `docs/graph-viewer.md`: The 3D memory viewer: web UI, VS Code and iPhone navigation, node dossiers, selection camera, review and bulk actions.
-- `docs/code-index.md`: Local symbol indexing, scoped browsing, paged usage, recent changes and notes sent to agents.
+- `docs/code-index.md`: Local code indexing, what changed, scoped browsing, most used, and notes remembered and sent to agents.
 - `docs/conductor.md`: Conductor launch, verified computers, dispatch, hand-off, standing grants and Siri controls.
 - `docs/fanout.md`: Worker selection, manifests, permission failures, phone visibility and archive retention.
 - `docs/schedules.md`: Scheduled prompts, run history and local reminders.

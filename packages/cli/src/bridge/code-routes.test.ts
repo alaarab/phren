@@ -169,7 +169,7 @@ describe("code re-index on change", () => {
 it("saves a symbol note, exposes it in the dossier and sends the bounded brief", async () => {
   const hit = (await routes.definition("fixture", "Point")).definition.symbol;
   let brief = "";
-  const input = { project: "fixture", symbol: "Point", file: hit.file, line: hit.line,
+  const input = { project: "fixture", name: "Point", file: hit.file, line: hit.line,
     text: "Point coordinates must remain immutable while calculating distances.", target: { harness: "codex" } };
   const result = await saveCodeNote(store, input, async (_note, text) => { brief = text; return { ok: true }; });
   expect(result.saved).toBe(true);
@@ -183,6 +183,7 @@ it("saves a symbol note, exposes it in the dossier and sends the bounded brief",
 
 it("preserves a saved note when agent delivery fails", async () => {
   const hit = (await routes.definition("fixture", "Point")).definition.symbol;
+  // An older phone still sends `symbol` (accepted until 0.3.1).
   const result = await saveCodeNote(store, { project: "fixture", symbol: "Point", file: hit.file, line: hit.line,
     text: "Point distance calculations need stable coordinate values throughout the operation.", target: { harness: "codex" } }, async () => { throw new Error("Session went offline"); });
   expect(result).toMatchObject({ saved: true, delivery: { ok: false, message: "Session went offline" } });
@@ -211,7 +212,7 @@ it("keeps a code note addressed to the originating session", async () => {
   const symbol = (await routes.definition("fixture", "typescript/app.ts::Point")).definition.symbol;
   const session = "aaaaaaaa-1111-4111-8111-111111111111";
   let recipient: unknown;
-  const result = await saveCodeNote(store, { project: "fixture", symbol: "typescript/app.ts::Point", file: symbol.file,
+  const result = await saveCodeNote(store, { project: "fixture", name: "typescript/app.ts::Point", file: symbol.file,
     line: symbol.line, text: "Point coordinates must stay stable during distance calculations.", target: { session } },
     async note => { recipient = note.target; return { delivered: true }; });
   expect(result.saved).toBe(true);
@@ -300,14 +301,54 @@ it("scopes search to a literal directory and groups type kinds", async () => {
   expect((await routes.search("fixture", "Point", null, null, "type%")).symbols).toEqual([]);
 });
 
-it("reports a completed no-change scan separately from symbol recency", async () => {
-  const before = await routes.recent("fixture", "typescript");
+it("advances the last scan time on a reindex that changes nothing", async () => {
   const first = await routes.status("fixture");
   const status = await routes.reindex("fixture");
   expect(status.lastIndexedAt).toBeGreaterThan(first.lastIndexedAt!);
-  expect((await routes.recent("fixture", "typescript")).entries).toEqual(before.entries);
-  expect(before.entries.length).toBeGreaterThan(0);
-  expect(before.entries.every(row => row.file.startsWith("typescript/"))).toBe(true);
+});
+
+describe("what changed", () => {
+  const previousHome = process.env.PHREN_BRIDGE_HOME;
+  afterEach(() => { if (previousHome === undefined) delete process.env.PHREN_BRIDGE_HOME; else process.env.PHREN_BRIDGE_HOME = previousHome; });
+
+  function edit(file: string, from: string, to: string): void {
+    const full = path.join(repo, file);
+    fs.writeFileSync(full, fs.readFileSync(full, "utf8").replace(from, to));
+  }
+  function diff(): string {
+    return execFileSync("git", ["diff", "-U0"], { cwd: repo, encoding: "utf8" });
+  }
+
+  it("names what today's agent sessions and recent commits touched, grouped by file", async () => {
+    process.env.PHREN_BRIDGE_HOME = path.join(tmp.path, "bridge");
+    fs.mkdirSync(path.join(tmp.path, "bridge", "changes"), { recursive: true });
+    // A commit that edits add().
+    edit("typescript/app.ts", "return a + b;", "return a + b + 0;");
+    git("commit", "-qam", "tweak add");
+    // An agent session's recorded edit to Point.length, not committed yet.
+    edit("typescript/app.ts", "return Math.sqrt(this.x * this.x + this.y * this.y);", "return Math.hypot(this.x, this.y);");
+    const sessionPatch = diff();
+    fs.writeFileSync(path.join(tmp.path, "bridge", "changes", "claude_today.jsonl"),
+      JSON.stringify({ toolUseId: "t1", files: [{ root: repo, path: "typescript/app.ts", status: "M", patch: sessionPatch, added: 1, removed: 1 }] }) + "\n"
+      + JSON.stringify({ toolUseId: "t2", files: [{ root: path.join(tmp.path, "elsewhere"), path: "typescript/util.ts", status: "M", patch: sessionPatch.replaceAll("typescript/app.ts", "typescript/util.ts"), added: 1, removed: 1 }] }) + "\n");
+    await indexProject(store, "fixture", { repoRoot: repo });
+
+    const changed = await routes.whatChanged("fixture");
+    expect(changed.files.map(file => file.path)).toEqual(["typescript/app.ts"]);
+    expect(changed.files[0].items.map(item => [item.name, item.family])).toEqual([["add", "function"], ["length", "function"]]);
+  });
+
+  it("counts functions and types the working tree changed or added, per file", async () => {
+    edit("typescript/app.ts", "return a + b;", "return a + b + 0;");
+    fs.writeFileSync(path.join(repo, "typescript/extra.ts"), "export interface Extra {\n  id: string;\n}\nexport function makeExtra(): Extra {\n  return { id: \"x\" };\n}\n");
+    await indexProject(store, "fixture", { repoRoot: repo });
+
+    const counts = await routes.changeCounts("fixture", JSON.stringify(["typescript/app.ts", "typescript/extra.ts"]));
+    expect(counts.entries).toEqual([
+      { path: "typescript/app.ts", functions: { changed: 1, added: 0 }, types: { changed: 0, added: 0 }, first: "typescript/app.ts::add" },
+      { path: "typescript/extra.ts", functions: { changed: 0, added: 1 }, types: { changed: 0, added: 1 }, first: "typescript/extra.ts::Extra" },
+    ]);
+  });
 });
 
 it("lists a file's resolved references with file-qualified declarations", async () => {

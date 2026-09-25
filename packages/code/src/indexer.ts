@@ -28,10 +28,11 @@ import {
 } from "./store.js";
 
 /**
- * Cold and incremental index of a project's tracked source files.
+ * Cold and incremental index of a project's source files.
  *
- * The walk is `git ls-files`, so `.gitignore` is respected for free and only
- * tracked files are indexed. Files are hashed; a file whose hash is unchanged
+ * The walk is `git ls-files --cached --others --exclude-standard`: tracked
+ * files plus new ones git does not ignore, so an agent's new file is known
+ * before it is committed, and `.gitignore` is respected for free. Files are hashed; a file whose hash is unchanged
  * is never re-parsed. Blame is stored as a sha256 of the git author line, never
  * the author's name, so nothing personal lands in the index.
  */
@@ -101,8 +102,8 @@ export function isGitRepository(dir: string): boolean {
   }
 }
 
-export function gitTrackedFiles(repoRoot: string): string[] {
-  const output = runGit(repoRoot, ["ls-files", "-z"], "buffer") as Buffer;
+export function gitSourceFiles(repoRoot: string): string[] {
+  const output = runGit(repoRoot, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], "buffer") as Buffer;
   return output.toString("utf8").split("\0").filter(Boolean);
 }
 
@@ -285,7 +286,7 @@ async function indexProjectLocked(store: string, project: string, options: Index
       existing = new Map();
     }
 
-    const tracked = gitTrackedFiles(repoRoot).filter(shouldIndex);
+    const tracked = gitSourceFiles(repoRoot).filter(shouldIndex);
     const currentPaths = new Set<string>();
     const pending: Array<{ file: string; hash: string; language: string; mtime: number; source: string }> = [];
 

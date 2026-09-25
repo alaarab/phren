@@ -1591,17 +1591,17 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
 
         <div class="ref-card">
           <div class="ref-card-name">phren code status &lt;project&gt; [--top &lt;n&gt;]</div>
-          <div class="ref-card-desc">Index counts, languages, and hot symbols.</div>
+          <div class="ref-card-desc">Index counts, languages, and the most used functions and types.</div>
         </div>
 
         <div class="ref-card">
           <div class="ref-card-name">phren code search &lt;project&gt; &lt;query&gt; [--kind k] [--limit n]</div>
-          <div class="ref-card-desc">Ranked symbol search.</div>
+          <div class="ref-card-desc">Find functions, types and variables by name.</div>
         </div>
 
         <div class="ref-card">
           <div class="ref-card-name">phren code outline|refs|def|usage ...</div>
-          <div class="ref-card-desc">A file outline, references to a symbol, its definition, or the hottest and coldest symbols.</div>
+          <div class="ref-card-desc">A file outline, where a function or type is used, where it is defined, or the most and least used.</div>
         </div>
 
         <h2 id="cli-schedules">Schedules <a href="#cli-schedules" class="anchor-link">#</a></h2>
@@ -1843,11 +1843,11 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
 
         <h2 id="mcp-code">Code Index <span class="cat-badge cat-search">5 tools</span> <a href="#mcp-code" class="anchor-link">#</a></h2>
         <p>Needs the <code>code</code> module and an index built with <code>phren code index</code>.</p>
-        <details class="ref-card"><summary><span class="ref-card-name">code_search</span><span class="ref-card-desc">Search symbols by name, signature, or doc text</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, query, kind?, limit?)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">code_definition</span><span class="ref-card-desc">A symbol's definition</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, symbol)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">code_references</span><span class="ref-card-desc">Resolved references to a symbol, grouped by file</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, symbol, limit?)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">code_outline</span><span class="ref-card-desc">A file's symbols in source order</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, path)</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">code_usage</span><span class="ref-card-desc">Hottest and coldest symbols by reference count</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, top?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">code_search</span><span class="ref-card-desc">Find functions, types and variables by name, signature, or doc text</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, query, kind?, limit?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">code_definition</span><span class="ref-card-desc">Where a function, type or variable is defined</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, name)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">code_references</span><span class="ref-card-desc">Where it is used, grouped by file</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, name, limit?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">code_outline</span><span class="ref-card-desc">A file's functions, types and variables in source order</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, path)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">code_usage</span><span class="ref-card-desc">Most and least used functions and types</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, top?)</div></div></details>
 
         <h2 id="mcp-dispatch">Dispatch <span class="cat-badge cat-session">4 tools</span> <a href="#mcp-dispatch" class="anchor-link">#</a></h2>
         <p>Needs the <code>conductor</code> module and a running <a href="phren-hook.html">Phren Hook</a>.</p>
@@ -2291,7 +2291,7 @@ pnpm test</code></pre>
             <tr><td><code>packages/cli/src/ui/</code></td><td>Web UI server and pages</td></tr>
             <tr><td><code>packages/cli/src/bridge/</code></td><td>Phren Hook: the phone and computer bridge, dispatch, schedules</td></tr>
             <tr><td><code>packages/cli/starter/</code></td><td>Templates and <code>phren-*</code> skills copied to <code>~/.phren</code> on init</td></tr>
-            <tr><td><code>packages/code/</code></td><td>Optional code symbol index (<code>@phren/code</code>)</td></tr>
+            <tr><td><code>packages/code/</code></td><td>Optional code index (<code>@phren/code</code>)</td></tr>
             <tr><td><code>packages/vscode/</code></td><td>VS Code extension</td></tr>
             <tr><td><code>apps/ios/</code></td><td>phren for iPhone (not part of the pnpm workspace)</td></tr>
             <tr><td><code>docs/</code></td><td>GitHub Pages site and developer docs</td></tr>

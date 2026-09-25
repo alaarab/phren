@@ -233,21 +233,23 @@ it("searches dollar-prefixed identifiers without FTS syntax errors", async () =>
   expect((await search(store, "fixture", "$helper")).value[0]?.name).toBe("$helper");
 });
 
-describe("recent index observations", () => {
-  it("retains unchanged symbols across reindex and advances body edits", async () => {
-    const { recentSymbols } = await import("./query.js");
-    const before = (await recentSymbols(store, "fixture", "typescript", 100)).value;
-    const original = before.find(row => row.name === "add")!;
-    const unchanged = before.find(row => row.name === "Point")!;
-    expect(original.indexedAt).toBeGreaterThan(0);
-    const file = path.join(repo, original.file);
-    const content = fs.readFileSync(file, "utf8");
-    fs.writeFileSync(file, content.replace("return a + b", "return a + b + 1"));
+describe("what changed", () => {
+  it("names the innermost function, type or variable each added line falls in, and marks whole additions new", async () => {
+    const { addedLinesByFile, changedDeclarations } = await import("./query.js");
+    const file = path.join(repo, "typescript/app.ts");
+    const source = fs.readFileSync(file, "utf8")
+      .replace("return a + b;", "return a + b + 0;")
+      .replace("return Math.sqrt(this.x * this.x + this.y * this.y);", "return Math.hypot(this.x, this.y);");
+    fs.writeFileSync(file, source + "\nexport function subtract(a: number, b: number): number {\n  return a - b;\n}\n");
     await indexProject(store, "fixture", { repoRoot: repo });
-    const after = (await recentSymbols(store, "fixture", "typescript", 100)).value;
-    expect(after.find(row => row.name === "add")!.indexedAt).toBeGreaterThan(original.indexedAt);
-    expect(after.find(row => row.name === "Point")!.indexedAt).toBe(unchanged.indexedAt);
-    await indexProject(store, "fixture", { repoRoot: repo, full: true });
-    expect((await recentSymbols(store, "fixture", "typescript", 100)).value).toEqual(after);
+    const patch = execFileSync("git", ["diff", "-U0"], { cwd: repo, encoding: "utf8" });
+    const changed = (await changedDeclarations(store, "fixture", addedLinesByFile(patch))).value;
+    expect(changed.map(item => [item.name, item.family, item.isNew])).toEqual([
+      ["add", "function", false],
+      ["length", "function", false],
+      ["subtract", "function", true],
+    ]);
+    // The method's edit belongs to the method, not to the class around it.
+    expect(changed.find(item => item.name === "Point")).toBeUndefined();
   });
 });

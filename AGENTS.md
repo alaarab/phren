@@ -13,7 +13,7 @@ pnpm workspace with turborepo. Shipped packages:
 
 | Package | Path | npm | Description |
 |---------|------|-----|-------------|
-| `@phren/code` | `packages/code/` | Published | Optional symbol index, grammars and code skill |
+| `@phren/code` | `packages/code/` | Published | Optional code index, grammars and code skill |
 | `@phren/cli` | `packages/cli/` | Published | CLI, MCP server, data layer |
 | `@phren/vscode` | `packages/vscode/` | VS Code Marketplace | VS Code extension. Versions separately from the CLI (`packages/vscode/CHANGELOG.md`, shown on the Marketplace listing) and releases through the `Release VS Code extension` workflow. It is a thin client calling MCP tools by name, so it starts its server in the `full` tool profile, and a test in `packages/cli` fails if the CLI stops registering a tool it calls. |
 
@@ -58,9 +58,9 @@ Outside the pnpm workspace:
 | `packages/cli/src/graph-core/` | Host-agnostic graph model shared by the browser viewer and the terminal graph view: payload types, palette, kind/health derivation, filters, ranking, search. Must not import node builtins or anything outside itself (it is bundled for the browser). |
 | `packages/cli/src/shell/graph/` | The shell's Graph view: deterministic force layout, braille canvas, controller (data/camera/selection/keys), view renderer, watch mode (tails the lookup log), agents overlay |
 | `packages/cli/src/agents/` | Discovering coding agents running on this machine (`PHREN_FEATURE_AGENTS`). Host-agnostic `AgentRecord` contract plus `providers/` (herdr, phren-agent spawner). Nothing host-specific may leak outside `providers/`. |
-| `packages/code/src/` | Per-project SQLite code index: tree-sitter parsing, incremental transactions, persisted identifier references, symbol queries and finding citations. `phren code index` resolves this machine's checkout. |
-| `packages/cli/src/bridge/code-routes.ts` | Registered-store Code routes: tree, search, outlines and batched counts, a file's resolved references, definitions with findings, references, paged usage, recent changes and reindex; debounced refresh after recorded file changes. |
-| `packages/cli/src/bridge/code-note.ts` | Validates a dossier line, saves a symbol-cited finding, then optionally hands off to the chosen session or dispatches a worker; delivery failure is separate from save success. |
+| `packages/code/src/` | Per-project SQLite code index: tree-sitter parsing, incremental transactions, persisted identifier references, queries over functions, types and variables (including what changed) and finding citations. `phren code index` resolves this machine's checkout. |
+| `packages/cli/src/bridge/code-routes.ts` | Registered-store Code routes: tree, search, outlines and batched counts, a file's resolved references, definitions with findings, references, paged usage, what changed, per-file change counts and reindex; debounced refresh after recorded file changes. |
+| `packages/cli/src/bridge/code-note.ts` | Validates a dossier line, saves a finding linked to that function, type or variable, then optionally hands off to the chosen session or dispatches a worker; delivery failure is separate from save success. |
 | `packages/cli/src/bridge/files.ts` | Read-only `/v1/projects/files` browser for discovered checkouts: relative paths, no symlinks or `.git`, 2 MiB files and at most 500 directory entries. |
 | `packages/cli/src/bridge/transcript-preview.ts` | Ephemeral live reply previews from Claude pane text and Codex/OpenCode deltas, capped at two updates per second and cleared by completed entries. |
 | `apps/ios/Phren/Features/Notifications/` | Local schedule and approval notifications: monitor, notification-center reconciliation, routing and optional background refresh, with no APNs key or relay required. |
@@ -120,7 +120,7 @@ Developer docs live in `docs/` (also published to the GitHub Pages site):
 - `feature-flags.md` -- optional features and their env flags
 - `performance.md` -- indexing and search performance notes
 - `shell.md` -- the interactive `phren` shell
-- `code-index.md` -- local symbol index, queries, phone routes and finding citations
+- `code-index.md` -- local code index, what changed, queries, phone routes and finding citations
 - `conductor.md` -- launch roles, placement, hand-off, standing grants and adapter boundaries
 - `fanout.md` -- worker manifests, permission failures, notification and archive lifecycle
 - `graph-viewer.md` -- the 3D memory viewer (web UI Graph tab + VS Code webview)

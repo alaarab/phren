@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- Code talks about functions, types and variables, never "symbols". `code_definition` and `code_references` take `name`, and so does the `add_finding` citation. `symbol` is still accepted until 0.3.1, marked deprecated, and a stored citation keeps its `symbol` key. Every `code_*` description, the `/code` skill, the notes sent to agents, `phren code` help and output, and the docs are reworded. `code_usage` and `phren code usage` report the most and least used functions and types instead of hot and cold.
+- Hook: `GET /v1/code/changed` returns what changed: the functions, types and variables that today's agent sessions (the Hook's recorded edits in the checkout) and the last 10 commits touched, by file, with `isNew` and `uses`. Only top-level or exported variables count, and the repository's first commit is left out. `GET /v1/code/change-counts` gives each changed file's function and type tallies for the phone's Changes chips. `/v1/code/recent` is gone. The note, definition and references routes take `name`, and older phones' `symbol` still works.
+- The code index includes untracked files git does not ignore (`git ls-files --cached --others --exclude-standard`), so an agent's new file is known before it is committed.
+
 ### Fixed
 
 - `phren doctor` reports `@path` import lines in store-managed `AGENTS.md`/`CLAUDE.md` (`context-imports`). The repo file is a symlink into the store, so Claude Code resolves those imports to `~/.phren/<project>/...` and blocks on its "Allow external CLAUDE.md file imports?" dialog; `--fix` rewrites each run as a plain reference list.

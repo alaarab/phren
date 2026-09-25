@@ -159,13 +159,20 @@ async function handleAddFinding(
   params: {
     project: string;
     finding: string | string[];
-    citation?: { file?: string; line?: number; repo?: string; commit?: string; symbol?: string; supersedes?: string; task_item?: string };
+    citation?: { file?: string; line?: number; repo?: string; commit?: string; name?: string; symbol?: string; supersedes?: string; task_item?: string };
     sessionId?: string;
     findingType?: (typeof FINDING_TYPES)[number];
     scope?: string;
   },
 ) {
-  const { finding, citation, sessionId, findingType, scope } = params;
+  const { finding, sessionId, findingType, scope } = params;
+  // `name` is the citation's code link (a function, type or variable);
+  // `symbol` is its deprecated spelling, accepted until 0.3.1. The stored
+  // citation keeps its existing key.
+  const { name: citedName, ...citationRest } = params.citation ?? {};
+  const citation = params.citation
+    ? { ...citationRest, ...(citedName ?? citationRest.symbol ? { symbol: citedName ?? citationRest.symbol } : {}) }
+    : undefined;
 
   // Resolve store-qualified project names (e.g., "team/arc" → store path + "arc")
   let phrenPath: string;
@@ -300,9 +307,9 @@ async function handleAddFinding(
   return withWriteQueue(async () => {
     try {
       const taggedFinding = applyFindingTypePrefix(finding, findingType);
-      // Memory link: auto-attach a symbol citation when the finding names one
-      // unique symbol, or validate an explicit `symbol:` citation. Never rewrites
-      // the finding text; only the citation comment gains the symbol.
+      // Memory link: link the finding to the one function, type or variable it
+      // names, or validate an explicit citation `name`. Never rewrites the
+      // finding text; only the citation comment gains the link.
       const code = moduleEnabled(phrenPath, "code") ? await loadCodePackage(phrenPath) : undefined;
       const symbolCitation = code ? await code.symbolCitationForFinding(phrenPath, project, taggedFinding, citation?.symbol) : citation?.symbol ? { symbol: citation.symbol } : {};
       const citationForWrite = (citation || symbolCitation.symbol)
@@ -832,7 +839,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           line: z.number().int().positive().optional().describe("1-based line number in file."),
           repo: z.string().optional().describe("Git repository root path for citation validation."),
           commit: z.string().optional().describe("Git commit SHA that supports this finding."),
-          symbol: z.string().optional().describe("A code symbol this finding is about: Name, Type.member or name(). Validated against the project's code index; stored unresolved when it does not resolve."),
+          name: z.string().optional().describe("The function, type or variable this finding is about: Name, Type.member or name(). Validated against the project's code index; stored unresolved when it does not resolve."),
+          symbol: z.string().optional().describe("Deprecated: use name. Accepted until @phren/cli 0.3.1."),
           supersedes: z.string().optional().describe("First 60 chars of the old finding this one replaces. The old entry will be marked as superseded."),
           task_item: z.string().optional().describe("Task item stable ID like bid:abcd1234, positional ID like A1, or item text to link this finding to."),
         }).optional().describe("Optional source citation for traceability (only used when finding is a single string)."),
