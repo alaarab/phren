@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-24
+
 ### Added
 
 - `phren pair` connects a phone in one scan. It turns on the Hook module, installs Phren Hook if needed, and prints a QR code (plus an address and six-character code for typing by hand). The phone sends its public key with an HMAC proof of the code and gets back an HMAC over the SSH host fingerprint, so it pins the right host key either way; this computer then adds one restricted `phren-iphone` line to `~/.ssh/authorized_keys`. The listener (port 47291) takes one phone, closes after five wrong codes, and times out after five minutes.
@@ -15,8 +17,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - `phren init` asks one question (recommended settings), then offers to sync memory to a private GitHub repo when `gh` is signed in (it creates `<login>/my-phren` and pushes) and to connect your phone. `--advanced` goes straight to every setting. The closing "Next steps" list is down to what is left to do, and Ctrl-C in a prompt says "Setup cancelled" instead of Inquirer's error.
 - `phren bridge install` turns the Hook module on instead of refusing with "module hook is disabled", which is what the phone's own setup command hit on a fresh store.
 
-### Changed
-
 - Hook: the ElevenLabs key for spoken replies and Scribe dictation is phren's own machine config, no longer `~/.config/mina-trailer.json`. The Hook reads `ELEVENLABS_API_KEY` first (ElevenLabs' own variable, shared with its SDKs and MCP server), then `~/.local/share/phren/bridge/elevenlabs.json` (`{"apiKey": …}`, mode 600, never synced; a file other users can read is ignored). `phren bridge speech-key set` stores it from stdin. When that file is missing and `mina-trailer.json` has `elevenlabs_api_key`, the Hook copies it once with mode 600 and then reads only the new file; `mina-trailer.json` is left alone. `phren doctor` (`speech-key`) and `phren bridge doctor` (`speechKey`) say whether the computer has a key without showing it.
 - The conductor skill has a Voice and pace section: lead with the outcome, keep replies to one to four short sentences, keep paths, SHAs, PR numbers and run IDs in Phren instead of the chat, one line per dispatch or return, dispatch an engineer for every task the owner gives, one question at a time, and delegate reading to workers. A message starting with `[voice]` (sent by the phone's talk mode) gets one or two plain spoken sentences.
 
@@ -24,8 +24,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Hook: Claude Code's AskUserQuestion is answered in its terminal dialog by a walk that reads the pane before and after every key. Before, the Hook sent each question's digit then Tab, but a single-select digit already moves to the next question, so the Tab skipped one and the later keys landed on the wrong tab or cancelled the review. A lone multi-select question got a stray Enter that toggled its first box. The dialog was left half-answered with the phone saying "answer in terminal". Several digits sent in one write are also ignored by Claude, so boxes are now toggled one at a time and checked.
 - Hook: `/v1/questions/answer` answers a Claude question for any 1–4 question set, single- or multi-select, with typed "Other" answers, and the status frame reports `capabilities.questions: true` for Claude. The phone no longer depends on the Hook remembering a released hold, so auto mode, a hold that expired after 15 minutes, or a restarted Hook still get choice rows. The Hook answers only a pane showing exactly the questions the phone names, and it no longer publishes Claude's question dialog as a numbered terminal choice.
-
-### Fixed
 
 - Hook: phone messages reach a Copilot CLI pane again. Copilot (1.0.88) switches conversation inside one process (`/new`, `/clear`, `/resume`) and runs its `sessionStart` hook only when that conversation's first prompt is submitted, so Herdr's reported session and the Hook's recorded binding kept naming the previous conversation. The phone sent there, the new conversation's `UserPromptSubmit` check refused the text ("Phren sent this message to a different conversation in this pane"), and because the refused prompt never started the conversation, every later send was refused too. The Hook now names a Copilot pane by the last `Registering foreground session` line in Copilot's own process log (`~/.copilot/logs/process-<time>-<pid>.log`, by the pane's foreground PIDs), with Herdr's report as the fallback. A conversation nothing was sent to yet has no transcript, so the pane shows as starting and the phone's first prompt goes through the starting binding.
 
