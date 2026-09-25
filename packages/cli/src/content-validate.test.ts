@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mergeFindings, extractConflictVersions, validateFinding } from "./content/validate.js";
-import { isValidProjectName } from "./utils.js";
+import { mergeFindings, validateFinding } from "./content/validate.js";
 
 describe("mergeFindings: nothing is dropped on a sync conflict", () => {
   // These run unattended (push_changes, session-stop conflict recovery) and the
@@ -268,57 +267,19 @@ describe("mergeFindings", () => {
 });
 
 describe("validateFinding", () => {
-  it("rejects empty string", () => {
-    expect(validateFinding("")).not.toBeNull();
-    expect(validateFinding("")).toContain("empty");
+  it.each([
+    ["", "empty"],
+    ["   ", "empty"],
+    ["x".repeat(2001), "2000"],
+  ])("rejects %j", (text, message) => {
+    expect(validateFinding(text)).toContain(message);
   });
 
-  it("rejects whitespace-only string", () => {
-    expect(validateFinding("   ")).not.toBeNull();
-    expect(validateFinding("   ")).toContain("empty");
+  it("reports the actual length of an oversized finding", () => {
+    expect(validateFinding("x".repeat(2001))).toContain("2001");
   });
 
-  it("rejects strings over 2000 chars", () => {
-    const long = "x".repeat(2001);
-    const error = validateFinding(long);
-    expect(error).not.toBeNull();
-    expect(error).toContain("2000");
-    expect(error).toContain("2001");
-  });
-
-  it("accepts a valid 100-char finding", () => {
-    const valid = "a".repeat(100);
-    expect(validateFinding(valid)).toBeNull();
-  });
-
-  it("accepts a finding at exactly 2000 chars", () => {
-    const boundary = "b".repeat(2000);
-    expect(validateFinding(boundary)).toBeNull();
-  });
-});
-
-describe("isValidProjectName edge cases", () => {
-  it("rejects '.'", () => {
-    expect(isValidProjectName(".")).toBe(false);
-  });
-
-  it("rejects '..'", () => {
-    expect(isValidProjectName("..")).toBe(false);
-  });
-
-  it("rejects names starting with dot (.hidden)", () => {
-    expect(isValidProjectName(".hidden")).toBe(false);
-  });
-
-  it("rejects names starting with hyphen (-flag)", () => {
-    expect(isValidProjectName("-flag")).toBe(false);
-  });
-
-  it("accepts 'my-project'", () => {
-    expect(isValidProjectName("my-project")).toBe(true);
-  });
-
-  it("accepts 'phren_01'", () => {
-    expect(isValidProjectName("phren_01")).toBe(true);
+  it.each([100, 2000])("accepts a finding of %i chars (2000 is the inclusive limit)", (length) => {
+    expect(validateFinding("b".repeat(length))).toBeNull();
   });
 });

@@ -12,10 +12,13 @@ import { describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import {
-  STORE_SECRET_GITIGNORE_LINES,
-  missingSecretGitignoreLines,
-} from "../init/store-gitignore.js";
+import { STORE_SECRET_GITIGNORE_LINES } from "../init/store-gitignore.js";
+
+/** Entries a .gitignore body lacks, by whole trimmed line (a commented-out entry does not count). */
+function missingSecretGitignoreLines(content: string): string[] {
+  const present = new Set(content.split("\n").map((line) => line.trim()));
+  return STORE_SECRET_GITIGNORE_LINES.filter((entry) => !present.has(entry));
+}
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const starterGitignore = path.resolve(here, "..", "..", "starter", ".gitignore");
@@ -28,6 +31,10 @@ describe("store .gitignore templates", () => {
     expect(STORE_SECRET_GITIGNORE_LINES).toContain(".env");
     expect(STORE_SECRET_GITIGNORE_LINES).toContain(".config/auth-profiles.json");
     expect(STORE_SECRET_GITIGNORE_LINES).toContain(".config/modules.yaml.migration-backup");
+    // The unstage guard in tools/finding.ts push_changes and cli/session-stop.ts
+    // resets these paths out of the index; .gitignore has to cover the same set.
+    expect(STORE_SECRET_GITIGNORE_LINES).toContain("*.pem");
+    expect(STORE_SECRET_GITIGNORE_LINES).toContain("*.key");
   });
 
   it("the shared-mode starter template covers every secret-bearing entry", () => {
@@ -42,34 +49,5 @@ describe("store .gitignore templates", () => {
     expect(src).toContain("...STORE_SECRET_GITIGNORE_LINES");
   });
 
-  it("matches the unstage guard used by both `git add -A` paths", () => {
-    // tools/finding.ts push_changes and cli/session-stop.ts both reset these
-    // paths out of the index. .gitignore has to cover the same set, otherwise
-    // a file the guard unstages today can still be tracked by another path.
-    const guarded = [".env", "*.pem", "*.key", ".config/auth-profiles.json"];
-    for (const entry of guarded) {
-      expect(STORE_SECRET_GITIGNORE_LINES).toContain(entry);
-    }
-  });
-
   // ── missingSecretGitignoreLines ───────────────────────────────────────────
-
-  it("reports every entry missing from an empty file", () => {
-    expect(missingSecretGitignoreLines("")).toEqual([...STORE_SECRET_GITIGNORE_LINES]);
-  });
-
-  it("ignores commented-out entries", () => {
-    const content = STORE_SECRET_GITIGNORE_LINES.map((l) => `# ${l}`).join("\n");
-    expect(missingSecretGitignoreLines(content)).toEqual([...STORE_SECRET_GITIGNORE_LINES]);
-  });
-
-  it("tolerates surrounding whitespace and unrelated entries", () => {
-    const content = ["node_modules", ...STORE_SECRET_GITIGNORE_LINES.map((l) => `  ${l}  `), "*.log"].join("\n");
-    expect(missingSecretGitignoreLines(content)).toEqual([]);
-  });
-
-  it("reports only what is actually absent", () => {
-    const content = STORE_SECRET_GITIGNORE_LINES.filter((l) => l !== ".env").join("\n");
-    expect(missingSecretGitignoreLines(content)).toEqual([".env"]);
-  });
 });

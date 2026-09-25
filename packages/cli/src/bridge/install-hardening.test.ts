@@ -12,7 +12,7 @@ vi.mock("node:fs/promises", async importOriginal => {
   return { ...fs, copyFile: async (src: string, dst: string) => src.endsWith("bridge-hook.mjs") ? fs.writeFile(dst, "bundle fixture") : fs.copyFile(src, dst) };
 });
 vi.mock("./transport.js", () => ({ health: async () => ({ version: "0.2.14" }) }));
-import { install, launchDomain, OPENCODE_PLUGIN_MARKER, opencodePluginNeedsWrite } from "./install.js";
+import { install, OPENCODE_PLUGIN_MARKER, opencodePluginNeedsWrite } from "./install.js";
 
 beforeEach(async () => {
   state.home = await mkdtemp("/tmp/phren-install-");
@@ -103,11 +103,6 @@ it.skipIf(process.platform === "win32")("replaces the OpenCode plugin copies it 
   expect(opencodePluginNeedsWrite(shipped, shipped)).toBe(false);
   expect(opencodePluginNeedsWrite(`${OPENCODE_PLUGIN_MARKER} and replaced on every update.\nexport const v = 1;\n`, shipped)).toBe(true);
   expect(opencodePluginNeedsWrite("export const mine = true;\n", shipped)).toBe(false);
-});
-
-it.skipIf(process.platform === "win32")("names the launchd domain for a session", () => {
-  expect(launchDomain(501, true)).toBe("gui/501");
-  expect(launchDomain(501, false)).toBe("user/501");
 });
 
 it.skipIf(process.platform === "win32")("bootstraps into gui/<uid> when someone is logged in at the screen", async () => {

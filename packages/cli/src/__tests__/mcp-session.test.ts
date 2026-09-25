@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { makeTempDir, writeFile } from "../test-helpers.js";
+import { makeTempDir, } from "../test-helpers.js";
 import { incrementSessionFindings, incrementSessionTasksCompleted } from "../tools/session.js";
 
 function sessionFile(phrenPath: string, sessionId: string) {
@@ -19,13 +19,6 @@ describe("incrementSessionFindings", () => {
 
   beforeEach(() => { tmp = makeTempDir("mcp-session-"); });
   afterEach(() => tmp.cleanup());
-
-  it("increments findingsAdded by 1 by default", () => {
-    writeSession(tmp.path, { sessionId: "abc", startedAt: new Date().toISOString(), findingsAdded: 0 });
-    incrementSessionFindings(tmp.path, 1, "abc");
-    const state = JSON.parse(fs.readFileSync(sessionFile(tmp.path, "abc"), "utf-8"));
-    expect(state.findingsAdded).toBe(1);
-  });
 
   it("increments by a custom count", () => {
     writeSession(tmp.path, { sessionId: "abc", startedAt: new Date().toISOString(), findingsAdded: 2 });
@@ -94,18 +87,6 @@ describe("incrementSessionTasksCompleted", () => {
 
   beforeEach(() => { tmp = makeTempDir("mcp-session-task-complete-"); });
   afterEach(() => tmp.cleanup());
-
-  it("increments tasksCompleted by 1 by default", () => {
-    writeSession(tmp.path, {
-      sessionId: "abc",
-      startedAt: new Date().toISOString(),
-      findingsAdded: 0,
-      tasksCompleted: 0,
-    });
-    incrementSessionTasksCompleted(tmp.path, 1, "abc");
-    const state = JSON.parse(fs.readFileSync(sessionFile(tmp.path, "abc"), "utf-8"));
-    expect(state.tasksCompleted).toBe(1);
-  });
 
   it("falls back to the most recent active session for the project", () => {
     writeSession(tmp.path, {

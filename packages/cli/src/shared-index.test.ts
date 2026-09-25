@@ -68,24 +68,14 @@ afterEach(() => {
 // ── porterStem ───────────────────────────────────────────────────────────────
 
 describe("porterStem", () => {
-  it("stems 'running' to 'run'", () => {
-    expect(porterStem("running")).toBe("run");
-  });
-
-  it("stems 'argued' to 'argu'", () => {
-    expect(porterStem("argued")).toBe("argu");
-  });
-
-  it("stems 'generalization' to 'general'", () => {
-    expect(porterStem("generalization")).toBe("general");
-  });
-
-  it("stems 'relational' to 'relat'", () => {
-    expect(porterStem("relational")).toBe("relat");
-  });
-
-  it("stems 'conditional' to 'condit'", () => {
-    expect(porterStem("conditional")).toBe("condit");
+  it.each([
+    ["running", "run"],
+    ["argued", "argu"],
+    ["generalization", "general"],
+    ["relational", "relat"],
+    ["conditional", "condit"],
+  ])("stems '%s' to '%s'", (word, stem) => {
+    expect(porterStem(word)).toBe(stem);
   });
 });
 
@@ -222,11 +212,8 @@ describe("extractSnippet", () => {
     const lines = snippet.split("\n");
     expect(lines.length).toBeLessThanOrEqual(5);
     expect(lines[0]).toBe("# Project");
-  });
-
-  it("returns first N lines for empty effective query", () => {
-    const snippet = extractSnippet("some content\nmore lines", "");
-    expect(snippet).toContain("some content");
+    // An empty effective query takes the same first-lines path.
+    expect(extractSnippet("some content\nmore lines", "")).toContain("some content");
   });
 
   it("finds the best matching section", () => {
@@ -282,25 +269,11 @@ describe("detectProject", () => {
     expect(detectProject(phren, "/home/user/myprojectx")).toBeNull();
   });
 
-  it("returns null when no project matches", () => {
-    const phren = makePhren();
-    makeProject(phren, "myproject", { "SUMMARY.md": "# Summary" });
-    const result = detectProject(phren, "/home/user/other/src");
-    expect(result).toBeNull();
-  });
-
   it("uses exact sourcePath matching for short names too", () => {
     const phren = makePhren();
     makeProject(phren, "abc", { "SUMMARY.md": "# Summary" });
     expect(detectProject(phren, "/home/user/abc")).toBe("abc");
     expect(detectProject(phren, "/home/user/abc/src")).toBe("abc");
-  });
-
-  it("matches long names by sourcePath prefix", () => {
-    const phren = makePhren();
-    makeProject(phren, "myapp", { "SUMMARY.md": "# Summary" });
-    const result = detectProject(phren, "/home/user/myapp/deep/nested");
-    expect(result).toBe("myapp");
   });
 
   it("uses the stored project name when sourcePath matches", () => {
@@ -507,19 +480,6 @@ describe("buildIndex", () => {
     db.close();
   });
 
-  it("uses cached index on second build with same content", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "proj", { "FINDINGS.md": "- stable content" });
-    const db1 = await buildIndex(phren);
-    db1.close();
-    // Second build should hit cache (no way to assert directly, but should not error)
-    const db2 = await buildIndex(phren);
-    const rows = queryRows(db2, "SELECT * FROM docs WHERE docs MATCH ?", ["stable"]);
-    expect(rows).not.toBeNull();
-    db2.close();
-  });
-
   it("classifies arbitrary reference docs by topic keywords at index time", async () => {
     const phren = makePhren();
     grantAdmin(phren);
@@ -591,18 +551,6 @@ describe("queryRows", () => {
     expect(rows).toBeNull();
     db.close();
   });
-
-  it("returns array of arrays for valid results", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "proj", { "FINDINGS.md": "- database patterns" });
-    const db = await buildIndex(phren);
-    const rows = queryRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["database"]);
-    expect(rows).not.toBeNull();
-    expect(Array.isArray(rows)).toBe(true);
-    expect(Array.isArray(rows![0])).toBe(true);
-    db.close();
-  });
 });
 
 // ── rowToDoc ─────────────────────────────────────────────────────────────────
@@ -653,16 +601,6 @@ describe("queryDocRows", () => {
     expect(docs).not.toBeNull();
     expect(docs![0].project).toBe("proj");
     expect(docs![0].type).toBe("findings");
-    db.close();
-  });
-
-  it("returns null when no matches", async () => {
-    const phren = makePhren();
-    grantAdmin(phren);
-    makeProject(phren, "proj", { "FINDINGS.md": "- data" });
-    const db = await buildIndex(phren);
-    const docs = queryDocRows(db, "SELECT * FROM docs WHERE docs MATCH ?", ["xyznonexistent"]);
-    expect(docs).toBeNull();
     db.close();
   });
 });

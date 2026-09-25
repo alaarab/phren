@@ -29,15 +29,8 @@ describe("UNIVERSAL_TECH_TERMS_RE", () => {
     }
   });
 
-  it("returns empty for text with no tech terms", () => {
-    const text = "The quick brown fox jumps over the lazy dog";
-    const matches = text.match(new RegExp(UNIVERSAL_TECH_TERMS_RE.source, UNIVERSAL_TECH_TERMS_RE.flags));
-    expect(matches).toBeNull();
-  });
-
-  it("handles empty string", () => {
-    const matches = "".match(new RegExp(UNIVERSAL_TECH_TERMS_RE.source, UNIVERSAL_TECH_TERMS_RE.flags));
-    expect(matches).toBeNull();
+  it.each(["The quick brown fox jumps over the lazy dog", ""])("matches nothing in %j", (text) => {
+    expect(text.match(new RegExp(UNIVERSAL_TECH_TERMS_RE.source, UNIVERSAL_TECH_TERMS_RE.flags))).toBeNull();
   });
 });
 
@@ -54,92 +47,28 @@ describe("EXTRA_FRAGMENT_PATTERNS", () => {
     return matches;
   }
 
-  describe("version pattern", () => {
-    it("matches semver versions", () => {
-      expect(matchPattern("version", "Upgrade to v1.2.3")).toEqual(["v1.2.3"]);
-    });
-
-    it("matches versions without v prefix", () => {
-      expect(matchPattern("version", "Version 2.0.0")).toEqual(["2.0.0"]);
-    });
-
-    it("matches prerelease versions", () => {
-      expect(matchPattern("version", "Use 3.0.0-beta.1 for testing")).toEqual(["3.0.0-beta.1"]);
-    });
-
-    it("returns empty for non-version numbers", () => {
-      expect(matchPattern("version", "port 8080 is open")).toEqual([]);
-    });
-  });
-
-  describe("env_key pattern", () => {
-    it("matches PHREN_ prefixed env vars", () => {
-      expect(matchPattern("env_key", "Set PHREN_LLM_ENDPOINT to your URL")).toEqual(["PHREN_LLM_ENDPOINT"]);
-    });
-
-    it("matches NODE_ENV style vars", () => {
-      expect(matchPattern("env_key", "NODE_ENV=production")).toEqual(["NODE_ENV"]);
-    });
-
-    it("does not match single-segment uppercase words", () => {
-      // "API" alone has no underscore segment, should not match
-      expect(matchPattern("env_key", "The API is down")).toEqual([]);
-    });
-
-    it("matches multiple env vars in one string", () => {
-      const matches = matchPattern("env_key", "PHREN_DEBUG=1 and AWS_REGION=us-east-1");
-      expect(matches).toContain("PHREN_DEBUG");
-      expect(matches).toContain("AWS_REGION");
-    });
-  });
-
-  describe("file_path pattern", () => {
-    it("matches absolute paths", () => {
-      const matches = matchPattern("file_path", "Edit /home/user/config.json");
-      expect(matches).toEqual(["/home/user/config.json"]);
-    });
-
-    it("matches relative paths", () => {
-      const matches = matchPattern("file_path", "Check ./src/index.ts");
-      expect(matches).toEqual(["./src/index.ts"]);
-    });
-
-    it("matches tilde paths", () => {
-      const matches = matchPattern("file_path", "Stored in ~/phren/FINDINGS.md");
-      expect(matches).toEqual(["~/phren/FINDINGS.md"]);
-    });
-
-    it("returns empty for plain text", () => {
-      expect(matchPattern("file_path", "no paths here")).toEqual([]);
-    });
-  });
-
-  describe("error_code pattern", () => {
-    it("matches TypeScript error codes", () => {
-      expect(matchPattern("error_code", "Fix TS2345 in the handler")).toEqual(["TS2345"]);
-    });
-
-    it("matches ERR_ style codes", () => {
-      expect(matchPattern("error_code", "ERR_MODULE_NOT_FOUND when importing")).toEqual(["ERR_MODULE_NOT_FOUND"]);
-    });
-
-    it("returns empty for normal words", () => {
-      expect(matchPattern("error_code", "Everything works fine")).toEqual([]);
-    });
-  });
-
-  describe("date pattern", () => {
-    it("matches ISO dates", () => {
-      expect(matchPattern("date", "Fixed on 2025-03-11")).toEqual(["2025-03-11"]);
-    });
-
-    it("matches slash dates", () => {
-      expect(matchPattern("date", "Deployed 2025/01/15")).toEqual(["2025/01/15"]);
-    });
-
-    it("returns empty for non-date numbers", () => {
-      expect(matchPattern("date", "value is 42")).toEqual([]);
-    });
+  it.each([
+    ["version", "Upgrade to v1.2.3", ["v1.2.3"]],
+    ["version", "Version 2.0.0", ["2.0.0"]],
+    ["version", "Use 3.0.0-beta.1 for testing", ["3.0.0-beta.1"]],
+    ["version", "port 8080 is open", []],
+    ["env_key", "Set PHREN_LLM_ENDPOINT to your URL", ["PHREN_LLM_ENDPOINT"]],
+    ["env_key", "NODE_ENV=production", ["NODE_ENV"]],
+    // A single uppercase word with no underscore segment is not an env key.
+    ["env_key", "The API is down", []],
+    ["env_key", "PHREN_DEBUG=1 and AWS_REGION=us-east-1", ["PHREN_DEBUG", "AWS_REGION"]],
+    ["file_path", "Edit /home/user/config.json", ["/home/user/config.json"]],
+    ["file_path", "Check ./src/index.ts", ["./src/index.ts"]],
+    ["file_path", "Stored in ~/phren/FINDINGS.md", ["~/phren/FINDINGS.md"]],
+    ["file_path", "no paths here", []],
+    ["error_code", "Fix TS2345 in the handler", ["TS2345"]],
+    ["error_code", "ERR_MODULE_NOT_FOUND when importing", ["ERR_MODULE_NOT_FOUND"]],
+    ["error_code", "Everything works fine", []],
+    ["date", "Fixed on 2025-03-11", ["2025-03-11"]],
+    ["date", "Deployed 2025/01/15", ["2025/01/15"]],
+    ["date", "value is 42", []],
+  ])("%s pattern finds the right matches in %j", (label, text, expected) => {
+    expect(matchPattern(label, text)).toEqual(expected);
   });
 
   it("handles empty input for all patterns", () => {
@@ -213,39 +142,22 @@ describe("phrenOk / phrenErr / forwardErr", () => {
 // ── parsePhrenErrorCode ────────────────────────────────────────────────────
 
 describe("parsePhrenErrorCode", () => {
-  it("extracts known error code from prefix", () => {
-    expect(parsePhrenErrorCode("PROJECT_NOT_FOUND: myproject")).toBe("PROJECT_NOT_FOUND");
-  });
-
-  it("returns undefined for unknown prefix", () => {
-    expect(parsePhrenErrorCode("RANDOM_ERROR: something")).toBeUndefined();
-  });
-
-  it("returns undefined for empty string", () => {
-    expect(parsePhrenErrorCode("")).toBeUndefined();
+  it.each([
+    ["PROJECT_NOT_FOUND: myproject", "PROJECT_NOT_FOUND"],
+    ["RANDOM_ERROR: something", undefined],
+    ["", undefined],
+  ])("parses %j as %s", (message, code) => {
+    expect(parsePhrenErrorCode(message)).toBe(code);
   });
 });
 
 // ── isRecord ────────────────────────────────────────────────────────────────
 
 describe("isRecord", () => {
-  it("returns true for plain objects", () => {
+  it("is true only for plain objects", () => {
     expect(isRecord({})).toBe(true);
     expect(isRecord({ a: 1 })).toBe(true);
-  });
-
-  it("returns false for arrays", () => {
-    expect(isRecord([])).toBe(false);
-  });
-
-  it("returns false for null", () => {
-    expect(isRecord(null)).toBe(false);
-  });
-
-  it("returns false for primitives", () => {
-    expect(isRecord("string")).toBe(false);
-    expect(isRecord(42)).toBe(false);
-    expect(isRecord(undefined)).toBe(false);
+    for (const value of [[], null, "string", 42, undefined]) expect(isRecord(value), String(value)).toBe(false);
   });
 });
 

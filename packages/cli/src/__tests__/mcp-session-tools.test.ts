@@ -156,6 +156,7 @@ describe("mcp-session tool contract", () => {
     expect(resumed.ok).toBe(true);
     expect(resumed.message).toContain("Continue where you left off?");
     expect(resumed.message).toContain("Implement snapshot pipeline");
+    expect(resumed.message).toContain("Fix the checkpoint matcher");
   });
 
   it("does not immediately delete a recently ended long-running session during session_start cleanup", async () => {

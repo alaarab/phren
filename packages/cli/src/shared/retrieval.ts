@@ -424,7 +424,7 @@ function semanticFallbackDocs(db: SqlJsDatabase, prompt: string, project?: strin
 }
 
 /** @internal Exported for tests. */
-export function shouldRunVectorExpansion(
+function shouldRunVectorExpansion(
   rows: DocRow[] | null,
   prompt: string,
   desiredResults = VECTOR_FALLBACK_SKIP_COUNT

@@ -66,16 +66,12 @@ it.skipIf(process.platform === "win32")("lets every open stream share one snapsh
   expect(calls.get("session.snapshot")).toBe(3);
 });
 
-it.skipIf(process.platform === "win32")("detects a changed conversation within one window", async () => {
+it.skipIf(process.platform === "win32").each([
+  ["a changed conversation", () => [pane(other)]],
+  ["a pane that disappeared", () => []],
+])("detects %s within one window", async (_label, next) => {
   await validateTarget(target, false, false, 2_500);
-  panes = [pane(other)];
-  now += 2_500;
-  await expect(validateTarget(target, false, false, 2_500)).rejects.toMatchObject({ status: 409 });
-});
-
-it.skipIf(process.platform === "win32")("detects a pane that disappeared within one window", async () => {
-  await validateTarget(target, false, false, 2_500);
-  panes = [];
+  panes = next();
   now += 2_500;
   await expect(validateTarget(target, false, false, 2_500)).rejects.toMatchObject({ status: 409 });
 });

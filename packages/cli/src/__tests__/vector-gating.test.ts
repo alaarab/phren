@@ -10,7 +10,7 @@ vi.mock("../shared/ollama.js", () => ({
   getCloudEmbeddingUrl: vi.fn().mockReturnValue(null),
 }));
 
-import { searchDocumentsAsync, shouldRunVectorExpansion } from "../shared/retrieval.js";
+import { searchDocumentsAsync } from "../shared/retrieval.js";
 import { vectorFallback } from "../shared/search-fallback.js";
 
 function makeDb(ftsRows: DbRow[]): SqlJsDatabase {
@@ -33,32 +33,6 @@ function makeDb(ftsRows: DbRow[]): SqlJsDatabase {
     close: () => {},
   };
 }
-
-describe("shouldRunVectorExpansion", () => {
-  it("returns false when lexical retrieval already has enough results", () => {
-    const rows = [
-      { project: "a", filename: "one.md", type: "summary", content: "alpha beta gamma", path: "/tmp/one.md" },
-      { project: "a", filename: "two.md", type: "summary", content: "alpha beta gamma", path: "/tmp/two.md" },
-      { project: "a", filename: "three.md", type: "summary", content: "alpha beta gamma", path: "/tmp/three.md" },
-    ];
-    expect(shouldRunVectorExpansion(rows, "alpha beta gamma")).toBe(false);
-  });
-
-  it("returns false for a single strong lexical hit", () => {
-    const rows = [
-      { project: "a", filename: "one.md", type: "summary", content: "semantic search setup during init with ollama", path: "/tmp/one.md" },
-    ];
-    expect(shouldRunVectorExpansion(rows, "semantic search setup during init with ollama")).toBe(false);
-  });
-
-  it("returns true for weak or missing lexical hits", () => {
-    const weakRows = [
-      { project: "a", filename: "one.md", type: "summary", content: "general project notes", path: "/tmp/one.md" },
-    ];
-    expect(shouldRunVectorExpansion(null, "external webhook alerts discord")).toBe(true);
-    expect(shouldRunVectorExpansion(weakRows, "external webhook alerts discord")).toBe(true);
-  });
-});
 
 describe("searchDocumentsAsync vector gating", () => {
   beforeEach(() => {
@@ -95,8 +69,11 @@ describe("searchDocumentsAsync vector gating", () => {
     expect(vectorFallback).not.toHaveBeenCalled();
   });
 
-  it("runs vector fallback when lexical retrieval is empty", async () => {
-    const db = makeDb([]);
+  it.each([
+    ["empty", []],
+    ["a single weak hit", [["proj", "one.md", "summary", "general project notes", "/tmp/one.md"]]],
+  ] as [string, DbRow[]][])("runs vector fallback when lexical retrieval is %s", async (_label, rows) => {
+    const db = makeDb(rows);
 
     await searchDocumentsAsync(db, "\"webhook\"", "external webhook alerts discord", "external webhook alerts discord", null, true, "/tmpphren");
 

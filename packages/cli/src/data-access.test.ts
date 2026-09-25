@@ -859,6 +859,7 @@ describe("machines, profiles, and shell state", () => {
     const after = listMachines(tmpDir);
     if (!after.ok) return;
     expect(after.data["machine-b"]).toBe("personal");
+    expect(after.data["machine-a"]).toBe("personal");
   });
 
   it("returns FILE_NOT_FOUND when machines.yaml is missing", () => {

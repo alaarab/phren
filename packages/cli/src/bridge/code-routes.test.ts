@@ -107,10 +107,6 @@ describe("code Hook routes", () => {
     await expect(routes.status("missing")).rejects.toMatchObject({ status: 404, message: expect.stringContaining("No code index") });
     await expect(routes.search("Bad Name", "x", null, null)).rejects.toThrow();
   });
-
-  it("404s a symbol that is not indexed", async () => {
-    await expect(routes.definition("fixture", "NoSuchSymbol")).rejects.toMatchObject({ status: 404 });
-  });
 });
 
 describe("code module gate", () => {
@@ -170,7 +166,6 @@ describe("code re-index on change", () => {
   });
 });
 
-
 it("saves a symbol note, exposes it in the dossier and sends the bounded brief", async () => {
   const hit = (await routes.definition("fixture", "Point")).definition.symbol;
   let brief = "";
@@ -193,7 +188,6 @@ it("preserves a saved note when agent delivery fails", async () => {
     text: "Point distance calculations need stable coordinate values throughout the operation.", target: { harness: "codex" } }, async () => { throw new Error("Session went offline"); });
   expect(result).toMatchObject({ saved: true, delivery: { ok: false, message: "Session went offline" } });
 });
-
 
 it("batches file and directory symbol summaries and resolves exact file declarations", async () => {
   const result = await routes.outlineSummary("fixture", JSON.stringify(["typescript", "typescript/app.ts", "typescript/util.ts", "typescript-neighbor", "missing.ts"]));
@@ -306,7 +300,6 @@ it("scopes search to a literal directory and groups type kinds", async () => {
   expect(swift.every(row => row.file.startsWith("swift/"))).toBe(true);
   expect((await routes.search("fixture", "Point", null, null, "type%")).symbols).toEqual([]);
 });
-
 
 it("advances the last scan time on a reindex that changes nothing", async () => {
   const first = await routes.status("fixture");

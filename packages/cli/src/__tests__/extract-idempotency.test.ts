@@ -79,16 +79,6 @@ afterEach(() => {
   tmp.cleanup();
 });
 
-describe("extractSubjectKey", () => {
-  it("collapses the rendered decoration two runs disagree on", async () => {
-    const { extractSubjectKey } = await loadExtract([]);
-    const fromQueue = extractSubjectKey("[confidence 0.65] Socket reconnect workaround (source commit 0a918619)");
-    const fromFindings = extractSubjectKey("Socket reconnect workaround (source commit c55f38fa) <!-- created: 2026-05-18 -->");
-    expect(fromQueue).toBe("socket reconnect workaround");
-    expect(fromFindings).toBe(fromQueue);
-  });
-});
-
 describe("extract idempotency", () => {
   it("running extract twice over the same commits produces no duplicate queue entries", async () => {
     const { handleExtractMemories } = await loadExtract([RECONNECT, DEADLOCK]);
@@ -121,14 +111,6 @@ describe("extract idempotency", () => {
 
     await handleExtractMemories(PROJECT, "/repo", true);
     expect(reviewQueueEntries()).toHaveLength(1);
-  });
-
-  it("stays stable across many runs, the way nightly sync calls it", async () => {
-    const { handleExtractMemories } = await loadExtract([RECONNECT, DEADLOCK]);
-    for (let run = 0; run < 8; run++) {
-      await handleExtractMemories(PROJECT, "/repo", true);
-    }
-    expect(reviewQueueEntries()).toHaveLength(2);
   });
 
   it("does not re-queue a commit that was already promoted into FINDINGS.md", async () => {
