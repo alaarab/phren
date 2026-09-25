@@ -67,17 +67,18 @@ These control how much context the UserPromptSubmit hook injects into each promp
 ## Finding citations
 
 A finding can carry a source citation in a `<!-- phren:cite {json} -->` comment.
-Besides `file`, `line`, `repo` and `commit`, the object may name a code symbol as
-`symbol: "Name"`, `symbol: "Type.member"` or `symbol: "name()"`. When the project
+Besides `file`, `line`, `repo` and `commit`, the object may link the finding to a
+function, type or variable as `name: "Name"`, `name: "Type.member"` or
+`name: "name()"` (the older `symbol` spelling is accepted until 0.2.18). When the project
 has a code index (the `code` module), a finding whose text names exactly one
-symbol the index resolves, at least four characters long and not a local
-variable unless exported, gets that `symbol` citation attached automatically;
-the finding text is never rewritten. An explicit `symbol` is validated against
-the index and stored either way: one that does not resolve is kept with
-`symbol_unresolved: true`, the symbol counterpart of an invalid file citation,
-and the trust filter treats it as `invalid_citation`. `code_definition` lists
-the findings that cite a symbol, and `get_findings` / `search_knowledge` return
-the symbol so a client can show it. See
+function, type or variable the index resolves, at least four characters long
+and not a local variable unless exported, gets that link attached
+automatically; the finding text is never rewritten. An explicit `name` is
+validated against the index and stored either way: one that does not resolve is
+kept and marked unresolved, the counterpart of an invalid file citation, and
+the trust filter treats it as `invalid_citation`. `code_definition` lists the
+findings linked to it, and `get_findings` / `search_knowledge` return the link
+so a client can show it. See
 [store-format.md](store-format.md#3-metadata-comments).
 
 ## File Locking
@@ -177,8 +178,8 @@ turn text for the live socket; it does not add it to transcript history.
 | `PHREN_FANOUT_JOB` | set by the launcher | Worker job ID; tells the OpenCode plugin that the worker is headless. |
 | `PHREN_FANOUT_DIR` | `<store>/.runtime/agent-fanouts/<job id>` | Worker directory; a refused permission is recorded in `blocked.json` here. |
 
-Code indexes live in `<store>/.runtime/code/<project>.sqlite`. Their symbol
-fingerprints and last-observed change times stay local. The optional package
+Code indexes live in `<store>/.runtime/code/<project>.sqlite`. Their
+declaration fingerprints and last-observed change times stay local. The optional package
 can live under `<store>/.runtime/packages/node_modules/@phren/code`.
 
 Workers write manifests, event logs, stderr and exit records under

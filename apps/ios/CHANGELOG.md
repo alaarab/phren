@@ -10,6 +10,9 @@ number counts up on its own.
 
 ### Changed
 
+- Code opens on What changed: the functions, types and variables your agents touched today and in the last 10 commits, by file, with new ones marked and "Used in N places". Files and Most used follow, and search groups what it finds under Functions, Types and Variables. The app never says "symbol".
+- A function's or type's details: write "Remember this about parseConfig" and Remember saves it as a Phren finding linked to that function, so agents recall it later. Then "Also tell an agent?" sends it on.
+- Changes tree chips read like "2 functions changed · 1 new type", from what the working tree actually changed instead of every declaration in the file.
 - A computer that is too busy to list its sessions but still answers now reads "Busy" instead of "Offline". Its sessions stay where they were and still open (chat and terminal), and the details fill in when it catches up. "Offline" now means the computer can't be reached at all.
 - Sending a message (typed, dictated or in talk mode) always scrolls the chat to its end, even when you had scrolled up or were reading an older page of history.
 - The chat options' "Repository changes" row is now "Git", with a commit-graph icon instead of the worktree's branch icon. It opens changes, history, branches, pull requests, the working tree, workers and code.

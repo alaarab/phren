@@ -13,7 +13,7 @@ final class ChangesTabTests: XCTestCase {
         app.buttons["changes-tab-tree"].tap()
         let directory = app.buttons["changes-tree-entry:Sources"]
         XCTAssertTrue(directory.waitForExistence(timeout: 8)); directory.tap()
-        let symbol = app.buttons["changes-tree-symbols:Sources/App.swift"]
+        let symbol = app.buttons["changes-tree-chip:Sources/App.swift"]
         XCTAssertTrue(symbol.waitForExistence(timeout: 8))
         attachUIScreenshot(app, "Working tree change chips")
         app.buttons["changes-tab-history"].tap()

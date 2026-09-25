@@ -345,7 +345,7 @@ private struct WorkingTreeRow: View {
                     }.buttonStyle(.plain)
                         .accessibilityLabel(label)
                         .accessibilityHint("Opens the first one")
-                        .accessibilityIdentifier("changes-tree-symbols:\(entry.path)")
+                        .accessibilityIdentifier("changes-tree-chip:\(entry.path)")
                 } else {
                     PhrenChip(text: label)
                 }

@@ -95,12 +95,15 @@ directory listings to 500 entries. Image previews retain full detail, with pinch
 zoom, double tap for actual size, bounded panning, a phren close control and a
 downward swipe to dismiss at fit.
 
-**Code** opens an indexed project's files, with symbol and language counts,
-index time and Reindex. Search filters by kind and directory. Usage shows the
-full paged ranking with bars and file filters; Hot and Cold jump within it.
-Recent shows symbols the index last saw change. A dossier includes definition,
-references and cited findings. Select a line to save a note, send it to a project
-session or start a worker. Code opened from Changes or the chat header keeps
+**Code** opens on What changed: the functions, types and variables your agents
+touched today and in the last 10 commits, by file, new ones marked. Files lists
+the checkout with function and type counts; search groups results into
+Functions, Types and Variables and filters by kind and directory. Most used is
+the full paged ranking with bars and file filters; Most used and Least used
+jump within it. A function's or type's details show where it is defined, where
+it is used and the findings linked to it. Select a line and write "Remember
+this about …" to save it as a finding linked to that function, then optionally
+tell a project session or a new worker. Code opened from Changes or the chat header keeps
 that session as the note recipient. See [Code index](../../docs/code-index.md).
 
 Herdr uses a single compact header for back, computer/status, and reconnect.

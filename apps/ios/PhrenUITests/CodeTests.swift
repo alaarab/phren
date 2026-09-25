@@ -109,7 +109,7 @@ final class CodeTests: XCTestCase {
         point.tap()
         let definition = app.buttons["code-dossier-definition"]
         XCTAssertTrue(definition.waitForExistence(timeout: 8))
-        capture(app, "Code symbol panel")
+        capture(app, "Code details panel")
         definition.tap()
         XCTAssertTrue(app.descendants(matching: .any)["code-file:typescript/app.ts"].firstMatch.waitForExistence(timeout: 8))
         XCTAssertTrue(app.navigationBars["app.ts"].waitForExistence(timeout: 5))
