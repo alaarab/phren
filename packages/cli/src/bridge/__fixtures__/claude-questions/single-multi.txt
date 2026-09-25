@@ -1,0 +1,16 @@
+❯ Use AskUserQuestion once: question "Which tools?" header Tools multiSelect true options Vim, Emacs. Nothing else.
+────────────────────────────────────────────────────────────────────────────────
+←  ☐ Tools  ✔ Submit  →
+
+Which tools?
+
+❯ 1. [ ] Vim
+         Vim editor
+  2. [ ] Emacs
+         Emacs editor
+  3. [ ] Type something
+     Submit
+────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

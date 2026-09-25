@@ -16,6 +16,7 @@ import { archiveFinishedFanouts, blockedFanouts, fanoutAsking } from "./fanouts.
 import { ensureGrant, listGrants, matchGrant, type Grant } from "./grants.js";
 import { ApprovalPushService } from "./push.js";
 import { intervalFromEnv } from "./limits.js";
+import { answerClaudeQuestionDialog, claudeQuestionDialog, type DialogAnswer, type DialogQuestion } from "./claude-question-dialog.js";
 import { answeredQuestionInput, numberedDialog, passwordLine, permissionPrompt, questionChoice, terminalChoice, terminalQuestions, visibleTerminalChoice,
   type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
 import { directoryNames, opencodeApprovalFile, opencodeRequest, readOpencodeRequest } from "./opencode-approvals.js";
@@ -366,12 +367,13 @@ export class AgentHooks {
       return;
     }
     // A released AskUserQuestion is answered by its own question card, never
-    // by the pane's numbered lines; it is cleared only when the pane stops
-    // waiting for it.
-    if (entry?.questions?.length) { if (!active) { this.terminalPrompts.delete(key); this.passwords.delete(key); } return; }
+    // by the pane's numbered lines. It is cleared when the pane stops waiting
+    // or no longer draws a question (answered or cancelled in the terminal).
+    const question = !!entry?.questions?.length;
+    if (question && !active) { this.terminalPrompts.delete(key); this.passwords.delete(key); return; }
     // A released permission request that carried its own choices keeps them;
     // one without (a Bash or MCP call) reads the pane's rows below.
-    if (entry && !entry.dialog && entry.choice && !entry.released) return;
+    if (!question && entry && !entry.dialog && entry.choice && !entry.released) return;
     if (!active) {
       if (entry) this.terminalPrompts.delete(key);
       this.passwords.delete(key);
@@ -384,6 +386,15 @@ export class AgentHooks {
     const text = await this.paneLines(target);
     this.passwords.set(key, passwordLine(text));
     while (this.passwords.size > 128) this.passwords.delete(this.passwords.keys().next().value!);
+    // Claude's AskUserQuestion dialog is answered from the question itself
+    // (the held request, the remembered one, or the transcript's), never as
+    // a numbered dialog: its digits advance on their own and a trailing
+    // Enter would land on the next tab.
+    if (target.source === "claude" && claudeQuestionDialog(text)) {
+      if (entry && !question) this.terminalPrompts.delete(key);
+      return;
+    }
+    if (question) { this.terminalPrompts.delete(key); return; }
     // Codex draws "> 1. Yes, proceed (y)" rows; the other fallbacks number
     // rows without a key in the label.
     const dialog = target.source === "codex" ? visibleTerminalChoice(text) : numberedDialog(text);
@@ -447,21 +458,37 @@ export class AgentHooks {
     }
     throw new BridgeError(409, "Could not move and verify the terminal selection. Open terminal to choose this option.");
   }
-  /** Answer one question of a released AskUserQuestion with the option's own
-   * digit: send the chosen digit(s), then Tab to advance to the next
-   * question or Enter after the last. The stored question index moves with
-   * them and a finished set is cleared. Undefined when the prompt is not a
-   * question, so an ordinary key falls through to the usual handling. */
-  questionAnswerKeys(target: Target, keys: readonly string[]): string[] | undefined {
+  /** Answer Claude's AskUserQuestion dialog in the pane: every question in
+   * `answers` from `from` on, then the set's submission when `submit`. The
+   * walk reads the pane before and after each key, so a dialog on another
+   * tab, a changed question or a missed key stops it with nothing stray
+   * typed. A finished set clears the remembered question. */
+  async answerClaudeQuestions(target: Target, questions: DialogQuestion[], answers: DialogAnswer[], options: { from?: number; submit?: boolean } = {}): Promise<void> {
+    const key = JSON.stringify(target);
+    await answerClaudeQuestionDialog({
+      read: () => this.paneLines(target),
+      keys: async keys => {
+        if (!keys.length) return;
+        await validateTarget(target, false, true);
+        await rpc(target.server, "agent.send_keys", { target: target.pane, keys });
+      },
+    }, questions, answers, options);
+    this.dialogReads.delete(key);
+    if (options.submit ?? true) this.terminalPrompts.delete(key);
+  }
+  /** An older phone answers a released AskUserQuestion one question at a
+   * time with the chosen digits through `/v1/keys`. Walk that question with
+   * the same verified steps and submit after the last. False when the
+   * prompt is not a remembered question, so the keys take the usual path. */
+  async answerReleasedQuestion(target: Target, keys: readonly string[]): Promise<boolean> {
     const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
-    if (!entry?.questions?.length) return undefined;
+    if (target.source !== "claude" || !entry?.questions?.length) return false;
     const digits = keys.filter(value => /^[1-9]$/.test(value));
-    if (!digits.length) return undefined;
-    const index = Math.min(entry.questionIndex ?? 0, entry.questions.length - 1), next = index + 1;
-    if (next >= entry.questions.length) { this.terminalPrompts.delete(key); return [...digits, "Enter"]; }
-    entry.questionIndex = next;
-    entry.choice = questionChoice(entry.questions, next);
-    return [...digits, "Tab"];
+    if (!digits.length) return false;
+    const index = Math.min(entry.questionIndex ?? 0, entry.questions.length - 1), last = index + 1 >= entry.questions.length;
+    await this.answerClaudeQuestions(target, entry.questions, [{ options: digits.map(digit => Number(digit) - 1) }], { from: index, submit: last });
+    if (!last) { entry.questionIndex = index + 1; entry.choice = questionChoice(entry.questions, index + 1); }
+    return true;
   }
   private startCompacting(target: Target) {
     this.compactingSince.set(JSON.stringify(target), Date.now());
