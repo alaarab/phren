@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { fanoutRoot } from "./fanouts.js";
 import { atomicInPrivateDir, bridgeRoot, type Json, object } from "./protocol.js";
 import { stripTerminal } from "../terminal-text.js";
+import { codexExecutable } from "./codex-binary.js";
 
 const exec = promisify(execFile);
 
@@ -582,7 +583,7 @@ async function liveClaudeUsage(now: Date): Promise<AccountUsage | undefined> {
 
 
 /** Only initialize and read limits. Never create a thread, prompt, or login. */
-export function readCodexLimits(executable = "codex"): Promise<AccountUsage> {
+export function readCodexLimits(executable = codexExecutable()): Promise<AccountUsage> {
   return new Promise(resolve => {
     const child = spawn(executable, ["app-server"], { cwd: homedir(), stdio: ["pipe", "pipe", "ignore"] });
     let pending = "", bytes = 0, initialized = false, done = false;

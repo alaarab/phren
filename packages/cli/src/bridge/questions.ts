@@ -7,6 +7,7 @@ import { z } from "zod";
 import { BridgeError, bridgeRoot, object, objects, type Json, type Target } from "./protocol.js";
 import { paneIdentity, validateTarget } from "./herdr.js";
 import { transcriptPath } from "./transcripts.js";
+import { codexExecutable } from "./codex-binary.js";
 import { withTranscriptIndex } from "./transcript-index.js";
 
 const exec = promisify(execFile);
@@ -58,7 +59,7 @@ const answersQuestions = (reply: string, questions: Question[]) => questions.eve
 interface PendingQuestion { id: string; questions: Question[] }
 export async function pendingAsyncQuestions(file: string, targetID?: string): Promise<PendingQuestion[]> {
   return withTranscriptIndex(file, async (handle, index) => {
-    const replies: string[] = [], acknowledged = new Set<string>(), resolved = new Set<string>(), pending: PendingQuestion[] = [];
+    const replies: string[] = [], acknowledged = new Set<string>(), resolved = new Set<string>(), seen = new Set<string>(), pending: PendingQuestion[] = [];
     let bytes = 0;
     for await (const row of index.rows(handle, index.lines, Math.max(0, index.lines - 10_000))) {
       // An incomplete scan is not evidence that no questions remain. Status
@@ -78,10 +79,13 @@ export async function pendingAsyncQuestions(file: string, targetID?: string): Pr
       if (targetID && resolved.has(targetID)) return [];
       if (!id || !acknowledged.has(id)) continue;
       const questions = asyncQuestion(raw, id);
-      if (questions && !replies.some(reply => answersQuestions(reply, questions))) {
+      // Codex 0.155 records one question twice under the same id: the
+      // request_user_input_async call and the AgentMessage delivered async.
+      if (questions && !seen.has(id) && !replies.some(reply => answersQuestions(reply, questions))) {
         pending.push({ id, questions });
         if (pending.length >= 64) throw new BridgeError(413, "Too many pending questions to verify.");
       }
+      if (questions) seen.add(id);
       if (targetID && questions && id === targetID) return pending.filter(p => p.id === targetID);
     }
     if (index.lines > 10_000) throw new BridgeError(413, "The pending question history is too large to verify.");
@@ -102,7 +106,9 @@ export class CodexQuestions {
   /** Feature discovery must never delay permission/status frames. */
   get available(): boolean { void this.supported(); return this.inboxAvailable; }
   private probe?: { at: number; result: Promise<boolean> };
-  constructor(private executable = "codex") {}
+  /** No executable: the real `codex` on PATH, past phren's session wrapper. */
+  constructor(private readonly configured?: string) {}
+  private get executable(): string { return this.configured ?? codexExecutable(); }
   supported(): Promise<boolean> {
     if (!this.probe || Date.now() - this.probe.at > 300_000) this.probe = { at: Date.now(), result:
       exec(this.executable, ["queue", "--help"], { timeout: 5000, maxBuffer: 65_536 })
