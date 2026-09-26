@@ -33,6 +33,8 @@ import {
 export type TopLevelInvocation =
   | { kind: "manage"; argv: string[] }
   | { kind: "mcp"; phrenArg: string }
+  // `phren mcp`: serve the store phren finds itself (the Claude Code plugin's entry).
+  | { kind: "mcp-serve" }
   | { kind: "help" }
   | { kind: "version" };
 
@@ -56,6 +58,10 @@ export function resolveTopLevelInvocation(argv: string[]): TopLevelInvocation {
 
   if (looksLikePhrenRootArg(positional)) {
     return { kind: "mcp", phrenArg: positional };
+  }
+
+  if (argvCommand === "mcp" && argv.length === 1) {
+    return { kind: "mcp-serve" };
   }
 
   if (argvCommand === "--help" || argvCommand === "-h") {

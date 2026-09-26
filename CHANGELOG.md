@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Claude Code plugin, ready for the Claude plugin directory. The plugin now carries phren's real memory hooks (SessionStart context, recall on every prompt, PostToolUse, save at Stop) through `hooks/phren-hook.sh`, instead of a Stop reminder, so a plugin-only user gets memory injection. The hooks never start a cold `npx` (installed `phren`, the `~/.local/bin` wrapper, or the pinned release already in npm's cache, offline), and fail open.
+- `phren mcp`: the MCP server as the plugin starts it, finding the store itself. With no store it serves one `phren_setup` tool that explains setup and, once the user agrees, runs `phren init --yes`. Launched by the plugin when `phren init` already registered its own server, it serves no tools.
+- No double hooks or tools with the plugin and `phren init` together: each plugin hook stands down when the settings file Claude Code reads already runs phren for that event, and the plugin's MCP server stands down when `.claude.json` has `phren init`'s server.
+- `evals/`: a `claude plugin eval` suite (recall from memory, save a finding, add a task) against fixed MCP mocks. See `docs/claude-code-plugin.md`.
+
+### Changed
+
+- The plugin's skills are read from `packages/cli/starter/global/skills/`, the set `phren init` provisions, instead of a stale copy in `global/skills/` (removed). `conductor` and `fanout` stay out of the plugin: they need the Hook and enrolled computers. Six skill descriptions were rewritten to say when to use them, and `/phren-init` now creates a missing store with `phren init` instead of `mkdir`.
+- Plugin metadata: marketplace description, plugin description and keywords for directory search, pinned MCP server (`@phren/cli@<version>`), rewritten `docs/claude-code-plugin.md` (install, what it brings, coexistence with `phren init`, privacy). `validate-docs` fails when the plugin versions or pins drift from `packages/cli/package.json`.
+
+### Fixed
+
+- The plugin's MCP server never started: `.mcp.json` ran `npx -y @phren/cli mcp-mode`, which prints the MCP mode and exits.
+
 ## [0.3.5] - 2026-09-25
 
 ### Added

@@ -1,6 +1,6 @@
 ---
 name: phren-init
-description: Set up a new project in phren with summary, AGENTS.md, task, and skill templates.
+description: Set up phren memory. Creates the store with `phren init` on first use, or adds the current project to an existing store with its summary, AGENTS.md and task list. Use when phren reports no store or the user wants a project remembered.
 dependencies:
   - git
 ---
@@ -24,17 +24,15 @@ PHREN_DIR="${PHREN_DIR:-$HOME/.phren}"
 ls "$PHREN_DIR" 2>/dev/null
 ```
 
-If the phren directory doesn't exist, offer to create it:
-> "No phren repo found. Want me to create one at ~/.phren? This will set up the base directory structure (global/, profiles/, machines.yaml)."
+If the phren directory doesn't exist, this is a first run. Offer to set phren up:
+> "phren has no memory store on this machine yet. Want me to run `phren init`? It creates a local git-backed store at ~/.phren and registers phren's memory hooks and MCP server with Claude Code (and any other agents it finds). Nothing leaves this machine unless you add a git remote."
 
-If the user says yes, create the base structure:
+If the user says yes, let the CLI build the store; never create it by hand:
 ```bash
-mkdir -p "$PHREN_DIR"/{global/skills,profiles}
-# Create a starter machines.yaml
-# Create a starter profile
+if command -v phren >/dev/null 2>&1; then phren init --yes; else npx -y @phren/cli init --yes; fi
 ```
 
-Then continue with the project scaffolding below.
+If phren's MCP server is running in setup mode it offers the same thing as the `phren_setup` tool (`confirm: true` runs it). Either way, tell the user to restart Claude Code afterwards so the memory tools and hooks load, then continue with the project scaffolding below if they named a project.
 
 ## With a project name
 

@@ -18,6 +18,7 @@ import {
   resolveTopLevelInvocation,
   runTopLevelCommand,
 } from "./entrypoint.js";
+import { pluginSetupReason, runPluginSetupServer } from "./mcp/plugin-mode.js";
 // NOTE: the MCP-server-only module graph (MCP SDK, FTS indexer, tool registries,
 // startup-embedding, custom-hook engine) is intentionally NOT imported here. It is
 // dynamically imported inside main() so that top-level commands — hook-prompt,
@@ -47,7 +48,12 @@ if (invocation.kind === "manage") {
   process.exit(process.exitCode ?? 0);
 }
 
-const phrenPath = findPhrenPathWithArg(invocation.phrenArg);
+// `phren mcp` (the Claude Code plugin) with no store yet, or with `phren init`'s
+// own server already registered, serves a small setup / empty server instead.
+const pluginSetup = invocation.kind === "mcp-serve" ? pluginSetupReason() : null;
+const phrenPath = pluginSetup
+  ? ""
+  : findPhrenPathWithArg(invocation.kind === "mcp" ? invocation.phrenArg : undefined);
 
 const STALE_LOCK_MS = 120_000; // 2 min — slightly above EXEC_TIMEOUT_MS (30s) to avoid blocking healthy writers
 
@@ -348,7 +354,7 @@ async function main() {
   process.on("SIGINT", () => void shutdown("SIGINT"));
 }
 
-main().catch((err) => {
+(pluginSetup ? runPluginSetupServer(pluginSetup) : main()).catch((err) => {
   console.error("Failed to start phren-mcp:", err);
   process.exit(1);
 });

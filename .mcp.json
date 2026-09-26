@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "phren": {
-      "command": "npx",
-      "args": ["-y", "@phren/cli", "mcp-mode"]
-    }
-  }
-}

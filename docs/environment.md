@@ -41,6 +41,14 @@ Polling covers the primary and registered secondary Git stores while an MCP serv
 | `PHREN_ACTOR` | string | `$USER` or `$USERNAME` | Identifies who performed a governance action. Used in audit logs and access control checks. |
 | `PHREN_SKIP_GLOBAL_NPM_UNINSTALL` | `0` or `1` | `0` | Set to `1` to make `phren uninstall` leave the global npm package (`@phren/cli`) installed. `npm uninstall -g` targets the machine's real npm prefix, which `PHREN_PATH`/`HOME` cannot redirect, set this whenever you run `phren uninstall` against a sandboxed store you don't want affecting the machine. The test helpers set it for every spawned CLI. |
 
+## Claude Code plugin
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `PHREN_PLUGIN_HOOKS` | `on` or `off` | `on` | `off` makes the plugin's hooks (`hooks/phren-hook.sh`) do nothing. Hooks `phren init` wrote into settings are unaffected. |
+| `PHREN_BIN` | path | (empty) | The `phren` executable the plugin's hooks run, ahead of `PATH` and `~/.local/bin/phren`. |
+| `PHREN_MCP_OWNER` | `plugin` or empty | (empty) | Set by the plugin for `phren mcp`. With `plugin`, the server serves no tools when `phren init` already registered its own `phren` server in `.claude.json`. |
+
 ## Context Injection (hook-prompt)
 
 These control how much context the UserPromptSubmit hook injects into each prompt.

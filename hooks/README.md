@@ -1,121 +1,34 @@
-# Phren hooks
+# Claude Code plugin hooks
 
-Shell scripts that plug into Claude Code's hook system. These run automatically at specific lifecycle points in a Claude session.
+`hooks.json` is the Claude Code plugin's hook config. It runs `phren-hook.sh`
+for the same four events `phren init` wires into `~/.claude/settings.json`:
 
-## Available hooks
+| Event | Command | What it does |
+|---|---|---|
+| SessionStart | `phren hook-session-start` | Pulls the store, loads the project's context |
+| UserPromptSubmit | `phren hook-prompt` | Injects the findings that match the prompt |
+| PostToolUse | `phren hook-tool` | Notes tool activity for auto-capture |
+| Stop | `phren hook-stop` | Saves and syncs what the session learned |
 
-### post-session.sh
+`phren-hook.sh` (POSIX sh) adds three rules:
 
-Fires when Claude finishes responding (`Stop` event). Auto-commits and pushes any phren changes from the session.
+- **One owner.** If the settings file Claude Code reads
+  (`$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json`) already
+  runs phren for the event, the plugin's copy exits without doing anything.
+- **Never slow.** It uses `$PHREN_BIN`, a `phren` on `PATH`, the
+  `~/.local/bin/phren` wrapper, or the pinned release already in npm's cache
+  (`npx --offline`), in that order. It never downloads on a prompt.
+- **Fail open.** No store, no phren, or a phren error: exit 0, no output.
 
-Set `PHREN_AUTO_LEARN=1` to make it output a stronger prompt that triggers an automatic learning extraction instead of a passive reminder.
+`PHREN_PLUGIN_HOOKS=off` turns the plugin's hooks off. `PHREN_PIN` must equal
+`packages/cli/package.json`'s version (`pnpm run validate-docs` checks).
 
-## Installation
-
-Add the hook config to `~/.claude/settings.json` (applies to all projects) or `.claude/settings.json` in a specific project.
-
-### Stop hook (post-session reminder)
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.phren/hooks/post-session.sh"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-If your phren repo lives somewhere other than `~/.phren`, update the path or set `PHREN_DIR`:
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "PHREN_DIR=/path/to/phren /path/to/phren/hooks/post-session.sh"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-### Merging with existing hooks
-
-If you already have hooks in your settings, merge the entries. Each event key (`Stop`, `PostToolUse`, etc.) takes an array, so you can have multiple hook groups per event:
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          { "type": "command", "command": "~/.phren/hooks/post-session.sh" }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          { "type": "command", "command": "your-formatter-here" }
-        ]
-      }
-    ]
-  }
-}
-```
-
-## Writing new hooks
-
-Hook scripts receive JSON on stdin with context about the event. Use `jq` to parse it:
-
-```bash
-INPUT=$(cat)
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
-CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
-```
-
-Exit codes:
-- **0**: allow the action. Stdout gets injected into Claude's context (for `Stop`, `SessionStart`, `UserPromptSubmit`).
-- **2**: block the action. Stderr becomes Claude's feedback.
-- **Other**: allow the action. Stderr is logged but not shown to Claude.
-
-See the [Claude Code hooks docs](https://code.claude.com/docs/en/hooks-guide) for the full event list and input schemas.
-
-## Per-tool hook enablement
-
-By default, `hooksEnabled` is all-or-nothing. To control which tools get session wrappers, add a `hookTools` key to `.config/install-preferences.json`:
-
-```json
-{
-  "hooksEnabled": true,
-  "hookTools": {
-    "claude": true,
-    "copilot": true,
-    "cursor": false,
-    "codex": true
-  }
-}
-```
-
-Missing keys default to the value of `hooksEnabled`. When `hooksEnabled` is `false`, all tools are disabled regardless of `hookTools`.
+Without the plugin, `phren init` writes these hooks itself; you do not need to
+copy anything from this directory. See `docs/claude-code-plugin.md`.
 
 ## Per-project hook overrides
 
-Tracked projects can override lifecycle hooks in `<phrenPath>/<project>phren.project.yaml`:
+Tracked projects can override lifecycle hooks in `<phrenPath>/<project>/phren.project.yaml`:
 
 ```yaml
 hooks:
@@ -123,9 +36,5 @@ hooks:
   UserPromptSubmit: true
 ```
 
-`hooks.enabled` sets the default for that project. Event-specific keys (`UserPromptSubmit`, `Stop`, `SessionStart`, `PostToolUse`) override the base toggle when present. This lets you keep hooks disabled for one project while still allowing a specific lifecycle event if needed.
-
-## Dependencies
-
-- `jq` for JSON parsing (`apt install jq` or `brew install jq`)
-- POSIX sh (bash not required; scripts use `#!/bin/sh`)
+`hooks.enabled` sets the default for that project. Event-specific keys
+(`UserPromptSubmit`, `Stop`, `SessionStart`, `PostToolUse`) override it.

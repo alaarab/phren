@@ -1,6 +1,6 @@
 ---
 name: phren-summarize
-description: Write the "what we know" paragraph for each topic archive yourself, from the bullets phren hands you, using the model you are already running as. No API key, no local model.
+description: Write the grounded "what we know" paragraph for each phren topic archive from the bullets phren provides, using the model already running. No API key or local model needed.
 ---
 # /phren-summarize
 

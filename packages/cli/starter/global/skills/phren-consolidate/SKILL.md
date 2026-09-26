@@ -1,6 +1,6 @@
 ---
 name: phren-consolidate
-description: Find patterns across project findings and surface insights that apply everywhere.
+description: Find patterns that repeat across several projects' phren findings and promote the ones that apply everywhere into shared global memory.
 dependencies:
   - git
 ---

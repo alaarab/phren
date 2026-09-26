@@ -1,0 +1,211 @@
+{
+  "tools": [
+    {
+      "name": "search_knowledge",
+      "description": "Search the user's phren. Call this at the start of any session to get project context, and any time the user asks about their codebase, stack, architecture, past decisions, commands, conventions, or findings. Prefer this over asking the user to re-explain things they've already told phren.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query (supports FTS5 syntax: AND, OR, NOT, phrase matching with quotes)"
+          },
+          "limit": {
+            "description": "Max results to return (1-20, default 5)",
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "project": {
+            "description": "Filter by project name.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Filter by document type: claude, findings, reference, summary, task, skill",
+            "type": "string",
+            "enum": [
+              "claude",
+              "findings",
+              "notes",
+              "reference",
+              "skills",
+              "summary",
+              "task",
+              "changelog",
+              "canonical",
+              "review-queue",
+              "skill",
+              "other"
+            ]
+          },
+          "tag": {
+            "description": "Filter findings by type tag: decision, pitfall, pattern, bug, workaround, context.",
+            "type": "string",
+            "enum": [
+              "decision",
+              "pitfall",
+              "pattern",
+              "bug",
+              "workaround",
+              "context"
+            ]
+          },
+          "since": {
+            "description": "Filter findings by creation date. Formats: \"7d\" (last 7 days), \"30d\" (last 30 days), \"YYYY-MM\" (since start of month), \"YYYY-MM-DD\" (since date).",
+            "type": "string"
+          },
+          "status": {
+            "description": "Filter findings by lifecycle status: active, superseded, contradicted, stale, invalid_citation, or retracted.",
+            "type": "string",
+            "enum": [
+              "active",
+              "superseded",
+              "contradicted",
+              "stale",
+              "invalid_citation",
+              "retracted"
+            ]
+          },
+          "include_history": {
+            "description": "When true, include historical findings (superseded/retracted). Default false.",
+            "type": "boolean"
+          },
+          "synthesize": {
+            "description": "When true, generate a short synthesis paragraph from the top results using an LLM. Requires PHREN_LLM_ENDPOINT, ANTHROPIC_API_KEY, or OPENAI_API_KEY.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "add_task",
+      "description": "Append one or more tasks to a project's tasks.md file. Adds to the Queue section. Pass a single string or an array of strings.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project name (must match a directory in your phren)."
+          },
+          "item": {
+            "description": "The task(s) to add. Always pass as an array of strings \u2014 use a single-element array for one task.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scope": {
+            "description": "Optional memory scope label. Defaults to 'shared'. Example: 'researcher' or 'builder'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "item"
+        ]
+      }
+    },
+    {
+      "name": "add_finding",
+      "description": "Tell phren one or more insights for a project's FINDINGS.md. Call this the moment you discover a non-obvious pattern, hit a subtle bug, find a workaround, or learn something that would save time in a future session. Do not wait until the end of the session. Pass a single string or an array of strings. Optionally classify with findingType: decision, pitfall, pattern, tradeoff, architecture, or bug. Pass kind: \"note\" to save a lightweight daily note instead (goes to the project's notes, not FINDINGS.md).",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project name (must match a directory in your phren store)."
+          },
+          "finding": {
+            "description": "The insight(s) to save. Always pass as an array of strings \u2014 use a single-element array for one finding.",
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "citation": {
+            "description": "Optional source citation for traceability (only used when finding is a single string).",
+            "type": "object",
+            "properties": {
+              "file": {
+                "description": "Source file path that supports this finding.",
+                "type": "string"
+              },
+              "line": {
+                "description": "1-based line number in file.",
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "repo": {
+                "description": "Git repository root path for citation validation.",
+                "type": "string"
+              },
+              "commit": {
+                "description": "Git commit SHA that supports this finding.",
+                "type": "string"
+              },
+              "name": {
+                "description": "The function, type or variable this finding is about: Name, Type.member or name(). Validated against the project's code index; stored unresolved when it does not resolve.",
+                "type": "string"
+              },
+              "symbol": {
+                "description": "Deprecated: use name. Accepted until @phren/cli 0.3.1.",
+                "type": "string"
+              },
+              "supersedes": {
+                "description": "First 60 chars of the old finding this one replaces. The old entry will be marked as superseded.",
+                "type": "string"
+              },
+              "task_item": {
+                "description": "Task item stable ID like bid:abcd1234, positional ID like A1, or item text to link this finding to.",
+                "type": "string"
+              }
+            }
+          },
+          "sessionId": {
+            "description": "Optional session ID from session_start. Pass this if you want session metrics to include this write.",
+            "type": "string"
+          },
+          "findingType": {
+            "description": "Classify this finding: 'decision' (architectural choice with rationale), 'pitfall' (bug or failure mode to avoid), 'pattern' (reusable approach that works well), 'bug' (confirmed defect or failure).",
+            "type": "string",
+            "enum": [
+              "decision",
+              "pitfall",
+              "pattern",
+              "bug"
+            ]
+          },
+          "scope": {
+            "description": "Optional memory scope label. Defaults to 'shared'. Example: 'researcher' or 'builder'.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "'finding' (default) is durable, curated knowledge; 'note' is a lightweight daily note.",
+            "type": "string",
+            "enum": [
+              "finding",
+              "note"
+            ]
+          },
+          "date": {
+            "description": "Notes only: YYYY-MM-DD, defaults to today.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "finding"
+        ]
+      }
+    }
+  ]
+}
