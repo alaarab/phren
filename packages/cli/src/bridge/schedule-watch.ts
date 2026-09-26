@@ -28,7 +28,7 @@ export function classifyStartupBlock(input: { elapsedMs: number; transcriptActiv
 }
 
 async function paneRecentLines(server: string, paneId: string): Promise<string[]> {
-  const text = await readPaneText(server, paneId, { method: "pane.read", source: "recent", lines: 40, what: "Scheduled run pane read" });
+  const text = await readPaneText(server, paneId, { scope: "pane", source: "recent", lines: 40, what: "Scheduled run pane read" });
   return text ? text.split(/\r?\n/) : [];
 }
 

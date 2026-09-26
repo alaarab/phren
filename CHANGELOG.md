@@ -11,6 +11,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Hook: OpenCode's permission prompt in the terminal ("Permission required", Allow once / Allow always / Reject) reaches the phone as a card with the request and its patterns. Allow once moves OpenCode's cursor there (read from the prompt's colors) and confirms it; Reject presses Escape. Allow always stays in the terminal, where OpenCode asks to confirm it.
 - Hook: OpenCode chat works on a computer without Herdr's OpenCode integration. phren's OpenCode plugin records which conversation each OpenCode process is showing (subagent sessions excluded), and the Hook binds the pane from that when Herdr reports no session. Restart OpenCode sessions started before this update so they load the new plugin.
 
+### Changed
+
+- Internal: the Hook drives its terminal multiplexer through a `TerminalProvider` (`bridge/terminal.ts`), with Herdr as the one implementation (`bridge/terminal-herdr.ts`), as a first step toward running without Herdr. Pane reads, keys, prompts, process lookups, pings, launches, focus, rename and close go through it and send Herdr the same requests as before. Herdr's agent and session reports become optional pane hints. No behavior change.
+
 ## [0.3.4] - 2026-09-25
 
 ### Fixed

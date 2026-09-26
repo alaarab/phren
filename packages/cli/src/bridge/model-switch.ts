@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AgentHooks, visibleTerminalChoice } from "./agent-hooks.js";
-import { rpc, validateTarget } from "./herdr.js";
+import { validateTarget } from "./herdr.js";
+import { terminalProvider } from "./terminal.js";
 import { ModelCatalog, type AgentModel } from "./models.js";
 import { BridgeError, type Json, type Target } from "./protocol.js";
 import { sideQuestionText } from "./side-questions.js";
@@ -115,7 +116,7 @@ export class ModelSwitcher {
     };
     const keys = async (values: string[]) => {
       await validate();
-      await rpc(target.server, "agent.send_keys", { target: target.pane, keys: values });
+      await terminalProvider().sendKeys(target.server, target.pane, values);
     };
     const waitFor = async <T>(read: (text: string) => T | undefined, step: string, ansi = false): Promise<T> => {
       const deadline = Date.now() + this.timeout;
@@ -153,7 +154,7 @@ export class ModelSwitcher {
       await validate(true);
       opened = true;
       this.hooks.menuOpened(target, "/model");
-      await rpc(target.server, "agent.prompt", { target: target.pane, text: target.source === "codex" ? "/model" : `/model ${id}` });
+      await terminalProvider().prompt(target.server, target.pane, target.source === "codex" ? "/model" : `/model ${id}`);
       if (target.source === "codex") {
         let menu = await waitFor(text => {
           const choice = visibleTerminalChoice(text);
@@ -196,7 +197,7 @@ export class ModelSwitcher {
           // `/effort` after the model, so the new model's own default never
           // replaces the chosen level.
           await validate(true);
-          await rpc(target.server, "agent.prompt", { target: target.pane, text: `/effort ${chosenEffort}` });
+          await terminalProvider().prompt(target.server, target.pane, `/effort ${chosenEffort}`);
           const reply = await waitFor(text => claudeEffortReply(text), "Claude's effort confirmation");
           if ("error" in reply) throw new BridgeError(409, reply.error);
           claudeEffort = reply.effort;

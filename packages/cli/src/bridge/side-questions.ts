@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { rpc, validateTarget } from "./herdr.js";
+import { validateTarget } from "./herdr.js";
+import { terminalProvider } from "./terminal.js";
 import { readPaneText } from "./pane-text.js";
 import { BridgeError, type Json, type Target } from "./protocol.js";
 
@@ -116,7 +117,7 @@ export class SideQuestions {
 
   private paneKey(target: Target) { return `${target.server}\0${target.pane}`; }
   private read(target: Target) {
-    return readPaneText(target.server, target.pane, { method: "agent.read", source: "visible", lines: 80, timeoutMs: 2_000 });
+    return readPaneText(target.server, target.pane, { scope: "agent", source: "visible", lines: 80, timeoutMs: 2_000 });
   }
 
   /** While a side question owns the pane, typed input would land in its panel
@@ -151,7 +152,7 @@ export class SideQuestions {
     try {
       // A panel the person opened in the terminal takes keys, not a prompt.
       if (sidePanel(await this.read(target))) throw new BridgeError(409, "The terminal already shows a side question. Close it there first.");
-      await rpc(target.server, "agent.prompt", { target: target.pane, text: `/btw ${question}` });
+      await terminalProvider().prompt(target.server, target.pane, `/btw ${question}`);
     } catch (error) { this.open.delete(key); throw error; }
     const record: SideRecord = { id, question, state: "pending", target, revision: 1 };
     this.records.set(id, record);
@@ -183,7 +184,7 @@ export class SideQuestions {
   private async close(target: Target): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       if (!sidePanel(await this.read(target))) return;
-      await rpc(target.server, "agent.send_keys", { target: target.pane, keys: ["esc"] });
+      await terminalProvider().sendKeys(target.server, target.pane, ["esc"]);
       await sleep(Math.min(this.options.intervalMs ?? 700, 300));
     }
   }
@@ -194,7 +195,7 @@ export class SideQuestions {
     let window = first.body, perKey = 0, size = lines.join("\n").length;
     for (let step = 0; step < 200 && size < MAX_ANSWER; step++) {
       const presses = perKey > 0 ? Math.max(1, Math.floor((window.length - 2) / perKey)) : 1;
-      await rpc(target.server, "agent.send_keys", { target: target.pane, keys: Array(presses).fill("down") });
+      await terminalProvider().sendKeys(target.server, target.pane, Array(presses).fill("down"));
       await sleep(Math.min(this.options.intervalMs ?? 700, 150));
       const panel = sidePanel(await this.read(target));
       if (!panel || panel.answering) break;

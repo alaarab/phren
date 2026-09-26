@@ -234,7 +234,7 @@ export function copilotThinking(rendered: string): ClaudeSpinner | undefined {
 export function readPreviewPane(target: Target): Promise<string> {
   // With its styles: Claude's bold becomes Markdown; everything else strips.
   return readPaneText(target.server, target.pane,
-    { method: "agent.read", source: "visible", lines: 80, stripAnsi: false, format: "ansi", timeoutMs: 2_000, what: "Preview pane read" });
+    { scope: "agent", source: "visible", lines: 80, stripAnsi: false, format: "ansi", timeoutMs: 2_000, what: "Preview pane read" });
 }
 
 // An SGR sequence (captured) or any other control sequence stripTerminal removes.

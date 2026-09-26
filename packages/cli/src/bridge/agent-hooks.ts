@@ -8,7 +8,8 @@ import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
-import { findPane, herdrPaneFromEnv, knownPanes, rpc, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
+import { findPane, herdrPaneFromEnv, knownPanes, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
+import { terminalProvider } from "./terminal.js";
 import { readPaneText } from "./pane-text.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
 import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
@@ -450,8 +451,7 @@ export class AgentHooks {
       const difference = intended - current.highlightedIndex;
       if (!difference) return;
       await beforeKeys?.();
-      await rpc(target.server, "agent.send_keys", { target: target.pane,
-        keys: Array<string>(Math.abs(difference)).fill(difference > 0 ? "down" : "up") });
+      await terminalProvider().sendKeys(target.server, target.pane, Array<string>(Math.abs(difference)).fill(difference > 0 ? "down" : "up"));
       await new Promise(resolve => setTimeout(resolve, 150));
       current = visibleTerminalChoice(await this.paneLines(target));
       if (matches(current) && current.highlightedIndex === intended) {
@@ -493,7 +493,7 @@ export class AgentHooks {
       keys: async keys => {
         if (!keys.length) return;
         await validateTarget(target, false, true);
-        await rpc(target.server, "agent.send_keys", { target: target.pane, keys });
+        await terminalProvider().sendKeys(target.server, target.pane, keys);
       },
     }, questions, answers, options);
     this.dialogReads.delete(key);
@@ -546,7 +546,7 @@ export class AgentHooks {
   }
   /** Read what the pane draws, stripping ANSI unless placeholder styling is needed. */
   paneLines(target: Target, stripAnsi = true): Promise<string> {
-    return readPaneText(target.server, target.pane, { method: "agent.read", source: "visible", lines: 40, stripAnsi, timeoutMs: 2_000 });
+    return readPaneText(target.server, target.pane, { scope: "agent", source: "visible", lines: 40, stripAnsi, timeoutMs: 2_000 });
   }
   /** After the phone walks Codex's /permissions menu onto Full Access, the
    * agent draws a second "Enable full access?" confirmation. Watch the pane's
@@ -566,8 +566,7 @@ export class AgentHooks {
         const option = choice.options[0];
         if (option.hasKey === false) await this.moveDialogHighlight(target, choice, option.key);
         await validateTarget(target, false, true);
-        await rpc(target.server, "agent.send_keys", { target: target.pane,
-          keys: option.hasKey === false ? ["enter"] : [option.key.toLowerCase(), "enter"] });
+        await terminalProvider().sendKeys(target.server, target.pane, option.hasKey === false ? ["enter"] : [option.key.toLowerCase(), "enter"]);
         this.clearTerminalPrompt(target);
         this.menuClosed(target);
         return { menuClosed: true };
@@ -815,8 +814,7 @@ export class AgentHooks {
       ? live.options.find(row => /^(yes|allow|approve|proceed|continue|run)\b/i.test(row.label)) ?? live.options[0]
       : live.options.find(row => /^(no|deny|reject|don'?t|cancel|skip)\b/i.test(row.label));
     const keys = option ? await this.dialogAnswerKeys(dialog.target, [option.key]) : ["Escape"];
-    await rpc(dialog.target.server, "agent.send_keys", { target: dialog.target.pane,
-      keys: keys.map(key => key === "Enter" ? "enter" : key === "Escape" ? "esc" : key.toLowerCase()) });
+    await terminalProvider().sendKeys(dialog.target.server, dialog.target.pane, keys.map(key => key === "Enter" ? "enter" : key === "Escape" ? "esc" : key.toLowerCase()));
     this.clearTerminalPrompt(dialog.target);
     this.dropDialogPush(key);
   }
@@ -844,8 +842,7 @@ export class AgentHooks {
         const s = await snapshot(target.server);
         const pane = findPane(s, { workspace: target.workspace, tab: target.tab, pane: target.pane });
         if (!pane || (pane.agent && pane.agent !== target.source)) throw new Error("The pane changed");
-        const info = object((await rpc(target.server, "pane.process_info", { pane_id: target.pane })).process_info);
-        const pids = objects(info.foreground_processes).map(p => p.pid).filter(p => Number.isSafeInteger(p));
+        const pids = (await terminalProvider().processes(target.server, target.pane)).foregroundPids;
         if (!pids.length) throw new Error("No foreground process");
         await atomicInPrivateDir(bindingPath(target.server, target.pane), JSON.stringify({ terminal: pane.terminal_id, source: target.source,
           session: target.session, pids, workspace: target.workspace, tab: target.tab }));
