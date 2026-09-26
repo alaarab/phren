@@ -8,7 +8,8 @@ import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
-import { findPane, knownPanes, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
+import { findPane, knownPanes, paneForCodexSession, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
+import { underCodexDaemon } from "./codex-daemon.js";
 import { terminalPaneFromEnv, terminalProvider } from "./terminal.js";
 import { readPaneText } from "./pane-text.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
@@ -841,16 +842,27 @@ export class AgentHooks {
         if (req.method !== "POST" || req.url !== "/hook") throw new Error("Invalid callback");
         let size = 0; const chunks: Buffer[] = [];
         for await (const bytes of req) { size += bytes.length; if (size > 1_048_576) throw new Error("Oversized hook"); chunks.push(bytes); }
-        const body = object(JSON.parse(Buffer.concat(chunks).toString())), target = targetSchema.parse(body.target);
+        const body = object(JSON.parse(Buffer.concat(chunks).toString()));
+        let target = targetSchema.parse(body.target);
         if (this.modules?.has("git") === false && ["PreToolUse", "PostToolUse"].includes(String(body.event))) {
           res.statusCode = 404; res.end(JSON.stringify({ error: disabledHint("git") })); return;
+        }
+        // A callback Codex's app-server daemon ran names the pane that started
+        // the daemon, not the conversation's. Place it by the conversation the
+        // Hook proves each pane shows, and never record a binding from it.
+        const daemon = body.daemon === true;
+        if (daemon) {
+          if (target.source !== "codex") throw new Error("Invalid callback");
+          const placed = await paneForCodexSession(target.server, target.session, typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : undefined);
+          if (!placed) { res.end("{}"); return; }
+          target = targetSchema.parse({ ...target, workspace: placed.workspace_id, tab: placed.tab_id, pane: placed.pane_id });
         }
         const s = await snapshot(target.server);
         const pane = findPane(s, { workspace: target.workspace, tab: target.tab, pane: target.pane });
         if (!pane || (pane.agent && pane.agent !== target.source)) throw new Error("The pane changed");
         const pids = (await terminalProvider().processes(target.server, target.pane)).foregroundPids;
         if (!pids.length) throw new Error("No foreground process");
-        await atomicInPrivateDir(bindingPath(target.server, target.pane), JSON.stringify({ terminal: pane.terminal_id, source: target.source,
+        if (!daemon) await atomicInPrivateDir(bindingPath(target.server, target.pane), JSON.stringify({ terminal: pane.terminal_id, source: target.source,
           session: target.session, pids, workspace: target.workspace, tab: target.tab, event: String(body.event).slice(0, 64), at: new Date().toISOString() }));
         // A terminal that does not watch its agents (tmux) takes the agent's
         // status from these events.
@@ -990,7 +1002,10 @@ export async function agentHook(source: Provider) {
   const event = String(value.hook_event_name || "SessionStart");
   const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
   if (!modules.has("hook") || (event.endsWith("ToolUse") && !modules.has("git"))) return;
-  const data = JSON.stringify({ target, event, tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
+  // Codex 0.157 runs hooks inside its shared app-server daemon, whose pane
+  // variables belong to whichever pane first started it.
+  const daemon = source === "codex" && await underCodexDaemon().catch(() => false);
+  const data = JSON.stringify({ target, event, ...(daemon ? { daemon: true } : {}), tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
     ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}) });
   await new Promise<void>(resolve => {
     const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? 8_000 : 1500,
