@@ -30,7 +30,7 @@ export type ReasoningLevel = ReasoningEffort | null;
 
 export interface ModelEntry {
   id: string;
-  provider: "openrouter" | "anthropic" | "openai" | "openai-codex" | "ollama";
+  provider: "openrouter" | "anthropic" | "openai" | "openai-codex" | "deepseek" | "ollama";
   label: string;
   reasoning: ReasoningLevel;       // current reasoning level
   reasoningRange: ReasoningLevel[]; // available levels (empty = no reasoning control)

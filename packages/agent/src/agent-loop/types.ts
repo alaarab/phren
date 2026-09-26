@@ -52,10 +52,14 @@ export interface AgentSession {
   repeatChain: RepeatChainState;
 }
 
+/** Why runTurn returned. */
+export type TurnStopReason = "end_turn" | "max_turns" | "budget" | "aborted" | "plan_rejected";
+
 export interface TurnResult {
   text: string;
   turns: number;
   toolCalls: number;
+  stopReason: TurnStopReason;
 }
 
 /** UI hooks for pluggable rendering. Defaults write to stdout/stderr. */
@@ -81,12 +85,16 @@ export interface TurnHooks {
   /** Plan approval override. Return { approved: true } to skip the readline
    *  prompt (e.g. in a TUI where per-tool approval handles gating instead). */
   onPlanApproval?: () => Promise<{ approved: boolean; feedback?: string }>;
+  /** A complete assistant message was recorded (after streaming finished). */
+  onAssistantMessage?: (content: ContentBlock[], stopReason: "end_turn" | "tool_use" | "max_tokens") => void;
+  /** Tool results were recorded (one entry per tool_use, in model order). */
+  onToolResults?: (results: ContentBlock[]) => void;
   /** Abort signal — when aborted, the turn stops immediately. */
   signal?: AbortSignal;
 }
 
 // Re-import LlmMessage for the AgentResult/AgentSession interfaces
-import type { LlmMessage } from "../providers/types.js";
+import type { ContentBlock, LlmMessage } from "../providers/types.js";
 import { SessionLog } from "../session/log.js";
 import { createRepeatChain, type RepeatChainState } from "../guards/repeat-tool-reminder.js";
 import { randomUUID } from "crypto";

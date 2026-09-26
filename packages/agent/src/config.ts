@@ -29,6 +29,15 @@ export interface CliArgs {
   verbose: boolean;
   interactive: boolean;
   resume: boolean;
+  /** Resume this session (id or unique id prefix) instead of the newest. */
+  resumeId?: string;
+  /** Print recent sessions and exit. */
+  listSessions: boolean;
+  /** Headless: no prompts, stdout carries only `outputFormat`. */
+  print: boolean;
+  outputFormat: "text" | "json" | "stream-json";
+  /** OpenAI-compatible endpoint for --provider openai-compat (or deepseek override). */
+  baseUrl?: string;
   lintCmd?: string;
   testCmd?: string;
   mcp: string[];
@@ -51,7 +60,9 @@ phren-agent — coding agent with persistent memory
 Usage: phren-agent [options] <task>    (also: phren agent [options] <task>)
 
 Options:
-  --provider <name>    Force provider: openrouter, anthropic, openai, openai-codex, ollama
+  --provider <name>    Force provider: openai-codex, openai, openrouter, anthropic, deepseek,
+                       openai-compat, ollama
+  --base-url <url>     Endpoint for openai-compat (or to override deepseek's)
   --model <model>      Override LLM model
   --reasoning <level>  Reasoning effort: low, medium, high, xhigh
   --project <name>     Force phren project context
@@ -65,7 +76,12 @@ Options:
   --permissions <mode> Permission mode: suggest (default), auto-confirm, full-auto
   --yolo               Full-auto permissions — no confirmations (alias for --permissions full-auto)
   --interactive, -i    Interactive REPL mode (multi-turn conversation)
-  --resume             Resume last session's conversation (task optional)
+  --resume, -c         Resume the newest session's conversation (task optional)
+  --session <id>       Resume a specific session by id or unique id prefix
+  --list-sessions      List recent sessions and exit
+  -p, --print          Headless: no prompts (tool approvals are denied), clean stdout
+  --output-format <f>  With -p: text (final message), json (one result object),
+                       stream-json (NDJSON events + result). Implies -p
   --lint-cmd <cmd>     Override auto-detected lint command
   --test-cmd <cmd>     Override auto-detected test command
   --mcp <command>      Connect to an MCP server via stdio (repeatable)
@@ -85,12 +101,18 @@ Providers (auto-detected from env, or use --provider):
   openai               OPENAI_API_KEY — OpenAI direct (defaults to gpt-5.4)
   openrouter           OPENROUTER_API_KEY — routes to any model
   anthropic            ANTHROPIC_API_KEY — Claude direct
+  deepseek             DEEPSEEK_API_KEY — DeepSeek's own API (api.deepseek.com)
+  openai-compat        PHREN_AGENT_BASE_URL (or --base-url) + PHREN_AGENT_API_KEY —
+                       any OpenAI-compatible /chat/completions endpoint
+                       (OpenCode Go/Zen, Together, Fireworks, vLLM, LM Studio…)
   ollama               PHREN_OLLAMA_URL — local models (default: localhost:11434)
 
 Environment:
   PHREN_AGENT_PROVIDER Force provider via env
   PHREN_AGENT_MODEL    Override model via env
   PHREN_AGENT_REASONING Override reasoning effort via env
+  PHREN_AGENT_BASE_URL  Endpoint for openai-compat
+  PHREN_AGENT_API_KEY   Key for openai-compat
 
 Examples:
   phren-agent "fix the login bug"
@@ -111,6 +133,9 @@ export function parseArgs(argv: string[]): CliArgs {
     verbose: false,
     interactive: false,
     resume: false,
+    listSessions: false,
+    print: false,
+    outputFormat: "text",
     noSubagents: false,
     noLlmCompact: false,
     sandbox: "auto",
@@ -136,7 +161,20 @@ export function parseArgs(argv: string[]): CliArgs {
       if (mode === "off" || mode === "auto" || mode === "require") { args.sandbox = mode; }
     }
     else if (arg === "--plan") { args.plan = true; }
-    else if (arg === "--resume") { args.resume = true; }
+    else if (arg === "--resume" || arg === "--continue" || arg === "-c") { args.resume = true; }
+    else if (arg === "--session" && argv[i + 1]) { args.resume = true; args.resumeId = argv[++i]; }
+    else if (arg === "--list-sessions") { args.listSessions = true; }
+    else if (arg === "--print" || arg === "-p") { args.print = true; }
+    else if (arg === "--output-format" && argv[i + 1]) {
+      const format = argv[++i];
+      if (format === "text" || format === "json" || format === "stream-json") {
+        args.outputFormat = format;
+        args.print = true;
+      } else {
+        throw new Error(`Unknown --output-format "${format}". Use text, json or stream-json.`);
+      }
+    }
+    else if (arg === "--base-url" && argv[i + 1]) { args.baseUrl = argv[++i]; }
     else if (arg === "--lint-cmd" && argv[i + 1]) { args.lintCmd = argv[++i]; }
     else if (arg === "--test-cmd" && argv[i + 1]) { args.testCmd = argv[++i]; }
     else if (arg === "--mcp" && argv[i + 1]) { args.mcp.push(argv[++i]); }

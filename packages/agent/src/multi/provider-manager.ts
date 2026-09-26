@@ -64,6 +64,14 @@ export function getProviderStatuses(): ProviderStatus[] {
       models: getBuiltinModels("openai-codex").map((model) => model.id),
     },
     {
+      name: "deepseek",
+      configured: !!process.env.DEEPSEEK_API_KEY,
+      authMethod: "api-key",
+      authSource: process.env.DEEPSEEK_API_KEY ? "env" : "none",
+      keyEnvVar: "DEEPSEEK_API_KEY",
+      models: getBuiltinModels("deepseek").map((model) => model.id),
+    },
+    {
       name: "ollama",
       configured: (process.env.PHREN_OLLAMA_URL ?? "").toLowerCase() !== "off",
       authMethod: "local",

@@ -34,11 +34,19 @@ function normalizeProviderSelection(
   return { provider, model };
 }
 
+export const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
+
+export interface ResolveOptions {
+  /** Endpoint for openai-compat (required there) or an override for deepseek. */
+  baseUrl?: string;
+}
+
 export function resolveProvider(
   overrideProvider?: string,
   overrideModel?: string,
   overrideMaxOutput?: number,
   overrideReasoning?: string,
+  options: ResolveOptions = {},
 ): LlmProvider {
   // Keyless replay of a recorded session — takes precedence over everything
   // so regression tests can run the real binary with no credentials at all.
@@ -46,7 +54,27 @@ export function resolveProvider(
     return ReplayProvider.fromEventLog(process.env.PHREN_AGENT_REPLAY);
   }
 
+  // Generic OpenAI-compatible endpoint: not a catalog provider, so it is
+  // handled before normalization and needs an explicit model.
+  const rawProvider = (overrideProvider ?? process.env.PHREN_AGENT_PROVIDER)?.toLowerCase();
+  if (rawProvider === "openai-compat" || rawProvider === "compat") {
+    const baseUrl = (options.baseUrl ?? process.env.PHREN_AGENT_BASE_URL)?.replace(/\/+$/, "");
+    if (!baseUrl) {
+      throw new Error("openai-compat needs an endpoint: pass --base-url <url> or set PHREN_AGENT_BASE_URL (e.g. https://host/v1).");
+    }
+    if (!overrideModel) throw new Error("openai-compat needs --model <id> (the endpoint's model name).");
+    const key = process.env.PHREN_AGENT_API_KEY ?? "";
+    const reasoning = normalizeReasoningEffort(overrideReasoning ?? process.env.PHREN_AGENT_REASONING);
+    return new OpenAiProvider(key, overrideModel, baseUrl, overrideMaxOutput, reasoning).withName("openai-compat", overrideMaxOutput);
+  }
+
   const { provider: explicit, model: normalizedModel } = normalizeProviderSelection(overrideProvider, overrideModel);
+  if (rawProvider && !explicit) {
+    // A typo must not silently fall through to auto-detection.
+    throw new Error(
+      `Unknown provider "${rawProvider}". Supported: openai-codex, openai, openrouter, anthropic, deepseek, openai-compat, ollama.`,
+    );
+  }
   const normalizedReasoning = normalizeReasoningEffort(overrideReasoning ?? process.env.PHREN_AGENT_REASONING);
   const openRouterKey = resolveApiKey("openrouter", "OPENROUTER_API_KEY");
   const anthropicKey = resolveApiKey("anthropic", "ANTHROPIC_API_KEY");
@@ -86,6 +114,15 @@ export function resolveProvider(
     );
   }
 
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
+  if (explicit === "deepseek" || (!explicit && deepseekKey)) {
+    if (!deepseekKey) throw new Error("DeepSeek credentials are required. Set DEEPSEEK_API_KEY.");
+    const model = normalizedModel ?? getDefaultModel("deepseek");
+    const baseUrl = (options.baseUrl ?? DEEPSEEK_BASE_URL).replace(/\/+$/, "");
+    return new OpenAiProvider(deepseekKey, model, baseUrl, resolveLimit("deepseek", model), resolveReasoning("deepseek", model))
+      .withName("deepseek", overrideMaxOutput ?? lookupMaxOutputTokens(model, "deepseek"));
+  }
+
   if (explicit === "ollama" || (!explicit && process.env.PHREN_OLLAMA_URL && process.env.PHREN_OLLAMA_URL !== "off")) {
     const model = normalizedModel ?? getDefaultModel("ollama");
     return new OllamaProvider(model, process.env.PHREN_OLLAMA_URL, resolveLimit("ollama", model));
@@ -98,7 +135,7 @@ export function resolveProvider(
   }
 
   throw new Error(
-    `Unknown provider "${explicit}". Supported: openrouter, anthropic, openai, openai-codex, ollama.\n` +
-    "Set one of: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or run 'phren auth login' for Codex.",
+    `Unknown provider "${explicit}". Supported: openai-codex, openai, openrouter, anthropic, deepseek, openai-compat, ollama.\n` +
+    "Set one of: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY, or run 'phren auth login' for Codex.",
   );
 }

@@ -47,6 +47,18 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/**
+ * The provider rejected the request because the prompt is too long for the
+ * model. Retrying unchanged cannot help; compacting the history can. Matches
+ * the wording of Anthropic, OpenAI (Chat and Responses), OpenRouter,
+ * DeepSeek, Gemini-via-gateway and Ollama errors.
+ */
+export function isContextOverflowError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return /context[_ ]length[_ ]exceeded|maximum context length|context window|prompt is too long|input is too long|too many (input )?tokens|exceeds? the (model's )?(maximum )?context|reduce the length of the messages|request too large|input length and `max_tokens` exceed/i.test(msg)
+    || extractStatus(error) === 413;
+}
+
 /** Wrap an async function with exponential backoff retry. */
 export async function withRetry<T>(
   fn: () => Promise<T>,

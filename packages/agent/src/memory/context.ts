@@ -57,7 +57,12 @@ function readTruths(phrenPath: string, project: string): string[] {
   }
 }
 
-const CLAUDE_MD_MAX_CHARS = 4000;
+/**
+ * Budget for all instruction files together. Codex's default is 32 KiB; the
+ * old 4,000-char cap cut a typical monorepo AGENTS.md off after its first
+ * screen.
+ */
+export const RULE_FILES_MAX_CHARS = 32_000;
 
 /**
  * Collect project rule files (AGENTS.md and legacy CLAUDE.md) by walking up from cwd
@@ -90,6 +95,27 @@ function collectRuleFiles(): { filePath: string; content: string }[] {
   read(path.resolve(os.homedir(), ".claude", "CLAUDE.md"));
 
   return results;
+}
+
+/**
+ * The "## Project instructions" section from AGENTS.md / CLAUDE.md files, or
+ * "" when there are none. Independent of a phren store: a repo's own
+ * instructions apply whether or not phren memory is set up.
+ */
+export function buildProjectInstructions(maxChars = RULE_FILES_MAX_CHARS): string {
+  try {
+    const ruleFiles = collectRuleFiles();
+    if (ruleFiles.length === 0) return "";
+    let combined = ruleFiles
+      .map((f) => `<!-- ${f.filePath} -->\n${f.content}`)
+      .join("\n\n---\n\n");
+    if (combined.length > maxChars) {
+      combined = combined.slice(0, maxChars) + "\n\n<!-- truncated -->";
+    }
+    return `## Project instructions\n\n${combined}`;
+  } catch {
+    return "";
+  }
 }
 
 /** Build a context string from phren knowledge to inject into the system prompt. */
@@ -142,18 +168,8 @@ export async function buildContextSnippet(ctx: PhrenContext, taskKeywords: strin
   }
 
   // Section 4: project rule files (AGENTS.md / legacy CLAUDE.md), cwd → parents → ~/.claude/CLAUDE.md
-  try {
-    const ruleFiles = collectRuleFiles();
-    if (ruleFiles.length > 0) {
-      let combined = ruleFiles
-        .map((f) => `<!-- ${f.filePath} -->\n${f.content}`)
-        .join("\n\n---\n\n");
-      if (combined.length > CLAUDE_MD_MAX_CHARS) {
-        combined = combined.slice(0, CLAUDE_MD_MAX_CHARS) + "\n\n<!-- truncated -->";
-      }
-      sections.push(`## Project instructions\n\n${combined}`);
-    }
-  } catch { /* silent */ }
+  const instructions = buildProjectInstructions();
+  if (instructions) sections.push(instructions);
 
   // Section 5: Available skills catalog — the model should know what skills
   // exist (name + description) instead of guessing names for run_skill.

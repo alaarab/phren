@@ -104,6 +104,86 @@ export function persistFork(phrenPath: string, parent: SessionLog, childSessionI
   return SessionLog.restore(header, events, sink);
 }
 
+export interface SessionListing {
+  sessionId: string;
+  file: string;
+  mtimeMs: number;
+  project?: string;
+  cwd?: string;
+  /** Model-visible message count after replaying the log. */
+  messages: number;
+  /** First user prompt, trimmed to one line. */
+  title: string;
+}
+
+/** Recent sessions, newest first; unreadable logs are skipped. */
+export function listEventLogs(phrenPath: string, opts: { project?: string; limit?: number } = {}): SessionListing[] {
+  const dir = sessionsDir(phrenPath);
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir).filter((f) => f.endsWith(".events.jsonl"));
+  } catch {
+    return [];
+  }
+  const stats = entries
+    .map((entry) => {
+      const file = path.join(dir, entry);
+      try {
+        return { file, mtimeMs: fs.statSync(file).mtimeMs };
+      } catch {
+        return null;
+      }
+    })
+    .filter((e): e is { file: string; mtimeMs: number } => e !== null)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const out: SessionListing[] = [];
+  for (const { file, mtimeMs } of stats) {
+    if (out.length >= (opts.limit ?? 20)) break;
+    try {
+      const { header, events } = loadEventLog(file);
+      if (opts.project && header.project !== opts.project) continue;
+      const log = SessionLog.restore(header, events, () => {});
+      const msgs = log.getMessages();
+      if (msgs.length === 0) continue;
+      const first = msgs.find((m) => m.role === "user" && typeof m.content === "string");
+      const title = typeof first?.content === "string" ? first.content.replace(/\s+/g, " ").trim().slice(0, 80) : "";
+      out.push({
+        sessionId: header.sessionId,
+        file,
+        mtimeMs,
+        ...(header.project ? { project: header.project } : {}),
+        ...(header.cwd ? { cwd: header.cwd } : {}),
+        messages: msgs.length,
+        title,
+      });
+    } catch {
+      // corrupt logs are not listed
+    }
+  }
+  return out;
+}
+
+/**
+ * The event log whose session id starts with `idPrefix`.
+ * Throws when the prefix matches no session or more than one.
+ */
+export function findEventLogById(phrenPath: string, idPrefix: string): string {
+  const dir = sessionsDir(phrenPath);
+  const prefix = idPrefix.replace(/^session-/, "");
+  let entries: string[] = [];
+  try {
+    entries = fs.readdirSync(dir).filter((f) => f.startsWith(`session-${prefix}`) && f.endsWith(".events.jsonl"));
+  } catch {
+    // no sessions directory
+  }
+  if (entries.length === 0) throw new SessionLogError(`no session matches "${idPrefix}"`);
+  if (entries.length > 1) {
+    const ids = entries.slice(0, 5).map((f) => f.slice("session-".length, -".events.jsonl".length));
+    throw new SessionLogError(`"${idPrefix}" matches ${entries.length} sessions (${ids.join(", ")}${entries.length > 5 ? ", …" : ""}); give more of the id`);
+  }
+  return path.join(dir, entries[0]);
+}
+
 /**
  * Newest event log for resume, optionally filtered by project.
  * @returns the file path, or null when none exist.
