@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - The fanout and conductor skills say plainly that workers start only through `phren fanout run` (or the fanout wrapper), never a hand-written `opencode run` or `codex exec`: those have no manifest, so the phone and the conductor cannot see them.
 
+### Fixed
+
+- Codex chats on the phone show the commands, edits, MCP calls and viewed images the terminal shows. Codex 0.155.1 and later run tools from a JavaScript script and record each action as its own item, which the Hook used to hide, so the phone showed only an opaque "Script completed" card. The Hook now sends each command as a shell call with its folder, output and exit code, each edit as a patch, each MCP call under its server and tool name, and each viewed image with its picture. The script and its "Script completed" result are hidden when every tool it called is recorded this way; a script that failed still shows with its error. Reasoning stays on the computer.
+
 ## [0.3.9] - 2026-09-26
 
 ### Fixed
