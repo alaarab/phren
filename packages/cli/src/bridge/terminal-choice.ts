@@ -158,7 +158,14 @@ export function opencodePermissionDialog(ansi: string): { choice: TerminalChoice
   // Lines pushed far right are OpenCode's status column, not the question.
   const body = plain.slice(header + 1, row).map(content)
     .filter(line => line.trim() && !/^\s{24,}/.test(line)).map(line => line.trim());
-  const title = ["Permission required", ...body].join("\n").slice(0, 4_000);
+  // "← Access external directory ~/apps" is what it asks; a "Patterns" list
+  // under it is what it applies to, one "- " line each.
+  const [asks, ...rest] = body;
+  const title = (asks?.replace(/^[←→]\s*/, "") || "Permission required").slice(0, 4_000);
+  const patterns = rest.indexOf("Patterns");
+  const details = patterns < 0 ? rest
+    : [...rest.slice(0, patterns), ...rest.slice(patterns + 1).map(line => line.replace(/^-\s+/, ""))];
+  const detail = details.join("\n").slice(0, 4_000);
   const backgrounds = OPENCODE_OPTIONS.map(label => {
     const at = raw[row].indexOf(label);
     if (at < 0) return undefined;
@@ -168,7 +175,7 @@ export function opencodePermissionDialog(ansi: string): { choice: TerminalChoice
   const unique = backgrounds.flatMap((background, index) =>
     background !== undefined && backgrounds.filter(other => other === background).length === 1 ? [index] : []);
   const selected = unique.length === 1 && backgrounds.every(background => background !== undefined) ? unique[0] : undefined;
-  return { choice: { title, options: [{ label: "Allow once", key: "1", hasKey: false }, { label: "Reject", key: "Escape", hasKey: true }],
+  return { choice: { title, ...(detail ? { body: detail } : {}), options: [{ label: "Allow once", key: "1", hasKey: false }, { label: "Reject", key: "Escape", hasKey: true }],
     ...(selected === 0 ? { highlightedIndex: 0 } : {}) }, ...(selected !== undefined ? { selected } : {}) };
 }
 /** The pane's last non-empty line is a password read: sudo's "[sudo] password

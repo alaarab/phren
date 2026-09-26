@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenCode permission requests reach the phone as what they ask ("Access external directory ~") with the paths they cover underneath, instead of the dialog's raw lines ("Permission required", "←", "Patterns", "- ").
+
 ## [0.3.6] - 2026-09-25
 
 ### Added
