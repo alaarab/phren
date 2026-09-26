@@ -65,6 +65,15 @@ pane occupant at dispatch time, so this reports uncertainty after a race; it
 cannot make delivery atomic with validation. Escape/stop retains Herdr's existing
 contract.
 
+A prompt may carry `deliveryId` (8 to 64 of `A-Z a-z 0-9 _ -`, a UUID works), the
+client's name for one composed message, kept on every attempt to send it (the
+`promptOnce` capability). For ten minutes the Hook types that id at most once:
+a repeat for the same pane, agent and text waits for the first attempt and
+answers with its reply (or its error) plus `"replayed": true`, typing nothing;
+a repeat after the first failed before typing runs normally; the same id with
+other text or another pane is 409. A dropped connection is then safe to retry.
+A request without an id behaves as before.
+
 ## Routes
 
 All ordinary routes use the private HTTP pipe; transcript and status streams use

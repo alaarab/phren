@@ -1709,6 +1709,80 @@ schedules:
       expect(commands.filter(c => c.method === "agent.prompt")).toHaveLength(1);
     });
 
+    // Seen 2026-09-24: the phone lost the connection after the Hook typed
+    // "Look what happened" into Claude, offered Retry, and the retry typed it
+    // again. The phone's message id makes the retry answer, not type.
+    it("types a message once per delivery id, however often the phone retries it", async () => {
+      const prompts = () => commands.filter(c => c.method === "agent.prompt").length;
+      const deliveryId = "5b0d6a7e-2f7c-4d0e-9d36-3f4c1a2b9e10";
+      // Two attempts in flight at once (the second after a dropped connection).
+      const [first, second] = await Promise.all([
+        api("/v1/prompt", { target, text: "Look what happened", deliveryId }),
+        sleep(50).then(() => api("/v1/prompt", { target, text: "Look what happened", deliveryId })),
+      ]);
+      expect(first).toEqual({ status: 200, data: { ok: true } });
+      expect(second).toEqual({ status: 200, data: { ok: true, replayed: true } });
+      expect(prompts()).toBe(1);
+      // A later retry, even after the pane's conversation changed, answers the same.
+      current = "bbbbbbbb-1111-4111-8111-111111111111";
+      expect(await api("/v1/prompt", { target, text: "Look what happened", deliveryId })).toEqual({ status: 200, data: { ok: true, replayed: true } });
+      expect(prompts()).toBe(1);
+      // The id belongs to that message; other text under it is refused untyped.
+      expect((await api("/v1/prompt", { target, text: "something else", deliveryId })).status).toBe(409);
+      // An attempt refused before typing (the conversation changed) can be retried
+      // under its id once the pane is back, and then types.
+      const fresh = "0c9e8f7a-6b5d-4c3b-8a19-2f0e1d2c3b4a";
+      expect((await api("/v1/prompt", { target, text: "retry me", deliveryId: fresh })).status).toBe(409);
+      expect(prompts()).toBe(1);
+      current = session;
+      expect(await api("/v1/prompt", { target, text: "retry me", deliveryId: fresh })).toEqual({ status: 200, data: { ok: true } });
+      expect(prompts()).toBe(2);
+      // No id: every request types, as before. A malformed id is a 400.
+      await api("/v1/prompt", { target, text: "Look what happened" });
+      expect(prompts()).toBe(3);
+      expect((await api("/v1/prompt", { target, text: "x", deliveryId: "bad id!" })).status).toBe(400);
+      expect(prompts()).toBe(3);
+    }, 20_000);
+
+    // Seen 2026-09-24 on Copilot CLI 1.0.88: after /new, Herdr still reported
+    // the previous conversation, the phone sent there, and the new
+    // conversation's UserPromptSubmit hook refused every message ("Phren sent
+    // this message to a different conversation in this pane"), each refusal a
+    // warning in the Copilot pane. The Hook now names the pane from Copilot's
+    // process log, so a send to the old conversation is refused before typing
+    // and the new one is offered as starting.
+    it("never types a phone message into a Copilot conversation it was not meant for after /new", async () => {
+      const copilot = path.join(root, ".copilot");
+      const fresh = "f27fdb49-70da-4c9d-b8ce-aa52b9dce81d";
+      const log = path.join(copilot, "logs", `process-1790311502722-${foregroundPID}.log`);
+      await mkdir(path.join(copilot, "logs"), { recursive: true });
+      await mkdir(path.join(copilot, "session-state", session), { recursive: true });
+      await writeFile(path.join(copilot, "session-state", session, "events.jsonl"), JSON.stringify({ type: "session.start", data: { sessionId: session } }) + "\n");
+      await writeFile(log, `2026-09-25T04:45:03.046Z [INFO] Registering foreground session: ${session}\n`);
+      paneAgent = "copilot"; agentStatus = "idle";
+      const old = { ...target, source: "copilot" as const };
+      const prompts = () => commands.filter(c => c.method === "agent.prompt").length;
+      try {
+        expect((await api("/v1/prompt", { target: old, text: "What's the latest pushed made" })).status).toBe(200);
+        expect(prompts()).toBe(1);
+        // /new: Copilot registers a new conversation; Herdr still reports the old one.
+        await writeFile(log, [`2026-09-25T04:45:03.046Z [INFO] Registering foreground session: ${session}`,
+          `2026-09-25T04:49:28.680Z [INFO] Unregistering foreground session: ${session}`,
+          `2026-09-25T04:49:28.692Z [INFO] Registering foreground session: ${fresh}`].join("\n") + "\n");
+        await sleep(IDENTITY_CACHE_MS + 50);
+        expect((await api("/v1/prompt", { target: old, text: "I had a specific question" })).status).toBe(409);
+        expect(prompts()).toBe(1);
+        // The pane is offered as starting, and its first prompt goes through once.
+        const pane = (await api("/v1/workspaces/panes?groupId=w1&childId=w1:t1")).data.panes[0];
+        expect(pane).toMatchObject({ agent: "copilot", starting: true });
+        expect(pane.sessionId).toBeUndefined();
+        const { session: _session, ...location } = old;
+        const starting = { ...location, starting: true, startingToken: pane.startingToken };
+        expect((await api("/v1/prompt", { target: starting, text: "I had a specific question" })).data).toEqual({ ok: true });
+        expect(prompts()).toBe(2);
+      } finally { await rm(copilot, { recursive: true, force: true }); }
+    }, 20_000);
+
     it("closes the oldest websocket when a seventeenth client connects", async () => {
       const clients: WebSocket[] = [];
       try {

@@ -111,7 +111,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, transcribe: true, memoryStore: true };
+  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, transcribe: true, memoryStore: true, promptOnce: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
