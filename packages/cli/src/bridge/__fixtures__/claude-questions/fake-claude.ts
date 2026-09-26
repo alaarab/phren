@@ -76,16 +76,20 @@ export class FakeClaude {
     return [bar, "", q.question, "", ...rows, ...other, "─".repeat(40), `  ${n + 2}. Chat about this`, "",
       "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"].join("\n");
   }
-  io() {
+  /** `redrawMs`: a busy computer, where the pane keeps showing the old
+   * screen for that long (on the walk's own clock) after a key. */
+  io(options: { redrawMs?: number } = {}) {
+    let now = 0, stale: { text: string; until: number } | undefined;
     return {
-      read: async () => this.render(),
+      read: async () => stale && now < stale.until ? stale.text : this.render(),
       keys: async (keys: string[]) => {
+        if (options.redrawMs) stale = { text: this.render(), until: now + options.redrawMs };
         this.sent.push(keys);
         // Ink reads several digits in one write as one input and ignores it.
         if (keys.length > 1 && keys.every(key => /^[1-9]$/.test(key))) return;
         for (const key of keys) this.press(key);
       },
-      sleep: async () => {},
+      sleep: async (ms: number) => { now += ms; },
     };
   }
 }
