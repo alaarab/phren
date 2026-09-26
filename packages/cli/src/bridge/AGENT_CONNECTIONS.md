@@ -193,7 +193,13 @@ opencode has no per-session transcript file. A Phren-installed opencode plugin
 `<store>/.runtime/sessions/opencode-<session>.events.jsonl` in the same
 `user/message`, `assistant/message`, and `tool/results` shape phren-agent uses,
 with opencode's `stop`/`tool-calls` stop reasons mapped to `end_turn`/`tool_use`
-and reasoning parts excluded. `phren bridge install` writes the plugin and
+and reasoning parts excluded. A tool's inline image attachments (the `read`
+tool's `{ type: "file", mime, url: "data:image/...;base64,..." }` entries in
+`state.attachments`) become `{ type: "image", source: { type: "base64", ... } }`
+blocks after the text in that call's `tool_result` content, the shape Claude Code
+writes, so `/v1/transcripts/blob` serves them by line, block and inner index.
+Images over 4,000,000 base64 characters, or past 24,000,000 in one session,
+become a text marker. `phren bridge install` writes the plugin and
 `phren bridge uninstall` removes it. Plugins load at opencode startup, so an
 opencode session started before the install has no transcript and no reported
 session id; restart it (or launch a new one) before its chat can attach.

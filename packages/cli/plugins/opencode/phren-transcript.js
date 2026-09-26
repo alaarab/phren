@@ -6,6 +6,12 @@ import path from "node:path";
 const PHREN_STORE = "__PHREN_STORE__";
 const FLUSH_MS = 250;
 const MAX_TOOL_OUTPUT = 200_000;
+// OpenCode's read tool returns a picture as an inline data URL on the tool
+// part (`state.attachments`). The Hook serves images up to 8 MiB; the session
+// budget bounds what every flush rewrites.
+const MAX_IMAGE_DATA = 4_000_000;
+const MAX_SESSION_IMAGE_DATA = 24_000_000;
+const IMAGE_DATA_URL = /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=]+)$/;
 const STOP_REASONS = { stop: "end_turn", "tool-calls": "tool_use", length: "max_tokens" };
 const OPENCODE_SESSION = /^ses_[0-9A-Za-z]{1,64}$/;
 const APPROVAL_POLL_MS = 200;
@@ -145,14 +151,36 @@ function blocksFor(message) {
   return blocks;
 }
 
-function toolResults(message) {
+/** A tool's picture attachments as Anthropic-shaped image blocks, the form the
+ * Hook's image route and the phone already read from Claude Code. Only inline
+ * data URLs are carried; an image over the caps becomes a text marker. */
+function toolImages(state, budget) {
+  const blocks = [];
+  for (const attachment of Array.isArray(state?.attachments) ? state.attachments : []) {
+    if (attachment?.type !== "file" || typeof attachment.url !== "string") continue;
+    const match = IMAGE_DATA_URL.exec(attachment.url);
+    if (!match) continue;
+    const data = match[2];
+    if (data.length > MAX_IMAGE_DATA || data.length > budget.remaining) {
+      blocks.push({ type: "text", text: "[Image not included: too large to show on the phone]" });
+      continue;
+    }
+    budget.remaining -= data.length;
+    blocks.push({ type: "image", source: { type: "base64", media_type: match[1], data } });
+  }
+  return blocks;
+}
+
+function toolResults(message, budget) {
   const results = [];
   for (const id of message.partOrder) {
     const part = message.parts.get(id);
     if (!part || part.type !== "tool" || typeof part.callID !== "string") continue;
     const status = part.state?.status;
     if (status !== "completed" && status !== "error") continue;
-    results.push({ type: "tool_result", tool_use_id: part.callID, content: toolOutput(part.state), is_error: status === "error" });
+    const output = toolOutput(part.state), images = toolImages(part.state, budget);
+    const content = images.length ? [{ type: "text", text: output }, ...images] : output;
+    results.push({ type: "tool_result", tool_use_id: part.callID, content, is_error: status === "error" });
   }
   return results;
 }
@@ -163,6 +191,7 @@ function linesFor(session) {
     .filter(Boolean)
     .sort((a, b) => (a.info?.time?.created ?? 0) - (b.info?.time?.created ?? 0) || String(a.info?.id).localeCompare(String(b.info?.id)));
   const lines = [];
+  const budget = { remaining: MAX_SESSION_IMAGE_DATA };
   let seq = 0;
   const emit = (type, data, created) => {
     lines.push(JSON.stringify({ seq: seq++, time: new Date(created || Date.now()).toISOString(), type, data }));
@@ -180,7 +209,7 @@ function linesFor(session) {
         data.usage = { input_tokens: info.tokens.input ?? 0, output_tokens: info.tokens.output ?? 0 };
       }
       if (blocks.length) emit("assistant/message", data, info.time?.created);
-      const results = toolResults(message);
+      const results = toolResults(message, budget);
       if (results.length) emit("tool/results", { message: { role: "user", content: results } }, info.time?.updated ?? info.time?.created);
     }
   }
