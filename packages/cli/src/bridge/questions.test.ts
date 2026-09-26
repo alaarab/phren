@@ -1,7 +1,8 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { appendFile, mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { appendFile, copyFile, mkdir, mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { CodexQuestions, pendingAsyncQuestion, pendingAsyncQuestions, questionReply } from "./questions.js";
 
 const state = vi.hoisted(() => ({ file: "", root: "", session: "aaaaaaaa-1111-4111-8111-111111111111" }));
@@ -108,5 +109,51 @@ describe("Codex async question replies", () => {
       await appendFile(file, JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: reply }] } }) + "\n");
       expect(await pendingAsyncQuestions(file)).toEqual([]);
     } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+  // Codex 0.155.1 as the Linux box wrote it: the request_user_input_async call,
+  // the AgentMessage delivered async under the same id, then {accepted:true}.
+  const fixture = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "codex", "0.155.1", "async-question.rollout.jsonl");
+  const fixtureTitle = "For the report inventory, what does \u201cXYZ data\u201d mean, and which sources beyond A and B should I include?";
+  it("counts a question Codex records as both a call and a delivered message once", async () => {
+    await copyFile(fixture, state.file);
+    expect(await pendingAsyncQuestions(state.file)).toEqual([{ id: "call_neutralQuestion0001", questions: [{ title: fixtureTitle }] }]);
+    expect(await new CodexQuestions(executable).pending(target)).toEqual([{ toolUseId: "call_neutralQuestion0001", isAsync: true, submitted: false,
+      questions: [{ question: fixtureTitle, options: [], kind: "text" }] }]);
+  });
+  // The fake codex is an extensionless shebang script, which Windows cannot execute.
+  it.skipIf(process.platform === "win32")("answers the recorded free-text question with one quoted codex queue message", async () => {
+    await copyFile(fixture, state.file);
+    await new CodexQuestions(executable).answer(target, { toolUseId: "call_neutralQuestion0001", answers: [{ optionIndexes: [], text: "Only the two named sources" }] });
+    expect(JSON.parse((await readFile(path.join(directory, "sent.jsonl"), "utf8")).trim())).toEqual(["queue", "--thread", target.session, "--message",
+      `> ${fixtureTitle}\n\nOnly the two named sources`]);
+    expect(await new CodexQuestions(executable).pending(target)).toEqual([]);
+  });
+  // phren's session wrapper at ~/.local/bin/codex runs phren's session-start
+  // hook first, which outlasted the 5 s probe: the phone was told to answer
+  // in the terminal. The Hook runs the binary the wrapper names instead.
+  it.skipIf(process.platform === "win32")("probes and answers with the real codex behind phren's slow session wrapper", async () => {
+    const bin = path.join(directory, "bin"), real = path.join(directory, "real");
+    await mkdir(bin); await mkdir(real);
+    await copyFile(executable, path.join(real, "codex"));
+    await writeFile(path.join(bin, "codex"), `#!/bin/sh
+set -u
+
+REAL_BIN='${path.join(real, "codex")}'
+if [ ! -x "$REAL_BIN" ]; then
+  echo "phren wrapper error: real codex binary not executable: $REAL_BIN" >&2
+  exit 127
+fi
+sleep 30
+"$REAL_BIN" "$@"
+`, { mode: 0o755 });
+    vi.stubEnv("PATH", `${bin}${path.delimiter}${process.env.PATH ?? ""}`);
+    try {
+      const started = Date.now(), bridge = new CodexQuestions();
+      expect(await bridge.supported()).toBe(true);
+      expect(Date.now() - started).toBeLessThan(4000);
+      await copyFile(fixture, state.file);
+      await bridge.answer(target, { toolUseId: "call_neutralQuestion0001", answers: [{ optionIndexes: [], text: "Yes" }] });
+      expect(JSON.parse((await readFile(path.join(directory, "sent.jsonl"), "utf8")).trim())[0]).toBe("queue");
+    } finally { vi.unstubAllEnvs(); }
   });
 });

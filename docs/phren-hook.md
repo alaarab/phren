@@ -140,8 +140,10 @@ No extra request per iPhone row is needed.
 - Codex/Claude approvals through Phren's lifecycle callbacks while you watch a
   conversation or the foreground session overview. Codex asynchronous questions
   can be answered in chat when the installed Codex supports its exact-thread
-  inbox command (`codex queue --thread … --message …`). Synchronous questions
-  and unsupported provider interactions open in Phren's terminal.
+  inbox command (`codex queue --thread … --message …`). The Hook runs the real
+  `codex` binary for this, skipping the session wrapper `phren init` can put at
+  `~/.local/bin/codex`. Synchronous questions and unsupported provider
+  interactions open in Phren's terminal.
 - Git diffs, local HTTP app discovery, and SSH browser previews.
 - The project's code index, when the `code` module is on and the project has
   been indexed: what changed, finding functions and types by name, file outlines,

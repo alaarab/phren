@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { claudeConfigDir } from "../home-paths.js";
 import path from "node:path";
 import { object, objects, type Json } from "./protocol.js";
+import { codexExecutable } from "./codex-binary.js";
 
 /** One entry of a `/model` menu as the phone draws it. */
 export interface AgentModel {
@@ -12,7 +13,7 @@ export interface AgentModel {
 }
 
 /** Only initialize and list. Never a thread, a prompt, or a login. */
-export function readCodexModels(executable = "codex"): Promise<AgentModel[]> {
+export function readCodexModels(executable = codexExecutable()): Promise<AgentModel[]> {
   return new Promise(resolve => {
     const child = spawn(executable, ["app-server"], { cwd: homedir(), stdio: ["pipe", "pipe", "ignore"] });
     let pending = "", bytes = 0, initialized = false, done = false;
