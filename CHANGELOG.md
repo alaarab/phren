@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Docs
+
+- Site: a phone app section. New `get-started.html` takes a new user from installing the app to a first chat, with what to do, what you should see and what to do if it fails at each step, and says plainly what works without Herdr. New `android.html` beside a rewritten `ios.html`. `privacy.html` is now one policy for iPhone and Android, dated 25 September 2026, and `support.html` covers both phones. The site nav, home page and docs page link "Get the app" to the guide.
+
 ### Fixed
 
 - Hook: a Claude Code skill's chat chip shows what the skill loaded. Claude Code answers a Skill call with only "Launching skill: <name>" and writes the skill's text as a hidden row pointing back at the call; the Hook now sends that one row as the call's second result. Other hidden rows stay private.
