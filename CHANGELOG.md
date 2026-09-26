@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- Copilot chat on the phone shows Copilot's thinking: the summary Copilot prints under "Thought for Ns" in its own terminal (`reasoningText`) now reaches the phone with the message. Its encrypted and opaque reasoning (`encryptedContent`, `reasoningOpaque`, `reasoningBlocks`) still never leaves the computer.
+
 ### Fixed
 
 - OpenCode permission requests reach the phone as what they ask ("Access external directory ~") with the paths they cover underneath, instead of the dialog's raw lines ("Permission required", "←", "Patterns", "- ").

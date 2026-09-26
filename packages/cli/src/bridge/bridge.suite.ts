@@ -2318,10 +2318,13 @@ schedules:
       expect(createHash("sha256").update(downloaded).digest("hex")).toBe(createHash("sha256").update(image).digest("hex"));
     });
 
-    it("reads Claude strings and Copilot public messages while excluding reasoning", async () => {
+    it("reads Claude strings and Copilot public messages while excluding private reasoning", async () => {
       for (const [source, event, expected] of [
         ["claude", { type: "user", message: { role: "user", content: "Claude user message" } }, "Claude user message"],
-        ["copilot", { type: "assistant.message", data: { content: "Copilot visible", reasoningText: "never-export-this" } }, "Copilot visible"],
+        // The summary Copilot prints under "Thought for Ns" is shown; its
+        // encrypted and opaque copies never are.
+        ["copilot", { type: "assistant.message", data: { content: "Copilot visible", reasoningText: "Checking the branch first",
+          encryptedContent: "never-export-this", reasoningOpaque: "never-export-this", reasoningBlocks: [{ text: "never-export-this" }] } }, "Checking the branch first"],
       ] as const) {
         await writeFile(record, JSON.stringify(event) + "\n");
         const page = await new TranscriptReader(record, source).read();

@@ -27,6 +27,7 @@
     "data": {
      "messageId": "051171ac-29fd-49e8-8ed6-cedd768eac84",
      "content": "Sample reply 1.",
+     "reasoningText": "sample",
      "phase": "final_answer"
     }
    }
@@ -65,7 +66,8 @@
     "timestamp": "2026-09-22T19:17:19.044Z",
     "data": {
      "messageId": "242fb49f-6264-440a-8e4a-64e8021e3a1c",
-     "content": ""
+     "content": "",
+     "reasoningText": "sample"
     }
    }
   },
@@ -120,7 +122,8 @@
     "timestamp": "2026-09-22T19:17:23.797Z",
     "data": {
      "messageId": "2297cb7d-5a9d-4317-8ed0-7b874332a886",
-     "content": ""
+     "content": "",
+     "reasoningText": "sample"
     }
    }
   },
@@ -131,7 +134,8 @@
     "timestamp": "2026-09-22T19:17:23.800Z",
     "data": {
      "messageId": "eadd0498-0022-4f99-8741-eba00d0a3077",
-     "content": ""
+     "content": "",
+     "reasoningText": "sample"
     }
    }
   },
@@ -247,7 +251,8 @@
     "timestamp": "2026-09-22T19:17:27.937Z",
     "data": {
      "messageId": "a66c2c04-804e-4ff8-8892-b655f5543142",
-     "content": ""
+     "content": "",
+     "reasoningText": "sample"
     }
    }
   },
@@ -342,7 +347,8 @@
     "timestamp": "2026-09-22T19:18:07.249Z",
     "data": {
      "messageId": "63a1871f-16b4-49df-815e-51dc5c9868e8",
-     "content": ""
+     "content": "",
+     "reasoningText": "sample"
     }
    }
   },
@@ -397,7 +403,8 @@
     "timestamp": "2026-09-22T19:18:15.901Z",
     "data": {
      "messageId": "f2151763-7dee-4631-8849-741c02b452e5",
-     "content": ""
+     "content": "",
+     "reasoningText": "sample"
     }
    }
   },
@@ -483,7 +490,8 @@
     "timestamp": "2026-09-22T19:18:23.880Z",
     "data": {
      "messageId": "ce5c14ac-61ea-4a03-8181-9b43d2c204cf",
-     "content": ""
+     "content": "",
+     "reasoningText": "sample"
     }
    }
   },
@@ -641,7 +649,8 @@
     "timestamp": "2026-09-22T19:18:28.290Z",
     "data": {
      "messageId": "f212e799-195f-4a95-85aa-9a2a5ee7e926",
-     "content": ""
+     "content": "",
+     "reasoningText": "sample"
     }
    }
   },
@@ -700,6 +709,7 @@
     "data": {
      "messageId": "d8b5d65c-dac8-4841-81b3-84f51d97639e",
      "content": "Sample reply 3.",
+     "reasoningText": "sample",
      "phase": "final_answer"
     }
    }
