@@ -5,7 +5,8 @@ import { codexHome } from "../home-paths.js";
 import path from "node:path";
 import { finished as streamFinished } from "node:stream/promises";
 import { fanoutRoot } from "./fanouts.js";
-import { findPane, paneIdentity, rpc, servers, snapshot } from "./herdr.js";
+import { findPane, paneIdentity, servers, snapshot } from "./herdr.js";
+import { terminalProvider } from "./terminal.js";
 import { atomic, atomicInPrivateDir, BridgeError, type Json } from "./protocol.js";
 import { logger } from "../logger.js";
 import { defaultPhrenPath } from "../shared.js";
@@ -51,7 +52,7 @@ async function launchInHerdr(server: string, context: ScheduleLaunchContext, lau
 async function promptWhenReady(server: string, paneId: string, text: string, signal: AbortSignal, waitMs = 60_000): Promise<void> {
   const deadline = Date.now() + waitMs;
   for (;;) {
-    try { await rpc(server, "agent.prompt", { target: paneId, text }, signal); return; }
+    try { await terminalProvider().prompt(server, paneId, text, signal); return; }
     catch (error) {
       const starting = error instanceof BridgeError && error.details?.herdrCode === "agent_not_ready";
       if (!starting || signal.aborted) throw error;

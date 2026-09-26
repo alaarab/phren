@@ -8,7 +8,8 @@ import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree
 import { fanoutWorktrees } from "./fanouts.js";
 import { gitWorktrees, resolveWorktree, type WorktreeWorker } from "./git-worktrees.js";
 import { gitCommit, gitPullRequest, gitPush } from "./git-publish.js";
-import { findPane, paneAgentName, paneChatState, paneIdentity, rpc, snapshot, startingPane, trustedDirectory, validateStartingTarget, validateTarget } from "./herdr.js";
+import { findPane, paneAgentName, paneChatState, paneIdentity, snapshot, startingPane, trustedDirectory, validateStartingTarget, validateTarget } from "./herdr.js";
+import { terminalProvider } from "./terminal.js";
 import { refuseWorkingSlash, type ModelSwitcher } from "./model-switch.js";
 import { sessionWebServers } from "./session-servers.js";
 import { repositoryDiff } from "./projects.js";
@@ -130,7 +131,7 @@ async function resubmitIfIdle(agentHooks: AgentHooks, target: Target, text: stri
   const status = async () => { try { return String(findPane(await snapshot(target.server), target)?.agent_status ?? "unknown"); } catch { return "unknown"; } };
   if (await status() === "working") return "pending";
   const late = agentHooks.awaitLateDelivery(target, text);
-  await rpc(target.server, "agent.send_keys", { target: target.pane, keys: ["enter"] });
+  await terminalProvider().sendKeys(target.server, target.pane, ["enter"]);
   const outcome = await late;
   if (outcome !== "pending") return outcome;
   return await status() === "working" ? "pending" : "unsubmitted";
@@ -179,7 +180,7 @@ async function submitStartingPrompt(server: string, target: { workspace: string;
   };
   const first = await settled();
   if (first !== "idle") return first !== "gone";
-  await rpc(server, "agent.send_keys", { target: target.pane, keys: ["enter"] });
+  await terminalProvider().sendKeys(server, target.pane, ["enter"]);
   const second = await settled();
   return second !== "idle" && second !== "gone";
 }
@@ -197,7 +198,7 @@ async function typeSecret(server: string, pane: string, text: string): Promise<v
   let sent = false;
   for (let index = 0; index < keys.length; index += 32) {
     try {
-      await rpc(server, "agent.send_keys", { target: pane, keys: keys.slice(index, index + 32) });
+      await terminalProvider().sendKeys(server, pane, keys.slice(index, index + 32));
       sent = true;
     } catch (error) {
       if (sent) throw new BridgeError(502, "The password may have been typed only partly; check the terminal.");
@@ -205,7 +206,7 @@ async function typeSecret(server: string, pane: string, text: string): Promise<v
     }
   }
   try {
-    await rpc(server, "agent.send_keys", { target: pane, keys: ["enter"] });
+    await terminalProvider().sendKeys(server, pane, ["enter"]);
   } catch (error) {
     if (sent) throw new BridgeError(502, "The password may have been typed only partly; check the terminal.");
     throw error;
@@ -222,7 +223,7 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     const pane = await startingPane(target);
     const keys = z.array(z.enum(ANSWER_KEYS)).min(1).max(4).parse(data.keys);
     if (!["blocked", "waiting", "unknown"].includes(String(pane.agent_status))) throw new BridgeError(409, "This agent is not waiting for an answer.");
-    await rpc(target.server, "agent.send_keys", { target: target.pane, keys: keys.map(key => HERDR_KEYS[key] ?? key) });
+    await terminalProvider().sendKeys(target.server, target.pane, keys.map(key => HERDR_KEYS[key] ?? key));
     result = { ok: true };
   } else if (url.pathname === "/v1/secret" && object(data.target).starting === true) {
     // A password the terminal is reading before the agent has a
@@ -238,7 +239,7 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     const pane = await validateStartingTarget(target);
     const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
     refuseWorkingSlash(pane, text);
-    await rpc(target.server, "agent.prompt", { target: target.pane, text });
+    await terminalProvider().prompt(target.server, target.pane, text);
     // A dispatched worker's brief is often long enough for Claude Code to
     // swallow the Enter; a slash command opens a menu an Enter would answer.
     const submitted = target.source !== "claude" || text.trim().startsWith("/")
@@ -291,7 +292,7 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     if (target.source === "codex" && /^\s*\/model\s+\S/i.test(text)) throw new BridgeError(422, "Use the model picker to switch Codex models.");
     const busy = String(pane.agent_status) === "working";
     const expected = agentHooks.expectDelivery(target, text, busy ? 300 : 1_500);
-    await rpc(target.server, "agent.prompt", { target: target.pane, text });
+    await terminalProvider().prompt(target.server, target.pane, text);
     let outcome: DeliveryOutcome | "unsubmitted" = await expected;
     // Only Claude confirms plain prompts through its hook, and a slash
     // command opens a menu that a second Enter would answer.
@@ -346,7 +347,7 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
       // Keyless choices move and verify the highlight before Enter;
       // the phone sends the option identifier through the same route.
       const answerKeys = await agentHooks.dialogAnswerKeys(target, keys);
-      await rpc(target.server, "agent.send_keys", { target: target.pane, keys: answerKeys.map(key => HERDR_KEYS[key] ?? key) });
+      await terminalProvider().sendKeys(target.server, target.pane, answerKeys.map(key => HERDR_KEYS[key] ?? key));
       // A remembered prompt is answered by any key but a cursor move; the
       // menu window stays open through Enter because some choices (Codex
       // full access) open a second confirmation the Hook now walks itself.

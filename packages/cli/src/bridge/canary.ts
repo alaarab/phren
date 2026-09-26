@@ -4,7 +4,8 @@ import path from "node:path";
 import { getProjectDirs } from "../phren-paths.js";
 import { listLiveSessions } from "./hand-off.js";
 import { canaryFile, type CanaryResult, type CanaryStep, readCanary } from "./health.js";
-import { paneIdentity, rpc, servers, snapshot } from "./herdr.js";
+import { paneIdentity, servers, snapshot } from "./herdr.js";
+import { terminalProvider } from "./terminal.js";
 import { atomic, BridgeError, bridgeRoot, id, type Json, objects, provider, type Provider } from "./protocol.js";
 import { readScheduleDocument } from "./schedules.js";
 import { TranscriptReader, transcriptPath } from "./transcripts.js";
@@ -46,7 +47,7 @@ async function closeCanaryWorkspaces(server: string, before: Set<string>, create
     && (workspace.workspace_id === created || workspace.label === CANARY_LABEL));
   for (const workspace of mine) {
     if (!id.safeParse(workspace.workspace_id).success) continue;
-    try { await rpc(server, "workspace.close", { workspace_id: workspace.workspace_id }); }
+    try { await terminalProvider().groupAction(server, "close", { workspace: String(workspace.workspace_id) }); }
     catch (error) { failures.push(`${String(workspace.workspace_id)}: ${reason(error)}`); }
   }
   return failures.length ? `cleanup failed for ${failures.join("; ")}` : undefined;

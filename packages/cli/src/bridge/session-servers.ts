@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
 import { open, stat } from "node:fs/promises";
 import { promisify } from "node:util";
-import { object, objects, type Json, type Provider } from "./protocol.js";
-import { rpc, snapshot } from "./herdr.js";
+import { objects, type Json, type Provider } from "./protocol.js";
+import { snapshot } from "./herdr.js";
+import { terminalProvider, type PaneProcesses } from "./terminal.js";
 import { webServers, type LocalServer } from "./projects.js";
 import { transcriptPath } from "./transcripts.js";
 
@@ -95,10 +96,8 @@ async function processTable(session: string): Promise<{ parents: Map<number, num
 }
 
 async function paneRoots(server: string, paneId: unknown): Promise<number[]> {
-  const answer: Json = await rpc(server, "pane.process_info", { pane_id: paneId }).catch(() => ({}));
-  const info = object(answer.process_info);
-  const pids = [info.shell_pid, ...objects(info.foreground_processes).map(process => process.pid)];
-  return pids.filter((pid): pid is number => Number.isSafeInteger(pid) && Number(pid) > 1);
+  const { shellPid, foregroundPids } = await terminalProvider().processes(server, String(paneId)).catch((): PaneProcesses => ({ foregroundPids: [] }));
+  return [shellPid, ...foregroundPids].filter((pid): pid is number => pid !== undefined && pid > 1);
 }
 
 /** Processes holding the transcript open: a background-job agent's own process. */
