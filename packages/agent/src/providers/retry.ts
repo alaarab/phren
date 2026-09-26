@@ -59,6 +59,16 @@ export function isContextOverflowError(error: unknown): boolean {
     || extractStatus(error) === 413;
 }
 
+/**
+ * A 429 that means "out of quota" (a subscription's weekly limit, an empty
+ * API balance) rather than "slow down". It resets in hours or never, so
+ * backing off for seconds only delays the error.
+ */
+export function isQuotaExhausted(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return /usage_limit_reached|insufficient_quota|insufficient[_ ]balance|exceeded your current quota|credit balance is too low/i.test(msg);
+}
+
 /** Wrap an async function with exponential backoff retry. */
 export async function withRetry<T>(
   fn: () => Promise<T>,
@@ -75,7 +85,8 @@ export async function withRetry<T>(
     } catch (error) {
       if (signal?.aborted) throw error;
       const status = extractStatus(error);
-      const isRetryable = (status !== null && cfg.retryableStatuses.has(status)) || isNetworkError(error);
+      const isRetryable = !isQuotaExhausted(error)
+        && ((status !== null && cfg.retryableStatuses.has(status)) || isNetworkError(error));
 
       if (!isRetryable || attempt >= cfg.maxRetries) {
         throw error;

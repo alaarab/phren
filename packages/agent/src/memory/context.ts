@@ -92,7 +92,11 @@ function collectRuleFiles(): { filePath: string; content: string }[] {
     dir = parent;
   }
 
-  read(path.resolve(os.homedir(), ".claude", "CLAUDE.md"));
+  // PHREN_AGENT_USER_RULES=off skips the user-level file (benchmarks and CI
+  // runs should not inherit one person's global instructions).
+  if (process.env.PHREN_AGENT_USER_RULES !== "off") {
+    read(path.resolve(os.homedir(), ".claude", "CLAUDE.md"));
+  }
 
   return results;
 }

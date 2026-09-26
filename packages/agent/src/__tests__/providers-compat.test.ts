@@ -100,6 +100,25 @@ describe("DeepSeek and OpenAI-compatible providers", () => {
   });
 });
 
+describe("Codex default model", () => {
+  let codexHome: string;
+  beforeEach(() => { codexHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-home-")); });
+  afterEach(() => fs.rmSync(codexHome, { recursive: true, force: true }));
+
+  it("follows the Codex CLI's configured model, ignoring table keys", async () => {
+    const { codexConfiguredModel } = await import("../providers/codex-auth.js");
+    fs.writeFileSync(path.join(codexHome, "config.toml"), 'model = "gpt-6-astra"\nmodel_reasoning_effort = "xhigh"\n[profiles.x]\nmodel = "other"\n');
+    expect(codexConfiguredModel(codexHome)).toBe("gpt-6-astra");
+  });
+
+  it("falls back to the first cached model, then to nothing", async () => {
+    const { codexConfiguredModel } = await import("../providers/codex-auth.js");
+    expect(codexConfiguredModel(codexHome)).toBeUndefined();
+    fs.writeFileSync(path.join(codexHome, "models_cache.json"), JSON.stringify({ models: [{ slug: "gpt-5.6-terra" }] }));
+    expect(codexConfiguredModel(codexHome)).toBe("gpt-5.6-terra");
+  });
+});
+
 describe("session listing and resume by id", () => {
   let store: string;
   beforeEach(() => {

@@ -4,7 +4,7 @@ import { AnthropicProvider } from "./anthropic.js";
 import { OllamaProvider } from "./ollama.js";
 import { CodexProvider } from "./codex.js";
 import { ReplayProvider } from "./replay.js";
-import { hasCodexToken } from "./codex-auth.js";
+import { codexConfiguredModel, hasCodexToken } from "./codex-auth.js";
 import { resolveApiKey } from "@phren/cli/auth/profiles";
 import {
   getDefaultModel,
@@ -86,7 +86,7 @@ export function resolveProvider(
 
   // Prefer Codex subscription and GPT-5.4 when available.
   if (explicit === "openai-codex" || (!explicit && hasCodexToken())) {
-    const model = normalizedModel ?? getDefaultModel("openai-codex");
+    const model = normalizedModel ?? codexConfiguredModel() ?? getDefaultModel("openai-codex");
     return new CodexProvider(model, resolveLimit("openai-codex", model), resolveReasoning("openai-codex", model));
   }
 

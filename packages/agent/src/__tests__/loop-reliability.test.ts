@@ -156,6 +156,28 @@ describe("context overflow recovery", () => {
   });
 });
 
+describe("quota errors are not retried", () => {
+  it("fails fast on a subscription usage limit but still retries a plain 429", async () => {
+    const { withRetry } = await import("../providers/retry.js");
+    let calls = 0;
+    const quota = withRetry(async () => {
+      calls++;
+      throw new Error('Codex API error 429: {"error":{"type":"usage_limit_reached","resets_in_seconds":34650}}');
+    }, { baseDelayMs: 1, maxDelayMs: 1 });
+    await expect(quota).rejects.toThrow(/usage_limit_reached/);
+    expect(calls).toBe(1);
+
+    let rateCalls = 0;
+    const rate = withRetry(async () => {
+      rateCalls++;
+      if (rateCalls < 2) throw new Error("OpenAI API error 429: rate limited");
+      return "ok";
+    }, { baseDelayMs: 1, maxDelayMs: 1 });
+    await expect(rate).resolves.toBe("ok");
+    expect(rateCalls).toBe(2);
+  });
+});
+
 describe("planPrune on a pure tool loop", () => {
   it("splits before an assistant message when no later user text exists", () => {
     const messages: LlmMessage[] = [{ role: "user", content: "task" }];

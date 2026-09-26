@@ -4,6 +4,9 @@
  */
 import * as crypto from "crypto";
 import * as http from "http";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import {
   authProfilesPath,
   getCodexAuthProfile,
@@ -232,6 +235,29 @@ export async function getAccessToken(): Promise<{ accessToken: string; accountId
   }
 
   return { accessToken: profile.accessToken, accountId: profile.accountId };
+}
+
+/**
+ * The model the Codex CLI itself is configured to use (`model = "…"` in
+ * $CODEX_HOME/config.toml), else the first model in its cached catalogue.
+ * ChatGPT accounts reject model ids the account is not offered, so the
+ * built-in default goes stale; the CLI's own choice is known to work.
+ */
+export function codexConfiguredModel(codexHome = process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex")): string | undefined {
+  try {
+    const toml = fs.readFileSync(path.join(codexHome, "config.toml"), "utf8");
+    // Top-level key only: stop at the first [table] header.
+    const top = toml.split(/^\s*\[/m)[0];
+    const match = top.match(/^\s*model\s*=\s*"([^"]+)"/m);
+    if (match) return match[1];
+  } catch { /* no config */ }
+  try {
+    const cache = JSON.parse(fs.readFileSync(path.join(codexHome, "models_cache.json"), "utf8")) as unknown;
+    const list = Array.isArray(cache) ? cache : (cache as { models?: unknown[] }).models;
+    const first = Array.isArray(list) ? (list[0] as { slug?: string; id?: string } | undefined) : undefined;
+    return first?.slug ?? first?.id;
+  } catch { /* no cache */ }
+  return undefined;
 }
 
 /** Check if user has a stored Codex token. */
