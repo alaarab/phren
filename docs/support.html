@@ -26,7 +26,7 @@
 
 <h2 id="first">Check these first</h2>
 <p>Most problems come down to one of these. On the computer, run:</p>
-<pre><code>npx --yes @phren/cli@0.3.4 bridge doctor</code></pre>
+<pre><code>npx --yes @phren/cli@0.3.5 bridge doctor</code></pre>
 <p>It checks Phren Hook, SSH, Herdr and the phone's authorization line, and says what to fix. Then check that:</p>
 <ol>
 <li>the computer is awake, and SSH is on (Remote Login on a Mac);</li>
@@ -40,7 +40,7 @@
 <ul>
 <li>Keep Tailscale connected on the phone and the computer when you are away from home. At home, check both are on the same network.</li>
 <li>Check SSH: on a Mac, System Settings → General → Sharing → Remote Login. On Linux, <code>sudo systemctl enable --now sshd</code>.</li>
-<li>Run <code>bridge doctor</code> (above). If Phren Hook is not installed or not running, install it again with <code>npx --yes @phren/cli@0.3.4 bridge install</code>.</li>
+<li>Run <code>bridge doctor</code> (above). If Phren Hook is not installed or not running, install it again with <code>npx --yes @phren/cli@0.3.5 bridge install</code>.</li>
 <li>On Linux, run <code>loginctl enable-linger $USER</code> if Phren Hook should keep running after you log out.</li>
 <li>Logs: <code>~/.local/share/phren/bridge/service.log</code> on a Mac, <code>journalctl --user -u phren-hook</code> on Linux.</li>
 </ul>
