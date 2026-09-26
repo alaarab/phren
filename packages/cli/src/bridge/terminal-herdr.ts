@@ -23,6 +23,7 @@ export function herdrPanes(server: string, s: Json): TerminalPane[] {
 export const herdrTerminal: TerminalProvider = {
   kind: "herdr",
   async ping(server) { await rpc(server, "ping"); },
+  async snapshot(server) { return object((await rpc(server, "session.snapshot")).snapshot); },
   async listPanes(server) { return herdrPanes(server, await snapshot(server)); },
   async processes(server, pane): Promise<PaneProcesses> {
     const info = object((await rpc(server, "pane.process_info", { pane_id: pane })).process_info);

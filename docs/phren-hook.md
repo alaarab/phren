@@ -7,8 +7,9 @@ other phone or terminal applications.
 
 ## Install on each computer
 
-Requires macOS or Linux, Node 20 or newer, Herdr, SSH, and `lsof`. Linux uses a
-systemd user service; macOS uses a LaunchAgent in your signed-in user session.
+Requires macOS or Linux, Node 20 or newer, Herdr or tmux 3.0+, SSH, and `lsof`.
+Linux uses a systemd user service; macOS uses a LaunchAgent in your signed-in
+user session. Without Herdr the Hook uses tmux; see [Without Herdr: tmux](#without-herdr-tmux).
 
 ```sh
 npx --yes @phren/cli@0.3.4 bridge install
@@ -117,8 +118,10 @@ No extra request per iPhone row is needed.
 - Chat history, incremental transcript updates, real token counts, image uploads,
   stop, and project context from Phren's memory and skills.
 - Native Herdr terminals, named servers, workspaces, tabs, and pane navigation.
-- Without Herdr: "Open a terminal instead" starts a shell or the chosen agent
-  straight over SSH in the project folder. Terminal only; it ends with the
+- Without Herdr, tmux: Claude Code sessions in your own tmux, and sessions the
+  phone starts in a hidden tmux server (see below).
+- Without Herdr or tmux: "Open a terminal instead" starts a shell or the chosen
+  agent straight over SSH in the project folder. Terminal only; it ends with the
   connection and has no chat, transcript, or approvals.
 - Codex/Claude approvals through Phren's lifecycle callbacks while you watch a
   conversation or the foreground session overview. Codex asynchronous questions
@@ -252,6 +255,46 @@ twice a second, stay out of history, and give way to the completed entry. Chat
 sends steering to working harnesses immediately and reads their queued state
 from transcripts. Local pending bubbles identify a connection, startup or held
 prompt that prevents delivery.
+
+### Without Herdr: tmux
+
+When no Herdr server answers and `tmux` (3.0 or newer) is installed, the Hook
+drives tmux instead. Install tmux, run `phren bridge install`, and the phone
+lists two servers:
+
+- `tmux`: your own tmux server (the default socket), while it runs. Claude Code
+  sessions you start there with `ssh server` then `tmux` then `claude` show up in
+  the phone's list with chat, status, approvals and the terminal.
+- `tmux-phren`: a hidden tmux server on its own socket, where sessions the phone
+  starts run. It starts with the first launch. Each launch is a tmux session
+  named after it, with the agent started under your login shell in the project
+  folder; when the agent exits the pane keeps a shell. To look at it on the
+  computer: `tmux -L phren attach` (detach with `Ctrl-b d`; the agents keep
+  running).
+
+What works, for Claude Code (and Codex, which reports the same lifecycle events):
+
+- Discovery: the Hook lists every pane with `tmux list-panes -a` and names the
+  agent from the pane's foreground processes (`ps`), not from tmux.
+- Identity: from the SessionStart, UserPromptSubmit, Stop and PermissionRequest
+  callbacks Phren installs for Claude Code, which record the pane's conversation,
+  and from the transcript the agent's process holds open (`lsof`).
+- Status: the last callback event. A submitted prompt or a tool call is working,
+  a finished turn or a new session idle, a permission request blocked until it
+  is answered from the phone or its dialog leaves the terminal. Before the first
+  event (a folder-trust screen, or a session started before the Hook was
+  installed) the status is unknown and sending waits; type anything in the
+  terminal, or answer the screen from the phone, to start it.
+- Chat, sends (pasted as one bracketed paste, then Enter), keys, approvals, the
+  terminal (`phren-hook v1 terminal tmux` attaches the phone's SSH terminal to
+  the server), and launching Claude Code, Codex, Copilot or OpenCode into
+  `tmux-phren`.
+
+Not yet: status for OpenCode and Copilot panes (they count as idle), approval
+dialogs drawn without a PermissionRequest callback (Claude's auto-mode
+fallback, Codex, OpenCode and Copilot terminal dialogs) while the pane is not
+already marked blocked, and tmux servers on sockets other than the two above.
+`PHREN_TMUX=off` keeps the Hook on Herdr alone.
 
 ## Maintain and diagnose
 

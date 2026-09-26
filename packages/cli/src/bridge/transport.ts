@@ -7,7 +7,8 @@ import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
 import { BridgeError, object, PROTOCOL, serverName, socketPath, bridgeRoot, atomic, type Json } from "./protocol.js";
-import { terminalProvider } from "./terminal.js";
+import { terminalKind, terminalProvider } from "./terminal.js";
+import { tmuxAttach } from "./terminal-tmux.js";
 import { launchDirectory } from "./projects.js";
 
 /** Decode the base64url project folder from a `phren-hook v1 shell` command; undefined when it is not a path. */
@@ -19,7 +20,7 @@ export function decodeShellDirectory(encoded: string): string | undefined {
   return path.isAbsolute(dir) && !/[\x00-\x1f\x7f]/.test(dir) && !dir.includes("\ufffd") ? dir : undefined;
 }
 export function shellEnvironment(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const env = Object.fromEntries(Object.entries(base).filter(([key]) => !key.startsWith("HERDR_")));
+  const env = Object.fromEntries(Object.entries(base).filter(([key]) => !key.startsWith("HERDR_") && key !== "TMUX" && key !== "TMUX_PANE"));
   env.PATH = [path.join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"].join(":");
   return env;
 }
@@ -106,12 +107,17 @@ export async function dispatch(command: string): Promise<void> {
     return;
   }
   const terminal = /^phren-hook v1 terminal ([A-Za-z0-9_.-]{1,100})$/.exec(command);
-  if (!terminal || terminal[0] !== command) throw new BridgeError(403, "This SSH key only permits Phren Hook, loopback web previews, project shells, and existing Herdr terminals.");
+  if (!terminal || terminal[0] !== command) throw new BridgeError(403, "This SSH key only permits Phren Hook, loopback web previews, project shells, and existing Herdr or tmux terminals.");
   requireHook();
   const server = serverName.parse(terminal[1]);
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Request an SSH terminal first.");
   // Verify the named server exists; never create a workspace or an agent implicitly.
   await terminalProvider().ping(server);
+  if (terminalKind(server) === "tmux") {
+    const { file, args } = tmuxAttach(server);
+    await attach(file, args, { env: shellEnvironment() }, "The tmux terminal disconnected.");
+    return;
+  }
   await attach("herdr", ["session", "attach", server], { env: shellEnvironment() }, "The Herdr terminal disconnected.");
 }
 

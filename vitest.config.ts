@@ -29,6 +29,9 @@ export default defineConfig({
     pool: "forks",
     fileParallelism: true,
     testTimeout: 15000,
+    // A developer or CI machine with tmux installed must not turn every
+    // "no Herdr running" test into a tmux one; tmux tests opt back in.
+    env: { PHREN_TMUX: "off" },
     include: [
       "packages/cli/src/**/*.test.ts",
       "packages/code/src/**/*.test.ts",
