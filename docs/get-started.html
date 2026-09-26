@@ -97,7 +97,7 @@ It installs Phren Hook if it is missing and prints a QR code. The app shows the 
 <li><strong>The phone can't reach the computer</strong>: put both on the same Wi-Fi, or turn on Tailscale on both (step 4).</li>
 <li>You prefer to set up SSH yourself: under Add computer choose <strong>Enter details</strong>, copy the line the app shows into <code>~/.ssh/authorized_keys</code>, then confirm the fingerprint. The <a href="phren-hook.html">Phren Hook page</a> covers this.</li>
 </ul>
-<p>To check the helper at any time, run <code>npx --yes @phren/cli@0.3.5 bridge doctor</code> on the computer.</p>
+<p>To check the helper at any time, run <code>npx --yes @phren/cli@0.3.6 bridge doctor</code> on the computer.</p>
 </section>
 
 <section class="step" id="away">
@@ -150,7 +150,7 @@ It installs Phren Hook if it is missing and prints a QR code. The app shows the 
 <span class="label fail">If it fails</span>
 <ul>
 <li><strong>No sessions show up</strong>: check that the agent runs inside Herdr (or tmux, on a computer without Herdr), not a plain terminal window.</li>
-<li><strong>OpenCode sessions don't show chat</strong>: turn on Herdr's OpenCode integration, or update the computer to phren 0.3.5 or later, whose OpenCode plugin reports the session itself. Then restart OpenCode.</li>
+<li><strong>OpenCode sessions don't show chat</strong>: turn on Herdr's OpenCode integration, or update the computer to phren 0.3.6 or later, whose OpenCode plugin reports the session itself. Then restart OpenCode.</li>
 </ul>
 </section>
 

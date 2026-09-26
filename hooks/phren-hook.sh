@@ -25,7 +25,7 @@ case "$EVENT" in
 esac
 
 # Kept in step with packages/cli/package.json by scripts/validate-docs.sh.
-PHREN_PIN="0.3.5"
+PHREN_PIN="0.3.6"
 
 standdown() {
   # Drain stdin so Claude Code never sees a broken pipe, then exit quietly.
