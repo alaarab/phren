@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - Hook: agents in your own tmux sessions show up on the phone while Herdr is also running. The Hook used to look at tmux only when no Herdr server answered, so `tmux new -s app` then `codex` over ssh stayed invisible on a computer with Herdr. Phone launches still go to Herdr, and the hidden `tmux-phren` server is listed only without Herdr.
+- Codex 0.157 chats open on the phone again. Codex now runs conversations in a shared background daemon, so the pane's own `codex` process holds no transcript and the chat stayed on "Starting Codex" or failed with "This pane's conversation changed. Reopen the chat." The Hook now finds the conversation the daemon runs for the pane by its folder and by when the pane's Codex started, and follows `/new` and `/resume` in the only Codex pane of a folder.
+- Codex callbacks that run inside that daemon no longer bind the conversation to the pane that first started the daemon. Approvals and prompt checks go to the pane that shows the conversation, and a wrong binding left by an earlier Hook is ignored.
 
 ## [0.3.7] - 2026-09-26
 

@@ -117,6 +117,17 @@ No extra request per iPhone row is needed.
   opencode is supported too: its session ids are `ses_…`, identity comes from
   Herdr's opencode integration, and a Phren-installed opencode plugin mirrors the
   session into the same `.runtime/sessions` event log.
+  Codex 0.157 and later run conversations in one shared background daemon
+  (`codex app-server`), so the pane's own `codex` process holds no rollout and
+  Codex's callbacks run inside the daemon with the environment of whichever
+  pane first started it. For such a pane the Hook reads the rollouts the
+  daemon holds open (else today's and yesterday's in `~/.codex/sessions`) and
+  picks the conversation whose `session_meta` folder is the pane's and that
+  began after the pane's Codex started. The only Codex pane in a folder follows
+  its most recently active conversation, so `/new` and `/resume` follow too;
+  several Codex panes in one folder each take the earliest conversation begun
+  after they started. A callback from inside the daemon is placed on the pane
+  that shows its conversation and never records a pane binding.
 - Chat history, incremental transcript updates, real token counts, image uploads,
   stop, and project context from Phren's memory and skills.
 - Native Herdr terminals, named servers, workspaces, tabs, and pane navigation.
@@ -291,6 +302,7 @@ What works:
 - Identity: from the SessionStart, UserPromptSubmit, Stop and PermissionRequest
   callbacks Phren installs for Claude Code and Codex, which record the pane's
   conversation, from the transcript the agent's process holds open (`lsof`),
+  from the rollout a Codex app-server daemon holds for the pane's folder,
   from the conversation phren's OpenCode plugin records per process, and from
   Copilot's process log.
 - Status, per harness:
