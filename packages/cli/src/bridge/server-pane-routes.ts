@@ -18,6 +18,7 @@ import type { CodexQuestions } from "./questions.js";
 import { childAgent, childAgentTree, conversationNamedPaths, transcriptPath, type ChildAgentRelation } from "./transcripts.js";
 import { sideQuestionText, type SideQuestions } from "./side-questions.js";
 import { saveUpload } from "./uploads.js";
+import { deliveryIdSchema, PromptOnce, promptScope } from "./prompt-once.js";
 
 /** Routes that act on one pane's conversation: prompts, answer keys, typed
  * secrets, uploads, diffs, git, approvals and questions. A starting pane (no
@@ -213,7 +214,18 @@ async function typeSecret(server: string, pane: string, text: string): Promise<v
   }
 }
 
+const promptOnce = new PromptOnce();
+
 export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse): Promise<unknown> {
+  if (url.pathname !== "/v1/prompt") return paneRouteOnce(ctx, url, data, response, () => {});
+  // A retried send carries its first attempt's id; the Hook answers it with
+  // that attempt's reply instead of typing the message a second time.
+  const id = deliveryIdSchema.parse(data.deliveryId);
+  return promptOnce.run(id, promptScope(object(data.target), String(data.text ?? "")),
+    async typing => object(await paneRouteOnce(ctx, url, data, response, typing)));
+}
+
+async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse, typing: () => void): Promise<unknown> {
   const { agentHooks, modelSwitcher, codexQuestions, sideQuestions } = ctx;
   let result: unknown;
   if (url.pathname === "/v1/keys" && object(data.target).starting === true) {
@@ -239,6 +251,7 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     const pane = await validateStartingTarget(target);
     const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
     refuseWorkingSlash(pane, text);
+    typing();
     await terminalProvider().prompt(target.server, target.pane, text);
     // A dispatched worker's brief is often long enough for Claude Code to
     // swallow the Enter; a slash command opens a menu an Enter would answer.
@@ -287,11 +300,13 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     if (sideQuestionText(target.source, text) !== undefined) {
       // Claude's `/btw` runs beside the turn and never reaches the transcript:
       // the Hook reads its panel and the answer arrives as a side-answer frame.
+      typing();
       return { ok: true, delivered: true, sideQuestion: await sideQuestions.ask(target, pane, text) };
     }
     if (target.source === "codex" && /^\s*\/model\s+\S/i.test(text)) throw new BridgeError(422, "Use the model picker to switch Codex models.");
     const busy = String(pane.agent_status) === "working";
     const expected = agentHooks.expectDelivery(target, text, busy ? 300 : 1_500);
+    typing();
     await terminalProvider().prompt(target.server, target.pane, text);
     let outcome: DeliveryOutcome | "unsubmitted" = await expected;
     // Only Claude confirms plain prompts through its hook, and a slash
