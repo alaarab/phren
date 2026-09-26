@@ -95,6 +95,10 @@ otherwise use and report the remote configured default. Each remote lead owns
 its local checkouts, fanout and provider rate limits. Where installed, local
 workers use the fanout wrapper's `scripts/run.sh --provider codex|opencode
 --label --worktree [--model] [--mode]` contract and parent-bound manifests.
+Tell every lead the same: a worker started any other way (its own `opencode
+run` or `codex exec`, a launch script, nohup) has no manifest, so the phone and
+you cannot see, resume or review it. Workers that exist only as processes do
+not count as dispatched.
 
 Prefer handing work to a session that already owns the project and is idle or
 doing related work; call `hand_off` in full or `phren_admin(action: "hand_off",
