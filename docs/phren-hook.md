@@ -118,8 +118,9 @@ No extra request per iPhone row is needed.
 - Chat history, incremental transcript updates, real token counts, image uploads,
   stop, and project context from Phren's memory and skills.
 - Native Herdr terminals, named servers, workspaces, tabs, and pane navigation.
-- Without Herdr, tmux: Claude Code sessions in your own tmux, and sessions the
-  phone starts in a hidden tmux server (see below).
+- Without Herdr, tmux: Claude Code, Codex, OpenCode, Copilot and phren-agent
+  sessions in your own tmux servers, and sessions the phone starts in a hidden
+  tmux server (see below).
 - Without Herdr or tmux: "Open a terminal instead" starts a shell or the chosen
   agent straight over SSH in the project folder. Terminal only; it ends with the
   connection and has no chat, transcript, or approvals.
@@ -260,11 +261,15 @@ prompt that prevents delivery.
 
 When no Herdr server answers and `tmux` (3.0 or newer) is installed, the Hook
 drives tmux instead. Install tmux, run `phren bridge install`, and the phone
-lists two servers:
+lists your tmux servers:
 
-- `tmux`: your own tmux server (the default socket), while it runs. Claude Code
-  sessions you start there with `ssh server` then `tmux` then `claude` show up in
-  the phone's list with chat, status, approvals and the terminal.
+- `tmux`: your own tmux server (the default socket), while it runs. Agent
+  sessions you start there with `ssh server` then `tmux` then `claude` show up
+  in the phone's list with chat, status, approvals and the terminal.
+- `tmux-<name>`: any other tmux server of yours that answers, such as one
+  started with `tmux -L work` (`tmux-work`). The Hook looks for sockets in
+  `$TMUX_TMPDIR/tmux-<uid>/` and `/tmp/tmux-<uid>/`, at most 16 servers.
+  A server started with `tmux -S <path>` elsewhere is not found.
 - `tmux-phren`: a hidden tmux server on its own socket, where sessions the phone
   starts run. It starts with the first launch. Each launch is a tmux session
   named after it, with the agent started under your login shell in the project
@@ -272,29 +277,57 @@ lists two servers:
   computer: `tmux -L phren attach` (detach with `Ctrl-b d`; the agents keep
   running).
 
-What works, for Claude Code (and Codex, which reports the same lifecycle events):
+What works:
 
 - Discovery: the Hook lists every pane with `tmux list-panes -a` and names the
   agent from the pane's foreground processes (`ps`), not from tmux.
 - Identity: from the SessionStart, UserPromptSubmit, Stop and PermissionRequest
-  callbacks Phren installs for Claude Code, which record the pane's conversation,
-  and from the transcript the agent's process holds open (`lsof`).
-- Status: the last callback event. A submitted prompt or a tool call is working,
-  a finished turn or a new session idle, a permission request blocked until it
-  is answered from the phone or its dialog leaves the terminal. Before the first
-  event (a folder-trust screen, or a session started before the Hook was
-  installed) the status is unknown and sending waits; type anything in the
-  terminal, or answer the screen from the phone, to start it.
+  callbacks Phren installs for Claude Code and Codex, which record the pane's
+  conversation, from the transcript the agent's process holds open (`lsof`),
+  from the conversation phren's OpenCode plugin records per process, and from
+  Copilot's process log.
+- Status, per harness:
+  - Claude Code, Codex and phren-agent: the last callback event. A submitted
+    prompt or a tool call is working, a finished turn or a new session idle, a
+    permission request blocked until it is answered from the phone or its
+    dialog leaves the terminal. Before the first event (a folder-trust screen,
+    or a session started before the Hook was installed) Claude and Codex show
+    unknown and sending waits; type anything in the terminal, or answer the
+    screen from the phone, to start it. phren-agent shows idle until its first
+    event.
+  - OpenCode: what phren's OpenCode plugin records for the process
+    (`.runtime/sessions/opencode-status-<pid>.json` in the store) from
+    OpenCode's own busy/idle and permission events. Restart OpenCode sessions
+    started before this update so they load the new plugin; until then they
+    show idle.
+  - Copilot: its session log (`~/.copilot/session-state/<id>/events.jsonl`).
+    A prompt is working, a permission request blocked until it completes, the
+    turn that ends with the final answer (or `session.idle`, an abort) idle.
+- Dialogs without a callback: Claude's auto-mode fallback and Codex, OpenCode
+  and Copilot terminal dialogs have no PermissionRequest behind them. While a
+  pane is working, the Hook reads its screen at most once every 3 seconds
+  (`PHREN_DIALOG_THROTTLE_MS`); a dialog there marks the pane blocked, which
+  puts the question on the phone, and the pane goes back to working when the
+  dialog is gone. Only a harness's own dialog counts: Claude's and phren-agent's
+  numbered rows with their "Esc to cancel" footer, Codex's and Copilot's
+  choice rows, OpenCode's "Permission required" prompt.
 - Chat, sends (pasted as one bracketed paste, then Enter), keys, approvals, the
   terminal (`phren-hook v1 terminal tmux` attaches the phone's SSH terminal to
   the server), and launching Claude Code, Codex, Copilot or OpenCode into
   `tmux-phren`.
+- Dispatch: `phren dispatch` and the `dispatch` MCP tool, run from an agent in
+  a tmux pane, remember that pane (from `TMUX` and `TMUX_PANE`) for the
+  workers' return notices, as they do in Herdr.
+- Diagnosis: `phren bridge doctor` prints a `terminal` section (the provider
+  each running server uses, the tmux version, whether it can start agents, the
+  owner's servers and whether the hidden server runs), and `phren status` and
+  the Hook's `/v1/health/details` carry the same. `phren canary` starts its
+  test conductor in `tmux-phren` when there is no Herdr.
 
-Not yet: status for OpenCode and Copilot panes (they count as idle), approval
-dialogs drawn without a PermissionRequest callback (Claude's auto-mode
-fallback, Codex, OpenCode and Copilot terminal dialogs) while the pane is not
-already marked blocked, and tmux servers on sockets other than the two above.
-`PHREN_TMUX=off` keeps the Hook on Herdr alone.
+Not verified yet: a real Claude Code, Codex, Copilot or OpenCode on tmux end to
+end with the phone (automated tests drive a real tmux with stand-in agents), and
+the phone's terminal attach over SSH. `PHREN_TMUX=off` keeps the Hook on Herdr
+alone.
 
 ## Maintain and diagnose
 

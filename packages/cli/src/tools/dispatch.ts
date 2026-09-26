@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { hookRequest } from "../bridge/client.js";
 import { dispatchSchema } from "../bridge/dispatch.js";
 import { handOff, handOffSchema, listLiveSessions } from "../bridge/hand-off.js";
-import { herdrPaneFromEnv } from "../bridge/herdr.js";
+import { terminalPaneFromEnv } from "../bridge/terminal.js";
 import { mcpResponse } from "./types.js";
 
 export function register(server: McpServer): void {
@@ -13,7 +13,7 @@ export function register(server: McpServer): void {
   }, async input => {
     try {
       // The pane this agent runs in receives the one-line return notices.
-      const origin = herdrPaneFromEnv();
+      const origin = await terminalPaneFromEnv();
       const result = await hookRequest("/v1/dispatch", { ...input, ...(origin ? { origin } : {}) }, undefined, 180_000);
       return mcpResponse({ ok: result.ok === true, data: result, message: `${result.computer}: ${result.state}.` });
     } catch (error) {

@@ -22,6 +22,11 @@ describe("Herdr lifecycle hooks", () => {
     const runner = (_: string, args: string[]) => { calls.push(args); };
     expect(herdrHookBundle({ PHREN_BRIDGE_HOME: home })).toBeNull();
     expect(herdrHookBundle({ HERDR_ENV: "1", PHREN_BRIDGE_HOME: home })).toBeNull();
+    expect(herdrHookBundle({ TMUX: "/tmp/tmux-501/default,1,0", PHREN_BRIDGE_HOME: home })).toBeNull();
+    // Inside Herdr only Herdr's pane counts, as in the Hook.
+    expect(herdrHookBundle({ HERDR_ENV: "1", TMUX: "/tmp/tmux-501/default,1,0", TMUX_PANE: "%1", PHREN_BRIDGE_HOME: home })).toBeNull();
+    // A tmux pane on a computer without Herdr reports too.
+    expect(herdrHookBundle({ TMUX: "/tmp/tmux-501/default,1,0", TMUX_PANE: "%3", PHREN_BRIDGE_HOME: home })).toBe(path.join(home, "current/bridge-hook.mjs"));
     expect(emitHerdrHook("SessionStart", { sessionId: session, env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1", PHREN_BRIDGE_HOME: bridgeHome(false) }, runner })).toBeNull();
     expect(emitHerdrHook("SessionStart", { sessionId: null, env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1", PHREN_BRIDGE_HOME: home }, runner })).toBeNull();
     expect(calls).toEqual([]);

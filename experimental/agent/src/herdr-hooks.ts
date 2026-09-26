@@ -1,5 +1,6 @@
 /**
- * Lifecycle reports to Phren Hook when phren-agent runs inside a Herdr pane.
+ * Lifecycle reports to Phren Hook when phren-agent runs inside a Herdr pane,
+ * or a tmux pane on a computer without Herdr.
  *
  * Codex, Claude Code and Copilot deliver these through their own hook
  * settings (`phren bridge install` edits them); phren-agent has no settings
@@ -21,9 +22,13 @@ export interface HerdrHookRunner {
 
 const HOOK_TIMEOUT_MS = 3000;
 
-/** The bundle to call, or null when this process is not under Herdr or nothing is installed. */
+/** The bundle to call, or null when this process is in neither a Herdr nor a
+ * tmux pane, or nothing is installed. The Hook finds the pane from the same
+ * variables; inside Herdr only Herdr's pane counts. */
 export function herdrHookBundle(env: NodeJS.ProcessEnv = process.env): string | null {
-  if (env.HERDR_ENV !== "1" || !env.HERDR_PANE_ID) return null;
+  const herdr = env.HERDR_ENV === "1" && !!env.HERDR_PANE_ID;
+  const tmux = env.HERDR_ENV !== "1" && !!env.TMUX && !!env.TMUX_PANE;
+  if (!herdr && !tmux) return null;
   const root = env.PHREN_BRIDGE_HOME || path.join(os.homedir(), ".local/share/phren/bridge");
   const bundle = path.join(root, "current/bridge-hook.mjs");
   try {
