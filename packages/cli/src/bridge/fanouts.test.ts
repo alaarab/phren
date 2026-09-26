@@ -356,12 +356,17 @@ describe("fan-out archive sweep", () => {
   it("caps the archive at 500 folders and deletes the oldest", async () => {
     const { root, env, archive } = await store();
     await mkdir(archive, { recursive: true });
-    for (let index = 0; index < ARCHIVE_MAX_FOLDERS; index++) {
+    // 1,500 file operations: one at a time they outlasted the 15 s timeout on
+    // Windows, so the folders are made in parallel batches.
+    const keep = async (index: number) => {
       const directory = path.join(archive, `kept-${String(index).padStart(3, "0")}`);
       await mkdir(directory);
       await writeFile(path.join(directory, "exit.txt"), "0\n");
       const stamp = new Date(Date.now() - 40 * 24 * HOUR_MS + index * 60_000);
       await utimes(path.join(directory, "exit.txt"), stamp, stamp);
+    };
+    for (let index = 0; index < ARCHIVE_MAX_FOLDERS; index += 50) {
+      await Promise.all(Array.from({ length: Math.min(50, ARCHIVE_MAX_FOLDERS - index) }, (_, offset) => keep(index + offset)));
     }
     await archiveJob(root, "job-in",
       { manifest: { status: "completed", finishedAt: new Date(Date.now() - 25 * HOUR_MS).toISOString() },

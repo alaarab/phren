@@ -548,7 +548,15 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
     await resetRecord();
     egressTargets = [];
     egress = createHttpServer();
-    egress.on("connect", (req, socket) => { egressTargets.push(String(req.url)); socket.end("HTTP/1.1 403 Forbidden\r\n\r\n"); });
+    egress.on("connect", (req, socket) => {
+      egressTargets.push(String(req.url));
+      // A CONNECT socket leaves the HTTP server with no 'error' listener. The
+      // Hook's fetch resets it after reading the 403 (chatgpt.com usage,
+      // models.opencode.ai), which would otherwise surface as an uncaught
+      // `read ECONNRESET` in the test worker.
+      socket.on("error", () => {});
+      socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+    });
     await new Promise<void>(resolve => egress!.listen(0, "127.0.0.1", resolve));
     herdr = createNetServer(socket => {
       herdrSockets.add(socket); socket.on("close", () => herdrSockets.delete(socket));

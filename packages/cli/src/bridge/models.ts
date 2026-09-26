@@ -153,7 +153,7 @@ function claudeVersion(executable = "claude"): Promise<string | undefined> {
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => { if (out.length < 4_096) out += chunk; });
     child.on("error", () => { clearTimeout(timer); resolve(undefined); });
-    child.on("exit", () => { clearTimeout(timer); resolve(/\d+\.\d+\.\d+/.exec(out)?.[0]); });
+    child.on("close", () => { clearTimeout(timer); resolve(/\d+\.\d+\.\d+/.exec(out)?.[0]); });
   });
 }
 
@@ -176,7 +176,8 @@ export async function readOpenCodeModels(executable = "opencode", configDir = pa
     const timer = setTimeout(() => { child.kill("SIGTERM"); finish(); }, 12_000);
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => { if (out.length < 262_144) out += chunk; });
-    child.on("error", finish); child.on("exit", finish);
+    // "close", not "exit": the process can exit before its stdout is read.
+    child.on("error", finish); child.on("close", finish);
   });
   const ids = [...new Set(listed.split(/\r?\n/).map(line => line.trim()).filter(line => /^[a-z0-9~.-]+\/[^\s]+$/i.test(line)))].slice(0, 400);
   if (!ids.length) return [];
