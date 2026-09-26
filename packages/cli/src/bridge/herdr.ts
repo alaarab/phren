@@ -129,8 +129,10 @@ export async function servers(): Promise<Json[]> {
     catch { return null; }
   }));
   const running: Json[] = results.filter((v): v is NonNullable<typeof v> => v !== null);
-  // Without a running Herdr, tmux: the owner's server and the Hook's hidden one.
-  if (!running.length) running.push(...await import("./terminal-tmux.js").then(tmux => tmux.tmuxServers()).catch(() => []));
+  // The owner's own tmux servers always: agents started with `tmux` beside a
+  // running Herdr show up too. The Hook's hidden server only without Herdr,
+  // where phone launches go; with Herdr they go to Herdr.
+  running.push(...await import("./terminal-tmux.js").then(tmux => tmux.tmuxServers({ hidden: !running.length })).catch(() => []));
   knownServers = running.map(server => String(server.session));
   return running;
 }

@@ -279,6 +279,11 @@ lists your tmux servers:
   computer: `tmux -L phren attach` (detach with `Ctrl-b d`; the agents keep
   running).
 
+With Herdr running as well, your own tmux servers (`tmux`, `tmux-<name>`) are
+listed beside it, so an agent started over ssh with `tmux new -s app` then
+`codex` shows up next to your Herdr sessions. Phone launches still go to Herdr,
+and `tmux-phren` is not listed.
+
 What works:
 
 - Discovery: the Hook lists every pane with `tmux list-panes -a` and names the
