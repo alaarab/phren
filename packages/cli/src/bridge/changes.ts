@@ -183,11 +183,16 @@ export class ToolChanges {
   private results = new Map<string, CachedChanges>();
   private controllers = new Set<AbortController>();
   private claims: Claim[] = [];
+  /** A hook callback's wall-clock cap on Git work; past it the call records
+   * no change. Tests about what is captured raise it, since a loaded Windows
+   * runner's Git can take longer than a person's machine ever does. */
+  private readonly budgetMs: number;
+  constructor(options: { budgetMs?: number } = {}) { this.budgetMs = options.budgetMs ?? BUDGET; }
 
   private file(conversation: string) { return path.join(bridgeRoot(), "changes", conversation.replace(/[^A-Za-z0-9._-]/g, "_") + ".jsonl"); }
   private async budget<T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const controller = new AbortController(); this.controllers.add(controller);
-    const timer = setTimeout(() => controller.abort(), BUDGET);
+    const timer = setTimeout(() => controller.abort(), this.budgetMs);
     try { return await work(controller.signal); }
     finally { clearTimeout(timer); this.controllers.delete(controller); }
   }
