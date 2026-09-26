@@ -9,7 +9,8 @@ import { materializeCodexThread, materializedRoot } from "./codex-threads.js";
 import { namedPaths, SHELL_TOOLS, outputCallIds, type ChangeLookup } from "./changes.js";
 import { fanoutChildren } from "./fanouts.js";
 import { claudeChildAgents, visibleClaudeEvent } from "./transcript-claude.js";
-import { childTranscriptBelongsTo, directChildAgents, projectCodexRow, rewriteProjectedOutput, visibleCodexEvent } from "./transcript-codex.js";
+import { childTranscriptBelongsTo, codeModeOutputCall, directChildAgents, findCodeModeCall, projectCodeModeOutput, projectCodexRow,
+  rewriteProjectedOutput, visibleCodexEvent } from "./transcript-codex.js";
 import { visibleCopilotEvent } from "./transcript-copilot.js";
 import { visibleOpencodeEvent } from "./transcript-opencode.js";
 
@@ -276,6 +277,10 @@ export class TranscriptReader {
           // A child agent's transcript is the sidechain. Its rows are that
           // conversation's own turns, not something for the reader to skip.
           if (raw && this.includeSidechain && raw.isSidechain === true) { const { isSidechain: _sidechain, ...own } = raw; raw = own; }
+          // A code-mode script's result follows from the script it answers,
+          // a few rows earlier: hidden when its items carry the actions.
+          const codeModeCall = raw && this.source === "codex" ? codeModeOutputCall(raw) : undefined;
+          if (raw && codeModeCall) raw = projectCodeModeOutput(raw, await findCodeModeCall((upper, lower) => index.rows(handle, upper, lower, signal), row.line, codeModeCall));
           if (raw) {
             if (this.changes && this.imageLine === undefined) {
               // A shell call's output carries what it changed on disk. While
