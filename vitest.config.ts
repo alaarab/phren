@@ -37,11 +37,10 @@ export default defineConfig({
       "packages/code/src/**/*.test.ts",
       "packages/push-relay/src/**/*.test.ts",
       "packages/vscode/test/**/*.test.ts",
-      // experimental/agent is a private, unshipped R&D package (21.4K LOC,
-      // 3 commits in 3.5 months) — its 331 tests are intentionally excluded
-      // from the default `pnpm test` run. Its own vitest.config.ts still
-      // covers it: run `pnpm --filter @phren/agent test` on demand, or see
-      // experimental/agent/README.md.
+      // packages/agent (@phren/agent) is not listed: its suite runs under its
+      // own vitest.config.ts without this root globalSetup, in CI's agent-test
+      // job and in release.yml. Run it with
+      // `pnpm exec turbo run test --filter=@phren/agent`.
     ],
   },
 });

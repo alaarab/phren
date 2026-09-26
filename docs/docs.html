@@ -492,6 +492,7 @@
       <a href="index.html#hooks" class="nav-link">Hooks</a>
       <a href="index.html#why" class="nav-link">Why</a>
       <a href="index.html#surfaces" class="nav-link">Surfaces</a>
+      <a href="docs.html#cli-agent" class="nav-link">Agent</a>
       <a href="index.html#teams" class="nav-link">Teams</a>
       <a href="get-started.html" class="nav-link">Get the app</a>
       <a href="docs.html" class="nav-link active">Docs</a>
@@ -595,6 +596,7 @@
             <a href="#cli-teams" class="sidebar-link sub">Teams &amp; Stores</a>
             <a href="#cli-notes" class="sidebar-link sub">Notes</a>
             <a href="#cli-code" class="sidebar-link sub">Code Index</a>
+            <a href="#cli-agent" class="sidebar-link sub">Coding Agent</a>
             <a href="#cli-schedules" class="sidebar-link sub">Schedules</a>
             <a href="#cli-dispatch" class="sidebar-link sub">Dispatch</a>
             <a href="#cli-modules" class="sidebar-link sub">Modules &amp; Presets</a>
@@ -1604,6 +1606,19 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <div class="ref-card">
           <div class="ref-card-name">phren code outline|refs|def|usage ...</div>
           <div class="ref-card-desc">A file outline, where a function or type is used, where it is defined, or the most and least used.</div>
+        </div>
+
+        <h2 id="cli-agent">Coding agent <a href="#cli-agent" class="anchor-link">#</a></h2>
+        <p>phren's own coding agent, shipped as the <code>@phren/agent</code> package (<code>npm install -g @phren/agent</code>). It starts every session with the project's memory loaded and runs on a ChatGPT/Codex subscription, OpenAI, OpenRouter, Anthropic or local Ollama models. The <a href="https://github.com/alaarab/phren/blob/main/docs/agent.md">agent guide</a> covers providers, MCP servers, permissions and headless runs.</p>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren agent [-i] [--provider &lt;name&gt;] [--model &lt;id&gt;] [task]</div>
+          <div class="ref-card-desc">Run the agent: <code>-i</code> for the terminal UI, or give a task to run it to the end. The package's own <code>phren-agent</code> binary takes the same arguments.</div>
+        </div>
+
+        <div class="ref-card">
+          <div class="ref-card-name">phren agent auth login|status|logout|set-key|clear-key</div>
+          <div class="ref-card-desc">Sign in with a ChatGPT/Codex subscription, or store an OpenAI, OpenRouter or Anthropic key.</div>
         </div>
 
         <h2 id="cli-schedules">Schedules <a href="#cli-schedules" class="anchor-link">#</a></h2>

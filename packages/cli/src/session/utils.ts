@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { errorMessage } from "../utils.js";
-// The experimental agent imports the sessions directory from here.
+// The coding agent (@phren/agent) imports the sessions directory from here.
 export { sessionsDir } from "../phren-paths.js";
 import { atomicWriteText } from "../phren-paths.js";
 

@@ -187,7 +187,10 @@ export function agentFromCommand(command: string): string | undefined {
   if (name === "codex" || program.includes("@openai/codex")) return "codex";
   if (name === "opencode" || name === ".opencode" || program.includes("opencode-ai")) return "opencode";
   if (name === "copilot" || program.includes("@github/copilot")) return "copilot";
-  if (name === "phren-agent") return "phren";
+  if (name === "phren-agent" || program.includes("@phren/agent/") || /\/packages\/agent\/dist\/bin\.js$/.test(program)) return "phren";
+  // `phren agent` runs the same agent through the CLI.
+  const next = words[words.indexOf(program) + 1];
+  if ((name === "phren" || program.includes("@phren/cli/")) && next === "agent") return "phren";
   return undefined;
 }
 

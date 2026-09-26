@@ -388,6 +388,13 @@ export const REGISTRY: Command[] = [
     run: async (args, ctx) => (await (await import("./modules/code-package.js")).requireCodePackage(ctx.phrenPath())).runCodeCommand(args, ctx),
   },
   {
+    name: "agent",
+    topic: "core",
+    usage: "phren agent [options] [task]",
+    summary: "Run phren's coding agent (needs @phren/agent); phren agent --help lists its options",
+    run: async (args) => (await import("./modules/agent-package.js")).runAgentCommand(args),
+  },
+  {
     name: "shell",
     topic: "core",
     usage: "phren shell [--view <view>] [--project <name>] [--here]",
