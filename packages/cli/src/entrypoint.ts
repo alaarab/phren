@@ -214,7 +214,8 @@ export async function runTopLevelCommand(
 
   // Intercept before any handler runs - in particular before namespace
   // handlers that used to print their own per-subcommand help text.
-  if (argv.includes("--help") || argv.includes("-h") || (argv.length === 1 && ["maintain", "config", "bridge"].includes(cmd.name))) {
+  // `phren agent` hands every argument to the agent, which prints its own help.
+  if (cmd.name !== "agent" && (argv.includes("--help") || argv.includes("-h")) || (argv.length === 1 && ["maintain", "config", "bridge"].includes(cmd.name))) {
     const out = formatCommand(cmd.name, snapshot);
     if (out) console.log(out);
     return finish();

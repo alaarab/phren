@@ -32,13 +32,18 @@ jobs:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
 
-      - name: Ensure version matches packages/cli/package.json
+      - name: Ensure version matches packages/cli and packages/agent
+        # @phren/agent is version-locked to @phren/cli: it imports the CLI's
+        # internal subpath exports, so it pins the exact CLI version it was
+        # built against and both ship together.
         run: |
-          PKG_VERSION=$(node -p "require('./packages/cli/package.json').version")
-          if [ "$PKG_VERSION" != "$INPUT_VERSION" ]; then
-            echo "Version mismatch: packages/cli/package.json=$PKG_VERSION, input=$INPUT_VERSION"
-            exit 1
-          fi
+          for pkg in cli agent; do
+            PKG_VERSION=$(node -p "require('./packages/$pkg/package.json').version")
+            if [ "$PKG_VERSION" != "$INPUT_VERSION" ]; then
+              echo "Version mismatch: packages/$pkg/package.json=$PKG_VERSION, input=$INPUT_VERSION"
+              exit 1
+            fi
+          done
 
       - name: Ensure changelog contains this version
         run: |
@@ -59,10 +64,24 @@ jobs:
       - name: Test
         run: pnpm test -- --coverage
 
+      - name: Test agent
+        # The agent's suite runs under its own vitest config, outside the root run.
+        run: pnpm --filter @phren/agent test
+
       - name: Validate docs
         run: pnpm run validate-docs
 
-      - name: Publish package
+      - name: Pack agent
+        # pnpm pack rewrites the agent's `workspace:*` dependency on @phren/cli
+        # to this exact version; npm publish of the directory would not.
+        working-directory: packages/agent
+        run: |
+          pnpm pack --pack-destination "$RUNNER_TEMP"
+          test -f "$RUNNER_TEMP/phren-agent-$INPUT_VERSION.tgz"
+          tar -xzOf "$RUNNER_TEMP/phren-agent-$INPUT_VERSION.tgz" package/package.json \
+            | node -e 'const m = JSON.parse(require("fs").readFileSync(0, "utf8")); if (m.dependencies["@phren/cli"] !== process.env.INPUT_VERSION) { console.error("@phren/agent does not pin @phren/cli " + process.env.INPUT_VERSION); process.exit(1); }'
+
+      - name: Publish CLI package
         working-directory: packages/cli
         # The publish token is scoped to this step only. At job level it was
         # visible to install/build/lint/test, so any dependency script could
@@ -70,6 +89,12 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --provenance
+
+      - name: Publish agent package
+        # After @phren/cli, whose exact version it depends on.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish "$RUNNER_TEMP/phren-agent-$INPUT_VERSION.tgz" --access public --provenance
 
       - name: Create git tag
         run: |

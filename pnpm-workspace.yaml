@@ -1,6 +1,5 @@
 packages:
   - "packages/*"
-  - "experimental/*"
 
 # Transitive-dependency pins, mostly security floors for packages we do not
 # depend on directly.

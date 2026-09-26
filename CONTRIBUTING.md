@@ -26,7 +26,7 @@ The repo is a monorepo defined by `pnpm-workspace.yaml` with three packages:
 | Package | Path | What it does |
 |---------|------|-------------|
 | `@phren/cli` | `packages/cli/` | CLI, MCP server, hooks, data layer, web UI |
-| `@phren/agent` | `experimental/agent/` | Experimental coding agent with TUI, multi-agent, provider abstraction (private, not published) |
+| `@phren/agent` | `packages/agent/` | Coding agent with TUI, multi-agent, provider abstraction; published with the CLI and launched by `phren agent` |
 | `phren-vscode` | `packages/vscode/` | VS Code extension: sidebar, onboarding, config panel |
 
 ### `packages/cli/src/` (the core)

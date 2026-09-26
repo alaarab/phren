@@ -85,6 +85,11 @@ describe("tmux names and ids", () => {
     expect(agentFromCommand("/home/me/.opencode/bin/opencode")).toBe("opencode");
     expect(agentFromCommand("node /usr/lib/node_modules/@github/copilot/index.js")).toBe("copilot");
     expect(agentFromCommand("phren-agent")).toBe("phren");
+    expect(agentFromCommand("node /usr/local/lib/node_modules/@phren/agent/dist/bin.js -i")).toBe("phren");
+    expect(agentFromCommand("node /home/me/phren/packages/agent/dist/bin.js")).toBe("phren");
+    expect(agentFromCommand("phren agent -i")).toBe("phren");
+    expect(agentFromCommand("node /usr/local/lib/node_modules/@phren/cli/dist/index.js agent")).toBe("phren");
+    expect(agentFromCommand("phren shell")).toBeUndefined();
     expect(agentFromCommand("-zsh")).toBeUndefined();
     expect(agentFromCommand("vim claude.md")).toBeUndefined();
   });

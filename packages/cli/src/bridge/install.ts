@@ -213,6 +213,10 @@ export async function install(version: string, noService = false): Promise<void>
     if (await applyOpencodePlugin()) {
       console.log("opencode chat: restart any opencode session started before now so it loads the transcript plugin.");
     }
+    // phren-agent calls the installed bundle itself, so it has no settings to edit.
+    if ((await import("../modules/agent-package.js")).agentInstalled()) {
+      console.log("phren-agent chat: found; it reports to this Hook itself, so restart any phren-agent session started before now.");
+    }
     const keys = path.join(homedir(), ".ssh/authorized_keys");
     const keyStat = await lstat(keys).catch(() => null);
     if (keyStat && !keyStat.isSymbolicLink() && keyStat.isFile()) {

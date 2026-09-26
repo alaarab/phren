@@ -1,14 +1,14 @@
 {
   "name": "@phren/agent",
-  "version": "0.1.15",
-  "private": true,
-  "description": "Experimental coding agent — not part of the shipped phren product. Source kept for local iteration only.",
+  "version": "0.3.4",
+  "description": "phren's coding agent: starts every session knowing your project's memory, tasks and decisions",
   "type": "module",
   "bin": {
     "phren-agent": "dist/bin.js"
   },
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"
@@ -39,9 +39,12 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/alaarab/phren.git",
-    "directory": "experimental/agent"
+    "directory": "packages/agent"
   },
   "devDependencies": {
     "@types/react": "^19.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

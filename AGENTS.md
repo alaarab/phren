@@ -15,13 +15,8 @@ pnpm workspace with turborepo. Shipped packages:
 |---------|------|-----|-------------|
 | `@phren/code` | `packages/code/` | Published | Optional code index, grammars and code skill |
 | `@phren/cli` | `packages/cli/` | Published | CLI, MCP server, data layer |
+| `@phren/agent` | `packages/agent/` | Published, version-locked to `@phren/cli` | phren's coding agent. Optional like `@phren/code`: `phren agent` lazy-loads it (`packages/cli/src/modules/agent-package.ts`) and spawns its `phren-agent` binary, which also works on its own. It pins the exact CLI version (its `workspace:*` dependency is rewritten by `pnpm pack` in `release.yml`, which publishes it right after the CLI); `validate-docs` fails if the two versions drift. Its suite runs under its own vitest config in the CI `agent-test` job (`pnpm exec turbo run test --filter=@phren/agent`), not the root `pnpm test`. |
 | `@phren/vscode` | `packages/vscode/` | VS Code Marketplace | VS Code extension. Versions separately from the CLI (`packages/vscode/CHANGELOG.md`, shown on the Marketplace listing) and releases through the `Release VS Code extension` workflow. It is a thin client calling MCP tools by name, so it starts its server in the `full` tool profile, and a test in `packages/cli` fails if the CLI stops registering a tool it calls. |
-
-Experimental (not published, not wired into the `phren` CLI):
-
-| Package | Path | Status | Description |
-|---------|------|--------|-------------|
-| `@phren/agent` | `experimental/agent/` | Private, experimental | Standalone coding agent. Built by root `pnpm build`; tested by the CI `agent-test` job (`pnpm exec turbo run test --filter=@phren/agent`). Run via the built `phren-agent` binary, **not** via `phren`. |
 
 Outside the pnpm workspace:
 
@@ -120,6 +115,7 @@ Developer docs live in `docs/` (also published to the GitHub Pages site):
 - `conductor.md` -- launch roles, placement, hand-off, standing grants and adapter boundaries
 - `fanout.md` -- worker manifests, permission failures, notification and archive lifecycle
 - `graph-viewer.md` -- the 3D memory viewer (web UI Graph tab + VS Code webview)
+- `agent.md` -- the coding agent (`phren agent`): install, providers, MCP, permissions, headless mode
 
 Note: `reference/topics/` is a *runtime* location inside a user's `.phren/<project>/`
 (archived per-topic docs), not a directory in this repo.

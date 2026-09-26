@@ -88,7 +88,7 @@ If you would rather install phren the way you install everything else:
 
 That brings the five `phren-*` slash commands, the MCP server, and the session hook, all version-pinned and removable with `/plugin uninstall`. `phren init` still does more: it creates the store and wires Copilot, Cursor and Codex too, so a reasonable split is `init` once for the store, the plugin for the Claude Code wiring. See [docs/claude-code-plugin.md](docs/claude-code-plugin.md).
 
-There is also an **experimental coding agent**, `phren-agent`, in [`experimental/agent`](experimental/agent): a standalone binary (not published, not wired into `phren`) that starts every session already knowing the project's gotchas, tasks, and decisions. It opens with the same splash. See [docs/agent.md](docs/agent.md).
+phren also has its **own coding agent**. `npm install -g @phren/agent`, then `phren agent -i`: it starts every session already knowing the project's gotchas, tasks, and decisions, saves what it learns back to the same store, and runs on a ChatGPT/Codex subscription, OpenAI, OpenRouter, Anthropic, or local Ollama models. See [docs/agent.md](docs/agent.md).
 
 ---
 
@@ -198,7 +198,7 @@ All use the same phren store. No vendor lock-in.
 | [`phren-vscode`](packages/vscode) | VS Code extension (sidebar, graph, onboarding) |
 | [`integrations/herdr`](integrations/herdr) | Herdr plugin: keybinding → `phren shell --here` in a pane |
 | [`integrations/omarchy`](integrations/omarchy) | Omarchy plugin: bar widget + app launcher entries for the shell and web viewer |
-| [`experimental/agent`](experimental/agent) | `phren-agent`, an experimental coding agent with phren memory (unpublished) |
+| [`@phren/agent`](packages/agent) | phren's coding agent (`phren agent` / `phren-agent`), released with the CLI |
 
 ---
 

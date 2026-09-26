@@ -40,7 +40,7 @@ Run after building the package:
 ```sh
 pnpm --filter @phren/cli build
 pnpm --filter @phren/agent build
-node experimental/agent/scripts/assess.mjs --live --output /tmp/phren-assessment.json
+node packages/agent/scripts/assess.mjs --live --output /tmp/phren-assessment.json
 ```
 
 The script reads `OPENROUTER_API_KEY`. To reuse an existing opencode API key,

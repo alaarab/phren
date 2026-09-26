@@ -1,74 +1,259 @@
-# phren agent (experimental)
+# phren agent
 
-> **Status: experimental and unpublished.** `@phren/agent` is **not on npm**
-> and is **not** wired into the `phren` CLI — it lives in `experimental/agent/`
-> in the monorepo. It is built by the root `pnpm build` and tested by the CI
-> `agent-test` job, but maintained at a lower bar than `packages/cli`.
-> Everything below assumes a repo checkout.
+`phren agent` is phren's own coding agent. It reads, edits and runs your code
+with tool calls, like Claude Code or Codex, and it starts every session already
+knowing the project: its truths, open tasks, recent findings and the summary of
+the last session. What it learns goes back into the same phren store your other
+agents use.
 
-A coding agent with persistent memory. Its entrypoint is the standalone
-`phren-agent` binary built from the workspace — **not** the `phren` CLI. It
-reads, writes, and edits your code with tool calling, and starts each session
-knowing your project's gotchas, active tasks, and past decisions.
+It ships as a separate npm package, `@phren/agent`, so the `phren` CLI stays
+small for people who only want memory. Install it and run it either way:
+
+- `phren agent …` from the phren CLI, or
+- `phren-agent …`, the package's own binary.
+
+Both run the same program with the same arguments.
 
 ---
 
-## Quickstart
+## Install
 
-### Install
+```bash
+npm install -g @phren/cli @phren/agent
+phren init              # once: creates the memory store (~/.phren)
+```
+
+`@phren/agent` is released with `@phren/cli` and carries the same version
+number. It needs Node.js 20 or later. Without it, `phren agent` prints
+`phren agent needs @phren/agent: run npm install -g @phren/agent` and exits.
+
+The CLI looks for the agent in this order: the directory in
+`PHREN_AGENT_PACKAGE`, a copy Node can resolve next to the CLI, a phren
+repository checkout (`packages/agent`), then npm's global packages.
+
+From a repository checkout instead:
 
 ```bash
 git clone https://github.com/alaarab/phren && cd phren
-pnpm install
-pnpm --filter @phren/agent build     # builds experimental/agent/dist
-npm i -g @phren/cli && phren init    # memory store + MCP config (this part IS published)
-alias phren-agent="node $(pwd)/experimental/agent/dist/bin.js"
+pnpm install && pnpm build
+node packages/cli/dist/index.js agent -i     # or: node packages/agent/dist/bin.js -i
 ```
 
-### Authentication
-
-Providers are auto-detected from environment variables:
+## Quickstart
 
 ```bash
-export OPENROUTER_API_KEY=sk-or-...     # OpenRouter (default)
-export ANTHROPIC_API_KEY=sk-ant-...     # Anthropic direct
-export OPENAI_API_KEY=sk-...            # OpenAI
+phren agent -i                                     # interactive terminal UI
+phren agent "fix the failing date test"            # one task, then exit
+phren agent --plan "refactor the database layer"   # review the plan before it acts
+phren agent --resume                               # continue the last session
+phren agent --help                                 # every option
 ```
 
-For Codex (ChatGPT subscription), authenticate via browser:
-
-```bash
-phren-agent auth login
-```
-
-Ollama requires no key — just a running local server.
-
-### First task
-
-```bash
-phren-agent "fix the login bug"                              # one-shot
-phren-agent -i                                               # interactive TUI
-phren-agent --plan "refactor the database layer"             # review plan first
-phren-agent --provider openai-codex --budget 2.00 "add tests" # pick provider, set cost cap
-phren-agent --reasoning high "trace the auth race"            # override default medium reasoning
-phren-agent --yolo "add input validation"                    # full-auto, no confirmations
-```
+Run it from the project's directory. phren picks the project from the
+directory (or `--project <name>`) and loads that project's memory.
 
 ---
 
 ## Providers
 
-Auto-detected from env vars, or forced with `--provider <name>`.
+The agent picks a provider from the credentials it finds, in this order, or
+the one you name with `--provider` (or `PHREN_AGENT_PROVIDER`):
 
-| Provider | Default Model | Env Var / Auth |
-|----------|---------------|----------------|
-| OpenRouter | claude-sonnet-4-20250514 | `OPENROUTER_API_KEY` |
-| Anthropic | claude-sonnet-4-20250514 | `ANTHROPIC_API_KEY` |
-| OpenAI | gpt-5.4 | `OPENAI_API_KEY` |
-| Codex | gpt-5.4 | `phren-agent auth login` (ChatGPT subscription) |
-| Ollama | llama3.3 | Local, no API key needed |
+| Provider | `--provider` | Credentials | Default model |
+|----------|--------------|-------------|---------------|
+| ChatGPT / Codex subscription | `openai-codex` | `phren agent auth login` (browser sign-in) | `gpt-5.4` |
+| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-5.4` |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4-20250514` |
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5` |
+| Ollama (local) | `ollama` | none; `PHREN_OLLAMA_URL` (default `http://localhost:11434`) | `qwen2.5-coder:14b` |
 
-Switch models mid-session with the `/model` command (interactive reasoning level slider).
+Choose a model with `--model <id>` (or `PHREN_AGENT_MODEL`) and a reasoning
+effort with `--reasoning low|medium|high|xhigh` (or `PHREN_AGENT_REASONING`).
+In the terminal UI, `/model` switches both mid-session.
+
+### ChatGPT or Codex subscription
+
+Uses the plan you already pay for; no API key and no per-token bill.
+
+```bash
+phren agent auth login      # opens the browser; tokens are stored locally
+phren agent auth status
+phren agent auth logout
+```
+
+Once signed in, this provider is preferred whenever no other is named.
+
+### API keys
+
+Set the environment variable, or store the key once so every shell picks it up:
+
+```bash
+phren agent auth set-key openrouter sk-or-...     # also: openai, anthropic
+phren agent auth clear-key openrouter
+```
+
+Stored keys live in `~/.phren/.runtime/auth-profiles.json` (private to your
+user). An environment variable wins over a stored key.
+
+### OpenRouter
+
+One key, many models. Name the model with its OpenRouter id:
+
+```bash
+phren agent --provider openrouter --model google/gemini-2.5-pro -i
+```
+
+### DeepSeek and other OpenAI-compatible models
+
+The agent does not yet take a custom OpenAI-compatible base URL, so a
+DeepSeek API key cannot be used directly. Reach DeepSeek through OpenRouter,
+which is how the agent's own assessment runs were made:
+
+```bash
+phren agent --provider openrouter --model deepseek/deepseek-v4.1-flash "add input validation"
+```
+
+or run a DeepSeek model locally through Ollama (below).
+
+### Ollama
+
+No key; the agent talks to a running Ollama server.
+
+```bash
+ollama pull qwen2.5-coder:14b
+phren agent --provider ollama -i
+PHREN_OLLAMA_URL=http://gpu-box:11434 phren agent --provider ollama --model deepseek-r1:14b -i
+```
+
+When no credentials are found at all, the agent falls back to Ollama on
+`localhost:11434`.
+
+---
+
+## MCP servers
+
+Give the agent more tools by connecting MCP servers. A config file uses the
+same `mcpServers` shape as Claude Code:
+
+```json
+{
+  "mcpServers": {
+    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": { "GITHUB_TOKEN": "..." } },
+    "docs":   { "type": "http", "url": "https://example.com/mcp", "oauth": true }
+  }
+}
+```
+
+```bash
+phren agent --mcp-config ./mcp.json -i
+phren agent --mcp "npx -y @modelcontextprotocol/server-filesystem /tmp" -i   # one stdio server, repeatable
+```
+
+Transports are `stdio`, `http` (Streamable HTTP) and legacy `sse`. With
+`oauth: true` the agent prints an authorization URL on first connection and
+stores the tokens in private files under `~/.phren/agent/mcp-auth`
+(`PHREN_MCP_AUTH_DIR` overrides it). `oauth` can also be an object with
+`clientId`, optional `clientSecret`, `scope` and `callbackPort` (default
+14557). The agent does not need phren's own MCP server: its memory tools are
+built in.
+
+---
+
+## Permissions
+
+Every tool call passes a permission check first.
+
+| Mode | What runs without asking | How to choose it |
+|------|--------------------------|------------------|
+| `suggest` (default) | Nothing; you approve each call | default |
+| `auto-confirm` | Reads and searches (read, glob, grep); edits and shell commands still ask | `--permissions auto-confirm` |
+| `full-auto` | Everything | `--yolo` or `--permissions full-auto` |
+
+Shift+Tab cycles the mode in the terminal UI, and the choice is remembered in
+`~/.phren-agent/settings.json`. At a prompt, `y` allows the call once, `s` allows
+calls like it (the same file, or the same command) for the rest of the
+session, `a` allows the tool for the rest of the session (for the shell, only
+that command) and `n` denies. Approvals kept across sessions live in
+`~/.phren-agent/permissions.json`.
+
+Whatever the mode, file tools stay inside the project directory, secret files
+such as `.env` are protected, shell commands have safety checks and timeouts,
+and on Linux shell commands run under a bubblewrap sandbox that makes
+everything outside the workspace read-only (`--sandbox auto|require|off`,
+see [Security](#security)).
+
+Hooks can allow or deny tool calls with your own scripts: put
+`PreToolUse`, `PostToolUse`, `UserPromptSubmit` or `Stop` entries (each a
+`command`, optional `matcher` and `timeoutMs`) in `~/.phren-agent/hooks.json`
+or the project's `.phren-agent/hooks.json`. Markdown files in
+`~/.phren-agent/commands/` or `.phren-agent/commands/` become slash commands.
+
+---
+
+## Memory
+
+The agent uses the phren store directly, the same one `phren init` created
+and your other agents read.
+
+**When a session starts** it loads the project's truths, open tasks, recent
+findings, the project's `AGENTS.md`, the enabled skills and, with `--resume`,
+the previous session's summary. Items waiting in the review queue are shown
+separately and marked as unconfirmed.
+
+**During the session** it has built-in tools to search memory
+(`phren_search`), save a finding (`phren_add_finding`), and read, add and
+complete tasks (`phren_get_tasks`, `phren_add_task`, `phren_complete_task`),
+plus `run_skill` for your phren skills.
+
+**When the context fills up** (or on `/compact`) it asks the model for a
+checkpoint and routes the knowledge in it by confidence: confident items
+become findings, uncertain ones go to the review queue
+([details](#compaction-with-knowledge-promotion)).
+
+**When the session ends** it saves a summary and checkpoint for `--resume` and
+writes a searchable session note.
+
+Every session is logged at
+`~/.phren/.runtime/sessions/session-<id>.events.jsonl`, which is also what the
+phone app reads (below).
+
+---
+
+## Headless and scripted runs
+
+Give the task as an argument and the agent runs it to the end, prints its
+answer on stdout and exits: no terminal UI. Nobody is there to approve tool
+calls, so choose the permission mode and limits up front:
+
+```bash
+phren agent --permissions auto-confirm --max-turns 30 --budget 1.00 "summarize open TODOs in src/"
+phren agent --yolo --provider openrouter --model deepseek/deepseek-v4.1-flash "run the tests and fix what fails"
+```
+
+`--budget <dollars>` stops the run when its estimated spend passes the limit,
+`--max-turns` caps tool rounds (default 50), `--verbose` streams tool calls to
+stderr and `--dry-run` prints the system prompt without calling a model. Exit
+code 130 means the run was interrupted; resume it with `--resume`. Subagents a
+one-shot run spawns run without a terminal and refuse any call that would need
+approval.
+
+---
+
+## Phone app
+
+Sessions show up in the phren iOS and Android apps like Claude Code, Codex and
+Copilot sessions do, through [Phren Hook](phren-hook.md) (`phren bridge
+install`).
+
+- **Under tmux** the Hook recognizes the agent whichever way it was started
+  (`phren agent`, `phren-agent`, or the package's `dist/bin.js`) and shows the
+  conversation, its status and a chat you can type into from the phone.
+- **Under Herdr** the agent reports its session to the Hook itself (no
+  settings to edit), which binds the pane to its event log. The chat appears
+  once Herdr reports `phren` as an agent kind.
+
+Starting a new phren agent session from the phone is not available yet; start
+it on the computer and it appears in the app.
 
 ---
 
@@ -76,32 +261,33 @@ Switch models mid-session with the `/model` command (interactive reasoning level
 
 | Flag | Description |
 |------|-------------|
-| `<task>` | Task description (one-shot mode) |
-| `-i`, `--interactive` | Interactive TUI with streaming, history, tab completion |
-| `--provider <name>` | Force provider: `openrouter`, `anthropic`, `openai`, `openai-codex`, `ollama` |
-| `--model <id>` | Override the default model for the chosen provider |
-| `--reasoning <level>` | Reasoning effort for GPT-5.4/Codex: `low`, `medium`, `high`, `xhigh` |
-| `--budget <dollars>` | Max spend in USD (aborts when exceeded) |
-| `--plan` | Plan mode: show plan before executing tools |
-| `--yolo` | Full-auto permissions — no confirmations |
-| `--resume` | Resume last session's conversation (task optional — continues where it left off) |
-| `--sandbox <mode>` | Kernel write-fence for shell (bwrap): `off`, `auto` (default), `require` |
-| `--no-llm-compact` | Use regex prune summaries instead of LLM compaction |
-| `--multi` | Multi-agent TUI mode |
+| `<task>` | Task to run (one-shot mode) |
+| `-i`, `--interactive` | Interactive terminal UI |
+| `--provider <name>` | `openai-codex`, `openai`, `openrouter`, `anthropic`, `ollama` |
+| `--model <id>` | Model for the chosen provider |
+| `--reasoning <level>` | `low`, `medium`, `high`, `xhigh` |
+| `--project <name>` | phren project to load, instead of the one found from the directory |
+| `--permissions <mode>` | `suggest` (default), `auto-confirm`, `full-auto` |
+| `--yolo` | Same as `--permissions full-auto` |
+| `--plan` | Show a plan and wait for approval before running tools |
+| `--resume` | Continue the last session (the task is optional) |
+| `--budget <dollars>` | Stop when estimated spend passes this |
+| `--max-turns <n>` | Maximum tool rounds (default 50) |
+| `--max-output <n>` | Maximum output tokens per response |
+| `--mcp <command>` | Connect a stdio MCP server (repeatable) |
+| `--mcp-config <path>` | Load MCP servers from a JSON file |
+| `--sandbox <mode>` | Linux shell sandbox: `auto` (default), `require`, `off` |
+| `--lint-cmd <cmd>`, `--test-cmd <cmd>` | Override the detected lint and test commands |
+| `--no-subagents` | No subagent tools in one-shot mode |
+| `--no-llm-compact` | Regex summaries instead of model checkpoints when compacting |
+| `--multi` | Multi-agent terminal UI |
 | `--team <name>` | Team mode with shared task coordination |
-| `--verbose` | Debug-level logging |
-| `--help` | Show help |
-| `--version` | Show version |
+| `--dry-run` | Print the system prompt and exit |
+| `--verbose` | Show tool calls as they run |
+| `--help`, `--version` | Help and version |
 
-### Permission modes
-
-| Mode | Behavior | How to set |
-|------|----------|------------|
-| **suggest** (default) | Agent proposes tool calls, you approve each one | Default |
-| **auto-confirm** | Auto-approve safe tools (read, glob, grep), confirm destructive ones | Shift+Tab in TUI |
-| **full-auto** | All tools run without confirmation | `--yolo` flag |
-
-Cycle modes during a session with Shift+Tab.
+`phren agent auth login|logout|status|set-key|clear-key` manages credentials
+(see [Providers](#providers)).
 
 ---
 
@@ -201,8 +387,8 @@ The agent has access to these built-in tools:
 Spawn and coordinate multiple agents from a single TUI.
 
 ```bash
-phren-agent --multi                             # start multi-agent TUI
-phren-agent --team myproject "build X"          # team mode with shared tasks
+phren agent --multi                            # start multi-agent TUI
+phren agent --team myproject "build X"          # team mode with shared tasks
 ```
 
 In the multi-agent TUI:
@@ -216,29 +402,6 @@ In the multi-agent TUI:
 | `1-9` | Switch between agent panes |
 
 Agents run as child processes with IPC messaging and shared task coordination.
-
----
-
-## Memory integration
-
-The agent is deeply integrated with phren's memory layer:
-
-**On startup:**
-- Loads project truths (always-injected facts)
-- Loads active tasks and recent findings
-- Reads AGENTS.md for project conventions
-- Restores prior session summary (with `--resume`)
-
-**During a session:**
-- Searches phren for relevant context when approaching new problems
-- Captures findings as it discovers patterns, pitfalls, and decisions
-- Creates and completes tasks
-
-**On session end:**
-- Saves session summary and checkpoint
-- Records edited files and test state for exact resume
-- Mines the transcript for durable knowledge (same graduated pipeline as
-  compaction, below) and writes a searchable session note
 
 ---
 
@@ -331,7 +494,7 @@ Every run records a session event log — and any recording can be replayed as
 a scripted provider with **zero API cost and no credentials**:
 
 ```bash
-PHREN_AGENT_REPLAY=path/to/session-<id>.events.jsonl phren-agent --yolo "same task"
+PHREN_AGENT_REPLAY=path/to/session-<id>.events.jsonl phren agent --yolo "same task"
 ```
 
 Each recorded `assistant/message` replays as one response, in order; the loop
@@ -347,8 +510,8 @@ credentials configured (skips the rest): a real tool call plus the final
 answer check. Use it before releases or after provider-layer changes:
 
 ```bash
-pnpm build && ./experimental/agent/scripts/agent-smoke.sh            # all configured
-./experimental/agent/scripts/agent-smoke.sh anthropic                # just one
+pnpm build && ./packages/agent/scripts/agent-smoke.sh            # all configured
+./packages/agent/scripts/agent-smoke.sh anthropic                # just one
 ```
 
 ## Skills

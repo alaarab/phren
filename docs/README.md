@@ -29,7 +29,7 @@ tectonic docs/whitepaper.tex --outdir docs
 - `docs/schedules.md`: Scheduled prompts, run history and local reminders.
 - `docs/api-reference.md`: MCP tools and Hook routes, including Code notes, model catalogues, file reads and live previews.
 - `docs/footprint.md`: Files phren writes and external files Hook reads, including Claude Code's cached model catalogue.
-- `docs/agent.md`: The experimental `phren-agent` coding agent (unpublished; lives in `experimental/agent/`).
+- `docs/agent.md`: phren's coding agent (`@phren/agent`, run with `phren agent`): install, providers, MCP servers, permissions, memory, headless runs and the phone app.
 - `docs/claude-code-plugin.md`: Installing phren as a Claude Code plugin, and how that differs from `phren init`.
 - `docs/phren-hook.md`: Install and maintain the independent computer helper for the iPhone app.
 - Screenshots used by the site and README: `shell-*.png` (terminal), `webui-graph.png` (the memory viewer, shared by the web UI and VS Code), `splash.gif`.

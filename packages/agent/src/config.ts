@@ -46,9 +46,9 @@ export interface CliArgs {
 }
 
 const HELP = `
-phren — coding agent with persistent memory
+phren-agent — coding agent with persistent memory
 
-Usage: phren [options] <task>
+Usage: phren-agent [options] <task>    (also: phren agent [options] <task>)
 
 Options:
   --provider <name>    Force provider: openrouter, anthropic, openai, openai-codex, ollama
@@ -80,7 +80,7 @@ Options:
 Providers (auto-detected from env, or use --provider):
   openai-codex         Uses your ChatGPT/Codex subscription directly (preferred default)
                        (no API key needed, flat rate via your subscription)
-                       Setup: phren auth login
+                       Setup: phren-agent auth login
                        Legacy alias: codex
   openai               OPENAI_API_KEY — OpenAI direct (defaults to gpt-5.4)
   openrouter           OPENROUTER_API_KEY — routes to any model
@@ -93,10 +93,10 @@ Environment:
   PHREN_AGENT_REASONING Override reasoning effort via env
 
 Examples:
-  phren "fix the login bug"
-  phren --provider openai-codex "add input validation"
-  phren --model openai-codex/gpt-5.4 --reasoning high "add input validation"
-  phren --provider anthropic --verbose "refactor the database layer"
+  phren-agent "fix the login bug"
+  phren-agent --provider openai-codex "add input validation"
+  phren-agent --model openai-codex/gpt-5.4 --reasoning high "add input validation"
+  phren-agent --provider anthropic --verbose "refactor the database layer"
 `.trim();
 
 export function parseArgs(argv: string[]): CliArgs {

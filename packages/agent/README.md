@@ -1,4 +1,20 @@
-# @phren/agent (experimental)
+# @phren/agent
+
+phren's coding agent. It reads, edits and runs your code with tool calls, and
+starts every session already knowing the project's truths, open tasks, recent
+findings and last session, from the same phren store your other agents use.
+
+```bash
+npm install -g @phren/cli @phren/agent
+phren init                 # once, creates the memory store
+phren agent -i             # or: phren-agent -i
+```
+
+It runs on a ChatGPT/Codex subscription (`phren agent auth login`), OpenAI,
+OpenRouter, Anthropic or local Ollama models. The full guide, including MCP
+servers, permissions, headless runs and the phone app, is
+[docs/agent.md](https://github.com/alaarab/phren/blob/main/docs/agent.md).
+This package is released together with `@phren/cli` and pins its exact version.
 
 ## Keyboard help and remote MCP
 
@@ -23,18 +39,13 @@ mode-0600 files under `~/.phren/agent/mcp-auth`; `PHREN_MCP_AUTH_DIR` overrides 
 directory. PKCE verifiers remain in memory. Authorization waits at most five
 minutes and closing a connection closes its callback listener.
 
-Experimental coding agent. **Not part of the shipped phren product** — source
-kept here for local iteration only. Low activity (see git history); do not
-assume this is maintained at the same bar as `packages/cli`.
+## Developing this package
 
-## Running this package
-
-`experimental/agent` is a pnpm workspace member, built by the root
+`packages/agent` is a pnpm workspace member, built by the root
 `pnpm build` and tested in CI by its own `agent-test` job:
 
 - `pnpm build` (root) includes this package.
-- `pnpm test` (root) still runs only `packages/cli` and `packages/vscode`
-  tests — this package's suite runs separately (its own `vitest.config.ts`,
+- `pnpm test` (root) does not run this package's tests: its suite runs separately (its own `vitest.config.ts`,
   no workspace-root globalSetup) and is kept off the CI OS×node matrix.
 
 To build, test, or lint this package on demand:
@@ -58,7 +69,9 @@ bundle (`~/.local/share/phren/bridge/current/bridge-hook.mjs hook phren`, see
 `.runtime/sessions/session-<id>.events.jsonl`. Everything on Phren's side is in
 place; the pane shows up as a chat once Herdr reports `phren` as an agent kind
 (Herdr adds agents in its own releases — see the draft request in the project
-notes). Without Herdr the hook calls are silent no-ops.
+notes). Without Herdr the hook calls are silent no-ops. Under tmux the Hook
+recognizes the agent from its process, whether it was started as `phren-agent`
+or `phren agent` (which spawns this package's binary with argv0 `phren-agent`).
 
 ## Splash
 

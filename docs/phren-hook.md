@@ -109,9 +109,11 @@ Missing limits, ambiguous panes, and unavailable observations omit the metric.
 No extra request per iPhone row is needed.
 
 - Codex, Claude Code, and Copilot conversations, with exact pane/session identity.
-  The experimental phren-agent is wired the same way (its `.runtime/sessions`
-  event log is the transcript, and it reports SessionStart/UserPromptSubmit/Stop
-  to the Hook itself) and switches on once Herdr reports the `phren` agent kind.
+  phren's coding agent (`phren agent` or `phren-agent`) is wired the same way:
+  its `.runtime/sessions` event log is the transcript, and it reports
+  SessionStart/UserPromptSubmit/Stop to the Hook itself. Under tmux it is
+  recognized from its process whichever entry point started it; under Herdr it
+  switches on once Herdr reports the `phren` agent kind.
   opencode is supported too: its session ids are `ses_…`, identity comes from
   Herdr's opencode integration, and a Phren-installed opencode plugin mirrors the
   session into the same `.runtime/sessions` event log.
