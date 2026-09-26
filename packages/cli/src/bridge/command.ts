@@ -3,6 +3,7 @@ import { serve } from "./server.js";
 import { dispatch, health } from "./transport.js";
 import { install, rollback, uninstall } from "./install.js";
 import { servers } from "./herdr.js";
+import { describeTerminal, terminalHealth } from "./health.js";
 import { agentHook } from "./agent-hooks.js";
 import { object, provider, type Json } from "./protocol.js";
 import { apnsSetupSteps } from "./push.js";
@@ -83,13 +84,14 @@ export async function runBridge(args: string[], version: string): Promise<number
     case "rollback": await rollback(); break;
     case "status": console.log(JSON.stringify(await health(), null, 2)); break;
     case "doctor": {
-      const helper = await health(), muxes = await servers();
+      const helper = await health(), muxes = await servers(), terminal = await terminalHealth();
       const push = approvalPushCheck(helper), speech = await speechKeyStatus();
-      // Chat needs Herdr; a plain project shell or agent over SSH does not.
-      console.log(JSON.stringify({ ok: true, helper, herdr: muxes, checks: {
+      // Chat needs Herdr or tmux; a plain project shell or agent over SSH does not.
+      console.log(JSON.stringify({ ok: true, helper, herdr: muxes, terminal, checks: {
         privateSocket: true, protocol: true, independentHelper: true,
-        herdrRunning: muxes.length > 0, terminal: "SSH PTY; authorize the Phren device key with pty",
-        shell: muxes.length > 0 ? "available" : "Herdr is not running: chat is unavailable, project shells and agents still open over SSH",
+        herdrRunning: terminal.servers.some(server => server.provider === "herdr"), terminal: "SSH PTY; authorize the Phren device key with pty",
+        multiplexer: describeTerminal(terminal),
+        shell: muxes.length > 0 ? "available" : "Neither Herdr nor tmux is available: chat is unavailable, project shells and agents still open over SSH",
         approvalPush: push.configured ? "configured" : "not configured",
         speechKey: speech.configured ? "configured" : "not configured", speechKeyDetail: speech.detail,
       }, ...(push.warning ? { warnings: [push.warning] } : {}) }, null, 2));

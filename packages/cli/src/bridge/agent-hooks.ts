@@ -8,8 +8,8 @@ import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
-import { findPane, herdrPaneFromEnv, knownPanes, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
-import { terminalProvider } from "./terminal.js";
+import { findPane, knownPanes, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
+import { terminalPaneFromEnv, terminalProvider } from "./terminal.js";
 import { readPaneText } from "./pane-text.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
 import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
@@ -23,7 +23,6 @@ import { answeredQuestionInput, numberedDialog, opencodePermissionDialog, passwo
 import { directoryNames, opencodeApprovalFile, opencodeRequest, readOpencodeRequest } from "./opencode-approvals.js";
 import { ApprovalWatchLeases, bindingPath, localSocket, PushBindingStore } from "./agent-hook-stores.js";
 import { eventStatus, notePaneStatus, settleBlockedPane } from "./pane-status.js";
-import { tmuxPaneFromEnv } from "./terminal-tmux.js";
 import { countTick } from "./metrics.js";
 
 export { permissionPrompt, terminalChoice, visibleTerminalChoice, type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
@@ -980,7 +979,7 @@ export async function agentHook(source: Provider) {
   provider.parse(source);
   // A missing helper must never prevent the coding agent from running.
   // Inside Herdr only Herdr's pane counts; elsewhere a tmux pane does.
-  const place = process.env.HERDR_ENV === "1" ? (process.env.HERDR_SOCKET_PATH ? herdrPaneFromEnv() : undefined) : await tmuxPaneFromEnv();
+  const place = await terminalPaneFromEnv();
   if (!place) return;
   let input = "";
   for await (const chunk of process.stdin) { input += chunk.toString(); if (input.length > 1_048_576) return; }

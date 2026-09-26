@@ -8,9 +8,10 @@ import { getProjectDirs } from "../phren-paths.js";
 import { resolveAllStores } from "../store-registry.js";
 import { publicComputerKey } from "./computers.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
-import { BridgeError, bridgeRoot, errorCode } from "./protocol.js";
+import { BridgeError, bridgeRoot, errorCode, type Json } from "./protocol.js";
 import { canonicalComputer, readScheduleDocument, readScheduleRuns, scheduleRunsFile } from "./schedules.js";
 import { countGit } from "./metrics.js";
+import { tmuxHealth, type TmuxHealth } from "./terminal-tmux.js";
 
 const exec = promisify(execFile);
 
@@ -52,6 +53,36 @@ export interface HealthDetails {
   peers: { configured: boolean; error?: string; computers: PeerHealth[] };
   push: { configured: boolean; devices?: number };
   canary: CanaryResult | null;
+  terminal: TerminalHealth;
+}
+
+/** Which terminal multiplexer the Hook drives, per running server, and tmux's state. */
+export interface TerminalHealth {
+  /** "herdr" while a Herdr server answers, else "tmux" when tmux can host agents, else "none". */
+  provider: "herdr" | "tmux" | "none";
+  servers: { name: string; provider: "herdr" | "tmux" }[];
+  tmux: TmuxHealth;
+}
+
+/** The running servers the Hook lists (Herdr's, else tmux's) and tmux's own state. */
+export async function terminalHealth(): Promise<TerminalHealth> {
+  const [{ servers }, tmux] = await Promise.all([import("./herdr.js"), tmuxHealth()]);
+  const running = (await servers().catch(() => [] as Json[])).map(server => ({ name: String(server.session),
+    provider: server.terminal === "tmux" ? "tmux" as const : "herdr" as const }));
+  const provider = running.some(server => server.provider === "herdr") ? "herdr" : running.length ? "tmux" : "none";
+  return { provider, servers: running, tmux };
+}
+
+/** One line on the terminal: the provider, its servers and tmux's state. */
+export function describeTerminal(terminal: TerminalHealth): string {
+  const tmux = terminal.tmux;
+  const hidden = tmux.hidden ? `hidden server ${tmux.hidden.running ? `running (${tmux.hidden.sessions ?? 0} session${tmux.hidden.sessions === 1 ? "" : "s"})` : "not started"}` : undefined;
+  const tmuxText = tmux.state === "off" ? "tmux off (PHREN_TMUX=off)" : tmux.state === "missing" ? "tmux not installed"
+    : [`tmux ${tmux.version ?? "(version unknown)"}`, tmux.launches === false ? "too old to start agents (needs 3.0)" : undefined, hidden].filter(Boolean).join(", ");
+  const names = terminal.servers.map(server => server.name).join(", ");
+  if (terminal.provider === "herdr") return `herdr (${names}); ${tmuxText}`;
+  if (terminal.provider === "tmux") return `tmux (${names}); ${tmuxText}`;
+  return `none: Herdr is not running; ${tmuxText}`;
 }
 
 export interface HealthOptions {
@@ -224,7 +255,7 @@ export async function healthDetails(options: HealthOptions): Promise<HealthDetai
     }
     return { configured: true, computers: await Promise.all(peers.map(peer => probePeer(peer, { name, hostKey }))) };
   })();
-  const [versions, stores, lastRun, peers, canary, push] = await Promise.all([
+  const [versions, stores, lastRun, peers, canary, push, terminal] = await Promise.all([
     Promise.all([
       Promise.resolve<ToolVersion>(options.hookVersion ? { tool: "hook", status: "ok", version: options.hookVersion } : { tool: "hook", status: "missing", detail: "Phren Hook is not running." }),
       ...["herdr", "claude", "codex", "copilot", "opencode"].map(tool => toolVersion(tool)),
@@ -234,13 +265,14 @@ export async function healthDetails(options: HealthOptions): Promise<HealthDetai
     peersPromise,
     readCanary(),
     options.push ? Promise.resolve(options.push) : pushConfigured(),
+    terminalHealth(),
   ]);
   return {
     product: "phren-hook", computer: { name, ...(options.computerId ? { id: options.computerId } : {}) }, checkedAt: new Date().toISOString(),
     versions, stores,
     schedules: { running: options.scheduler ? options.scheduler.running : null,
       ...(options.scheduler?.lastTickAt ? { lastTickAt: options.scheduler.lastTickAt.toISOString() } : {}), lastRun },
-    peers, push, canary,
+    peers, push, canary, terminal,
   };
 }
 
@@ -263,6 +295,7 @@ export function formatHealth(health: HealthDetails, color: { dim: string; reset:
       : peer.listsBack === false ? `${yellow}one-way${reset} ${dim}(${peer.name} does not list this computer)${reset}` : `${green}ok${reset} ${dim}${peer.ms} ms${reset}`;
     lines.push(`  ${dim}peer${reset}     ${peer.name} ${state}`);
   }
+  if (health.terminal) lines.push(`  ${dim}terminal${reset} ${health.terminal.provider === "none" ? `${yellow}${describeTerminal(health.terminal)}${reset}` : describeTerminal(health.terminal)}`);
   lines.push(`  ${dim}push${reset}     ${health.push.configured ? `${green}configured${reset}` : `${dim}not configured${reset}`}`);
   if (health.canary) {
     const failed = health.canary.steps.filter(step => step.status === "failed");

@@ -43,6 +43,7 @@ function fakeTmux(overrides: { panes?: string; ps?: string; fail?: (args: string
     binary: () => "/usr/bin/tmux",
     version: async () => "tmux 3.4\n",
     processes: async () => overrides.ps ?? PS,
+    sockets: async () => [],
     sleep: async () => {},
     run: async (socket, args, options = {}) => {
       calls.push({ socket, args, ...(options.input !== undefined ? { input: options.input } : {}) });

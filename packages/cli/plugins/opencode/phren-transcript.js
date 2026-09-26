@@ -224,13 +224,33 @@ function writePidBinding(sessionID) {
   writeJsonAtomic(pidBindingFile(), { session: sessionID, at: new Date().toISOString() });
 }
 
+/** What this OpenCode process is doing, by PID: "working", "idle" or
+ * "blocked" (a permission waits for an answer). The Hook reads it for a pane
+ * whose terminal does not watch its agents (tmux); Herdr has its own. */
+const statusFile = () => path.join(storeRoot(), ".runtime", "sessions", `opencode-status-${process.pid}.json`);
+
 export const PhrenTranscriptPlugin = async () => {
   const sessions = new Map();
   // Subagent sessions run inside the same process; the pane shows their parent.
   const children = new Set();
   let boundSession;
-  // A reused PID must not inherit an old process's conversation.
-  try { removeFile(pidBindingFile()); } catch {}
+  // A reused PID must not inherit an old process's conversation or state.
+  try { removeFile(pidBindingFile()); removeFile(statusFile()); } catch {}
+  let recordedStatus;
+  // Permission asks still open, by id: while any is, the process is blocked.
+  const asking = new Set();
+  const recordStatus = (status, sessionID) => {
+    // A fan-out worker runs headless, in no pane.
+    if (process.env.PHREN_FANOUT_JOB) return;
+    const next = asking.size && status === "working" ? "blocked" : status;
+    if (next === recordedStatus) return;
+    try {
+      mkdirSync(path.dirname(statusFile()), { recursive: true });
+      writeJsonAtomic(statusFile(), { status: next, ...(sessionID ? { session: sessionID } : {}), at: new Date().toISOString() });
+      recordedStatus = next;
+    } catch {}
+  };
+  const permissionId = properties => text(properties?.permissionID) || text(properties?.requestID) || text(properties?.id);
   const timers = new Map();
   const written = new Map();
   const pendingApprovals = new Set();
@@ -304,6 +324,7 @@ export const PhrenTranscriptPlugin = async () => {
       }
       rememberInfo(input.sessionID, output.message);
       for (const part of output.parts ?? []) rememberPart(input.sessionID, output.message.id, part);
+      if (!children.has(input.sessionID)) recordStatus("working", input.sessionID);
     },
     "permission.ask": async (input, output) => {
       // A fan-out worker runs headless in its own worktree with nobody watching
@@ -321,7 +342,11 @@ export const PhrenTranscriptPlugin = async () => {
         writeBlocked(input);
         return;
       }
-      let request, answer, pendingSession;
+      let request, answer, pendingSession, decision;
+      // The ask blocks the process until it is answered: here from the
+      // phone, or in the terminal (permission.replied below).
+      const askId = text(input?.id);
+      if (askId) { asking.add(askId); recordStatus("blocked", text(input?.sessionID)); }
       try {
         const sessionID = text(input?.sessionID), id = text(input?.id);
         if (!OPENCODE_SESSION.test(sessionID) || !id) { setStatus(output, "ask"); return; }
@@ -339,7 +364,6 @@ export const PhrenTranscriptPlugin = async () => {
           title: text(input.title) || `Allow ${text(input.type) || "action"}?`, message: permissionMessage(input),
           createdAt: new Date(created).toISOString(), expiresAt: new Date(created + APPROVAL_DEADLINE_MS).toISOString() });
         const deadline = created + APPROVAL_DEADLINE_MS;
-        let decision;
         while (Date.now() < deadline) {
           await sleep(APPROVAL_POLL_MS);
           try {
@@ -356,6 +380,8 @@ export const PhrenTranscriptPlugin = async () => {
         if (answer) removeFile(answer);
         if (request) removeFile(request);
         if (pendingSession) pendingApprovals.delete(pendingSession);
+        // Answered from the phone: back to work. Otherwise the terminal asks.
+        if (askId && (decision === "approve" || decision === "deny")) { asking.delete(askId); recordStatus("working", pendingSession); }
       }
     },
     event: async ({ event }) => {
@@ -363,6 +389,16 @@ export const PhrenTranscriptPlugin = async () => {
       if ((event?.type === "session.created" || event?.type === "session.updated") && properties.info?.parentID
         && OPENCODE_SESSION.test(text(properties.info.id))) children.add(properties.info.id);
       const sessionID = typeof properties.sessionID === "string" ? properties.sessionID : properties.info?.sessionID ?? properties.part?.sessionID;
+      // Permission events name the ask (permission.updated / permission.asked)
+      // and its answer, which may come from the terminal.
+      if (event?.type === "permission.updated" || event?.type === "permission.asked") {
+        const id = permissionId(properties);
+        if (id) { asking.add(id); recordStatus("blocked", text(sessionID)); }
+      } else if (event?.type === "permission.replied") {
+        const id = permissionId(properties);
+        if (id) asking.delete(id); else asking.clear();
+        recordStatus("working", text(sessionID));
+      }
       if (!OPENCODE_SESSION.test(text(sessionID))) return;
       if (event.type === "message.updated") rememberInfo(sessionID, properties.info);
       else if (event.type === "message.part.updated") rememberPart(sessionID, properties.part?.messageID, properties.part);
@@ -381,7 +417,15 @@ export const PhrenTranscriptPlugin = async () => {
       } else if (event.type === "session.idle" || event.type === "session.error") {
         sessionState(sessionID).idle = true;
         flush(sessionID);
-      } else if (event.type === "session.status" && properties.status?.type === "busy") sessionState(sessionID).idle = false;
+        if (!children.has(sessionID)) { asking.clear(); recordStatus("idle", sessionID); }
+      } else if (event.type === "session.status") {
+        if (properties.status?.type === "busy") sessionState(sessionID).idle = false;
+        // A subagent's session runs inside its parent's turn.
+        if (!children.has(sessionID) && ["busy", "retry", "idle"].includes(properties.status?.type)) {
+          if (properties.status.type === "idle") asking.clear();
+          recordStatus(properties.status.type === "idle" ? "idle" : "working", sessionID);
+        }
+      }
     },
   };
 };

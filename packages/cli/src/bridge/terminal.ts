@@ -7,10 +7,17 @@
 // that does not leaves them out and the Hook falls back to lifecycle hooks
 // and process logs.
 import { existsSync } from "node:fs";
-import { herdrSocketPath } from "./herdr.js";
+import { herdrPaneFromEnv, herdrSocketPath } from "./herdr.js";
 import { BridgeError, type Json } from "./protocol.js";
 import { herdrTerminal } from "./terminal-herdr.js";
-import { tmuxSocketName, tmuxTerminal } from "./terminal-tmux.js";
+import { tmuxPaneFromEnv, tmuxSocketName, tmuxTerminal } from "./terminal-tmux.js";
+
+/** The pane this process runs in, from the variables its multiplexer sets:
+ * inside Herdr only Herdr's pane counts, elsewhere a tmux pane does. */
+export async function terminalPaneFromEnv(env: NodeJS.ProcessEnv = process.env): Promise<{ server: string; workspace: string; tab: string; pane: string } | undefined> {
+  if (env.HERDR_ENV === "1") return env.HERDR_SOCKET_PATH ? herdrPaneFromEnv(env) : undefined;
+  return tmuxPaneFromEnv(env);
+}
 
 /** A pane as the multiplexer lists it. `server` names the multiplexer instance
  * (a Herdr session, a tmux socket), `workspace` and `tab` its place in it

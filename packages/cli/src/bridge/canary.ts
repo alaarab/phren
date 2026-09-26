@@ -6,6 +6,7 @@ import { listLiveSessions } from "./hand-off.js";
 import { canaryFile, type CanaryResult, type CanaryStep, readCanary } from "./health.js";
 import { paneIdentity, servers, snapshot } from "./herdr.js";
 import { terminalProvider } from "./terminal.js";
+import { TMUX_HIDDEN } from "./terminal-tmux.js";
 import { atomic, BridgeError, bridgeRoot, id, type Json, objects, provider, type Provider } from "./protocol.js";
 import { readScheduleDocument } from "./schedules.js";
 import { TranscriptReader, transcriptPath } from "./transcripts.js";
@@ -115,6 +116,16 @@ async function sessionsStep(): Promise<Omit<CanaryStep, "name" | "durationMs">> 
   return { status: "ok", detail };
 }
 
+/** Where the canary's conductor starts: Herdr's default server, else the
+ * first Herdr server running; on a computer without Herdr, tmux's hidden
+ * server, so nothing opens where the owner is working. Undefined with neither. */
+export async function canaryServer(): Promise<string | undefined> {
+  const live = await servers().catch(() => [] as Json[]);
+  const herdr = live.filter(server => server.terminal !== "tmux").map(server => String(server.session));
+  if (herdr.length) return herdr.includes("default") ? "default" : herdr[0];
+  return live.some(server => server.session === TMUX_HIDDEN) ? TMUX_HIDDEN : undefined;
+}
+
 let running: Promise<CanaryResult> | undefined;
 
 /** Exercise the real launch, schedule, transcript and session paths once and
@@ -124,8 +135,9 @@ let running: Promise<CanaryResult> | undefined;
 export function runCanary(options: CanaryOptions): Promise<CanaryResult> {
   if (running) throw new BridgeError(409, "A canary is already running on this computer.");
   running = (async () => {
-    const started = new Date(), steps: CanaryStep[] = [], server = options.server ?? "default";
-    await step(steps, "conductor", () => conductorStep(options, server));
+    const started = new Date(), steps: CanaryStep[] = [], server = options.server ?? await canaryServer();
+    await step(steps, "conductor", async () => server ? conductorStep(options, server)
+      : { status: "failed", reason: "No terminal to start an agent in: Herdr is not running and tmux is not installed (or PHREN_TMUX=off)." });
     await step(steps, "schedules", () => scheduleStep(options));
     await step(steps, "transcript", () => transcriptStep());
     await step(steps, "sessions", () => sessionsStep());

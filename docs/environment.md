@@ -152,7 +152,8 @@ long the Hook holds a permission ask for the phone (default `55000`, the whole
 Claude window is 60000); tests shorten it. Tests also shorten
 `PHREN_IDENTITY_CACHE_MS` (how long a pane's process-based conversation probe
 is reused, default `2000`) and `PHREN_DIALOG_THROTTLE_MS` (how often a waiting
-pane's terminal dialog is read, default `3000`); the Hook reads all three once
+pane's terminal dialog is read, and on tmux how often a working pane's screen is
+checked for one, default `3000`); the Hook reads all three once
 at startup. `PHREN_SNAPSHOT_SHARE_MS` sets how old a Herdr `session.snapshot`
 may be for the chat and status streams and the activity timer to share it
 (default `2500`; `0` stops reusing answers), and `PHREN_SERVER_LIST_REUSE_MS` how

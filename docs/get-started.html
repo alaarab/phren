@@ -24,7 +24,7 @@
 <li>An iPhone with iOS 17 or later, or an Android phone with Android 8.0 or later.</li>
 <li>A Mac or a Linux computer where you run coding agents: Claude Code, Codex, Copilot or OpenCode.</li>
 <li><a href="https://nodejs.org">Node.js</a> 20 or newer on that computer.</li>
-<li><a href="https://herdr.dev">Herdr</a> on that computer, for chat, status, approvals and starting agents from the phone. See <a href="#herdr">what works without Herdr</a>.</li>
+<li><a href="https://herdr.dev">Herdr</a> on that computer, for chat, status, approvals and starting agents from the phone. tmux 3.0 or newer also works; see <a href="#herdr">what works without Herdr</a>.</li>
 <li>Optional: a GitHub account, to sync memory when you are away from your computer.</li>
 <li>Optional: Tailscale on the phone and the computer, to reach it away from home.</li>
 </ul>
@@ -149,7 +149,7 @@ It installs Phren Hook if it is missing and prints a QR code. The app shows the 
 <p>Each agent appears in the Agents tab with its computer, project and state: working, waiting on you, or idle.</p>
 <span class="label fail">If it fails</span>
 <ul>
-<li><strong>No sessions show up</strong>: check that the agent runs inside Herdr, not a plain terminal window.</li>
+<li><strong>No sessions show up</strong>: check that the agent runs inside Herdr (or tmux, on a computer without Herdr), not a plain terminal window.</li>
 <li><strong>OpenCode sessions don't show chat</strong>: turn on Herdr's OpenCode integration, or update the computer to phren 0.3.5 or later, whose OpenCode plugin reports the session itself. Then restart OpenCode.</li>
 </ul>
 </section>
@@ -169,18 +169,19 @@ It installs Phren Hook if it is missing and prints a QR code. The app shows the 
 </section>
 
 <h2 id="herdr">What Herdr does, and what works without it</h2>
-<p><a href="https://herdr.dev">Herdr</a> is a terminal workspace manager. It runs your agents in named workspaces, tabs and panes, and it knows which agent is in which pane. Phren Hook uses that to find each session, read its conversation and send your messages to the right place.</p>
+<p><a href="https://herdr.dev">Herdr</a> is a terminal workspace manager. It runs your agents in named workspaces, tabs and panes, and it knows which agent is in which pane. Phren Hook uses that to find each session, read its conversation and send your messages to the right place. On a computer without Herdr, Phren Hook uses <a href="https://github.com/tmux/tmux">tmux</a> 3.0 or newer instead, if it is installed.</p>
 <div class="table-wrap"><table>
-<tr><th>Feature</th><th>With Herdr</th><th>Without Herdr</th></tr>
-<tr><td>Memory: projects, findings, notes, tasks</td><td>Yes</td><td>Yes</td></tr>
-<tr><td>Agent list and status</td><td>Yes</td><td>No</td></tr>
-<tr><td>Chat with a running agent</td><td>Yes</td><td>No</td></tr>
-<tr><td>Approvals from the phone</td><td>Yes</td><td>No</td></tr>
-<tr><td>Start an agent from the phone</td><td>Yes, in a Herdr workspace that keeps running</td><td>Only as a terminal over SSH</td></tr>
-<tr><td>Terminal</td><td>The exact Herdr pane, which survives a dropped connection</td><td>A shell or an agent in a project folder, which ends when the connection drops</td></tr>
+<tr><th>Feature</th><th>With Herdr</th><th>With tmux, no Herdr</th><th>Neither</th></tr>
+<tr><td>Memory: projects, findings, notes, tasks</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+<tr><td>Agent list and status</td><td>Yes</td><td>Yes, from the agents' own reports</td><td>No</td></tr>
+<tr><td>Chat with a running agent</td><td>Yes</td><td>Yes</td><td>No</td></tr>
+<tr><td>Approvals from the phone</td><td>Yes</td><td>Yes</td><td>No</td></tr>
+<tr><td>Start an agent from the phone</td><td>Yes, in a Herdr workspace that keeps running</td><td>Yes, in a hidden tmux server that keeps running</td><td>Only as a terminal over SSH</td></tr>
+<tr><td>Terminal</td><td>The exact Herdr pane, which survives a dropped connection</td><td>The tmux server, which survives a dropped connection</td><td>A shell or an agent in a project folder, which ends when the connection drops</td></tr>
 </table></div>
-<p>Without Herdr, choose <strong>Open a terminal instead</strong> when you open a project on a computer. It runs a shell, or the agent you picked, straight over SSH in that folder. It has no chat and no approvals, and it stops when you leave or the connection drops.</p>
-<p class="note">Support for tmux without Herdr is planned. It does not work yet.</p>
+<p>With tmux, start your agents inside tmux (<code>tmux</code>, then <code>claude</code>) and they show up on the phone. Agents you start from the phone run in a hidden tmux server; to see them on the computer, run <code>tmux -L phren attach</code>.</p>
+<p>Without Herdr or tmux, choose <strong>Open a terminal instead</strong> when you open a project on a computer. It runs a shell, or the agent you picked, straight over SSH in that folder. It has no chat and no approvals, and it stops when you leave or the connection drops.</p>
+<p class="note">tmux support is new. It is tested against tmux itself with stand-in agents; tell us on <a href="support.html">Support</a> if a harness misbehaves in tmux.</p>
 
 <h2>Optional extras</h2>
 <ul>
