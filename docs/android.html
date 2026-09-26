@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>phren for Android</title>
+<meta name="description" content="The phren Android app: your project memory, and chat, terminals and diffs for the coding agents running on your own computers. Same design, same store, same sync as the iPhone app.">
+<link rel="icon" href="phren-icon-64.svg"><link rel="stylesheet" href="app.css">
+</head><body><main>
+<nav class="appnav" aria-label="App"><a class="home" href="index.html">phren</a><a href="get-started.html">Get started</a><a href="ios.html">iPhone</a><a href="android.html" aria-current="page">Android</a><a href="phren-hook.html">Phren Hook</a><a href="support.html">Support</a><a href="privacy.html">Privacy</a><a href="docs.html">Docs</a></nav>
+
+<div class="eyebrow">phren for Android</div>
+<h1>The same phren.<br>On Android.</h1>
+<p class="lead">Your memory and the coding agents on your own computers, on an Android phone. It uses the same store format, the same sync and the same Phren Hook as the iPhone app, so you can use both side by side.</p>
+<p><span class="status">Early testing · version 1.0.0 · Android 8.0 or later</span></p>
+<div class="cta"><a class="button" href="get-started.html">Get started</a><a class="button secondary" href="support.html">Support</a></div>
+
+<div class="grid">
+<section><h3>Memory</h3><p>Projects, findings, notes, tasks and summaries, edited offline and synced to your GitHub store when you're back online.</p></section>
+<section><h3>Agents</h3><p>Every session on your computers, with chat, approvals, Git and a full terminal.</p></section>
+<section><h3>Nothing in between</h3><p>GitHub for the store and pinned SSH to your computers. Your sign-in and keys are encrypted with the Android Keystore.</p></section>
+</div>
+
+<h2>Install</h2>
+<p>phren for Android is not on Google Play yet. We share test builds directly while we finish it. <a href="support.html#contact">Write to us</a> for one. This page will link the store listing when it exists.</p>
+<p>Then follow <a href="get-started.html">Get started</a>. The steps are the same on both phones.</p>
+
+<h2>What you need</h2>
+<ul>
+<li><strong>Phren Hook on each computer</strong> that runs your agents. <code>npx --yes @phren/cli@latest pair</code> installs it and shows a pairing code. Scan it from <strong>Agents → Add computer</strong>, or open it with the camera app.</li>
+<li><strong>Herdr</strong> on that computer for chat, status, approvals and starting agents. <a href="get-started.html#herdr">What works without Herdr</a>.</li>
+<li><strong>SSH</strong> turned on, and <strong>Tailscale</strong> when you are away from home.</li>
+<li><strong>A phren store</strong>, read from a paired computer or synced through a GitHub repository you own.</li>
+</ul>
+
+<h2>What's in it</h2>
+<ul>
+<li><strong>Projects, Tasks, Memory and Settings</strong>: the project grid, findings, notes, tasks, summaries, skills, the review queue, the store's files, and the same 3D memory graph as the iPhone app and the web UI.</li>
+<li><strong>Agents</strong>: every saved computer's sessions, pins, Busy versus Offline, and the last known list shown greyed while it reconnects.</li>
+<li><strong>Chat</strong>: the agent's conversation as it streams, command rows, changed files, permission requests and questions answered in the chat, photos and files, dictation, the model picker, Stop, and talk mode.</li>
+<li><strong>Git</strong>: changes with staging, history, branches, pull requests and the repository's other worktrees.</li>
+<li><strong>Terminal</strong>: the computer's Herdr panes with a key bar for Esc, Tab, Ctrl and arrows, and Herdr workspaces to focus, rename, add and close.</li>
+<li><strong>Start an agent</strong> on a computer, from a project or a task, and <strong>Pause all agents</strong>.</li>
+<li><strong>Schedules</strong>, <strong>Code</strong> (what changed, files, most used, find by name), <strong>Simulators</strong> on a Mac, <strong>account usage</strong> and conductor grants.</li>
+</ul>
+
+<h2>Only on Android</h2>
+<ul>
+<li><strong>Share to phren.</strong> Share text from any app to <strong>Add to phren</strong> to save it as a task or note.</li>
+<li><strong>Quick Settings tile.</strong> Add the <strong>Add phren task</strong> tile to capture a task from the notification shade.</li>
+<li><strong>App shortcuts</strong>: hold the phren icon for Add task, Add note and Pause all agents.</li>
+<li><strong>Home-screen widget</strong>: how many findings wait for review, with a tap into the review queue or your tasks.</li>
+</ul>
+
+<h2>Not there yet</h2>
+<p>A few iPhone features are still coming to Android:</p>
+<ul>
+<li>Web server previews. We have not shipped them because a local tunnel on the phone could be reached by other apps, and we want a safe design first.</li>
+<li>On-device reply summaries.</li>
+<li>Siri, Live Activities and Control Center controls are iPhone features. Android has the share target, tile and widget above instead.</li>
+</ul>
+
+<h2>Notifications on Android</h2>
+<p>With notifications on, phren checks your computers for agents waiting on you about every 15 minutes while it is closed, and reminds you before a schedule's next run. Android decides the exact timing and may delay checks to save battery. There is no push service in between: the phone asks your computers directly over SSH.</p>
+
+<h2>Permissions it asks for</h2>
+<ul>
+<li><strong>Microphone</strong>: only while you dictate or use talk mode.</li>
+<li><strong>Notifications</strong>: to tell you when an agent is waiting on you, if you allow it.</li>
+<li><strong>Network access</strong>: to reach GitHub and your computers. Android grants this without asking.</li>
+</ul>
+<p>The pairing scanner is Google Play services' code scanner, so phren itself does not ask for the camera. Photos you attach come through Android's photo picker, which shares only what you pick.</p>
+
+<h2>Where your data goes</h2>
+<p>Store data moves between the phone and GitHub, or between the phone and your own computer. Session data comes from your own computers over SSH. We receive nothing. The <a href="privacy.html">privacy policy</a> covers both apps and lists what Android's backup and speech services see.</p>
+
+<footer><a href="get-started.html">Get started</a> · <a href="ios.html">iPhone</a> · <a href="support.html">Support</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/alaarab/phren">Source</a></footer>
+</main></body></html>

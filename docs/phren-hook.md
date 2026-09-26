@@ -1,7 +1,8 @@
 # Phren Hook
 
-Phren Hook connects the Phren iPhone app to agents already running on your
-computers. It is part of the open-source Phren CLI and runs independently of
+Phren Hook connects the phren iPhone and Android apps to agents already running
+on your computers. New users: [Get started](get-started.html) walks through the
+whole setup. It is part of the open-source Phren CLI and runs independently of
 other phone or terminal applications.
 
 ## Install on each computer

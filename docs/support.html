@@ -1,36 +1,137 @@
 <!doctype html>
-<!-- Generated from apps/ios/AppStore/support.md in the private phren-apps repo. Keep source and page in sync. -->
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
-<title>Phren iOS — Support</title><style>
-:root{color-scheme:dark}body{margin:40px auto;padding:0 22px;max-width:760px;background:#1e1e1e;color:#fff;font:17px/1.65 system-ui,sans-serif}a{color:#c2aaff}h1,h2{line-height:1.2;margin-top:1.6em}pre,code{background:#121416;border-radius:6px}pre{padding:16px;overflow:auto}code{padding:2px 4px}nav{display:flex;gap:24px;font-size:15px}footer{margin:44px 0;color:#a4a9b1}
-</style></head><body><nav><a href="./">Phren</a><a href="ios.html">iPhone app</a><a href="privacy.html">Privacy</a><a href="support.html">Support</a></nav><main>
-<h1>phren for iOS — Support</h1>
-<p>New here? The <a href="ios.html">iPhone app page</a> explains what the app does and what it needs; the <a href="privacy.html">privacy policy</a> lists what it stores and where data goes.</p>
-<h2>Getting started</h2>
-<p>phren for iOS connects to your coding agents and project memory. Agents and terminals use SSH and Phren Hook on your computers; they work without a GitHub sign-in. To sync memory, connect a phren store — a GitHub repository containing a <code>phren.root.yaml</code> file.</p>
-<p>If you don&#x27;t have one yet, install the CLI and create one:</p>
-<pre>
-npm install -g @phren/cli
+<!-- Support for phren for iPhone and phren for Android. The private phren-apps repo keeps apps/ios/AppStore/support.md; keep both in step. Store listings link this URL. -->
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>phren app support</title>
+<meta name="description" content="Help with the phren iPhone and Android apps: connecting a computer, chat that won't start, OpenCode, TestFlight, GitHub sign-in and re-pairing.">
+<link rel="icon" href="phren-icon-64.svg"><link rel="stylesheet" href="app.css">
+</head><body><main>
+<nav class="appnav" aria-label="App"><a class="home" href="index.html">phren</a><a href="get-started.html">Get started</a><a href="ios.html">iPhone</a><a href="android.html">Android</a><a href="phren-hook.html">Phren Hook</a><a href="support.html" aria-current="page">Support</a><a href="privacy.html">Privacy</a><a href="docs.html">Docs</a></nav>
 
-phren init
+<div class="eyebrow">Support</div>
+<h1>Help with the phren app</h1>
+<p class="lead">For iPhone and Android. New here? Start with <a href="get-started.html">Get started</a>, which walks through setup step by step.</p>
 
-</pre>
-<p>Then push that store to a GitHub repository and connect the app to it.</p>
-<h2>Connecting memory</h2>
-<p>Open Projects or Settings → Connect memory. GitHub is needed only for syncing your memory repositories; you can dismiss setup and continue using Agents.</p>
-<p>1. Create a fine-grained personal access token at <strong>github.com/settings/personal-access-tokens/new</strong> 2. Under <strong>Repository access</strong>, choose <strong>Only select repositories</strong> and pick your phren store repository 3. Under <strong>Permissions → Repository permissions</strong>, set <strong>Contents: Read and write</strong> and <strong>Metadata: Read</strong> 4. Paste the token into the app</p>
-<p>Your token is stored only in your device&#x27;s Keychain and is sent only to GitHub.</p>
-<h2>Common problems</h2>
-<p><strong>Agent chat or terminals cannot connect.</strong> Keep Tailscale connected on the phone and computer. Install Phren Hook on each computer with <code>npx --yes @phren/cli@0.3.4 bridge install</code>, then run <code>npx --yes @phren/cli@0.3.4 bridge doctor</code>. Add the computer in Agents and authorize its device SSH key. Moshi is not required. See the <a href="https://alaarab.github.io/phren/phren-hook.html">Phren Hook guide</a>.</p>
-<p><strong>A web preview has no styles or scripts.</strong> Check that the development server serves its CSS and JavaScript URLs without errors. Restart or redeploy its HTML and asset manifest together after an app build. Relative assets and WebSockets work over Phren&#x27;s SSH preview; an app that hardcodes another origin may need its public/base URL configured.</p>
-<p><strong>The input token count is much larger than the message I typed.</strong> The latest response can include conversation context, instructions, and tools. The usage details distinguish reused cached input from uncached input. They show the latest model response, not an account quota or the text length of your latest message.</p>
-<p><strong>&quot;Only public repositories are listed&quot; / my store isn&#x27;t in the picker.</strong> Your token doesn&#x27;t have access to the repository. GitHub deliberately returns &quot;not found&quot; rather than &quot;forbidden&quot; for private repositories a token can&#x27;t read, so this looks like the repo doesn&#x27;t exist. Edit the token and make sure your store repository is included under Repository access.</p>
-<p><strong>Everything is read-only / I can&#x27;t add anything.</strong> Your token has read access but not write. Set <strong>Contents: Read and write</strong> on the token, then pull to refresh in the app — permissions are re-checked on refresh.</p>
-<p><strong>A note or task I added hasn&#x27;t appeared on my other machines.</strong> Changes are queued locally and pushed when the app is open. Open the app and give it a few seconds. <strong>Settings → Recent captures</strong> shows each capture and whether it has synced yet. If something failed permanently, it appears under <strong>Settings → Needs attention</strong>, where you can retry or discard it.</p>
-<p><strong>Siri added a task but I don&#x27;t know where it went.</strong> <strong>Settings → Recent captures</strong> shows the destination of every capture. To stop it choosing for you, set a default under <strong>Settings → Quick capture</strong>, or leave it on <strong>Always ask</strong> and Siri will ask each time.</p>
-<p><strong>Siri opens the wrong app when I say &quot;phren&quot;.</strong> Say <strong>&quot;Add a phren task&quot;</strong> rather than &quot;add a task to phren&quot; — the latter is a phrase Reminders also claims. Running the shortcut once by hand from the Shortcuts app significantly improves Siri&#x27;s recognition afterwards. You can also bind <strong>phren: Add Task</strong> to the Action Button.</p>
-<h2>Contact</h2>
-<p><strong>ala@alaarab.com</strong></p>
-<p>Bug reports and feature requests are welcome as GitHub issues: https://github.com/alaarab/phren/issues</p>
-</main><footer>Phren for iPhone · Your computers, your memory.</footer></body></html>
+<nav class="toc" aria-label="On this page">
+<strong>On this page</strong>
+<ul>
+<li><a href="#first">Check these first</a></li>
+<li><a href="#computers">Computers and agents</a></li>
+<li><a href="#memory">Memory and GitHub</a></li>
+<li><a href="#phones">Installing and moving phones</a></li>
+<li><a href="#more">Other questions</a></li>
+<li><a href="#contact">Contact</a></li>
+</ul>
+</nav>
+
+<h2 id="first">Check these first</h2>
+<p>Most problems come down to one of these. On the computer, run:</p>
+<pre><code>npx --yes @phren/cli@0.3.4 bridge doctor</code></pre>
+<p>It checks Phren Hook, SSH, Herdr and the phone's authorization line, and says what to fix. Then check that:</p>
+<ol>
+<li>the computer is awake, and SSH is on (Remote Login on a Mac);</li>
+<li>the phone and computer are on the same Wi-Fi, or Tailscale is connected on both;</li>
+<li>your agents run inside <a href="https://herdr.dev">Herdr</a>, and were started after Phren Hook was installed.</li>
+</ol>
+
+<h2 id="computers">Computers and agents</h2>
+
+<h3 id="unreachable">The computer shows Offline, or Phren Hook can't be reached</h3>
+<ul>
+<li>Keep Tailscale connected on the phone and the computer when you are away from home. At home, check both are on the same network.</li>
+<li>Check SSH: on a Mac, System Settings → General → Sharing → Remote Login. On Linux, <code>sudo systemctl enable --now sshd</code>.</li>
+<li>Run <code>bridge doctor</code> (above). If Phren Hook is not installed or not running, install it again with <code>npx --yes @phren/cli@0.3.4 bridge install</code>.</li>
+<li>On Linux, run <code>loginctl enable-linger $USER</code> if Phren Hook should keep running after you log out.</li>
+<li>Logs: <code>~/.local/share/phren/bridge/service.log</code> on a Mac, <code>journalctl --user -u phren-hook</code> on Linux.</li>
+</ul>
+<p><strong>Busy</strong> is different from Offline. It means the computer answered but was too loaded to list its sessions in time. Its sessions still open, and the details fill in when it catches up.</p>
+
+<h3 id="starting">A chat stays on "Starting…"</h3>
+<p>The agent isn't reporting its session to Phren Hook. Phren Hook adds callbacks to your agents, and an agent only loads them when it starts. Quit the agent and start it again inside Herdr. In Codex, also open <code>/hooks</code> and approve phren's callbacks; Codex doesn't trust new hooks on its own.</p>
+<p>If you started the agent from the phone, give it up to a minute. If it still says Starting, open the terminal from the chat header to see what the agent is doing; it may be asking a question on screen.</p>
+
+<h3 id="opencode">OpenCode sessions don't show chat</h3>
+<p>Phren Hook needs to know which OpenCode conversation each pane is showing. It learns that from Herdr's OpenCode integration, or from phren's own OpenCode plugin in phren 0.3.5 or later. Turn on Herdr's OpenCode integration, or update phren on that computer, then restart OpenCode.</p>
+
+<h3 id="no-sessions">No sessions show up</h3>
+<ul>
+<li>Agents need to run inside Herdr. An agent in a plain terminal window is invisible to Phren Hook.</li>
+<li>If you use a named Herdr server, enter its name on the computer's page in the app.</li>
+<li>Without Herdr you still have memory and an SSH terminal: open a project on the computer and choose <strong>Open a terminal instead</strong>. That terminal ends when the connection drops. Support for tmux without Herdr is planned but does not work yet.</li>
+</ul>
+
+<h3 id="approvals">A permission request only shows in the terminal</h3>
+<p>Claude Code and Codex requests reach the chat through phren's callbacks. Some questions have no callback; open the terminal from the chat header and answer there. The phone holds a request for up to 55 seconds, then the agent shows it in its terminal again, where you can still answer from the phone.</p>
+
+<h3 id="muted">A message stays as a muted bubble</h3>
+<p>The computer did not confirm delivery. It usually arrived anyway, so check the chat or the terminal before you tap Retry. Tap Dismiss if it did arrive.</p>
+
+<h3 id="notifications">Notifications arrive late, or not at all</h3>
+<ul>
+<li>Check Settings → Notifications in the app, and that notifications for phren are allowed in the phone's settings.</li>
+<li>iPhone: without your own push key on the computer, the app checks for waiting agents during short background windows that iOS decides. Alerts are instant while the app is open.</li>
+<li>Android: the app checks about every 15 minutes while closed, and Android may delay that to save battery. Exempting phren from battery optimization helps.</li>
+</ul>
+
+<h2 id="memory">Memory and GitHub</h2>
+
+<h3>Connecting memory</h3>
+<p>Open Projects, or Settings → Connect memory. Choose <strong>Use memory from</strong> a paired computer (no GitHub needed), or <strong>Sign in with GitHub</strong>. To use a token instead:</p>
+<ol>
+<li>Create a fine-grained personal access token at <a href="https://github.com/settings/personal-access-tokens/new">github.com/settings/personal-access-tokens/new</a>.</li>
+<li>Under <strong>Repository access</strong>, choose <strong>Only select repositories</strong> and pick your phren store repository.</li>
+<li>Under <strong>Permissions → Repository permissions</strong>, set <strong>Contents: Read and write</strong> and <strong>Metadata: Read</strong>.</li>
+<li>In the app, choose <strong>Other options → Use a GitHub token</strong> and paste it.</li>
+</ol>
+<p>Your token stays on the phone and is sent only to GitHub. No store yet? On your computer, run <code>npm install -g @phren/cli</code>, then <code>phren init</code>, then push the store to a private GitHub repository.</p>
+
+<h3>My store isn't in the list, or only public repositories are listed</h3>
+<p>Your sign-in can't see the repository. GitHub answers "not found" rather than "forbidden" for a private repository a token can't read, so it looks like the repository doesn't exist. Add your store under Repository access on GitHub, then pull to refresh.</p>
+
+<h3>Everything is read-only</h3>
+<p>The token can read but not write. Set <strong>Contents: Read and write</strong>, then pull to refresh. The app checks permissions again on refresh.</p>
+
+<h3>Something I added hasn't reached my other computers</h3>
+<p>Changes wait on the phone and go out when the app is open and online. Open the app and give it a few seconds. <strong>Settings → Recent captures</strong> shows where each capture went and whether it synced. Anything that failed for good shows under <strong>Settings → Needs attention</strong>, where you can retry or discard it.</p>
+
+<h2 id="phones">Installing and moving phones</h2>
+
+<h3 id="testflight">TestFlight (iPhone)</h3>
+<ul>
+<li><strong>The invite expired or the beta is full</strong>: <a href="#contact">write to us</a> for a new invite.</li>
+<li><strong>The app won't open and TestFlight says the build expired</strong>: open TestFlight and install the newest build. Test builds stop working after 90 days.</li>
+<li><strong>No update showing</strong>: open TestFlight and pull to refresh. Automatic updates can be turned on on the app's TestFlight page.</li>
+</ul>
+
+<h3 id="android-build">Android test builds</h3>
+<p>phren for Android is not on Google Play yet. <a href="#contact">Ask us</a> for a test build. Android may ask you to allow installs from the app you download it with.</p>
+
+<h3 id="repair">New phone, reinstalled app, or keys lost</h3>
+<p>The phone's SSH keys never leave it and are not in backups. A new phone, a restored backup, a reinstall, or clearing the app's data on Android all leave the app without its keys, and computers stop answering it. To fix it:</p>
+<ol>
+<li>In the app, open the computer and choose <strong>Forget computer</strong>, if it is still listed.</li>
+<li>On the computer, run <code>npx --yes @phren/cli@latest pair</code> and scan the new code.</li>
+<li>On the computer, remove the old phone's <code>phren-iphone</code> or <code>phren-android</code> line from <code>~/.ssh/authorized_keys</code>.</li>
+</ol>
+<p>Your GitHub sign-in also stays on the old phone; sign in again on the new one.</p>
+<p><strong>The phone can't connect while locked</strong> (iPhone): its SSH keys can only be read while the phone is unlocked. Unlock it and the connection resumes.</p>
+
+<h2 id="more">Other questions</h2>
+
+<h3>A web preview has no styles or scripts (iPhone)</h3>
+<p>Check that the development server serves its CSS and JavaScript without errors. Relative assets and WebSockets work over phren's SSH preview; an app that hard-codes another address may need its public or base URL set.</p>
+
+<h3>The input token count is much bigger than my message</h3>
+<p>Each response counts the whole conversation, instructions and tools, not only your latest message. The usage details separate cached input from new input. They describe the latest response, not your account's limit.</p>
+
+<h3>Talk mode uses the phone's voice, not ElevenLabs</h3>
+<p>The computer the chat is on needs an ElevenLabs key. Run <code>phren bridge speech-key set</code> there and paste it. Without a key, or when the computer can't be reached, the phone reads replies itself.</p>
+
+<h3>Siri opens the wrong app when I say "phren" (iPhone)</h3>
+<p>Say <strong>"Add a phren task"</strong> rather than "add a task to phren", which Reminders also claims. Running the shortcut once by hand from the Shortcuts app helps Siri recognize it. You can also put <strong>phren: Add Task</strong> on the Action Button. To choose where Siri's captures go, set a default under <strong>Settings → Quick capture</strong>.</p>
+
+<h2 id="contact">Contact</h2>
+<p>Email <a href="mailto:ala@alaarab.com">ala@alaarab.com</a>. Bug reports and feature requests are welcome as <a href="https://github.com/alaarab/phren/issues">GitHub issues</a>. Please don't paste tokens, keys or private code into an issue.</p>
+
+<footer><a href="get-started.html">Get started</a> · <a href="ios.html">iPhone</a> · <a href="android.html">Android</a> · <a href="phren-hook.html">Phren Hook</a> · <a href="privacy.html">Privacy</a></footer>
+</main></body></html>
