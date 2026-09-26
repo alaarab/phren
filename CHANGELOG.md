@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-09-25
+
 ### Added
 
 - `phren agent`: phren's coding agent is now a released package. `@phren/agent` (moved from `experimental/agent` to `packages/agent`) is published with `@phren/cli` at the same version and pins that exact CLI. Install it with `npm install -g @phren/agent`, then run `phren agent -i` or the package's own `phren-agent` binary. The CLI loads it only when the command runs, so its cold start and install size are unchanged; without the package, `phren agent` prints the install command. Under tmux the Hook recognizes the agent whichever way it was started, and `phren init` and `phren bridge install` mention it when it is installed. See `docs/agent.md`, now a user guide covering providers (ChatGPT/Codex subscription, OpenAI, OpenRouter, Anthropic, Ollama), MCP servers, permissions, memory, headless runs and the phone app.
