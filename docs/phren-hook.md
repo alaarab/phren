@@ -12,8 +12,8 @@ Linux uses a systemd user service; macOS uses a LaunchAgent in your signed-in
 user session. Without Herdr the Hook uses tmux; see [Without Herdr: tmux](#without-herdr-tmux).
 
 ```sh
-npx --yes @phren/cli@0.3.7 bridge install
-npx --yes @phren/cli@0.3.7 bridge doctor
+npx --yes @phren/cli@0.3.8 bridge install
+npx --yes @phren/cli@0.3.8 bridge doctor
 ```
 
 Keep Tailscale connected on the iPhone and computer for remote access. Funnel and
@@ -351,10 +351,10 @@ alone.
 ## Maintain and diagnose
 
 ```sh
-npx --yes @phren/cli@0.3.7 bridge status
-npx --yes @phren/cli@0.3.7 bridge update
-npx --yes @phren/cli@0.3.7 bridge rollback
-npx --yes @phren/cli@0.3.7 bridge uninstall
+npx --yes @phren/cli@0.3.8 bridge status
+npx --yes @phren/cli@0.3.8 bridge update
+npx --yes @phren/cli@0.3.8 bridge rollback
+npx --yes @phren/cli@0.3.8 bridge uninstall
 ```
 
 `update` installs the version of the CLI you invoke; choose an explicit newer
