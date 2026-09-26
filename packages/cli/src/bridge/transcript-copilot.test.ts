@@ -13,7 +13,7 @@ const phoneFixture = path.resolve(here, "../../fixtures/conformance/copilot-1.0.
 const session = "00000000-0000-4000-8000-000000000187";
 
 describe("Copilot 1.0.87 transcript projection", () => {
-  it("keeps the final-answer phase and tool success, and drops reasoning and prompt augmentation", async () => {
+  it("keeps the final-answer phase, tool success and the shown reasoning summary, and drops private reasoning and prompt augmentation", async () => {
     const page = await new TranscriptReader(events, "copilot").read();
     expect(page.entries).toHaveLength(60);
     const counts: Record<string, number> = {};
@@ -25,7 +25,11 @@ describe("Copilot 1.0.87 transcript projection", () => {
     const completes = page.entries.filter(entry => entry.raw.type === "tool.execution_complete");
     expect(completes.every(entry => (entry.raw.data as { success?: boolean }).success === true)).toBe(true);
     const wire = JSON.stringify(page.entries);
-    for (const hidden of ["reasoningText", "reasoningOpaque", "encryptedContent", "transformedContent", "toolTelemetry", "interactionId"]) {
+    // The summary Copilot prints under "Thought for Ns" rides on its message.
+    const thoughts = page.entries.filter(entry => typeof (entry.raw.data as { reasoningText?: unknown }).reasoningText === "string");
+    expect(thoughts.length).toBeGreaterThan(0);
+    expect(thoughts.every(entry => entry.raw.type === "assistant.message")).toBe(true);
+    for (const hidden of ["reasoningOpaque", "reasoningBlocks", "encryptedContent", "transformedContent", "toolTelemetry", "interactionId"]) {
       expect(wire).not.toContain(hidden);
     }
   });
