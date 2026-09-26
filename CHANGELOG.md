@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-09-26
+
 ### Fixed
 
 - Answering Claude's question from the phone after its hold has ended no longer reports "not confirmed" when Claude took the answer but redrew slowly (a busy computer): the Hook waits up to 8 seconds for the terminal to move on instead of 2.
