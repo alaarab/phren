@@ -1,3 +1,4 @@
+import { createServer } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -224,7 +225,7 @@ describe("choosing the terminal", () => {
     expect(terminalKind("tmux-phren")).toBe("herdr");
   });
 
-  it("lists tmux servers only while no Herdr server answers, under the phone's session kind", async () => {
+  it("lists tmux servers under the phone's session kind, the hidden one only while no Herdr server answers", async () => {
     ({ restore } = fakeTmux());
     expect(await tmuxServers()).toEqual([
       { id: "tmux:tmux", kind: "herdr", terminal: "tmux", session: "tmux", running: true },
@@ -234,6 +235,24 @@ describe("choosing the terminal", () => {
     restore();
     restore = setTmuxDeps({ binary: () => undefined });
     expect(await servers()).toEqual([]);
+  });
+
+  // Windows cannot listen on a unix socket path for the fake Herdr.
+  it.skipIf(process.platform === "win32")("lists the owner's tmux servers beside a running Herdr, without the hidden one", async () => {
+    ({ restore } = fakeTmux());
+    // A running Herdr: the owner's tmux sessions still show beside it, so
+    // `tmux new -s app codex` over ssh is visible; launches stay on Herdr.
+    const herdr = createServer(socket => socket.on("data", bytes => {
+      const request = JSON.parse(String(bytes));
+      socket.end(JSON.stringify({ id: request.id, result: {} }) + "\n");
+    }));
+    await new Promise<void>(resolve => herdr.listen(path.join(home, "herdr.sock"), resolve));
+    try {
+      expect(await servers()).toEqual([
+        { id: "herdr:default", kind: "herdr", session: "default", running: true },
+        { id: "tmux:tmux", kind: "herdr", terminal: "tmux", session: "tmux", running: true },
+      ]);
+    } finally { await new Promise<void>(resolve => herdr.close(() => resolve())); }
   });
 });
 

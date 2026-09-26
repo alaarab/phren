@@ -13,7 +13,7 @@
 <h2>Install on each computer</h2><p>You’ll need macOS or Linux, Node 20+, Herdr, SSH, and <code>lsof</code>. Run as the same user who runs your agents.</p>
 <pre><code>npx --yes @phren/cli@0.3.7 bridge install
 npx --yes @phren/cli@0.3.7 bridge doctor</code></pre>
-<p class="note">Herdr is what lets Phren Hook find your agents, read their conversations and type into them. Without Herdr the app still gives you memory and an SSH terminal (a shell, or an agent started in a project folder) that ends when the connection drops. Support for tmux without Herdr is planned; it does not work yet.</p>
+<p class="note">Herdr or tmux (3.0 or newer) is what lets Phren Hook find your agents, read their conversations and type into them. Your own tmux sessions show up beside Herdr's when both run. Without either, the app still gives you memory and an SSH terminal (a shell, or an agent started in a project folder) that ends when the connection drops.</p>
 <p>The installer adds a LaunchAgent on macOS or a systemd user service on Linux. It preserves other agent hooks and SSH keys, and backs up files it changes.</p>
 <p>New to phren? <a href="get-started.html">Get started</a> walks through the whole setup, including pairing.</p>
 <ol><li>On the computer, run <code>phren pair</code> (or <code>npx --yes @phren/cli@latest pair</code> without a global install). It installs Phren Hook if needed and prints a QR code.</li><li>In Phren, open <strong>Agents → Add computer → Scan pairing code</strong>. Can’t scan? Choose <strong>Enter code</strong> and type the address and code the terminal shows.</li><li>Keep Tailscale connected on both devices for remote access. No public port or Funnel is needed.</li></ol>
