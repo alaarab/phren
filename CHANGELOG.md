@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Copilot chat on the phone: a skill Copilot loads opens to its SKILL.md behind the skill chip (Copilot's `skill.invoked` body, instead of "Skill loaded successfully"), and an MCP call carries its server and tool names so phren's own tools draw as phren cards instead of "Phren-Get Tasks" with raw JSON.
 - Copilot chat on the phone shows Copilot's thinking: the summary Copilot prints under "Thought for Ns" in its own terminal (`reasoningText`) now reaches the phone with the message. Its encrypted and opaque reasoning (`encryptedContent`, `reasoningOpaque`, `reasoningBlocks`) still never leaves the computer.
 
 ### Fixed

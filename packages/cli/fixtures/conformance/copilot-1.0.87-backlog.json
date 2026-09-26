@@ -100,6 +100,18 @@
    }
   },
   {
+   "line": 45,
+   "raw": {
+    "type": "skill.invoked",
+    "timestamp": "2026-09-22T19:17:19.048Z",
+    "data": {
+     "name": "sample",
+     "content": "Sample text.",
+     "description": "sample"
+    }
+   }
+  },
+  {
    "line": 47,
    "raw": {
     "type": "assistant.turn_end",
@@ -149,7 +161,9 @@
      "toolName": "phren-get_project_summary",
      "arguments": {
       "name": "sample"
-     }
+     },
+     "mcpServerName": "sample",
+     "mcpToolName": "sample"
     }
    }
   },
@@ -381,6 +395,18 @@
    }
   },
   {
+   "line": 99,
+   "raw": {
+    "type": "skill.invoked",
+    "timestamp": "2026-09-22T19:18:07.258Z",
+    "data": {
+     "name": "sample",
+     "content": "Sample text.",
+     "description": "sample"
+    }
+   }
+  },
+  {
    "line": 101,
    "raw": {
     "type": "assistant.turn_end",
@@ -518,7 +544,9 @@
       "project": "sample",
       "query": "sample",
       "limit": 5
-     }
+     },
+     "mcpServerName": "sample",
+     "mcpToolName": "sample"
     }
    }
   },
@@ -724,9 +752,9 @@
   }
  ],
  "totalLines": 130,
- "startLine": 6,
- "hasMore": true,
- "reset": true,
+ "startLine": 0,
+ "hasMore": false,
+ "reset": false,
  "type": "backlog",
  "source": "copilot",
  "session": "00000000-0000-4000-8000-000000000187"
