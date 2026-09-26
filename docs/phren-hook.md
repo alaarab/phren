@@ -328,6 +328,28 @@ start to the first response byte (`gatewayMs`). The iPhone shows a computer as
 gateway took over 1.5 seconds, keeping the last snapshot visible instead of
 calling it unreachable.
 
+### Offline reasons
+
+When the Hook cannot reach this computer's Herdr or a linked peer, its error
+response keeps the human `error` text and adds a stable `code`, so a client can
+say why without matching sentences. A remote Hook's code travels on unchanged
+through the peer that asked it. The same `code` appears on unreachable rows in
+`/v1/health/details` `peers` and in `live_sessions`' `unreachable` list.
+
+| `code` | Meaning |
+| --- | --- |
+| `herdr-not-running` | Herdr's socket does not exist: Herdr is not running. |
+| `herdr-stale-socket` | The socket exists but nothing listens on it. |
+| `herdr-permission` | The socket belongs to another user or is not a socket. |
+| `herdr-unreachable` | Any other socket failure; the text names the errno. |
+| `herdr-timeout` | Herdr accepted the request but did not answer in time. |
+| `ssh-unavailable` | This computer could not start `ssh`. |
+| `dispatch-key-missing` | This computer has no private dispatch key; run `phren bridge enroll-computer`. |
+| `peer-offline` | SSH to the peer failed; the text keeps ssh's first line and exit code. |
+| `peer-timeout` | The peer's Hook did not answer within the wait. |
+| `peer-key-not-enrolled` | The peer refused this computer's dispatch key. |
+| `peer-host-key-mismatch` | The peer's SSH host key does not match its pin. |
+
 ### Health and the canary
 
 `GET /v1/health/details` answers whether phren is healthy on this computer, and

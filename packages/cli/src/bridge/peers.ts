@@ -7,7 +7,7 @@ import { z } from "zod";
 import { logger } from "../logger.js";
 import { hookRequest } from "./client.js";
 import { computerName, dispatchKeyPath, publicComputerKey } from "./computers.js";
-import { atomic, BridgeError, bridgeRoot, serverName, type Json } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, serverName, withErrorCode, type Json } from "./protocol.js";
 
 const peerSchema = z.object({
   name: computerName,
@@ -99,7 +99,7 @@ export function peerOfflineMessage(diagnostic: string, exitCode: number | null |
 export async function peerRequest(peer: HookPeer, route: string, data?: Json, timeout?: number): Promise<Json> {
   const root = bridgeRoot(), key = dispatchKeyPath(root);
   const info = await lstat(key).catch(() => undefined);
-  if (!info?.isFile() || info.isSymbolicLink() || (info.mode & 0o077)) throw new BridgeError(409, "Run phren bridge enroll-computer on this computer first (private key mode 0600).");
+  if (!info?.isFile() || info.isSymbolicLink() || (info.mode & 0o077)) throw new BridgeError(409, "Run phren bridge enroll-computer on this computer first (private key mode 0600).", { code: "dispatch-key-missing" });
   const temporary = await mkdtemp(path.join(root, "peer-"));
   let child: ReturnType<typeof spawn> | undefined, stream: Duplex | undefined;
   try {
@@ -120,7 +120,7 @@ export async function peerRequest(peer: HookPeer, route: string, data?: Json, ti
     let diagnostic = "";
     child.stderr!.on("data", bytes => { diagnostic = (diagnostic + bytes.toString()).slice(-4096); });
     const exited = new Promise<number | null>(resolve => ssh.once("exit", code => resolve(code)));
-    child.on("error", error => stream?.destroy(new BridgeError(503, `SSH is unavailable (${(error as NodeJS.ErrnoException).code ?? "spawn failed"}).`)));
+    child.on("error", error => stream?.destroy(new BridgeError(503, `SSH is unavailable (${(error as NodeJS.ErrnoException).code ?? "spawn failed"}).`, { code: "ssh-unavailable" })));
     try {
       return await hookRequest(route, data, { createConnection: () => stream! }, timeout ?? (data === undefined ? 15_000 : 65_000));
     } catch (error) {
@@ -128,10 +128,12 @@ export async function peerRequest(peer: HookPeer, route: string, data?: Json, ti
         // ssh's stderr and exit status usually land just after the stream ends.
         const exitCode = await Promise.race([exited, new Promise<undefined>(resolve => { setTimeout(() => resolve(undefined), 250).unref(); })]);
         if (!/Permission denied|Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(diagnostic))
-          throw new BridgeError(503, peerOfflineMessage(diagnostic, exitCode));
+          throw new BridgeError(503, peerOfflineMessage(diagnostic, exitCode), { code: "peer-offline" });
       }
-      if (/Permission denied/i.test(diagnostic)) throw new BridgeError(403, "The remote computer has not enrolled this dispatch key.");
-      if (/Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(diagnostic)) throw new BridgeError(403, "The remote SSH host key does not match its pin.");
+      if (/Permission denied/i.test(diagnostic)) throw new BridgeError(403, "The remote computer has not enrolled this dispatch key.", { code: "peer-key-not-enrolled" });
+      if (/Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(diagnostic)) throw new BridgeError(403, "The remote SSH host key does not match its pin.", { code: "peer-host-key-mismatch" });
+      // Our own wait ran out (client.ts); a remote Hook's own 504 keeps its code.
+      if (error instanceof BridgeError && error.status === 504 && error.message.startsWith("Hook did not confirm")) throw withErrorCode(error, "peer-timeout");
       throw error;
     }
   } finally { stream?.destroy(); child?.kill(); await rm(temporary, { recursive: true, force: true }); }

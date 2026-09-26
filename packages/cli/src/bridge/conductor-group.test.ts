@@ -12,7 +12,7 @@ it("finds a linked peer's conductor and names the peers it could not rule out", 
   const answers: Record<string, () => Json> = {
     Mini: () => ({ conductor: null }),
     MacBook: () => ({ conductor: { server: "default", target } }),
-    Linuxbox: () => { throw new BridgeError(503, "The remote Hook is offline or SSH did not confirm the request."); },
+    Linuxbox: () => { throw new BridgeError(503, "The remote Hook is offline or SSH did not confirm the request.", { code: "peer-offline" }); },
     Laptop: () => { throw new BridgeError(404, "Unknown Phren Hook route."); },
     Desk: () => { throw new BridgeError(404, disabledHint("conductor")); },
   };
@@ -23,7 +23,7 @@ it("finds a linked peer's conductor and names the peers it could not rule out", 
     found: { computer: "MacBook", target },
     // A disabled conductor module means no conductor can run there; an older Hook cannot say.
     unchecked: [
-      { computer: "Linuxbox", error: "The remote Hook is offline or SSH did not confirm the request." },
+      { computer: "Linuxbox", error: "The remote Hook is offline or SSH did not confirm the request.", code: "peer-offline" },
       { computer: "Laptop", error: "Its Hook is too old to report a conductor." },
     ],
   });
