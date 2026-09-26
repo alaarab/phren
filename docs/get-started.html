@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Get started with the phren app</title>
+<meta name="description" content="Set up phren on iPhone or Android from zero: install the app, pair a computer, connect your memory, and chat with the coding agents on your own computers.">
+<link rel="icon" href="phren-icon-64.svg"><link rel="stylesheet" href="app.css">
+</head><body><main>
+<nav class="appnav" aria-label="App"><a class="home" href="index.html">phren</a><a href="get-started.html" aria-current="page">Get started</a><a href="ios.html">iPhone</a><a href="android.html">Android</a><a href="phren-hook.html">Phren Hook</a><a href="support.html">Support</a><a href="privacy.html">Privacy</a><a href="docs.html">Docs</a></nav>
+
+<div class="eyebrow">Get started</div>
+<h1>From zero to your first chat.</h1>
+<p class="lead">This guide takes you from a new phone to talking with a coding agent on your own computer. It takes about fifteen minutes. Every step says what to do, what you should see, and what to do if it goes wrong.</p>
+
+<h2>How the pieces fit</h2>
+<p>There is no phren server and no phren account. The app talks to two things you already own:</p>
+<ul>
+<li><strong>Your computers.</strong> The phone connects over SSH to <strong>Phren Hook</strong>, a small helper you install on each computer. Phren Hook reads your agents through <a href="https://herdr.dev">Herdr</a>, a terminal workspace manager, and passes chat, status and approvals to the phone.</li>
+<li><strong>Your memory.</strong> Your phren store (findings, notes, tasks) comes either from a paired computer or from a GitHub repository you own.</li>
+</ul>
+<p>At home, the phone reaches your computer on your Wi-Fi. Away from home, <a href="https://tailscale.com">Tailscale</a> connects them privately. Nothing needs a public port.</p>
+
+<h2>What you need</h2>
+<ul>
+<li>An iPhone with iOS 17 or later, or an Android phone with Android 8.0 or later.</li>
+<li>A Mac or a Linux computer where you run coding agents: Claude Code, Codex, Copilot or OpenCode.</li>
+<li><a href="https://nodejs.org">Node.js</a> 20 or newer on that computer.</li>
+<li><a href="https://herdr.dev">Herdr</a> on that computer, for chat, status, approvals and starting agents from the phone. See <a href="#herdr">what works without Herdr</a>.</li>
+<li>Optional: a GitHub account, to sync memory when you are away from your computer.</li>
+<li>Optional: Tailscale on the phone and the computer, to reach it away from home.</li>
+</ul>
+
+<nav class="toc" aria-label="Steps">
+<strong>Steps</strong>
+<ol>
+<li><a href="#install">Install the app</a></li>
+<li><a href="#computer">Get your computer ready</a></li>
+<li><a href="#pair">Pair the phone with the computer</a></li>
+<li><a href="#away">Reach it away from home</a></li>
+<li><a href="#memory">Connect your memory</a></li>
+<li><a href="#agents">Start your agents</a></li>
+<li><a href="#chat">Your first chat</a></li>
+</ol>
+</nav>
+
+<section class="step" id="install">
+<h2><span class="num">1</span>Install the app</h2>
+<span class="label do">Do this</span>
+<ul>
+<li><strong>iPhone:</strong> phren is in testing through Apple's TestFlight and is not on the App Store yet. Install <a href="https://apps.apple.com/app/testflight/id899247664">TestFlight</a> from the App Store, then open the invite link we sent you on the phone and tap <strong>Install</strong>.</li>
+<li><strong>Android:</strong> phren for Android is not on Google Play yet. <a href="support.html#contact">Ask us</a> for a test build.</li>
+</ul>
+<span class="label see">You should see</span>
+<p>Five tabs along the bottom: Projects, Agents, Tasks, Memory and Settings. Projects opens on <strong>Connect project memory</strong>. You can leave it for now; step 5 comes back to it.</p>
+<span class="label fail">If it fails</span>
+<ul>
+<li>The TestFlight link says the invite expired or the beta is full: write to us and we will send a new one.</li>
+<li>TestFlight says the build expired: open TestFlight and install the newest build. Test builds stop working after 90 days.</li>
+</ul>
+<p>More on each platform: <a href="ios.html">iPhone</a>, <a href="android.html">Android</a>.</p>
+</section>
+
+<section class="step" id="computer">
+<h2><span class="num">2</span>Get your computer ready</h2>
+<span class="label do">Do this</span>
+<ol>
+<li><strong>Turn on SSH.</strong> On a Mac: System Settings → General → Sharing → <strong>Remote Login</strong>. On Linux: <code>sudo systemctl enable --now sshd</code> (the service is called <code>ssh</code> on some distributions).</li>
+<li><strong>Check Node.</strong> Run <code>node --version</code>. It should print v20 or higher.</li>
+<li><strong>Install Herdr</strong> from <a href="https://herdr.dev">herdr.dev</a> and run your agents inside it. Herdr keeps each agent in a named pane that Phren Hook can find, read and type into.</li>
+</ol>
+<span class="label see">You should see</span>
+<p><code>ssh localhost</code> on the computer asks for your password or logs you in. Herdr opens and shows your workspaces.</p>
+<span class="label fail">If it fails</span>
+<ul>
+<li>A company-managed Mac may block Remote Login. Ask your IT team, or use a computer you control.</li>
+<li><code>node</code> is missing or old: install the current LTS release from nodejs.org or your package manager.</li>
+</ul>
+</section>
+
+<section class="step" id="pair">
+<h2><span class="num">3</span>Pair the phone with the computer</h2>
+<span class="label do">Do this</span>
+<ol>
+<li>On the computer, as the user who runs your agents, run:
+<pre><code>npx --yes @phren/cli@latest pair</code></pre>
+It installs Phren Hook if it is missing and prints a QR code. The app shows the same command under Add computer, with a Copy button.</li>
+<li>On the phone, open <strong>Agents → Add computer → Scan pairing code</strong> and point the camera at the QR code.</li>
+<li>Can't scan? Choose <strong>Enter code</strong> and type the address and the six-character code the terminal shows.</li>
+</ol>
+<span class="label see">You should see</span>
+<p>The terminal prints <strong>Paired</strong> with your phone's name. The computer appears in the Agents tab, and after a few seconds it lists the agent sessions running in Herdr.</p>
+<p>Behind the scenes, the phone made its own SSH key and the computer added one restricted line for it to <code>~/.ssh/authorized_keys</code>. The phone also saved the computer's host key, so it will refuse to talk to anything pretending to be that computer. The pairing code never crosses the network.</p>
+<span class="label fail">If it fails</span>
+<ul>
+<li><strong>"SSH isn't answering on this computer"</strong>: go back to step 2 and turn on SSH. Pairing can finish first; the phone connects once SSH is on.</li>
+<li><strong>"No network address found"</strong>: connect the computer to Wi-Fi or Tailscale and run the command again.</li>
+<li><strong>The code stopped working</strong>: it lasts five minutes and closes after five wrong tries. Run the command again, or give yourself longer with <code>npx --yes @phren/cli@latest pair --minutes 15</code>.</li>
+<li><strong>The phone can't reach the computer</strong>: put both on the same Wi-Fi, or turn on Tailscale on both (step 4).</li>
+<li>You prefer to set up SSH yourself: under Add computer choose <strong>Enter details</strong>, copy the line the app shows into <code>~/.ssh/authorized_keys</code>, then confirm the fingerprint. The <a href="phren-hook.html">Phren Hook page</a> covers this.</li>
+</ul>
+<p>To check the helper at any time, run <code>npx --yes @phren/cli@0.3.4 bridge doctor</code> on the computer.</p>
+</section>
+
+<section class="step" id="away">
+<h2><span class="num">4</span>Reach it away from home</h2>
+<span class="label do">Do this</span>
+<p>Install <a href="https://tailscale.com/download">Tailscale</a> on the phone and on the computer and sign in to the same account. Keep it connected on both. If you pair while Tailscale is on, the QR code already carries the computer's Tailscale name, so there is nothing else to set.</p>
+<span class="label see">You should see</span>
+<p>Turn off Wi-Fi on the phone. The computer in the Agents tab still lists its sessions.</p>
+<span class="label fail">If it fails</span>
+<ul>
+<li>The computer shows <strong>Offline</strong>: open the Tailscale app on both devices and check they are connected. A sleeping laptop can't answer; keep it awake or plugged in.</li>
+<li>It shows <strong>Busy</strong>: the computer answers but is too loaded to list sessions right away. Its sessions still open; the details fill in when it catches up.</li>
+<li>You paired before installing Tailscale: pair again with Tailscale on, so the phone learns the Tailscale address.</li>
+</ul>
+</section>
+
+<section class="step" id="memory">
+<h2><span class="num">5</span>Connect your memory</h2>
+<p>Memory is your phren store: the findings, notes and tasks your agents keep. Open the <strong>Projects</strong> tab and choose one way in.</p>
+<span class="label do">Do this</span>
+<dl>
+<dt>From your computer (no GitHub)</dt>
+<dd>Tap <strong>Use memory from</strong> your paired computer. The phone reads and edits the store on that computer through Phren Hook. This only works while the phone can reach that computer.</dd>
+<dt>Through GitHub (works anywhere)</dt>
+<dd>Tap <strong>Sign in with GitHub</strong>, enter the code GitHub shows, then pick the repository that holds your store (it contains a <code>phren.root.yaml</code> file). Prefer a token? Under <strong>Other options</strong>, choose <strong>Use a GitHub token</strong>; the <a href="support.html#memory">Support page</a> lists the exact permissions.</dd>
+<dt>Just looking (iPhone)</dt>
+<dd>Tap <strong>Try the sample store</strong> for two example projects that stay on the phone.</dd>
+</dl>
+<p>No store yet? On your computer run <code>npm install -g @phren/cli</code> and then <code>phren init</code>. To sync through GitHub, push the store to a private repository, for example with <code>phren store add --remote &lt;url&gt;</code> or <code>phren team init</code> for a team store.</p>
+<span class="label see">You should see</span>
+<p>"Syncing your store…", then your projects with their counts. Tasks and Memory fill in too.</p>
+<span class="label fail">If it fails</span>
+<ul>
+<li><strong>Your store is not in the list</strong>: the token or sign-in can't see that repository. Give it access under Repository access on GitHub, then pull to refresh.</li>
+<li><strong>Everything is read-only</strong>: the token needs <strong>Contents: Read and write</strong>.</li>
+</ul>
+</section>
+
+<section class="step" id="agents">
+<h2><span class="num">6</span>Start your agents</h2>
+<p>Phren Hook connects to agents that are running. It adds small callbacks to your agents so they report their sessions and approval requests. An agent loads those callbacks when it starts.</p>
+<span class="label do">Do this</span>
+<ol>
+<li><strong>Restart any agent that was already running</strong> when you installed Phren Hook. Quit it and start it again inside a Herdr pane.</li>
+<li>In Codex, open <code>/hooks</code> and approve phren's new callbacks. Codex does not trust new hooks on its own.</li>
+<li>Or start one from the phone: open a project, tap <strong>Open on a computer</strong>, pick the computer and agent, and tap <strong>Open &lt;project&gt; with &lt;agent&gt;</strong>. The app creates a Herdr workspace in that folder and starts the agent. Starting can take up to a minute.</li>
+</ol>
+<span class="label see">You should see</span>
+<p>Each agent appears in the Agents tab with its computer, project and state: working, waiting on you, or idle.</p>
+<span class="label fail">If it fails</span>
+<ul>
+<li><strong>No sessions show up</strong>: check that the agent runs inside Herdr, not a plain terminal window.</li>
+<li><strong>OpenCode sessions don't show chat</strong>: turn on Herdr's OpenCode integration, or update the computer to phren 0.3.5 or later, whose OpenCode plugin reports the session itself. Then restart OpenCode.</li>
+</ul>
+</section>
+
+<section class="step" id="chat">
+<h2><span class="num">7</span>Your first chat</h2>
+<span class="label do">Do this</span>
+<p>Tap a session in the Agents tab. Type a message and send it, or tap the microphone to dictate.</p>
+<span class="label see">You should see</span>
+<p>The agent's reply streams in, with each command it runs as a compact row you can expand, and the files it changed with their diffs. When the agent asks for permission, the request shows as a card with Deny and Approve.</p>
+<span class="label fail">If it fails</span>
+<ul>
+<li><strong>The chat stays on "Starting…"</strong>: the agent is not reporting its session to Phren Hook. Almost always it was started before Phren Hook was installed. Restart the agent (step 6). For OpenCode, see step 6's note.</li>
+<li><strong>A message stays as a muted bubble</strong>: the computer did not confirm delivery. It often arrived anyway. Check the terminal before you tap Retry.</li>
+<li><strong>Approvals only show in the terminal</strong>: some questions have no callback yet. Open the terminal from the chat header and answer there.</li>
+</ul>
+</section>
+
+<h2 id="herdr">What Herdr does, and what works without it</h2>
+<p><a href="https://herdr.dev">Herdr</a> is a terminal workspace manager. It runs your agents in named workspaces, tabs and panes, and it knows which agent is in which pane. Phren Hook uses that to find each session, read its conversation and send your messages to the right place.</p>
+<div class="table-wrap"><table>
+<tr><th>Feature</th><th>With Herdr</th><th>Without Herdr</th></tr>
+<tr><td>Memory: projects, findings, notes, tasks</td><td>Yes</td><td>Yes</td></tr>
+<tr><td>Agent list and status</td><td>Yes</td><td>No</td></tr>
+<tr><td>Chat with a running agent</td><td>Yes</td><td>No</td></tr>
+<tr><td>Approvals from the phone</td><td>Yes</td><td>No</td></tr>
+<tr><td>Start an agent from the phone</td><td>Yes, in a Herdr workspace that keeps running</td><td>Only as a terminal over SSH</td></tr>
+<tr><td>Terminal</td><td>The exact Herdr pane, which survives a dropped connection</td><td>A shell or an agent in a project folder, which ends when the connection drops</td></tr>
+</table></div>
+<p>Without Herdr, choose <strong>Open a terminal instead</strong> when you open a project on a computer. It runs a shell, or the agent you picked, straight over SSH in that folder. It has no chat and no approvals, and it stops when you leave or the connection drops.</p>
+<p class="note">Support for tmux without Herdr is planned. It does not work yet.</p>
+
+<h2>Optional extras</h2>
+<ul>
+<li><strong>Talk mode</strong> reads an agent's replies aloud. It uses an ElevenLabs voice through your computer if that computer has a key (<code>phren bridge speech-key set</code>), and the phone's own voice otherwise. Each ElevenLabs use is billed to your ElevenLabs account.</li>
+<li><strong>Notifications</strong> tell you when an agent is waiting on you. Turn them on under Settings → Notifications.</li>
+<li><strong>More computers</strong>: repeat steps 2 and 3 on each one. The Agents tab lists them all.</li>
+</ul>
+
+<h2>Where to go next</h2>
+<ul>
+<li><a href="support.html">Support and troubleshooting</a></li>
+<li><a href="phren-hook.html">Phren Hook</a>: install, update, remove, and what it connects</li>
+<li><a href="privacy.html">Privacy policy</a>: what stays on the phone and what leaves it</li>
+<li><a href="docs.html#getting-started">phren documentation</a>: the CLI, memory, and the rest</li>
+</ul>
+
+<footer><a href="ios.html">iPhone</a> · <a href="android.html">Android</a> · <a href="support.html">Support</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/alaarab/phren">Source</a></footer>
+</main></body></html>

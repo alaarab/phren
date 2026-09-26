@@ -6,7 +6,7 @@
   <title>Documentation | phren</title>
   <meta name="description" content="Complete phren documentation: getting started, CLI and MCP reference, shell and VS Code workflows, team sharing, security, contributing, FAQ, and architecture." />
   <meta property="og:title" content="phren documentation" />
-  <meta property="og:description" content="Install phren, use the CLI and MCP tools, connect the iPhone app, and share memory across machines and teams." />
+  <meta property="og:description" content="Install phren, use the CLI and MCP tools, connect the phone app, and share memory across machines and teams." />
   <meta property="og:type" content="website" />
   <link rel="icon" type="image/svg+xml" href="phren-icon-64.svg">
   <link rel="stylesheet" href="style.css">
@@ -493,7 +493,7 @@
       <a href="index.html#why" class="nav-link">Why</a>
       <a href="index.html#surfaces" class="nav-link">Surfaces</a>
       <a href="index.html#teams" class="nav-link">Teams</a>
-      <a href="ios.html" class="nav-link">iPhone</a>
+      <a href="get-started.html" class="nav-link">Get the app</a>
       <a href="docs.html" class="nav-link active">Docs</a>
       <a href="https://github.com/alaarab/phren" class="nav-cta" target="_blank" rel="noopener">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -542,10 +542,11 @@
         <div class="sidebar-group">
           <a href="#iphone" class="sidebar-section-link sidebar-group-toggle" data-group="iphone">
             <svg class="sidebar-chevron" width="10" height="10" viewBox="0 0 10 10"><path d="M3 2l4 3-4 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            iPhone &amp; Hook
+            Phone app &amp; Hook
           </a>
           <div class="sidebar-group-items" data-group="iphone">
-            <a href="#ios-app" class="sidebar-link sub">iPhone App</a>
+            <a href="#ios-app" class="sidebar-link sub">Phone app</a>
+            <a href="get-started.html" class="sidebar-link sub">Get started guide</a>
             <a href="#ios-hook" class="sidebar-link sub">Phren Hook</a>
           </div>
         </div>
@@ -776,7 +777,7 @@
         <div class="docs-overview">
           <div class="docs-kicker">Docs, Setup, Teams, and Internals</div>
           <h1>phren documentation</h1>
-          <p>Install, use, and extend phren. This page covers setup, the CLI and MCP tools, the iPhone app, the shell and VS Code, teams, security, and how phren works inside.</p>
+          <p>Install, use, and extend phren. This page covers setup, the CLI and MCP tools, the phone app, the shell and VS Code, teams, security, and how phren works inside.</p>
 
           <div class="docs-overview-grid">
             <a href="#getting-started" class="docs-overview-card">
@@ -802,7 +803,7 @@
           </div>
 
           <div class="docs-overview-links">
-            <a href="#iphone" class="docs-pill-link">iPhone app</a>
+            <a href="#iphone" class="docs-pill-link">Phone app</a>
             <a href="#security" class="docs-pill-link">Security model</a>
             <a href="#faq" class="docs-pill-link">Common questions</a>
             <a href="#architecture" class="docs-pill-link">Architecture</a>
@@ -1044,16 +1045,17 @@ phren hooks errors --limit 5</code></pre>
       <!--  IPHONE APP AND PHREN HOOK                                    -->
       <!-- ============================================================ -->
       <section class="docs-section" id="iphone">
-        <h1>iPhone App and Phren Hook</h1>
+        <h1>Phone App and Phren Hook</h1>
         <p class="docs-subtitle">Read your memory and talk to your running agents from your phone. Nothing goes through a phren server.</p>
 
-        <h2 id="ios-app">phren for iPhone <a href="#ios-app" class="anchor-link">#</a></h2>
-        <p>The app shows findings, notes, tasks, and the review queue from your store, and lists the agent sessions on your computers. It is not on the App Store yet. <a href="ios.html">The iPhone page</a> covers what it does and how to get it.</p>
+        <h2 id="ios-app">phren for iPhone and Android <a href="#ios-app" class="anchor-link">#</a></h2>
+        <p>The app shows findings, notes, tasks, and the review queue from your store, and lets you chat with the agent sessions on your computers. The iPhone app is in TestFlight testing and the Android app is in early testing; neither is in a store yet. <a href="get-started.html">Get started</a> walks through setup step by step. The <a href="ios.html">iPhone</a> and <a href="android.html">Android</a> pages cover each app, and <a href="privacy.html">the privacy policy</a> covers both.</p>
         <p>It needs:</p>
         <ul>
-          <li><strong>Your store on GitHub.</strong> The app signs in with a fine-grained GitHub token scoped to that repo. <a href="support.html">Support</a> lists the permissions.</li>
-          <li><strong>Phren Hook</strong> on each computer that runs your agents, for sessions and chat. Memory works without it.</li>
+          <li><strong>Phren Hook</strong> on each computer that runs your agents. <code>npx --yes @phren/cli@latest pair</code> installs it and pairs the phone.</li>
+          <li><strong><a href="https://herdr.dev">Herdr</a></strong> on that computer for chat, status, approvals and starting agents. Without it you get memory and an SSH terminal that ends when the connection drops.</li>
           <li><strong>SSH</strong> to each computer, and <strong>Tailscale</strong> when you are away from home. No public port is needed.</li>
+          <li><strong>Your store</strong>, read from a paired computer or synced through GitHub. <a href="support.html#memory">Support</a> lists the GitHub token permissions.</li>
         </ul>
 
         <h2 id="ios-hook">Phren Hook <a href="#ios-hook" class="anchor-link">#</a></h2>
@@ -2828,7 +2830,11 @@ phren team join git@github.com:example-org/phren-arc.git
       <span class="dot-sep">•</span>
       <a href="whitepaper.pdf" target="_blank" rel="noopener">Whitepaper</a>
       <span class="dot-sep">•</span>
+      <a href="get-started.html">Get the app</a>
+      <span class="dot-sep">•</span>
       <a href="ios.html">iPhone</a>
+      <span class="dot-sep">•</span>
+      <a href="android.html">Android</a>
       <span class="dot-sep">•</span>
       <a href="privacy.html">Privacy</a>
       <span class="dot-sep">•</span>
