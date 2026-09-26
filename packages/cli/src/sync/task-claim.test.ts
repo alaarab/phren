@@ -1,7 +1,7 @@
 import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { readTasks } from "../data/tasks.js";
 import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 import { claimTaskSynced } from "./task-claim.js";
@@ -33,7 +33,10 @@ beforeEach(() => {
     return clone;
   });
 }, 30_000);
-afterEach(() => tmp.cleanup());
+// The claims below carry fixed times; pin the clock just after them so the
+// first one stays fresh (under a day old) whatever day the suite runs.
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-09-25T05:02:00Z") }); });
+afterEach(() => { vi.useRealTimers(); tmp.cleanup(); });
 
 const task = (store: string, bid: string) => {
   const doc = readTasks(store, "phren");
