@@ -232,6 +232,14 @@ describe("choosing the terminal", () => {
       { id: "tmux:tmux-phren", kind: "herdr", terminal: "tmux", session: "tmux-phren", running: true },
     ]);
     expect(await servers()).toEqual(await tmuxServers());
+    restore();
+    restore = setTmuxDeps({ binary: () => undefined });
+    expect(await servers()).toEqual([]);
+  });
+
+  // Windows cannot listen on a unix socket path for the fake Herdr.
+  it.skipIf(process.platform === "win32")("lists the owner's tmux servers beside a running Herdr, without the hidden one", async () => {
+    ({ restore } = fakeTmux());
     // A running Herdr: the owner's tmux sessions still show beside it, so
     // `tmux new -s app codex` over ssh is visible; launches stay on Herdr.
     const herdr = createServer(socket => socket.on("data", bytes => {
@@ -245,9 +253,6 @@ describe("choosing the terminal", () => {
         { id: "tmux:tmux", kind: "herdr", terminal: "tmux", session: "tmux", running: true },
       ]);
     } finally { await new Promise<void>(resolve => herdr.close(() => resolve())); }
-    restore();
-    restore = setTmuxDeps({ binary: () => undefined });
-    expect(await servers()).toEqual([]);
   });
 });
 
