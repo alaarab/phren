@@ -66,7 +66,7 @@ describe("OpenCode's permission prompt", () => {
 
   it("reads the question and offers Allow once and Reject", () => {
     expect(opencodePermissionDialog(screen(0))).toEqual({ selected: 0, choice: {
-      title: "Permission required\n← Access external directory ~/apps\nPatterns\n- /Users/me/apps/*", highlightedIndex: 0,
+      title: "Access external directory ~/apps", body: "/Users/me/apps/*", highlightedIndex: 0,
       options: [{ label: "Allow once", key: "1", hasKey: false }, { label: "Reject", key: "Escape", hasKey: true }] } });
   });
   it("finds the cursor from the colors wherever it sits", () => {
