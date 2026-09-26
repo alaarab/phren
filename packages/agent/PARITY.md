@@ -7,7 +7,7 @@ evidence, and lists what is still missing.
 
 How to read it:
 
-- **phren-agent** cells cite `file:line` under `experimental/agent/` and the
+- **phren-agent** cells cite `file:line` under `packages/agent/` and the
   test file that covers the behaviour. "Fixed here" marks work done in this
   pass (branch `feat/agent-parity`).
 - **Claude Code / Codex / OpenCode** cells summarize their public docs and
@@ -51,7 +51,7 @@ How to read it:
 | 30 | Provider coverage incl. DeepSeek | Anthropic, Bedrock, Vertex, any Anthropic-compatible URL | OpenAI + any OpenAI-compatible `model_providers` | 75+ via models.dev, OpenCode Zen/Go | **improved here**: openai-codex (ChatGPT subscription; default model now follows `~/.codex/config.toml` because the built-in `gpt-5.4` is rejected for ChatGPT accounts), openai, openrouter (DeepSeek ids refreshed against the live catalog), anthropic, **deepseek** (api.deepseek.com, `DEEPSEEK_API_KEY`, `deepseek-flash` / `deepseek-v4-pro`), **openai-compat** (`--base-url` / `PHREN_AGENT_BASE_URL` + `PHREN_AGENT_API_KEY`: OpenCode Go/Zen, vLLM, LM Studio, Together…), ollama, replay. Unknown `--provider` names now error instead of silently auto-detecting | `src/providers/resolve.ts:60`, `:118`, `src/providers/codex-auth.ts` (`codexConfiguredModel`), `src/models.ts` (deepseek catalog). Tests: `providers-compat.test.ts`, `resolve-provider.test.ts` |
 | 31 | Retry / backoff | yes | yes | yes | yes: 429/5xx/network with backoff; no Retry-After header, 504 not retried, streams retried only at open | `src/providers/retry.ts`. Tests: `retry.test.ts`, `abort-retry.test.ts` |
 | 32 | LSP / diagnostics | partial (IDE) | no | yes (LSP diagnostics after edits) | partial: post-edit lint/test commands through the permissioned shell; no LSP | `src/agent-loop/index.ts` (post-edit checks), `src/tools/lint-test.ts`. Tests: `post-edit-checks.test.ts` |
-| 33 | Launch from the phone | Claude Code yes | Codex yes | OpenCode yes | **no**: the Phren Hook's `launchKinds` does not include phren-agent, so the iPhone/Android app cannot start it (a running phren-agent pane in Herdr does report its session) | Not implemented in this pass by request; see `src/herdr-hooks.ts` for the reporting side |
+| 33 | Launch from the phone | Claude Code yes | Codex yes | OpenCode yes | **no**: the Phren Hook's `launchKinds` does not include phren-agent, so the iPhone/Android app cannot start a new session | Not implemented in this pass by request. A phren-agent started on the computer does appear on the phone (tmux process detection, Herdr session reporting in `src/herdr-hooks.ts`) |
 
 ## Top gaps remaining
 
@@ -98,8 +98,8 @@ byte-identical test files, and (for the rename) a grep for the old name.
 
 ```sh
 pnpm --filter @phren/agent build
-node experimental/agent/scripts/bench/run.mjs --self-check          # fixtures fail untouched
-node experimental/agent/scripts/bench/run.mjs --provider openai-codex --reasoning medium \
+node packages/agent/scripts/bench/run.mjs --self-check          # fixtures fail untouched
+node packages/agent/scripts/bench/run.mjs --provider openai-codex --reasoning medium \
   [--model <id>] [--task rename-symbol] [--runs 3] [--output results.json]
 ```
 
@@ -124,7 +124,7 @@ No paid key (OpenRouter, DeepSeek) was used. The only local Ollama model is an
 embedding model. After the Codex window resets, rerun:
 
 ```sh
-node experimental/agent/scripts/bench/run.mjs --provider openai-codex --reasoning medium --output bench.json
+node packages/agent/scripts/bench/run.mjs --provider openai-codex --reasoning medium --output bench.json
 ```
 
 The earlier opt-in OpenRouter smoke assessment (`ASSESSMENT.md`,
