@@ -9,6 +9,7 @@ import { searchErrorRecovery } from "../memory/error-recovery.js";
 import { analyzeAndCapture } from "../memory/auto-capture.js";
 import { AntiPatternTracker } from "../memory/anti-patterns.js";
 import type { TurnHooks } from "./types.js";
+import { DIFF_MARKER } from "../multi/diff-renderer.js";
 
 const MAX_TOOL_CONCURRENCY = 5;
 
@@ -273,6 +274,16 @@ export interface ToolExecContext {
   repeatChain?: RepeatChainState;
 }
 
+/**
+ * The model-visible part of a tool output. File tools append a full
+ * before/after payload after DIFF_MARKER for the TUI's diff view; sending it
+ * to the model would put two copies of the file into context on every edit.
+ */
+export function modelVisibleOutput(output: string): string {
+  const at = output.indexOf(DIFF_MARKER);
+  return at === -1 ? output : output.slice(0, at);
+}
+
 /** Execute tool blocks, collect results with error recovery and anti-pattern tracking. */
 export async function executeToolBlocks(
   toolUseBlocks: ToolUseBlock[],
@@ -322,18 +333,19 @@ export async function executeToolBlocks(
       ctx.status(`\x1b[2m  ← ${is_error ? "ERROR: " : ""}${preview}${finalOutput.length > 200 ? "..." : ""}\x1b[0m\n`);
     }
 
+    const modelOutput = modelVisibleOutput(finalOutput);
     results.push({
       type: "tool_result",
       tool_use_id: block.id,
       content: images
         ? [
-            { type: "text", text: finalOutput },
+            { type: "text", text: modelOutput },
             ...images.map((img) => ({
               type: "image" as const,
               source: { type: "base64" as const, media_type: img.media_type, data: img.data },
             })),
           ]
-        : finalOutput,
+        : modelOutput,
       is_error,
     });
   }

@@ -123,7 +123,8 @@ describe("editFileTool", () => {
       new_string: "baz",
     });
     expect(result.is_error).toBe(true);
-    expect(result.output).toContain("2 times");
+    expect(result.output).toContain("matches 2 locations (lines 1, 2)");
+    expect(result.output).toContain("replace_all");
   });
 
   it("returns error for missing file", async () => {

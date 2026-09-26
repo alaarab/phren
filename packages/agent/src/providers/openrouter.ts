@@ -88,7 +88,10 @@ export class OpenRouterProvider implements LlmProvider {
   }
 }
 
-/** OpenAI-native provider (same protocol, different base URL). */
+/**
+ * OpenAI Chat Completions provider. Also serves any OpenAI-compatible endpoint
+ * (DeepSeek, OpenCode Go/Zen, vLLM…) through `baseUrl` and a provider `name`.
+ */
 export class OpenAiProvider implements LlmProvider {
   name = "openai";
   contextWindow: number;
@@ -105,6 +108,19 @@ export class OpenAiProvider implements LlmProvider {
     this.maxOutputTokens = maxOutputTokens ?? lookupMaxOutputTokens(this.model, this.name);
     this.reasoningEffort = reasoningEffort;
     this.contextWindow = lookupContextWindow(this.model, this.name);
+  }
+
+  /** Rename for an OpenAI-compatible endpoint; limits are looked up again under the new name. */
+  withName(name: string, maxOutputTokens?: number): this {
+    this.name = name;
+    this.maxOutputTokens = maxOutputTokens ?? lookupMaxOutputTokens(this.model, name);
+    this.contextWindow = lookupContextWindow(this.model, name);
+    return this;
+  }
+
+  private apiError(status: number, text: string): Error {
+    const label = this.name === "openai" ? "OpenAI" : this.name;
+    return new Error(`${label} API error ${status}: ${text}`);
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {
@@ -125,7 +141,7 @@ export class OpenAiProvider implements LlmProvider {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`OpenAI API error ${res.status}: ${text}`);
+      throw this.apiError(res.status, text);
     }
 
     return parseOpenAiResponse(await res.json() as Record<string, unknown>, this.name);
@@ -151,7 +167,7 @@ export class OpenAiProvider implements LlmProvider {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`OpenAI API error ${res.status}: ${text}`);
+      throw this.apiError(res.status, text);
     }
 
     yield* parseOpenAiStream(res);

@@ -47,6 +47,28 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/**
+ * The provider rejected the request because the prompt is too long for the
+ * model. Retrying unchanged cannot help; compacting the history can. Matches
+ * the wording of Anthropic, OpenAI (Chat and Responses), OpenRouter,
+ * DeepSeek, Gemini-via-gateway and Ollama errors.
+ */
+export function isContextOverflowError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return /context[_ ]length[_ ]exceeded|maximum context length|context window|prompt is too long|input is too long|too many (input )?tokens|exceeds? the (model's )?(maximum )?context|reduce the length of the messages|request too large|input length and `max_tokens` exceed/i.test(msg)
+    || extractStatus(error) === 413;
+}
+
+/**
+ * A 429 that means "out of quota" (a subscription's weekly limit, an empty
+ * API balance) rather than "slow down". It resets in hours or never, so
+ * backing off for seconds only delays the error.
+ */
+export function isQuotaExhausted(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return /usage_limit_reached|insufficient_quota|insufficient[_ ]balance|exceeded your current quota|credit balance is too low/i.test(msg);
+}
+
 /** Wrap an async function with exponential backoff retry. */
 export async function withRetry<T>(
   fn: () => Promise<T>,
@@ -63,7 +85,8 @@ export async function withRetry<T>(
     } catch (error) {
       if (signal?.aborted) throw error;
       const status = extractStatus(error);
-      const isRetryable = (status !== null && cfg.retryableStatuses.has(status)) || isNetworkError(error);
+      const isRetryable = !isQuotaExhausted(error)
+        && ((status !== null && cfg.retryableStatuses.has(status)) || isNetworkError(error));
 
       if (!isRetryable || attempt >= cfg.maxRetries) {
         throw error;

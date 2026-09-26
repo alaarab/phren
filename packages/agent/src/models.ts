@@ -1,4 +1,4 @@
-export type ProviderId = "openrouter" | "anthropic" | "openai" | "openai-codex" | "ollama";
+export type ProviderId = "openrouter" | "anthropic" | "openai" | "openai-codex" | "deepseek" | "ollama";
 export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
 export interface ModelPricing {
@@ -145,7 +145,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
       maxOutputTokens: 65_536,
       reasoningDefault: "medium",
       reasoningRange: ["low", "medium", "high"],
-      pricing: { inputPer1M: 0.15, outputPer1M: 0.6 },
+      pricing: { inputPer1M: 0.14, outputPer1M: 0.42 },
     },
     {
       id: "deepseek/deepseek-v4-pro",
@@ -155,27 +155,37 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
       maxOutputTokens: 65_536,
       reasoningDefault: "medium",
       reasoningRange: ["low", "medium", "high"],
-      pricing: { inputPer1M: 1.6, outputPer1M: 3.2 },
+      pricing: { inputPer1M: 0.42, outputPer1M: 0.84 },
+    },
+    {
+      id: "deepseek/deepseek-v4-flash",
+      provider: "openrouter",
+      label: "DeepSeek V4 Flash",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 65_536,
+      reasoningDefault: "medium",
+      reasoningRange: ["low", "medium", "high"],
+      pricing: { inputPer1M: 0.05, outputPer1M: 0.1 },
     },
     {
       id: "deepseek/deepseek-r1",
       provider: "openrouter",
       label: "DeepSeek R1",
-      contextWindow: 128_000,
+      contextWindow: 64_000,
       maxOutputTokens: 8_192,
       reasoningDefault: "high",
       reasoningRange: ["medium", "high"],
-      pricing: { inputPer1M: 0.55, outputPer1M: 2.19 },
+      pricing: { inputPer1M: 0.7, outputPer1M: 2.5 },
     },
     {
-      id: "deepseek/deepseek-v3",
+      id: "deepseek/deepseek-v3.2",
       provider: "openrouter",
-      label: "DeepSeek V3",
-      contextWindow: 128_000,
+      label: "DeepSeek V3.2",
+      contextWindow: 163_840,
       maxOutputTokens: 8_192,
       reasoningDefault: null,
       reasoningRange: [],
-      pricing: { inputPer1M: 0.27, outputPer1M: 1.1 },
+      pricing: { inputPer1M: 0.27, outputPer1M: 0.4 },
     },
     {
       id: "meta-llama/llama-4-maverick",
@@ -289,6 +299,28 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
       reasoningDefault: "high",
       reasoningRange: ["low", "medium", "high", "xhigh"],
       metered: false,
+    },
+  ],
+  deepseek: [
+    {
+      id: "deepseek-flash",
+      provider: "deepseek",
+      label: "DeepSeek V4.1 Flash (direct)",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 65_536,
+      reasoningDefault: null,
+      reasoningRange: ["low", "medium", "high"],
+      pricing: { inputPer1M: 0.3, outputPer1M: 1.2 },
+    },
+    {
+      id: "deepseek-v4-pro",
+      provider: "deepseek",
+      label: "DeepSeek V4 Pro (direct)",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 65_536,
+      reasoningDefault: null,
+      reasoningRange: ["low", "medium", "high"],
+      pricing: { inputPer1M: 1.32, outputPer1M: 3.96 },
     },
   ],
   ollama: [
@@ -425,6 +457,7 @@ export function normalizeProviderId(provider: string | undefined): ProviderId | 
     provider === "anthropic" ||
     provider === "openai" ||
     provider === "openai-codex" ||
+    provider === "deepseek" ||
     provider === "ollama"
   ) {
     return provider;

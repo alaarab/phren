@@ -72,7 +72,16 @@ function summarizeCall(toolName: string, input: Record<string, unknown>): string
     }
     case "edit_file": {
       const p = (input.path as string) || "?";
-      return `Edit ${p}`;
+      return `Edit ${p}${input.replace_all === true ? " (all occurrences)" : ""}`;
+    }
+    case "multi_edit": {
+      const p = (input.path as string) || "?";
+      const n = Array.isArray(input.edits) ? input.edits.length : 0;
+      return `Edit ${p} (${n} edit${n === 1 ? "" : "s"})`;
+    }
+    case "apply_patch": {
+      const files = String(input.patch ?? "").match(/^\*\*\* (?:Add|Delete|Update) File: .+$/gm) ?? [];
+      return `Patch ${files.length} file${files.length === 1 ? "" : "s"}: ${files.map((f) => f.replace(/^\*\*\* (\w+) File: /, "$1 ")).join(", ")}`;
     }
     case "glob": {
       const pattern = (input.pattern as string) || "?";
