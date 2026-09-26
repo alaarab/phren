@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-09-26
+
 ### Changed
 
 - The fanout and conductor skills say plainly that workers start only through `phren fanout run` (or the fanout wrapper), never a hand-written `opencode run` or `codex exec`: those have no manifest, so the phone and the conductor cannot see them.
