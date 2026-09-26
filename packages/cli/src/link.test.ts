@@ -810,6 +810,21 @@ describe("link", () => {
       expect(fs.existsSync(path.join(phrenPath, ".config"))).toBe(true);
     });
 
+    it("doctor --fix reports the Codex hooks config its relink wrote", async () => {
+      const profilesDir = path.join(phrenPath, "profiles");
+      fs.mkdirSync(profilesDir, { recursive: true });
+      fs.writeFileSync(path.join(profilesDir, "test.yaml"), yaml.dump({ name: "test", description: "T", projects: ["cproj"] }));
+      fs.writeFileSync(path.join(phrenPath, "machines.yaml"), `${getMachineName()}: test\n`);
+      fs.mkdirSync(path.join(phrenPath, "cproj"), { recursive: true });
+      fs.writeFileSync(path.join(phrenPath, "cproj", "phren.project.yaml"), "ownership: detached\n");
+      fs.mkdirSync(path.join(tmpRoot, ".codex"), { recursive: true });
+
+      const result = await runDoctor(phrenPath, true);
+      expect(result.checks.find((c) => c.name === "self-heal")?.ok).toBe(true);
+      expect(fs.existsSync(path.join(phrenPath, "codex.json"))).toBe(true);
+      expect(result.checks.find((c) => c.name === "codex-hooks")?.ok).toBe(true);
+    });
+
     it("detects zombie blocked tasks and reports without --fix", async () => {
       const profilesDir = path.join(phrenPath, "profiles");
       fs.mkdirSync(profilesDir, { recursive: true });

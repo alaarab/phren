@@ -733,6 +733,36 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
     });
   }
 
+  // Repair before the hook and wrapper checks below, so they report what
+  // --fix left behind: the relink is what writes codex.json, the Copilot and
+  // Cursor hook files and the wrappers.
+  if (fix) {
+    const repaired = repairPreexistingInstall(phrenPath);
+    const details: string[] = [];
+    if (repaired.removedLegacyProjects > 0) details.push(`removed ${repaired.removedLegacyProjects} legacy sample profile entries`);
+    if (repaired.createdContextFile) details.push("recreated ~/.phren-context.md");
+    if (repaired.createdRootMemory) details.push("recreated generated MEMORY.md");
+    if (details.length === 0) details.push("baseline repair complete");
+    checks.push({ name: "baseline-repair", ok: true, detail: details.join("; ") });
+  }
+
+  if (fix && invalidProjectDirs.length > 0) {
+    const migration = migrateInvalidProjectNames(phrenPath);
+    const unresolved = migration.outcomes.filter((o) => o.action !== "renamed");
+    checks.push({
+      name: "project-names-migrate",
+      ok: unresolved.length === 0,
+      detail: formatMigrationSummary(migration),
+    });
+  }
+
+  if (fix && profile && profileFile) {
+    await runLink(phrenPath, { machine, profile });
+    checks.push({ name: "self-heal", ok: true, detail: "relinked hooks, symlinks, context, memory pointers" });
+  } else if (fix) {
+    checks.push({ name: "self-heal", ok: false, detail: "relink blocked: machine/profile not fully configured" });
+  }
+
   const detected = detectInstalledTools();
   if (detected.has("copilot")) {
     const copilotHooks = hookConfigPath("copilot", phrenPath);
@@ -784,32 +814,7 @@ export async function runDoctor(phrenPath: string, fix: boolean = false, checkDa
   }
   checks.push(wrapperCheck("phren", wrapperState("phren")));
 
-  if (fix) {
-    const repaired = repairPreexistingInstall(phrenPath);
-    const details: string[] = [];
-    if (repaired.removedLegacyProjects > 0) details.push(`removed ${repaired.removedLegacyProjects} legacy sample profile entries`);
-    if (repaired.createdContextFile) details.push("recreated ~/.phren-context.md");
-    if (repaired.createdRootMemory) details.push("recreated generated MEMORY.md");
-    if (details.length === 0) details.push("baseline repair complete");
-    checks.push({ name: "baseline-repair", ok: true, detail: details.join("; ") });
-  }
-
-  if (fix && invalidProjectDirs.length > 0) {
-    const migration = migrateInvalidProjectNames(phrenPath);
-    const unresolved = migration.outcomes.filter((o) => o.action !== "renamed");
-    checks.push({
-      name: "project-names-migrate",
-      ok: unresolved.length === 0,
-      detail: formatMigrationSummary(migration),
-    });
-  }
-
-  if (fix && profile && profileFile) {
-    await runLink(phrenPath, { machine, profile });
-    checks.push({ name: "self-heal", ok: true, detail: "relinked hooks, symlinks, context, memory pointers" });
-  } else if (fix) {
-    checks.push({ name: "self-heal", ok: false, detail: "relink blocked: machine/profile not fully configured" });
-  } else {
+  if (!fix) {
     // Read-only mode: just check if hook configs exist, don't write anything
     const detectedTools = detected;
     const hookChecks: string[] = [];
