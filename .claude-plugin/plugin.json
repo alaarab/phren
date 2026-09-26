@@ -1,6 +1,7 @@
 {
   "name": "phren",
-  "description": "Long-term memory for AI coding agents. Project context, learnings, task queues, memory governance. Works with Claude Code, Copilot CLI, Cursor, and Codex.",
+  "displayName": "phren",
+  "description": "Long-term memory for Claude Code. Recalls relevant past findings on every prompt, keeps per-project context, and saves what each session learned to a local git-backed store you own. No account, no telemetry by default.",
   "version": "0.3.5",
   "author": {
     "name": "Ala Arab",
@@ -10,15 +11,35 @@
   "license": "MIT",
   "homepage": "https://alaarab.github.io/phren/",
   "keywords": [
-    "claude",
-    "claude-code",
-    "mcp",
     "memory",
-    "knowledge",
-    "agent-skills",
-    "hooks"
+    "long-term-memory",
+    "persistent-memory",
+    "context",
+    "knowledge-base",
+    "project-context",
+    "tasks",
+    "findings",
+    "local-first",
+    "git",
+    "mcp",
+    "hooks",
+    "skills"
   ],
-  "skills": "./global/skills/",
-  "mcpServers": "./.mcp.json",
-  "hooks": "./hooks/hooks.json"
+  "skills": [
+    "./packages/cli/starter/global/skills/phren-init",
+    "./packages/cli/starter/global/skills/phren-sync",
+    "./packages/cli/starter/global/skills/phren-discover",
+    "./packages/cli/starter/global/skills/phren-consolidate",
+    "./packages/cli/starter/global/skills/phren-summarize",
+    "./packages/cli/starter/global/skills/phren-profiles"
+  ],
+  "mcpServers": {
+    "phren": {
+      "command": "npx",
+      "args": ["-y", "@phren/cli@0.3.5", "mcp"],
+      "env": {
+        "PHREN_MCP_OWNER": "plugin"
+      }
+    }
+  }
 }

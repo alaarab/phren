@@ -18,7 +18,11 @@ GitHub Actions with signed [provenance](https://docs.npmjs.com/generating-proven
 Unlike ogrid, phren's release is **gated on the version + changelog already
 being committed**, so do these two edits first:
 
-1. **Bump the version** in `packages/cli/package.json` (e.g. `0.1.34`).
+1. **Bump the version** in `packages/cli/package.json` (e.g. `0.1.34`), and
+   the same version in `packages/agent/package.json`, `.claude-plugin/plugin.json`
+   (`version` and the `@phren/cli@<version>` MCP pin),
+   `.claude-plugin/marketplace.json` and `PHREN_PIN` in `hooks/phren-hook.sh`.
+   `pnpm run validate-docs` fails if any of them drift.
 2. **Add a changelog entry** at the top of `CHANGELOG.md` with a matching
    header — it must start exactly with `## [0.1.34]`.
 3. Commit both to `main` and push.

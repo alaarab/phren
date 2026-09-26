@@ -34,6 +34,27 @@ else
   echo "OK: @phren/agent version matches @phren/cli ($AGENT_VERSION)"
 fi
 
+# 2c. The Claude Code plugin pins the CLI it runs; the release bumps all of these together
+PLUGIN_DRIFT=$(node -e '
+  const fs = require("fs");
+  const v = process.argv[1];
+  const plugin = JSON.parse(fs.readFileSync(".claude-plugin/plugin.json", "utf8"));
+  const market = JSON.parse(fs.readFileSync(".claude-plugin/marketplace.json", "utf8"));
+  const bad = [];
+  if (plugin.version !== v) bad.push(".claude-plugin/plugin.json version " + plugin.version);
+  const entry = (market.plugins || []).find((p) => p.name === "phren");
+  if (!entry || entry.version !== v) bad.push(".claude-plugin/marketplace.json version " + (entry && entry.version));
+  if (!(plugin.mcpServers?.phren?.args || []).includes("@phren/cli@" + v)) bad.push(".claude-plugin/plugin.json mcpServers pin");
+  if (!fs.readFileSync("hooks/phren-hook.sh", "utf8").includes("PHREN_PIN=\"" + v + "\"")) bad.push("hooks/phren-hook.sh PHREN_PIN");
+  console.log(bad.join("; "));
+' "$VERSION")
+if [ -n "$PLUGIN_DRIFT" ]; then
+  echo "FAIL: Claude Code plugin is not at $VERSION: $PLUGIN_DRIFT"
+  ERRORS=$((ERRORS + 1))
+else
+  echo "OK: Claude Code plugin manifests and CLI pin match $VERSION"
+fi
+
 # 3. Verify runtime version comes from shared package metadata (not a hardcoded string)
 if grep -q 'export const VERSION' packages/cli/src/package-metadata.ts && grep -q 'package.json' packages/cli/src/package-metadata.ts && grep -q 'version: PACKAGE_VERSION' packages/cli/src/index.ts; then
   echo "OK: runtime version is derived from shared package metadata"

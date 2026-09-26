@@ -1,6 +1,6 @@
 ---
 name: phren-sync
-description: Pull your phren store onto this machine or push local changes back. Thin wrapper around the CLI, which does the linking.
+description: Pull the phren memory store onto this machine (and wire it with `phren init`) or push local memory changes to its git remote. Use on a new machine or when memory on another machine should catch up.
 dependencies:
   - git
 ---
