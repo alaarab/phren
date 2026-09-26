@@ -11,7 +11,12 @@ phren agent -i             # or: phren-agent -i
 ```
 
 It runs on a ChatGPT/Codex subscription (`phren agent auth login`), OpenAI,
-OpenRouter, Anthropic or local Ollama models. The full guide, including MCP
+OpenRouter, Anthropic, DeepSeek (`DEEPSEEK_API_KEY`), any OpenAI-compatible
+endpoint (`--provider openai-compat --base-url … --model …`) or local Ollama
+models. For scripts, `-p --output-format json|stream-json` gives
+machine-readable output. [PARITY.md](PARITY.md) compares it with Claude Code,
+Codex and OpenCode, and `scripts/bench/run.mjs` runs it headless against small
+real-task fixture repos. The full guide, including MCP
 servers, permissions, headless runs and the phone app, is
 [docs/agent.md](https://github.com/alaarab/phren/blob/main/docs/agent.md).
 This package is released together with `@phren/cli` and pins its exact version.

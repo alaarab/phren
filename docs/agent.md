@@ -61,11 +61,16 @@ the one you name with `--provider` (or `PHREN_AGENT_PROVIDER`):
 
 | Provider | `--provider` | Credentials | Default model |
 |----------|--------------|-------------|---------------|
-| ChatGPT / Codex subscription | `openai-codex` | `phren agent auth login` (browser sign-in) | `gpt-5.4` |
+| ChatGPT / Codex subscription | `openai-codex` | `phren agent auth login` (browser sign-in) | the Codex CLI's configured `model`, else `gpt-5.4` |
 | OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-5.4` |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4-20250514` |
 | Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5` |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-flash` |
+| Any OpenAI-compatible endpoint | `openai-compat` | `--base-url` or `PHREN_AGENT_BASE_URL`, plus `PHREN_AGENT_API_KEY` | none: pass `--model` |
 | Ollama (local) | `ollama` | none; `PHREN_OLLAMA_URL` (default `http://localhost:11434`) | `qwen2.5-coder:14b` |
+
+An unknown `--provider` name is an error rather than a silent fallback to
+auto-detection. `openai-compat` is only used when named.
 
 Choose a model with `--model <id>` (or `PHREN_AGENT_MODEL`) and a reasoning
 effort with `--reasoning low|medium|high|xhigh` (or `PHREN_AGENT_REASONING`).
@@ -81,7 +86,11 @@ phren agent auth status
 phren agent auth logout
 ```
 
-Once signed in, this provider is preferred whenever no other is named.
+Once signed in, this provider is preferred whenever no other is named. Its
+default model is the one the Codex CLI is set to (`model = "…"` in
+`~/.codex/config.toml`, or `$CODEX_HOME`), because ChatGPT accounts reject
+model ids the plan doesn't offer. A weekly `usage_limit_reached` error is
+reported at once rather than retried.
 
 ### API keys
 
@@ -105,15 +114,40 @@ phren agent --provider openrouter --model google/gemini-2.5-pro -i
 
 ### DeepSeek and other OpenAI-compatible models
 
-The agent does not yet take a custom OpenAI-compatible base URL, so a
-DeepSeek API key cannot be used directly. Reach DeepSeek through OpenRouter,
-which is how the agent's own assessment runs were made:
+With a DeepSeek API key, use DeepSeek's own endpoint (`https://api.deepseek.com`).
+Models are `deepseek-flash` (default) and `deepseek-v4-pro`; `--reasoning`
+sets DeepSeek's `reasoning_effort`:
 
 ```bash
-phren agent --provider openrouter --model deepseek/deepseek-v4.1-flash "add input validation"
+export DEEPSEEK_API_KEY=sk-...
+phren agent --provider deepseek "add input validation"
+phren agent --provider deepseek --model deepseek-v4-pro --reasoning high -i
 ```
 
-or run a DeepSeek model locally through Ollama (below).
+A `DEEPSEEK_API_KEY` alone also selects this provider when no Codex login,
+OpenAI, OpenRouter or Anthropic key is present. `--base-url` overrides the
+endpoint.
+
+Any other OpenAI-compatible `/chat/completions` endpoint (OpenCode Go or Zen,
+Together, Fireworks, vLLM, LM Studio, a self-hosted gateway) works through
+`openai-compat`. Give the base URL (the part before `/chat/completions`),
+the key and the endpoint's model name:
+
+```bash
+export PHREN_AGENT_API_KEY=...            # sent as "Authorization: Bearer"; may be empty for local servers
+phren agent --provider openai-compat --base-url https://example.com/v1 --model some-model -i
+# or entirely from the environment
+PHREN_AGENT_PROVIDER=openai-compat PHREN_AGENT_BASE_URL=http://127.0.0.1:8000/v1 \
+  PHREN_AGENT_MODEL=qwen3-coder phren agent "run the tests"
+```
+
+`--base-url` is passed on to `/model` switches and subagents. Context window
+and pricing come from the built-in catalogue when the model id is known,
+otherwise a 200k-token window and a conservative price estimate are assumed.
+
+DeepSeek is also on OpenRouter (`deepseek/deepseek-v4.1-flash`,
+`deepseek/deepseek-v4-pro`, `deepseek/deepseek-v4-flash`,
+`deepseek/deepseek-v3.2`), and locally through Ollama (below).
 
 ### Ollama
 
@@ -223,12 +257,33 @@ phone app reads (below).
 
 Give the task as an argument and the agent runs it to the end, prints its
 answer on stdout and exits: no terminal UI. Nobody is there to approve tool
-calls, so choose the permission mode and limits up front:
+calls, so choose the permission mode and limits up front. When stdin is not a
+terminal, calls that would need approval are denied (with a note on stderr)
+instead of waiting for an answer that can't come:
 
 ```bash
 phren agent --permissions auto-confirm --max-turns 30 --budget 1.00 "summarize open TODOs in src/"
 phren agent --yolo --provider openrouter --model deepseek/deepseek-v4.1-flash "run the tests and fix what fails"
 ```
+
+For scripts and CI, use `-p` (`--print`) with `--output-format`:
+
+```bash
+phren agent -p --yolo "fix the failing test"                        # text: only the final answer on stdout
+phren agent --output-format json --yolo "rename calcTotal" | jq .    # one result object
+echo "add a --json flag" | phren agent --output-format stream-json --yolo   # task from stdin, NDJSON events
+```
+
+| Format | stdout |
+|--------|--------|
+| `text` (default with `-p`) | the final assistant message |
+| `json` | one object: `type: "result"`, `subtype` (`success`, `error_max_turns`, `error_budget`, `error_plan_rejected`, `cancelled`, `error_during_execution`), `is_error`, `result`, `num_turns`, `tool_calls`, `duration_ms`, `session_id`, `provider`, `model`, `usage`, `total_cost_usd` (null on a subscription), `permission_denials`, `error` |
+| `stream-json` | one JSON object per line: `system`/`init`, then `assistant`, `tool_use` and `tool_result` events as they happen, then the same `result` object |
+
+`--output-format` implies `-p`. Everything else (warnings, compaction notices,
+tool lines with `--verbose`) goes to stderr. Exit code is 0 only for
+`success`, 130 when cancelled, 1 otherwise. With `-p`, approvals are always
+denied, and `--plan` stops after presenting the plan.
 
 `--budget <dollars>` stops the run when its estimated spend passes the limit,
 `--max-turns` caps tool rounds (default 50), `--verbose` streams tool calls to
@@ -263,14 +318,19 @@ it on the computer and it appears in the app.
 |------|-------------|
 | `<task>` | Task to run (one-shot mode) |
 | `-i`, `--interactive` | Interactive terminal UI |
-| `--provider <name>` | `openai-codex`, `openai`, `openrouter`, `anthropic`, `ollama` |
+| `--provider <name>` | `openai-codex`, `openai`, `openrouter`, `anthropic`, `deepseek`, `openai-compat`, `ollama` |
+| `--base-url <url>` | Endpoint for `openai-compat`, or to override `deepseek`'s |
 | `--model <id>` | Model for the chosen provider |
 | `--reasoning <level>` | `low`, `medium`, `high`, `xhigh` |
 | `--project <name>` | phren project to load, instead of the one found from the directory |
 | `--permissions <mode>` | `suggest` (default), `auto-confirm`, `full-auto` |
 | `--yolo` | Same as `--permissions full-auto` |
 | `--plan` | Show a plan and wait for approval before running tools |
-| `--resume` | Continue the last session (the task is optional) |
+| `--resume`, `--continue`, `-c` | Continue the newest session; a task given with it becomes the next prompt |
+| `--session <id>` | Continue a specific session by id or unique id prefix |
+| `--list-sessions` | List recent sessions (with `--output-format json` as JSON) and exit |
+| `-p`, `--print` | Headless run: clean stdout, approvals denied |
+| `--output-format <f>` | `text`, `json` or `stream-json`; implies `-p` |
 | `--budget <dollars>` | Stop when estimated spend passes this |
 | `--max-turns <n>` | Maximum tool rounds (default 50) |
 | `--max-output <n>` | Maximum output tokens per response |
@@ -359,7 +419,9 @@ The agent has access to these built-in tools:
 ### File operations
 - **read_file** — Read file contents (with line range support)
 - **write_file** — Write or create files
-- **edit_file** — Surgical string replacements in files
+- **edit_file** — Exact string replacement (`replace_all` for every occurrence). Tolerates CRLF files, trailing-whitespace and indentation drift and pasted `read_file` line numbers; a miss shows the closest lines and the first difference
+- **multi_edit** — Several edits to one file, applied in order, all or nothing
+- **apply_patch** — Codex-format patches (`*** Begin Patch` … add, delete, update, move) across files, atomic
 - **glob** — Find files by pattern
 - **grep** — Search file contents with regex
 
@@ -534,7 +596,8 @@ The message array the model sees is derived from the log, and an invariant
 asserts before every request that the projection still reconstructs from it
 (disable with `PHREN_AGENT_NO_INVARIANT=1`). Context pruning appends a
 `log/replace` event instead of deleting: the model sees a summary, the log
-keeps everything for replay and resume. `--resume` prefers the newest event
+keeps everything for replay and resume. `--list-sessions` shows recent logs
+and `--session <id>` resumes a specific one. `--resume` prefers the newest event
 log (forking it into the new run's own file, with `parentSession` lineage)
 and falls back to legacy v1 message snapshots, which are still written once
 at session end.

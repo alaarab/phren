@@ -26,7 +26,7 @@ export function shouldPrune(
 
 // ── Fact extraction (regex only, no LLM) ────────────────────────────────────
 
-const FILE_TOOL_NAMES = new Set(["edit_file", "write_file"]);
+const FILE_TOOL_NAMES = new Set(["edit_file", "multi_edit", "write_file"]);
 const SEARCH_TOOL_NAMES = new Set(["phren_search"]);
 
 const DECISION_RE = /\b(?:I'll|Let's|The fix is|Changed|because|decided to|switched to|replaced|removed|added|created|updated|refactored)\b/i;
@@ -79,7 +79,8 @@ function extractFromToolUse(
   searchesSet: Set<string>,
 ): void {
   if (FILE_TOOL_NAMES.has(block.name)) {
-    const fp = block.input?.file_path;
+    // The tools take `path`; `file_path` is kept for older recorded sessions.
+    const fp = block.input?.path ?? block.input?.file_path;
     if (typeof fp === "string" && fp) {
       filesSet.add(fp);
     }
@@ -181,7 +182,15 @@ export function planPrune(messages: LlmMessage[], config?: Partial<PruneConfig>)
     }
     splitIdx--;
   }
-  if (splitIdx <= 1) return null;
+  if (splitIdx <= 1) {
+    // A single long tool loop (the usual one-shot run) has no later user
+    // text message at all: every user message is tool results. Split before
+    // an assistant message instead; the tail then opens with a complete
+    // tool_use/tool_result pair and never orphans a result.
+    splitIdx = messages.length - keepRecentMessages;
+    while (splitIdx > 1 && messages[splitIdx].role !== "assistant") splitIdx--;
+    if (splitIdx <= 1) return null;
+  }
 
   const middle = messages.slice(1, splitIdx);
 

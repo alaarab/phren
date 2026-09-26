@@ -1,0 +1,6 @@
+{
+  "task": "Rename the function calcTotal to computeTotal everywhere in src/ (definition and every caller, including namespace-style calls). Keep behaviour identical. Do not modify test/. Run npm test to confirm.",
+  "check": ["npm", "test", "--silent"],
+  "absent": { "pattern": "calcTotal", "dir": "src" },
+  "unchanged": ["test/pricing.test.js"]
+}

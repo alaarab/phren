@@ -683,7 +683,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     },
     onToolEnd: (name, input, output, isError, dur) => {
       activeTool = null;
-      const diffData = (name === "edit_file" || name === "write_file") ? decodeDiffPayload(output) : null;
+      const diffData = (name === "edit_file" || name === "multi_edit" || name === "write_file") ? decodeDiffPayload(output) : null;
       const cleanOutput = diffData ? output.slice(0, output.indexOf(DIFF_MARKER)) : output;
       const diffRendered = diffData ? renderDiffCapped(diffData.oldContent, diffData.newContent, diffData.filePath) : undefined;
       const call = { name, input, output: cleanOutput, isError, durationMs: dur, diffRendered };
@@ -870,7 +870,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     spawner.on("tool_end", (agentId: string, toolName: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number) => {
       const convo = getOrCreateConvo(agentId);
       convo.activeTool = null;
-      const diffData = (toolName === "edit_file" || toolName === "write_file") ? decodeDiffPayload(output) : null;
+      const diffData = (toolName === "edit_file" || toolName === "multi_edit" || toolName === "write_file") ? decodeDiffPayload(output) : null;
       const cleanOutput = diffData ? output.slice(0, output.indexOf(DIFF_MARKER)) : output;
       const diffRendered = diffData ? renderDiffCapped(diffData.oldContent, diffData.newContent, diffData.filePath) : undefined;
       const call = { name: toolName, input, output: cleanOutput, isError, durationMs, diffRendered };

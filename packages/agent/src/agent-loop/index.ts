@@ -3,7 +3,7 @@ import { createSpinner, formatTurnHeader, formatToolCall } from "../spinner.js";
 import { shouldPrune } from "../context/pruner.js";
 import { compactWithLlm } from "../context/compactor.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
-import { withRetry } from "../providers/retry.js";
+import { isContextOverflowError, withRetry } from "../providers/retry.js";
 import { checkFlushNeeded } from "../memory/context-flush.js";
 import { injectPlanPrompt, requestPlanApproval } from "../plan.js";
 import { detectLintCommand, detectTestCommand } from "../tools/lint-test.js";
@@ -11,11 +11,31 @@ import { createCheckpoint } from "../checkpoint.js";
 import { resetRepeatChain } from "../guards/repeat-tool-reminder.js";
 import { runLifecycleHooks } from "../user-hooks.js";
 
-import type { AgentConfig, AgentSession, AgentResult, TurnResult, TurnHooks } from "./types.js";
+import type { AgentConfig, AgentSession, AgentResult, TurnResult, TurnHooks, TurnStopReason } from "./types.js";
 import { createSession } from "./types.js";
 import { consumeStream, executeToolBlocks, prefetchFirst, runToolsConcurrently } from "./stream.js";
-export type { AgentConfig, AgentResult, AgentSession, TurnResult, TurnHooks };
+export type { AgentConfig, AgentResult, AgentSession, TurnResult, TurnHooks, TurnStopReason };
 export { createSession };
+
+/**
+ * If the history ends with an assistant message whose tool calls have no
+ * results, append a cancelled result for each. Returns how many were closed.
+ */
+export function closeDanglingToolUses(session: AgentSession, reason = "Cancelled by user."): number {
+  const messages = session.messages;
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "assistant" || !Array.isArray(last.content)) return 0;
+  const calls = last.content.filter((b): b is ToolUseBlock => b.type === "tool_use");
+  if (calls.length === 0) return 0;
+  session.log.append("tool/results", {
+    message: {
+      role: "user",
+      content: calls.map((b) => ({ type: "tool_result" as const, tool_use_id: b.id, content: reason, is_error: true })),
+    },
+    turn: session.turns,
+  });
+  return calls.length;
+}
 
 export async function runTurn(
   userInput: string,
@@ -38,6 +58,10 @@ export async function runTurn(
     systemPrompt = injectPlanPrompt(systemPrompt);
   }
 
+  // A previous turn that crashed or was killed mid-tool (or a resumed log
+  // written by one) can end with unanswered tool calls; answer them first.
+  closeDanglingToolUses(session);
+
   // Direct user input resets the repeat-call chain (repetition across it is not a loop)
   resetRepeatChain(session.repeatChain);
 
@@ -52,6 +76,8 @@ export async function runTurn(
   const turnStart = session.turns;
   // A refusal applies to automatic checks for this entire user turn.
   const deniedChecks = new Set<string>();
+  // One overflow-driven compaction per model call; reset after a success.
+  let overflowRecovered = false;
 
   const signal = hooks?.signal;
   const hookConfig = config.hookConfig ?? null;
@@ -59,13 +85,16 @@ export async function runTurn(
     await runLifecycleHooks(hookConfig, "UserPromptSubmit", { prompt: userInput });
   }
 
+  // Why the loop ended; stays "max_turns" if the turn cap runs out.
+  let endReason: TurnStopReason = "max_turns";
   while (session.turns - turnStart < maxTurns) {
     // Abort check
-    if (signal?.aborted) break;
+    if (signal?.aborted) { endReason = "aborted"; break; }
 
     // Budget check
     if (costTracker?.isOverBudget()) {
       status(`\x1b[33m[budget exceeded: ${costTracker.formatCost()}]\x1b[0m\n`);
+      endReason = "budget";
       break;
     }
 
@@ -87,7 +116,7 @@ export async function runTurn(
 
     // Prune context if approaching limit — LLM checkpoint with knowledge
     // promotion, degrading to the regex summary on any failure.
-    if (shouldPrune(systemPrompt, session.messages, { contextLimit })) {
+    const compactHistory = async (keepRecentTurns: number, trigger: string): Promise<boolean> => {
       const preCount = session.messages.length;
       const preTokens = estimateMessageTokens(session.messages);
       const result = await compactWithLlm(provider, systemPrompt, session.messages, {
@@ -95,23 +124,27 @@ export async function runTurn(
         sessionId: config.sessionId,
         costTracker,
         config: config.compaction,
-        pruneConfig: { contextLimit, keepRecentTurns: 6 },
+        pruneConfig: { contextLimit, keepRecentTurns },
         signal,
         verbose,
       });
-      if (result) {
-        session.log.replaceMessageRange(result.plan.startIndex, result.plan.endIndex, result.plan.summaryMessage);
-        const postCount = session.messages.length;
-        const postTokens = estimateMessageTokens(session.messages);
-        const reduction = preTokens > 0 ? ((1 - postTokens / preTokens) * 100).toFixed(0) : "0";
-        const fmtPre = preTokens >= 1000 ? `${(preTokens / 1000).toFixed(1)}k` : String(preTokens);
-        const fmtPost = postTokens >= 1000 ? `${(postTokens / 1000).toFixed(1)}k` : String(postTokens);
-        const mode = result.usedLlm ? "llm" : "regex";
-        const routed = result.promoted + result.queued > 0
-          ? `, +${result.promoted} promoted, +${result.queued} queued`
-          : "";
-        status(`\x1b[2m[context compacted (${mode}): ${preCount} → ${postCount} messages, ~${fmtPre} → ~${fmtPost} tokens, ${reduction}% reduction${routed}]\x1b[0m\n`);
-      }
+      if (!result) return false;
+      session.log.replaceMessageRange(result.plan.startIndex, result.plan.endIndex, result.plan.summaryMessage);
+      const postCount = session.messages.length;
+      const postTokens = estimateMessageTokens(session.messages);
+      const reduction = preTokens > 0 ? ((1 - postTokens / preTokens) * 100).toFixed(0) : "0";
+      const fmtPre = preTokens >= 1000 ? `${(preTokens / 1000).toFixed(1)}k` : String(preTokens);
+      const fmtPost = postTokens >= 1000 ? `${(postTokens / 1000).toFixed(1)}k` : String(postTokens);
+      const mode = result.usedLlm ? "llm" : "regex";
+      const routed = result.promoted + result.queued > 0
+        ? `, +${result.promoted} promoted, +${result.queued} queued`
+        : "";
+      status(`\x1b[2m[context compacted (${mode}${trigger}): ${preCount} → ${postCount} messages, ~${fmtPre} → ~${fmtPost} tokens, ${reduction}% reduction${routed}]\x1b[0m\n`);
+      return true;
+    };
+
+    if (shouldPrune(systemPrompt, session.messages, { contextLimit })) {
+      await compactHistory(6, "");
     }
 
     // For plan mode first turn, pass empty tools so LLM can't call any
@@ -127,61 +160,74 @@ export async function runTurn(
     let assistantContent: ContentBlock[];
     let stopReason: "end_turn" | "tool_use" | "max_tokens";
 
-    if (useStream) {
-      // Streaming path — retry the initial connection. The async generator does
-      // no work until first read, so the first next() runs inside withRetry.
-      const opening = await withRetry(
-        async () => {
-          const iterator = provider.chatStream!(systemPrompt, session.messages, turnTools, signal)[Symbol.asyncIterator]();
-          const first = await iterator.next();
-          return { iterator, first };
-        },
-        undefined,
-        verbose,
-        signal,
-      );
-      const onReasoningDelta =
-        hooks?.onReasoningDelta ??
-        (verbose ? (text: string) => process.stderr.write(`\x1b[2m${text}\x1b[0m`) : undefined);
-      const result = await consumeStream(
-        prefetchFirst(opening.iterator, opening.first),
-        costTracker,
-        { onTextDelta: hooks?.onTextDelta, onReasoningDelta, providerName: provider.name },
-        signal,
-      );
-      assistantContent = result.content;
-      stopReason = result.stop_reason;
-    } else {
-      // Batch path
-      spinner.start("Thinking...");
-      const response = await withRetry(
-        () => provider.chat(systemPrompt, session.messages, turnTools, signal),
-        undefined,
-        verbose,
-        signal,
-      );
-      spinner.stop();
+    try {
+      if (useStream) {
+        // Streaming path — retry the initial connection. The async generator does
+        // no work until first read, so the first next() runs inside withRetry.
+        const opening = await withRetry(
+          async () => {
+            const iterator = provider.chatStream!(systemPrompt, session.messages, turnTools, signal)[Symbol.asyncIterator]();
+            const first = await iterator.next();
+            return { iterator, first };
+          },
+          undefined,
+          verbose,
+          signal,
+        );
+        const onReasoningDelta =
+          hooks?.onReasoningDelta ??
+          (verbose ? (text: string) => process.stderr.write(`\x1b[2m${text}\x1b[0m`) : undefined);
+        const result = await consumeStream(
+          prefetchFirst(opening.iterator, opening.first),
+          costTracker,
+          { onTextDelta: hooks?.onTextDelta, onReasoningDelta, providerName: provider.name },
+          signal,
+        );
+        assistantContent = result.content;
+        stopReason = result.stop_reason;
+      } else {
+        // Batch path
+        spinner.start("Thinking...");
+        const response = await withRetry(
+          () => provider.chat(systemPrompt, session.messages, turnTools, signal),
+          undefined,
+          verbose,
+          signal,
+        );
+        spinner.stop();
 
-      assistantContent = response.content;
-      stopReason = response.stop_reason;
+        assistantContent = response.content;
+        stopReason = response.stop_reason;
 
-      // Track cost from batch response
-      if (costTracker && response.usage) {
-        costTracker.recordUsage(response.usage.input_tokens, response.usage.output_tokens);
-      }
+        // Track cost from batch response
+        if (costTracker && response.usage) {
+          costTracker.recordUsage(response.usage.input_tokens, response.usage.output_tokens);
+        }
 
-      // Print text blocks (streaming already prints inline)
-      for (const block of assistantContent) {
-        if (block.type === "text" && block.text) {
-          if (hooks?.onTextBlock) {
-            hooks.onTextBlock(block.text);
-          } else {
-            process.stdout.write(block.text);
-            if (!block.text.endsWith("\n")) process.stdout.write("\n");
+        // Print text blocks (streaming already prints inline)
+        for (const block of assistantContent) {
+          if (block.type === "text" && block.text) {
+            if (hooks?.onTextBlock) {
+              hooks.onTextBlock(block.text);
+            } else {
+              process.stdout.write(block.text);
+              if (!block.text.endsWith("\n")) process.stdout.write("\n");
+            }
           }
         }
       }
+    } catch (err: unknown) {
+      spinner.stop();
+      // The token estimate is approximate; when the provider itself says the
+      // prompt is too long, compact harder (keep 2 turns) and retry once.
+      if (!overflowRecovered && !signal?.aborted && isContextOverflowError(err)) {
+        overflowRecovered = true;
+        status("\x1b[33m[provider reported a context overflow; compacting and retrying]\x1b[0m\n");
+        if (await compactHistory(2, ", after overflow")) continue;
+      }
+      throw err;
     }
+    overflowRecovered = false;
 
     if (hooks?.onReasoningDone) {
       for (const block of assistantContent) {
@@ -203,9 +249,16 @@ export async function runTurn(
       turn: session.turns,
     });
     session.turns++;
+    hooks?.onAssistantMessage?.(assistantContent, stopReason);
 
-    // Abort check after LLM response
-    if (signal?.aborted) break;
+    // Abort check after LLM response. Tool calls the model already made must
+    // still get results, or the next request carries an unpaired tool_use,
+    // which Anthropic and OpenAI reject on every later turn.
+    if (signal?.aborted) {
+      closeDanglingToolUses(session);
+      endReason = "aborted";
+      break;
+    }
 
     // Show turn cost
     if (verbose && costTracker) {
@@ -216,7 +269,7 @@ export async function runTurn(
     if (planPending) {
       const approve = hooks?.onPlanApproval ?? requestPlanApproval;
       const { approved, feedback } = await approve();
-      if (signal?.aborted) break;
+      if (signal?.aborted) { endReason = "aborted"; break; }
       if (!approved) {
         const msg = feedback
           ? `The user rejected the plan with feedback: ${feedback}\nPlease revise your plan.`
@@ -230,6 +283,7 @@ export async function runTurn(
           });
           continue;
         }
+        endReason = "plan_rejected";
         break;
       }
       // Approved — restore original system prompt and continue with tools enabled
@@ -255,14 +309,14 @@ export async function runTurn(
     }
 
     // If no tool use, we're done
-    if (stopReason !== "tool_use") break;
+    if (stopReason !== "tool_use") { endReason = "end_turn"; break; }
 
     // Execute tool calls with concurrency
     const toolUseBlocks = assistantContent.filter((b): b is ToolUseBlock => b.type === "tool_use");
 
     // Checkpoint BEFORE the mutating batch: the tool names are known now, and
     // the snapshot must be the true pre-turn tree so /rewind can restore it.
-    const mutatingTools = new Set(["edit_file", "write_file"]);
+    const mutatingTools = new Set(["edit_file", "multi_edit", "apply_patch", "write_file"]);
     const hasMutation = toolUseBlocks.some(b => mutatingTools.has(b.name));
     if (hasMutation) {
       createCheckpoint(process.cwd(), `turn-${session.turns}`);
@@ -333,6 +387,7 @@ export async function runTurn(
       message: { role: "user", content: toolResults },
       turn: session.turns,
     });
+    hooks?.onToolResults?.(toolResults);
 
     // Steering input injection (TUI mid-turn input)
     const steer = hooks?.getSteeringInput?.();
@@ -362,7 +417,7 @@ export async function runTurn(
     await runLifecycleHooks(hookConfig, "Stop", {});
   }
 
-  return { text, turns: session.turns - turnStart, toolCalls: turnToolCalls };
+  return { text, turns: session.turns - turnStart, toolCalls: turnToolCalls, stopReason: signal?.aborted ? "aborted" : endReason };
 }
 
 export async function runAgent(task: string, config: AgentConfig): Promise<AgentResult> {

@@ -2,6 +2,7 @@ import type { PermissionConfig, PermissionRule } from "./types.js";
 import { checkShellSafety } from "./shell-safety.js";
 import { validatePath, checkSensitivePath } from "./sandbox.js";
 import { isAllowed } from "./allowlist.js";
+import { parsePatch, patchPaths } from "../tools/apply-patch.js";
 
 /** Tools that are safe in all modes — read-only, no side effects. */
 export const READ_ONLY_TOOLS = new Set([
@@ -24,6 +25,7 @@ const FILE_TOOLS = new Set([
   "read_file",
   "write_file",
   "edit_file",
+  "multi_edit",
   "glob",
   "grep",
 ]);
@@ -31,6 +33,8 @@ const FILE_TOOLS = new Set([
 /** Tools that auto-confirm mode allows without prompting. */
 const AUTO_CONFIRM_TOOLS = new Set([
   "edit_file",
+  "multi_edit",
+  "apply_patch",
   "phren_add_finding",
   "phren_complete_task",
   // Spawning forks a child process running with auto-confirm permissions —
@@ -94,6 +98,26 @@ export function checkPermission(
 
       // Sandbox check: ask for out-of-sandbox paths in ALL modes (not just full-auto)
       const pathResult = validatePath(filePath, config.projectRoot, config.allowedPaths);
+      if (!pathResult.ok) {
+        return { verdict: "ask", reason: `Path outside sandbox: ${pathResult.error}` };
+      }
+    }
+  }
+
+  // apply_patch names its paths inside the patch text: check every one.
+  if (toolName === "apply_patch") {
+    let paths: string[] = [];
+    try {
+      paths = patchPaths(parsePatch(String(input.patch ?? "")));
+    } catch {
+      // Unparseable: the tool itself reports the error without writing.
+    }
+    for (const p of paths) {
+      const sensitive = checkSensitivePath(p);
+      if (sensitive.sensitive) {
+        return { verdict: "deny", reason: `Sensitive path: ${sensitive.reason}` };
+      }
+      const pathResult = validatePath(p, config.projectRoot, config.allowedPaths);
       if (!pathResult.ok) {
         return { verdict: "ask", reason: `Path outside sandbox: ${pathResult.error}` };
       }

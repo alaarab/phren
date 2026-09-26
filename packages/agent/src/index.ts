@@ -5,7 +5,8 @@ import { resolveProvider } from "./providers/resolve.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { readFileTool } from "./tools/read-file.js";
 import { writeFileTool } from "./tools/write-file.js";
-import { editFileTool } from "./tools/edit-file.js";
+import { editFileTool, multiEditTool } from "./tools/edit-file.js";
+import { applyPatchTool } from "./tools/apply-patch.js";
 import { createShellTool, taskOutputTool, taskStopTool } from "./tools/shell.js";
 import { globTool } from "./tools/glob.js";
 import { grepTool } from "./tools/grep.js";
@@ -21,7 +22,7 @@ import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "./tools/ph
 import { gitStatusTool, gitDiffTool, gitCommitTool } from "./tools/git.js";
 import { updatePlanTool } from "./tools/update-plan.js";
 import { listMcpResourcesTool, readMcpResourceTool } from "./tools/mcp-resources.js";
-import { buildPhrenContext, buildContextSnippet } from "./memory/context.js";
+import { buildPhrenContext, buildContextSnippet, buildProjectInstructions } from "./memory/context.js";
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot, writeSessionNote } from "./memory/session.js";
 import { emitHerdrHook, setHerdrHookSession } from "./herdr-hooks.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
@@ -30,7 +31,8 @@ import { loadHooksConfig } from "./user-hooks.js";
 import { loadAndRegisterCustomCommands, getCustomCommandInfos } from "./commands.js";
 import { createSession, runTurn } from "./agent-loop.js";
 import { SessionLog, seedFromMessages } from "./session/log.js";
-import { fileSink, findLatestEventLog, persistFork, restoreSessionLog } from "./session/persist.js";
+import { fileSink, findEventLogById, findLatestEventLog, listEventLogs, persistFork, restoreSessionLog } from "./session/persist.js";
+import { buildHeadlessResult, createHeadlessHooks, headlessExitCode, readStdin, type HeadlessResult } from "./headless.js";
 import type { LlmMessage } from "./providers/types.js";
 import { createCostTracker } from "./cost.js";
 import { codexLogin, codexLogout } from "./providers/codex-auth.js";
@@ -124,13 +126,54 @@ export async function runAgentCli(raw: string[]) {
     process.exit(1);
   }
 
-  const args = parseArgs(raw);
+  let args;
+  try {
+    args = parseArgs(raw);
+  } catch (err: unknown) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
   resolveStartupPermissions(args);
   loadPersistentAllowlist(process.cwd());
 
   if (args.help) { printHelp(); process.exit(0); }
   if (args.version) { console.log(`phren-agent v${VERSION}`); process.exit(0); }
+  // Model switches and spawned children resolve the provider again; they
+  // read the endpoint from the environment.
+  if (args.baseUrl) process.env.PHREN_AGENT_BASE_URL = args.baseUrl;
+
+  if (args.listSessions) {
+    const ctx = await buildPhrenContext(args.project);
+    if (!ctx) {
+      console.error("Sessions are stored in the phren store; none was found.");
+      process.exit(1);
+    }
+    const sessions = listEventLogs(ctx.phrenPath, { project: args.project ?? undefined, limit: 20 });
+    if (args.outputFormat === "json") {
+      console.log(JSON.stringify(sessions.map(({ file: _file, ...rest }) => ({ ...rest, updatedAt: new Date(rest.mtimeMs).toISOString() })), null, 2));
+    } else if (sessions.length === 0) {
+      console.log("No sessions.");
+    } else {
+      for (const s of sessions) {
+        const when = new Date(s.mtimeMs).toISOString().replace("T", " ").slice(0, 16);
+        console.log(`${s.sessionId.slice(0, 12)}  ${when}  ${String(s.messages).padStart(4)} msgs  ${s.project ?? "-"}  ${s.title}`);
+      }
+      console.log("\nResume one with: phren-agent --session <id>");
+    }
+    process.exit(0);
+  }
+
+  // Headless with no task argument: read the task from piped stdin.
+  if (args.print && !args.task && !process.stdin.isTTY) {
+    args.task = (await readStdin()).trim();
+  }
+  if (args.print) {
+    args.interactive = false;
+    args.multi = false;
+  }
+
   // `--resume` alone continues the prior session without a placeholder task
+  const userTask = args.task;
   if (!args.task && args.resume) {
     args.task = "Continue where the previous session left off.";
   }
@@ -142,7 +185,7 @@ export async function runAgentCli(raw: string[]) {
   // Resolve LLM provider
   let provider;
   try {
-    provider = resolveProvider(args.provider, args.model, args.maxOutput, args.reasoning);
+    provider = resolveProvider(args.provider, args.model, args.maxOutput, args.reasoning, { baseUrl: args.baseUrl });
   } catch (err: unknown) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
@@ -200,6 +243,9 @@ export async function runAgentCli(raw: string[]) {
     }
   }
 
+  // Without a phren store, the repo's AGENTS.md / CLAUDE.md still apply.
+  if (!phrenCtx) contextSnippet = buildProjectInstructions();
+
   loadAndRegisterCustomCommands(process.cwd());
 
   const systemPrompt = buildSystemPrompt(contextSnippet, priorSummary, {
@@ -225,9 +271,24 @@ export async function runAgentCli(raw: string[]) {
     projectRoot: process.cwd(),
     sandboxMode: args.sandbox,
   });
+  // Nobody can answer a prompt in a headless run or with stdin not a
+  // terminal (a readline question on a closed stdin would hang): deny, and
+  // say how to allow.
+  let permissionDenials = 0;
+  if (args.print || (!process.stdin.isTTY && !args.interactive && !args.multi && !args.team)) {
+    registry.askUser = async (toolName, _input, reason) => {
+      permissionDenials++;
+      process.stderr.write(
+        `[denied ${toolName}: ${reason} No one is present to approve; rerun with --permissions auto-confirm or --yolo to allow.]\n`,
+      );
+      return false;
+    };
+  }
   registry.register(readFileTool);
   registry.register(writeFileTool);
   registry.register(editFileTool);
+  registry.register(multiEditTool);
+  registry.register(applyPatchTool);
   // Live-config factory: /permissions and sandbox mode changes apply per call
   registry.register(createShellTool(() => registry.permissionConfig));
   registry.register(taskOutputTool);
@@ -310,7 +371,17 @@ export async function runAgentCli(raw: string[]) {
    */
   const makeResumedLog = (): SessionLog | undefined => {
     if (!phrenCtx || !sessionId) return undefined;
-    const latest = findLatestEventLog(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
+    let latest: string | null;
+    if (args.resumeId) {
+      try {
+        latest = findEventLogById(phrenCtx.phrenPath, args.resumeId);
+      } catch (err: unknown) {
+        process.stderr.write(`Cannot resume: ${err instanceof Error ? err.message : String(err)}\n`);
+        process.exit(1);
+      }
+    } else {
+      latest = findLatestEventLog(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
+    }
     if (latest) {
       try {
         const parent = restoreSessionLog(phrenCtx.phrenPath, latest);
@@ -330,6 +401,7 @@ export async function runAgentCli(raw: string[]) {
         );
       }
     }
+    if (args.resumeId) return undefined; // a named session never falls back to another one
     const priorSnapshot = loadLastSessionSnapshot(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
     if (priorSnapshot && priorSnapshot.messages.length > 0) {
       if (args.verbose) {
@@ -464,46 +536,79 @@ export async function runAgentCli(raw: string[]) {
     registry.register(createListAgentsTool(oneShotSpawner));
   }
 
+  const startedAt = Date.now();
+  const headlessHooks = args.print
+    ? createHeadlessHooks({ format: args.outputFormat, verbose: args.verbose, write: (line) => process.stdout.write(`${line}\n`) })
+    : undefined;
+  const modelId = (provider as { model?: string }).model ?? null;
+  const emitHeadless = (result: HeadlessResult) => {
+    if (args.outputFormat === "text") {
+      if (result.result) process.stdout.write(result.result.endsWith("\n") ? result.result : `${result.result}\n`);
+      if (result.is_error) process.stderr.write(`[${result.subtype}${result.error ? `: ${result.error}` : ""}]\n`);
+    } else {
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+    }
+  };
+  if (args.print && args.outputFormat === "stream-json") {
+    process.stdout.write(`${JSON.stringify({
+      type: "system",
+      subtype: "init",
+      session_id: sessionId,
+      provider: provider.name,
+      model: modelId,
+      cwd,
+      permission_mode: args.permissions,
+      tools: registry.toolNames(),
+    })}\n`);
+  }
+
+  let exitCode = 0;
   try {
     const contextLimit = provider.contextWindow ?? 200_000;
 
-    let result;
     if (args.resume && !resumedLog) {
       process.stderr.write("No previous session to resume.\n");
     }
-    if (resumedLog) {
-      const session = createSession(contextLimit, { log: resumedLog });
-      emitHerdrHook("UserPromptSubmit");
-      const turnResult = await runTurn("Continuing where we left off. Please review the conversation and continue with the task.", session, agentConfig)
-        .finally(() => emitHerdrHook("Stop"));
-      result = {
-        finalText: turnResult.text,
-        turns: turnResult.turns,
-        toolCalls: turnResult.toolCalls,
-        totalCost: agentConfig.costTracker?.formatCost(),
-        messages: session.messages,
-        session,
-      };
-    } else {
-      const session = createSession(contextLimit, { log: agentConfig.sessionLog });
-      emitHerdrHook("UserPromptSubmit");
-      const turnResult = await runTurn(args.task, session, agentConfig).finally(() => emitHerdrHook("Stop"));
-      result = {
-        finalText: turnResult.text,
-        turns: turnResult.turns,
-        toolCalls: turnResult.toolCalls,
-        totalCost: agentConfig.costTracker?.formatCost(),
-        messages: session.messages,
-        session,
-      };
-    }
+    // A resumed session continues with the task given on the command line,
+    // or with a generic "continue" when none was.
+    const prompt = resumedLog && !userTask
+      ? "Continuing where we left off. Please review the conversation and continue with the task."
+      : args.task;
+    const session = createSession(contextLimit, { log: resumedLog ?? agentConfig.sessionLog });
+    emitHerdrHook("UserPromptSubmit");
+    const turnResult = await runTurn(prompt, session, agentConfig, headlessHooks).finally(() => emitHerdrHook("Stop"));
+    const result = {
+      finalText: turnResult.text,
+      turns: turnResult.turns,
+      toolCalls: turnResult.toolCalls,
+      totalCost: agentConfig.costTracker?.formatCost(),
+      messages: session.messages,
+      session,
+    };
 
     if (args.verbose) {
       const costStr = result.totalCost ? `, ${result.totalCost}` : "";
       process.stderr.write(`\nDone: ${result.turns} turns, ${result.toolCalls} tool calls${costStr}\n`);
     }
 
-    process.stdout.write("\x07"); // bell on completion
+    if (args.print) {
+      const headless = buildHeadlessResult({
+        text: turnResult.text,
+        stopReason: turnResult.stopReason,
+        turns: turnResult.turns,
+        toolCalls: turnResult.toolCalls,
+        startedAt,
+        sessionId,
+        provider: provider.name,
+        model: modelId,
+        costTracker,
+        permissionDenials,
+      });
+      emitHeadless(headless);
+      exitCode = headlessExitCode(headless);
+    } else if (process.stdout.isTTY) {
+      process.stdout.write("\x07"); // bell on completion; never into a pipe
+    }
 
     // End session with summary + memory intelligence
     if (phrenCtx && sessionId) {
@@ -524,7 +629,28 @@ export async function runAgentCli(raw: string[]) {
       writeSessionNote(phrenCtx, { sessionId, task: args.task, outcome: result.finalText });
     }
   } catch (err: unknown) {
-    console.error(err instanceof Error ? err.message : String(err));
+    const message = err instanceof Error ? err.message : String(err);
+    if (args.print) {
+      emitHeadless(buildHeadlessResult({
+        text: "",
+        stopReason: "error",
+        turns: 0,
+        toolCalls: 0,
+        startedAt,
+        sessionId,
+        provider: provider.name,
+        model: modelId,
+        costTracker,
+        permissionDenials,
+        error: message,
+      }));
+      if (args.outputFormat !== "text") {
+        // The error is in the JSON; keep stderr for humans too.
+        process.stderr.write(`${message}\n`);
+      }
+    } else {
+      console.error(message);
+    }
     if (phrenCtx && sessionId) {
       endSession(phrenCtx, sessionId, `Error: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -535,6 +661,7 @@ export async function runAgentCli(raw: string[]) {
 
   try { await oneShotSpawner?.shutdown(); } catch { /* children exit with the IPC channel */ }
   mcpCleanup?.();
+  if (exitCode !== 0) process.exit(exitCode);
 }
 
 // When run directly (phren-agent binary), parse from process.argv

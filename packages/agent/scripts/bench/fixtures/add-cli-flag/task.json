@@ -1,0 +1,5 @@
+{
+  "task": "Add a --json flag to src/cli.js: when given (before or after the file), print a single JSON object {\"file\", \"lines\", \"words\", \"chars\"} followed by a newline instead of the plain line. Any other option starting with -- must print `unknown option: <flag>` and return exit code 2. The tests in test/ describe the expected behaviour; do not modify them. Run npm test to confirm.",
+  "check": ["npm", "test", "--silent"],
+  "unchanged": ["test/cli.test.js"]
+}
