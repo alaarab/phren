@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Hook: tmux support for computers without Herdr. When no Herdr server answers and tmux 3.0+ is installed, the phone lists `tmux` (your own tmux server) and `tmux-phren` (a hidden server on `tmux -L phren` that phone launches start). Claude Code panes in either get chat, status, approvals, sends, the SSH terminal and launch. The agent in a pane is read from its foreground processes, its conversation from Claude's lifecycle callbacks and open transcript, and its status from the last callback event. See "Without Herdr: tmux" in `docs/phren-hook.md` for what does not work yet.
+
 ### Docs
 
 - Site: a phone app section. New `get-started.html` takes a new user from installing the app to a first chat, with what to do, what you should see and what to do if it fails at each step, and says plainly what works without Herdr. New `android.html` beside a rewritten `ios.html`. `privacy.html` is now one policy for iPhone and Android, dated 25 September 2026, and `support.html` covers both phones. The site nav, home page and docs page link "Get the app" to the guide.
@@ -18,6 +22,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - Internal: the Hook drives its terminal multiplexer through a `TerminalProvider` (`bridge/terminal.ts`), with Herdr as the one implementation (`bridge/terminal-herdr.ts`), as a first step toward running without Herdr. Pane reads, keys, prompts, process lookups, pings, launches, focus, rename and close go through it and send Herdr the same requests as before. Herdr's agent and session reports become optional pane hints. No behavior change.
+- Internal: `TerminalProvider.snapshot` returns a server's panes in the Hook's snapshot shape (Herdr's `session.snapshot`), and every Hook server name routes to its provider (`tmux` and `tmux-<socket>` to tmux, all others to Herdr, unchanged). "Agent not ready" is recognized from either provider's error code. Lifecycle binding files also record the last event and its time.
 
 ## [0.3.4] - 2026-09-25
 

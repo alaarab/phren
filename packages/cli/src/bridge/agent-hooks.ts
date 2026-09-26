@@ -22,6 +22,8 @@ import { answeredQuestionInput, numberedDialog, opencodePermissionDialog, passwo
   type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
 import { directoryNames, opencodeApprovalFile, opencodeRequest, readOpencodeRequest } from "./opencode-approvals.js";
 import { ApprovalWatchLeases, bindingPath, localSocket, PushBindingStore } from "./agent-hook-stores.js";
+import { eventStatus, notePaneStatus, settleBlockedPane } from "./pane-status.js";
+import { tmuxPaneFromEnv } from "./terminal-tmux.js";
 import { countTick } from "./metrics.js";
 
 export { permissionPrompt, terminalChoice, visibleTerminalChoice, type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
@@ -410,10 +412,14 @@ export class AgentHooks {
       // `dialog`: Claude takes a row's digit at once, and an Enter after it
       // could land on the next permission.
       if (dialog?.title) { entry.choice = dialog; entry.released = true; }
-      else if (entry.released) { delete entry.choice; delete entry.released; }
+      else {
+        if (entry.released) { delete entry.choice; delete entry.released; }
+        settleBlockedPane(target.server, target.pane);
+      }
       return;
     }
-    if (!dialog?.title) { if (entry) this.terminalPrompts.delete(key); return; }
+    // No dialog left: a request answered in the terminal itself.
+    if (!dialog?.title) { if (entry) this.terminalPrompts.delete(key); settleBlockedPane(target.server, target.pane); return; }
     this.terminalPrompts.set(key, { tool: "Question", message: dialog.title, choice: dialog, dialog: true, at: now });
     while (this.terminalPrompts.size > 64) this.terminalPrompts.delete(this.terminalPrompts.keys().next().value!);
   }
@@ -682,6 +688,7 @@ export class AgentHooks {
     }
     if (this.pending.get(id) !== entry || entry.response.destroyed) throw new BridgeError(409, "This approval is no longer pending.");
     this.pending.delete(id); this.dropPushBindings(id); clearTimeout(entry.timer);
+    settleBlockedPane(entry.target.server, entry.target.pane, 0);
     entry.response.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: {
       behavior: effective === "approve" ? "allow" : "deny", ...(effective === "deny" ? { message: "Declined in Phren." } : {}),
       ...(answered ? { updatedInput: answered } : {}),
@@ -845,7 +852,11 @@ export class AgentHooks {
         const pids = (await terminalProvider().processes(target.server, target.pane)).foregroundPids;
         if (!pids.length) throw new Error("No foreground process");
         await atomicInPrivateDir(bindingPath(target.server, target.pane), JSON.stringify({ terminal: pane.terminal_id, source: target.source,
-          session: target.session, pids, workspace: target.workspace, tab: target.tab }));
+          session: target.session, pids, workspace: target.workspace, tab: target.tab, event: String(body.event).slice(0, 64), at: new Date().toISOString() }));
+        // A terminal that does not watch its agents (tmux) takes the agent's
+        // status from these events.
+        const status = eventStatus(body.event);
+        if (status && typeof pane.terminal_id === "string") notePaneStatus(target.server, target.pane, pane.terminal_id, status);
         // What a shell call changed on disk: snapshot before, diff after.
         const input = typeof body.input === "string" ? { patch: body.input } : object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
         // A shell call by name, or any tool whose input is a command line —
@@ -968,15 +979,15 @@ export class AgentHooks {
 export async function agentHook(source: Provider) {
   provider.parse(source);
   // A missing helper must never prevent the coding agent from running.
-  if (process.env.HERDR_ENV !== "1" || !process.env.HERDR_SOCKET_PATH) return;
-  const server = herdrPaneFromEnv()?.server;
-  if (!server) return;
+  // Inside Herdr only Herdr's pane counts; elsewhere a tmux pane does.
+  const place = process.env.HERDR_ENV === "1" ? (process.env.HERDR_SOCKET_PATH ? herdrPaneFromEnv() : undefined) : await tmuxPaneFromEnv();
+  if (!place) return;
   let input = "";
   for await (const chunk of process.stdin) { input += chunk.toString(); if (input.length > 1_048_576) return; }
   const value = object(JSON.parse(input));
   if (value.agent_id || value.agentId || value.isSidechain || value.is_sidechain) return;
-  const target = targetSchema.parse({ server, workspace: process.env.HERDR_WORKSPACE_ID, tab: process.env.HERDR_TAB_ID,
-    pane: process.env.HERDR_PANE_ID, source, session: value.session_id || value.sessionId });
+  const target = targetSchema.parse({ server: place.server, workspace: place.workspace, tab: place.tab,
+    pane: place.pane, source, session: value.session_id || value.sessionId });
   const event = String(value.hook_event_name || "SessionStart");
   const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
   if (!modules.has("hook") || (event.endsWith("ToolUse") && !modules.has("git"))) return;

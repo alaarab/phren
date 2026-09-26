@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { homeDir } from "../home-paths.js";
 import { agentNames, findPane, isConductorName, paneAgentName, paneChatState, paneIdentity, servers, snapshot } from "./herdr.js";
-import { terminalProvider } from "./terminal.js";
+import { agentNotReady, terminalName, terminalProvider } from "./terminal.js";
 import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from "./launch-worktree.js";
 import { groupConductor } from "./conductor-group.js";
 import { optionalHookPeers } from "./peers.js";
@@ -171,18 +171,19 @@ export async function launchSession(server: string, data: Json, options: { canar
       created = { workspaceId: String(tab.workspace_id), tabId: String(tab.tab_id), paneId: String(pane.pane_id) };
     } else await new Promise(resolve => setTimeout(resolve, 200));
   }
-  if (!created) throw new BridgeError(409, `Herdr created "${label}" but its pane did not appear. Check Herdr on the computer.`);
+  if (!created) throw new BridgeError(409, `${terminalName(server)} created "${label}" but its pane did not appear. Check ${terminalName(server)} on the computer.`);
   try {
     await terminalProvider().startAgent(server, created.paneId, { name, kind, args, timeoutMs: timeout });
   } catch (error) {
     // A first-run screen (Claude's folder trust, a login notice) holds the
     // agent at startup. It did start: hand the pane back so the owner answers
     // that screen from the chat instead of stranding the workspace.
-    const blocked = error instanceof BridgeError && error.details?.herdrCode === "agent_not_ready";
+    const blocked = agentNotReady(error);
     if (!blocked) {
+    const host = terminalName(server);
     const reason = error instanceof BridgeError && error.status === 504 ? "it did not become ready in time"
-      : error instanceof BridgeError && error.message.startsWith("Herdr: ") ? error.message.slice(7) : "Herdr reported an error";
-    throw new BridgeError(409, `Herdr couldn't start ${kind} in the new "${label}" pane (${reason}). The workspace was created and is still open on the computer — open it from Herdr workspaces.`);
+      : error instanceof BridgeError && error.message.startsWith(`${host}: `) ? error.message.slice(host.length + 2) : `${host} reported an error`;
+    throw new BridgeError(409, `${host} couldn't start ${kind} in the new "${label}" pane (${reason}). The workspace was created and is still open on the computer — open it from ${host === "Herdr" ? "Herdr workspaces" : "its tmux session"}.`);
     }
   }
   const after = await snapshot(server);

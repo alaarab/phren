@@ -1,13 +1,16 @@
-// What the Hook needs from the terminal multiplexer its agents run in. Herdr
-// is the only one today (terminal-herdr.ts); the interface is shaped so tmux
-// fits too (list-panes -F, capture-pane -p [-e], send-keys / paste-buffer,
-// new-window). Nothing Herdr-specific may leak past a provider's own file.
+// What the Hook needs from the terminal multiplexer its agents run in: Herdr
+// (terminal-herdr.ts) or, on a computer without it, tmux (terminal-tmux.ts).
+// Nothing Herdr- or tmux-specific may leak past a provider's own file.
 //
 // Identity (which conversation a pane runs) and agent status are not the
 // provider's job. A multiplexer that knows them reports them as `hints`; one
 // that does not leaves them out and the Hook falls back to lifecycle hooks
 // and process logs.
+import { existsSync } from "node:fs";
+import { herdrSocketPath } from "./herdr.js";
+import { BridgeError, type Json } from "./protocol.js";
 import { herdrTerminal } from "./terminal-herdr.js";
+import { tmuxSocketName, tmuxTerminal } from "./terminal-tmux.js";
 
 /** A pane as the multiplexer lists it. `server` names the multiplexer instance
  * (a Herdr session, a tmux socket), `workspace` and `tab` its place in it
@@ -72,6 +75,17 @@ export interface TerminalProvider {
   readonly kind: string;
   /** Resolves when `server` is running and answering. */
   ping(server: string): Promise<void>;
+  /**
+   * The server's panes in the Hook's snapshot shape, the one Herdr's
+   * `session.snapshot` answers: `workspaces` (`workspace_id`, `label`), `tabs`
+   * (`tab_id`, `workspace_id`, `label`, `agent_status`) and `panes`
+   * (`pane_id`, `tab_id`, `workspace_id`, `terminal_id`, `cwd`,
+   * `foreground_cwd`, `title`, `label`, `agent`, `agent_status`,
+   * `agent_name`, `state_change_seq`), plus `focused_workspace_id` /
+   * `focused_tab_id` / `focused_pane_id`. `terminal_id` names the terminal
+   * instance, so a pane reused by a new shell is a different terminal.
+   */
+  snapshot(server: string): Promise<Json>;
   listPanes(server: string): Promise<TerminalPane[]>;
   processes(server: string, pane: string): Promise<PaneProcesses>;
   readScreen(server: string, pane: string, read: ScreenRead): Promise<string>;
@@ -86,9 +100,43 @@ export interface TerminalProvider {
   groupAction(server: string, operation: "focus" | "rename" | "close", group: { workspace?: string; tab?: string }, label?: string): Promise<void>;
 }
 
-let current: TerminalProvider = herdrTerminal;
+/** Which multiplexer a Hook server name belongs to: "tmux" and "tmux-<socket>"
+ * are tmux servers unless Herdr has a session of that name; every other name
+ * is a Herdr server, exactly as before tmux support. */
+export function terminalKind(server: string): "herdr" | "tmux" {
+  if (!tmuxSocketName(server)) return "herdr";
+  try { return existsSync(herdrSocketPath(server)) ? "herdr" : "tmux"; } catch { return "tmux"; }
+}
+/** The multiplexer's name as the phone shows it in messages. */
+export function terminalName(server: string): string { return terminalKind(server) === "tmux" ? "tmux" : "Herdr"; }
+const route = (server: string): TerminalProvider => terminalKind(server) === "tmux" ? tmuxTerminal : herdrTerminal;
 
-/** The multiplexer the Hook drives. */
+/** The provider for each server by its name: Herdr's or tmux's. */
+export const routedTerminal: TerminalProvider = {
+  kind: "routed",
+  ping: server => route(server).ping(server),
+  snapshot: server => route(server).snapshot(server),
+  listPanes: server => route(server).listPanes(server),
+  processes: (server, pane) => route(server).processes(server, pane),
+  readScreen: (server, pane, read) => route(server).readScreen(server, pane, read),
+  sendKeys: (server, pane, keys) => route(server).sendKeys(server, pane, keys),
+  prompt: (server, pane, text, signal) => route(server).prompt(server, pane, text, signal),
+  create: (server, placement) => route(server).create(server, placement),
+  startAgent: (server, pane, agent) => route(server).startAgent(server, pane, agent),
+  focusPane: (server, pane) => route(server).focusPane(server, pane),
+  groupAction: (server, operation, group, label) => route(server).groupAction(server, operation, group, label),
+};
+
+/** True when a start or prompt was refused because the agent is still
+ * starting (a folder-trust or login screen holds it). Herdr says so with its
+ * own error code; another provider with `code`. */
+export function agentNotReady(error: unknown): boolean {
+  return error instanceof BridgeError && (error.details?.code === "agent_not_ready" || error.details?.herdrCode === "agent_not_ready");
+}
+
+let current: TerminalProvider = routedTerminal;
+
+/** The multiplexer the Hook drives: each call goes to its server's provider. */
 export function terminalProvider(): TerminalProvider { return current; }
 
 /** For tests: drive the Hook through `provider`; the returned function restores the previous one. */

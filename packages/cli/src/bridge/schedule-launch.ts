@@ -6,7 +6,7 @@ import path from "node:path";
 import { finished as streamFinished } from "node:stream/promises";
 import { fanoutRoot } from "./fanouts.js";
 import { findPane, paneIdentity, servers, snapshot } from "./herdr.js";
-import { terminalProvider } from "./terminal.js";
+import { agentNotReady, terminalProvider } from "./terminal.js";
 import { atomic, atomicInPrivateDir, BridgeError, type Json } from "./protocol.js";
 import { logger } from "../logger.js";
 import { defaultPhrenPath } from "../shared.js";
@@ -54,7 +54,7 @@ async function promptWhenReady(server: string, paneId: string, text: string, sig
   for (;;) {
     try { await terminalProvider().prompt(server, paneId, text, signal); return; }
     catch (error) {
-      const starting = error instanceof BridgeError && error.details?.herdrCode === "agent_not_ready";
+      const starting = agentNotReady(error);
       if (!starting || signal.aborted) throw error;
       if (Date.now() >= deadline) throw new BridgeError(409, `The agent in ${paneId} never became ready for the prompt; it may be waiting at a startup screen on the computer.`);
       await new Promise(resolve => setTimeout(resolve, 1_000));
