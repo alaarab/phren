@@ -128,6 +128,13 @@ No extra request per iPhone row is needed.
   several Codex panes in one folder each take the earliest conversation begun
   after they started. A callback from inside the daemon is placed on the pane
   that shows its conversation and never records a pane binding.
+  Codex 0.155.1 and later run tools from a JavaScript script (code mode) and
+  record each action as its own item. The chat shows those items as the calls
+  the terminal shows: commands with their folder, output (last 4,000
+  characters) and exit code, edits as patches, MCP calls under
+  `mcp__<server>__<tool>`, and viewed images with the picture. The script
+  itself is hidden when every tool it called is recorded as an item; a failed
+  script stays with its error.
 - Chat history, incremental transcript updates, real token counts, image uploads,
   stop, and project context from Phren's memory and skills.
 - Native Herdr terminals, named servers, workspaces, tabs, and pane navigation.
