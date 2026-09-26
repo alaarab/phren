@@ -13,10 +13,12 @@
 // stdin, never through a shell.
 import { execFile } from "node:child_process";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
+import { lstat, readdir } from "node:fs/promises";
 import { hostname, userInfo } from "node:os";
 import path from "node:path";
 import { BridgeError, objects, serverName, type Json } from "./protocol.js";
-import { paneStatus } from "./pane-status.js";
+import { harnessStatus } from "./harness-status.js";
+import { dialogStatus, notePaneStatus, paneStatus } from "./pane-status.js";
 import type { TerminalPane, TerminalProvider } from "./terminal.js";
 import { herdrPanes } from "./terminal-herdr.js";
 
@@ -47,6 +49,8 @@ interface TmuxDeps {
   processes: () => Promise<string>;
   /** `tmux -V`. */
   version: () => Promise<string>;
+  /** The names of the tmux sockets this user has, whether or not they answer. */
+  sockets: () => Promise<string[]>;
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
@@ -83,12 +87,46 @@ function tmuxError(stderr: string, error: { name: string; code?: string | number
   return new BridgeError(409, said ? `tmux: ${said}` : "tmux could not perform this action. Refresh the session before trying again.");
 }
 
+/** The folders this user's tmux sockets live in: `$TMUX_TMPDIR/tmux-<uid>`,
+ * where `-L` looks, then `/tmp/tmux-<uid>` when TMUX_TMPDIR points elsewhere
+ * (a server started from a shell with another TMUX_TMPDIR than the Hook's). */
+export function tmuxSocketFolders(env: NodeJS.ProcessEnv = process.env): string[] {
+  const uid = process.getuid?.();
+  if (uid === undefined) return [];
+  const base = env.TMUX_TMPDIR && path.isAbsolute(env.TMUX_TMPDIR) ? env.TMUX_TMPDIR : "/tmp";
+  return [...new Set([path.join(base, `tmux-${uid}`), path.join("/tmp", `tmux-${uid}`)])];
+}
+
+/** Sockets outside `-L`'s folder, by name: tmux reaches them with `-S`. */
+const socketPaths = new Map<string, string>();
+function socketFlags(socket: string): string[] {
+  const file = socketPaths.get(socket);
+  return file ? ["-S", file] : ["-L", socket];
+}
+
+/** The tmux sockets in `folder` this user owns, by name (at most 32). A socket
+ * outside the first folder of `tmuxSocketFolders` is remembered by path. */
+export async function tmuxSocketsIn(folder: string): Promise<string[]> {
+  const uid = process.getuid?.(), primary = tmuxSocketFolders()[0];
+  const names = (await readdir(folder).catch(() => [] as string[])).slice(0, 256);
+  const found: string[] = [];
+  for (const name of names) {
+    if (found.length >= 32) break;
+    if (!tmuxServerName(name)) continue;
+    const info = await lstat(path.join(folder, name)).catch(() => undefined);
+    if (!info?.isSocket() || (uid !== undefined && info.uid !== uid)) continue;
+    found.push(name);
+    if (folder !== primary && !socketPaths.has(name) && !existsSync(path.join(primary ?? folder, name))) socketPaths.set(name, path.join(folder, name));
+  }
+  return found;
+}
+
 const defaultDeps: TmuxDeps = {
   binary: tmuxBinary,
   run: (socket, args, options = {}) => new Promise((resolve, reject) => {
     const binary = tmuxBinary();
     if (!binary) { reject(new BridgeError(503, "tmux is not installed on this computer.")); return; }
-    const child = execFile(binary, ["-L", socket, ...args], { timeout: options.timeoutMs ?? 5_000, maxBuffer: 4_194_304, env: tmuxEnvironment(), signal: options.signal },
+    const child = execFile(binary, [...socketFlags(socket), ...args], { timeout: options.timeoutMs ?? 5_000, maxBuffer: 4_194_304, env: tmuxEnvironment(), signal: options.signal },
       (error, stdout, stderr) => { if (error) reject(tmuxError(String(stderr), error)); else resolve(String(stdout)); });
     if (options.input !== undefined) child.stdin?.end(options.input); else child.stdin?.end();
   }),
@@ -101,6 +139,7 @@ const defaultDeps: TmuxDeps = {
     if (!binary) { resolve(""); return; }
     execFile(binary, ["-V"], { timeout: 3_000 }, (error, stdout) => resolve(error ? "" : String(stdout)));
   }),
+  sockets: async () => (await Promise.all(tmuxSocketFolders().map(tmuxSocketsIn))).flat(),
   sleep: (ms, signal) => new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(new BridgeError(499, "Request cancelled.")); return; }
     const timer = setTimeout(() => { signal?.removeEventListener("abort", abort); resolve(); }, ms);
@@ -188,6 +227,18 @@ async function listRows(server: string): Promise<Row[]> {
   }
 }
 
+/** The agent's status in a pane: its lifecycle events (Claude, Codex,
+ * phren-agent) or its own records (OpenCode, Copilot), then blocked while a
+ * working agent draws a dialog on the screen. */
+async function agentStatus(server: string, pane: string, terminal: string, agent: string, pids: number[]): Promise<{ status: string; seq: number } | undefined> {
+  let status: { status: string; seq: number } | undefined;
+  if (agent === "opencode" || agent === "copilot") {
+    const recorded = await harnessStatus(agent, pids).catch(() => undefined);
+    status = recorded ? notePaneStatus(server, pane, terminal, recorded) : undefined;
+  } else status = await paneStatus(server, pane, terminal);
+  return dialogStatus(server, pane, terminal, agent, status, () => tmuxTerminal.readScreen(server, pane, { scope: "pane", source: "visible", lines: 40, format: "ansi", timeoutMs: 2_000 }));
+}
+
 const STATUS_RANK = ["blocked", "waiting", "working", "done", "idle"];
 /** One tmux server in the shape of the Hook's pane snapshot (the shape
  * Herdr's `session.snapshot` answers): workspaces are tmux sessions, tabs
@@ -207,11 +258,11 @@ export async function tmuxSnapshot(server: string): Promise<Json> {
     const running = foreground(processes, row.pane_tty);
     const agent = [row.pane_current_command, ...running.map(p => p.args)].map(agentFromCommand).find(Boolean);
     const terminal = `${pane}:${row.pane_pid}`;
+    const status = agent ? await agentStatus(server, pane, terminal, agent, running.map(p => p.pid)) : undefined;
     // Claude and Codex report every turn through their lifecycle hooks; until
-    // the first event the status is unknown (a folder-trust screen, say).
-    // The other harnesses do not report turns there yet and count as idle.
+    // the first event the status is unknown (a folder-trust screen, say). The
+    // others count as idle until their own records say otherwise.
     const hooked = agent === "claude" || agent === "codex";
-    const status = hooked ? await paneStatus(server, pane, terminal) : undefined;
     const name = row["@phren_agent"] || undefined;
     const title = row.pane_title && row.pane_title !== host && row.pane_title !== short ? row.pane_title : undefined;
     panes.push({ pane_id: pane, tab_id: tab, workspace_id: workspace, terminal_id: terminal, cwd: row.pane_current_path || undefined,
@@ -380,14 +431,49 @@ export const tmuxTerminal: TerminalProvider = {
   },
 };
 
+/** The owner's tmux servers that answer, by Hook server name: the default
+ * socket and every other socket in the user's tmux folders (`tmux -L work`
+ * is "tmux-work"), at most 16. The hidden server is not among them. */
+async function ownerServers(): Promise<string[]> {
+  const sockets = [...new Set(["default", ...await deps.sockets().catch(() => [] as string[])])].filter(socket => socket !== "phren");
+  const names = sockets.flatMap(socket => tmuxServerName(socket) ?? []).slice(0, 16);
+  const running = await Promise.all(names.map(name => tmuxTerminal.ping(name).then(() => true, () => false)));
+  return names.filter((_, index) => running[index]);
+}
+
 /** The tmux servers the Hook drives, as `/v1/muxes` lists servers: the owner's
- * default server while it runs, and the hidden server whenever tmux is
- * installed (a launch starts it). `kind` stays "herdr", the phone's name for
- * the Hook's session protocol; `terminal` names the multiplexer. */
+ * servers that answer, and the hidden server whenever tmux is installed (a
+ * launch starts it). `kind` stays "herdr", the phone's name for the Hook's
+ * session protocol; `terminal` names the multiplexer. */
 export async function tmuxServers(): Promise<Json[]> {
   if (!deps.binary()) return [];
-  const running = await tmuxTerminal.ping(TMUX_DEFAULT).then(() => true, () => false);
-  return [...(running ? [TMUX_DEFAULT] : []), TMUX_HIDDEN].map(name => ({ id: `tmux:${name}`, kind: "herdr", terminal: "tmux", session: name, running: true }));
+  return [...await ownerServers(), TMUX_HIDDEN].map(name => ({ id: `tmux:${name}`, kind: "herdr", terminal: "tmux", session: name, running: true }));
+}
+
+/** What `phren bridge doctor` and the health details say about tmux. */
+export interface TmuxHealth {
+  /** "off" when PHREN_TMUX=off, "missing" without a tmux executable. */
+  state: "ok" | "off" | "missing";
+  version?: string;
+  /** Whether this tmux can start agents (3.0 and later). */
+  launches?: boolean;
+  /** The owner's servers that answer, by Hook server name. */
+  servers?: string[];
+  /** The hidden server phone launches use: running with its session count, or not started yet. */
+  hidden?: { running: boolean; sessions?: number };
+}
+
+export async function tmuxHealth(): Promise<TmuxHealth> {
+  if (process.env.PHREN_TMUX === "off") return { state: "off" };
+  if (!deps.binary()) return { state: "missing" };
+  const [version, servers, hidden] = await Promise.all([
+    deps.version().then(text => /(\d+\.\d+[a-z]?)/.exec(text)?.[1]),
+    ownerServers(),
+    tmux(TMUX_HIDDEN, ["list-sessions", "-F", "#{session_id}"], { timeoutMs: 3_000 })
+      .then(text => ({ running: true, sessions: text.split("\n").filter(Boolean).length }), () => ({ running: false })),
+  ]);
+  const major = Number(/^(\d+)/.exec(version ?? "")?.[1]);
+  return { state: "ok", ...(version ? { version, launches: major >= 3 } : {}), servers, hidden };
 }
 
 /** The tmux pane this process runs in, from the variables tmux sets in every
@@ -397,6 +483,9 @@ export async function tmuxPaneFromEnv(env: NodeJS.ProcessEnv = process.env): Pro
   if (!socket || !path.isAbsolute(socket) || !pane || !fromTmuxId(pane)) return undefined;
   const server = tmuxServerName(path.basename(socket));
   if (!server) return undefined;
+  // A socket outside `-L`'s folder (another TMUX_TMPDIR) is reached by path.
+  const primary = tmuxSocketFolders(env)[0];
+  if (primary && path.dirname(socket) !== primary && !socketPaths.has(path.basename(socket))) socketPaths.set(path.basename(socket), socket);
   try {
     const [session, window] = (await deps.run(path.basename(socket), ["display-message", "-p", "-t", pane, "#{session_id}\t#{window_id}"], { timeoutMs: 1_500 })).trim().split("\t");
     const workspace = fromTmuxId(session ?? ""), tab = fromTmuxId(window ?? "");
@@ -408,9 +497,9 @@ export async function tmuxPaneFromEnv(env: NodeJS.ProcessEnv = process.env): Pro
 export function tmuxAttach(server: string): { file: string; args: string[] } {
   const binary = deps.binary();
   if (!binary) throw new BridgeError(503, "tmux is not installed on this computer.");
-  return { file: binary, args: ["-L", socketOf(server), "attach-session"] };
+  return { file: binary, args: [...socketFlags(socketOf(server)), "attach-session"] };
 }
 
-/** For tests: forget the tmux executable lookup. */
-export function resetTmuxBinary(): void { cachedBinary = undefined; }
+/** For tests: forget the tmux executable lookup and the sockets found by path. */
+export function resetTmuxBinary(): void { cachedBinary = undefined; socketPaths.clear(); }
 

@@ -12,7 +12,7 @@ import { paneIdentity, snapshot, validateTarget, workspaceSnapshot } from "./her
 import { objects } from "./protocol.js";
 import type { ApprovalPushService } from "./push.js";
 import { launchSession } from "./server-launch.js";
-import { resetTmuxBinary, tmuxBinary, tmuxPaneFromEnv, tmuxSnapshot, tmuxTerminal, toTmuxId } from "./terminal-tmux.js";
+import { resetTmuxBinary, tmuxBinary, tmuxHealth, tmuxPaneFromEnv, tmuxServers, tmuxSnapshot, tmuxTerminal, toTmuxId } from "./terminal-tmux.js";
 
 const saved = process.env.PHREN_TMUX;
 delete process.env.PHREN_TMUX;
@@ -44,7 +44,11 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
     process.env.PHREN_PATH = path.join(folder, "store");
     await mkdir(process.env.PHREN_BRIDGE_HOME, { recursive: true, mode: 0o700 });
     // A stand-in for Claude Code: a Node script named claude that echoes what it is sent.
-    await writeFile(path.join(folder, "claude"), `#!${process.execPath}\nconst rl = require("node:readline").createInterface({ input: process.stdin });\nprocess.stdout.write("fake claude ready\\n");\nrl.on("line", line => process.stdout.write("got: " + line + "\\n"));\n`);
+    // "DIALOG" draws Claude's permission dialog, as its auto-mode fallback
+    // does with no hook behind it; "CLEAR" clears the screen.
+    await writeFile(path.join(folder, "claude"), `#!${process.execPath}\nconst rl = require("node:readline").createInterface({ input: process.stdin });\n`
+      + `const dialog = ${JSON.stringify(CLAUDE_DIALOG)};\nprocess.stdout.write("fake claude ready\\n");\n`
+      + `rl.on("line", line => process.stdout.write(line === "DIALOG" ? dialog : line === "CLEAR" ? "\\x1b[2J\\x1b[H" : "got: " + line + "\\n"));\n`);
     await chmod(path.join(folder, "claude"), 0o755);
     process.env.SHELL = "/bin/sh";
     process.env.PATH = `${folder}${path.delimiter}${process.env.PATH}`;
@@ -104,13 +108,29 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
       expect(await paneIdentity(server, (await validateTarget(target, true)))).toBe(SESSION);
       await hook({ target, event: "UserPromptSubmit", prompt: "hi" });
       expect(await validateTarget(target)).toMatchObject({ agent_status: "working" });
+      // A dialog drawn while working, with no PermissionRequest behind it,
+      // blocks the pane until it is gone.
+      const status = async () => objects((await tmuxSnapshot(server)).panes).find(p => p.pane_id === place.pane)?.agent_status;
+      await tmuxTerminal.prompt(server, place.pane, "DIALOG");
+      expect(await until(status, value => value === "blocked", 12_000)).toBe("blocked");
+      await tmuxTerminal.prompt(server, place.pane, "CLEAR");
+      expect(await until(status, value => value === "working", 12_000)).toBe("working");
       await hook({ target, event: "Stop" });
       expect(workspaceSnapshot(await snapshot(server)).groups).toContainEqual(expect.objectContaining({ label: "phone launch",
         children: [expect.objectContaining({ agent: "claude", agentStatus: "idle" })] }));
     } finally { hooks.close(); }
   }, 60_000);
+
+  it("finds this test's socket among the owner's servers and reports tmux's health", async () => {
+    expect((await tmuxServers()).map(entry => entry.session)).toContain(server);
+    const health = await tmuxHealth();
+    expect(health).toMatchObject({ state: "ok", launches: true, hidden: { running: expect.any(Boolean) } });
+    expect(health.version).toMatch(/^\d+\.\d+/);
+    expect(health.servers).toContain(server);
+  }, 30_000);
 });
 
+const CLAUDE_DIALOG = " Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend\n";
 const SESSION = "bbbbbbbb-2222-4222-8222-222222222222";
 /** Claude's hook process: one lifecycle event posted to the Hook's agent socket. */
 function hook(body: Record<string, unknown>): Promise<string> {

@@ -2,7 +2,7 @@ import { parseArgs } from "node:util";
 import { hookRequest } from "./client.js";
 import { dispatchSchema } from "./dispatch.js";
 import { handOff } from "./hand-off.js";
-import { herdrPaneFromEnv } from "./herdr.js";
+import { terminalPaneFromEnv } from "./terminal.js";
 import { addGrant, grantSchema, listGrants, removeGrant } from "./grants.js";
 import { sessionId } from "./protocol.js";
 
@@ -36,7 +36,7 @@ export async function runDispatch(args: string[]): Promise<number> {
   const input = dispatchSchema.parse({ computer: positionals[0], project: positionals[1], ...ordinary,
     ...(parent ? { parent, parentTarget } : {}) });
   // Run inside an agent's pane, the dispatch remembers that pane for return notices.
-  const origin = herdrPaneFromEnv();
+  const origin = await terminalPaneFromEnv();
   const result = await hookRequest("/v1/dispatch", { ...input, ...(origin ? { origin } : {}) }, undefined, 180_000);
   console.log(JSON.stringify(result, null, 2));
   return result.ok === true ? 0 : 1;
