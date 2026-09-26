@@ -445,12 +445,13 @@ async function ownerServers(): Promise<string[]> {
 }
 
 /** The tmux servers the Hook drives, as `/v1/muxes` lists servers: the owner's
- * servers that answer, and the hidden server whenever tmux is installed (a
- * launch starts it). `kind` stays "herdr", the phone's name for the Hook's
+ * servers that answer, and (unless `hidden: false`) the hidden server whenever
+ * tmux is installed (a launch starts it). `kind` stays "herdr", the phone's name for the Hook's
  * session protocol; `terminal` names the multiplexer. */
-export async function tmuxServers(): Promise<Json[]> {
+export async function tmuxServers(options: { hidden?: boolean } = {}): Promise<Json[]> {
   if (!deps.binary()) return [];
-  return [...await ownerServers(), TMUX_HIDDEN].map(name => ({ id: `tmux:${name}`, kind: "herdr", terminal: "tmux", session: name, running: true }));
+  return [...await ownerServers(), ...(options.hidden ?? true ? [TMUX_HIDDEN] : [])]
+    .map(name => ({ id: `tmux:${name}`, kind: "herdr", terminal: "tmux", session: name, running: true }));
 }
 
 /** What `phren bridge doctor` and the health details say about tmux. */

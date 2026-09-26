@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Hook: agents in your own tmux sessions show up on the phone while Herdr is also running. The Hook used to look at tmux only when no Herdr server answered, so `tmux new -s app` then `codex` over ssh stayed invisible on a computer with Herdr. Phone launches still go to Herdr, and the hidden `tmux-phren` server is listed only without Herdr.
+
 ## [0.3.7] - 2026-09-26
 
 ### Changed
