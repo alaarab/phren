@@ -13,8 +13,14 @@ import { intervalFromEnv } from "./limits.js";
 import { countHerdr, countIdentity } from "./metrics.js";
 import { phrenStoreRoot } from "./transcripts.js";
 
+// terminal.ts and terminal-tmux.ts import this module, so it reaches them at
+// call time; a static import back would be an import cycle.
+const terminal = () => import("./terminal.js");
+
 const exec = promisify(execFile);
 export function herdrRoot(): string { return process.env.PHREN_HERDR_HOME || path.join(homedir(), ".config/herdr"); }
+/** Where Herdr's socket for `server` lives. */
+export function herdrSocketPath(server: string): string { return herdrSocket(server); }
 function herdrSocket(server: string): string {
   serverName.parse(server);
   return path.join(herdrRoot(), ...(server === "default" ? [] : ["sessions", server]), "herdr.sock");
@@ -120,8 +126,10 @@ export async function servers(): Promise<Json[]> {
     try { await rpc(name, "ping"); return { id: `herdr:${name}`, kind: "herdr", session: name, running: true }; }
     catch { return null; }
   }));
-  const running = results.filter((v): v is NonNullable<typeof v> => v !== null);
-  knownServers = running.map(server => server.session);
+  const running: Json[] = results.filter((v): v is NonNullable<typeof v> => v !== null);
+  // Without a running Herdr, tmux: the owner's server and the Hook's hidden one.
+  if (!running.length) running.push(...await import("./terminal-tmux.js").then(tmux => tmux.tmuxServers()).catch(() => []));
+  knownServers = running.map(server => String(server.session));
   return running;
 }
 
@@ -135,7 +143,7 @@ const inFlightSnapshots = new Map<string, Promise<Json>>();
 /** A fresh snapshot. Its answer also becomes the shared one, so pollers reuse it. */
 export async function snapshot(server: string): Promise<Json> {
   const started = Date.now();
-  const value = object((await rpc(server, "session.snapshot")).snapshot);
+  const value = await (await terminal()).terminalProvider().snapshot(server);
   const current = sharedSnapshots.get(server);
   // A slower request that started before the current answer never replaces it.
   if (!current || current.at <= started) {
@@ -240,8 +248,7 @@ export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json
 /** Only file descriptors held by this pane's foreground processes establish identity.
  * A directory match, latest log, or focused tab must never select a conversation. */
 async function foregroundPids(server: string, pane: Json): Promise<number[]> {
-  const info = object((await rpc(server, "pane.process_info", { pane_id: pane.pane_id })).process_info);
-  const pids = objects(info.foreground_processes).map(p => p.pid).filter((p): p is number => Number.isSafeInteger(p) && Number(p) > 0).slice(0, 16);
+  const pids = (await (await terminal()).terminalProvider().processes(server, String(pane.pane_id))).foregroundPids.filter(p => Number.isSafeInteger(p) && p > 0).slice(0, 16);
   return pids.sort((a, b) => a - b);
 }
 async function processLogs(pids: number[]): Promise<string[]> {

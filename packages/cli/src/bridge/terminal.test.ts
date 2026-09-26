@@ -3,7 +3,7 @@ import { AgentHooks } from "./agent-hooks.js";
 import { rpc, validateTarget } from "./herdr.js";
 import { readPaneText } from "./pane-text.js";
 import type { Target } from "./protocol.js";
-import { setTerminalProvider, terminalProvider, type ScreenRead, type TerminalProvider } from "./terminal.js";
+import { routedTerminal, setTerminalProvider, terminalProvider, type ScreenRead, type TerminalProvider } from "./terminal.js";
 import { herdrPanes, herdrTerminal } from "./terminal-herdr.js";
 
 vi.mock("./herdr.js", async importOriginal => ({
@@ -17,7 +17,7 @@ const target: Target = { server: "work", workspace: "w1", tab: "w1:t1", pane: "%
 function fakeTerminal(screen: () => string): TerminalProvider & { keys: string[][]; reads: ScreenRead[] } {
   const keys: string[][] = [], reads: ScreenRead[] = [];
   const refuse = async () => { throw new Error("not used"); };
-  return { kind: "fake", keys, reads, ping: async () => {}, listPanes: async () => [],
+  return { kind: "fake", keys, reads, ping: async () => {}, snapshot: async () => ({}), listPanes: async () => [],
     processes: async () => ({ foregroundPids: [] }),
     readScreen: async (_server, _pane, read) => { reads.push(read); return screen(); },
     sendKeys: async (_server, _pane, sent) => { keys.push(sent); },
@@ -50,7 +50,7 @@ describe("the Hook through a terminal provider", () => {
     expect(await readPaneText("work", "%3", { scope: "pane", source: "recent", lines: 40, format: "ansi", what: "Test read" })).toBe("");
     expect(fake.reads).toEqual([{ scope: "pane", source: "recent", lines: 40, format: "ansi" }]);
     restore();
-    expect(terminalProvider()).toBe(herdrTerminal);
+    expect(terminalProvider()).toBe(routedTerminal);
   });
 });
 
@@ -74,6 +74,7 @@ describe("the Herdr provider", () => {
     await herdrTerminal.groupAction("s", "rename", { workspace: "w", tab: "t" }, "New");
     await herdrTerminal.groupAction("s", "close", { workspace: "w" });
     await herdrTerminal.ping("s");
+    await herdrTerminal.snapshot("s");
     expect(vi.mocked(rpc).mock.calls).toStrictEqual([
       ["s", "agent.read", { target: "p", source: "visible", lines: 40, strip_ansi: true }, undefined, 2_000],
       ["s", "pane.read", { pane_id: "p", source: "recent", lines: 40, strip_ansi: false, format: "ansi" }, undefined, undefined],
@@ -88,6 +89,7 @@ describe("the Herdr provider", () => {
       ["s", "tab.rename", { tab_id: "t", label: "New" }],
       ["s", "workspace.close", { workspace_id: "w" }],
       ["s", "ping"],
+      ["s", "session.snapshot"],
     ]);
   });
 
