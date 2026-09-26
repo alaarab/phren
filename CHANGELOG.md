@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-09-25
+
 ### Added
 
 - Claude Code plugin, ready for the Claude plugin directory. The plugin now carries phren's real memory hooks (SessionStart context, recall on every prompt, PostToolUse, save at Stop) through `hooks/phren-hook.sh`, instead of a Stop reminder, so a plugin-only user gets memory injection. The hooks never start a cold `npx` (installed `phren`, the `~/.local/bin` wrapper, or the pinned release already in npm's cache, offline), and fail open.
@@ -20,6 +22,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - The plugin's MCP server never started: `.mcp.json` ran `npx -y @phren/cli mcp-mode`, which prints the MCP mode and exits.
+- A task-claim test pinned its claims to fixed times and started failing once they were a day old; its clock is now pinned too.
 
 ## [0.3.5] - 2026-09-25
 

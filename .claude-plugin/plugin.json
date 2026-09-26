@@ -2,7 +2,7 @@
   "name": "phren",
   "displayName": "phren",
   "description": "Long-term memory for Claude Code. Recalls relevant past findings on every prompt, keeps per-project context, and saves what each session learned to a local git-backed store you own. No account, no telemetry by default.",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "author": {
     "name": "Ala Arab",
     "url": "https://github.com/alaarab"
@@ -36,7 +36,7 @@
   "mcpServers": {
     "phren": {
       "command": "npx",
-      "args": ["-y", "@phren/cli@0.3.5", "mcp"],
+      "args": ["-y", "@phren/cli@0.3.6", "mcp"],
       "env": {
         "PHREN_MCP_OWNER": "plugin"
       }
