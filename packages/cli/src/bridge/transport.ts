@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
 import { BridgeError, object, PROTOCOL, serverName, socketPath, bridgeRoot, atomic, type Json } from "./protocol.js";
-import { rpc } from "./herdr.js";
+import { terminalProvider } from "./terminal.js";
 import { launchDirectory } from "./projects.js";
 
 /** Decode the base64url project folder from a `phren-hook v1 shell` command; undefined when it is not a path. */
@@ -111,7 +111,7 @@ export async function dispatch(command: string): Promise<void> {
   const server = serverName.parse(terminal[1]);
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Request an SSH terminal first.");
   // Verify the named server exists; never create a workspace or an agent implicitly.
-  await rpc(server, "ping");
+  await terminalProvider().ping(server);
   await attach("herdr", ["session", "attach", server], { env: shellEnvironment() }, "The Herdr terminal disconnected.");
 }
 

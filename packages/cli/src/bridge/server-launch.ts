@@ -3,7 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { homeDir } from "../home-paths.js";
-import { agentNames, findPane, isConductorName, paneAgentName, paneChatState, paneIdentity, rpc, servers, snapshot } from "./herdr.js";
+import { agentNames, findPane, isConductorName, paneAgentName, paneChatState, paneIdentity, servers, snapshot } from "./herdr.js";
+import { terminalProvider } from "./terminal.js";
 import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from "./launch-worktree.js";
 import { groupConductor } from "./conductor-group.js";
 import { optionalHookPeers } from "./peers.js";
@@ -155,7 +156,7 @@ export async function launchSession(server: string, data: Json, options: { canar
   // never leaves a worktree or branch behind.
   const worktree: LaunchWorktree | undefined = worktreeRequest ? await createLaunchWorktree(projectDirectory, worktreeRequest) : undefined;
   const cwd = worktree?.cwd ?? projectDirectory;
-  try { await rpc(server, workspace ? "tab.create" : "workspace.create", { workspace_id: workspace, label, cwd, focus: false, env: {} }); }
+  try { await terminalProvider().create(server, { workspace, label, cwd }); }
   catch (error) { await worktree?.discard(); throw error; }
   let created: { workspaceId: string; tabId: string; paneId: string } | undefined;
   for (let attempt = 0; attempt < 25 && !created; attempt++) {
@@ -172,7 +173,7 @@ export async function launchSession(server: string, data: Json, options: { canar
   }
   if (!created) throw new BridgeError(409, `Herdr created "${label}" but its pane did not appear. Check Herdr on the computer.`);
   try {
-    await rpc(server, "agent.start", { name, kind, pane_id: created.paneId, timeout_ms: timeout, ...(args.length ? { args } : {}) }, undefined, timeout + 5_000);
+    await terminalProvider().startAgent(server, created.paneId, { name, kind, args, timeoutMs: timeout });
   } catch (error) {
     // A first-run screen (Claude's folder trust, a login notice) holds the
     // agent at startup. It did start: hand the pane back so the owner answers
@@ -206,10 +207,10 @@ export async function workspaceAction(server: string, operation: string, data: J
   if (pane && !objects(s.panes).some(p => p.pane_id === pane && (!tab || p.tab_id === tab) && (!workspace || p.workspace_id === workspace))) throw new BridgeError(409, "The pane changed.");
   const label = data.label === undefined ? undefined : z.string().min(1).max(200).refine(t => !/[\x00-\x1f\x7f]/.test(t)).parse(data.label);
   const cwd = data.cwd === undefined ? undefined : z.string().max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
-  if (operation === "create") await rpc(server, workspace ? "tab.create" : "workspace.create", { workspace_id: workspace, label, cwd, focus: false, env: {} });
+  if (operation === "create") await terminalProvider().create(server, { workspace, label, cwd });
   else if (!workspace && !tab && !pane) throw new BridgeError(400, "Choose a Herdr destination.");
-  else if (pane && operation === "focus") await rpc(server, "pane.focus", { pane_id: pane });
+  else if (pane && operation === "focus") await terminalProvider().focusPane(server, pane);
   else if (pane) throw new BridgeError(400, "This pane action is not available.");
-  else await rpc(server, `${tab ? "tab" : "workspace"}.${operation}`, { ...(tab ? { tab_id: tab } : { workspace_id: workspace }), ...(label ? { label } : {}) });
+  else await terminalProvider().groupAction(server, operation as "focus" | "rename" | "close", { workspace, tab }, label);
   return { ok: true };
 }
