@@ -12,6 +12,7 @@ import { tabActivityKey } from "./tab-activity.js";
 import { intervalFromEnv } from "./limits.js";
 import { countHerdr, countIdentity } from "./metrics.js";
 import { phrenStoreRoot } from "./transcripts.js";
+import { assignDaemonConversation, daemonRollouts, processTable, sameDirectory, startedAt, type CodexPaneStart } from "./codex-daemon.js";
 
 // terminal.ts and terminal-tmux.ts import this module, so it reaches them at
 // call time; a static import back would be an import cycle.
@@ -378,12 +379,68 @@ async function identityFromProcesses(server: string, pane: Json, pids: number[])
     return match ? [match[1]] : [];
   });
   if (new Set(candidates).size === 1) return { sessionId: candidates[0], noTranscriptLogs: false };
+  if (pane.agent === "codex" && candidates.length === 0) {
+    const daemon = await codexDaemonIdentity(server, pane, pids).catch(() => undefined);
+    if (daemon?.sessionId) return { sessionId: daemon.sessionId, noTranscriptLogs: false };
+    const recorded = await recordedSession(server, pane, pids);
+    // A binding naming a conversation the daemon runs came from a hook inside
+    // the daemon, which carries the pane that started the daemon, not this one.
+    return { sessionId: recorded && !daemon?.known.has(recorded) ? recorded : undefined, noTranscriptLogs: true };
+  }
   // A lifecycle callback is bound to the process and terminal, never just cwd.
   // Codex can hold its parent and subagent transcripts in the same process.
   // Use the verified binding to disambiguate only if its log is still open;
   // a stale binding must not override evidence of other conversations.
   const recorded = await recordedSession(server, pane, pids);
   return { sessionId: candidates.length === 0 || (recorded && candidates.includes(recorded)) ? recorded : undefined, noTranscriptLogs: candidates.length === 0 };
+}
+
+const rolloutIds = (files: string[]) => files.flatMap(file => /rollout-.*-([a-f0-9-]{36})\.jsonl$/i.exec(file)?.[1] ?? []);
+const paneCwd = (pane: Json) => pane.foreground_cwd || pane.cwd;
+/** A Codex 0.157 pane whose TUI holds no rollout: the conversation a Codex
+ * app-server daemon runs for it, matched by the pane's folder and its TUI's
+ * start time (codex-daemon.ts). `known` names every conversation the daemon
+ * holds, so a binding written from inside the daemon can be refused. */
+async function codexDaemonIdentity(server: string, pane: Json, pids: number[]): Promise<{ sessionId?: string; known: Set<string> }> {
+  const all = await daemonRollouts(processLogs);
+  const known = new Set(all.map(r => r.id));
+  const cwd = paneCwd(pane);
+  const here: typeof all = [];
+  for (const r of all) if (await sameDirectory(r.cwd, cwd)) here.push(r);
+  if (!here.length) return { known };
+  const rows = await processTable(), start = startedAt(rows, pids);
+  if (start === undefined) return { known };
+  // Other Codex panes in the same folder: a conversation their own processes
+  // hold is theirs; otherwise they compete for daemon conversations by start
+  // time. Their bindings are not trusted here: before this fix the daemon's
+  // hooks wrote them for the pane that started the daemon.
+  const s = await (await terminal()).terminalProvider().snapshot(server).catch(() => ({} as Json));
+  const claimed = new Set<string>(), rivals: CodexPaneStart[] = [];
+  for (const peer of objects(s.panes).filter(p => p.agent === "codex" && p.pane_id !== pane.pane_id).slice(0, 16)) {
+    if (!await sameDirectory(paneCwd(peer), cwd)) continue;
+    const peerPids = await foregroundPids(server, peer).catch(() => [] as number[]);
+    if (!peerPids.length) continue;
+    const own = rolloutIds(await processLogs(peerPids));
+    if (own.length) { for (const id of own) claimed.add(id); continue; }
+    const peerStart = startedAt(rows, peerPids);
+    if (peerStart !== undefined) rivals.push({ key: String(peer.pane_id), start: peerStart });
+  }
+  return { sessionId: assignDaemonConversation(here, { key: String(pane.pane_id), start }, claimed, rivals), known };
+}
+
+/** The Codex pane that shows `session`, for a lifecycle callback that ran
+ * inside a Codex daemon and so cannot name its pane. Falls back to the only
+ * Codex pane in the callback's folder while that pane shows no conversation. */
+export async function paneForCodexSession(server: string, session: string, cwd?: string): Promise<Json | undefined> {
+  const s = await snapshot(server);
+  const codex = objects(s.panes).filter(p => p.agent === "codex").slice(0, 32);
+  const identities = await Promise.all(codex.map(p => paneIdentity(server, p).catch(() => undefined)));
+  const index = identities.indexOf(session);
+  if (index >= 0) return codex[index];
+  if (!cwd) return undefined;
+  const same: number[] = [];
+  for (const [i, p] of codex.entries()) if (await sameDirectory(paneCwd(p), cwd)) same.push(i);
+  return same.length === 1 && !identities[same[0]] ? codex[same[0]] : undefined;
 }
 
 const startingKey = randomBytes(32);
