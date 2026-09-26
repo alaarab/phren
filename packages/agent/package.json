@@ -1,6 +1,6 @@
 {
   "name": "@phren/agent",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "phren's coding agent: starts every session knowing your project's memory, tasks and decisions",
   "type": "module",
   "bin": {
