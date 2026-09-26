@@ -401,8 +401,13 @@ export async function archiveFinishedFanouts(env: NodeJS.ProcessEnv = process.en
   }
   // Cap the archive: after the moves it may hold ARCHIVE_MAX_FOLDERS + n folders.
   const archived = (await readdir(archive).catch(() => [])).filter(name => jobID.safeParse(name).success);
+  // Up to ARCHIVE_MAX_FOLDERS + n folders at two or three file reads each:
+  // one at a time that takes seconds on Windows, where every stat is slow.
   const entries: Array<{ name: string; age: number }> = [];
-  for (const name of archived) entries.push({ name, age: await archivedFinishedAt(path.join(archive, name)) });
+  for (let index = 0; index < archived.length; index += 32) {
+    entries.push(...await Promise.all(archived.slice(index, index + 32)
+      .map(async name => ({ name, age: await archivedFinishedAt(path.join(archive, name)) }))));
+  }
   // On a dry run the moves never landed, so weigh them at their finish stamp.
   if (dryRun) for (const move of moves) entries.push({ name: move.name, age: move.basis });
   let deleted = 0;

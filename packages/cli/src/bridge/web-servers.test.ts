@@ -1,4 +1,6 @@
-import { createServer, type Server } from "node:http";
+import { randomUUID } from "node:crypto";
+import { createServer, get, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // execFile is promisified at module load, so the mock has to be in place first
@@ -21,16 +23,36 @@ function answer(byTool: Record<string, Answer>) {
   });
 }
 
-async function listenBelowEphemeral(server: Server): Promise<number> {
+/** Listens on 127.0.0.1:`port` (0 lets the OS pick) and confirms, by a request
+ * that must come back with this server's nonce, that the address reaches this
+ * server. macOS lets a 127.0.0.1 bind succeed beside another process's listener
+ * on the same port, so a successful listen alone does not prove the probe in
+ * webServers() will land here. */
+async function listenOwned(server: Server, nonce: string, port: number): Promise<number | undefined> {
+  const listening = await new Promise<boolean>(resolve => {
+    const fail = () => resolve(false);
+    server.once("error", fail);
+    server.listen(port, "127.0.0.1", () => { server.off("error", fail); resolve(true); });
+  });
+  if (!listening) return undefined;
+  const bound = (server.address() as AddressInfo).port;
+  const owned = await new Promise<boolean>(resolve => {
+    get({ host: "127.0.0.1", port: bound, path: "/", agent: false, timeout: 2_000 }, res => {
+      res.resume(); resolve(res.headers["x-test-nonce"] === nonce);
+    }).on("error", () => resolve(false)).on("timeout", () => resolve(false));
+  });
+  if (owned) return bound;
+  await new Promise<void>(resolve => server.close(() => resolve()));
+  return undefined;
+}
+
+/** A port below the ephemeral range, which the ordering test needs. */
+async function listenBelowEphemeral(server: Server, nonce: string): Promise<number | undefined> {
   for (let attempt = 0; attempt < 20; attempt++) {
-    const candidate = 20_000 + Math.floor(Math.random() * 10_000);
-    const ok = await new Promise<boolean>(resolve => {
-      server.once("error", () => resolve(false));
-      server.listen(candidate, "127.0.0.1", () => resolve(true));
-    });
-    if (ok) return candidate;
+    const port = await listenOwned(server, nonce, 20_000 + Math.floor(Math.random() * 10_000));
+    if (port) return port;
   }
-  throw new Error("no free port below the ephemeral range");
+  return undefined;
 }
 
 const ssLine = (port: number, name = "node", pid = 1) =>
@@ -39,13 +61,22 @@ const ssLine = (port: number, name = "node", pid = 1) =>
 describe("webServers", () => {
   let server: Server;
   let port = 0;
-  beforeEach(async () => {
-    server = createServer((_req, res) => { res.setHeader("content-type", "text/html"); res.end("<html><title>Alastack &amp; Co</title></html>"); });
-    // A port below the ephemeral range, so the ordering test is deterministic.
-    port = await listenBelowEphemeral(server);
+  beforeEach(async context => {
+    const nonce = randomUUID();
+    server = createServer((_req, res) => {
+      res.setHeader("content-type", "text/html"); res.setHeader("x-test-nonce", nonce);
+      res.end("<html><title>Alastack &amp; Co</title></html>");
+    });
+    // Only the ordering test needs a port below the ephemeral range; the others
+    // take the OS's pick, which no other socket can already hold.
+    const bound = context.task.name.startsWith("probes well-known ports")
+      ? await listenBelowEphemeral(server, nonce)
+      : await listenOwned(server, nonce, 0);
+    if (!bound) throw new Error("could not listen on a port this test owns");
+    port = bound;
   });
   afterEach(async () => {
-    await new Promise<void>(resolve => server.close(() => resolve()));
+    if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
     execFileMock.mockReset();
   });
 
@@ -58,7 +89,7 @@ describe("webServers", () => {
   it("falls back to lsof when ss is missing", async () => {
     answer({ lsof: { stdout: `p42\ncbun\nn*:${port}\n` } });
     const found = await webServers();
-    expect(found.map(server => server.port)).toEqual([port]);
+    expect(found).toEqual([{ name: "Alastack & Co", port, origin: `http://127.0.0.1:${port}`, process: "bun", pid: 42 }]);
   });
 
   it("probes well-known ports before ephemeral ones so a browser cannot crowd out a dev server", async () => {

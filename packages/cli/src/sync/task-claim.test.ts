@@ -22,15 +22,17 @@ beforeEach(() => {
   fs.writeFileSync(path.join(seed, ".gitignore"), ".runtime/\n");
   fs.writeFileSync(path.join(seed, "phren", "tasks.md"),
     "# phren tasks\n\n## Active\n\n## Queue\n\n- [ ] Port the parser <!-- bid:aaaa1111 rank:1 -->\n- [ ] Fix the menu <!-- bid:bbbb2222 rank:2 -->\n\n## Done\n");
-  for (const [key, value] of [["user.email", "t@example.com"], ["user.name", "t"]]) git(seed, "config", key, value);
-  git(seed, "add", "-A"); git(seed, "commit", "-qm", "seed"); git(seed, "remote", "add", "origin", remote); git(seed, "push", "-qu", "origin", "main");
+  // Each git process costs a second or more on a loaded Windows runner, where
+  // the 13 this setup once spawned outlasted the hook timeout: identities go
+  // on the command line and into the clone, not through separate config calls.
+  git(seed, "add", "-A"); git(seed, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "seed");
+  git(seed, "push", "-q", remote, "main");
   [mini, laptop] = ["mini", "laptop"].map(name => {
     const clone = path.join(tmp.path, name);
-    git(tmp.path, "clone", "-q", remote, clone);
-    for (const [key, value] of [["user.email", "t@example.com"], ["user.name", name]]) git(clone, "config", key, value);
+    git(tmp.path, "clone", "-q", "-c", "user.email=t@example.com", "-c", `user.name=${name}`, remote, clone);
     return clone;
   });
-});
+}, 30_000);
 afterEach(() => tmp.cleanup());
 
 const task = (store: string, bid: string) => {

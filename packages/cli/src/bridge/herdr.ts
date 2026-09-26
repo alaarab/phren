@@ -286,7 +286,13 @@ async function resolveIdentity(server: string, pane: Json, fresh: boolean): Prom
   countIdentity(fresh ? "probe-fresh" : "probe");
   const result = identityFromProcesses(server, pane, pids);
   if (identities.size >= 128) identities.delete(identities.keys().next().value!);
-  identities.set(key, { at: Date.now(), result });
+  const entry = { at: Date.now(), result };
+  // The evidence is as old as its answer, not its question: lsof on a busy
+  // Mac can outlast the cache window, and a probe stamped when it started
+  // would already be stale to paneChatState, which then never reports the
+  // brand-new conversation it just proved as starting.
+  void result.then(() => { entry.at = Date.now(); }, () => {});
+  identities.set(key, entry);
   return { sessionId: (await result).sessionId, pids };
 }
 export async function paneIdentity(server: string, pane: Json, fresh = false): Promise<string | undefined> {

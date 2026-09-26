@@ -19,7 +19,7 @@ beforeEach(async () => {
   await exec("git", ["init", "-q", "-b", "main", repo]);
   await writeFile(path.join(repo, "README.md"), "hello\n");
   await git("add", "."); await git("commit", "-qm", "start");
-  changes = new ToolChanges();
+  changes = new ToolChanges({ budgetMs: 10_000 });
 });
 afterEach(async () => { await changes.close(); vi.unstubAllEnvs(); await rm(home, { recursive: true, force: true }); });
 

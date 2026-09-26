@@ -14,6 +14,9 @@ import { LaunchLimiter, ProcessPool } from "./limits.js";
 import { serverName } from "./protocol.js";
 
 const exec = promisify(execFile);
+// These tests check what a call captures, not the Hook's 2.5 s latency cap:
+// a loaded Windows runner's Git once outlasted it and the capture came back empty.
+const CAPTURE = { budgetMs: 10_000 };
 let home: string;
 beforeEach(async () => {
   home = await realpath(await mkdtemp(path.join(scratchRoot, "phren-hardening-")));
@@ -79,7 +82,7 @@ describe("transcript export hardening", () => {
 
 describe("isolated and bounded changes", () => {
   it("captures Write input paths outside cwd and exports their redacted change rows", async () => {
-    const dir = await repo("write-target"), changes = new ToolChanges();
+    const dir = await repo("write-target"), changes = new ToolChanges(CAPTURE);
     const input = { file_path: path.join(dir, "created.txt"), content: "new line\n" };
     expect(capturesChanges("Write", input)).toBe(true);
     try {
@@ -106,7 +109,7 @@ describe("isolated and bounded changes", () => {
     const dir = await repo("repo"), objects = path.join(dir, ".git/objects"), index = path.join(dir, ".git/index");
     await writeFile(path.join(dir, "untracked.txt"), "untracked before\n");
     const before = await fileCount(objects), indexBefore = await readFile(index);
-    const changes = new ToolChanges();
+    const changes = new ToolChanges(CAPTURE);
     await changes.before("c", "t", dir, "echo after > ./untracked.txt");
     expect(changes.view("c").pending("t")).toBe(true);
     expect(await fileCount(objects)).toBe(before);
@@ -120,14 +123,14 @@ describe("isolated and bounded changes", () => {
   it("isolates linked worktrees too", async () => {
     const dir = await repo("main"), worktree = path.join(home, "worktree");
     await git(dir, "worktree", "add", "-qb", "feature", worktree);
-    const count = await fileCount(path.join(dir, ".git/objects")), changes = new ToolChanges();
+    const count = await fileCount(path.join(dir, ".git/objects")), changes = new ToolChanges(CAPTURE);
     await changes.before("c", "t", worktree, "touch ./new.txt");
     await writeFile(path.join(worktree, "new.txt"), "new\n"); await changes.after("c", "t");
     expect((await changes.view("c").changes("t"))?.[0].path).toBe("new.txt");
     expect(await fileCount(path.join(dir, ".git/objects"))).toBe(count);
   });
   it("redacts every secret basename and Git binary patch, preserving public patches and counts", async () => {
-    const dir = await repo("repo"), changes = new ToolChanges();
+    const dir = await repo("repo"), changes = new ToolChanges(CAPTURE);
     await changes.before("c", "t", dir, "generate");
     const names = [".env", ".env.local", "a.pem", "a.key", "id_rsa", "id_rsa.pub", "id_ed25519", "id_ed25519.pub", "a.p12", "a.pfx", "a.keychain-db", "credentials.json", "a.credentials.json", ".netrc", ".npmrc", ".pypirc", "a.tfstate"];
     await mkdir(path.join(dir, "nested"));
