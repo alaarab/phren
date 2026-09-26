@@ -108,6 +108,10 @@ export async function answerClaudeQuestionDialog(io: DialogIO, questions: Dialog
       await sleep(120);
     }
   };
+  // After a key that answers, Claude may take seconds to redraw on a busy
+  // computer; the answer was taken, so wait for the redraw instead of
+  // calling it refused (the phone would say it was not confirmed).
+  const ANSWERED_MS = 8_000;
   const initial = await settle(screen => screen);
   if (!initial) throw changed("The terminal is not showing Claude's question.");
   // A set of several questions draws one tab per question; a single question
@@ -152,7 +156,7 @@ export async function answerClaudeQuestionDialog(io: DialogIO, questions: Dialog
       } else {
         await io.keys([String(screen.options[answer.options[0]].number)]);
       }
-      if (!await settle(leaves(index))) throw changed("The terminal did not take the answer.");
+      if (!await settle(leaves(index), ANSWERED_MS)) throw changed("The terminal did not take the answer.");
       continue;
     }
     // Multi-select: toggle only the boxes that differ, one key per write
@@ -187,10 +191,10 @@ export async function answerClaudeQuestionDialog(io: DialogIO, questions: Dialog
       // Tab from the typed row would stop on Next instead of leaving.
       await io.keys(screen.other && screen.cursor === screen.other.number ? ["up", "tab"] : ["tab"]);
     }
-    if (!await settle(leaves(index))) throw changed("The terminal did not move past the question.");
+    if (!await settle(leaves(index), ANSWERED_MS)) throw changed("The terminal did not move past the question.");
   }
   if (!submit) return;
-  const review = await settle(value => value?.kind === "review" ? value : value === undefined ? "gone" as const : undefined);
+  const review = await settle(value => value?.kind === "review" ? value : value === undefined ? "gone" as const : undefined, ANSWERED_MS);
   // A lone single-select question submits on its digit.
   if (review === "gone") return;
   if (!review) throw changed("The terminal did not reach the review of the answers.");
@@ -199,5 +203,5 @@ export async function answerClaudeQuestionDialog(io: DialogIO, questions: Dialog
     throw changed("Not every question has an answer in the terminal.");
   }
   await io.keys(["1"]);
-  if (await settle(value => value === undefined ? "gone" : undefined) !== "gone") throw changed("The terminal did not submit the answers.");
+  if (await settle(value => value === undefined ? "gone" : undefined, ANSWERED_MS) !== "gone") throw changed("The terminal did not submit the answers.");
 }

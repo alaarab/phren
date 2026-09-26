@@ -73,6 +73,15 @@ describe("answering Claude's question dialog", () => {
     expect(claude.result).toEqual({ "Which color?": "Teal", "Which tools?": ["Emacs"], "Which size?": "Small" });
   });
 
+  it("waits for a slow redraw instead of calling a taken answer refused", async () => {
+    // A busy computer: Claude took the digit but redraws 3 s later. The walk
+    // used to give up after 2 s and the phone said the answer wasn't confirmed.
+    const one = [set[0]], claude = new FakeClaude(one);
+    await answerClaudeQuestionDialog(claude.io({ redrawMs: 3_000 }), one, [{ options: [1] }]);
+    expect(claude.sent).toEqual([["2"]]);
+    expect(claude.result).toEqual({ "Which color?": "Green" });
+  });
+
   it("answers a lone single-select question with its digit alone", async () => {
     const one = [set[0]], claude = new FakeClaude(one);
     await answerClaudeQuestionDialog(claude.io(), one, [{ options: [2] }]);
