@@ -473,7 +473,7 @@ export class AgentHooks {
       await validateTarget(target, false, true);
       if (current.selected > 0) {
         await beforeKeys?.();
-        await rpc(target.server, "agent.send_keys", { target: target.pane, keys: Array<string>(current.selected).fill("left") });
+        await terminalProvider().sendKeys(target.server, target.pane, Array<string>(current.selected).fill("left"));
         await new Promise(resolve => setTimeout(resolve, 150));
       }
       const moved = current.selected > 0 ? await read() : current;
@@ -542,7 +542,7 @@ export class AgentHooks {
   menuClosed(target: Target) { this.menus.delete(JSON.stringify(target)); }
   /** The pane with its colors, for dialogs whose cursor is only a color. */
   paneAnsi(target: Target): Promise<string> {
-    return readPaneText(target.server, target.pane, { method: "agent.read", source: "visible", lines: 40, stripAnsi: false, format: "ansi", timeoutMs: 2_000 });
+    return readPaneText(target.server, target.pane, { scope: "agent", source: "visible", lines: 40, stripAnsi: false, format: "ansi", timeoutMs: 2_000 });
   }
   /** Read what the pane draws, stripping ANSI unless placeholder styling is needed. */
   paneLines(target: Target, stripAnsi = true): Promise<string> {
