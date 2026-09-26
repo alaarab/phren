@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-09-26
+
 ### Changed
 
 - Copilot chat on the phone: a skill Copilot loads opens to its SKILL.md behind the skill chip (Copilot's `skill.invoked` body, instead of "Skill loaded successfully"), and an MCP call carries its server and tool names so phren's own tools draw as phren cards instead of "Phren-Get Tasks" with raw JSON.
