@@ -1,6 +1,5 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { object, objects, sessionId, type Json } from "./protocol.js";
 import { visibleCodexExecEvent } from "./fanouts.js";
 import { harnessPreamble } from "./transcript-claude.js";
@@ -185,7 +184,16 @@ function commandText(value: unknown): string {
 
 function localPath(value: unknown): string | undefined {
   if (typeof value !== "string" || !value) return undefined;
-  if (value.startsWith("file://")) { try { return fileURLToPath(value); } catch { return undefined; } }
+  // The URL names a path on the computer Codex ran on, which may not follow
+  // this platform's rules (fileURLToPath refuses `file:///work` on Windows).
+  if (value.startsWith("file://")) {
+    try {
+      const url = new URL(value);
+      if (url.host) return undefined;
+      const pathname = decodeURIComponent(url.pathname);
+      return /^\/[A-Za-z]:\//.test(pathname) ? pathname.slice(1) : pathname;
+    } catch { return undefined; }
+  }
   return value.startsWith("/") ? value : undefined;
 }
 
