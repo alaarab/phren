@@ -82,7 +82,11 @@ export interface ScheduleLaunchContext {
   blockedStartup?: (promptText: string) => void | Promise<void>;
 }
 
-export type ScheduleLauncher = ((context: ScheduleLaunchContext) => Promise<ScheduleLaunchResult>) & { close?: () => void };
+export type ScheduleLauncher = ((context: ScheduleLaunchContext) => Promise<ScheduleLaunchResult>) & {
+  close?: () => void;
+  /** Follows a run a previous Hook process launched and never saw finish. */
+  resume?: (run: ScheduleRun, schedule: Schedule) => Promise<ScheduleRunOutcome>;
+};
 export interface SchedulePushSender { notify(value: SchedulePush): Promise<SchedulePushResult> }
 
 export interface ScheduleStatus extends Schedule {

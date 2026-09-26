@@ -4,7 +4,7 @@ import { hookRequest } from "./client.js";
 import { projectName } from "./dispatch.js";
 import { grantLabel, listGrants, matchGrant } from "./grants.js";
 import { hookPeers, optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
-import { BridgeError, object, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
+import { BridgeError, errorCode, object, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
 import { findPhrenPath } from "../phren-paths.js";
 import { listMachines } from "../profile-store.js";
 import { localNames } from "./computer-names.js";
@@ -138,7 +138,7 @@ export function notLinkedComputers(store: string | null, here: string, linked: r
 
 export interface LiveSessions {
   sessions: LiveSession[];
-  unreachable: { computer: string; error: string }[];
+  unreachable: { computer: string; error: string; code?: string }[];
   /** Registered in the store but not linked in hooks.yaml: unknown, not idle. */
   notLinked: NotLinkedComputer[];
   enrolled: number;
@@ -153,7 +153,7 @@ export async function listLiveSessions(options: { store?: string | null } = {}):
   const here = typeof object(health.computer).name === "string" ? String(object(health.computer).name) : "this computer";
   const sessions = sessionsFrom(await hookRequest("/v1/workspaces"), here, true);
   const { peers, peerError } = await optionalHookPeers();
-  const unreachable: { computer: string; error: string }[] = [];
+  const unreachable: LiveSessions["unreachable"] = [];
   // Names each peer answers to (its hostname, Bonjour name), so a computer
   // registered under another of its names is not reported as unlinked.
   const peerNames: string[] = [];
@@ -165,7 +165,8 @@ export async function listLiveSessions(options: { store?: string | null } = {}):
       const computer = object(object(health).computer);
       for (const name of [computer.name, ...(Array.isArray(computer.aliases) ? computer.aliases : [])]) if (typeof name === "string") peerNames.push(name);
     } catch (error) {
-      unreachable.push({ computer: peer.name, error: error instanceof Error ? error.message : "Unreachable." });
+      const code = errorCode(error);
+      unreachable.push({ computer: peer.name, error: error instanceof Error ? error.message : "Unreachable.", ...(code ? { code } : {}) });
     }
   }));
   const store = options.store !== undefined ? options.store : findPhrenPath();

@@ -6,7 +6,7 @@ import { homeDir } from "../home-paths.js";
 import { agentNames, findPane, isConductorName, paneAgentName, paneChatState, paneIdentity, servers, snapshot } from "./herdr.js";
 import { agentNotReady, terminalName, terminalProvider } from "./terminal.js";
 import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from "./launch-worktree.js";
-import { groupConductor } from "./conductor-group.js";
+import { groupConductor, type GroupConductor } from "./conductor-group.js";
 import { optionalHookPeers } from "./peers.js";
 import { atomic, BridgeError, bridgeRoot, id, type Json, objects, provider } from "./protocol.js";
 
@@ -135,7 +135,7 @@ export async function launchSession(server: string, data: Json, options: { canar
   let name = wanted;
   for (let n = 2; taken.has(name) && n < 100; n++) name = `${wanted.slice(0, 32 - String(n).length - 1)}-${n}`;
   // One conductor per connected group: this computer and every linked peer.
-  let unchecked: { computer: string; error: string }[] = [];
+  let unchecked: GroupConductor["unchecked"] = [];
   if (role === "conductor" && !options.canary) {
     const existing = await localConductor({ server, snapshot: before });
     if (existing) throw new BridgeError(409, "A conductor is already running on this computer.", { target: existing.target });

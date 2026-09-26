@@ -8,7 +8,7 @@ import { getProjectDirs } from "../phren-paths.js";
 import { resolveAllStores } from "../store-registry.js";
 import { publicComputerKey } from "./computers.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
-import { BridgeError, bridgeRoot } from "./protocol.js";
+import { BridgeError, bridgeRoot, errorCode } from "./protocol.js";
 import { canonicalComputer, readScheduleDocument, readScheduleRuns, scheduleRunsFile } from "./schedules.js";
 import { countGit } from "./metrics.js";
 
@@ -32,6 +32,8 @@ export interface LastScheduledRun {
 
 export interface PeerHealth {
   name: string; reachable: boolean; ms: number; error?: string; version?: string;
+  /** Why an unreachable peer failed, as a stable offline code (docs/phren-hook.md#offline-reasons). */
+  code?: string;
   /** Whether the peer's own hooks.yaml lists this computer; null when its Hook is too old to say. */
   listsBack: boolean | null;
 }
@@ -185,7 +187,8 @@ async function probePeer(peer: HookPeer, caller: { name: string; hostKey?: strin
   } catch (error) {
     const reason = error instanceof BridgeError && error.status === 504 ? "No answer within 5 seconds."
       : error instanceof Error ? error.message : "Unreachable.";
-    return { name: peer.name, reachable: false, ms: Date.now() - started, error: plainError(reason), listsBack: null };
+    const code = errorCode(error);
+    return { name: peer.name, reachable: false, ms: Date.now() - started, error: plainError(reason), ...(code ? { code } : {}), listsBack: null };
   }
 }
 
