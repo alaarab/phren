@@ -17,8 +17,10 @@ export async function hookRequest(route: string, data?: Json, options: RequestOp
       response.on("end", () => {
         try {
           const value = object(JSON.parse(Buffer.concat(chunks).toString()));
+          // A remote Hook's `code` (why its Herdr is offline, say) travels on with its text.
           if (response.statusCode !== 200) throw new BridgeError(response.statusCode ?? 502,
-            typeof value.error === "string" ? value.error.slice(0, 500) : "Hook rejected the request.");
+            typeof value.error === "string" ? value.error.slice(0, 500) : "Hook rejected the request.",
+            typeof value.code === "string" && /^[a-z][a-z0-9-]{0,39}$/.test(value.code) ? { code: value.code } : undefined);
           resolve(value);
         } catch (error) { reject(error); }
       });

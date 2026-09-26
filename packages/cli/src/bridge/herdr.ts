@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { open, readdir, readlink, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { BridgeError, id, object, objects, requestID, serverName, provider, sessionId, type Json, type Target, type StartingTarget } from "./protocol.js";
+import { BridgeError, id, object, objects, requestID, serverName, provider, sessionId, type Json, type OfflineCode, type Target, type StartingTarget } from "./protocol.js";
 import { logger } from "../logger.js";
 import { recordedSession } from "./agent-hook-stores.js";
 import { tabActivityKey } from "./tab-activity.js";
@@ -46,7 +46,9 @@ export function herdrSocketError(error: Error): BridgeError {
     : code === "EACCES" || code === "EPERM" ? "this user may not open Herdr's socket"
     : undefined;
   const tag = code && /^[A-Z0-9_]{1,32}$/.test(code) ? code : "unknown error";
-  return new BridgeError(503, `Herdr is not reachable on this computer (${tag}${reason ? `: ${reason}` : ""}).`);
+  const offline: OfflineCode = code === "ENOENT" ? "herdr-not-running" : code === "ECONNREFUSED" ? "herdr-stale-socket"
+    : code === "EACCES" || code === "EPERM" ? "herdr-permission" : "herdr-unreachable";
+  return new BridgeError(503, `Herdr is not reachable on this computer (${tag}${reason ? `: ${reason}` : ""}).`, { code: offline });
 }
 
 const optionalReadFailures = new Map<string, string>();
@@ -67,7 +69,7 @@ export async function rpc(server: string, method: string, params: Json = {}, sig
   const socket = herdrSocket(server);
   countHerdr(method);
   const metadata = await stat(socket).catch(error => { throw herdrSocketError(error); });
-  if (!metadata.isSocket() || (process.getuid && metadata.uid !== process.getuid())) throw new BridgeError(503, "The Herdr socket is unavailable.");
+  if (!metadata.isSocket() || (process.getuid && metadata.uid !== process.getuid())) throw new BridgeError(503, "The Herdr socket is unavailable.", { code: "herdr-permission" });
   return new Promise((resolve, reject) => {
     const client = connect(socket);
     const key = requestID();
@@ -80,7 +82,7 @@ export async function rpc(server: string, method: string, params: Json = {}, sig
     const abort = () => finish(new BridgeError(499, "Request cancelled."));
     if (signal?.aborted) { abort(); return; }
     signal?.addEventListener("abort", abort, { once: true });
-    client.setTimeout(timeoutMs, () => finish(new BridgeError(504, "Herdr did not answer. Refresh before trying again.")));
+    client.setTimeout(timeoutMs, () => finish(new BridgeError(504, "Herdr did not answer. Refresh before trying again.", { code: "herdr-timeout" })));
     client.on("error", error => finish(herdrSocketError(error)));
     client.on("end", () => finish(new BridgeError(503, "Herdr closed the request before confirming it.")));
     client.on("connect", () => client.write(JSON.stringify({ id: key, method, params }) + "\n"));

@@ -41,6 +41,19 @@ describe("mergeTasksByBid", () => {
     }));
   });
 
+  it("settles a claim race by task id: the claim that reached the remote first holds, a completion beats a claim", () => {
+    const claimed = (bid: string, text: string, computer: string) => `${task(bid, text)}\n  Claimed: ${computer} 2026-09-25T04:30:00Z session:w1-p1`;
+    const ours = doc({ Active: [claimed("a1a1a1a1", "Ship the release notes", "Mini"), claimed("b2b2b2b2", "Fix the flaky sync test", "Mini")], Queue: [C], Done: [] });
+    const theirs = doc({ Active: [claimed("a1a1a1a1", "Ship the release notes", "Desk")], Queue: [C], Done: [task("b2b2b2b2", "Fix the flaky sync test", true)] });
+    const merged = mergeTasksByBid(base, ours, theirs);
+    expect(merged).toBe(doc({
+      Active: [claimed("a1a1a1a1", "Ship the release notes", "Desk")],
+      Queue: [C],
+      Done: [task("b2b2b2b2", "Fix the flaky sync test", true)],
+    }));
+    expect(merged).not.toContain("Claimed: Mini");
+  });
+
   it("keeps a completion made on one side while the other side left the task alone", () => {
     const theirs = doc({ Active: [], Queue: [A, C], Done: [task("b2b2b2b2", "Fix the flaky sync test", true)] });
     const merged = mergeTasksByBid(base, base, theirs);

@@ -1,6 +1,6 @@
 import { disabledHint } from "../modules/registry.js";
 import { peerRequest, type HookPeer } from "./peers.js";
-import { BridgeError, object, type Json } from "./protocol.js";
+import { BridgeError, errorCode, object, type Json } from "./protocol.js";
 
 /**
  * One conductor per connected group. A group is this computer and the peers
@@ -12,7 +12,7 @@ export interface GroupConductor {
   /** A live conductor on a linked peer. */
   found?: { computer: string; target?: Json };
   /** Peers that could not say, so a conductor there cannot be ruled out. */
-  unchecked: { computer: string; error: string }[];
+  unchecked: { computer: string; error: string; code?: string }[];
 }
 
 type Ask = (peer: HookPeer, route: string, data?: Json, timeout?: number) => Promise<Json>;
@@ -28,12 +28,13 @@ export async function groupConductor(peers: readonly HookPeer[], ask: Ask = peer
       if (error instanceof BridgeError && error.status === 404 && error.message === disabledHint("conductor")) return { peer };
       const message = error instanceof BridgeError && error.status === 404 ? "Its Hook is too old to report a conductor."
         : error instanceof Error ? error.message : "Unreachable.";
-      return { peer, error: message };
+      const code = errorCode(error);
+      return { peer, error: message, ...(code ? { code } : {}) };
     }
   }));
   const hit = answers.find(answer => answer.conductor);
   return {
     ...(hit ? { found: { computer: hit.peer.name, ...(hit.conductor!.target ? { target: object(hit.conductor!.target) } : {}) } } : {}),
-    unchecked: answers.flatMap(answer => "error" in answer && answer.error ? [{ computer: answer.peer.name, error: answer.error }] : []),
+    unchecked: answers.flatMap(answer => "error" in answer && answer.error ? [{ computer: answer.peer.name, error: answer.error, ...("code" in answer && answer.code ? { code: answer.code } : {}) }] : []),
   };
 }

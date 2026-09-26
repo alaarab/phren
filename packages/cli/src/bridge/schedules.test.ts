@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,6 +14,7 @@ import {
   headlessCommand,
   nextRun,
   parseSchedule,
+  resumeScheduleRun,
   readScheduleRuns,
   scheduleSessionRoute,
   watchHerdrRun,
@@ -572,5 +573,74 @@ describe("a scheduled turn that finished", () => {
     expect((await readScheduleRuns(fixture.runs))[0].status).toBe("needs-you");
     await waitForPushes(pushes, 1);
     expect(pushes).toMatchObject([{ kind: "scheduleFinished", status: "needs-you", reason: "Want me to open a PR?" }]);
+  });
+});
+
+describe("runs an earlier Hook process left open", () => {
+  const herdrRun = (fields: Partial<ScheduleRun> = {}): ScheduleRun => ({ id: "run-before-restart", scheduleId: "7f3a2c1d", project: "demo",
+    startedAt: "2026-09-20T09:00:00.000Z", status: "running", launch: { mode: "herdr", server: "default", workspaceId: "w1", tabId: "w1:t1",
+      paneId: "w1:p1", sessionId: "aaaaaaaa-1111-4111-8111-111111111111" }, ...fields });
+
+  it("follows a run left running to its real end, then lets the schedule run again", async () => {
+    const fixture = await storeFixture(schedule({ every: "interval", at: undefined, interval: "30m", createdAt: "2026-09-20T08:00:00.000Z" }));
+    await writeScheduleRuns(fixture.runs, [herdrRun()]);
+    const pushes: SchedulePush[] = [];
+    let end!: (outcome: ScheduleRunOutcome) => void;
+    const resumed: ScheduleRun[] = [];
+    let launches = 0;
+    const launch = Object.assign(async () => { launches++; return { launch: { mode: "headless" as const } }; }, {
+      resume: (run: ScheduleRun) => { resumed.push(run); return new Promise<ScheduleRunOutcome>(resolve => { end = resolve; }); },
+    });
+    const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00.000Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", push: fakePush(pushes), launch, log: () => {} });
+    await scheduler.tick();
+    // Still open while the pane works: the schedule does not start a second copy.
+    expect(resumed.map(run => run.id)).toEqual(["run-before-restart"]);
+    expect(launches).toBe(0);
+    expect((await scheduler.history())[0].status).toBe("running");
+    end({ status: "finished" });
+    await waitForStatus(scheduler, "finished");
+    await waitForPushes(pushes, 1);
+    expect(pushes).toMatchObject([{ kind: "scheduleFinished", runId: "run-before-restart", status: "finished" }]);
+    await scheduler.tick();
+    expect(launches).toBe(1);
+    expect(resumed).toHaveLength(1);
+  });
+
+  it("fails an open run whose schedule was removed, with the reason", async () => {
+    const fixture = await storeFixture(schedule());
+    await writeScheduleRuns(fixture.runs, [herdrRun({ scheduleId: "0badc0de" })]);
+    const launch = Object.assign(async () => ({ launch: { mode: "headless" as const } }), {
+      resume: async (): Promise<ScheduleRunOutcome> => { throw new Error("must not resume"); },
+    });
+    const scheduler = new Scheduler({ now: () => new Date("2026-09-20T06:00:00.000Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", launch, log: () => {} });
+    await scheduler.tick();
+    expect((await readScheduleRuns(fixture.runs))[0]).toMatchObject({ status: "failed",
+      reason: "Phren Hook restarted during this run, and its schedule no longer exists.", finishedAt: "2026-09-20T06:00:00.000Z" });
+  });
+
+  it("settles each kind of left-open run honestly", async () => {
+    const item = schedule({ harness: "claude" });
+    const signal = new AbortController().signal;
+    const watched: unknown[] = [];
+    const watch = (async (...args: unknown[]) => { watched.push(args); return { status: "needs-you", reason: "Merge it?" }; }) as unknown as typeof watchHerdrRun;
+    expect(await resumeScheduleRun(herdrRun({ status: "launched", launch: { mode: "headless" } }), item, signal, watch))
+      .toEqual({ status: "failed", reason: "Phren Hook restarted before this run finished launching." });
+    expect(await resumeScheduleRun(herdrRun({ status: "blocked" }), item, signal, watch)).toEqual({ status: "needs-you", reason: "Merge it?" });
+    expect(watched).toEqual([["default", { workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p1" }, signal,
+      { source: "claude", startedAt: Date.parse("2026-09-20T09:00:00.000Z"), sessionId: "aaaaaaaa-1111-4111-8111-111111111111" }]]);
+
+    const jobDir = await mkdtemp(path.join(tmpdir(), "phren-schedule-job-")); temporary.push(jobDir);
+    const headless = herdrRun({ launch: { mode: "headless", jobDir } });
+    const manifest = (value: Record<string, unknown>) => writeFile(path.join(jobDir, "manifest.json"), JSON.stringify(value));
+    await manifest({ status: "completed" });
+    expect(await resumeScheduleRun(headless, item, signal, watch)).toEqual({ status: "finished" });
+    await manifest({ status: "failed", exitCode: 2 });
+    expect(await resumeScheduleRun(headless, item, signal, watch)).toEqual({ status: "failed", reason: "The scheduled agent exited with code 2." });
+    await manifest({ status: "running" });
+    expect(await resumeScheduleRun(headless, item, signal, watch))
+      .toEqual({ status: "failed", reason: "Phren Hook restarted while this run was going, so its end was not observed." });
+    expect(watched).toHaveLength(1);
   });
 });

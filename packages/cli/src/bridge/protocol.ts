@@ -40,6 +40,28 @@ export function socketPath(): string { return path.join(bridgeRoot(), "hook.sock
 export class BridgeError extends Error {
   constructor(public status: number, message: string, public details?: Json) { super(message); }
 }
+
+/**
+ * Why a computer's Herdr or a linked peer could not be reached, as a stable
+ * `code` beside the human `error` text, so a client can explain the offline
+ * state without matching sentences. See docs/phren-hook.md#offline-reasons.
+ */
+export type OfflineCode =
+  | "herdr-not-running" | "herdr-stale-socket" | "herdr-permission" | "herdr-unreachable" | "herdr-timeout"
+  | "ssh-unavailable" | "dispatch-key-missing" | "peer-offline" | "peer-timeout" | "peer-key-not-enrolled" | "peer-host-key-mismatch";
+
+const ERROR_CODE = /^[a-z][a-z0-9-]{0,39}$/;
+
+/** The machine-readable `code` an error carries, if any. */
+export function errorCode(error: unknown): string | undefined {
+  const code = error instanceof BridgeError ? error.details?.code : undefined;
+  return typeof code === "string" && ERROR_CODE.test(code) ? code : undefined;
+}
+
+/** A BridgeError that keeps `error`'s status and text and adds `code` when it has none yet. */
+export function withErrorCode(error: BridgeError, code: OfflineCode): BridgeError {
+  return errorCode(error) ? error : new BridgeError(error.status, error.message, { ...(error.details ?? {}), code });
+}
 export const requestID = () => randomUUID();
 
 /**

@@ -10,7 +10,7 @@ import { agentNotReady, terminalProvider } from "./terminal.js";
 import { atomic, atomicInPrivateDir, BridgeError, type Json } from "./protocol.js";
 import { logger } from "../logger.js";
 import { defaultPhrenPath } from "../shared.js";
-import type { Schedule, ScheduleLauncher, ScheduleLaunchContext, ScheduleLaunchRecord, ScheduleLaunchResult, ScheduleRunOutcome } from "./schedule-format.js";
+import type { Schedule, ScheduleLauncher, ScheduleLaunchContext, ScheduleLaunchRecord, ScheduleLaunchResult, ScheduleRun, ScheduleRunOutcome } from "./schedule-format.js";
 import { watchHerdrRun } from "./schedule-watch.js";
 
 /** Starting a scheduled run: in a Herdr pane when a server is live, otherwise
@@ -28,7 +28,33 @@ export function createScheduleLauncher(launchHerdr: HerdrLauncher, store = defau
     return launchHeadless(context, store, child => { children.add(child); child.once("exit", () => children.delete(child)); });
   };
   launcher.close = () => { abort.abort(); for (const child of children) child.kill("SIGTERM"); children.clear(); };
+  launcher.resume = (run, schedule) => resumeScheduleRun(run, schedule, abort.signal);
   return launcher;
+}
+
+/**
+ * The outcome of a run a previous Hook process launched and never saw finish
+ * (a restart or crash mid-run). A Herdr pane is followed again to its real
+ * end; a headless job's manifest says how it ended, if it got that far. A run
+ * whose end cannot be known fails with that reason rather than staying open,
+ * since an open run blocks its schedule for good.
+ */
+export async function resumeScheduleRun(run: ScheduleRun, schedule: Schedule, signal: AbortSignal,
+  watch: typeof watchHerdrRun = watchHerdrRun): Promise<ScheduleRunOutcome> {
+  const launch = run.launch;
+  if (run.status === "launched") return { status: "failed", reason: "Phren Hook restarted before this run finished launching." };
+  if (launch.mode === "herdr" && launch.server && launch.workspaceId && launch.tabId && launch.paneId) {
+    return watch(launch.server, { workspaceId: launch.workspaceId, tabId: launch.tabId, paneId: launch.paneId }, signal,
+      { source: schedule.harness, startedAt: Date.parse(run.startedAt), sessionId: launch.sessionId });
+  }
+  if (launch.mode === "headless" && launch.jobDir) {
+    const manifest = await readFile(path.join(launch.jobDir, "manifest.json"), "utf8").then(text => JSON.parse(text) as Json).catch(() => undefined);
+    if (manifest?.status === "completed") return { status: "finished" };
+    if (manifest?.status === "failed") {
+      return { status: "failed", reason: typeof manifest.exitCode === "number" ? `The scheduled agent exited with code ${manifest.exitCode}.` : "The scheduled agent failed." };
+    }
+  }
+  return { status: "failed", reason: "Phren Hook restarted while this run was going, so its end was not observed." };
 }
 
 async function launchInHerdr(server: string, context: ScheduleLaunchContext, launchHerdr: HerdrLauncher, signal: AbortSignal): Promise<ScheduleLaunchResult> {

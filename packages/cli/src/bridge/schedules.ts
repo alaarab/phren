@@ -26,6 +26,9 @@ export class Scheduler {
   private readonly log: (message: string) => void;
   private serial: Promise<void> = Promise.resolve();
   private ticking = false;
+  /** Runs this process launched; any other open run was left by an earlier Hook. */
+  private readonly own = new Set<string>();
+  private recovered = false;
   /** When the scheduler last looked for due work; a health read shows it. */
   lastTickAt?: Date;
 
@@ -92,6 +95,7 @@ export class Scheduler {
         throw new BridgeError(409, `Schedule "${schedule.name}" is already running.`);
       }
       const run: ScheduleRun = { id: randomUUID(), scheduleId: id, project, startedAt: this.now().toISOString(), status: "launched", launch: { mode: "headless" } };
+      this.own.add(run.id);
       await writeScheduleRuns(this.runsFile, [...runs, run]);
       if (schedule.every === "once" && schedule.enabled) {
         const updatedAt = this.now().toISOString();
@@ -174,11 +178,43 @@ export class Scheduler {
     return result.notified;
   }
 
+  /**
+   * Settles the runs an earlier Hook process left open (a restart or crash
+   * mid-run). Each is followed to its real end where the launcher can, and
+   * otherwise failed with the reason, since an open run blocks its schedule
+   * for good. Runs once, on the first tick, with a launcher that can resume.
+   */
+  async recoverOpenRuns(): Promise<void> {
+    const resume = this.launch.resume;
+    if (this.recovered || !resume) return;
+    this.recovered = true;
+    const open = (await readScheduleRuns(this.runsFile)).filter(run => runningStatuses.has(run.status) && !this.own.has(run.id));
+    for (const run of open) {
+      this.own.add(run.id);
+      let schedule: Schedule | undefined;
+      try { schedule = (await readScheduleDocument(this.projectDirectory(run.project))).schedules.find(item => item.id === run.scheduleId); }
+      catch { schedule = undefined; }
+      if (!schedule) {
+        await this.updateRun(run.id, { status: "failed", finishedAt: this.now().toISOString(),
+          reason: "Phren Hook restarted during this run, and its schedule no longer exists." })
+          .catch(error => this.log(`[schedule] Could not close run ${run.id}: ${String(error)}`));
+        continue;
+      }
+      const known = schedule;
+      this.log(`[schedule] Following run ${run.id} of "${known.name}", left ${run.status} by an earlier Hook process.`);
+      void resume(run, known)
+        .catch((error): ScheduleRunOutcome => ({ status: "failed", reason: error instanceof Error ? error.message : "The scheduled agent failed." }))
+        .then(result => this.finishRun(run.id, known, result.status, result.reason))
+        .catch(error => this.log(`[schedule] Could not finish run ${run.id}: ${String(error)}`));
+    }
+  }
+
   async tick(): Promise<void> {
     if (this.ticking) return;
     this.ticking = true;
     this.lastTickAt = this.now();
     try {
+      await this.recoverOpenRuns().catch(error => this.log(`[schedule] Recovering open runs failed: ${String(error)}`));
       const status = await this.statuses(), now = this.now();
       for (const schedule of status.schedules) {
         if (!schedule.enabled || schedule.running || !schedule.nextRun || new Date(schedule.nextRun) > now) continue;
