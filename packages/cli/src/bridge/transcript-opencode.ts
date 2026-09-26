@@ -8,7 +8,7 @@ export function visibleOpencodeEvent(raw: Json, source: "phren" | "opencode", cw
   if (source === "opencode") {
     const runEvent = visibleOpenCodeRunEvent(raw, cwd); if (runEvent) return runEvent;
   }
-  // phren-agent's event log (experimental/agent/src/session/log.ts): the
+  // phren-agent's event log (packages/agent/src/session/log.ts): the
   // header and log/replace splices are bookkeeping; the three message
   // events are the conversation. Reasoning blocks stay on the computer.
   if (!["user/message", "assistant/message", "tool/results"].includes(String(raw.type))) return undefined;

@@ -25,6 +25,15 @@ else
   echo "OK: package.json version is $VERSION"
 fi
 
+# 2b. @phren/agent ships version-locked with @phren/cli (release.yml publishes both)
+AGENT_VERSION=$(node -p "require('./packages/agent/package.json').version")
+if [ "$AGENT_VERSION" != "$VERSION" ]; then
+  echo "FAIL: packages/agent/package.json is $AGENT_VERSION but packages/cli is $VERSION; bump both together"
+  ERRORS=$((ERRORS + 1))
+else
+  echo "OK: @phren/agent version matches @phren/cli ($AGENT_VERSION)"
+fi
+
 # 3. Verify runtime version comes from shared package metadata (not a hardcoded string)
 if grep -q 'export const VERSION' packages/cli/src/package-metadata.ts && grep -q 'package.json' packages/cli/src/package-metadata.ts && grep -q 'version: PACKAGE_VERSION' packages/cli/src/index.ts; then
   echo "OK: runtime version is derived from shared package metadata"

@@ -887,6 +887,10 @@ export async function runInit(opts: InitOptions = {}) {
   log(`\nNext:`);
   let step = 1;
   log(`  ${step++}. Start a new agent session (Claude, Codex, Copilot…) in a project. Phren loads its memory automatically.`);
+  const { agentInstalled } = await import("../modules/agent-package.js");
+  log(agentInstalled()
+    ? `     Or use phren's own coding agent: phren agent -i`
+    : `     phren's own coding agent is optional: npm install -g @phren/agent, then phren agent -i`);
   if (!paired) log(`  ${step++}. Connect your phone any time: phren pair`);
   if (!synced) {
     const repo = gh ? `${gh.username ? `${gh.username}/` : ""}${gh.repo}` : "my-phren";
