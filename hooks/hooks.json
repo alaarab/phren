@@ -1,11 +1,43 @@
 {
+  "description": "phren memory: load project context at session start, inject relevant findings on each prompt, note tool activity, save and sync at stop. Each hook stands down when `phren init` already wired the same event in ~/.claude/settings.json.",
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/phren-hook.sh\" hook-session-start"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/phren-hook.sh\" hook-prompt",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/phren-hook.sh\" hook-tool"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-session.sh"
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/phren-hook.sh\" hook-stop"
           }
         ]
       }

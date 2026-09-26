@@ -138,9 +138,10 @@ docs: update API reference with bulk tools
 
 ## Adding a global skill
 
-1. Create a markdown file in `global/skills/your-skill.md`
+1. Create `packages/cli/starter/global/skills/your-skill/SKILL.md` (the set `phren init` provisions)
 2. Follow the existing skill format: name, description, steps
 3. Test locally by running `phren init` and invoking `/your-skill` in a Claude Code session
+4. Decide whether the Claude Code plugin ships it: add it to `skills` in `.claude-plugin/plugin.json`, or to `NOT_IN_PLUGIN` in `packages/cli/src/claude-plugin.test.ts` with the reason
 
 ## Reporting Bugs
 

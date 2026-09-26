@@ -1,6 +1,6 @@
 ---
 name: phren-discover
-description: Audit your phren repo and tell you exactly what needs attention.
+description: Audit the phren memory store and report what needs attention, such as stale content, projects missing a summary, skill gaps and unhealthy task queues, with the top three things to fix.
 dependencies:
   - git
   - gh

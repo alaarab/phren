@@ -1,6 +1,6 @@
 ---
 name: phren-profiles
-description: Manage machine-to-profile and profile-to-project mappings in phren. Multi-machine users only.
+description: Inspect or change which projects each machine loads from the phren store (machine-to-profile and profile-to-project mappings). Only for users who sync phren across several machines.
 dependencies:
   - git
 ---
