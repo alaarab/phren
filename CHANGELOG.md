@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Answering Claude's question from the phone after its hold has ended no longer reports "not confirmed" when Claude took the answer but redrew slowly (a busy computer): the Hook waits up to 8 seconds for the terminal to move on instead of 2.
+
+### Fixed
+
 - Codex questions can be answered from the phone again when phren's session wrapper is installed at `~/.local/bin/codex`. The Hook checked for `codex queue` through that wrapper, which runs phren's session hook first and took about 8 seconds, longer than the check allows. The phone then said "This connection needs its question answered in the terminal." The Hook now runs the real `codex` binary the wrapper names, for questions, the model list and Codex limits.
 - A Codex question no longer counts twice. Codex records it as a tool call and as a delivered message with the same id, and the phone showed "2 pending questions" for one question.
 
