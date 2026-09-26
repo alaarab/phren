@@ -228,7 +228,8 @@ describe("tmux sockets, the pane a process runs in, health and the canary", () =
     expect((await tmuxServers()).map(server => server.session)).toEqual(["tmux", "tmux-work", "tmux-phren"]);
   });
 
-  it("finds this user's sockets in a tmux folder", async () => {
+  // tmux runs on Unix only, and Windows refuses a Unix socket at a file path.
+  it.skipIf(process.platform === "win32")("finds this user's sockets in a tmux folder", async () => {
     const folder = path.join(home, "tmux-sockets");
     await mkdir(folder);
     const server = createServer();
