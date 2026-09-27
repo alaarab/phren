@@ -187,7 +187,7 @@ export function combineUsage(perComputer: HarnessUsage[][]): HarnessUsage[] {
 
 export async function readUsage(options: { peers?: boolean; request?: Request; now?: number } = {}): Promise<UsageReport & { hookError?: string; peerError?: string }> {
   const request = options.request ?? defaultRequest, now = options.now ?? Date.now();
-  const query = new URLSearchParams({ sources: USAGE_SOURCES.join(",") });
+  const query = new URLSearchParams({ sources: USAGE_SOURCES.join(","), goPlan: "1" });
   if (options.peers !== false) query.set("peers", "1");
   let answer: Json;
   try { answer = await request(`/v1/usage?${query}`); }

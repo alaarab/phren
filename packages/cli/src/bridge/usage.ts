@@ -1,12 +1,11 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
-import { lstat, open, readFile, readdir, realpath, stat } from "node:fs/promises";
+import { lstat, open, readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { claudeConfigDir, homeDir } from "../home-paths.js";
 import path from "node:path";
 import { promisify } from "node:util";
-import { fanoutRoot } from "./fanouts.js";
 import { atomicInPrivateDir, bridgeRoot, type Json, object } from "./protocol.js";
 import { stripTerminal } from "../terminal-text.js";
 import { codexExecutable } from "./codex-binary.js";
@@ -23,6 +22,8 @@ export interface UsageWindow {
   limitUSD?: number;
   usedTokens?: number;
   resetsAt?: string;
+  /** The service says this window is refusing requests now (OpenCode Go's `rate-limited`). */
+  limited?: boolean;
   asOf?: string;
 }
 export interface UsageSpend { amountUSD: number; period: "rolling_7_days" | "rolling_30_days" | "calendar_week" }
@@ -138,269 +139,134 @@ export async function readOpenCodeGoKey(): Promise<string | undefined> {
   } catch { return undefined; }
 }
 
-type GoPeriod = "5h" | "7d" | "30d";
-type GoLimit = { limitUSD: number; resetsAt?: string };
-type GoLimits = Map<string, Partial<Record<GoPeriod, GoLimit>>>;
-type GoTotals = Map<string, Record<GoPeriod, { usedUSD: number; usedTokens: number }>>;
-const goPeriods: { id: GoPeriod; label: string; milliseconds: number }[] = [
-  { id: "5h", label: "5h", milliseconds: 5 * 60 * 60 * 1_000 },
-  { id: "7d", label: "7d", milliseconds: 7 * 24 * 60 * 60 * 1_000 },
-  { id: "30d", label: "30d", milliseconds: 30 * 24 * 60 * 60 * 1_000 },
-];
 const GO_GATEWAY = "https://opencode.ai/zen/go/v1";
-const MAX_GO_JOBS = 128;
-const MAX_GO_MANIFEST_BYTES = 64 * 1_024;
-const MAX_GO_EVENTS_BYTES = 64 * 1_024 * 1_024;
 const GO_KEY_MESSAGE = "Connect OpenCode Go on this computer to see its usage.";
+const GO_WINDOWS = [
+  { key: "rolling", id: "opencode-go:plan:5h", name: "5-hour limit" },
+  { key: "weekly", id: "opencode-go:plan:7d", name: "Weekly limit" },
+  { key: "monthly", id: "opencode-go:plan:30d", name: "Monthly limit" },
+] as const;
 
-function goPeriod(value: unknown): GoPeriod | undefined {
-  const text = String(value ?? "").toLowerCase().replace(/[\s_-]/g, "");
-  if (text === "5h" || text === "5hour" || text === "fivehour" || text === "300m" || text === "300minute") return "5h";
-  if (text === "7d" || text === "7day" || text === "week" || text === "weekly") return "7d";
-  if (text === "30d" || text === "30day" || text === "month" || text === "monthly") return "30d";
-  return undefined;
-}
-function goModel(value: unknown, allowBare = false): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const model = value.trim();
-  if (/^opencode-go\/[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/.test(model)) return model;
-  const reserved = new Set(["data", "limits", "usage", "models", "credits", "window", "period", "monthly", "weekly",
-    "5h", "7d", "30d", "fivehour", "seven_day", "month", "limit", "quota", "max", "plan", "account", "rate", "ratelimit",
-    "ratelimits", "remaining", "reset"]);
-  return allowBare && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,190}$/.test(model) && !reserved.has(model.toLowerCase())
-    ? `opencode-go/${model}` : undefined;
-}
-function amount(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1_000_000_000 ? value : undefined;
-}
-function resetAt(value: unknown): string | undefined {
-  if (typeof value === "string" && Number.isFinite(Date.parse(value))) return new Date(value).toISOString();
-  if (typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value)) return resetAt(Number(value));
-  if (typeof value === "number" && Number.isFinite(value) && value > 0 && value < 32_503_680_000) {
-    return new Date(value * 1_000).toISOString();
-  }
-  return undefined;
-}
-function recordGoLimit(limits: GoLimits, model: string, period: GoPeriod, limitUSD: number | undefined, resetsAt?: string): void {
-  if (limitUSD === undefined || limitUSD <= 0) return;
-  const current = limits.get(model) ?? {};
-  const existing = current[period];
-  // A response can repeat a limit at several levels. Keep the first numeric
-  // value, but retain a reset time wherever the service supplied one.
-  current[period] = existing ? { ...existing, ...(existing.resetsAt ? {} : { resetsAt }) } : { limitUSD, resetsAt };
-  limits.set(model, current);
-}
-function numberFrom(value: Record<string, unknown>, names: string[]): number | undefined {
-  for (const name of names) {
-    const found = amount(value[name]);
-    if (found !== undefined) return found;
-  }
-  return undefined;
-}
-function parseGoLimits(value: unknown, limits: GoLimits, model?: string, period?: GoPeriod, depth = 0): void {
-  if (depth > 8) return;
-  if (typeof value === "number") {
-    if (period) recordGoLimit(limits, model ?? "*", period, amount(value));
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value.slice(0, 64)) parseGoLimits(item, limits, model, period, depth + 1);
-    return;
-  }
-  const item = object(value);
-  if (!Object.keys(item).length) return;
-  const nestedModel = goModel(item.model, true) ?? goModel(item.modelId, true) ?? goModel(item.model_id, true) ?? model;
-  const nestedPeriod = goPeriod(item.window) ?? goPeriod(item.period) ?? goPeriod(item.interval) ?? goPeriod(item.windowName) ?? period;
-  const limitUSD = numberFrom(item, ["limitUSD", "limit_usd", "dollarLimit", "dollar_limit", "creditLimit", "credit_limit", "limit", "quota", "max"]);
-  const reset = resetAt(item.resetsAt) ?? resetAt(item.resets_at) ?? resetAt(item.resetAt) ?? resetAt(item.reset_at);
-  if (nestedPeriod) recordGoLimit(limits, nestedModel ?? "*", nestedPeriod, limitUSD, reset);
-  for (const [key, nested] of Object.entries(item).slice(0, 64)) {
-    const keyPeriod = goPeriod(key) ?? nestedPeriod;
-    const keyModel = goModel(key) ?? nestedModel ?? (typeof nested === "object" && !keyPeriod ? goModel(key, true) : undefined);
-    // Scalar metadata such as a plan name cannot carry a usable limit.
-    if (typeof nested !== "object" && typeof nested !== "number") continue;
-    parseGoLimits(nested, limits, keyModel, keyPeriod, depth + 1);
-  }
-}
-function completeGoLimits(limits: GoLimits): void {
-  for (const [model, windows] of limits) {
-    const monthly = windows["30d"]?.limitUSD ?? (windows["7d"] ? windows["7d"].limitUSD * 2 : windows["5h"] ? windows["5h"].limitUSD * 5 : undefined);
-    if (!monthly || !Number.isFinite(monthly) || monthly <= 0) continue;
-    recordGoLimit(limits, model, "5h", monthly * 0.2);
-    recordGoLimit(limits, model, "7d", monthly * 0.5);
-    recordGoLimit(limits, model, "30d", monthly);
-  }
-}
-function header(response: Response, name: string): string | undefined {
-  try { return response.headers.get(name) ?? undefined; } catch { return undefined; }
-}
-function parseGoHeaders(response: Response, limits: GoLimits): void {
-  const limit = amount(Number(header(response, "x-ratelimit-limit")));
-  const remaining = amount(Number(header(response, "x-ratelimit-remaining")));
-  if (limit === undefined || remaining === undefined || remaining > limit) return;
-  const period = goPeriod(header(response, "x-ratelimit-window"));
-  const reset = resetAt(header(response, "x-ratelimit-reset"));
-  // Gateway headers do not identify a model. Their plan-wide limit is the
-  // monthly amount unless the response explicitly names its window.
-  recordGoLimit(limits, "*", period ?? "30d", limit, reset);
+/**
+ * Go's own report of the plan, `GET /zen/go/v1/usage`:
+ * `{usage: {rolling|weekly|monthly: {status, percent, resetsAt}}}`. It is
+ * account-wide, so it already counts every computer's use, and it is what
+ * Go enforces: `status: "rate-limited"` is the window that refuses requests.
+ * It carries no dollar amounts, so none are shown.
+ */
+export function openCodeGoPlan(value: unknown): UsageWindow[] {
+  const usage = object(object(value).usage);
+  return GO_WINDOWS.flatMap(({ key, id, name }) => {
+    const item = object(usage[key]);
+    const percent = item.percent;
+    if (typeof percent !== "number" || !Number.isFinite(percent) || percent < 0 || percent > 100) return [];
+    const resetsAt = typeof item.resetsAt === "string" && Number.isFinite(Date.parse(item.resetsAt)) ? new Date(item.resetsAt).toISOString() : undefined;
+    const limited = typeof item.status === "string" && item.status !== "ok";
+    return [{ id, name, usedPercent: Math.round(percent * 10) / 10, ...(resetsAt ? { resetsAt } : {}), ...(limited ? { limited: true } : {}) }];
+  });
 }
 
-/** Best-effort gateway discovery. All four requests are independent because
- * undocumented routes vary by OpenCode release and account. */
-export async function fetchOpenCodeGoLimits(key: string, fetchImpl: typeof fetch = fetch): Promise<GoLimits> {
+export async function fetchOpenCodeGoPlan(key: string, fetchImpl: typeof fetch = fetch): Promise<UsageWindow[]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8_000);
-  const limits: GoLimits = new Map();
   try {
-    const responses = await Promise.allSettled([
-      ["GET", `${GO_GATEWAY}/usage`],
-      ["GET", `${GO_GATEWAY}/limits`],
-      ["GET", `${GO_GATEWAY}/credits`],
-      ["HEAD", `${GO_GATEWAY}/models`],
-    ].map(async ([method, url]) => {
-      const response = await fetchImpl(url, { method, headers: { authorization: `Bearer ${key}`, accept: "application/json" },
-        redirect: "error", signal: controller.signal });
-      if (!response.ok) return;
-      parseGoHeaders(response, limits);
-      if (method === "GET") {
-        try { parseGoLimits(await response.json(), limits); } catch { /* An HTML or empty gateway response has no limits. */ }
-      }
-    }));
-    // Keep every request observed: one undocumented endpoint failing must not
-    // prevent headers or a second endpoint from describing the account.
-    void responses;
-  } finally {
-    clearTimeout(timer);
-  }
-  completeGoLimits(limits);
-  return limits;
+    const response = await fetchImpl(`${GO_GATEWAY}/usage`, { headers: { authorization: `Bearer ${key}`, accept: "application/json" },
+      redirect: "error", signal: controller.signal });
+    if (!response.ok) throw new Error(`OpenCode Go usage returned ${response.status}.`);
+    return openCodeGoPlan(await response.json());
+  } finally { clearTimeout(timer); }
 }
 
-async function containedRegularFile(root: string, candidate: string, maximum: number): Promise<string | undefined> {
-  try {
-    const link = await lstat(candidate);
-    if (!link.isFile() || link.isSymbolicLink() || link.size > maximum) return undefined;
-    const resolved = await realpath(candidate);
-    if (!resolved.startsWith(root + path.sep)) return undefined;
-    const metadata = await stat(resolved);
-    return metadata.isFile() && metadata.size <= maximum ? resolved : undefined;
-  } catch { return undefined; }
-}
-function goEventTime(value: Record<string, unknown>): number | undefined {
-  const raw = value.timestamp ?? value.time ?? value.createdAt ?? value.created_at;
-  if (typeof raw === "string" && Number.isFinite(Date.parse(raw))) return Date.parse(raw);
-  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return undefined;
-  return raw < 32_503_680_000 ? raw * 1_000 : raw;
-}
-function goTokenCount(value: unknown, depth = 0): number {
-  if (depth > 5) return 0;
-  if (typeof value === "number") return Number.isFinite(value) && value >= 0 && value <= 10_000_000_000 ? value : 0;
-  const item = object(value);
-  const total = amount(item.total) ?? amount(item.totalTokens) ?? amount(item.total_tokens);
-  if (total !== undefined) return total;
-  return Object.values(item).reduce<number>((sum, part) => sum + goTokenCount(part, depth + 1), 0);
-}
-function goStepCost(event: Record<string, unknown>, part: Record<string, unknown>): number | undefined {
-  const raw = part.cost ?? event.cost;
-  if (typeof raw === "number") return amount(raw);
-  const cost = object(raw);
-  return numberFrom(cost, ["total", "amount", "usd", "cost"]);
-}
+export interface GoRefusals { count: number; first: string; last: string; models: string[] }
+const openCodeLogDir = () => path.join(process.env.OPENCODE_DATA_DIR || path.join(process.env.XDG_DATA_HOME || path.join(homedir(), ".local/share"), "opencode"), "log");
 
-/** Sum only completed OpenCode Go fan-outs. Their ledger stays on the
- * computer and malformed jobs are ignored rather than becoming usage. */
-export async function readOpenCodeGoLedger(root = fanoutRoot(), now = new Date()): Promise<GoTotals> {
-  const totals: GoTotals = new Map();
-  let directory: string;
-  try { directory = await realpath(root); } catch { return totals; }
-  const names = (await readdir(directory).catch(() => [])).slice(0, MAX_GO_JOBS);
-  for (const name of names) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) continue;
-    const manifestFile = await containedRegularFile(directory, path.join(directory, name, "manifest.json"), MAX_GO_MANIFEST_BYTES);
-    if (!manifestFile) continue;
-    let manifest: Record<string, unknown>;
-    try { manifest = object(JSON.parse(await readFile(manifestFile, "utf8"))); } catch { continue; }
-    const model = goModel(manifest.model);
-    const eventLog = typeof manifest.eventLog === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.jsonl$/.test(manifest.eventLog)
-      ? manifest.eventLog : undefined;
-    if (manifest.provider !== "opencode" || !model || !eventLog) continue;
-    const jobRoot = await realpath(path.join(directory, name)).catch(() => undefined);
-    if (!jobRoot || !jobRoot.startsWith(directory + path.sep)) continue;
-    const eventsFile = await containedRegularFile(jobRoot, path.join(jobRoot, eventLog), MAX_GO_EVENTS_BYTES);
-    if (!eventsFile) continue;
-    let events: string;
-    try { events = await readFile(eventsFile, "utf8"); } catch { continue; }
-    for (const line of events.split("\n")) {
-      if (!line || Buffer.byteLength(line) > 1_048_576) continue;
-      let event: Record<string, unknown>;
-      try { event = object(JSON.parse(line)); } catch { continue; }
-      if (event.type !== "step_finish") continue;
-      const at = goEventTime(event), part = object(event.part);
-      const cost = goStepCost(event, part), tokens = goTokenCount(part.tokens ?? event.tokens);
-      if (at === undefined || (cost === undefined && tokens === 0) || at > now.getTime()) continue;
-      for (const period of goPeriods) {
-        if (at < now.getTime() - period.milliseconds) continue;
-        const modelTotals = totals.get(model) ?? {
-          "5h": { usedUSD: 0, usedTokens: 0 }, "7d": { usedUSD: 0, usedTokens: 0 }, "30d": { usedUSD: 0, usedTokens: 0 },
-        };
-        const usedUSD = modelTotals[period.id].usedUSD + (cost ?? 0);
-        if (usedUSD > 1_000_000_000) continue;
-        modelTotals[period.id].usedUSD = usedUSD;
-        modelTotals[period.id].usedTokens += tokens;
-        totals.set(model, modelTotals);
-      }
+/** Refusals already read from each log, so a poll reads only what OpenCode
+ * appended since (this log grows by tens of MB a day). */
+const refusalScans = new Map<string, { ino: number; offset: number; events: { at: number; model?: string }[] }>();
+const FIRST_SCAN_BYTES = 64 * 1_048_576;
+
+/** "Go usage limit exceeded" refusals in OpenCode's own log over the last
+ * `withinMs`. The first read of a log covers at most its last 64 MB. */
+export async function readGoRefusals(now = new Date(), withinMs = 24 * 3_600_000, root = openCodeLogDir()): Promise<GoRefusals | undefined> {
+  const since = now.getTime() - withinMs;
+  const events: { at: number; model?: string }[] = [];
+  for (const name of (await readdir(root).catch(() => [] as string[])).filter(name => name.endsWith(".log")).slice(0, 32)) {
+    const file = path.join(root, name);
+    const info = await lstat(file).catch(() => undefined);
+    if (!info?.isFile() || info.isSymbolicLink() || info.mtimeMs < since) continue;
+    let scan = refusalScans.get(file);
+    // A rotated or truncated log starts over.
+    if (!scan || scan.ino !== info.ino || scan.offset > info.size) scan = { ino: info.ino, offset: Math.max(0, info.size - FIRST_SCAN_BYTES), events: [] };
+    if (info.size > scan.offset) {
+      const handle = await open(file, "r");
+      try {
+        const length = Math.min(info.size - scan.offset, FIRST_SCAN_BYTES), bytes = Buffer.alloc(length);
+        await handle.read(bytes, 0, length, info.size - length);
+        const text = bytes.toString("utf8");
+        // Only whole lines: a line still being written is read next time.
+        const complete = text.lastIndexOf("\n") + 1;
+        for (const line of text.slice(0, complete).split("\n")) {
+          if (!line.includes("Go usage limit exceeded")) continue;
+          const stamp = /timestamp=(\S+)/.exec(line)?.[1] ?? /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/.exec(line)?.[0];
+          const at = stamp ? Date.parse(stamp) : NaN;
+          if (Number.isFinite(at)) scan.events.push({ at, model: /modelID=([A-Za-z0-9._\/-]{1,120})/.exec(line)?.[1] });
+        }
+        scan.offset = info.size - length + complete;
+      } finally { await handle.close(); }
     }
+    scan.events = scan.events.filter(event => event.at >= now.getTime() - 7 * 24 * 3_600_000).slice(-10_000);
+    refusalScans.set(file, scan);
+    events.push(...scan.events.filter(event => event.at >= since && event.at <= now.getTime() + 60_000));
   }
-  return totals;
+  if (!events.length) return undefined;
+  events.sort((a, b) => a.at - b.at);
+  const models = [...new Set(events.flatMap(event => event.model ? [`opencode-go/${event.model}`] : []))].sort().slice(0, 8);
+  return { count: events.length, first: new Date(events[0].at).toISOString(), last: new Date(events.at(-1)!.at).toISOString(), models };
 }
 
-function goLimitFor(limits: GoLimits, model: string, period: GoPeriod): GoLimit | undefined {
-  return limits.get(model)?.[period] ?? limits.get("*")?.[period];
-}
-function goWindowID(model: string, period: GoPeriod): string {
-  return `opencode-go:${model.slice("opencode-go/".length).replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "")}:${period}`;
-}
-function openCodeGoUsage(totals: GoTotals, limits: GoLimits, now: Date, hasKey: boolean): AccountUsage {
-  const windows: UsageWindow[] = [];
-  let total30Days = 0;
-  for (const model of [...totals.keys()].sort((a, b) => a.localeCompare(b))) {
-    const modelTotals = totals.get(model)!;
-    for (const period of goPeriods) {
-      const local = modelTotals[period.id], limit = goLimitFor(limits, model, period.id);
-      const usedPercent = limit ? Math.min(100, Math.round(local.usedUSD / limit.limitUSD * 10_000) / 100) : undefined;
-      windows.push({ id: goWindowID(model, period.id), name: `${model} · ${period.label}`, usedUSD: local.usedUSD,
-        usedTokens: local.usedTokens, ...(limit ? { limitUSD: limit.limitUSD, usedPercent, resetsAt: limit.resetsAt } : {}) });
-    }
-    total30Days += modelTotals["30d"].usedUSD;
-  }
-  return { source: "opencode-go", windows, updatedAt: now.toISOString(),
-    ...(windows.length ? { spend: { amountUSD: total30Days, period: "rolling_30_days" as const } } : {}),
-    ...(!hasKey ? { message: GO_KEY_MESSAGE } : {}) };
+const clock = (iso: string) => `${iso.slice(11, 16)} UTC`;
+export function openCodeGoUsage(windows: UsageWindow[], refusals: GoRefusals | undefined, now: Date, hasKey: boolean, planError?: boolean): AccountUsage {
+  const refused = refusals
+    ? `OpenCode refused ${refusals.count} Go request${refusals.count === 1 ? "" : "s"} with "usage limit exceeded" in the last day (${refusals.first.slice(0, 10) === refusals.last.slice(0, 10) ? `${clock(refusals.first)} to ${clock(refusals.last)}` : `${refusals.first.slice(0, 16).replace("T", " ")} to ${refusals.last.slice(0, 16).replace("T", " ")} UTC`}).`
+    : undefined;
+  const reached = windows.filter(window => window.limited).map(window => window.name.replace(" limit", "").toLowerCase());
+  const message = [
+    !hasKey ? GO_KEY_MESSAGE : planError ? "Could not read Go's usage report; showing what OpenCode's log says." : undefined,
+    reached.length ? `Go is refusing requests: the ${reached.join(" and ")} limit is reached.` : undefined,
+    refused,
+  ].filter(Boolean).join(" ");
+  return { source: "opencode-go", windows, updatedAt: now.toISOString(), ...(message ? { message } : {}) };
 }
 
-let goDiscoveryCached: { at: number; limits: GoLimits } | undefined;
-let goDiscoveryPending: Promise<GoLimits> | undefined;
-async function cachedOpenCodeGoLimits(key: string, now: Date): Promise<GoLimits> {
-  if (!goDiscoveryCached || now.getTime() - goDiscoveryCached.at >= 10 * 60_000) {
-    goDiscoveryPending ??= fetchOpenCodeGoLimits(key).catch(() => new Map<string, Partial<Record<GoPeriod, GoLimit>>>())
-      .then(limits => { goDiscoveryCached = { at: now.getTime(), limits }; return limits; })
-      .finally(() => { goDiscoveryPending = undefined; });
+/** The accounts one caller can read: the sources it names, and Go's plan
+ * windows only for a caller that asked for them (`goPlan=1`). */
+export function usageForCaller(accounts: AccountUsage[], sources: Set<string>, goPlan: boolean): AccountUsage[] {
+  return accounts.filter(account => sources.has(account.source)).map(account => goPlan || account.source !== "opencode-go" ? account
+    : { ...account, windows: account.windows.filter(window => !window.id.startsWith("opencode-go:plan:")) });
+}
+
+let goPlanCached: { at: number; windows: UsageWindow[] } | undefined;
+let goPlanPending: Promise<UsageWindow[]> | undefined;
+async function cachedOpenCodeGoPlan(key: string, now: Date): Promise<UsageWindow[]> {
+  if (!goPlanCached || now.getTime() - goPlanCached.at >= 60_000) {
+    goPlanPending ??= fetchOpenCodeGoPlan(key)
+      .then(windows => { goPlanCached = { at: now.getTime(), windows }; return windows; })
+      .finally(() => { goPlanPending = undefined; });
   }
-  return goDiscoveryPending ? await goDiscoveryPending : goDiscoveryCached?.limits ?? new Map();
+  return goPlanPending ? await goPlanPending : goPlanCached!.windows;
 }
 
 export async function readOpenCodeGoUsage(now = new Date(), options: {
-  root?: string;
   readKey?: () => Promise<string | undefined>;
   fetchImpl?: typeof fetch;
+  readRefusals?: (now: Date) => Promise<GoRefusals | undefined>;
 } = {}): Promise<AccountUsage> {
-  const [totals, key] = await Promise.all([readOpenCodeGoLedger(options.root, now), (options.readKey ?? readOpenCodeGoKey)()]);
-  if (!key) return openCodeGoUsage(totals, new Map(), now, false);
-  let limits: GoLimits = new Map();
+  const [key, refusals] = await Promise.all([(options.readKey ?? readOpenCodeGoKey)(), (options.readRefusals ?? readGoRefusals)(now).catch(() => undefined)]);
+  if (!key) return openCodeGoUsage([], refusals, now, false);
   try {
-    limits = options.fetchImpl ? await fetchOpenCodeGoLimits(key, options.fetchImpl) : await cachedOpenCodeGoLimits(key, now);
-  } catch { /* Gateway discovery is optional; local accounting is still useful. */ }
-  return openCodeGoUsage(totals, limits, now, true);
+    const windows = options.fetchImpl ? await fetchOpenCodeGoPlan(key, options.fetchImpl) : await cachedOpenCodeGoPlan(key, now);
+    return openCodeGoUsage(windows, refusals, now, true);
+  } catch { return openCodeGoUsage([], refusals, now, true, true); }
 }
 
 /** OpenRouter reports the current UTC calendar week's charged usage per key. */
