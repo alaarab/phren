@@ -249,6 +249,10 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
   } else if (url.pathname === "/v1/prompt" && object(data.target).starting === true) {
     const target = startingTargetSchema.parse(data.target);
     const pane = await validateStartingTarget(target);
+    if (typeof pane.startingSession === "string") {
+      const resolved = { ...target, session: pane.startingSession };
+      modelSwitcher.assertAvailable(resolved); sideQuestions.assertAvailable(resolved);
+    }
     const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
     refuseWorkingSlash(pane, text);
     typing();
