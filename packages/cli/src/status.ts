@@ -22,6 +22,7 @@ import { logger } from "./logger.js";
 import { readRuntimeHealth, resolveTaskFilePath, FINDINGS_FILENAME } from "./data/access.js";
 import { assessSyncOutage } from "./shared/governance.js";
 import { resolveRuntimeProfile } from "./runtime-profile.js";
+import { describeProfileMapping } from "./profile-store.js";
 import { renderPhrenArt } from "./phren-art.js";
 import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell/render.js";
 import { storeWeight } from "./store-weight.js";
@@ -125,7 +126,12 @@ export async function runStatus() {
     console.log(`  ${DIM}sync${RESET}     ${manifest.syncMode}`);
   }
   if (profile) {
-    console.log(`  ${DIM}profile${RESET}  ${profile}`);
+    const mapping = describeProfileMapping(phrenPath);
+    const assumed = !process.env.PHREN_PROFILE?.trim() && !mapping.mapped && mapping.assumed === profile;
+    const suffix = assumed
+      ? ` ${YELLOW}(assumed; machine "${mapping.machine}" is not mapped in machines.yaml)${RESET}`
+      : "";
+    console.log(`  ${DIM}profile${RESET}  ${profile}${suffix}`);
   }
 
   // Management preset + MCP + hooks status

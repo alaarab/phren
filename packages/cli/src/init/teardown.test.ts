@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { makeTempDir, suppressOutput } from "../test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
-import { removeGitExcludes, removePhrenHomeSymlinks, removePhrenWrappers } from "./teardown.js";
+import { generatedRootMemoryPath, removeGeneratedHomeFiles, removeGitExcludes, removePhrenHomeSymlinks, removePhrenWrappers } from "./teardown.js";
 
 describe("teardown helpers", () => {
   let tmpRoot: string;
@@ -76,5 +76,58 @@ describe("teardown helpers", () => {
 
     expect(fs.existsSync(phrenWrapper)).toBe(false);
     expect(fs.existsSync(otherBin)).toBe(true);
+  });
+
+  it("removes generated blocks while preserving surrounding user notes byte for byte", () => {
+    const context = path.join(homeDir, ".phren-context.md");
+    const memory = generatedRootMemoryPath();
+    fs.mkdirSync(path.dirname(memory), { recursive: true });
+    fs.writeFileSync(context, "my heading\n<!-- phren-managed -->\nold wiring\n<!-- phren-managed -->\nmy notes\n");
+    fs.writeFileSync(memory, "custom intro\n<!-- phren:projects:start -->\nold projects\n<!-- phren:projects:end -->\nremember this\n");
+    suppressOutput(() => removeGeneratedHomeFiles());
+    expect(fs.readFileSync(context, "utf8")).toBe("my heading\n\nmy notes\n");
+    expect(fs.readFileSync(memory, "utf8")).toBe("custom intro\n\nremember this\n");
+  });
+
+  it("deletes files containing only generated content, including the known root introduction", () => {
+    const context = path.join(homeDir, ".phren-context.md");
+    const memory = generatedRootMemoryPath();
+    fs.mkdirSync(path.dirname(memory), { recursive: true });
+    fs.writeFileSync(context, "<!-- phren-managed -->\ncontext\n<!-- phren-managed -->\n");
+    fs.writeFileSync(memory, "# Root Memory\n\n## Machine Context\nRead `~/.phren-context.md` for profile, active projects, and sync metadata.\n\n<!-- phren:projects:start -->\nprojects\n<!-- phren:projects:end -->\n");
+    suppressOutput(() => removeGeneratedHomeFiles());
+    expect(fs.existsSync(context)).toBe(false);
+    expect(fs.existsSync(memory)).toBe(false);
+  });
+
+  it("leaves unmarked, incomplete and symlinked home files alone", () => {
+    const context = path.join(homeDir, ".phren-context.md");
+    const memory = generatedRootMemoryPath();
+    fs.mkdirSync(path.dirname(memory), { recursive: true });
+    fs.writeFileSync(context, "my own machine context\n");
+    fs.writeFileSync(memory, "<!-- phren:projects:start -->\nunfinished user edit\n");
+    expect(removeGeneratedHomeFiles()).toEqual([]);
+    expect(fs.readFileSync(context, "utf8")).toBe("my own machine context\n");
+    expect(fs.readFileSync(memory, "utf8")).toContain("unfinished user edit");
+    const target = path.join(tmpRoot, "user-context.md");
+    fs.writeFileSync(target, "<!-- phren-managed -->\nuser's source\n<!-- phren-managed -->\n");
+    fs.unlinkSync(context);
+    fs.symlinkSync(target, context);
+    expect(removeGeneratedHomeFiles()).toEqual([]);
+    expect(fs.lstatSync(context).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(target, "utf8")).toContain("user's source");
+  });
+
+  it("removes the link-generated introduction without removing added notes", () => {
+    const memory = generatedRootMemoryPath();
+    fs.mkdirSync(path.dirname(memory), { recursive: true });
+    const introduction = "# Root Memory\n\n## Machine Context\nRead `~/.phren-context.md` for profile, active projects, last sync date.\n\n## Cross-Project Notes\n- Read a project's AGENTS.md before making changes.\n- Per-project memory files (MEMORY-{name}.md) have commands, versions, findings.\n\n";
+    const projects = "<!-- phren:projects:start -->\nprojects\n<!-- phren:projects:end -->";
+    fs.writeFileSync(memory, introduction + projects + "\n");
+    suppressOutput(() => removeGeneratedHomeFiles());
+    expect(fs.existsSync(memory)).toBe(false);
+    fs.writeFileSync(memory, introduction + "Owner's cross-project note\n" + projects + "\nmore notes\n");
+    suppressOutput(() => removeGeneratedHomeFiles());
+    expect(fs.readFileSync(memory, "utf8")).toBe("Owner's cross-project note\n\nmore notes\n");
   });
 });

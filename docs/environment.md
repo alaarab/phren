@@ -25,6 +25,14 @@ The first remote check runs after the configured interval. MCP clients sharing a
 
 Polling covers the primary and registered secondary Git stores while an MCP server is running. It refreshes each client's index and existing managed skill/instruction mirrors when local commits change. Agents consume updated instructions at their normal reload boundaries. The manual preset and project-local/workspace-Git installs do not poll by default. Disabling periodic checks does not disable SessionStart/Stop hooks. This setting installs no background service.
 
+## Project profile selection
+
+When machine mapping cannot select a profile and multiple profiles exist, phren
+keeps the existing first-profile fallback and warns once per process. Map the
+machine with `phren profile switch <profile>` to make the choice explicit.
+`phren status` labels an implicit fallback as assumed; an explicit `PHREN_PROFILE`
+selection is not labeled assumed. `PHREN_QUIET=1` suppresses the warning.
+
 ## MCP tool profile
 
 | Variable | Values | Default | Effect |

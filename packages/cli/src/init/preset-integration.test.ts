@@ -143,17 +143,26 @@ describe("management preset init integration", () => {
     expect(fs.existsSync(homeClaude)).toBe(true);
 
     const { runPreset } = await import("./init-preset.js");
+    const { generatedRootMemoryPath } = await import("./teardown.js");
+    const context = path.join(homeDir, ".phren-context.md");
+    const memory = generatedRootMemoryPath();
+    expect(fs.existsSync(context)).toBe(true);
+    expect(fs.existsSync(memory)).toBe(true);
 
     // Downgrade to assisted removes the phren-owned home symlink.
     await suppressOutput(() => runPreset("assisted", { yes: true }));
     expect(readInstallPreferences(phrenPath).managementPreset).toBe("assisted");
     expect(fs.existsSync(homeClaude)).toBe(false);
+    expect(fs.existsSync(context)).toBe(false);
+    expect(fs.existsSync(memory)).toBe(false);
     expect(getHooksEnabledPreference(phrenPath)).toBe(true); // hooks stay on
 
     // Upgrade back to managed re-creates it.
     await suppressOutput(() => runPreset("managed", { yes: true }));
     expect(readInstallPreferences(phrenPath).managementPreset).toBe("managed");
     expect(fs.existsSync(homeClaude)).toBe(true);
+    expect(fs.existsSync(context)).toBe(true);
+    expect(fs.existsSync(memory)).toBe(true);
   });
 
   // ── ~/.claude/CLAUDE.md ownership ──────────────────────────────────────

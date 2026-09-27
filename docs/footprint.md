@@ -79,6 +79,10 @@ and entries phren created. User-owned files stay intact.
 
 Switching to a lower-touch preset (`phren preset assisted|manual`) performs the
 same teardown for the surfaces the new preset no longer manages.
+Generated machine-context and root-memory blocks are removed when leaving
+`managed`, and on uninstall. Surrounding user notes, unmarked/incomplete files,
+and symlink targets are preserved; a file is deleted only when no user content
+remains. Returning to `managed` recreates missing generated files.
 
 ## Optional iPhone connection: Phren Hook
 
