@@ -23,6 +23,8 @@ export interface ChildAgentRelation {
   id: string; session?: string; transcript?: string; provider: Provider; path: string; callId: string; state: "running" | "completed" | "failed" | "gone" | "unavailable";
   /** Why a fan-out worker did not finish: `blocked: <type> <pattern>`. */
   reason?: string;
+  /** Present only when a source supplies a validated worker launch time. */
+  startedAt?: string;
   finishedAt?: string;
   /** Fan-out manifests and Claude child transcripts can name a model. */
   model?: string;
@@ -71,11 +73,12 @@ export async function childAgentTree(source: Provider, session: string, depth = 
 /** Explicit wire projection prevents a provider's private transcript identity
  * from being returned if relation internals grow later. */
 export function publicChildAgents(tree: ChildAgentRelation[]): Json[] {
-  return tree.map(({ id, provider, path: agentPath, callId, state, reason, finishedAt, model, worktreeName, branch, computer, remote, fanout, children }) =>
+  return tree.map(({ id, provider, path: agentPath, callId, state, reason, startedAt, finishedAt, model, worktreeName, branch, computer, remote, fanout, children }) =>
     // A blocked worker is finished; the phone's relation contract has no failed
     // state, so the reason carries what happened without breaking old clients.
     ({ id, provider, path: agentPath, callId, state: state === "failed" || state === "gone" ? "completed" : state,
-      ...(state === "failed" || state === "gone" ? { failed: true } : {}), ...(finishedAt ? { finishedAt } : {}),
+      ...(state === "failed" || state === "gone" ? { failed: true } : {}),
+      ...(startedAt ? { startedAt } : {}), ...(finishedAt ? { finishedAt } : {}),
       ...(reason !== undefined ? { reason } : {}), ...(model !== undefined ? { model } : {}),
       ...(worktreeName !== undefined ? { worktreeName } : {}), ...(branch !== undefined ? { branch } : {}),
       ...(computer !== undefined ? { computer: { id: computer.id, name: computer.name } } : {}),

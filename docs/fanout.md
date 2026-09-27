@@ -220,6 +220,10 @@ also preserved internally even when an exit code is absent.
 
 ## Continue a worker from chat
 
+The child tree includes `startedAt` for a tracked worker once its validated
+manifest says it has started. Queued jobs and child agents without a reliable
+launch timestamp omit the field, so clients do not invent an elapsed time.
+
 The child tree publishes `fanout.resumable` for Codex and OpenCode jobs with a
 saved session id. `POST /v1/subagents/resume` accepts `{ target, child, text }`:
 the live parent target, opaque child id from that tree and a message. The Hook
