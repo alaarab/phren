@@ -70,9 +70,15 @@ const CONVERSATIONAL_FILLER_RE = /\b(?:lmao|lmfao|rofl|lol+|haha+|idk|idc|tbh|ng
 // words (a relayed conductor message rewrote a task's Context three times), so it never
 // files or touches a task; only what was typed outside the wrapper counts.
 const PASTED_CONTENT_WRAPPER_RE = /<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content\b[^>]*>/g;
-// A message relayed from another agent: "From the conductor, a correction: …",
-// "From tidy-phren: …". One name (optionally after "the"), then a comma or colon.
-const RELAYED_MESSAGE_RE = /^\s*from\s+(?:the\s+)?(?!(?:now|here|there|then|scratch|today|tomorrow)\b)[\w.-]+\s*[,:]/i;
+// Relays may name one sender ("From tidy-phren:") or a computer and agent
+// ("From macbook android-codex:"). Keep "From now on" as a request.
+// A two-word sender needs the colon, so "From the settings page, add …" stays a request.
+const RELAYED_MESSAGE_RE = /^\s*from\s+(?:the\s+)?(?!(?:now|here|there|then|scratch|today|tomorrow)\b)(?:[\w.-]+\s*[,:]|[\w.-]+\s+[\w.-]+\s*:)/i;
+// Dispatch returns are typed into an idle agent as ordinary prompts.
+const DISPATCH_RETURN_NOTICE_RE = /^\s*returns?:\s+[^\n]+\bCall dispatch_returns\.\s*$/i;
+// Completed-work reports can arrive without a relay prefix. Only a status
+// ending in a commit, push or opened PR is excluded; imperative requests stay eligible.
+const AGENT_STATUS_REPORT_RE = /(?:\b(?:committed|pushed)\s+as\s+[0-9a-f]{7,40}|\bPR\s+#\d+\s+opened)\s*[.!]?\s*$/i;
 // Frames another agent or the harness put in the prompt: a cross-session message, a
 // sub-agent hand-back, a delivery/idle notice, a task or system notification, a system
 // reminder. Not the person's request. Matched anywhere, since a harness may put the
@@ -88,10 +94,19 @@ export function typedPromptText(prompt: string): string {
   return prompt.includes("<pasted_content") ? prompt.replace(PASTED_CONTENT_WRAPPER_RE, " ").trim() : prompt;
 }
 
+function isAgentStatusReportPrompt(prompt: string): boolean {
+  const trimmed = prompt.trim();
+  if (ACTION_PREFIX_RE.test(trimmed) || /^(?:can|could|would|will|should)\b/i.test(trimmed)
+    || ACTIONABLE_RE.exec(trimmed)?.index === 0) return false;
+  return AGENT_STATUS_REPORT_RE.test(trimmed);
+}
+
 /** A frame from another agent or the harness, or a message relayed from one,
  *  rather than something the person asked. */
 export function isAgentFramePrompt(prompt: string): boolean {
-  return AGENT_FRAME_RE.test(prompt) || RELAYED_MESSAGE_RE.test(prompt);
+  return AGENT_FRAME_RE.test(prompt) || RELAYED_MESSAGE_RE.test(prompt)
+    || DISPATCH_RETURN_NOTICE_RE.test(prompt)
+    || isAgentStatusReportPrompt(prompt);
 }
 
 /** A reply or a question: conversation with the agent, not a request for work. */
