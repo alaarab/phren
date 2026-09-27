@@ -1170,7 +1170,24 @@ the conversation.
 
 ### `GET /v1/usage`
 
-Account limits and spend for the phone's Account usage screen: `{accounts: [...]}`, each account carrying `source` (`codex`, `claude`, `opencode`, `opencode-go`, `openrouter`), `windows`, optional `updatedAt`, `message`, `spend`, `accountName`, `accountId` and, for Claude, `origin`. The optional `?sources=` comma list names the sources the phone understands; an older phone that sends none gets the original four so it never meets a source it cannot read.
+Account limits and spend for the phone's Account usage screen: `{accounts: [...]}`, each account carrying `source` (`codex`, `claude`, `opencode`, `opencode-go`, `openrouter`, `copilot`), `windows`, optional `updatedAt`, `message`, `spend`, `accountName`, `accountId` and, for Claude, `origin`. The optional `?sources=` comma list names the sources the phone understands; an older phone that sends none gets the original four so it never meets a source it cannot read. `copilot` is GitHub Copilot's own quota report read through the GitHub CLI's sign-in (`gh api /copilot_internal/user`): one window per limited quota (premium requests) with its monthly reset, unlimited quotas named in `message`; the token never reaches Phren. With `?peers=1` the answer adds `computer` and `peers: [{name, computer, accounts} | {name, error, code?}]`, each linked computer's own answer over its pinned SSH pipe.
+
+### `GET /v1/resources`
+
+This computer's live resources, `{computer, resources}`, collected at most once per `PHREN_RESOURCES_MAX_AGE_MS` (10 s) by `bridge/resources.ts`: `cpu` (`cores`, `load1`/`load5`/`load15`, `loadPerCore`), `memory` (`totalBytes`, `availablePercent`, `pressure` normal/warn/critical, `swapUsedBytes`), `disk` (the home volume's `totalBytes` and `freeBytes`), `battery` (`percent`, `charging`, `onAC`) when there is one, `uptimeSeconds`, and `heavy`: simulators (one per `launchd_sim`, test clones named as such), Android emulators, xcodebuild, Gradle and Kotlin daemons, Java, Codex, OpenCode and Claude Code, each with its processes, CPU and memory and the Herdr or tmux pane that started it (`pane: {server, workspace, pane, agent, label}`) when one did; any other program whose processes together hold half a core shows as `busy`. Every process counts toward its nearest heavy ancestor, so a Codex worker running xcodebuild shows both. `pressure` (`cpu`, `memory`, `disk`, `overall`, 0 to 1) fills every client's gauge the same way, `level` is `ok`, `busy` or `stressed`, and `warnings` lists `load-high` (load above twice the cores), `disk-low` (under 10 GB free), `memory-low` and `battery-low`. macOS reads sysctl, pmset and ps; Linux reads /proc, /sys and ps. With `?peers=1` it adds `peers`, as `/v1/usage` does. Advertised as `capabilities.resources`. A phone that opens `WS /v1/overview` with `resources=1` also gets `{type: "resources", resources}` first and every `PHREN_OVERVIEW_RESOURCES_MS` (12 s) after.
+
+## Computers and usage without memory
+
+`phren computers mcp` is a separate stdio MCP server (`phren-computers`) for agents that should see the owner's computers and usage but not their memory: it never opens a Phren store and has only these read-only tools, all answered by the local Hook (and, through it, each linked computer). Register it with `claude mcp add phren-computers -- phren computers mcp` (or `codex mcp add phren-computers -- phren computers mcp`).
+
+| Tool | Input | Returns |
+|------|-------|---------|
+| `list_computers` | none | Each computer: `online`, `platform`, `level`, `warnings`, `pressure`, `cores`, `load1`, `memoryFreePercent`, `diskFreeGB`, `heavyJobs`, a one-line `summary`; offline ones with `error`. |
+| `get_resources` | `computer?` (name or prefix; omit for this one) | That computer's full `/v1/resources` reading, heavy jobs and their panes included. |
+| `pick_computer` | `platform?` (`mac` default, `linux`, `any`), `exclude?` | `{pick, reason, ranked}`: the least-loaded online computer (stressed ones last, then overall pressure, load per core, free disk). It starts nothing. |
+| `get_usage` | `computer?`, `view?` (`combined` default, `per-computer`, `both`) | Per harness (Claude, Codex, GitHub Copilot, OpenCode local spend incl. DeepSeek, OpenCode Go, OpenRouter): windows with `usedPercent`, `resetsAt` and `resetsIn`, `spend` where reported, and `message` when a harness reports nothing. Combined takes each account's freshest limits and sums OpenCode's per-computer spend. No key identities or credentials. |
+
+The same readings from a shell: `phren computers` (one line per computer), `phren computers --resources [name]` (numbers and heavy jobs), `phren computers --pick [mac|linux|any]`, `phren usage` (combined) and `phren usage --per-computer`; each takes `--json`. They run without a store too. Without a Hook, `phren computers` reports this computer from its own reading and says so.
 
 Each Claude number has one documented source:
 

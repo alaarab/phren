@@ -57,6 +57,8 @@ export interface Command {
   subcommands?: Subcommand[];
   featured?: boolean;
   hidden?: boolean;
+  /** Runs without a Phren store: dispatch never finds, activates or tracks one. */
+  standalone?: boolean;
   run: RunFn;
 }
 
@@ -231,6 +233,19 @@ export const REGISTRY: Command[] = [
       { name: "returns", usage: "phren dispatch returns", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read" },
       { name: "sessions", usage: "phren dispatch sessions", summary: "List live agent sessions on this and every enrolled computer" }],
     run: async args => (await import("./bridge/dispatch-command.js")).runDispatch(args),
+  },
+  {
+    name: "computers", topic: "core", standalone: true,
+    usage: "phren computers [<name>] [--resources] [--pick [mac|linux|any]] [--exclude a,b] [--local] [--json] | phren computers mcp",
+    summary: "Each computer's load, memory, disk, battery and heavy jobs from Phren Hook, without Phren memory; `mcp` serves them read-only to agents",
+    subcommands: [{ name: "mcp", usage: "phren computers mcp", summary: "Stdio MCP server: list_computers, get_resources, pick_computer, get_usage (read-only, no memory)" }],
+    run: async args => (await import("./computers/command.js")).runComputers(args),
+  },
+  {
+    name: "usage", topic: "core", standalone: true,
+    usage: "phren usage [--per-computer] [--computer <name>] [--local] [--json]",
+    summary: "Agent usage per harness (limits, resets, spend) across computers from Phren Hook, without Phren memory",
+    run: async args => (await import("./computers/command.js")).runUsage(args),
   },
   {
     name: "hand-off", topic: "core", usage: "phren hand-off <computer|local> --session <id> --text <prompt>",
