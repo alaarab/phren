@@ -16,6 +16,10 @@ describe("fan-out routing", () => {
     expect(chosen.provider).toBe("codex");
     expect(chosen.reason).toBe("chose codex/gpt-5.6-terra: opencode-go mimo flash 5h at 100 percent");
   });
+  it("skips every Go model while Go's plan says a window is refusing requests", () => {
+    const usage = [{ source: "opencode-go" as const, windows: [{ id: "opencode-go:plan:7d", name: "Weekly limit", usedPercent: 54, limited: true, resetsAt: "2099-01-01T00:00:00Z" }] }];
+    expect(pick({ ...base, usage }).reason).toBe("chose codex/gpt-5.6-terra: opencode-go Weekly limit at 54 percent");
+  });
   it("blocks a provider for thirty minutes after a recent refusal", () => {
     const errors = parseProviderErrors('ERROR 2026-09-21T11:45:00Z providerID=opencode-go error="Go usage limit exceeded"', now);
     expect(pick({ ...base, errors }).provider).toBe("codex");

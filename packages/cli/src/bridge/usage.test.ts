@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -17,7 +17,10 @@ import {
   readClaudeToken,
   readCodexLimits,
   readCopilotUsage,
+  openCodeGoPlan,
+  readGoRefusals,
   readOpenCodeGoUsage,
+  usageForCaller,
   readOpenCodeUsage,
   usageStatusLine,
 } from "./usage.js";
@@ -171,57 +174,62 @@ describe("account usage", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
     expect(openCodeFailure({ killed: true, signal: "SIGTERM" })).toContain("timed out");
   });
-  it("accounts for OpenCode Go fan-outs by model and rolling window", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "phren-go-usage-"));
-    const jobs = path.join(root, ".runtime", "agent-fanouts");
-    const writeJob = async (id: string, model: string, events: unknown[]) => {
-      const directory = path.join(jobs, id); await mkdir(directory, { recursive: true });
-      await writeFile(path.join(directory, "manifest.json"), JSON.stringify({ provider: "opencode", model, eventLog: "events.jsonl" }));
-      await writeFile(path.join(directory, "events.jsonl"), events.map(event => JSON.stringify(event)).join("\n") + "\n");
-    };
-    try {
-      await writeJob("go-kimi", "opencode-go/kimi-k3", [
-        { type: "step_finish", timestamp: "2026-09-12T07:00:00Z", part: { cost: 1.2, tokens: { input: 100, output: 20 } } },
-        { type: "step_finish", timestamp: "2026-09-06T08:00:00Z", part: { cost: 3.6, tokens: 360 } },
-        { type: "step_finish", timestamp: "2026-08-15T08:00:00Z", part: { cost: 4.3, tokens: 430 } },
-      ]);
-      await writeJob("go-qwen", "opencode-go/qwen3", [
-        { type: "step_finish", timestamp: "2026-09-12T07:30:00Z", part: { cost: 0.25, tokens: 25 } },
-      ]);
-      await writeJob("not-go", "openrouter/example", [
-        { type: "step_finish", timestamp: "2026-09-12T07:00:00Z", part: { cost: 99, tokens: 99_999 } },
-      ]);
-      const calls: { url: string; method?: string; authorization?: string }[] = [];
-      const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
-        calls.push({ url: String(url), method: init?.method, authorization: (init?.headers as Record<string, string>).authorization });
-        return { ok: true, headers: { get: () => null }, json: async () => ({ limits: {
-        "opencode-go/kimi-k3": { "5h": { limitUSD: 2 }, "7d": { limitUSD: 5 }, "30d": { limitUSD: 10 } },
-        } }) };
-      }) as unknown as typeof fetch;
-      const value = await readOpenCodeGoUsage(now, { root: jobs, readKey: async () => "go-test-key-not-a-secret", fetchImpl });
-      expect(calls).toEqual([
-        { url: "https://opencode.ai/zen/go/v1/usage", method: "GET", authorization: "Bearer go-test-key-not-a-secret" },
-        { url: "https://opencode.ai/zen/go/v1/limits", method: "GET", authorization: "Bearer go-test-key-not-a-secret" },
-        { url: "https://opencode.ai/zen/go/v1/credits", method: "GET", authorization: "Bearer go-test-key-not-a-secret" },
-        { url: "https://opencode.ai/zen/go/v1/models", method: "HEAD", authorization: "Bearer go-test-key-not-a-secret" },
-      ]);
-      expect(value.source).toBe("opencode-go");
-      expect(JSON.stringify(value)).not.toContain("go-test-key-not-a-secret");
-      expect(value.windows).toHaveLength(6);
-      expect(value.windows.filter(window => window.name.startsWith("opencode-go/kimi-k3"))).toMatchObject([
-        { name: "opencode-go/kimi-k3 · 5h", usedUSD: 1.2, usedTokens: 120, limitUSD: 2, usedPercent: 60 },
-        { name: "opencode-go/kimi-k3 · 7d", usedUSD: 4.8, usedTokens: 480, limitUSD: 5, usedPercent: 96 },
-        { name: "opencode-go/kimi-k3 · 30d", usedUSD: 9.1, usedTokens: 910, limitUSD: 10, usedPercent: 91 },
-      ]);
-      expect(value.windows.find(window => window.name == "opencode-go/qwen3 · 30d")).toMatchObject({ usedUSD: 0.25 });
-      expect(value.windows.some(window => window.usedUSD === 99)).toBe(false);
-      expect(value.spend).toEqual({ amountUSD: 9.35, period: "rolling_30_days" });
+  // Owner bug 2026-09-26: the meter showed $0.44 of an invented $100 while
+  // Go was refusing requests. Go's own report is what it enforces.
+  it("shows OpenCode Go's own plan windows, the limit it is enforcing, and its refusals", async () => {
+    const report = { usage: {
+      rolling: { status: "ok", percent: 0, resetsAt: "2026-09-27T06:46:25.185Z" },
+      weekly: { status: "rate-limited", percent: 100, resetsAt: "2026-09-28T00:00:00.000Z" },
+      monthly: { status: "ok", percent: 54, resetsAt: "2026-10-20T19:52:38.000Z" },
+    } };
+    expect(openCodeGoPlan(report)).toEqual([
+      { id: "opencode-go:plan:5h", name: "5-hour limit", usedPercent: 0, resetsAt: "2026-09-27T06:46:25.185Z" },
+      { id: "opencode-go:plan:7d", name: "Weekly limit", usedPercent: 100, resetsAt: "2026-09-28T00:00:00.000Z", limited: true },
+      { id: "opencode-go:plan:30d", name: "Monthly limit", usedPercent: 54, resetsAt: "2026-10-20T19:52:38.000Z" },
+    ]);
+    // No dollar caps are invented from percentages.
+    expect(JSON.stringify(openCodeGoPlan(report))).not.toMatch(/USD/);
 
-      const withoutKey = await readOpenCodeGoUsage(now, { root: jobs, readKey: async () => undefined });
-      expect(withoutKey.message).toBe("Connect OpenCode Go on this computer to see its usage.");
-      expect(withoutKey.windows).toHaveLength(6);
-      expect(withoutKey.windows.every(window => window.limitUSD === undefined && window.usedPercent === undefined)).toBe(true);
-    } finally { await rm(root, { recursive: true, force: true }); }
+    const logs = await mkdtemp(path.join(tmpdir(), "phren-opencode-log-"));
+    try {
+      const line = (at: string, model = "deepseek-v4.1-flash") => `timestamp=${at} level=ERROR run=a message="stream error" providerID=opencode-go modelID=${model} error.error="AI_APICallError: Go usage limit exceeded"`;
+      await writeFile(path.join(logs, "opencode.log"), [line("2026-09-25T09:00:00.000Z"), line("2026-09-26T20:34:02.000Z"),
+        "timestamp=2026-09-26T20:40:00.000Z level=INFO message=ok", line("2026-09-26T21:18:48.946Z")].join("\n") + "\n");
+      const now = new Date("2026-09-26T22:00:00Z");
+      const refusals = await readGoRefusals(now, 24 * 3_600_000, logs);
+      expect(refusals).toEqual({ count: 2, first: "2026-09-26T20:34:02.000Z", last: "2026-09-26T21:18:48.946Z", models: ["opencode-go/deepseek-v4.1-flash"] });
+      // A later poll reads only what OpenCode appended.
+      await appendFile(path.join(logs, "opencode.log"), `${line("2026-09-26T21:30:00.000Z", "glm-5")}\n`);
+      expect(await readGoRefusals(now, 24 * 3_600_000, logs)).toMatchObject({ count: 3, last: "2026-09-26T21:30:00.000Z",
+        models: ["opencode-go/deepseek-v4.1-flash", "opencode-go/glm-5"] });
+
+      let seen: { url?: string; auth?: string } = {};
+      const fetchImpl = (async (url: string, init: RequestInit) => {
+        seen = { url, auth: (init.headers as Record<string, string>).authorization };
+        return new Response(JSON.stringify(report), { status: 200 });
+      }) as typeof fetch;
+      const value = await readOpenCodeGoUsage(now, { readKey: async () => "go-test-key-not-a-secret", fetchImpl, readRefusals: async () => refusals });
+      expect(seen).toEqual({ url: "https://opencode.ai/zen/go/v1/usage", auth: "Bearer go-test-key-not-a-secret" });
+      expect(value.windows.find(window => window.id === "opencode-go:plan:7d")).toMatchObject({ usedPercent: 100, limited: true });
+      expect(value.message).toBe('Go is refusing requests: the weekly limit is reached. OpenCode refused 2 Go requests with "usage limit exceeded" in the last day (20:34 UTC to 21:18 UTC).');
+      expect(JSON.stringify(value)).not.toContain("go-test-key-not-a-secret");
+      expect(value.spend).toBeUndefined();
+
+      // A phone built before plan windows rejects them, so it gets the account and message only.
+      const accounts = [value, { source: "claude" as const, windows: [] }];
+      expect(usageForCaller(accounts, new Set(["opencode-go", "claude"]), false)[0]).toEqual({ ...value, windows: [] });
+      expect(usageForCaller(accounts, new Set(["opencode-go", "claude"]), true)[0]).toBe(value);
+      expect(usageForCaller(accounts, new Set(["claude"]), true).map(account => account.source)).toEqual(["claude"]);
+
+      // Go's report unreachable: the log still says what happened.
+      const down = await readOpenCodeGoUsage(now, { readKey: async () => "go-test-key-not-a-secret", readRefusals: async () => refusals,
+        fetchImpl: (async () => new Response("", { status: 502 })) as typeof fetch });
+      expect(down.windows).toEqual([]);
+      expect(down.message).toContain("Could not read Go's usage report");
+      expect(down.message).toContain("refused 2 Go requests");
+      const withoutKey = await readOpenCodeGoUsage(now, { readKey: async () => undefined, readRefusals: async () => undefined });
+      expect(withoutKey).toMatchObject({ source: "opencode-go", windows: [], message: "Connect OpenCode Go on this computer to see its usage." });
+    } finally { await rm(logs, { recursive: true, force: true }); }
   });
   it("reads OpenRouter's current calendar-week spend without returning its key", async () => {
     let authorization = "";

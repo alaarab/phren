@@ -7,7 +7,7 @@ import type { ProviderError } from "./picker.js";
 
 export async function readUsage(): Promise<AccountUsage[]> {
   try {
-    const value = await hookRequest("/v1/usage?sources=codex,claude,opencode,opencode-go,openrouter", undefined, undefined, 2_000);
+    const value = await hookRequest("/v1/usage?sources=codex,claude,opencode,opencode-go,openrouter&goPlan=1", undefined, undefined, 2_000);
     if (Array.isArray(value.accounts)) return value.accounts as unknown as AccountUsage[];
   } catch { /* Same readers when the local Hook is unavailable. */ }
   return (await new AccountUsageReader().read()).accounts;

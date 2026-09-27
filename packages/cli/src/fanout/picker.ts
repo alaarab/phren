@@ -38,8 +38,9 @@ export function pick(options: { policy: Policy; tier: Tier; usage: AccountUsage[
     const account = options.usage.find(a => a.source === key);
     const model = candidate.model.split("/").slice(1).join("/");
     const windowPrefix = `opencode-go:${model.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "")}:`;
-    const windows = account?.windows.filter(w => key !== "opencode-go" || !model || w.id.startsWith(windowPrefix) || w.id.startsWith(`${model}/`) || w.id === model) ?? [];
-    const exhausted = windows.find(w => (w.usedPercent ?? 0) >= policy.threshold && (!w.resetsAt || !Number.isFinite(Date.parse(w.resetsAt)) || Date.parse(w.resetsAt) > now));
+    // Go's plan windows (`opencode-go:plan:*`) bind every Go model.
+    const windows = account?.windows.filter(w => key !== "opencode-go" || !model || w.id.startsWith("opencode-go:plan:") || w.id.startsWith(windowPrefix) || w.id.startsWith(`${model}/`) || w.id === model) ?? [];
+    const exhausted = windows.find(w => (w.limited || (w.usedPercent ?? 0) >= policy.threshold) && (!w.resetsAt || !Number.isFinite(Date.parse(w.resetsAt)) || Date.parse(w.resetsAt) > now));
     if (exhausted) { rejected.push(`${key} ${exhausted.name} at ${exhausted.usedPercent} percent`); continue; }
     return { ...candidate, reason: `chose ${candidate.provider}/${candidate.model}: ${rejected.join("; ") || (windows.length ? "usage below threshold" : "usage unavailable; first eligible policy candidate")}` };
   }
