@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The Claude plugin now offers first-run store setup at SessionStart and ignores unrelated settings text when deciding whether its memory hooks should stand down. Its documentation and eval suite cover directory submission and onboarding.
 - Bare headless `claude -p` workers launched by Codex or Claude now register from Claude's SessionStart hook, appear beneath their launcher with the native transcript on the phone, and finish on Stop; a vanished process is reported as gone.
 - The overview socket sends its first overview before collecting resources, keeps resource reads from overlapping, and logs their failures. Usage reads skip Copilot when the caller did not ask for it, and a GitHub 404 reports that the account has no Copilot subscription.
 - Task auto-capture skips relayed computer and agent status reports, dispatch return notices, and completed commit, push or PR reports typed into an agent's prompt.

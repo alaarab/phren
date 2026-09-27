@@ -86,7 +86,7 @@ If you would rather install phren the way you install everything else:
 /plugin install phren@phren
 ```
 
-That brings the memory hooks (context at session start, recall on every prompt, save at stop), the MCP server and six `phren-*` skills, all version-pinned and removable with `/plugin uninstall`. On first run it offers to create the store with `phren init`. Plugin and `phren init` can coexist: whatever `init` wired in your settings wins, and the plugin's copy stands down, so nothing runs twice. See [docs/claude-code-plugin.md](docs/claude-code-plugin.md).
+That brings the memory hooks (context at session start, recall on every prompt, save at stop), the MCP server and six `phren-*` skills, all version-pinned and removable with `/plugin uninstall`. On first run Claude offers to create the store with `phren init`. Plugin and `phren init` can coexist: the plugin's hooks yield to matching hooks from `init`, and its MCP server yields when Claude Code loads the server registered by `init`. See [docs/claude-code-plugin.md](docs/claude-code-plugin.md).
 
 phren also has its **own coding agent**. `npm install -g @phren/agent`, then `phren agent -i`: it starts every session already knowing the project's gotchas, tasks, and decisions, saves what it learns back to the same store, and runs on a ChatGPT/Codex subscription, OpenAI, OpenRouter, Anthropic, or local Ollama models. See [docs/agent.md](docs/agent.md).
 

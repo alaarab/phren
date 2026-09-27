@@ -36,12 +36,12 @@ standdown() {
 [ "${PHREN_PLUGIN_HOOKS:-on}" = "off" ] && standdown
 
 # ── 1. One owner ──────────────────────────────────────────────────────────
-# `phren init` writes commands ending in `phren hook-prompt"` (or
+# `phren init` writes command hooks ending in `phren hook-prompt"` (or
 # `index.js" hook-prompt"`) into the user's settings. If one is there for
 # this event, settings.json owns it. Only the file Claude Code itself reads
 # counts: under CLAUDE_CONFIG_DIR, hooks in ~/.claude/settings.json never run.
 SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
-if [ -f "$SETTINGS" ] && grep -q -- "$EVENT\"" "$SETTINGS" 2>/dev/null; then
+if [ -f "$SETTINGS" ] && grep -Eq -- '"command"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*(PHREN_PATH|phren|index\.js)([^"\\]|\\.)*'"$EVENT"'([^"\\]|\\.)*"' "$SETTINGS" 2>/dev/null; then
   standdown
 fi
 
@@ -60,9 +60,19 @@ has_store() {
   return 1
 }
 
-# No store yet: stay silent. Setup is offered by the plugin's MCP server,
-# which runs in setup mode (one phren_setup tool) until a store exists.
-has_store || standdown
+# The setup-mode MCP server offers phren_setup. Tell Claude about it once,
+# at the first session start, so a first-run user need not know the skill or
+# tool name; someone who declines is not asked again every session.
+SETUP_OFFERED="${XDG_STATE_HOME:-$HOME/.local/state}/phren/plugin-setup-offered"
+if ! has_store; then
+  if [ "$EVENT" = "hook-session-start" ] && [ ! -e "$SETUP_OFFERED" ]; then
+    cat >/dev/null 2>&1
+    mkdir -p "$(dirname "$SETUP_OFFERED")" 2>/dev/null && : > "$SETUP_OFFERED" 2>/dev/null
+    printf '%s\n' 'phren has no memory store yet. Tell the user setup creates a local git-backed store and wires Claude Code, then offer to run phren_setup with confirm=true after they agree. Restart Claude Code after setup.'
+    exit 0
+  fi
+  standdown
+fi
 
 # ── 3. Find phren without touching the network ────────────────────────────
 run_phren() {

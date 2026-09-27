@@ -14,11 +14,12 @@ for the same four events `phren init` wires into `~/.claude/settings.json`:
 
 - **One owner.** If the settings file Claude Code reads
   (`$CLAUDE_CONFIG_DIR/settings.json`, else `~/.claude/settings.json`) already
-  runs phren for the event, the plugin's copy exits without doing anything.
+  has a phren command hook for the event, the plugin's copy exits without doing anything.
 - **Never slow.** It uses `$PHREN_BIN`, a `phren` on `PATH`, the
   `~/.local/bin/phren` wrapper, or the pinned release already in npm's cache
   (`npx --offline`), in that order. It never downloads on a prompt.
-- **Fail open.** No store, no phren, or a phren error: exit 0, no output.
+- **Fail open.** Without a store, SessionStart offers setup once and the
+  other events stay silent. If phren is unavailable or fails, hooks exit 0.
 
 `PHREN_PLUGIN_HOOKS=off` turns the plugin's hooks off. `PHREN_PIN` must equal
 `packages/cli/package.json`'s version (`pnpm run validate-docs` checks).

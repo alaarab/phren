@@ -9,7 +9,7 @@ import { fileURLToPath } from "url";
 import { makeTempDir } from "./test-helpers.js";
 import { configureClaude } from "./init/config.js";
 import { resetVSCodeProbeCache } from "./init/init.js";
-import { pluginSetupReason } from "./mcp/plugin-mode.js";
+import { pluginSetupReason, setupMessage } from "./mcp/plugin-mode.js";
 import { resolveTopLevelInvocation } from "./entrypoint.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -33,6 +33,10 @@ describe("Claude Code plugin manifest", () => {
     expect(plugin.mcpServers.phren.args).toEqual(["-y", `@phren/cli@${cliVersion}`, "mcp"]);
     expect(plugin.mcpServers.phren.env.PHREN_MCP_OWNER).toBe("plugin");
     expect(fs.readFileSync(hookScript, "utf8")).toContain(`PHREN_PIN="${cliVersion}"`);
+    expect(marketplace.description).toMatch(/\S/);
+    expect(marketplace.owner.name).toBe(plugin.author.name);
+    expect(entry.description).toBe(plugin.description);
+    expect(entry.category).toBe("productivity");
   });
 
   it("ships every starter skill except the ones deliberately left out", () => {
@@ -139,6 +143,22 @@ describe.skipIf(process.platform === "win32")("phren-hook.sh", () => {
     expect(run("hook-prompt").stdout).toContain("RAN hook-prompt");
   });
 
+  it("does not let unrelated settings text suppress a phren hook", () => {
+    makeStore();
+    fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+    fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({
+      hooks: { Stop: [{ hooks: [{ type: "command", command: "phren hook-stop" }] }] },
+      env: { REMINDER: "run phren hook-prompt" },
+    }));
+    expect(run("hook-prompt").stdout).toContain("RAN hook-prompt");
+    expect(run("hook-stop").stdout).toBe("");
+
+    fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({
+      hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: 'set "PHREN_PATH=C:/phren" && node "C:/pkg/index.js" hook-prompt' }] }] },
+    }));
+    expect(run("hook-prompt").stdout).toBe("");
+  });
+
   it("reads settings from CLAUDE_CONFIG_DIR too", () => {
     makeStore();
     const configDir = path.join(tmp.path, "claude-config");
@@ -151,8 +171,13 @@ describe.skipIf(process.platform === "win32")("phren-hook.sh", () => {
     expect(run("hook-stop", { CLAUDE_CONFIG_DIR: configDir }).stdout).toContain("RAN hook-stop");
   });
 
-  it("with no store, stays silent and never runs phren (which would create one)", () => {
-    for (const event of ["hook-session-start", "hook-prompt", "hook-tool", "hook-stop"]) {
+  it("with no store, offers setup at session start without running phren", () => {
+    const start = run("hook-session-start");
+    expect(start.status).toBe(0);
+    expect(start.stdout).toContain("phren_setup");
+    expect(start.stdout).toContain("after they agree");
+    expect(run("hook-session-start").stdout).toBe("");
+    for (const event of ["hook-prompt", "hook-tool", "hook-stop"]) {
       const result = run(event);
       expect(result.status).toBe(0);
       expect(result.stdout).toBe("");
@@ -199,6 +224,8 @@ describe("phren mcp (plugin entry)", () => {
 
   it("serves setup mode when there is no store", () => {
     expect(pluginSetupReason({ PHREN_MCP_OWNER: "plugin" })).toBe("no-store");
+    expect(setupMessage()).toContain("phren init --yes");
+    expect(setupMessage()).toContain("plugin yields wherever init's wiring loads");
   });
 
   it("serves the full server when a store exists and init registered no server", () => {
