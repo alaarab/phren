@@ -1156,6 +1156,30 @@ branch's pull request in any state, `{number, title, url, head, base, draft,
 state, checks}`, where `checks` is `passing`, `failing`, `pending` or null.
 `POST /v1/git/status` returns `defaultBranch`, the branch a push asks to confirm.
 
+### Terminal sources and independent overviews
+
+`GET /v1/muxes` enumerates both Herdr and tmux sources in `{muxes: [...]}`.
+Each source carries `id` (`herdr:default`, `tmux:tmux`, `tmux:tmux-work`),
+`kind` (`herdr` or `tmux`), `session` (the existing server name) and `running`.
+The hidden `tmux-phren` source remains visible when it is running alongside
+Herdr; without Herdr it is also offered before its first phone launch.
+A failed socket probe does not remove the other responding sources.
+
+Read each source with `GET /v1/workspaces?mux=<id>`,
+`GET /v1/workspaces/panes?mux=<id>&groupId=...&childId=...`, or
+`WS /v1/overview?mux=<id>`. Overview and pane replies carry the actual `kind`
+and `mux: {id, kind, session}`. Group, pane and target identities are unchanged;
+`target.source` still names the agent harness. Clients combine successful
+sources independently, preserving their rows if another source fails.
+Legacy `server=` and `mux=herdr:tmux` selectors remain accepted. A typed tmux
+selector that would resolve to Herdr returns 409 `mux-kind-mismatch`.
+
+Existing HTTP transcript lookup failures carry 404 `code: "transcript-unavailable"`
+after route target validation. This code does not mean every 404 is a missing
+transcript. An identified conversation whose transcript has not been written
+yet still opens an empty transcript WebSocket and waits for it; startup does
+not trigger terminal fallback merely because its file is absent.
+
 ### Live transcript previews
 
 The transcript WebSocket includes `preview: {turnStartedAt, text}` or

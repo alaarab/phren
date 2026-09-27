@@ -212,7 +212,7 @@ export async function transcriptPath(source: Provider, session: string): Promise
     // materializes those into a rollout-shaped file of its own.
     const materialized = source === "codex" ? await materializeCodexThread(session) : undefined;
     if (materialized) return materialized;
-    throw new BridgeError(404, "The transcript is not available for this conversation.");
+    throw new BridgeError(404, "The transcript is not available for this conversation.", { code: "transcript-unavailable" });
   }
   const file = await realpath(matches[0]);
   if (!file.startsWith(root + path.sep)) throw new BridgeError(403, "The transcript points outside its agent folder.");

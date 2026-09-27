@@ -45,6 +45,7 @@ import { launchSession, localConductor, workspaceAction } from "./server-launch.
 import type { TranscriptStreams } from "./server-stream.js";
 import { hookMetrics } from "./metrics.js";
 import { streamSpeech } from "./speech.js";
+import { terminalKind, terminalMux } from "./terminal.js";
 
 /** The Hook's HTTP API over its Unix socket: module gating, the GET routes,
  * the POST routes that are not bound to one pane, and grant deletion. */
@@ -148,8 +149,17 @@ async function body(request: IncomingMessage): Promise<Json> {
 
 export function selectedServer(url: URL): string {
   const mux = url.searchParams.get("mux");
-  if (mux && !mux.startsWith("herdr:")) throw new BridgeError(400, "Select a Herdr server.");
-  return serverName.parse(url.searchParams.get("server") || mux?.slice(6) || "default");
+  const selected = mux ? /^(herdr|tmux):(.+)$/.exec(mux) : undefined;
+  if (mux && !selected) throw new BridgeError(400, "Select a terminal source.");
+  const explicit = url.searchParams.get("server");
+  if (explicit && selected && explicit !== selected[2]) throw new BridgeError(400, "Conflicting terminal sources.");
+  const server = serverName.parse(explicit || selected?.[2] || "default");
+  // Old phones used herdr:tmux. Keep that alias, but a typed tmux id must
+  // never silently route to a Herdr session with the same server name.
+  if (selected?.[1] === "tmux" && terminalKind(server) !== "tmux") {
+    throw new BridgeError(409, "This terminal source changed. Refresh the computer.", { code: "mux-kind-mismatch" });
+  }
+  return server;
 }
 
 /**
@@ -225,7 +235,8 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([enrich, new Promise<void>(resolve => { timer = setTimeout(resolve, OVERVIEW_ENRICH_BUDGET_MS); })]);
     expired = true; clearTimeout(timer);
-    return { ...workspaces, phren: info };
+    const mux = terminalMux(server);
+    return { ...workspaces, kind: mux.kind, mux, phren: info };
   };
 }
 

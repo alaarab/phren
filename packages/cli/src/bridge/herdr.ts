@@ -131,8 +131,8 @@ export async function servers(): Promise<Json[]> {
   }));
   const running: Json[] = results.filter((v): v is NonNullable<typeof v> => v !== null);
   // The owner's own tmux servers always: agents started with `tmux` beside a
-  // running Herdr show up too. The Hook's hidden server only without Herdr,
-  // where phone launches go; with Herdr they go to Herdr.
+  // running Herdr show up too, including an already-running hidden server.
+  // Without Herdr, also offer the hidden server before its first launch.
   running.push(...await import("./terminal-tmux.js").then(tmux => tmux.tmuxServers({ hidden: !running.length })).catch(() => []));
   knownServers = running.map(server => String(server.session));
   return running;
@@ -470,8 +470,9 @@ export async function paneChatState(server: string, pane: Json, options: { token
 export async function panes(server: string, workspace: string, tab: string): Promise<Json> {
   id.parse(workspace); id.parse(tab);
   const s = await snapshot(server);
-  if (!objects(s.tabs).some(t => t.tab_id === tab && t.workspace_id === workspace)) throw new BridgeError(409, "This Herdr tab has changed. Refresh the computer.");
-  return { kind: "herdr", groupId: workspace, childId: tab, panes: await Promise.all(objects(s.panes)
+  if (!objects(s.tabs).some(t => t.tab_id === tab && t.workspace_id === workspace)) throw new BridgeError(409, "This terminal tab has changed. Refresh the computer.");
+  const mux = (await terminal()).terminalMux(server);
+  return { kind: mux.kind, mux, groupId: workspace, childId: tab, panes: await Promise.all(objects(s.panes)
     .filter(p => p.workspace_id === workspace && p.tab_id === tab).map(async p => ({ id: p.pane_id,
       label: p.label || p.pane_id, agent: p.agent, agentStatus: p.agent_status,
       title: p.title || p.terminal_title_stripped, cwd: p.foreground_cwd || p.cwd,

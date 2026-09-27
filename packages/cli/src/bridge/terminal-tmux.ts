@@ -446,12 +446,14 @@ async function ownerServers(): Promise<string[]> {
 
 /** The tmux servers the Hook drives, as `/v1/muxes` lists servers: the owner's
  * servers that answer, and (unless `hidden: false`) the hidden server whenever
- * tmux is installed (a launch starts it). `kind` stays "herdr", the phone's name for the Hook's
- * session protocol; `terminal` names the multiplexer. */
+ * tmux is installed (a launch starts it). An already running hidden server
+ * remains discoverable beside Herdr too. `kind` names the actual multiplexer. */
 export async function tmuxServers(options: { hidden?: boolean } = {}): Promise<Json[]> {
   if (!deps.binary()) return [];
-  return [...await ownerServers(), ...(options.hidden ?? true ? [TMUX_HIDDEN] : [])]
-    .map(name => ({ id: `tmux:${name}`, kind: "herdr", terminal: "tmux", session: name, running: true }));
+  const includeHidden = options.hidden ?? true;
+  const hiddenRunning = includeHidden || await tmux(TMUX_HIDDEN, ["list-sessions", "-F", "#{session_id}"], { timeoutMs: 3_000 }).then(() => true, () => false);
+  return [...await ownerServers(), ...(hiddenRunning ? [TMUX_HIDDEN] : [])]
+    .map(name => ({ id: `tmux:${name}`, kind: "tmux", terminal: "tmux", session: name, running: true }));
 }
 
 /** What `phren bridge doctor` and the health details say about tmux. */
@@ -506,4 +508,3 @@ export function tmuxAttach(server: string): { file: string; args: string[] } {
 
 /** For tests: forget the tmux executable lookup and the sockets found by path. */
 export function resetTmuxBinary(): void { cachedBinary = undefined; socketPaths.clear(); }
-
