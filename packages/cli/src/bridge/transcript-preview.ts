@@ -355,23 +355,32 @@ export class TranscriptPreviewStream {
   private current: TranscriptPreview | null = null;
   private observedLine = -1;
   private wasWorking = false;
+  private readonly codexCompleted = new Set<string>();
   private readonly rollout = new CodexRolloutPreview();
   constructor(private readonly target: Target,
     private readonly pane: () => Promise<string> = () => readPreviewPane(target),
     private readonly delta: (file?: string) => Promise<TranscriptPreview | null> = file => readDeltaPreview(target, file, this.rollout)) {}
 
   observe(entries: Entry[], reset = false): void {
-    if (reset) { this.observedLine = -1; this.startedAt = undefined; this.landed = false; this.ended = false; this.wasWorking = false; }
+    if (reset) { this.observedLine = -1; this.startedAt = undefined; this.landed = false; this.ended = false; this.wasWorking = false; this.codexCompleted.clear(); }
     for (const { raw, line } of entries) {
       if (line <= this.observedLine) continue;
       this.observedLine = line;
       if (this.target.source === "codex") {
-        // Codex brackets a turn with task_started and task_complete; its
-        // delta source is only read between them.
+        // A completed commentary message can land before task_complete while
+        // Codex keeps working on a tool call.
         const payload = object(raw.payload);
-        if (raw.type === "event_msg" && payload.type === "task_started") this.ended = false;
-        else if (raw.type === "response_item" && payload.type === "message" && payload.role === "user") this.ended = false;
-        else if (raw.type === "event_msg" && ["task_complete", "task_completed", "turn_aborted", "task_aborted"].includes(String(payload.type))) this.ended = true;
+        if (raw.type === "event_msg" && payload.type === "task_started") { this.ended = false; this.codexCompleted.clear(); }
+        else if (raw.type === "response_item" && payload.type === "message" && payload.role === "user" && !raw.phrenQueued) {
+          this.ended = false; this.codexCompleted.clear();
+        } else if (raw.type === "response_item" && payload.type === "message" && payload.role === "assistant") {
+          const text = (typeof payload.content === "string" ? payload.content
+            : objects(payload.content).map(block => typeof block.text === "string" ? block.text : "").join("\n")).trim();
+          if (text) {
+            this.codexCompleted.add(text);
+            if (this.codexCompleted.size > 32) this.codexCompleted.delete(this.codexCompleted.values().next().value!);
+          }
+        } else if (raw.type === "event_msg" && ["task_complete", "task_completed", "turn_aborted", "task_aborted"].includes(String(payload.type))) this.ended = true;
         continue;
       }
       if (this.target.source === "copilot") {
@@ -407,6 +416,10 @@ export class TranscriptPreviewStream {
         // These harnesses own a delta source. Never scrape their pane, even
         // when the source is temporarily empty or unavailable.
         if (!this.ended) next = await this.delta(file);
+        if (this.target.source === "codex" && next) {
+          const text = next.text.trim();
+          if (text && [...this.codexCompleted].some(completed => completed.startsWith(text))) next = null;
+        }
       } else if (this.target.source === "claude" && this.startedAt && !this.ended) {
         if (readAt - this.lastRead < PREVIEW_INTERVAL_MS) return undefined;
         this.lastRead = readAt;
