@@ -126,6 +126,16 @@ WebSockets on the same socket.
 | `POST /v1/push/target` | Where a live push binding's request is (server, workspace, tab, pane, source), without spending it, so a tapped notification opens that session's details. |
 | `POST /v1/questions/answer` | Answer an exact pending Codex `request_user_input_async` call through `codex queue --thread <UUID> --message <quoted answer>`. Choices and typed answers are checked against the original acknowledged transcript call, the pane identity is rechecked, and a durable receipt prevents resending an uncertain result. Synchronous `request_user_input` remains unsupported on terminal-only connections. |
 
+Codex runs its `PermissionRequest` hook before its automatic reviewer, and the
+payload doesn't say which one will decide. For each request the hook reads the
+session's rollout (`transcript_path`) back to the latest `turn_context` or
+`thread_settings_applied` line. When that says `approvals_reviewer: "auto_review"`
+with an `on-request` or granular policy, Codex's reviewer decides: the Hook
+answers at once with no decision, and holds, pushes and remembers nothing, and
+doesn't mark the pane blocked. If Codex hands the request back to the owner, it
+draws its own approval dialog, and the waiting-pane dialog read pushes that like
+any other. Other sessions keep the normal hold.
+
 Creation resolves `cwd` with `realpath`, requires an existing directory under the
 user's real home or within a `locateProject` candidate, and sends the resolved
 path to Herdr. At most one creation/launch is in flight, and at most six attempts
