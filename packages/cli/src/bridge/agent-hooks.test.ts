@@ -138,7 +138,8 @@ describe("terminal dialogs reach a phone with phren closed", () => {
     const sentPush = notify.mock.calls[0][0] as { binding: string; provider: string; title: string; message: string };
     expect(sentPush.provider).toBe("codex");
     // The alert names the request itself, not a generic "needs approval".
-    expect((sentPush as { request?: string }).request).toContain("rm -rf build");
+    // The recorded Codex dialog is a command approval, not a question.
+    expect(sentPush).toMatchObject({ question: false, request: "Run: rm -rf build", requestKind: "command" });
     expect((sentPush as { computer?: string }).computer).toBeTruthy();
     await hooks.answerPush(sentPush.binding, "approve");
     expect(keys()).toEqual([["y"]]);

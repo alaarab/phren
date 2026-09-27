@@ -24,8 +24,12 @@ export function redactApproval(value: string): string {
       } catch { return "…"; }
     })
     .replace(/\bAuthorization\s*:\s*Bearer\s+(\S+)/gi, (_whole, token: string) => `Authorization: Bearer …${/["']$/.test(token) ? token.slice(-1) : ""}`)
-    .replace(/(^|\s)(--(?:token|password|secret|api-key|access-token)|-p)(?:\s+|=)(?:"[^"]*"|'[^']*'|\S+)/gi, "$1$2 …")
-    .replace(/\b([A-Za-z_][A-Za-z0-9_]*)=(?:"[^"]*"|'[^']*'|[^\s;]+)/g, "$1=…")
+    .replace(/(^|\s)(--(?:token|password|secret|api-key|access-token))(?:\s+|=)(?:"[^"]*"|'[^']*'|\S+)/gi, "$1$2 …")
+    // -p is a password only for MySQL-style clients (-pSECRET); elsewhere it is
+    // mkdir -p, ssh -p 22, git log -p, claude -p.
+    .replace(/(\b(?:mysql|mysqldump|mysqladmin|mariadb)\b[^\n]*?\s-p)(?:"[^"]*"|'[^']*'|\S+)/gi, "$1…")
+    // Environment assignments only: a word after a separator, not a --flag=value.
+    .replace(/(^|[\s;&|(])([A-Za-z_][A-Za-z0-9_]*)=(?:"[^"]*"|'[^']*'|[^\s;]+)/g, "$1$2=…")
     .replace(/\b(?:gh[po]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+|xox[abp]-[A-Za-z0-9-]+|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|[A-Fa-f0-9]{32,}|[A-Za-z0-9_-]{32,})\b/g, "…");
 }
 
@@ -35,6 +39,13 @@ export function shortApproval(value: string): string {
   const prefix = line.slice(0, 109);
   const boundary = prefix.lastIndexOf(" ");
   return (boundary >= 65 ? prefix.slice(0, boundary) : prefix).trimEnd() + "…";
+}
+
+/** A terminal approval dialog's command: Codex shows `$ <command>`, Claude's
+ * dialog a `Bash command` heading over it. */
+function dialogCommand(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  return (/^\s*\$ (\S.*)$/m.exec(text) ?? /^\s*Bash command\s*\n+\s*(\S.*)$/m.exec(text))?.[1].trim();
 }
 
 function commandText(value: unknown): string | undefined {
@@ -65,8 +76,10 @@ export function approvalSummary(value: ApprovalRequest): { request: string; requ
     if (line) requestKind = "question";
   } else {
     const messageCommand = /^(?:bash|shell):\s*(.+)$/is.exec(value.message ?? "")?.[1];
-    const command = commandText(input.command ?? input.cmd ?? input.commandLine ?? (Array.isArray(value.input) ? value.input : undefined)) ?? messageCommand;
-    if (command && (/^(?:Bash|Shell|exec_command|functions\.shell|bash|shell)$/i.test(tool) || input.command !== undefined || input.cmd !== undefined || input.commandLine !== undefined)) {
+    // A terminal dialog read from the pane arrives as tool "Question".
+    const shown = tool === "Question" ? dialogCommand(value.message) : undefined;
+    const command = commandText(input.command ?? input.cmd ?? input.commandLine ?? (Array.isArray(value.input) ? value.input : undefined)) ?? messageCommand ?? shown;
+    if (command && (shown !== undefined || /^(?:Bash|Shell|exec_command|functions\.shell|bash|shell)$/i.test(tool) || input.command !== undefined || input.cmd !== undefined || input.commandLine !== undefined)) {
       line = `Run: ${command}`; requestKind = "command";
     } else {
       const mcp = /^mcp__(.+?)__(.+)$/.exec(tool);

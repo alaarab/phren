@@ -31,7 +31,11 @@ describe("approval summaries", () => {
     ["Run: TOKEN=abc123 pnpm build", "Run: TOKEN=… pnpm build"],
     ["Run: PASSWORD='secret words' build", "Run: PASSWORD=… build"],
     ["Run: curl -H 'Authorization: Bearer abcdef'", "Run: curl -H 'Authorization: Bearer …'"],
-    ["Run: tool --token abc --password=def -p xyz", "Run: tool --token … --password … -p …"],
+    ["Run: tool --token abc --password=def", "Run: tool --token … --password …"],
+    ["Run: mysql -u root -phunter2 app", "Run: mysql -u root -p… app"],
+    ["Run: mkdir -p build && ssh -p 2222 host && git log -p", "Run: mkdir -p build && ssh -p 2222 host && git log -p"],
+    ["Run: pnpm --filter=cli build", "Run: pnpm --filter=cli build"],
+    ["Run: cd app; API_KEY=abc make", "Run: cd app; API_KEY=… make"],
     ["Run: ghp_1234567890 gho_1234567890 github_pat_1234567890", "Run: … … …"],
     ["Run: sk-abcdefghijklmnopqrstuvwxyz xoxb-123-abc AKIAABCDEFGHIJKLMNOP", "Run: … … …"],
     ["Run: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature", "Run: …"],
@@ -39,6 +43,15 @@ describe("approval summaries", () => {
     ["Run: curl https://alice:password@example.com/api/items?token=secret", "Run: curl https://example.com/api/items"],
   ])("redacts %# before delivery", (raw, expected) => {
     expect(shortApproval(raw)).toBe(expected);
+  });
+
+  it("reads the command out of a terminal approval dialog", () => {
+    const codex = "Would you like to run the following command?\n\n  $ curl -sI https://example.com/?token=abc\n\n› 1. Yes, proceed (y)";
+    expect(approvalSummary({ tool: "Question", message: codex })).toEqual({ request: "Run: curl -sI https://example.com/", requestKind: "command" });
+    expect(approvalSummary({ tool: "Question", message: "Bash command\n\n  git status --short\n  Show changes" }))
+      .toEqual({ request: "Run: git status --short", requestKind: "command" });
+    expect(approvalSummary({ tool: "Question", message: "Which branch should I use?" }))
+      .toEqual({ request: "Which branch should I use?", requestKind: "question" });
   });
 
   it("redacts before truncating and ends at a word boundary", () => {
