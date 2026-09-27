@@ -7,6 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Hook bridge integration tests inject fixed model catalogues and usage readers, so a developer's installed Codex, Claude, OpenCode or GitHub CLI cannot delay or change the HTTP results.
+- CLI init integration tests now verify a second init and an existing install's dry-run in separate cases, avoiding three synchronous CLI launches under one Windows test deadline.
 - A Hook installed from a source checkout can load a built `packages/code` workspace sibling through the store link; direct checkout runs resolve the sibling too. A missing build now names `pnpm --filter @phren/code build` in the Code route's 503 response.
 - `phren bridge update` on macOS retries the LaunchAgent with a fresh bootout/bootstrap when launchd accepts the first start but the Hook remains on the old version. It checks the running Hook's version after each start and reports the last kickstart error if neither brings up the update.
 - The Claude plugin now offers first-run store setup at SessionStart and ignores unrelated settings text when deciding whether its memory hooks should stand down. Its documentation and eval suite cover directory submission and onboarding.

@@ -94,6 +94,16 @@ function herdrRequestProblem(method: string, params: Record<string, unknown> | u
 }
 /** Codex 0.155.1's /permissions menu as recorded, with the cursor on `highlight` (none when undefined). */
 const recordedPermissionsMenu = recorded("codex/0.155.1/permissions-menu.txt").replace(/^› /m, "  ");
+const modelFixture = { codex: [], claude: [
+  { id: "claude-fable-5-1", name: "Fable 5.1", isDefault: true },
+  { id: "claude-opus-5", name: "Opus 5" },
+  { id: "claude-sonnet-5", name: "Sonnet 5" },
+  { id: "claude-haiku-4-5-20251001", name: "Haiku 4.5" },
+  { id: "claude-fable-5-1[1m]", name: "Fable 5.1 (1M context)" },
+], opencode: [
+  { id: "opencode-go/kimi-k3", name: "kimi-k3" },
+  { id: "openrouter/deepseek-v4", name: "deepseek-v4" },
+] };
 const permissionsMenu = (highlight: number | undefined) => highlight === undefined ? recordedPermissionsMenu
   : recordedPermissionsMenu.replace(new RegExp(`^  ${highlight + 1}\\. `, "m"), `› ${highlight + 1}. `);
 const fullAccessConfirmation = recorded("codex/0.155.1/full-access-confirmation.txt");
@@ -545,6 +555,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
     await mkdir(path.join(root, "bin"));
     await mkdir(path.join(root, "herdr"));
     await mkdir(path.join(root, "codex/sessions/2026/09/10"), { recursive: true });
+    await writeFile(path.join(root, "model-catalog.json"), JSON.stringify(modelFixture));
     await resetRecord();
     egressTargets = [];
     egress = createHttpServer();
@@ -665,6 +676,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
     hook = spawn(process.execPath, [hookBundle, "serve"], { env: { ...process.env,
       PATH: `${path.join(root, "bin")}:${process.env.PATH}`, PHREN_PATH: path.join(root, ".phren"),
       HOME: root, XDG_CONFIG_HOME: path.join(root, ".config"), PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex"),
+      NODE_ENV: "test", PHREN_TEST_MODEL_CATALOG: path.join(root, "model-catalog.json"),
       ELEVENLABS_API_KEY: "", NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: `http://127.0.0.1:${(egress!.address() as { port: number }).port}`, NO_PROXY: "localhost,127.0.0.1,::1",
       PHREN_APPROVAL_HOLD_MS: "2500", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
       stdio: ["ignore", "ignore", "pipe"] });
@@ -801,6 +813,8 @@ socket.on('close', () => process.exit(0));
       expect(legacyUsage.data.accounts.map((a: { source: string }) => a.source)).not.toContain("opencode-go");
       const fullUsage = await api("/v1/usage?sources=codex,claude,opencode,opencode-go,openrouter");
       expect(fullUsage.data.accounts.map((a: { source: string }) => a.source)).toContain("opencode-go");
+      expect(fullUsage.data.accounts.find((a: { source: string }) => a.source === "claude").windows)
+        .toEqual([{ id: "fixture", name: "Fixture", usedPercent: 0 }]);
       const workspaces = await api("/v1/workspaces?mux=herdr:default");
       expect(workspaces.data.groups[0].children[0].id).toBe("w1:t1");
       expect(workspaces.data.phren.load.cpus).toBeGreaterThan(0);
@@ -1665,6 +1679,7 @@ schedules:
     });
 
     it("lists the models a computer's agents offer", async () => {
+      expect((await api("/v1/models?source=codex")).data).toEqual({ models: [] });
       const claude = await api("/v1/models?source=claude");
       expect(claude.status).toBe(200);
       // The HTTP boundary pins Claude Code's own menu: five rows, exact ids
@@ -1677,10 +1692,18 @@ schedules:
         ["claude-fable-5-1[1m]", "Fable 5.1 (1M context)"],
       ]);
       expect(claude.data.models.filter((m: any) => m.isDefault).map((m: any) => m.id)).toEqual(["claude-fable-5-1"]);
-      // OpenCode's list comes from its own binary: every id names its provider,
-      // and a computer without opencode simply offers nothing.
+      // The injected OpenCode catalogue has fixed provider-prefixed ids.
       const opencode = (await api("/v1/models?source=opencode")).data.models;
-      expect(opencode.every((m: any) => /^[^/]+\/.+/.test(m.id) && typeof m.name === "string")).toBe(true);
+      expect(opencode.map((m: any) => [m.id, m.name])).toEqual([
+        ["opencode-go/kimi-k3", "kimi-k3"], ["openrouter/deepseek-v4", "deepseek-v4"],
+      ]);
+      expect(opencode.every((m: any) => /^[^/]+\/.+/.test(m.id))).toBe(true);
+      await writeFile(path.join(root, "model-catalog.json"), JSON.stringify({ ...modelFixture, opencode: [] }));
+      try {
+        expect((await api("/v1/models?source=opencode")).data).toEqual({ models: [] });
+      } finally {
+        await writeFile(path.join(root, "model-catalog.json"), JSON.stringify(modelFixture));
+      }
       expect((await api("/v1/models?source=../etc")).data).toEqual({ models: [] });
     });
 

@@ -1043,12 +1043,13 @@ describe("CLI integration: init", () => {
 
   afterEach(() => cleanup());
 
-  it("init with --machine persists the local machine alias", () => {
+  it("init with --machine persists the local machine alias across a second init", () => {
     const { exitCode } = runCli(
       ["init", "-y", "--machine", "test-box", "--mcp", "off"],
       cliEnv.env({ PHREN_ACTOR: "cli-test" })
     );
     expect(exitCode).toBe(0);
+    expect(runCli(["init", "-y", "--mcp", "off"], cliEnv.env({ PHREN_ACTOR: "cli-test" })).exitCode).toBe(0);
     const machineFile = path.join(cliEnv.homeDir, ".phren", ".machine-id");
     expect(fs.readFileSync(machineFile, "utf8").trim()).toBe("test-box");
   }, CLI_INTEGRATION_TIMEOUT_MS);
@@ -1063,12 +1064,11 @@ describe("CLI integration: init", () => {
   }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("init --dry-run on existing install describes update plan", () => {
-    runCli(
+    const installed = runCli(
       ["init", "-y", "--mcp", "off"],
       cliEnv.env({ PHREN_ACTOR: "cli-test" })
     );
-    // Re-running init on an existing install succeeds (idempotent).
-    expect(runCli(["init", "-y", "--mcp", "off"], cliEnv.env({ PHREN_ACTOR: "cli-test" })).exitCode).toBe(0);
+    expect(installed.exitCode).toBe(0);
     const { stdout, exitCode } = runCli(
       ["init", "--dry-run", "-y"],
       cliEnv.env()

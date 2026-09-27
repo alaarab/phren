@@ -8,10 +8,11 @@ import { agentHook } from "./agent-hooks.js";
 import { object, provider, type Json } from "./protocol.js";
 import { apnsSetupSteps } from "./push.js";
 import { speechKeyFile, speechKeyStatus, writeSpeechKey } from "./speech-key.js";
-import { AccountUsageReader, captureClaudeUsage } from "./usage.js";
+import { AccountUsageReader, captureClaudeUsage, type AccountUsage } from "./usage.js";
 import { acceptComputer, enrollComputer } from "./computers.js";
 import { addPeerFromLink, discoverComputers, linkComputer } from "./link.js";
 import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts, FANOUTS_ARCHIVE_USAGE, parseFanoutArchiveFlags } from "./fanouts.js";
+import { ModelCatalog, type AgentModel } from "./models.js";
 
 const LINK_USAGE = "Usage: phren bridge link <ssh-host> [--name <its name here>] [--as <this computer's name there>] [--back-address <address it dials>] [--yes]";
 
@@ -77,7 +78,23 @@ export async function runBridge(args: string[], version: string): Promise<number
     case "usage-statusline": await captureClaudeUsage(args[1] || ""); break;
     case "usage": console.log(JSON.stringify(await new AccountUsageReader().read(), null, 2)); break;
     case "hook": await agentHook(provider.parse(args[1])).catch(() => {}); break;
-    case "serve": await serve(version); break;
+    case "serve": {
+      // The subprocess bridge suite supplies this fixture; no agent binaries or
+      // machine-specific catalogue caches should affect its HTTP assertions.
+      const fixture = process.env.NODE_ENV === "test" ? process.env.PHREN_TEST_MODEL_CATALOG : undefined;
+      if (!fixture) { await serve(version); break; }
+      const readModels = async (source: string): Promise<AgentModel[]> => {
+        const rows = JSON.parse(await readFile(fixture, "utf8")) as Record<string, AgentModel[]>;
+        return Array.isArray(rows[source]) ? rows[source] : [];
+      };
+      const emptyUsage = (source: AccountUsage["source"]): AccountUsage => ({ source, windows: [] });
+      const modelCatalog = new ModelCatalog(() => readModels("codex"), () => readModels("claude"), () => readModels("opencode"), 0);
+      const accountUsage = new AccountUsageReader(async () => emptyUsage("codex"), Date.now,
+        async () => ({ source: "claude", windows: [{ id: "fixture", name: "Fixture", usedPercent: 0 }] }),
+        async () => emptyUsage("opencode"), async () => undefined, async () => emptyUsage("opencode-go"), async () => emptyUsage("copilot"));
+      await serve(version, { modelCatalog, accountUsage });
+      break;
+    }
     case "ssh": await dispatch(process.env.SSH_ORIGINAL_COMMAND || ""); break;
     case "install": case "update": await install(version, args.includes("--no-service")); break;
     case "uninstall": await uninstall(); break;
