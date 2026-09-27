@@ -4,6 +4,7 @@ import { connect } from "node:http2";
 import path from "node:path";
 import { z } from "zod";
 import { atomic, bridgeRoot } from "./protocol.js";
+import { approvalTitle, shortApproval, type RequestKind } from "./approval-summary.js";
 
 /** A phone registered through the phren push relay: the relay knows where to
  * deliver, and `key` (32 bytes, base64url) encrypts what the notification says
@@ -36,9 +37,7 @@ const configSchema = z.object({
 type APNsConfig = z.infer<typeof configSchema>;
 
 export interface ApprovalPush { binding: string; provider: string; question: boolean; expiresAt: string;
-  /** What the request is, when the provider names it (an opencode permission
-   * ask): shown in the alert so the phone can answer without opening Phren. */
-  title?: string; message?: string }
+  project?: string; computer?: string; request?: string; requestKind?: RequestKind }
 export interface FanoutBlockedPush { job: string; label: string; provider: string; reason: string }
 export type SchedulePushKind = "scheduleStarted" | "scheduleFinished" | "scheduleFailed" | "scheduleBlocked";
 export interface SchedulePush {
@@ -59,15 +58,16 @@ export function scheduleCollapseId(kind: SchedulePushKind, runId: string): strin
 }
 
 export function approvalPushPayload(value: ApprovalPush, host?: string): Record<string, unknown> {
-  const label = value.provider === "claude" ? "Claude" : value.provider === "codex" ? "Codex" : value.provider === "opencode" ? "opencode" : "Your agent";
+  const request = shortApproval(value.request ?? "Open Phren to review the request.") || "Open Phren to review the request.";
   return {
     aps: {
-      alert: { title: value.title ?? (value.question ? `${label} has a question` : `${label} needs approval`),
-        body: value.message ?? "Open Phren to review the request." },
+      alert: { title: approvalTitle(value.provider, value.project, value.computer), body: request },
       sound: "default", category: value.question ? "PHREN_AGENT_QUESTION" : "PHREN_AGENT_APPROVAL",
       "interruption-level": "time-sensitive",
     },
-    phren: { version: 1, binding: value.binding, expiresAt: value.expiresAt, ...(host ? { host } : {}) },
+    phren: { version: 1, binding: value.binding, expiresAt: value.expiresAt, ...(host ? { host } : {}),
+      agent: value.provider, ...(value.project ? { project: value.project } : {}), ...(value.computer ? { computer: value.computer } : {}),
+      request, requestKind: value.requestKind ?? (value.question ? "question" : "other") },
   };
 }
 

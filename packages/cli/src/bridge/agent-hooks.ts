@@ -7,6 +7,7 @@ import { mkdir, readFile, chmod, unlink, lstat } from "node:fs/promises";
 import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { findPane, knownPanes, paneForCodexSession, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
 import { underCodexDaemon } from "./codex-daemon.js";
@@ -18,6 +19,8 @@ import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
 import { archiveFinishedFanouts, blockedFanouts, fanoutAsking } from "./fanouts.js";
 import { ensureGrant, listGrants, matchGrant, type Grant } from "./grants.js";
 import { ApprovalPushService } from "./push.js";
+import { approvalSummary, type RequestKind } from "./approval-summary.js";
+import { computerDisplayName } from "./pair.js";
 import { intervalFromEnv } from "./limits.js";
 import { answerClaudeQuestionDialog, claudeQuestionDialog, type DialogAnswer, type DialogQuestion } from "./claude-question-dialog.js";
 import { answeredQuestionInput, numberedDialog, opencodePermissionDialog, passwordLine, permissionPrompt, questionChoice, terminalChoice, terminalQuestions, visibleTerminalChoice,
@@ -42,13 +45,12 @@ const APPROVAL_HOLD_MS = (() => {
 })();
 /** A pane's terminal dialog is read at most once per this window. */
 const DIALOG_READ_MS = intervalFromEnv("PHREN_DIALOG_THROTTLE_MS", 3_000);
-const AGENT_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", opencode: "OpenCode", copilot: "Copilot", phren: "phren" };
 /** How long a pushed terminal dialog can be answered from its notification. */
 const DIALOG_PUSH_MS = 10 * 60_000;
 const FANOUT_SWEEP_MS = 5_000;
 const FANOUT_ARCHIVE_MS = 60 * 60 * 1000;
 
-interface Pending { target: Target; response: ServerResponse; tool: string; input: unknown; message: string; title?: string; choice?: TerminalChoice; expiresAt: string; timer: NodeJS.Timeout; conductor?: { action: "dispatch" | "hand_off"; project?: string; computer?: string } }
+interface Pending { target: Target; response: ServerResponse; tool: string; input: unknown; message: string; request: string; requestKind: RequestKind; title?: string; choice?: TerminalChoice; expiresAt: string; timer: NodeJS.Timeout; conductor?: { action: "dispatch" | "hand_off"; project?: string; computer?: string } }
 
 /** A conductor `dispatch` or `hand_off` permission ask the Hook can answer
  * itself under a standing grant, or offer the phone two grant-writing answers. */
@@ -72,7 +74,7 @@ export function conductorCall(tool: string, input: unknown): Pending["conductor"
  * A fan-out worker's ask is shown on its parent conversation under an action
  * id of the parent's shape, and still answers the worker's own session; with
  * no parent pane in reach it is answered from its push alone. */
-interface OpencodeHeld { target?: Target; request: Json; expiresAt: number; fanout?: { session: string; actionId: string } }
+interface OpencodeHeld { target?: Target; request: Json; requestLine: string; expiresAt: number; fanout?: { session: string; actionId: string } }
 
 export type DeliveryOutcome = "delivered" | "blocked" | "pending";
 interface Delivery { source: Provider; session: string; settle: (outcome: DeliveryOutcome) => void; timer: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
@@ -100,7 +102,7 @@ export class AgentHooks {
    * from the pane's own numbered lines, whose answers gain an Enter, and
    * `questions` carries a released AskUserQuestion's normalized question set
    * with the index currently being answered. */
-  private terminalPrompts = new Map<string, { tool: string; message: string; choice?: TerminalChoice; questions?: TerminalQuestion[]; questionIndex?: number; dialog?: boolean; released?: boolean; at: number }>();
+  private terminalPrompts = new Map<string, { tool: string; message: string; request?: string; requestKind?: RequestKind; choice?: TerminalChoice; questions?: TerminalQuestion[]; questionIndex?: number; dialog?: boolean; released?: boolean; at: number }>();
   /** The last time each pane's terminal lines were read for a dialog, so a
    * status tick reads them at most once per three seconds per pane. */
   private dialogReads = new Map<string, number>();
@@ -141,7 +143,12 @@ export class AgentHooks {
   private fanoutSeen = new Map<string, number>();
   private fanoutTimer?: NodeJS.Timeout;
   private fanoutArchiveTimer?: NodeJS.Timeout;
-  constructor(readonly push = new ApprovalPushService(), private modules?: ModuleSnapshot) {}
+  /** The name the phone paired with (macOS Computer Name), for approval alerts;
+   * the short host name until that lookup answers. */
+  private computerName = hostname().replace(/\.local$/i, "").split(".")[0] || "Computer";
+  constructor(readonly push = new ApprovalPushService(), private modules?: ModuleSnapshot) {
+    void computerDisplayName().then(name => { this.computerName = name; }, () => {});
+  }
   private approvalsDirectory(): string { return path.join(phrenStoreRoot(), ".runtime", "approvals"); }
   private scheduleOpencodeSweep() {
     if (this.closed || this.opencodeDebounce) return;
@@ -182,18 +189,21 @@ export class AgentHooks {
       if (!target && !asking) continue;
       const expiresAt = typeof request.expiresAt === "string" ? Date.parse(request.expiresAt) : NaN;
       if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) continue;
+      const pane = target && !asking?.worktree ? findPane(await snapshot(target.server).catch(() => ({})),
+        { workspace: target.workspace, tab: target.tab, pane: target.pane, source: target.source }) : undefined;
+      const cwd = asking?.worktree ?? (pane ? await trustedDirectory(pane).catch(() => undefined) : undefined);
+      const summary = approvalSummary({ tool: String(request.type ?? ""), input: request, message: typeof request.message === "string" ? request.message : undefined, cwd });
       // The answer route checks an action id by the parent's source: a UUID
       // for Claude and Codex, a plain token for opencode.
       const fanout = asking ? { session: match[1], actionId: asking.parent.provider === "opencode" ? randomUUID().replaceAll("-", "") : randomUUID() } : undefined;
-      this.opencode.set(id, { ...(target ? { target } : {}), request, expiresAt, ...(fanout ? { fanout } : {}) });
+      this.opencode.set(id, { ...(target ? { target } : {}), request, requestLine: summary.request, expiresAt, ...(fanout ? { fanout } : {}) });
       if (!this.push.available) continue;
       const binding = randomUUID();
       this.pushBindings.add(binding, { action: id, expiresAt });
-      const title = typeof request.title === "string" ? request.title : `Allow ${String(request.type ?? "action")}?`;
-      const message = typeof request.message === "string" ? request.message : "";
       // The held request is what stops a later sweep from pushing again; a
       // failed delivery only drops the binding and leaves the card in place.
-      void this.push.notify({ binding, provider: "opencode", question: false, expiresAt: String(request.expiresAt), title, message })
+      void this.push.notify({ binding, provider: "opencode", question: false, expiresAt: String(request.expiresAt),
+        ...(cwd ? { project: path.basename(cwd) } : {}), computer: this.computerName, ...summary })
         .then(delivered => { if (!delivered) this.pushBindings.dropAction(id); })
         .catch(() => {});
     }
@@ -328,8 +338,10 @@ export class AgentHooks {
     const tool = String(body.tool || "action").slice(0, 200);
     const questions = tool === "AskUserQuestion" ? terminalQuestions(body.input) : undefined;
     const choice = questions ? questionChoice(questions, 0) : terminalChoice(body.input);
+    const summary = approvalSummary({ tool, input: body.input, question: tool === "AskUserQuestion" });
     this.terminalPrompts.set(JSON.stringify(target), { tool,
       message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...(choice ? { choice } : {}),
+      ...summary,
       ...(questions ? { questions, questionIndex: 0 } : {}), at: Date.now() });
     while (this.terminalPrompts.size > 64) this.terminalPrompts.delete(this.terminalPrompts.keys().next().value!);
   }
@@ -339,7 +351,7 @@ export class AgentHooks {
     const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
     if (!entry) return undefined;
     if (Date.now() - entry.at > 900_000) { this.terminalPrompts.delete(key); return undefined; }
-    return { toolName: entry.tool, message: entry.message, ...(entry.choice ? { choice: entry.choice } : {}),
+    return { toolName: entry.tool, message: entry.message, ...(entry.request ? { request: entry.request } : {}), ...(entry.choice ? { choice: entry.choice } : {}),
       ...(entry.questions?.length ? { questions: entry.questions, questionIndex: entry.questionIndex ?? 0 } : {}), at: new Date(entry.at).toISOString() };
   }
   clearTerminalPrompt(target: Target) { this.terminalPrompts.delete(JSON.stringify(target)); }
@@ -365,7 +377,8 @@ export class AgentHooks {
       if ([...this.pending.values()].includes(held)) {
         held.choice = prompt.choice;
         held.title = prompt.title;
-        if (held.choice) this.terminalPrompts.set(key, { tool: held.tool, message: held.message, choice: held.choice, dialog: true, at: now });
+        if (held.choice) this.terminalPrompts.set(key, { tool: held.tool, message: held.message,
+          request: held.request, requestKind: held.requestKind, choice: held.choice, dialog: true, at: now });
         else this.terminalPrompts.delete(key);
       }
       return;
@@ -421,7 +434,9 @@ export class AgentHooks {
     }
     // No dialog left: a request answered in the terminal itself.
     if (!dialog?.title) { if (entry) this.terminalPrompts.delete(key); settleBlockedPane(target.server, target.pane); return; }
-    this.terminalPrompts.set(key, { tool: "Question", message: dialog.title, choice: dialog, dialog: true, at: now });
+    this.terminalPrompts.set(key, { tool: "Question", message: dialog.title,
+      ...approvalSummary({ tool: "Question", message: dialog.title }),
+      choice: dialog, dialog: true, at: now });
     while (this.terminalPrompts.size > 64) this.terminalPrompts.delete(this.terminalPrompts.keys().next().value!);
   }
   /** Resolve a phone option identifier. Real shortcuts retain their key path;
@@ -590,6 +605,7 @@ export class AgentHooks {
   approval(target: Target): Json | undefined {
     const pending = [...this.pending.entries()].find(([, p]) => JSON.stringify(p.target) === JSON.stringify(target));
     if (pending) return { actionId: pending[0], toolName: pending[1].tool, title: pending[1].choice?.title ?? pending[1].title, message: pending[1].message,
+      request: pending[1].request,
       details: pending[1].message, terminalOnly: target.source === "codex" && !pending[1].choice,
       ...(pending[1].choice ? { choice: pending[1].choice } : {}), expiresAt: pending[1].expiresAt,
       ...(pending[1].conductor ? { conductor: pending[1].conductor } : {}) };
@@ -598,13 +614,15 @@ export class AgentHooks {
     // A fan-out worker this conversation started is waiting on the owner.
     const worker = this.fanoutHeld(target)[0];
     return worker?.fanout ? { actionId: worker.fanout.actionId, toolName: worker.request.type, title: worker.request.title,
-      message: worker.request.message, expiresAt: worker.request.expiresAt } : undefined;
+      message: worker.request.message, request: worker.requestLine, expiresAt: worker.request.expiresAt } : undefined;
   }
   private opencodeApproval(target: Target): Json | undefined {
     const held = [...this.opencode.values()].find(value => !value.fanout && JSON.stringify(value.target) === JSON.stringify(target));
-    if (held) return { actionId: held.request.id, toolName: held.request.type, title: held.request.title, message: held.request.message, expiresAt: held.request.expiresAt };
+    if (held) return { actionId: held.request.id, toolName: held.request.type, title: held.request.title, message: held.request.message, request: held.requestLine, expiresAt: held.request.expiresAt };
     const request = opencodeRequest(target.session);
-    return request ? { actionId: request.id, toolName: request.type, title: request.title, message: request.message, expiresAt: request.expiresAt } : undefined;
+    return request ? { actionId: request.id, toolName: request.type, title: request.title, message: request.message,
+      request: approvalSummary({ tool: String(request.type ?? ""), input: request, message: typeof request.message === "string" ? request.message : undefined }).request,
+      expiresAt: request.expiresAt } : undefined;
   }
   /** Live fan-out worker asks shown on this parent conversation, oldest first. */
   private fanoutHeld(target: Target): OpencodeHeld[] {
@@ -782,8 +800,11 @@ export class AgentHooks {
       this.dialogPushes.set(key, { action, title });
       this.dialogActions.set(action, { target, choice: entry.choice, expiresAt });
       this.pushBindings.add(binding, { action, expiresAt });
-      void this.push.notify({ binding, provider: target.source, question: false, expiresAt: new Date(expiresAt).toISOString(),
-        title: `${AGENT_NAMES[target.source] ?? "An agent"} needs your approval`, message: title.slice(0, 1_000) })
+      const cwd = await trustedDirectory(pane).catch(() => undefined);
+      const summary = entry.request ? { request: entry.request, requestKind: entry.requestKind ?? "other" }
+        : approvalSummary({ tool: entry.tool, message: title });
+      void this.push.notify({ binding, provider: target.source, question: entry.tool === "AskUserQuestion", expiresAt: new Date(expiresAt).toISOString(),
+        ...(cwd ? { project: path.basename(cwd) } : {}), computer: this.computerName, ...summary })
         .then(delivered => { if (!delivered) this.dropDialogPush(key); }).catch(() => this.dropDialogPush(key));
     }
     for (const [key, hold] of this.releasedHolds) {
@@ -917,6 +938,7 @@ export class AgentHooks {
         this.dialogReads.delete(JSON.stringify(target));
         const conductor = body.event === "PermissionRequest" ? conductorCall(String(body.tool || "action"), body.input) : undefined;
         const locallyWatched = this.watching.has(JSON.stringify(target)) || this.overview.has(target.server);
+        const cwd = typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane).catch(() => undefined);
         // When the hold ends the request stays in the terminal. A pushed
         // notification keeps working: its binding waits for the pane's dialog
         // and then answers that, instead of going dead with the hold.
@@ -929,8 +951,9 @@ export class AgentHooks {
         }, APPROVAL_HOLD_MS);
         const expiresAt = new Date(Date.now() + APPROVAL_HOLD_MS).toISOString();
         const { choice, title } = permissionPrompt(String(body.tool || "action"), body.input);
+        const summary = approvalSummary({ tool: String(body.tool || "action"), input: body.input, cwd, question: body.tool === "AskUserQuestion" });
         this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input, title,
-          message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...(choice ? { choice } : {}), expiresAt, timer,
+          message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...summary, ...(choice ? { choice } : {}), expiresAt, timer,
           ...(conductor ? { conductor } : {}) });
         res.on("close", () => { clearTimeout(timer); this.pending.delete(action); this.pushedHolds.delete(action); if (!released) this.dropPushBindings(action); });
         if (this.push.available) {
@@ -938,7 +961,7 @@ export class AgentHooks {
           this.pushBindings.add(binding, { action, expiresAt: pushExpiresAt });
           this.pushedHolds.set(action, pushExpiresAt);
           void this.push.notify({ binding, provider: target.source, question: body.tool === "AskUserQuestion",
-            expiresAt: new Date(pushExpiresAt).toISOString() }).catch(() => false).then(delivered => {
+            expiresAt: new Date(pushExpiresAt).toISOString(), ...(cwd ? { project: path.basename(cwd) } : {}), computer: this.computerName, ...summary }).catch(() => false).then(delivered => {
             if (!delivered) {
               this.pushBindings.consume(binding); this.pushedHolds.delete(action);
               const pending = this.pending.get(action);

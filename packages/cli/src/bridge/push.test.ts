@@ -9,26 +9,37 @@ import { PushBindingStore } from "./agent-hooks.js";
 import { approvalPushCheck } from "./command.js";
 
 describe("approval push payload", () => {
-  it("contains only a generic alert and opaque expiring binding", () => {
+  it("sends the redacted request and its location with the existing binding", () => {
     const value = approvalPushPayload({
       binding: "6fd8c056-032d-4219-97d7-a506d672ccf2", provider: "codex", question: false,
-      expiresAt: "2026-09-19T20:00:55.000Z",
+      expiresAt: "2026-09-19T20:00:55.000Z", project: "phren", computer: "Omarchy",
+      request: "Run: curl --token abc https://me:pass@example.com/api?key=secret", requestKind: "command",
     }, "73d445d1-4b31-43fc-9185-65b60c6f7125");
     expect(value).toEqual({
-      aps: { alert: { title: "Codex needs approval", body: "Open Phren to review the request." }, sound: "default",
+      aps: { alert: { title: "Codex · phren on Omarchy", body: "Run: curl --token … https://example.com/api" }, sound: "default",
         category: "PHREN_AGENT_APPROVAL", "interruption-level": "time-sensitive" },
       phren: { version: 1, binding: "6fd8c056-032d-4219-97d7-a506d672ccf2", expiresAt: "2026-09-19T20:00:55.000Z",
-        host: "73d445d1-4b31-43fc-9185-65b60c6f7125" },
+        host: "73d445d1-4b31-43fc-9185-65b60c6f7125", agent: "codex", project: "phren", computer: "Omarchy",
+        request: "Run: curl --token … https://example.com/api", requestKind: "command" },
     });
     const encoded = JSON.stringify(value);
     expect(encoded).not.toContain("workspace"); expect(encoded).not.toContain("session");
-    expect(encoded).not.toContain("actionId"); expect(encoded).not.toContain("command");
+    expect(encoded).not.toContain("actionId"); expect(encoded).not.toContain("secret");
   });
 
-  it("requires questions to open Phren instead of offering blind approval", () => {
-    const value = approvalPushPayload({ binding: "a", provider: "claude", question: true, expiresAt: "2026-09-19T20:00:55.000Z" });
+  it("keeps the question category and the same title and request shape", () => {
+    const value = approvalPushPayload({ binding: "a", provider: "claude", question: true, expiresAt: "2026-09-19T20:00:55.000Z",
+      project: "phren", computer: "Desk", request: "Ship this now?", requestKind: "question" });
     expect((value.aps as any).category).toBe("PHREN_AGENT_QUESTION");
+    expect((value.aps as any).alert).toEqual({ title: "Claude · phren on Desk", body: "Ship this now?" });
+    expect((value.phren as any)).toMatchObject({ agent: "claude", request: "Ship this now?", requestKind: "question" });
     expect(JSON.stringify(value)).not.toContain("Approve");
+  });
+
+  it("uses a short fallback when the Hook has no request details", () => {
+    const value = approvalPushPayload({ binding: "a", provider: "copilot", question: false, expiresAt: "2026-09-19T20:00:55.000Z" });
+    expect((value.aps as any).alert).toEqual({ title: "Copilot", body: "Open Phren to review the request." });
+    expect((value.phren as any)).toMatchObject({ agent: "copilot", request: "Open Phren to review the request.", requestKind: "other" });
   });
 
   it("keeps separate phones registered and rotates only the matching phone token", () => {
@@ -154,7 +165,7 @@ describe("push honesty", () => {
     expect(approvalPushCapability(push.status)).toBe("relay");
 
     const payload = approvalPushPayload({ binding: device.deviceID, provider: "claude", question: false,
-      expiresAt: "2026-09-19T20:00:55.000Z", message: "x".repeat(5_000) }, device.hostID);
+      expiresAt: "2026-09-19T20:00:55.000Z", request: "x".repeat(5_000) }, device.hostID);
     let sent: { url: string; headers: Record<string, string>; body: string } | undefined;
     const fetcher = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
       sent = { url, headers: init.headers, body: init.body };
@@ -170,7 +181,7 @@ describe("push honesty", () => {
     const decipher = createDecipheriv("chacha20-poly1305", Buffer.from(key, "base64url"), sealed.subarray(0, 12), { authTagLength: 16 });
     decipher.setAuthTag(sealed.subarray(sealed.length - 16));
     const content = JSON.parse(Buffer.concat([decipher.update(sealed.subarray(12, sealed.length - 16)), decipher.final()]).toString("utf8"));
-    expect(content).toMatchObject({ t: "Claude needs approval", c: "PHREN_AGENT_APPROVAL", p: { binding: device.deviceID, host: device.hostID } });
+    expect(content).toMatchObject({ t: "Claude", c: "PHREN_AGENT_APPROVAL", p: { binding: device.deviceID, host: device.hostID } });
 
     const gone = (async () => new Response("{}", { status: 410 })) as unknown as typeof fetch;
     expect(await sendThroughRelay(relay, payload, { expiration: "0", collapseId: "c" }, gone)).toBe("gone");

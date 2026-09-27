@@ -20,9 +20,9 @@ const bindingFile = (bridge: string) => path.join(bridge, "bindings", "default",
 
 /** A push service that records what would have gone to APNs. */
 function fakePush() {
-  const sent: { binding: string; provider: string; title?: string; message?: string }[] = [];
+  const sent: { binding: string; provider: string; request?: string; requestKind?: string; project?: string; computer?: string }[] = [];
   return { sent, service: { available: true,
-    notify: vi.fn(async (value: { binding: string; provider: string; title?: string; message?: string }) => { sent.push(value); return true; }),
+    notify: vi.fn(async (value: { binding: string; provider: string; request?: string; requestKind?: string; project?: string; computer?: string }) => { sent.push(value); return true; }),
     notifyFanoutBlocked: vi.fn(async () => true) } as unknown as ApprovalPushService };
 }
 
@@ -48,7 +48,8 @@ describe("opencode file approvals", () => {
       title: "Allow bash?", message: "bash: rm -rf /tmp/x", createdAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 30_000).toISOString() }));
     const hooks = new AgentHooks();
-    expect(hooks.approval(target)).toMatchObject({ actionId: "per_abc123", toolName: "bash", title: "Allow bash?", message: "bash: rm -rf /tmp/x" });
+    expect(hooks.approval(target)).toMatchObject({ actionId: "per_abc123", toolName: "bash", title: "Allow bash?",
+      message: "bash: rm -rf /tmp/x", request: "Run: rm -rf /tmp/x" });
     const state = { panes: [{ pane_id: "w1:p1", workspace_id: "w1", tab_id: "w1:t1", agent: "opencode",
       agent_session: { kind: "id", agent: "opencode", value: session } }] };
     expect(hooks.pendingPanes("default", state)).toEqual(new Set(["w1:p1"]));
@@ -87,10 +88,10 @@ describe("opencode file approvals", () => {
       createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 30_000).toISOString() }));
     await Promise.all([hooks.sweepOpencodeApprovals(), hooks.sweepOpencodeApprovals()]);
     expect(push.sent).toHaveLength(1);
-    expect(push.sent[0]).toMatchObject({ provider: "opencode", title: "Allow external_directory?", message: "external_directory: /private/tmp/x" });
+    expect(push.sent[0]).toMatchObject({ provider: "opencode", request: "external_directory: /private/tmp/x", requestKind: "tool" });
     expect(push.sent[0].binding).toMatch(/^[0-9a-f-]{36}$/);
     expect(hooks.approval(target)).toMatchObject({ actionId: "per_ext1", toolName: "external_directory",
-      title: "Allow external_directory?", message: "external_directory: /private/tmp/x" });
+      title: "Allow external_directory?", message: "external_directory: /private/tmp/x", request: "external_directory: /private/tmp/x" });
   });
 
   it("answers a pushed opencode request by writing the answer file", async () => {
@@ -126,6 +127,7 @@ describe("opencode file approvals", () => {
     await writeFile(bindingFile(bridge), JSON.stringify({ terminal: "term-1", source: "opencode", session, pids: [process.pid], workspace: "w1", tab: "w1:t1" }));
     await hooks.sweepOpencodeApprovals();
     expect(push.sent).toHaveLength(1);
+    expect(push.sent[0]).toMatchObject({ project: path.basename(store), request: "external_directory: m" });
     const approval = hooks.approval(target);
     expect(String(approval?.actionId)).toMatch(/^[0-9a-f]{32}$/);
     await hooks.answer(target, String(approval!.actionId), "deny");

@@ -138,7 +138,7 @@ describe.skipIf(process.platform === "win32")("a Codex approval under automatic 
     screen = CODEX_DIALOG; status = "blocked";
     await hooks.observeWaitingPanes("default", [pane()], async () => target);
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ title: "Codex needs your approval" });
+    expect(sent[0]).toMatchObject({ provider: "codex", request: expect.stringContaining("Run: curl -sI https://example.com"), requestKind: "command" });
     expect(hooks.terminalPrompt(target)).toMatchObject({ choice: { options: expect.arrayContaining([expect.objectContaining({ key: "y" })]) } });
     await hooks.answerPush(sent[0].binding, "approve");
     expect(vi.mocked(rpc).mock.calls.filter(call => call[1] === "agent.send_keys").map(call => call[2]?.keys)).toEqual([["y"]]);
