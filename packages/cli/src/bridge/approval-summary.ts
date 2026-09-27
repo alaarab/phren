@@ -64,7 +64,7 @@ function commandText(value: unknown): string | undefined {
 function relativeFile(file: string, cwd?: string): string {
   if (!cwd || !path.isAbsolute(file) || !path.isAbsolute(cwd)) return file;
   const relative = path.relative(cwd, file);
-  return relative && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative) ? relative : file;
+  return relative && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative) ? relative.split(path.sep).join("/") : file;
 }
 
 export function approvalSummary(value: ApprovalRequest): { request: string; requestKind: RequestKind } {

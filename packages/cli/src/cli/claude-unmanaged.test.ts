@@ -18,6 +18,9 @@ beforeEach(() => {
   const root = fs.mkdtempSync(path.join(scratch, "claude-unmanaged-"));
   temp = { path: root, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
   vi.stubEnv("HOME", temp.path);
+  // os.homedir reads USERPROFILE on Windows; keep the native transcript
+  // boundary in the same isolated fixture on every CI platform.
+  vi.stubEnv("USERPROFILE", temp.path);
   store = path.join(temp.path, ".phren");
   fs.mkdirSync(store);
   const project = path.join(temp.path, ".claude", "projects", "-repo");
