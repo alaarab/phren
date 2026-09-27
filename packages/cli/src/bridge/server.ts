@@ -43,7 +43,7 @@ export { capabilities, capabilitiesForModules, requireRoute } from "./server-rou
 export { streamCloseReason } from "./server-stream.js";
 export { herdrAgentName, launchSession } from "./server-launch.js";
 
-export async function serve(version: string): Promise<void> {
+export async function serve(version: string, options: { modelCatalog?: ModelCatalog; accountUsage?: AccountUsageReader } = {}): Promise<void> {
   process.umask(0o077);
   const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
   if (!modules.has("hook")) throw new BridgeError(404, disabledHint("hook"));
@@ -72,11 +72,11 @@ export async function serve(version: string): Promise<void> {
   if ("approvalPush" in activeCapabilities) {
     Object.defineProperty(activeCapabilities, "approvalPush", { enumerable: true, get: () => approvalPushCapability(agentHooks.push.status) });
   }
-  const modelCatalog = new ModelCatalog();
+  const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
   const sideQuestions = new SideQuestions();
   const contextUsage = new WorkspaceContextUsage();
-  const accountUsage = new AccountUsageReader();
+  const accountUsage = options.accountUsage ?? new AccountUsageReader();
   const resources = new ResourceMonitor();
   const tabActivity = new TabActivityStore();
   const codexQuestions = new CodexQuestions();
