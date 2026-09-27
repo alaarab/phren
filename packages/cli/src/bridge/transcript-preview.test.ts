@@ -130,6 +130,35 @@ describe("live reply previews", () => {
     expect(delta).toHaveBeenCalledTimes(2);
   });
 
+  it("clears a Codex 0.157 commentary preview when its saved message precedes a shell call", async () => {
+    const file = path.join(await scratch(), "rollout.jsonl");
+    const row = (raw: object) => JSON.stringify(raw) + "\n";
+    await writeFile(file, row({ type: "event_msg", timestamp: start, payload: { type: "task_started" } })
+      + row({ type: "event_msg", payload: { type: "agent_message_delta", delta: "Checking files" } }));
+    const history = new TranscriptReader(file, "codex");
+    let live = { turnStartedAt: start, text: "Checking files" };
+    const delta = vi.fn(async () => live);
+    const stream = new TranscriptPreviewStream({ ...target, source: "codex" }, async () => "", delta);
+    stream.observe((await history.read()).entries);
+    expect(await stream.update("working", file, 0)).toEqual({ preview: live });
+
+    await appendFile(file, row({ type: "event_msg", payload: { type: "item_completed",
+      item: { type: "AgentMessage", id: "msg-1", phase: "commentary", content: [{ type: "Text", text: "Checking files and running tests." }] } } })
+      + row({ type: "response_item", payload: { type: "message", id: "msg-1", role: "assistant", phase: "commentary",
+        content: [{ type: "output_text", text: "Checking files and running tests." }] } })
+      + row({ type: "event_msg", payload: { type: "item_completed", item: { type: "CommandExecution", id: "shell-1",
+        command: ["/bin/sh", "-lc", "pwd"], cwd: "/work/app", status: "completed", exit_code: 0, aggregated_output: "/work/app" } } }));
+    const entries = (await history.read()).entries;
+    expect(entries.some(entry => (entry.raw as any).payload?.role === "assistant")).toBe(true);
+    expect(entries.some(entry => (entry.raw as any).payload?.name === "exec_command")).toBe(true);
+    stream.observe(entries);
+    // The delta source can lag behind the completed row while the turn stays working.
+    expect(await stream.update("working", file, 600)).toEqual({ preview: null });
+    expect(await stream.update("working", file, 1200)).toBeUndefined();
+    live = { turnStartedAt: start, text: "The shell output is ready" };
+    expect(await stream.update("working", file, 1800)).toEqual({ preview: live });
+  });
+
   it("clears at stop and does not resurrect a preview from unchanged terminal content", async () => {
     const pane = vi.fn(async () => "❯ Explain this\n⏺ Partial reply\n❯");
     const stream = new TranscriptPreviewStream(target, pane); stream.observe([user]);
