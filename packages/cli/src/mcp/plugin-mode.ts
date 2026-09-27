@@ -57,7 +57,7 @@ export function setupMessage(): string {
     "",
     "Setup runs `phren init --yes`, which:",
     "- creates the store at ~/.phren (a local git repo; nothing leaves the machine unless you add a remote)",
-    "- registers phren's MCP server and memory hooks in ~/.claude/settings.json (the plugin's own copies then stand down)",
+    "- wires Claude Code's memory hooks and MCP server (the plugin yields wherever init's wiring loads)",
     "- wires any other agents it detects (Codex, Copilot CLI, Cursor, VS Code)",
     "",
     "Ask the user before running it. Afterwards, Claude Code needs a restart to load the memory tools.",
