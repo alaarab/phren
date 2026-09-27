@@ -31,7 +31,7 @@ import {
 } from "./config.js";
 import type { HookEntry, HookMap } from "./config.js";
 import { DEFAULT_PHREN_PATH, log } from "./shared.js";
-import { sweepProjectMirrors } from "./teardown.js";
+import { removeGeneratedHomeFiles, sweepProjectMirrors } from "./teardown.js";
 
 const PHREN_NPM_PACKAGE_NAME = "@phren/cli";
 
@@ -442,15 +442,7 @@ export async function runUninstall(opts: { yes?: boolean } = {}) {
     }
   } catch (err: unknown) { debugLog(`uninstall: cleanup failed for ${machineFile}: ${errorMessage(err)}`); }
 
-  const contextFile = homePath(".phren-context.md");
-  try {
-    if (fs.existsSync(contextFile)) {
-      fs.unlinkSync(contextFile);
-      log(`  Removed machine context file (${contextFile})`);
-    }
-  } catch (err: unknown) {
-    debugLog(`uninstall: cleanup failed for ${contextFile}: ${errorMessage(err)}`);
-  }
+  removeGeneratedHomeFiles();
 
   // Remove global AGENTS.md symlink (created by linkGlobal -> ~/.claude/CLAUDE.md)
   const globalClaudeLink = homePath(".claude", "CLAUDE.md");

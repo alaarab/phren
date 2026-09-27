@@ -434,7 +434,7 @@ describe("link", () => {
       expect(content).toContain("memory test project");
     });
 
-    it("rebuildMemory preserves existing header in MEMORY.md", async () => {
+    it("rebuildMemory preserves notes before and after the managed projects block", async () => {
       setupProfile(["preserve-project"]);
 
       const projectDir = path.join(tmpRoot, "projects", "preserve-project");
@@ -452,7 +452,7 @@ describe("link", () => {
       fs.mkdirSync(memDir, { recursive: true });
       fs.writeFileSync(
         path.join(memDir, "MEMORY.md"),
-        "# Custom Header\n\nMy custom notes here.\n\n<!-- phren:projects:start -->\nold data\n<!-- phren:projects:end -->\n"
+        "# Custom Header\n\nMy custom notes here.\n\n<!-- phren:projects:start -->\nold data\n<!-- phren:projects:end -->\n\n## Owner footer\nKeep this too.\n"
       );
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test" });
@@ -461,6 +461,37 @@ describe("link", () => {
       expect(content).toContain("# Custom Header");
       expect(content).toContain("My custom notes here");
       expect(content).toContain("Preserve Project");
+      expect(content.endsWith("\n\n## Owner footer\nKeep this too.\n")).toBe(true);
+      expect(content).not.toContain("old data");
+      await runLink(phrenPath, { machine: "test-machine", profile: "test" });
+      expect(fs.readFileSync(path.join(memDir, "MEMORY.md"), "utf8")).toBe(content);
+    });
+
+    it.each([
+      ["unmarked notes", "# My memory\n\nDo not lose this note.", true],
+      ["missing end marker", "# My memory\n<!-- phren:projects:start -->\nKeep this ambiguous content.\n", false],
+      ["missing start marker", "# My memory\n<!-- phren:projects:end -->\nKeep this ambiguous content.\n", false],
+      ["reversed markers", "<!-- phren:projects:end -->\nKeep this.\n<!-- phren:projects:start -->", false],
+    ])("rebuildMemory preserves %s", async (_label, existing, addBlock) => {
+      const { rebuildMemory } = await import("./link/context.js");
+      fs.mkdirSync(path.join(phrenPath, "notes-project"), { recursive: true });
+      fs.writeFileSync(path.join(phrenPath, "notes-project", "summary.md"), "**What:** Current summary\n");
+      const projectKey = homeDir.replace(/[/\\:]/g, "-").replace(/^-/, "");
+      const memDir = path.join(homeDir, ".claude", "projects", projectKey, "memory");
+      fs.mkdirSync(memDir, { recursive: true });
+      const memory = path.join(memDir, "MEMORY.md");
+      fs.writeFileSync(memory, existing);
+
+      rebuildMemory(phrenPath, ["notes-project"]);
+      const updated = fs.readFileSync(memory, "utf8");
+      if (addBlock) {
+        expect(updated.startsWith(existing + "\n\n")).toBe(true);
+        expect(updated).toContain("| Notes Project | Current summary | MEMORY-notes-project.md |");
+      } else {
+        expect(updated).toBe(existing);
+      }
+      rebuildMemory(phrenPath, ["notes-project"]);
+      expect(fs.readFileSync(memory, "utf8")).toBe(updated);
     });
 
     it("skips projects not found on disk", async () => {

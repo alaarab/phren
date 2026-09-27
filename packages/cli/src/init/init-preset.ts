@@ -24,7 +24,7 @@ import {
   resolveManagementCapabilities,
   type ManagementCapabilities,
 } from "./management-preset.js";
-import { removePhrenHomeSymlinks, removePhrenWrappers, sweepAgentSkillSymlinks, sweepProjectMirrors } from "./teardown.js";
+import { removeGeneratedHomeFiles, removePhrenHomeSymlinks, removePhrenWrappers, sweepAgentSkillSymlinks, sweepProjectMirrors } from "./teardown.js";
 import { printSelfWiringSnippet } from "./self-wiring.js";
 import { DEFAULT_PHREN_PATH, log, confirmPrompt } from "./shared.js";
 
@@ -78,7 +78,8 @@ export async function runPreset(arg?: string, opts: { yes?: boolean } = {}): Pro
     (prevCaps.linkGlobalClaudeMd && !caps.linkGlobalClaudeMd) ||
     (prevCaps.installSkillLinks && !caps.installSkillLinks) ||
     (prevCaps.installWrappers && !caps.installWrappers) ||
-    (prevCaps.repoMirroring && !caps.repoMirroring);
+    (prevCaps.repoMirroring && !caps.repoMirroring) ||
+    (prevCaps.selfHeal && !caps.selfHeal);
 
   if (teardownNeeded && !opts.yes) {
     const ok = await confirmPrompt(
@@ -116,12 +117,14 @@ export async function runPreset(arg?: string, opts: { yes?: boolean } = {}): Pro
   if (prevCaps.installSkillLinks && !caps.installSkillLinks) sweepAgentSkillSymlinks(phrenPath);
   if (prevCaps.installWrappers && !caps.installWrappers) removePhrenWrappers();
   if (prevCaps.repoMirroring && !caps.repoMirroring) sweepProjectMirrors(phrenPath);
+  if (prevCaps.selfHeal && !caps.selfHeal) removeGeneratedHomeFiles();
 
   // Setup of artifacts the new preset adds but the previous one lacked.
   const setupNeeded =
     (!prevCaps.linkGlobalClaudeMd && caps.linkGlobalClaudeMd) ||
     (!prevCaps.installSkillLinks && caps.installSkillLinks) ||
-    (!prevCaps.repoMirroring && caps.repoMirroring);
+    (!prevCaps.repoMirroring && caps.repoMirroring) ||
+    (!prevCaps.selfHeal && caps.selfHeal);
   if (setupNeeded) {
     try {
       repairPreexistingInstall(phrenPath, { caps, preset });

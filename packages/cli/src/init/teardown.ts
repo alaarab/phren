@@ -26,6 +26,49 @@ function agentSkillDirs(): string[] {
   ];
 }
 
+export function generatedRootMemoryPath(): string {
+  const home = homeDir();
+  const key = home.replace(/[/\\:]/g, "-").replace(/^-/, "");
+  return path.join(home, ".claude", "projects", key, "memory", "MEMORY.md");
+}
+
+/** Remove only complete managed blocks; surrounding notes and unmarked files survive. */
+export function removeGeneratedHomeFiles(): string[] {
+  const changed: string[] = [];
+  const targets = [
+    { file: homePath(".phren-context.md"), start: "<!-- phren-managed -->", end: "<!-- phren-managed -->" },
+    { file: generatedRootMemoryPath(), start: "<!-- phren:projects:start -->", end: "<!-- phren:projects:end -->" },
+  ];
+  for (const { file, start, end } of targets) {
+    try {
+      // A symlink may point at a user's unrelated file, even if it has a marker.
+      if (!fs.existsSync(file) || !fs.lstatSync(file).isFile()) continue;
+      const content = fs.readFileSync(file, "utf8");
+      const first = content.indexOf(start);
+      const last = content.indexOf(end, first + start.length);
+      if (first < 0 || last < 0) continue;
+      let remaining = content.slice(0, first) + content.slice(last + end.length);
+      // This exact introduction is generated alongside the root projects block.
+      // Custom introductions and any notes following the block remain intact.
+      const generatedIntros = [
+        "# Root Memory\n\n## Machine Context\nRead `~/.phren-context.md` for profile, active projects, and sync metadata.\n\n",
+        "# Root Memory\n\n## Machine Context\nRead `~/.phren-context.md` for profile, active projects, last sync date.\n\n## Cross-Project Notes\n- Read a project's AGENTS.md before making changes.\n- Per-project memory files (MEMORY-{name}.md) have commands, versions, findings.\n\n",
+      ];
+      if (file === generatedRootMemoryPath()) {
+        const introduction = generatedIntros.find((intro) => remaining.startsWith(intro));
+        if (introduction) remaining = remaining.slice(introduction.length);
+      }
+      if (remaining.trim()) fs.writeFileSync(file, remaining);
+      else fs.unlinkSync(file);
+      changed.push(file);
+      log(`  Removed phren-managed content: ${file}`);
+    } catch (err: unknown) {
+      debugLog(`removeGeneratedHomeFiles: cleanup failed for ${file}: ${errorMessage(err)}`);
+    }
+  }
+  return changed;
+}
+
 /** Remove the phren-owned ~/.claude/CLAUDE.md and copilot-instructions.md symlinks. */
 export function removePhrenHomeSymlinks(): string[] {
   const removed: string[] = [];
