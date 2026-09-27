@@ -127,6 +127,13 @@ describe("child agent relationships", () => {
     expect(publicChildAgents(tree)[0]).not.toHaveProperty("session");
   });
 
+  it("projects a worker launch time without inventing one for an inferred child", () => {
+    const worker = { id: "a".repeat(32), provider: "codex" as const, path: "Build app", callId: "fanout:a",
+      state: "running" as const, startedAt: "2026-09-19T19:00:01.000Z", children: [] };
+    expect(publicChildAgents([worker])[0]).toMatchObject({ startedAt: worker.startedAt });
+    expect(publicChildAgents([{ ...worker, startedAt: undefined }])[0]).not.toHaveProperty("startedAt");
+  });
+
   it("builds a bounded tree from explicit Codex start/completion events", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "phren-children-"));
     const old = process.env.CODEX_HOME; process.env.CODEX_HOME = root;
