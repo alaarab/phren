@@ -13,7 +13,7 @@ import { agentFromCommand, fromTmuxId, parsePanes, sendKeysCalls, setTmuxDeps, t
   tmuxSnapshot, tmuxSocketName, tmuxTerminal, toTmuxId } from "./terminal-tmux.js";
 import { notePaneStatus, paneStatus, resetPaneStatus, settleBlockedPane } from "./pane-status.js";
 import { terminalKind } from "./terminal.js";
-import { paneChatState, paneIdentity, resetSharedHerdrState, servers, validateTarget } from "./herdr.js";
+import { paneChatState, paneIdentity, panes, resetSharedHerdrState, servers, validateTarget } from "./herdr.js";
 import { bindingPath } from "./agent-hook-stores.js";
 import type { Target } from "./protocol.js";
 
@@ -225,11 +225,11 @@ describe("choosing the terminal", () => {
     expect(terminalKind("tmux-phren")).toBe("herdr");
   });
 
-  it("lists tmux servers under the phone's session kind, the hidden one only while no Herdr server answers", async () => {
+  it("lists tmux servers with their actual source kind", async () => {
     ({ restore } = fakeTmux());
     expect(await tmuxServers()).toEqual([
-      { id: "tmux:tmux", kind: "herdr", terminal: "tmux", session: "tmux", running: true },
-      { id: "tmux:tmux-phren", kind: "herdr", terminal: "tmux", session: "tmux-phren", running: true },
+      { id: "tmux:tmux", kind: "tmux", terminal: "tmux", session: "tmux", running: true },
+      { id: "tmux:tmux-phren", kind: "tmux", terminal: "tmux", session: "tmux-phren", running: true },
     ]);
     expect(await servers()).toEqual(await tmuxServers());
     restore();
@@ -237,8 +237,19 @@ describe("choosing the terminal", () => {
     expect(await servers()).toEqual([]);
   });
 
+  it("keeps healthy sockets when another fails and labels pane replies as tmux", async () => {
+    restore = setTmuxDeps({ binary: () => "/usr/bin/tmux", sockets: async () => ["work", "broken"],
+      run: async socket => { if (socket === "broken" || socket === "phren") throw new Error("unavailable"); return ""; } });
+    expect((await tmuxServers({ hidden: false })).map(s => s.id)).toEqual(["tmux:tmux", "tmux:tmux-work"]);
+    restore();
+    ({ restore } = fakeTmux());
+    state.exec.mockResolvedValue({ stdout: "" });
+    expect(await panes("tmux", "s1", "w1")).toMatchObject({ kind: "tmux",
+      mux: { id: "tmux:tmux", kind: "tmux", session: "tmux" }, groupId: "s1", childId: "w1", panes: [{ id: "p1" }] });
+  });
+
   // Windows cannot listen on a unix socket path for the fake Herdr.
-  it.skipIf(process.platform === "win32")("lists the owner's tmux servers beside a running Herdr, without the hidden one", async () => {
+  it.skipIf(process.platform === "win32")("lists all running tmux servers beside a running Herdr", async () => {
     ({ restore } = fakeTmux());
     // A running Herdr: the owner's tmux sessions still show beside it, so
     // `tmux new -s app codex` over ssh is visible; launches stay on Herdr.
@@ -250,7 +261,8 @@ describe("choosing the terminal", () => {
     try {
       expect(await servers()).toEqual([
         { id: "herdr:default", kind: "herdr", session: "default", running: true },
-        { id: "tmux:tmux", kind: "herdr", terminal: "tmux", session: "tmux", running: true },
+        { id: "tmux:tmux", kind: "tmux", terminal: "tmux", session: "tmux", running: true },
+        { id: "tmux:tmux-phren", kind: "tmux", terminal: "tmux", session: "tmux-phren", running: true },
       ]);
     } finally { await new Promise<void>(resolve => herdr.close(() => resolve())); }
   });

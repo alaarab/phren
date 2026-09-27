@@ -74,6 +74,17 @@ a repeat after the first failed before typing runs normally; the same id with
 other text or another pane is 409. A dropped connection is then safe to retry.
 A request without an id behaves as before.
 
+A `startingToken` issued while a pane is proven to have no transcript remains
+valid as its first conversation becomes identified, for up to one minute after
+the Hook first observes that identity. Fresh validation still binds the server,
+workspace, tab, pane, terminal, agent and foreground process. Helper processes
+joining that foreground group do not change the binding. A different process,
+terminal or observed conversation retires the token, as does losing a previously
+known identity. Tokens read from an already identified or ambiguous pane grant
+no transition permission. A transitioning prompt observes the same model/side
+question reservations as an ordinary prompt. The client keeps its `deliveryId`
+when retrying with the new session target, so that retry types nothing twice.
+
 ## Routes
 
 All ordinary routes use the private HTTP pipe; transcript and status streams use
@@ -86,8 +97,8 @@ WebSockets on the same socket.
 | `GET /v1/dispatch`, `/v1/dispatch/capacity` | Local placement receipts, with each worker's last observed state and latest return; running Herdr servers and working-agent count for scheduling. |
 | `POST /v1/dispatch/workers` | Receiving side of the returns loop: the state of up to 64 dispatched targets from the shared Herdr snapshot, plus a stopped worker's final reply (at most 4000 bytes). Keeps no dispatch state. |
 | `POST /v1/dispatch/returns` | Unread worker returns (done, needs-you, failed, blocked, gone), marked read as they are returned. |
-| `GET /v1/muxes` | Running Herdr servers. |
-| `GET /v1/workspaces`, `/v1/workspaces/panes` | Workspace overview, pane identity, context, branch, activity and watched approvals. |
+| `GET /v1/muxes?typed=1` | Herdr and tmux sources together, with typed `id`, `kind`, `session` and `running`. A failed source does not remove other sources. Without `typed=1`, discovery retains legacy Herdr aliases, with accurate additive `mux` descriptors for tmux. |
+| `GET /v1/workspaces`, `/v1/workspaces/panes` | Workspace overview, pane identity, context, branch, activity and watched approvals. Select with `mux=herdr:<session>` or `mux=tmux:<server>`; replies include `mux: {id, kind, session}`. Typed tmux selectors return `kind: "tmux"`; legacy selectors retain the `kind: "herdr"` envelope for installed clients. The same negotiation applies to the overview WebSocket. |
 | `POST /v1/workspaces/launch` | Create a workspace/tab and start the selected agent. Accepts the phone's `cwd` or a mutually exclusive `project` slug resolved from this computer's registered sourcePath. Returns a session or starting `target` when identity is available. |
 | `POST /v1/schedules` | List every store schedule with its project, this computer's next run, latest local run, and running state. A schedule assigned to another computer has `nextRun: null`. |
 | `POST /v1/schedules/run` | Launch `{ project, id }` immediately through the same Herdr or headless scheduler path. Unknown schedules are 404; an active run or another computer assignment is 409. |

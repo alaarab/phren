@@ -34,10 +34,12 @@ export interface HeavyProcess {
   kind: HeavyKind;
   name: string;
   pid: number;
-  /** Processes counted under this one: itself and descendants no nearer heavy job claims. */
+  /** OS processes, including helpers; never a count of agents or working sessions. */
   processes: number;
   cpuPercent: number;
   memoryBytes: number;
+  /** Why this process group is listed; resource use does not establish session activity. */
+  resourceReason?: "cpu" | "memory" | "tracked";
   pane?: PaneRef;
 }
 
@@ -89,7 +91,10 @@ export function heavyKind(row: ProcessRow): { kind: HeavyKind; name: string } | 
     if (/KotlinCompileDaemon/.test(args)) return { kind: "gradle", name: "Kotlin daemon" };
     return { kind: "java", name: "Java" };
   }
-  if (base === "codex" || base === "node" && /^\S*node\s+\S*\/codex(?:\.js)?(?:\s|$)/.test(args)) return { kind: "codex", name: "Codex" };
+  if (base === "codex" || base === "node" && /^\S*node\s+\S*\/codex(?:\.js)?(?:\s|$)/.test(args)) {
+    const service = /^\S+\s+(app-server|mcp-server)(?:\s|$)/.exec(args)?.[1];
+    return { kind: "codex", name: service === "app-server" ? "Codex app server" : service === "mcp-server" ? "Codex MCP server" : "Codex" };
+  }
   if (base === "opencode" || base === ".opencode") return { kind: "opencode", name: "OpenCode" };
   if (base === "claude" || /^\d+\.\d+\.\d+$/.test(base) && /(?:^|\/)claude(?:\s|$)/.test(args)) return { kind: "claude", name: "Claude Code" };
   return undefined;
@@ -99,8 +104,10 @@ export function heavyKind(row: ProcessRow): { kind: HeavyKind; name: string } | 
  * The heavy jobs in a process table. Every process counts toward its nearest
  * heavy ancestor-or-self, so a Codex worker running xcodebuild shows both,
  * each with only its own share. Any other program shows as `busy` when its
- * processes together hold half a core. Agents idling at no cost are left
- * out: only jobs that cost something (a core's tenth or 200 MB) make the list.
+ * processes together hold half a core. Known programs below both a core's
+ * tenth and 200 MiB are left out (simulators/emulators stay visible).
+ * A memory-only row can be an idle session or helper; it is not evidence of
+ * agent activity. Counts include OS helpers, not just the named executable.
  * On Linux, ps pcpu is a process lifetime average, so these cutoffs can miss
  * daemons that spike briefly.
  */
@@ -108,6 +115,15 @@ export function heavyProcesses(rows: ProcessRow[], owners: Map<number, PaneRef> 
   const byPid = new Map(rows.map(row => [row.pid, row]));
   const kinds = new Map<number, { kind: HeavyKind; name: string }>();
   for (const row of rows) { const kind = heavyKind(row); if (kind) kinds.set(row.pid, kind); }
+  // npm's node launcher and its native Codex child are one process group.
+  // Keep independently launched/nested Codex workers as separate groups.
+  for (const row of rows) {
+    const parent = byPid.get(row.ppid);
+    if (kinds.get(row.pid)?.kind === "codex" && parent && path.basename(parent.command) === "node" && kinds.get(parent.pid)?.kind === "codex") {
+      kinds.set(parent.pid, kinds.get(row.pid)!);
+      kinds.delete(row.pid);
+    }
+  }
   const totals = new Map<number, HeavyProcess>();
   const busy = new Map<string, HeavyProcess & { top: number; row: ProcessRow }>();
   const claim = (row: ProcessRow): number | undefined => {
@@ -154,7 +170,8 @@ export function heavyProcesses(rows: ProcessRow[], owners: Map<number, PaneRef> 
   }
   return [...totals.values()]
     .filter(item => item.kind === "simulator" || item.kind === "emulator" || item.kind === "busy" || item.cpuPercent >= 10 || item.memoryBytes >= 200 * 1024 ** 2)
-    .map(item => ({ ...item, cpuPercent: Math.round(item.cpuPercent * 10) / 10 }))
+    .map(item => ({ ...item, cpuPercent: Math.round(item.cpuPercent * 10) / 10,
+      resourceReason: (item.cpuPercent >= 10 ? "cpu" : item.memoryBytes >= 200 * 1024 ** 2 ? "memory" : "tracked") as HeavyProcess["resourceReason"] }))
     .sort((a, b) => b.cpuPercent - a.cpuPercent || b.memoryBytes - a.memoryBytes)
     .slice(0, limit);
 }
