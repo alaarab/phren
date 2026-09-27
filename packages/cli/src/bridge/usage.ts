@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { statSync } from "node:fs";
 import { lstat, open, readFile, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { claudeConfigDir, homeDir } from "../home-paths.js";
@@ -26,7 +27,7 @@ export interface UsageWindow {
 }
 export interface UsageSpend { amountUSD: number; period: "rolling_7_days" | "rolling_30_days" | "calendar_week" }
 export interface AccountUsage {
-  source: "codex" | "claude" | "opencode" | "opencode-go" | "openrouter";
+  source: "codex" | "claude" | "opencode" | "opencode-go" | "openrouter" | "copilot";
   windows: UsageWindow[];
   updatedAt?: string;
   message?: string;
@@ -627,6 +628,45 @@ export function readCodexLimits(executable = codexExecutable()): Promise<Account
   });
 }
 
+/**
+ * GitHub Copilot's own quota report (`gh api /copilot_internal/user`): one
+ * window per limited quota (premium requests, usually) with the monthly
+ * reset. Unlimited quotas are named in the message, not drawn as 0%.
+ */
+export function copilotUsage(value: unknown, now = new Date()): AccountUsage {
+  const result = object(value), snapshots = object(result.quota_snapshots);
+  const reset = typeof result.quota_reset_date_utc === "string" && Number.isFinite(Date.parse(result.quota_reset_date_utc))
+    ? new Date(Date.parse(result.quota_reset_date_utc)).toISOString() : undefined;
+  const names: Record<string, string> = { premium_interactions: "Premium requests · monthly", chat: "Chat · monthly", completions: "Completions · monthly" };
+  const windows: UsageWindow[] = [], unlimited: string[] = [];
+  for (const [id, raw] of Object.entries(snapshots).slice(0, 8)) {
+    const quota = object(raw), key = safeText(id) ?? "quota";
+    if (quota.unlimited === true) { unlimited.push((names[key] ?? key).replace(" · monthly", "").toLowerCase()); continue; }
+    const remaining = quota.percent_remaining;
+    if (typeof remaining !== "number" || !Number.isFinite(remaining) || remaining < 0 || remaining > 100) continue;
+    windows.push({ id: key, name: names[key] ?? key, usedPercent: Math.round((100 - remaining) * 10) / 10, ...(reset ? { resetsAt: reset } : {}) });
+  }
+  const plan = safeText(result.copilot_plan);
+  const notes = [plan ? `Plan: ${plan}.` : "", unlimited.length ? `Unlimited: ${unlimited.join(", ")}.` : ""].filter(Boolean).join(" ");
+  return { source: "copilot", windows, updatedAt: now.toISOString(),
+    ...(notes || !windows.length ? { message: notes || "GitHub reported no Copilot quotas for this account." } : {}) };
+}
+
+/** The first GitHub CLI found; the Hook's service PATH may not include Homebrew. */
+function ghExecutable(): string {
+  for (const candidate of ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]) {
+    try { if (statSync(candidate).isFile()) return candidate; } catch { /* next */ }
+  }
+  return "gh";
+}
+
+/** Reads through the GitHub CLI's own sign-in; the token never reaches Phren. */
+export async function readCopilotUsage(now = new Date(), run: (file: string, args: string[]) => Promise<string> =
+  async (file, args) => (await exec(file, args, { timeout: 10_000, maxBuffer: 1_048_576, cwd: homedir() })).stdout): Promise<AccountUsage> {
+  try { return copilotUsage(JSON.parse(await run(ghExecutable(), ["api", "/copilot_internal/user"])), now); }
+  catch { return { source: "copilot", windows: [], message: "Could not read Copilot usage. Sign in with gh auth login on this computer (Copilot reports its quotas through GitHub)." }; }
+}
+
 export class AccountUsageReader {
   private cached?: { at: number; value: AccountUsage };
   private pending?: Promise<AccountUsage>;
@@ -638,7 +678,8 @@ export class AccountUsageReader {
               private readClaudeLive: (now: Date) => Promise<AccountUsage | undefined> = liveClaudeUsage,
               private readOpenCode: (now: Date) => Promise<AccountUsage> = now => readOpenCodeUsage("opencode", now),
               private readOpenRouter: (now: Date) => Promise<AccountUsage | undefined> = liveOpenRouterUsage,
-              private readOpenCodeGo: (now: Date) => Promise<AccountUsage> = readOpenCodeGoUsage) {}
+              private readOpenCodeGo: (now: Date) => Promise<AccountUsage> = readOpenCodeGoUsage,
+              private readCopilot: (now: Date) => Promise<AccountUsage> = readCopilotUsage) {}
   async read(): Promise<{ accounts: AccountUsage[] }> {
     if (!this.cached || this.now() - this.cached.at >= 60_000) {
       this.pending ??= this.readCodex().then(value => { this.cached = { at: this.now(), value }; return value; }).finally(() => { this.pending = undefined; });
@@ -650,8 +691,8 @@ export class AccountUsageReader {
   private async spending(): Promise<AccountUsage[]> {
     if (!this.spendingCached || this.now() - this.spendingCached.at >= 60_000) {
       const at = this.now();
-      this.spendingPending ??= Promise.all([this.readOpenCode(new Date(at)), this.readOpenCodeGo(new Date(at)), this.readOpenRouter(new Date(at))])
-        .then(([openCode, openCodeGo, openRouter]) => [openCode, openCodeGo, ...(openRouter ? [openRouter] : [])])
+      this.spendingPending ??= Promise.all([this.readOpenCode(new Date(at)), this.readOpenCodeGo(new Date(at)), this.readOpenRouter(new Date(at)), this.readCopilot(new Date(at))])
+        .then(([openCode, openCodeGo, openRouter, copilot]) => [openCode, openCodeGo, ...(openRouter ? [openRouter] : []), copilot])
         .then(value => { this.spendingCached = { at, value }; return value; })
         .finally(() => { this.spendingPending = undefined; });
     }

@@ -29,6 +29,7 @@ import { ModelCatalog } from "./models.js";
 import { ModelSwitcher } from "./model-switch.js";
 import { SideQuestions } from "./side-questions.js";
 import { AccountUsageReader } from "./usage.js";
+import { ResourceMonitor } from "./resources.js";
 import { createScheduleLauncher, Scheduler, scheduleRunsFile } from "./schedules.js";
 import { dailyCanaryDue, runCanary } from "./canary.js";
 import { defaultPhrenPath } from "../shared.js";
@@ -76,6 +77,7 @@ export async function serve(version: string): Promise<void> {
   const sideQuestions = new SideQuestions();
   const contextUsage = new WorkspaceContextUsage();
   const accountUsage = new AccountUsageReader();
+  const resources = new ResourceMonitor();
   const tabActivity = new TabActivityStore();
   const codexQuestions = new CodexQuestions();
   const scheduleStore = defaultPhrenPath();
@@ -129,9 +131,10 @@ export async function serve(version: string): Promise<void> {
     read: workspacesReader({ modules, info, agentHooks, journal, tabActivity, contextUsage }),
     info: () => ({ ...info, capabilities: info.capabilities }),
     renew: server => agentHooks.overview.renew(server),
+    resources: () => resources.read(),
   });
   const http = createServer(createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
-    journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, sideQuestions, accountUsage, codexQuestions, launches, locatedDirectories,
+    journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
     fanoutMessages, canary, streams, returns }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
@@ -148,7 +151,7 @@ export async function serve(version: string): Promise<void> {
           oldest.close(1008, "Too many connections; reconnect"); oldest.terminate();
           ws.clients.delete(oldest);
         }
-        if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1"); return; }
+        if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1", url.searchParams.get("resources") === "1"); return; }
         if (url.pathname === "/v1/speech/transcribe") { void relayTranscription(client, url.searchParams).catch(() => client.close(1011, "Transcription unavailable")); return; }
         void stream(client, url).catch(() => client.close(1011, "Conversation unavailable; refresh"));
       });

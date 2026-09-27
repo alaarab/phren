@@ -21,11 +21,14 @@ import { streamCloseReason } from "./server-stream.js";
  * overview it holds is still current.
  *
  * Frames: `{ type: "overview", ...workspaces, phren }` and
- * `{ type: "heartbeat", phren }`.
+ * `{ type: "heartbeat", phren }`. A phone that asks with `resources=1` also
+ * gets `{ type: "resources", resources }` first and every
+ * `OVERVIEW_RESOURCES_MS` after (an older phone never asks, so never meets it).
  */
 export const OVERVIEW_TICK_MS = intervalFromEnv("PHREN_OVERVIEW_TICK_MS", 5_000, 250, 60_000);
 export const OVERVIEW_REFRESH_MS = intervalFromEnv("PHREN_OVERVIEW_REFRESH_MS", 10_000, 1_000, 120_000);
 export const OVERVIEW_HEARTBEAT_MS = intervalFromEnv("PHREN_OVERVIEW_HEARTBEAT_MS", 20_000, 1_000, 60_000);
+export const OVERVIEW_RESOURCES_MS = intervalFromEnv("PHREN_OVERVIEW_RESOURCES_MS", 12_000, 1_000, 120_000);
 
 export interface OverviewStreamOptions {
   read: WorkspacesReader;
@@ -33,11 +36,14 @@ export interface OverviewStreamOptions {
   info: () => Json;
   /** Renews the approval watch lease `watchApprovals=1` asks for. */
   renew: (server: string) => void;
+  /** This computer's resources (`GET /v1/resources`), for phones that ask. */
+  resources?: () => Promise<unknown>;
   snapshot?: (server: string, maxAgeMs: number) => Promise<Json>;
   now?: () => number;
   tickMs?: number;
   refreshMs?: number;
   heartbeatMs?: number;
+  resourcesMs?: number;
 }
 
 /** A socket-like peer: the `ws` client, or a test double. */
@@ -55,6 +61,7 @@ export function overviewStream(options: OverviewStreamOptions) {
   const tickMs = options.tickMs ?? OVERVIEW_TICK_MS;
   const refreshMs = options.refreshMs ?? OVERVIEW_REFRESH_MS;
   const heartbeatMs = options.heartbeatMs ?? OVERVIEW_HEARTBEAT_MS;
+  const resourcesMs = options.resourcesMs ?? OVERVIEW_RESOURCES_MS;
 
   function send(client: OverviewClient, frame: Json): boolean {
     if (client.readyState !== WebSocket.OPEN) return false;
@@ -69,15 +76,22 @@ export function overviewStream(options: OverviewStreamOptions) {
 
   /** Streams one server's overview until the client closes. Returns the
    * tick function, for tests that drive time themselves. */
-  return function stream(client: OverviewClient, server: string, watchApprovals: boolean) {
+  return function stream(client: OverviewClient, server: string, watchApprovals: boolean, withResources = false) {
     let closed = false, busy = false, first = true;
-    let snapshotKey = "", builtAt = 0, sentKey = "", sentAt = 0;
+    let snapshotKey = "", builtAt = 0, sentKey = "", sentAt = 0, resourcesAt = -Infinity;
     const tick = async (): Promise<void> => {
       if (busy || closed) return;
       busy = true;
       try {
         countTick("overview-stream");
         const at = now();
+        // Resources ride their own frame and clock; a failed read waits for the next.
+        if (withResources && options.resources && at - resourcesAt >= resourcesMs) {
+          resourcesAt = at;
+          const resources = await options.resources().catch(() => undefined);
+          if (closed) return;
+          if (resources) send(client, { type: "resources", resources });
+        }
         // The first frame reads a fresh snapshot, as a poll would.
         const held = await snapshot(server, first ? 0 : tickMs);
         if (closed) return;

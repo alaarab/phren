@@ -120,4 +120,27 @@ describe("overview stream", () => {
     expect(broken.closed?.code).toBe(1011);
     expect(broken.closed?.reason).toContain("Herdr is not running");
   });
+
+  it("sends resources frames on their own clock only to phones that ask", async () => {
+    let now = 0, reads = 0;
+    const stream = overviewStream({
+      snapshot: async () => ({ panes: [] }),
+      read: async () => ({ groups: [], phren: {} }),
+      info: () => ({}), renew: () => {},
+      resources: async () => ({ level: "ok", read: ++reads }),
+      now: () => now, tickMs: 60_000, resourcesMs: 12_000,
+    });
+    const asked = new FakeClient(), older = new FakeClient();
+    const a = stream(asked, "default", false, true), b = stream(older, "default", false);
+    await settle();
+    expect(asked.frames.map(frame => frame.type)).toEqual(["resources", "overview"]);
+    expect(asked.frames[0]).toEqual({ type: "resources", resources: { level: "ok", read: 1 } });
+    expect(older.frames.map(frame => frame.type)).toEqual(["overview"]);
+    now = 11_999; await a.tick();
+    expect(asked.frames.filter(frame => frame.type === "resources")).toHaveLength(1);
+    now = 12_000; await a.tick(); await b.tick();
+    expect(asked.frames.filter(frame => frame.type === "resources")).toHaveLength(2);
+    expect(older.frames.some(frame => frame.type === "resources")).toBe(false);
+    a.stop(); b.stop();
+  });
 });

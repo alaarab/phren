@@ -9,12 +9,14 @@ import {
   claudeScopedWindows,
   claudeUsage,
   codexUsage,
+  copilotUsage,
   fetchClaudeUsage,
   fetchOpenRouterUsage,
   openCodeFailure,
   openCodeUsage,
   readClaudeToken,
   readCodexLimits,
+  readCopilotUsage,
   readOpenCodeGoUsage,
   readOpenCodeUsage,
   usageStatusLine,
@@ -27,6 +29,7 @@ const limits = { primary: { usedPercent: 23.5, windowDurationMins: 300, resetsAt
 const openCode = async (date: Date) => openCodeUsage("Total Cost  $0.00", date);
 const noOpenRouter = async () => undefined;
 const noOpenCodeGo = async () => ({ source: "opencode-go" as const, windows: [] });
+const noCopilot = async () => ({ source: "copilot" as const, windows: [] });
 
 describe("account usage", () => {
   it("keeps quota percentages and reset times separate from token counts", () => {
@@ -123,11 +126,26 @@ describe("account usage", () => {
   it("shares in-flight Codex requests and caches account reads for a minute", async () => {
     let calls = 0, time = 0;
     const reader = new AccountUsageReader(async () => { calls++; return codexUsage({ rateLimits: limits }, now); }, () => time,
-      async () => undefined, openCode, noOpenRouter, noOpenCodeGo);
+      async () => undefined, openCode, noOpenRouter, noOpenCodeGo, noCopilot);
     await Promise.all([reader.read(), reader.read()]);
     expect(calls).toBe(1);
     time = 59_999; await reader.read(); expect(calls).toBe(1);
     time = 60_000; await reader.read(); expect(calls).toBe(2);
+  });
+  it("reads Copilot's limited quotas, names unlimited ones and never passes a token on", async () => {
+    const report = { copilot_plan: "enterprise", quota_reset_date_utc: "2026-10-01T00:00:00.000Z", token: "ghu_secret",
+      quota_snapshots: {
+        chat: { quota_id: "chat", unlimited: true, percent_remaining: 100 },
+        completions: { quota_id: "completions", unlimited: true, percent_remaining: 100 },
+        premium_interactions: { quota_id: "premium_interactions", unlimited: false, percent_remaining: 67.3, quota_remaining: 67305.9 },
+      } };
+    const value = copilotUsage(report, now);
+    expect(value).toEqual({ source: "copilot", updatedAt: now.toISOString(), message: "Plan: enterprise. Unlimited: chat, completions.",
+      windows: [{ id: "premium_interactions", name: "Premium requests · monthly", usedPercent: 32.7, resetsAt: "2026-10-01T00:00:00.000Z" }] });
+    expect(JSON.stringify(value)).not.toContain("ghu_secret");
+    const signedOut = await readCopilotUsage(now, async () => { throw new Error("gh: not logged in"); });
+    expect(signedOut.windows).toEqual([]);
+    expect(signedOut.message).toContain("gh auth login");
   });
   it("reports OpenCode's rolling seven-day cost without session content", () => {
     const output = "\u001b[32mTotal Cost\u001b[0m                                        $4.39\nprivate session title";
@@ -268,14 +286,14 @@ describe("account usage", () => {
 
     let claudeCalls = 0;
     const reader = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0,
-      async () => { claudeCalls++; return claudeUsage({ rate_limits: { five_hour: { used_percentage: 42 } } }, now); }, openCode, noOpenRouter, noOpenCodeGo);
+      async () => { claudeCalls++; return claudeUsage({ rate_limits: { five_hour: { used_percentage: 42 } } }, now); }, openCode, noOpenRouter, noOpenCodeGo, noCopilot);
     const first = await reader.read();
     expect(first.accounts[1].windows[0].usedPercent).toBe(42);
     expect(first.accounts[1].origin).toBe("status-line");
     await reader.read(); expect(claudeCalls).toBe(1);
 
     const fallback = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0,
-      async () => undefined, openCode, noOpenRouter, noOpenCodeGo);
+      async () => undefined, openCode, noOpenRouter, noOpenCodeGo, noCopilot);
     const empty = await mkdtemp(path.join(tmpdir(), "phren-empty-"));
     const previousBridge = process.env.PHREN_BRIDGE_HOME, previousConfig = process.env.CLAUDE_CONFIG_DIR;
     process.env.PHREN_BRIDGE_HOME = empty; process.env.CLAUDE_CONFIG_DIR = empty;
