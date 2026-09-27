@@ -169,8 +169,13 @@ package loadable, enable its tools and routes, and copy its bundled code skill
 into the store. A workspace checkout at `packages/code` is linked; otherwise the
 package is installed under `<store>/.runtime/packages` so the Hook can find it
 without a global npm. Resolution checks `PHREN_CODE_PACKAGE`, the bridge's
-node_modules, that store directory, a plain import and finally `npm root -g`
-(shielded from a service PATH without npm). If installation fails, run
+node_modules, that store directory, a built `packages/code` sibling in a source
+checkout, a plain import and finally `npm root -g` (shielded from a service
+PATH without npm). From a source checkout, run `pnpm --filter @phren/code build`
+from the repository root before `phren modules enable code`; that command also
+links the built package into the store for a copied Hook bundle. See the
+[source Hook install steps](phren-hook.md) when running the Hook from this repo.
+If installation fails, run
 `npm install --prefix <store>/.runtime/packages @phren/code` and retry. Restart
 MCP and Hook after changing modules; `/v1/health` reports where the package
 loaded from.

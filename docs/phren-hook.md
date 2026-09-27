@@ -82,10 +82,30 @@ installed at a lower nice value (`Nice -5` in the launchd plist and the systemd
 unit) so the Hook daemon keeps the CPU ahead of the workers it supervises.
 
 For unreleased fixes from a local checkout, build and install that checkout's
-helper instead of reinstalling the published package:
+helper instead of reinstalling the published package. If the `code` module is
+enabled, build its workspace package first:
+
+```sh
+pnpm --filter @phren/code build
+```
+
+Then build the CLI:
 
 ```sh
 pnpm --filter @phren/cli build
+```
+
+If `code` is enabled, link that built package into the store before installing
+the Hook. The installed Hook runs from a copied bundle, so it needs the store
+link even when the CLI can see the workspace sibling directly:
+
+```sh
+node packages/cli/dist/index.js modules enable code
+```
+
+Then install and check the Hook:
+
+```sh
 node packages/cli/dist/index.js bridge install
 node packages/cli/dist/index.js bridge doctor
 ```

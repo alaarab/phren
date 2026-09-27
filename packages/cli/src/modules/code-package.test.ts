@@ -9,7 +9,8 @@ const temps: Array<ReturnType<typeof makeTempDir>> = [];
 function tempDir(prefix: string): string {
   const temp = makeTempDir(prefix);
   temps.push(temp);
-  return temp.path;
+  // macOS temp paths sit behind /var -> /private/var; the loader reports real paths.
+  return fs.realpathSync(temp.path);
 }
 afterEach(() => {
   for (const temp of temps.splice(0)) temp.cleanup();
@@ -24,6 +25,18 @@ function writePackage(directory: string, marker: string): void {
   fs.mkdirSync(directory, { recursive: true });
   fs.writeFileSync(path.join(directory, "package.json"), JSON.stringify({ name: "@phren/code", type: "module", exports: { ".": "./index.mjs" } }));
   fs.writeFileSync(path.join(directory, "index.mjs"), `export const marker = ${JSON.stringify(marker)};\n`);
+}
+
+function writeWorkspacePackage(directory: string, marker?: string): void {
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, "package.json"), JSON.stringify({
+    name: "@phren/code", type: "module", exports: { ".": { types: "./dist/code/src/index.d.ts", default: "./dist/code/src/index.js" } },
+  }));
+  if (marker) {
+    const entry = path.join(directory, "dist", "code", "src", "index.js");
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    fs.writeFileSync(entry, `export const marker = ${JSON.stringify(marker)};\n`);
+  }
 }
 
 function copyModule(directory: string): string {
@@ -97,6 +110,46 @@ it("falls back to the store runtime packages", () => {
   expect(JSON.parse(output)).toEqual({ marker: "store", from: path.join(store, ".runtime", "packages", "node_modules", "@phren", "code") });
 });
 
+it("loads the built workspace sibling from a source checkout without a node_modules link", () => {
+  const root = tempDir("code-source-hook-");
+  const workspace = path.join(root, "packages", "code");
+  writeWorkspacePackage(workspace, "workspace");
+  const module = copyModule(path.join(root, "packages", "cli", "dist", "modules"));
+  const output = run(module, LOAD_SCRIPT(module), baseEnv(path.join(root, "home")));
+  expect(JSON.parse(output)).toEqual({ marker: "workspace", from: workspace });
+});
+
+it("reports the exact build command when a source checkout has no code entry", () => {
+  const root = tempDir("code-unbuilt-hook-");
+  writeWorkspacePackage(path.join(root, "packages", "code"));
+  const module = copyModule(path.join(root, "packages", "cli", "dist", "modules"));
+  const output = run(module, `const code = await import(${JSON.stringify(pathToFileURL(module).href)});
+const loaded = await code.loadCodePackage();
+console.log(JSON.stringify({ loaded: Boolean(loaded), hint: code.codePackageHint() }));`, baseEnv(path.join(root, "home")));
+  expect(JSON.parse(output)).toEqual({
+    loaded: false,
+    hint: `phren code needs @phren/code: run phren modules enable code. @phren/code at ${path.join(root, "packages", "code")} has no built entry. From the source checkout root run: pnpm --filter @phren/code build`,
+  });
+});
+
+it("reports an unbuilt workspace linked into a copied Hook's store", () => {
+  const root = tempDir("code-unbuilt-installed-hook-");
+  const workspace = path.join(root, "checkout", "packages", "code");
+  writeWorkspacePackage(workspace);
+  const store = path.join(root, "store");
+  const linked = path.join(store, ".runtime", "packages", "node_modules", "@phren", "code");
+  fs.mkdirSync(path.dirname(linked), { recursive: true });
+  fs.symlinkSync(workspace, linked, "junction");
+  const module = copyModule(path.join(root, "bridge", "versions", "0.3.10"));
+  const output = run(module, `const code = await import(${JSON.stringify(pathToFileURL(module).href)});
+const loaded = await code.loadCodePackage(${JSON.stringify(store)});
+console.log(JSON.stringify({ loaded: Boolean(loaded), hint: code.codePackageHint(${JSON.stringify(store)}) }));`, baseEnv(path.join(root, "home")));
+  expect(JSON.parse(output)).toEqual({
+    loaded: false,
+    hint: `phren code needs @phren/code: run phren modules enable code. @phren/code at ${linked} has no built entry. From the source checkout root run: pnpm --filter @phren/code build`,
+  });
+});
+
 it("imports the bare specifier from an ancestor node_modules", () => {
   const root = tempDir("code-plain-");
   writePackage(path.join(root, "node_modules", "@phren", "code"), "plain");
@@ -145,16 +198,15 @@ console.log(JSON.stringify({ marker: loaded.marker, from: code.loadedFrom() }));
 
 it("links a workspace checkout instead of installing", () => {
   const root = tempDir("code-workspace-");
-  fs.writeFileSync(path.join(root, "placeholder"), "");
-  writePackage(path.join(root, "packages", "code"), "workspace");
+  const workspace = path.join(root, "packages", "code");
+  writeWorkspacePackage(workspace, "workspace");
   const module = copyModule(path.join(root, "packages", "cli", "dist", "modules"));
   const store = path.join(root, "store");
   const output = run(module, `const code = await import(${JSON.stringify(pathToFileURL(module).href)});
 const loaded = await code.installCodePackage(${JSON.stringify(store)});
 console.log(JSON.stringify({ marker: loaded.marker, from: code.loadedFrom() }));`, baseEnv(path.join(root, "home")));
-  expect(JSON.parse(output.trim().split("\n").at(-1)!)).toEqual({
-    marker: "workspace", from: path.join(store, ".runtime", "packages", "node_modules", "@phren", "code"),
-  });
+  expect(JSON.parse(output.trim().split("\n").at(-1)!)).toEqual({ marker: "workspace", from: workspace });
+  expect(fs.realpathSync(path.join(store, ".runtime", "packages", "node_modules", "@phren", "code"))).toBe(fs.realpathSync(workspace));
 });
 
 it("returns undefined when no copy is available", () => {
@@ -164,15 +216,16 @@ it("returns undefined when no copy is available", () => {
   expect(JSON.parse(output)).toEqual({});
 });
 
-it("keeps the same actionable message at the Hook boundary", async () => {
+it("returns the package's actionable build hint at the Hook boundary", async () => {
+  const hint = "phren code needs @phren/code: from the source checkout root run pnpm --filter @phren/code build";
   vi.resetModules();
   vi.doMock("./code-package.js", () => ({
     loadCodePackage: async () => undefined,
     loadedFrom: () => undefined,
-    CODE_PACKAGE_HINT: "phren code needs @phren/code: run phren modules enable code",
+    codePackageHint: () => hint,
   }));
   const { CodeRoutes } = await import("../bridge/code-routes.js");
   await expect(new CodeRoutes("/missing-store").status("demo")).rejects.toMatchObject({
-    status: 503, message: "phren code needs @phren/code: run phren modules enable code",
+    status: 503, message: hint,
   });
 });

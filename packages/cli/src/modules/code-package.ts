@@ -17,8 +17,8 @@ export function loadedFrom(): string | undefined { return resolvedFrom; }
  * The Hook bundle runs from `<bridge>/versions/<v>` with no node_modules, so a
  * bare import fails there and the npm global root is invisible when the
  * daemon's PATH has no npm (mise shims under systemd). Resolve a local copy
- * before the bare import: an explicit directory, the bridge install, then the
- * store's runtime packages.
+ * before the bare import: an explicit directory, the bridge install, the
+ * store's runtime packages, then a built workspace sibling.
  */
 function bridgeRoot(): string { return process.env.PHREN_BRIDGE_HOME || path.join(homedir(), ".local/share/phren/bridge"); }
 
@@ -71,6 +71,8 @@ export async function loadCodePackage(store?: string): Promise<CodePackage | und
   candidates.push(path.join(bridgeRoot(), "node_modules", "@phren", "code"));
   const root = store || process.env.PHREN_PATH;
   if (root) candidates.push(path.join(root, ".runtime", "packages", "node_modules", "@phren", "code"));
+  const workspace = workspaceCodeDirectory();
+  if (workspace && builtEntryExists(workspace)) candidates.push(workspace);
   for (const directory of candidates) {
     if (!fs.existsSync(path.join(directory, "package.json"))) continue;
     try {
@@ -93,7 +95,7 @@ export async function loadCodePackage(store?: string): Promise<CodePackage | und
 
 export async function requireCodePackage(store?: string): Promise<CodePackage> {
   const code = await loadCodePackage(store);
-  if (!code) throw new Error(CODE_PACKAGE_HINT);
+  if (!code) throw new Error(codePackageHint(store));
   return code;
 }
 
@@ -110,6 +112,25 @@ function workspaceCodeDirectory(): string | undefined {
   return undefined;
 }
 
+function builtEntryExists(directory: string): boolean {
+  try { return fs.existsSync(packageEntry(directory)); }
+  catch { return false; }
+}
+
+export function codePackageHint(store?: string): string {
+  const root = store || process.env.PHREN_PATH;
+  const linked = root && path.join(root, ".runtime", "packages", "node_modules", "@phren", "code");
+  const workspace = workspaceCodeDirectory();
+  let workspaceLink: string | undefined;
+  try { if (linked && fs.lstatSync(linked).isSymbolicLink()) workspaceLink = linked; }
+  catch { /* no store link */ }
+  for (const directory of [workspace, workspaceLink]) {
+    if (!directory || !fs.existsSync(path.join(directory, "package.json")) || builtEntryExists(directory)) continue;
+    return `${CODE_PACKAGE_HINT}. @phren/code at ${directory} has no built entry. From the source checkout root run: pnpm --filter @phren/code build`;
+  }
+  return `${CODE_PACKAGE_HINT}. For a source checkout, from its root run pnpm --filter @phren/code build, then node packages/cli/dist/index.js modules enable code and restart the Hook.`;
+}
+
 /**
  * Make @phren/code available to this store. A workspace checkout links its own
  * package; otherwise npm installs into the store's runtime packages, which the
@@ -117,16 +138,17 @@ function workspaceCodeDirectory(): string | undefined {
  */
 export async function installCodePackage(store: string): Promise<CodePackage> {
   const existing = await loadCodePackage(store);
-  if (existing) return existing;
+  const workspace = workspaceCodeDirectory();
+  // The installed Hook bundle cannot find the workspace sibling after relocation.
+  if (existing && resolvedFrom !== workspace) return existing;
   const packages = path.join(store, ".runtime", "packages");
   const linked = path.join(packages, "node_modules", "@phren", "code");
-  const workspace = workspaceCodeDirectory();
   if (workspace) {
     fs.mkdirSync(path.dirname(linked), { recursive: true });
     fs.rmSync(linked, { recursive: true, force: true });
     fs.symlinkSync(workspace, linked, "junction");
-    const code = await loadCodePackage(store);
-    if (!code) throw new Error(`${CODE_PACKAGE_HINT}\nLinked ${workspace}, but it could not be loaded. Run pnpm build.`);
+    const code = existing ?? await loadCodePackage(store);
+    if (!code) throw new Error(`${codePackageHint(store)}\nLinked ${workspace}, but it could not be loaded.`);
     console.log(`@phren/code linked from ${workspace} into ${linked}.`);
     return code;
   }
