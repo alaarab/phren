@@ -294,7 +294,7 @@ export async function blockedFanouts(env: NodeJS.ProcessEnv = process.env): Prom
 /** The running OpenCode fan-out job a permission request names, when its own
  * manifest confirms the worker session and a parent conversation: the parent
  * is where the phone answers the ask. */
-export async function fanoutAsking(job: unknown, session: string, env: NodeJS.ProcessEnv = process.env): Promise<{ id: string; label: string; parent: NonNullable<FanoutManifest["parent"]> } | undefined> {
+export async function fanoutAsking(job: unknown, session: string, env: NodeJS.ProcessEnv = process.env): Promise<{ id: string; label: string; worktree: string; parent: NonNullable<FanoutManifest["parent"]> } | undefined> {
   if (!jobID.safeParse(job).success) return undefined;
   const root = await containedFanoutRoot(env);
   if (!root) return undefined;
@@ -305,7 +305,7 @@ export async function fanoutAsking(job: unknown, session: string, env: NodeJS.Pr
   try {
     const manifest = manifestSchema.parse(JSON.parse(await readFile(file, "utf8")));
     if (manifest.id !== job || manifest.provider !== "opencode" || manifest.session !== session || manifest.status !== "running" || !manifest.parent) return undefined;
-    return { id: manifest.id, label: manifest.taskLabel, parent: manifest.parent };
+    return { id: manifest.id, label: manifest.taskLabel, worktree: manifest.worktree, parent: manifest.parent };
   } catch { return undefined; }
 }
 
