@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-const state = vi.hoisted(() => ({ home: "", exec: vi.fn() }));
+const state = vi.hoisted(() => ({ home: "", exec: vi.fn(), health: vi.fn() }));
 vi.mock("node:os", async importOriginal => ({ ...await importOriginal<typeof import("node:os")>(), homedir: () => state.home }));
 vi.mock("node:child_process", async importOriginal => ({ ...await importOriginal<typeof import("node:child_process")>(),
   execFile: Object.assign(() => {}, { [Symbol.for("nodejs.util.promisify.custom")]: state.exec }),
@@ -11,7 +11,7 @@ vi.mock("node:fs/promises", async importOriginal => {
   const fs = await importOriginal<typeof import("node:fs/promises")>();
   return { ...fs, copyFile: async (src: string, dst: string) => src.endsWith("bridge-hook.mjs") ? fs.writeFile(dst, "bundle fixture") : fs.copyFile(src, dst) };
 });
-vi.mock("./transport.js", () => ({ health: async () => ({ version: "0.2.14" }) }));
+vi.mock("./transport.js", () => ({ health: state.health }));
 import { install, OPENCODE_PLUGIN_MARKER, opencodePluginNeedsWrite } from "./install.js";
 
 beforeEach(async () => {
@@ -22,6 +22,7 @@ beforeEach(async () => {
   vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
   vi.spyOn(console, "log").mockImplementation(() => {});
   state.exec.mockReset().mockResolvedValue({ stdout: "", stderr: "" });
+  state.health.mockReset().mockResolvedValue({ version: "0.2.14" });
 });
 afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(state.home, { recursive: true, force: true }); });
 
@@ -111,6 +112,51 @@ it.skipIf(process.platform === "win32")("bootstraps into gui/<uid> when someone 
   const calls = state.exec.mock.calls.filter(([file]) => file === "launchctl").map(([, args]) => (args as string[]).slice(0, 2).join(" "));
   expect(calls).toEqual([`bootout gui/${uid}/com.phren.hook`, `bootout user/${uid}/com.phren.hook`, `print gui/${uid}`,
     `bootstrap gui/${uid}`, `kickstart gui/${uid}/com.phren.hook`]);
+});
+
+it.skipIf(process.platform === "win32")("rebootstraps when the first kickstart fails and the old Hook still answers", async () => {
+  const uid = process.getuid!();
+  let bootstraps = 0;
+  vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void) => {
+    queueMicrotask(callback); return {} as NodeJS.Timeout;
+  }) as typeof setTimeout);
+  state.exec.mockImplementation(async (file: string, args: string[]) => {
+    if (file === "launchctl" && args[0] === "bootstrap") bootstraps++;
+    if (file === "launchctl" && args[0] === "kickstart" && bootstraps === 1) {
+      throw Object.assign(new Error("kickstart failed"), { stderr: "Could not kickstart service\n" });
+    }
+    return { stdout: "", stderr: "" };
+  });
+  state.health.mockImplementation(async () => ({ version: bootstraps === 1 ? "0.2.13" : "0.2.14" }));
+
+  await install("0.2.14");
+  expect(bootstraps).toBe(2);
+  const calls = state.exec.mock.calls.filter(([file]) => file === "launchctl").map(([, args]) => (args as string[]).slice(0, 2).join(" "));
+  expect(calls).toEqual([`bootout gui/${uid}/com.phren.hook`, `bootout user/${uid}/com.phren.hook`, `print gui/${uid}`,
+    `bootstrap gui/${uid}`, `kickstart gui/${uid}/com.phren.hook`, `bootout gui/${uid}/com.phren.hook`,
+    `bootout user/${uid}/com.phren.hook`, `print gui/${uid}`, `bootstrap gui/${uid}`, `kickstart gui/${uid}/com.phren.hook`]);
+  expect(state.health).toHaveBeenCalled();
+  expect(JSON.parse(await readFile(path.join(process.env.PHREN_BRIDGE_HOME!, "installed.json"), "utf8")).version).toBe("0.2.14");
+});
+
+it.skipIf(process.platform === "win32")("reports a failed kickstart only after both launchd starts remain on the old version", async () => {
+  let bootstraps = 0;
+  vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void) => {
+    queueMicrotask(callback); return {} as NodeJS.Timeout;
+  }) as typeof setTimeout);
+  state.exec.mockImplementation(async (file: string, args: string[]) => {
+    if (file === "launchctl" && args[0] === "bootstrap") bootstraps++;
+    if (file === "launchctl" && args[0] === "kickstart") {
+      throw Object.assign(new Error("kickstart failed"), { stderr: "Could not kickstart service\n" });
+    }
+    return { stdout: "", stderr: "" };
+  });
+  state.health.mockResolvedValue({ version: "0.2.13" });
+
+  const error = await install("0.2.14").catch((failure: Error) => failure);
+  expect(String(error)).toContain("Phren Hook 0.2.14 did not become ready after two launchd starts");
+  expect(String(error)).toContain("Last launchctl kickstart error: Could not kickstart service");
+  expect(bootstraps).toBe(2);
 });
 
 it.skipIf(process.platform === "win32")("falls back to user/<uid> over an SSH login with no GUI session and says how to move it", async () => {

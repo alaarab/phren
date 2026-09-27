@@ -133,7 +133,7 @@ async function stopService() {
   }
   else await exec("systemctl", ["--user", "stop", unit]).catch(() => {});
 }
-async function startService() {
+async function startService(): Promise<string | undefined> {
   if (process.platform === "darwin") {
     const uid = process.getuid!(), gui = await guiSession(uid), domain = launchDomain(uid, gui);
     // bootout returns before launchd finishes releasing the old job. A valid
@@ -149,10 +149,21 @@ async function startService() {
       }
     }
     // RunAtLoad does not always fire for a job bootstrapped from an SSH login.
-    await exec("launchctl", ["kickstart", `${domain}/${label}`]).catch(() => {});
+    // A failed kickstart is only fatal if the version check below also fails.
+    const kickstartError = await exec("launchctl", ["kickstart", `${domain}/${label}`]).then(() => undefined, error =>
+      String((error as { stderr?: string }).stderr || (error as Error).message).trim());
     if (!gui) console.log(`No one is logged in at this Mac's screen, so the Phren Hook runs in ${domain}. After a screen login, run phren bridge install again to move it into gui/${uid}.`);
+    return kickstartError;
   }
   else { await exec("systemctl", ["--user", "daemon-reload"]); await exec("systemctl", ["--user", "enable", "--now", unit]); }
+}
+
+async function serviceReady(version: string): Promise<boolean> {
+  for (let i = 0; i < 50; i++) {
+    try { if ((await health()).version === version) return true; } catch { /* Hook is still starting */ }
+    if (i < 49) await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  return false;
 }
 
 export async function install(version: string, noService = false): Promise<void> {
@@ -195,16 +206,18 @@ export async function install(version: string, noService = false): Promise<void>
   await activate(version);
   try {
     if (!noService) {
-      await startService();
-      let ready = false;
-      for (let i = 0; i < 30; i++) {
-        try { const status = await health(); ready = status.version === version; } catch { /* bounded readiness check */ }
-        if (ready) break;
-        await new Promise(resolve => setTimeout(resolve, 200));
+      let kickstartError = await startService();
+      let ready = await serviceReady(version);
+      if (!ready && process.platform === "darwin") {
+        // launchd may accept bootstrap but leave a throttled or old job behind.
+        // Reload the plist and give the new job a second bounded start window.
+        await stopService();
+        kickstartError = await startService();
+        ready = await serviceReady(version);
       }
       if (!ready) {
         const uid = process.getuid!(), domain = process.platform === "darwin" ? launchDomain(uid, await guiSession(uid)) : undefined;
-        throw new Error(`The new Phren Hook did not become ready. See ${serviceLog}. ` + (domain
+        throw new Error(`The new Phren Hook ${version} did not become ready after ${domain ? "two launchd starts" : "starting the service"}.${kickstartError ? ` Last launchctl kickstart error: ${kickstartError}.` : ""} See ${serviceLog}. ` + (domain
           ? `To start it by hand:\n  ${launchCommands(domain, launchAgentPlist()).join("\n  ")}`
           : `Check systemctl --user status ${unit}.`));
       }
