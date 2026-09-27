@@ -10,6 +10,8 @@ import {
   getHooksEnabledPreference,
 } from "./preferences.js";
 import { getProjectOwnershipDefault } from "../project-config.js";
+import { getMachineName } from "../machine-identity.js";
+import { setMachineProfile } from "../profile-store.js";
 
 describe("management preset init integration", () => {
   let tmpRoot: string;
@@ -163,6 +165,35 @@ describe("management preset init integration", () => {
     expect(fs.existsSync(homeClaude)).toBe(true);
     expect(fs.existsSync(context)).toBe(true);
     expect(fs.existsSync(memory)).toBe(true);
+  });
+
+  it("preserves root memory notes through managed -> assisted -> managed and relink", async () => {
+    const phrenPath = path.join(tmpRoot, "notes-roundtrip");
+    process.env.PHREN_PATH = phrenPath;
+    await suppressOutput(() => runInit({ yes: true, managementPreset: "managed" }));
+    fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
+    fs.writeFileSync(path.join(phrenPath, "profiles", "notes.yaml"), "name: notes\nprojects:\n  - notes-project\n");
+    fs.mkdirSync(path.join(phrenPath, "notes-project"), { recursive: true });
+    fs.writeFileSync(path.join(phrenPath, "notes-project", "summary.md"), "**What:** Preserved project\n");
+    expect(setMachineProfile(phrenPath, getMachineName(), "notes").ok).toBe(true);
+
+    const { runPreset } = await import("./init-preset.js");
+    const { generatedRootMemoryPath } = await import("./teardown.js");
+    const { runLink } = await import("../link/link.js");
+    const memory = generatedRootMemoryPath();
+    const before = "# Owner notes\n\nKeep the deployment checklist.\n\n";
+    const after = "\n\n## Personal reminder\nRetain the recovery instructions.\n";
+    fs.writeFileSync(memory, before + "<!-- phren:projects:start -->\nold projects\n<!-- phren:projects:end -->" + after);
+
+    await suppressOutput(() => runPreset("assisted", { yes: true }));
+    expect(fs.readFileSync(memory, "utf8")).toBe(before + after);
+    await suppressOutput(() => runPreset("managed", { yes: true }));
+    const restored = fs.readFileSync(memory, "utf8");
+    expect(restored.startsWith(before + after)).toBe(true);
+    expect(restored.split("\n")).toContain("| Notes Project | Preserved project | MEMORY-notes-project.md |");
+    expect(restored.match(/<!-- phren:projects:start -->/g)).toHaveLength(1);
+    await suppressOutput(() => runLink(phrenPath, {}));
+    expect(fs.readFileSync(memory, "utf8")).toBe(restored);
   });
 
   // ── ~/.claude/CLAUDE.md ownership ──────────────────────────────────────
