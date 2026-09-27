@@ -46,6 +46,7 @@ import type { TranscriptStreams } from "./server-stream.js";
 import { hookMetrics } from "./metrics.js";
 import { streamSpeech } from "./speech.js";
 import { terminalKind, terminalMux } from "./terminal.js";
+import { muxListForClient, muxReplyForClient, typedMuxRequest } from "./mux-wire.js";
 
 /** The Hook's HTTP API over its Unix socket: module gating, the GET routes,
  * the POST routes that are not bound to one pane, and grant deletion. */
@@ -292,7 +293,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
               working: snapshots.reduce((sum, value) => sum + objects(value.panes).filter(pane => pane.agent && pane.agent_status === "working").length, 0) };
             break;
           }
-          case "/v1/muxes": result = { muxes: await servers() }; break;
+          case "/v1/muxes": result = { muxes: muxListForClient(await servers(), url.searchParams.get("typed") === "1") }; break;
           case "/v1/activity": result = { events: await journal.recent() }; break;
           case "/v1/web-servers": result = { servers: await webServers() }; break;
           case "/v1/simulators": result = { simulators: await bootedSimulators() }; break;
@@ -371,10 +372,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/projects/repos": result = { repos: await candidateRepos(await journal.recent()) }; break;
           case "/v1/workspaces": {
             const server = selectedServer(url);
-            result = await readWorkspaces(server, await snapshot(server), url.searchParams.get("watchApprovals") === "1");
+            result = muxReplyForClient(await readWorkspaces(server, await snapshot(server), url.searchParams.get("watchApprovals") === "1"), typedMuxRequest(url));
             break;
           }
-          case "/v1/workspaces/panes": result = await panes(selectedServer(url), url.searchParams.get("groupId") || "", url.searchParams.get("childId") || ""); break;
+          case "/v1/workspaces/panes": result = muxReplyForClient(await panes(selectedServer(url), url.searchParams.get("groupId") || "", url.searchParams.get("childId") || ""), typedMuxRequest(url)); break;
           case "/v1/transcripts/blob": {
             const target = targetFromURL(url); await validateTarget(target);
             const inner = url.searchParams.get("inner");

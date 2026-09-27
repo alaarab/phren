@@ -3,6 +3,7 @@ import { logger } from "../logger.js";
 import { sharedSnapshot } from "./herdr.js";
 import { intervalFromEnv } from "./limits.js";
 import { countTick } from "./metrics.js";
+import { muxReplyForClient } from "./mux-wire.js";
 import { type Json, MAX_FRAME } from "./protocol.js";
 import type { WorkspacesReader } from "./server-routes.js";
 import { streamCloseReason } from "./server-stream.js";
@@ -76,7 +77,7 @@ export function overviewStream(options: OverviewStreamOptions) {
 
   /** Streams one server's overview until the client closes. Returns the
    * tick function, for tests that drive time themselves. */
-  return function stream(client: OverviewClient, server: string, watchApprovals: boolean, withResources = false) {
+  return function stream(client: OverviewClient, server: string, watchApprovals: boolean, withResources = false, typedMux = false) {
     let closed = false, busy = false, resourcesPending = false, first = true;
     let snapshotKey = "", builtAt = 0, sentKey = "", sentAt = 0, resourcesAt = -Infinity;
     const collectResources = () => {
@@ -102,7 +103,7 @@ export function overviewStream(options: OverviewStreamOptions) {
         const key = JSON.stringify(held);
         if (first || key !== snapshotKey || at - builtAt >= refreshMs) {
           snapshotKey = key; builtAt = at;
-          const overview = await options.read(server, held, watchApprovals);
+          const overview = muxReplyForClient(await options.read(server, held, watchApprovals), typedMux);
           if (closed) return;
           const { phren: _phren, ...rows } = overview;
           const rowsKey = JSON.stringify(rows);
