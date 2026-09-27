@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `phren bridge update` on macOS retries the LaunchAgent with a fresh bootout/bootstrap when launchd accepts the first start but the Hook remains on the old version. It checks the running Hook's version after each start and reports the last kickstart error if neither brings up the update.
 - The Claude plugin now offers first-run store setup at SessionStart and ignores unrelated settings text when deciding whether its memory hooks should stand down. Its documentation and eval suite cover directory submission and onboarding.
 - Bare headless `claude -p` workers launched by Codex or Claude now register from Claude's SessionStart hook, appear beneath their launcher with the native transcript on the phone, and finish on Stop; a vanished process is reported as gone.
 - The overview socket sends its first overview before collecting resources, keeps resource reads from overlapping, and logs their failures. Usage reads skip Copilot when the caller did not ask for it, and a GitHub 404 reports that the account has no Copilot subscription.
@@ -17,7 +18,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- `phren bridge update` on macOS retries the LaunchAgent with a fresh bootout/bootstrap when launchd accepts the first start but the Hook remains on the old version. It checks the running Hook's version after each start and reports the last kickstart error if neither brings up the update.
 - OpenCode Go usage now shows what Go enforces. The Hook reads Go's own account report (percent used, status and reset for the 5-hour, weekly and monthly windows, covering every computer), marks a window Go is refusing requests on (`limited`), and adds how many requests OpenCode's log shows refused with "usage limit exceeded" in the last day. The old meter summed only `phren fanout` runs and read the report's percentages as dollar caps. That produced figures like "$0.44 of $100 (7d), $54 (30d), $10.80 (5h)", with the 30-day cap below the 7-day one, while Go was refusing requests. Fan-out routing now skips every Go model while a plan window is limited. Phones get plan windows only when they ask with `goPlan=1`, because older builds reject them.
 
 ### Added
