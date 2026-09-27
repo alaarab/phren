@@ -13,6 +13,7 @@ import { TranscriptPreviewStream } from "./transcript-preview.js";
 import { childAgent, childAgentTree, refreshTranscript, TranscriptReader, transcriptPath } from "./transcripts.js";
 import type { ModuleSnapshot } from "../modules/runtime.js";
 import { countTick } from "./metrics.js";
+import { approvalSummary } from "./approval-summary.js";
 
 /** The WebSocket transcript and status streams: the backlog, appended rows and
  * previews on a tick loop, older pages on request, and the pane's status. */
@@ -161,8 +162,8 @@ export function transcriptStreams(ctx: StreamContext) {
             // the phone already answers with keys (alt+up, then the option).
             const terminalPrompt = hookPrompt
               ?? (waiting && target.source === "codex" && !pendingQuestions?.length
-                ? await queuedQuestion(target.session).then(queued => queued ? {
-                    toolName: "Question", message: queued.title, queued: true,
+                  ? await queuedQuestion(target.session).then(queued => queued ? {
+                    toolName: "Question", message: queued.title, request: approvalSummary({ tool: "Question", message: queued.title, question: true }).request, queued: true,
                     choice: { title: queued.title, options: queued.options },
                   } : undefined).catch(() => undefined)
                 : undefined);
