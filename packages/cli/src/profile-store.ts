@@ -84,7 +84,32 @@ export function resolveActiveProfile(phrenPath: string, requestedProfile?: strin
 
   const profiles = listProfiles(phrenPath);
   if (!profiles.ok) return phrenOk(undefined);
-  return phrenOk(profiles.data[0]?.name);
+  const assumed = profiles.data[0]?.name;
+  if (assumed && profiles.data.length > 1 && process.env.PHREN_QUIET !== "1") {
+    const machine = getMachineName();
+    const key = JSON.stringify([phrenPath, machine, assumed]);
+    if (!warnedProfileAssumptions.has(key)) {
+      warnedProfileAssumptions.add(key);
+      process.stderr.write(`[phren] Machine "${machine}" is not mapped in machines.yaml; assuming profile "${assumed}". Run 'phren profile switch ${assumed}' to pin it.\n`);
+    }
+  }
+  return phrenOk(assumed);
+}
+
+const warnedProfileAssumptions = new Set<string>();
+
+/** Explain implicit selection without changing the selected profile. */
+export function describeProfileMapping(phrenPath: string): { machine: string; mapped: boolean; assumed?: string } {
+  const machine = getMachineName();
+  const machines = listMachines(phrenPath);
+  const profiles = listProfiles(phrenPath);
+  if (machines.ok && profiles.ok) {
+    for (const name of [machine, defaultMachineName()]) {
+      const mapped = machines.data[name];
+      if (mapped && profiles.data.some((entry) => entry.name === mapped)) return { machine, mapped: true };
+    }
+  }
+  return { machine, mapped: false, assumed: profiles.ok ? profiles.data[0]?.name : undefined };
 }
 
 export function getDefaultMachineAlias(): string {
