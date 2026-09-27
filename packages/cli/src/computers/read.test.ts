@@ -48,7 +48,7 @@ describe("computers surface", () => {
   it("reports every harness, says when one has nothing, and combines limits and spend", async () => {
     const now = Date.parse("2026-09-26T12:00:00Z");
     const report = await readUsage({ now, request: async route => {
-      expect(route).toBe("/v1/usage?sources=claude%2Ccodex%2Ccopilot%2Copencode%2Copencode-go%2Copenrouter&peers=1");
+      expect(route).toBe("/v1/usage?sources=claude%2Ccodex%2Ccopilot%2Copencode%2Copencode-go%2Copenrouter&goPlan=1&peers=1");
       return { computer: { name: "mini" }, accounts: [
         { source: "claude", windows: [{ id: "five_hour", name: "5-hour limit", usedPercent: 30, resetsAt: "2026-09-26T13:30:00Z" }], updatedAt: "2026-09-26T11:00:00Z", origin: "oauth" },
         { source: "opencode", windows: [], spend: { amountUSD: 1.5, period: "rolling_7_days" } },

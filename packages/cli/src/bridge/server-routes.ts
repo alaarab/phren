@@ -34,7 +34,7 @@ import type { ModelCatalog } from "./models.js";
 import type { ModelSwitcher } from "./model-switch.js";
 import type { SideQuestions } from "./side-questions.js";
 import { currentModel, currentStep } from "./steps.js";
-import type { AccountUsageReader } from "./usage.js";
+import { type AccountUsageReader, usageForCaller } from "./usage.js";
 import type { ResourceMonitor } from "./resources.js";
 import type { Scheduler } from "./schedules.js";
 import { healthDetails, listsCaller } from "./health.js";
@@ -331,11 +331,16 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             // meets a source it does not know, so a client names the sources it
             // understands and an older one gets the original four.
             const known = new Set((url.searchParams.get("sources") ?? "codex,claude,opencode,openrouter").split(",").map(s => s.trim()).filter(Boolean));
+            // A phone built before Go's plan windows rejects a Go window with a
+            // percentage and no dollar limit (and the whole answer with it), so
+            // they go only to callers that ask with `goPlan=1`; others keep the
+            // Go account and its message without windows.
+            const goPlan = url.searchParams.get("goPlan") === "1";
             const usage = await accountUsage.read();
-            result = { ...usage, accounts: usage.accounts.filter(account => known.has(account.source)) };
+            result = { ...usage, accounts: usageForCaller(usage.accounts, known, goPlan) };
             // `peers=1` (the memory-free `phren usage`): each linked computer's own answer too.
             if (url.searchParams.get("peers") === "1") result = { ...result as Json, computer: info.computer,
-              ...await fromPeers(`/v1/usage?${new URLSearchParams({ sources: [...known].join(",") })}`) };
+              ...await fromPeers(`/v1/usage?${new URLSearchParams({ sources: [...known].join(","), ...(goPlan ? { goPlan: "1" } : {}) })}`) };
             break;
           }
           case "/v1/resources": {
