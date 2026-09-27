@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { findPane, knownPanes, paneForCodexSession, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
 import { underCodexDaemon } from "./codex-daemon.js";
+import { codexAutoReview } from "./codex-review-mode.js";
 import { terminalPaneFromEnv, terminalProvider } from "./terminal.js";
 import { readPaneText } from "./pane-text.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
@@ -866,7 +867,13 @@ export class AgentHooks {
           session: target.session, pids, workspace: target.workspace, tab: target.tab, event: String(body.event).slice(0, 64), at: new Date().toISOString() }));
         // A terminal that does not watch its agents (tmux) takes the agent's
         // status from these events.
-        const status = eventStatus(body.event);
+        // Codex's automatic reviewer decides this request on its own: it is
+        // not a question for the owner, so nothing is held, pushed or
+        // remembered and the pane is not marked blocked. If Codex hands the
+        // request back to the owner it draws its approval dialog, which the
+        // waiting-pane dialog read picks up and pushes like any other.
+        const autoReview = body.event === "PermissionRequest" && target.source === "codex" && body.autoReview === true;
+        const status = autoReview ? undefined : eventStatus(body.event);
         if (status && typeof pane.terminal_id === "string") notePaneStatus(target.server, target.pane, pane.terminal_id, status);
         // What a shell call changed on disk: snapshot before, diff after.
         const input = typeof body.input === "string" ? { patch: body.input } : object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
@@ -897,6 +904,7 @@ export class AgentHooks {
             }
           }
         }
+        if (autoReview) { res.end("{}"); return; }
         if (body.event !== "PermissionRequest" || target.source === "copilot"
           || (!this.watching.has(JSON.stringify(target)) && !this.overview.has(target.server) && !this.push.available)) {
           if (body.event === "PermissionRequest") this.rememberTerminalPrompt(target, body);
@@ -1005,7 +1013,10 @@ export async function agentHook(source: Provider) {
   // Codex 0.157 runs hooks inside its shared app-server daemon, whose pane
   // variables belong to whichever pane first started it.
   const daemon = source === "codex" && await underCodexDaemon().catch(() => false);
-  const data = JSON.stringify({ target, event, ...(daemon ? { daemon: true } : {}), tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
+  // Codex asks this hook before its automatic reviewer: say when that
+  // reviewer, not the owner, will decide.
+  const autoReview = source === "codex" && event === "PermissionRequest" && await codexAutoReview(value.transcript_path);
+  const data = JSON.stringify({ target, event, ...(daemon ? { daemon: true } : {}), ...(autoReview ? { autoReview: true } : {}), tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
     ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}) });
   await new Promise<void>(resolve => {
     const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? 8_000 : 1500,
