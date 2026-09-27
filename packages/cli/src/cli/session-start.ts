@@ -27,6 +27,7 @@ import {
   isProjectTracked,
   repairPreexistingInstall,
   errorMessage,
+  getPhrenPath,
   resolveRuntimeProfile,
 } from "./hooks-context.js";
 import { TASKS_FILENAME } from "../data/tasks.js";
@@ -42,6 +43,7 @@ import {
 import { runBestEffortGit, countUnsyncedCommits, pullAtSessionStart } from "./session-git.js";
 import { scheduleBackgroundMaintenance } from "./session-background.js";
 import { runDoctor } from "./hooks-context.js";
+import { readClaudeHookPayload, registerUnmanagedClaude } from "./claude-unmanaged.js";
 
 const SESSION_START_ONBOARDING_MARKER = "session-start-onboarding-v1";
 const SYNC_WARN_MARKER = "sync-broken-warned-v1";
@@ -139,6 +141,10 @@ export function getSessionStartOnboardingNotice(
 }
 
 export async function handleHookSessionStart() {
+  const payload = readClaudeHookPayload();
+  // A hand-rolled claude -p worker registers under its launcher, then gets the usual context.
+  try { registerUnmanagedClaude(payload, getPhrenPath(), process.cwd()); }
+  catch (err: unknown) { debugLog(`hook-session-start worker registration failed: ${errorMessage(err)}`); }
   const startedAt = new Date().toISOString();
   const ctx = buildHookContext();
   const { phrenPath, cwd, activeProject, manifest } = ctx;
