@@ -14,6 +14,8 @@ export interface Adapter {
   command: Provider;
   argv(options: LaunchOptions): string[];
   session(event: Record<string, unknown>): string | undefined;
+  /** A tool the worker was refused, when the harness reports it in its events. */
+  refusal?(event: Record<string, unknown>): { type: string; pattern: string; message: string } | undefined;
   /** A harness that serves an API instead of printing events: the launcher
    * spawns `argv` and this drives the worker, returning its exit code. */
   drive?(child: ChildProcess, options: DriveOptions): Promise<number>;

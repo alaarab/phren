@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Claude workers a Codex session starts now show under that Codex conversation on the phone. The fanout skill's wrapper had no Claude provider, so a Codex agent fell back to a bare `claude -p` that wrote no manifest. The wrapper now has `run.sh --provider claude`, and the fanout skills tell Codex agents to use it or `phren fanout run --provider claude`.
+- A worker started from a Claude that itself runs under Codex (or the reverse) is filed under the agent that actually launched it, not whichever id the environment inherited first.
+- `phren fanout run --provider claude` workers can edit their worktree (edits are accepted; commands still need `--allowedTools`), no longer pass `--model default` when no model was named, and are reported as blocked when Claude refused a tool. The phone can send a finished Claude worker a follow-up, and that message shows in its chat.
+
 ## [0.3.10] - 2026-09-26
 
 ### Changed

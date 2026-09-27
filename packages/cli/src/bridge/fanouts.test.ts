@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts, fanoutChildren, parseFanoutArchiveFlags, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
 import type { ChangedFile } from "./changes.js";
+import { visibleClaudeEvent } from "./transcript-claude.js";
 import { object, objects } from "./protocol.js";
 
 const parent = "aaaaaaaa-1111-4111-8111-111111111111";
@@ -149,6 +150,34 @@ describe("fan-out manifests", () => {
 
     const crossProvider = await fixture("job-open-bad", { session: thread });
     expect(await fanoutChildren("codex", parent, crossProvider.env)).toEqual([]);
+  });
+
+  it("lists a Claude worker a Codex session launched, resumable, with its stream-json log readable", async () => {
+    const worker = "dddddddd-4444-4444-8444-444444444444";
+    const events = [
+      { type: "system", subtype: "hook_response", session_id: worker, stdout: "private hook output" },
+      { type: "system", subtype: "init", session_id: worker, cwd: "/repo-wt", model: "haiku" },
+      { type: "assistant", session_id: worker, uuid: "u1", timestamp: "2026-09-19T19:00:03.000Z",
+        message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "Write", input: { file_path: "/repo-wt/a.txt", content: "hi" } }] } },
+      { type: "user", session_id: worker, uuid: "u2", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "ok" }] } },
+      { type: "assistant", session_id: worker, uuid: "u3", message: { role: "assistant", content: [{ type: "text", text: "DONE." }] } },
+      { type: "result", subtype: "success", session_id: worker, result: "DONE.", total_cost_usd: 0.01 },
+      { type: "phren/fanout-message", timestamp: "2026-09-19T19:05:00.000Z", id: "m1", text: "Also add a test." },
+    ].map(event => JSON.stringify(event)).join("\n") + "\n";
+    const bound = await fixture("claude-job", { provider: "claude", model: "haiku", session: worker, status: "completed", exitCode: 0 }, events);
+    const [child] = await fanoutChildren("codex", parent, bound.env);
+    expect(child).toMatchObject({ provider: "claude", session: worker, path: "Review bridge", state: "completed", model: "haiku", fanout: { resumable: true } });
+    expect(await fanoutChildren("claude", parent, bound.env)).toEqual([]);
+    const visible = (await readFile(child.transcript, "utf8")).trim().split("\n")
+      .map(line => visibleClaudeEvent(JSON.parse(line), true)).filter(Boolean) as Array<Record<string, any>>;
+    expect(visible.map(row => row.type)).toEqual(["assistant", "user", "assistant", "user"]);
+    expect(JSON.stringify(visible)).not.toContain("private hook output");
+    expect(JSON.stringify(visible)).not.toContain("total_cost_usd");
+    expect(visible[2].message.content[0]).toEqual({ type: "text", text: "DONE." });
+    expect(visible[3]).toEqual({ type: "user", timestamp: "2026-09-19T19:05:00.000Z", message: { role: "user", content: "Also add a test." } });
+
+    const unresumable = await fixture("claude-job-2", { provider: "claude", status: "running" });
+    expect((await fanoutChildren("codex", parent, unresumable.env))[0].fanout).toEqual({ resumable: false });
   });
 
   it("exports OpenCode commands, URLs, paths and output tails, never reasoning, other arguments, costs or snapshots", () => {
