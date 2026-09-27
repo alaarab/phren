@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex chats on the phone clear a live commentary preview when that message lands in the transcript, even if the turn continues into a shell call and the delta source briefly repeats the old text.
+
 ## [0.3.11] - 2026-09-26
 
 ### Fixed
