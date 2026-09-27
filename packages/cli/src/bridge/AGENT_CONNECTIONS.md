@@ -74,6 +74,17 @@ a repeat after the first failed before typing runs normally; the same id with
 other text or another pane is 409. A dropped connection is then safe to retry.
 A request without an id behaves as before.
 
+A `startingToken` issued while a pane is proven to have no transcript remains
+valid as its first conversation becomes identified, for up to one minute after
+the Hook first observes that identity. Fresh validation still binds the server,
+workspace, tab, pane, terminal, agent and foreground process. Helper processes
+joining that foreground group do not change the binding. A different process,
+terminal or observed conversation retires the token, as does losing a previously
+known identity. Tokens read from an already identified or ambiguous pane grant
+no transition permission. A transitioning prompt observes the same model/side
+question reservations as an ordinary prompt. The client keeps its `deliveryId`
+when retrying with the new session target, so that retry types nothing twice.
+
 ## Routes
 
 All ordinary routes use the private HTTP pipe; transcript and status streams use
