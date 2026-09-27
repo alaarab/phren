@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Task auto-capture skips relayed computer and agent status reports, dispatch return notices, and completed commit, push or PR reports typed into an agent's prompt.
 - Codex chats on the phone clear a live commentary preview when that message lands in the transcript, even if the turn continues into a shell call and the delta source briefly repeats the old text.
 
 ## [0.3.11] - 2026-09-26
