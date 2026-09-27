@@ -82,6 +82,14 @@ describe("fan-out manifests", () => {
     expect(await fanoutChildren("codex", "bbbbbbbb-2222-4222-8222-222222222222", env)).toEqual([]);
   });
 
+  it("exposes a running worker's manifest launch time, but not a queued worker's", async () => {
+    const running = await fixture("job-running-time");
+    expect((await fanoutChildren("codex", parent, running.env))[0].startedAt).toBe("2026-09-19T19:00:01.000Z");
+
+    const queued = await fixture("job-queued-time", { status: "queued" });
+    expect((await fanoutChildren("codex", parent, queued.env))[0].startedAt).toBeUndefined();
+  });
+
   it("accepts legacy parents and scopes a new computer-bound parent when supplied", async () => {
     const computer = "11111111-1111-4111-8111-111111111111";
     const legacy = await fixture("job-legacy");

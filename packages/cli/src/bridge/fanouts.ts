@@ -95,6 +95,8 @@ export interface FanoutChild {
   state: "running" | "completed" | "failed" | "gone";
   /** `blocked: <type> <pattern>` when the plugin refused a permission. */
   reason?: string;
+  /** Actual launch time from a validated manifest; queued jobs omit it. */
+  startedAt?: string;
   finishedAt?: string;
   transcript: string;
   fanout: { resumable: boolean };
@@ -254,7 +256,8 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
       children.push({ id, provider: manifest.provider, session: manifest.session, model: manifest.model, ...worktree, cwd: manifest.worktree,
         path: manifest.taskLabel, callId: `fanout:${id}`,
         state: blocked || manifest.status === "failed" || manifest.status === "cancelled" ? "failed" : gone ? "gone" : ["queued", "running"].includes(manifest.status) ? "running" : "completed",
-        ...(blocked ? { reason: blockedReason(blocked) } : gone ? { reason: "gone: worker process exited" } : asking ? { reason: `needs-you: ${String(asking.message ?? asking.type)}`.slice(0, 500) } : {}), ...(finishedAt ? { finishedAt } : {}), transcript,
+        ...(blocked ? { reason: blockedReason(blocked) } : gone ? { reason: "gone: worker process exited" } : asking ? { reason: `needs-you: ${String(asking.message ?? asking.type)}`.slice(0, 500) } : {}),
+        ...(manifest.status === "queued" ? {} : { startedAt: manifest.startedAt }), ...(finishedAt ? { finishedAt } : {}), transcript,
         fanout: { resumable: manifest.session !== undefined }, children: [] });
     } catch { /* Torn, old, or untrusted manifests do not become child agents. */ }
   }
