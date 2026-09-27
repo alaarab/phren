@@ -61,7 +61,7 @@ export class FanoutMessages {
     if (!relation?.fanout?.resumable) throw new BridgeError(404, "That resumable worker is not part of this conversation.");
     const root = await containedFanoutRoot(this.env);
     const job = (await this.jobs()).find(job => root && fanoutChildID(root, job.manifest) === child);
-    if (!job || !job.manifest.session || !["codex", "opencode"].includes(job.manifest.provider)) {
+    if (!job || !job.manifest.session || !["codex", "opencode", "claude"].includes(job.manifest.provider)) {
       throw new BridgeError(404, "That worker does not belong to this store.");
     }
     return job;
@@ -143,7 +143,7 @@ export class FanoutMessages {
       // Re-read under the job lock. The original launcher owns the manifest until it finishes.
       const fresh = (await this.jobs()).find(candidate => candidate.directory === job.directory);
       if (!fresh || ["queued", "running"].includes(fresh.manifest.status)) return;
-      if (!fresh.manifest.session || !["codex", "opencode"].includes(fresh.manifest.provider)) return;
+      if (!fresh.manifest.session || !["codex", "opencode", "claude"].includes(fresh.manifest.provider)) return;
       const next = (await this.records(fresh)).find(row => row.message.status === "queued");
       if (!next) return;
       pending = next;

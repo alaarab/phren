@@ -11,6 +11,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - `phren computers` and `phren usage` read computers and agent usage from the Hook without Phren memory: `phren computers --resources`, `phren computers --pick mac` for the least-loaded Mac, `phren usage` combined across computers or `--per-computer`. `phren computers mcp` serves the same as four read-only MCP tools (`list_computers`, `get_resources`, `pick_computer`, `get_usage`) for agents that must not see the memory store.
 - GitHub Copilot usage (premium requests and their monthly reset) through the GitHub CLI's own sign-in.
 
+### Fixed
+
+- Claude workers a Codex session starts now show under that Codex conversation on the phone. The fanout skill's wrapper had no Claude provider, so a Codex agent fell back to a bare `claude -p` that wrote no manifest. The wrapper now has `run.sh --provider claude`, and the fanout skills tell Codex agents to use it or `phren fanout run --provider claude`.
+- A worker started from a Claude that itself runs under Codex (or the reverse) is filed under the agent that actually launched it, not whichever id the environment inherited first.
+- `phren fanout run --provider claude` workers can edit their worktree (edits are accepted; commands still need `--allowedTools`), no longer pass `--model default` when no model was named, and are reported as blocked when Claude refused a tool. The phone can send a finished Claude worker a follow-up, and that message shows in its chat.
+
 ## [0.3.10] - 2026-09-26
 
 ### Changed

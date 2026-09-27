@@ -9,6 +9,7 @@ import { opencode } from "../fanout/adapters/opencode.js";
 
 const parent = "aaaaaaaa-1111-4111-8111-111111111111";
 const thread = "cccccccc-3333-4333-8333-333333333333";
+const claudeSession = "dddddddd-4444-4444-8444-444444444444";
 const target = { server: "default", workspace: "w", tab: "w:t", pane: "w:p", source: "codex" as const, session: parent };
 const roots: string[] = [];
 const services: FanoutMessages[] = [];
@@ -18,7 +19,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
-async function fixture(status: "running" | "completed" = "completed", provider: "codex" | "opencode" = "codex") {
+async function fixture(status: "running" | "completed" = "completed", provider: "codex" | "opencode" | "claude" = "codex") {
   const scratch = path.resolve(".scratch"); await mkdir(scratch, { recursive: true });
   const store = await mkdtemp(path.join(scratch, "fanout-messages-")); roots.push(store);
   const directory = path.join(store, ".runtime/agent-fanouts/job-1");
@@ -26,11 +27,12 @@ async function fixture(status: "running" | "completed" = "completed", provider: 
   await mkdir(directory, { recursive: true }); await mkdir(worktree);
   const now = new Date().toISOString();
   const manifest = manifestSchema.parse({ schemaVersion: 1, id: "job-1", parent: { provider: "codex", session: parent },
-    provider, session: provider === "codex" ? thread : "ses_worker42", taskLabel: "Parser checks", cwd: worktree, worktree,
+    provider, session: provider === "codex" ? thread : provider === "claude" ? claudeSession : "ses_worker42", taskLabel: "Parser checks", cwd: worktree, worktree,
     eventLog: "events.jsonl", model: "configured-model", createdAt: now, startedAt: now, updatedAt: now, status });
   await writeFile(path.join(directory, "manifest.json"), JSON.stringify(manifest));
   const original = provider === "codex"
     ? { type: "item.completed", item: { id: "original", type: "agent_message", text: "Original reply" } }
+    : provider === "claude" ? { type: "assistant", session_id: claudeSession, message: { role: "assistant", content: [{ type: "text", text: "Original reply" }] } }
     : { type: "text", part: { type: "text", text: "Original reply" } };
   await writeFile(path.join(directory, "events.jsonl"), JSON.stringify(original) + "\n");
   const env = { ...process.env, PHREN_PATH: store };
@@ -73,7 +75,9 @@ let text = '';
 process.stdin.on('data', chunk => text += chunk);
 process.stdin.on('end', () => {
   fs.writeFileSync('invocation.json', JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), text }));
-  console.log(JSON.stringify(${provider === "codex" ? '{ type: "item.completed", item: { id: "reply", type: "agent_message", text: "Resumed reply" } }' : '{ type: "text", part: { type: "text", text: "Resumed reply" } }'}));
+  console.log(JSON.stringify(${provider === "codex" ? '{ type: "item.completed", item: { id: "reply", type: "agent_message", text: "Resumed reply" } }'
+    : provider === "claude" ? `{ type: "assistant", session_id: "${claudeSession}", message: { role: "assistant", content: [{ type: "text", text: "Resumed reply" }] } }`
+    : '{ type: "text", part: { type: "text", text: "Resumed reply" } }'}));
 });
 `);
   await chmod(executable, 0o700);
@@ -97,7 +101,7 @@ describe("POST /v1/subagents/resume", () => {
   // stops a served harness by its process group, both POSIX: Windows has no nice
   // (the runner's comes from Git for Windows' MSYS, slow and flaky here) and a
   // served OpenCode stays alive. The Hook that runs fan-out supports macOS and Linux only.
-  it.skipIf(process.platform === "win32").each(["codex", "opencode"] as const)("resumes a finished %s worker with stdin in its own worktree and keeps the same job", async provider => {
+  it.skipIf(process.platform === "win32").each(["codex", "opencode", "claude"] as const)("resumes a finished %s worker with stdin in its own worktree and keeps the same job", async provider => {
     const f = await fixture("completed", provider);
     const text = "Review the fix\n`literal` $(also literal)";
     const result = await f.service.send({ target, child: f.child, text });
@@ -108,7 +112,9 @@ describe("POST /v1/subagents/resume", () => {
     expect(invocation).toMatchObject({ text, cwd: f.worktree });
     expect(invocation.argv).toEqual(provider === "codex"
       ? ["exec", "resume", "--json", "-o", path.join(f.directory, "final.txt"), "-m", "configured-model", thread, "-"]
-      : ["serve", "--hostname", "127.0.0.1", "--port", "0"]);
+      : provider === "claude"
+        ? ["-p", "--output-format", "stream-json", "--verbose", "--model", "configured-model", "--permission-mode", "acceptEdits", "--resume", claudeSession]
+        : ["serve", "--hostname", "127.0.0.1", "--port", "0"]);
     if (provider === "opencode") expect(invocation).toMatchObject({ model: { providerID: "configured-model", modelID: "" }, agent: "build" });
     const saved = JSON.parse(await readFile(path.join(f.directory, "manifest.json"), "utf8"));
     expect(saved).toMatchObject({ id: "job-1", session: f.manifest.session, resumes: f.manifest.session, status: "completed" });

@@ -18,6 +18,9 @@ Enable Hook and fanout, then use `phren fanout run --tier narrow|wide|review
 --label LABEL --worktree PATH < brief.txt`. The command chooses an eligible
 provider using current usage, errors and concurrency. Use `phren fanout usage`
 to inspect it, and `--provider`/`--model` for an explicit choice subject to caps.
+A Codex agent that wants a Claude worker or reviewer runs `phren fanout run
+--provider claude --model opus` (add `--tier review` for a read-only one); it
+shows under the Codex conversation like any other worker.
 
 Use `phren fanout list` to inspect jobs, `phren fanout resume JOB < feedback.txt`
 to send a bounded follow-up, and `phren fanout review JOB` for a review round.
