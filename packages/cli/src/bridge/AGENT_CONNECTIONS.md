@@ -135,6 +135,16 @@ optional `request` line on `pendingApproval` or `terminalPrompt` for the phone's
 local activity. The full `message` remains available inside the authenticated
 chat for reviewing and answering the request.
 
+Codex runs its `PermissionRequest` hook before its automatic reviewer, and the
+payload doesn't say which one will decide. For each request the hook reads the
+session's rollout (`transcript_path`) back to the latest `turn_context` or
+`thread_settings_applied` line. When that says `approvals_reviewer: "auto_review"`
+with an `on-request` or granular policy, Codex's reviewer decides: the Hook
+answers at once with no decision, and holds, pushes and remembers nothing, and
+doesn't mark the pane blocked. If Codex hands the request back to the owner, it
+draws its own approval dialog, and the waiting-pane dialog read pushes that like
+any other. Other sessions keep the normal hold.
+
 Creation resolves `cwd` with `realpath`, requires an existing directory under the
 user's real home or within a `locateProject` candidate, and sends the resolved
 path to Herdr. At most one creation/launch is in flight, and at most six attempts

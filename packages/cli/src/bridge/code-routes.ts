@@ -6,7 +6,7 @@ import { git } from "./projects.js";
 import { z } from "zod";
 import { getProjectDirs } from "../shared.js";
 import type { IndexResult, CodeStatus, OutlineEntry, ReferenceResult, SymbolDefinition, SymbolHit, UsageEntry } from "@phren/code";
-import { CODE_PACKAGE_HINT, loadCodePackage } from "../modules/code-package.js";
+import { codePackageHint, loadCodePackage } from "../modules/code-package.js";
 const indexProject: typeof import("@phren/code").indexProject = async (store, ...args) => (await requireCodePackage(store)).indexProject(store, ...args);
 import { isValidProjectName } from "../utils-paths.js";
 import { errorMessage } from "../utils.js";
@@ -16,7 +16,7 @@ import type { ChangedFile } from "./changes.js";
 
 export async function requireCodePackage(store?: string): Promise<typeof import("@phren/code")> {
   const code = await loadCodePackage(store);
-  if (!code) throw new BridgeError(503, CODE_PACKAGE_HINT);
+  if (!code) throw new BridgeError(503, codePackageHint(store));
   return code;
 }
 

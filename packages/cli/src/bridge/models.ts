@@ -211,10 +211,10 @@ export function claudeName(id: string): string {
 export class ModelCatalog {
   private cache = new Map<string, { at: number; value: Promise<AgentModel[]> }>();
   constructor(private readonly codex = () => readCodexModels(), private readonly claude = () => readClaudeModels(),
-              private readonly opencode = () => readOpenCodeModels()) {}
+              private readonly opencode = () => readOpenCodeModels(), private readonly cacheMs = 600_000) {}
   list(source: string): Promise<AgentModel[]> {
     const cached = this.cache.get(source);
-    if (cached && Date.now() - cached.at < 600_000) return cached.value;
+    if (cached && Date.now() - cached.at < this.cacheMs) return cached.value;
     const value = (source === "codex" ? this.codex() : source === "claude" ? this.claude() : source === "opencode" ? this.opencode() : Promise.resolve([])).catch(() => [] as AgentModel[]);
     this.cache.set(source, { at: Date.now(), value });
     return value;

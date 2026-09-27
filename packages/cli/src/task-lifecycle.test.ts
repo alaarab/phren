@@ -435,6 +435,14 @@ describe("task auto-capture prompt gate", () => {
     ["pasted content", '<pasted_content id="7f01">\nFix the retry backoff in the sync worker\n</pasted_content id="7f01">'],
     ["a relayed conductor message", "From the conductor, a correction: the owner wants test runs in parallel, fix the runner"],
     ["a relayed agent message", "From tidy-phren: update the docs and fix the lint errors in src/index.ts"],
+    ["a computer and agent push report", "From macbook android-codex: parity slice 3 done, pushed as 42002c1"],
+    ["a computer and agent commit report", "From linuxbox claude: parser checks done, committed as abc1234"],
+    ["a computer and agent PR report", "From desktop codex: release checklist PR #27 opened"],
+    ["a dispatch return notice", "Return: Linuxbox parser checks done, Parser checks passed. (dispatch 40000000-0000-4000-8000-000000000001). Call dispatch_returns."],
+    ["a dispatch returns notice", "Returns: 2 dispatches (Linuxbox parser checks done, Fix parser regression; Desk nav checks gone). Call dispatch_returns."],
+    ["a bare commit report", "Parser checks complete, committed as 42002c1"],
+    ["a bare push report", "Parity slice 3 complete, pushed as 42002c1"],
+    ["a bare PR report", "Release checklist PR #27 opened"],
     ["a pasted relay", '<pasted_content id="a1">\nFrom the conductor: fix the retry backoff in the sync worker\n</pasted_content id="a1">'],
   ];
   for (const [label, prompt] of relayed) {
@@ -451,6 +459,15 @@ describe("task auto-capture prompt gate", () => {
     const tasks = readTasks(tmp.path, project);
     expect((tasks.ok && tasks.data.items.Queue[0].context) || "").not.toContain("stack trace");
     expect(capture("From now on, fix lint errors in src/index.ts before each commit", "session-from-now").noticeLines.join("\n")).toContain("Queued task");
+  });
+
+  it("still captures requests that look like relays or status reports", () => {
+    for (const [session, prompt] of [
+      ["session-settings", "From the settings page, add a toggle for sync notifications"],
+      ["session-pr-request", "Investigate why PR #27 opened"],
+      ["session-polite-pr-request", "Could someone investigate why PR #28 opened"],
+    ]) expect(capture(prompt, session).noticeLines.join("\n")).toContain("Queued task");
+    expect(taskCount()).toBe(3);
   });
 
   it("never rewrites the Context of the session's tracked task or a matched task", () => {

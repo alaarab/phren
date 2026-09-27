@@ -8,6 +8,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - Hook approval pushes now show the agent, project and computer, plus a redacted one-line command, tool, edit or question; watched approval state carries the same request for the phone's local activity.
+- Hook bridge integration tests inject fixed model catalogues and usage readers, so a developer's installed Codex, Claude, OpenCode or GitHub CLI cannot delay or change the HTTP results.
+- CLI init integration tests now verify a second init and an existing install's dry-run in separate cases, avoiding three synchronous CLI launches under one Windows test deadline.
+- A Hook installed from a source checkout can load a built `packages/code` workspace sibling through the store link; direct checkout runs resolve the sibling too. A missing build now names `pnpm --filter @phren/code build` in the Code route's 503 response.
+- `phren bridge update` on macOS retries the LaunchAgent with a fresh bootout/bootstrap when launchd accepts the first start but the Hook remains on the old version. It checks the running Hook's version after each start and reports the last kickstart error if neither brings up the update.
+- The Claude plugin now offers first-run store setup at SessionStart and ignores unrelated settings text when deciding whether its memory hooks should stand down. Its documentation and eval suite cover directory submission and onboarding.
+- Bare headless `claude -p` workers launched by Codex or Claude now register from Claude's SessionStart hook, appear beneath their launcher with the native transcript on the phone, and finish on Stop; a vanished process is reported as gone.
+- The overview socket sends its first overview before collecting resources, keeps resource reads from overlapping, and logs their failures. Usage reads skip Copilot when the caller did not ask for it, and a GitHub 404 reports that the account has no Copilot subscription.
+- Task auto-capture skips relayed computer and agent status reports, dispatch return notices, and completed commit, push or PR reports typed into an agent's prompt.
+- Codex chats on the phone clear a live commentary preview when that message lands in the transcript, even if the turn continues into a shell call and the delta source briefly repeats the old text.
 
 ## [0.3.11] - 2026-09-26
 

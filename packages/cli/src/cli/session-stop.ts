@@ -52,6 +52,7 @@ import { spawnDetachedChild } from "../shared/process.js";
 import { resolveManagementCapabilities } from "../init/management-preset.js";
 import { aheadBehind, logSyncOutcome } from "../sync/outcome.js";
 import { storeCommitMessage } from "../machine-identity.js";
+import { finishUnmanagedClaude } from "./claude-unmanaged.js";
 
 // ── Utility ─────────────────────────────────────────────────────────────────
 
@@ -229,6 +230,10 @@ function getSessionCap(): number {
 // ── Hook stop handler ───────────────────────────────────────────────────────
 
 export async function handleHookStop() {
+  // Stop is the terminal event for a one-shot Claude print session.
+  const stdinPayload = readStdinJson<{ transcript_path?: string; session_id?: string }>();
+  try { finishUnmanagedClaude(stdinPayload ?? undefined, getPhrenPath()); }
+  catch (err: unknown) { debugLog(`hook-stop worker finish failed: ${errorMessage(err)}`); }
   const ctx = buildHookContext();
   const { phrenPath, activeProject, manifest } = ctx;
   const now = new Date().toISOString();
@@ -255,7 +260,6 @@ export async function handleHookStop() {
 
   // Read stdin early — it's a stream and can only be consumed once.
   // Needed for auto-capture transcript_path parsing.
-  const stdinPayload = readStdinJson<{ transcript_path?: string; session_id?: string }>();
   const taskSessionId = typeof stdinPayload?.session_id === "string" ? stdinPayload.session_id : undefined;
   const taskLevel = getProactivityLevelForTask(phrenPath);
   if (taskSessionId && taskLevel !== "high") {
