@@ -194,6 +194,11 @@ export async function runTopLevelCommand(
 
   const cmd = lookupCommand(argvCommand);
   if (!cmd) return false;
+  // Hook-only commands never find, activate or track a store.
+  if (cmd.standalone && !argv.includes("--help") && !argv.includes("-h")) {
+    try { return finish(await cmd.run(argv.slice(1), buildCliContext()) ?? undefined); }
+    catch (err: unknown) { console.error(errorMessage(err)); return finish(1); }
+  }
   let snapshot: ModuleSnapshot | undefined;
   try {
     const store = findPhrenPath() ?? defaultPhrenPath();

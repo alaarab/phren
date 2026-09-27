@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Each computer's resources: the Hook reports load against cores, memory, free disk on the home volume, battery, uptime and the heavy jobs (simulators and test clones, emulators, xcodebuild, Gradle, Codex, OpenCode, Claude Code, anything else holding half a core) with the pane that started each, at `GET /v1/resources` and as `resources` frames on the overview socket for phones that ask. It warns when free disk is under 10 GB or load is above twice the cores.
+- `phren computers` and `phren usage` read computers and agent usage from the Hook without Phren memory: `phren computers --resources`, `phren computers --pick mac` for the least-loaded Mac, `phren usage` combined across computers or `--per-computer`. `phren computers mcp` serves the same as four read-only MCP tools (`list_computers`, `get_resources`, `pick_computer`, `get_usage`) for agents that must not see the memory store.
+- GitHub Copilot usage (premium requests and their monthly reset) through the GitHub CLI's own sign-in.
+
 ## [0.3.10] - 2026-09-26
 
 ### Changed
