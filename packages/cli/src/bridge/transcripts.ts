@@ -20,7 +20,7 @@ export { codeToolCalls, projectCodexRow, type CodeToolCall } from "./transcript-
 export interface Entry { line: number; raw: Json }
 export interface ChildAgentRelation {
   /** `id` is a parent-scoped public reference; local session and transcript details never leave Hook. */
-  id: string; session?: string; transcript?: string; provider: Provider; path: string; callId: string; state: "running" | "completed" | "failed" | "unavailable";
+  id: string; session?: string; transcript?: string; provider: Provider; path: string; callId: string; state: "running" | "completed" | "failed" | "gone" | "unavailable";
   /** Why a fan-out worker did not finish: `blocked: <type> <pattern>`. */
   reason?: string;
   finishedAt?: string;
@@ -74,8 +74,8 @@ export function publicChildAgents(tree: ChildAgentRelation[]): Json[] {
   return tree.map(({ id, provider, path: agentPath, callId, state, reason, finishedAt, model, worktreeName, branch, computer, remote, fanout, children }) =>
     // A blocked worker is finished; the phone's relation contract has no failed
     // state, so the reason carries what happened without breaking old clients.
-    ({ id, provider, path: agentPath, callId, state: state === "failed" ? "completed" : state,
-      ...(state === "failed" ? { failed: true } : {}), ...(finishedAt ? { finishedAt } : {}),
+    ({ id, provider, path: agentPath, callId, state: state === "failed" || state === "gone" ? "completed" : state,
+      ...(state === "failed" || state === "gone" ? { failed: true } : {}), ...(finishedAt ? { finishedAt } : {}),
       ...(reason !== undefined ? { reason } : {}), ...(model !== undefined ? { model } : {}),
       ...(worktreeName !== undefined ? { worktreeName } : {}), ...(branch !== undefined ? { branch } : {}),
       ...(computer !== undefined ? { computer: { id: computer.id, name: computer.name } } : {}),

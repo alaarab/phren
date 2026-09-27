@@ -41,6 +41,8 @@ export const manifestSchema = z.object({
   worktree: z.string().min(1).max(4096).refine(path.isAbsolute),
   model: z.string().min(1).max(200).optional(),
   eventLog: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.jsonl$/),
+  nativeTranscript: z.string().min(1).max(4096).refine(path.isAbsolute).optional(),
+  unmanagedPid: z.number().int().positive().optional(),
   createdAt: timestamp,
   startedAt: timestamp,
   updatedAt: timestamp,
@@ -51,6 +53,10 @@ export const manifestSchema = z.object({
   resumes: sessionId.optional(),
   schedule: z.object({ id: z.string().regex(/^[a-f0-9]{8}$/), project: z.string().min(1).max(200) }).optional(),
 }).strict().superRefine((manifest, ctx) => {
+  if (manifest.nativeTranscript && (manifest.provider !== "claude" || !manifest.unmanagedPid || !manifest.session))
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["nativeTranscript"], message: "A native transcript needs an unmanaged Claude process." });
+  if (manifest.unmanagedPid && !manifest.nativeTranscript)
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["unmanagedPid"], message: "An unmanaged process needs a native transcript." });
   // OpenCode sessions are `ses_…`; Codex and Claude sessions are UUIDs.
   // A provider cannot claim another provider's identity shape.
   if (manifest.session === undefined) return;
@@ -86,7 +92,7 @@ export interface FanoutChild {
   cwd: string;
   path: string;
   callId: string;
-  state: "running" | "completed" | "failed";
+  state: "running" | "completed" | "failed" | "gone";
   /** `blocked: <type> <pattern>` when the plugin refused a permission. */
   reason?: string;
   finishedAt?: string;
@@ -153,6 +159,19 @@ async function regularContainedFile(root: string, candidate: string, maxBytes: n
   } catch { return; }
 }
 
+async function nativeClaudeTranscript(candidate: string, session: string): Promise<string | undefined> {
+  const root = path.join(homedir(), ".claude", "projects");
+  if (path.basename(candidate) !== `${session}.jsonl`) return;
+  const resolvedRoot = await realpath(root).catch(() => undefined);
+  if (!resolvedRoot) return;
+  return regularContainedFile(resolvedRoot, candidate, MAX_EVENT_LOG_BYTES);
+}
+
+function pidGone(pid: number): boolean {
+  try { process.kill(pid, 0); return false; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+}
+
 async function readBlocked(jobRoot: string): Promise<Blocked | undefined> {
   const file = await regularContainedFile(jobRoot, path.join(jobRoot, "blocked.json"), MAX_BLOCKED_BYTES);
   if (file) {
@@ -214,7 +233,10 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
           || (manifest.parent.computer !== undefined && parentComputer !== undefined && manifest.parent.computer !== parentComputer)) continue;
       const jobRoot = await realpath(directory);
       if (!jobRoot.startsWith(root + path.sep)) continue;
-      const transcript = await regularContainedFile(jobRoot, path.join(jobRoot, manifest.eventLog), MAX_EVENT_LOG_BYTES);
+      const transcript = manifest.nativeTranscript && manifest.session
+        ? await nativeClaudeTranscript(manifest.nativeTranscript, manifest.session)
+          ?? await regularContainedFile(jobRoot, path.join(jobRoot, manifest.eventLog), MAX_EVENT_LOG_BYTES)
+        : await regularContainedFile(jobRoot, path.join(jobRoot, manifest.eventLog), MAX_EVENT_LOG_BYTES);
       if (!transcript) continue;
       const worktree = await worktreeDetails(manifest.worktree);
       const id = fanoutChildID(root, manifest);
@@ -224,13 +246,15 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
       // A running worker waiting on the phone's answer to a permission ask.
       const asking = !blocked && manifest.status === "running" && manifest.provider === "opencode" && manifest.session
         ? await readOpencodeRequest(manifest.session, storeRoot(env)) : undefined;
+      const gone = manifest.status === "running" && manifest.unmanagedPid !== undefined && pidGone(manifest.unmanagedPid);
       const finishedAt = manifest.finishedAt ?? blocked?.at
+        ?? (gone ? manifest.updatedAt : undefined)
         ?? (ARCHIVED_STATUSES.has(manifest.status)
           ? (await stat(path.join(jobRoot, "exit.txt")).catch(() => undefined))?.mtime.toISOString() ?? manifest.updatedAt : undefined);
       children.push({ id, provider: manifest.provider, session: manifest.session, model: manifest.model, ...worktree, cwd: manifest.worktree,
         path: manifest.taskLabel, callId: `fanout:${id}`,
-        state: blocked || manifest.status === "failed" || manifest.status === "cancelled" ? "failed" : ["queued", "running"].includes(manifest.status) ? "running" : "completed",
-        ...(blocked ? { reason: blockedReason(blocked) } : asking ? { reason: `needs-you: ${String(asking.message ?? asking.type)}`.slice(0, 500) } : {}), ...(finishedAt ? { finishedAt } : {}), transcript,
+        state: blocked || manifest.status === "failed" || manifest.status === "cancelled" ? "failed" : gone ? "gone" : ["queued", "running"].includes(manifest.status) ? "running" : "completed",
+        ...(blocked ? { reason: blockedReason(blocked) } : gone ? { reason: "gone: worker process exited" } : asking ? { reason: `needs-you: ${String(asking.message ?? asking.type)}`.slice(0, 500) } : {}), ...(finishedAt ? { finishedAt } : {}), transcript,
         fanout: { resumable: manifest.session !== undefined }, children: [] });
     } catch { /* Torn, old, or untrusted manifests do not become child agents. */ }
   }
