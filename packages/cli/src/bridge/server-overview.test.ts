@@ -133,14 +133,37 @@ describe("overview stream", () => {
     const asked = new FakeClient(), older = new FakeClient();
     const a = stream(asked, "default", false, true), b = stream(older, "default", false);
     await settle();
-    expect(asked.frames.map(frame => frame.type)).toEqual(["resources", "overview"]);
-    expect(asked.frames[0]).toEqual({ type: "resources", resources: { level: "ok", read: 1 } });
+    expect(asked.frames.map(frame => frame.type)).toEqual(["overview", "resources"]);
+    expect(asked.frames[1]).toEqual({ type: "resources", resources: { level: "ok", read: 1 } });
     expect(older.frames.map(frame => frame.type)).toEqual(["overview"]);
     now = 11_999; await a.tick();
     expect(asked.frames.filter(frame => frame.type === "resources")).toHaveLength(1);
-    now = 12_000; await a.tick(); await b.tick();
+    now = 12_000; await a.tick(); await b.tick(); await settle();
     expect(asked.frames.filter(frame => frame.type === "resources")).toHaveLength(2);
     expect(older.frames.some(frame => frame.type === "resources")).toBe(false);
     a.stop(); b.stop();
+  });
+
+  it("sends the first overview while a resources read is still pending, without overlapping reads", async () => {
+    let now = 0, reads = 0;
+    let resolveResources!: (value: unknown) => void;
+    const pending = new Promise<unknown>(resolve => { resolveResources = resolve; });
+    const stream = overviewStream({
+      snapshot: async () => ({ panes: [] }),
+      read: async () => ({ groups: [], phren: {} }),
+      info: () => ({}), renew: () => {},
+      resources: () => { reads++; return pending; },
+      now: () => now, tickMs: 60_000, resourcesMs: 12_000,
+    });
+    const client = new FakeClient(), connection = stream(client, "default", false, true);
+    await settle();
+    expect(client.frames.map(frame => frame.type)).toEqual(["overview"]);
+    expect(reads).toBe(1);
+    now = 12_000; await connection.tick();
+    expect(reads).toBe(1);
+    resolveResources({ level: "ok" });
+    await settle();
+    expect(client.frames.map(frame => frame.type)).toEqual(["overview", "resources"]);
+    connection.stop();
   });
 });
