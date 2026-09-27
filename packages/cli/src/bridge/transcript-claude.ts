@@ -271,6 +271,11 @@ export function phrenHookContext(raw: Json, includeSidechain = false): Json | un
  * private reasoning redacted, queued phone messages, background task
  * notifications and compaction markers. */
 export function visibleClaudeEvent(raw: Json, includeSidechain = false): Json | undefined {
+  // A follow-up the phone sent a Claude fan-out worker, written into its
+  // event log by the Hook before the resumed run.
+  if (raw.type === "phren/fanout-message" && typeof raw.text === "string") {
+    return { type: "user", timestamp: raw.timestamp, message: { role: "user", content: raw.text.slice(0, 65_536) } };
+  }
   // A queued phone message carries the same wrapper; unwrap before the
   // digest so enqueue and remove keep matching keys.
   if (raw.type === "queue-operation" && typeof raw.content === "string") raw = { ...raw, content: unwrapPastedContent(raw.content) };

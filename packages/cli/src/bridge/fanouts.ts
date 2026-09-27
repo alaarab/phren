@@ -231,7 +231,7 @@ export async function fanoutChildren(parentProvider: Provider, parentSession: st
         path: manifest.taskLabel, callId: `fanout:${id}`,
         state: blocked || manifest.status === "failed" || manifest.status === "cancelled" ? "failed" : ["queued", "running"].includes(manifest.status) ? "running" : "completed",
         ...(blocked ? { reason: blockedReason(blocked) } : asking ? { reason: `needs-you: ${String(asking.message ?? asking.type)}`.slice(0, 500) } : {}), ...(finishedAt ? { finishedAt } : {}), transcript,
-        fanout: { resumable: ["codex", "opencode"].includes(manifest.provider) && manifest.session !== undefined }, children: [] });
+        fanout: { resumable: manifest.session !== undefined }, children: [] });
     } catch { /* Torn, old, or untrusted manifests do not become child agents. */ }
   }
   return children.sort((a, b) => a.path.localeCompare(b.path) || a.id.localeCompare(b.id));

@@ -80,3 +80,40 @@ printf '%s\\n' 'permission requested: external_directory (/tmp/work); auto-rejec
   expect(JSON.parse(fs.readFileSync(path.join(reservation.job, "blocked.json"), "utf8"))).toMatchObject({ type: "external_directory", pattern: "/tmp/work" });
   expect(fs.readFileSync(path.join(reservation.job, "exit.txt"), "utf8")).toBe("0\n");
 });
+
+it("starts Claude build workers with edits accepted and the configured model when none is named", () => {
+  const options = { model: "default", worktree: "/work", job: "/job" };
+  expect(adapters.claude.argv(options)).toEqual(["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"]);
+  expect(adapters.claude.refusal?.({ type: "result", permission_denials: [] })).toBeUndefined();
+  expect(adapters.claude.refusal?.({ type: "result", permission_denials: [{ tool_name: "Bash", tool_input: { command: "ls /" } }] }))
+    .toEqual({ type: "permission", pattern: "Bash ls /", message: "1 tool call(s) refused; first: Bash" });
+});
+
+it("binds a worker to the nearest agent when both a Codex and a Claude id are inherited", () => {
+  temp = makeTempDir("fanout-parent-");
+  const codex = "00000000-0000-4000-8000-00000000000c", claude = "00000000-0000-4000-8000-00000000000d";
+  const options = { store: temp.path, provider: "claude" as const, model: "haiku", label: "nested", worktree: temp.path, prompt: "brief", reason: "explicit" };
+  const env = { CODEX_THREAD_ID: codex, CLAUDE_CODE_SESSION_ID: claude };
+  expect(createJob(options, env, () => "codex").manifest.parent).toEqual({ provider: "codex", session: codex });
+  expect(createJob(options, env, () => "claude").manifest.parent).toEqual({ provider: "claude", session: claude });
+  expect(createJob(options, env, () => undefined).manifest.parent).toEqual({ provider: "codex", session: codex });
+  expect(createJob(options, { CLAUDE_CODE_SESSION_ID: claude }, () => "codex").manifest.parent).toEqual({ provider: "claude", session: claude });
+});
+
+it("records a Claude worker's session and reports a refused tool as blocked", async () => {
+  if (process.platform === "win32") return;
+  temp = makeTempDir("fanout-claude-");
+  const bin = path.join(temp.path, "bin");
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, "claude"), `#!/bin/sh
+cat > /dev/null
+printf '%s\\n' '{"type":"system","subtype":"init","session_id":"00000000-0000-4000-8000-000000000003"}'
+printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"00000000-0000-4000-8000-000000000003","permission_denials":[{"tool_name":"Bash","tool_input":{"command":"ls /"}}]}'
+`, { mode: 0o700 });
+  vi.stubEnv("PATH", `${bin}${path.delimiter}${process.env.PATH}`);
+  const options = { store: temp.path, provider: "claude" as const, model: "haiku", label: "refused", worktree: temp.path, prompt: "brief", reason: "explicit" };
+  const reservation = createJob(options, {});
+  expect(await launch(options, reservation)).toBe(1);
+  expect(readJob(temp.path, reservation.manifest.id)).toMatchObject({ status: "failed", exitCode: 0, session: "00000000-0000-4000-8000-000000000003" });
+  expect(JSON.parse(fs.readFileSync(path.join(reservation.job, "blocked.json"), "utf8"))).toMatchObject({ type: "permission", pattern: "Bash ls /" });
+});

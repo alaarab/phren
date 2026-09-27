@@ -30,18 +30,37 @@ export function swiftBuildCount(): number {
   const output = execFileSync("ps", ["-axo", "comm="], { encoding: "utf8", timeout: 5_000 });
   return output.split("\n").filter(line => path.basename(line.trim()) === "xcodebuild").length;
 }
+/** The nearest codex or claude process above this one. Each agent sets its
+ * own id for the commands it runs and inherits the other's, so a Claude
+ * started from Codex has both; the process tree says which one launched. */
+export function nearestAgent(pid = process.ppid): "codex" | "claude" | undefined {
+  if (process.platform === "win32") return undefined;
+  for (let depth = 0; depth < 16 && pid > 1; depth++) {
+    let row: string;
+    try { row = execFileSync("ps", ["-o", "ppid=,comm=", "-p", String(pid)], { encoding: "utf8", timeout: 2_000 }).trim(); } catch { return undefined; }
+    const match = /^(\d+)\s+(.+)$/.exec(row);
+    if (!match) return undefined;
+    const name = path.basename(match[2].trim());
+    if (name === "claude") return "claude";
+    if (name === "codex" || name.startsWith("codex-")) return "codex";
+    pid = Number(match[1]);
+  }
+  return undefined;
+}
 export function writeManifest(job: string, manifest: FanoutManifest): void {
   atomicWriteText(path.join(job, "manifest.json"), JSON.stringify(manifestSchema.parse(manifest)) + "\n");
   fs.chmodSync(path.join(job, "manifest.json"), 0o600);
 }
-export function createJob(options: JobOptions, env: NodeJS.ProcessEnv = process.env): { job: string; manifest: FanoutManifest } {
+export function createJob(options: JobOptions, env: NodeJS.ProcessEnv = process.env, nearest = nearestAgent): { job: string; manifest: FanoutManifest } {
   if (!options.label.trim() || options.label.length > 200) throw new Error("Choose a label of 1 to 200 characters.");
   const worktree = fs.realpathSync(options.worktree);
   if (!fs.statSync(worktree).isDirectory()) throw new Error("Choose a worktree directory.");
   const id = `${options.provider}-${randomBytes(12).toString("hex")}`;
   const root = jobsRoot(options.store), job = path.join(root, id);
   fs.mkdirSync(job, { recursive: true, mode: 0o700 }); fs.chmodSync(root, 0o700);
-  const codexParent = uuid(env.CODEX_THREAD_ID || env.CODEX_SESSION_ID), claudeParent = uuid(env.CLAUDE_CODE_SESSION_ID);
+  const claudeParent = uuid(env.CLAUDE_CODE_SESSION_ID);
+  let codexParent = uuid(env.CODEX_THREAD_ID || env.CODEX_SESSION_ID);
+  if (codexParent && claudeParent && nearest() === "claude") codexParent = undefined;
   const now = new Date().toISOString();
   const manifest: FanoutManifest = { schemaVersion: 1, id, provider: options.provider, taskLabel: options.label,
     cwd: worktree, worktree, model: options.model, eventLog: "events.jsonl", createdAt: now, startedAt: now, updatedAt: now,
@@ -64,6 +83,7 @@ export async function launch(options: JobOptions, reservation = createJob(option
     stdio: ["pipe", "pipe", "pipe"], detached: process.platform !== "win32",
   });
   let pending = "", stderr = "", cancelled = false;
+  let refused: { type: string; pattern: string; message: string } | undefined;
   const watchdog = new LoopWatchdog();
   const kill = () => { try { if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM"); else child.kill("SIGTERM"); } catch { /* Already exited. */ } };
   const cancel = () => { cancelled = true; kill(); };
@@ -74,7 +94,7 @@ export async function launch(options: JobOptions, reservation = createJob(option
     let newline: number;
     while ((newline = pending.indexOf("\n")) >= 0) {
       const line = pending.slice(0, newline); pending = pending.slice(newline + 1);
-      try { const event = JSON.parse(line); watchdog.observe(event); record(adapter.session(event)); } catch { /* Partial or non-JSON provider output. */ }
+      try { const event = JSON.parse(line); watchdog.observe(event); record(adapter.session(event)); refused ??= adapter.refusal?.(event); } catch { /* Partial or non-JSON provider output. */ }
     }
     if (pending.length > 1_048_576) pending = "";
   };
@@ -105,7 +125,7 @@ export async function launch(options: JobOptions, reservation = createJob(option
   clearInterval(timer);
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.off(signal, cancel);
   fs.closeSync(out); fs.closeSync(err);
-  const blockedFile = path.join(job, "blocked.json"), refusal = stderrRefusal(stderr);
+  const blockedFile = path.join(job, "blocked.json"), refusal = refused ?? stderrRefusal(stderr);
   if (refusal && !fs.existsSync(blockedFile)) atomicWriteText(blockedFile, JSON.stringify({ ...refusal, at: new Date().toISOString() }));
   const blocked = fs.existsSync(blockedFile);
   if (blocked) console.error(`blocked: ${fs.readFileSync(blockedFile, "utf8").slice(0, 4000)}`);
