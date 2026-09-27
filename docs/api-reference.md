@@ -1156,6 +1156,36 @@ branch's pull request in any state, `{number, title, url, head, base, draft,
 state, checks}`, where `checks` is `passing`, `failing`, `pending` or null.
 `POST /v1/git/status` returns `defaultBranch`, the branch a push asks to confirm.
 
+### Terminal sources and independent overviews
+
+`GET /v1/muxes?typed=1` enumerates both Herdr and tmux sources in `{muxes: [...]}`.
+Each source carries `id` (`herdr:default`, `tmux:tmux`, `tmux:tmux-work`),
+`kind` (`herdr` or `tmux`), `session` (the existing server name) and `running`.
+The hidden `tmux-phren` source remains visible when it is running alongside
+Herdr; without Herdr it is also offered before its first phone launch.
+A failed socket probe does not remove the other responding sources.
+
+Read each source with `GET /v1/workspaces?mux=<id>`,
+`GET /v1/workspaces/panes?mux=<id>&groupId=...&childId=...`, or
+`WS /v1/overview?mux=<id>`. Overview and pane replies carry the actual `kind`
+and `mux: {id, kind, session}`. Group, pane and target identities are unchanged;
+`target.source` still names the agent harness. Clients combine successful
+sources independently, preserving their rows if another source fails.
+Installed clients require the historical Herdr envelope: without `typed=1`,
+`/v1/muxes` retains `herdr:<session>` IDs and `kind: "herdr"`, with an additive
+accurate `mux` descriptor for tmux entries. Legacy no-mux, `server=` and
+`mux=herdr:tmux` workspace/pane/overview requests likewise retain top-level
+`kind: "herdr"`; their `mux` descriptor still identifies the real source.
+New clients opt in with `mux=tmux:<server>`. Older Hooks ignore `typed=1`, so
+clients must accept legacy discovery aliases during upgrades. A typed tmux
+selector that would resolve to Herdr returns 409 `mux-kind-mismatch`.
+
+Existing HTTP transcript lookup failures carry 404 `code: "transcript-unavailable"`
+after route target validation. This code does not mean every 404 is a missing
+transcript. An identified conversation whose transcript has not been written
+yet still opens an empty transcript WebSocket and waits for it; startup does
+not trigger terminal fallback merely because its file is absent.
+
 ### Live transcript previews
 
 The transcript WebSocket includes `preview: {turnStartedAt, text}` or
@@ -1174,7 +1204,7 @@ Account limits and spend for the phone's Account usage screen: `{accounts: [...]
 
 ### `GET /v1/resources`
 
-This computer's live resources, `{computer, resources}`, collected at most once per `PHREN_RESOURCES_MAX_AGE_MS` (10 s) by `bridge/resources.ts`: `cpu` (`cores`, `load1`/`load5`/`load15`, `loadPerCore`), `memory` (`totalBytes`, `availablePercent`, `pressure` normal/warn/critical, `swapUsedBytes`), `disk` (the home volume's `totalBytes` and `freeBytes`), `battery` (`percent`, `charging`, `onAC`) when there is one, `uptimeSeconds`, and `heavy`: simulators (one per `launchd_sim`, test clones named as such), Android emulators, xcodebuild, Gradle and Kotlin daemons, Java, Codex, OpenCode and Claude Code, each with its processes, CPU and memory and the Herdr or tmux pane that started it (`pane: {server, workspace, pane, agent, label}`) when one did; any other program whose processes together hold half a core shows as `busy`. Every process counts toward its nearest heavy ancestor, so a Codex worker running xcodebuild shows both. `pressure` (`cpu`, `memory`, `disk`, `overall`, 0 to 1) fills every client's gauge the same way, `level` is `ok`, `busy` or `stressed`, and `warnings` lists `load-high` (load above twice the cores), `disk-low` (under 10 GB free), `memory-low` and `battery-low`. macOS reads sysctl, pmset and ps; Linux reads /proc, /sys and ps. With `?peers=1` it adds `peers`, as `/v1/usage` does. Advertised as `capabilities.resources`. A phone that opens `WS /v1/overview` with `resources=1` also gets `{type: "resources", resources}` first and every `PHREN_OVERVIEW_RESOURCES_MS` (12 s) after.
+This computer's live resources, `{computer, resources}`, collected at most once per `PHREN_RESOURCES_MAX_AGE_MS` (10 s) by `bridge/resources.ts`: `cpu` (`cores`, `load1`/`load5`/`load15`, `loadPerCore`), `memory` (`totalBytes`, `availablePercent`, `pressure` normal/warn/critical, `swapUsedBytes`), `disk` (the home volume's `totalBytes` and `freeBytes`), `battery` (`percent`, `charging`, `onAC`) when there is one, `uptimeSeconds`, and `heavy`: simulators (one per `launchd_sim`, test clones named as such), Android emulators, xcodebuild, Gradle and Kotlin daemons, Java, Codex, OpenCode and Claude Code, each with its processes, CPU and memory and the Herdr or tmux pane that started it (`pane: {server, workspace, pane, agent, label}`) when one did; any other program whose processes together hold half a core shows as `busy`. `processes` counts OS processes, including helpers, never active agents or sessions. Known programs are included at 10% CPU or 200 MiB resident memory; simulators and emulators remain visible below those thresholds. `resourceReason` is `cpu`, `memory`, or `tracked`: memory-only rows may be idle sessions or background services, and resource use alone does not establish session status. Codex app/MCP servers are named explicitly; an npm launcher and its native Codex child share one group, including both processes in CPU/RSS totals. Other processes count toward their nearest heavy ancestor, so a Codex worker running xcodebuild shows both without double-counting. CPU is the OS `ps` percentage (a lifetime average on Linux), and resident-memory totals may include shared pages. `pressure` (`cpu`, `memory`, `disk`, `overall`, 0 to 1) fills every client's gauge the same way, `level` is `ok`, `busy` or `stressed`, and `warnings` lists `load-high` (load above twice the cores), `disk-low` (under 10 GB free), `memory-low` and `battery-low`. macOS reads sysctl, pmset and ps; Linux reads /proc, /sys and ps. With `?peers=1` it adds `peers`, as `/v1/usage` does. Advertised as `capabilities.resources`. A phone that opens `WS /v1/overview` with `resources=1` also gets `{type: "resources", resources}` first and every `PHREN_OVERVIEW_RESOURCES_MS` (12 s) after.
 
 ## Computers and usage without memory
 

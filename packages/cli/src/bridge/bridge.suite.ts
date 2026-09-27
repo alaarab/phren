@@ -987,10 +987,16 @@ schedules:
       const attached = await discover();
       expect(attached.sessionId).toBe(session); expect(attached.starting).toBeUndefined();
       expect(attached.startingToken).toBe(starting.startingToken);
-      expect((await api("/v1/prompt", { target: starting, text: "stale first send" })).status).toBe(409);
+      // The verified startup binding follows its first identified conversation.
+      // Retrying that send after the client attaches must not type it twice.
+      const transition = { target: starting, text: "Message while attaching", deliveryId: "starting-transition-integration" };
+      expect((await api("/v1/prompt", transition)).status).toBe(200);
+      const retry = await api("/v1/prompt", { ...transition, target });
+      expect(retry.status).toBe(200); expect(retry.data.replayed).toBe(true);
+      expect(deliveries).toHaveLength(2);
       reportIdentity = false; terminalID = "replacement";
       expect((await api("/v1/prompt", { target: starting, text: "replaced terminal" })).status).toBe(409);
-      expect(deliveries).toHaveLength(1);
+      expect(deliveries).toHaveLength(2);
     });
 
     it("captures a Write PreToolUse/PostToolUse pair as phren_changes without altering the repository index", async () => {

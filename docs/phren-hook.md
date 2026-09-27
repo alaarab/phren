@@ -322,7 +322,8 @@ lists your tmux servers:
 With Herdr running as well, your own tmux servers (`tmux`, `tmux-<name>`) are
 listed beside it, so an agent started over ssh with `tmux new -s app` then
 `codex` shows up next to your Herdr sessions. Phone launches still go to Herdr,
-and `tmux-phren` is not listed.
+and an already-running `tmux-phren` remains listed so its sessions stay reachable.
+Each source is identified as `herdr` or `tmux`; tmux is not a Herdr server.
 
 What works:
 

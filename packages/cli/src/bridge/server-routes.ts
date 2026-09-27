@@ -45,6 +45,8 @@ import { launchSession, localConductor, workspaceAction } from "./server-launch.
 import type { TranscriptStreams } from "./server-stream.js";
 import { hookMetrics } from "./metrics.js";
 import { streamSpeech } from "./speech.js";
+import { terminalKind, terminalMux } from "./terminal.js";
+import { muxListForClient, muxReplyForClient, typedMuxRequest } from "./mux-wire.js";
 
 /** The Hook's HTTP API over its Unix socket: module gating, the GET routes,
  * the POST routes that are not bound to one pane, and grant deletion. */
@@ -148,8 +150,17 @@ async function body(request: IncomingMessage): Promise<Json> {
 
 export function selectedServer(url: URL): string {
   const mux = url.searchParams.get("mux");
-  if (mux && !mux.startsWith("herdr:")) throw new BridgeError(400, "Select a Herdr server.");
-  return serverName.parse(url.searchParams.get("server") || mux?.slice(6) || "default");
+  const selected = mux ? /^(herdr|tmux):(.+)$/.exec(mux) : undefined;
+  if (mux && !selected) throw new BridgeError(400, "Select a terminal source.");
+  const explicit = url.searchParams.get("server");
+  if (explicit && selected && explicit !== selected[2]) throw new BridgeError(400, "Conflicting terminal sources.");
+  const server = serverName.parse(explicit || selected?.[2] || "default");
+  // Old phones used herdr:tmux. Keep that alias, but a typed tmux id must
+  // never silently route to a Herdr session with the same server name.
+  if (selected?.[1] === "tmux" && terminalKind(server) !== "tmux") {
+    throw new BridgeError(409, "This terminal source changed. Refresh the computer.", { code: "mux-kind-mismatch" });
+  }
+  return server;
 }
 
 /**
@@ -225,7 +236,8 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([enrich, new Promise<void>(resolve => { timer = setTimeout(resolve, OVERVIEW_ENRICH_BUDGET_MS); })]);
     expired = true; clearTimeout(timer);
-    return { ...workspaces, phren: info };
+    const mux = terminalMux(server);
+    return { ...workspaces, kind: mux.kind, mux, phren: info };
   };
 }
 
@@ -281,7 +293,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
               working: snapshots.reduce((sum, value) => sum + objects(value.panes).filter(pane => pane.agent && pane.agent_status === "working").length, 0) };
             break;
           }
-          case "/v1/muxes": result = { muxes: await servers() }; break;
+          case "/v1/muxes": result = { muxes: muxListForClient(await servers(), url.searchParams.get("typed") === "1") }; break;
           case "/v1/activity": result = { events: await journal.recent() }; break;
           case "/v1/web-servers": result = { servers: await webServers() }; break;
           case "/v1/simulators": result = { simulators: await bootedSimulators() }; break;
@@ -360,10 +372,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/projects/repos": result = { repos: await candidateRepos(await journal.recent()) }; break;
           case "/v1/workspaces": {
             const server = selectedServer(url);
-            result = await readWorkspaces(server, await snapshot(server), url.searchParams.get("watchApprovals") === "1");
+            result = muxReplyForClient(await readWorkspaces(server, await snapshot(server), url.searchParams.get("watchApprovals") === "1"), typedMuxRequest(url));
             break;
           }
-          case "/v1/workspaces/panes": result = await panes(selectedServer(url), url.searchParams.get("groupId") || "", url.searchParams.get("childId") || ""); break;
+          case "/v1/workspaces/panes": result = muxReplyForClient(await panes(selectedServer(url), url.searchParams.get("groupId") || "", url.searchParams.get("childId") || ""), typedMuxRequest(url)); break;
           case "/v1/transcripts/blob": {
             const target = targetFromURL(url); await validateTarget(target);
             const inner = url.searchParams.get("inner");

@@ -131,8 +131,8 @@ export async function servers(): Promise<Json[]> {
   }));
   const running: Json[] = results.filter((v): v is NonNullable<typeof v> => v !== null);
   // The owner's own tmux servers always: agents started with `tmux` beside a
-  // running Herdr show up too. The Hook's hidden server only without Herdr,
-  // where phone launches go; with Herdr they go to Herdr.
+  // running Herdr show up too, including an already-running hidden server.
+  // Without Herdr, also offer the hidden server before its first launch.
   running.push(...await import("./terminal-tmux.js").then(tmux => tmux.tmuxServers({ hidden: !running.length })).catch(() => []));
   knownServers = running.map(server => String(server.session));
   return running;
@@ -444,12 +444,26 @@ export async function paneForCodexSession(server: string, session: string, cwd?:
 }
 
 const startingKey = randomBytes(32);
+interface StartingBinding { process: string; token: string; wasStarting: boolean; sessionId?: string; identifiedAt?: number }
+const startingBindings = new Map<string, StartingBinding>();
+const startingPaneKey = (server: string, pane: Json) => JSON.stringify([server, pane.workspace_id, pane.tab_id, pane.pane_id, pane.terminal_id, pane.agent]);
+const startingToken = (process: string) => createHmac("sha256", startingKey).update(process).update(randomBytes(32)).digest("hex");
+/** Remember the first identified conversation even when an overview skips the
+ * PID probe. A later conversation in the same process retires its old token. */
+function identifyStartingBinding(key: string, session: string): void {
+  const binding = startingBindings.get(key);
+  if (!binding || binding.sessionId === session) return;
+  if (binding.sessionId) { binding.wasStarting = false; binding.token = startingToken(binding.process); }
+  binding.sessionId = session; binding.identifiedAt = Date.now();
+}
 /** Bind first-send permission to the actual terminal/process, never a cwd or
  * a guessed conversation. Tokens expire naturally when the Hook/process restarts. */
 export async function paneChatState(server: string, pane: Json, options: { tokenWhenIdentified?: boolean } = {}): Promise<Json> {
   if (!provider.safeParse(pane.agent).success) return {};
   const identity = await resolveIdentity(server, pane, false);
   const sessionId = identity.sessionId;
+  const key = startingPaneKey(server, pane);
+  if (sessionId) identifyStartingBinding(key, sessionId);
   // A pane whose conversation is known is not starting, so a caller that
   // reads only `sessionId` and `starting` (the overview) needs no PIDs.
   if (sessionId && options.tokenWhenIdentified === false) return { sessionId };
@@ -457,21 +471,32 @@ export async function paneChatState(server: string, pane: Json, options: { token
   // The token binds to the agent's own process, the oldest in the pane's
   // foreground group. Helpers it spawns while starting up (Codex forks
   // several in its first seconds) must not turn the phone's first send away.
-  const startingToken = typeof pane.terminal_id === "string" && pids.length
-    ? createHmac("sha256", startingKey).update(JSON.stringify([server, pane.workspace_id, pane.tab_id, pane.pane_id, pane.terminal_id, pane.agent, pids[0]])).digest("hex") : undefined;
+  const process = typeof pane.terminal_id === "string" && pids.length ? JSON.stringify([key, pids[0]]) : undefined;
   // An ambiguous set of open logs is not a brand-new conversation.
   // Reuse the same two-second identity probe as context/overview polling;
   // discovering a new chat must not run lsof again for every list refresh.
   const evidence = identities.get(identityKey(server, pane, pids));
-  const starting = !sessionId && !!startingToken && !!evidence && Date.now() - evidence.at < IDENTITY_CACHE_MS && (await evidence.result).noTranscriptLogs;
-  return { sessionId, ...(startingToken ? { startingToken } : {}), ...(starting ? { starting: true } : {}) };
+  const starting = !sessionId && !!process && !!evidence && Date.now() - evidence.at < IDENTITY_CACHE_MS && (await evidence.result).noTranscriptLogs;
+  let binding = startingBindings.get(key);
+  if (process) {
+    // Lost identity, changed process, or newly ambiguous evidence requires a
+    // new token. Never revive a previous conversation's first-send permission.
+    if (!binding || binding.process !== process || (!sessionId && (!!binding.sessionId || binding.wasStarting !== starting))) {
+      binding = { process, token: startingToken(process), wasStarting: starting,
+        ...(sessionId ? { sessionId, identifiedAt: Date.now() } : {}) };
+      if (startingBindings.size >= 256) startingBindings.delete(startingBindings.keys().next().value!);
+      startingBindings.set(key, binding);
+    }
+  }
+  return { sessionId, ...(process && binding ? { startingToken: binding.token } : {}), ...(starting ? { starting: true } : {}) };
 }
 
 export async function panes(server: string, workspace: string, tab: string): Promise<Json> {
   id.parse(workspace); id.parse(tab);
   const s = await snapshot(server);
-  if (!objects(s.tabs).some(t => t.tab_id === tab && t.workspace_id === workspace)) throw new BridgeError(409, "This Herdr tab has changed. Refresh the computer.");
-  return { kind: "herdr", groupId: workspace, childId: tab, panes: await Promise.all(objects(s.panes)
+  if (!objects(s.tabs).some(t => t.tab_id === tab && t.workspace_id === workspace)) throw new BridgeError(409, "This terminal tab has changed. Refresh the computer.");
+  const mux = (await terminal()).terminalMux(server);
+  return { kind: mux.kind, mux, groupId: workspace, childId: tab, panes: await Promise.all(objects(s.panes)
     .filter(p => p.workspace_id === workspace && p.tab_id === tab).map(async p => ({ id: p.pane_id,
       label: p.label || p.pane_id, agent: p.agent, agentStatus: p.agent_status,
       title: p.title || p.terminal_title_stripped, cwd: p.foreground_cwd || p.cwd,
@@ -495,11 +520,17 @@ export async function validateStartingTarget(target: StartingTarget): Promise<Js
   const pane = findPane(s, target);
   if (!pane) throw new BridgeError(409, "This agent pane changed. Reopen the chat.");
   // Force fresh process/log evidence before a mutation.
-  if (await paneIdentity(target.server, pane, true)) throw new BridgeError(409, "The conversation is ready. Wait for chat to attach before sending.");
+  await paneIdentity(target.server, pane, true);
   const state = await paneChatState(target.server, pane);
-  if (!state.starting || state.startingToken !== target.startingToken) throw new BridgeError(409, "This starting agent changed. Reopen the chat.");
+  const binding = startingBindings.get(startingPaneKey(target.server, pane));
+  // Only a token issued while proven new may follow its first identified
+  // conversation, for one minute. Tokens read from mature/ambiguous panes
+  // grant nothing; a process/terminal/conversation change retires the token.
+  const transitioned = !!state.sessionId && binding?.wasStarting && binding.sessionId === state.sessionId
+    && binding.identifiedAt !== undefined && Date.now() - binding.identifiedAt <= 60_000;
+  if ((!state.starting && !transitioned) || state.startingToken !== target.startingToken) throw new BridgeError(409, "This starting agent changed. Reopen the chat.");
   if (["blocked", "waiting", "unknown"].includes(String(pane.agent_status))) throw new BridgeError(409, "This agent needs input in the terminal first.");
-  return pane;
+  return transitioned ? { ...pane, startingSession: state.sessionId } : pane;
 }
 
 /** Identities already resolved for a shared snapshot's pane objects, so every

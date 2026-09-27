@@ -43,6 +43,41 @@ describe("resources", () => {
     ]);
   });
 
+  it("counts a Codex launcher, native child and helpers once without absorbing a nested worker or build", () => {
+    const pane = { server: "default", pane: "w1:p1", workspace: "Conductor" };
+    const rows = [row(10, 1, 0, 20, "/bin/zsh"),
+      row(20, 10, 0, 30, "/usr/bin/node", "node /usr/local/bin/codex"),
+      row(21, 20, 0, 220, "/vendor/bin/codex"),
+      row(22, 21, 0, 40, "/vendor/bin/codex-code-mode-host"),
+      row(23, 21, 1, 25, "/bin/node", "node phren mcp"),
+      row(30, 21, 12, 100, "/vendor/bin/codex", "codex exec -"),
+      row(40, 21, 70, 100, "/usr/bin/xcodebuild"),
+      row(41, 40, 30, 50, "/usr/bin/swift-frontend")];
+    const jobs = heavyProcesses(rows, new Map([[10, pane]]));
+    expect(jobs.map(j => [j.pid, j.processes, j.cpuPercent, j.memoryBytes / 1024 ** 2, j.resourceReason])).toEqual([
+      [40, 2, 100, 150, "cpu"], [30, 1, 12, 100, "cpu"], [20, 4, 1, 315, "memory"],
+    ]);
+    expect(jobs.every(j => j.pane === pane)).toBe(true);
+    // Reversing ps order must not change ownership or totals.
+    expect(heavyProcesses([...rows].reverse(), new Map([[10, pane]]))).toEqual(jobs);
+  });
+
+  it("keeps memory diagnostics without equating idle/helper processes to active sessions", () => {
+    const jobs = heavyProcesses([
+      row(10, 1, 0, 250, "/bin/codex", "codex app-server --listen unix:///tmp/codex.sock"),
+      row(11, 10, 0, 30, "/bin/codex-code-mode-host"),
+      row(20, 1, 0, 200, "/bin/codex", "codex mcp-server"),
+      row(30, 1, 0, 199, "/bin/codex"),
+      row(40, 1, 9.9, 1, "/bin/codex"),
+      row(50, 1, 10, 1, "/bin/codex"),
+      row(60, 1, 0, 1, "/bin/launchd_sim"),
+    ]);
+    expect(jobs.map(j => [j.name, j.processes, j.resourceReason])).toEqual([
+      ["Codex", 1, "cpu"], ["Codex app server", 2, "memory"], ["Codex MCP server", 1, "memory"], ["Simulator", 1, "tracked"],
+    ]);
+    expect(jobs.filter(j => j.kind === "codex").reduce((sum, j) => sum + j.memoryBytes, 0)).toBe(481 * 1024 ** 2);
+  });
+
   it("reads battery, swap and Linux memory", () => {
     expect(parsePmset("Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t12%; discharging; 0:40 remaining present: true"))
       .toEqual({ percent: 12, charging: false, onAC: false });
