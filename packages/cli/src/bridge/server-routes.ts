@@ -35,6 +35,7 @@ import type { ModelSwitcher } from "./model-switch.js";
 import type { SideQuestions } from "./side-questions.js";
 import { currentModel, currentStep } from "./steps.js";
 import type { AccountUsageReader } from "./usage.js";
+import type { ResourceMonitor } from "./resources.js";
 import type { Scheduler } from "./schedules.js";
 import { healthDetails, listsCaller } from "./health.js";
 import { defaultPhrenPath } from "../shared.js";
@@ -80,6 +81,7 @@ export interface RouteContext {
   modelSwitcher: ModelSwitcher;
   sideQuestions: SideQuestions;
   accountUsage: AccountUsageReader;
+  resources: ResourceMonitor;
   codexQuestions: CodexQuestions;
   launches: LaunchLimiter;
   locatedDirectories: Set<string>;
@@ -111,7 +113,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, transcribe: true, memoryStore: true, promptOnce: true };
+  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, transcribe: true, memoryStore: true, promptOnce: true, resources: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -227,9 +229,23 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
   };
 }
 
+/** One read-only GET to every linked peer, each answer or its error by computer name. */
+async function fromPeers(route: string): Promise<{ peers: Json[]; peerError?: string }> {
+  const { peers, peerError } = await optionalHookPeers();
+  const answers = await Promise.all(peers.map(async peer => {
+    try { return { name: peer.name, ...await peerRequest(peer, route, undefined, 15_000) }; }
+    catch (error) {
+      const code = error instanceof BridgeError && typeof error.details?.code === "string" ? error.details.code : undefined;
+      const older = error instanceof BridgeError && error.status === 404;
+      return { name: peer.name, error: older ? "This computer's Hook predates this report; update it with phren bridge update." : error instanceof Error ? error.message.slice(0, 300) : "Unavailable", ...(code ? { code } : {}) };
+    }
+  }));
+  return { peers: answers, ...(peerError ? { peerError } : {}) };
+}
+
 export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage, response: ServerResponse) => Promise<void> {
   const { version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks, journal,
-    modelCatalog, accountUsage, launches, locatedDirectories, fanoutMessages, canary } = ctx;
+    modelCatalog, accountUsage, resources, launches, locatedDirectories, fanoutMessages, canary } = ctx;
   const { conversationReader, childConversationReader, emptyPage } = ctx.streams;
   const readWorkspaces = workspacesReader(ctx);
   return async (request, response) => {
@@ -317,6 +333,14 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             const known = new Set((url.searchParams.get("sources") ?? "codex,claude,opencode,openrouter").split(",").map(s => s.trim()).filter(Boolean));
             const usage = await accountUsage.read();
             result = { ...usage, accounts: usage.accounts.filter(account => known.has(account.source)) };
+            // `peers=1` (the memory-free `phren usage`): each linked computer's own answer too.
+            if (url.searchParams.get("peers") === "1") result = { ...result as Json, computer: info.computer,
+              ...await fromPeers(`/v1/usage?${new URLSearchParams({ sources: [...known].join(",") })}`) };
+            break;
+          }
+          case "/v1/resources": {
+            result = { computer: info.computer, resources: await resources.read() };
+            if (url.searchParams.get("peers") === "1") result = { ...result as Json, ...await fromPeers("/v1/resources") };
             break;
           }
           case "/v1/push/status": result = agentHooks.push.status; break;
