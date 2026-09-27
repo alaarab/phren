@@ -52,13 +52,26 @@ describe("overview stream", () => {
       snapshot: async server => { if (server === "broken") throw new Error("source unavailable"); return { panes: [] }; },
       read: async server => ({ kind: "tmux", mux: { id: `tmux:${server}`, kind: "tmux", session: server }, groups: [{ id: "s1" }] }) });
     const bad = new FakeClient(), good = new FakeClient();
-    const a = stream(bad, "broken", false), b = stream(good, "tmux", false);
+    const a = stream(bad, "broken", false), b = stream(good, "tmux", false, false, true);
     await settle();
     expect(bad.closed?.code).toBe(1011);
     expect(good.closed).toBeUndefined();
     expect(good.frames[0]).toMatchObject({ type: "overview", kind: "tmux", mux: { id: "tmux:tmux" }, groups: [{ id: "s1" }] });
     await b.tick(); expect(good.closed).toBeUndefined();
     a.stop(); b.stop();
+  });
+
+  it("keeps legacy tmux overview envelopes readable while typed clients get the real kind", async () => {
+    const stream = overviewStream({ info: () => ({}), renew: () => {}, tickMs: 60_000,
+      snapshot: async () => ({ panes: [] }),
+      read: async () => ({ kind: "tmux", mux: { id: "tmux:tmux", kind: "tmux", session: "tmux" }, groups: [{ id: "s1" }] }) });
+    const legacy = new FakeClient(), typed = new FakeClient();
+    const a = stream(legacy, "tmux", false), b = stream(typed, "tmux", false, false, true);
+    try {
+      await settle();
+      expect(legacy.frames[0]).toMatchObject({ type: "overview", kind: "herdr", mux: { kind: "tmux" }, groups: [{ id: "s1" }] });
+      expect(typed.frames[0]).toMatchObject({ type: "overview", kind: "tmux", mux: { kind: "tmux" }, groups: [{ id: "s1" }] });
+    } finally { a.stop(); b.stop(); }
   });
 
   it("sends the overview first, then only what changed", async () => {

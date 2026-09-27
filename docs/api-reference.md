@@ -1158,7 +1158,7 @@ state, checks}`, where `checks` is `passing`, `failing`, `pending` or null.
 
 ### Terminal sources and independent overviews
 
-`GET /v1/muxes` enumerates both Herdr and tmux sources in `{muxes: [...]}`.
+`GET /v1/muxes?typed=1` enumerates both Herdr and tmux sources in `{muxes: [...]}`.
 Each source carries `id` (`herdr:default`, `tmux:tmux`, `tmux:tmux-work`),
 `kind` (`herdr` or `tmux`), `session` (the existing server name) and `running`.
 The hidden `tmux-phren` source remains visible when it is running alongside
@@ -1171,7 +1171,13 @@ Read each source with `GET /v1/workspaces?mux=<id>`,
 and `mux: {id, kind, session}`. Group, pane and target identities are unchanged;
 `target.source` still names the agent harness. Clients combine successful
 sources independently, preserving their rows if another source fails.
-Legacy `server=` and `mux=herdr:tmux` selectors remain accepted. A typed tmux
+Installed clients require the historical Herdr envelope: without `typed=1`,
+`/v1/muxes` retains `herdr:<session>` IDs and `kind: "herdr"`, with an additive
+accurate `mux` descriptor for tmux entries. Legacy no-mux, `server=` and
+`mux=herdr:tmux` workspace/pane/overview requests likewise retain top-level
+`kind: "herdr"`; their `mux` descriptor still identifies the real source.
+New clients opt in with `mux=tmux:<server>`. Older Hooks ignore `typed=1`, so
+clients must accept legacy discovery aliases during upgrades. A typed tmux
 selector that would resolve to Herdr returns 409 `mux-kind-mismatch`.
 
 Existing HTTP transcript lookup failures carry 404 `code: "transcript-unavailable"`
