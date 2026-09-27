@@ -206,6 +206,20 @@
           "finding"
         ]
       }
+    },
+    {
+      "name": "phren_setup",
+      "description": "phren has no memory store on this machine yet. Call without arguments to get what setup does; call with confirm=true, only after the user agrees, to run `phren init --yes` (creates ~/.phren and wires Claude Code). Restart Claude Code afterwards.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "description": "true runs setup now. Only after the user agreed."
+          }
+        }
+      }
     }
   ]
 }
