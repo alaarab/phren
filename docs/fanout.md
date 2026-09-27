@@ -67,6 +67,17 @@ Each job is a directory under the store's private runtime root:
 
 `<store>` is `PHREN_PATH` when set, otherwise `~/.phren`.
 
+A bare `claude -p` launched from a Codex or Claude session is registered by
+Claude's SessionStart hook, even without `phren fanout run`. Its manifest has
+`nativeTranscript` pointing to Claude's JSONL under `~/.claude/projects/` and
+`unmanagedPid` for liveness; its `events.jsonl` is an empty compatibility file.
+The Hook reads the native transcript for the phone. The wrapper's
+`PHREN_FANOUT_JOB` marker and a matching session in an existing manifest
+prevent a second row. The Stop hook marks this one-shot worker completed and
+writes `exit.txt`. If its process disappears before Stop, the reader reports
+the worker as gone. No usage routing or wrapper permission policy applies to
+workers started directly with `claude -p`.
+
 ## Environment the launcher sets
 
 | Variable | Meaning |

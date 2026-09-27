@@ -12,10 +12,10 @@ on your machine.
 /plugin install phren@phren
 ```
 
-Then restart Claude Code. On first run phren has no store yet; ask Claude to
-set phren up (or run `/phren:phren-init`). With your go-ahead it runs
-`phren init`, which creates `~/.phren` and wires Claude Code. Restart once more
-and memory is live.
+Then restart Claude Code. On first run, SessionStart offers to create a local
+store. With your go-ahead Claude calls `phren_setup` (or you can run
+`/phren:phren-init`). Setup runs `phren init --yes`, which creates
+`~/.phren` and wires Claude Code. Restart once more and memory is live.
 
 Prefer a terminal? `npx -y @phren/cli init` does the same thing, and also wires
 Codex, Copilot CLI, Cursor and VS Code if you use them.
@@ -50,8 +50,9 @@ wired, and the plugin fills in the rest:
 
 ## First run and missing pieces
 
-The plugin fails open. With no store, the hooks stay silent (they never run
-phren, which would create one), and the MCP server offers a single
+The plugin fails open. With no store, SessionStart asks Claude to offer setup;
+the other hooks stay silent. No hook runs phren or creates a store without
+consent. The MCP server offers a single
 `phren_setup` tool: without arguments it explains what setup does, and with
 `confirm: true` (only after you agree) it runs `phren init --yes`.
 
@@ -75,9 +76,9 @@ embeddings, and LLM-assisted dedup (`PHREN_FEATURE_SEMANTIC_DEDUP`).
 
 ## Evals
 
-`evals/` holds a small `claude plugin eval` suite: memory recall from a seeded
-store, saving a finding, and adding a task. phren's MCP server is replaced by
-fixed mocks (`evals/mocks/phren/`, with the real tool schemas in `_tools.json`),
+`evals/` holds a small `claude plugin eval` suite: first-run setup, memory
+recall from a seeded store, saving a finding, and adding a task. phren's MCP
+server is replaced by fixed mocks (`evals/mocks/phren/`, with the real tool schemas in `_tools.json`),
 and each run gets a temporary home, so no store is touched; but every run is a
 real model call on your own Claude credential.
 
@@ -85,9 +86,26 @@ real model call on your own Claude credential.
 claude plugin eval . --trust-plugin --runs 1 --no-publish
 ```
 
-Three cases at one run each, plus the no-plugin baseline arm and the haiku
-judge, stay well under a dollar on the default model. Add `--max-cost-usd 1`
-for a hard ceiling.
+Each case includes a no-plugin baseline arm and a judge, so runs incur model
+usage. Add `--max-cost-usd 1` for a hard ceiling.
+
+## Directory submission
+
+The plugin lives at the repository root. In Anthropic's
+[developer portal](https://claude.ai/directory/manage), choose **Plugin bundle**,
+enter `alaarab/phren` and the release branch or tag, then run **Validate**.
+The repository must be public before publication. The portal reads the root
+README as the listing text, and the manifest supplies the MIT license,
+description, author and version. Local MCP runs in Claude Code and Cowork;
+Claude chat ignores local MCP servers and hooks, so phren memory is not
+available there. The portal displays supported surfaces before submission.
+
+This monorepo has over 512 tracked files, a PDF, and a pinned `npx` launcher,
+so the directory may hold it for reviewer inspection even when validation has
+no blocking findings. The owner must resolve any portal findings, answer its
+data-handling and compliance questions, submit for review and publish an
+approved version. See Anthropic's
+[pre-submission checklist](https://claude.com/docs/plugins/pre-submission-checklist).
 
 ## For maintainers
 
