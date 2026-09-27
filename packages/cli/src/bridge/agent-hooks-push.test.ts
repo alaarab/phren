@@ -23,13 +23,13 @@ const pane = { pane_id: "w1:p1", workspace_id: "w1", tab_id: "w1:t1", agent: "cl
 const dialog = " Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend";
 
 /** Claude's hook subprocess: posts the ask and waits for the Hook's answer. */
-function ask(): Promise<string> {
+function ask(tool = "Bash", input: unknown = { command: "rm -rf build" }, cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const req = request({ socketPath: localSocket(), path: "/hook", method: "POST" }, res => {
       let body = ""; res.on("data", chunk => { body += chunk; }); res.on("end", () => resolve(body));
     });
     req.on("error", reject);
-    req.end(JSON.stringify({ event: "PermissionRequest", target, tool: "Bash", input: { command: "rm -rf build" } }));
+    req.end(JSON.stringify({ event: "PermissionRequest", target, tool, input, cwd }));
   });
 }
 
@@ -37,7 +37,7 @@ function ask(): Promise<string> {
 // listen on under Windows; the Hook supports macOS and Linux only.
 describe.skipIf(process.platform === "win32")("an approval pushed to a closed phone", () => {
   let bridge: string, previous: string | undefined, hooks: AgentHooks;
-  const sent: { binding: string; expiresAt: string }[] = [];
+  const sent: { binding: string; expiresAt: string; request?: string; requestKind?: string; project?: string; computer?: string }[] = [];
   const keys = () => vi.mocked(rpc).mock.calls.filter(call => call[1] === "agent.send_keys").map(call => call[2]?.keys);
 
   beforeEach(async () => {
@@ -53,7 +53,7 @@ describe.skipIf(process.platform === "win32")("an approval pushed to a closed ph
       throw new Error(`Unexpected RPC ${method}`);
     });
     const push = { available: true, start: async () => {}, status: { configured: true },
-      notify: vi.fn(async (value: { binding: string; expiresAt: string }) => { sent.push(value); return true; }) };
+      notify: vi.fn(async (value: { binding: string; expiresAt: string; request?: string; requestKind?: string; project?: string; computer?: string }) => { sent.push(value); return true; }) };
     hooks = new AgentHooks(push as unknown as ApprovalPushService);
     await hooks.start();
   });
@@ -66,12 +66,32 @@ describe.skipIf(process.platform === "win32")("an approval pushed to a closed ph
   it("Approve from the lock screen answers a held ask through its hook", async () => {
     const answer = ask();
     await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({ request: "Run: rm -rf build", requestKind: "command" });
+    expect(hooks.approval(target)).toMatchObject({ request: "Run: rm -rf build" });
     // The notification lives past the hold, so it can still act once the hold ends.
     expect(Date.parse(sent[0].expiresAt) - Date.now()).toBeGreaterThan(60_000);
     expect(hooks.pushTarget(sent[0].binding)).toEqual(target);
     await hooks.answerPush(sent[0].binding, "approve");
     expect(JSON.parse(await answer)).toMatchObject({ hookSpecificOutput: { decision: { behavior: "allow" } } });
     await expect(hooks.answerPush(sent[0].binding, "approve")).rejects.toThrow(/no longer pending/);
+  });
+
+  it("pushes Claude's question text with the question kind", async () => {
+    const answer = ask("AskUserQuestion", { questions: [{ question: "Ship this now?", header: "Ship", options: [] }] });
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({ request: "Ship this now?", requestKind: "question" });
+    expect(hooks.approval(target)).toMatchObject({ request: "Ship this now?" });
+    await hooks.answerPush(sent[0].binding, "deny");
+    await answer;
+  });
+
+  it("uses the callback's project folder and the Hook computer", async () => {
+    const answer = ask("Bash", { command: "echo ready" }, "/home/me/worktrees/feature");
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({ project: "feature", request: "Run: echo ready", requestKind: "command" });
+    expect(sent[0].computer).toBeTruthy();
+    await hooks.answerPush(sent[0].binding, "deny");
+    await answer;
   });
 
   it("after the hold ends, the same notification answers the dialog left in the terminal", async () => {

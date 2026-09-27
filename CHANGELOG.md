@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Hook approval pushes now show the agent, project and computer, plus a redacted one-line command, tool, edit or question; watched approval state carries the same request for the phone's local activity.
+
 ## [0.3.11] - 2026-09-26
 
 ### Fixed
