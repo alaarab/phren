@@ -530,7 +530,13 @@ function ghExecutable(): string {
 export async function readCopilotUsage(now = new Date(), run: (file: string, args: string[]) => Promise<string> =
   async (file, args) => (await exec(file, args, { timeout: 10_000, maxBuffer: 1_048_576, cwd: homedir() })).stdout): Promise<AccountUsage> {
   try { return copilotUsage(JSON.parse(await run(ghExecutable(), ["api", "/copilot_internal/user"])), now); }
-  catch { return { source: "copilot", windows: [], message: "Could not read Copilot usage. Sign in with gh auth login on this computer (Copilot reports its quotas through GitHub)." }; }
+  catch (error) {
+    const failure = object(error);
+    const detail = [failure.stderr, failure.message].filter((part): part is string => typeof part === "string").join(" ");
+    return { source: "copilot", windows: [], message: /\bHTTP 404\b/i.test(detail)
+      ? "No Copilot subscription on this GitHub account"
+      : "Could not read Copilot usage. Sign in with gh auth login on this computer (Copilot reports its quotas through GitHub)." };
+  }
 }
 
 export class AccountUsageReader {
@@ -538,31 +544,36 @@ export class AccountUsageReader {
   private pending?: Promise<AccountUsage>;
   private claudeCached?: { at: number; value?: AccountUsage };
   private claudePending?: Promise<AccountUsage | undefined>;
-  private spendingCached?: { at: number; value: AccountUsage[] };
-  private spendingPending?: Promise<AccountUsage[]>;
+  private spendingCached = new Map<boolean, { at: number; value: AccountUsage[] }>();
+  private spendingPending = new Map<boolean, Promise<AccountUsage[]>>();
   constructor(private readCodex = readCodexLimits, private now = Date.now,
               private readClaudeLive: (now: Date) => Promise<AccountUsage | undefined> = liveClaudeUsage,
               private readOpenCode: (now: Date) => Promise<AccountUsage> = now => readOpenCodeUsage("opencode", now),
               private readOpenRouter: (now: Date) => Promise<AccountUsage | undefined> = liveOpenRouterUsage,
               private readOpenCodeGo: (now: Date) => Promise<AccountUsage> = readOpenCodeGoUsage,
               private readCopilot: (now: Date) => Promise<AccountUsage> = readCopilotUsage) {}
-  async read(): Promise<{ accounts: AccountUsage[] }> {
+  async read(sources?: Set<string>): Promise<{ accounts: AccountUsage[] }> {
     if (!this.cached || this.now() - this.cached.at >= 60_000) {
       this.pending ??= this.readCodex().then(value => { this.cached = { at: this.now(), value }; return value; }).finally(() => { this.pending = undefined; });
     }
     const codex = this.pending ?? Promise.resolve(this.cached!.value);
-    const [codexValue, claude, spending] = await Promise.all([codex, this.claude(), this.spending()]);
+    const [codexValue, claude, spending] = await Promise.all([codex, this.claude(), this.spending(sources?.has("copilot") ?? true)]);
     return { accounts: [codexValue, claude, ...spending] };
   }
-  private async spending(): Promise<AccountUsage[]> {
-    if (!this.spendingCached || this.now() - this.spendingCached.at >= 60_000) {
+  private async spending(includeCopilot: boolean): Promise<AccountUsage[]> {
+    const cached = this.spendingCached.get(includeCopilot);
+    if (!cached || this.now() - cached.at >= 60_000) {
       const at = this.now();
-      this.spendingPending ??= Promise.all([this.readOpenCode(new Date(at)), this.readOpenCodeGo(new Date(at)), this.readOpenRouter(new Date(at)), this.readCopilot(new Date(at))])
-        .then(([openCode, openCodeGo, openRouter, copilot]) => [openCode, openCodeGo, ...(openRouter ? [openRouter] : []), copilot])
-        .then(value => { this.spendingCached = { at, value }; return value; })
-        .finally(() => { this.spendingPending = undefined; });
+      if (!this.spendingPending.has(includeCopilot)) {
+        const pending = Promise.all([this.readOpenCode(new Date(at)), this.readOpenCodeGo(new Date(at)), this.readOpenRouter(new Date(at)),
+          includeCopilot ? this.readCopilot(new Date(at)) : Promise.resolve(undefined)])
+          .then(([openCode, openCodeGo, openRouter, copilot]) => [openCode, openCodeGo, ...(openRouter ? [openRouter] : []), ...(copilot ? [copilot] : [])])
+          .then(value => { this.spendingCached.set(includeCopilot, { at, value }); return value; })
+          .finally(() => { this.spendingPending.delete(includeCopilot); });
+        this.spendingPending.set(includeCopilot, pending);
+      }
     }
-    return this.spendingPending ? await this.spendingPending : this.spendingCached!.value;
+    return this.spendingPending.get(includeCopilot) ?? cached!.value;
   }
   /** Live first, so the phone's minute-by-minute poll keeps Claude current
    *  even when Claude Code is not running; the local snapshot is the backup. */

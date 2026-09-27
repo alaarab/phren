@@ -22,8 +22,8 @@ import { streamCloseReason } from "./server-stream.js";
  *
  * Frames: `{ type: "overview", ...workspaces, phren }` and
  * `{ type: "heartbeat", phren }`. A phone that asks with `resources=1` also
- * gets `{ type: "resources", resources }` first and every
- * `OVERVIEW_RESOURCES_MS` after (an older phone never asks, so never meets it).
+ * gets `{ type: "resources", resources }` after the first overview, then at
+ * `OVERVIEW_RESOURCES_MS` intervals (an older phone never asks, so never meets it).
  */
 export const OVERVIEW_TICK_MS = intervalFromEnv("PHREN_OVERVIEW_TICK_MS", 5_000, 250, 60_000);
 export const OVERVIEW_REFRESH_MS = intervalFromEnv("PHREN_OVERVIEW_REFRESH_MS", 10_000, 1_000, 120_000);
@@ -77,21 +77,25 @@ export function overviewStream(options: OverviewStreamOptions) {
   /** Streams one server's overview until the client closes. Returns the
    * tick function, for tests that drive time themselves. */
   return function stream(client: OverviewClient, server: string, watchApprovals: boolean, withResources = false) {
-    let closed = false, busy = false, first = true;
+    let closed = false, busy = false, resourcesPending = false, first = true;
     let snapshotKey = "", builtAt = 0, sentKey = "", sentAt = 0, resourcesAt = -Infinity;
+    const collectResources = () => {
+      const at = now();
+      if (!withResources || !options.resources || resourcesPending || at - resourcesAt < resourcesMs) return;
+      resourcesPending = true;
+      resourcesAt = at;
+      void Promise.resolve().then(() => options.resources!()).then(resources => {
+        if (!closed && resources) send(client, { type: "resources", resources });
+      }).catch(error => {
+        logger.warn("stream", `/v1/overview resources read failed: ${streamCloseReason(error)}`);
+      }).finally(() => { resourcesPending = false; });
+    };
     const tick = async (): Promise<void> => {
       if (busy || closed) return;
       busy = true;
       try {
         countTick("overview-stream");
         const at = now();
-        // Resources ride their own frame and clock; a failed read waits for the next.
-        if (withResources && options.resources && at - resourcesAt >= resourcesMs) {
-          resourcesAt = at;
-          const resources = await options.resources().catch(() => undefined);
-          if (closed) return;
-          if (resources) send(client, { type: "resources", resources });
-        }
         // The first frame reads a fresh snapshot, as a poll would.
         const held = await snapshot(server, first ? 0 : tickMs);
         if (closed) return;
@@ -119,6 +123,8 @@ export function overviewStream(options: OverviewStreamOptions) {
         client.close(1011, reason);
       } finally {
         busy = false;
+        // Start this separately so ps and pane ownership cannot hold up the overview.
+        if (!closed) collectResources();
       }
     };
     const timer = setInterval(() => { void tick(); }, tickMs);

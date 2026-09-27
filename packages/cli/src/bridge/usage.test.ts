@@ -150,6 +150,23 @@ describe("account usage", () => {
     expect(signedOut.windows).toEqual([]);
     expect(signedOut.message).toContain("gh auth login");
   });
+  it("does not ask gh for Copilot usage when the caller excludes Copilot", async () => {
+    let ghCalls = 0;
+    const reader = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0,
+      async () => undefined, openCode, noOpenRouter, noOpenCodeGo,
+      date => readCopilotUsage(date, async () => { ghCalls++; return "{}"; }));
+    const usage = await reader.read(new Set(["codex", "claude", "opencode"]));
+    expect(ghCalls).toBe(0);
+    expect(usage.accounts.some(account => account.source === "copilot")).toBe(false);
+    const withCopilot = await reader.read(new Set(["codex", "copilot"]));
+    expect(ghCalls).toBe(1);
+    expect(withCopilot.accounts.some(account => account.source === "copilot")).toBe(true);
+  });
+  it("explains a Copilot 404 as a missing subscription", async () => {
+    const error = Object.assign(new Error("Command failed"), { stderr: "gh: Not Found (HTTP 404)" });
+    const usage = await readCopilotUsage(now, async () => { throw error; });
+    expect(usage.message).toBe("No Copilot subscription on this GitHub account");
+  });
   it("reports OpenCode's rolling seven-day cost without session content", () => {
     const output = "\u001b[32mTotal Cost\u001b[0m                                        $4.39\nprivate session title";
     const value = openCodeUsage(output, now);

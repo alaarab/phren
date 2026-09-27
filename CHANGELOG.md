@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The overview socket sends its first overview before collecting resources, keeps resource reads from overlapping, and logs their failures. Usage reads skip Copilot when the caller did not ask for it, and a GitHub 404 reports that the account has no Copilot subscription.
 - Task auto-capture skips relayed computer and agent status reports, dispatch return notices, and completed commit, push or PR reports typed into an agent's prompt.
 - Codex chats on the phone clear a live commentary preview when that message lands in the transcript, even if the turn continues into a shell call and the delta source briefly repeats the old text.
 

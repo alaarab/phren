@@ -101,6 +101,8 @@ export function heavyKind(row: ProcessRow): { kind: HeavyKind; name: string } | 
  * each with only its own share. Any other program shows as `busy` when its
  * processes together hold half a core. Agents idling at no cost are left
  * out: only jobs that cost something (a core's tenth or 200 MB) make the list.
+ * On Linux, ps pcpu is a process lifetime average, so these cutoffs can miss
+ * daemons that spike briefly.
  */
 export function heavyProcesses(rows: ProcessRow[], owners: Map<number, PaneRef> = new Map(), limit = 12): HeavyProcess[] {
   const byPid = new Map(rows.map(row => [row.pid, row]));

@@ -336,7 +336,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             // they go only to callers that ask with `goPlan=1`; others keep the
             // Go account and its message without windows.
             const goPlan = url.searchParams.get("goPlan") === "1";
-            const usage = await accountUsage.read();
+            const usage = await accountUsage.read(known);
             result = { ...usage, accounts: usageForCaller(usage.accounts, known, goPlan) };
             // `peers=1` (the memory-free `phren usage`): each linked computer's own answer too.
             if (url.searchParams.get("peers") === "1") result = { ...result as Json, computer: info.computer,
