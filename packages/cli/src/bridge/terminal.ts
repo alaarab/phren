@@ -1,5 +1,5 @@
 // What the Hook needs from the terminal multiplexer its agents run in: Herdr
-// (terminal-herdr.ts) or, on a computer without it, tmux (terminal-tmux.ts).
+// (terminal-herdr.ts) and tmux (terminal-tmux.ts), including both on one computer.
 // Nothing Herdr- or tmux-specific may leak past a provider's own file.
 //
 // Identity (which conversation a pane runs) and agent status are not the
@@ -116,6 +116,11 @@ export function terminalKind(server: string): "herdr" | "tmux" {
 }
 /** The multiplexer's name as the phone shows it in messages. */
 export function terminalName(server: string): string { return terminalKind(server) === "tmux" ? "tmux" : "Herdr"; }
+/** Stable source identity for overview/pane replies; agent source remains its harness. */
+export function terminalMux(server: string): { id: string; kind: "herdr" | "tmux"; session: string } {
+  const kind = terminalKind(server);
+  return { id: `${kind}:${server}`, kind, session: server };
+}
 const route = (server: string): TerminalProvider => terminalKind(server) === "tmux" ? tmuxTerminal : herdrTerminal;
 
 /** The provider for each server by its name: Herdr's or tmux's. */

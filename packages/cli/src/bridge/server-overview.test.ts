@@ -47,6 +47,20 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 describe("overview stream", () => {
   afterEach(() => { vi.useRealTimers(); });
 
+  it("isolates a failed mux stream from another source on the same computer", async () => {
+    const stream = overviewStream({ info: () => ({}), renew: () => {}, tickMs: 60_000,
+      snapshot: async server => { if (server === "broken") throw new Error("source unavailable"); return { panes: [] }; },
+      read: async server => ({ kind: "tmux", mux: { id: `tmux:${server}`, kind: "tmux", session: server }, groups: [{ id: "s1" }] }) });
+    const bad = new FakeClient(), good = new FakeClient();
+    const a = stream(bad, "broken", false), b = stream(good, "tmux", false);
+    await settle();
+    expect(bad.closed?.code).toBe(1011);
+    expect(good.closed).toBeUndefined();
+    expect(good.frames[0]).toMatchObject({ type: "overview", kind: "tmux", mux: { id: "tmux:tmux" }, groups: [{ id: "s1" }] });
+    await b.tick(); expect(good.closed).toBeUndefined();
+    a.stop(); b.stop();
+  });
+
   it("sends the overview first, then only what changed", async () => {
     const h = harness(), client = new FakeClient();
     const { tick, stop } = h.stream(client, "default", true);
