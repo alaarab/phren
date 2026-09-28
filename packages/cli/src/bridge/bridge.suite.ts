@@ -1245,9 +1245,15 @@ schedules:
       await sleep(2_500);
       expect(enters()).toBe(before + 1);
       // Taken when the turn ended: nothing more is pressed.
+      // A working Claude takes a message typed mid-turn and runs its
+      // UserPromptSubmit ~340 ms later (seen 2026-09-28, curly quotes and
+      // all); the phone gets a confirmed delivery, not a bare ok.
       agentStatus = "working";
-      expect((await api("/v1/prompt", { target: claude, text: "then run the soak" })).data).toEqual({ ok: true });
-      expect(await submit("then run the soak")).toEqual({ status: 200 });
+      const midTurn = "then run the soak, I\u2019d say the \u2018disconnecting\u2019 flash matters";
+      const taken = api("/v1/prompt", { target: claude, text: midTurn });
+      await sleep(400);
+      expect(await submit(midTurn)).toEqual({ status: 200 });
+      expect((await taken).data).toEqual({ ok: true, delivered: true });
       agentStatus = "idle";
       await sleep(5_000);
       expect(enters()).toBe(before + 1);

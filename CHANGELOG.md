@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A message sent from the phone to a Claude agent that is mid-turn is confirmed as delivered again. Since phren-apps #62 the phone needs `delivered: true`, but the Hook waited only 300 ms on a working pane and Claude runs UserPromptSubmit about 340 ms after a mid-turn message is typed. Every such send came back as a bare `ok`, and the phone showed "Delivery wasn't confirmed" and "Not confirmed in chat" until the queued row landed. A working Claude now gets the same 1.5 s wait as an idle one; the wait ends when the hook arrives.
 - Dispatch resolves a project to this computer's folder the way the rest of phren does: the store's `sourcePaths` entry for this machine wins over the shared `sourcePath`, and with neither here a `~/Projects/<name>` git checkout is used. Linuxbox had refused project `phren` with "Project is not on this computer" even after `sourcePaths: omarchy:` was added.
 - A dispatched Codex or Claude that has no conversation until its first prompt now gets its brief on its starting binding. Before, the dispatch waited 15 s for a session and left the pane idle with the brief unsent and the receipt "uncertain".
 - A dispatched agent held on a startup screen (Claude's "Quick safety check: do you trust this folder", a sign-in) is reported as `failed` with a `needs-you` return that names the pane, instead of "uncertain". The brief is not sent and the Hook never answers the screen: its default choice is "No, exit".
