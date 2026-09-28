@@ -80,6 +80,23 @@ export function codexAppServerEnabled(env: NodeJS.ProcessEnv = process.env, plat
   return !/^(?:0|off|false|no)$/i.test(env.PHREN_CODEX_APP_SERVER ?? "");
 }
 
+/** A question on a Hook-run pane reaches the phone as a card either way, but
+ * only the blocking `request_user_input` holds the turn until someone answers:
+ * an async question (`request_user_input_async`) lets the worker carry on
+ * without the answer, and a plain-text question never becomes a card at all.
+ * Codex 0.157 offers the blocking tool outside plan mode only behind
+ * `features.default_mode_request_user_input`, and a short developer
+ * instruction steers the model to it (as T3 Code's CodexDeveloperInstructions
+ * does). `PHREN_CODEX_BLOCKING_QUESTIONS=off` leaves both out. */
+export const BLOCKING_QUESTION_INSTRUCTIONS = "When you need the user to decide or supply something you cannot find out yourself, "
+  + "ask with the `request_user_input` tool, which waits for the answer; the user answers it from their phone or this terminal. "
+  + "Do not use `request_user_input_async` for that, and never write a multiple-choice question as a plain message. "
+  + "Ask only when a reasonable assumption would be risky.";
+export function serverConfig(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (/^(?:0|off|false|no)$/i.test(env.PHREN_CODEX_BLOCKING_QUESTIONS ?? "")) return [];
+  return ["features.default_mode_request_user_input=true", `developer_instructions=${JSON.stringify(BLOCKING_QUESTION_INSTRUCTIONS)}`];
+}
+
 /** The variable that tells a hook it runs inside the Hook's own app-server
  * for one pane, so the pane variables it carries are that pane's. */
 export const CODEX_SERVER_ENV = "PHREN_CODEX_SERVER";
@@ -175,7 +192,7 @@ export class CodexServers {
     await mkdir(codexServersRoot(), { recursive: true, mode: 0o700 });
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const handle = await this.deps.spawn({ socketPath: socket, cwd: options.cwd, detached: true, logFile: path.join(directory, "server.log"),
-      replaceEnv: true, env: serverEnvironment(process.env, { ...(options.env ?? {}), [CODEX_SERVER_ENV]: serverId }) }).catch(async error => {
+      config: serverConfig(), replaceEnv: true, env: serverEnvironment(process.env, { ...(options.env ?? {}), [CODEX_SERVER_ENV]: serverId }) }).catch(async error => {
       await rm(directory, { recursive: true, force: true }).catch(() => undefined);
       throw error;
     });

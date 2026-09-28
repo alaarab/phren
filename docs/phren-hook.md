@@ -312,6 +312,11 @@ instead of a Codex the Hook types into. Conductors keep the typed path.
   question cards in chat, answered as the reply to that server request.
   Secret inputs, URL elicitations and multi-select fields stay in the pane.
   Chat shows a question reply as the question and its answer.
+  Each server starts with `-c features.default_mode_request_user_input=true`
+  and a developer instruction to ask with the blocking `request_user_input`,
+  not the async tool or a plain-text question, so a worker waits for the
+  owner's answer instead of carrying on without it
+  (`PHREN_CODEX_BLOCKING_QUESTIONS=off` leaves both out).
 - **Escape.** `/v1/keys` Escape on such a pane with a running turn declines the
   thread's parked requests, then interrupts the turn (`turn/interrupt`).
 - **Restart.** Servers outlive the Hook. A restarted Hook reads
