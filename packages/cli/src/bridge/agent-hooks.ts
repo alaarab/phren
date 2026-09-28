@@ -17,7 +17,7 @@ import { readPaneText } from "./pane-text.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
 import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
 import { archiveFinishedFanouts, blockedFanouts, fanoutAsking } from "./fanouts.js";
-import { ensureGrant, listGrants, matchGrant, type Grant } from "./grants.js";
+import { ensureGrant, findGrant } from "./grants.js";
 import { ApprovalPushService } from "./push.js";
 import { approvalSummary, type RequestKind } from "./approval-summary.js";
 import { computerDisplayName } from "./pair.js";
@@ -1214,9 +1214,9 @@ export class AgentHooks {
           const conductor = conductorCall(String(body.tool || "action"), body.input);
           if (conductor) {
             // A standing grant answers the call before it becomes an approval card.
-            const grant = matchGrant(await listGrants().catch(() => [] as Grant[]), {
+            const grant = await findGrant({
               action: conductor.action, project: conductor.project, computer: conductor.computer,
-            });
+            }).catch(() => undefined);
             if (grant) {
               res.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } }));
               return;

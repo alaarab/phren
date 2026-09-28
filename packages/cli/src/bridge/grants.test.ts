@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addGrant, ensureGrant, listGrants, matchGrant, removeGrant, type Grant } from "./grants.js";
+import { foldComputers } from "./computer-identity.js";
 import { BridgeError } from "./protocol.js";
 
 const now = Date.parse("2026-09-21T12:00:00.000Z");
@@ -32,6 +33,31 @@ describe("conductor grants", () => {
     await removeGrant({ index: 0, expected: first }, root);
     await expect(removeGrant({ index: 0, expected: first }, root)).rejects.toMatchObject({ status: 409 });
     expect(await listGrants(root)).toEqual([second]);
+  });
+
+  it("matches a grant naming any alias of the destination computer", () => {
+    const computers = foldComputers({ local: { names: ["Mac.attlocal.net", "Mac", "Squids-Mac-mini"] }, machines: { "Squids-Mac-mini.local": "mac-mini", MacBookPro: "macbook", "Alas-MacBook-Pro.local": "macbook" },
+      peers: [{ name: "MacBook", address: "alas-macbook-pro", names: ["Alas-MacBook-Pro.local"] }] });
+    const owner = grant({ computers: ["Squids-Mac-mini.local"] });
+    expect(matchGrant([owner], { action: "dispatch", computer: "Mac" }, now)).toBeUndefined();
+    expect(matchGrant([owner], { action: "dispatch", computer: "Mac", computers }, now)).toBe(owner);
+    expect(matchGrant([owner], { action: "dispatch", computer: "MacBook", computers }, now)).toBeUndefined();
+    expect(matchGrant([grant({ computers: ["MacBookPro"] })], { action: "hand_off", computer: "MacBook", computers }, now)).toBeDefined();
+    // Still never covers an unresolved destination.
+    expect(matchGrant([owner], { action: "dispatch", computer: "anywhere", computers }, now)).toBeUndefined();
+    expect(matchGrant([owner], { action: "dispatch", computers }, now)).toBeUndefined();
+  });
+
+  it.skipIf(process.platform === "win32")("stores canonical computer names and lists them, keeping unknown names", async () => {
+    vi.stubEnv("PHREN_PATH", "");
+    await writeFile(path.join(root, "hooks.yaml"), `version: 1\ncomputers:\n  - name: MacBook\n    address: alas-macbook-pro\n    username: sam\n    hostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPKDk8cewh74xDIccwQz/N4V05hPT+bdp5fEii+pzf9B\n`, { mode: 0o600 });
+    const added = await addGrant({ scope: "global", actions: ["dispatch"], computers: ["Alas-MacBook-Pro", "alas-macbook-pro", "Unknown"] }, root);
+    expect(added.computers).toEqual(["MacBook", "Unknown"]);
+    expect((await listGrants(root))[0].computers).toEqual(["MacBook", "Unknown"]);
+    await expect(addGrant({ scope: "global", actions: ["dispatch"], computers: ["alas-macbook-pro", "Unknown"] }, root)).rejects.toMatchObject({ status: 409 });
+    await removeGrant({ scope: "global", computers: ["alas-macbook-pro", "Unknown"] }, root);
+    expect(await listGrants(root)).toEqual([]);
+    vi.unstubAllEnvs();
   });
 
   it("matches by specificity: project beats global, named computers beat any, most specific wins", () => {

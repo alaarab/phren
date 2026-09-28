@@ -15,7 +15,8 @@ import { type DispatchService, dispatchProjectDirectory, dispatchStatus } from "
 import { type DispatchReturns, workerStates } from "./dispatch-returns.js";
 import { remoteChildren } from "./dispatch-tree.js";
 import { briefArrival, briefId } from "./launch-brief.js";
-import { addGrant, listGrants, removeGrant } from "./grants.js";
+import { addGrant, listNamedGrants, removeGrant } from "./grants.js";
+import { readComputers } from "./computer-identity.js";
 import { optionalHookPeers, peerRequest } from "./peers.js";
 import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
@@ -288,7 +289,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
           // Receiving side of a launched brief: what the worker's hooks reported for it.
           case "/v1/dispatch/arrival": result = { arrival: await briefArrival(briefId.parse(url.searchParams.get("id"))) ?? null }; break;
-          case "/v1/conductor/grants": result = { grants: await listGrants() }; break;
+          case "/v1/conductor/grants": result = { grants: await listNamedGrants() }; break;
+          // One row per real computer, however many names machines.yaml and the network give it.
+          case "/v1/computers": { const { computers, peerError } = await readComputers({ probe: true, local: { id: info.computer.id } });
+            result = { computers, ...(peerError ? { peerError } : {}) }; break; }
           // Asked by linked peers before they start a conductor: one per connected group.
           case "/v1/conductor": result = { computer: info.computer, conductor: await localConductor() ?? null }; break;
           case "/v1/dispatch/capacity": {

@@ -3,7 +3,7 @@ import { hookRequest } from "./client.js";
 import { dispatchSchema } from "./dispatch.js";
 import { handOff } from "./hand-off.js";
 import { terminalPaneFromEnv } from "./terminal.js";
-import { addGrant, grantSchema, listGrants, removeGrant } from "./grants.js";
+import { addGrant, grantSchema, listNamedGrants, removeGrant } from "./grants.js";
 import { sessionId } from "./protocol.js";
 
 export async function runDispatch(args: string[]): Promise<number> {
@@ -57,7 +57,7 @@ export async function runConductor(args: string[]): Promise<number> {
   const [namespace, action = "list", ...rest] = args;
   if (namespace !== "grants") throw new Error("Usage: phren conductor grants [list|add|remove]");
   if (action === "list") {
-    console.log(JSON.stringify(await listGrants(), null, 2));
+    console.log(JSON.stringify(await listNamedGrants(), null, 2));
     return 0;
   }
   if (action === "add") {
