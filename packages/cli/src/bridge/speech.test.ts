@@ -1,8 +1,21 @@
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeError, type Json } from "./protocol.js";
 import { alignmentOf, DEFAULT_SPEECH_VOICE, SPEECH_AUDIO, SPEECH_MODEL, speakableText, streamSpeech, type SpeechOptions } from "./speech.js";
+import { writeSpeechVoice } from "./speech-voice.js";
+
+// The voice setting lives in the Hook's directory: never the developer's own.
+let bridge: string;
+beforeEach(async () => {
+  bridge = await mkdtemp(path.join(tmpdir(), "phren-speech-"));
+  vi.stubEnv("PHREN_BRIDGE_HOME", bridge);
+  vi.stubEnv("PHREN_SPEECH_VOICE", "");
+});
+afterEach(async () => { vi.unstubAllEnvs(); await rm(bridge, { recursive: true, force: true }); });
 
 const KEY = "sk_test_do_not_leak_0123456789";
 
@@ -72,6 +85,24 @@ describe("speech route", () => {
     expect(JSON.parse(String(calls[0].init.body))).toMatchObject({ text: "Two commits landed.", model_id: SPEECH_MODEL });
     expect(reply.bytes.toString("latin1")).not.toContain(KEY);
     expect(JSON.stringify(reply.headers)).not.toContain(KEY);
+  });
+
+  it("speaks with the phone's voice, else this computer's setting, else the default", async () => {
+    const calls: string[] = [];
+    const { server, post } = await hook({
+      key: async () => KEY,
+      fetch: (async (url: string) => { calls.push(url); return new Response(audioStream([new Uint8Array([1])]), { status: 200 }); }) as typeof fetch,
+    });
+    servers.push(server);
+    const voiceOf = (url: string) => url.split("/text-to-speech/")[1].split("/")[0];
+    expect((await post({ text: "Hello." })).status).toBe(200);
+    await writeSpeechVoice("S9EGwlCtMF7VXtENq79v");
+    expect((await post({ text: "Hello." })).status).toBe(200);
+    expect((await post({ text: "Hello.", voice: "UgBBYS2sOqTuMpoF3BR0" })).status).toBe(200);
+    expect(calls.map(voiceOf)).toEqual([DEFAULT_SPEECH_VOICE, "S9EGwlCtMF7VXtENq79v", "UgBBYS2sOqTuMpoF3BR0"]);
+    // A voice that is not an ElevenLabs id is refused before any request.
+    expect((await post({ text: "Hello.", voice: "../../v1/user" })).status).toBe(400);
+    expect(calls).toHaveLength(3);
   });
 
   it("maps ElevenLabs failures to fixed messages that never carry the key or ElevenLabs' text", async () => {

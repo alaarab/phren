@@ -511,8 +511,19 @@ strips the reply's markdown, so `characters` joined is the spoken text. The
 phone uses it to highlight the word being read in the chat.
 
 The key is this computer's ElevenLabs key (see [the ElevenLabs key](#the-elevenlabs-key)),
-used only in the request to ElevenLabs and never returned, even in errors. The voice is River (calm, neutral); set `PHREN_SPEECH_VOICE` in the
-Hook's environment to another ElevenLabs voice id. Failures answer JSON with a
+used only in the request to ElevenLabs and never returned, even in errors.
+
+The voice is, in order: the request's own `voice` (an ElevenLabs voice id the
+phone picked), this computer's setting, else River (calm, neutral). Set it with
+`phren bridge speech-voice set <voice-id>` (`show` prints it, `clear` removes
+it); it lives in `~/.local/share/phren/bridge/speech.json`, is read on every
+reply (no restart), and install and update leave it alone. The old
+`PHREN_SPEECH_VOICE` environment override is still read when nothing is
+stored, and copied into the setting then; `phren bridge update` also moves it
+from the LaunchAgent, and keeps every environment key it doesn't manage.
+`GET /v1/speech/voices` (capability `speechVoices`) answers `{ voice, source,
+defaultVoice, voices: [{ id, name, category?, description? }] }` from the
+account's ElevenLabs voices, for the phone's picker. Failures answer JSON with a
 `code`: `speech-unconfigured` (503, no key), `speech-unreachable` (502),
 `speech-rejected` (502, key refused), `speech-quota` (402), `speech-voice` (502,
 unknown voice), `speech-invalid` (400), `speech-busy` (429) or `speech-failed`

@@ -314,6 +314,9 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     // A working agent queues typed text and submits it when its turn
     // ends, which can be minutes away; waiting for that only delays
     // the phone. The record still guards the paste for ten minutes.
+    // Claude Code is the exception: it takes a message typed mid-turn at
+    // once and runs UserPromptSubmit about a third of a second later, so a
+    // busy Claude gets the idle wait and the phone a confirmed delivery.
     refuseWorkingSlash(pane, text, target.source);
     if (sideQuestionText(target.source, text) !== undefined) {
       // Claude's `/btw` runs beside the turn and never reaches the transcript:
@@ -323,7 +326,7 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     }
     if (target.source === "codex" && /^\s*\/model\s+\S/i.test(text)) throw new BridgeError(422, "Use the model picker to switch Codex models.");
     const busy = String(pane.agent_status) === "working";
-    const expected = agentHooks.expectDelivery(target, text, busy ? 300 : 1_500);
+    const expected = agentHooks.expectDelivery(target, text, busy && target.source !== "claude" ? 300 : 1_500);
     typing();
     await terminalProvider().prompt(target.server, target.pane, text);
     let outcome: DeliveryOutcome | "unsubmitted" = await expected;
