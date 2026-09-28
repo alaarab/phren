@@ -146,7 +146,10 @@ describe("the worker's Hook answering from turn events", () => {
     const value = receipt();
     observe(value, await ask(), now);
     expect(value.worker!.state).toBe("working");
-    now += BACKGROUND_WAIT_MS;
+    expect(BACKGROUND_WAIT_MS).toBe(2 * 60 * 60 * 1000);
+    now += BACKGROUND_WAIT_MS - 1;
+    expect(await ask()).toMatchObject({ state: "working", background: 2 });
+    now += 1;
     const late = await ask();
     expect(late).toMatchObject({ state: "done", background: 2, reply: "Suite started." });
     observe(value, late, now);

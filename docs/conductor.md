@@ -330,6 +330,12 @@ the worker's last observed state in `worker` and the latest return in
 `returned`, so `phren dispatch status` shows them too, and a finished lead
 reads as completed in `/v1/subagents`.
 
+The dispatch `label` is also the worker's session name: the receiving Hook
+keeps it in `<bridge>/briefs/<id>/label` and shows it as the session's title
+in place of the harness's own, which for a brief launch is only "Read and
+follow the brief...". A session with background work still running is listed
+as `working` with `backgroundTasks`, in `live_sessions` and on the phone.
+
 How it works: the receiving computer's Hook answers
 `POST /v1/dispatch/workers` from what the worker's harness reported about its
 own turns. Claude, Codex, Copilot and phren-agent send SessionStart,
@@ -349,8 +355,13 @@ into its per-process status file. From that record:
   transcript shows the turn ended on an error). When background tasks were
   still in flight the worker stays `working`: the harness wakes it with a new
   prompt when a task ends, and that turn's Stop decides. A worker still
-  waiting on background work 30 minutes after its Stop (a dev server it left
-  running) counts as `done`, with `background` set. Older Claude Code builds
+  waiting on background work two hours after its Stop (a dev server it left
+  running) counts as `done`, with `background` set. The wait is measured from
+  the latest Stop and every task that finishes wakes the worker with a new
+  Stop, so it only runs out when no task has finished for two hours. The
+  dispatching Hook remembers the most background tasks it saw the worker
+  waiting on and, when the worker returns with none still running, sets
+  `waited` and the notice reads "done (after 7 background tasks finished)". Older Claude Code builds
   leave the count out of Stop; the Hook then counts background tasks the
   transcript started and did not end.
 - a conversation with no prompt yet has not taken its brief and stays
@@ -360,7 +371,9 @@ Only a record from the dispatched conversation, in the terminal still in the
 pane, counts; when the worker's hooks named a `PHREN_DISPATCH_ID`, it must be
 this receipt's. With no record (hooks not installed, an older Hook or plugin),
 the Hook falls back to the Herdr snapshot it already shares with the phone
-and the transcript readers: idle with a finished turn is `done`, and idle
+and the transcript readers: idle with a finished turn is `done` (or `working` while that turn left background
+tasks running, a wait bounded at two hours as well: the dispatching Hook counts it from when it first saw the
+worker waiting, and then returns `done` with `background` set), and idle
 after being seen working is `done`. There is no time-based guess: a worker
 never seen working with no finished turn stays `working` until the receipt's
 24-hour watch ends.

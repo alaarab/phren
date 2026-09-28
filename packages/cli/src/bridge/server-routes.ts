@@ -23,6 +23,7 @@ import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { storeRoute } from "./memory-store.js";
+import { markBackground, paneRecord, recordedBackground, recordTitle } from "./session-activity.js";
 import { paneAccountField, paneChatState, panes, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
@@ -213,8 +214,23 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     // the phone waits, so the computer read as offline. The overview answers
     // within its budget with whatever decoration is ready; a later read fills in.
     let expired = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const budget = new Promise<void>(resolve => { timer = setTimeout(resolve, OVERVIEW_ENRICH_BUDGET_MS); });
+    // First, each pane's own turn record (one small file): whether its ended
+    // turn still has background work, and which dispatch it is. It runs ahead
+    // of the slower reads so the status does not flicker between answers, but
+    // inside the budget, so a stuck disk cannot hold the overview either.
+    const records = Promise.all(tabs.map(async ({ group, tab }) => {
+      const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
+      const session = agents.length === 1 && object(tab.target).session;
+      const record = typeof session === "string" ? await paneRecord(server, agents[0], session) : undefined;
+      const title = await recordTitle(record, { harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label });
+      if (expired) return;
+      markBackground(tab, recordedBackground(record));
+      tab.title = title;
+    }));
     let nextTab = 0;
-    const enrich = Promise.all(Array.from({ length: Math.min(4, tabs.length) }, async () => {
+    const enrich = records.then(() => Promise.all(Array.from({ length: Math.min(4, tabs.length) }, async () => {
       while (!expired && nextTab < tabs.length) {
         const { group, tab } = tabs[nextTab++];
         const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
@@ -237,11 +253,14 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
           }
         }
         // A row finished after the answer left belongs to the next read.
-        if (!expired) Object.assign(tab, Object.fromEntries(Object.entries(found).filter(([, value]) => value !== undefined)));
+        if (!expired) {
+          Object.assign(tab, Object.fromEntries(Object.entries(found).filter(([, value]) => value !== undefined)));
+          // Codex subagents and fanout jobs keep an idle-looking session working too.
+          markBackground(tab, typeof found.runningChildren === "number" ? found.runningChildren : undefined);
+        }
       }
-    }));
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([enrich, new Promise<void>(resolve => { timer = setTimeout(resolve, OVERVIEW_ENRICH_BUDGET_MS); })]);
+    })));
+    await Promise.race([enrich, budget]);
     expired = true; clearTimeout(timer);
     const mux = terminalMux(server);
     return { ...workspaces, kind: mux.kind, mux, phren: info };

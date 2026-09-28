@@ -22,7 +22,7 @@ export function register(server: McpServer): void {
   });
   server.registerTool("dispatch_returns", {
     title: "◆ phren · dispatch returns",
-    description: "List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), failed (the harness ended the turn on an error such as a usage limit, with the error), is blocked on terminal input, or its pane is gone. Each row has the dispatch id, computer, project, label and the worker's target for hand_off.",
+    description: "List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), failed (the harness ended the turn on an error such as a usage limit, with the error), is blocked on terminal input, or its pane is gone. A worker that ended its turn with background tasks pending is waited on for up to two hours; a row has `waited` (the most tasks it waited on) or, if some were still running after that, `background`. Each row has the dispatch id, computer, project, label and the worker's target for hand_off.",
     inputSchema: {},
   }, async () => {
     try {
@@ -35,7 +35,7 @@ export function register(server: McpServer): void {
   });
   server.registerTool("live_sessions", {
     title: "◆ phren · live sessions",
-    description: "List the live agent sessions on this computer and every enrolled computer: computer, project, harness, status, idleFor (seconds since the tab last changed), role and the target hand_off takes. Computers that could not be reached are listed separately, and computers registered in the store but not linked in hooks.yaml come back in notLinked: their sessions are unknown, not absent.",
+    description: "List the live agent sessions on this computer and every enrolled computer: computer, project, harness, status (working, with backgroundTasks, while background work runs after the main turn ended), idleFor (seconds since the tab last changed), role and the target hand_off takes. Computers that could not be reached are listed separately, and computers registered in the store but not linked in hooks.yaml come back in notLinked: their sessions are unknown, not absent.",
     inputSchema: {},
   }, async () => {
     try {

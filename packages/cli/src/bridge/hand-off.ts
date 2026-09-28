@@ -92,6 +92,8 @@ export interface LiveSession {
   account?: string;
   /** Seconds since the tab last changed, when the Hook has seen it change. */
   idleFor?: number;
+  /** Set when the main turn ended and this many background tasks keep the session `working`. */
+  backgroundTasks?: number;
 }
 
 function sessionsFrom(overview: Json, computer: string, local: boolean, now = Date.now()): LiveSession[] {
@@ -110,6 +112,7 @@ function sessionsFrom(overview: Json, computer: string, local: boolean, now = Da
     sessions.push({ computer, local, project: tab.role === "conductor" ? undefined : text(cwd.split("/").filter(Boolean).at(-1)), label: text(label),
       title: text(tab.title), agent: tab.agent, status: text(tab.agentStatus), role: text(tab.role),
       branch: text(tab.branch), model: text(tab.model), ...(typeof object(tab.account).id === "string" ? { account: String(object(tab.account).id) } : {}), ...(target.success ? { target: target.data } : {}),
+      ...(typeof tab.backgroundTasks === "number" && tab.backgroundTasks > 0 ? { backgroundTasks: tab.backgroundTasks } : {}),
       ...(Number.isFinite(changedAt) ? { idleFor: Math.max(0, Math.floor((now - changedAt) / 1000)) } : {}) });
   }
   return sessions;

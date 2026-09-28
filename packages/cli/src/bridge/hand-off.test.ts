@@ -54,9 +54,11 @@ it("lists registered computers that are not linked and how long each session has
     await writeFile(path.join(store, "machines.yaml"), "Desk.local: personal\nLinuxbox: work\n");
     const target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude", session: "aaaaaaaa-1111-4111-8111-111111111111" };
     vi.mocked(hookRequest).mockResolvedValueOnce({ computer: { name: "Desk" } }).mockResolvedValueOnce({ groups: [{ label: "phren",
-      children: [{ agent: "claude", agentStatus: "idle", cwd: "/home/sam/phren", target, lastChangedAt: "2026-09-22T11:55:00.000Z" }] }] });
+      children: [{ agent: "claude", agentStatus: "idle", cwd: "/home/sam/phren", target, lastChangedAt: "2026-09-22T11:55:00.000Z" },
+        { agent: "claude", agentStatus: "working", backgroundTasks: 5, cwd: "/home/sam/phren", target }] }] });
     const live = await listLiveSessions({ store });
-    expect(live.sessions).toMatchObject([{ computer: "Desk", project: "phren", status: "idle", idleFor: 300 }]);
+    expect(live.sessions).toMatchObject([{ computer: "Desk", project: "phren", status: "idle", idleFor: 300 }, { status: "working", backgroundTasks: 5 }]);
+    expect(live.sessions[0]).not.toHaveProperty("backgroundTasks");
     expect(live.notLinked).toEqual([{ name: "Linuxbox" }]);
     expect(live.enrolled).toBe(0);
   } finally { vi.useRealTimers(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }

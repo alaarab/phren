@@ -222,7 +222,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   // answers; its file still marks the dispatch so the arrival is recorded here.
   const served = kind === "opencode" ? await prepareServedLaunch() : undefined;
   if (served) args.push(...served.args);
-  const briefFile = brief && (launchesWithBrief(kind) || structured || served) ? await writeLaunchBrief(brief) : undefined;
+  const briefFile = brief && (launchesWithBrief(kind) || structured || served) ? await writeLaunchBrief(brief, Date.now(), label) : undefined;
   const briefLaunch = brief && briefFile && launchesWithBrief(kind) ? briefArgs(kind, briefFile) : undefined;
   const variables = { ...(brief ? { [DISPATCH_ID_ENV]: brief.id } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
   const env = Object.keys(variables).length ? variables : undefined;

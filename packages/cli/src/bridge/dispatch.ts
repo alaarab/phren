@@ -52,13 +52,16 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
     .describe("Computers left out of anywhere placement, with the reason each could not report capacity."),
   origin: originPaneSchema.extend({ agent: provider, terminal: z.string().min(1).max(200) }).strict().optional()
     .describe("The local agent pane that placed this dispatch; return notices go there."),
-  worker: z.object({ state: z.enum(workerStates), since: timestamp, checkedAt: timestamp, sawWorking: z.boolean() }).strict().optional()
+  worker: z.object({ state: z.enum(workerStates), since: timestamp, checkedAt: timestamp, sawWorking: z.boolean(),
+    background: z.number().int().min(0).max(999).optional().describe("The most background tasks seen running while the worker was working."),
+    waitingSince: timestamp.optional().describe("When the dispatching Hook first saw the worker's finished turn waiting on background tasks; bounds that wait.") }).strict().optional()
     .describe("The worker pane's last observed state."),
   returned: z.object({
     state: z.enum(["done", "needs-you", "failed", "blocked", "gone"]), at: timestamp,
     reply: z.string().max(4000).optional(), error: z.string().max(500).optional(), truncated: z.boolean().optional(), question: z.string().max(200).optional(),
     turn: z.string().regex(/^[a-f0-9]{16}$/).optional(), read: z.boolean(), notifiedAt: timestamp.optional(),
     background: z.number().int().min(1).max(999).optional().describe("Background tasks the worker left running when it was counted done."),
+    waited: z.number().int().min(1).max(999).optional().describe("The most background tasks the worker waited on before it finished."),
   }).strict().optional().describe("The latest return: the worker finished, needs the owner, failed, is blocked or is gone."),
 });
 export type Receipt = z.infer<typeof receiptSchema>;
