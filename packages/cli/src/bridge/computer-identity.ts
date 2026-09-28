@@ -21,6 +21,8 @@ export interface Computer {
   reachable?: boolean;
 }
 
+/** `name` and `address` come from hooks.yaml, which the owner writes. `names`
+ * is what the peer's own Hook says it is called: display only, never trusted. */
 export interface PeerFacts { name: string; address: string; id?: string; names?: readonly string[]; reachable?: boolean }
 export interface IdentityFacts {
   local: { id?: string; names: readonly string[] };
@@ -43,8 +45,13 @@ const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLow
 const namesOf = (row: Computer) => [row.name, ...row.aliases];
 const shortestFirst = (a: string, b: string) => a.length - b.length || a.localeCompare(b);
 
-function addAlias(row: Computer, name: string): void {
-  if (name.trim() && !namesOf(row).some(known => same(known, name))) row.aliases.push(name);
+/** Adds a name unless the row has it, or it (or its first label) already
+ * names another row: one name never points at two computers. */
+function addAlias(row: Computer, name: string, rows: readonly Computer[] = [row]): void {
+  if (!name.trim() || namesOf(row).some(known => same(known, name))) return;
+  const label = computerLabel(name);
+  if (rows.some(other => other !== row && namesOf(other).some(known => same(known, name) || computerLabel(known) === label))) return;
+  row.aliases.push(name);
 }
 
 /** Folds what this Hook knows into one row per real computer. A machines.yaml
@@ -52,20 +59,24 @@ function addAlias(row: Computer, name: string): void {
  * has, or when it shares a profile with names already folded into exactly one
  * computer (a profile two computers claim folds nothing). The rest become
  * unlinked rows: names sharing a label or a profile are one computer. */
-export function foldComputers(facts: IdentityFacts): Computer[] {
+export function foldComputers(facts: IdentityFacts, options: { trusted?: boolean } = {}): Computer[] {
   const localName = facts.local.names.find(name => !name.includes(".")) ?? facts.local.names[0] ?? "local";
   const linked: Computer[] = [{ ...(facts.local.id ? { id: facts.local.id } : {}), name: localName, aliases: [], local: true, linked: true, reachable: true }];
   for (const name of facts.local.names) addAlias(linked[0], name);
-  for (const peer of facts.peers) {
+  const peers = facts.peers.map(peer => {
     const row: Computer = { ...(peer.id ? { id: peer.id } : {}), name: peer.name, aliases: [], local: false, linked: true,
       ...(peer.reachable === undefined ? {} : { reachable: peer.reachable }) };
-    for (const name of [peer.address, ...(peer.names ?? [])]) addAlias(row, name);
     linked.push(row);
-  }
+    return { peer, row };
+  });
+  // Owner-written names first, so a peer's report can never take one of them.
+  for (const { peer, row } of peers) addAlias(row, peer.address, linked);
+  // `trusted` rows (grant matching) leave out what peers say about themselves.
+  if (!options.trusted) for (const { peer, row } of peers) for (const name of peer.names ?? []) addAlias(row, name, linked);
   const votes = new Map<Computer, Map<string, number>>();
   const claims = new Map<string, Set<Computer>>();
   const fold = (row: Computer, name: string, profile: string, claim: boolean) => {
-    addAlias(row, name);
+    addAlias(row, name, linked);
     votes.set(row, votes.get(row) ?? new Map());
     votes.get(row)!.set(profile, (votes.get(row)!.get(profile) ?? 0) + 1);
     if (claim) claims.set(profile, (claims.get(profile) ?? new Set()).add(row));
@@ -74,8 +85,9 @@ export function foldComputers(facts: IdentityFacts): Computer[] {
   for (const [name, profile] of Object.entries(facts.machines)) {
     const label = computerLabel(name);
     if (!label) continue;
-    const row = linked.find(candidate => namesOf(candidate).some(known => computerLabel(known) === label));
-    if (row) fold(row, name, profile, true); else rest.push([name, profile]);
+    // A label two computers share folds into neither.
+    const hits = linked.filter(candidate => namesOf(candidate).some(known => computerLabel(known) === label));
+    if (hits.length === 1) fold(hits[0], name, profile, true); else rest.push([name, profile]);
   }
   const unfolded: [string, string][] = [];
   for (const [name, profile] of rest) {
@@ -107,15 +119,17 @@ export function foldComputers(facts: IdentityFacts): Computer[] {
 }
 
 /** The computer a name refers to: an exact name or alias, else the same first
- * label (case-insensitive), so `Desk.local` finds `Desk`. `local` is this computer. */
+ * label (case-insensitive), so `Desk.local` finds `Desk`. `local` is this
+ * computer. A name two rows answer to resolves to nothing. */
 export function resolveComputer(computers: readonly Computer[], name: string): Computer | undefined {
   const wanted = name.trim().toLowerCase();
   if (!wanted) return undefined;
-  const exact = computers.find(row => namesOf(row).some(known => same(known, wanted)));
-  if (exact) return exact;
+  const only = (rows: Computer[]) => rows.length === 1 ? rows[0] : undefined;
+  const exact = computers.filter(row => namesOf(row).some(known => same(known, wanted)));
+  if (exact.length) return only(exact);
   if (wanted === "local" || wanted === "localhost") return computers.find(row => row.local);
   const label = computerLabel(wanted);
-  return computers.find(row => namesOf(row).some(known => computerLabel(known) === label));
+  return only(computers.filter(row => namesOf(row).some(known => computerLabel(known) === label)));
 }
 
 /** What each peer's Hook last said about itself, so grant matching and
@@ -127,6 +141,8 @@ const PROBE_MS = 8_000;
 export interface ReadOptions {
   /** Ask each peer's Hook for its identity (parallel, short timeout) and report `reachable`. */
   probe?: boolean;
+  /** Only names the owner wrote (this computer's, hooks.yaml, machines.yaml): what grants match against. */
+  trusted?: boolean;
   local?: { id?: string; names?: readonly string[] };
   store?: string | null;
   root?: string;
@@ -155,6 +171,6 @@ export async function readComputers(options: ReadOptions = {}): Promise<{ comput
   const store = options.store !== undefined ? options.store : findPhrenPath();
   const machines = store ? listMachines(store) : undefined;
   const computers = foldComputers({ local: { ...(options.local?.id ? { id: options.local.id } : {}), names: options.local?.names ?? localNames() },
-    peers: facts, machines: machines?.ok ? machines.data : {} });
+    peers: facts, machines: machines?.ok ? machines.data : {} }, { trusted: options.trusted });
   return { computers, ...(peerError ? { peerError } : {}) };
 }

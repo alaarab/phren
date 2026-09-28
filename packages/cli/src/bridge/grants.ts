@@ -107,7 +107,7 @@ export function matchGrant(grants: Grant[], query: GrantQuery, now = Date.now())
 export async function findGrant(query: Omit<GrantQuery, "computers">, root = bridgeRoot()): Promise<Grant | undefined> {
   const grants = await listGrants(root);
   const restricted = query.computer && query.computer !== "anywhere" && grants.some(grant => grant.computers);
-  return matchGrant(grants, { ...query, ...(restricted ? { computers: (await readComputers({ root })).computers } : {}) });
+  return matchGrant(grants, { ...query, ...(restricted ? { computers: (await readComputers({ root, trusted: true })).computers } : {}) });
 }
 
 /** The grant with each computer named by its canonical name; unknown names stay. */
@@ -117,7 +117,7 @@ function nameComputers(grant: Grant, known: readonly Computer[]): Grant {
 }
 
 async function knownFor(root: string, grants: readonly Pick<Grant, "computers">[]): Promise<readonly Computer[]> {
-  return grants.some(grant => grant.computers) ? (await readComputers({ root })).computers : [];
+  return grants.some(grant => grant.computers) ? (await readComputers({ root, trusted: true })).computers : [];
 }
 
 /** Grants as listed to people: computers by canonical name. The file is left as written. */

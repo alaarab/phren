@@ -1,5 +1,20 @@
-import { describe, expect, it } from "vitest";
-import { foldComputers, resolveComputer, type IdentityFacts } from "./computer-identity.js";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { foldComputers, readComputers, resolveComputer, type IdentityFacts } from "./computer-identity.js";
+import { addGrant, matchGrant } from "./grants.js";
+
+// A verified peer whose Hook claims the MacBook's names.
+vi.mock("./peers.js", () => ({
+  optionalHookPeers: async () => ({ peers: [
+    { name: "Aardvark", address: "aardvark.lan", username: "x", port: 22, server: "default" },
+    { name: "MacBook", address: "alas-macbook-pro", username: "x", port: 22, server: "default" },
+  ] }),
+  peerRequest: async (peer: { name: string }) => peer.name === "Aardvark"
+    ? { computer: { id: "aard-id", name: "Aardvark", aliases: ["MacBook", "Alas-MacBook-Pro.local", "Mac"] } }
+    : { computer: { id: "book-id", name: "Alas-MacBook-Pro.local", aliases: [] } },
+}));
 
 // The owner's setup: one Mac mini (this computer), a MacBook and an Omarchy box
 // linked over SSH, and three computers registered but never linked.
@@ -63,5 +78,50 @@ describe("resolveComputer", () => {
   it("returns nothing for an unknown or empty name", () => {
     expect(resolveComputer(computers, "Nowhere")).toBeUndefined();
     expect(resolveComputer(computers, " ")).toBeUndefined();
+  });
+});
+
+describe("names a peer reports about itself", () => {
+  const facts: IdentityFacts = {
+    local: { names: ["Mac.attlocal.net", "Mac"] },
+    peers: [
+      { name: "Aardvark", address: "aardvark.lan", names: ["MacBook", "alas-macbook-pro.tailnet", "Mac.evil", "Burrow"] },
+      { name: "MacBook", address: "alas-macbook-pro" },
+    ],
+    machines: {},
+  };
+
+  it("never take a name or label another computer already has", () => {
+    const rows = foldComputers(facts);
+    expect(rows.find(row => row.name === "Aardvark")?.aliases).toEqual(["aardvark.lan", "Burrow"]);
+    expect(resolveComputer(rows, "MacBook")?.name).toBe("MacBook");
+    expect(resolveComputer(rows, "Mac")?.name).toBe("Mac");
+  });
+
+  it("are left out of the trusted rows grants match against", () => {
+    const rows = foldComputers(facts, { trusted: true });
+    expect(rows.find(row => row.name === "Aardvark")?.aliases).toEqual(["aardvark.lan"]);
+    const macbookOnly = { scope: "global" as const, actions: ["dispatch" as const], computers: ["MacBook"] };
+    expect(matchGrant([macbookOnly], { action: "dispatch", computer: "Aardvark", computers: rows })).toBeUndefined();
+    expect(matchGrant([macbookOnly], { action: "dispatch", computer: "Burrow", computers: foldComputers(facts) })).toBeUndefined();
+    expect(matchGrant([macbookOnly], { action: "dispatch", computer: "MacBook", computers: rows })).toBe(macbookOnly);
+  });
+
+  it("resolve an ambiguous first label to nothing", () => {
+    const rows = foldComputers({ local: { names: ["Desk"] }, peers: [{ name: "Box", address: "box.lan" }, { name: "Box2", address: "box.example" }], machines: {} });
+    expect(resolveComputer(rows, "box.other")).toBeUndefined();
+  });
+
+  it.skipIf(process.platform === "win32")("do not steer addGrant's canonical names, even after a probe", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "phren-identity-"));
+    try {
+      const probed = await readComputers({ probe: true, store: null, local: { names: ["Mac"] }, root });
+      expect(probed.computers.find(row => row.name === "Aardvark")?.aliases).not.toContain("MacBook");
+      const trusted = await readComputers({ trusted: true, store: null, local: { names: ["Mac"] }, root });
+      expect(trusted.computers.find(row => row.name === "MacBook")?.aliases).toEqual(["alas-macbook-pro"]);
+      // Canonicalised through trusted rows only: the self-reported alias is not resolved to Aardvark.
+      const added = await addGrant({ scope: "global", actions: ["dispatch"], computers: ["Alas-MacBook-Pro.local"] }, root);
+      expect(added.computers).toEqual(["MacBook"]);
+    } finally { await rm(root, { recursive: true, force: true }); }
   });
 });

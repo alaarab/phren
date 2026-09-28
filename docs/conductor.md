@@ -270,6 +270,12 @@ first. `reachable` is whether the peer's Hook answered its health read within
 8 seconds; it is absent on unlinked rows. `live_sessions` reports the same
 unlinked rows as `notLinked`.
 
+The names a peer's own Hook reports about itself only label its row. A
+reported name, or its first label, that another computer already answers to is
+dropped, and grants match only names the owner wrote: this computer's own
+names, hooks.yaml names and addresses, and machines.yaml. A name that two rows
+answer to resolves to no computer.
+
 ```sh
 phren conductor grants list
 phren conductor grants add --scope project:demo --actions dispatch,hand_off --computers Desk
