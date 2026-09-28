@@ -325,8 +325,9 @@ export class DispatchService {
         if (!peer) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
         const reported = await capacity(peer);
         remoteComputerID = reported.computerId;
-        // A Hook that reports what it can run is believed; one that does not (older) is left to answer the launch itself.
-        const reason = unusable(data, reported.harnesses, false);
+        // A Hook that reports what it can run is believed. An older one that does not is left to answer the launch
+        // itself, except for a non-default account: it would ignore `account` and launch under its default login.
+        const reason = unusable(data, reported.harnesses, true);
         if (reason) throw new BridgeError(409, `${peer.name} cannot run ${data.harness}${data.account ? ` account ${data.account}` : ""}: ${reason}`);
       }
       const grant = await findGrant({ action: "dispatch", project: data.project, computer: peer.name });

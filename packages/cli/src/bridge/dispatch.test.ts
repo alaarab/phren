@@ -94,6 +94,14 @@ describe("dispatch receipts and selection", () => {
       expect(error.message).toContain("account work");
     });
 
+    it("a named older computer without harnesses refuses a non-default account before launching", async () => {
+      vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity" ? capacityFor(undefined, 0)
+        : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
+      await expect(new DispatchService().dispatch({ ...claude, computer: "Desk" })).rejects.toThrow("does not report harnesses");
+      expect(vi.mocked(peerRequest).mock.calls.some(call => call[1].startsWith("/v1/workspaces/launch"))).toBe(false);
+      expect(await new DispatchService().dispatch({ ...brief, computer: "Desk" })).toMatchObject({ computer: "Desk", state: "accepted" });
+    });
+
     it("a named computer that reports the account unusable fails before launching", async () => {
       vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
         ? capacityFor(inventory([{ id: "default", usable: true }, { id: "work", usable: false, reason: "Not signed in" }]), 0) : { ok: true });
