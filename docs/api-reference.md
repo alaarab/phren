@@ -67,13 +67,16 @@ CLI equivalent:
 List unread returns from dispatched workers, oldest first, and mark them read.
 No parameters. In the core profile use `phren_admin(action: "dispatch_returns")`.
 
-A return is recorded when a worker's pane changes to one of these states:
+A return is recorded when a worker changes to one of these states. The
+worker's Hook decides from the turn events its harness reported (a Stop after
+the prompt is a finished turn), falling back to the pane's Herdr status and
+transcript when there are none; see [Returns](conductor.md#returns).
 
 | State | Meaning |
 |-------|---------|
-| `done` | The worker finished its turn. `reply` holds its final reply from the transcript, at most 4000 UTF-8 bytes (`truncated` when cut). |
+| `done` | The worker finished its turn. `reply` holds its final reply from the Stop hook or the transcript, at most 4000 UTF-8 bytes (`truncated` when cut). `background` counts background tasks still running when it was counted done after waiting 30 minutes for them. |
 | `needs-you` | The worker finished by asking the owner something. `question` holds the question line, `reply` the whole reply. |
-| `failed` | The harness ended the worker's turn on an error instead of a reply, such as Codex's usage limit. `error` holds its message. |
+| `failed` | The harness ended the worker's turn on an error instead of a reply, such as Codex's usage limit, or the owner interrupted it in the worker's terminal. `error` holds the message. |
 | `blocked` | The worker waits on terminal input, such as a permission prompt. |
 | `gone` | The worker's pane closed or another conversation took it over. |
 
@@ -85,7 +88,8 @@ most every 15 seconds, in one request per computer. Dispatches are followed
 for 24 hours or until the worker is gone. When the dispatching agent is idle,
 the Hook also types one line into it, at most once every two minutes, for
 example `Return: Linuxbox parser checks done, tests passed (dispatch <id>).
-Call dispatch_returns.` It never types into a working agent.
+Call dispatch_returns.` It never types into a working agent; a return waiting
+on a working agent is tried again every 5 seconds, under the same `deliveryId`.
 
 CLI equivalent: `phren dispatch returns`.
 

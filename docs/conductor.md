@@ -261,12 +261,14 @@ After placement the dispatching Hook follows each worker and records what
 comes back. `dispatch_returns` (MCP) and `phren dispatch returns` list the
 unread returns, oldest first, and mark them read. A return is one of:
 
-- `done`: the worker finished its turn. `reply` is its final reply, read from
-  its transcript and capped at 4000 bytes (`truncated` when cut).
+- `done`: the worker finished its turn. `reply` is its final reply, from the
+  harness's Stop hook or its transcript, capped at 4000 bytes (`truncated`
+  when cut). `background` counts background tasks it left running (see below).
 - `needs-you`: the worker finished by asking the owner something. `question`
   is the question line.
 - `failed`: the harness ended the turn on an error instead of a reply, such
-  as Codex's usage limit. `error` is its message.
+  as Codex's usage limit, or the owner interrupted the turn in the worker's
+  terminal. `error` is the message.
 - `blocked`: the worker waits on terminal input, such as a permission prompt.
 - `gone`: its pane closed or another conversation took the pane over.
 
@@ -278,14 +280,45 @@ the worker's last observed state in `worker` and the latest return in
 reads as completed in `/v1/subagents`.
 
 How it works: the receiving computer's Hook answers
-`POST /v1/dispatch/workers` from the Herdr snapshot it already shares with the
-phone and its activity tick, and reads a stopped worker's final reply through
-the transcript readers. It keeps no state about the dispatch. The dispatching
-Hook asks each enrolled computer about all of its open dispatches in one
-request, at most every 15 seconds, and follows a dispatch for 24 hours or
-until the worker is gone. A computer that does not answer records nothing;
-silence is never a transition. The receiving computer needs the conductor
-module, as it already does for placement.
+`POST /v1/dispatch/workers` from what the worker's harness reported about its
+own turns. Claude, Codex, Copilot and phren-agent send SessionStart,
+UserPromptSubmit and Stop to the Hook, which keeps one small record per pane
+(`turns/<server>/<pane>.json` beside the pane bindings): when the last prompt
+was submitted, when the turn stopped, the Stop's final message and, from
+Claude Code, how many background tasks (shells, subagents, monitors) were
+still in flight. phren's OpenCode plugin stamps the same turn start and end
+into its per-process status file. From that record:
+
+- a submitted prompt with no Stop after it is `working`, however long the
+  pane looks idle. If the pane is idle and the transcript shows the owner
+  interrupted the turn (no Stop comes then), the return is `failed`; if the
+  transcript shows a finished turn whose Stop never reached the Hook, it is
+  `done`.
+- a Stop after the prompt is `done` (or `needs-you`, or `failed` when the
+  transcript shows the turn ended on an error). When background tasks were
+  still in flight the worker stays `working`: the harness wakes it with a new
+  prompt when a task ends, and that turn's Stop decides. A worker still
+  waiting on background work 30 minutes after its Stop (a dev server it left
+  running) counts as `done`, with `background` set. Older Claude Code builds
+  leave the count out of Stop; the Hook then counts background tasks the
+  transcript started and did not end.
+- a conversation with no prompt yet has not taken its brief and stays
+  `working`.
+
+Only a record from the dispatched conversation, in the terminal still in the
+pane, counts; when the worker's hooks named a `PHREN_DISPATCH_ID`, it must be
+this receipt's. With no record (hooks not installed, an older Hook or plugin),
+the Hook falls back to the Herdr snapshot it already shares with the phone
+and the transcript readers: idle with a finished turn is `done`, and idle
+after being seen working is `done`. There is no time-based guess: a worker
+never seen working with no finished turn stays `working` until the receipt's
+24-hour watch ends.
+
+The dispatching Hook asks each enrolled computer about all of its open
+dispatches in one request, at most every 15 seconds, and follows a dispatch
+for 24 hours or until the worker is gone. A computer that does not answer
+records nothing; silence is never a transition. The receiving computer needs
+the conductor module, as it already does for placement.
 
 When `dispatch` is called by an agent running in a Herdr pane, the receipt
 keeps that pane as `origin`. While that agent is idle, the Hook types one line
@@ -297,9 +330,12 @@ Return: Linuxbox parser checks done, tests passed (dispatch <id>). Call dispatch
 
 Several waiting returns share one line. The Hook never types into a working
 or blocked agent, nor into a pane now running another terminal, and sends at
-most one notice per pane every two minutes. A notice that was not delivered
-is tried again after that wait, under the same `deliveryId`, so a first
-attempt that did reach the pane is not typed twice. Returns stay unread until `dispatch_returns`
+most one notice per pane every two minutes. A return recorded while the
+dispatching agent was working is tried on every activity tick (5 seconds), so
+the notice lands as soon as the agent stops rather than on the next poll. A
+notice that was not delivered is tried again after the two-minute wait. Every
+attempt carries the same `deliveryId`, so a first attempt that did reach the
+pane is not typed twice. Returns stay unread until `dispatch_returns`
 takes them, so a missed notice loses nothing.
 
 Remote ancestry and phone navigation are wired independently through receipts

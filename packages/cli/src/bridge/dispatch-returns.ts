@@ -1,37 +1,47 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { arrivalOf, dispatchStatus, updateReceipt, type OriginPane, type Receipt, type WorkerState } from "./dispatch.js";
-import { briefArrival, type BriefArrival } from "./launch-brief.js";
+import { briefArrival, briefId, type BriefArrival } from "./launch-brief.js";
 import { findPane, paneIdentity, sharedSnapshot } from "./herdr.js";
 import { handOff } from "./hand-off.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { objects, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { ownerQuestion, readFinalTurn, type FinalTurn } from "./schedule-watch.js";
+import { terminalProvider } from "./terminal.js";
+import { opencodeTurn, readTurn, TURN_REPLY_LIMIT, truncateUtf8, turnPhase, type TurnRecord } from "./turn-records.js";
+
+export { truncateUtf8 } from "./turn-records.js";
 
 /**
  * The conductor's returns loop. The worker's computer answers what its
- * dispatched panes are doing from the Herdr snapshot its Hook already shares
- * (`workerStates`); the dispatching Hook asks each peer once per poll for all
- * of its open dispatches, records transitions in the receipts, and tells an
- * idle dispatching agent that returns are waiting (`DispatchReturns`).
+ * dispatched panes are doing (`workerStates`): from the turn record its
+ * agent's own hooks wrote (turn-records.ts) when there is one, else from the
+ * Herdr snapshot its Hook already shares and the transcript. The dispatching
+ * Hook asks each peer once per poll for all of its open dispatches, records
+ * transitions in the receipts, and tells an idle dispatching agent that
+ * returns are waiting (`DispatchReturns`).
  */
 
 /** Longest final reply kept in a receipt, in UTF-8 bytes. */
-export const REPLY_LIMIT = 4000;
+export const REPLY_LIMIT = TURN_REPLY_LIMIT;
 /** How often the dispatching Hook asks peers about open dispatches. */
 export const POLL_MS = 15_000;
 /** Shortest gap between two notices typed into the same dispatching pane. */
 export const NOTICE_MS = 120_000;
 /** Receipts older than this are no longer watched. */
 export const WATCH_MS = 24 * 60 * 60 * 1000;
-/** An idle worker that was never seen working and has no finished turn is
- * counted as done after this long: the prompt may never have been taken. */
-export const IDLE_GRACE_MS = 5 * 60 * 1000;
+/** How long a stopped worker whose harness still runs background tasks is
+ * waited on before it counts as done anyway (a dev server it left running
+ * never finishes). The harness wakes the worker when a task ends, which is a
+ * new turn and a new Stop. */
+export const BACKGROUND_WAIT_MS = 30 * 60 * 1000;
 /** How old a shared Herdr snapshot may be when answering a peer. */
 const SNAPSHOT_AGE_MS = 5_000;
 
-const workerTarget = z.union([targetSchema, startingTargetSchema]);
+// `dispatch` names the receipt, which is the worker's PHREN_DISPATCH_ID. An
+// older Hook's target schema strips it, so it is safe to send to any peer.
+const workerTarget = z.union([targetSchema.extend({ dispatch: briefId.optional() }), startingTargetSchema.extend({ dispatch: briefId.optional() })]);
 export const workerRequestSchema = z.object({ targets: z.array(workerTarget).min(1).max(64) }).strict();
 
 /** What a worker pane shows right now, as its own computer reads it. */
@@ -44,31 +54,74 @@ export interface WorkerObservation {
   truncated?: boolean;
   /** The error the harness ended the turn on (Codex's usage limit). */
   error?: string;
+  /** The state comes from the agent's own turn events, not from how the pane looks. */
+  hook?: true;
+  /** When the turn's Stop arrived, on the worker's clock; names the turn. */
+  endedAt?: string;
+  /** Background tasks the harness still runs: waited on while `working`,
+   * left running when `done` after BACKGROUND_WAIT_MS. */
+  background?: number;
+  /** The owner stopped the turn in the worker's terminal. */
+  interrupted?: true;
 }
 
 export interface WorkerReaders {
   snapshot: (server: string) => Promise<Json>;
   identity: (server: string, pane: Json) => Promise<string | undefined>;
   finalTurn: (source: Provider, session: string) => Promise<FinalTurn | undefined>;
+  /** The turn record the pane's agent reported through its hooks (or OpenCode's plugin). */
+  turn?: (server: string, pane: Json, source: Provider) => Promise<TurnRecord | undefined>;
+  now?: () => number;
+}
+
+async function paneTurn(server: string, pane: Json, source: Provider): Promise<TurnRecord | undefined> {
+  if (source !== "opencode") return readTurn(server, String(pane.pane_id));
+  if (typeof pane.terminal_id !== "string") return undefined;
+  return opencodeTurn((await terminalProvider().processes(server, String(pane.pane_id))).foregroundPids, pane.terminal_id);
 }
 
 const defaultReaders: WorkerReaders = {
   snapshot: server => sharedSnapshot(server, SNAPSHOT_AGE_MS),
   identity: (server, pane) => paneIdentity(server, pane),
   finalTurn: (source, session) => source === "codex" || source === "claude" || source === "opencode" ? readFinalTurn(source, session) : Promise.resolve(undefined),
+  turn: paneTurn,
 };
 
-/** `value` cut to at most `limit` UTF-8 bytes on a character boundary. */
-export function truncateUtf8(value: string, limit = REPLY_LIMIT): { text: string; truncated: boolean } {
-  const bytes = Buffer.from(value);
-  if (bytes.length <= limit) return { text: value, truncated: false };
-  let end = limit;
-  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
-  return { text: bytes.subarray(0, end).toString("utf8"), truncated: true };
+function replyFields(text: string | undefined, truncated?: boolean): Pick<WorkerObservation, "reply" | "truncated"> {
+  if (!text) return {};
+  const reply = truncateUtf8(text);
+  return { reply: reply.text, ...(reply.truncated || truncated ? { truncated: true } : {}) };
 }
 
-/** Receiving side: the state of each dispatched pane, from the shared snapshot
- * and, once the agent has stopped, the final reply in its transcript. */
+/** A worker's state from its own turn events. Done means a Stop arrived after
+ * the last submitted prompt with no background work left (or it has waited
+ * BACKGROUND_WAIT_MS); a prompt with no Stop is still working, unless the
+ * pane is idle and the transcript shows the owner interrupted it (no Stop
+ * comes then) or a finished turn whose Stop the Hook never received. */
+async function fromTurn(record: TurnRecord, session: string, status: string, source: Provider, readers: WorkerReaders): Promise<WorkerObservation> {
+  const base = { session, hook: true as const };
+  if (status === "blocked") return { state: "blocked", ...base };
+  const phase = turnPhase(record);
+  if (phase.phase === "unprompted") return { state: "idle", ...base, completed: false };
+  const idle = status === "idle" || status === "done";
+  if (phase.phase === "working" && !idle) return { state: "working", ...base };
+  const final = await readers.finalTurn(source, session).catch(() => undefined);
+  if (phase.phase === "working") {
+    if (final?.interrupted) return { state: "done", ...base, completed: true, interrupted: true };
+    if (!final?.completed || final.background) return { state: "working", ...base };
+    return { state: "done", ...base, completed: true, ...(final.error ? { error: final.error } : {}), ...replyFields(final.lastAssistant) };
+  }
+  const background = phase.background ?? (final?.completed ? final.background : undefined);
+  const now = (readers.now ?? Date.now)();
+  if (background && now - Date.parse(phase.at) < BACKGROUND_WAIT_MS) return { state: "working", ...base, background };
+  return { state: "done", ...base, completed: true, endedAt: phase.at, ...(background ? { background } : {}),
+    ...(final?.completed && final.error ? { error: final.error } : {}),
+    ...(phase.reply ? replyFields(phase.reply, phase.truncated) : replyFields(final?.lastAssistant)) };
+}
+
+/** Receiving side: the state of each dispatched pane, from its agent's turn
+ * record when its hooks wrote one, else from the shared snapshot and, once
+ * the agent has stopped, the final reply in its transcript. */
 export async function workerStates(input: unknown, readers: WorkerReaders = defaultReaders): Promise<{ workers: WorkerObservation[] }> {
   const { targets } = workerRequestSchema.parse(input);
   const snapshots = new Map<string, Promise<Json>>();
@@ -84,14 +137,20 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     const expected = "session" in target ? target.session : undefined;
     // Another conversation in the same pane means the worker is gone.
     if (expected && current && current !== expected) return { state: "gone" };
-    const session = expected ?? current;
     const status = String(pane.agent_status);
+    // The record counts only for the conversation this dispatch started, in
+    // the terminal still there, and never for another dispatch's worker.
+    const record = await readers.turn?.(target.server, pane, target.source).catch(() => undefined);
+    const own = record && record.terminal === pane.terminal_id && record.source === target.source
+      && record.session === (expected ?? current ?? record.session)
+      && !(target.dispatch && record.dispatch && target.dispatch !== record.dispatch) ? record : undefined;
+    if (own) return fromTurn(own, own.session, status, target.source, readers);
+    const session = expected ?? current;
     const state = (["working", "idle", "done", "blocked"] as const).find(value => value === status) ?? "unknown";
     if ((state !== "idle" && state !== "done") || !session) return { state, ...(session ? { session } : {}) };
     const turn = await readers.finalTurn(target.source, session).catch(() => undefined);
-    const reply = turn?.lastAssistant ? truncateUtf8(turn.lastAssistant) : undefined;
     return { state, session, completed: turn?.completed === true, ...(turn?.error ? { error: turn.error } : {}),
-      ...(reply ? { reply: reply.text, ...(reply.truncated ? { truncated: true } : {}) } : {}) };
+      ...(turn?.interrupted ? { interrupted: true as const } : {}), ...replyFields(turn?.lastAssistant) };
   }));
   return { workers };
 }
@@ -100,10 +159,15 @@ const observationSchema = z.object({
   state: z.enum(["working", "idle", "done", "blocked", "unknown", "gone", "unavailable"]),
   session: z.string().max(200).optional(), completed: z.boolean().optional(),
   reply: z.string().max(REPLY_LIMIT).optional(), truncated: z.boolean().optional(), error: z.string().max(500).optional(),
+  hook: z.boolean().optional(), endedAt: z.string().max(40).optional(), background: z.number().int().min(0).max(999).optional(),
+  interrupted: z.boolean().optional(),
 }).passthrough();
 
-function turnKey(reply: string | undefined): string | undefined {
-  return reply ? createHash("sha256").update(reply).digest("hex").slice(0, 16) : undefined;
+/** What the owner is told when the worker's turn was interrupted in its terminal. */
+export const INTERRUPTED = "The worker's turn was interrupted in its terminal before it finished.";
+
+function turnKey(value: string | undefined): string | undefined {
+  return value ? createHash("sha256").update(value).digest("hex").slice(0, 16) : undefined;
 }
 
 /** Apply one observation to a receipt. Returns true when the receipt changed. */
@@ -119,8 +183,10 @@ export function observe(receipt: Receipt, value: unknown, now: number): boolean 
     if (full.success) { receipt.target = full.data; changed = true; }
   }
   const sawWorking = receipt.worker?.sawWorking === true || seen.state === "working" || seen.state === "blocked";
-  // A turn the harness ended on an error (a usage limit) failed, reply or not.
-  const failed = seen.completed && seen.error ? seen.error : undefined;
+  const stopped = seen.state === "idle" || seen.state === "done";
+  // A turn the harness ended on an error (a usage limit) failed, reply or not,
+  // and so did one the owner interrupted in the worker's terminal.
+  const failed = stopped && seen.completed && seen.error ? seen.error : stopped && seen.interrupted ? INTERRUPTED : undefined;
   const question = seen.completed && seen.reply && !failed ? ownerQuestion(seen.reply) : undefined;
   let next: WorkerState;
   if (seen.state === "gone") next = "gone";
@@ -128,8 +194,12 @@ export function observe(receipt: Receipt, value: unknown, now: number): boolean 
   else if (seen.state === "blocked") next = "blocked";
   else if (failed) next = "failed";
   else if (seen.completed) next = question ? "needs-you" : "done";
-  else next = sawWorking || now - Date.parse(receipt.createdAt) > IDLE_GRACE_MS ? "done" : "working";
-  const turn = next === "done" || next === "needs-you" ? turnKey(seen.reply) : next === "failed" ? turnKey(failed) : undefined;
+  // The worker's own hooks say no turn has ended: it has not taken its
+  // brief yet. Without them, idle after being seen working is the only sign.
+  else next = !seen.hook && sawWorking ? "done" : "working";
+  // A Stop's time names its turn; without one, the final reply does.
+  const turn = next === "done" || next === "needs-you" || next === "failed"
+    ? turnKey(seen.endedAt ? `${seen.endedAt}\n${failed ?? ""}` : next === "failed" ? failed : seen.reply) : undefined;
   const previous = receipt.worker?.state;
   // The same finished state with a different final reply is a new turn: the
   // worker took more work (a hand_off) and finished again between two polls.
@@ -142,7 +212,8 @@ export function observe(receipt: Receipt, value: unknown, now: number): boolean 
   if (next !== "working") {
     receipt.returned = { state: next, at, read: false,
       ...(seen.reply && (next === "done" || next === "needs-you") ? { reply: seen.reply, ...(seen.truncated ? { truncated: true } : {}) } : {}),
-      ...(failed ? { error: failed } : {}), ...(question ? { question } : {}), ...(turn ? { turn } : {}) };
+      ...(failed ? { error: failed } : {}), ...(question ? { question } : {}), ...(turn ? { turn } : {}),
+      ...((next === "done" || next === "needs-you") && seen.background ? { background: seen.background } : {}) };
   }
   return true;
 }
@@ -156,7 +227,8 @@ export function noticeLine(receipts: readonly Receipt[]): string {
     const detail = returned.state === "needs-you" ? returned.question : returned.state === "failed" ? returned.error
       : returned.state === "done" ? returned.reply?.split("\n").find(line => line.trim()) : undefined;
     const excerpt = detail ? clean(detail.replace(/[*_`#>]+/g, ""), room) : "";
-    return `${clean(receipt.computer, 60)} ${clean(receipt.label, 80)} ${word[returned.state]}${excerpt ? `, ${excerpt}` : ""}`;
+    const left = returned.background ? ` (${returned.background} background task${returned.background === 1 ? "" : "s"} still running)` : "";
+    return `${clean(receipt.computer, 60)} ${clean(receipt.label, 80)} ${word[returned.state]}${left}${excerpt ? `, ${excerpt}` : ""}`;
   };
   if (receipts.length === 1) return `Return: ${describe(receipts[0], 100)} (dispatch ${receipts[0].id}). Call dispatch_returns.`;
   const items = receipts.slice(0, 4).map(receipt => describe(receipt, 40)).join("; ");
@@ -169,6 +241,7 @@ export function returnRow(receipt: Receipt): Json {
   return { id: receipt.id, computer: receipt.computer, project: receipt.project, label: receipt.label, harness: receipt.harness,
     state: returned.state, at: returned.at, ...(returned.reply !== undefined ? { reply: returned.reply } : {}),
     ...(returned.truncated ? { truncated: true } : {}), ...(returned.error ? { error: returned.error } : {}), ...(returned.question ? { question: returned.question } : {}),
+    ...(returned.background ? { background: returned.background } : {}),
     ...(receipt.target ? { target: receipt.target } : {}) };
 }
 
@@ -191,6 +264,11 @@ export interface DispatchReturnsOptions {
 
 const originKey = (origin: OriginPane & { terminal: string }) => JSON.stringify([origin.server, origin.workspace, origin.tab, origin.pane, origin.terminal]);
 
+/** One notice's delivery id, named by what it reports: the same returns keep the same id on a retry. */
+export function noticeDeliveryId(receipts: readonly Receipt[]): string {
+  return `notice-${createHash("sha256").update(receipts.map(receipt => `${receipt.id}@${receipt.returned!.at}`).sort().join(",")).digest("hex").slice(0, 32)}`;
+}
+
 /** Dispatching side: follows open dispatches and delivers their returns. */
 export class DispatchReturns {
   private readonly peers: () => Promise<HookPeer[]>;
@@ -204,6 +282,9 @@ export class DispatchReturns {
   private readonly now: () => number;
   private lastPoll = -Infinity;
   private readonly lastNotice = new Map<string, number>();
+  /** A return is waiting for a dispatching agent that was busy: try again on
+   * the next tick instead of the next poll. */
+  private noticesDue = false;
   private running?: Promise<void>;
 
   constructor(options: DispatchReturnsOptions = {}) {
@@ -218,11 +299,16 @@ export class DispatchReturns {
     this.now = options.now ?? Date.now;
   }
 
-  /** Called from the Hook's activity tick; polls and notifies at most every POLL_MS. */
+  /** Called from the Hook's activity tick. Polls peers at most every POLL_MS;
+   * a return waiting for its notice is tried on every tick, so one recorded
+   * while the dispatching agent was busy reaches it as soon as it stops. */
   tick(): Promise<void> {
-    if (this.running || this.now() - this.lastPoll < POLL_MS) return this.running ?? Promise.resolve();
-    this.lastPoll = this.now();
-    this.running = (async () => { await this.poll(); await this.notify(); })().catch(() => {}).finally(() => { this.running = undefined; });
+    if (this.running) return this.running;
+    const poll = this.now() - this.lastPoll >= POLL_MS;
+    if (!poll && !this.noticesDue) return Promise.resolve();
+    if (poll) this.lastPoll = this.now();
+    this.running = (async () => { if (poll) await this.poll(); await this.notify(); })()
+      .catch(() => {}).finally(() => { this.running = undefined; });
     return this.running;
   }
 
@@ -267,7 +353,7 @@ export class DispatchReturns {
       if (!peer && !local) return;
       for (let start = 0; start < receipts.length; start += 64) {
         const batch = receipts.slice(start, start + 64);
-        const input = { targets: batch.map(receipt => receipt.target!) };
+        const input = { targets: batch.map(receipt => ({ ...receipt.target!, dispatch: receipt.id })) };
         // An unreachable peer records nothing: silence is not a transition.
         const answer: Json | undefined = await (peer ? this.request(peer, "/v1/dispatch/workers", input) : this.localWorkers(input) as Promise<Json>).catch(() => undefined);
         const workers = objects(answer?.workers);
@@ -279,9 +365,11 @@ export class DispatchReturns {
     }));
   }
 
-  /** Type one line into each idle dispatching agent that has returns it was not told about. */
+  /** Type one line into each idle dispatching agent that has returns it was
+   * not told about. A pane still working is tried again on the next tick. */
   async notify(): Promise<void> {
     const waiting = (await dispatchStatus()).filter(receipt => receipt.origin && receipt.returned && !receipt.returned.read && !receipt.returned.notifiedAt);
+    let busy = false;
     const byOrigin = new Map<string, Receipt[]>();
     for (const receipt of waiting) byOrigin.set(originKey(receipt.origin!), [...byOrigin.get(originKey(receipt.origin!)) ?? [], receipt]);
     for (const [key, receipts] of byOrigin) {
@@ -289,14 +377,13 @@ export class DispatchReturns {
       const origin = receipts[0].origin!;
       const pane = findPane(await this.snapshot(origin.server).catch(() => ({})), { ...origin, source: origin.agent });
       // Never interrupt: only an agent that has stopped, in the same terminal, gets a notice.
-      if (!pane || pane.terminal_id !== origin.terminal || !["idle", "done"].includes(String(pane.agent_status))) continue;
+      if (!pane || pane.terminal_id !== origin.terminal) continue;
+      if (!["idle", "done"].includes(String(pane.agent_status))) { busy = true; continue; }
       const session = await this.identity(origin.server, pane).catch(() => undefined);
       const target = targetSchema.safeParse({ server: origin.server, workspace: origin.workspace, tab: origin.tab, pane: origin.pane, source: origin.agent, session });
       if (!target.success) continue;
       this.lastNotice.set(key, this.now());
-      // Named by what it reports: the same returns keep the same id on a retry.
-      const deliveryId = `notice-${createHash("sha256").update(receipts.map(receipt => `${receipt.id}@${receipt.returned!.at}`).sort().join(",")).digest("hex").slice(0, 32)}`;
-      const sent = await this.deliver(target.data, noticeLine(receipts), deliveryId).catch(() => ({ delivered: false }));
+      const sent = await this.deliver(target.data, noticeLine(receipts), noticeDeliveryId(receipts)).catch(() => ({ delivered: false }));
       if (!sent.delivered) continue;
       const at = new Date(this.now()).toISOString();
       for (const receipt of receipts) {
@@ -306,6 +393,7 @@ export class DispatchReturns {
         }).catch(() => undefined);
       }
     }
+    this.noticesDue = busy;
   }
 
   /** Every unread return, oldest first, marked read as it is handed over. */
