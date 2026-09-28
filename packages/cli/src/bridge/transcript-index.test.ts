@@ -47,6 +47,39 @@ describe("indexed transcript pages", () => {
     expect((await live.read()).entries).toEqual([]);
   });
 
+  it("replaces a long resume window so history can recover every skipped line", async () => {
+    await writeFile(file, Array.from({ length: 2709 }, (_, i) => row(`Turn ${i}`)).join("\n") + "\n");
+    // The phone last read the turn at line 1020 before the Hook restarted.
+    // A new reader can return only its bounded newest page in one frame.
+    const resumed = await new TranscriptReader(file, "codex").readAfter(1020);
+    expect(resumed.reset).toBe(true);
+    expect(resumed.startLine).toBeGreaterThan(1021);
+    expect(resumed.entries.at(-1)?.line).toBe(2708);
+
+    const lines = resumed.entries.map(entry => entry.line);
+    let before = resumed.startLine;
+    while (before > 0) {
+      const page = await new TranscriptReader(file, "codex").read(before);
+      expect(page.startLine).toBeLessThan(before);
+      lines.unshift(...page.entries.map(entry => entry.line));
+      before = page.startLine;
+    }
+    expect(lines).toEqual(Array.from({ length: 2709 }, (_, i) => i));
+
+    // A short reconnect still merges with the phone's existing window.
+    const short = await new TranscriptReader(file, "codex").readAfter(2700);
+    expect(short.reset).toBe(false);
+    expect(short.entries.map(entry => entry.line)).toEqual([2701, 2702, 2703, 2704, 2705, 2706, 2707, 2708]);
+
+    // The same bound can be hit by a running reader during a busy poll.
+    const live = new TranscriptReader(file, "codex");
+    await live.read();
+    await appendFile(file, Array.from({ length: 300 }, (_, i) => row(`Later ${i}`)).join("\n") + "\n");
+    const burst = await live.read();
+    expect(burst.reset).toBe(true);
+    expect(burst.startLine).toBeGreaterThan(2709);
+  });
+
   it("invalidates cached indexes on replacement, truncation, and same-size rewrite", async () => {
     await writeFile(file, row("Before") + "\n");
     const reader = new TranscriptReader(file, "codex");

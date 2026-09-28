@@ -317,8 +317,14 @@ export class TranscriptReader {
         if (entries.length >= entryBudget) break;
       }
       if (before === undefined) { this.revision = index.revision; this.nextLine = held ?? index.lines; }
+      // Live reads run newest first. After a long disconnect or a burst of
+      // output, a bounded page can stop before the phone's cursor. Mark that
+      // page as a replacement so its start becomes a usable older-page cursor
+      // instead of silently merging two disjoint windows. A pending diff
+      // holds its row for a later poll and is not a completed page.
+      const skippedLiveLines = before === undefined && held === undefined && cursor > lower;
       return { entries: entries.reverse(), totalLines: index.lines, startLine: cursor, hasMore: cursor > 0,
-        reset: resuming && !pastEnd ? false : reset };
+        reset: (resuming && !pastEnd ? false : reset) || skippedLiveLines };
     }, signal);
   }
 }

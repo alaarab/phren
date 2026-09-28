@@ -1948,7 +1948,8 @@ schedules:
         expect(frames[0]).toMatchObject({ type: "backlog", totalLines: 4 });
         expect(frames[0].entries.map((entry: any) => entry.line)).toEqual([2, 3]);
         expect(JSON.stringify(frames[0])).not.toContain("First message");
-        // An in-range resume is a delta, never an explicit replacement.
+        // A short in-range resume is a delta. A bounded one that cannot
+        // reach the old cursor becomes a replacement snapshot.
         expect(frames[0].reset).toBe(false);
       } finally { resumed.terminate(); }
     });
