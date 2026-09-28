@@ -12,7 +12,8 @@ describe("the talk-mode voice setting", () => {
   it("uses the default on a new computer, and a stored voice once set", async () => {
     expect(await resolveSpeechVoice(undefined, { env: {}, file })).toEqual({ voice: DEFAULT_SPEECH_VOICE, source: "default" });
     await writeSpeechVoice(" S9EGwlCtMF7VXtENq79v ", file);
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX permission bits.
+    if (process.platform !== "win32") expect((await stat(file)).mode & 0o777).toBe(0o600);
     expect(await resolveSpeechVoice(undefined, { env: {}, file })).toEqual({ voice: "S9EGwlCtMF7VXtENq79v", source: "setting" });
     expect(await resolveSpeechVoice("UgBBYS2sOqTuMpoF3BR0", { env: {}, file })).toEqual({ voice: "UgBBYS2sOqTuMpoF3BR0", source: "request" });
     await clearSpeechVoice(file);
