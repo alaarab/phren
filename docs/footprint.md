@@ -186,7 +186,11 @@ nothing to that checkout.
   records each OpenCode pane the Hook launched with its own server: port,
   server password, process id, folder and launch settings. An entry is removed
   once its process is gone. The pane's shell also keeps
-  `OPENCODE_SERVER_PASSWORD` and `PHREN_OPENCODE_PORT` in its environment;
+  `OPENCODE_SERVER_PASSWORD` and `PHREN_OPENCODE_PORT` in its environment.
+  Under tmux the password is also on the `tmux respawn-pane -e` command line
+  for the moment that command runs. This is accepted: the reader would have to
+  be the same user, the server listens only on 127.0.0.1, and the password
+  lives only as long as that OpenCode process;
   `<bridge>/conductor.yaml` holds standing grants and `<bridge>/hooks.yaml`
   holds the verified peer directory.
 

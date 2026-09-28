@@ -231,6 +231,29 @@ describe("asks", () => {
     expect(server.state.replies).toEqual([["per_1", "reject"]]);
   });
 
+  it("keeps an ask OpenCode still lists on the phone, and answerable from its push, past any single horizon", async () => {
+    registerPaneServer(paneServersDir(), entry());
+    const push = fakePush();
+    const hooks = new AgentHooks(push.service);
+    const start = Date.now();
+    const now = vi.spyOn(Date, "now");
+    try {
+      now.mockReturnValue(start);
+      await hooks.servedAsks(entry(), server.client, asks({ permissions: [permission] }));
+      // Listed again every 50 minutes for three hours, with no event between.
+      for (let step = 1; step <= 4; step++) {
+        now.mockReturnValue(start + step * 50 * 60_000);
+        await hooks.servedAsks(entry(), server.client, asks({ permissions: [permission] }));
+      }
+      now.mockReturnValue(start + 4 * 50 * 60_000 + 55 * 60_000);
+      const card = hooks.approval(target);
+      expect(card).toMatchObject({ actionId: "per_1" });
+      expect(Date.parse(String(card?.expiresAt))).toBeGreaterThan(Date.now());
+      await hooks.answerPush(push.sent[0].binding, "approve");
+      expect(server.state.replies).toEqual([["per_1", "once"]]);
+    } finally { now.mockRestore(); }
+  });
+
   it("clears the card when the TUI answered first or the pane is gone", async () => {
     const hooks = new AgentHooks();
     await hooks.servedAsks(entry(), server.client, asks({ permissions: [permission], questions: [question] }));
@@ -325,6 +348,20 @@ describe("watcher", () => {
     watcher.tick();
     expect(gone).toEqual([paneKey(entry())]);
     expect(watcher.watching()).toEqual([]);
+    watcher.close();
+  });
+
+  it("lists a live pane's asks again on every tick without an event", async () => {
+    const seen: PaneAsks[] = [];
+    const watcher = new PaneServerWatcher({ asks: async (_entry, _client, value) => { seen.push(value); }, gone: () => {} }, () => [entry()], 5);
+    watcher.tick();
+    await until(() => seen.length === 1);
+    server.state.permissions = [{ id: "per_7", sessionID: "ses_root", permission: "edit" }];
+    watcher.tick();
+    await until(() => seen.length === 2);
+    watcher.tick();
+    await until(() => seen.length === 3);
+    expect(seen[2].permissions.map(ask => ask.id)).toEqual(["per_7"]);
     watcher.close();
   });
 

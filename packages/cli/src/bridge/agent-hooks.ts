@@ -54,9 +54,10 @@ const DIALOG_READ_MS = intervalFromEnv("PHREN_DIALOG_THROTTLE_MS", 3_000);
 /** How long a pushed terminal dialog can be answered from its notification. */
 const DIALOG_PUSH_MS = 10 * 60_000;
 const FANOUT_SWEEP_MS = 5_000;
-/** How long a served OpenCode pane's ask is shown and answerable from its
- * notification without a new event. OpenCode itself waits for as long as it
- * takes; each event or reconnect that still lists the ask extends it. */
+/** How far ahead a served OpenCode pane's ask expires. OpenCode waits for as
+ * long as it takes, so this is only a horizon: every listing that still
+ * returns the ask (each ask event, reconnect and the Hook's 5 s tick) moves it
+ * forward, and the card goes only when the ask is gone or the pane is dead. */
 const SERVED_ASK_MS = 60 * 60_000;
 const FANOUT_ARCHIVE_MS = 60 * 60 * 1000;
 
@@ -289,7 +290,10 @@ export class AgentHooks {
       permissions.add(ask.id);
       const known = this.opencode.get(ask.id);
       if (known) {
-        if (known.served?.key === key) { known.expiresAt = expiresAt; known.request.expiresAt = new Date(expiresAt).toISOString(); }
+        if (known.served?.key === key) {
+          known.expiresAt = expiresAt; known.request.expiresAt = new Date(expiresAt).toISOString();
+          this.pushBindings.extendAction(ask.id, expiresAt);
+        }
         continue;
       }
       const target = await this.servedTarget(entry, client, ask.sessionID).catch(() => undefined);

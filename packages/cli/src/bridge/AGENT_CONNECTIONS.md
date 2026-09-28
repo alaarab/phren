@@ -129,7 +129,10 @@ For a registered pane:
   a plugin ask (`actionId` is OpenCode's `per_…` id), shown on the root of the
   asking session, and `POST /v1/approvals/answer` or its push replies `once` or
   `reject` over HTTP. It stays answerable while OpenCode lists it, with no 50 s
-  deadline (its `expiresAt` moves an hour ahead on each listing). A question is
+  deadline: the Hook lists every live pane again on its five-second tick, and
+  each listing that still returns the ask moves its `expiresAt` (and its push
+  binding) an hour ahead. The card goes only when the ask is no longer listed
+  or the pane's process is gone. A question is
   published as the status frame's `terminalPrompt` in Claude's AskUserQuestion
   shape (`questions`, `questionIndex`, `choice`) with `capabilities.questions`;
   `POST /v1/questions/answer` replies with the chosen labels plus any typed

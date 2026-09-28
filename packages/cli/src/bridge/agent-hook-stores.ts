@@ -33,6 +33,9 @@ export class PushBindingStore {
     const value = this.values.get(binding);
     return value && value.expiresAt > this.now() ? value : undefined;
   }
+  /** Keeps an action's bindings answerable until `expiresAt`: an ask its
+   * agent still lists must stay answerable from its notification. */
+  extendAction(action: string, expiresAt: number) { for (const value of this.values.values()) if (value.action === action && value.expiresAt < expiresAt) value.expiresAt = expiresAt; }
   dropAction(action: string) { for (const [key, value] of this.values) if (value.action === action) this.values.delete(key); }
   clear() { this.values.clear(); }
   get size() { return this.values.size; }

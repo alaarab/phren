@@ -3,8 +3,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { intervalFromEnv } from "./limits.js";
 import {
-  freePort, listPaneServers, newPassword, openPaneClient, PromptNotSent, readPaneServer, registerPaneServer, removePaneServer,
-  type OpenCodePermission, type OpenCodeQuestion, type PaneClient, type PaneServerEntry, type PromptOptions,
+  freePort, listPaneServers, newPassword, type OpenCodePermission, type OpenCodeQuestion, openPaneClient, type PaneClient,
+  type PaneServerEntry, PromptNotSent, type PromptOptions, readPaneServer, registerPaneServer, removePaneServer,
 } from "./opencode-pane-server.js";
 import { bridgeRoot } from "./protocol.js";
 import { terminalProvider } from "./terminal.js";
@@ -232,7 +232,7 @@ export const paneKey = (entry: { server: string; pane: string }) => `${entry.ser
  * gone (the process exited) and starts new ones.
  */
 export class PaneServerWatcher {
-  private live = new Map<string, { entry: PaneServerEntry; abort: AbortController }>();
+  private live = new Map<string, { entry: PaneServerEntry; abort: AbortController; refresh?: () => Promise<void> }>();
   private closed = false;
   constructor(private sink: PaneAskSink, private list: () => PaneServerEntry[] = servedPanes, private minBackoffMs = 1_000) {}
   tick(): void {
@@ -240,7 +240,9 @@ export class PaneServerWatcher {
     const current = new Map(this.list().map(entry => [paneKey(entry), entry]));
     for (const [key, running] of this.live) {
       const entry = current.get(key);
-      if (entry && entry.pid === running.entry.pid && entry.port === running.entry.port) continue;
+      // A live pane is listed again each tick, so an ask it still has keeps
+      // its card however long it waits with no event.
+      if (entry && entry.pid === running.entry.pid && entry.port === running.entry.port) { void running.refresh?.().catch(() => {}); continue; }
       running.abort.abort(); this.live.delete(key); this.sink.gone(key);
     }
     for (const [key, entry] of current) {
@@ -271,6 +273,8 @@ export class PaneServerWatcher {
       })().finally(() => { refreshing = undefined; });
       return refreshing;
     };
+    const running = this.live.get(paneKey(entry));
+    if (running?.entry === entry) running.refresh = refresh;
     while (!signal.aborted) {
       try {
         // The list is read once the stream is open (its first event), so an
