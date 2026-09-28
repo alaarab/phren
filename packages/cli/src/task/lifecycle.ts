@@ -76,6 +76,10 @@ const PASTED_CONTENT_WRAPPER_RE = /<pasted_content\b[^>]*>[\s\S]*?<\/pasted_cont
 const RELAYED_MESSAGE_RE = /^\s*from\s+(?:the\s+)?(?!(?:now|here|there|then|scratch|today|tomorrow)\b)(?:[\w.-]+\s*[,:]|[\w.-]+\s+[\w.-]+\s*:)/i;
 // Dispatch returns are typed into an idle agent as ordinary prompts.
 const DISPATCH_RETURN_NOTICE_RE = /^\s*returns?:\s+[^\n]+\bCall dispatch_returns\.\s*$/i;
+// A dispatched or scheduled worker's first prompt names its brief file
+// (launch-brief.ts). The dispatch already tracks that work, so the worker's
+// own hook must not file it again: every dispatched Claude filed one task.
+const LAUNCH_BRIEF_PROMPT_RE = /^\s*Read and follow the brief in \/[^\n]+$/;
 // Completed-work reports can arrive without a relay prefix. Only a status
 // ending in a commit, push or opened PR is excluded; imperative requests stay eligible.
 const AGENT_STATUS_REPORT_RE = /(?:\b(?:committed|pushed)\s+as\s+[0-9a-f]{7,40}|\bPR\s+#\d+\s+opened)\s*[.!]?\s*$/i;
@@ -105,7 +109,7 @@ function isAgentStatusReportPrompt(prompt: string): boolean {
  *  rather than something the person asked. */
 export function isAgentFramePrompt(prompt: string): boolean {
   return AGENT_FRAME_RE.test(prompt) || RELAYED_MESSAGE_RE.test(prompt)
-    || DISPATCH_RETURN_NOTICE_RE.test(prompt)
+    || DISPATCH_RETURN_NOTICE_RE.test(prompt) || LAUNCH_BRIEF_PROMPT_RE.test(prompt)
     || isAgentStatusReportPrompt(prompt);
 }
 
