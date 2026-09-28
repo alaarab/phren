@@ -108,6 +108,9 @@ export interface SpawnAppServerOptions {
    * outlives the Hook's end of a pipe, and a write to a closed pipe could
    * end it, so a long-lived server logs to a file instead. */
   logFile?: string;
+  /** Config overrides for every thread the server runs, as `-c key=value`
+   * (the value is TOML). */
+  config?: string[];
 }
 
 /** Start one `codex app-server --listen unix://<socketPath>` and wait until its
@@ -123,7 +126,7 @@ export async function spawnAppServer(options: SpawnAppServerOptions): Promise<Ap
   const log = options.logFile ? await open(options.logFile, "a", 0o600) : undefined;
   let child: ChildProcess;
   try {
-    child = spawn(codexBin, ["app-server", "--listen", `unix://${options.socketPath}`], {
+    child = spawn(codexBin, ["app-server", ...(options.config ?? []).flatMap(value => ["-c", value]), "--listen", `unix://${options.socketPath}`], {
       cwd: options.cwd,
       env,
       detached: options.detached === true,

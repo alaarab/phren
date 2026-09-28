@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
-import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -223,6 +223,7 @@ const path = require("node:path");
 const listen = process.argv[process.argv.indexOf("--listen") + 1] || "";
 const socketPath = listen.replace(/^unix:\\/\\//, "");
 mkdirSync(path.dirname(socketPath), { recursive: true, mode: 0o700 });
+require("node:fs").writeFileSync(path.join(path.dirname(socketPath), "argv.json"), JSON.stringify(process.argv.slice(2)));
 const httpServer = http.createServer();
 const wss = new WebSocketServer({ server: httpServer });
 wss.on("connection", socket => socket.on("message", raw => {
@@ -233,8 +234,10 @@ httpServer.listen(socketPath);
 `, { mode: 0o755 });
     const own = await mkdtemp(path.join(tmpdir(), "phren-as-"));
     const ownSocket = path.join(own, "nested", "worker.sock");
-    const handle = await spawnAppServer({ codexBin: codex, socketPath: ownSocket, cwd: root });
+    const handle = await spawnAppServer({ codexBin: codex, socketPath: ownSocket, cwd: root, config: ["features.x=true", 'y="a b"'] });
     handles.push(handle);
+    expect(JSON.parse(await readFile(path.join(path.dirname(ownSocket), "argv.json"), "utf8")))
+      .toEqual(["app-server", "-c", "features.x=true", "-c", 'y="a b"', "--listen", `unix://${ownSocket}`]);
     expect(handle.child.pid).toBeGreaterThan(0);
     expect((await stat(path.dirname(ownSocket))).mode & 0o077).toBe(0);
     const client = await connectAppServer(ownSocket, { clientName: "phren_test" });

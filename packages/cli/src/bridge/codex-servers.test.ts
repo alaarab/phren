@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { SpawnAppServerOptions } from "./codex-app-server.js";
-import { type CodexServerEntry, CodexServers, codexServersRoot, CODEX_SERVER_ENV, serverEnvironment } from "./codex-servers.js";
+import { BLOCKING_QUESTION_INSTRUCTIONS, type CodexServerEntry, CodexServers, codexServersRoot, CODEX_SERVER_ENV, serverConfig, serverEnvironment } from "./codex-servers.js";
 import type { Json, Target } from "./protocol.js";
 
 /** A `codex app-server` as far as the Hook's client can tell: answers its
@@ -115,6 +115,9 @@ describe.skipIf(process.platform === "win32")("launching a pane's Codex server",
     expect(fakes[0].sent("thread/start")[0].params).toEqual({ cwd: root, model: "gpt-5.4", config: { model_reasoning_effort: "low" } });
     expect(spawned[0]).toMatchObject({ detached: true, replaceEnv: true, cwd: root, logFile: path.join(path.dirname(entry.socket), "server.log") });
     expect(spawned[0].env?.[CODEX_SERVER_ENV]).toBe(entry.id);
+    // Every thread on the server may ask a blocking question, and is told to.
+    expect(spawned[0].config).toEqual(["features.default_mode_request_user_input=true", `developer_instructions=${JSON.stringify(BLOCKING_QUESTION_INSTRUCTIONS)}`]);
+    expect(serverConfig({ PHREN_CODEX_BLOCKING_QUESTIONS: "off" })).toEqual([]);
     expect(spawned[0].env?.HERDR_PANE_ID).toBe("w1:p1");
     expect(await registry(entry)).toMatchObject({ id: entry.id, threadId: "thread-1", pane: "w1:p1" });
     const again = await servers.launch({ ...place, pane: "w1:p2" }, { cwd: root, startThread: true });
