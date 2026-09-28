@@ -81,7 +81,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const accountUsage = options.accountUsage ?? new AccountUsageReader();
   const resources = new ResourceMonitor();
   const tabActivity = new TabActivityStore();
-  const codexQuestions = new CodexQuestions();
+  const codexQuestions = new CodexQuestions(undefined, codexServers);
   const scheduleStore = defaultPhrenPath();
   const scheduler = modules.has("schedules") ? new Scheduler({ now: () => new Date(), store: scheduleStore, runsFile: scheduleRunsFile(),
     // A schedule starts in its project's folder, which the Hook resolved itself.

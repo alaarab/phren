@@ -9,6 +9,9 @@ import { paneIdentity, validateTarget } from "./herdr.js";
 import { transcriptPath } from "./transcripts.js";
 import { codexExecutable } from "./codex-binary.js";
 import { withTranscriptIndex } from "./transcript-index.js";
+import type { AppServerRequestId, PendingServerRequest } from "./codex-app-server.js";
+import type { CodexServerEntry } from "./codex-servers.js";
+import { formatQuestionReply, parseQuestionReply } from "./codex-question-reply.js";
 
 const exec = promisify(execFile);
 const text = z.string().trim().min(1).max(4000).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t));
@@ -40,7 +43,8 @@ export function deliveredQuestion(raw: Json): { id: string; questions: Question[
     return { id: item.id.slice(0, 512), questions };
   } catch { return; }
 }
-export function questionReply(questions: Question[], answers: unknown): string {
+/** The phone's answer to each question: one option it chose or its typed text. */
+function answerValues(questions: Question[], answers: unknown): string[] {
   const parsed = z.array(z.object({ optionIndexes: z.array(z.number().int().nonnegative()).max(1), text: z.string().max(4000).optional() })).parse(answers);
   if (parsed.length !== questions.length) throw new BridgeError(400, "Answer every question.");
   return questions.map((q, index) => {
@@ -48,8 +52,17 @@ export function questionReply(questions: Question[], answers: unknown): string {
     if (answer.optionIndexes.length + (typed ? 1 : 0) !== 1) throw new BridgeError(400, "Choose one answer for each question.");
     const value = typed || options[answer.optionIndexes[0]];
     if (!value || !text.safeParse(value).success) throw new BridgeError(400, "Choose an available answer.");
-    return q.title.split("\n").map(line => `> ${line}`).join("\n") + "\n\n" + value;
-  }).join("\n\n");
+    return value;
+  });
+}
+export function questionReply(questions: Question[], answers: unknown): string {
+  const values = answerValues(questions, answers);
+  return questions.map((q, index) => q.title.split("\n").map(line => `> ${line}`).join("\n") + "\n\n" + values[index]).join("\n\n");
+}
+/** The same answers as Codex's own TUI sends them into the running turn. */
+export function asyncQuestionReply(id: string, questions: Question[], answers: unknown): string {
+  const values = answerValues(questions, answers);
+  return formatQuestionReply(id, questions.map((q, index) => ({ question: q.title, answer: values[index] })));
 }
 const answersQuestions = (reply: string, questions: Question[]) => questions.every(q => {
   const quote = q.title.split("\n").map(line => `> ${line}`).join("\n") + "\n\n";
@@ -59,7 +72,7 @@ const answersQuestions = (reply: string, questions: Question[]) => questions.eve
 interface PendingQuestion { id: string; questions: Question[] }
 export async function pendingAsyncQuestions(file: string, targetID?: string): Promise<PendingQuestion[]> {
   return withTranscriptIndex(file, async (handle, index) => {
-    const replies: string[] = [], acknowledged = new Set<string>(), resolved = new Set<string>(), seen = new Set<string>(), pending: PendingQuestion[] = [];
+    const replies: string[] = [], replied = new Set<string>(), acknowledged = new Set<string>(), resolved = new Set<string>(), seen = new Set<string>(), pending: PendingQuestion[] = [];
     let bytes = 0;
     for await (const row of index.rows(handle, index.lines, Math.max(0, index.lines - 10_000))) {
       // An incomplete scan is not evidence that no questions remain. Status
@@ -71,7 +84,12 @@ export async function pendingAsyncQuestions(file: string, targetID?: string): Pr
       if (delivered) acknowledged.add(delivered.id);
       if (raw.type !== "response_item" && !delivered) continue;
       const p = object(raw.payload), id = delivered ? delivered.id : typeof p.call_id === "string" ? p.call_id : "";
-      if (p.type === "message" && p.role === "user") replies.push(objects(p.content).map(b => typeof b.text === "string" ? b.text : "").join("\n"));
+      if (p.type === "message" && p.role === "user") {
+        const reply = objects(p.content).map(b => typeof b.text === "string" ? b.text : "").join("\n");
+        replies.push(reply);
+        // Codex's own answer (its TUI, or the Hook for a pane on its app-server) names the question.
+        for (const entry of parseQuestionReply(reply) ?? []) if (entry.id) replied.add(entry.id);
+      }
       if (id && ["function_call_output", "custom_tool_call_output"].includes(String(p.type)) && !resolved.has(id) && !acknowledged.has(id)) {
         try { if (object(JSON.parse(String(p.output))).accepted === true) acknowledged.add(id); else resolved.add(id); }
         catch { resolved.add(id); }
@@ -81,7 +99,7 @@ export async function pendingAsyncQuestions(file: string, targetID?: string): Pr
       const questions = asyncQuestion(raw, id);
       // Codex 0.155 records one question twice under the same id: the
       // request_user_input_async call and the AgentMessage delivered async.
-      if (questions && !seen.has(id) && !replies.some(reply => answersQuestions(reply, questions))) {
+      if (questions && !seen.has(id) && !replied.has(id) && !replies.some(reply => answersQuestions(reply, questions))) {
         pending.push({ id, questions });
         if (pending.length >= 64) throw new BridgeError(413, "Too many pending questions to verify.");
       }
@@ -99,6 +117,73 @@ export async function pendingAsyncQuestion(file: string, id: string): Promise<Qu
   return pending.questions;
 }
 
+/** The Hook's own Codex app-servers (codex-servers.ts), as far as questions go. */
+export interface ServedCodex {
+  forTarget(target: Target): CodexServerEntry | undefined;
+  steer(entry: CodexServerEntry, text: string): Promise<{ turnId: string }>;
+  questions(entry: CodexServerEntry): PendingServerRequest[];
+  answerQuestion(entry: CodexServerEntry, requestId: AppServerRequestId, result: Json): boolean;
+}
+
+/** A question parked on the app-server as the phone shows it, and the
+ * server's answer for the phone's choices. */
+interface ServerQuestion { questions: Question[]; result(values: string[]): Json }
+const requestKey = (requestId: AppServerRequestId) => `request:${JSON.stringify(requestId)}`;
+const choose = (label: string, options: string[], typed: boolean) => {
+  if (!typed && !options.includes(label)) throw new BridgeError(400, "Choose one of the offered answers.");
+  return label;
+};
+
+/** `item/tool/requestUserInput` (the synchronous tool) and a form MCP
+ * elicitation whose fields are all single values. Secret inputs, URL
+ * elicitations and multi-select fields stay in the pane. */
+export function serverQuestion(request: PendingServerRequest): ServerQuestion | undefined {
+  const params = request.params;
+  if (request.method === "item/tool/requestUserInput") {
+    const asked = objects(params.questions);
+    if (!asked.length || asked.some(q => q.isSecret === true || typeof q.id !== "string" || typeof q.question !== "string")) return undefined;
+    const parsed = questionSet.safeParse(asked.map(q => ({ title: q.question,
+      options: objects(q.options).map(option => option.label).filter((label): label is string => typeof label === "string") })));
+    if (!parsed.success) return undefined;
+    const questions = parsed.data.map(q => ({ ...q, options: q.options?.length ? q.options : undefined }));
+    return { questions, result: values => ({ answers: Object.fromEntries(asked.map((q, index) => [String(q.id),
+      { answers: [choose(values[index], questions[index].options ?? [], q.isOther === true || !questions[index].options)] }])) }) };
+  }
+  if (request.method !== "mcpServer/elicitation/request" || !["form", "openai/form", "openaiForm"].includes(String(params.mode))) return undefined;
+  const message = typeof params.message === "string" ? params.message.trim() : "";
+  const fields = Object.entries(object(object(params.requestedSchema).properties));
+  if (!message || !fields.length || fields.length > 8) return undefined;
+  const shaped: { key: string; title: string; options?: string[]; value(label: string): unknown }[] = [];
+  for (const [key, raw] of fields) {
+    const field = object(raw), label = [field.title, field.description].find((value): value is string => typeof value === "string" && !!value.trim())?.trim() ?? key;
+    if (field.type === "boolean") { shaped.push({ key, title: label, options: ["Yes", "No"], value: answer => choose(answer, ["Yes", "No"], false) === "Yes" }); continue; }
+    if (field.type === "number" || field.type === "integer") {
+      shaped.push({ key, title: label, value: answer => {
+        const number = Number(answer.trim());
+        if (!answer.trim() || !Number.isFinite(number) || (field.type === "integer" && !Number.isInteger(number))) throw new BridgeError(400, `Answer "${label}" with a number.`);
+        return number;
+      } });
+      continue;
+    }
+    if (field.type !== "string") return undefined;
+    const titled = objects(field.oneOf).filter(option => typeof option.const === "string" && typeof option.title === "string");
+    const plain = Array.isArray(field.enum) ? field.enum.filter((value): value is string => typeof value === "string") : [];
+    const names = Array.isArray(field.enumNames) ? field.enumNames : [];
+    const pairs = titled.length ? titled.map(option => [String(option.title), String(option.const)])
+      : plain.map((value, index) => [typeof names[index] === "string" ? String(names[index]) : value, value]);
+    if (pairs.length) {
+      const options = pairs.map(([title]) => title);
+      shaped.push({ key, title: label, options, value: answer => pairs[options.indexOf(choose(answer, options, false))][1] });
+    } else shaped.push({ key, title: label, value: answer => answer });
+  }
+  // The server's message heads the first question; one field reads as the message itself.
+  const titles = shaped.map((field, index) => shaped.length === 1 ? (field.title === field.key ? message : `${message}\n\n${field.title}`)
+    : index === 0 ? `${message}\n\n${field.title}` : field.title);
+  const parsed = questionSet.safeParse(shaped.map((field, index) => ({ title: titles[index], ...(field.options ? { options: field.options } : {}) })));
+  if (!parsed.success) return undefined;
+  return { questions: parsed.data, result: values => ({ action: "accept", content: Object.fromEntries(shaped.map((field, index) => [field.key, field.value(values[index])])) }) };
+}
+
 export class CodexQuestions {
   private snapshots = new Map<string, { at: number; stamp: string; pending: PendingQuestion[] }>();
   private failedSnapshots = new Map<string, number>();
@@ -106,8 +191,12 @@ export class CodexQuestions {
   /** Feature discovery must never delay permission/status frames. */
   get available(): boolean { void this.supported(); return this.inboxAvailable; }
   private probe?: { at: number; result: Promise<boolean> };
-  /** No executable: the real `codex` on PATH, past phren's session wrapper. */
-  constructor(private readonly configured?: string) {}
+  /** No executable: the real `codex` on PATH, past phren's session wrapper.
+   * `served` answers panes on the Hook's own app-server over that server. */
+  constructor(private readonly configured?: string, private readonly served?: ServedCodex) {}
+  /** Whether the phone can answer this pane's questions: a pane on the Hook's
+   * own app-server always can; any other needs `codex queue`. */
+  availableFor(target: Target): boolean { return target.source === "codex" && (!!this.served?.forTarget(target) || this.available); }
   private get executable(): string { return this.configured ?? codexExecutable(); }
   supported(): Promise<boolean> {
     if (!this.probe || Date.now() - this.probe.at > 300_000) this.probe = { at: Date.now(), result:
@@ -118,6 +207,14 @@ export class CodexQuestions {
   }
   async pending(target: Target): Promise<Json[]> {
     if (target.source !== "codex") return [];
+    const entry = this.served?.forTarget(target);
+    const parked = entry ? this.served!.questions(entry).flatMap(request => {
+      const shown = serverQuestion(request);
+      return shown ? [{ toolUseId: requestKey(request.requestId), isAsync: true, submitted: false, questions: asPrompt(shown.questions) }] : [];
+    }) : [];
+    return [...parked, ...await this.transcriptPending(target)];
+  }
+  private async transcriptPending(target: Target): Promise<Json[]> {
     if (Date.now() - (this.failedSnapshots.get(target.session) ?? 0) < 5000) throw new BridgeError(503, "Pending question history is unavailable.");
     const file = await transcriptPath("codex", target.session);
     const cached = this.snapshots.get(target.session);
@@ -135,16 +232,28 @@ export class CodexQuestions {
     return Promise.all((pending ?? []).map(async p => {
       const key = createHash("sha256").update(JSON.stringify([target.source, target.session, p.id])).digest("hex");
       const submitted = await readFile(path.join(bridgeRoot(), "question-replies", key), "utf8").then(value => value === "submitted").catch(() => false);
-      return { toolUseId: p.id, isAsync: true, submitted, questions: p.questions.map(q => ({ question: q.title,
-        options: (q.options ?? []).map(label => ({ label })), ...(!q.options?.length ? { kind: "text" } : {}) })) };
+      return { toolUseId: p.id, isAsync: true, submitted, questions: asPrompt(p.questions) };
     })).then(prompts => prompts.filter(p => !p.submitted));
   }
   async answer(target: Target, data: Json): Promise<void> {
-    if (target.source !== "codex" || !await this.supported()) throw new BridgeError(409, "This connection needs the question answered in the terminal.");
-    z.string().uuid().parse(target.session);
     const id = z.string().min(1).max(512).parse(data.toolUseId);
+    const entry = target.source === "codex" ? this.served?.forTarget(target) : undefined;
+    if (entry && id.startsWith("request:")) {
+      // A question parked on the Hook's own app-server: the answer is the
+      // reply to that request, exactly once, from whichever client is first.
+      const request = this.served!.questions(entry).find(candidate => requestKey(candidate.requestId) === id);
+      const shown = request && serverQuestion(request);
+      if (!request || !shown) throw new BridgeError(409, "This question is no longer pending. Refresh the conversation.");
+      const result = shown.result(answerValues(shown.questions, data.answers));
+      if (!this.served!.answerQuestion(entry, request.requestId, result)) throw new BridgeError(409, "This question is no longer pending. Refresh the conversation.");
+      return;
+    }
+    if (target.source !== "codex" || (!entry && !await this.supported())) throw new BridgeError(409, "This connection needs the question answered in the terminal.");
+    z.string().uuid().parse(target.session);
     const questions = await pendingAsyncQuestion(await transcriptPath("codex", target.session), id);
-    const reply = questionReply(questions, data.answers);
+    // A pane on the Hook's app-server gets the answer in its running turn, as
+    // Codex's TUI sends it; `codex queue` would hold it until the turn ends.
+    const reply = entry ? asyncQuestionReply(id, questions, data.answers) : questionReply(questions, data.answers);
     const pane = await validateTarget(target);
     if (await paneIdentity(target.server, pane, true) !== target.session) throw new BridgeError(409, "This pane's conversation changed. Reopen the chat.");
     // Record before invoking the provider: a timeout can mean it accepted the
@@ -160,8 +269,15 @@ export class CodexQuestions {
     await receipt.close();
     try {
       // Explicit UUID, no session-name lookup, no shell, no terminal keystrokes.
-      await exec(this.executable, ["queue", "--thread", target.session, "--message", reply], { timeout: 8000, maxBuffer: 65_536 });
+      if (entry) await this.served!.steer(entry, reply);
+      else await exec(this.executable, ["queue", "--thread", target.session, "--message", reply], { timeout: 8000, maxBuffer: 65_536 });
       await writeFile(receiptPath, "submitted", { mode: 0o600 });
     } catch { throw new BridgeError(409, "Codex did not confirm the answer. Check the conversation; Phren has not retried it."); }
   }
+}
+
+/** Questions in the phone's pending-question shape: labelled options, or a
+ * typed answer when there are none. */
+function asPrompt(questions: Question[]): Json[] {
+  return questions.map(q => ({ question: q.title, options: (q.options ?? []).map(label => ({ label })), ...(!q.options?.length ? { kind: "text" } : {}) }));
 }

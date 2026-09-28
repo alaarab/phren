@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { type AppServerClient, type AppServerRequestId, connectAppServer, type PendingServerRequest, spawnAppServer } from "./codex-app-server.js";
+import { type AppServerClient, type AppServerRequestId, AppServerRpcError, connectAppServer, type PendingServerRequest, spawnAppServer } from "./codex-app-server.js";
 import { logger } from "../logger.js";
 import { atomic, bridgeRoot, id, type Json, object, objects, serverName, type Target } from "./protocol.js";
 
@@ -25,6 +25,7 @@ const MAX_SOCKET_PATH = 100;
 /** A pane that shows no Codex for this long no longer runs the worker. */
 const AGENT_GONE_MS = 120_000;
 const CLIENT_NAME = "phren_hook";
+const QUESTION_METHODS = new Set(["item/tool/requestUserInput", "mcpServer/elicitation/request"]);
 
 const entrySchema = z.object({
   id: z.string().regex(/^[a-f0-9]{12}$/),
@@ -236,6 +237,38 @@ export class CodexServers {
     if (!entry.threadId) throw new CodexServerUnavailable("The Codex pane has not started its thread yet.");
     const client = await this.client(entry);
     return client.turnStart({ threadId: entry.threadId, input: [{ type: "text", text, text_elements: [] }] });
+  }
+
+  /** Input for the thread's running turn (`turn/steer`, as the TUI sends an
+   * async question's answer), or a new turn when none is running or the one
+   * it knew has ended. A refused steer sent nothing, so starting is safe. */
+  async steer(entry: CodexServerEntry, text: string): Promise<{ turnId: string }> {
+    if (!entry.threadId) throw new CodexServerUnavailable("The Codex pane has not started its thread yet.");
+    const client = await this.client(entry);
+    const input = [{ type: "text", text, text_elements: [] }];
+    const running = this.live.get(entry.id)?.entry.activeTurn;
+    if (running) {
+      try { return await client.turnSteer({ threadId: entry.threadId, expectedTurnId: running, input }); }
+      catch (error) { if (!(error instanceof AppServerRpcError)) throw error; }
+    }
+    return client.turnStart({ threadId: entry.threadId, input });
+  }
+
+  /** The thread's parked questions: `item/tool/requestUserInput` and MCP
+   * elicitations, which wait for an answer from any client. */
+  questions(entry: CodexServerEntry): PendingServerRequest[] {
+    const client = this.live.get(entry.id)?.client;
+    if (!client || !entry.threadId) return [];
+    return [...client.pending.values()].filter(request => QUESTION_METHODS.has(request.method)
+      && (request.threadId === undefined || request.threadId === entry.threadId));
+  }
+
+  /** Answers one parked question; false when no client still waits on it. */
+  answerQuestion(entry: CodexServerEntry, requestId: AppServerRequestId, result: Json): boolean {
+    const client = this.live.get(entry.id)?.client;
+    if (!client?.pending.has(requestId)) return false;
+    client.respond(requestId, result);
+    return true;
   }
 
   /** Interrupt the running turn, declining the thread's parked server
