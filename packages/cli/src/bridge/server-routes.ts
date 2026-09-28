@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { harnessInventoryWithin } from "./harnesses.js";
+import { harnessInventoryWithin, launchCheckOff } from "./harnesses.js";
 import path from "node:path";
 import { z } from "zod";
 import { saveCodeNote } from "./code-note.js";
@@ -308,7 +308,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             result = { product: "phren-hook", protocol: PROTOCOL, computer: info.computer, servers: live.map(server => server.session),
               working: snapshots.reduce((sum, value) => sum + objects(value.panes).filter(pane => pane.agent && pane.agent_status === "working").length, 0),
               // Bounded so a peer's capacity probe never waits on a cold `claude auth status`; missing means unknown.
-              ...await harnessInventoryWithin(2_500).then(inventory => inventory ? { harnesses: inventory.harnesses } : {}) };
+              // PHREN_LAUNCH_CHECK=off turns this Hook's availability checks off, including what it advertises to dispatch.
+              ...(launchCheckOff() ? {} : await harnessInventoryWithin(2_500).then(inventory => inventory ? { harnesses: inventory.harnesses } : {})) };
             break;
           }
           case "/v1/speech/voices": {

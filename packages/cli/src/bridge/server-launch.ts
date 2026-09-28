@@ -12,7 +12,7 @@ import { prepareServedLaunch, registerServedPane, sendServedBrief } from "./open
 import { groupConductor, type GroupConductor } from "./conductor-group.js";
 import { pretrustFolder } from "./folder-trust.js";
 import { claudeHome, claudeLaunchEnv, isAccountSlug, DEFAULT_ACCOUNT } from "./claude-accounts.js";
-import { harnessInventoryWithin, hasUsable, type HarnessInventory } from "./harnesses.js";
+import { harnessInventoryWithin, hasUsable, launchCheckOff, type HarnessInventory } from "./harnesses.js";
 import { paneAccountKey, recordPaneAccount } from "./pane-accounts.js";
 import { optionalHookPeers } from "./peers.js";
 import { AppServerRpcError } from "./codex-app-server.js";
@@ -135,7 +135,7 @@ export function setLaunchInventory(reader: InventoryReader | undefined): void { 
  * (`harness_unavailable`), or the account is unknown, signed out, or given for a harness without accounts
  * (`account_unavailable`). Only a definite answer refuses; an inventory that cannot be read lets the launch go on. */
 async function requireAvailable(kind: string, account: string | undefined): Promise<void> {
-  if (!inventoryReader && /^(off|0|false|no)$/i.test(process.env.PHREN_LAUNCH_CHECK?.trim() ?? "")) return;
+  if (!inventoryReader && launchCheckOff()) return;
   // Bounded: a cold sign-in check per home can take seconds, and an unready inventory lets the launch go on.
   const inventory = await (inventoryReader ?? (() => harnessInventoryWithin(2_500)))().catch(() => undefined);
   if (!inventory) return;
