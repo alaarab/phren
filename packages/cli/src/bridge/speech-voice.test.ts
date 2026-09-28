@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { clearSpeechVoice, DEFAULT_SPEECH_VOICE, listSpeechVoices, readStoredVoice, resolveSpeechVoice, writeSpeechVoice } from "./speech-voice.js";
+import { clearSpeechModel, clearSpeechVoice, DEFAULT_SPEECH_MODEL, DEFAULT_SPEECH_VOICE, listSpeechVoices, readStoredModel, readStoredVoice, resolveSpeechModel, resolveSpeechVoice, writeSpeechModel, writeSpeechVoice } from "./speech-voice.js";
 
 describe("the talk-mode voice setting", () => {
   let root: string, file: string;
@@ -28,6 +28,24 @@ describe("the talk-mode voice setting", () => {
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ voice: "S9EGwlCtMF7VXtENq79v" });
     expect(await resolveSpeechVoice(undefined, { env: {}, file })).toEqual({ voice: "S9EGwlCtMF7VXtENq79v", source: "setting" });
     expect(await resolveSpeechVoice(undefined, { env: { PHREN_SPEECH_VOICE: "UgBBYS2sOqTuMpoF3BR0" }, file })).toMatchObject({ source: "setting" });
+  });
+
+  it("stores the model next to the voice, and clearing one keeps the other", async () => {
+    expect(await resolveSpeechModel(file)).toEqual({ model: DEFAULT_SPEECH_MODEL, source: "default" });
+    await writeSpeechVoice("S9EGwlCtMF7VXtENq79v", file);
+    await writeSpeechModel(" eleven_v4 ", file);
+    if (process.platform !== "win32") expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ voice: "S9EGwlCtMF7VXtENq79v", model: "eleven_v4" });
+    expect(await resolveSpeechModel(file)).toEqual({ model: "eleven_v4", source: "setting" });
+    await clearSpeechVoice(file);
+    expect(await resolveSpeechModel(file)).toEqual({ model: "eleven_v4", source: "setting" });
+    await writeSpeechVoice("S9EGwlCtMF7VXtENq79v", file);
+    await clearSpeechModel(file);
+    expect(await readStoredVoice(file)).toBe("S9EGwlCtMF7VXtENq79v");
+    expect(await readStoredModel(file)).toBeUndefined();
+    await clearSpeechVoice(file);
+    await expect(stat(file)).rejects.toThrow();
+    for (const bad of ["", "ab", "../v1/user", "Eleven V4", "eleven_v4?x=1"]) await expect(writeSpeechModel(bad, file)).rejects.toThrow();
   });
 
   it("refuses anything that is not an ElevenLabs voice id", async () => {
