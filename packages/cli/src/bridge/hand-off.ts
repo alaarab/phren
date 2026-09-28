@@ -2,6 +2,7 @@ import { z } from "zod";
 import { computerName } from "./computers.js";
 import { hookRequest } from "./client.js";
 import { projectName } from "./dispatch.js";
+import { isAccountSlug } from "./claude-accounts.js";
 import { grantLabel, findGrant } from "./grants.js";
 import { hookPeers, optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { BridgeError, errorCode, object, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
@@ -19,6 +20,8 @@ export const handOffSchema = z.object({
   target: targetSchema.optional().describe("Complete live target for the existing session."),
   session: sessionId.optional().describe("Session id to resolve through the Hook workspace overview."),
   project: projectName.optional().describe("Project slug this hand-off belongs to, for conductor grant matching."),
+  account: z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").optional()
+    .describe("Claude account id the session must run under (default, or a slug). A session of another account is refused; a row without an account counts as default."),
   text: promptText.describe("Prompt to deliver to the existing session, at most 32768 characters."),
 }).strict().superRefine((value, context) => {
   if ((value.target === undefined) === (value.session === undefined)) context.addIssue({ code: "custom", message: "Provide exactly one of target or session." });
@@ -34,19 +37,23 @@ function labelOf(group: Json, tab: Json): string | undefined {
   return folder || (typeof group.label === "string" && group.label ? group.label : undefined);
 }
 
-async function findInOverview(request: Request, match: (target: Target) => boolean, server?: string): Promise<{ target: Target; label?: string } | undefined> {
+/** The account id an overview row runs under; a row without one is the default account. */
+const accountOf = (tab: Json): string => typeof object(tab.account).id === "string" ? String(object(tab.account).id) : "default";
+
+async function findInOverview(request: Request, match: (target: Target) => boolean, server?: string): Promise<{ target: Target; label?: string; account: string } | undefined> {
   const route = server ? `/v1/workspaces?server=${encodeURIComponent(server)}` : "/v1/workspaces";
   const overview = await request(route);
   for (const group of objects(overview.groups)) for (const tab of objects(group.children)) {
     const parsed = targetSchema.safeParse(tab.target);
-    if (parsed.success && match(parsed.data)) return { target: parsed.data, label: labelOf(group, tab) };
+    if (parsed.success && match(parsed.data)) return { target: parsed.data, label: labelOf(group, tab), account: accountOf(tab) };
   }
   return undefined;
 }
 
-async function targetFromOverview(request: Request, session: string, server?: string): Promise<{ target: Target; label?: string }> {
+async function targetFromOverview(request: Request, session: string, server?: string, account?: string): Promise<{ target: Target; label?: string }> {
   const found = await findInOverview(request, target => target.session === session, server);
   if (!found) throw new BridgeError(404, "No live session with that id appears in the workspace overview.");
+  if (account && found.account !== account) throw new BridgeError(409, `That session runs under account ${found.account}, not ${account}.`, { code: "account_mismatch" });
   return found;
 }
 
@@ -63,7 +70,7 @@ export async function handOff(input: unknown, options: { deliveryId?: string } =
     if (!peer) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
     request = (route, body) => peerRequest(peer!, route, body);
   }
-  const resolved = data.target ? undefined : await targetFromOverview(request, data.session!, peer?.server);
+  const resolved = data.target ? undefined : await targetFromOverview(request, data.session!, peer?.server, data.account);
   const target = data.target ?? resolved!.target;
   if (peer && target.server !== peer.server) throw new BridgeError(400, "The target belongs to a different Herdr server on that computer.");
   const grant = await findGrant({ action: "hand_off", project: data.project, computer: data.computer });
@@ -81,6 +88,8 @@ export async function handOff(input: unknown, options: { deliveryId?: string } =
 export interface LiveSession {
   computer: string; local: boolean; project?: string; label?: string; title?: string; agent?: string;
   status?: string; role?: string; branch?: string; model?: string; target?: Target;
+  /** Claude account id, when the Hook knows it; absent means the default account or an unknown one. */
+  account?: string;
   /** Seconds since the tab last changed, when the Hook has seen it change. */
   idleFor?: number;
 }
@@ -100,7 +109,7 @@ function sessionsFrom(overview: Json, computer: string, local: boolean, now = Da
     // A conductor sits in the store, not a project.
     sessions.push({ computer, local, project: tab.role === "conductor" ? undefined : text(cwd.split("/").filter(Boolean).at(-1)), label: text(label),
       title: text(tab.title), agent: tab.agent, status: text(tab.agentStatus), role: text(tab.role),
-      branch: text(tab.branch), model: text(tab.model), ...(target.success ? { target: target.data } : {}),
+      branch: text(tab.branch), model: text(tab.model), ...(typeof object(tab.account).id === "string" ? { account: String(object(tab.account).id) } : {}), ...(target.success ? { target: target.data } : {}),
       ...(Number.isFinite(changedAt) ? { idleFor: Math.max(0, Math.floor((now - changedAt) / 1000)) } : {}) });
   }
   return sessions;

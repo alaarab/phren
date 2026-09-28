@@ -60,6 +60,52 @@ describe("dispatch receipts and selection", () => {
     await expect(new DispatchService().dispatch({ ...brief, effort: "turbo" } as never)).rejects.toThrow();
   });
 
+  describe("account targeting", () => {
+    const claude = { ...brief, harness: "claude", account: "work" };
+    const inventory = (accounts: { id: string; usable: boolean; reason?: string }[]) => [{ source: "claude", installed: true, usable: true, accounts }];
+    const capacityFor = (harnesses: unknown, working: number) => ({ product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working, ...(harnesses ? { harnesses } : {}) });
+
+    it("anywhere skips computers without the account, lists why, and launches with the account", async () => {
+      vi.mocked(peerRequest).mockImplementation(async (peer, route) => {
+        if (route === "/v1/dispatch/capacity") {
+          // Desk is the least busy but has no work account; Linuxbox is older and reports nothing.
+          if (peer.name === "Desk") return capacityFor(inventory([{ id: "default", usable: true }]), 0);
+          return capacityFor(undefined, 0);
+        }
+        return route.startsWith("/v1/workspaces/launch") ? { ok: true, target: { ...target, source: "claude" } } : { ok: true };
+      });
+      vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/dispatch/capacity"
+        ? { ...capacityFor(inventory([{ id: "default", usable: true }, { id: "work", usable: true }]), 9), computer: { id: localID } }
+        : route.startsWith("/v1/workspaces/launch") ? { ok: true, target: { ...target, source: "claude" } } : { ok: true });
+      const result = await new DispatchService().dispatch(claude);
+      expect(result).toMatchObject({ computer: "Laptop", account: "work", state: "accepted" });
+      expect(result.skipped.map((item: { computer: string }) => item.computer)).toEqual(["Desk", "Linuxbox"]);
+      expect(result.skipped[0].reason).toContain('No claude account "work"');
+      expect(vi.mocked(hookRequest).mock.calls.find(call => call[0].startsWith("/v1/workspaces/launch"))?.[1]).toMatchObject({ kind: "claude", account: "work" });
+      expect((await dispatchStatus())[0]).toMatchObject({ account: "work" });
+    });
+
+    it("an older computer without harnesses stays eligible when no account is asked for", async () => {
+      vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity" ? capacityFor(undefined, 0)
+        : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
+      expect(await new DispatchService().dispatch(brief)).toMatchObject({ computer: "Desk", state: "accepted" });
+      const error = await new DispatchService().dispatch({ ...brief, harness: "claude", account: "work" }).catch(e => e);
+      expect(error).toBeInstanceOf(BridgeError);
+      expect(error.message).toContain("account work");
+    });
+
+    it("a named computer that reports the account unusable fails before launching", async () => {
+      vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
+        ? capacityFor(inventory([{ id: "default", usable: true }, { id: "work", usable: false, reason: "Not signed in" }]), 0) : { ok: true });
+      await expect(new DispatchService().dispatch({ ...claude, computer: "Desk" })).rejects.toThrow("Desk cannot run claude account work: Not signed in");
+      expect(vi.mocked(peerRequest).mock.calls.some(call => call[1].startsWith("/v1/workspaces/launch"))).toBe(false);
+    });
+
+    it("rejects a malformed account", async () => {
+      await expect(new DispatchService().dispatch({ ...claude, account: "../x" })).rejects.toThrow();
+    });
+  });
+
   it("keeps an uncertain target after lost prompt acknowledgement and never retries", async () => {
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => {
       if (route === "/v1/dispatch/capacity") return { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 };

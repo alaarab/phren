@@ -189,7 +189,13 @@ No extra request per iPhone row is needed.
 From a project, the iPhone can open a new session on a computer:
 `POST /v1/workspaces/launch` creates a Herdr workspace (or a tab in one) in
 the project's directory and starts Codex, Claude Code, Copilot or OpenCode
-in its pane, returning once Herdr has detected it ready. Otherwise
+in its pane, returning once Herdr has detected it ready. `account` (`default`
+or a slug) runs Claude under that account's config home: the pane and agent get
+`CLAUDE_CONFIG_DIR` (Herdr at pane creation, tmux on the agent's `respawn-pane -e`),
+folder trust is written to that home's `.claude.json`, and the reply echoes
+`account`. Before any pane exists the Hook answers 409 `harness_unavailable`
+(not installed) or `account_unavailable` (unknown, signed out, or an account for a
+harness without accounts); see [accounts](accounts.md). Otherwise
 the helper does not start coding agents for you. Text updates depend on when
 that agent writes its transcript; usage numbers are never estimated. In Codex,
 review the installed Phren callbacks in `/hooks`. Resume existing sessions if
