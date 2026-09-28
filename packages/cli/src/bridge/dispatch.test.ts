@@ -49,6 +49,14 @@ describe("dispatch receipts and selection", () => {
     expect((await dispatchStatus())[0]).toMatchObject({ state: "accepted", computer: "Linuxbox" });
   });
 
+  it("launches the worker with the dispatch's model and effort and keeps them on the receipt", async () => {
+    const result = await new DispatchService().dispatch({ ...brief, model: "gpt-5.6-terra", effort: "high" });
+    const launch = vi.mocked(peerRequest).mock.calls.find(call => call[1].startsWith("/v1/workspaces/launch"))?.[2];
+    expect(launch).toMatchObject({ kind: "codex", model: "gpt-5.6-terra", effort: "high" });
+    expect((await dispatchStatus())[0]).toMatchObject({ id: result.id, model: "gpt-5.6-terra", effort: "high" });
+    await expect(new DispatchService().dispatch({ ...brief, effort: "turbo" } as never)).rejects.toThrow();
+  });
+
   it("keeps an uncertain target after lost prompt acknowledgement and never retries", async () => {
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => {
       if (route === "/v1/dispatch/capacity") return { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 };
