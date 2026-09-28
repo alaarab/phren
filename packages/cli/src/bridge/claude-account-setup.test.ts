@@ -31,9 +31,10 @@ it("creates a private home with symlinks, only mcpServers, and a label", async (
 
 it("never overwrites existing entries and merges mcpServers with the default winning", async () => {
   const dir = path.join(home, ".claude-work");
-  mkdirSync(dir); writeFileSync(path.join(dir, "settings.json"), "mine");
+  mkdirSync(dir, { mode: 0o755 }); writeFileSync(path.join(dir, "settings.json"), "mine");
   writeFileSync(path.join(dir, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: "w" }, mcpServers: { phren: { command: "old" }, extra: { command: "x" } } }));
   await addClaudeAccount("work");
+  expect(statSync(dir).mode & 0o777).toBe(0o700);
   expect(readFileSync(path.join(dir, "settings.json"), "utf8")).toBe("mine");
   expect(json(".claude-work/.claude.json")).toEqual({ oauthAccount: { accountUuid: "w" }, mcpServers: { phren: { command: "phren" }, extra: { command: "x" } } });
 });

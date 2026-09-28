@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { clearAccountCaches } from "./claude-accounts.js";
-import { harnessInventory, hasUsable } from "./harnesses.js";
+import { harnessInventory, harnessInventoryWithin, hasUsable } from "./harnesses.js";
 import type { ToolVersion } from "./health.js";
 
 let home = "";
@@ -64,4 +64,16 @@ it("keeps an account usable when Claude does not answer its sign-in check", asyn
   const claude = inv.harnesses.find(h => h.source === "claude")!;
   expect(claude.accounts![0]).toMatchObject({ id: "default", signedIn: false, usable: true });
   expect(hasUsable(inv, "claude")).toEqual({ ok: true });
+});
+
+it("answers within its bound while a cold sign-in check is still running", async () => {
+  let release!: (value: string) => void;
+  const slow = new Promise<string>(resolve => { release = resolve; });
+  const started = Date.now();
+  expect(await harnessInventoryWithin(50, { toolVersion: async t => versions[t], authRunner: () => slow })).toBeUndefined();
+  expect(Date.now() - started).toBeLessThan(1_000);
+  release('{"loggedIn":true}');
+  // The probe kept running and cached its answer for the next request.
+  const inv = await harnessInventoryWithin(1_000, { toolVersion: async t => versions[t], authRunner: () => slow });
+  expect(inv?.harnesses.find(h => h.source === "claude")?.accounts?.[0]).toMatchObject({ signedIn: true, usable: true });
 });

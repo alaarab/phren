@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { harnessInventory, harnessInventoryWithin } from "./harnesses.js";
+import { harnessInventoryWithin } from "./harnesses.js";
 import path from "node:path";
 import { z } from "zod";
 import { saveCodeNote } from "./code-note.js";
@@ -294,7 +294,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/conductor/grants": result = { grants: await listGrants() }; break;
           // Asked by linked peers before they start a conductor: one per connected group.
           case "/v1/conductor": result = { computer: info.computer, conductor: await localConductor() ?? null }; break;
-          case "/v1/harnesses": result = await harnessInventory(); break;
+          // Bounded like capacity: a cold `claude auth status` per home can take seconds. Without
+          // `harnesses` the phone treats the computer as unknown and offers everything; the probe keeps
+          // running, so the next request answers from cache.
+          case "/v1/harnesses": result = await harnessInventoryWithin(2_500) ?? { pending: true }; break;
           case "/v1/dispatch/capacity": {
             const live = await servers();
             const snapshots = await Promise.all(live.map(server => snapshot(String(server.session))));

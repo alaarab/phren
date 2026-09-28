@@ -1,5 +1,5 @@
 // `phren bridge accounts add`: a new Claude home that shares the default home's setup.
-import { lstat, mkdir, readFile, symlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, symlink } from "node:fs/promises";
 import path from "node:path";
 import { homeDir } from "../home-paths.js";
 import { claudeHome, claudeHomes, DEFAULT_ACCOUNT, isAccountSlug, setAccountLabel } from "./claude-accounts.js";
@@ -53,6 +53,7 @@ export async function addClaudeAccount(slug: string, opts: { label?: string; env
   if (dir === source.dir) throw new Error(`~/.claude-${slug} is the default Claude home.`);
   const created = !(await exists(dir));
   await mkdir(dir, { recursive: true, mode: 0o700 });
+  await chmod(dir, 0o700); // An existing home keeps its login: tighten it too.
   const linked: string[] = [];
   for (const name of SHARED_ENTRIES) {
     const target = path.join(source.dir, name), link = path.join(dir, name);
