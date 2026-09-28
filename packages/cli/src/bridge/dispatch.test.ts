@@ -314,6 +314,15 @@ describe("dispatch to this computer", () => {
     expect(await new DispatchService().dispatch(brief)).toMatchObject({ ok: true, computer: "Laptop" });
   });
 
+  it("finds a named computer by an alias, the way grants do", async () => {
+    vi.mocked(hookPeers).mockResolvedValue([{ name: "Linuxbox", address: "linuxbox.example", username: "sam", port: 22, hostKey: "unused", server: "default" }]);
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 }
+      : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
+    expect(await new DispatchService().dispatch({ ...brief, computer: "linuxbox.example" })).toMatchObject({ computer: "Linuxbox", state: "accepted" });
+    await expect(new DispatchService().dispatch({ ...brief, computer: "Studio" })).rejects.toThrow("Unknown computer");
+  });
+
   it("matches this computer by any of its names, never another's", () => {
     const names = ["Mac.example.net", "Mac", "Sams-Mac"];
     for (const name of ["Mac", "mac.example.net", "MAC.attlocal.net", "Sams-Mac.local", "local"]) expect(isLocalComputer(name, names)).toBe(true);

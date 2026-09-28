@@ -174,3 +174,12 @@ export async function readComputers(options: ReadOptions = {}): Promise<{ comput
     peers: facts, machines: machines?.ok ? machines.data : {} }, { trusted: options.trusted });
   return { computers, ...(peerError ? { peerError } : {}) };
 }
+
+/** What a dispatch or hand-off's `computer` names, by owner-written names only: an alias,
+ * a machines.yaml name or `Desk.local` finds the enrolled peer (by its hooks.yaml name) or
+ * this computer. Unknown, ambiguous or unlinked names resolve to nothing. */
+export async function linkedComputer(name: string, root?: string): Promise<{ local: true } | { peer: string } | undefined> {
+  const row = resolveComputer((await readComputers({ trusted: true, ...(root ? { root } : {}) })).computers, name);
+  if (!row?.linked) return undefined;
+  return row.local ? { local: true } : { peer: row.name };
+}

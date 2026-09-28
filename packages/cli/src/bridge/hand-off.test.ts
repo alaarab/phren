@@ -1,13 +1,22 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { hookRequest } from "./client.js";
+import { hookPeers, optionalHookPeers, peerRequest } from "./peers.js";
 import { handOff, listLiveSessions, notLinkedComputers } from "./hand-off.js";
 
 vi.mock("./client.js", () => ({ hookRequest: vi.fn() }));
 // This computer's names are synthetic so the real hostname never matters.
 vi.mock("./computer-names.js", () => ({ localNames: () => ["Desk.example.net", "Desk"] }));
+vi.mock("./peers.js", async original => ({ ...await original<typeof import("./peers.js")>(), hookPeers: vi.fn(), peerRequest: vi.fn(), optionalHookPeers: vi.fn() }));
+// The real peers unless a test says otherwise.
+beforeEach(async () => {
+  const actual = await vi.importActual<typeof import("./peers.js")>("./peers.js");
+  vi.mocked(hookPeers).mockImplementation(actual.hookPeers);
+  vi.mocked(peerRequest).mockImplementation(actual.peerRequest);
+  vi.mocked(optionalHookPeers).mockImplementation(actual.optionalHookPeers);
+});
 vi.mock("./grants.js", () => ({ findGrant: vi.fn(), grantLabel: vi.fn() }));
 afterEach(() => vi.resetAllMocks());
 
@@ -127,3 +136,27 @@ it("hands off by session only to a session of the requested account, counting a 
   expect(vi.mocked(hookRequest).mock.calls.filter(call => call[0] === "/v1/prompt")).toHaveLength(1);
   await expect(handOff({ session: target.session, account: "../x", text: "Go" })).rejects.toThrow();
 });
+
+it("hands off to a computer named by an alias, and to this computer by its own name", async () => {
+  const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "codex", session: "00000001-1111-4111-8111-111111111111" };
+  const linuxbox = { name: "Linuxbox", address: "linuxbox.example", username: "sam", port: 22, hostKey: "unused", server: "default" };
+  vi.mocked(hookPeers).mockResolvedValue([linuxbox]);
+  vi.mocked(optionalHookPeers).mockResolvedValue({ peers: [linuxbox] });
+  vi.mocked(peerRequest).mockResolvedValueOnce({ groups: [{ children: [{ target }] }] }).mockResolvedValueOnce({ ok: true });
+  expect(await handOff({ computer: "linuxbox.example", session: target.session, text: "hi" })).toMatchObject({ delivered: true });
+  expect(vi.mocked(peerRequest).mock.calls.map(call => call[0].name)).toEqual(["Linuxbox", "Linuxbox"]);
+  vi.mocked(hookRequest).mockResolvedValueOnce({ groups: [{ children: [{ target }] }] }).mockResolvedValueOnce({ ok: true });
+  expect(await handOff({ computer: "Desk.local", session: target.session, text: "hi" })).toMatchObject({ delivered: true });
+  expect(vi.mocked(hookRequest).mock.calls.map(call => call[0])).toContain("/v1/prompt");
+});
+
+it("hands off to this computer by its own name when no computer is enrolled", async () => {
+  const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "codex", session: "00000001-1111-4111-8111-111111111111" };
+  const missing = Object.assign(new Error("Configure peers and verified host keys in the Hook's hooks.yaml first."), { status: 409 });
+  vi.mocked(hookPeers).mockRejectedValue(missing);
+  vi.mocked(optionalHookPeers).mockResolvedValue({ peers: [] });
+  vi.mocked(hookRequest).mockResolvedValueOnce({ groups: [{ children: [{ target }] }] }).mockResolvedValueOnce({ ok: true });
+  expect(await handOff({ computer: "Desk.local", session: target.session, text: "hi" })).toMatchObject({ delivered: true });
+  await expect(handOff({ computer: "Linuxbox", session: target.session, text: "hi" })).rejects.toThrow("hooks.yaml first");
+});
+
