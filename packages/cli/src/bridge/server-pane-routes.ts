@@ -9,7 +9,7 @@ import { fanoutWorktrees } from "./fanouts.js";
 import { gitWorktrees, resolveWorktree, type WorktreeWorker } from "./git-worktrees.js";
 import { gitCommit, gitPullRequest, gitPush } from "./git-publish.js";
 import { findPane, paneAgentName, paneChatState, paneIdentity, snapshot, startingPane, trustedDirectory, validateStartingTarget, validateTarget } from "./herdr.js";
-import { terminalProvider } from "./terminal.js";
+import { agentNotReady, terminalProvider } from "./terminal.js";
 import { refuseWorkingSlash, type ModelSwitcher } from "./model-switch.js";
 import { sessionWebServers } from "./session-servers.js";
 import { repositoryDiff } from "./projects.js";
@@ -186,6 +186,20 @@ async function submitStartingPrompt(server: string, target: { workspace: string;
   return second !== "idle" && second !== "gone";
 }
 
+/** Herdr refuses a prompt to an agent it has not finished starting ("agent
+ * w34:p1 is not an active named agent", `agent_not_ready`) without typing
+ * anything. A Codex dispatched a moment ago read that way on 2026-09-28 and
+ * sat at its prompt with no brief; wait for it as a schedule run does. */
+async function promptStartingAgent(server: string, pane: string, text: string, waitMs = 20_000): Promise<void> {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try { await terminalProvider().prompt(server, pane, text); return; } catch (error) {
+      if (!agentNotReady(error) || Date.now() >= deadline) throw error;
+      await sleep(500);
+    }
+  }
+}
+
 /** One key per character; Herdr's send_keys takes single characters and named
  * keys only, and a tty password read is corrupted by a bracketed paste. */
 function secretKeys(text: string): string[] {
@@ -256,7 +270,7 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
     refuseWorkingSlash(pane, text);
     typing();
-    await terminalProvider().prompt(target.server, target.pane, text);
+    await promptStartingAgent(target.server, target.pane, text);
     // A dispatched worker's brief is often long enough for Claude Code to
     // swallow the Enter; a slash command opens a menu an Enter would answer.
     const submitted = target.source !== "claude" || text.trim().startsWith("/")
