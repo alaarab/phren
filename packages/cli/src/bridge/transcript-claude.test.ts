@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import { visibleClaudeEvent } from "./transcript-claude.js";
 
 describe("phren prompt-hook context", () => {
@@ -17,6 +18,20 @@ describe("phren prompt-hook context", () => {
     const queued = (commandMode: string) => ({ type: "attachment", timestamp: "t", attachment: { type: "queued_command", prompt: "private words", commandMode } });
     expect(visibleClaudeEvent(queued("prompt"))).toEqual({ type: "phren_turn_input", timestamp: "t", notification: false });
     expect(visibleClaudeEvent(queued("task-notification"))).toEqual({ type: "phren_turn_input", timestamp: "t", notification: true });
+  });
+  it("names a picture sent mid-turn so its receipt can match, keeping its queue key", () => {
+    // Claude Code 2026-09-27: a phone picture sent while the conductor worked.
+    const content = "[Image #7]Attached files on this computer:";
+    const key = createHash("sha256").update(content).digest("hex");
+    const queued = (operation: string, text = content) => ({ type: "queue-operation", operation, timestamp: "t", sessionId: "s", content: text });
+    expect(visibleClaudeEvent(queued("enqueue"))).toEqual({ type: "user", phrenQueued: true, phrenQueueKey: key, timestamp: "t",
+      message: { role: "user", content: "[Image attachment]" } });
+    expect(visibleClaudeEvent(queued("remove"))).toEqual({ type: "phren_queue_consumed", key, timestamp: "t" });
+    // Words, or a file that is not a picture, still cross as written.
+    const worded = "[Image #6]I had to approve these..\nAttached files on this computer:";
+    expect(visibleClaudeEvent(queued("enqueue", worded))).toMatchObject({ message: { content: worded } });
+    const file = "[Image #2]Attached files on this computer:\n/Users/me/report.pdf";
+    expect(visibleClaudeEvent(queued("enqueue", file))).toMatchObject({ message: { content: file } });
   });
   it("bounds a very large injection", () => {
     const row = visibleClaudeEvent(hook("◆ phren · big\n" + "x".repeat(40_000)));

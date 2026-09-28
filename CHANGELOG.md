@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A picture sent from the phone while a Claude agent is mid-turn no longer shows "Not confirmed in chat". Claude queues it as a bare `[Image #N]` label, which matched none of the phone's receipts. The Hook now exports that queued row as `[Image attachment]` and keeps its queue key.
 - Hook approval pushes now show the agent, project and computer, plus a redacted one-line command, tool, edit or question; watched approval state carries the same request for the phone's local activity.
 - Hook bridge integration tests inject fixed model catalogues and usage readers, so a developer's installed Codex, Claude, OpenCode or GitHub CLI cannot delay or change the HTTP results.
 - CLI init integration tests now verify a second init and an existing install's dry-run in separate cases, avoiding three synchronous CLI launches under one Windows test deadline.

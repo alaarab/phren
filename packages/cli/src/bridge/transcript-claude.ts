@@ -249,6 +249,12 @@ export function skillBody(raw: Json): Json | undefined {
     message: { role: "user", content: [{ type: "tool_result", tool_use_id: raw.sourceToolUseID, content: text.slice(0, 32_768), phrenSkillBody: true }] } };
 }
 
+/** Claude Code's label where a pasted picture path was, and the footer the
+ * phone puts above the paths of the files it attached. */
+const QUEUED_IMAGE_LABEL = /\[Image #\d+\]/;
+const QUEUED_IMAGE_LABELS = /\[Image #\d+\]/g;
+const ATTACHED_FILES_FOOTER = /Attached files on this computer:\s*$/;
+
 /** A phren UserPromptSubmit injection, as `{ type: "phren_hook_context",
  * parentUuid, content }`, or undefined for any other row. */
 export function phrenHookContext(raw: Json, includeSidechain = false): Json | undefined {
@@ -307,8 +313,13 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false): Json | 
     // Only the identity crosses the wire on consumption: no queue payload,
     // tool envelope, private metadata, or reasoning is exported.
     if (raw.operation === "remove") return { type: "phren_queue_consumed", key, timestamp: raw.timestamp };
+    // A picture sent mid-turn queues as "[Image #7]Attached files on this
+    // computer:": the pixels never reach this row. Words-free, it matched no
+    // receipt, and the phone warned "Not confirmed in chat" about a picture
+    // the agent had taken. Name it the way a picture-only turn reads.
+    const pictureOnly = QUEUED_IMAGE_LABEL.test(text) && !text.replace(QUEUED_IMAGE_LABELS, "").replace(ATTACHED_FILES_FOOTER, "").trim();
     return { type: "user", phrenQueued: true, phrenQueueKey: key, timestamp: raw.timestamp,
-      message: { role: "user", content: text } };
+      message: { role: "user", content: pictureOnly ? "[Image attachment]" : text } };
   }
   // Claude Code appends a boundary marker and then the summary it hands the
   // model as a user turn. The phone shows the marker and a bounded preview,
