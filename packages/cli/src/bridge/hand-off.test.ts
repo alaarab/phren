@@ -147,3 +147,20 @@ it("hands off to a computer named by an alias, and to this computer by its own n
   expect(await handOff({ computer: "Desk.local", session: target.session, text: "hi" })).toMatchObject({ delivered: true });
   expect(vi.mocked(hookRequest).mock.calls.map(call => call[0])).toContain("/v1/prompt");
 });
+
+it("hands off to this computer by its own name when no computer is enrolled", async () => {
+  const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "codex", session: "00000001-1111-4111-8111-111111111111" };
+  const missing = Object.assign(new Error("Configure peers and verified host keys in the Hook's hooks.yaml first."), { status: 409 });
+  vi.mocked(hookPeers).mockRejectedValue(missing);
+  vi.mocked(optionalHookPeers).mockResolvedValue({ peers: [] });
+  vi.mocked(hookRequest).mockResolvedValueOnce({ groups: [{ children: [{ target }] }] }).mockResolvedValueOnce({ ok: true });
+  expect(await handOff({ computer: "Desk.local", session: target.session, text: "hi" })).toMatchObject({ delivered: true });
+  await expect(handOff({ computer: "Linuxbox", session: target.session, text: "hi" })).rejects.toThrow("hooks.yaml first");
+});
+
+it("refuses a name two enrolled computers answer to", async () => {
+  const peer = (name: string) => ({ name, address: "shared.example", username: "sam", port: 22, hostKey: "unused", server: "default" });
+  vi.mocked(hookPeers).mockResolvedValue([peer("Linuxbox"), peer("Studio")]);
+  vi.mocked(optionalHookPeers).mockResolvedValue({ peers: [peer("Linuxbox"), peer("Studio")] });
+  await expect(handOff({ computer: "shared.example", session: "00000001-1111-4111-8111-111111111111", text: "hi" })).rejects.toThrow("Unknown computer");
+});

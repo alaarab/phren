@@ -66,11 +66,14 @@ export async function handOff(input: unknown, options: { deliveryId?: string } =
   let peer: HookPeer | undefined;
   if (data.computer === undefined) request = (route, body) => hookRequest(route, body);
   else {
-    const peers = await hookPeers();
+    // No hooks.yaml only matters when the name turns out to be another computer.
+    let peersError: unknown;
+    const peers = await hookPeers().catch(error => { peersError = error; return [] as HookPeer[]; });
     // An alias or hostname (`Mac`, `Desk.local`) names the same computer as its hooks.yaml name.
     const named = peers.some(candidate => candidate.name === data.computer) ? undefined : await linkedComputer(data.computer).catch(() => undefined);
     if (named && "local" in named) request = (route, body) => hookRequest(route, body);
     else {
+      if (peersError) throw peersError;
       const found = peers.find(candidate => candidate.name === (named && "peer" in named ? named.peer : data.computer));
       if (!found) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
       peer = found;
