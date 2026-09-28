@@ -428,6 +428,11 @@ export class CodexServers {
   /** For tests: forget everything without touching processes. */
   reset(): void { this.close(); this.closed = false; }
 
+  /** Resolves once every registry write started so far has finished. */
+  async saved(): Promise<void> {
+    await Promise.all([...this.saving.values()].map(write => write.catch(() => undefined)));
+  }
+
   private target(entry: CodexServerEntry): Target {
     return { server: entry.server, workspace: entry.workspace, tab: entry.tab, pane: entry.pane, source: "codex", session: entry.threadId ?? "" };
   }
