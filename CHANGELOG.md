@@ -11,7 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - A dispatched Codex or Claude that has no conversation until its first prompt now gets its brief on its starting binding. Before, the dispatch waited 15 s for a session and left the pane idle with the brief unsent and the receipt "uncertain".
 - A dispatched agent held on a startup screen (Claude's "Quick safety check: do you trust this folder", a sign-in) is reported as `failed` with a `needs-you` return that names the pane, instead of "uncertain". The brief is not sent and the Hook never answers the screen: its default choice is "No, exit".
 - A launch retries Herdr's `agent_pane_busy` ("is not an available shell") for up to 15 s (`PHREN_SHELL_READY_MS`) while the new pane's login shell starts. Three Linuxbox dispatches and one MacBook dispatch failed on 2026-09-27 because a loaded machine had not reached its shell prompt yet.
-
+- A picture sent from the phone while a Claude agent is mid-turn no longer shows "Not confirmed in chat". Claude queues it as a bare `[Image #N]` label, which matched none of the phone's receipts. The Hook now exports that queued row as `[Image attachment]` and keeps its queue key.
 - Hook approval pushes now show the agent, project and computer, plus a redacted one-line command, tool, edit or question; watched approval state carries the same request for the phone's local activity.
 - Hook bridge integration tests inject fixed model catalogues and usage readers, so a developer's installed Codex, Claude, OpenCode or GitHub CLI cannot delay or change the HTTP results.
 - CLI init integration tests now verify a second init and an existing install's dry-run in separate cases, avoiding three synchronous CLI launches under one Windows test deadline.
