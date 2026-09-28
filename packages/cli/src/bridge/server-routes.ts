@@ -23,6 +23,7 @@ import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { storeRoute } from "./memory-store.js";
+import { markBackground, paneRecord, recordedBackground, recordTitle } from "./session-activity.js";
 import { paneAccountField, paneChatState, panes, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
@@ -208,6 +209,16 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         tab.target = { server, workspace: group.id, tab: tab.id, pane: agents[0].pane_id, source: agents[0].agent, session: chat.sessionId };
       }
     }
+    // The pane's own turn record (one small file) says whether its ended turn
+    // still has background work, and which dispatch it is. Read here, not in
+    // the budgeted pass below, so the status never flickers when that expires.
+    await Promise.all(tabs.map(async ({ group, tab }) => {
+      const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
+      const session = agents.length === 1 && object(tab.target).session;
+      const record = typeof session === "string" ? await paneRecord(server, agents[0], session) : undefined;
+      markBackground(tab, recordedBackground(record));
+      tab.title = await recordTitle(record, { harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label });
+    }));
     // Branch, model, children and current step read git and transcripts. On a
     // starved machine (load 230 on 10 cores, 2026-09-24) that took longer than
     // the phone waits, so the computer read as offline. The overview answers
@@ -237,7 +248,11 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
           }
         }
         // A row finished after the answer left belongs to the next read.
-        if (!expired) Object.assign(tab, Object.fromEntries(Object.entries(found).filter(([, value]) => value !== undefined)));
+        if (!expired) {
+          Object.assign(tab, Object.fromEntries(Object.entries(found).filter(([, value]) => value !== undefined)));
+          // Codex subagents and fanout jobs keep an idle-looking session working too.
+          markBackground(tab, typeof found.runningChildren === "number" ? found.runningChildren : undefined);
+        }
       }
     }));
     let timer: ReturnType<typeof setTimeout> | undefined;

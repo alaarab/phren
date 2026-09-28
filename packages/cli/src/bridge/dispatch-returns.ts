@@ -32,10 +32,12 @@ export const NOTICE_MS = 120_000;
 /** Receipts older than this are no longer watched. */
 export const WATCH_MS = 24 * 60 * 60 * 1000;
 /** How long a stopped worker whose harness still runs background tasks is
- * waited on before it counts as done anyway (a dev server it left running
- * never finishes). The harness wakes the worker when a task ends, which is a
- * new turn and a new Stop. */
-export const BACKGROUND_WAIT_MS = 30 * 60 * 1000;
+ * waited on before it counts as done anyway. Measured from the latest Stop,
+ * and every task that finishes wakes the worker (a new prompt, a new Stop), so
+ * it only elapses when no background task has finished for two hours: a dev
+ * server the worker left running. It is then reported done with the count
+ * still running. */
+export const BACKGROUND_WAIT_MS = 2 * 60 * 60 * 1000;
 /** How old a shared Herdr snapshot may be when answering a peer. */
 const SNAPSHOT_AGE_MS = 5_000;
 
@@ -149,6 +151,8 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     const state = (["working", "idle", "done", "blocked"] as const).find(value => value === status) ?? "unknown";
     if ((state !== "idle" && state !== "done") || !session) return { state, ...(session ? { session } : {}) };
     const turn = await readers.finalTurn(target.source, session).catch(() => undefined);
+    // A finished turn that left background work is still the worker's turn (no record to time the wait from).
+    if (turn?.completed && turn.background) return { state: "working", session, background: turn.background };
     return { state, session, completed: turn?.completed === true, ...(turn?.error ? { error: turn.error } : {}),
       ...(turn?.interrupted ? { interrupted: true as const } : {}), ...replyFields(turn?.lastAssistant) };
   }));
@@ -182,6 +186,11 @@ export function observe(receipt: Receipt, value: unknown, now: number): boolean 
       pane: receipt.target.pane, source: receipt.target.source, session: seen.session });
     if (full.success) { receipt.target = full.data; changed = true; }
   }
+  // The most background work seen while the worker was working: what the
+  // dispatcher is told it waited on when the worker finally returns.
+  // A worker that took new work after returning starts the count again.
+  const carried = seen.state === "working" && receipt.worker && receipt.worker.state !== "working" ? 0 : receipt.worker?.background ?? 0;
+  const background = seen.state === "working" && seen.background ? Math.max(carried, seen.background) : carried;
   const sawWorking = receipt.worker?.sawWorking === true || seen.state === "working" || seen.state === "blocked";
   const stopped = seen.state === "idle" || seen.state === "done";
   // A turn the harness ended on an error (a usage limit) failed, reply or not,
@@ -206,14 +215,17 @@ export function observe(receipt: Receipt, value: unknown, now: number): boolean 
   const repeated = previous === next && !(turn && receipt.returned?.turn && turn !== receipt.returned.turn);
   if (repeated) {
     if (receipt.worker && receipt.worker.sawWorking !== sawWorking) { receipt.worker.sawWorking = sawWorking; changed = true; }
+    if (receipt.worker && background > (receipt.worker.background ?? 0)) { receipt.worker.background = background; changed = true; }
     return changed;
   }
-  receipt.worker = { state: next, since: at, checkedAt: at, sawWorking };
+  receipt.worker = { state: next, since: at, checkedAt: at, sawWorking, ...(background ? { background } : {}) };
   if (next !== "working") {
     receipt.returned = { state: next, at, read: false,
       ...(seen.reply && (next === "done" || next === "needs-you") ? { reply: seen.reply, ...(seen.truncated ? { truncated: true } : {}) } : {}),
       ...(failed ? { error: failed } : {}), ...(question ? { question } : {}), ...(turn ? { turn } : {}),
-      ...((next === "done" || next === "needs-you") && seen.background ? { background: seen.background } : {}) };
+      ...((next === "done" || next === "needs-you") && seen.background ? { background: seen.background } : {}),
+      // Nothing still running: say what it waited on.
+      ...((next === "done" || next === "needs-you") && !seen.background && background ? { waited: background } : {}) };
   }
   return true;
 }
@@ -227,7 +239,8 @@ export function noticeLine(receipts: readonly Receipt[]): string {
     const detail = returned.state === "needs-you" ? returned.question : returned.state === "failed" ? returned.error
       : returned.state === "done" ? returned.reply?.split("\n").find(line => line.trim()) : undefined;
     const excerpt = detail ? clean(detail.replace(/[*_`#>]+/g, ""), room) : "";
-    const left = returned.background ? ` (${returned.background} background task${returned.background === 1 ? "" : "s"} still running)` : "";
+    const tasks = (count: number) => `${count} background task${count === 1 ? "" : "s"}`;
+    const left = returned.background ? ` (${tasks(returned.background)} still running)` : returned.waited ? ` (after ${tasks(returned.waited)} finished)` : "";
     return `${clean(receipt.computer, 60)} ${clean(receipt.label, 80)} ${word[returned.state]}${left}${excerpt ? `, ${excerpt}` : ""}`;
   };
   if (receipts.length === 1) return `Return: ${describe(receipts[0], 100)} (dispatch ${receipts[0].id}). Call dispatch_returns.`;
@@ -242,6 +255,7 @@ export function returnRow(receipt: Receipt): Json {
     state: returned.state, at: returned.at, ...(returned.reply !== undefined ? { reply: returned.reply } : {}),
     ...(returned.truncated ? { truncated: true } : {}), ...(returned.error ? { error: returned.error } : {}), ...(returned.question ? { question: returned.question } : {}),
     ...(returned.background ? { background: returned.background } : {}),
+    ...(returned.waited && !returned.background ? { waited: returned.waited } : {}),
     ...(receipt.target ? { target: receipt.target } : {}) };
 }
 
