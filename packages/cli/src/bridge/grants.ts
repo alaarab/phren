@@ -4,6 +4,7 @@ import path from "node:path";
 import { dump, load } from "js-yaml";
 import { z } from "zod";
 import { atomic, BridgeError, bridgeRoot, computerName } from "./protocol.js";
+import { readComputers, resolveComputer, type Computer } from "./computer-identity.js";
 
 const grantAction = z.enum(["dispatch", "hand_off"]);
 const grantScope = z.union([
@@ -65,14 +66,26 @@ async function writeGrants(root: string, grants: Grant[]): Promise<void> {
   await atomic(file, dump({ grants }, { lineWidth: 120 }));
 }
 
-export interface GrantQuery { action: z.infer<typeof grantAction>; project?: string; computer?: string }
+export interface GrantQuery {
+  action: z.infer<typeof grantAction>; project?: string; computer?: string;
+  /** The computers this Hook knows, so a grant naming any alias of `computer` matches. */
+  computers?: readonly Computer[];
+}
+
+/** A grant's computer list names `computer` itself or another name of the same computer. */
+function namesComputer(list: readonly string[], computer: string, known?: readonly Computer[]): boolean {
+  if (list.includes(computer)) return true;
+  const row = known && resolveComputer(known, computer);
+  return !!row && list.some(name => resolveComputer(known, name) === row);
+}
 
 /** Project scope beats global; a named computer list beats any. */
 function specificity(grant: Grant): number {
   return (grant.scope === "global" ? 0 : 2) + (grant.computers ? 1 : 0);
 }
 
-/** Most specific matching grant wins. A computers-restricted grant never
+/** Most specific matching grant wins. A grant's computers may be any name the
+ * destination answers to (see `computer-identity.ts`). A computers-restricted grant never
  * covers an unresolved destination: `anywhere` may pick a peer outside the
  * list, and a local hand-off never goes to one of them. */
 export function matchGrant(grants: Grant[], query: GrantQuery, now = Date.now()): Grant | undefined {
@@ -83,10 +96,35 @@ export function matchGrant(grants: Grant[], query: GrantQuery, now = Date.now())
       const slug = grant.scope.slice("project:".length);
       if (query.project !== slug) return false;
     }
-    if (grant.computers && (!query.computer || query.computer === "anywhere" || !grant.computers.includes(query.computer))) return false;
+    if (grant.computers && (!query.computer || query.computer === "anywhere" || !namesComputer(grant.computers, query.computer, query.computers))) return false;
     return true;
   });
   return matches.sort((a, b) => specificity(b) - specificity(a))[0];
+}
+
+/** matchGrant over the stored grants; the known computers are read once, and
+ * only when a grant restricts computers. */
+export async function findGrant(query: Omit<GrantQuery, "computers">, root = bridgeRoot()): Promise<Grant | undefined> {
+  const grants = await listGrants(root);
+  const restricted = query.computer && query.computer !== "anywhere" && grants.some(grant => grant.computers);
+  return matchGrant(grants, { ...query, ...(restricted ? { computers: (await readComputers({ root, trusted: true })).computers } : {}) });
+}
+
+/** The grant with each computer named by its canonical name; unknown names stay. */
+function nameComputers(grant: Grant, known: readonly Computer[]): Grant {
+  if (!grant.computers) return grant;
+  return { ...grant, computers: [...new Set(grant.computers.map(name => resolveComputer(known, name)?.name ?? name))] };
+}
+
+async function knownFor(root: string, grants: readonly Pick<Grant, "computers">[]): Promise<readonly Computer[]> {
+  return grants.some(grant => grant.computers) ? (await readComputers({ root, trusted: true })).computers : [];
+}
+
+/** Grants as listed to people: computers by canonical name. The file is left as written. */
+export async function listNamedGrants(root = bridgeRoot()): Promise<Grant[]> {
+  const grants = await listGrants(root);
+  const known = await knownFor(root, grants);
+  return grants.map(grant => nameComputers(grant, known));
 }
 
 export function grantLabel(grant: Grant): string {
@@ -108,9 +146,11 @@ async function mutateGrants<T>(root: string, action: () => Promise<T>): Promise<
 
 export async function addGrant(input: unknown, root = bridgeRoot()): Promise<Grant> {
   return mutateGrants(root, async () => {
-    const grant = grantSchema.parse(input);
+    const parsed = grantSchema.parse(input);
     const existing = await listGrants(root);
-    if (existing.some(item => canonicalGrant(item) === canonicalGrant(grant))) {
+    const known = await knownFor(root, [parsed, ...existing]);
+    const grant = nameComputers(parsed, known);
+    if (existing.some(item => canonicalGrant(nameComputers(item, known)) === canonicalGrant(grant))) {
       throw new BridgeError(409, "That grant is already listed.");
     }
     if (existing.length >= 64) throw new BridgeError(409, "conductor.yaml already holds 64 grants.");
@@ -126,9 +166,11 @@ function canonicalGrant(grant: Grant): string {
 /** Write a grant from an approval card answer: already listed is success. */
 export async function ensureGrant(input: unknown, root = bridgeRoot()): Promise<Grant> {
   return mutateGrants(root, async () => {
-    const grant = grantSchema.parse(input);
+    const parsed = grantSchema.parse(input);
     const existing = await listGrants(root);
-    if (existing.some(item => canonicalGrant(item) === canonicalGrant(grant))) return grant;
+    const known = await knownFor(root, [parsed, ...existing]);
+    const grant = nameComputers(parsed, known);
+    if (existing.some(item => canonicalGrant(nameComputers(item, known)) === canonicalGrant(grant))) return grant;
     if (existing.length >= 64) throw new BridgeError(409, "conductor.yaml already holds 64 grants.");
     await writeGrants(root, [...existing, grant]);
     return grant;
@@ -148,6 +190,10 @@ export async function removeGrant(input: unknown, root = bridgeRoot()): Promise<
       { message: "Provide an index or a scope to remove." }).parse(input);
     const existing = await listGrants(root);
     if (!existing.length) throw new BridgeError(404, "There are no conductor grants to remove.");
+    // The list shows canonical names, so compare that way, not by the raw text.
+    const known = await knownFor(root, [body, body.expected ?? {}, ...existing]);
+    const named = (grant: Grant) => nameComputers(grant, known);
+    const wanted = body.computers && named({ scope: "global", actions: ["dispatch"], computers: body.computers }).computers;
     let index = body.index;
     if (index === undefined) {
       // Scope names the row; the optional fields refine it. They never invent a
@@ -156,12 +202,12 @@ export async function removeGrant(input: unknown, root = bridgeRoot()): Promise<
       index = existing.findIndex(grant =>
         grant.scope === body.scope
         && (body.actions === undefined || sameSet(grant.actions, body.actions))
-        && (body.computers === undefined || (grant.computers !== undefined && sameSet(grant.computers, body.computers)))
+        && (wanted === undefined || (grant.computers !== undefined && sameSet(named(grant).computers!, wanted)))
         && (body.until === undefined || grant.until === body.until));
       if (index < 0) throw new BridgeError(404, "No conductor grant matches that scope.");
     }
     if (index >= existing.length) throw new BridgeError(404, "No conductor grant has that index.");
-    if (body.expected && canonicalGrant(existing[index]) !== canonicalGrant(body.expected)) {
+    if (body.expected && canonicalGrant(named(existing[index])) !== canonicalGrant(named(body.expected))) {
       throw new BridgeError(409, "The grants list changed. Refresh it before revoking this grant.");
     }
     const [removed] = existing.splice(index, 1);

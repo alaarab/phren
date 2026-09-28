@@ -8,7 +8,7 @@ import { getMachineName } from "../machine-identity.js";
 import { getProjectSourcePath } from "../project-config.js";
 import { computerName } from "./computers.js";
 import { dispatchParentSchema, validateDispatchParent } from "./dispatch-tree.js";
-import { grantLabel, listGrants, matchGrant } from "./grants.js";
+import { findGrant, grantLabel } from "./grants.js";
 import { hookPeers } from "./peers.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
 import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
@@ -302,7 +302,7 @@ export class DispatchService {
         if (!peer) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
         remoteComputerID = (await capacity(peer)).computerId;
       }
-      const grant = matchGrant(await listGrants(), { action: "dispatch", project: data.project, computer: peer.name });
+      const grant = await findGrant({ action: "dispatch", project: data.project, computer: peer.name });
       const origin = await this.origin(originValue);
       // Prompts are sent over the pipe, never stored in the dispatch ledger.
       const { prompt, ...metadata } = data;
