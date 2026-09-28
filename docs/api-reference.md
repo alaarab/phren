@@ -223,6 +223,31 @@ What is in effect is in the transcript: Claude's assistant rows carry
 `message.model` and a top-level `effort`, and Codex's `turn_context` rows carry
 `model` and `effort`.
 
+`POST /v1/settings { target, permissionMode?, plan?, fast? }` changes the
+composer's settings (at least one). `permissionMode` is `supervised`,
+`auto-edits`, `auto` or `full-access`. A Codex pane on the Hook's own
+app-server holds them for its next turn (approval policy, sandbox and reviewer
+as T3 maps them, plan as a collaboration mode) merged with a pending model, and
+replies `{ ok, permissionMode?, plan?, applies: "next-turn" }`, even while it
+works. An idle Claude pane gets `/fast on|off` and `/plan` typed, and Shift+Tab
+pressed (at most 6 times) until the footer under its composer (`⏸ manual mode
+on`, `⏵⏵ accept edits on`, `⏸ plan mode on`, `⏵⏵ auto mode on`, `bypass
+permissions on`) shows the wanted mode; a lap back to the start answers 422
+"Claude doesn't offer that mode in this session". The reply is the verified state
+`{ ok, permissionMode?, plan, fast?, verified? }`. Fast mode is verified from
+Claude's `<local-command-stdout>` transcript row after the command (422 with
+Claude's own message when it says fast mode is unavailable), else from the
+screen, else `verified: false`. Any other pane answers 422, a
+busy Claude pane 409. The stream's `capabilities.settings` says what a pane
+offers: `{ permissionModes, plan, fast }`, and for a Claude pane
+`settingsState: { permissionMode?, plan? }` beside `capabilities` is its current
+state read from that footer (throttled like the dialog check; `full-access` is
+offered once bypass has shown there). Codex's state is in the transcript, and so is Claude's when its
+footer can't be read:
+Claude's `permission-mode` rows (written when a prompt is submitted), `permissionMode` on user rows and
+`message.usage.speed`; Codex's `turn_context` `approval_policy`,
+`approvals_reviewer`, `sandbox_policy.type` and `collaboration_mode.mode`.
+
 A working pane returns 409 before any model command is typed. `/v1/prompt`
 also refuses every slash command while working, except Claude Code's
 `/btw <question>` side question, which is made to run beside a turn.

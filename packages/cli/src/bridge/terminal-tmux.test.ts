@@ -137,7 +137,7 @@ describe("the tmux snapshot", () => {
 describe("the tmux provider", () => {
   it("maps the Hook's key names to tmux keys, literal characters with -l", () => {
     expect(tmuxKey("enter")).toBe("Enter"); expect(tmuxKey("esc")).toBe("Escape"); expect(tmuxKey("alt+Up")).toBe("M-Up");
-    expect(tmuxKey("ctrl+c")).toBe("C-c"); expect(tmuxKey("y")).toBeUndefined();
+    expect(tmuxKey("ctrl+c")).toBe("C-c"); expect(tmuxKey("shift+tab")).toBe("BTab"); expect(tmuxKey("y")).toBeUndefined();
     expect(() => tmuxKey("launch-missiles")).toThrow(/not supported/);
     expect(sendKeysCalls("%1", ["esc", "down", "down", "2", "enter"])).toEqual([
       ["send-keys", "-t", "%1", "Escape", "Down", "Down"], ["send-keys", "-t", "%1", "-l", "--", "2"], ["send-keys", "-t", "%1", "Enter"]]);

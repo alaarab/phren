@@ -44,11 +44,19 @@ const entrySchema = z.object({
   dispatchId: z.string().optional(),
   activeTurn: z.string().optional(),
   lastTurn: z.object({ id: z.string(), status: z.string(), at: z.string() }).optional(),
-  /** A model and effort the phone chose, sent with the Hook's next `turn/start`
-   * (Codex keeps them for the thread's later turns too). */
-  nextTurn: z.object({ model: z.string().min(1).max(200), effort: z.string().min(1).max(20).optional() }).strict().optional(),
+  /** What the phone chose, sent with the Hook's next `turn/start` (Codex keeps
+   * it for the thread's later turns too): model and effort, and the permission
+   * and plan settings as T3 maps them. */
+  nextTurn: z.object({
+    model: z.string().min(1).max(200).optional(), effort: z.string().min(1).max(20).optional(),
+    approvalPolicy: z.enum(["untrusted", "on-request", "never"]).optional(),
+    approvalsReviewer: z.enum(["user", "auto_review"]).optional(),
+    sandboxPolicy: z.object({ type: z.enum(["readOnly", "workspaceWrite", "dangerFullAccess"]) }).strict().optional(),
+    collaborationMode: z.object({ mode: z.enum(["plan", "default"]) }).strict().optional(),
+  }).strict().optional(),
 }).strict();
 export type CodexServerEntry = z.infer<typeof entrySchema>;
+export type CodexNextTurn = NonNullable<CodexServerEntry["nextTurn"]>;
 
 /** Where the Hook's approval cards come from and go: every server request of
  * a registered thread is offered here with the function that answers it, and
@@ -127,6 +135,9 @@ interface Live {
    * A thread is resumable only once it has a turn, so a thread the pane's
    * TUI started is joined on the next tick after its first turn. */
   subscribed?: boolean;
+  /** The thread's model as `thread/start` or `thread/resume` last reported it;
+   * a collaboration mode has to name one. */
+  model?: string;
   off?: () => void;
   connecting?: Promise<void>;
   /** When the pane was first seen without Codex. */
@@ -217,6 +228,7 @@ export class CodexServers {
         if (typeof threadId !== "string" || !threadId) throw new Error("codex app-server thread/start returned no thread id");
         entry.threadId = threadId;
         live.subscribed = true;
+        if (typeof started.model === "string") live.model = started.model;
       }
       await this.save(entry);
       this.live.set(serverId, live);
@@ -260,8 +272,14 @@ export class CodexServers {
     if (!entry.threadId) throw new CodexServerUnavailable("The Codex pane has not started its thread yet.");
     const client = await this.client(entry);
     const live = this.live.get(entry.id)?.entry ?? entry, next = live.nextTurn;
+    const modeModel = next?.model ?? this.live.get(entry.id)?.model;
+    const collaborationMode = next?.collaborationMode && modeModel
+      // The mode carries its own model and effort, which win over the turn's.
+      ? { mode: next.collaborationMode.mode, settings: { model: modeModel, reasoning_effort: next.effort ?? null, developer_instructions: null } } : undefined;
     const started = await client.turnStart({ threadId: entry.threadId, input: [{ type: "text", text, text_elements: [] }],
-      ...(next ? { model: next.model, ...(next.effort ? { effort: next.effort } : {}) } : {}) });
+      ...(next ? { ...(next.model ? { model: next.model } : {}), ...(next.effort ? { effort: next.effort } : {}),
+        ...(next.approvalPolicy ? { approvalPolicy: next.approvalPolicy } : {}), ...(next.approvalsReviewer ? { approvalsReviewer: next.approvalsReviewer } : {}),
+        ...(next.sandboxPolicy ? { sandboxPolicy: next.sandboxPolicy } : {}), ...(collaborationMode ? { collaborationMode } : {}) } : {}) });
     // Codex took the override with the turn; the turn's own record shows it.
     if (next && live.nextTurn === next) { delete live.nextTurn; void this.save(live).catch(() => undefined); }
     return started;
@@ -270,9 +288,25 @@ export class CodexServers {
   /** Holds a model and effort for the pane's next Hook-sent turn. Nothing is
    * typed into the TUI and a running turn is not disturbed. */
   setNextTurn(entry: CodexServerEntry, model: string, effort?: string): void {
+    this.hold(entry, { model, effort });
+    // A model chosen without an effort takes its own default, not the last one's.
+    if (!effort) { const live = this.live.get(entry.id)?.entry; if (live?.nextTurn) delete live.nextTurn.effort; }
+  }
+
+  /** Holds permission and plan settings the same way, next to a pending model. */
+  holdSettings(entry: CodexServerEntry, settings: Omit<CodexNextTurn, "model" | "effort">): void {
+    const live = this.live.get(entry.id);
+    if (settings.collaborationMode && !(live?.entry.nextTurn?.model ?? live?.model)) {
+      throw new CodexServerUnavailable("Codex has not reported this thread's model yet. Send a message first, then change plan mode.");
+    }
+    this.hold(entry, settings);
+  }
+
+  /** Merges into what is pending: a later choice replaces its own fields only. */
+  private hold(entry: CodexServerEntry, patch: Partial<Record<keyof CodexNextTurn, unknown>>): void {
     const live = this.live.get(entry.id)?.entry;
     if (!live) throw new CodexServerUnavailable("This Codex server is no longer registered.");
-    live.nextTurn = { model, ...(effort ? { effort } : {}) };
+    live.nextTurn = { ...live.nextTurn, ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) } as CodexNextTurn;
     void this.save(live).catch(() => undefined);
   }
 
@@ -441,6 +475,7 @@ export class CodexServers {
     // The pane moved on while this was in flight: that thread's join decides.
     if (live.entry.threadId !== threadId) return;
     live.subscribed = true;
+    if (typeof resumed.model === "string") live.model = resumed.model;
     // A turn that ended while no client listened: the recorded one is stale.
     if (object(object(resumed.thread).status).type === "idle") delete live.entry.activeTurn;
   }

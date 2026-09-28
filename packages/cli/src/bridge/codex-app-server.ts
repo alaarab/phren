@@ -54,6 +54,9 @@ export interface TurnStartParams {
   approvalPolicy?: string;
   sandboxPolicy?: Json;
   approvalsReviewer?: string;
+  /** EXPERIMENTAL: plan or default mode. The settings are required and win
+   * over `model` and `effort`. */
+  collaborationMode?: { mode: string; settings: { model: string; reasoning_effort: string | null; developer_instructions: string | null } };
 }
 
 export interface AppServerHandle {

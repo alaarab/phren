@@ -57,7 +57,7 @@ export function claudeEffortReply(text: string): EffortReply | undefined {
 
 /** Empty prompts can draw a dim placeholder. Only ANSI evidence that every
  * character after the prompt is dim distinguishes that from a person's draft. */
-function emptyComposer(line: string): boolean {
+export function emptyComposer(line: string): boolean {
   if (!/^\s*[›❯>]\s*/.test(stripTerminal(line))) return false;
   let dim = false, prompt = false;
   for (const token of line.match(/\x1b\[[0-9;]*m|[^\x1b]/g) ?? []) {

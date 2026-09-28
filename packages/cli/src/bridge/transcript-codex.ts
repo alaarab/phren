@@ -74,16 +74,27 @@ export async function childTranscriptBelongsTo(file: string, parent: string): Pr
 
 /** Codex rows the phone may see: public messages, tool calls and their
  * outputs, the answering model, and turn/usage events. */
+/** The approval policy (a granular one as its kind), reviewer, sandbox kind and
+ * collaboration mode of a turn_context, each only when short and plain. */
+function turnSettings(p: Json): Json {
+  const word = (value: unknown) => typeof value === "string" && /^[A-Za-z_-]{1,30}$/.test(value) ? value : undefined;
+  const policy = word(p.approval_policy) ?? (p.approval_policy && typeof p.approval_policy === "object" ? Object.keys(p.approval_policy).find(key => word(key)) : undefined);
+  const reviewer = word(p.approvals_reviewer), sandbox = word(object(p.sandbox_policy).type), mode = word(object(p.collaboration_mode).mode);
+  return { ...(policy ? { approval_policy: policy } : {}), ...(reviewer ? { approvals_reviewer: reviewer } : {}),
+    ...(sandbox ? { sandbox_policy: { type: sandbox } } : {}), ...(mode ? { collaboration_mode: { mode } } : {}) };
+}
+
 export function visibleCodexEvent(raw: Json): Json | undefined {
   if (raw.type === "phren_queue_consumed" && typeof raw.key === "string" && /^[a-f0-9]{64}$/.test(raw.key)) {
     return { type: raw.type, key: raw.key };
   }
   const execEvent = visibleCodexExecEvent(raw); if (execEvent) return execEvent;
   const p = object(raw.payload);
-  // The model answering this turn and its effort are the only fields of turn_context the
-  // phone shows; its policies and instructions stay on the computer.
+  // The model answering this turn, its effort and the permission and plan
+  // settings are the only fields of turn_context the phone shows; its
+  // instructions, paths and rules stay on the computer.
   if (raw.type === "turn_context") return typeof p.model === "string" ? { type: "turn_context", timestamp: raw.timestamp,
-    payload: { model: p.model, ...(typeof p.effort === "string" && p.effort.length <= 20 ? { effort: p.effort } : {}) } } : undefined;
+    payload: { model: p.model, ...(typeof p.effort === "string" && p.effort.length <= 20 ? { effort: p.effort } : {}), ...turnSettings(p) } } : undefined;
   if (raw.type === "event_msg" && p.type === "error") return { type: raw.type, timestamp: raw.timestamp,
     payload: { type: "error", ...(typeof p.message === "string" ? { message: p.message } : {}) } };
   if (raw.type === "event_msg" && ["token_count", "task_started", "task_complete", "task_completed", "turn_aborted", "task_aborted", "error"].includes(String(p.type))) return raw;
