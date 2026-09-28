@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { homeDir } from "../home-paths.js";
 import { agentNames, findPane, isConductorName, paneAgentName, paneChatState, paneIdentity, servers, snapshot } from "./herdr.js";
-import { agentNotReady, terminalName, terminalProvider } from "./terminal.js";
+import { type AgentStart, agentNotReady, terminalName, terminalProvider } from "./terminal.js";
+import { intervalFromEnv } from "./limits.js";
 import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from "./launch-worktree.js";
 import { groupConductor, type GroupConductor } from "./conductor-group.js";
 import { optionalHookPeers } from "./peers.js";
@@ -91,6 +92,26 @@ export async function localConductor(known?: { server: string; snapshot: Json })
   return undefined;
 }
 
+/** How long a pane the Hook just created may take to reach its shell prompt. */
+const SHELL_READY_MS = intervalFromEnv("PHREN_SHELL_READY_MS", 15_000);
+
+/** Herdr starts an agent only at an interactive shell prompt and refuses
+ * with `agent_pane_busy` ("is not an available shell") before that. A pane
+ * created a moment ago is busy only while its login shell starts, which a
+ * loaded computer can stretch to seconds (three Linuxbox dispatches failed
+ * this way on 2026-09-27; the same pane took the agent by hand a minute
+ * later). Nothing is typed on a refusal, so retry until the shell is up. */
+async function startWhenShellReady(server: string, pane: string, agent: AgentStart): Promise<void> {
+  const deadline = Date.now() + SHELL_READY_MS;
+  for (;;) {
+    try { await terminalProvider().startAgent(server, pane, agent); return; } catch (error) {
+      const starting = error instanceof BridgeError && error.details?.herdrCode === "agent_pane_busy";
+      if (!starting || Date.now() >= deadline) throw error;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+  }
+}
+
 /** The Herdr agent-name slug for a human label: "Conductor smoke 4" becomes "conductor-smoke-4". */
 export function herdrAgentName(label: string): string {
   const slug = label.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[^a-z]+/, "").replace(/-+$/, "").slice(0, 32).replace(/-+$/, "");
@@ -173,7 +194,7 @@ export async function launchSession(server: string, data: Json, options: { canar
   }
   if (!created) throw new BridgeError(409, `${terminalName(server)} created "${label}" but its pane did not appear. Check ${terminalName(server)} on the computer.`);
   try {
-    await terminalProvider().startAgent(server, created.paneId, { name, kind, args, timeoutMs: timeout });
+    await startWhenShellReady(server, created.paneId, { name, kind, args, timeoutMs: timeout });
   } catch (error) {
     // A first-run screen (Claude's folder trust, a login notice) holds the
     // agent at startup. It did start: hand the pane back so the owner answers
