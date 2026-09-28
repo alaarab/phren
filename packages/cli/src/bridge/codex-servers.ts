@@ -289,6 +289,33 @@ export class CodexServers {
     }
   }
 
+  /** The pane's TUI moved to `threadId` (`/new`, `/resume`), as its
+   * SessionStart hook reports: follow it, so prompts, approvals and Escape
+   * go where the TUI is. False when the pane has no registered server. */
+  follow(server: string, pane: string, threadId: string): boolean {
+    const live = [...this.live.values()].find(candidate => candidate.entry.server === server && candidate.entry.pane === pane);
+    if (!live) return false;
+    this.rebind(live, threadId);
+    return true;
+  }
+
+  private rebind(live: Live, threadId: string): void {
+    const entry = live.entry;
+    if (entry.threadId === threadId) return;
+    const previous = entry.threadId;
+    // The old thread's cards cannot be answered from this pane any more.
+    if (previous && live.client) {
+      const target = this.target(entry);
+      for (const request of live.client.pending.values()) if (request.threadId === undefined || request.threadId === previous) this.sink?.resolved(target, request.requestId);
+    }
+    entry.threadId = threadId;
+    delete entry.activeTurn; delete entry.lastTurn;
+    live.subscribed = false;
+    void this.save(entry).catch(() => undefined);
+    // A thread with no turn yet cannot be resumed; the tick tries again.
+    if (live.client) void this.subscribe(live, live.client).catch(() => undefined);
+  }
+
   /** Ends the server and forgets it. */
   async stop(entry: CodexServerEntry): Promise<void> {
     const live = this.live.get(entry.id);
@@ -313,8 +340,11 @@ export class CodexServers {
   /** Rejoin the thread: its history is skipped, its pending server requests
    * come again as requests. */
   private async subscribe(live: Live, client: AppServerClient): Promise<void> {
-    if (!live.entry.threadId) return;
-    const resumed = await client.threadResume({ threadId: live.entry.threadId });
+    const threadId = live.entry.threadId;
+    if (!threadId) return;
+    const resumed = await client.threadResume({ threadId });
+    // The pane moved on while this was in flight: that thread's join decides.
+    if (live.entry.threadId !== threadId) return;
     live.subscribed = true;
     // A turn that ended while no client listened: the recorded one is stale.
     if (object(object(resumed.thread).status).type === "idle") delete live.entry.activeTurn;
@@ -348,17 +378,15 @@ export class CodexServers {
     live.off?.();
     const off = client.on(event => {
       const entry = live.entry;
-      if (event.kind === "notification" && event.method === "thread/started" && !entry.threadId) {
-        // The pane's TUI started its thread: the first top-level one in the
-        // pane's folder (helper threads, such as the one naming the thread,
-        // have no environment).
+      if (event.kind === "notification" && event.method === "thread/started") {
+        // The pane's TUI started a thread: its first one, or a later /new.
+        // Only the TUI and this Hook use the server, and the Hook starts a
+        // thread only at launch, so a top-level thread in the pane's folder
+        // is the one the pane now shows (helper threads, such as the one
+        // naming the thread, have no environment; subagents have a parent).
         const thread = object(event.params.thread);
         const here = objects(thread.environments).some(environment => typeof environment.cwd === "string" && path.resolve(environment.cwd) === path.resolve(entry.cwd));
-        if (typeof thread.id === "string" && thread.id && !thread.parentThreadId && here) {
-          entry.threadId = thread.id;
-          void this.save(entry).catch(() => undefined);
-          void this.subscribe(live, client).catch(() => undefined);
-        }
+        if (typeof thread.id === "string" && thread.id && !thread.parentThreadId && here) this.rebind(live, thread.id);
         return;
       }
       if (!entry.threadId) return;

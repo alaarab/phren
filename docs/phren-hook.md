@@ -275,8 +275,12 @@ instead of a Codex the Hook types into. Conductors keep the typed path.
   (`turn/start`) and answers `{ "ok": true, "delivered": true, "turnId": … }`
   as soon as Codex acknowledges it. Nothing is typed. A slash command is the
   TUI's own and is still typed; a server that cannot be reached falls back to
-  typing. A turn started while one is running steers it, the way Codex's own
-  clients do.
+  typing. A message sent while a turn runs steers that turn (Codex takes it at
+  its next step, like a mid-turn Claude message) rather than waiting for it to
+  end.
+- **`/new` and `/resume`.** The Hook follows the pane's TUI to the thread it
+  switched to, so the phone's messages, approvals and Escape go where the pane
+  is.
 - **Approvals.** Command, file-change and permission requests arrive as server
   requests and become the same approval card and push as a held
   PermissionRequest, answered over RPC (`accept` or `decline`, a permission
@@ -300,9 +304,8 @@ instead of a Codex the Hook types into. Conductors keep the typed path.
 on the typed path. A server that fails to start falls back to it for that
 launch.
 
-Known gaps: `/new` or `/resume` typed in such a pane moves the TUI to another
-thread the Hook does not follow (the pane's identity stays the first thread
-until the pane closes); approvals push only for the three request kinds above.
+Known gaps: questions and MCP elicitations are answered in the pane only; all
+servers share one `CODEX_HOME` (one sign-in, one refresh token).
 
 ### Approval push with your own APNs key
 

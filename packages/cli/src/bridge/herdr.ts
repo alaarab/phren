@@ -282,7 +282,10 @@ async function resolveIdentity(server: string, pane: Json, fresh: boolean): Prom
   const reported = object(pane.agent_session);
   // Copilot's report lags a conversation switch (see copilotForegroundSession);
   // its own process log is read first and the report is the fallback.
-  if (pane.agent !== "copilot" && reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) { countIdentity("reported"); return { sessionId: reported.value }; }
+  // A Codex pane on the Hook's own app-server: the registry follows `/new`
+  // and `/resume` as they happen, while Herdr's report waits for a hook.
+  const owned = pane.agent === "codex" && !!codexServers.forPane(server, String(pane.pane_id))?.threadId;
+  if (pane.agent !== "copilot" && !owned && reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) { countIdentity("reported"); return { sessionId: reported.value }; }
   const pids = await foregroundPids(server, pane);
   const key = identityKey(server, pane, pids);
   const cached = identities.get(key);

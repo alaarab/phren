@@ -1001,6 +1001,9 @@ export class AgentHooks {
           dispatch = named ?? (typeof body.prompt === "string" ? briefIdInPrompt(body.prompt) : undefined);
           if (dispatch) await recordBriefArrival(dispatch, String(body.event), target).catch(() => undefined);
         }
+        // `/new` or `/resume` in a pane on the Hook's own Codex server: follow
+        // the TUI to its new thread. Only a callback trusted to name its pane.
+        if (body.event === "SessionStart" && target.source === "codex" && !daemon) codexServers.follow(target.server, target.pane, target.session);
         if (body.event === "PreCompact") { this.startCompacting(target); res.end("{}"); return; }
         if (["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event))) this.stopCompacting(target);
         if (body.event === "UserPromptSubmit") {

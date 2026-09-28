@@ -133,6 +133,34 @@ describe("launching a pane's Codex server", () => {
     expect(servers.forTarget({ ...target, session: "tui-thread" })).toBe(entry);
   });
 
+  it("follows the pane's TUI to a new thread (/new or /resume)", async () => {
+    const entry = await launched();
+    fakes[0].send({ id: 11, method: "item/commandExecution/requestApproval", params: { threadId: "thread-1", turnId: "t", itemId: "i" } });
+    await until(() => requests.length === 1, "the old thread's approval");
+    fakes[0].send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-7" } } });
+    await until(() => entry.activeTurn === "turn-7", "the old turn");
+    // /new: a new top-level thread in the pane's folder; a subagent's is ignored.
+    fakes[0].send({ method: "thread/started", params: { thread: { id: "sub", environments: [{ cwd: root }], parentThreadId: "thread-1" } } });
+    fakes[0].send({ method: "thread/started", params: { thread: { id: "thread-2", environments: [{ cwd: root }], parentThreadId: null } } });
+    await until(() => entry.threadId === "thread-2", "the new thread");
+    expect(entry.activeTurn).toBeUndefined();
+    expect(resolved).toEqual([{ target, requestId: 11 }]);
+    await until(() => fakes[0].sent("thread/resume").some(message => (message.params as Json).threadId === "thread-2"), "the join");
+    expect(servers.forTarget(target)).toBeUndefined();
+    expect(servers.forTarget({ ...target, session: "thread-2" })).toBe(entry);
+    await servers.prompt(entry, "hi");
+    expect(fakes[0].sent("turn/start").at(-1)?.params).toMatchObject({ threadId: "thread-2" });
+    // /resume of an older thread, as the TUI's SessionStart hook reports it.
+    expect(servers.follow("default", "w1:p1", "thread-old")).toBe(true);
+    expect(servers.follow("default", "w9:p9", "thread-old")).toBe(false);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(await registry(entry)).toMatchObject({ threadId: "thread-old" });
+    // Events of the thread it left no longer count.
+    fakes[0].send({ id: 12, method: "item/commandExecution/requestApproval", params: { threadId: "thread-2", turnId: "t", itemId: "j" } });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(requests).toHaveLength(1);
+  });
+
   it("gives the server none of the Hook's own terminal variables", () => {
     const env = serverEnvironment({ PATH: "/bin", HERDR_PANE_ID: "hook-pane", HERDR_ENV: "1", TMUX: "/tmp/x,1,0", TMUX_PANE: "%1", PHREN_DISPATCH_ID: "old" },
       { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1" });

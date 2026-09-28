@@ -189,13 +189,21 @@ WebSocket-on-UDS (`codex-app-server.ts`) as client `phren_hook`.
   socket, pid, thread id, folder, dispatch id, running turn and last finished
   turn (id, status). No prompt text. A restarted Hook reconnects to every
   record whose pid is alive and resumes its thread; the rest are removed.
+- `/new` or `/resume` in the pane is followed: a top-level `thread/started`
+  in the pane's folder, or the pane's trusted SessionStart callback naming
+  another thread, rebinds the record to that thread (its old cards are
+  withdrawn, its turn state reset) and the Hook joins it with `thread/resume`
+  once it has a turn.
 - The pane's identity is the registered thread while one of its foreground
   processes runs with `unix://<socket>` on its command line. Other panes'
   daemon-rollout matching never takes a registered thread.
 - `POST /v1/prompt` on that exact target (server, workspace, tab, pane, thread)
   sends `turn/start` and replies `delivered: true` with `turnId`; a slash
   command is typed; an unreachable server falls back to typing; an RPC error
-  is 409; a lost reply is `deliveryUncertain` and not retried.
+  is 409; a lost reply is `deliveryUncertain` and not retried. A prompt sent
+  while a turn runs steers that turn (Codex takes it at its next step, as a
+  mid-turn Claude message is taken at the next tool boundary) instead of
+  queueing until the turn ends as typed text would.
 - Server requests `item/commandExecution/requestApproval`,
   `item/fileChange/requestApproval` and `item/permissions/requestApproval`
   become approval cards in the same store and push path as a held
