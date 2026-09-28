@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { codexHome } from "../home-paths.js";
 import { claudeAccountRef, claudeHomeOfPath, claudeHomes, type AccountRef } from "./claude-accounts.js";
+import { paneAccount, paneAccountKey } from "./pane-accounts.js";
 import path from "node:path";
 import { withTranscriptIndex } from "./transcript-index.js";
 import { BridgeError, object, objects, sessionId, type Json, type Provider, type Target } from "./protocol.js";
@@ -205,6 +206,12 @@ async function findPatternMatches(root: string, pattern: string): Promise<string
 export function transcriptAccount(file: string): AccountRef | undefined {
   const home = claudeHomeOfPath(file);
   return home ? claudeAccountRef(home) : undefined;
+}
+
+/** A pane's transcript: the pane's known Claude account settles a session id found in more than one home. */
+export function targetTranscriptPath(target: { server: string; pane: string; source: Provider; session: string }): Promise<string> {
+  const account = target.source === "claude" ? paneAccount(paneAccountKey(target.server, target.pane))?.id : undefined;
+  return transcriptPath(target.source, target.session, account);
 }
 
 /** `account` (a Claude home id) settles a session id found in more than one home. */

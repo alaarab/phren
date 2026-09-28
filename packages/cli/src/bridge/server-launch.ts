@@ -11,6 +11,9 @@ import { briefArgs, DISPATCH_ID_ENV, launchBriefSchema, launchesWithBrief, recor
 import { prepareServedLaunch, registerServedPane, sendServedBrief } from "./opencode-panes.js";
 import { groupConductor, type GroupConductor } from "./conductor-group.js";
 import { pretrustFolder } from "./folder-trust.js";
+import { claudeHome, claudeLaunchEnv, isAccountSlug, DEFAULT_ACCOUNT } from "./claude-accounts.js";
+import { harnessInventoryWithin, hasUsable, launchCheckOff, type HarnessInventory } from "./harnesses.js";
+import { paneAccountKey, recordPaneAccount } from "./pane-accounts.js";
 import { optionalHookPeers } from "./peers.js";
 import { AppServerRpcError } from "./codex-app-server.js";
 import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
@@ -123,6 +126,23 @@ export function herdrAgentName(label: string): string {
   return slug || "agent";
 }
 
+type InventoryReader = () => Promise<HarnessInventory>;
+let inventoryReader: InventoryReader | undefined;
+/** Only for tests: what this computer can launch. Without one, `PHREN_LAUNCH_CHECK=off` skips the early availability check. */
+export function setLaunchInventory(reader: InventoryReader | undefined): void { inventoryReader = reader; }
+
+/** Refuses a launch the computer cannot run before any pane exists: the harness is not installed
+ * (`harness_unavailable`), or the account is unknown, signed out, or given for a harness without accounts
+ * (`account_unavailable`). Only a definite answer refuses; an inventory that cannot be read lets the launch go on. */
+async function requireAvailable(kind: string, account: string | undefined): Promise<void> {
+  if (!inventoryReader && launchCheckOff()) return;
+  // Bounded: a cold sign-in check per home can take seconds, and an unready inventory lets the launch go on.
+  const inventory = await (inventoryReader ?? (() => harnessInventoryWithin(2_500)))().catch(() => undefined);
+  if (!inventory) return;
+  const availability = hasUsable(inventory, kind, account);
+  if (!availability.ok) throw new BridgeError(409, availability.reason, { code: availability.code });
+}
+
 export interface LaunchOptions {
   canary?: boolean;
   /** `data.cwd` is a folder the Hook resolved itself (a dispatched or
@@ -146,6 +166,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const label = plainText(200).parse(data.label);
   const kind = z.enum(launchKinds).parse(data.kind);
   const effort = z.enum(launchEfforts).default("medium").parse(data.effort);
+  const account = data.account === undefined || data.account === null ? undefined : z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(data.account);
   if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
   // A dispatched worker's or scheduled run's first prompt. It rides on the
   // launch where the harness takes one; elsewhere the caller types it.
@@ -166,6 +187,10 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   let workspace = data.workspaceId === undefined ? undefined : id.parse(data.workspaceId);
   // Herdr 0.9.1 refuses a start timeout of 3000 ms or less (invalid_agent_timeout).
   const timeout = Math.min(120_000, Math.max(3_001, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
+  // Checked before anything is created, so a refusal leaves no pane, worktree or brief file behind.
+  await requireAvailable(kind, account);
+  const home = kind === "claude" && account && account !== DEFAULT_ACCOUNT ? claudeHome(account) : undefined;
+  if (kind === "claude" && account && account !== DEFAULT_ACCOUNT && !home) throw new BridgeError(409, `No claude account "${account}"`, { code: "account_unavailable" });
   const before = await snapshot(server);
   // Herdr agent names are unique per server; a scheduled run or a second
   // launch with the same label would otherwise collide with the first.
@@ -199,7 +224,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   if (served) args.push(...served.args);
   const briefFile = brief && (launchesWithBrief(kind) || structured || served) ? await writeLaunchBrief(brief) : undefined;
   const briefLaunch = brief && briefFile && launchesWithBrief(kind) ? briefArgs(kind, briefFile) : undefined;
-  const variables = { ...(brief ? { [DISPATCH_ID_ENV]: brief.id } : {}), ...served?.env };
+  const variables = { ...(brief ? { [DISPATCH_ID_ENV]: brief.id } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
   const env = Object.keys(variables).length ? variables : undefined;
   if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
   const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));
@@ -210,7 +235,8 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const cwd = worktree?.cwd ?? projectDirectory;
   // Claude's folder-trust screen defaults to "No, exit" and Codex's holds the
   // agent too; a folder the Hook picked or just created is trusted up front.
-  if (worktree || options.trustFolder) await pretrustFolder(kind, cwd, worktree ? `new worktree for ${worktree.branch}` : "project folder");
+  if (worktree || options.trustFolder) await pretrustFolder(kind, cwd, worktree ? `new worktree for ${worktree.branch}` : "project folder",
+    home ? { ...process.env, ...claudeLaunchEnv(home) } : process.env);
   try { await terminalProvider().create(server, { workspace, label, cwd, ...(env ? { env } : {}) }); }
   catch (error) { await worktree?.discard(); throw error; }
   let created: { workspaceId: string; tabId: string; paneId: string } | undefined;
@@ -284,11 +310,12 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const after = await snapshot(server);
   const pane = findPane(after, { workspace: created.workspaceId, tab: created.tabId, pane: created.paneId });
   const agentStatus = typeof pane?.agent_status === "string" ? pane.agent_status : undefined;
+  if (kind === "claude" && account) recordPaneAccount(paneAccountKey(server, created.paneId), account, typeof pane?.terminal_id === "string" ? pane.terminal_id : undefined);
   const sessionId = appServer?.threadId ?? (pane && pane.agent === kind ? await paneIdentity(server, pane) : undefined) ?? servedBrief?.session;
   const chat = !sessionId && pane && pane.agent === kind ? await paneChatState(server, pane).catch((): Json => ({})) : {};
   const target = sessionId ? { ...binding, session: sessionId }
     : chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
-  return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(unchecked.length ? { unchecked } : {}),
+  return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(account ? { account } : {}), ...(unchecked.length ? { unchecked } : {}),
     // The caller types the brief itself unless it went with the launch.
     ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief } : {}),
     ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}) };

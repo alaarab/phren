@@ -32,7 +32,8 @@ export default defineConfig({
     // A developer or CI machine with tmux installed must not turn every
     // "no Herdr running" test into a tmux one; tmux tests opt back in.
     // Codex launches stay on the typed path unless a test opts in.
-    env: { PHREN_TMUX: "off", PHREN_CODEX_APP_SERVER: "off" },
+    // Launches skip the installed-harness check (it probes real binaries); tests of it inject an inventory.
+    env: { PHREN_TMUX: "off", PHREN_CODEX_APP_SERVER: "off", PHREN_LAUNCH_CHECK: "off" },
     include: [
       "packages/cli/src/**/*.test.ts",
       "packages/code/src/**/*.test.ts",

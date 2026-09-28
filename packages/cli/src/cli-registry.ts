@@ -128,7 +128,7 @@ const PROJECTS_SUBCOMMANDS: Subcommand[] = [
 
 const SCHEDULE_SUBCOMMANDS: Subcommand[] = [
   { name: "list", usage: "phren schedule list [project]", summary: "List scheduled prompts" },
-  { name: "add", usage: "phren schedule add <project> --name <name> --harness <name> --computer <name> [--model <model>] --every <kind> [timing] (--prompt <text>|--prompt-file <path>)", summary: "Add a scheduled prompt" },
+  { name: "add", usage: "phren schedule add <project> --name <name> --harness <name> --computer <name> [--model <model>] [--account <id>] --every <kind> [timing] (--prompt <text>|--prompt-file <path>)", summary: "Add a scheduled prompt" },
   { name: "remove", usage: "phren schedule remove <project> <id>", summary: "Remove a scheduled prompt" },
   { name: "enable", usage: "phren schedule enable <project> <id>", summary: "Resume a scheduled prompt" },
   { name: "disable", usage: "phren schedule disable <project> <id>", summary: "Pause a scheduled prompt" },
@@ -229,7 +229,7 @@ export const REGISTRY: Command[] = [
     },
   },
   {
-    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>] [--effort <effort>]",
+    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>] [--effort <effort>] [--account <id>]",
     summary: "Dispatch a worker brief through Phren Hook",
     subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List local dispatch receipts" },
       { name: "returns", usage: "phren dispatch returns", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read" },
@@ -250,7 +250,7 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./computers/command.js")).runUsage(args),
   },
   {
-    name: "hand-off", topic: "core", usage: "phren hand-off <computer|local> --session <id> --text <prompt>",
+    name: "hand-off", topic: "core", usage: "phren hand-off <computer|local> --session <id> --text <prompt> [--account <id>]",
     summary: "Send work to an existing agent session through Phren Hook",
     run: async args => (await import("./bridge/dispatch-command.js")).runHandOff(args),
   },

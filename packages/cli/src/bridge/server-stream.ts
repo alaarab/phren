@@ -10,7 +10,7 @@ import type { CodexQuestions } from "./questions.js";
 import type { HookInfo } from "./server-routes.js";
 import type { SideQuestions } from "./side-questions.js";
 import { TranscriptPreviewStream } from "./transcript-preview.js";
-import { childAgent, childAgentTree, refreshTranscript, TranscriptReader, transcriptPath } from "./transcripts.js";
+import { childAgent, childAgentTree, refreshTranscript, targetTranscriptPath, TranscriptReader } from "./transcripts.js";
 import type { ModuleSnapshot } from "../modules/runtime.js";
 import { countTick } from "./metrics.js";
 import { approvalSummary } from "./approval-summary.js";
@@ -60,7 +60,7 @@ export function transcriptStreams(ctx: StreamContext) {
    * missing one: `reader` stays undefined until the file appears. */
   async function conversationReader(target: Target): Promise<{ reader?: TranscriptReader; source: Provider; session: string }> {
     try {
-      const reader = new TranscriptReader(await transcriptPath(target.source, target.session), target.source, undefined, modules.has("git") ? agentHooks.changes.view(`${target.source}:${target.session}`) : undefined);
+      const reader = new TranscriptReader(await targetTranscriptPath(target), target.source, undefined, modules.has("git") ? agentHooks.changes.view(`${target.source}:${target.session}`) : undefined);
       return { reader, source: target.source, session: target.session };
     } catch (error) {
       if (error instanceof BridgeError && error.status === 404) return { source: target.source, session: target.session };

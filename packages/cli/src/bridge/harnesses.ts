@@ -56,6 +56,11 @@ export function harnessInventoryWithin(ms: number, deps: HarnessDeps = {}): Prom
   return Promise.race([harnessInventory(deps).catch(() => undefined), late]).finally(() => clearTimeout(timer));
 }
 
+/** `PHREN_LAUNCH_CHECK=off`: no early launch refusal and no `harnesses` advertised to dispatch (tests, or a misreporting computer). */
+export function launchCheckOff(env: NodeJS.ProcessEnv = process.env): boolean {
+  return /^(off|0|false|no)$/i.test(env.PHREN_LAUNCH_CHECK?.trim() ?? "");
+}
+
 export type Availability = { ok: true } | { ok: false; code: "harness_unavailable" | "account_unavailable"; reason: string };
 
 /** Whether a launch of `source` (and `accountId`) should work on a computer with this inventory. */

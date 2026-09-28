@@ -100,6 +100,10 @@ Long lists are searchable; offline rows explain why they cannot open. The
 Open agent accessibility action reaches the same flow. Harness, model and
 effort choices follow the computer choice.
 
+`dispatch` and `hand_off` take `account` for Claude accounts (`phren dispatch ... --account work`).
+`anywhere` places only on a computer whose reported accounts include it, and lists the rest in
+`skipped` with the reason. See [accounts](accounts.md).
+
 ## Siri and the Action button
 
 The phone exposes three conductor shortcuts: Tell my conductor sends a line,

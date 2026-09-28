@@ -43,6 +43,7 @@ See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
 | `harness` | enum | yes | `codex`, `claude`, or `opencode`. |
 | `model` | string | no | Explicit remote model, up to 200 characters; otherwise its configured default. |
 | `effort` | enum | no | Reasoning effort: `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; otherwise the harness default. Codex takes it as `model_reasoning_effort`, Claude as `--effort`, OpenCode as `--variant`. |
+| `account` | string | no | Claude account id (`default` or a slug from `phren bridge accounts`). `anywhere` skips computers whose `harnesses` do not report that account usable (an older Hook that reports none is skipped too) and lists each in `skipped`; a named computer that lacks it fails before launching. Recorded on the receipt. |
 | `prompt` | string | yes | Worker brief, up to 32768 characters. |
 | `label` | string | yes | Task label, up to 200 characters. |
 | `parent` | object | no | Conversation identity to retain in the dispatch receipt. |
@@ -122,6 +123,7 @@ exposes `hand_off` directly. Supply exactly one of `target` or `session`.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `computer` | string | no | Enrolled computer name. Omit for the local Hook. |
+| `account` | string | no | Claude account id the `session` must run under. A session of another account is refused with 409 `account_mismatch`; an overview row without an account counts as `default`. Not checked for an explicit `target`. |
 | `target` | object | one of | Complete live Hook target. |
 | `session` | string | one of | Session id resolved through the selected Hook's workspace overview. |
 | `text` | string | yes | Prompt to deliver, up to 32768 characters. |

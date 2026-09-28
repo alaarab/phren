@@ -112,3 +112,16 @@ it("counts a peer as linked through any name or alias its Hook reports", async (
     expect(notLinkedComputers(store, "Desk", ["Build", "10.0.0.8", "Linuxbox", "LINUXBOX-HOST"])).toEqual([]);
   } finally { await rm(store, { recursive: true, force: true }); }
 });
+
+it("hands off by session only to a session of the requested account, counting a row without one as default", async () => {
+  const target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude", session: "aaaaaaaa-1111-4111-8111-111111111111" };
+  const overview = (account?: { id: string }) => ({ groups: [{ children: [{ target, ...(account ? { account: { ...account, label: "x", key: "k" } } : {}) }] }] });
+  vi.mocked(hookRequest).mockResolvedValueOnce(overview({ id: "work" })).mockResolvedValueOnce({ ok: true });
+  expect(await handOff({ session: target.session, account: "work", text: "Go" })).toMatchObject({ ok: true });
+  vi.mocked(hookRequest).mockReset().mockResolvedValueOnce(overview({ id: "work" }));
+  await expect(handOff({ session: target.session, account: "default", text: "Go" })).rejects.toMatchObject({ status: 409, details: { code: "account_mismatch" } });
+  vi.mocked(hookRequest).mockReset().mockResolvedValueOnce(overview()).mockResolvedValueOnce({ ok: true });
+  expect(await handOff({ session: target.session, account: "default", text: "Go" })).toMatchObject({ ok: true });
+  expect(vi.mocked(hookRequest).mock.calls.filter(call => call[0] === "/v1/prompt")).toHaveLength(1);
+  await expect(handOff({ session: target.session, account: "../x", text: "Go" })).rejects.toThrow();
+});

@@ -5,7 +5,7 @@ import { objects, type Json, type Provider } from "./protocol.js";
 import { snapshot } from "./herdr.js";
 import { terminalProvider, type PaneProcesses } from "./terminal.js";
 import { webServers, type LocalServer } from "./projects.js";
-import { transcriptPath } from "./transcripts.js";
+import { targetTranscriptPath } from "./transcripts.js";
 
 /**
  * The web servers one agent session owns, for the chat's ••• menu. Never a
@@ -122,7 +122,7 @@ async function transcriptTail(file: string): Promise<string> {
 export async function sessionWebServers(target: { server: string; pane: string; source: Provider; session: string }, pane: Json): Promise<{ servers: SessionServer[] }> {
   const [servers, table, own, file] = await Promise.all([
     webServers(), processTable(target.session), paneRoots(target.server, pane.pane_id),
-    transcriptPath(target.source, target.session).catch(() => undefined),
+    targetTranscriptPath(target).catch(() => undefined),
   ]);
   const parents = table.parents;
   const ownRoots = new Set([...own, ...table.runners]);

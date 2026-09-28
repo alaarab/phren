@@ -17,7 +17,7 @@ import { sessionWebServers } from "./session-servers.js";
 import { repositoryDiff } from "./projects.js";
 import { BridgeError, type Json, MAX_FRAME, object, objects, startingTargetSchema, type Target, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
-import { childAgent, childAgentTree, conversationNamedPaths, transcriptPath, type ChildAgentRelation } from "./transcripts.js";
+import { childAgent, childAgentTree, conversationNamedPaths, targetTranscriptPath, type ChildAgentRelation } from "./transcripts.js";
 import { sideQuestionText, type SideQuestions } from "./side-questions.js";
 import { saveUpload } from "./uploads.js";
 import { deliveryIdSchema, PromptOnce, promptScope } from "./prompt-once.js";
@@ -481,7 +481,7 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
       response.once("close", () => { if (!response.writableEnded) abort.abort(); });
       const allowed = paths.length ? await agentHooks.changes.recordedPaths(`${target.source}:${target.session}`) : [];
       if (paths.length) {
-        try { allowed.push(...await conversationNamedPaths(await transcriptPath(target.source, target.session), target.source, cwd, abort.signal)); }
+        try { allowed.push(...await conversationNamedPaths(await targetTranscriptPath(target), target.source, cwd, abort.signal)); }
         catch { abort.signal.throwIfAborted(); /* Missing transcripts grant no extra paths; recorded scope still works. */ }
       }
       result = await repositoryDiff(cwd, paths, allowed);
