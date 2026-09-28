@@ -6,6 +6,8 @@ import { usageStatusLine } from "./usage.js";
 import { chmod, copyFile, mkdir, open, readFile, rename, symlink, unlink, lstat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { codexHome, claudeConfigDir } from "../home-paths.js";
+import { claudeHomes } from "./claude-accounts.js";
+import { syncAccountMcpServers } from "./claude-account-setup.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -256,6 +258,8 @@ export async function install(version: string, noService = false): Promise<void>
       }
     }
     await applyAgentHooks(hookEdits);
+    const synced = await syncAccountMcpServers().catch(() => []);
+    if (synced.length) console.log(`Claude accounts: refreshed MCP servers in ${synced.join(", ")}.`);
     if (await applyOpencodePlugin()) {
       console.log("opencode chat: restart any opencode session started before now so it loads the transcript plugin.");
     }
@@ -313,12 +317,16 @@ async function missingFile<T>(operation: Promise<T>): Promise<T | undefined> {
 
 export async function planAgentHooks(program: string, remove = false, modules?: ModuleSnapshot): Promise<SettingsEdit[]> {
   const edits: SettingsEdit[] = [];
+  // Extra Claude homes (one per account) get the same hooks; a symlinked settings.json shares another home's, so it is skipped.
+  const extraClaude = claudeHomes().slice(1).map(home => ["claude", path.join(home.dir, "settings.json")] as const);
   for (const [source, file] of [
     ["codex", path.join(codexHome(), "hooks.json")],
     ["claude", path.join(claudeConfigDir(), "settings.json")],
+    ...extraClaude,
     ["copilot", path.join(process.env.COPILOT_HOME || path.join(homedir(), ".copilot"), "hooks/phren.json")],
   ]) {
     const metadata = await missingFile(lstat(file));
+    if (metadata && extraClaude.some(([, extra]) => extra === file) && (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 2_097_152)) continue;
     if (metadata && (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > 2_097_152)) {
       throw new Error(`Agent settings require a manual update: ${file}`);
     }

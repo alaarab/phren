@@ -2,9 +2,11 @@ import { spawn } from "node:child_process";
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Readable } from "node:stream";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AccountUsageReader,
+  captureClaudeUsage,
   claudeOAuthUsage,
   claudeScopedWindows,
   claudeUsage,
@@ -24,6 +26,7 @@ import {
   readOpenCodeUsage,
   usageStatusLine,
 } from "./usage.js";
+import { CODEX_ACCOUNT, clearAccountCaches, claudeHomes } from "./claude-accounts.js";
 
 const now = new Date("2026-09-12T08:00:00Z");
 const reset = now.getTime() / 1000 + 3600;
@@ -373,5 +376,87 @@ rl.on('line', line => {
     const stored = await readFile(path.join(root, "usage/claude.json"), "utf8");
     expect(JSON.parse(stored).rate_limits.five_hour.used_percentage).toBe(52);
     expect(stored).not.toContain("do-not-persist");
+  });
+});
+
+describe("Claude accounts in usage", () => {
+  let home: string, bridge: string;
+  const saved: Record<string, string | undefined> = {};
+  const setEnv = (key: string, value: string | undefined) => { if (!(key in saved)) saved[key] = process.env[key]; if (value === undefined) delete process.env[key]; else process.env[key] = value; };
+  const reader = (platform: NodeJS.Platform, live: (date: Date, home: { id: string }) => Promise<undefined | ReturnType<typeof claudeUsage>>) =>
+    new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0, live as never, openCode, noOpenRouter, noOpenCodeGo, noCopilot, platform);
+  beforeEach(async () => {
+    home = await mkdtemp(path.join(tmpdir(), "phren-acct-home-")); bridge = await mkdtemp(path.join(tmpdir(), "phren-acct-bridge-"));
+    setEnv("HOME", home); setEnv("PHREN_BRIDGE_HOME", bridge); setEnv("CLAUDE_CONFIG_DIR", undefined);
+    await mkdir(path.join(home, ".claude-work"), { recursive: true });
+    await writeFile(path.join(home, ".claude-work", ".claude.json"), "{}");
+    clearAccountCaches();
+  });
+  afterEach(async () => {
+    for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    vi.restoreAllMocks(); clearAccountCaches();
+    await rm(home, { recursive: true, force: true }); await rm(bridge, { recursive: true, force: true });
+  });
+  it("returns one Claude row (the default home) unless every account is asked for", async () => {
+    const r = reader("linux", async (date, h) => claudeUsage({ rate_limits: { five_hour: { used_percentage: h.id === "work" ? 70 : 10 } } }, date));
+    const single = await r.read();
+    expect(single.accounts.map(a => [a.source, a.account?.id])).toEqual([["codex", "default"], ["claude", "default"], ["opencode", undefined], ["opencode-go", undefined], ["copilot", undefined]]);
+  });
+  it("returns one Claude row per home with accounts=all, default first, and tags Codex", async () => {
+    const usage = await reader("linux", async (date, h) => claudeUsage({ rate_limits: { five_hour: { used_percentage: h.id === "work" ? 70 : 10 } } }, date)).read(undefined, true);
+    expect(usage.accounts.map(a => [a.source, a.account?.id])).toEqual([["codex", "default"], ["claude", "default"], ["claude", "work"], ["opencode", undefined], ["opencode-go", undefined], ["copilot", undefined]]);
+    expect(usage.accounts[0].account).toEqual(CODEX_ACCOUNT);
+    expect(usage.accounts[1].account).toMatchObject({ id: "default", label: "Claude", key: "claude:home:default" });
+    expect(usage.accounts[2].account).toMatchObject({ id: "work", label: "Work", key: "claude:home:work" });
+    expect(usage.accounts.filter(a => a.source === "claude").map(a => a.windows[0].usedPercent)).toEqual([10, 70]);
+  });
+  it("does no live read for a non-default home on macOS and uses its own snapshot", async () => {
+    const seen: string[] = [];
+    await mkdir(path.join(bridge, "usage"), { recursive: true });
+    await writeFile(path.join(bridge, "usage", "claude-work.json"), JSON.stringify({ rate_limits: { five_hour: { used_percentage: 33 } }, updatedAt: new Date(0).toISOString() }));
+    const usage = await reader("darwin", async (_date, h) => { seen.push(h.id); return undefined; }).read(undefined, true);
+    expect(seen).toEqual(["default"]);
+    const work = usage.accounts.find(a => a.account?.id === "work" && a.source === "claude")!;
+    expect(work.origin).toBe("status-line");
+    expect(work.windows[0].usedPercent).toBe(33);
+  });
+  it("reads a non-default home's own credentials file off macOS, with a fake fetch", async () => {
+    await writeFile(path.join(home, ".claude-work", ".credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: "work-token", expiresAt: Date.now() + 3_600_000 } }));
+    const noKeychain = (async () => { throw new Error("no keychain"); }) as unknown as Parameters<typeof readClaudeToken>[0];
+    const work = claudeHomes().find(h => h.id === "work")!, main = claudeHomes()[0];
+    expect(await readClaudeToken(noKeychain, "linux", work)).toBe("work-token");
+    expect(await readClaudeToken(noKeychain, "linux", main)).toBeUndefined();
+    let keychainCalls = 0;
+    const counting = (async () => { keychainCalls++; return { stdout: "{}", stderr: "" }; }) as unknown as Parameters<typeof readClaudeToken>[0];
+    expect(await readClaudeToken(counting, "darwin", work)).toBeUndefined();
+    expect(keychainCalls).toBe(0);
+    const fetchImpl = (async (_url: string | URL, init?: RequestInit) => ({ ok: true, status: 200,
+      json: async () => ({ limits: [{ kind: "session", percent: (init?.headers as Record<string, string>).authorization === "Bearer work-token" ? 61 : 1, resets_at: null }] }) }) as unknown as Response) as unknown as typeof fetch;
+    expect((await fetchClaudeUsage((await readClaudeToken(noKeychain, "linux", work))!, fetchImpl, now)).windows[0].usedPercent).toBe(61);
+  });
+  it("caches each home separately for a minute", async () => {
+    const calls: Record<string, number> = {};
+    let time = 0;
+    const r = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => time,
+      async (date, h) => { calls[h.id] = (calls[h.id] ?? 0) + 1; return claudeUsage({ rate_limits: { five_hour: { used_percentage: 5 } } }, date); },
+      openCode, noOpenRouter, noOpenCodeGo, noCopilot, "linux");
+    await r.read(undefined, true); await r.read(undefined, true);
+    expect(calls).toEqual({ default: 1, work: 1 });
+    time = 60_000; await r.read(undefined, true);
+    expect(calls).toEqual({ default: 2, work: 2 });
+  });
+  it("captures the status line into the file of the home Claude runs in, and skips unknown homes", async () => {
+    const input = JSON.stringify({ rate_limits: { five_hour: { used_percentage: 12, resets_at: 1_900_000_000 } } });
+    const feed = () => vi.spyOn(process, "stdin", "get").mockReturnValue(Readable.from([input]) as unknown as typeof process.stdin);
+    setEnv("CLAUDE_CONFIG_DIR", path.join(home, ".claude-work"));
+    feed(); await captureClaudeUsage("bnVsbA==");
+    expect(JSON.parse(await readFile(path.join(bridge, "usage", "claude-work.json"), "utf8")).rate_limits.five_hour.used_percentage).toBe(12);
+    setEnv("CLAUDE_CONFIG_DIR", undefined);
+    feed(); await captureClaudeUsage("bnVsbA==");
+    expect(JSON.parse(await readFile(path.join(bridge, "usage", "claude.json"), "utf8")).rate_limits.five_hour.used_percentage).toBe(12);
+    await rm(path.join(bridge, "usage"), { recursive: true, force: true });
+    setEnv("CLAUDE_CONFIG_DIR", path.join(home, ".claude-nowhere"));
+    feed(); await captureClaudeUsage("bnVsbA==");
+    await expect(readFile(path.join(bridge, "usage", "claude.json"))).rejects.toThrow();
   });
 });

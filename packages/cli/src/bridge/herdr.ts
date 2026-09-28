@@ -1,4 +1,6 @@
 import { createHmac, randomBytes } from "node:crypto";
+import { paneAccount, paneAccountKey, notePaneTranscript } from "./pane-accounts.js";
+import type { AccountRef } from "./claude-accounts.js";
 import { execFile } from "node:child_process";
 import { connect } from "node:net";
 import { homedir } from "node:os";
@@ -391,7 +393,13 @@ async function identityFromProcesses(server: string, pane: Json, pids: number[])
       : /\/session-state\/([a-f0-9-]{36})\/events\.jsonl$/i.exec(file);
     return match ? [match[1]] : [];
   });
-  if (new Set(candidates).size === 1) return { sessionId: candidates[0], noTranscriptLogs: false };
+  if (new Set(candidates).size === 1) {
+    if (pane.agent === "claude") {
+      const open = files.find(file => file.endsWith(`/${candidates[0]}.jsonl`));
+      if (open) notePaneTranscript(paneAccountKey(server, pane.pane_id), open, String(pane.terminal_id ?? ""));
+    }
+    return { sessionId: candidates[0], noTranscriptLogs: false };
+  }
   if (pane.agent === "codex" && candidates.length === 0) {
     const daemon = await codexDaemonIdentity(server, pane, pids).catch(() => undefined);
     if (daemon?.sessionId) return { sessionId: daemon.sessionId, noTranscriptLogs: false };
@@ -505,6 +513,13 @@ export async function paneChatState(server: string, pane: Json, options: { token
   return { sessionId, ...(process && binding ? { startingToken: binding.token } : {}), ...(starting ? { starting: true } : {}) };
 }
 
+/** `{ account }` for a Claude pane whose account is known, else nothing. */
+export function paneAccountField(server: string, pane: Json): { account?: AccountRef } {
+  if (pane.agent !== "claude") return {};
+  const account = paneAccount(paneAccountKey(server, pane.pane_id), String(pane.terminal_id ?? ""));
+  return account ? { account } : {};
+}
+
 export async function panes(server: string, workspace: string, tab: string): Promise<Json> {
   id.parse(workspace); id.parse(tab);
   const s = await snapshot(server);
@@ -514,7 +529,8 @@ export async function panes(server: string, workspace: string, tab: string): Pro
     .filter(p => p.workspace_id === workspace && p.tab_id === tab).map(async p => ({ id: p.pane_id,
       label: p.label || p.pane_id, agent: p.agent, agentStatus: p.agent_status,
       title: p.title || p.terminal_title_stripped, cwd: p.foreground_cwd || p.cwd,
-      ...await paneChatState(server, p) }))) };
+      ...await paneChatState(server, p),
+      ...paneAccountField(server, p) }))) };
 }
 
 /** The pane a starting target names, if its terminal/process binding still

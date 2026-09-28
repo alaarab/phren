@@ -27,6 +27,7 @@ import { answeredQuestionInput, numberedDialog, opencodePermissionDialog, passwo
   type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
 import { directoryNames, opencodeApprovalFile, opencodeRequest, readOpencodeRequest } from "./opencode-approvals.js";
 import { ApprovalWatchLeases, bindingPath, localSocket, PushBindingStore } from "./agent-hook-stores.js";
+import { notePaneTranscript, paneAccountKey } from "./pane-accounts.js";
 import { eventStatus, notePaneStatus, settleBlockedPane } from "./pane-status.js";
 import { noteTurn as recordTurn } from "./turn-records.js";
 import { countTick } from "./metrics.js";
@@ -1166,6 +1167,7 @@ export class AgentHooks {
         if (!pane || (pane.agent && pane.agent !== target.source)) throw new Error("The pane changed");
         const pids = (await terminalProvider().processes(target.server, target.pane)).foregroundPids;
         if (!pids.length) throw new Error("No foreground process");
+        if (!daemon && target.source === "claude") notePaneTranscript(paneAccountKey(target.server, target.pane), body.transcript, String(pane.terminal_id ?? ""));
         if (!daemon) await atomicInPrivateDir(bindingPath(target.server, target.pane), JSON.stringify({ terminal: pane.terminal_id, source: target.source,
           session: target.session, pids, workspace: target.workspace, tab: target.tab, event: String(body.event).slice(0, 64), at: new Date().toISOString() }));
         // A terminal that does not watch its agents (tmux) takes the agent's
@@ -1362,6 +1364,7 @@ export async function agentHook(source: Provider) {
   const dispatchId = !daemon && (event === "SessionStart" || event === "UserPromptSubmit") && briefId.safeParse(process.env[DISPATCH_ID_ENV]).success
     ? process.env[DISPATCH_ID_ENV] : undefined;
   const data = JSON.stringify({ target, event, ...(daemon ? { daemon: true } : {}), ...(autoReview ? { autoReview: true } : {}), ...(dispatchId ? { dispatchId } : {}),
+    ...(source === "claude" && typeof value.transcript_path === "string" ? { transcript: value.transcript_path.slice(0, 4096) } : {}),
     tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
     ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}),
     ...(event === "Stop" ? stopFacts(value) : {}) });

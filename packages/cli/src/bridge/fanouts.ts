@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { ChangedFile } from "./changes.js";
 import { type Json, object, type Provider, sessionId } from "./protocol.js";
 import { countGit } from "./metrics.js";
+import { claudeHomes } from "./claude-accounts.js";
 import { readOpencodeRequest } from "./opencode-approvals.js";
 
 const MAX_MANIFEST_BYTES = 64 * 1024;
@@ -161,12 +162,15 @@ async function regularContainedFile(root: string, candidate: string, maxBytes: n
   } catch { return; }
 }
 
-async function nativeClaudeTranscript(candidate: string, session: string): Promise<string | undefined> {
-  const root = path.join(homedir(), ".claude", "projects");
+export async function nativeClaudeTranscript(candidate: string, session: string): Promise<string | undefined> {
   if (path.basename(candidate) !== `${session}.jsonl`) return;
-  const resolvedRoot = await realpath(root).catch(() => undefined);
-  if (!resolvedRoot) return;
-  return regularContainedFile(resolvedRoot, candidate, MAX_EVENT_LOG_BYTES);
+  for (const home of claudeHomes()) {
+    const resolvedRoot = await realpath(path.join(home.dir, "projects")).catch(() => undefined);
+    if (!resolvedRoot) continue;
+    const file = await regularContainedFile(resolvedRoot, candidate, MAX_EVENT_LOG_BYTES);
+    if (file) return file;
+  }
+  return undefined;
 }
 
 function pidGone(pid: number): boolean {

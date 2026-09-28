@@ -211,10 +211,11 @@ export const REGISTRY: Command[] = [
     },
   },
   {
-    name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall|enroll-computer|discover|link|fanouts archive|speech-key set|speech-voice>",
+    name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall|enroll-computer|accounts|discover|link|fanouts archive|speech-key set|speech-voice>",
     summary: "Install Phren Hook and enroll phone or computer connections",
     subcommands: [
       { name: "enroll-computer", usage: "phren bridge enroll-computer <name> [--accept <public-key-file>]", summary: "Print or accept a restricted computer dispatch key" },
+      { name: "accounts", usage: "phren bridge accounts [add <slug> [--label <name>] | label <id> <label>]", summary: "List this computer's harnesses and Claude accounts, add a Claude account home, or label one" },
       { name: "discover", usage: "phren bridge discover", summary: "List computers you already reach over ssh that run Phren Hook and are not linked" },
       { name: "link", usage: "phren bridge link <ssh-host> [--name <name>] [--as <name>] [--back-address <address>] [--yes]", summary: "Link this computer and an ssh host both ways in one step, after confirming" },
       { name: "fanouts archive", usage: "phren bridge fanouts archive [--dry-run] [--parent <session-id>] [--older-than <minutes>]", summary: "Archive finished fan-out jobs older than 24 hours, or one parent chat's, or older than N minutes" },

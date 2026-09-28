@@ -3,12 +3,13 @@ import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { lstat, open, readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { claudeConfigDir, homeDir } from "../home-paths.js";
+import { claudeConfigDir } from "../home-paths.js";
 import path from "node:path";
 import { promisify } from "node:util";
 import { atomicInPrivateDir, bridgeRoot, type Json, object } from "./protocol.js";
 import { stripTerminal } from "../terminal-text.js";
 import { codexExecutable } from "./codex-binary.js";
+import { CODEX_ACCOUNT, claudeAccountRef, claudeHomeOfEnv, claudeHomes, type AccountRef, type ClaudeHome } from "./claude-accounts.js";
 
 const exec = promisify(execFile);
 
@@ -39,8 +40,11 @@ export interface AccountUsage {
    *  or the OAuth usage endpoint. Per-model windows the status line never
    *  carries document their own age through each window's asOf instead. */
   origin?: "status-line" | "oauth";
+  /** Which account this row is: a Claude home, or Codex's single one. Older phones ignore it. */
+  account?: AccountRef;
 }
-const claudeFile = () => path.join(bridgeRoot(), "usage", "claude.json");
+/** The status-line snapshot: `usage/claude.json` for the default home, `usage/claude-<id>.json` for others. */
+const claudeFile = (home?: ClaudeHome) => path.join(bridgeRoot(), "usage", home && !home.isDefault ? `claude-${home.id}.json` : "claude.json");
 const safeText = (v: unknown) => typeof v === "string" ? v.replace(/[\x00-\x1f\x7f]/g, "").slice(0, 100) : undefined;
 function window(id: string, name: string, percent: unknown, reset: unknown): UsageWindow | undefined {
   if (typeof percent !== "number" || !Number.isFinite(percent) || percent < 0 || percent > 100) return;
@@ -364,9 +368,7 @@ export function claudeScopedWindows(config: unknown, now = new Date()): UsageWin
   }
   return windows;
 }
-// Claude keeps .claude.json inside CLAUDE_CONFIG_DIR when set, else beside ~/.claude.
-const claudeConfigFile = () => path.join(process.env.CLAUDE_CONFIG_DIR?.trim() ? claudeConfigDir() : homeDir(), ".claude.json");
-const claudeCredentialsFile = () => path.join(claudeConfigDir(), ".credentials.json");
+const claudeCredentialsFile = (home?: ClaudeHome) => path.join(home?.dir ?? claudeConfigDir(), ".credentials.json");
 
 /**
  * The OAuth usage endpoint Claude Code itself reads, mapped to the same
@@ -405,9 +407,10 @@ export function claudeOAuthUsage(value: unknown, now = new Date()): AccountUsage
  * Claude Code's own sign-in token, read locally and used only against
  * Anthropic's usage endpoint — never persisted, logged, or sent elsewhere.
  * The file is authoritative off macOS; macOS keeps it in the login keychain,
- * with the file left stale after a refresh.
+ * with the file left stale after a refresh. A non-default `home` reads only its
+ * own file, and nothing on macOS (its keychain item name is unverified).
  */
-export async function readClaudeToken(execSecurity = exec, platform = process.platform): Promise<string | undefined> {
+export async function readClaudeToken(execSecurity = exec, platform = process.platform, home?: ClaudeHome): Promise<string | undefined> {
   const parse = (raw: string): string | undefined => {
     if (raw.length > 16_384) return undefined;
     const oauth = object(object(JSON.parse(raw)).claudeAiOauth);
@@ -416,6 +419,8 @@ export async function readClaudeToken(execSecurity = exec, platform = process.pl
     if (!token || (expires !== undefined && expires <= Date.now() + 60_000)) return undefined;
     return token;
   };
+  const other = home !== undefined && !home.isDefault;
+  if (other && platform === "darwin") return undefined;
   if (platform === "darwin") {
     try {
       const { stdout } = await execSecurity("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"], { timeout: 5_000, maxBuffer: 16_384 });
@@ -423,7 +428,7 @@ export async function readClaudeToken(execSecurity = exec, platform = process.pl
       if (token) return token;
     } catch { /* Headless installs can keep credentials in the file instead. */ }
   }
-  try { return parse(await readFile(claudeCredentialsFile(), "utf8")); } catch { return undefined; }
+  try { return parse(await readFile(claudeCredentialsFile(home), "utf8")); } catch { return undefined; }
 }
 
 /** Fetch live limits; any failure falls back to the local snapshot. */
@@ -441,9 +446,9 @@ export async function fetchClaudeUsage(token: string, fetchImpl: typeof fetch = 
   } finally { clearTimeout(timer); }
 }
 
-async function liveClaudeUsage(now: Date): Promise<AccountUsage | undefined> {
+async function liveClaudeUsage(now: Date, home?: ClaudeHome): Promise<AccountUsage | undefined> {
   if (typeof fetch !== "function") return undefined;
-  const token = await readClaudeToken();
+  const token = await readClaudeToken(exec, process.platform, home);
   if (!token) return undefined;
   try { return await fetchClaudeUsage(token, fetch, now); } catch { return undefined; }
 }
@@ -542,23 +547,29 @@ export async function readCopilotUsage(now = new Date(), run: (file: string, arg
 export class AccountUsageReader {
   private cached?: { at: number; value: AccountUsage };
   private pending?: Promise<AccountUsage>;
-  private claudeCached?: { at: number; value?: AccountUsage };
-  private claudePending?: Promise<AccountUsage | undefined>;
+  private claudeCached = new Map<string, { at: number; value?: AccountUsage }>();
+  private claudePending = new Map<string, Promise<AccountUsage | undefined>>();
   private spendingCached = new Map<boolean, { at: number; value: AccountUsage[] }>();
   private spendingPending = new Map<boolean, Promise<AccountUsage[]>>();
   constructor(private readCodex = readCodexLimits, private now = Date.now,
-              private readClaudeLive: (now: Date) => Promise<AccountUsage | undefined> = liveClaudeUsage,
+              private readClaudeLive: (now: Date, home: ClaudeHome) => Promise<AccountUsage | undefined> = liveClaudeUsage,
               private readOpenCode: (now: Date) => Promise<AccountUsage> = now => readOpenCodeUsage("opencode", now),
               private readOpenRouter: (now: Date) => Promise<AccountUsage | undefined> = liveOpenRouterUsage,
               private readOpenCodeGo: (now: Date) => Promise<AccountUsage> = readOpenCodeGoUsage,
-              private readCopilot: (now: Date) => Promise<AccountUsage> = readCopilotUsage) {}
-  async read(sources?: Set<string>): Promise<{ accounts: AccountUsage[] }> {
+              private readCopilot: (now: Date) => Promise<AccountUsage> = readCopilotUsage,
+              private platform: NodeJS.Platform = process.platform) {}
+  /** `allAccounts`: one Claude row per home. Otherwise only the default home's, as
+   *  before accounts existed, since older phones refuse two rows of one source. */
+  async read(sources?: Set<string>, allAccounts = false): Promise<{ accounts: AccountUsage[] }> {
     if (!this.cached || this.now() - this.cached.at >= 60_000) {
       this.pending ??= this.readCodex().then(value => { this.cached = { at: this.now(), value }; return value; }).finally(() => { this.pending = undefined; });
     }
     const codex = this.pending ?? Promise.resolve(this.cached!.value);
-    const [codexValue, claude, spending] = await Promise.all([codex, this.claude(), this.spending(sources?.has("copilot") ?? true)]);
-    return { accounts: [codexValue, claude, ...spending] };
+    // Every home, default first; the labels and keys are read once per poll.
+    const homes = allAccounts ? claudeHomes() : claudeHomes().slice(0, 1);
+    const [codexValue, claude, spending] = await Promise.all([codex, Promise.all(homes.map(async home => ({ ...await this.claude(home), account: claudeAccountRef(home) }))),
+      this.spending(sources?.has("copilot") ?? true)]);
+    return { accounts: [{ ...codexValue, account: CODEX_ACCOUNT }, ...claude, ...spending] };
   }
   private async spending(includeCopilot: boolean): Promise<AccountUsage[]> {
     const cached = this.spendingCached.get(includeCopilot);
@@ -576,23 +587,29 @@ export class AccountUsageReader {
     return this.spendingPending.get(includeCopilot) ?? cached!.value;
   }
   /** Live first, so the phone's minute-by-minute poll keeps Claude current
-   *  even when Claude Code is not running; the local snapshot is the backup. */
-  private async claude(): Promise<AccountUsage> {
-    if (!this.claudeCached || this.now() - this.claudeCached.at >= 60_000) {
-      const at = this.now();
-      this.claudePending ??= this.readClaudeLive(new Date(at))
-        .then(value => { this.claudeCached = { at, value }; return value; })
-        .catch(() => { this.claudeCached = { at, value: undefined }; return undefined; })
-        .finally(() => { this.claudePending = undefined; });
+   *  even when Claude Code is not running; the local snapshot is the backup.
+   *  Off macOS a non-default home reads its own credentials file; on macOS it
+   *  has no live read (the keychain item name for custom homes is unverified). */
+  private async claude(home: ClaudeHome): Promise<AccountUsage> {
+    if (home.isDefault || this.platform !== "darwin") {
+      const cached = this.claudeCached.get(home.dir);
+      if (!cached || this.now() - cached.at >= 60_000) {
+        const at = this.now();
+        if (!this.claudePending.has(home.dir)) this.claudePending.set(home.dir, this.readClaudeLive(new Date(at), home)
+          .then(value => { this.claudeCached.set(home.dir, { at, value }); return value; })
+          .catch(() => { this.claudeCached.set(home.dir, { at, value: undefined }); return undefined; })
+          .finally(() => { this.claudePending.delete(home.dir); }));
+      }
+      const pending = this.claudePending.get(home.dir);
+      const live = pending ? await pending : this.claudeCached.get(home.dir)?.value;
+      if (live?.windows.length) return live;
     }
-    const live = this.claudePending ? await this.claudePending : this.claudeCached?.value;
-    if (live?.windows.length) return live;
-    return this.snapshotClaude();
+    return this.snapshotClaude(home);
   }
-  private async snapshotClaude(): Promise<AccountUsage> {
+  private async snapshotClaude(home: ClaudeHome): Promise<AccountUsage> {
     let claude: AccountUsage = { source: "claude", windows: [], message: "Usage appears after Claude Code replies on this computer. Run phren bridge install if usage reporting is not set up yet." };
     try {
-      const handle = await open(claudeFile(), "r");
+      const handle = await open(claudeFile(home), "r");
       try {
         const stat = await handle.stat();
         if (!stat.isFile() || stat.size > 16_384) throw new Error("Invalid usage snapshot");
@@ -603,7 +620,7 @@ export class AccountUsageReader {
       } finally { await handle.close(); }
     } catch { /* No status-line report yet. Keep unavailable explicit. */ }
     try {
-      const handle = await open(claudeConfigFile(), "r");
+      const handle = await open(home.configFile, "r");
       try {
         const stat = await handle.stat();
         if (!stat.isFile() || stat.size > 16_777_216) throw new Error("Invalid Claude config");
@@ -639,12 +656,16 @@ export async function captureClaudeUsage(original: string): Promise<void> {
   let input = "";
   for await (const chunk of process.stdin) { input += chunk.toString(); if (Buffer.byteLength(input) > 1_048_576) return; }
   try {
+    // The home Claude runs in names the file; an unknown CLAUDE_CONFIG_DIR records nothing.
+    // Homes are resolved without this process's CLAUDE_CONFIG_DIR: that is the account's own dir here, not the default.
+    const home = claudeHomeOfEnv(process.env.CLAUDE_CONFIG_DIR, { ...process.env, CLAUDE_CONFIG_DIR: undefined });
+    if (!home) throw new Error("Unknown Claude home");
     const snapshot = claudeUsage(JSON.parse(input));
     // Persist only normalized percentages/reset times; never session content.
     const rate_limits = Object.fromEntries(snapshot.windows.map(w => [w.id, {
       used_percentage: w.usedPercent, resets_at: w.resetsAt ? Date.parse(w.resetsAt) / 1000 : undefined,
     }]));
-    await atomicInPrivateDir(claudeFile(), JSON.stringify({ rate_limits, updatedAt: snapshot.updatedAt }));
+    await atomicInPrivateDir(claudeFile(home), JSON.stringify({ rate_limits, updatedAt: snapshot.updatedAt }));
   } catch { /* Status line rendering must survive unavailable usage storage. */ }
   const previous = object(JSON.parse(Buffer.from(original, "base64").toString()));
   if (typeof previous.command === "string") {

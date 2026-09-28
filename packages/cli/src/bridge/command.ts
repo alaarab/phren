@@ -13,6 +13,9 @@ import { AccountUsageReader, captureClaudeUsage, type AccountUsage } from "./usa
 import { acceptComputer, enrollComputer } from "./computers.js";
 import { addPeerFromLink, discoverComputers, linkComputer } from "./link.js";
 import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts, FANOUTS_ARCHIVE_USAGE, parseFanoutArchiveFlags } from "./fanouts.js";
+import { harnessInventory } from "./harnesses.js";
+import { addClaudeAccount } from "./claude-account-setup.js";
+import { setAccountLabel } from "./claude-accounts.js";
 import { ModelCatalog, type AgentModel } from "./models.js";
 
 const LINK_USAGE = "Usage: phren bridge link <ssh-host> [--name <its name here>] [--as <this computer's name there>] [--back-address <address it dials>] [--yes]";
@@ -25,6 +28,25 @@ export async function runBridge(args: string[], version: string): Promise<number
         await acceptComputer(args[1], await readFile(args[3], "utf8"));
         console.log(`Enrolled ${args[1]} for Phren Hook.`);
       } else throw new Error("Usage: phren bridge enroll-computer <name> [--accept <public-key-file>]");
+      break;
+    }
+    case "accounts": {
+      if (args.length === 1) {
+        for (const harness of (await harnessInventory()).harnesses) {
+          console.log(`${harness.source}: ${harness.installed ? `installed ${harness.version ?? ""}`.trim() : "not installed"}, ${harness.usable ? "usable" : `not usable (${harness.reason ?? "unknown"})`}`);
+          for (const account of harness.accounts ?? []) console.log(`  ${account.id}  ${account.label}  ${account.signedIn ? "signed in" : "not signed in"}  ${account.usable ? "usable" : `not usable (${account.reason ?? "unknown"})`}${account.plan ? `  plan ${account.plan}` : ""}`);
+        }
+      } else if (args[1] === "add" && args[2] && !args[2].startsWith("-")) {
+        const at = args.indexOf("--label");
+        if (at !== -1 && !args[at + 1]) throw new Error("Usage: phren bridge accounts add <slug> [--label <name>]");
+        const added = await addClaudeAccount(args[2], { label: at === -1 ? undefined : args[at + 1] });
+        console.log(`${added.created ? "Created" : "Updated"} ${added.dir}${added.linked.length ? `, linked ${added.linked.join(", ")} from the default home` : ""}.`);
+        console.log(`Next: CLAUDE_CONFIG_DIR=${added.dir} claude   # finish first-run setup, run /login with this account, then /exit`);
+        console.log(`Check: CLAUDE_CONFIG_DIR=${added.dir} claude auth status --text; phren bridge accounts`);
+      } else if (args[1] === "label" && args.length >= 4) {
+        await setAccountLabel(args[2], args.slice(3).join(" "));
+        console.log(`Labeled ${args[2]} "${args.slice(3).join(" ").trim()}".`);
+      } else throw new Error("Usage: phren bridge accounts [add <slug> [--label <name>] | label <id> <label>]");
       break;
     }
     case "discover": {
@@ -133,7 +155,7 @@ export async function runBridge(args: string[], version: string): Promise<number
       if (push.warning) console.error(`warning: ${push.warning}`);
       break;
     }
-    default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall|enroll-computer|discover|link|fanouts archive|speech-key set|speech-voice>");
+    default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall|enroll-computer|accounts|discover|link|fanouts archive|speech-key set|speech-voice>");
   }
   return 0;
 }
