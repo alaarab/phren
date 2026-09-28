@@ -31,7 +31,7 @@ import { BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCO
 import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
 import type { TabActivityStore } from "./tab-activity.js";
-import { childAgentTree, historicalImage, publicChildAgents, refreshTranscript, transcriptPath } from "./transcripts.js";
+import { childAgentTree, historicalImage, publicChildAgents, refreshTranscript, targetTranscriptPath } from "./transcripts.js";
 import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import type { ModelCatalog } from "./models.js";
 import type { ModelSwitcher } from "./model-switch.js";
@@ -408,7 +408,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/transcripts/blob": {
             const target = targetFromURL(url); await validateTarget(target);
             const inner = url.searchParams.get("inner");
-            const bytes = await historicalImage(await transcriptPath(target.source, target.session), Number(url.searchParams.get("line")), Number(url.searchParams.get("block")), target.source, inner === null ? undefined : Number(inner));
+            const bytes = await historicalImage(await targetTranscriptPath(target), Number(url.searchParams.get("line")), Number(url.searchParams.get("block")), target.source, inner === null ? undefined : Number(inner));
             response.setHeader("Content-Type", "application/octet-stream"); response.end(bytes); return;
           }
           case "/v1/transcripts/history": {
