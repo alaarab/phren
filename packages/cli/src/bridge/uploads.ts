@@ -75,3 +75,15 @@ export async function uploadImage(requested: string): Promise<Buffer> {
   if (!imageBytes(bytes)) throw missing;
   return bytes;
 }
+
+/** A file the phone uploaded for this conversation, by the path `/v1/upload`
+ * returned: it must resolve to a regular file inside uploads/<session>/. */
+export async function sessionUpload(session: string, requested: string): Promise<string> {
+  const refused = new BridgeError(400, "An attachment is not one of this conversation's uploads. Attach it again.");
+  if (!requested || requested.length > 4096 || !path.isAbsolute(requested)) throw refused;
+  const folder = await realpath(path.join(bridgeRoot(), "uploads", session)).catch(() => undefined);
+  const file = await realpath(requested).catch(() => undefined);
+  if (!folder || !file || !file.startsWith(folder + path.sep)) throw refused;
+  if (!(await stat(file)).isFile()) throw refused;
+  return file;
+}

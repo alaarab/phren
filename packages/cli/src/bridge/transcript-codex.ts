@@ -95,8 +95,16 @@ export function visibleCodexEvent(raw: Json): Json | undefined {
     if (p.role === "user" && harnessPreamble(text)) return undefined;
     // An answer to an async question reads as the question and its answer,
     // not as the envelope Codex's TUI (or the Hook) sent it in.
-    const answered = p.role === "user" ? readableQuestionReply(text) : undefined;
-    return answered ? { ...raw, payload: { ...p, content: [{ type: "input_text", text: answered }] } } : raw;
+    // Only the reply's own block changes: attached files and images that
+    // came with the answer stay as their own blocks.
+    if (p.role === "user" && Array.isArray(p.content) && readableQuestionReply(text) !== undefined) {
+      return { ...raw, payload: { ...p, content: objects(p.content).map(block => {
+        const readable = typeof block.text === "string" ? readableQuestionReply(block.text) : undefined;
+        return readable === undefined ? block : { ...block, text: readable };
+      }) } };
+    }
+    const answered = p.role === "user" && typeof p.content === "string" ? readableQuestionReply(p.content) : undefined;
+    return answered ? { ...raw, payload: { ...p, content: answered } } : raw;
   }
   if (["function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output"].includes(String(p.type))) return raw;
   return undefined;

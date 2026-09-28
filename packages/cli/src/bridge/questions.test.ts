@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { appendFile, copyFile, mkdir, mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { appendFile, copyFile, mkdir, mkdtemp, realpath, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -164,10 +164,10 @@ sleep 30
 describe("Codex questions on the Hook's own app-server", () => {
   const entry = { id: "0123456789ab", threadId: target.session } as CodexServerEntry;
   function served(parked: PendingServerRequest[] = []) {
-    const steered: string[] = [], answered: { requestId: unknown; result: unknown }[] = [];
+    const steered: string[] = [], extras: unknown[][] = [], answered: { requestId: unknown; result: unknown }[] = [];
     const codex: ServedCodex = {
       forTarget: where => where.pane === target.pane ? entry : undefined,
-      steer: async (_entry, text) => { steered.push(text); return { turnId: "turn-1" }; },
+      steer: async (_entry, text, extra = []) => { steered.push(text); extras.push(extra); return { turnId: "turn-1" }; },
       questions: () => parked,
       answerQuestion: (_entry, requestId, result) => {
         const index = parked.findIndex(request => request.requestId === requestId);
@@ -175,7 +175,7 @@ describe("Codex questions on the Hook's own app-server", () => {
         parked.splice(index, 1); answered.push({ requestId, result }); return true;
       },
     };
-    return { codex, steered, answered };
+    return { codex, steered, extras, answered };
   }
 
   it("clears a question Codex's own reply answers and shows that reply as the question and answer", async () => {
@@ -185,6 +185,10 @@ describe("Codex questions on the Hook's own app-server", () => {
     expect(await pendingAsyncQuestions(state.file)).toEqual([]);
     expect(readableQuestionReply(reply)).toBe("> Which screens?\n\nBoth");
     expect(readableQuestionReply("Both")).toBeUndefined();
+    // Codex joins an answer's attached files into the same message.
+    const attached = `${reply}\nAttached files on this computer:\n/u/shot.png\n<image name=[Image #1] path="/u/shot.png">\n</image>`;
+    await transcript([call, accepted, message(attached)]);
+    expect(await pendingAsyncQuestions(state.file)).toEqual([]);
   });
 
   it("answers an async question in the running turn, as Codex's TUI does, never through codex queue", async () => {
@@ -232,5 +236,38 @@ describe("Codex questions on the Hook's own app-server", () => {
     expect(serverQuestion({ requestId: 1, method: "item/tool/requestUserInput", params: { questions: [{ id: "k", header: "Key", question: "API key?", isSecret: true }] } })).toBeUndefined();
     expect(serverQuestion({ requestId: 2, method: "mcpServer/elicitation/request", params: { mode: "url", message: "Sign in", url: "https://example.com", elicitationId: "x" } })).toBeUndefined();
     expect(serverQuestion({ requestId: 3, method: "mcpServer/elicitation/request", params: { mode: "form", message: "Pick", requestedSchema: { properties: { tags: { type: "array", items: { enum: ["a"] } } } } } })).toBeUndefined();
+  });
+
+  async function uploads(...names: string[]): Promise<string[]> {
+    const folder = path.join(directory, "uploads", target.session);
+    await mkdir(folder, { recursive: true });
+    return Promise.all(names.map(async name => { const file = path.join(folder, name); await writeFile(file, "x"); return realpath(file); }));
+  }
+
+  it("sends an async answer's attached pictures as images and names every file", async () => {
+    const [picture, notes] = await uploads("1-shot.png", "2-notes.txt");
+    const { codex, steered, extras } = served();
+    await new CodexQuestions(path.join(directory, "missing-codex"), codex).answer(target, { toolUseId: "call-1", answers: [{ optionIndexes: [0] }], attachments: [picture, notes] });
+    expect(steered).toEqual([formatQuestionReply("call-1", [{ question: "Which screens?", answer: "Both" }])]);
+    expect(extras[0]).toEqual([{ type: "text", text: `Attached files on this computer:\n${picture}\n${notes}`, text_elements: [] }, { type: "localImage", path: picture }]);
+  });
+
+  it("adds attachments to a blocking answer and to a codex queue reply, and refuses others", async () => {
+    const [picture] = await uploads("1-shot.png");
+    const asked: PendingServerRequest = { requestId: 9, method: "item/tool/requestUserInput", threadId: target.session, params: { questions: [{ id: "why", header: "Why", question: "What went wrong?", isOther: true, options: null }] } };
+    const { codex, answered } = served([asked]);
+    await new CodexQuestions(path.join(directory, "missing-codex"), codex).answer(target, { toolUseId: "request:9", answers: [{ optionIndexes: [], text: "See the screenshot" }], attachments: [picture] });
+    expect(answered[0].result).toEqual({ answers: { why: { answers: [`See the screenshot\n\nAttached files on this computer:\n${picture}`] } } });
+
+    const outside = path.join(directory, "elsewhere.png"); await writeFile(outside, "x");
+    await expect(new CodexQuestions(path.join(directory, "missing-codex"), served().codex).answer(target, { toolUseId: "call-1", answers: [{ optionIndexes: [0] }], attachments: [outside] })).rejects.toThrow("not one of this conversation's uploads");
+    const form: PendingServerRequest = { requestId: "e", method: "mcpServer/elicitation/request", params: { mode: "form", message: "Pick", requestedSchema: { properties: { name: { type: "string" } } } } };
+    await expect(new CodexQuestions(path.join(directory, "missing-codex"), served([form]).codex).answer(target, { toolUseId: 'request:"e"', answers: [{ optionIndexes: [], text: "x" }], attachments: [picture] })).rejects.toThrow("takes no attachments");
+  });
+
+  it.skipIf(process.platform === "win32")("names attached files under a codex queue reply for a pane not on the Hook's server", async () => {
+    const [picture] = await uploads("1-shot.png");
+    await new CodexQuestions(executable).answer(target, { toolUseId: "call-1", answers: [{ optionIndexes: [0] }], attachments: [picture] });
+    expect(JSON.parse((await readFile(path.join(directory, "sent.jsonl"), "utf8")).trim()).at(-1)).toBe(`> Which screens?\n\nBoth\n\nAttached files on this computer:\n${picture}`);
   });
 });

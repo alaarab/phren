@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { type AppServerClient, type AppServerRequestId, AppServerRpcError, connectAppServer, type PendingServerRequest, spawnAppServer } from "./codex-app-server.js";
+import { type AppServerClient, type AppServerRequestId, AppServerRpcError, type AppServerTurnInput, connectAppServer, type PendingServerRequest, spawnAppServer } from "./codex-app-server.js";
 import { logger } from "../logger.js";
 import { atomic, bridgeRoot, id, type Json, object, objects, serverName, type Target } from "./protocol.js";
 
@@ -244,10 +244,10 @@ export class CodexServers {
   /** Input for the thread's running turn (`turn/steer`, as the TUI sends an
    * async question's answer), or a new turn when none is running or the one
    * it knew has ended. A refused steer sent nothing, so starting is safe. */
-  async steer(entry: CodexServerEntry, text: string): Promise<{ turnId: string }> {
+  async steer(entry: CodexServerEntry, text: string, extra: AppServerTurnInput[] = []): Promise<{ turnId: string }> {
     if (!entry.threadId) throw new CodexServerUnavailable("The Codex pane has not started its thread yet.");
     const client = await this.client(entry);
-    const input = [{ type: "text", text, text_elements: [] }];
+    const input = [{ type: "text", text, text_elements: [] }, ...extra];
     const running = this.live.get(entry.id)?.entry.activeTurn;
     if (running) {
       try { return await client.turnSteer({ threadId: entry.threadId, expectedTurnId: running, input }); }

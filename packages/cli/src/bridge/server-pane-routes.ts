@@ -511,6 +511,8 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
       : z.string().uuid().parse(data.actionId);
     await agentHooks.answer(target, actionId, data.decision, data.updatedInput); result = { ok: true };
   } else if (url.pathname === "/v1/questions/answer") {
+    // Only a Codex answer can carry the phone's uploads (codex-questions).
+    if (target.source !== "codex" && Array.isArray(data.attachments) && data.attachments.length) throw new BridgeError(400, "This question takes no attachments.");
     if (target.source === "claude") {
       // Claude's AskUserQuestion, answered in its terminal dialog: the
       // phone names the questions it shows, and the Hook answers only a
