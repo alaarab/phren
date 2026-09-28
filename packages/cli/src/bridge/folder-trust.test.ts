@@ -46,7 +46,8 @@ describe("folder trust", () => {
     const written = JSON.parse(await readFile(claudeFile, "utf8"));
     expect(written).toEqual({ ...original, projects: { ...original.projects,
       [claudeProjectKey(project)]: { allowedTools: ["Read"], hasClaudeMdExternalIncludesApproved: false, hasTrustDialogAccepted: true } } });
-    expect((await stat(claudeFile)).mode & 0o777).toBe(0o640);
+    // Windows has no POSIX modes to keep.
+    if (process.platform !== "win32") expect((await stat(claudeFile)).mode & 0o777).toBe(0o640);
     // Nothing left behind: no lock directory, no temporary file.
     expect((await readdir(path.dirname(claudeFile))).sort()).toEqual([".claude.json"]);
     expect(await ensureClaudeFolderTrusted(project, env)).toBe("already");
