@@ -2,12 +2,15 @@ import { z } from "zod";
 import { computerName } from "./computers.js";
 import { hookRequest } from "./client.js";
 import { projectName } from "./dispatch.js";
-import { grantLabel, listGrants, matchGrant } from "./grants.js";
+import { grantLabel, findGrant } from "./grants.js";
 import { hookPeers, optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { BridgeError, errorCode, object, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
 import { findPhrenPath } from "../phren-paths.js";
 import { listMachines } from "../profile-store.js";
 import { localNames } from "./computer-names.js";
+import { computerLabel, foldComputers, type PeerFacts } from "./computer-identity.js";
+
+export { computerLabel };
 
 const promptText = z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value));
 
@@ -63,7 +66,7 @@ export async function handOff(input: unknown, options: { deliveryId?: string } =
   const resolved = data.target ? undefined : await targetFromOverview(request, data.session!, peer?.server);
   const target = data.target ?? resolved!.target;
   if (peer && target.server !== peer.server) throw new BridgeError(400, "The target belongs to a different Herdr server on that computer.");
-  const grant = matchGrant(await listGrants(), { action: "hand_off", project: data.project, computer: data.computer });
+  const grant = await findGrant({ action: "hand_off", project: data.project, computer: data.computer });
   const result = await request("/v1/prompt", { target, text: data.text, ...(options.deliveryId ? { deliveryId: options.deliveryId } : {}) });
   const delivered = result.ok === true && result.deliveryUncertain !== true;
   // A session id was resolved from the overview already; an explicit target
@@ -103,40 +106,26 @@ function sessionsFrom(overview: Json, computer: string, local: boolean, now = Da
   return sessions;
 }
 
-/** A computer name's first DNS label, lowercased: `Desk`, `desk.local` and
- * `Desk.example.net` are one computer. DHCP and Bonjour add domains to the
- * same machine's name, so full names do not identify a computer. */
-export function computerLabel(name: string): string {
-  const value = name.trim().toLowerCase();
-  // An IPv4 address is one name, not a label and a domain.
-  return /^\d+(\.\d+){3}$/.test(value) ? value : value.split(".")[0] ?? "";
-}
-
 /** A registered computer this Hook cannot see, with the other names the store
  * registers it under. */
 export interface NotLinkedComputer { name: string; aliases?: string[] }
 
 /** Computers the store registers (machines.yaml) that this Hook has no
- * verified connection to, so their sessions cannot be listed from here.
- * Names are compared by first label against this computer's names and each
- * peer's name, address and aliases; names sharing a label collapse into one
- * entry. */
-export function notLinkedComputers(store: string | null, here: string, linked: readonly string[]): NotLinkedComputer[] {
+ * verified connection to, so their sessions cannot be listed from here: the
+ * unlinked rows of `foldComputers`, which folds names by first label and by
+ * shared profile into the computers it can see. */
+export function notLinkedFrom(store: string | null, here: string, peers: readonly PeerFacts[]): NotLinkedComputer[] {
   if (!store) return [];
   const machines = listMachines(store);
   if (!machines.ok) return [];
-  const known = new Set([here, ...localNames(), ...linked].map(computerLabel).filter(Boolean));
-  const groups = new Map<string, string[]>();
-  for (const name of Object.keys(machines.data)) {
-    const label = computerLabel(name);
-    if (!label || known.has(label)) continue;
-    groups.set(label, [...(groups.get(label) ?? []), name]);
-  }
-  return [...groups.values()].map(names => {
-    // The shortest name leads (usually the bare label); the rest are aliases.
-    const [name, ...aliases] = [...names].sort((a, b) => a.length - b.length || a.localeCompare(b));
-    return aliases.length ? { name, aliases } : { name };
-  }).sort((a, b) => a.name.localeCompare(b.name));
+  return foldComputers({ local: { names: [here, ...localNames()] }, peers, machines: machines.data })
+    .filter(row => !row.linked).map(row => row.aliases.length ? { name: row.name, aliases: row.aliases } : { name: row.name });
+}
+
+/** As `notLinkedFrom` for a flat list of names the linked computers answer
+ * to, each standing for its own computer. */
+export function notLinkedComputers(store: string | null, here: string, linked: readonly string[]): NotLinkedComputer[] {
+  return notLinkedFrom(store, here, linked.map(name => ({ name, address: name })));
 }
 
 export interface LiveSessions {
@@ -159,20 +148,20 @@ export async function listLiveSessions(options: { store?: string | null } = {}):
   const unreachable: LiveSessions["unreachable"] = [];
   // Names each peer answers to (its hostname, Bonjour name), so a computer
   // registered under another of its names is not reported as unlinked.
-  const peerNames: string[] = [];
+  const peerNames = new Map<string, string[]>();
   await Promise.all(peers.map(async peer => {
     try {
       const route = peer.server && peer.server !== "default" ? `/v1/workspaces?server=${encodeURIComponent(peer.server)}` : "/v1/workspaces";
       const [overview, health] = await Promise.all([peerRequest(peer, route), peerRequest(peer, "/v1/health").catch(() => ({}))]);
       sessions.push(...sessionsFrom(overview, peer.name, false));
       const computer = object(object(health).computer);
-      for (const name of [computer.name, ...(Array.isArray(computer.aliases) ? computer.aliases : [])]) if (typeof name === "string") peerNames.push(name);
+      peerNames.set(peer.name, [computer.name, ...(Array.isArray(computer.aliases) ? computer.aliases : [])].filter((name): name is string => typeof name === "string"));
     } catch (error) {
       const code = errorCode(error);
       unreachable.push({ computer: peer.name, error: error instanceof Error ? error.message : "Unreachable.", ...(code ? { code } : {}) });
     }
   }));
   const store = options.store !== undefined ? options.store : findPhrenPath();
-  const notLinked = notLinkedComputers(store, here, [...peers.flatMap(peer => [peer.name, peer.address]), ...peerNames]);
+  const notLinked = notLinkedFrom(store, here, peers.map(peer => ({ name: peer.name, address: peer.address, names: peerNames.get(peer.name) })));
   return { sessions, unreachable, notLinked, enrolled: peers.length, ...(peerError ? { peerError } : {}) };
 }

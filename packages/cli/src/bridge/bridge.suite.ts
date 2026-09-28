@@ -2465,6 +2465,20 @@ schedules:
       expect((await api("/v1/conductor/grants", { scope: "global" }, "DELETE")).status).toBe(404);
     });
 
+    it("lists one row per computer on GET /v1/computers, this computer first and an unreachable peer marked", async () => {
+      const health = (await api("/v1/health")).data.computer;
+      await writeFile(path.join(root, "bridge/hooks.yaml"), JSON.stringify({ version: 1, computers: [
+        { name: "Linuxbox", address: "omarchy", username: "sam", port: 22, server: "default", hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPKDk8cewh74xDIccwQz/N4V05hPT+bdp5fEii+pzf9B" },
+      ] }), { mode: 0o600 });
+      const { status, data } = await api("/v1/computers");
+      expect(status).toBe(200);
+      expect(data.computers.length).toBeLessThanOrEqual(64);
+      expect(data.computers[0]).toMatchObject({ id: health.id, local: true, linked: true, reachable: true });
+      expect(data.computers[0].name).toBe(health.aliases.find((name: string) => !name.includes(".")) ?? health.aliases[0]);
+      // No dispatch key is enrolled in the fixture, so the peer cannot answer.
+      expect(data.computers[1]).toEqual({ name: "Linuxbox", aliases: ["omarchy"], local: false, linked: true, reachable: false });
+    });
+
     it("rejects DELETE on a path that is not the grants route", async () => {
       expect((await api("/v1/dispatch", undefined, "DELETE")).status).toBe(404);
     });

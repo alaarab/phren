@@ -243,9 +243,32 @@ also accepts `project` for project-scoped grant matching.
 
 Grants live in private `<bridge>/conductor.yaml`, outside the synced store.
 A grant specifies `scope: global` or `project:<slug>`, one or both actions
-`dispatch` and `hand_off`, optional enrolled computer names and an optional
-expiry. Expired grants do not match. A computer restriction does not cover an
+`dispatch` and `hand_off`, optional computer names and an optional expiry.
+Expired grants do not match. A computer restriction does not cover an
 unspecified computer or `anywhere` before a peer has been selected.
+
+`computers` accepts any name a computer answers to: its hooks.yaml name, its
+hostname or Bonjour name, a peer's address, or a name machines.yaml registers
+for it (see `GET /v1/computers` below). A grant for `Squids-Mac-mini.local`
+matches a dispatch to `Mac`, the same computer. Adding a grant stores each name
+as the computer's canonical one (the hooks.yaml name, or this computer's short
+hostname) and keeps names it cannot resolve as written; `grants list` and
+`GET /v1/conductor/grants` show canonical names, and grants already in the file
+keep matching under their old spelling.
+
+### Computers
+
+`GET /v1/computers` returns one row per real computer:
+`{ id?, name, aliases, profile?, local, linked, reachable? }`, this computer
+first, then linked peers, then unlinked, alphabetical inside each group and at
+most 64 rows. `name` is what `dispatch`, `hand_off` and grants accept. A
+machines.yaml name joins a computer when its first label matches any name that
+computer has, or when it shares a profile with names already folded into
+exactly that one computer; a profile two computers claim folds nothing. Names
+left over become unlinked rows, one per label or shared profile, shortest name
+first. `reachable` is whether the peer's Hook answered its health read within
+8 seconds; it is absent on unlinked rows. `live_sessions` reports the same
+unlinked rows as `notLinked`.
 
 ```sh
 phren conductor grants list
