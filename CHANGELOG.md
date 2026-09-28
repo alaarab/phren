@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A dispatched or phone-opened Codex that Herdr has not finished starting gets its first prompt once it is ready. Herdr refused it with "agent w34:p1 is not an active named agent" (`agent_not_ready`, nothing typed). The Hook gave up at once, so the dispatch came back "uncertain" and the worker sat at its prompt with no brief. The first prompt now retries that refusal for up to 20 s, as scheduled runs already did.
 - Dispatch resolves a project to this computer's folder the way the rest of phren does: the store's `sourcePaths` entry for this machine wins over the shared `sourcePath`, and with neither here a `~/Projects/<name>` git checkout is used. Linuxbox had refused project `phren` with "Project is not on this computer" even after `sourcePaths: omarchy:` was added.
 - A dispatched Codex or Claude that has no conversation until its first prompt now gets its brief on its starting binding. Before, the dispatch waited 15 s for a session and left the pane idle with the brief unsent and the receipt "uncertain".
 - A dispatched agent held on a startup screen (Claude's "Quick safety check: do you trust this folder", a sign-in) is reported as `failed` with a `needs-you` return that names the pane, instead of "uncertain". The brief is not sent and the Hook never answers the screen: its default choice is "No, exit".

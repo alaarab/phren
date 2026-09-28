@@ -1261,8 +1261,12 @@ schedules:
       const starting = { ...location, source: "claude", starting: true, startingToken: pane.startingToken };
       const enters = () => commands.filter(c => c.method === "agent.send_keys" && JSON.stringify(c.params.keys) === '["enter"]').length;
       const before = enters();
+      // Herdr refuses the first prompts while it finishes starting the agent
+      // ("not an active named agent", seen with Codex 2026-09-28); the brief waits.
+      promptNotReady = 2;
       expect((await api("/v1/prompt", { target: starting, text: "A long dispatched brief" })).data)
         .toEqual({ ok: true, deliveryUncertain: true, unsubmitted: true });
+      expect(commands.filter(c => c.method === "agent.prompt" && c.params.text === "A long dispatched brief")).toHaveLength(3);
       expect(enters()).toBe(before + 1);
       // A worker that started on its brief is never sent another Enter.
       agentStatus = "working";
