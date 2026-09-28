@@ -128,6 +128,11 @@ context-window limit from a bounded transcript tail, caches unchanged files,
 and limits concurrent lookups. Optional enrichment returns partial results after
 1.5 seconds; later requests omit metrics while the bounded pending work drains.
 Missing limits, ambiguous panes, and unavailable observations omit the metric.
+
+Claude rows in workspace snapshots, the overview socket and `GET /v1/workspaces/panes`
+carry `account: { id, label, key }` when the Hook knows which Claude account the
+pane runs under: the home of the transcript the pane holds open or that its hook
+payload names, else the account recorded at launch (see [accounts](accounts.md)).
 No extra request per iPhone row is needed.
 
 - Codex, Claude Code, and Copilot conversations, with exact pane/session identity.
@@ -224,6 +229,13 @@ directory of a session's working tree, with descendant file counts and a
 snapshot version. Its bounded cache expires after two seconds; status refresh
 and mutations invalidate it. Indexed projects add per-file change chips
 without making an index a requirement for file browsing.
+
+`GET /v1/harnesses` reports which harnesses (Claude, Codex, OpenCode, Copilot) are
+installed and usable on this computer, and each Claude account's sign-in state; the
+same list rides on `GET /v1/dispatch/capacity` as `harnesses`. `phren bridge accounts`
+prints it, `phren bridge accounts add <slug> [--label <name>]` creates another Claude
+home, and `phren bridge accounts label <id> <label>` names one. See
+[Accounts](accounts.md).
 
 `GET /v1/models?source=claude` reads Claude Code's own cached model catalogue,
 preserving names, order and default and filtering out rows requiring a newer

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { objects, type Json } from "./protocol.js";
+import { paneAccountKey, recordPaneAccount } from "./pane-accounts.js";
 
 // Git never answers: a starved machine where a branch read outlasts the phone's patience.
 vi.mock("./projects.js", async importOriginal => ({ ...await importOriginal<object>(), repositoryBranch: () => new Promise<never>(() => {}) }));
@@ -31,5 +32,21 @@ describe("the overview on a loaded computer", () => {
     // The chat still opens on the exact conversation; the branch simply isn't there yet.
     expect(working.target).toMatchObject({ pane: "w13:p2", source: "claude", session: "session-w13:p2" });
     expect(working).not.toHaveProperty("branch");
+  });
+
+  it("puts the Claude account on a row whose pane has one recorded", async () => {
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w13:p2")!;
+    recordPaneAccount(paneAccountKey("default", pane.pane_id), "default", String(pane.terminal_id ?? ""));
+    const read = workspacesReader({
+      modules: { has: () => false } as never, info: {} as never,
+      agentHooks: { overview: { renew() {} }, pendingPanes: () => new Set<string>() } as never,
+      journal: { record: async () => {} } as never, tabActivity: { observe: async () => new Map() } as never,
+      contextUsage: { read: async () => new Map() } as never,
+    });
+    const answer = await read("default", snapshot, false);
+    const tabs = objects(answer.groups).flatMap(group => objects(group.children));
+    const row = tabs.find(tab => objects(snapshot.panes).some(p => p.pane_id === "w13:p2" && p.tab_id === tab.id))!;
+    expect(row.account).toMatchObject({ id: "default" });
+    expect(row.account).toHaveProperty("key");
   });
 });

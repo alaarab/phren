@@ -1,7 +1,8 @@
 import { readdir, realpath, lstat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { codexHome, claudeConfigDir } from "../home-paths.js";
+import { codexHome } from "../home-paths.js";
+import { claudeAccountRef, claudeHomeOfPath, claudeHomes, type AccountRef } from "./claude-accounts.js";
 import path from "node:path";
 import { withTranscriptIndex } from "./transcript-index.js";
 import { BridgeError, object, objects, sessionId, type Json, type Provider, type Target } from "./protocol.js";
@@ -200,25 +201,41 @@ async function findPatternMatches(root: string, pattern: string): Promise<string
   return matches;
 }
 
-export async function transcriptPath(source: Provider, session: string): Promise<string> {
+/** The account a resolved Claude transcript belongs to, by the home holding it. */
+export function transcriptAccount(file: string): AccountRef | undefined {
+  const home = claudeHomeOfPath(file);
+  return home ? claudeAccountRef(home) : undefined;
+}
+
+/** `account` (a Claude home id) settles a session id found in more than one home. */
+export async function transcriptPath(source: Provider, session: string, account?: string): Promise<string> {
   if (!sessionId.safeParse(session).success) throw new BridgeError(400, "Invalid conversation identity.");
-  const base = source === "codex" ? path.join(codexHome(), "sessions")
-    : source === "claude" ? path.join(claudeConfigDir(), "projects")
-    : source === "phren" || source === "opencode" ? path.join(phrenStoreRoot(), ".runtime", "sessions")
-    : path.join(process.env.COPILOT_HOME || path.join(homedir(), ".copilot"), "session-state");
-  const root = await realpath(base).catch(() => base);
+  const bases: { id?: string; base: string }[] = source === "codex" ? [{ base: path.join(codexHome(), "sessions") }]
+    : source === "claude" ? claudeHomes().map(home => ({ id: home.id, base: path.join(home.dir, "projects") }))
+    : source === "phren" || source === "opencode" ? [{ base: path.join(phrenStoreRoot(), ".runtime", "sessions") }]
+    : [{ base: path.join(process.env.COPILOT_HOME || path.join(homedir(), ".copilot"), "session-state") }];
   const pattern = source === "codex" ? `*/*/*/rollout-*-${session}.jsonl` : source === "claude" ? `*/${session}.jsonl`
     : source === "phren" ? `session-${session}.events.jsonl` : source === "opencode" ? `opencode-${session}.events.jsonl` : `${session}/events.jsonl`;
-  const matches = await findPatternMatches(root, pattern).catch(() => [] as string[]);
-  if (matches.length !== 1) {
+  const found: { id?: string; root: string; match: string }[] = [];
+  for (const entry of bases) {
+    const root = await realpath(entry.base).catch(() => entry.base);
+    const matches = await findPatternMatches(root, pattern).catch(() => [] as string[]);
+    for (const match of matches) found.push({ id: entry.id, root, match });
+  }
+  let chosen = found;
+  if (source === "claude" && found.length > 1 && account) {
+    const preferred = found.filter(item => item.id === account);
+    if (preferred.length) chosen = preferred;
+  }
+  if (chosen.length !== 1) {
     // Codex 0.155 keeps new threads only in its sqlite store; the Hook
     // materializes those into a rollout-shaped file of its own.
     const materialized = source === "codex" ? await materializeCodexThread(session) : undefined;
     if (materialized) return materialized;
     throw new BridgeError(404, "The transcript is not available for this conversation.", { code: "transcript-unavailable" });
   }
-  const file = await realpath(matches[0]);
-  if (!file.startsWith(root + path.sep)) throw new BridgeError(403, "The transcript points outside its agent folder.");
+  const file = await realpath(chosen[0].match);
+  if (!file.startsWith(chosen[0].root + path.sep)) throw new BridgeError(403, "The transcript points outside its agent folder.");
   return file;
 }
 
