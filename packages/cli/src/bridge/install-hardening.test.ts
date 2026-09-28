@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readlink, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 const state = vi.hoisted(() => ({ home: "", exec: vi.fn(), health: vi.fn() }));
@@ -83,7 +83,7 @@ it.skipIf(process.platform === "win32")("reconciles Hook and Git owners independ
   await reconcileModuleHooks(store);
   let config = JSON.parse(await readFile(settings, "utf8"));
   expect(config.hooks.PostToolUse).toEqual([own]);
-  expect(JSON.stringify(config.hooks.SessionStart)).toContain("bridge-hook.mjs");
+  expect(JSON.stringify(config.hooks.SessionStart)).toContain("claude-hook.mjs");
   setModuleEnabled(store, "hook", false);
   await reconcileModuleHooks(store);
   config = JSON.parse(await readFile(settings, "utf8"));
@@ -94,8 +94,83 @@ it.skipIf(process.platform === "win32")("reconciles Hook and Git owners independ
   setModuleEnabled(store, "git", true);
   await reconcileModuleHooks(store);
   config = JSON.parse(await readFile(settings, "utf8"));
-  expect(JSON.stringify(config.hooks.PostToolUse)).toContain("bridge-hook.mjs");
+  expect(JSON.stringify(config.hooks.PostToolUse)).toContain("claude-hook.mjs");
   expect(config.hooks.PostToolUse[0]).toEqual(own);
+});
+
+const quoted = (file: string) => `'${file.replace(/'/g, "'\\''")}'`;
+const forwarder = () => `${quoted(process.execPath)} ${quoted(path.join(process.env.PHREN_BRIDGE_HOME!, "current/claude-hook.mjs"))} claude`;
+const claudeSettings = () => path.join(process.env.CLAUDE_CONFIG_DIR!, "settings.json");
+/** Serves `version` from health and lets the readiness wait run without delays. */
+function liveVersion(version: { value: string }) {
+  vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: () => void) => { queueMicrotask(callback); return {} as NodeJS.Timeout; }) as typeof setTimeout);
+  state.health.mockImplementation(async () => ({ version: version.value }));
+}
+
+it.skipIf(process.platform === "win32")("moves Claude callbacks an older install wrote onto the forwarder with 15 s limits", async () => {
+  const root = process.env.PHREN_BRIDGE_HOME!;
+  const settings = claudeSettings();
+  await mkdir(path.dirname(settings), { recursive: true });
+  const old = (timeout: number) => ({ type: "command", command: `'/old/node' ${quoted(path.join(root, "current/bridge-hook.mjs"))} hook claude`, timeout });
+  const user = { type: "command", command: "user-callback", timeout: 3 };
+  await writeFile(settings, JSON.stringify({ model: "opus", hooks: {
+    UserPromptSubmit: [{ matcher: "", hooks: [user, old(3)] }], Stop: [{ hooks: [old(3)] }], PermissionRequest: [{ hooks: [old(60)] }],
+    PostToolUse: [{ matcher: "Bash", hooks: [old(10)] }],
+  } }));
+  await install("0.2.14", true);
+  expect(await readFile(path.join(root, "versions/0.2.14/claude-hook.mjs"), "utf8")).toContain("Installed by Phren Hook");
+  const config = JSON.parse(await readFile(settings, "utf8"));
+  expect(config.model).toBe("opus");
+  const fast = forwarder();
+  expect(config.hooks.UserPromptSubmit).toEqual([{ matcher: "", hooks: [user] }, { hooks: [{ type: "command", command: fast, timeout: 15 }] }]);
+  for (const event of ["SessionStart", "Stop", "PreCompact"]) expect(config.hooks[event]).toEqual([{ hooks: [{ type: "command", command: fast, timeout: 15 }] }]);
+  expect(config.hooks.PermissionRequest).toEqual([{ hooks: [{ type: "command", command: fast, timeout: 60 }] }]);
+  // Tool calls go through the forwarder too, still filtered to the editing tools.
+  for (const event of ["PreToolUse", "PostToolUse"]) {
+    expect(config.hooks[event]).toEqual([{ matcher: "Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch|str_replace_editor", hooks: [{ type: "command", command: fast, timeout: 10 }] }]);
+  }
+  expect(JSON.stringify(config.hooks)).not.toContain("bridge-hook.mjs");
+  const { planAgentHooks } = await import("./install.js");
+  expect((await planAgentHooks(path.join(root, "current/bridge-hook.mjs"))).some(edit => edit.file === settings)).toBe(false);
+  const removed = JSON.parse((await planAgentHooks(path.join(root, "current/bridge-hook.mjs"), true)).find(edit => edit.file === settings)!.after);
+  expect(removed.hooks.UserPromptSubmit).toEqual([{ matcher: "", hooks: [user] }]);
+  expect(removed.hooks.Stop).toEqual([]);
+});
+
+it.skipIf(process.platform === "win32")("keeps the running version's own forwarder and settings when an update never becomes ready", async () => {
+  const root = process.env.PHREN_BRIDGE_HOME!;
+  const live = { value: "0.2.13" };
+  liveVersion(live);
+  await install("0.2.13");
+  await writeFile(path.join(root, "versions/0.2.13/claude-hook.mjs"), "// 0.2.13's forwarder\n");
+  const before = await readFile(claudeSettings(), "utf8");
+  expect(String(await install("0.2.14").catch((failure: Error) => failure))).toContain("did not become ready");
+  expect(await readlink(path.join(root, "current"))).toBe(path.join("versions", "0.2.13"));
+  expect(await readFile(path.join(root, "current/claude-hook.mjs"), "utf8")).toBe("// 0.2.13's forwarder\n");
+  expect(await readFile(claudeSettings(), "utf8")).toBe(before);
+  expect(JSON.parse(before).hooks.Stop).toEqual([{ hooks: [{ type: "command", command: forwarder(), timeout: 15 }] }]);
+});
+
+it.skipIf(process.platform === "win32")("points Claude back at the bundle when rolling back to a version without the forwarder, and forward again", async () => {
+  const root = process.env.PHREN_BRIDGE_HOME!;
+  const live = { value: "0.2.13" };
+  liveVersion(live);
+  await install("0.2.13");
+  // A release from before the forwarder ships only its bundle.
+  await unlink(path.join(root, "versions/0.2.13/claude-hook.mjs"));
+  live.value = "0.2.14";
+  await install("0.2.14");
+  expect(JSON.stringify(JSON.parse(await readFile(claudeSettings(), "utf8")).hooks.Stop)).toContain("claude-hook.mjs");
+  const { rollback } = await import("./install.js");
+  await rollback();
+  const bundle = `${quoted(process.execPath)} ${quoted(path.join(root, "current/bridge-hook.mjs"))} hook claude`;
+  let hooks = JSON.parse(await readFile(claudeSettings(), "utf8")).hooks;
+  expect(hooks.Stop).toEqual([{ hooks: [{ type: "command", command: bundle, timeout: 15 }] }]);
+  expect(JSON.stringify(hooks)).not.toContain("claude-hook.mjs");
+  await rollback();
+  hooks = JSON.parse(await readFile(claudeSettings(), "utf8")).hooks;
+  expect(hooks.Stop).toEqual([{ hooks: [{ type: "command", command: forwarder(), timeout: 15 }] }]);
+  expect(await readFile(path.join(root, "current/claude-hook.mjs"), "utf8")).toContain("Installed by Phren Hook");
 });
 
 it.skipIf(process.platform === "win32")("replaces the OpenCode plugin copies it wrote and leaves a user's own copy alone", () => {

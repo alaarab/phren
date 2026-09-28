@@ -115,7 +115,8 @@ hooks under existing policy; those do not grant access to disabled modules.
 
 The separate phone installer currently sends Codex and Claude `SessionStart`,
 `UserPromptSubmit`, `Stop`, `PermissionRequest`, `PreToolUse` and `PostToolUse`
-to `bridge-hook.mjs hook <agent>`, plus Claude `PreCompact`. Copilot gets
+to the Hook, plus Claude `PreCompact`: Codex runs `bridge-hook.mjs hook codex`,
+Claude runs the small `claude-hook.mjs claude` forwarder beside it. Copilot gets
 `SessionStart` and `UserPromptSubmit`. The manifest assigns the two tool-use
 events to Git because `AgentHooks` uses them for before/after change snapshots.
 The OpenCode transcript/approval plugin and Claude usage status line belong to

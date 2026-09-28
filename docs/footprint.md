@@ -104,7 +104,13 @@ not conversation text. See [Phren Hook](phren-hook.md).
 The installer adds `~/Library/LaunchAgents/com.phren.hook.plist` on macOS, or
 `~/.config/systemd/user/phren-hook.service` on Linux. Agent callbacks are merged
 into `~/.codex/hooks.json`, `~/.claude/settings.json`, and
-`~/.copilot/hooks/phren.json`. Where an opencode config exists, the installer
+`~/.copilot/hooks/phren.json`. Claude's callbacks run `<bridge>/current/claude-hook.mjs`,
+a small forwarder each version ships beside its `bridge-hook.mjs` so each event
+does not load the whole Hook bundle; SessionStart, UserPromptSubmit, Stop and PreCompact
+callbacks get a 15 s timeout. Install and update rewrite only Phren's own
+entries in those files, including ones an older version wrote, through a
+temporary file and rename. `phren bridge rollback` rewrites them again for the
+version it returns to. Where an opencode config exists, the installer
 also writes `~/.config/opencode/plugins/phren-transcript.js`, which mirrors
 opencode sessions into the store's `.runtime/sessions`. Recognized `phren-iphone` and `phren-android` entries in
 `~/.ssh/authorized_keys` are migrated to the restricted Phren dispatcher with

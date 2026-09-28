@@ -3,7 +3,7 @@ import { defaultPhrenPath } from "../shared.js";
 import { disabledHint } from "../modules/registry.js";
 import { execFile } from "node:child_process";
 import { usageStatusLine } from "./usage.js";
-import { chmod, copyFile, mkdir, open, readFile, rename, symlink, unlink, lstat, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, mkdir, open, readFile, rename, symlink, unlink, lstat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { codexHome, claudeConfigDir } from "../home-paths.js";
 import { claudeHomes } from "./claude-accounts.js";
@@ -14,6 +14,7 @@ import { promisify } from "node:util";
 import { bridgeRoot, object, objects, atomic, socketPath } from "./protocol.js";
 import { herdrRoot } from "./herdr.js";
 import { health } from "./transport.js";
+import { FAST_HOOK_SOURCE, fastHookPath } from "./hook-fast.js";
 import { readStoredVoice, SPEECH_VOICE_ENV, writeSpeechVoice } from "./speech-voice.js";
 
 const exec = promisify(execFile);
@@ -216,6 +217,7 @@ export async function install(version: string, noService = false): Promise<void>
   const previousBundle = await missingFile(readFile(installedBundle));
   const stagedBundle = installedBundle + `.phren-${process.pid}`;
   await copyFile(bundle, stagedBundle); await rename(stagedBundle, installedBundle);
+  await atomic(fastHookPath(destination), FAST_HOOK_SOURCE);
   const previous = await readFile(path.join(root, "installed.json"), "utf8").then(v => JSON.parse(v) as { version: string; previous?: string }).catch(() => null);
   const gateway = await detectGateway();
   await atomic(path.join(root, "dispatch"), gatewayScript(gateway, {
@@ -315,7 +317,11 @@ async function missingFile<T>(operation: Promise<T>): Promise<T | undefined> {
   }
 }
 
-export async function planAgentHooks(program: string, remove = false, modules?: ModuleSnapshot): Promise<SettingsEdit[]> {
+/** Whether the version `current/` points at ships the Claude forwarder; one
+ * from before it does not, and its Claude callbacks run the bundle. */
+const currentHasFastHook = (root: string) => access(fastHookPath(path.join(root, "current"))).then(() => true, () => false);
+
+export async function planAgentHooks(program: string, remove = false, modules?: ModuleSnapshot, fastClaude = true): Promise<SettingsEdit[]> {
   const edits: SettingsEdit[] = [];
   // Extra Claude homes (one per account) get the same hooks; a symlinked settings.json shares another home's, so it is skipped.
   const extraClaude = claudeHomes().slice(1).map(home => ["claude", path.join(home.dir, "settings.json")] as const);
@@ -337,8 +343,11 @@ export async function planAgentHooks(program: string, remove = false, modules?: 
     const config = object(parsed);
     if (config.hooks !== undefined && (!config.hooks || typeof config.hooks !== "object" || Array.isArray(config.hooks))) throw new Error(`Invalid hook configuration: ${file}`);
     const hooks = object(config.hooks);
-    const command = `${quote(process.execPath)} ${quote(program)} hook ${source}`;
-    const ownHook = (entry: unknown) => typeof entry === "string" && entry.endsWith(` ${quote(program)} hook ${source}`);
+    // Claude's callbacks run the small forwarder beside the bundle (hook-fast.ts)
+    // instead of loading the whole bundle for every event.
+    const fast = fastHookPath(path.dirname(program));
+    const command = source === "claude" && fastClaude ? `${quote(process.execPath)} ${quote(fast)} claude` : `${quote(process.execPath)} ${quote(program)} hook ${source}`;
+    const ownHook = (entry: unknown) => typeof entry === "string" && (entry.endsWith(` ${quote(program)} hook ${source}`) || (source === "claude" && entry.endsWith(` ${quote(fast)} claude`)));
     if (remove || modules?.has("hook") === false) {
       const owned = Object.values(hooks).flatMap(objects).some(group => ownHook(group.command) || ownHook(group.bash) || objects(group.hooks).some(hook => ownHook(hook.command)));
       const statusChanged = source === "claude" && JSON.stringify(usageStatusLine(config.statusLine, program, true)) !== JSON.stringify(config.statusLine);
@@ -352,7 +361,7 @@ export async function planAgentHooks(program: string, remove = false, modules?: 
       config.version = 1;
       for (const event of ["SessionStart", "UserPromptSubmit"]) {
         const entries = objects(hooks[event]).filter(h => !ownHook(h.bash) && !ownHook(h.command));
-        hooks[event] = remove || modules?.has("hook") === false ? entries : [...entries, { type: "command", bash: command, timeoutSec: 3 }];
+        hooks[event] = remove || modules?.has("hook") === false ? entries : [...entries, { type: "command", bash: command, timeoutSec: 15 }];
       }
     } else {
       for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "PreToolUse", "PostToolUse", ...(source === "claude" ? ["PreCompact"] : [])]) {
@@ -362,7 +371,7 @@ export async function planAgentHooks(program: string, remove = false, modules?: 
         // Codex names tools differently across versions; filter its callbacks
         // inside the Hook. Claude can narrow its registration here.
         const group = event.endsWith("ToolUse") ? { ...(source === "claude" ? { matcher: "Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch|str_replace_editor" } : {}), hooks: [{ type: "command", command, timeout: 10 }] }
-          : { hooks: [{ type: "command", command, timeout: event === "PermissionRequest" ? 60 : 3 }] };
+          : { hooks: [{ type: "command", command, timeout: event === "PermissionRequest" ? 60 : 15 }] };
         const owner = event.endsWith("ToolUse") ? "git" : "hook";
         hooks[event] = remove || modules?.has("hook") === false || modules?.has(owner) === false ? groups : [...groups, group];
       }
@@ -437,6 +446,11 @@ export async function rollback() {
   const config = JSON.parse(await readFile(path.join(bridgeRoot(), "installed.json"), "utf8")) as { version: string; previous?: string };
   if (!config.previous || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(config.previous)) throw new Error("No previous helper version is available.");
   await stopService(); await activate(config.previous); await startService();
+  // The version now in `current/` decides whether Claude's callbacks run its
+  // forwarder or, from before the forwarder, its bundle.
+  const root = bridgeRoot();
+  await applyAgentHooks(await planAgentHooks(path.join(root, "current/bridge-hook.mjs"), false,
+    moduleSnapshot(defaultPhrenPath(), undefined, true), await currentHasFastHook(root)));
   await atomic(path.join(bridgeRoot(), "installed.json"), JSON.stringify({ version: config.previous, previous: config.version }) + "\n");
 }
 
@@ -445,7 +459,7 @@ export async function reconcileModuleHooks(store: string, profile?: string): Pro
   const root = bridgeRoot();
   // Synced enablement alone never installs a host service or enrolls a key.
   if (!await missingFile(readFile(path.join(root, "installed.json")))) return;
-  await applyAgentHooks(await planAgentHooks(path.join(root, "current/bridge-hook.mjs"), false, modules));
+  await applyAgentHooks(await planAgentHooks(path.join(root, "current/bridge-hook.mjs"), false, modules, await currentHasFastHook(root)));
   await applyOpencodePlugin(!modules.has("hook"));
   if (!modules.has("hook")) await stopService();
 }
