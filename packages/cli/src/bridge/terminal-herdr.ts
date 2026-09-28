@@ -45,9 +45,10 @@ export const herdrTerminal: TerminalProvider = {
     if (signal) await rpc(server, "agent.prompt", { target: pane, text }, signal);
     else await rpc(server, "agent.prompt", { target: pane, text });
   },
-  async create(server, { workspace, label, cwd }) {
-    await rpc(server, workspace ? "tab.create" : "workspace.create", { workspace_id: workspace, label, cwd, focus: false, env: {} });
+  async create(server, { workspace, label, cwd, env }) {
+    await rpc(server, workspace ? "tab.create" : "workspace.create", { workspace_id: workspace, label, cwd, focus: false, env: env ?? {} });
   },
+  // `agent.start` takes no environment; the pane's shell got it at `create`.
   async startAgent(server, pane, { name, kind, args, timeoutMs }) {
     // Herdr waits up to `timeout_ms` for the agent to become ready; the socket waits a little longer.
     await rpc(server, "agent.start", { name, kind, pane_id: pane, timeout_ms: timeoutMs, ...(args.length ? { args } : {}) }, undefined, timeoutMs + 5_000);

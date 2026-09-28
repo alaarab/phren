@@ -47,7 +47,10 @@ async function targetFromOverview(request: Request, session: string, server?: st
   return found;
 }
 
-export async function handOff(input: unknown): Promise<{ ok: boolean; delivered: boolean; target: Target; label?: string; granted?: string }> {
+/** `deliveryId` names this one message on the receiving Hook, which then types
+ * it at most once however often it is sent (the Hook's own callers retry;
+ * the MCP tool does not take one). */
+export async function handOff(input: unknown, options: { deliveryId?: string } = {}): Promise<{ ok: boolean; delivered: boolean; target: Target; label?: string; granted?: string }> {
   const data = handOffSchema.parse(input);
   let request: Request;
   let peer: HookPeer | undefined;
@@ -61,7 +64,7 @@ export async function handOff(input: unknown): Promise<{ ok: boolean; delivered:
   const target = data.target ?? resolved!.target;
   if (peer && target.server !== peer.server) throw new BridgeError(400, "The target belongs to a different Herdr server on that computer.");
   const grant = matchGrant(await listGrants(), { action: "hand_off", project: data.project, computer: data.computer });
-  const result = await request("/v1/prompt", { target, text: data.text });
+  const result = await request("/v1/prompt", { target, text: data.text, ...(options.deliveryId ? { deliveryId: options.deliveryId } : {}) });
   const delivered = result.ok === true && result.deliveryUncertain !== true;
   // A session id was resolved from the overview already; an explicit target
   // is looked up once more, best effort, for its label.

@@ -9,6 +9,7 @@ import { BridgeError } from "./protocol.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { hookRequest } from "./client.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
+import { DispatchReturns } from "./dispatch-returns.js";
 
 vi.mock("./peers.js", () => ({ hookPeers: vi.fn(), peerRequest: vi.fn() }));
 // This computer is "Laptop" and its own Hook is faked: tests never reach a real Hook.
@@ -38,8 +39,11 @@ describe("dispatch receipts and selection", () => {
     const result = await new DispatchService().dispatch(brief);
     expect(result).toMatchObject({ ok: true, state: "accepted", computer: "Linuxbox", target });
     const calls = vi.mocked(peerRequest).mock.calls;
-    expect(calls.find(call => call[1].startsWith("/v1/workspaces/launch"))?.[2]).toEqual({ project: "phren", kind: "codex", label: "Tests", model: undefined });
-    expect(calls.at(-1)?.[2]).toEqual({ target, text: brief.prompt });
+    // The brief is offered with the launch; this Hook did not take it there, so it is typed, once per delivery id.
+    expect(calls.find(call => call[1].startsWith("/v1/workspaces/launch"))?.[2]).toEqual({ project: "phren", kind: "codex", label: "Tests", model: undefined,
+      brief: { id: result.id, text: brief.prompt } });
+    expect(calls.at(-1)?.[2]).toEqual({ target, text: brief.prompt, deliveryId: `dispatch-${result.id}` });
+    expect(result.brief).toBe("typed");
     const stored = await readFile(path.join(root, `dispatches/${result.id}.json`), "utf8");
     expect(stored).not.toContain(brief.prompt);
     expect((await dispatchStatus())[0]).toMatchObject({ state: "accepted", computer: "Linuxbox" });
@@ -133,7 +137,7 @@ describe("dispatch receipts and selection", () => {
     launchingWithoutTarget({ agentStatus: "idle", starting: true, startingToken: target.startingToken });
     const result = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" });
     expect(result).toMatchObject({ ok: true, state: "accepted", target });
-    expect(vi.mocked(peerRequest).mock.calls.find(call => call[1] === "/v1/prompt")?.[2]).toEqual({ target, text: brief.prompt });
+    expect(vi.mocked(peerRequest).mock.calls.find(call => call[1] === "/v1/prompt")?.[2]).toEqual({ target, text: brief.prompt, deliveryId: `dispatch-${result.id}` });
   });
 
   it("says the brief was not sent when a new agent never shows a target", async () => {
@@ -229,7 +233,7 @@ describe("dispatch to this computer", () => {
     expect(vi.mocked(peerRequest)).not.toHaveBeenCalled();
     const routes = vi.mocked(hookRequest).mock.calls.map(call => call[0]);
     expect(routes.filter(route => route.startsWith("/v1/workspaces/launch"))).toHaveLength(3);
-    expect(vi.mocked(hookRequest).mock.calls.find(call => call[0] === "/v1/prompt")?.[1]).toEqual({ target, text: brief.prompt });
+    expect(vi.mocked(hookRequest).mock.calls.find(call => call[0] === "/v1/prompt")?.[1]).toEqual({ target, text: brief.prompt, deliveryId: expect.stringMatching(/^dispatch-[a-f0-9-]{36}$/) });
   });
 
   it("still refuses an unknown computer when hooks.yaml is missing", async () => {
@@ -281,5 +285,59 @@ describe("the project folder a dispatch launches in", () => {
     // No folder anywhere: the refusal names this computer.
     await register("global", "");
     await expect(dispatchProjectDirectory("global", path.join(root, "home"))).rejects.toThrow(/names no folder for/);
+  });
+});
+
+// Harness audit §2.2: a brief typed into a starting pane was often never
+// confirmed. It now goes with the launch, and the worker's own hook confirms
+// it by dispatch id.
+describe("a brief that went with the launch", () => {
+  let root: string;
+  const session = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "codex", session: "00000005-1111-4111-8111-111111111111" };
+  const accepted = { accepted: { at: "2026-09-27T10:00:05.000Z", target: session } };
+  beforeEach(async () => {
+    root = await mkdtemp(path.join(tmpdir(), "phren-dispatch-launch-")); vi.stubEnv("PHREN_BRIDGE_HOME", root);
+    vi.mocked(hookPeers).mockResolvedValue([{ name: "Desk", address: "desk.example", username: "sam", port: 22, hostKey: "unused", server: "default" }]);
+  });
+  afterEach(async () => { vi.unstubAllEnvs(); vi.resetAllMocks(); await rm(root, { recursive: true, force: true }); });
+
+  function receiving(launch: Record<string, unknown>, arrivals: unknown[], panes: unknown[] = []) {
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route) => {
+      if (route === "/v1/dispatch/capacity") return { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 };
+      if (route.startsWith("/v1/workspaces/launch")) return { ok: true, workspaceId: "w1", tabId: "t1", paneId: "p1", agent: "codex", briefLaunched: true, ...launch };
+      if (route.startsWith("/v1/dispatch/arrival")) return { arrival: arrivals.length > 1 ? arrivals.shift() : arrivals[0] };
+      if (route.startsWith("/v1/workspaces/panes")) return { panes };
+      throw new Error(`Unexpected ${route}`);
+    });
+  }
+  const prompts = () => vi.mocked(peerRequest).mock.calls.filter(call => call[1] === "/v1/prompt");
+
+  it("is accepted when the worker's hook echoes the dispatch id, with nothing typed", async () => {
+    receiving({ agentStatus: "working", target }, [{}, { started: accepted.accepted }, accepted]);
+    const result = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" });
+    expect(result).toMatchObject({ ok: true, state: "accepted", brief: "launch", target: session });
+    expect(vi.mocked(peerRequest).mock.calls.find(call => call[1].startsWith("/v1/dispatch/arrival"))?.[1]).toBe(`/v1/dispatch/arrival?id=${result.id}`);
+    expect(prompts()).toHaveLength(0);
+  });
+
+  it("waits on a startup screen as needing the owner, and turns accepted once the worker confirms", async () => {
+    receiving({ agentStatus: "blocked" }, [{}]);
+    const result = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" });
+    expect(result).toMatchObject({ ok: false, state: "uncertain", brief: "launch", returned: { state: "needs-you", question: expect.stringContaining("startup screen") } });
+    expect(result.error).toContain("The brief is queued as its first prompt");
+    expect(prompts()).toHaveLength(0);
+    // The owner answers the screen; the returns loop asks the worker's computer again.
+    receiving({}, [accepted]);
+    await new DispatchReturns().confirmArrivals(await hookPeers());
+    expect((await dispatchStatus())[0]).toMatchObject({ state: "accepted", target: session });
+    expect((await dispatchStatus())[0].error).toBeUndefined();
+  });
+
+  it("stays uncertain, not failed, while the worker has not confirmed", async () => {
+    receiving({ agentStatus: "idle", target }, [{}], [{ id: "p1", agentStatus: "idle" }]);
+    const result = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" });
+    expect(result).toMatchObject({ ok: false, state: "uncertain", brief: "launch", target });
+    expect(result.error).toContain("has not confirmed it yet (last status idle)");
+    expect(prompts()).toHaveLength(0);
   });
 });

@@ -2,7 +2,7 @@ import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { readFileSync, realpathSync } from "node:fs";
-import { appendFile, chmod, mkdir, mkdtemp, open, readFile, realpath as realpathAsync, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, mkdtemp, open, readdir, readFile, realpath as realpathAsync, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer, request, type Server as HttpServer } from "node:http";
 import { createConnection, createServer as createNetServer, type Server, type Socket } from "node:net";
 import { hostname, tmpdir } from "node:os";
@@ -901,8 +901,8 @@ schedules:
     name: Nightly test sweep
     enabled: true
     computer: ${JSON.stringify(computer)}
-    harness: codex
-    model: gpt-5.6-sol
+    harness: opencode
+    model: openrouter/deepseek/deepseek-v4.1-flash
     every: daily
     at: "07:30"
     prompt: Run the test suite.
@@ -913,7 +913,8 @@ schedules:
       expect(listing.status).toBe(200);
       expect(listing.data.computer).toBe(computer);
       expect(listing.data.schedules[0]).toMatchObject({ id: "7f3a2c1d", project: "demo", running: false, lastRun: null });
-      // Claude is still starting when the run first prompts; the run waits for it.
+      // OpenCode takes no first prompt at launch, so the run types it; the
+      // agent is still starting when the run first prompts, and the run waits for it.
       promptNotReady = 1;
       const launched = await api("/v1/schedules/run", { project: "demo", id: "7f3a2c1d" });
       expect(launched.status, JSON.stringify(launched.data)).toBe(200);
@@ -2544,16 +2545,26 @@ schedules:
 
     it("dispatches through a fake SSH pipe to a second Hook and its registered project", async () => {
       await dispatchFixture();
-      const sent = await api("/v1/dispatch", { computer: "Linuxbox", project: "phren", harness: "codex", model: "test-model", label: "Worker", prompt: "Run the assigned checks" });
+      const sending = api("/v1/dispatch", { computer: "Linuxbox", project: "phren", harness: "codex", model: "test-model", label: "Worker", prompt: "Run the assigned checks" });
+      // The receiving Hook writes the brief and starts Codex with it as the first prompt.
+      const briefs = path.join(root, "remote/briefs");
+      await waitFor(async () => (await readdir(briefs).catch(() => [])).length > 0, 10_000);
+      const [id] = await readdir(briefs);
+      const file = path.join(briefs, id, "brief.md");
+      expect(await readFile(file, "utf8")).toBe("Run the assigned checks\n");
+      // What the worker's UserPromptSubmit hook records when Codex submits it.
+      const worker = { server: "default", workspace: "w9", tab: "w9:t1", pane: "w9:p1", source: "codex", session: "00000009-1111-4111-8111-111111111111" };
+      await writeFile(path.join(briefs, id, "arrival.json"), JSON.stringify({ accepted: { at: new Date().toISOString(), target: worker } }));
+      const sent = await sending;
       expect(sent.status, JSON.stringify(sent.data)).toBe(200);
-      expect(sent.data).toMatchObject({ ok: true, computer: "Linuxbox", state: "accepted", target: { source: "codex", starting: true, pane: "w9:p1" } });
+      expect(sent.data).toMatchObject({ ok: true, id, computer: "Linuxbox", state: "accepted", brief: "launch", target: worker });
       // The remote Hook resolves the checkout through realpath; on macOS /tmp is a symlink.
-      expect(commands.find(c => c.method === "workspace.create")?.params.cwd).toBe(await realpathAsync(path.join(root, "checkout")));
-      expect(commands.find(c => c.method === "agent.start")?.params.args).toEqual(["--model", "test-model"]);
-      expect(commands.filter(c => c.method === "agent.prompt").map(c => c.params)).toEqual([{ target: "w9:p1", text: "Run the assigned checks" }]);
+      expect(commands.find(c => c.method === "workspace.create")?.params).toMatchObject({ cwd: await realpathAsync(path.join(root, "checkout")), env: { PHREN_DISPATCH_ID: id } });
+      expect(commands.find(c => c.method === "agent.start")?.params.args).toEqual(["--model", "test-model", `Read and follow the brief in ${file}`]);
+      expect(commands.filter(c => c.method === "agent.prompt")).toEqual([]);
       expect((await api("/v1/dispatch")).data.dispatches[0]).toMatchObject({ id: sent.data.id, state: "accepted" });
       const connections = (await readFile(path.join(root, "ssh-calls.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
-      expect(connections).toHaveLength(3);
+      expect(connections.length).toBeGreaterThanOrEqual(3);
       expect(connections.every(args => args.includes("IdentityAgent=none"))).toBe(true);
     });
 

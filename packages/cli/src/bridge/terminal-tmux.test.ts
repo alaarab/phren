@@ -188,10 +188,12 @@ describe("the tmux provider", () => {
       processes: async () => started ? PS : PS.replace("/Users/me/.local/share/claude/versions/2.1.3 --effort high", "-zsh"),
       run: async (_s, args) => { calls.push(args); return args[0] === "list-panes" ? PANES : ""; } });
     vi.stubEnv("SHELL", "/bin/sh");
-    await tmuxTerminal.startAgent("tmux-phren", "p1", { name: "fix-tests", kind: "claude", args: ["--model", "opus; rm -rf ~"], timeoutMs: 5_000 });
+    await tmuxTerminal.startAgent("tmux-phren", "p1", { name: "fix-tests", kind: "claude", args: ["--model", "opus; rm -rf ~"], timeoutMs: 5_000,
+      env: { PHREN_DISPATCH_ID: "dispatch-1" } });
     expect(calls).toContainEqual(["set-option", "-p", "-t", "%1", "@phren_agent", "fix-tests"]);
     const respawn = calls.find(c => c[0] === "respawn-pane")!;
-    expect(respawn).toEqual(["respawn-pane", "-k", "-t", "%1", "-c", "/repo", "--", "/bin/sh", "-l", "-c", 'shell="$1"; shift; "$@"; exec "$shell" -l',
+    // The dispatch id reaches the agent's environment, not its command line.
+    expect(respawn).toEqual(["respawn-pane", "-k", "-t", "%1", "-c", "/repo", "-e", "PHREN_DISPATCH_ID=dispatch-1", "--", "/bin/sh", "-l", "-c", 'shell="$1"; shift; "$@"; exec "$shell" -l',
       "phren", "/bin/sh", "claude", "--model", "opus; rm -rf ~"]);
     expect(started).toBe(true);
   });

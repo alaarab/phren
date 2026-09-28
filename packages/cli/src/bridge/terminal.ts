@@ -65,11 +65,15 @@ export interface ScreenRead {
   timeoutMs?: number;
 }
 
-/** A new pane: a tab in `workspace`, or a new workspace when it is absent. */
-export interface PanePlacement { workspace?: string; label?: string; cwd?: string }
+/** A new pane: a tab in `workspace`, or a new workspace when it is absent.
+ * `env` is added to the pane's shell environment, so an agent started there
+ * inherits it (Herdr takes variables only here, at pane creation). */
+export interface PanePlacement { workspace?: string; label?: string; cwd?: string; env?: Record<string, string> }
 
-/** Starts an agent in an existing, empty pane. */
-export interface AgentStart { name: string; kind: string; args: string[]; timeoutMs: number }
+/** Starts an agent in an existing, empty pane. `env` is the same variables as
+ * the pane's placement, for a provider that starts the agent in a fresh
+ * process of its own (tmux respawns the pane). */
+export interface AgentStart { name: string; kind: string; args: string[]; timeoutMs: number; env?: Record<string, string> }
 
 /**
  * Key names are the Hook's vocabulary: "enter", "esc", "up", "down", "tab",

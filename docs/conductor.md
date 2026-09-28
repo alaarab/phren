@@ -156,14 +156,35 @@ currently requires Herdr.
 Each placement writes a private receipt in `<bridge>/dispatches/<id>.json`
 without retaining the prompt. States are `launching`, `sending`, `accepted`,
 `uncertain` and `failed`. `accepted` confirms first-prompt delivery, not worker
-completion; completion arrives as a return (see [Returns](#returns)). A lost acknowledgement leaves an uncertain receipt and is never
-automatically retried. A new agent that has not written a conversation yet takes
-its brief on its starting binding, as the phone's first message does. One held
-on a startup screen of its own (Claude's folder trust, a sign-in) gets no brief:
-its receipt is `failed` with a `needs-you` return naming the pane, and the Hook
-never answers that screen. An agent that never shows a target is `failed` with
-the brief unsent and its pane left open. Receipts survive restart; interrupted placement states
-are reported as uncertain. Only one placement runs at a time per service.
+completion; completion arrives as a return (see [Returns](#returns)).
+
+Claude and Codex workers start with the brief as their first prompt, so nothing
+is typed into a starting pane. The receiving Hook writes the brief to
+`<bridge>/briefs/<dispatch id>/brief.md` (0600) and starts the harness with one
+short argument, `Read and follow the brief in <path>`; Claude also gets
+`--add-dir` for that folder so reading it needs no permission. The pane's
+environment carries `PHREN_DISPATCH_ID=<dispatch id>`, and the worker's
+SessionStart and UserPromptSubmit hooks send it back: the receipt turns
+`accepted` when the worker's own UserPromptSubmit names that id, never on a
+text match. A Codex hook run by its shared app-server daemon ignores the
+inherited variable and is matched by the brief path in the prompt instead. A
+worker held on a startup screen (Claude's folder trust, a sign-in) keeps the
+brief queued as its first prompt: the receipt is `uncertain` with a `needs-you`
+return naming the pane, the Hook never answers that screen, and once the owner
+does the harness submits the brief itself. An unconfirmed brief is asked about
+again on each returns poll, so the receipt turns `accepted` when the worker
+confirms it. Briefs are kept for seven days (at most 256).
+
+OpenCode, and a receiving Hook too old to take the brief at launch, get it
+typed as before, with a `deliveryId` of `dispatch-<id>` so the receiving Hook
+types it at most once. A new agent that has not written a conversation yet
+takes it on its starting binding, as the phone's first message does. One held
+on a startup screen gets no brief: its receipt is `failed` with a `needs-you`
+return naming the pane. An agent that never shows a target is `failed` with the
+brief unsent and its pane left open. A lost acknowledgement leaves an uncertain
+receipt and is never automatically retried. Receipts survive restart;
+interrupted placement states are reported as uncertain. Only one placement runs
+at a time per service.
 
 An optional `parent` and `parentTarget` must be supplied together. The Hook
 checks the parent against its own computer and live pane. Receipts retain the
@@ -270,7 +291,8 @@ Return: Linuxbox parser checks done, tests passed (dispatch <id>). Call dispatch
 Several waiting returns share one line. The Hook never types into a working
 or blocked agent, nor into a pane now running another terminal, and sends at
 most one notice per pane every two minutes. A notice that was not delivered
-is tried again after that wait. Returns stay unread until `dispatch_returns`
+is tried again after that wait, under the same `deliveryId`, so a first
+attempt that did reach the pane is not typed twice. Returns stay unread until `dispatch_returns`
 takes them, so a missed notice loses nothing.
 
 Remote ancestry and phone navigation are wired independently through receipts

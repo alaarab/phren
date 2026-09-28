@@ -184,7 +184,7 @@ describe("the dispatching Hook's returns loop", () => {
     await returns.tick();
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver).toHaveBeenCalledWith({ ...conductorPane, source: "claude", session: "00000002-1111-4111-8111-111111111111" },
-      `Return: Linuxbox parser checks done, Parser checks done, tests passed. (dispatch ${placed.id}). Call dispatch_returns.`);
+      `Return: Linuxbox parser checks done, Parser checks done, tests passed. (dispatch ${placed.id}). Call dispatch_returns.`, expect.stringMatching(/^notice-[a-f0-9]{32}$/));
     expect((await dispatchStatus())[0].returned).toMatchObject({ state: "done", read: false, notifiedAt: expect.any(String) });
 
     clock += POLL_MS;
@@ -220,7 +220,10 @@ describe("the dispatching Hook's returns loop", () => {
     clock += NOTICE_MS;
     await returns.tick();
     expect(deliver).toHaveBeenCalledTimes(2);
-    expect(deliver).toHaveBeenLastCalledWith(expect.anything(), `Return: Linuxbox parser checks blocked (dispatch ${placed.id}). Call dispatch_returns.`);
+    expect(deliver).toHaveBeenLastCalledWith(expect.anything(), `Return: Linuxbox parser checks blocked (dispatch ${placed.id}). Call dispatch_returns.`, expect.any(String));
+    // The retry names the same notice, so a first attempt that did type is not typed again.
+    const ids = (deliver.mock.calls as unknown as [unknown, string, string][]).map(call => call[2]);
+    expect(ids.at(-1)).toBe(ids.at(-2));
   });
 
   it("skips a replaced conductor, records a gone worker and stops watching it", async () => {

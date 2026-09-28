@@ -14,6 +14,7 @@ import type { WorkspaceContextUsage } from "./context.js";
 import { type DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
 import { type DispatchReturns, workerStates } from "./dispatch-returns.js";
 import { remoteChildren } from "./dispatch-tree.js";
+import { briefArrival, briefId } from "./launch-brief.js";
 import { addGrant, listGrants, removeGrant } from "./grants.js";
 import { optionalHookPeers, peerRequest } from "./peers.js";
 import { candidateRepos, enrollProject } from "./enroll.js";
@@ -285,6 +286,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             result = { computer: info.computer, version, ...await listsCaller(caller) }; break;
           }
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
+          // Receiving side of a launched brief: what the worker's hooks reported for it.
+          case "/v1/dispatch/arrival": result = { arrival: await briefArrival(briefId.parse(url.searchParams.get("id"))) ?? null }; break;
           case "/v1/conductor/grants": result = { grants: await listGrants() }; break;
           // Asked by linked peers before they start a conductor: one per connected group.
           case "/v1/conductor": result = { computer: info.computer, conductor: await localConductor() ?? null }; break;
