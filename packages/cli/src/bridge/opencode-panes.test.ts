@@ -1,13 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentHooks } from "./agent-hooks.js";
 import { validateTarget } from "./herdr.js";
-import { registerPaneServer, type OpenCodePermission, type OpenCodeQuestion, type PaneClient, type PaneEvent, type PaneServerEntry, type PromptOptions } from "./opencode-pane-server.js";
+import { type OpenCodePermission, type OpenCodeQuestion, type PaneClient, type PaneEvent, type PaneServerEntry, type PromptOptions, registerPaneServer } from "./opencode-pane-server.js";
 import {
-  listensOn, paneKey, paneServersDir, PaneServerWatcher, prepareServedLaunch, registerServedPane, sendServedPrompt, servedPane,
-  setPaneClientFactory, showSession, type PaneAsks,
+  listensOn, type PaneAsks, PaneServerWatcher, paneKey, paneServersDir, prepareServedLaunch, registerServedPane, sendServedPrompt,
+  servedPane, setPaneClientFactory, showSession,
 } from "./opencode-panes.js";
 import type { Target } from "./protocol.js";
 import type { ApprovalPushService } from "./push.js";
