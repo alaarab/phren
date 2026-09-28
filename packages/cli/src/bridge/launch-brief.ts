@@ -13,8 +13,9 @@ import { atomic, bridgeRoot, targetSchema, type Target } from "./protocol.js";
  * `PHREN_DISPATCH_ID`, and its SessionStart and UserPromptSubmit hooks echo
  * it back: the receipt is that echo, not a match on typed text.
  *
- * Harnesses without an initial-prompt argument that opens their TUI (OpenCode,
- * Copilot) keep the typed path.
+ * OpenCode takes its brief over the HTTP API its launched TUI serves
+ * (opencode-panes.ts); the file is still written so the arrival is recorded
+ * here. Copilot, with no such argument or API, keeps the typed path.
  */
 
 /** A dispatch receipt id or a scheduled run id: what `PHREN_DISPATCH_ID` carries. */

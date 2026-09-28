@@ -4,7 +4,7 @@ import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  freePort, newPassword, openPaneClient, readPaneServer, registerPaneServer, removePaneServer,
+  freePort, listPaneServers, newPassword, openPaneClient, PromptNotSent, readPaneServer, registerPaneServer, removePaneServer,
   type PaneServerEntry,
 } from "./opencode-pane-server.js";
 
@@ -25,6 +25,11 @@ interface Fake {
   permissionBodies: unknown[];
   questionBodies: unknown[];
   abortPaths: string[];
+  created: unknown[];
+  selected: unknown[];
+  rejectedQuestions: string[];
+  /** A status the prompt route answers with instead of accepting. */
+  refusePrompt?: number;
   unauthorized: number;
   /** When false the server accepts a prompt but never records a user message. */
   echoPrompt: boolean;
@@ -42,7 +47,7 @@ afterEach(async () => {
  * Basic auth or `directory` query does not match, and records what it got. */
 async function startFake(): Promise<Fake> {
   const fake: Fake = { port: 0, seen: [], sessions: [], messages: [], permissions: [], questions: [],
-    promptBodies: [], permissionBodies: [], questionBodies: [], abortPaths: [], unauthorized: 0, echoPrompt: true,
+    promptBodies: [], permissionBodies: [], questionBodies: [], abortPaths: [], created: [], selected: [], rejectedQuestions: [], unauthorized: 0, echoPrompt: true,
     close: () => new Promise(resolve => server.close(() => resolve())) };
   const server = http.createServer((req, res) => {
     let raw = "";
@@ -63,8 +68,19 @@ async function startFake(): Promise<Fake> {
       const permission = /^\/permission\/([^/]+)\/reply$/.exec(url.pathname);
       const question = /^\/question\/([^/]+)\/reply$/.exec(url.pathname);
       if (req.method === "GET" && url.pathname === "/session") { res.end(JSON.stringify(fake.sessions)); return; }
+      if (req.method === "POST" && url.pathname === "/session") { fake.created.push(body); res.end(JSON.stringify({ id: "ses_created", directory: DIRECTORY })); return; }
+      if (req.method === "POST" && url.pathname === "/tui/select-session") { fake.selected.push(body); res.end("true"); return; }
+      const one = /^\/session\/([^/]+)$/.exec(url.pathname);
+      if (req.method === "GET" && one) {
+        const found = (fake.sessions as Array<{ id: string }>).find(value => value.id === one[1]);
+        if (!found) { res.writeHead(404); res.end("{}"); return; }
+        res.end(JSON.stringify(found)); return;
+      }
+      const reject = /^\/question\/([^/]+)\/reject$/.exec(url.pathname);
+      if (req.method === "POST" && reject) { fake.rejectedQuestions.push(reject[1]); res.end("true"); return; }
       if (req.method === "GET" && messages) { res.end(JSON.stringify(fake.messages)); return; }
       if (req.method === "POST" && prompt) {
+        if (fake.refusePrompt) { res.writeHead(fake.refusePrompt); res.end("{}"); return; }
         fake.promptBodies.push(body);
         if (fake.echoPrompt) fake.messages.push({ info: { id: "msg_new", role: "user" }, parts: body.parts });
         res.writeHead(204); res.end(); return;
@@ -109,8 +125,11 @@ it("registers a pane server, reads it back, and removes it", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "phren-oc-pane-")); roots.push(dir);
   const entry = baseEntry();
   const file = registerPaneServer(dir, entry);
-  expect((await stat(file)).mode & 0o777).toBe(0o600);
-  expect((await stat(dir)).mode & 0o777).toBe(0o700);
+  // Windows reports no POSIX modes (a file reads back as 0o666).
+  if (process.platform !== "win32") {
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect((await stat(dir)).mode & 0o777).toBe(0o700);
+  }
   expect(readPaneServer(dir, "default", "w1:p1")).toEqual(entry);
   removePaneServer(dir, "default", "w1:p1");
   expect(readPaneServer(dir, "default", "w1:p1")).toBeUndefined();
@@ -202,4 +221,54 @@ it("takes the most recent root session, never a subagent's, and asks for recent 
   const client = openPaneClient(entryFor(fake));
   expect((await client.currentSession())?.id).toBe("ses_root");
   expect(await client.prompt("ses_root", "  hello  ", { timeoutMs: 1_000 })).toEqual({ delivered: true, messageId: "msg_new" });
+});
+
+it("lists live entries and removes those whose process is gone", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "phren-oc-pane-")); roots.push(dir);
+  registerPaneServer(dir, baseEntry());
+  const dead = registerPaneServer(dir, baseEntry({ pane: "w1:p2", pid: 2_147_483_647 }));
+  expect(listPaneServers(dir).map(entry => entry.pane)).toEqual(["w1:p1"]);
+  await expect(stat(dead)).rejects.toThrow();
+  expect(listPaneServers(path.join(dir, "missing"))).toEqual([]);
+});
+
+it("creates a session, moves the TUI onto it, and reads one session", async () => {
+  const fake = await startFake();
+  fake.sessions = [{ id: "ses_root", directory: DIRECTORY }, { id: "ses_child", parentID: "ses_root" }];
+  const client = openPaneClient(entryFor(fake));
+  expect(await client.ready()).toBe(true);
+  expect((await client.createSession()).id).toBe("ses_created");
+  await client.selectSession("ses_created");
+  expect(fake.selected).toEqual([{ sessionID: "ses_created" }]);
+  expect((await client.session("ses_child"))?.parentID).toBe("ses_root");
+  expect(await client.session("ses_missing")).toBeUndefined();
+  await client.rejectQuestion("que_1");
+  expect(fake.rejectedQuestions).toEqual(["que_1"]);
+});
+
+it("is not ready while nothing answers or the password is wrong", async () => {
+  const fake = await startFake();
+  expect(await openPaneClient(entryFor(fake, { password: "wrong" })).ready()).toBe(false);
+  expect(await openPaneClient(baseEntry({ port: await freePort() })).ready(300)).toBe(false);
+});
+
+it("continues with the last user turn's agent, model and variant", async () => {
+  const fake = await startFake();
+  fake.messages = [
+    { info: { id: "msg_1", role: "user", agent: "conductor", model: { providerID: "opencode-go", modelID: "deepseek-v4.1-flash", variant: "high" } }, parts: [] },
+    { info: { id: "msg_2", role: "assistant" }, parts: [] },
+  ];
+  const client = openPaneClient(entryFor(fake));
+  await client.prompt("ses_1", "next", { inherit: true, timeoutMs: 500 });
+  expect(fake.promptBodies[0]).toEqual({ parts: [{ type: "text", text: "next" }], agent: "conductor",
+    model: { providerID: "opencode-go", modelID: "deepseek-v4.1-flash" }, variant: "high" });
+  await client.prompt("ses_1", "explicit", { inherit: true, agent: "build", timeoutMs: 500 });
+  expect(fake.promptBodies[1]).toEqual({ parts: [{ type: "text", text: "explicit" }], agent: "build" });
+});
+
+it("says a refused or unheard prompt was never sent", async () => {
+  const fake = await startFake();
+  fake.refusePrompt = 400;
+  await expect(openPaneClient(entryFor(fake)).prompt("ses_1", "hi")).rejects.toBeInstanceOf(PromptNotSent);
+  await expect(openPaneClient(baseEntry({ port: await freePort() })).prompt("ses_1", "hi")).rejects.toBeInstanceOf(PromptNotSent);
 });

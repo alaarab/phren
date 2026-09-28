@@ -182,6 +182,11 @@ nothing to that checkout.
   pane, process id, thread id, folder and last turn state, no prompt text) and
   its stderr (`server.log`). The Hook removes the folder when the server exits
   or stops it when its pane closes;
+  `<bridge>/opencode-panes/<server>%2F<pane>.json` (0600, in a 0700 folder)
+  records each OpenCode pane the Hook launched with its own server: port,
+  server password, process id, folder and launch settings. An entry is removed
+  once its process is gone. The pane's shell also keeps
+  `OPENCODE_SERVER_PASSWORD` and `PHREN_OPENCODE_PORT` in its environment;
   `<bridge>/conductor.yaml` holds standing grants and `<bridge>/hooks.yaml`
   holds the verified peer directory.
 

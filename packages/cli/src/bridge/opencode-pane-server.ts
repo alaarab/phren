@@ -14,8 +14,10 @@ import { atomicWriteText } from "../phren-paths.js";
  * Routes and bodies are the server's own spec (opencode 1.18.31, saved to
  * `.scratch/openapi.json`): `session.list`, `session.prompt_async`,
  * `session.messages`, `session.abort`, `event.subscribe`, `permission.list`,
- * `permission.reply`, `question.list` and `question.reply`. A question reply
- * takes `{ answers }`, each answer an array of selected labels.
+ * `permission.reply`, `question.list`, `question.reply`, `question.reject`,
+ * `session.create` and `tui.selectSession`. A question reply takes
+ * `{ answers }`, each answer an array of selected labels. A session created
+ * over HTTP is not what the TUI shows until `tui.selectSession` moves it there.
  */
 
 const MAX_PASSWORD = 200;
@@ -33,6 +35,9 @@ export interface PaneServerEntry {
   pid: number;
   directory: string;
   createdAt: string;
+  /** What the TUI was started with (`--agent`, `--model`, `--variant`), for
+   * the first prompt of a session that has no earlier turn to follow. */
+  defaults?: { agent?: string; model?: string; variant?: string };
 }
 
 export interface OpenCodeSession {
@@ -44,7 +49,7 @@ export interface OpenCodeSession {
 }
 
 export interface OpenCodeMessage {
-  info?: { id?: string; role?: string };
+  info?: { id?: string; role?: string; agent?: string; model?: { providerID?: string; modelID?: string; variant?: string } };
   parts?: Array<{ type?: string; text?: string }>;
 }
 
@@ -61,6 +66,10 @@ export interface OpenCodeQuestion {
   questions?: unknown[];
 }
 
+/** The prompt never reached the server (refused, or nothing listening), so
+ * the caller may still send it another way without a duplicate. */
+export class PromptNotSent extends Error {}
+
 export interface PaneEvent {
   type: string;
   properties?: Record<string, unknown>;
@@ -72,6 +81,11 @@ export interface PromptOptions {
   /** `provider/model`; split on the first slash. */
   model?: string;
   agent?: string;
+  /** A model variant (reasoning effort), as `opencode --variant` takes it. */
+  variant?: string;
+  /** Without an explicit model or agent, continue with the ones the
+   * session's last user turn used, as the TUI would. */
+  inherit?: boolean;
   timeoutMs?: number;
 }
 
@@ -125,6 +139,28 @@ export function readPaneServer(dir: string, server: string, pane: string): PaneS
   return parsed;
 }
 
+/** Every registered pane whose OpenCode process is still running. An entry
+ * whose process is gone is removed as it is found. */
+export function listPaneServers(dir: string): PaneServerEntry[] {
+  let names: string[];
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  const entries: PaneServerEntry[] = [];
+  for (const name of names.slice(0, 1024)) {
+    if (!name.endsWith(".json")) continue;
+    const file = path.join(dir, name);
+    let parsed: unknown;
+    try {
+      const info = fs.lstatSync(file);
+      if (!info.isFile() || info.size > 16_384) continue;
+      parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch { continue; }
+    if (!validEntry(parsed) || paneServerFile(dir, parsed.server, parsed.pane) !== file) continue;
+    if (!alive(parsed.pid)) { try { fs.rmSync(file, { force: true }); } catch { /* already gone */ } continue; }
+    entries.push(parsed);
+  }
+  return entries;
+}
+
 export function removePaneServer(dir: string, server: string, pane: string): void {
   if (!safeSegment(server) || !safeSegment(pane)) return;
   try { fs.rmSync(paneServerFile(dir, server, pane), { force: true }); } catch { /* already gone */ }
@@ -147,13 +183,23 @@ export function newPassword(): string {
 }
 
 export interface PaneClient {
+  /** True once the server answers an authenticated request within `timeoutMs`. */
+  ready(timeoutMs?: number): Promise<boolean>;
   sessions(): Promise<OpenCodeSession[]>;
+  session(id: string): Promise<OpenCodeSession | undefined>;
   currentSession(): Promise<OpenCodeSession | undefined>;
+  /** A new root session in the pane's directory. The TUI does not show it
+   * until `selectSession` moves it there. */
+  createSession(): Promise<OpenCodeSession>;
+  /** Asks the TUI to show `id`. A TUI still starting drops the request, so
+   * the caller checks the pane and asks again. */
+  selectSession(id: string): Promise<void>;
   prompt(sessionId: string, text: string, opts?: PromptOptions): Promise<PromptResult>;
   permissions(): Promise<OpenCodePermission[]>;
   replyPermission(id: string, reply: PermissionReply, message?: string): Promise<void>;
   questions(): Promise<OpenCodeQuestion[]>;
   replyQuestion(id: string, answers: string[][]): Promise<void>;
+  rejectQuestion(id: string): Promise<void>;
   abort(sessionId: string): Promise<boolean>;
   events(signal?: AbortSignal): AsyncGenerator<PaneEvent>;
 }
@@ -164,10 +210,10 @@ export function openPaneClient(entry: PaneServerEntry, fetchImpl: typeof fetch =
   const base = `http://127.0.0.1:${entry.port}`;
   const auth = "Basic " + Buffer.from(`opencode:${entry.password}`).toString("base64");
 
-  const send = (method: string, route: string, body?: unknown, signal?: AbortSignal, timeout = true): Promise<Response> => {
+  const send = (method: string, route: string, body?: unknown, signal?: AbortSignal, timeout: boolean | number = true): Promise<Response> => {
     const url = new URL(route, base);
     url.searchParams.set("directory", entry.directory);
-    const requestSignal = signal ?? (timeout ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : undefined);
+    const requestSignal = signal ?? (timeout === false ? undefined : AbortSignal.timeout(timeout === true ? REQUEST_TIMEOUT_MS : timeout));
     return fetchImpl(url.toString(), { method,
       headers: { Authorization: auth, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -195,7 +241,26 @@ export function openPaneClient(entry: PaneServerEntry, fetchImpl: typeof fetch =
     (message.parts ?? []).filter(part => part.type === "text").map(part => part.text ?? "").join("").trim();
 
   return {
+    async ready(timeoutMs = 1_500) {
+      try { return (await send("GET", "/session?limit=1", undefined, undefined, timeoutMs)).ok; } catch { return false; }
+    },
     sessions: sessionList,
+    async session(id) {
+      const response = await send("GET", `/session/${encodeURIComponent(id)}`);
+      const text = await response.text();
+      if (response.status === 404) return undefined;
+      if (!response.ok) throw new Error(`opencode GET /session/{id} failed with ${response.status}.`);
+      const value = text ? JSON.parse(text) as OpenCodeSession : undefined;
+      return value && typeof value.id === "string" ? value : undefined;
+    },
+    async createSession() {
+      const created = await json<OpenCodeSession>("POST", "/session", {});
+      if (!created || typeof created.id !== "string") throw new Error("opencode POST /session returned no session.");
+      return created;
+    },
+    async selectSession(id) {
+      await json<unknown>("POST", "/tui/select-session", { sessionID: id });
+    },
     async currentSession() {
       const list = (await sessionList()).filter(session => typeof session.id === "string" && !session.parentID);
       const matching = list.filter(session => !session.directory || session.directory === entry.directory);
@@ -203,19 +268,39 @@ export function openPaneClient(entry: PaneServerEntry, fetchImpl: typeof fetch =
       return pool.sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))[0];
     },
     async prompt(sessionId, text, opts = {}) {
-      const before = await messages(sessionId);
+      let before: OpenCodeMessage[];
+      try { before = await messages(sessionId); } catch (error) { throw new PromptNotSent((error as Error).message); }
       const beforeIds = new Set(before.map(message => message.info?.id).filter((id): id is string => Boolean(id)));
       const body: Record<string, unknown> = { parts: [{ type: "text", text }] };
+      const last = opts.inherit ? before.filter(message => message.info?.role === "user").at(-1)?.info : undefined;
+      if (!opts.model && !opts.agent && last) {
+        if (typeof last.agent === "string" && last.agent) body.agent = last.agent;
+        if (typeof last.model?.providerID === "string" && typeof last.model.modelID === "string") {
+          body.model = { providerID: last.model.providerID, modelID: last.model.modelID };
+          if (typeof last.model.variant === "string" && last.model.variant) body.variant = last.model.variant;
+        }
+      }
       if (opts.model) {
         const slash = opts.model.indexOf("/");
         body.model = { providerID: slash < 0 ? opts.model : opts.model.slice(0, slash), modelID: slash < 0 ? "" : opts.model.slice(slash + 1) };
       }
       if (opts.agent) body.agent = opts.agent;
-      await json<unknown>("POST", `/session/${encodeURIComponent(sessionId)}/prompt_async`, body);
+      if (opts.variant) body.variant = opts.variant;
+      let response: Response;
+      try { response = await send("POST", `/session/${encodeURIComponent(sessionId)}/prompt_async`, body); } catch (error) {
+        // Nothing listening: the prompt never left. Any other failure (a
+        // timeout, a reset) may have reached the server, so it is unconfirmed.
+        const code = ((error as { cause?: { code?: unknown } }).cause)?.code;
+        if (code === "ECONNREFUSED") throw new PromptNotSent("opencode is not listening.");
+        return { delivered: false, reason: "timeout" };
+      }
+      const refused = await response.text().catch(() => "");
+      if (!response.ok) throw new PromptNotSent(`opencode POST prompt_async failed with ${response.status}: ${refused.slice(0, 300)}`);
       const deadline = Date.now() + (opts.timeoutMs ?? DEFAULT_PROMPT_TIMEOUT_MS);
       for (;;) {
         await sleep(PROMPT_POLL_MS);
-        for (const message of await messages(sessionId)) {
+        const after = await messages(sessionId).catch(() => [] as OpenCodeMessage[]);
+        for (const message of after) {
           const id = message.info?.id;
           if (message.info?.role !== "user" || !id || beforeIds.has(id)) continue;
           if (textOf(message) === text.trim()) return { delivered: true, messageId: id };
@@ -236,6 +321,9 @@ export function openPaneClient(entry: PaneServerEntry, fetchImpl: typeof fetch =
     },
     async replyQuestion(id, answers) {
       await json<unknown>("POST", `/question/${encodeURIComponent(id)}/reply`, { answers });
+    },
+    async rejectQuestion(id) {
+      await json<unknown>("POST", `/question/${encodeURIComponent(id)}/reject`);
     },
     async abort(sessionId) {
       return json<boolean>("POST", `/session/${encodeURIComponent(sessionId)}/abort`);

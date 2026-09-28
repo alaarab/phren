@@ -87,11 +87,21 @@ describe("launching an agent with its brief", () => {
   });
 
   it("leaves the brief to be typed for a harness without a first-prompt argument", async () => {
-    const launched = await launchSession("default", { cwd: root, label: "Worker", kind: "opencode", brief: { id, text: "Do the work." } });
+    const launched = await launchSession("default", { cwd: root, label: "Worker", kind: "copilot", brief: { id, text: "Do the work." } });
     expect(launched).toMatchObject({ ok: true, briefLaunched: false });
     expect(starts[0].args).toEqual([]);
     expect(placements[0].env).toEqual({ PHREN_DISPATCH_ID: id });
     await expect(stat(path.join(root, "briefs", id))).rejects.toThrow();
+  });
+
+  it("starts OpenCode on a port of its own and types the brief when its server never registers", async () => {
+    const launched = await launchSession("default", { cwd: root, label: "Worker", kind: "opencode", brief: { id, text: "Do the work." } });
+    expect(launched).toMatchObject({ ok: true, briefLaunched: false });
+    const port = starts[0].args[1];
+    expect(starts[0].args).toEqual(["--port", expect.stringMatching(/^\d+$/)]);
+    expect(placements[0].env).toEqual({ PHREN_DISPATCH_ID: id, PHREN_OPENCODE_PORT: port, OPENCODE_SERVER_PASSWORD: expect.stringMatching(/^[\w-]{43}$/) });
+    // The brief is on file so a served send can record its arrival.
+    expect(await briefArrival(id)).toEqual({});
   });
 
   it("launches as before without a brief, and refuses one for a conductor", async () => {

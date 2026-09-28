@@ -194,7 +194,13 @@ no 55-second hold, and the Hook records each finished turn's status for the
 returns loop. When the server cannot start, the worker falls back to the
 launch-argument path above.
 
-OpenCode, and a receiving Hook too old to take the brief at launch, get it
+An OpenCode worker gets its brief over its own HTTP API instead: the receiving
+Hook starts it with `--port` and a server password, creates a session, sends the
+brief, moves the TUI onto that session, and records the arrival (`accepted`
+when the brief's user turn appears), so its receipt confirms like Claude's and
+Codex's. If its server never answers, it is typed as below.
+
+Copilot, and a receiving Hook too old to take the brief at launch, get it
 typed as before, with a `deliveryId` of `dispatch-<id>` so the receiving Hook
 types it at most once. A new agent that has not written a conversation yet
 takes it on its starting binding, as the phone's first message does. One held
