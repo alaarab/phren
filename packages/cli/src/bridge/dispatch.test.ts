@@ -11,7 +11,10 @@ import { hookRequest } from "./client.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { DispatchReturns } from "./dispatch-returns.js";
 
-vi.mock("./peers.js", () => ({ hookPeers: vi.fn(), peerRequest: vi.fn() }));
+vi.mock("./peers.js", () => {
+  const hookPeers = vi.fn();
+  return { hookPeers, peerRequest: vi.fn(), optionalHookPeers: async () => ({ peers: await hookPeers().catch(() => []) }) };
+});
 // This computer is "Laptop" and its own Hook is faked: tests never reach a real Hook.
 vi.mock("./computer-names.js", () => ({ localNames: () => ["Laptop.example.net", "Laptop"] }));
 vi.mock("./client.js", () => ({ hookRequest: vi.fn() }));

@@ -8,7 +8,7 @@ import { handOff, listLiveSessions, notLinkedComputers } from "./hand-off.js";
 vi.mock("./client.js", () => ({ hookRequest: vi.fn() }));
 // This computer's names are synthetic so the real hostname never matters.
 vi.mock("./computer-names.js", () => ({ localNames: () => ["Desk.example.net", "Desk"] }));
-vi.mock("./grants.js", () => ({ listGrants: vi.fn(async () => []), matchGrant: vi.fn(), grantLabel: vi.fn() }));
+vi.mock("./grants.js", () => ({ findGrant: vi.fn(), grantLabel: vi.fn() }));
 afterEach(() => vi.resetAllMocks());
 
 it("resolves an existing session and delivers one prompt through its live target", async () => {
@@ -51,7 +51,7 @@ it("lists registered computers that are not linked and how long each session has
   try {
     await writeFile(path.join(root, "hooks.yaml"), "version: 1\ncomputers: []\n", { mode: 0o600 });
     await mkdir(store);
-    await writeFile(path.join(store, "machines.yaml"), "Desk.local: personal\nLinuxbox: personal\n");
+    await writeFile(path.join(store, "machines.yaml"), "Desk.local: personal\nLinuxbox: work\n");
     const target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude", session: "aaaaaaaa-1111-4111-8111-111111111111" };
     vi.mocked(hookRequest).mockResolvedValueOnce({ computer: { name: "Desk" } }).mockResolvedValueOnce({ groups: [{ label: "phren",
       children: [{ agent: "claude", agentStatus: "idle", cwd: "/home/sam/phren", target, lastChangedAt: "2026-09-22T11:55:00.000Z" }] }] });

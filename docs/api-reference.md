@@ -137,7 +137,15 @@ validated `scope`, `actions` and optional `computers` rule.
 `DELETE /v1/conductor/grants` takes an `index` and optional `expected` grant;
 a changed row returns 409 instead of revoking a different grant.
 Concurrent writes are serialized per store and protected by a file lock.
-See [Conductor](conductor.md) for scope and matching rules.
+`computers` takes any name or alias of a computer and is stored under its
+canonical name. See [Conductor](conductor.md) for scope and matching rules.
+
+### Computers
+
+`GET /v1/computers` returns `{ computers }`: one row per real computer
+(`id`, `name`, `aliases`, `profile`, `local`, `linked`, `reachable`) with
+machines.yaml names folded in, this computer first. Part of the `conductor`
+module. Folding rules are in [Conductor](conductor.md#computers).
 
 ### Hook workspace launch fields
 
