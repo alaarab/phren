@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readdir, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { type AppServerClient, type AppServerRequestId, AppServerRpcError, type AppServerTurnInput, connectAppServer, type PendingServerRequest, spawnAppServer } from "./codex-app-server.js";
@@ -288,6 +289,28 @@ export class CodexServers {
     if (!client?.pending.has(requestId)) return false;
     client.respond(requestId, result);
     return true;
+  }
+
+  /** One proactive refresh of the shared Codex sign-in (codex-auth-refresh.ts)
+   * through Codex's own flow: on a running server's connection, or on a
+   * short-lived server when none runs. */
+  async refreshAuth(): Promise<void> {
+    for (const live of this.live.values()) {
+      if (!this.deps.alive(live.entry.pid)) continue;
+      const client = await this.client(live.entry).catch(() => undefined);
+      if (!client) continue;
+      await client.request("account/read", { refreshToken: true });
+      return;
+    }
+    const directory = await mkdtemp(path.join(tmpdir(), "phren-codex-auth-"));
+    const socket = path.join(directory, "app.sock");
+    try {
+      const handle = await this.deps.spawn({ socketPath: socket, cwd: directory, replaceEnv: true, env: serverEnvironment(process.env, {}) });
+      try {
+        const client = await this.deps.connect(socket, { clientName: CLIENT_NAME, clientTitle: "Phren Hook" });
+        try { await client.request("account/read", { refreshToken: true }); } finally { client.close(); }
+      } finally { await handle.stop().catch(() => undefined); }
+    } finally { await rm(directory, { recursive: true, force: true }).catch(() => undefined); }
   }
 
   /** Interrupt the running turn, declining the thread's parked server

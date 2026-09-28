@@ -182,7 +182,10 @@ config before launching there (see [footprint](footprint.md)).
 path instead of a Phren-owned `codex app-server` per pane; those servers run
 their hooks with `PHREN_CODEX_SERVER` set to the server's registry ID, and
 turn on Codex's blocking `request_user_input` with an instruction to use it;
-`PHREN_CODEX_BLOCKING_QUESTIONS=off` starts them without either. Windows always keeps the typed path, because the server listens on a unix socket. `PHREN_SNAPSHOT_SHARE_MS` sets how old a Herdr `session.snapshot`
+`PHREN_CODEX_BLOCKING_QUESTIONS=off` starts them without either. With those
+servers on, the Hook also refreshes the shared Codex sign-in once, after six
+days, before the processes reach Codex's own threshold together;
+`PHREN_CODEX_AUTH_REFRESH=off` leaves refreshing to Codex. Windows always keeps the typed path, because the server listens on a unix socket. `PHREN_SNAPSHOT_SHARE_MS` sets how old a Herdr `session.snapshot`
 may be for the chat and status streams and the activity timer to share it
 (default `2500`; `0` stops reusing answers), and `PHREN_SERVER_LIST_REUSE_MS` how
 long the activity timer reuses the list of running Herdr servers (default
