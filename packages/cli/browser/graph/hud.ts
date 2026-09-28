@@ -171,6 +171,8 @@ export function buildFilterBar(): void {
     { key: "task", label: "Tasks", color: KIND_COLORS["task-active"] },
     { key: "entity", label: "Fragments", color: KIND_COLORS.entity },
     { key: "reference", label: "Refs", color: KIND_COLORS.reference },
+    { key: "topic", label: "Topics", color: TOPIC_COLORS.general },
+    { key: "note", label: "Notes", color: KIND_COLORS.note },
   ];
 
   const typeSection = typeDefs.map((typeDef) => (
@@ -500,6 +502,8 @@ function renderLegend(): void {
     { key: "task", label: "Tasks", color: KIND_COLORS["task-active"] },
     { key: "entity", label: "Fragments", color: KIND_COLORS.entity },
     { key: "reference", label: "Refs", color: KIND_COLORS.reference },
+    { key: "topic", label: "Topics", color: TOPIC_COLORS.general },
+    { key: "note", label: "Notes", color: KIND_COLORS.note },
   ];
   // Kind chips only — the topic list can contain noisy auto-classified
   // slugs; those stay in the Filters panel where they're opt-in.

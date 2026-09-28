@@ -70,6 +70,8 @@ export function deriveKind(node: RawNode): NodeKind {
   if (node.group === "project") return "project";
   if (node.group === "entity") return "entity";
   if (node.group === "reference") return "reference";
+  if (node.group === "topic") return "topic";
+  if (node.group === "note") return "note";
   if (node.group.startsWith("task-")) return "task";
   if (node.group.startsWith("topic:")) return "finding";
   return "other";
@@ -126,6 +128,8 @@ export function baseColorForNode(node: RawNode, storeColor: StoreColorFn): strin
   if (kind === "project") return storeColor(node.store) || KIND_COLORS.project;
   if (kind === "entity") return KIND_COLORS.entity;
   if (kind === "reference") return KIND_COLORS.reference;
+  if (kind === "topic") return topicColor(node.topicSlug);
+  if (kind === "note") return KIND_COLORS.note;
   return KIND_COLORS.other;
 }
 
@@ -139,6 +143,8 @@ export function sizeForNode(node: RawNode, scores: ScoreMap): number {
   if (kind === "finding") return clamp(7.5 + Math.sqrt(helpful + 1) * 1.8 + (node.tagged ? 1.4 : 0), 9, 18);
   if (kind === "task") return clamp(8 + (node.section === "Active" ? 2 : 0) + (node.priority === "high" ? 1 : 0), 8, 15);
   if (kind === "reference") return clamp(7 + Math.sqrt(refCount + 1) * 1.2, 7, 12);
+  if (kind === "topic") return clamp(10 + Math.sqrt(refCount + 1) * 2.2, 11, 24);
+  if (kind === "note") return 9;
   return 9;
 }
 
@@ -171,7 +177,7 @@ export function normalizeNode(node: RawNode, scores: ScoreMap, storeColor: Store
     health: inferHealth(score),
     baseColor: baseColorForNode(node, storeColor),
     size: sizeForNode(node, scores),
-    forceLabel: kind === "project" || (kind === "entity" && (node.refCount || 0) >= 12),
+    forceLabel: kind === "project" || (kind === "entity" && (node.refCount || 0) >= 12) || (kind === "topic" && (node.refCount || 0) >= 8),
   };
 }
 
@@ -188,7 +194,7 @@ export function buildFullAdjacency(nodes: RuntimeNode[], links: RawLink[]): Map<
 }
 
 export function connectionCounts(model: Pick<GraphModel, "fullAdjacency" | "nodeById">, nodeId: string): NodeDetail["connections"] {
-  const counts = { total: 0, projects: 0, findings: 0, tasks: 0, entities: 0, references: 0 };
+  const counts = { total: 0, projects: 0, findings: 0, tasks: 0, entities: 0, references: 0, topics: 0, notes: 0 };
   const adjacency = model.fullAdjacency.get(nodeId);
   if (!adjacency) return counts;
   counts.total = adjacency.size;
@@ -200,6 +206,8 @@ export function connectionCounts(model: Pick<GraphModel, "fullAdjacency" | "node
     else if (neighbor.kind === "task") counts.tasks++;
     else if (neighbor.kind === "entity") counts.entities++;
     else if (neighbor.kind === "reference") counts.references++;
+    else if (neighbor.kind === "topic") counts.topics++;
+    else if (neighbor.kind === "note") counts.notes++;
   });
   return counts;
 }
@@ -274,6 +282,8 @@ export function nodeRank(node: RuntimeNode, filters: GraphFilters, scores: Score
   if (node.kind === "finding") rank += 600 + (scoreForNode(node, scores)?.helpful || 0) * 14 + (node.tagged ? 45 : 0);
   if (node.kind === "task") rank += node.section === "Active" ? 540 : 470;
   if (node.kind === "reference") rank += 180 + (node.refCount || 0) * 3;
+  if (node.kind === "topic") rank += 700 + (node.refCount || 0) * 4;
+  if (node.kind === "note") rank += 440;
   if (node.priority === "high") rank += 60;
   if (node.health === "healthy") rank += 24;
   if (node.health === "decaying") rank -= 12;
@@ -470,7 +480,8 @@ export function rankedProjectIds(nodes: readonly RawNode[], project: string): st
     return left > right ? -1 : 1;
   });
   const tasks = nodes.filter((node) => node.project === project && deriveKind(node) === "task");
-  return [...findings, ...tasks].map((node) => node.id);
+  const notes = nodes.filter((node) => node.project === project && deriveKind(node) === "note");
+  return [...findings, ...tasks, ...notes].map((node) => node.id);
 }
 
 /**

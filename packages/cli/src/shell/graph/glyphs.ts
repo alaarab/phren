@@ -17,6 +17,8 @@ const UNICODE: GlyphSet = {
   task: "▤",
   entity: "❖",
   reference: "▣",
+  topic: "◆",
+  note: "▪",
   other: "·",
 };
 
@@ -26,6 +28,8 @@ const NERD: GlyphSet = {
   task: "", // nf-fa-check_square_o
   entity: "", // nf-fa-share_alt (node graph)
   reference: "", // nf-fa-book
+  topic: "", // nf-fa-tag
+  note: "", // nf-fa-sticky_note
   other: "", // nf-fa-circle
 };
 
