@@ -77,7 +77,7 @@ export interface AgentStart { name: string; kind: string; args: string[]; timeou
 
 /**
  * Key names are the Hook's vocabulary: "enter", "esc", "up", "down", "tab",
- * "space", "alt+Up" and single characters. A provider maps them to its own.
+ * "space", "shift+tab", "alt+Up" and single characters. A provider maps them to its own.
  *
  * Every method rejects with a BridgeError when the multiplexer refuses or is
  * unreachable; the message is shown to the phone.

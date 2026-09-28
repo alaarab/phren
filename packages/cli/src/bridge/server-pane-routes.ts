@@ -13,6 +13,7 @@ import { agentNotReady, terminalProvider } from "./terminal.js";
 import { AppServerRpcError } from "./codex-app-server.js";
 import { CodexServerUnavailable, codexServers } from "./codex-servers.js";
 import { refuseWorkingSlash, type ModelSwitcher } from "./model-switch.js";
+import type { SettingsSwitcher } from "./settings-switch.js";
 import { sessionWebServers } from "./session-servers.js";
 import { repositoryDiff } from "./projects.js";
 import { BridgeError, type Json, MAX_FRAME, object, objects, startingTargetSchema, type Target, targetSchema } from "./protocol.js";
@@ -30,6 +31,7 @@ import { sendServedPrompt, servedPane } from "./opencode-panes.js";
 export interface PaneRouteContext {
   agentHooks: AgentHooks;
   modelSwitcher: ModelSwitcher;
+  settingsSwitcher: SettingsSwitcher;
   codexQuestions: CodexQuestions;
   sideQuestions: SideQuestions;
 }
@@ -258,7 +260,7 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
 }
 
 async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse, typing: () => void): Promise<unknown> {
-  const { agentHooks, modelSwitcher, codexQuestions, sideQuestions } = ctx;
+  const { agentHooks, modelSwitcher, settingsSwitcher, codexQuestions, sideQuestions } = ctx;
   let result: unknown;
   if (url.pathname === "/v1/keys" && object(data.target).starting === true) {
     // A folder-trust or login prompt comes before the agent has a
@@ -283,7 +285,7 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     const pane = await validateStartingTarget(target);
     if (typeof pane.startingSession === "string") {
       const resolved = { ...target, session: pane.startingSession };
-      modelSwitcher.assertAvailable(resolved); sideQuestions.assertAvailable(resolved);
+      modelSwitcher.assertAvailable(resolved); settingsSwitcher.assertAvailable(resolved); sideQuestions.assertAvailable(resolved);
     }
     const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
     refuseWorkingSlash(pane, text);
@@ -310,13 +312,13 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
   const target = targetSchema.parse(data.target);
   // Uploads store bytes without answering or interrupting the agent.
   // They still require fresh identity, just like prompt mutations.
-  const sendsInput = ["/v1/prompt", "/v1/keys", "/v1/secret", "/v1/model"].includes(url.pathname);
-  if (sendsInput) { modelSwitcher.assertAvailable(target); sideQuestions.assertAvailable(target); }
+  const sendsInput = ["/v1/prompt", "/v1/keys", "/v1/secret", "/v1/model", "/v1/settings"].includes(url.pathname);
+  if (sendsInput) { modelSwitcher.assertAvailable(target); settingsSwitcher.assertAvailable(target); sideQuestions.assertAvailable(target); }
   // A key press is how a prompt the agent draws in its terminal gets
   // answered, so keys are the one input allowed while the agent is
   // blocked or waiting; the status check below is theirs alone.
   const pane = await validateTarget(target, false, sendsInput || url.pathname === "/v1/upload");
-  if (sendsInput) { modelSwitcher.assertAvailable(target); sideQuestions.assertAvailable(target); }
+  if (sendsInput) { modelSwitcher.assertAvailable(target); settingsSwitcher.assertAvailable(target); sideQuestions.assertAvailable(target); }
   if (url.pathname === "/v1/prompt") {
     // A waiting agent takes typed text only when nothing structured
     // is pending there: an approval the Hook holds or saw, or a
@@ -397,6 +399,8 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     result = sideQuestions.dismiss(target, z.string().uuid().parse(data.id));
   } else if (url.pathname === "/v1/model") {
     result = await modelSwitcher.switch(target, data);
+  } else if (url.pathname === "/v1/settings") {
+    result = await settingsSwitcher.switch(target, data);
   } else if (url.pathname === "/v1/keys" && await agentHooks.servedKeys(target, z.array(z.enum(ANSWER_KEYS)).min(1).max(4).parse(data.keys), String(pane.agent_status))) {
     // A served OpenCode pane: Esc aborts its turn or declines its question,
     // a digit answers its question, over its own API.

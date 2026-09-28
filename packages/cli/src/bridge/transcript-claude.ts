@@ -184,8 +184,9 @@ async function claudeChildBelongsTo(file: string, parent: string, agentId: strin
 }
 
 // `effort` rides on each assistant row (Claude Code 2.1): with `message.model`
-// it is what the phone's model chip shows as in effect.
-const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message", "gitBranch", "cwd", "requestId", "isMeta", "isSidechain", "isCompactSummary", "phrenQueued", "phrenQueueKey", "phrenBackground", "phrenCompacted", "effort"]);
+// it is what the phone's model chip shows as in effect. `permissionMode` on a
+// user row is the mode that turn ran in (the phone's permission chip).
+const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message", "gitBranch", "cwd", "requestId", "isMeta", "isSidechain", "isCompactSummary", "phrenQueued", "phrenQueueKey", "phrenBackground", "phrenCompacted", "effort", "permissionMode"]);
 export const harnessPreamble = (text: string) => /^<(?:environment_context>|user_instructions>|permission_profile|system-reminder>|turn_context>)/.test(text.trimStart());
 
 function taskNotification(content: string): string | undefined {
@@ -341,6 +342,10 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false): Json | 
   if (hookContext) return hookContext;
   const skill = skillBody(raw);
   if (skill) return skill;
+  // The row Claude writes when the permission mode changes; nothing else of it.
+  if (raw.type === "permission-mode" && typeof raw.permissionMode === "string" && /^[A-Za-z]{1,30}$/.test(raw.permissionMode)) {
+    return { type: "permission-mode", permissionMode: raw.permissionMode, ...(typeof raw.timestamp === "string" ? { timestamp: raw.timestamp } : {}) };
+  }
   if (raw.isMeta || (raw.isSidechain && !includeSidechain) || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
   raw = Object.fromEntries(Object.entries(raw).filter(([key]) => CLAUDE_KEYS.has(key)));
   const message = unwrapUserText(object(raw.message));

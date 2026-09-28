@@ -301,9 +301,10 @@ describe("Phren Hook boundaries", () => {
       await rm(store, { recursive: true, force: true });
     }
   });
-  it("exports only the model from a Codex turn context", () => {
+  it("exports only the model, effort and permission settings from a Codex turn context", () => {
     const context = { type: "turn_context", timestamp: "2026-09-12T05:24:16.986Z", payload: { model: "gpt-6-astra", cwd: "/private/work", approval_policy: "never", instructions: "private" } };
-    expect(visibleEvent(context, "codex")).toEqual({ type: "turn_context", timestamp: "2026-09-12T05:24:16.986Z", payload: { model: "gpt-6-astra" } });
+    // The approval policy is public now (the phone's permission chip); paths and instructions are not.
+    expect(visibleEvent(context, "codex")).toEqual({ type: "turn_context", timestamp: "2026-09-12T05:24:16.986Z", payload: { model: "gpt-6-astra", approval_policy: "never" } });
     expect(visibleEvent({ type: "turn_context", payload: { cwd: "/private/work" } }, "codex")).toBeUndefined();
   });
   it("locates a project on this computer from activity, Herdr state, registration and search roots", async () => {

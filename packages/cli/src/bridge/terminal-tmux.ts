@@ -289,7 +289,7 @@ export async function tmuxSnapshot(server: string): Promise<Json> {
 /** The Hook's key names as tmux key names; undefined for a literal character. */
 export function tmuxKey(key: string): string | undefined {
   const named: Record<string, string> = { enter: "Enter", esc: "Escape", escape: "Escape", up: "Up", down: "Down", left: "Left", right: "Right",
-    tab: "Tab", space: "Space", backspace: "BSpace", home: "Home", end: "End", pageup: "PPage", pagedown: "NPage" };
+    tab: "Tab", "shift+tab": "BTab", space: "Space", backspace: "BSpace", home: "Home", end: "End", pageup: "PPage", pagedown: "NPage" };
   if ([...key].length === 1) return undefined;
   const lower = key.toLowerCase();
   if (named[lower]) return named[lower];
