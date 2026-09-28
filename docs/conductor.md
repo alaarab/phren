@@ -372,7 +372,8 @@ pane, counts; when the worker's hooks named a `PHREN_DISPATCH_ID`, it must be
 this receipt's. With no record (hooks not installed, an older Hook or plugin),
 the Hook falls back to the Herdr snapshot it already shares with the phone
 and the transcript readers: idle with a finished turn is `done` (or `working` while that turn left background
-tasks running), and idle
+tasks running, a wait bounded at two hours as well: the dispatching Hook counts it from when it first saw the
+worker waiting, and then returns `done` with `background` set), and idle
 after being seen working is `done`. There is no time-based guess: a worker
 never seen working with no finished turn stays `working` until the receipt's
 24-hour watch ends.

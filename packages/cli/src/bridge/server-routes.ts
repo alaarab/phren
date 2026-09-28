@@ -224,7 +224,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
       const session = agents.length === 1 && object(tab.target).session;
       const record = typeof session === "string" ? await paneRecord(server, agents[0], session) : undefined;
-      const title = await recordTitle(record, { harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label });
+      const title = await recordTitle(record, { harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label });
       if (expired) return;
       markBackground(tab, recordedBackground(record));
       tab.title = title;

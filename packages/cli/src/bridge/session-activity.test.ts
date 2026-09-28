@@ -79,4 +79,16 @@ describe("session titles", () => {
     expect(sessionTitle({ harnessTitle: "Brief d35c6189", tabLabel: "1", workspaceLabel: "2", dispatched: false })).toBeUndefined();
     expect(sessionTitle({ tabLabel: "nav", workspaceLabel: "app", dispatched: false })).toBeUndefined();
   });
+
+  it("falls back to the raw harness title rather than leave a row blank", () => {
+    const brief = "Read and follow the brief in /x/briefs/abc/brief.md";
+    // The label the phone falls back to is blank or missing: the raw title stands.
+    expect(sessionTitle({ harnessTitle: brief, tabLabel: "1", workspaceLabel: "2", dispatched: true, fallbackLabel: "" })).toBe(brief);
+    expect(sessionTitle({ harnessTitle: brief, tabLabel: "1", workspaceLabel: "2", dispatched: false, fallbackLabel: "  " })).toBe(brief);
+    expect(sessionTitle({ harnessTitle: brief, dispatched: false, fallbackLabel: undefined })).toBe(brief);
+    // A usable fallback label keeps the title dropped; a chosen title is unchanged; no title stays undefined.
+    expect(sessionTitle({ harnessTitle: brief, tabLabel: "1", workspaceLabel: "2", dispatched: true, fallbackLabel: "1" })).toBeUndefined();
+    expect(sessionTitle({ harnessTitle: "Fix it", dispatched: false, fallbackLabel: "" })).toBe("Fix it");
+    expect(sessionTitle({ dispatched: true, fallbackLabel: "" })).toBeUndefined();
+  });
 });

@@ -53,7 +53,8 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   origin: originPaneSchema.extend({ agent: provider, terminal: z.string().min(1).max(200) }).strict().optional()
     .describe("The local agent pane that placed this dispatch; return notices go there."),
   worker: z.object({ state: z.enum(workerStates), since: timestamp, checkedAt: timestamp, sawWorking: z.boolean(),
-    background: z.number().int().min(0).max(999).optional().describe("The most background tasks seen running while the worker was working.") }).strict().optional()
+    background: z.number().int().min(0).max(999).optional().describe("The most background tasks seen running while the worker was working."),
+    waitingSince: timestamp.optional().describe("When the dispatching Hook first saw the worker's finished turn waiting on background tasks; bounds that wait.") }).strict().optional()
     .describe("The worker pane's last observed state."),
   returned: z.object({
     state: z.enum(["done", "needs-you", "failed", "blocked", "gone"]), at: timestamp,

@@ -73,17 +73,21 @@ export function isBriefTitle(title: string): boolean {
  * 3. the harness's own title, unless it is brief boilerplate, which is
  *    replaced by a meaningful tab or workspace label or dropped (the phone
  *    then falls back to the label).
+ * Never leaves a row blank: when none applies and `fallbackLabel` (passed, even
+ * if undefined) is the label the phone shows without a title and is blank, the raw harness title stands.
  */
-export function sessionTitle(input: { dispatched: boolean; dispatchLabel?: string; harnessTitle?: unknown; tabLabel?: unknown; workspaceLabel?: unknown }): string | undefined {
+export function sessionTitle(input: { dispatched: boolean; dispatchLabel?: string; harnessTitle?: unknown; tabLabel?: unknown; workspaceLabel?: unknown; fallbackLabel?: unknown }): string | undefined {
   if (input.dispatchLabel) return input.dispatchLabel;
   const named = meaningfulLabel(input.tabLabel) ?? meaningfulLabel(input.workspaceLabel);
-  if (input.dispatched) return named;
   const title = typeof input.harnessTitle === "string" && input.harnessTitle.trim() ? input.harnessTitle : undefined;
-  return !title ? undefined : isBriefTitle(title) ? named : title;
+  const chosen = input.dispatched ? named : !title ? undefined : isBriefTitle(title) ? named : title;
+  const label = input.fallbackLabel;
+  const blank = "fallbackLabel" in input && (typeof label !== "string" || !label.trim());
+  return chosen ?? (blank ? title : undefined);
 }
 
 /** `sessionTitle` for a pane, given its own turn record (the guarded one from `paneRecord`). */
-export async function recordTitle(record: TurnRecord | undefined, input: { harnessTitle?: unknown; tabLabel?: unknown; workspaceLabel?: unknown }): Promise<string | undefined> {
+export async function recordTitle(record: TurnRecord | undefined, input: { harnessTitle?: unknown; tabLabel?: unknown; workspaceLabel?: unknown; fallbackLabel?: unknown }): Promise<string | undefined> {
   const dispatch = record?.dispatch;
   return sessionTitle({ ...input, dispatched: !!dispatch, dispatchLabel: dispatch ? await briefLabel(dispatch) : undefined });
 }

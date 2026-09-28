@@ -533,7 +533,7 @@ export async function panes(server: string, workspace: string, tab: string): Pro
       const t = objects(s.tabs).find(candidate => candidate.tab_id === tab && candidate.workspace_id === workspace);
       const w = objects(s.workspaces).find(candidate => candidate.workspace_id === workspace);
       return { id: p.pane_id, label: p.label || p.pane_id, agent: p.agent, agentStatus: p.agent_status,
-        title: await recordTitle(record, { harnessTitle: p.title || p.terminal_title_stripped, tabLabel: t?.label, workspaceLabel: w?.label }),
+        title: await recordTitle(record, { harnessTitle: p.title || p.terminal_title_stripped, tabLabel: t?.label, workspaceLabel: w?.label, fallbackLabel: p.label || p.pane_id }),
         cwd: p.foreground_cwd || p.cwd, ...chat, ...paneAccountField(server, p) };
     })) };
 }
