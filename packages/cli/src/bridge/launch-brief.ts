@@ -1,4 +1,5 @@
-import { lstat, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { lstat, mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { atomic, bridgeRoot, targetSchema, type Target } from "./protocol.js";
@@ -61,14 +62,34 @@ async function prune(now: number): Promise<void> {
   await Promise.all(stale.map(entry => rm(path.join(root, entry.name), { recursive: true, force: true }).catch(() => undefined)));
 }
 
-/** Writes the brief (0600, in a 0700 folder of its own) and returns its path. */
+/**
+ * Writes the brief (0600, in a 0700 folder of its own) and returns its path.
+ * The folder is filled beside `briefs/` and renamed into place, so a brief
+ * folder never exists without its `brief.md`: anything that lists `briefs/`
+ * (the arrival route, a test, the owner) sees a whole brief or none. Writing
+ * it in place left a moment where the folder was there and the file was not.
+ */
 export async function writeLaunchBrief(brief: LaunchBrief, now = Date.now()): Promise<string> {
   await mkdir(briefRoot(), { recursive: true, mode: 0o700 });
   await prune(now);
   const directory = briefDirectory(brief.id);
-  await mkdir(directory, { recursive: true, mode: 0o700 });
   const file = path.join(directory, "brief.md");
-  await atomic(file, brief.text.endsWith("\n") ? brief.text : `${brief.text}\n`);
+  const text = brief.text.endsWith("\n") ? brief.text : `${brief.text}\n`;
+  // The same id again (a retried launch) replaces the text in the existing folder.
+  if (await stat(directory).catch(() => undefined)) { await atomic(file, text); return file; }
+  const staging = path.join(bridgeRoot(), "briefs-staging");
+  await mkdir(staging, { recursive: true, mode: 0o700 });
+  const draft = path.join(staging, `${brief.id}.${randomUUID()}`);
+  try {
+    await mkdir(draft, { mode: 0o700 });
+    await atomic(path.join(draft, "brief.md"), text);
+    await rename(draft, directory);
+  } catch (error) {
+    await rm(draft, { recursive: true, force: true }).catch(() => undefined);
+    // Another writer published the same id first: write into its folder.
+    if (!(await stat(path.join(directory, "brief.md")).catch(() => undefined))) throw error;
+    await atomic(file, text);
+  }
   return file;
 }
 

@@ -176,7 +176,8 @@ nothing to that checkout.
   on the computer that runs a dispatched Claude or Codex worker (or a
   scheduled run), `<bridge>/briefs/<id>/` holds its brief (`brief.md`, 0600)
   and what the worker's hooks reported (`arrival.json`), kept seven days and
-  at most 256;
+  at most 256. A brief is written in `<bridge>/briefs-staging/` first and
+  renamed into `briefs/`, so that folder is empty between launches;
   `<bridge>/codex-servers/<id>/` (0700) holds one Codex pane's Phren-owned
   app-server: its socket (`app.sock`), its registry record (`server.json`: the
   pane, process id, thread id, folder and last turn state, no prompt text) and
