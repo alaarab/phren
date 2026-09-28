@@ -10,6 +10,7 @@ import { computerName } from "./computers.js";
 import { dispatchParentSchema, validateDispatchParent } from "./dispatch-tree.js";
 import { findGrant, grantLabel } from "./grants.js";
 import { hookPeers } from "./peers.js";
+import { linkedComputer } from "./computer-identity.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
 import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -292,7 +293,10 @@ export class DispatchService {
       // This computer needs no hooks.yaml entry, so a missing file only
       // matters when the dispatch names another computer.
       const here = this.local();
-      const toLocal = data.computer !== "anywhere" && isLocalComputer(data.computer, here.names);
+      // An alias or hostname (`Mac`, `Squids-Mac-mini.local`) names the same computer as its hooks.yaml name.
+      const named = data.computer === "anywhere" || isLocalComputer(data.computer, here.names) ? undefined : await linkedComputer(data.computer).catch(() => undefined);
+      const toLocal = data.computer !== "anywhere" && (isLocalComputer(data.computer, here.names) || (named !== undefined && "local" in named));
+      const peerName = named && "peer" in named ? named.peer : data.computer;
       const enrolled = await hookPeers().catch(error => { if (toLocal || data.computer === "anywhere") return []; throw error; });
       const peers: DispatchHost[] = [...enrolled.map(candidate => peerHost(candidate)), here];
       let peer: DispatchHost | undefined;
@@ -321,7 +325,7 @@ export class DispatchService {
         remoteComputerID = selected?.computerId;
         if (!peer) throw new BridgeError(503, incapable ? `No enrolled computer with a running Herdr can run ${data.harness}${data.account ? ` account ${data.account}` : ""}.` : "No enrolled computer with a running Herdr is connected.", skipped.length ? { skipped } : undefined);
       } else {
-        peer = toLocal ? peers.find(candidate => candidate.local) : peers.find(candidate => !candidate.local && candidate.name === data.computer);
+        peer = toLocal ? peers.find(candidate => candidate.local) : peers.find(candidate => !candidate.local && candidate.name === peerName);
         if (!peer) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
         const reported = await capacity(peer);
         remoteComputerID = reported.computerId;
