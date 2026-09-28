@@ -174,10 +174,13 @@ checked for one, default `3000`); the Hook reads all three once
 at startup. `PHREN_SHELL_READY_MS` is how long a launch keeps asking Herdr to
 start the agent while the new pane's shell is still starting (default `15000`).
 A worker the Hook launched with its brief runs with `PHREN_DISPATCH_ID` set to
-its dispatch or scheduled-run ID; its hooks echo it back as the delivery receipt. 
+its dispatch or scheduled-run ID; its hooks echo it back as the delivery receipt.
 `PHREN_PRETRUST=off` stops the Hook from marking a dispatched or scheduled
 project's folder, or a worktree it created, trusted in Claude's and Codex's
-config before launching there (see [footprint](footprint.md)). `PHREN_SNAPSHOT_SHARE_MS` sets how old a Herdr `session.snapshot`
+config before launching there (see [footprint](footprint.md)).
+`PHREN_CODEX_APP_SERVER=off` keeps Codex workers the Hook launches on the typed
+path instead of a Phren-owned `codex app-server` per pane; those servers run
+their hooks with `PHREN_CODEX_SERVER` set to the server's registry ID. `PHREN_SNAPSHOT_SHARE_MS` sets how old a Herdr `session.snapshot`
 may be for the chat and status streams and the activity timer to share it
 (default `2500`; `0` stops reusing answers), and `PHREN_SERVER_LIST_REUSE_MS` how
 long the activity timer reuses the list of running Herdr servers (default

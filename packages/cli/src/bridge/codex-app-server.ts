@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdir, rm, stat } from "node:fs/promises";
+import { mkdir, open, readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { WebSocket } from "ws";
 import { codexExecutable } from "./codex-binary.js";
@@ -84,6 +84,8 @@ export interface AppServerClient {
   respond(requestId: AppServerRequestId, result: unknown): void;
   respondError(requestId: AppServerRequestId, code: number, message: string): void;
   on(listener: AppServerListener): () => void;
+  /** Called once when the connection ends, from either side. */
+  onClose(listener: () => void): () => void;
   close(): void;
 }
 
@@ -92,41 +94,61 @@ export interface SpawnAppServerOptions {
   socketPath: string;
   codexHome?: string;
   env?: NodeJS.ProcessEnv;
+  /** Use `env` as the whole environment instead of layering it over the
+   * Hook's, so variables of the Hook's own terminal cannot leak in. */
+  replaceEnv?: boolean;
   cwd: string;
   /** Let the server outlive the Hook (a Hook update must not end a worker the
    * owner is watching in a pane). The caller records the pid to stop it later. */
   detached?: boolean;
+  /** Where the server's stderr goes for its whole life. A detached server
+   * outlives the Hook's end of a pipe, and a write to a closed pipe could
+   * end it, so a long-lived server logs to a file instead. */
+  logFile?: string;
 }
 
 /** Start one `codex app-server --listen unix://<socketPath>` and wait until its
  * socket accepts WebSocket connections. The server is the worker's; `stop()`
  * is the only owner. Extra `env` is layered over the current process's. */
 export async function spawnAppServer(options: SpawnAppServerOptions): Promise<AppServerHandle> {
-  const env = { ...process.env, ...(options.env ?? {}), ...(options.codexHome ? { CODEX_HOME: options.codexHome } : {}) };
-  const codexBin = options.codexBin ?? codexExecutable(options.env);
+  const env = { ...(options.replaceEnv ? {} : process.env), ...(options.env ?? {}), ...(options.codexHome ? { CODEX_HOME: options.codexHome } : {}) };
+  // The merged environment's PATH, so a caller's partial `env` still finds codex.
+  const codexBin = options.codexBin ?? codexExecutable(env);
   await mkdir(path.dirname(options.socketPath), { recursive: true, mode: 0o700 });
   // A socket file left by a dead server would pass the stat below and block the bind.
   await rm(options.socketPath, { force: true });
-  const child = spawn(codexBin, ["app-server", "--listen", `unix://${options.socketPath}`], {
-    cwd: options.cwd,
-    env,
-    detached: options.detached === true,
-    // No stdin: the app-server is reached over its socket, never over stdio.
-    // stderr is kept (bounded) so a failed start can say why.
-    stdio: ["ignore", "ignore", "pipe"],
-  });
+  const log = options.logFile ? await open(options.logFile, "a", 0o600) : undefined;
+  let child: ChildProcess;
+  try {
+    child = spawn(codexBin, ["app-server", "--listen", `unix://${options.socketPath}`], {
+      cwd: options.cwd,
+      env,
+      detached: options.detached === true,
+      // No stdin: the app-server is reached over its socket, never over stdio.
+      // stderr is kept (bounded) so a failed start can say why.
+      stdio: ["ignore", "ignore", log ? log.fd : "pipe"],
+    });
+  } finally { await log?.close(); }
+  // A missing binary is an `error` event, not an exit: without a listener
+  // it would take the Hook down.
+  let failure: Error | undefined;
+  child.once("error", error => { failure = error; });
   let stderr = "";
   child.stderr?.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString("utf8")).slice(-2_000); });
-  const why = () => (stderr.trim() ? `: ${stderr.trim().split("\n").slice(-3).join(" | ")}` : "");
+  const why = async () => {
+    const text = options.logFile ? (await readFile(options.logFile, "utf8").catch(() => "")).slice(-2_000) : stderr;
+    return text.trim() ? `: ${text.trim().split("\n").slice(-3).join(" | ")}` : "";
+  };
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
   while (true) {
+    if (failure) throw new Error(`codex app-server could not start: ${failure.message}`);
     if (child.exitCode !== null || child.signalCode !== null) {
-      throw new Error(`codex app-server exited before ${options.socketPath} was ready (${child.exitCode ?? child.signalCode})${why()}`);
+      throw new Error(`codex app-server exited before ${options.socketPath} was ready (${child.exitCode ?? child.signalCode})${await why()}`);
     }
     if (await socketAccepts(options.socketPath)) break;
     if (Date.now() > deadline) {
       child.kill("SIGKILL");
-      throw new Error(`Timed out waiting for codex app-server at ${options.socketPath}${why()}`);
+      throw new Error(`Timed out waiting for codex app-server at ${options.socketPath}${await why()}`);
     }
     await delay(STARTUP_POLL_MS);
   }
@@ -215,10 +237,15 @@ class AppServerConnection implements AppServerClient {
   private nextId = 1;
   private readonly waiters = new Map<number, Waiter>();
   private readonly listeners = new Set<AppServerListener>();
+  private readonly closeListeners = new Set<() => void>();
 
   constructor(private readonly ws: WebSocket) {
     ws.on("message", data => this.handle(data));
-    ws.on("close", () => this.failAll(new Error("codex app-server connection closed")));
+    ws.on("close", () => {
+      this.failAll(new Error("codex app-server connection closed"));
+      for (const listener of [...this.closeListeners]) listener();
+      this.closeListeners.clear();
+    });
     ws.on("error", () => this.failAll(new Error("codex app-server connection error")));
   }
 
@@ -283,6 +310,11 @@ class AppServerConnection implements AppServerClient {
   on(listener: AppServerListener): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
+  }
+
+  onClose(listener: () => void): () => void {
+    this.closeListeners.add(listener);
+    return () => { this.closeListeners.delete(listener); };
   }
 
   close(): void {
@@ -353,7 +385,8 @@ export function declineResult(method: string): Json {
     case "item/fileChange/requestApproval":
       return { decision: "cancel" };
     case "item/permissions/requestApproval":
-      return { permissions: {} };
+      // `scope` is required (PermissionsRequestApprovalResponse, 0.155.1).
+      return { permissions: {}, scope: "turn" };
     case "item/tool/requestUserInput":
       return { answers: {} };
     case "mcpServer/elicitation/request":

@@ -164,6 +164,57 @@ doesn't mark the pane blocked. If Codex hands the request back to the owner, it
 draws its own approval dialog, and the waiting-pane dialog read pushes that like
 any other. Other sessions keep the normal hold.
 
+### Codex panes on the Hook's own app-server
+
+A Codex agent the Hook launches with role `agent` (dispatch, schedule, phone)
+runs on a `codex app-server` the Hook spawns for that pane alone:
+`codex app-server --listen unix://<bridge>/codex-servers/<id>/app.sock`,
+detached, folder 0700, stderr to `server.log` there. Its environment is the
+Hook's without the Hook's own `HERDR_*`/`TMUX*`/`PHREN_DISPATCH_ID`, plus the
+pane's multiplexer variables (`TerminalProvider.paneEnv`), `PHREN_DISPATCH_ID`
+for a brief, and `PHREN_CODEX_SERVER=<id>`. Codex's hooks run inside that
+server; a hook that sees `PHREN_CODEX_SERVER` trusts its pane variables instead
+of treating the server as the shared daemon. The Hook connects over
+WebSocket-on-UDS (`codex-app-server.ts`) as client `phren_hook`.
+
+- With a brief, the Hook calls `thread/start` (`cwd`, `model`,
+  `config.model_reasoning_effort`), sends the brief text as `turn/start`, records
+  the brief as accepted on the returned turn id, and starts the pane with
+  `codex resume <thread> --remote unix://<socket>`. Without one, a thread with no
+  turn cannot be resumed, so the pane runs `codex --remote unix://<socket>`
+  (`--model`, `-c model_reasoning_effort=`) and the Hook takes the first
+  top-level `thread/started` in the pane's folder as the pane's thread, joining
+  it with `thread/resume` once it has a turn.
+- The registry record `<id>/server.json` holds server, workspace, tab, pane,
+  socket, pid, thread id, folder, dispatch id, running turn and last finished
+  turn (id, status). No prompt text. A restarted Hook reconnects to every
+  record whose pid is alive and resumes its thread; the rest are removed.
+- The pane's identity is the registered thread while one of its foreground
+  processes runs with `unix://<socket>` on its command line. Other panes'
+  daemon-rollout matching never takes a registered thread.
+- `POST /v1/prompt` on that exact target (server, workspace, tab, pane, thread)
+  sends `turn/start` and replies `delivered: true` with `turnId`; a slash
+  command is typed; an unreachable server falls back to typing; an RPC error
+  is 409; a lost reply is `deliveryUncertain` and not retried.
+- Server requests `item/commandExecution/requestApproval`,
+  `item/fileChange/requestApproval` and `item/permissions/requestApproval`
+  become approval cards in the same store and push path as a held
+  PermissionRequest, without the hold timer; the card's `expiresAt` slides ten
+  minutes ahead while it waits. Approve answers `{decision:"accept"}` (a
+  permission request: its requested permissions, `scope:"turn"`), deny
+  `{decision:"decline"}` (`permissions:{}`). `serverRequest/resolved` drops the
+  card. A replayed request keeps its card and is answered on the new
+  connection. The PermissionRequest callback for a registered thread answers
+  `{}` at once. `item/tool/requestUserInput` and `mcpServer/elicitation/request`
+  are left to the pane.
+- `/v1/keys` Escape on that target with a running turn answers the thread's
+  parked requests with their cancel shapes, then sends `turn/interrupt`.
+- The 5-second tick removes a record whose process exited and stops (process
+  group SIGTERM) a server whose pane is gone, or whose pane has shown no Codex
+  (or whose Herdr or tmux server has not run) for two minutes. The Hook's shutdown closes its clients only.
+- `PHREN_CODEX_APP_SERVER=off` disables all of this. A failed server start
+  falls back to the launch-argument path.
+
 Creation resolves `cwd` with `realpath`, requires an existing directory under the
 user's real home or within a `locateProject` candidate, and sends the resolved
 path to Herdr. At most one creation/launch is in flight, and at most six attempts

@@ -2,7 +2,7 @@ import { defaultPhrenPath } from "../shared.js";
 import { disabledHint } from "../modules/registry.js";
 import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
 import { logger } from "../logger.js";
-import { request, createServer, type Server, type ServerResponse } from "node:http";
+import { request, createServer, type Server } from "node:http";
 import { mkdir, readFile, chmod, unlink, lstat } from "node:fs/promises";
 import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
@@ -31,6 +31,8 @@ import { eventStatus, notePaneStatus, settleBlockedPane } from "./pane-status.js
 import { noteTurn as recordTurn } from "./turn-records.js";
 import { countTick } from "./metrics.js";
 import { briefId, briefIdInPrompt, DISPATCH_ID_ENV, recordBriefArrival } from "./launch-brief.js";
+import type { AppServerRequestId, PendingServerRequest } from "./codex-app-server.js";
+import { CODEX_SERVER_ENV, codexServerId, codexServers } from "./codex-servers.js";
 
 export { permissionPrompt, terminalChoice, visibleTerminalChoice, type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
 export { ApprovalWatchLeases, PushBindingStore, recordedSession } from "./agent-hook-stores.js";
@@ -52,7 +54,41 @@ const DIALOG_PUSH_MS = 10 * 60_000;
 const FANOUT_SWEEP_MS = 5_000;
 const FANOUT_ARCHIVE_MS = 60 * 60 * 1000;
 
-interface Pending { target: Target; response: ServerResponse; tool: string; input: unknown; message: string; request: string; requestKind: RequestKind; title?: string; choice?: TerminalChoice; expiresAt: string; timer: NodeJS.Timeout; conductor?: { action: "dispatch" | "hand_off"; project?: string; computer?: string } }
+/** Where a held request's answer goes: the callback's HTTP response, or the
+ * reply to a Codex app-server request (codex-servers.ts). Either takes the
+ * PermissionRequest-shaped JSON; "{}" gives the request back to the terminal. */
+interface HeldReply { end(body: string): unknown; readonly destroyed: boolean }
+interface Pending { target: Target; response: HeldReply; tool: string; input: unknown; message: string; request: string; requestKind: RequestKind; title?: string; choice?: TerminalChoice; expiresAt: string; timer?: NodeJS.Timeout; conductor?: { action: "dispatch" | "hand_off"; project?: string; computer?: string };
+  /** A server request of the Hook's own Codex app-server: answered over RPC, never held on a timer. */
+  appServer?: { requestId: AppServerRequestId; answer: (result: Json) => void } }
+
+/** The approval card's tool and input for an app-server request, in the
+ * shapes `approvalSummary` and the phone already read for Codex's hook.
+ * Undefined for questions (`item/tool/requestUserInput`) and MCP
+ * elicitations, which stay in the pane. */
+export function appServerApproval(request: PendingServerRequest): { tool: string; input: Json } | undefined {
+  const params = request.params;
+  const reason = typeof params.reason === "string" && params.reason ? { reason: params.reason } : {};
+  if (request.method === "item/commandExecution/requestApproval") {
+    return { tool: "Bash", input: { ...(typeof params.command === "string" ? { command: params.command } : {}),
+      ...(typeof params.cwd === "string" ? { cwd: params.cwd } : {}), ...reason } };
+  }
+  if (request.method === "item/fileChange/requestApproval") {
+    const changes = objects(params.changes);
+    const verb = (change: Json) => object(change.kind).type === "add" ? "Add" : object(change.kind).type === "delete" ? "Delete" : "Update";
+    const patch = changes.filter(change => typeof change.path === "string").map(change => `*** ${verb(change)} File: ${change.path}`).join("\n");
+    return { tool: "apply_patch", input: { ...(patch ? { patch } : {}), ...(typeof params.grantRoot === "string" ? { grantRoot: params.grantRoot } : {}), ...reason } };
+  }
+  if (request.method === "item/permissions/requestApproval") return { tool: "Permissions", input: { permissions: params.permissions ?? {}, ...reason } };
+  return undefined;
+}
+
+/** The app-server's answer for the phone's allow or deny (T3's
+ * CodexSessionRuntime shapes: accept / decline, a permission grant or none). */
+export function appServerDecision(request: PendingServerRequest, allow: boolean): Json {
+  if (request.method === "item/permissions/requestApproval") return { permissions: allow ? object(request.params.permissions) : {}, scope: "turn" };
+  return { decision: allow ? "accept" : "decline" };
+}
 
 /** A conductor `dispatch` or `hand_off` permission ask the Hook can answer
  * itself under a standing grant, or offer the phone two grant-writing answers. */
@@ -380,6 +416,8 @@ export class AgentHooks {
     const held = [...this.pending.values()].find(p => JSON.stringify(p.target) === key);
     // A held Codex permission can already have real choices in its pane.
     // Refresh those before publishing the approval, even while it is held.
+    // One the Hook's own app-server asked is answered over RPC, not in the pane.
+    if (held?.appServer) return;
     if (held && target.source === "codex") {
       const now = Date.now();
       if (now - (this.dialogReads.get(key) ?? 0) < DIALOG_READ_MS) return;
@@ -617,8 +655,10 @@ export class AgentHooks {
     const pending = [...this.pending.entries()].find(([, p]) => JSON.stringify(p.target) === JSON.stringify(target));
     if (pending) return { actionId: pending[0], toolName: pending[1].tool, title: pending[1].choice?.title ?? pending[1].title, message: pending[1].message,
       request: pending[1].request,
-      details: pending[1].message, terminalOnly: target.source === "codex" && !pending[1].choice,
-      ...(pending[1].choice ? { choice: pending[1].choice } : {}), expiresAt: pending[1].expiresAt,
+      details: pending[1].message, terminalOnly: target.source === "codex" && !pending[1].choice && !pending[1].appServer,
+      ...(pending[1].choice ? { choice: pending[1].choice } : {}),
+      // An app-server request waits for as long as it takes: its card never runs out.
+      expiresAt: pending[1].appServer ? new Date(Math.max(Date.parse(pending[1].expiresAt), Date.now() + DIALOG_PUSH_MS)).toISOString() : pending[1].expiresAt,
       ...(pending[1].conductor ? { conductor: pending[1].conductor } : {}) };
     const own = target.source === "opencode" ? this.opencodeApproval(target) : undefined;
     if (own) return own;
@@ -861,6 +901,47 @@ export class AgentHooks {
   private dropPushBindings(action: string) {
     this.pushBindings.dropAction(action);
   }
+  /** A server request from one of the Hook's own Codex app-servers: an
+   * approval card like a held PermissionRequest, pushed the same way, but
+   * with no hold timer. The request stays parked in Codex until someone
+   * answers it, here or in the pane's TUI (`codexResolved`). */
+  codexRequest(target: Target, request: PendingServerRequest, answer: (result: Json) => void): void {
+    const shown = appServerApproval(request);
+    if (!shown || this.closed) return;
+    // Replayed after a reconnect: the card stays, answered through the new connection.
+    const known = [...this.pending.values()].find(entry => entry.appServer?.requestId === request.requestId && JSON.stringify(entry.target) === JSON.stringify(target));
+    if (known?.appServer) { known.appServer.answer = answer; return; }
+    const action = randomUUID();
+    const held = { requestId: request.requestId, answer };
+    const reply = { destroyed: false, end(body: string) {
+      if (reply.destroyed) return;
+      reply.destroyed = true;
+      // "{}" gives the request back to the pane: it stays parked in Codex.
+      const behavior = object(object(object((() => { try { return JSON.parse(body); } catch { return {}; } })()).hookSpecificOutput).decision).behavior;
+      if (behavior === "allow" || behavior === "deny") held.answer(appServerDecision(request, behavior === "allow"));
+    } };
+    const cwd = typeof request.params.cwd === "string" && path.isAbsolute(request.params.cwd) ? request.params.cwd : undefined;
+    const summary = approvalSummary({ tool: shown.tool, input: shown.input, cwd });
+    const expiresAt = Date.now() + DIALOG_PUSH_MS;
+    this.pending.set(action, { target, response: reply, tool: shown.tool, input: shown.input, message: JSON.stringify(shown.input, null, 2).slice(0, 32_768),
+      ...summary, expiresAt: new Date(expiresAt).toISOString(), appServer: held });
+    while (this.pending.size > 64) this.pending.delete(this.pending.keys().next().value!);
+    if (!this.push.available) return;
+    const binding = randomUUID();
+    this.pushBindings.add(binding, { action, expiresAt });
+    void this.push.notify({ binding, provider: "codex", question: false, expiresAt: new Date(expiresAt).toISOString(),
+      ...(cwd ? { project: path.basename(cwd) } : {}), computer: this.computerName, ...summary })
+      .then(delivered => { if (!delivered) this.pushBindings.consume(binding); }).catch(() => {});
+  }
+  /** Another client (the pane's TUI) answered the request, or this one declined it. */
+  codexResolved(target: Target, requestId: AppServerRequestId): void {
+    for (const [action, entry] of this.pending) {
+      if (entry.appServer?.requestId !== requestId || JSON.stringify(entry.target) !== JSON.stringify(target)) continue;
+      this.pending.delete(action); this.dropPushBindings(action);
+      (entry.response as { destroyed: boolean }).destroyed = true;
+      settleBlockedPane(target.server, target.pane, 0);
+    }
+  }
   async start() {
     await this.push.start();
     // The public helper singleton was already checked before this is called.
@@ -950,6 +1031,10 @@ export class AgentHooks {
           }
         }
         if (autoReview) { res.end("{}"); return; }
+        // A thread on the Hook's own Codex app-server: the request reaches
+        // this Hook as a server request with no time limit, so the callback
+        // lets Codex ask for it at once instead of holding a second card.
+        if (body.event === "PermissionRequest" && target.source === "codex" && codexServers.forThread(target.session)) { res.end("{}"); return; }
         if (body.event !== "PermissionRequest" || target.source === "copilot"
           || (!this.watching.has(JSON.stringify(target)) && !this.overview.has(target.server) && !this.push.available)) {
           if (body.event === "PermissionRequest") this.rememberTerminalPrompt(target, body);
@@ -1070,7 +1155,10 @@ export async function agentHook(source: Provider) {
   if (!modules.has("hook") || (event.endsWith("ToolUse") && !modules.has("git"))) return;
   // Codex 0.157 runs hooks inside its shared app-server daemon, whose pane
   // variables belong to whichever pane first started it.
-  const daemon = source === "codex" && await underCodexDaemon().catch(() => false);
+  // The Hook's own per-pane app-server (codex-servers.ts) runs its hooks
+  // with that pane's variables, so they are trusted like a pane's own.
+  const ownServer = source === "codex" && codexServerId.safeParse(process.env[CODEX_SERVER_ENV]).success;
+  const daemon = source === "codex" && !ownServer && await underCodexDaemon().catch(() => false);
   // Codex asks this hook before its automatic reviewer: say when that
   // reviewer, not the owner, will decide.
   const autoReview = source === "codex" && event === "PermissionRequest" && await codexAutoReview(value.transcript_path);
