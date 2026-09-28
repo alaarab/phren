@@ -6,6 +6,7 @@ import { ModelCatalog, type AgentModel } from "./models.js";
 import { BridgeError, type Json, type Target } from "./protocol.js";
 import { sideQuestionText } from "./side-questions.js";
 import { stripTerminal } from "../terminal-text.js";
+import { codexServers } from "./codex-servers.js";
 
 export const MODEL_BUSY = "This agent is working. The model switch can happen when the turn ends. Choose Switch after this turn.";
 export const SLASH_BUSY = "This agent is working. Slash commands run between turns; send it again when this turn ends.";
@@ -129,6 +130,20 @@ export class ModelSwitcher {
       throw new BridgeError(409, `Could not verify ${step}. Open terminal to check the model.`);
     };
     try {
+      // A Codex pane on the Hook's own app-server takes the model and effort
+      // with its next turn (turn/start overrides), as T3 does: no menu is
+      // walked in its TUI, and a working turn is left alone.
+      const served = target.source === "codex" ? codexServers.forTarget(target) : undefined;
+      if (served) {
+        const model = (await this.catalog.list("codex")).find(model => model.id === id);
+        if (!model) throw new BridgeError(422, "That model is not in the computer's catalogue. Refresh the model list.");
+        const effort = chosenEffort ?? model.defaultReasoningEffort;
+        if (effort && model.supportedReasoningEfforts?.length && !model.supportedReasoningEfforts.includes(effort)) {
+          throw new BridgeError(422, "The catalogue does not confirm that reasoning effort. Refresh the model list.");
+        }
+        codexServers.setNextTurn(served, model.id, effort);
+        return { ok: true, model: model.id, name: model.name, ...(effort ? { effort } : {}), applies: "next-turn" };
+      }
       terminal = (await validate(true)).terminal_id;
       if (target.source === "opencode") throw new BridgeError(422, "OpenCode uses an interactive /models picker. Open terminal to switch models; remote selection cannot yet be verified.");
       if (!["codex", "claude"].includes(target.source)) throw new BridgeError(422, "Model switching is not supported for this harness. Open terminal to choose a model.");

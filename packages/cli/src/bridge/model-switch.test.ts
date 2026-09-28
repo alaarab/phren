@@ -4,6 +4,7 @@ import { rpc, validateTarget } from "./herdr.js";
 import { codexModelStatus, MODEL_BUSY, ModelSwitcher, refuseWorkingSlash, SLASH_BUSY } from "./model-switch.js";
 import { codexModels, ModelCatalog } from "./models.js";
 import type { Target } from "./protocol.js";
+import { codexServers, type CodexServerEntry } from "./codex-servers.js";
 
 vi.mock("./herdr.js", async original => ({ ...await original<typeof import("./herdr.js")>(), rpc: vi.fn(), validateTarget: vi.fn() }));
 const target: Target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "codex", session: "fixture-session" };
@@ -47,6 +48,20 @@ describe("model switch route transaction", () => {
       }
       throw Error(`Unexpected ${method}`);
     });
+  });
+
+  it("holds a Hook-run Codex pane's model and effort for its next turn, typing nothing, even while it works", async () => {
+    status = "working";
+    const entry = { id: "0123456789ab" } as CodexServerEntry;
+    const forTarget = vi.spyOn(codexServers, "forTarget").mockReturnValue(entry);
+    const setNextTurn = vi.spyOn(codexServers, "setNextTurn").mockImplementation(() => {});
+    try {
+      expect(await switcher.switch(target, { model: astra.id, effort: "high" }))
+        .toEqual({ ok: true, model: astra.id, name: astra.name, effort: "high", applies: "next-turn" });
+      expect(setNextTurn).toHaveBeenCalledWith(entry, astra.id, "high");
+      expect(sent()).toEqual([]);
+      await expect(switcher.switch(target, { model: astra.id, effort: "max" })).rejects.toThrow("reasoning effort");
+    } finally { forTarget.mockRestore(); setNextTurn.mockRestore(); }
   });
 
   it.each([undefined, "xhigh"])("walks both menus and verifies the status line with effort %s", async effort => {
