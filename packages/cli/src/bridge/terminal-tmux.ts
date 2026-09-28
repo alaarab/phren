@@ -388,7 +388,7 @@ export const tmuxTerminal: TerminalProvider = {
     const taken = new Set((await tmux(server, ["list-sessions", "-F", "#{session_name}"]).catch(() => "")).split("\n").filter(Boolean));
     await tmux(server, ["new-session", "-d", "-s", sessionName(label, taken), "-x", "200", "-y", "50", ...directory, ...name]);
   },
-  async startAgent(server, pane, { name, kind, args, timeoutMs }) {
+  async startAgent(server, pane, { name, kind, args, timeoutMs, env }) {
     if (!["claude", "codex", "copilot", "opencode"].includes(kind)) throw new BridgeError(400, "This agent cannot be started in tmux.");
     await requireDirectExec();
     const target = toTmuxId(pane, "p"), row = await paneRow(server, target);
@@ -399,7 +399,9 @@ export const tmuxTerminal: TerminalProvider = {
     // the pane falls back to that shell when it exits. The harness and its
     // arguments are the script's positional parameters, never script text.
     const shell = loginShell();
-    await tmux(server, ["respawn-pane", "-k", "-t", target, ...(row.pane_current_path ? ["-c", row.pane_current_path] : []),
+    // Variables for the agent alone (a dispatch id) ride on the respawn.
+    const variables = Object.entries(env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]);
+    await tmux(server, ["respawn-pane", "-k", "-t", target, ...(row.pane_current_path ? ["-c", row.pane_current_path] : []), ...variables,
       "--", shell, "-l", "-c", 'shell="$1"; shift; "$@"; exec "$shell" -l', "phren", shell, kind, ...args]);
     // Started once the harness is the pane's foreground program.
     const deadline = Date.now() + Math.min(timeoutMs, 30_000);

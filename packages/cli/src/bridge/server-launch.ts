@@ -7,6 +7,7 @@ import { agentNames, findPane, isConductorName, paneAgentName, paneChatState, pa
 import { type AgentStart, agentNotReady, terminalName, terminalProvider } from "./terminal.js";
 import { intervalFromEnv } from "./limits.js";
 import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from "./launch-worktree.js";
+import { briefArgs, DISPATCH_ID_ENV, launchBriefSchema, launchesWithBrief, writeLaunchBrief } from "./launch-brief.js";
 import { groupConductor, type GroupConductor } from "./conductor-group.js";
 import { optionalHookPeers } from "./peers.js";
 import { atomic, BridgeError, bridgeRoot, id, type Json, objects, provider } from "./protocol.js";
@@ -134,6 +135,10 @@ export async function launchSession(server: string, data: Json, options: { canar
   const kind = z.enum(launchKinds).parse(data.kind);
   const effort = z.enum(launchEfforts).default("medium").parse(data.effort);
   if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
+  // A dispatched worker's or scheduled run's first prompt. It rides on the
+  // launch where the harness takes one; elsewhere the caller types it.
+  const brief = data.brief === undefined || data.brief === null ? undefined : launchBriefSchema.parse(data.brief);
+  if (brief && role === "conductor") throw new BridgeError(400, "A conductor starts with its own brief.");
   // Herdr's agent name is a slug (lowercase, digits, - or _, 1 to 32 chars);
   // the label a person typed is not, so derive one from it.
   const baseName = herdrAgentName(data.name === undefined ? label : plainText(200).parse(data.name));
@@ -170,6 +175,9 @@ export async function launchSession(server: string, data: Json, options: { canar
   if (role === "agent" && workspace && objects(before.panes).some(pane => pane.workspace_id === workspace && isConductorName(paneAgentName(before, pane)))) workspace = undefined;
   const args = role === "conductor" ? await prepareConductor(kind, effort, model)
     : [...(model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort))];
+  const briefLaunch = brief && launchesWithBrief(kind) ? briefArgs(kind, await writeLaunchBrief(brief)) : undefined;
+  if (briefLaunch) args.push(...briefLaunch);
+  const env = brief ? { [DISPATCH_ID_ENV]: brief.id } : undefined;
   if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
   const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));
   const knownTabs = new Set(objects(before.tabs).map(t => t.tab_id));
@@ -177,7 +185,7 @@ export async function launchSession(server: string, data: Json, options: { canar
   // never leaves a worktree or branch behind.
   const worktree: LaunchWorktree | undefined = worktreeRequest ? await createLaunchWorktree(projectDirectory, worktreeRequest) : undefined;
   const cwd = worktree?.cwd ?? projectDirectory;
-  try { await terminalProvider().create(server, { workspace, label, cwd }); }
+  try { await terminalProvider().create(server, { workspace, label, cwd, ...(env ? { env } : {}) }); }
   catch (error) { await worktree?.discard(); throw error; }
   let created: { workspaceId: string; tabId: string; paneId: string } | undefined;
   for (let attempt = 0; attempt < 25 && !created; attempt++) {
@@ -194,7 +202,7 @@ export async function launchSession(server: string, data: Json, options: { canar
   }
   if (!created) throw new BridgeError(409, `${terminalName(server)} created "${label}" but its pane did not appear. Check ${terminalName(server)} on the computer.`);
   try {
-    await startWhenShellReady(server, created.paneId, { name, kind, args, timeoutMs: timeout });
+    await startWhenShellReady(server, created.paneId, { name, kind, args, timeoutMs: timeout, ...(env ? { env } : {}) });
   } catch (error) {
     // A first-run screen (Claude's folder trust, a login notice) holds the
     // agent at startup. It did start: hand the pane back so the owner answers
@@ -216,6 +224,8 @@ export async function launchSession(server: string, data: Json, options: { canar
   const target = sessionId ? { ...binding, session: sessionId }
     : chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
   return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(unchecked.length ? { unchecked } : {}),
+    // The caller types the brief itself unless it went with the launch.
+    ...(brief ? { briefLaunched: !!briefLaunch } : {}),
     ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}) };
 }
 export async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {

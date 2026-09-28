@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { dispatchStatus, updateReceipt, type OriginPane, type Receipt, type WorkerState } from "./dispatch.js";
+import { arrivalOf, dispatchStatus, updateReceipt, type OriginPane, type Receipt, type WorkerState } from "./dispatch.js";
+import { briefArrival, type BriefArrival } from "./launch-brief.js";
 import { findPane, paneIdentity, sharedSnapshot } from "./herdr.js";
 import { handOff } from "./hand-off.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
@@ -180,8 +181,11 @@ export interface DispatchReturnsOptions {
   /** A recent Herdr snapshot of a local server, to see whether the dispatching agent is idle. */
   snapshot?: (server: string) => Promise<Json>;
   identity?: (server: string, pane: Json) => Promise<string | undefined>;
-  /** Types the notice into the dispatching agent, through the ordinary hand-off path. */
-  deliver?: (target: Target, text: string) => Promise<{ delivered: boolean }>;
+  /** Types the notice into the dispatching agent, through the ordinary hand-off
+   * path; the same notice keeps one delivery id, so a retry is never typed twice. */
+  deliver?: (target: Target, text: string, deliveryId: string) => Promise<{ delivered: boolean }>;
+  /** What a worker's hooks reported for a brief launched on this computer. */
+  localArrival?: (id: string) => Promise<BriefArrival | undefined>;
   now?: () => number;
 }
 
@@ -195,7 +199,8 @@ export class DispatchReturns {
   private readonly isLocal: (computer: string) => boolean;
   private readonly snapshot: (server: string) => Promise<Json>;
   private readonly identity: (server: string, pane: Json) => Promise<string | undefined>;
-  private readonly deliver: (target: Target, text: string) => Promise<{ delivered: boolean }>;
+  private readonly deliver: (target: Target, text: string, deliveryId: string) => Promise<{ delivered: boolean }>;
+  private readonly localArrival: (id: string) => Promise<BriefArrival | undefined>;
   private readonly now: () => number;
   private lastPoll = -Infinity;
   private readonly lastNotice = new Map<string, number>();
@@ -208,7 +213,8 @@ export class DispatchReturns {
     this.isLocal = options.isLocal ?? (computer => isLocalComputer(computer));
     this.snapshot = options.snapshot ?? (server => sharedSnapshot(server, SNAPSHOT_AGE_MS));
     this.identity = options.identity ?? ((server, pane) => paneIdentity(server, pane));
-    this.deliver = options.deliver ?? ((target, text) => handOff({ target, text }));
+    this.deliver = options.deliver ?? ((target, text, deliveryId) => handOff({ target, text }, { deliveryId }));
+    this.localArrival = options.localArrival ?? briefArrival;
     this.now = options.now ?? Date.now;
   }
 
@@ -220,8 +226,33 @@ export class DispatchReturns {
     return this.running;
   }
 
+  /**
+   * A brief that went with the launch but was not confirmed while the dispatch
+   * was placed (a startup screen held it, the agent was slow): ask the
+   * worker's computer whether its hook has confirmed it since.
+   */
+  async confirmArrivals(peers: HookPeer[]): Promise<void> {
+    const now = this.now();
+    const unconfirmed = (await dispatchStatus()).filter(receipt => receipt.state === "uncertain" && receipt.brief === "launch"
+      && now - Date.parse(receipt.createdAt) < WATCH_MS).slice(0, 64);
+    for (const receipt of unconfirmed) {
+      const peer = peers.find(candidate => candidate.name === receipt.computer);
+      if (!peer && !this.isLocal(receipt.computer)) continue;
+      const arrival = await (peer ? arrivalOf({ request: route => this.request(peer, route) }, receipt.id) : this.localArrival(receipt.id)).catch(() => undefined);
+      if (!arrival?.accepted) continue;
+      const named = arrival.accepted.target;
+      await updateReceipt(receipt.id, current => {
+        if (current.state !== "uncertain") return false;
+        current.state = "accepted"; delete current.error;
+        if (named.source === current.harness) current.target = named;
+        return true;
+      }).catch(() => undefined);
+    }
+  }
+
   /** Ask each peer, once, about every open dispatch placed on it. */
   async poll(): Promise<void> {
+    await this.confirmArrivals(await this.peers().catch(() => [] as HookPeer[]));
     const now = this.now();
     const open = (await dispatchStatus()).filter(receipt => (receipt.state === "accepted" || receipt.state === "uncertain")
       && receipt.target && receipt.worker?.state !== "gone" && now - Date.parse(receipt.createdAt) < WATCH_MS);
@@ -263,7 +294,9 @@ export class DispatchReturns {
       const target = targetSchema.safeParse({ server: origin.server, workspace: origin.workspace, tab: origin.tab, pane: origin.pane, source: origin.agent, session });
       if (!target.success) continue;
       this.lastNotice.set(key, this.now());
-      const sent = await this.deliver(target.data, noticeLine(receipts)).catch(() => ({ delivered: false }));
+      // Named by what it reports: the same returns keep the same id on a retry.
+      const deliveryId = `notice-${createHash("sha256").update(receipts.map(receipt => `${receipt.id}@${receipt.returned!.at}`).sort().join(",")).digest("hex").slice(0, 32)}`;
+      const sent = await this.deliver(target.data, noticeLine(receipts), deliveryId).catch(() => ({ delivered: false }));
       if (!sent.delivered) continue;
       const at = new Date(this.now()).toISOString();
       for (const receipt of receipts) {

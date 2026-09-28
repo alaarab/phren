@@ -13,6 +13,7 @@ import { hookPeers } from "./peers.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
 import { atomic, BridgeError, bridgeRoot, id, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
+import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
 export const projectName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/);
@@ -39,6 +40,8 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   computerId: z.string().uuid().optional(),
   state: z.enum(["launching", "sending", "accepted", "uncertain", "failed"]),
   target: remoteTarget.optional(), error: z.string().max(500).optional(),
+  brief: z.enum(["launch", "typed"]).optional()
+    .describe("How the brief reached the worker: as its first prompt at launch (confirmed by the worker's hook), or typed into its pane."),
   granted: z.string().max(200).optional().describe("Scope of the conductor grant that allowed this call."),
   skipped: z.array(z.object({ computer: computerName, reason: z.string().max(200) }).strict()).max(32).optional()
     .describe("Computers left out of anywhere placement, with the reason each could not report capacity."),
@@ -196,9 +199,10 @@ class StartupScreen extends Error {
  * unclassified; a pane that is blocked or waiting really needs its terminal,
  * and that refusal stands.
  */
-async function sendBrief(peer: DispatchHost, target: Json, text: string): Promise<Json> {
+async function sendBrief(peer: DispatchHost, target: Json, text: string, deliveryId: string): Promise<Json> {
   for (let attempt = 0; ; attempt++) {
-    try { return await peer.request("/v1/prompt", { target, text }); } catch (error) {
+    // One delivery id for every attempt: the receiving Hook types it once.
+    try { return await peer.request("/v1/prompt", { target, text, deliveryId }); } catch (error) {
       const unsettled = error instanceof BridgeError && error.status === 409 && /needs input in the terminal first/.test(error.message);
       if (!unsettled || attempt >= 20) throw error;
       const panes = await peer.request(`/v1/workspaces/panes?server=${encodeURIComponent(peer.server)}&groupId=${encodeURIComponent(String(target.workspace))}&childId=${encodeURIComponent(String(target.tab))}`).catch(() => undefined);
@@ -209,6 +213,38 @@ async function sendBrief(peer: DispatchHost, target: Json, text: string): Promis
       await new Promise(resolve => setTimeout(resolve, 1_000));
     }
   }
+}
+
+/** What the worker's own hooks reported for a brief that went with its
+ * launch, or undefined when the receiving Hook has no such brief. */
+export async function arrivalOf(peer: Pick<DispatchHost, "request">, id: string): Promise<BriefArrival | undefined> {
+  const answer = await peer.request(`/v1/dispatch/arrival?id=${encodeURIComponent(id)}`);
+  const arrival = answer.arrival === null ? undefined : arrivalSchema.parse(answer.arrival);
+  return arrival;
+}
+
+/**
+ * A brief that went with the launch is the new agent's first prompt; its
+ * UserPromptSubmit hook echoes the dispatch id when the harness submits it.
+ * Waits for that echo, and returns the conversation it named.
+ */
+async function awaitArrival(peer: DispatchHost, id: string, intervalMs: number): Promise<BriefArrival> {
+  let last: BriefArrival = {};
+  for (let attempt = 0; attempt < ARRIVAL_ATTEMPTS; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+    last = await arrivalOf(peer, id).catch(() => undefined) ?? last;
+    if (last.accepted) break;
+  }
+  return last;
+}
+/** Claude and Codex take a few seconds to start, load their MCP servers and submit the prompt. */
+const ARRIVAL_ATTEMPTS = 30;
+
+/** The pane's status as the remote Hook lists it now. */
+async function paneStatus(peer: DispatchHost, launched: Json): Promise<string | undefined> {
+  const panes = await peer.request(`/v1/workspaces/panes?server=${encodeURIComponent(peer.server)}&groupId=${encodeURIComponent(String(launched.workspaceId))}&childId=${encodeURIComponent(String(launched.tabId))}`).catch(() => undefined);
+  const pane = (Array.isArray(panes?.panes) ? panes.panes : []).find((p: Json) => p && typeof p === "object" && (p as Json).id === launched.paneId) as Json | undefined;
+  return typeof pane?.agentStatus === "string" ? pane.agentStatus : undefined;
 }
 
 export interface DispatchIdentity {
@@ -273,8 +309,17 @@ export class DispatchService {
         ...(grant ? { granted: grantLabel(grant) } : {}), ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}) };
       await save(receipt);
       try {
+        // The brief goes with the launch: a Hook that can start the harness
+        // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
-          { project: data.project, kind: data.harness, model: data.model, label: data.label });
+          { project: data.project, kind: data.harness, model: data.model, label: data.label, brief: { id: receipt.id, text: prompt } });
+        if (launched.briefLaunched === true) {
+          receipt.brief = "launch";
+          await this.confirmLaunched(peer, receipt, launched);
+          receipt.updatedAt = new Date().toISOString(); await save(receipt);
+          return { ok: receipt.state === "accepted", ...receipt };
+        }
+        receipt.brief = "typed";
         const settled: { target?: unknown; status?: string } = launched.target ? { target: launched.target } : await settledTarget(peer, launched, data.harness, this.settleIntervalMs);
         if (!settled.target) {
           if (["blocked", "waiting"].includes(String(settled.status ?? launched.agentStatus))) throw new StartupScreen(String(settled.status ?? launched.agentStatus));
@@ -284,7 +329,7 @@ export class DispatchService {
         if (target.source !== data.harness || target.server !== peer.server) throw new BridgeError(502, "The remote Hook returned a different launch target.");
         receipt.target = target;
         receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt);
-        const result = await sendBrief(peer, receipt.target, prompt);
+        const result = await sendBrief(peer, receipt.target, prompt, `dispatch-${receipt.id}`);
         receipt.state = result.ok === true && result.deliveryUncertain !== true ? "accepted" : "uncertain";
       } catch (error) {
         if (error instanceof StartupScreen) {
@@ -302,6 +347,34 @@ export class DispatchService {
       receipt.updatedAt = new Date().toISOString(); await save(receipt);
       return { ok: receipt.state === "accepted", ...receipt };
     } finally { this.active = false; }
+  }
+
+  /**
+   * A brief that went with the launch: wait for the worker's hook to confirm
+   * it by dispatch id. A startup screen (folder trust, sign-in) holds the
+   * prompt until the owner answers it, and the harness then submits it by
+   * itself, so that is not a failure. Neither confirmed nor held reads
+   * uncertain, and the returns loop keeps asking.
+   */
+  private async confirmLaunched(peer: DispatchHost, receipt: Receipt, launched: Json): Promise<void> {
+    const known = remoteTarget.safeParse(launched.target);
+    if (known.success && known.data.source === receipt.harness && known.data.server === peer.server) receipt.target = known.data;
+    receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt);
+    const held = (status: unknown) => ["blocked", "waiting"].includes(String(status));
+    const arrival = held(launched.agentStatus) ? await arrivalOf(peer, receipt.id).catch(() => undefined) ?? {}
+      : await awaitArrival(peer, receipt.id, this.settleIntervalMs);
+    const named = arrival.accepted?.target ?? arrival.started?.target;
+    if (named && named.source === receipt.harness && named.server === peer.server) receipt.target = named;
+    if (arrival.accepted) { receipt.state = "accepted"; return; }
+    const status = held(launched.agentStatus) ? String(launched.agentStatus) : await paneStatus(peer, launched);
+    receipt.state = "uncertain";
+    if (held(status)) {
+      const question = `${receipt.harness} in "${receipt.label}" on ${receipt.computer} is waiting on a startup screen (folder trust or sign-in).`.slice(0, 200);
+      receipt.error = `${question} The brief is queued as its first prompt and starts once that screen is answered in the pane (the phone can).`.slice(0, 500);
+      receipt.returned = { state: "needs-you", at: new Date().toISOString(), question, read: false };
+      return;
+    }
+    receipt.error = `${receipt.harness} started with the brief on ${receipt.computer} but has not confirmed it yet (last status ${status ?? "unknown"}). The Hook keeps checking.`.slice(0, 500);
   }
 
   private async origin(value: unknown): Promise<Receipt["origin"]> {

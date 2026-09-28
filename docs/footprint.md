@@ -145,6 +145,10 @@ nothing to that checkout.
 - OpenCode's mirrored session event logs can have a `.preview.json` sidecar in
   `<store>/.runtime/sessions/`, holding temporary live reply text for Hook.
 - `<bridge>/dispatches/` holds dispatch receipts without prompt text;
+  on the computer that runs a dispatched Claude or Codex worker (or a
+  scheduled run), `<bridge>/briefs/<id>/` holds its brief (`brief.md`, 0600)
+  and what the worker's hooks reported (`arrival.json`), kept seven days and
+  at most 256;
   `<bridge>/conductor.yaml` holds standing grants and `<bridge>/hooks.yaml`
   holds the verified peer directory.
 

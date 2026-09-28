@@ -58,9 +58,12 @@ export async function resumeScheduleRun(run: ScheduleRun, schedule: Schedule, si
 }
 
 async function launchInHerdr(server: string, context: ScheduleLaunchContext, launchHerdr: HerdrLauncher, signal: AbortSignal): Promise<ScheduleLaunchResult> {
-  const launched = await launchHerdr(server, { cwd: context.cwd, label: context.schedule.name, kind: context.schedule.harness, model: context.schedule.model });
+  // The prompt goes with the launch where the harness takes one (Claude,
+  // Codex); otherwise it is typed once the agent is ready.
+  const brief = context.schedule.prompt.trim() ? { brief: { id: context.runId, text: context.schedule.prompt } } : {};
+  const launched = await launchHerdr(server, { cwd: context.cwd, label: context.schedule.name, kind: context.schedule.harness, model: context.schedule.model, ...brief });
   const workspaceId = String(launched.workspaceId), tabId = String(launched.tabId), paneId = String(launched.paneId);
-  await promptWhenReady(server, paneId, context.schedule.prompt, signal);
+  if (launched.briefLaunched !== true) await promptWhenReady(server, paneId, context.schedule.prompt, signal);
   let sessionId = typeof launched.sessionId === "string" ? launched.sessionId : undefined;
   for (let attempt = 0; attempt < 10 && !sessionId; attempt++) {
     const pane = findPane(await snapshot(server), { workspace: workspaceId, tab: tabId, pane: paneId });
