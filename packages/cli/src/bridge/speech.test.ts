@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeError, type Json } from "./protocol.js";
-import { alignmentOf, DEFAULT_SPEECH_VOICE, SPEECH_AUDIO, SPEECH_MODEL, speakableText, streamSpeech, type SpeechOptions } from "./speech.js";
-import { writeSpeechVoice } from "./speech-voice.js";
+import { alignmentOf, DEFAULT_SPEECH_MODEL, DEFAULT_SPEECH_VOICE, FALLBACK_HOLD_MS, FALLBACK_SPEECH_MODEL, SPEECH_AUDIO, SPEECH_SLOW_MS, SpeechState, speakableText, streamSpeech, type SpeechOptions } from "./speech.js";
+import { writeSpeechModel, writeSpeechVoice } from "./speech-voice.js";
 
 // The voice setting lives in the Hook's directory: never the developer's own.
 let bridge: string;
@@ -22,11 +22,13 @@ const KEY = "sk_test_do_not_leak_0123456789";
 /** A Hook-shaped server around the speech route: its errors are answered as
  * the route handler answers them. */
 async function hook(options: SpeechOptions): Promise<{ server: Server; post: (body: unknown) => Promise<{ status: number; headers: Record<string, unknown>; bytes: Buffer }> }> {
+  // Each server learns formats and model health on its own, not the module's.
+  const state = new SpeechState(options.now);
   const server = createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk);
     try {
-      await streamSpeech(JSON.parse(Buffer.concat(chunks).toString() || "{}") as Json, res, options);
+      await streamSpeech(JSON.parse(Buffer.concat(chunks).toString() || "{}") as Json, res, { state, ...options });
     } catch (error) {
       res.statusCode = error instanceof BridgeError ? error.status : 400;
       res.setHeader("Content-Type", "application/json");
@@ -82,7 +84,7 @@ describe("speech route", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe(`https://api.elevenlabs.io/v1/text-to-speech/${DEFAULT_SPEECH_VOICE}/stream?output_format=pcm_24000`);
     expect((calls[0].init.headers as Record<string, string>)["xi-api-key"]).toBe(KEY);
-    expect(JSON.parse(String(calls[0].init.body))).toMatchObject({ text: "Two commits landed.", model_id: SPEECH_MODEL });
+    expect(JSON.parse(String(calls[0].init.body))).toMatchObject({ text: "Two commits landed.", model_id: DEFAULT_SPEECH_MODEL });
     expect(reply.bytes.toString("latin1")).not.toContain(KEY);
     expect(JSON.stringify(reply.headers)).not.toContain(KEY);
   });
@@ -187,6 +189,133 @@ describe("speech route", () => {
     });
     servers.push(server);
     await expect(post({ text: "Hello." })).rejects.toThrow();
+  });
+});
+
+/** An ElevenLabs stand-in: `answer` decides each call from its format and
+ * model; every call is recorded. */
+function upstream(answer: (format: string, model: string) => Response | undefined) {
+  const calls: { format: string; model: string; endpoint: string }[] = [];
+  const fetch = (async (url: string, init: RequestInit) => {
+    const parsed = new URL(url);
+    const format = parsed.searchParams.get("output_format")!, model = JSON.parse(String(init.body)).model_id as string;
+    calls.push({ format, model, endpoint: parsed.pathname.split("/").at(-1)! });
+    return answer(format, model) ?? new Response(audioStream([new Uint8Array([1, 2])]), { status: 200 });
+  }) as unknown as typeof fetch;
+  return { calls, fetch };
+}
+const refusal = (status: number, code: string) => new Response(JSON.stringify({ detail: { status: code, message: `no ${KEY}` } }), { status });
+const timedReply = () => new Response(JSON.stringify({ audio_base64: Buffer.from([7, 7]).toString("base64"), alignment: null }), { status: 200 });
+
+describe("speech output format", () => {
+  it("serves pcm_24000 to a phone that names no formats, whatever the plan allows", async () => {
+    const eleven = upstream(() => undefined);
+    const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch });
+    servers.push(server);
+    const reply = await post({ text: "Hello." });
+    expect(reply.headers["x-phren-audio"]).toBe(SPEECH_AUDIO);
+    expect(reply.headers["x-phren-audio-rate"]).toBe("24000");
+    expect(reply.headers["x-phren-speech-model"]).toBe(DEFAULT_SPEECH_MODEL);
+    expect(eleven.calls.map(call => call.format)).toEqual(["pcm_24000"]);
+  });
+
+  it("serves 44.1 kHz PCM when the phone plays it and the plan allows it, and reports the rate", async () => {
+    const eleven = upstream(() => undefined);
+    const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch });
+    servers.push(server);
+    const reply = await post({ text: "Hello.", formats: ["pcm_44100", "pcm_24000", "opus_48000_192"] });
+    expect(reply.headers["x-phren-audio"]).toBe("pcm_s16le;rate=44100;channels=1");
+    expect(reply.headers["x-phren-audio-rate"]).toBe("44100");
+    expect(eleven.calls.map(call => call.format)).toEqual(["pcm_44100"]);
+  });
+
+  it("falls back from a format the plan refuses, remembers the refusal, and never passes ElevenLabs' text on", async () => {
+    // Creator: pcm_44100 is Pro and above; mp3_44100_192 is allowed.
+    const eleven = upstream(format => format === "pcm_44100" ? refusal(403, "output_format_not_allowed") : format === "mp3_44100_192" ? timedReply() : undefined);
+    const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch });
+    servers.push(server);
+    const pcmOnly = await post({ text: "Hello.", formats: ["pcm_44100", "pcm_24000"] });
+    expect(pcmOnly.status).toBe(200);
+    expect(pcmOnly.headers["x-phren-audio-rate"]).toBe("24000");
+    expect(eleven.calls.map(call => call.format)).toEqual(["pcm_44100", "pcm_24000"]);
+    expect(JSON.stringify(pcmOnly.headers)).not.toContain(KEY);
+
+    // The refusal is remembered: the next reply goes straight to what works.
+    eleven.calls.length = 0;
+    const mp3 = await post({ text: "Hi.", timestamps: true, formats: ["pcm_44100", "mp3_44100_192", "pcm_24000"] });
+    expect(eleven.calls.map(call => call.format)).toEqual(["mp3_44100_192"]);
+    expect(JSON.parse(mp3.bytes.toString())).toMatchObject({ audioFormat: "mp3;rate=44100;bitrate=192000;channels=1", sampleRate: 44_100, format: "mp3_44100_192", model: DEFAULT_SPEECH_MODEL });
+  });
+
+  it("reports the sample rate in the timestamped reply, 24 kHz for an older phone", async () => {
+    const eleven = upstream(() => timedReply());
+    const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch });
+    servers.push(server);
+    const json = JSON.parse((await post({ text: "Hi.", timestamps: true })).bytes.toString());
+    expect(json).toMatchObject({ audioFormat: SPEECH_AUDIO, sampleRate: 24_000, format: "pcm_24000", alignment: null });
+    const hifi = JSON.parse((await post({ text: "Hi.", timestamps: true, formats: ["pcm_44100"] })).bytes.toString());
+    expect(hifi).toMatchObject({ audioFormat: "pcm_s16le;rate=44100;channels=1", sampleRate: 44_100 });
+  });
+});
+
+describe("speech model", () => {
+  it("speaks with v4 Turbo by default and with the stored model once set", async () => {
+    const eleven = upstream(() => undefined);
+    const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch });
+    servers.push(server);
+    await post({ text: "Hello." });
+    await writeSpeechModel("eleven_v4");
+    await post({ text: "Hello." });
+    expect(eleven.calls.map(call => call.model)).toEqual(["eleven_v4_turbo", "eleven_v4"]);
+  });
+
+  it("falls back to Flash v2.5 when v4 Turbo errors, and keeps using it for a while", async () => {
+    let clock = 1_000_000;
+    const eleven = upstream((_format, model) => model === DEFAULT_SPEECH_MODEL ? refusal(400, "model_not_found") : undefined);
+    const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch, now: () => clock });
+    servers.push(server);
+    const first = await post({ text: "Hello." });
+    expect(first.status).toBe(200);
+    expect(first.headers["x-phren-speech-model"]).toBe(FALLBACK_SPEECH_MODEL);
+    expect(eleven.calls.map(call => call.model)).toEqual([DEFAULT_SPEECH_MODEL, FALLBACK_SPEECH_MODEL]);
+    eleven.calls.length = 0;
+    await post({ text: "Hello." });
+    expect(eleven.calls.map(call => call.model)).toEqual([FALLBACK_SPEECH_MODEL]);
+    // After the hold, v4 Turbo is tried again.
+    clock += FALLBACK_HOLD_MS + 1;
+    eleven.calls.length = 0;
+    await post({ text: "Hello." });
+    expect(eleven.calls[0].model).toBe(DEFAULT_SPEECH_MODEL);
+  });
+
+  it("does not fall back for the key, the quota, the voice or a rate limit", async () => {
+    for (const [status, code] of [[401, "invalid_api_key"], [401, "quota_exceeded"], [404, "voice_not_found"], [429, "too_many_concurrent_requests"]] as const) {
+      const eleven = upstream(() => refusal(status, code));
+      const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch });
+      servers.push(server);
+      expect((await post({ text: "Hello." })).status).not.toBe(200);
+      expect(eleven.calls.map(call => call.model), code).toEqual([DEFAULT_SPEECH_MODEL]);
+    }
+  });
+
+  it("sets v4 Turbo aside while its replies take longer than SPEECH_SLOW_MS to start", async () => {
+    let clock = 0;
+    const eleven = upstream((_format, model) => { if (model === DEFAULT_SPEECH_MODEL) clock += SPEECH_SLOW_MS + 500; else clock += 300; return timedReply(); });
+    const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch, now: () => clock });
+    servers.push(server);
+    for (let i = 0; i < 3; i++) await post({ text: "Hi.", timestamps: true });
+    const json = JSON.parse((await post({ text: "Hi.", timestamps: true })).bytes.toString());
+    expect(json.model).toBe(FALLBACK_SPEECH_MODEL);
+    expect(eleven.calls.map(call => call.model)).toEqual([DEFAULT_SPEECH_MODEL, DEFAULT_SPEECH_MODEL, DEFAULT_SPEECH_MODEL, FALLBACK_SPEECH_MODEL]);
+  });
+
+  it("judges speed on the median of the last three replies, so one slow reply is not enough", () => {
+    const state = new SpeechState(() => 0);
+    for (let i = 0; i < 5; i++) state.recordLatency(DEFAULT_SPEECH_MODEL, 1_100);
+    state.recordLatency(DEFAULT_SPEECH_MODEL, 9_000);
+    expect(state.benchedReason(DEFAULT_SPEECH_MODEL)).toBeUndefined();
+    state.recordLatency(DEFAULT_SPEECH_MODEL, 9_000);
+    expect(state.benchedReason(DEFAULT_SPEECH_MODEL)).toBe("slow");
   });
 });
 

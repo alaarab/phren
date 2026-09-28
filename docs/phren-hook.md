@@ -602,16 +602,40 @@ which names the session without answering it.
 
 The phone's talk mode reads an agent's replies aloud. `POST /v1/speech` with
 `{ "text": "…" }` (1 to 2,000 characters, usually one sentence) voices the text
-with ElevenLabs' `eleven_flash_v2_5` model and streams the audio back as raw
-16-bit little-endian mono PCM at 24 kHz (`X-Phren-Audio:
-pcm_s16le;rate=24000;channels=1`). The Hook advertises it as the `speech`
-capability.
+with ElevenLabs and streams the audio back. The Hook advertises it as the
+`speech` capability.
+
+The model is this computer's setting, else `eleven_v4_turbo`. Set it with
+`phren bridge speech-model set <model-id>` (`show` prints it, `clear` goes back
+to the default); it is stored next to the voice in `speech.json` and install
+and update keep it. When the model fails (an ElevenLabs error that names the
+model, or a 5xx) the Hook retries the reply with `eleven_flash_v2_5` and keeps
+using Flash for 10 minutes. It does the same when the median of the model's
+last three short replies (200 characters or fewer) took more than 1.5 s to
+start: the first streamed byte, or the whole timestamped reply talk mode waits
+for. Measured on 2026-09-28 with a 95-character reply, v4 Turbo started
+streaming in 200-400 ms and finished a timestamped reply in about 1.1 s, Flash
+v2.5 in 180-460 ms and about 0.4 s. A key, quota, voice or rate-limit error
+never switches model.
+
+The audio format is the best the phone plays and the ElevenLabs plan allows,
+tried in this order: `pcm_44100` (16-bit little-endian mono PCM at 44.1 kHz,
+Pro plans and above), `mp3_44100_192` (Creator and above), `pcm_24000` (every
+plan). The phone lists what it plays in `formats` (names from the
+`speechFormats` capability); a phone that sends none gets `pcm_24000`, as every
+phone did before. A format the plan refuses (403 `output_format_not_allowed`)
+is skipped for 6 hours. The streamed reply names what it sends in
+`X-Phren-Audio` (`pcm_s16le;rate=24000;channels=1`,
+`pcm_s16le;rate=44100;channels=1` or `mp3;rate=44100;bitrate=192000;channels=1`)
+and `X-Phren-Audio-Rate` (`24000` or `44100`), and the model in
+`X-Phren-Speech-Model`.
 
 With `"timestamps": true` (the `speechTimestamps` capability) the Hook calls
 ElevenLabs' `with-timestamps` endpoint instead and answers JSON: `{ "audio":
-"<base64 PCM, same format>", "audioFormat": "pcm_s16le;rate=24000;channels=1",
-"alignment": { "characters": [...], "starts": [...], "ends": [...] } }`, the
-times in seconds from the start of the audio, or `alignment: null` when
+"<base64>", "audioFormat": "pcm_s16le;rate=24000;channels=1", "sampleRate":
+24000, "format": "pcm_24000", "model": "eleven_v4_turbo", "alignment": {
+"characters": [...], "starts": [...], "ends": [...] } }`, the times in seconds
+from the start of the audio whatever its sample rate, or `alignment: null` when
 ElevenLabs sent none. The alignment covers the words spoken, after the Hook
 strips the reply's markdown, so `characters` joined is the spoken text. The
 phone uses it to highlight the word being read in the chat.
