@@ -36,7 +36,9 @@ it("reports install state, Claude accounts and Codex sign-in", async () => {
   ]);
   expect(by.codex).toMatchObject({ usable: true, accounts: [{ id: "default", label: "Codex", key: "codex", signedIn: true, usable: true }] });
   expect(by.opencode).toEqual({ source: "opencode", installed: false, usable: false, reason: "Not installed" });
-  expect(by.copilot).toMatchObject({ installed: false, usable: false, reason: "--version did not answer within 3 seconds" });
+  // A slow --version is not "missing": the harness stays offered.
+  expect(by.copilot).toMatchObject({ installed: true, usable: true });
+  expect(by.copilot.version).toBeUndefined();
 });
 
 it("marks Codex unusable without auth.json and Claude unusable with no signed-in account", async () => {
@@ -55,4 +57,11 @@ it("hasUsable answers for dispatch", async () => {
   expect(hasUsable(inv, "copilot")).toEqual({ ok: true });
   expect(hasUsable(inv, "copilot", "work")).toMatchObject({ ok: false, code: "account_unavailable" });
   expect(hasUsable(inv, "nothing")).toMatchObject({ ok: false, code: "harness_unavailable" });
+});
+
+it("keeps an account usable when Claude does not answer its sign-in check", async () => {
+  const inv = await harnessInventory({ toolVersion: async t => versions[t], authRunner: async () => "" });
+  const claude = inv.harnesses.find(h => h.source === "claude")!;
+  expect(claude.accounts![0]).toMatchObject({ id: "default", signedIn: false, usable: true });
+  expect(hasUsable(inv, "claude")).toEqual({ ok: true });
 });

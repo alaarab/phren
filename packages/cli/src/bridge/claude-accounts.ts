@@ -153,7 +153,8 @@ export function clearAccountCaches(): void { identityCache.clear(); authCache.cl
 
 // ── sign-in state (`claude auth status --json`, cached) ─────────────────────
 
-export interface AuthStatus { signedIn: boolean; plan?: string; reason?: string }
+/** `unknown`: Claude gave no answer (timeout, crash, unparseable), which must not block a launch. */
+export interface AuthStatus { signedIn: boolean; unknown?: boolean; plan?: string; reason?: string }
 const AUTH_CACHE_MS = 5 * 60_000;
 const AUTH_TIMEOUT_MS = 10_000;
 const SIGNED_OUT_CACHE_MS = 30_000;
@@ -166,7 +167,7 @@ export function parseAuthStatus(output: string): AuthStatus {
     if (value.loggedIn !== true) return { signedIn: false, reason: "Not signed in" };
     const plan = typeof value.subscriptionType === "string" && /^[a-z0-9_-]{1,32}$/i.test(value.subscriptionType) ? value.subscriptionType : undefined;
     return { signedIn: true, ...(plan ? { plan } : {}) };
-  } catch { return { signedIn: false, reason: "Claude did not report its sign-in state" }; }
+  } catch { return { signedIn: false, unknown: true, reason: "Claude did not report its sign-in state" }; }
 }
 
 export type AuthRunner = (home: ClaudeHome) => Promise<string>;
@@ -188,8 +189,8 @@ export function claudeAuthStatus(home: ClaudeHome, run: AuthRunner = runAuthStat
   if (cached && now - cached.at < (cached.signedIn === false ? SIGNED_OUT_CACHE_MS : AUTH_CACHE_MS)) return cached.value;
   const entry: { at: number; value: Promise<AuthStatus>; signedIn?: boolean } = { at: now, value: Promise.resolve({ signedIn: false }) };
   // A signed-out answer is kept briefly so a fresh /login shows up within half a minute.
-  entry.value = run(home).then(parseAuthStatus, () => ({ signedIn: false, reason: "Claude did not report its sign-in state" }))
-    .then(status => { entry.signedIn = status.signedIn; return status; });
+  entry.value = run(home).then(parseAuthStatus, (): AuthStatus => ({ signedIn: false, unknown: true, reason: "Claude did not report its sign-in state" }))
+    .then(status => { entry.signedIn = status.unknown ? false : status.signedIn; return status; });
   authCache.set(home.dir, entry);
   return entry.value;
 }

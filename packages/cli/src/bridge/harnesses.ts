@@ -25,12 +25,15 @@ export async function harnessInventory(deps: HarnessDeps = {}): Promise<HarnessI
   const probe = deps.toolVersion ?? ((tool: string) => toolVersion(tool));
   const harnesses = await Promise.all(SOURCES.map(async (source): Promise<HarnessEntry> => {
     const found = await probe(source);
-    if (found.status !== "ok") return { source, installed: false, usable: false, reason: found.status === "missing" ? "Not installed" : found.detail || "Could not run" };
-    const base = { source, installed: true, version: found.version };
+    // Only a missing binary is definite; a slow or failing --version (a loaded computer) stays usable.
+    if (found.status === "missing") return { source, installed: false, usable: false, reason: "Not installed" };
+    const base = { source, installed: true, ...(found.version ? { version: found.version } : {}) };
     if (source === "claude") {
       const accounts = await Promise.all(claudeHomes(env).map(async (home): Promise<HarnessAccount> => {
         const auth = await claudeAuthStatus(home, deps.authRunner);
-        return { ...claudeAccountRef(home), signedIn: auth.signedIn, usable: auth.signedIn,
+        // An unanswered sign-in check stays usable: only Claude saying "logged out" hides an account.
+        const usable = auth.signedIn || auth.unknown === true;
+        return { ...claudeAccountRef(home), signedIn: auth.signedIn, usable,
           ...(auth.plan ? { plan: auth.plan } : {}), ...(auth.signedIn ? {} : { reason: auth.reason ?? "Not signed in" }) };
       }));
       const usable = accounts.some(account => account.usable);

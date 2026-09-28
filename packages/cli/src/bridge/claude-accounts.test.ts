@@ -70,6 +70,7 @@ it("parses claude auth status output", () => {
   expect(parseAuthStatus('{"loggedIn":true,"subscriptionType":"max","email":"x"}')).toEqual({ signedIn: true, plan: "max" });
   expect(parseAuthStatus('{"loggedIn":true}')).toEqual({ signedIn: true });
   expect(parseAuthStatus('{"loggedIn":false}')).toMatchObject({ signedIn: false, reason: "Not signed in" });
-  expect(parseAuthStatus("not json")).toMatchObject({ signedIn: false });
+  expect(parseAuthStatus('{"loggedIn":false}').unknown).toBeUndefined();
+  expect(parseAuthStatus("not json")).toMatchObject({ signedIn: false, unknown: true });
   expect(parseAuthStatus("")).toMatchObject({ signedIn: false });
 });
