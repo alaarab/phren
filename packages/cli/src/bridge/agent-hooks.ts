@@ -29,6 +29,7 @@ import { directoryNames, opencodeApprovalFile, opencodeRequest, readOpencodeRequ
 import { ApprovalWatchLeases, bindingPath, localSocket, PushBindingStore } from "./agent-hook-stores.js";
 import { eventStatus, notePaneStatus, settleBlockedPane } from "./pane-status.js";
 import { countTick } from "./metrics.js";
+import { briefId, briefIdInPrompt, DISPATCH_ID_ENV, recordBriefArrival } from "./launch-brief.js";
 
 export { permissionPrompt, terminalChoice, visibleTerminalChoice, type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
 export { ApprovalWatchLeases, PushBindingStore, recordedSession } from "./agent-hook-stores.js";
@@ -900,6 +901,14 @@ export class AgentHooks {
         const input = typeof body.input === "string" ? { patch: body.input } : object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
         // A shell call by name, or any tool whose input is a command line —
         // Codex has renamed its shell tool more than once.
+        // A launched brief's receipt: the worker's own hook names its dispatch
+        // id (from its environment, or the brief path in its first prompt when
+        // Codex's shared daemon ran the hook with another pane's variables).
+        if (body.event === "SessionStart" || body.event === "UserPromptSubmit") {
+          const named = !daemon && briefId.safeParse(body.dispatchId).success ? String(body.dispatchId) : undefined;
+          const dispatch = named ?? (typeof body.prompt === "string" ? briefIdInPrompt(body.prompt) : undefined);
+          if (dispatch) await recordBriefArrival(dispatch, String(body.event), target).catch(() => undefined);
+        }
         if (body.event === "PreCompact") { this.startCompacting(target); res.end("{}"); return; }
         if (["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event))) this.stopCompacting(target);
         if (body.event === "UserPromptSubmit") {
@@ -1039,7 +1048,12 @@ export async function agentHook(source: Provider) {
   // Codex asks this hook before its automatic reviewer: say when that
   // reviewer, not the owner, will decide.
   const autoReview = source === "codex" && event === "PermissionRequest" && await codexAutoReview(value.transcript_path);
-  const data = JSON.stringify({ target, event, ...(daemon ? { daemon: true } : {}), ...(autoReview ? { autoReview: true } : {}), tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
+  // A worker the Hook launched with its brief carries that dispatch's id. A
+  // daemon's variables belong to another pane, so it sends none.
+  const dispatchId = !daemon && (event === "SessionStart" || event === "UserPromptSubmit") && briefId.safeParse(process.env[DISPATCH_ID_ENV]).success
+    ? process.env[DISPATCH_ID_ENV] : undefined;
+  const data = JSON.stringify({ target, event, ...(daemon ? { daemon: true } : {}), ...(autoReview ? { autoReview: true } : {}), ...(dispatchId ? { dispatchId } : {}),
+    tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
     ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}) });
   await new Promise<void>(resolve => {
     const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? 8_000 : 1500,

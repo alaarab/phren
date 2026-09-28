@@ -68,7 +68,7 @@ describe("the Herdr provider", () => {
     await herdrTerminal.prompt("s", "p", "hi", signal);
     expect(await herdrTerminal.processes("s", "p")).toEqual({ shellPid: 10, foregroundPids: [12, 11] });
     await herdrTerminal.create("s", { workspace: "w", label: "L", cwd: "/tmp" });
-    await herdrTerminal.create("s", { label: "L", cwd: "/tmp" });
+    await herdrTerminal.create("s", { label: "L", cwd: "/tmp", env: { PHREN_DISPATCH_ID: "dispatch-1" } });
     await herdrTerminal.startAgent("s", "p", { name: "n", kind: "claude", args: [], timeoutMs: 1_000 });
     await herdrTerminal.focusPane("s", "p");
     await herdrTerminal.groupAction("s", "rename", { workspace: "w", tab: "t" }, "New");
@@ -83,7 +83,7 @@ describe("the Herdr provider", () => {
       ["s", "agent.prompt", { target: "p", text: "hi" }, signal],
       ["s", "pane.process_info", { pane_id: "p" }],
       ["s", "tab.create", { workspace_id: "w", label: "L", cwd: "/tmp", focus: false, env: {} }],
-      ["s", "workspace.create", { workspace_id: undefined, label: "L", cwd: "/tmp", focus: false, env: {} }],
+      ["s", "workspace.create", { workspace_id: undefined, label: "L", cwd: "/tmp", focus: false, env: { PHREN_DISPATCH_ID: "dispatch-1" } }],
       ["s", "agent.start", { name: "n", kind: "claude", pane_id: "p", timeout_ms: 1_000 }, undefined, 6_000],
       ["s", "pane.focus", { pane_id: "p" }],
       ["s", "tab.rename", { tab_id: "t", label: "New" }],
