@@ -13,7 +13,7 @@ const target: Target = { server: "default", workspace: "w1", tab: "w1:t1", pane:
 const command: PendingServerRequest = { requestId: 4, method: "item/commandExecution/requestApproval",
   params: { threadId: target.session, turnId: "t", itemId: "i", command: "touch approved.txt", cwd: "/tmp/work" }, threadId: target.session };
 
-describe("approvals from the Hook's own Codex app-server", () => {
+describe.skipIf(process.platform === "win32")("approvals from the Hook's own Codex app-server", () => {
   let hooks: AgentHooks, answers: Json[];
   beforeEach(() => {
     hooks = new AgentHooks(); answers = [];

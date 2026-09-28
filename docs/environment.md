@@ -180,7 +180,7 @@ project's folder, or a worktree it created, trusted in Claude's and Codex's
 config before launching there (see [footprint](footprint.md)).
 `PHREN_CODEX_APP_SERVER=off` keeps Codex workers the Hook launches on the typed
 path instead of a Phren-owned `codex app-server` per pane; those servers run
-their hooks with `PHREN_CODEX_SERVER` set to the server's registry ID. `PHREN_SNAPSHOT_SHARE_MS` sets how old a Herdr `session.snapshot`
+their hooks with `PHREN_CODEX_SERVER` set to the server's registry ID. Windows always keeps the typed path, because the server listens on a unix socket. `PHREN_SNAPSHOT_SHARE_MS` sets how old a Herdr `session.snapshot`
 may be for the chat and status streams and the activity timer to share it
 (default `2500`; `0` stops reusing answers), and `PHREN_SERVER_LIST_REUSE_MS` how
 long the activity timer reuses the list of running Herdr servers (default

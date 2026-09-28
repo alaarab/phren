@@ -106,7 +106,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-describe("connectAppServer", () => {
+describe.skipIf(process.platform === "win32")("connectAppServer", () => {
   it("initializes, then sends the initialized notification", async () => {
     const { client } = await connected(server);
     await until(() => server.received.length >= 2, "the initialized notification");
@@ -151,7 +151,7 @@ describe("connectAppServer", () => {
   });
 });
 
-describe("server requests", () => {
+describe.skipIf(process.platform === "win32")("server requests", () => {
   it("hands a server request to listeners and responds with its id and result", async () => {
     const { client, events } = await connected(server);
     server.sendRequest(7, "item/commandExecution/requestApproval", { threadId: "thread-1", turnId: "turn-1", itemId: "exec-1" });
@@ -185,7 +185,7 @@ describe("server requests", () => {
   });
 });
 
-describe("interruptTurn", () => {
+describe.skipIf(process.platform === "win32")("interruptTurn", () => {
   it("declines this thread's parked requests before turn/interrupt, leaving other threads alone", async () => {
     const { client } = await connected(server);
     server.sendRequest(10, "item/commandExecution/requestApproval", { threadId: "thread-A", turnId: "turn-A" });
@@ -211,7 +211,7 @@ describe("interruptTurn", () => {
   });
 });
 
-describe("spawnAppServer", () => {
+describe.skipIf(process.platform === "win32")("spawnAppServer", () => {
   it("starts the binary, makes the socket's folder owner-only, and stops it", async () => {
     const wsModule = createRequire(import.meta.url).resolve("ws");
     const codex = path.join(root, "fake-codex.cjs");

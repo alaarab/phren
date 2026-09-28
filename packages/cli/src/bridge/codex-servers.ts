@@ -72,7 +72,10 @@ const defaultDeps: CodexServerDeps = {
 };
 
 /** `PHREN_CODEX_APP_SERVER=off` keeps every Codex launch on the typed path. */
-export function codexAppServerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+export function codexAppServerEnabled(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): boolean {
+  // The server listens on a unix socket and the pane joins it with
+  // `--remote unix://…`; Windows keeps the typed path.
+  if (platform === "win32") return false;
   return !/^(?:0|off|false|no)$/i.test(env.PHREN_CODEX_APP_SERVER ?? "");
 }
 

@@ -100,7 +100,7 @@ async function launched(options: Partial<Parameters<CodexServers["launch"]>[1]> 
 }
 const registry = async (entry: CodexServerEntry) => JSON.parse(await readFile(path.join(codexServersRoot(), entry.id, "server.json"), "utf8")) as Json;
 
-describe("launching a pane's Codex server", () => {
+describe.skipIf(process.platform === "win32")("launching a pane's Codex server", () => {
   it("starts the thread in the pane's folder, with its model and effort, and registers it", async () => {
     const entry = await launched({ model: "gpt-5.4", effort: "low", env: { HERDR_PANE_ID: "w1:p1", PHREN_DISPATCH_ID: "dispatch-1234" }, dispatchId: "dispatch-1234" });
     expect(entry).toMatchObject({ ...place, threadId: "thread-1", pid: 4242, cwd: root, dispatchId: "dispatch-1234" });
@@ -179,7 +179,7 @@ describe("launching a pane's Codex server", () => {
   });
 });
 
-describe("driving the thread", () => {
+describe.skipIf(process.platform === "win32")("driving the thread", () => {
   it("sends a prompt as a turn and follows the turn to its end", async () => {
     const entry = await launched();
     expect(await servers.prompt(entry, "reply ok")).toEqual({ turnId: "turn-1" });
@@ -223,7 +223,7 @@ describe("driving the thread", () => {
   });
 });
 
-describe("a restarted Hook", () => {
+describe.skipIf(process.platform === "win32")("a restarted Hook", () => {
   it("rejoins a running server's thread and forgets a dead one", async () => {
     const entry = await launched();
     entry.activeTurn = "turn-9";
@@ -253,7 +253,7 @@ describe("a restarted Hook", () => {
   });
 });
 
-describe("reaping", () => {
+describe.skipIf(process.platform === "win32")("reaping", () => {
   const pane = (agent?: string) => ({ panes: [{ pane_id: "w1:p1", ...(agent ? { agent } : {}) }] });
 
   it("stops the server when its pane closes", async () => {
