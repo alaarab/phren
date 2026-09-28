@@ -9,6 +9,7 @@ import { intervalFromEnv } from "./limits.js";
 import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from "./launch-worktree.js";
 import { briefArgs, DISPATCH_ID_ENV, launchBriefSchema, launchesWithBrief, writeLaunchBrief } from "./launch-brief.js";
 import { groupConductor, type GroupConductor } from "./conductor-group.js";
+import { pretrustFolder } from "./folder-trust.js";
 import { optionalHookPeers } from "./peers.js";
 import { atomic, BridgeError, bridgeRoot, id, type Json, objects, provider } from "./protocol.js";
 
@@ -119,6 +120,14 @@ export function herdrAgentName(label: string): string {
   return slug || "agent";
 }
 
+export interface LaunchOptions {
+  canary?: boolean;
+  /** `data.cwd` is a folder the Hook resolved itself (a dispatched or
+   * scheduled project's source folder), so it may be marked trusted for the
+   * harness before the launch. Never set for a folder the phone chose. */
+  trustFolder?: boolean;
+}
+
 /**
  * "Open on a computer": a new Herdr workspace (or a tab in an existing one)
  * in the project's directory, with the chosen agent started in its pane.
@@ -126,7 +135,7 @@ export function herdrAgentName(label: string): string {
  * by diffing snapshots; `agent.start` returns once Herdr has detected the
  * agent and it is ready for input, which can take most of `timeoutMs`.
  */
-export async function launchSession(server: string, data: Json, options: { canary?: boolean } = {}): Promise<Json> {
+export async function launchSession(server: string, data: Json, options: LaunchOptions = {}): Promise<Json> {
   const role = z.enum(["agent", "conductor"]).default("agent").parse(data.role);
   const projectDirectory = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
   const worktreeRequest = data.worktree === undefined || data.worktree === null ? undefined : launchWorktreeSchema.parse(data.worktree);
@@ -185,6 +194,9 @@ export async function launchSession(server: string, data: Json, options: { canar
   // never leaves a worktree or branch behind.
   const worktree: LaunchWorktree | undefined = worktreeRequest ? await createLaunchWorktree(projectDirectory, worktreeRequest) : undefined;
   const cwd = worktree?.cwd ?? projectDirectory;
+  // Claude's folder-trust screen defaults to "No, exit" and Codex's holds the
+  // agent too; a folder the Hook picked or just created is trusted up front.
+  if (worktree || options.trustFolder) await pretrustFolder(kind, cwd, worktree ? `new worktree for ${worktree.branch}` : "project folder");
   try { await terminalProvider().create(server, { workspace, label, cwd, ...(env ? { env } : {}) }); }
   catch (error) { await worktree?.discard(); throw error; }
   let created: { workspaceId: string; tabId: string; paneId: string } | undefined;
