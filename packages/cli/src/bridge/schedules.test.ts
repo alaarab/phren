@@ -26,6 +26,7 @@ import {
   type StartupWatchEnv,
 } from "./schedules.js";
 import type { SchedulePush } from "./push.js";
+import { headlessEnv } from "./schedule-launch.js";
 
 const originalTimezone = process.env.TZ;
 const temporary: string[] = [];
@@ -189,6 +190,21 @@ describe("scheduled startup prompts", () => {
       expect(command.args.indexOf("--model")).toBeGreaterThanOrEqual(0);
       expect(command.args[command.args.indexOf("--model") + 1]).toBe("test-model");
     }
+  });
+
+  it("keeps a schedule's account and gives a headless Claude run that account's config directory", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "phren-schedule-account-")); temporary.push(home);
+    await mkdir(path.join(home, ".claude-work"));
+    await writeFile(path.join(home, ".claude-work", ".claude.json"), "{}");
+    const env = { HOME: home, PATH: "/bin" };
+    const work = schedule({ harness: "claude", account: "work" });
+    expect(parseSchedule({ ...work }).account).toBe("work");
+    expect(() => parseSchedule({ ...work, account: "Bad Slug" })).toThrow();
+    expect(headlessEnv(work, env)).toEqual({ ...env, CLAUDE_CONFIG_DIR: path.join(home, ".claude-work") });
+    expect(headlessEnv(schedule({ harness: "claude" }), env)).toBe(env);
+    expect(headlessEnv(schedule({ harness: "claude", account: "default" }), env)).toEqual(env);
+    expect(headlessEnv(schedule({ harness: "codex", account: "work" }), env)).toBe(env);
+    expect(() => headlessEnv(schedule({ harness: "claude", account: "gone" }), env)).toThrow('account "gone", which is not set up');
   });
 
   it("reports the watch loop's real error instead of assuming Herdr disconnected", async () => {

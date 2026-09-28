@@ -3,6 +3,7 @@ import { createWriteStream } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { finished as streamFinished } from "node:stream/promises";
+import { claudeHome, claudeLaunchEnv } from "./claude-accounts.js";
 import { fanoutRoot } from "./fanouts.js";
 import { pretrustFolder } from "./folder-trust.js";
 import { findPane, paneIdentity, servers, snapshot } from "./herdr.js";
@@ -60,7 +61,7 @@ async function launchInHerdr(server: string, context: ScheduleLaunchContext, lau
   // The prompt goes with the launch where the harness takes one (Claude,
   // Codex); otherwise it is typed once the agent is ready.
   const brief = context.schedule.prompt.trim() ? { brief: { id: context.runId, text: context.schedule.prompt } } : {};
-  const launched = await launchHerdr(server, { cwd: context.cwd, label: context.schedule.name, kind: context.schedule.harness, model: context.schedule.model, ...brief });
+  const launched = await launchHerdr(server, { cwd: context.cwd, label: context.schedule.name, kind: context.schedule.harness, model: context.schedule.model, ...(context.schedule.account ? { account: context.schedule.account } : {}), ...brief });
   const workspaceId = String(launched.workspaceId), tabId = String(launched.tabId), paneId = String(launched.paneId);
   if (launched.briefLaunched !== true) await promptWhenReady(server, paneId, context.schedule.prompt, signal);
   let sessionId = typeof launched.sessionId === "string" ? launched.sessionId : undefined;
@@ -90,7 +91,16 @@ async function promptWhenReady(server: string, paneId: string, text: string, sig
   }
 }
 
+/** The environment a headless run gets: this Hook's, plus the chosen Claude account's config directory. */
+export function headlessEnv(schedule: Schedule, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  if (!schedule.account || schedule.harness !== "claude") return env;
+  const home = claudeHome(schedule.account, env);
+  if (!home) throw new Error(`Schedule "${schedule.name}" uses Claude account "${schedule.account}", which is not set up on this computer. Run \`phren bridge accounts\`.`);
+  return { ...env, ...claudeLaunchEnv(home) };
+}
+
 async function launchHeadless(context: ScheduleLaunchContext, store: string, started: (child: ChildProcess) => void): Promise<ScheduleLaunchResult> {
+  const env = headlessEnv(context.schedule);
   const root = fanoutRoot({ ...process.env, PHREN_PATH: store }), jobDir = path.join(root, context.runId);
   await mkdir(jobDir, { recursive: true, mode: 0o700 });
   const eventLog = "events.jsonl", now = new Date().toISOString();
@@ -103,7 +113,7 @@ async function launchHeadless(context: ScheduleLaunchContext, store: string, sta
   // Headless Claude (`-p`) has no trust screen, so only Codex needs it here.
   if (context.schedule.harness === "codex") await pretrustFolder("codex", context.cwd, `scheduled run ${context.runId}`);
   let child: ChildProcess;
-  try { child = spawn(command.file, command.args, { cwd: command.cwd, env: process.env, stdio: ["pipe", "pipe", "pipe"] }); }
+  try { child = spawn(command.file, command.args, { cwd: command.cwd, env, stdio: ["pipe", "pipe", "pipe"] }); }
   catch (error) { await writeManifest(jobDir, { ...manifest, status: "failed", updatedAt: new Date().toISOString(), finishedAt: new Date().toISOString() }); throw error; }
   started(child);
   const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => {

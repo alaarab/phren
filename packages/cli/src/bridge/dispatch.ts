@@ -13,6 +13,8 @@ import { hookPeers } from "./peers.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
 import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
+import { isAccountSlug } from "./claude-accounts.js";
+import { hasUsable, type HarnessInventory } from "./harnesses.js";
 import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
@@ -23,6 +25,8 @@ export const dispatchSchema = z.object({
   harness: z.enum(["codex", "claude", "opencode"]).describe("Agent harness on the receiving computer."),
   model: text(200).optional().describe("Explicit model, otherwise the remote harness default."),
   effort: z.enum(launchEfforts).optional().describe("Reasoning effort for the worker (minimal, low, medium, high, xhigh, max), otherwise the harness default."),
+  account: z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").optional()
+    .describe("Claude account id to run the worker under (default, or a slug from `phren bridge accounts`). anywhere only picks computers where that account is signed in; a named computer without it fails."),
   prompt: z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value)).describe("Worker brief, at most 32768 characters."),
   label: text(200).describe("Short task label."),
   parent: dispatchParentSchema.optional().describe("Explicit local conversation parent for work-tree attachment."),
@@ -151,14 +155,25 @@ export async function dispatchStatus(): Promise<Receipt[]> {
   return receipts.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-async function capacity(host: DispatchHost): Promise<{ working: number; computerId: string }> {
+async function capacity(host: DispatchHost): Promise<{ working: number; computerId: string; harnesses?: HarnessInventory["harnesses"] }> {
   const value = await host.request("/v1/dispatch/capacity");
   const result = z.object({ product: z.literal("phren-hook"), protocol: z.literal(PROTOCOL), working: z.number().int().nonnegative(),
-    servers: z.array(z.string()), computer: z.object({ id: z.string().uuid() }).passthrough() }).parse(value);
+    servers: z.array(z.string()), computer: z.object({ id: z.string().uuid() }).passthrough(),
+    // Missing from an older Hook, or when its inventory was not ready in time: unknown, not unavailable.
+    harnesses: z.array(z.object({ source: z.string(), installed: z.boolean(), usable: z.boolean(), reason: z.string().optional(),
+      accounts: z.array(z.object({ id: z.string(), usable: z.boolean(), reason: z.string().optional() }).passthrough()).optional() }).passthrough()).optional() }).parse(value);
   // This computer places on whichever Herdr server its own Hook runs.
   if (host.local && !result.servers.includes(host.server) && result.servers[0]) host.server = result.servers[0];
   if (!result.servers.includes(host.server)) throw new BridgeError(503, "Herdr is not running on the selected computer. Headless dispatch is not installed yet.");
-  return { working: result.working, computerId: result.computer.id };
+  return { working: result.working, computerId: result.computer.id, ...(result.harnesses ? { harnesses: result.harnesses as HarnessInventory["harnesses"] } : {}) };
+}
+
+/** Why a computer cannot run this dispatch's harness and account, or undefined when it can or cannot yet be told.
+ * `unknown` (no `harnesses`) only counts against a computer when a non-default account was asked for. */
+function unusable(data: { harness: string; account?: string }, harnesses: HarnessInventory["harnesses"] | undefined, strictUnknown: boolean): string | undefined {
+  if (!harnesses) return strictUnknown && data.account && data.account !== "default" ? "Its Hook does not report harnesses or accounts (update it)." : undefined;
+  const availability = hasUsable({ harnesses }, data.harness, data.account);
+  return availability.ok ? undefined : availability.reason;
 }
 
 /**
@@ -283,6 +298,7 @@ export class DispatchService {
       let peer: DispatchHost | undefined;
       let remoteComputerID: string | undefined;
       const skipped: Skipped[] = [];
+      let incapable = false;
       if (data.computer === "anywhere") {
         const available = await Promise.all(peers.map(async candidate => {
           try { return { peer: candidate, ...await capacity(candidate) }; } catch (error) {
@@ -292,15 +308,27 @@ export class DispatchService {
           }
         }));
         skipped.sort((a, b) => a.computer.localeCompare(b.computer));
-        const selected = available.filter((item): item is NonNullable<typeof item> => !!item)
+        const capable = available.filter((item): item is NonNullable<typeof item> => !!item).filter(item => {
+          const reason = unusable(data, item.harnesses, true);
+          if (reason) incapable = true;
+          if (reason) skipped.push({ computer: item.peer.name, reason: reason.slice(0, 200) });
+          return !reason;
+        });
+        skipped.sort((a, b) => a.computer.localeCompare(b.computer));
+        const selected = capable
           .sort((a, b) => a.working - b.working || a.peer.name.localeCompare(b.peer.name))[0];
         peer = selected?.peer;
         remoteComputerID = selected?.computerId;
-        if (!peer) throw new BridgeError(503, "No enrolled computer with a running Herdr is connected.", skipped.length ? { skipped } : undefined);
+        if (!peer) throw new BridgeError(503, incapable ? `No enrolled computer with a running Herdr can run ${data.harness}${data.account ? ` account ${data.account}` : ""}.` : "No enrolled computer with a running Herdr is connected.", skipped.length ? { skipped } : undefined);
       } else {
         peer = toLocal ? peers.find(candidate => candidate.local) : peers.find(candidate => !candidate.local && candidate.name === data.computer);
         if (!peer) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
-        remoteComputerID = (await capacity(peer)).computerId;
+        const reported = await capacity(peer);
+        remoteComputerID = reported.computerId;
+        // A Hook that reports what it can run is believed. An older one that does not is left to answer the launch
+        // itself, except for a non-default account: it would ignore `account` and launch under its default login.
+        const reason = unusable(data, reported.harnesses, true);
+        if (reason) throw new BridgeError(409, `${peer.name} cannot run ${data.harness}${data.account ? ` account ${data.account}` : ""}: ${reason}`);
       }
       const grant = await findGrant({ action: "dispatch", project: data.project, computer: peer.name });
       const origin = await this.origin(originValue);
@@ -314,7 +342,7 @@ export class DispatchService {
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
-          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), label: data.label, brief: { id: receipt.id, text: prompt } });
+          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ? { account: data.account } : {}), label: data.label, brief: { id: receipt.id, text: prompt } });
         if (launched.briefLaunched === true) {
           receipt.brief = "launch";
           await this.confirmLaunched(peer, receipt, launched);

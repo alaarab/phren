@@ -5,6 +5,7 @@ import * as yaml from "js-yaml";
 import { z } from "zod";
 import type { SchedulePush, SchedulePushResult } from "./push.js";
 import { atomicInPrivateDir, bridgeRoot, object } from "./protocol.js";
+import { isAccountSlug } from "./claude-accounts.js";
 
 /** The schedules.yaml store: the schedule and run record shapes, validation,
  * the five timing forms evaluated in local time, and the run history file. */
@@ -30,6 +31,8 @@ export interface Schedule {
   computer: string;
   harness: ScheduleHarness;
   model?: string;
+  /** Claude account id (a slug) the run uses; absent means the default account. */
+  account?: string;
   notify?: ScheduleNotify[];
   every: ScheduleEvery;
   at?: string;
@@ -151,6 +154,7 @@ export function parseSchedule(value: unknown): Schedule {
     updatedAt: timestamp.parse(raw.updatedAt),
   };
   if (raw.model !== undefined) schedule.model = singleLine(200).parse(raw.model);
+  if (raw.account !== undefined) schedule.account = z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(raw.account);
   if (raw.notify !== undefined) schedule.notify = z.array(z.enum(SCHEDULE_NOTIFY)).max(3).parse(raw.notify)
     .filter((kind, index, kinds) => kinds.indexOf(kind) === index);
   if (every === "daily" || every === "weekly") schedule.at = clockTime.parse(raw.at);

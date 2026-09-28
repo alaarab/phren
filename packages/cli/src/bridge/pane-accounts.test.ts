@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { nativeClaudeTranscript } from "./fanouts.js";
 import { notePaneTranscript, paneAccount, paneAccountKey, recordPaneAccount } from "./pane-accounts.js";
-import { transcriptAccount, transcriptPath } from "./transcripts.js";
+import { targetTranscriptPath, transcriptAccount, transcriptPath } from "./transcripts.js";
 
 const session = "bbbbbbbb-1111-4111-8111-111111111111";
 const shared = "cccccccc-1111-4111-8111-111111111111";
@@ -43,6 +43,14 @@ describe("Claude transcripts across accounts", () => {
     const work = await transcript(".claude-work", shared);
     await expect(transcriptPath("claude", shared)).rejects.toThrow("not available");
     expect(await transcriptPath("claude", shared, "work")).toBe(work);
+  });
+
+  it("settles it from the account the pane was launched with", async () => {
+    await transcript(".claude", shared);
+    const work = await transcript(".claude-work", shared);
+    recordPaneAccount(paneAccountKey("srv", "p9"), "work");
+    expect(await targetTranscriptPath({ server: "srv", pane: "p9", source: "claude", session: shared })).toBe(work);
+    await expect(targetTranscriptPath({ server: "srv", pane: "other", source: "claude", session: shared })).rejects.toThrow("not available");
   });
 });
 

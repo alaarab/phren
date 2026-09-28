@@ -74,7 +74,8 @@ async function add(store: string, args: string[]): Promise<void> {
   const now = new Date().toISOString();
   const schedule: Schedule = {
     id: newScheduleId(file.schedules.map(item => item.id)), name, enabled: true, computer, harness,
-    ...(option(args, "--model") ? { model: option(args, "--model") } : {}), every, prompt, createdAt: now, updatedAt: now,
+    ...(option(args, "--model") ? { model: option(args, "--model") } : {}),
+    ...(option(args, "--account") ? { account: option(args, "--account") } : {}), every, prompt, createdAt: now, updatedAt: now,
     ...(option(args, "--at") ? { at: option(args, "--at") } : {}),
     ...(option(args, "--days") ? { days: option(args, "--days")!.split(",").map(day => day.trim().toLowerCase()) as Weekday[] } : {}),
     ...(option(args, "--interval") ? { interval: option(args, "--interval") } : {}),

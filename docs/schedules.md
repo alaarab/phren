@@ -25,7 +25,7 @@ schedules:
     updatedAt: 2026-09-20T21:00:00Z
 ```
 
-The `id` is eight lowercase hexadecimal characters and does not change. Names are 1 to 80 characters, prompts are 1 to 8000 characters, and a project may have at most 64 schedules. `model` is optional; without it, the selected harness uses its default. `notify` is an optional list containing `start`, `finish`, and `failure`. When it is absent, Phren notifies on finish and failure.
+The `id` is eight lowercase hexadecimal characters and does not change. Names are 1 to 80 characters, prompts are 1 to 8000 characters, and a project may have at most 64 schedules. `model` is optional; without it, the selected harness uses its default. `account` is optional: a Claude account id (`default` or a slug) the run uses; a Herdr run launches under it and a headless Claude run gets its `CLAUDE_CONFIG_DIR`. `phren schedule add ... --account <id>` sets it. `notify` is an optional list containing `start`, `finish`, and `failure`. When it is absent, Phren notifies on finish and failure.
 
 `every` selects one timing form:
 
