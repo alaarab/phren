@@ -40,12 +40,13 @@ See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
 | `project` | string | yes | Project slug whose `phren.project.yaml` sourcePath exists on the receiver. No local checkout paths. |
 | `harness` | enum | yes | `codex`, `claude`, or `opencode`. |
 | `model` | string | no | Explicit remote model, up to 200 characters; otherwise its configured default. |
+| `effort` | enum | no | Reasoning effort: `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; otherwise the harness default. Codex takes it as `model_reasoning_effort`, Claude as `--effort`, OpenCode as `--variant`. |
 | `prompt` | string | yes | Worker brief, up to 32768 characters. |
 | `label` | string | yes | Task label, up to 200 characters. |
 | `parent` | object | no | Conversation identity to retain in the dispatch receipt. |
 | `parentTarget` | object | no | Live local target used to validate the parent identity. |
 
-Returns the receipt in `data`: dispatch ID, computer, project, harness/model,
+Returns the receipt in `data`: dispatch ID, computer, project, harness/model/effort,
 label, timestamps, state, remote target when known, grant match (`granted`), and an optional error.
 `accepted` means first-prompt acceptance, not task completion: for Claude and
 Codex the brief goes with the launch and the worker's own hook confirms it by

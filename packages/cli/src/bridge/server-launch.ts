@@ -15,7 +15,7 @@ import { optionalHookPeers } from "./peers.js";
 import { AppServerRpcError } from "./codex-app-server.js";
 import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { logger } from "../logger.js";
-import { atomic, BridgeError, bridgeRoot, id, type Json, objects, provider } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, id, type Json, launchEfforts, objects, provider } from "./protocol.js";
 
 /** Starting agents in Herdr from the phone: the launch route's harness
  * arguments, the conductor brief, and workspace, tab and pane actions. */
@@ -44,7 +44,6 @@ async function conductorBrief(): Promise<string> {
   return brief;
 }
 
-const launchEfforts = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
 type LaunchEffort = (typeof launchEfforts)[number];
 
 /** How each harness takes a reasoning effort at startup. */

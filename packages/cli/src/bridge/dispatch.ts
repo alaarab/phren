@@ -11,7 +11,7 @@ import { dispatchParentSchema, validateDispatchParent } from "./dispatch-tree.js
 import { grantLabel, listGrants, matchGrant } from "./grants.js";
 import { hookPeers } from "./peers.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
-import { atomic, BridgeError, bridgeRoot, id, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
 import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
 
@@ -22,6 +22,7 @@ export const dispatchSchema = z.object({
   project: projectName.describe("Project slug registered on the receiving computer."),
   harness: z.enum(["codex", "claude", "opencode"]).describe("Agent harness on the receiving computer."),
   model: text(200).optional().describe("Explicit model, otherwise the remote harness default."),
+  effort: z.enum(launchEfforts).optional().describe("Reasoning effort for the worker (minimal, low, medium, high, xhigh, max), otherwise the harness default."),
   prompt: z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value)).describe("Worker brief, at most 32768 characters."),
   label: text(200).describe("Short task label."),
   parent: dispatchParentSchema.optional().describe("Explicit local conversation parent for work-tree attachment."),
@@ -313,7 +314,7 @@ export class DispatchService {
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
-          { project: data.project, kind: data.harness, model: data.model, label: data.label, brief: { id: receipt.id, text: prompt } });
+          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), label: data.label, brief: { id: receipt.id, text: prompt } });
         if (launched.briefLaunched === true) {
           receipt.brief = "launch";
           await this.confirmLaunched(peer, receipt, launched);
