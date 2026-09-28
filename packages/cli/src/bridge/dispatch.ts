@@ -3,7 +3,9 @@ import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promise
 import path from "node:path";
 import { z } from "zod";
 import { logger } from "../logger.js";
-import { readProjectConfig } from "../project-config.js";
+import { homeDir } from "../home-paths.js";
+import { getMachineName } from "../machine-identity.js";
+import { getProjectSourcePath } from "../project-config.js";
 import { computerName } from "./computers.js";
 import { dispatchParentSchema, validateDispatchParent } from "./dispatch-tree.js";
 import { grantLabel, listGrants, matchGrant } from "./grants.js";
@@ -53,13 +55,31 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
 export type Receipt = z.infer<typeof receiptSchema>;
 type Skipped = { computer: string; reason: string };
 
-export async function dispatchProjectDirectory(project: unknown): Promise<string> {
-  const name = projectName.parse(project);
-  const source = readProjectConfig(phrenStoreRoot(), name).sourcePath;
-  if (typeof source !== "string" || !path.isAbsolute(source) || /[\x00-\x1f\x7f]/.test(source)) throw new BridgeError(404, "Project has no absolute sourcePath on this computer.");
+/** Where a checkout usually sits when the store names none for this computer. */
+const CHECKOUT_ROOTS = ["Projects", "projects", "Sites", "Code", "code", "dev", "src", "repos"];
+
+async function directoryAt(source: string | undefined): Promise<string | undefined> {
+  if (typeof source !== "string" || !path.isAbsolute(source) || /[\x00-\x1f\x7f]/.test(source)) return undefined;
   const directory = await realpath(source).catch(() => undefined);
-  if (!directory || !(await stat(directory)).isDirectory()) throw new BridgeError(404, "Project is not on this computer.");
-  return directory;
+  return directory && (await stat(directory)).isDirectory() ? directory : undefined;
+}
+
+/**
+ * The project's folder on this computer. The store syncs between computers,
+ * so its shared `sourcePath` is often another machine's folder: this
+ * machine's `sourcePaths` entry wins, as everywhere else in phren. With
+ * neither here, a git checkout named after the project in a usual project
+ * root is taken (the owner's layout is `~/Projects/<name>` on every computer).
+ */
+export async function dispatchProjectDirectory(project: unknown, home = homeDir()): Promise<string> {
+  const name = projectName.parse(project);
+  const configured = await directoryAt(getProjectSourcePath(phrenStoreRoot(), name));
+  if (configured) return configured;
+  for (const root of [...(process.env.PROJECTS_DIR ? [process.env.PROJECTS_DIR] : []), ...CHECKOUT_ROOTS.map(folder => path.join(home, folder))]) {
+    const checkout = await directoryAt(path.join(root, name));
+    if (checkout && await stat(path.join(checkout, ".git")).catch(() => undefined)) return checkout;
+  }
+  throw new BridgeError(404, `Project ${name} is not on this computer: the store names no folder for ${getMachineName()} that exists here, and there is no ~/Projects/${name} checkout.`);
 }
 
 async function save(receipt: Receipt): Promise<void> {
@@ -138,23 +158,35 @@ async function capacity(host: DispatchHost): Promise<{ working: number; computer
 
 /**
  * A freshly started agent may not have written its session yet when the launch
- * returns, so the launch carries no target. Ask the remote pane for its session
- * for a few seconds before giving up; the pane ids from the launch are enough
- * to find it.
+ * returns, so the launch carries no target. Ask the remote pane for a few
+ * seconds; the pane ids from the launch are enough to find it. Until its first
+ * prompt a new Codex or Claude has no conversation at all, only a starting
+ * binding, and that is the target its brief goes to (as the phone's first
+ * message does). `status` is the pane's last status when neither appeared.
  */
-async function settledTarget(peer: DispatchHost, launched: Json, harness: string): Promise<Json | undefined> {
+async function settledTarget(peer: DispatchHost, launched: Json, harness: string, intervalMs = 1_000): Promise<{ target?: Json; status?: string }> {
   const workspace = launched.workspaceId, tab = launched.tabId, pane = launched.paneId;
-  if (typeof workspace !== "string" || typeof tab !== "string" || typeof pane !== "string") return undefined;
+  if (typeof workspace !== "string" || typeof tab !== "string" || typeof pane !== "string") return {};
+  let status: string | undefined;
   for (let attempt = 0; attempt < 15; attempt++) {
-    await new Promise(resolve => setTimeout(resolve, 1_000));
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
     try {
       const result = await peer.request(`/v1/workspaces/panes?server=${encodeURIComponent(peer.server)}&groupId=${encodeURIComponent(workspace)}&childId=${encodeURIComponent(tab)}`);
       const found = (Array.isArray(result.panes) ? result.panes : []).find((p: Json) => p && typeof p === "object" && (p as Json).id === pane) as Json | undefined;
+      if (typeof found?.agentStatus === "string") status = found.agentStatus;
+      const binding = { server: peer.server, workspace, tab, pane, source: harness };
       const session = found?.sessionId;
-      if (typeof session === "string" && session) return { server: peer.server, workspace, tab, pane, source: harness, session };
+      if (typeof session === "string" && session) return { target: { ...binding, session } };
+      if (found?.starting === true && typeof found.startingToken === "string") return { target: { ...binding, starting: true, startingToken: found.startingToken } };
     } catch { /* The pane list can lag the launch; try again. */ }
   }
-  return undefined;
+  return { status };
+}
+
+/** The new agent is holding a screen of its own before it takes any prompt:
+ * Claude's folder trust or a sign-in. Only the owner answers those. */
+class StartupScreen extends Error {
+  constructor(readonly status: string) { super(`The agent is ${status} on a startup screen.`); }
 }
 
 /**
@@ -172,7 +204,8 @@ async function sendBrief(peer: DispatchHost, target: Json, text: string): Promis
       const panes = await peer.request(`/v1/workspaces/panes?server=${encodeURIComponent(peer.server)}&groupId=${encodeURIComponent(String(target.workspace))}&childId=${encodeURIComponent(String(target.tab))}`).catch(() => undefined);
       const pane = (Array.isArray(panes?.panes) ? panes.panes : []).find((p: Json) => p && typeof p === "object" && (p as Json).id === target.pane) as Json | undefined;
       const status = pane?.agentStatus;
-      if (typeof status === "string" && ["blocked", "waiting"].includes(status)) throw error;
+      // Nothing was typed: the refusal came before any text reached the pane.
+      if (typeof status === "string" && ["blocked", "waiting"].includes(status)) throw new StartupScreen(status);
       await new Promise(resolve => setTimeout(resolve, 1_000));
     }
   }
@@ -189,7 +222,8 @@ export class DispatchService {
   private active = false;
   /** `local` is this computer as a dispatch destination (its own Hook's
    * socket); tests replace it so they never reach a real Hook. */
-  constructor(private readonly identity?: DispatchIdentity, private readonly local: () => DispatchHost = () => localHost()) {}
+  constructor(private readonly identity?: DispatchIdentity, private readonly local: () => DispatchHost = () => localHost(),
+    private readonly settleIntervalMs = 1_000) {}
   /** `originValue` is the local pane the request came from, as its agent's
    * Herdr variables name it; a pane without a running agent is left out. */
   async dispatch(input: unknown, originValue?: unknown): Promise<Json> {
@@ -241,15 +275,29 @@ export class DispatchService {
       try {
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
           { project: data.project, kind: data.harness, model: data.model, label: data.label });
-        const target = remoteTarget.parse(launched.target ?? await settledTarget(peer, launched, data.harness));
+        const settled: { target?: unknown; status?: string } = launched.target ? { target: launched.target } : await settledTarget(peer, launched, data.harness, this.settleIntervalMs);
+        if (!settled.target) {
+          if (["blocked", "waiting"].includes(String(settled.status ?? launched.agentStatus))) throw new StartupScreen(String(settled.status ?? launched.agentStatus));
+          throw new BridgeError(504, `${data.harness} started in the new "${data.label}" pane on ${peer.name} but never showed a conversation or a starting pane (last status ${settled.status ?? "unknown"}), so the brief was not sent. The pane is still open.`);
+        }
+        const target = remoteTarget.parse(settled.target);
         if (target.source !== data.harness || target.server !== peer.server) throw new BridgeError(502, "The remote Hook returned a different launch target.");
         receipt.target = target;
         receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt);
         const result = await sendBrief(peer, receipt.target, prompt);
         receipt.state = result.ok === true && result.deliveryUncertain !== true ? "accepted" : "uncertain";
       } catch (error) {
-        receipt.state = receipt.state === "launching" && error instanceof BridgeError && [400, 404, 429].includes(error.status) ? "failed" : "uncertain";
-        receipt.error = error instanceof BridgeError ? error.message.slice(0, 500) : "Remote delivery was not confirmed. Inspect this dispatch before retrying.";
+        if (error instanceof StartupScreen) {
+          // Known, not uncertain: the brief never reached the pane. Say where
+          // the owner answers, and let the returns loop tell the conductor once.
+          const question = `${data.harness} in "${data.label}" on ${peer.name} is waiting on a startup screen (folder trust or sign-in).`.slice(0, 200);
+          receipt.state = "failed";
+          receipt.error = `${question} The brief was not sent. Answer that screen in the pane (the phone can), then hand the brief off to the new session.`.slice(0, 500);
+          receipt.returned = { state: "needs-you", at: new Date().toISOString(), question, read: false };
+        } else {
+          receipt.state = receipt.state === "launching" && error instanceof BridgeError && [400, 404, 429, 504].includes(error.status) ? "failed" : "uncertain";
+          receipt.error = error instanceof BridgeError ? error.message.slice(0, 500) : "Remote delivery was not confirmed. Inspect this dispatch before retrying.";
+        }
       }
       receipt.updatedAt = new Date().toISOString(); await save(receipt);
       return { ok: receipt.state === "accepted", ...receipt };
