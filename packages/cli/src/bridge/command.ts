@@ -8,6 +8,7 @@ import { agentHook } from "./agent-hooks.js";
 import { object, provider, type Json } from "./protocol.js";
 import { apnsSetupSteps } from "./push.js";
 import { speechKeyFile, speechKeyStatus, writeSpeechKey } from "./speech-key.js";
+import { clearSpeechVoice, resolveSpeechVoice, speechVoiceFile, voiceId, writeSpeechVoice } from "./speech-voice.js";
 import { AccountUsageReader, captureClaudeUsage, type AccountUsage } from "./usage.js";
 import { acceptComputer, enrollComputer } from "./computers.js";
 import { addPeerFromLink, discoverComputers, linkComputer } from "./link.js";
@@ -75,6 +76,22 @@ export async function runBridge(args: string[], version: string): Promise<number
       console.log(`Stored the ElevenLabs key in ${speechKeyFile()} (mode 600).`);
       break;
     }
+    case "speech-voice": {
+      // Read on every spoken reply, so a change needs no Hook restart.
+      const [, action = "show", id] = args;
+      if (action === "set" && id && args.length === 3) {
+        if (!voiceId.safeParse(id).success) throw new Error(`"${id}" is not an ElevenLabs voice id (10 to 40 letters and digits, e.g. S9EGwlCtMF7VXtENq79v).`);
+        console.log(`Talk mode now speaks with ${await writeSpeechVoice(id)} (stored in ${speechVoiceFile()}). Install and update keep it.`);
+      } else if (action === "clear" && args.length === 2) {
+        await clearSpeechVoice();
+        const next = await resolveSpeechVoice();
+        console.log(`Cleared the stored voice; talk mode uses ${next.voice} (${next.source}).`);
+      } else if (action === "show" && args.length <= 2) {
+        const current = await resolveSpeechVoice();
+        console.log(`${current.voice} (${current.source === "setting" ? `stored in ${speechVoiceFile()}` : current.source})`);
+      } else throw new Error(SPEECH_VOICE_USAGE);
+      break;
+    }
     case "usage-statusline": await captureClaudeUsage(args[1] || ""); break;
     case "usage": console.log(JSON.stringify(await new AccountUsageReader().read(), null, 2)); break;
     case "hook": await agentHook(provider.parse(args[1])).catch(() => {}); break;
@@ -102,7 +119,7 @@ export async function runBridge(args: string[], version: string): Promise<number
     case "status": console.log(JSON.stringify(await health(), null, 2)); break;
     case "doctor": {
       const helper = await health(), muxes = await servers(), terminal = await terminalHealth();
-      const push = approvalPushCheck(helper), speech = await speechKeyStatus();
+      const push = approvalPushCheck(helper), speech = await speechKeyStatus(), voice = await resolveSpeechVoice().catch(() => undefined);
       // Chat needs Herdr or tmux; a plain project shell or agent over SSH does not.
       console.log(JSON.stringify({ ok: true, helper, herdr: muxes, terminal, checks: {
         privateSocket: true, protocol: true, independentHelper: true,
@@ -111,11 +128,12 @@ export async function runBridge(args: string[], version: string): Promise<number
         shell: muxes.length > 0 ? "available" : "Neither Herdr nor tmux is available: chat is unavailable, project shells and agents still open over SSH",
         approvalPush: push.configured ? "configured" : "not configured",
         speechKey: speech.configured ? "configured" : "not configured", speechKeyDetail: speech.detail,
+        ...(voice ? { speechVoice: `${voice.voice} (${voice.source})` } : {}),
       }, ...(push.warning ? { warnings: [push.warning] } : {}) }, null, 2));
       if (push.warning) console.error(`warning: ${push.warning}`);
       break;
     }
-    default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall|enroll-computer|discover|link|fanouts archive|speech-key set>");
+    default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall|enroll-computer|discover|link|fanouts archive|speech-key set|speech-voice>");
   }
   return 0;
 }
@@ -129,6 +147,7 @@ export function approvalPushCheck(helper: Json): { configured: boolean; warning?
   return configured ? { configured } : { configured, warning: apnsSetupSteps() };
 }
 
+const SPEECH_VOICE_USAGE = "Usage: phren bridge speech-voice [show | set <elevenlabs-voice-id> | clear]";
 const SPEECH_KEY_USAGE = "Usage: phren bridge speech-key set  (paste the key when asked, or pipe it on stdin)";
 
 /** One line from stdin: piped as is, or typed at a prompt without echo. */

@@ -83,7 +83,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ...routes("GET", [
         "/v1/health", "/v1/health/details", "/v1/health/peers", "/v1/muxes", "/v1/activity", "/v1/metrics", "/v1/web-servers", "/v1/simulators",
         "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/files", "/v1/models", "/v1/projects/files",
-        "/v1/uploads/image", "/v1/files/range", "/v1/usage", "/v1/resources", "/v1/push/status", "/v1/projects/locate", "/v1/projects/repos",
+        "/v1/uploads/image", "/v1/files/range", "/v1/usage", "/v1/resources", "/v1/speech/voices", "/v1/push/status", "/v1/projects/locate", "/v1/projects/repos",
         "/v1/workspaces", "/v1/workspaces/panes", "/v1/transcripts/blob", "/v1/transcripts/history",
         "/v1/subagents", "/v1/subagents/transcript", "/v1/subagents/messages",
       ]),
@@ -99,7 +99,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     capabilities: [
       "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "herdr",
       "webServers", "webPreview", "activity", "approvals", "questions", "accountUsage", "providers",
-      "files", "repositoryFiles", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "transcribe", "promptOnce", "resources",
+      "files", "repositoryFiles", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechVoices", "transcribe", "promptOnce", "resources",
     ],
     storeFiles: [".runtime/sessions/opencode-*.events.jsonl", ".runtime/approvals/opencode-*.json"],
     localFiles: ["<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily"],

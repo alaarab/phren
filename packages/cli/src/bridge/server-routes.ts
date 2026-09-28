@@ -45,6 +45,8 @@ import { launchSession, localConductor, workspaceAction } from "./server-launch.
 import type { TranscriptStreams } from "./server-stream.js";
 import { hookMetrics } from "./metrics.js";
 import { streamSpeech } from "./speech.js";
+import { readSpeechKey } from "./speech-key.js";
+import { DEFAULT_SPEECH_VOICE, listSpeechVoices, resolveSpeechVoice } from "./speech-voice.js";
 import { terminalKind, terminalMux } from "./terminal.js";
 import { muxListForClient, muxReplyForClient, typedMuxRequest } from "./mux-wire.js";
 
@@ -115,7 +117,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, transcribe: true, memoryStore: true, promptOnce: true, resources: true };
+  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechVoices: true, transcribe: true, memoryStore: true, promptOnce: true, resources: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -291,6 +293,14 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             const snapshots = await Promise.all(live.map(server => snapshot(String(server.session))));
             result = { product: "phren-hook", protocol: PROTOCOL, computer: info.computer, servers: live.map(server => server.session),
               working: snapshots.reduce((sum, value) => sum + objects(value.panes).filter(pane => pane.agent && pane.agent_status === "working").length, 0) };
+            break;
+          }
+          case "/v1/speech/voices": {
+            // The phone's voice picker: this computer's setting and the voices its account has.
+            const key = await readSpeechKey();
+            if (!key) throw new BridgeError(503, "Spoken replies aren't set up on this computer: it has no ElevenLabs key.", { code: "speech-unconfigured" });
+            const current = await resolveSpeechVoice();
+            result = { voice: current.voice, source: current.source, defaultVoice: DEFAULT_SPEECH_VOICE, voices: await listSpeechVoices(key) };
             break;
           }
           case "/v1/muxes": result = { muxes: muxListForClient(await servers(), url.searchParams.get("typed") === "1") }; break;

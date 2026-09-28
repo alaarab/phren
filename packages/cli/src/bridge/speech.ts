@@ -3,6 +3,9 @@ import type { ServerResponse } from "node:http";
 import { z } from "zod";
 import { BridgeError, type Json } from "./protocol.js";
 import { readSpeechKey } from "./speech-key.js";
+import { resolveSpeechVoice, voiceId } from "./speech-voice.js";
+
+export { DEFAULT_SPEECH_VOICE } from "./speech-voice.js";
 
 /** Spoken replies for the phone's talk mode. The phone sends a sentence; the
  * Hook voices it with ElevenLabs and streams the audio back. The API key is
@@ -15,8 +18,6 @@ export const SPEECH_AUDIO = "pcm_s16le;rate=24000;channels=1";
 const OUTPUT_FORMAT = "pcm_24000";
 /** ElevenLabs' lowest-latency model. */
 export const SPEECH_MODEL = "eleven_flash_v2_5";
-/** River: relaxed, neutral and informative. PHREN_SPEECH_VOICE overrides it. */
-export const DEFAULT_SPEECH_VOICE = "SAz9YHcvj6GT2YYXdXww";
 const MAX_TEXT = 2_000;
 
 export const speechRequest = z.object({
@@ -24,6 +25,8 @@ export const speechRequest = z.object({
   /** Answer JSON with the audio and when each character is spoken, so the
    * phone can highlight the word being read (talk mode's karaoke). */
   timestamps: z.boolean().optional(),
+  /** A voice the phone picked; otherwise this computer's setting. */
+  voice: voiceId.optional(),
 });
 
 /** When each character of the voiced text starts and ends, in seconds from
@@ -116,7 +119,7 @@ export function alignmentOf(raw: { characters?: unknown; character_start_times_s
 async function elevenLabs(endpoint: "stream" | "with-timestamps", text: string, signal: AbortSignal, options: SpeechOptions): Promise<Response> {
   const key = await (options.key ?? readSpeechKey)();
   if (!key) throw new BridgeError(503, "Spoken replies aren't set up on this computer: it has no ElevenLabs key.", { code: "speech-unconfigured" });
-  const voice = options.voice ?? process.env.PHREN_SPEECH_VOICE ?? DEFAULT_SPEECH_VOICE;
+  const { voice } = await resolveSpeechVoice(options.voice);
   const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}/${endpoint}?output_format=${OUTPUT_FORMAT}`;
   let upstream: Response;
   try {
@@ -145,6 +148,7 @@ export async function streamSpeech(data: Json, response: ServerResponse, options
   if (!text) throw new BridgeError(400, "There is nothing to say in this reply.", { code: "speech-invalid" });
   // With timestamps, the alignment covers these spoken words, not the markdown.
   const { timestamps } = request;
+  if (request.voice) options = { ...options, voice: request.voice };
   const abort = new AbortController();
   response.once("close", () => { if (!response.writableEnded) abort.abort(); });
   if (timestamps) {
