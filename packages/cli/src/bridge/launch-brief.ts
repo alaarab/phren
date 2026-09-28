@@ -62,33 +62,62 @@ async function prune(now: number): Promise<void> {
   await Promise.all(stale.map(entry => rm(path.join(root, entry.name), { recursive: true, force: true }).catch(() => undefined)));
 }
 
+const LABEL_FILE = "label";
+const MAX_LABEL = 200;
+
+/** A dispatch label as stored and shown: control characters and runs of blanks collapsed, at most 200 characters. */
+function cleanLabel(value: string): string { return value.replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_LABEL).trim(); }
+
+/**
+ * The label the dispatcher gave a launched worker, kept beside its brief so
+ * this Hook can name the worker's session by it: the harness titles a session
+ * after its first prompt, which is only "Read and follow the brief in ...".
+ * Undefined for an id this computer wrote no label for (older dispatches).
+ */
+export async function briefLabel(id: string): Promise<string | undefined> {
+  if (!briefId.safeParse(id).success) return undefined;
+  const file = path.join(briefDirectory(id), LABEL_FILE);
+  try {
+    const info = await lstat(file);
+    if (!info.isFile() || info.size > 4 * MAX_LABEL) return undefined;
+    return cleanLabel(await readFile(file, "utf8")) || undefined;
+  } catch { return undefined; }
+}
+
 /**
  * Writes the brief (0600, in a 0700 folder of its own) and returns its path.
+ * A `label` is written beside it, inside the same folder, so it is published
+ * with the brief and never lags it.
  * The folder is filled beside `briefs/` and renamed into place, so a brief
  * folder never exists without its `brief.md`: anything that lists `briefs/`
  * (the arrival route, a test, the owner) sees a whole brief or none. Writing
  * it in place left a moment where the folder was there and the file was not.
  */
-export async function writeLaunchBrief(brief: LaunchBrief, now = Date.now()): Promise<string> {
+export async function writeLaunchBrief(brief: LaunchBrief, now = Date.now(), label?: string): Promise<string> {
   await mkdir(briefRoot(), { recursive: true, mode: 0o700 });
   await prune(now);
   const directory = briefDirectory(brief.id);
   const file = path.join(directory, "brief.md");
   const text = brief.text.endsWith("\n") ? brief.text : `${brief.text}\n`;
-  // The same id again (a retried launch) replaces the text in the existing folder.
-  if (await stat(directory).catch(() => undefined)) { await atomic(file, text); return file; }
+  const named = label ? cleanLabel(label) : "";
+  const fill = async (folder: string) => {
+    await atomic(path.join(folder, "brief.md"), text);
+    if (named) await atomic(path.join(folder, LABEL_FILE), named);
+  };
+  // The same id again (a retried launch) replaces the text and label in the existing folder.
+  if (await stat(directory).catch(() => undefined)) { await fill(directory); return file; }
   const staging = path.join(bridgeRoot(), "briefs-staging");
   await mkdir(staging, { recursive: true, mode: 0o700 });
   const draft = path.join(staging, `${brief.id}.${randomUUID()}`);
   try {
     await mkdir(draft, { mode: 0o700 });
-    await atomic(path.join(draft, "brief.md"), text);
+    await fill(draft);
     await rename(draft, directory);
   } catch (error) {
     await rm(draft, { recursive: true, force: true }).catch(() => undefined);
     // Another writer published the same id first: write into its folder.
     if (!(await stat(path.join(directory, "brief.md")).catch(() => undefined))) throw error;
-    await atomic(file, text);
+    await fill(directory);
   }
   return file;
 }

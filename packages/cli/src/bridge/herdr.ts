@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import { BridgeError, id, object, objects, requestID, serverName, provider, sessionId, type Json, type OfflineCode, type Target, type StartingTarget } from "./protocol.js";
 import { logger } from "../logger.js";
 import { recordedSession } from "./agent-hook-stores.js";
+import { paneRecord, recordTitle } from "./session-activity.js";
 import { tabActivityKey } from "./tab-activity.js";
 import { intervalFromEnv } from "./limits.js";
 import { countHerdr, countIdentity } from "./metrics.js";
@@ -526,11 +527,15 @@ export async function panes(server: string, workspace: string, tab: string): Pro
   if (!objects(s.tabs).some(t => t.tab_id === tab && t.workspace_id === workspace)) throw new BridgeError(409, "This terminal tab has changed. Refresh the computer.");
   const mux = (await terminal()).terminalMux(server);
   return { kind: mux.kind, mux, groupId: workspace, childId: tab, panes: await Promise.all(objects(s.panes)
-    .filter(p => p.workspace_id === workspace && p.tab_id === tab).map(async p => ({ id: p.pane_id,
-      label: p.label || p.pane_id, agent: p.agent, agentStatus: p.agent_status,
-      title: p.title || p.terminal_title_stripped, cwd: p.foreground_cwd || p.cwd,
-      ...await paneChatState(server, p),
-      ...paneAccountField(server, p) }))) };
+    .filter(p => p.workspace_id === workspace && p.tab_id === tab).map(async p => {
+      const chat = await paneChatState(server, p);
+      const record = await paneRecord(server, p, typeof chat.sessionId === "string" ? chat.sessionId : undefined);
+      const t = objects(s.tabs).find(candidate => candidate.tab_id === tab && candidate.workspace_id === workspace);
+      const w = objects(s.workspaces).find(candidate => candidate.workspace_id === workspace);
+      return { id: p.pane_id, label: p.label || p.pane_id, agent: p.agent, agentStatus: p.agent_status,
+        title: await recordTitle(record, { harnessTitle: p.title || p.terminal_title_stripped, tabLabel: t?.label, workspaceLabel: w?.label, fallbackLabel: p.label || p.pane_id }),
+        cwd: p.foreground_cwd || p.cwd, ...chat, ...paneAccountField(server, p) };
+    })) };
 }
 
 /** The pane a starting target names, if its terminal/process binding still

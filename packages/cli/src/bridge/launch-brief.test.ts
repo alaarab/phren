@@ -1,8 +1,8 @@
-import { mkdtemp, readdir, readFile, rm, stat, utimes } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { briefArgs, briefArrival, briefIdInPrompt, briefRoot, recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
+import { briefArgs, briefArrival, briefLabel, briefIdInPrompt, briefRoot, recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
 import { launchSession } from "./server-launch.js";
 import { type AgentStart, type PanePlacement, setTerminalProvider, type TerminalProvider } from "./terminal.js";
 import type { Json, Target } from "./protocol.js";
@@ -13,6 +13,39 @@ const target: Target = { server: "default", workspace: "w1", tab: "w1:t1", pane:
 let root: string;
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-launch-brief-")); vi.stubEnv("PHREN_BRIDGE_HOME", root); });
 afterEach(async () => { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
+
+describe("a dispatch label kept with its brief", () => {
+  it("is written with the brief, privately, and read back cleaned", async () => {
+    const file = await writeLaunchBrief({ id, text: "Line one" }, Date.now(), "  parser\tchecks\n ");
+    expect(await readFile(path.join(path.dirname(file), "label"), "utf8")).toBe("parser checks");
+    if (process.platform !== "win32") expect((await stat(path.join(path.dirname(file), "label"))).mode & 0o777).toBe(0o600);
+    expect(await briefLabel(id)).toBe("parser checks");
+    expect((await readdir(path.join(root, "briefs-staging"))).length).toBe(0);
+  });
+
+  it("is undefined for a bad id, a brief written without one and a missing brief", async () => {
+    await writeLaunchBrief({ id, text: "Line one" });
+    expect(await briefLabel(id)).toBeUndefined();
+    expect(await briefLabel("../../etc")).toBeUndefined();
+    expect(await briefLabel("50000000-0000-4000-8000-000000000009")).toBeUndefined();
+  });
+
+  it("is capped at 200 characters and refuses an oversized file", async () => {
+    await writeLaunchBrief({ id, text: "x" }, Date.now(), "é".repeat(300));
+    expect([...(await briefLabel(id))!].length).toBe(200);
+    await writeFile(path.join(briefRoot(), id, "label"), "y".repeat(5000));
+    expect(await briefLabel(id)).toBeUndefined();
+  });
+
+  it("follows a retried launch of the same id", async () => {
+    await writeLaunchBrief({ id, text: "first" }, Date.now(), "first label");
+    await writeLaunchBrief({ id, text: "second" }, Date.now(), "second label");
+    expect(await briefLabel(id)).toBe("second label");
+    // A retry that names no label leaves the earlier one.
+    await writeLaunchBrief({ id, text: "third" });
+    expect(await briefLabel(id)).toBe("second label");
+  });
+});
 
 describe("a brief that goes with the launch", () => {
   it("is written privately and handed to Claude and Codex as one short argument", async () => {
@@ -102,6 +135,8 @@ describe("launching an agent with its brief", () => {
     const file = path.join(root, "briefs", id, "brief.md");
     expect(launched).toMatchObject({ ok: true, briefLaunched: true });
     expect(await readFile(file, "utf8")).toBe("Do the work.\n");
+    // The dispatch label is kept beside the brief, to name the session by.
+    expect(await briefLabel(id)).toBe("Worker");
     expect(placements[0].env).toEqual({ PHREN_DISPATCH_ID: id });
     expect(starts[0]).toMatchObject({ kind: "claude", env: { PHREN_DISPATCH_ID: id },
       args: ["--model", "opus", `Read and follow the brief in ${file}`, "--add-dir", path.dirname(file)] });

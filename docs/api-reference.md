@@ -78,7 +78,7 @@ transcript when there are none; see [Returns](conductor.md#returns).
 
 | State | Meaning |
 |-------|---------|
-| `done` | The worker finished its turn. `reply` holds its final reply from the Stop hook or the transcript, at most 4000 UTF-8 bytes (`truncated` when cut). `background` counts background tasks still running when it was counted done after waiting 30 minutes for them. |
+| `done` | The worker finished its turn. `reply` holds its final reply from the Stop hook or the transcript, at most 4000 UTF-8 bytes (`truncated` when cut). `background` counts background tasks still running when it was counted done after waiting two hours for them (every task that finishes wakes the worker, so the wait only runs out when none has finished for two hours). `waited` is the most background tasks the worker waited on before it finished, when none is still running. |
 | `needs-you` | The worker finished by asking the owner something. `question` holds the question line, `reply` the whole reply. |
 | `failed` | The harness ended the worker's turn on an error instead of a reply, such as Codex's usage limit, or the owner interrupted it in the worker's terminal. `error` holds the message. |
 | `blocked` | The worker waits on terminal input, such as a permission prompt. |
@@ -1209,6 +1209,22 @@ accurate `mux` descriptor for tmux entries. Legacy no-mux, `server=` and
 New clients opt in with `mux=tmux:<server>`. Older Hooks ignore `typed=1`, so
 clients must accept legacy discovery aliases during upgrades. A typed tmux
 selector that would resolve to Herdr returns 409 `mux-kind-mismatch`.
+
+Each tab in the `/v1/workspaces` and `WS /v1/overview` replies carries
+`agentStatus` and `title`. A session whose main turn ended while background
+work still runs is `agentStatus: "working"` with `backgroundTasks: <n>`,
+where Herdr or tmux say idle or done. `n` is the larger of the Stop hook's
+count of Claude background tasks (shells, subagents, monitors) and the running
+Codex or Claude subagents and fanout jobs (`runningChildren`), never their
+sum. `backgroundTasks` is absent on a tab that is working, blocked or waiting
+on its own turn, and such a tab has no `currentStep`. The Hook's `live_sessions`
+list carries the same field. `title` is the dispatch label for a dispatched
+worker (kept in `<bridge>/briefs/<id>/label`); a dispatch sent before labels
+were kept uses its tab or workspace label. Otherwise it is the harness's own
+title, except a title made from the brief launch's first prompt ("Read and
+follow the brief...", a `/briefs/` path, "Brief" and a bare id), which is
+dropped so the client falls back to `label`. `GET /v1/workspaces/panes` gives
+each pane's `title` by the same rule.
 
 Existing HTTP transcript lookup failures carry 404 `code: "transcript-unavailable"`
 after route target validation. This code does not mean every 404 is a missing

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchStatus, updateReceipt, type Receipt } from "./dispatch.js";
-import { DispatchReturns, NOTICE_MS, noticeLine, observe, POLL_MS, REPLY_LIMIT, workerStates, type WorkerReaders } from "./dispatch-returns.js";
+import { BACKGROUND_WAIT_MS, DispatchReturns, NOTICE_MS, noticeLine, observe, POLL_MS, REPLY_LIMIT, returnRow, workerStates, type WorkerReaders } from "./dispatch-returns.js";
 import { findPane } from "./herdr.js";
 import { localHost } from "./dispatch-hosts.js";
 import { hookPeers, peerRequest } from "./peers.js";
@@ -41,7 +41,7 @@ const workingTarget = { server: "default", workspace: "w13", tab: "w13:t2", pane
 const remoteID = "30000000-0000-4000-8000-000000000001";
 const brief = { computer: "Linuxbox", project: "phren", harness: "claude", prompt: "Run the parser checks", label: "parser checks" };
 
-function readers(snapshot: () => Json, reply?: { completed: boolean; lastAssistant?: string }): WorkerReaders {
+function readers(snapshot: () => Json, reply?: { completed: boolean; lastAssistant?: string; background?: number }): WorkerReaders {
   return { snapshot: async () => snapshot(), identity: recordedIdentity, finalTurn: async () => reply };
 }
 
@@ -65,6 +65,13 @@ describe("the receiving Hook's worker states", () => {
     expect(answer.workers[3]).toEqual({ state: "gone" });
     const blocked = await workerStates({ targets: [workerTarget] }, readers(() => herdrSnapshot({ "w1P:p2": "blocked" })));
     expect(blocked.workers[0]).toEqual({ state: "blocked", session: workerTarget.session });
+  });
+
+  it("keeps an idle pane with no turn record working while its finished turn left background tasks", async () => {
+    const answer = await workerStates({ targets: [workerTarget] }, readers(() => herdrSnapshot(), { completed: true, lastAssistant: "Started.", background: 4 }));
+    expect(answer.workers[0]).toEqual({ state: "working", session: workerTarget.session, completed: true, background: 4, reply: "Started." });
+    const settled = await workerStates({ targets: [workerTarget] }, readers(() => herdrSnapshot(), { completed: true, lastAssistant: "Done." }));
+    expect(settled.workers[0]).toMatchObject({ state: "done", completed: true });
   });
 
   it("reports an unreachable Herdr as unavailable and refuses malformed requests", async () => {
@@ -131,6 +138,78 @@ describe("recording transitions", () => {
     expect(value.returned).toMatchObject({ state: "done" });
   });
 
+  it("remembers the most background work seen and says what the worker waited on", () => {
+    const value = receipt();
+    expect(observe(value, { state: "working", background: 3 }, 1000)).toBe(true);
+    // The same state with more work is a change to the receipt, not a new return.
+    expect(observe(value, { state: "working", background: 7 }, 2000)).toBe(true);
+    expect(observe(value, { state: "working", background: 2 }, 3000)).toBe(false);
+    expect(observe(value, { state: "working", background: 7 }, 3500)).toBe(false);
+    expect(value.worker).toMatchObject({ state: "working", background: 7 });
+    expect(value.returned).toBeUndefined();
+    expect(observe(value, { state: "done", completed: true, reply: "Suite passed." }, 4000)).toBe(true);
+    expect(value.returned).toMatchObject({ state: "done", waited: 7 });
+    expect(value.returned!.background).toBeUndefined();
+    expect(noticeLine([value])).toContain("parser checks done (after 7 background tasks finished), Suite passed.");
+    expect(returnRow(value)).toMatchObject({ state: "done", waited: 7 });
+    // Work still running after the wait keeps the still-running wording, not both.
+    const late = receipt();
+    observe(late, { state: "working", background: 1 }, 1000);
+    observe(late, { state: "done", completed: true, reply: "Left a server.", background: 1 }, 2000);
+    expect(late.returned).toMatchObject({ background: 1 });
+    expect(late.returned!.waited).toBeUndefined();
+    expect(noticeLine([late])).toContain("parser checks done (1 background task still running)");
+    expect(noticeLine([late])).not.toContain("after");
+    expect(returnRow(late)).not.toHaveProperty("waited");
+    // A worker that never had background work says nothing about it.
+    const plain = receipt();
+    observe(plain, { state: "working" }, 1000); observe(plain, { state: "done", completed: true, reply: "Ok." }, 2000);
+    expect(plain.returned).not.toHaveProperty("waited");
+  });
+
+  it("bounds a record-less finished turn's background wait from when it was first seen", () => {
+    const waiting = { state: "working", completed: true, background: 2, reply: "Started the server.", session: "s" } as const;
+    const value = receipt();
+    expect(observe(value, waiting, 1000)).toBe(true);
+    expect(value.worker).toMatchObject({ state: "working", background: 2, waitingSince: new Date(1000).toISOString() });
+    // Still waiting just short of the bound: the start does not move.
+    expect(observe(value, { ...waiting, background: 3 }, 1000 + BACKGROUND_WAIT_MS - 1)).toBe(true);
+    expect(value.worker).toMatchObject({ state: "working", background: 3, waitingSince: new Date(1000).toISOString() });
+    expect(value.returned).toBeUndefined();
+    // Exactly at the bound it is a finished turn, with what still runs and its reply.
+    expect(observe(value, { ...waiting, background: 3 }, 1000 + BACKGROUND_WAIT_MS)).toBe(true);
+    expect(value.worker).toMatchObject({ state: "done" });
+    expect(value.worker).not.toHaveProperty("waitingSince");
+    expect(value.returned).toMatchObject({ state: "done", background: 3, reply: "Started the server." });
+    expect(noticeLine([value])).toContain("done (3 background tasks still running)");
+    // An error or a question in the reply is judged as for any finished turn.
+    const failed = receipt();
+    observe(failed, { ...waiting, error: "usage limit" }, 0);
+    observe(failed, { ...waiting, error: "usage limit" }, BACKGROUND_WAIT_MS);
+    expect(failed.returned).toMatchObject({ state: "failed", error: "usage limit" });
+  });
+
+  it("starts the background wait again once the worker is plainly working", () => {
+    const waiting = { state: "working", completed: true, background: 1, reply: "Started." } as const;
+    const value = receipt();
+    observe(value, waiting, 1000);
+    expect(observe(value, { state: "working" }, 2000)).toBe(true);
+    expect(value.worker).not.toHaveProperty("waitingSince");
+    observe(value, waiting, 3000);
+    expect(value.worker!.waitingSince).toBe(new Date(3000).toISOString());
+    observe(value, waiting, 3000 + BACKGROUND_WAIT_MS - 1);
+    expect(value.returned).toBeUndefined();
+  });
+
+  it("never force-finishes an observation from the worker's own hooks", () => {
+    const value = receipt();
+    observe(value, { state: "working", hook: true, completed: true, background: 2 }, 0);
+    observe(value, { state: "working", hook: true, completed: true, background: 2 }, BACKGROUND_WAIT_MS * 3);
+    expect(value.worker).toMatchObject({ state: "working" });
+    expect(value.worker).not.toHaveProperty("waitingSince");
+    expect(value.returned).toBeUndefined();
+  });
+
   it("writes one plain line per notice", () => {
     const done = receipt(); observe(done, { state: "working" }, 1); observe(done, { state: "done", completed: true, reply: "**Parser checks done**, tests passed.\nDetails follow." }, 2);
     expect(noticeLine([done])).toBe(`Return: Linuxbox parser checks done, Parser checks done, tests passed. (dispatch ${done.id}). Call dispatch_returns.`);
@@ -146,7 +225,7 @@ describe("the dispatching Hook's returns loop", () => {
   let clock: number;
   let remote: Json;
   let local: Json;
-  let finalTurn: { completed: boolean; lastAssistant?: string } | undefined;
+  let finalTurn: { completed: boolean; lastAssistant?: string; background?: number } | undefined;
   const deliver = vi.fn(async (_target: unknown, _text: string, _id: string) => ({ delivered: true }));
 
   beforeEach(async () => {
@@ -174,6 +253,21 @@ describe("the dispatching Hook's returns loop", () => {
       return agent.success ? { agent: agent.data, terminal: String(pane!.terminal_id) } : undefined;
     } });
   const loop = () => new DispatchReturns({ snapshot: async () => local, identity: recordedIdentity, deliver, now: () => clock });
+
+  it("carries the background work the worker waited on through the receipt file into the return", async () => {
+    remote = herdrSnapshot();
+    finalTurn = { completed: true, lastAssistant: "Started the gate.", background: 5 };
+    const placed = await service().dispatch(brief, conductorPane);
+    const returns = loop();
+    await returns.tick();
+    expect((await dispatchStatus())[0].worker).toMatchObject({ state: "working", background: 5, waitingSince: new Date(clock).toISOString() });
+    finalTurn = { completed: true, lastAssistant: "Gate passed." };
+    clock += POLL_MS;
+    await returns.tick();
+    const [saved] = await dispatchStatus();
+    expect(saved.returned).toMatchObject({ state: "done", waited: 5 });
+    expect(deliver).toHaveBeenCalledWith(expect.anything(), `Return: Linuxbox parser checks done (after 5 background tasks finished), Gate passed. (dispatch ${placed.id}). Call dispatch_returns.`, expect.any(String));
+  });
 
   it("keeps the dispatching pane, follows the worker to done and tells an idle conductor once", async () => {
     const placed = await service().dispatch(brief, conductorPane);
