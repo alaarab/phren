@@ -28,6 +28,7 @@ import { answeredQuestionInput, numberedDialog, opencodePermissionDialog, passwo
 import { directoryNames, opencodeApprovalFile, opencodeRequest, readOpencodeRequest } from "./opencode-approvals.js";
 import { ApprovalWatchLeases, bindingPath, localSocket, PushBindingStore } from "./agent-hook-stores.js";
 import { eventStatus, notePaneStatus, settleBlockedPane } from "./pane-status.js";
+import { noteTurn as recordTurn } from "./turn-records.js";
 import { countTick } from "./metrics.js";
 import { briefId, briefIdInPrompt, DISPATCH_ID_ENV, recordBriefArrival } from "./launch-brief.js";
 
@@ -334,6 +335,15 @@ export class AgentHooks {
     if (delivery.source === target.source && delivery.session === target.session) { delivery.settle("delivered"); return {}; }
     delivery.settle("blocked");
     return { decision: "block", reason: "Phren sent this message to a different conversation in this pane; it was not delivered here. Send it again from the phone." };
+  }
+  /** The conversation's own turn events, for dispatch returns (turn-records.ts).
+   * A failed write never fails the agent's callback. */
+  private async recordTurn(target: Target, pane: Json, body: Json, dispatch?: string) {
+    if (typeof pane.terminal_id !== "string") return;
+    await recordTurn(target.server, target.pane, { event: String(body.event), terminal: pane.terminal_id, source: target.source, session: target.session,
+      ...(dispatch ? { dispatch } : {}),
+      ...(typeof body.background === "number" ? { background: body.background } : {}),
+      ...(typeof body.reply === "string" ? { reply: body.reply } : {}) }).catch(() => undefined);
   }
   private rememberTerminalPrompt(target: Target, body: Json) {
     const tool = String(body.tool || "action").slice(0, 200);
@@ -904,16 +914,21 @@ export class AgentHooks {
         // A launched brief's receipt: the worker's own hook names its dispatch
         // id (from its environment, or the brief path in its first prompt when
         // Codex's shared daemon ran the hook with another pane's variables).
+        let dispatch: string | undefined;
         if (body.event === "SessionStart" || body.event === "UserPromptSubmit") {
           const named = !daemon && briefId.safeParse(body.dispatchId).success ? String(body.dispatchId) : undefined;
-          const dispatch = named ?? (typeof body.prompt === "string" ? briefIdInPrompt(body.prompt) : undefined);
+          dispatch = named ?? (typeof body.prompt === "string" ? briefIdInPrompt(body.prompt) : undefined);
           if (dispatch) await recordBriefArrival(dispatch, String(body.event), target).catch(() => undefined);
         }
         if (body.event === "PreCompact") { this.startCompacting(target); res.end("{}"); return; }
         if (["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event))) this.stopCompacting(target);
         if (body.event === "UserPromptSubmit") {
-          res.end(JSON.stringify(typeof body.prompt === "string" ? this.submitted(target, body.prompt.slice(0, 65_536)) : {})); return;
+          const answer = typeof body.prompt === "string" ? this.submitted(target, body.prompt.slice(0, 65_536)) : {};
+          // A prompt refused here never starts a turn in this conversation.
+          if (answer.decision !== "block") await this.recordTurn(target, pane, body, dispatch);
+          res.end(JSON.stringify(answer)); return;
         }
+        if (body.event === "SessionStart" || body.event === "Stop") await this.recordTurn(target, pane, body, dispatch);
         if ((this.modules?.has("git") ?? true) && ["PreToolUse", "PostToolUse"].includes(String(body.event)) && capturesChanges(String(body.tool), input)) {
           const conversation = `${target.source}:${target.session}`, id = String(body.toolUseId || "").slice(0, 200);
           if (body.event === "PreToolUse") await this.changes.before(conversation, id, typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane), command ?? "", input);
@@ -1027,6 +1042,17 @@ export class AgentHooks {
   }
 }
 
+/** What a Stop payload says about the turn it ends: the harness's last
+ * assistant message (Claude, Codex) and, from Claude Code, the background
+ * tasks still in flight, which will wake the conversation again when they
+ * finish. Absent fields are left out, so the Hook falls back to the transcript. */
+export function stopFacts(value: Json): { background?: number; reply?: string } {
+  const tasks = Array.isArray(value.background_tasks)
+    ? value.background_tasks.filter(task => !["completed", "failed", "killed", "stopped"].includes(String(object(task).status))) : undefined;
+  return { ...(tasks ? { background: tasks.length } : {}),
+    ...(typeof value.last_assistant_message === "string" && value.last_assistant_message.trim() ? { reply: value.last_assistant_message.slice(0, 16_384) } : {}) };
+}
+
 export async function agentHook(source: Provider) {
   provider.parse(source);
   // A missing helper must never prevent the coding agent from running.
@@ -1054,7 +1080,8 @@ export async function agentHook(source: Provider) {
     ? process.env[DISPATCH_ID_ENV] : undefined;
   const data = JSON.stringify({ target, event, ...(daemon ? { daemon: true } : {}), ...(autoReview ? { autoReview: true } : {}), ...(dispatchId ? { dispatchId } : {}),
     tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
-    ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}) });
+    ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}),
+    ...(event === "Stop" ? stopFacts(value) : {}) });
   await new Promise<void>(resolve => {
     const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? 8_000 : 1500,
       headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, res => {

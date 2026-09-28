@@ -239,14 +239,22 @@ export const PhrenTranscriptPlugin = async () => {
   let recordedStatus;
   // Permission asks still open, by id: while any is, the process is blocked.
   const asking = new Set();
+  // The session's last turn: when it went busy, and when it went idle after
+  // that. Dispatch returns read these as the turn's start and Stop.
+  let turn = {};
   const recordStatus = (status, sessionID) => {
     // A fan-out worker runs headless, in no pane.
     if (process.env.PHREN_FANOUT_JOB) return;
     const next = asking.size && status === "working" ? "blocked" : status;
     if (next === recordedStatus) return;
     try {
+      const at = new Date().toISOString();
+      if (sessionID && turn.session !== sessionID) turn = { session: sessionID };
+      if (next !== "idle" && (recordedStatus === undefined || recordedStatus === "idle")) { turn.busyAt = at; delete turn.idleAt; }
+      else if (next === "idle" && turn.busyAt) turn.idleAt = at;
       mkdirSync(path.dirname(statusFile()), { recursive: true });
-      writeJsonAtomic(statusFile(), { status: next, ...(sessionID ? { session: sessionID } : {}), at: new Date().toISOString() });
+      writeJsonAtomic(statusFile(), { status: next, ...(sessionID ? { session: sessionID } : {}), at,
+        ...(turn.session === sessionID && turn.busyAt ? { busyAt: turn.busyAt } : {}), ...(turn.session === sessionID && turn.idleAt ? { idleAt: turn.idleAt } : {}) });
       recordedStatus = next;
     } catch {}
   };

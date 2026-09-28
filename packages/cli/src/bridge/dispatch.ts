@@ -53,6 +53,7 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
     state: z.enum(["done", "needs-you", "failed", "blocked", "gone"]), at: timestamp,
     reply: z.string().max(4000).optional(), error: z.string().max(500).optional(), truncated: z.boolean().optional(), question: z.string().max(200).optional(),
     turn: z.string().regex(/^[a-f0-9]{16}$/).optional(), read: z.boolean(), notifiedAt: timestamp.optional(),
+    background: z.number().int().min(1).max(999).optional().describe("Background tasks the worker left running when it was counted done."),
   }).strict().optional().describe("The latest return: the worker finished, needs the owner, failed, is blocked or is gone."),
 });
 export type Receipt = z.infer<typeof receiptSchema>;

@@ -55,8 +55,12 @@ export interface StartupWatchEnv {
   finalTurn?: (source: ScheduleHarness, sessionId: string | undefined) => Promise<FinalTurn | undefined>;
 }
 
-/** `error`: the harness ended the turn on an error (Codex's usage limit) instead of a reply. */
-export interface FinalTurn { completed: boolean; lastAssistant?: string; error?: string }
+/** `error`: the harness ended the turn on an error (Codex's usage limit) instead of a reply.
+ * `interrupted`: the owner stopped the last turn (Claude's "[Request interrupted by user]",
+ * Codex's turn_aborted); the harness sends no Stop for it.
+ * `background`: Claude Code background tasks (shells, subagents, monitors) started in
+ * the transcript's tail with no task-notification or TaskStop ending them yet. */
+export interface FinalTurn { completed: boolean; lastAssistant?: string; error?: string; interrupted?: boolean; background?: number }
 
 /** The public text of one assistant row, without reasoning or tool output. */
 export function publicAssistant(raw: Json, source: Provider): string | undefined {
@@ -104,24 +108,57 @@ function turnError(raw: Json, source: ScheduleHarness): string | undefined {
   return message ? message.slice(0, 500) : undefined;
 }
 
+/** The owner stopping a turn: Claude's interruption marker, Codex's aborted turn. */
+function turnInterrupted(raw: Json, source: ScheduleHarness): boolean {
+  if (source === "codex") return raw.type === "event_msg" && object(raw.payload).type === "turn_aborted";
+  if (source !== "claude" || raw.type !== "user") return false;
+  const content = object(raw.message).content;
+  const text = typeof content === "string" ? content : objects(content).filter(block => block.type === "text").map(block => String(block.text ?? "")).join("");
+  return text.startsWith("[Request interrupted by user");
+}
+
+/** Claude Code background work a transcript line starts or ends, by task id:
+ * a backgrounded Bash call, an async subagent or a Monitor start one; a
+ * task-notification with a final status, or a TaskStop, ends it. A
+ * persistent monitor runs for the whole session and is never waited on. */
+function backgroundTasks(raw: Json, running: Set<string>): void {
+  const result = object(raw.toolUseResult);
+  const started = typeof result.backgroundTaskId === "string" ? result.backgroundTaskId
+    : result.isAsync === true && typeof result.agentId === "string" ? result.agentId
+    : typeof result.taskId === "string" && result.persistent !== true && typeof result.timeoutMs === "number" ? result.taskId : undefined;
+  if (started) running.add(started);
+  if (typeof result.task_id === "string" && typeof result.message === "string" && /\bstopped\b/i.test(result.message)) running.delete(result.task_id);
+  const content = object(raw.message).content, attachment = object(raw.attachment);
+  const notices = [typeof content === "string" ? content : "", typeof attachment.prompt === "string" ? attachment.prompt : ""];
+  // A monitor's events arrive as notifications too, without a final status.
+  for (const block of notices.flatMap(notice => notice.split("<task-notification>").slice(1))) {
+    const id = /<task-id>([^<\s]{1,100})<\/task-id>/.exec(block)?.[1];
+    if (id && /<status>(?:completed|failed|killed|stopped)<\/status>/.test(block)) running.delete(id);
+  }
+}
+
 /** The last assistant reply in a transcript and whether its turn finished.
  * A person's message after the reply opens a new turn, so it clears both. */
 export function finalTurnFromLines(lines: readonly string[], source: ScheduleHarness): FinalTurn {
-  let completed = false, lastAssistant: string | undefined, error: string | undefined;
+  let completed = false, lastAssistant: string | undefined, error: string | undefined, interrupted = false;
+  const running = new Set<string>();
   for (const line of lines) {
     if (!line.trim()) continue;
     let raw: Json;
     try { raw = object(JSON.parse(line)); } catch { continue; }
     const payload = object(raw.payload);
+    if (source === "claude") backgroundTasks(raw, running);
+    if (turnInterrupted(raw, source)) { interrupted = true; completed = false; continue; }
     const userTurn = source === "claude" ? raw.type === "user" && !raw.isMeta && typeof object(raw.message).content === "string"
       : source === "codex" ? raw.type === "response_item" && payload.type === "message" && payload.role === "user"
       : raw.type === "user/message";
-    if (userTurn) { completed = false; lastAssistant = undefined; error = undefined; continue; }
+    if (userTurn) { completed = false; lastAssistant = undefined; error = undefined; interrupted = false; continue; }
     const text = publicAssistant(raw, source);
-    if (text) { lastAssistant = text; completed = false; }
-    if (turnEnded(raw, source)) { completed = true; error = turnError(raw, source); }
+    if (text) { lastAssistant = text; completed = false; interrupted = false; }
+    if (turnEnded(raw, source)) { completed = true; interrupted = false; error = turnError(raw, source); }
   }
-  return { completed, ...(lastAssistant ? { lastAssistant } : {}), ...(completed && error ? { error } : {}) };
+  return { completed, ...(lastAssistant ? { lastAssistant } : {}), ...(completed && error ? { error } : {}),
+    ...(interrupted ? { interrupted: true } : {}), ...(completed && running.size ? { background: running.size } : {}) };
 }
 
 /** The final turn of a conversation, read from the tail of its transcript. */
