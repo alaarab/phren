@@ -6,6 +6,8 @@ import { accountLabel, clearAccountCaches } from "./claude-accounts.js";
 import { addClaudeAccount, syncAccountMcpServers } from "./claude-account-setup.js";
 
 let home = "";
+// Windows reports 0666 whatever mode is asked for.
+const posix = process.platform !== "win32";
 const json = (file: string) => JSON.parse(readFileSync(path.join(home, file), "utf8"));
 beforeEach(() => {
   home = mkdtempSync(path.join(tmpdir(), "phren-setup-"));
@@ -23,9 +25,9 @@ it("creates a private home with symlinks, only mcpServers, and a label", async (
   expect(added.linked.sort()).toEqual(["CLAUDE.md", "settings.json", "skills"]);
   expect(readlinkSync(path.join(dir, "settings.json"))).toBe(path.join(home, ".claude/settings.json"));
   expect(() => lstatSync(path.join(dir, "agents"))).toThrow();
-  expect(statSync(dir).mode & 0o777).toBe(0o700);
+  if (posix) expect(statSync(dir).mode & 0o777).toBe(0o700);
   expect(json(".claude-work/.claude.json")).toEqual({ mcpServers: { phren: { command: "phren" } } });
-  expect(statSync(path.join(dir, ".claude.json")).mode & 0o777).toBe(0o600);
+  if (posix) expect(statSync(path.join(dir, ".claude.json")).mode & 0o777).toBe(0o600);
   expect(accountLabel("work")).toBe("Work Sub");
 });
 
@@ -34,7 +36,7 @@ it("never overwrites existing entries and merges mcpServers with the default win
   mkdirSync(dir, { mode: 0o755 }); writeFileSync(path.join(dir, "settings.json"), "mine");
   writeFileSync(path.join(dir, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: "w" }, mcpServers: { phren: { command: "old" }, extra: { command: "x" } } }));
   await addClaudeAccount("work");
-  expect(statSync(dir).mode & 0o777).toBe(0o700);
+  if (posix) expect(statSync(dir).mode & 0o777).toBe(0o700);
   expect(readFileSync(path.join(dir, "settings.json"), "utf8")).toBe("mine");
   expect(json(".claude-work/.claude.json")).toEqual({ oauthAccount: { accountUuid: "w" }, mcpServers: { phren: { command: "phren" }, extra: { command: "x" } } });
 });
