@@ -41,7 +41,7 @@ rather than coupling the resolver to the host loop.
 
 The dossier's header row carries the node's kind and title on the left and
 44px icon buttons on the right, beside **Close**: **Previous node** and
-**Next node** chevrons (findings and tasks only), then **Edit** (pencil) and
+**Next node** chevrons (findings, tasks, then notes), then **Edit** (pencil) and
 **Delete** (trash in the danger tint) for nodes that can change. Previous and
 Next step through the current ranked list, the order the list mode shows for
 that project: its findings newest date first, then its tasks, wrapping at

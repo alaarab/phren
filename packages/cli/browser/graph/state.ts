@@ -216,13 +216,13 @@ function dossierNodes(): RuntimeNode[] {
 
 function steppableDossierNode(nodeId: string): RuntimeNode | null {
   const node = state.nodeById.get(nodeId);
-  if (!node || (node.kind !== "finding" && node.kind !== "task")) return null;
+  if (!node || (node.kind !== "finding" && node.kind !== "task" && node.kind !== "note")) return null;
   return node;
 }
 
 /**
  * Previous/next node id in the ranked list the list mode shows (the
- * project's findings newest first, then its tasks), wrapping at the ends.
+ * project's findings newest first, then its tasks, then its notes), wrapping at the ends.
  * Null when the node does not step: projects, fragments, references.
  */
 export function stepDossier(nodeId: string, delta: number): string | null {

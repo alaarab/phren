@@ -21,7 +21,9 @@ import {
   nodeMatchesFilters,
   normalizeNode,
   recomputeSearchMatches,
+  rankedProjectIds,
   seeded,
+  stepRanked,
 } from "./model.js";
 import type { GraphFilters, GraphModel } from "./model.js";
 import type { RawLink, RawNode, RuntimeNode } from "./types.js";
@@ -158,6 +160,16 @@ describe("topic and note kinds", () => {
     expect(topic.forceLabel).toBe(true);
     expect(normalizeNode({ ...TOPIC, refCount: 3 }, {}, () => null).forceLabel).toBe(false);
     expect(note.forceLabel).toBe(false);
+  });
+
+  it("walk findings, then tasks, then notes, and back", () => {
+    const nodes: RawNode[] = [...RAW, NOTE, { id: "n:2", label: "older", group: "note", project: "hub", date: "2026-09-01" }];
+    const ranked = rankedProjectIds(nodes, "hub");
+    expect(ranked).toEqual(["f:1", "f:2", "t:1", "n:1", "n:2"]);
+    expect(stepRanked(ranked, "t:1", 1)).toBe("n:1");
+    expect(stepRanked(ranked, "n:1", 1)).toBe("n:2");
+    expect(stepRanked(ranked, "n:2", 1)).toBe("f:1");
+    expect(stepRanked(ranked, "n:1", -1)).toBe("t:1");
   });
 
   it("stay visible under the default filters", () => {
