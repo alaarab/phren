@@ -925,8 +925,8 @@ schedules:
       expect(launched.data.run).toMatchObject({ scheduleId: "7f3a2c1d", project: "demo", status: "running",
         launch: { mode: "herdr" } });
       expect(commands.some(command => command.method === "agent.prompt" && command.params.text === "Run the test suite.")).toBe(true);
-      // The project's folder was trusted for Codex before the interactive launch.
-      expect(await readFile(path.join(root, "codex/config.toml"), "utf8")).toContain(`[projects.${JSON.stringify(root)}]\ntrust_level = "trusted"\n`);
+      // OpenCode has no folder-trust screen, so nothing is written for it.
+      await expect(readFile(path.join(root, "codex/config.toml"), "utf8")).rejects.toThrow();
       expect((await api("/v1/schedules/run", { project: "demo", id: "7f3a2c1d" })).status).toBe(409);
       const history = await api("/v1/schedules/history", { project: "demo", id: "7f3a2c1d", limit: 10 });
       expect(history.status).toBe(200);
