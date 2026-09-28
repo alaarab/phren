@@ -21,6 +21,7 @@ import { childAgent, childAgentTree, conversationNamedPaths, transcriptPath, typ
 import { sideQuestionText, type SideQuestions } from "./side-questions.js";
 import { saveUpload } from "./uploads.js";
 import { deliveryIdSchema, PromptOnce, promptScope } from "./prompt-once.js";
+import { sendServedPrompt, servedPane } from "./opencode-panes.js";
 
 /** Routes that act on one pane's conversation: prompts, answer keys, typed
  * secrets, uploads, diffs, git, approvals and questions. A starting pane (no
@@ -232,6 +233,21 @@ async function typeSecret(server: string, pane: string, text: string): Promise<v
 
 const promptOnce = new PromptOnce();
 
+/** A prompt for an OpenCode pane the Hook started with its own server: sent
+ * over that API into the conversation the TUI shows (a new one, shown first,
+ * when it has none) and confirmed by the user turn appearing there. Undefined
+ * when the pane has no server entry, the text is a slash command (the TUI's
+ * own menus), or nothing reached OpenCode; the caller then types it. */
+async function servedPrompt(target: { server: string; pane: string; source: string }, session: string | undefined, text: string, typing: () => void): Promise<Json | undefined> {
+  if (target.source !== "opencode" || text.trim().startsWith("/")) return undefined;
+  const entry = servedPane(target.server, target.pane);
+  if (!entry) return undefined;
+  typing();
+  const sent = await sendServedPrompt(entry, session, text);
+  if (!sent.sent) return undefined;
+  return sent.delivered ? { ok: true, delivered: true } : { ok: true, deliveryUncertain: true };
+}
+
 export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse): Promise<unknown> {
   if (url.pathname !== "/v1/prompt") return paneRouteOnce(ctx, url, data, response, () => {});
   // A retried send carries its first attempt's id; the Hook answers it with
@@ -271,6 +287,8 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     }
     const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
     refuseWorkingSlash(pane, text);
+    const served = await servedPrompt(target, undefined, text, typing);
+    if (served) return served;
     typing();
     await promptStartingAgent(target.server, target.pane, text);
     // A dispatched worker's brief is often long enough for Claude Code to
@@ -304,9 +322,12 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     // is pending there: an approval the Hook holds or saw, or a
     // status Herdr cannot read. Otherwise the answer keys are the way.
     const status = String(pane.agent_status);
-    if (status === "unknown" || (["blocked", "waiting"].includes(status) && (agentHooks.approval(target) || agentHooks.terminalPrompt(target)))) {
+    if (status === "unknown" || (["blocked", "waiting"].includes(status) && (agentHooks.approval(target) || agentHooks.terminalPrompt(target) || agentHooks.servedQuestion(target)))) {
       throw new BridgeError(409, "This agent needs input in the terminal first.");
     }
+    const text = typeof data.text === "string" && data.text && data.text.length <= 32768 && !/[\x00-\x08\x0b-\x1f\x7f]/.test(data.text) ? data.text : undefined;
+    const served = text === undefined ? undefined : await servedPrompt(target, target.session, text, typing);
+    if (served) return served;
   }
   if (url.pathname === "/v1/prompt") {
     const text = z.string().min(1).max(32768).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t)).parse(data.text);
@@ -376,6 +397,10 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     result = sideQuestions.dismiss(target, z.string().uuid().parse(data.id));
   } else if (url.pathname === "/v1/model") {
     result = await modelSwitcher.switch(target, data);
+  } else if (url.pathname === "/v1/keys" && await agentHooks.servedKeys(target, z.array(z.enum(ANSWER_KEYS)).min(1).max(4).parse(data.keys), String(pane.agent_status))) {
+    // A served OpenCode pane: Esc aborts its turn or declines its question,
+    // a digit answers its question, over its own API.
+    result = { ok: true };
   } else if (url.pathname === "/v1/keys") {
     const keys = z.array(z.enum(ANSWER_KEYS)).min(1).max(4).parse(data.keys);
     const status = String(pane.agent_status), menu = agentHooks.menuOpen(target);
@@ -492,6 +517,10 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
       // pane that is drawing exactly those.
       const { questions, answers } = claudeQuestionAnswer(data);
       await agentHooks.answerClaudeQuestions(target, questions, answers);
+    } else if (target.source === "opencode") {
+      // A served OpenCode pane's question, answered over its own API.
+      const { questions, answers } = claudeQuestionAnswer(data);
+      await agentHooks.answerServedQuestion(target, questions, answers);
     } else await codexQuestions.answer(target, data);
     result = { ok: true };
   }

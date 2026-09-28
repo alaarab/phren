@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, utimes } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,6 +32,27 @@ describe("a brief that goes with the launch", () => {
     expect(briefArgs("copilot", file)).toBeUndefined();
     expect(briefIdInPrompt(`Read and follow the brief in ${file}`)).toBe(id);
     expect(briefIdInPrompt("Read and follow the brief in /tmp/briefs/x/brief.md")).toBeUndefined();
+  });
+
+  it("never shows a brief folder without its brief, and rewrites the same id in place", async () => {
+    let seen = 0, torn = 0, done = false;
+    const watch = (async () => {
+      while (!done) {
+        for (const name of await readdir(briefRoot()).catch(() => [] as string[])) {
+          seen++;
+          if (!(await stat(path.join(briefRoot(), name, "brief.md")).catch(() => undefined))) torn++;
+        }
+        await new Promise(resolve => setImmediate(resolve));
+      }
+    })();
+    for (let n = 0; n < 20; n++) await writeLaunchBrief({ id: `40000000-0000-4000-8000-0000000001${String(n).padStart(2, "0")}`, text: "x".repeat(200_000) });
+    done = true; await watch;
+    expect(seen).toBeGreaterThan(0);
+    expect(torn).toBe(0);
+    expect(await readdir(path.join(root, "briefs-staging"))).toEqual([]);
+    await writeLaunchBrief({ id, text: "first" });
+    await writeLaunchBrief({ id, text: "second" });
+    expect(await readFile(path.join(briefRoot(), id, "brief.md"), "utf8")).toBe("second\n");
   });
 
   it("keeps a week of briefs", async () => {
@@ -87,11 +108,21 @@ describe("launching an agent with its brief", () => {
   });
 
   it("leaves the brief to be typed for a harness without a first-prompt argument", async () => {
-    const launched = await launchSession("default", { cwd: root, label: "Worker", kind: "opencode", brief: { id, text: "Do the work." } });
+    const launched = await launchSession("default", { cwd: root, label: "Worker", kind: "copilot", brief: { id, text: "Do the work." } });
     expect(launched).toMatchObject({ ok: true, briefLaunched: false });
     expect(starts[0].args).toEqual([]);
     expect(placements[0].env).toEqual({ PHREN_DISPATCH_ID: id });
     await expect(stat(path.join(root, "briefs", id))).rejects.toThrow();
+  });
+
+  it("starts OpenCode on a port of its own and types the brief when its server never registers", async () => {
+    const launched = await launchSession("default", { cwd: root, label: "Worker", kind: "opencode", brief: { id, text: "Do the work." } });
+    expect(launched).toMatchObject({ ok: true, briefLaunched: false });
+    const port = starts[0].args[1];
+    expect(starts[0].args).toEqual(["--port", expect.stringMatching(/^\d+$/)]);
+    expect(placements[0].env).toEqual({ PHREN_DISPATCH_ID: id, PHREN_OPENCODE_PORT: port, OPENCODE_SERVER_PASSWORD: expect.stringMatching(/^[\w-]{43}$/) });
+    // The brief is on file so a served send can record its arrival.
+    expect(await briefArrival(id)).toEqual({});
   });
 
   it("launches as before without a brief, and refuses one for a conductor", async () => {

@@ -92,6 +92,60 @@ no transition permission. A transitioning prompt observes the same model/side
 question reservations as an ordinary prompt. The client keeps its `deliveryId`
 when retrying with the new session target, so that retry types nothing twice.
 
+### OpenCode panes the Hook starts
+
+An OpenCode the Hook launches (worker, conductor, dispatch or schedule) runs as
+`opencode --port <free port>` with `OPENCODE_SERVER_PASSWORD` (32 random bytes)
+and `PHREN_OPENCODE_PORT` in the pane's environment, beside `PHREN_DISPATCH_ID`.
+The TUI serves OpenCode's HTTP API on 127.0.0.1 with Basic auth, and the pane
+stays the owner's view of the same conversation. Once the process carrying that
+port answers, the Hook records the pane in `<bridge>/opencode-panes/`
+(`<server>%2F<pane>.json`, 0600 in a 0700 folder: port, password, PID, folder,
+and the launch's agent, model and variant). An entry whose PID is gone is
+removed on the Hook's five-second tick; a pane without an entry (OpenCode started
+by hand) keeps every typed path below.
+
+For a registered pane:
+
+- A dispatch or schedule brief is sent over HTTP, not typed: the Hook creates a
+  session, prompts it with the brief, and moves the TUI onto it
+  (`/tui/select-session`, repeated until the pane draws the prompt, because a
+  TUI that has just started drops the first request). The brief file is still
+  written, and the arrival record gets `started` when the prompt is sent and
+  `accepted` when the user turn appears in the session, so the receipt turns
+  `accepted` exactly as a Claude or Codex hook echo does. `briefLaunched` is
+  true once the prompt was sent, confirmed or not.
+- `POST /v1/prompt` sends into the target's session over `prompt_async` after
+  checking it is a root session of that server; a starting target gets a new
+  session shown in the TUI. A continuing session keeps its last user turn's
+  agent, model and variant; a new one takes the launch's. The reply is
+  `delivered: true` once the user turn appears (within 3 s), else
+  `deliveryUncertain: true`; `deliveryId` applies as for typing. A slash command
+  (the TUI's own menus) and a prompt that never reached OpenCode (refused, or
+  nothing listening) are typed instead.
+- The Hook follows each pane's `/event` stream (reconnecting with backoff up to
+  30 s) and, on connect and on every permission or question event, lists
+  `/permission` and `/question`. A permission becomes the same card and push as
+  a plugin ask (`actionId` is OpenCode's `per_…` id), shown on the root of the
+  asking session, and `POST /v1/approvals/answer` or its push replies `once` or
+  `reject` over HTTP. It stays answerable while OpenCode lists it, with no 50 s
+  deadline: the Hook lists every live pane again on its five-second tick, and
+  each listing that still returns the ask moves its `expiresAt` (and its push
+  binding) an hour ahead. The card goes only when the ask is no longer listed
+  or the pane's process is gone. A question is
+  published as the status frame's `terminalPrompt` in Claude's AskUserQuestion
+  shape (`questions`, `questionIndex`, `choice`) with `capabilities.questions`;
+  `POST /v1/questions/answer` replies with the chosen labels plus any typed
+  answer. An ask answered in the TUI leaves the list, and its card and push
+  binding go with it. The pane's screen is not read for dialogs, and the
+  OpenCode plugin writes no request file for a process whose own command line
+  carries the `--port` named by `PHREN_OPENCODE_PORT` (OpenCode 1.18.31 does not
+  call the plugin's `permission.ask` hook at all; older releases did).
+- `POST /v1/keys`: Escape declines a pending question, or aborts a working
+  turn with `session.abort` (a failed abort falls back to the key); a digit
+  answers a pending single-question, single-choice set. Other keys go to the
+  pane.
+
 ## Routes
 
 All ordinary routes use the private HTTP pipe; transcript and status streams use
@@ -139,11 +193,11 @@ WebSockets on the same socket.
 | `GET /v1/web-servers` | Discover local web servers; discovery does not constrain the SSH web relay. |
 | `GET /v1/simulators`, `/v1/simulators/apps`, `/v1/simulators/screenshot` | Booted simulators, installed apps and a selected device screenshot on macOS. |
 | `POST /v1/simulators/action` | Validated simulator lifecycle, launch, URL, tap, home/lock and text actions. |
-| `POST /v1/approvals/answer` | Answer an exact, live watched approval request. For Claude Code's `AskUserQuestion` an approval may carry `updatedInput`: the original input plus `answers` keyed by question text (a label, labels for multiSelect, any other string for a typed "Other") and an optional `response`; the hook then allows the call with that input. Rewritten questions, answers on another tool, or answers with a denial are refused (400). An opencode permission ask the plugin writes to `.runtime/approvals` is watched the same way: the Hook maps it to its pane through the recorded session binding or Herdr's opencode session id, pushes it to registered phones, and this route writes the plugin's answer file. A fan-out worker's ask (its request names the job, whose manifest must confirm the worker session) is shown on the worker's parent conversation under an action id of the parent's shape (a UUID, or 32 hex characters for an opencode parent); answering it there or from its push writes the answer the fan-out launcher waits on. |
+| `POST /v1/approvals/answer` | Answer an exact, live watched approval request. For Claude Code's `AskUserQuestion` an approval may carry `updatedInput`: the original input plus `answers` keyed by question text (a label, labels for multiSelect, any other string for a typed "Other") and an optional `response`; the hook then allows the call with that input. Rewritten questions, answers on another tool, or answers with a denial are refused (400). An opencode permission ask the plugin writes to `.runtime/approvals` is watched the same way: the Hook maps it to its pane through the recorded session binding or Herdr's opencode session id, pushes it to registered phones, and this route writes the plugin's answer file. A fan-out worker's ask (its request names the job, whose manifest must confirm the worker session) is shown on the worker's parent conversation under an action id of the parent's shape (a UUID, or 32 hex characters for an opencode parent); answering it there or from its push writes the answer the fan-out launcher waits on. A served OpenCode pane's ask (see *OpenCode panes the Hook starts*) is answered over that pane's HTTP API with `once` or `reject`. |
 | `POST /v1/push/register` | Register this authenticated phone for suspended approval delivery: its APNs `token` (sent direct with the Hook's own `apns.json` key), or a `relay` registration `{url, relayId, secret, key}` from the phren push relay, whose alerts are encrypted with the phone's `key` (ChaCha20-Poly1305) so the relay can't read them. A relay `410` drops the phone until it registers again. Stored mode 0600 on the computer. |
 | `POST /v1/push/answer` | Consume a one-time push binding with Approve or Deny. The binding outlives the 55-second hold for ten minutes: once the hold ends it answers the dialog the agent draws in its terminal. The APNs payload never carries the provider action or conversation identity. |
 | `POST /v1/push/target` | Where a live push binding's request is (server, workspace, tab, pane, source), without spending it, so a tapped notification opens that session's details. |
-| `POST /v1/questions/answer` | Answer an exact pending Codex `request_user_input_async` call through `codex queue --thread <UUID> --message <quoted answer>`. Choices and typed answers are checked against the original acknowledged transcript call, the pane identity is rechecked, and a durable receipt prevents resending an uncertain result. Synchronous `request_user_input` remains unsupported on terminal-only connections. |
+| `POST /v1/questions/answer` | Answer an exact pending Codex `request_user_input_async` call through `codex queue --thread <UUID> --message <quoted answer>`. Choices and typed answers are checked against the original acknowledged transcript call, the pane identity is rechecked, and a durable receipt prevents resending an uncertain result. Synchronous `request_user_input` remains unsupported on terminal-only connections. For a served OpenCode pane it takes Claude's question body (`questions`, `answers` with `optionIndexes` and `text`) and replies to OpenCode's pending question with the chosen labels. |
 
 Approval pushes use the existing version 1 binding and category. Their alert title is
 `<Agent> · <project> on <computer>` with missing parts omitted; the body is a

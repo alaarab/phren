@@ -33,6 +33,8 @@ import { countTick } from "./metrics.js";
 import { briefId, briefIdInPrompt, DISPATCH_ID_ENV, recordBriefArrival } from "./launch-brief.js";
 import type { AppServerRequestId, PendingServerRequest } from "./codex-app-server.js";
 import { CODEX_SERVER_ENV, codexServerId, codexServers } from "./codex-servers.js";
+import { paneClient, paneKey, PaneServerWatcher, rootSession, servedPane, type PaneAsks } from "./opencode-panes.js";
+import type { OpenCodeQuestion, PaneClient, PaneServerEntry } from "./opencode-pane-server.js";
 
 export { permissionPrompt, terminalChoice, visibleTerminalChoice, type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
 export { ApprovalWatchLeases, PushBindingStore, recordedSession } from "./agent-hook-stores.js";
@@ -52,6 +54,11 @@ const DIALOG_READ_MS = intervalFromEnv("PHREN_DIALOG_THROTTLE_MS", 3_000);
 /** How long a pushed terminal dialog can be answered from its notification. */
 const DIALOG_PUSH_MS = 10 * 60_000;
 const FANOUT_SWEEP_MS = 5_000;
+/** How far ahead a served OpenCode pane's ask expires. OpenCode waits for as
+ * long as it takes, so this is only a horizon: every listing that still
+ * returns the ask (each ask event, reconnect and the Hook's 5 s tick) moves it
+ * forward, and the card goes only when the ask is gone or the pane is dead. */
+const SERVED_ASK_MS = 60 * 60_000;
 const FANOUT_ARCHIVE_MS = 60 * 60 * 1000;
 
 /** Where a held request's answer goes: the callback's HTTP response, or the
@@ -112,7 +119,11 @@ export function conductorCall(tool: string, input: unknown): Pending["conductor"
  * A fan-out worker's ask is shown on its parent conversation under an action
  * id of the parent's shape, and still answers the worker's own session; with
  * no parent pane in reach it is answered from its push alone. */
-interface OpencodeHeld { target?: Target; request: Json; requestLine: string; expiresAt: number; fanout?: { session: string; actionId: string } }
+interface OpencodeHeld { target?: Target; request: Json; requestLine: string; expiresAt: number; fanout?: { session: string; actionId: string };
+  /** The served pane (`paneKey`) whose OpenCode server listed this ask; answered over its HTTP API. */
+  served?: { key: string; server: string; pane: string } }
+/** A structured question a served OpenCode pane is asking. */
+interface ServedQuestion { key: string; server: string; pane: string; target?: Target; question: OpenCodeQuestion; questions: TerminalQuestion[]; at: number }
 
 export type DeliveryOutcome = "delivered" | "blocked" | "pending";
 interface Delivery { source: Provider; session: string; settle: (outcome: DeliveryOutcome) => void; timer: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
@@ -167,8 +178,12 @@ export class AgentHooks {
    * action, what an answer from the notification types. */
   private dialogPushes = new Map<string, { action: string; title: string }>();
   private dialogActions = new Map<string, { target: Target; choice: TerminalChoice; expiresAt: number }>();
-  /** opencode permission asks seen on disk, by request id. */
+  /** opencode permission asks seen on disk or listed by a served pane, by request id. */
   private opencode = new Map<string, OpencodeHeld>();
+  /** Questions served OpenCode panes are asking, by question id. */
+  private servedQuestions = new Map<string, ServedQuestion>();
+  /** One event subscription per served OpenCode pane; ticked with the Hook. */
+  readonly paneServers = new PaneServerWatcher({ asks: (entry, client, asks) => this.servedAsks(entry, client, asks), gone: key => this.servedGone(key) });
   private closed = false;
   private opencodeSweep?: Promise<void>;
   private opencodeLive = new Set<string>();
@@ -246,8 +261,158 @@ export class AgentHooks {
         .catch(() => {});
     }
     for (const [id, held] of this.opencode) {
+      if (held.served) continue;
       if (!live.has(id) || held.expiresAt <= Date.now()) { this.opencode.delete(id); this.pushBindings.dropAction(id); }
     }
+  }
+  /** The pane a served OpenCode ask belongs to, as the phone names it: the
+   * pane's place from its terminal, and the root of the asking session (a
+   * subagent's ask shows on the conversation the pane shows). */
+  private async servedTarget(entry: PaneServerEntry, client: PaneClient, session: unknown): Promise<Target | undefined> {
+    if (typeof session !== "string") return undefined;
+    const root = await rootSession(client, session);
+    const state = await snapshot(entry.server).catch(() => undefined);
+    const pane = objects(state?.panes).find(value => value.pane_id === entry.pane);
+    if (!pane) return undefined;
+    const parsed = targetSchema.safeParse({ server: entry.server, workspace: pane.workspace_id, tab: pane.tab_id, pane: entry.pane, source: "opencode", session: root });
+    return parsed.success ? parsed.data : undefined;
+  }
+  /** Everything a served pane is asking right now. New asks become the same
+   * cards (and pushes) as the plugin's file asks; asks no longer listed were
+   * answered in the TUI or went away, and their cards go with them. */
+  async servedAsks(entry: PaneServerEntry, client: PaneClient, asks: PaneAsks): Promise<void> {
+    if (this.closed) return;
+    const key = paneKey(entry), where = { key, server: entry.server, pane: entry.pane };
+    const expiresAt = Date.now() + SERVED_ASK_MS;
+    const permissions = new Set<string>();
+    for (const ask of asks.permissions) {
+      if (typeof ask.id !== "string" || !/^[A-Za-z0-9_]{1,200}$/.test(ask.id)) continue;
+      permissions.add(ask.id);
+      const known = this.opencode.get(ask.id);
+      if (known) {
+        if (known.served?.key === key) {
+          known.expiresAt = expiresAt; known.request.expiresAt = new Date(expiresAt).toISOString();
+          this.pushBindings.extendAction(ask.id, expiresAt);
+        }
+        continue;
+      }
+      const target = await this.servedTarget(entry, client, ask.sessionID).catch(() => undefined);
+      if (this.closed) return;
+      const type = typeof ask.permission === "string" && ask.permission ? ask.permission.slice(0, 200) : "action";
+      const patterns = (Array.isArray(ask.patterns) ? ask.patterns : []).filter((value): value is string => typeof value === "string").slice(0, 32);
+      const metadata = object((ask as unknown as Json).metadata);
+      const detail = [patterns.join(", "), metadata.command, metadata.description, metadata.filepath, metadata.path, metadata.url]
+        .find((value): value is string => typeof value === "string" && !!value);
+      const message = (detail ? `${type}: ${detail}` : `opencode asks to use ${type}.`).slice(0, 2000);
+      const request: Json = { id: ask.id, sessionID: ask.sessionID, type, title: `Allow ${type}?`, message, pattern: patterns,
+        ...(typeof metadata.command === "string" ? { metadata: { command: metadata.command } } : {}), expiresAt: new Date(expiresAt).toISOString() };
+      const summary = approvalSummary({ tool: type, input: request, message, cwd: entry.directory });
+      this.opencode.set(ask.id, { ...(target ? { target } : {}), request, requestLine: summary.request, expiresAt, served: where });
+      if (!this.push.available) continue;
+      const binding = randomUUID();
+      this.pushBindings.add(binding, { action: ask.id, expiresAt });
+      void this.push.notify({ binding, provider: "opencode", question: false, expiresAt: String(request.expiresAt),
+        project: path.basename(entry.directory), computer: this.computerName, ...summary })
+        .then(delivered => { if (!delivered) this.pushBindings.dropAction(ask.id); })
+        .catch(() => {});
+    }
+    for (const [id, held] of this.opencode) {
+      if (held.served?.key === key && !permissions.has(id)) { this.opencode.delete(id); this.pushBindings.dropAction(id); }
+    }
+    const questions = new Set<string>();
+    for (const ask of asks.questions) {
+      if (typeof ask.id !== "string" || !/^[A-Za-z0-9_]{1,200}$/.test(ask.id)) continue;
+      questions.add(ask.id);
+      if (this.servedQuestions.has(ask.id)) continue;
+      const raw = Array.isArray(ask.questions) ? ask.questions : [];
+      // OpenCode's `multiple` is the phone's multiSelect. A set the phone
+      // cannot show whole stays in the TUI.
+      const mapped = terminalQuestions({ questions: raw.map(value => ({ ...object(value), multiSelect: object(value).multiple === true })) });
+      if (!mapped || mapped.length !== raw.length) continue;
+      const target = await this.servedTarget(entry, client, ask.sessionID).catch(() => undefined);
+      if (this.closed) return;
+      this.servedQuestions.set(ask.id, { ...where, ...(target ? { target } : {}), question: ask, questions: mapped, at: Date.now() });
+      while (this.servedQuestions.size > 64) this.servedQuestions.delete(this.servedQuestions.keys().next().value!);
+    }
+    for (const [id, held] of this.servedQuestions) if (held.key === key && !questions.has(id)) this.servedQuestions.delete(id);
+  }
+  /** A served pane's process is gone: nothing it asked can be answered. */
+  servedGone(key: string): void {
+    for (const [id, held] of this.opencode) if (held.served?.key === key) { this.opencode.delete(id); this.pushBindings.dropAction(id); }
+    for (const [id, held] of this.servedQuestions) if (held.key === key) this.servedQuestions.delete(id);
+  }
+  /** The question a served OpenCode pane is asking, in the shape the phone
+   * answers Claude's AskUserQuestion with (`/v1/questions/answer`). */
+  servedQuestion(target: Target): Json | undefined {
+    if (target.source !== "opencode") return undefined;
+    const key = JSON.stringify(target);
+    const held = [...this.servedQuestions.values()].find(value => value.target && JSON.stringify(value.target) === key);
+    if (!held) return undefined;
+    const title = held.questions[0].question;
+    return { toolName: "AskUserQuestion", actionId: held.question.id, message: title,
+      request: approvalSummary({ tool: "Question", message: title, question: true }).request,
+      choice: questionChoice(held.questions, 0), questions: held.questions, questionIndex: 0, at: new Date(held.at).toISOString() };
+  }
+  private servedClient(server: string, pane: string): PaneClient {
+    const entry = servedPane(server, pane);
+    if (!entry) throw new BridgeError(409, "This approval is no longer pending.");
+    return paneClient(entry);
+  }
+  /** Answers a served pane's permission ask over its own API. */
+  private async answerServed(id: string, held: OpencodeHeld, decision: unknown): Promise<void> {
+    if (!["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
+    const served = held.served!;
+    const client = this.servedClient(served.server, served.pane);
+    try { await client.replyPermission(id, decision === "approve" ? "once" : "reject"); }
+    catch { throw new BridgeError(409, "This approval is no longer pending."); }
+    this.opencode.delete(id); this.pushBindings.dropAction(id);
+  }
+  /** The phone's answers to a served pane's question: the labels it chose
+   * (and a typed answer) per question, for exactly the questions it shows. */
+  async answerServedQuestion(target: Target, questions: DialogQuestion[], answers: DialogAnswer[]): Promise<void> {
+    const key = JSON.stringify(target);
+    const found = [...this.servedQuestions.entries()].find(([, value]) => value.target && JSON.stringify(value.target) === key);
+    if (!found) throw new BridgeError(409, "This question is no longer pending.");
+    const [id, held] = found;
+    const same = held.questions.length === questions.length && held.questions.every((question, index) =>
+      question.question === questions[index].question.trim()
+      && question.options.length === questions[index].options.length
+      && question.options.every((option, position) => option.label === questions[index].options[position].label.trim()));
+    if (!same) throw new BridgeError(409, "That question has changed. Open phren to answer it.");
+    await validateTarget(target);
+    const labels = answers.map((answer, index) => [...answer.options.map(option => held.questions[index].options[option].label), ...(answer.text ? [answer.text] : [])]);
+    try { await this.servedClient(held.server, held.pane).replyQuestion(id, labels); }
+    catch { throw new BridgeError(409, "This question is no longer pending."); }
+    this.servedQuestions.delete(id);
+  }
+  /** Keys the phone sends to a served OpenCode pane that its API answers
+   * better than the terminal: Esc declines a pending question or stops a
+   * working turn (`session.abort`), and a digit answers a pending
+   * single-question, single-choice set. False leaves the keys to the pane. */
+  async servedKeys(target: Target, keys: readonly string[], status: string): Promise<boolean> {
+    if (target.source !== "opencode") return false;
+    const entry = servedPane(target.server, target.pane);
+    if (!entry) return false;
+    const client = paneClient(entry), key = JSON.stringify(target);
+    const question = [...this.servedQuestions.entries()].find(([, value]) => value.target && JSON.stringify(value.target) === key);
+    const escape = keys.length > 0 && keys.every(value => value === "Escape");
+    if (question && escape) {
+      await client.rejectQuestion(question[0]).catch(() => { throw new BridgeError(409, "This question is no longer pending."); });
+      this.servedQuestions.delete(question[0]);
+      return true;
+    }
+    if (question && keys.length === 1 && /^[1-9]$/.test(keys[0]) && question[1].questions.length === 1 && !question[1].questions[0].multiSelect) {
+      const option = question[1].questions[0].options[Number(keys[0]) - 1];
+      if (!option) throw new BridgeError(400, "Choose an available answer.");
+      await client.replyQuestion(question[0], [[option.label]]).catch(() => { throw new BridgeError(409, "This question is no longer pending."); });
+      this.servedQuestions.delete(question[0]);
+      return true;
+    }
+    if (escape && status === "working") {
+      // A failed abort leaves Esc to the terminal, as before.
+      return client.abort(target.session).then(done => done === true, () => false);
+    }
+    return false;
   }
   /** A session's exact pane. A recorded binding carries the full target; when
    * there is none, Herdr's explicit session identity names the pane. */
@@ -413,6 +578,8 @@ export class AgentHooks {
    * read notes whether the terminal is reading a password. */
   async syncTerminalDialog(target: Target, active: boolean): Promise<void> {
     const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
+    // A served OpenCode pane lists its asks over its API; its screen is not read.
+    if (target.source === "opencode" && servedPane(target.server, target.pane)) { if (entry) this.terminalPrompts.delete(key); return; }
     const held = [...this.pending.values()].find(p => JSON.stringify(p.target) === key);
     // A held Codex permission can already have real choices in its pane.
     // Refresh those before publishing the approval, even while it is held.
@@ -703,6 +870,12 @@ export class AgentHooks {
         pending.add(String(pane.pane_id));
       }
     }
+    // A served OpenCode pane's permission or question, listed by its server.
+    const served = [...[...this.opencode.values()].filter(held => held.served).map(held => held.target), ...[...this.servedQuestions.values()].map(held => held.target)];
+    for (const at of served) {
+      if (!at || at.server !== server) continue;
+      if (panes.some(pane => pane.pane_id === at.pane && pane.workspace_id === at.workspace && pane.tab_id === at.tab && pane.agent === "opencode")) pending.add(at.pane);
+    }
     for (const held of this.opencode.values()) {
       const parent = held.target;
       if (!held.fanout || !parent || parent.server !== server) continue;
@@ -725,6 +898,14 @@ export class AgentHooks {
       if (updatedInput !== undefined) throw new BridgeError(400, "Answers go with an approval.");
       await validateTarget(target);
       await this.answerFanout(worker[0], worker[1], decision);
+      return;
+    }
+    const served = target.source === "opencode" ? this.opencode.get(id) : undefined;
+    if (served?.served) {
+      if (updatedInput !== undefined) throw new BridgeError(400, "Answers go with an approval.");
+      if (!served.target || JSON.stringify(served.target) !== JSON.stringify(target)) throw new BridgeError(409, "This approval is no longer pending.");
+      await validateTarget(target);
+      await this.answerServed(id, served, decision);
       return;
     }
     if (target.source === "opencode") {
@@ -808,6 +989,8 @@ export class AgentHooks {
     // The binding is the single-use proof for a worker's ask, whose parent
     // may not be in any pane the Hook can see.
     if (held?.fanout) { await this.answerFanout(linked.action, held, decision); return; }
+    // A served pane's ask is answered over its own API, target or not.
+    if (held?.served) { await this.answerServed(linked.action, held, decision); return; }
     if (held?.target) { await this.answer(held.target, linked.action, decision); return; }
     throw new BridgeError(409, "This approval is no longer pending.");
   }
@@ -834,6 +1017,8 @@ export class AgentHooks {
       if (!target) continue;
       const key = JSON.stringify(target);
       waiting.add(key);
+      // A served OpenCode pane's asks were pushed as its server listed them.
+      if (target.source === "opencode" && servedPane(target.server, target.pane)) continue;
       // A request its own hook already holds was pushed on arrival.
       if ([...this.pending.values()].some(held => JSON.stringify(held.target) === key)) continue;
       // Read the dialog even with no push device: the overview marks the
@@ -1113,6 +1298,7 @@ export class AgentHooks {
     this.fanoutArchiveTimer.unref?.();
     this.scheduleOpencodeSweep();
     void this.sweepBlockedFanouts();
+    this.paneServers.tick();
   }
   close() {
     this.closed = true;
@@ -1121,6 +1307,7 @@ export class AgentHooks {
     this.pending.clear(); this.server?.close(); this.server?.closeAllConnections();
     this.pushBindings.clear();
     this.opencode.clear();
+    this.paneServers.close(); this.servedQuestions.clear();
     if (this.opencodeDebounce) clearTimeout(this.opencodeDebounce);
     if (this.opencodePoll) clearInterval(this.opencodePoll);
     this.opencodeWatcher?.close(); this.opencodeWatcher = undefined;

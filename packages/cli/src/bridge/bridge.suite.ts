@@ -682,7 +682,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
       HOME: root, XDG_CONFIG_HOME: path.join(root, ".config"), PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex"),
       CLAUDE_CONFIG_DIR: path.join(root, "claude-config"), NODE_ENV: "test", PHREN_TEST_MODEL_CATALOG: path.join(root, "model-catalog.json"),
       ELEVENLABS_API_KEY: "", NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: `http://127.0.0.1:${(egress!.address() as { port: number }).port}`, NO_PROXY: "localhost,127.0.0.1,::1",
-      PHREN_APPROVAL_HOLD_MS: "2500", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SHELL_READY_MS: "1500", PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
+      PHREN_APPROVAL_HOLD_MS: "2500", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SHELL_READY_MS: "1500", PHREN_OPENCODE_PID_MS: "0", PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
       stdio: ["ignore", "ignore", "pipe"] });
     hook.stderr!.on("data", bytes => log += bytes);
     let ready = false;
@@ -1056,7 +1056,8 @@ schedules:
     it("passes a model to the harness on launch", async () => {
       const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "model", kind: "opencode", model: "openrouter/deepseek/deepseek-v4.1-flash" });
       expect(launched.status, JSON.stringify(launched.data)).toBe(200);
-      expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ kind: "opencode", args: ["--model", "openrouter/deepseek/deepseek-v4.1-flash"] });
+      // OpenCode also gets the port its own server listens on (served panes).
+      expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ kind: "opencode", args: ["--model", "openrouter/deepseek/deepseek-v4.1-flash", "--port", expect.stringMatching(/^\d+$/)] });
     });
 
     it("omits the model argument for a harness without one", async () => {

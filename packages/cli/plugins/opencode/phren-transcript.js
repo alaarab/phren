@@ -1,4 +1,5 @@
 // Installed by Phren Hook and replaced on every update. Copy it under another name to customize.
+import { execFileSync } from "node:child_process";
 import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -114,6 +115,26 @@ function removeFile(file) {
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Started by Phren Hook with a port of its own (`opencode --port N`, with
+ * PHREN_OPENCODE_PORT=N and a server password in its environment): the Hook
+ * lists and answers this process's permission asks over its HTTP API, so no
+ * request file is written for them. The port must be on this process's own
+ * command line, so an OpenCode started by hand in the same shell keeps the
+ * file path. Plugins run in a worker whose `process.argv` is the worker's,
+ * so the command line comes from `ps`, once. */
+let served;
+function servedByHook() {
+  if (served !== undefined) return served;
+  const port = text(process.env.PHREN_OPENCODE_PORT);
+  served = false;
+  if (!/^\d{1,5}$/.test(port) || !text(process.env.OPENCODE_SERVER_PASSWORD)) return served;
+  try {
+    const command = execFileSync("ps", ["-ww", "-o", "command=", "-p", String(process.pid)], { encoding: "utf8", timeout: 2_000 });
+    served = new RegExp(`(?:^|\\s)--port(?:\\s+|=)${port}(?:\\s|$)`).test(command.trim());
+  } catch {}
+  return served;
 }
 
 function setStatus(output, status) {
@@ -357,7 +378,7 @@ export const PhrenTranscriptPlugin = async () => {
       if (askId) { asking.add(askId); recordStatus("blocked", text(input?.sessionID)); }
       try {
         const sessionID = text(input?.sessionID), id = text(input?.id);
-        if (!OPENCODE_SESSION.test(sessionID) || !id) { setStatus(output, "ask"); return; }
+        if (!OPENCODE_SESSION.test(sessionID) || !id || servedByHook()) { setStatus(output, "ask"); return; }
         // A second request for this session belongs in the terminal until
         // the existing phone request has finished.
         if (pendingApprovals.has(sessionID)) { setStatus(output, "ask"); return; }

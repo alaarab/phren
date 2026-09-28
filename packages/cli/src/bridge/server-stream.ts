@@ -154,7 +154,10 @@ export function transcriptStreams(ctx: StreamContext) {
               await agentHooks.syncTerminalDialog(target, waiting && !pendingQuestions?.length);
               pendingApproval = agentHooks.approval(target);
             }
-            const hookPrompt = waiting ? agentHooks.terminalPrompt(target) : undefined;
+            // A served OpenCode pane's question comes from its own API, whatever
+            // status its terminal reports.
+            const servedQuestion = agentHooks.servedQuestion(target);
+            const hookPrompt = servedQuestion ?? (waiting ? agentHooks.terminalPrompt(target) : undefined);
             // Codex 0.155's queued follow-up question never becomes a held
             // PermissionRequest: it lives as a thread item the terminal shows
             // under "Queued follow-up inputs". With nothing else to ask, read
@@ -169,7 +172,7 @@ export function transcriptStreams(ctx: StreamContext) {
                 : undefined);
             const historyHealth = target.source === "codex" ? await threadHealth(target.session, pane.agent_status) : { stalled: false };
             send(client, { agentStatus: { source: target.source, session: target.session,
-              status: pendingApproval ? "waiting" : pane.agent_status, pendingApproval, pendingQuestions, terminalPrompt,
+              status: pendingApproval || servedQuestion ? "waiting" : pane.agent_status, pendingApproval, pendingQuestions, terminalPrompt,
               ...(waiting && agentHooks.passwordPrompt(target) ? { passwordPrompt: true } : {}),
               compacting: agentHooks.compacting(target),
               ...(historyHealth.stalled ? { historyStalled: true, historyStalledSince: historyHealth.since } : {}),
@@ -177,7 +180,7 @@ export function transcriptStreams(ctx: StreamContext) {
               capabilities: { ...activeCapabilities, asyncQuestions: target.source === "codex" && codexQuestions.available,
                 // Claude's AskUserQuestion is answered in its terminal dialog
                 // through /v1/questions/answer, whether or not a hold caught it.
-                ...(target.source === "claude" ? { questions: true } : {}) }, branch } });
+                ...(target.source === "claude" || servedQuestion ? { questions: true } : {}) }, branch } });
           }
           if (sideAnswers && sideQuestions) {
             for (const { revision, ...side } of sideQuestions.list(target)) {
