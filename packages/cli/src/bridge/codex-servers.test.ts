@@ -96,6 +96,9 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   servers.reset();
+  // Registry writes are not awaited by their callers; one still running when
+  // the root is removed fails the rm with ENOTEMPTY.
+  await servers.saved();
   for (const fake of fakes) await fake.close();
   if (previousHome === undefined) delete process.env.PHREN_BRIDGE_HOME; else process.env.PHREN_BRIDGE_HOME = previousHome;
   await rm(root, { recursive: true, force: true });
