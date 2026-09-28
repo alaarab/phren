@@ -176,12 +176,22 @@ nothing to that checkout.
   on the computer that runs a dispatched Claude or Codex worker (or a
   scheduled run), `<bridge>/briefs/<id>/` holds its brief (`brief.md`, 0600)
   and what the worker's hooks reported (`arrival.json`), kept seven days and
-  at most 256;
+  at most 256. A brief is written in `<bridge>/briefs-staging/` first and
+  renamed into `briefs/`, so that folder is empty between launches;
   `<bridge>/codex-servers/<id>/` (0700) holds one Codex pane's Phren-owned
   app-server: its socket (`app.sock`), its registry record (`server.json`: the
   pane, process id, thread id, folder and last turn state, no prompt text) and
   its stderr (`server.log`). The Hook removes the folder when the server exits
   or stops it when its pane closes;
+  `<bridge>/opencode-panes/<server>%2F<pane>.json` (0600, in a 0700 folder)
+  records each OpenCode pane the Hook launched with its own server: port,
+  server password, process id, folder and launch settings. An entry is removed
+  once its process is gone. The pane's shell also keeps
+  `OPENCODE_SERVER_PASSWORD` and `PHREN_OPENCODE_PORT` in its environment.
+  Under tmux the password is also on the `tmux respawn-pane -e` command line
+  for the moment that command runs. This is accepted: the reader would have to
+  be the same user, the server listens only on 127.0.0.1, and the password
+  lives only as long as that OpenCode process;
   `<bridge>/conductor.yaml` holds standing grants and `<bridge>/hooks.yaml`
   holds the verified peer directory.
 

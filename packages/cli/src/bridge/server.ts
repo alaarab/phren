@@ -175,6 +175,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   let recording = false;
   const activityTimer = setInterval(() => {
     countTick("activity");
+    // Served OpenCode panes: follow new ones, drop those whose process is gone.
+    agentHooks.paneServers.tick();
     if (recording) return;
     recording = true;
     void (async () => {

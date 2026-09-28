@@ -243,6 +243,17 @@ to its pane through the recorded session binding or Herdr's opencode session id,
 and pushes it to registered phones with the ask's title and message. The same
 `POST /v1/approvals/answer` route writes the plugin's answer file.
 
+An OpenCode the Hook launches serves its own HTTP API: it runs as
+`opencode --port <free port>` with a random `OPENCODE_SERVER_PASSWORD`, and the
+Hook records the pane under `<bridge>/opencode-panes/`. For that pane the Hook
+sends prompts and dispatch briefs over the API (confirmed by the user turn
+appearing in the session), follows its event stream for permission asks and
+questions, answers them over the API with no 55-second hold (an ask stays on
+the phone for as long as OpenCode waits, and leaves it when the TUI answers
+first), and stops a working turn from the phone's Esc with `session.abort`.
+The pane stays the owner's live view of the same conversation. An OpenCode
+started by hand keeps the typed path and the plugin's approval files.
+
 On iOS, a request received in an open chat or discovered from the foreground
 session overview can create a Live Activity with Deny and Approve on the Lock
 Screen and Dynamic Island. Tapping either authenticates
