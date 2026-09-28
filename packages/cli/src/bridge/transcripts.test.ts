@@ -318,6 +318,10 @@ describe("Codex async question answers", () => {
     const raw = { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text }] } };
     expect(visibleEvent(raw, "codex")).toEqual({ type: "response_item", payload: { type: "message", role: "user",
       content: [{ type: "input_text", text: "> May I release the lock?\n\nYes, clear the day-old lock" }] } });
+    const withImage = { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text },
+      { type: "input_text", text: "Attached files on this computer:\n/u/shot.png" }, { type: "input_image", image_url: "data:image/png;base64,AAAA" }] } };
+    expect((visibleEvent(withImage, "codex") as any).payload.content).toEqual([{ type: "input_text", text: "> May I release the lock?\n\nYes, clear the day-old lock" },
+      { type: "input_text", text: "Attached files on this computer:\n/u/shot.png" }, { type: "input_image", image_url: "data:image/png;base64,AAAA" }]);
     const plain = { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Keep going" }] } };
     expect(visibleEvent(plain, "codex")).toBe(plain);
   });

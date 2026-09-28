@@ -12,6 +12,7 @@ import { withTranscriptIndex } from "./transcript-index.js";
 import type { AppServerRequestId, PendingServerRequest } from "./codex-app-server.js";
 import type { CodexServerEntry } from "./codex-servers.js";
 import { formatQuestionReply, parseQuestionReply } from "./codex-question-reply.js";
+import { IMAGE_NAME, sessionUpload } from "./uploads.js";
 
 const exec = promisify(execFile);
 const text = z.string().trim().min(1).max(4000).refine(t => !/[\x00-\x08\x0b-\x1f\x7f]/.test(t));
@@ -120,14 +121,23 @@ export async function pendingAsyncQuestion(file: string, id: string): Promise<Qu
 /** The Hook's own Codex app-servers (codex-servers.ts), as far as questions go. */
 export interface ServedCodex {
   forTarget(target: Target): CodexServerEntry | undefined;
-  steer(entry: CodexServerEntry, text: string): Promise<{ turnId: string }>;
+  steer(entry: CodexServerEntry, text: string, extra?: Json[]): Promise<{ turnId: string }>;
   questions(entry: CodexServerEntry): PendingServerRequest[];
   answerQuestion(entry: CodexServerEntry, requestId: AppServerRequestId, result: Json): boolean;
 }
 
 /** A question parked on the app-server as the phone shows it, and the
  * server's answer for the phone's choices. */
-interface ServerQuestion { questions: Question[]; result(values: string[]): Json }
+interface ServerQuestion { questions: Question[]; result(values: string[]): Json; attachments: boolean }
+/** Files the phone attached to an answer, named the way the phone names them
+ * under a chat message it sends with attachments. */
+export const attachedFiles = (paths: string[]) => paths.length ? `Attached files on this computer:\n${paths.join("\n")}` : "";
+const withAttachments = (answer: string, paths: string[]) => paths.length ? `${answer}\n\n${attachedFiles(paths)}` : answer;
+/** The phone's attachments for an answer: at most eight of this conversation's uploads. */
+export async function answerAttachments(session: string, data: Json): Promise<string[]> {
+  const requested = z.array(z.string().max(4096)).max(8).optional().parse(data.attachments) ?? [];
+  return Promise.all(requested.map(file => sessionUpload(session, file)));
+}
 const requestKey = (requestId: AppServerRequestId) => `request:${JSON.stringify(requestId)}`;
 const choose = (label: string, options: string[], typed: boolean) => {
   if (!typed && !options.includes(label)) throw new BridgeError(400, "Choose one of the offered answers.");
@@ -146,7 +156,7 @@ export function serverQuestion(request: PendingServerRequest): ServerQuestion | 
       options: objects(q.options).map(option => option.label).filter((label): label is string => typeof label === "string") })));
     if (!parsed.success) return undefined;
     const questions = parsed.data.map(q => ({ ...q, options: q.options?.length ? q.options : undefined }));
-    return { questions, result: values => ({ answers: Object.fromEntries(asked.map((q, index) => [String(q.id),
+    return { questions, attachments: true, result: values => ({ answers: Object.fromEntries(asked.map((q, index) => [String(q.id),
       { answers: [choose(values[index], questions[index].options ?? [], q.isOther === true || !questions[index].options)] }])) }) };
   }
   if (request.method !== "mcpServer/elicitation/request" || !["form", "openai/form", "openaiForm"].includes(String(params.mode))) return undefined;
@@ -181,7 +191,7 @@ export function serverQuestion(request: PendingServerRequest): ServerQuestion | 
     : index === 0 ? `${message}\n\n${field.title}` : field.title);
   const parsed = questionSet.safeParse(shaped.map((field, index) => ({ title: titles[index], ...(field.options ? { options: field.options } : {}) })));
   if (!parsed.success) return undefined;
-  return { questions: parsed.data, result: values => ({ action: "accept", content: Object.fromEntries(shaped.map((field, index) => [field.key, field.value(values[index])])) }) };
+  return { questions: parsed.data, attachments: false, result: values => ({ action: "accept", content: Object.fromEntries(shaped.map((field, index) => [field.key, field.value(values[index])])) }) };
 }
 
 export class CodexQuestions {
@@ -244,16 +254,28 @@ export class CodexQuestions {
       const request = this.served!.questions(entry).find(candidate => requestKey(candidate.requestId) === id);
       const shown = request && serverQuestion(request);
       if (!request || !shown) throw new BridgeError(409, "This question is no longer pending. Refresh the conversation.");
+      const files = await answerAttachments(target.session, data);
+      if (files.length && !shown.attachments) throw new BridgeError(400, "This question takes no attachments.");
       const result = shown.result(answerValues(shown.questions, data.answers));
+      // Files ride on the last answer, the way a chat message carries them.
+      const answers = object(result.answers), last = Object.keys(answers).at(-1);
+      if (files.length && last) {
+        const values = object(answers[last]).answers as string[];
+        answers[last] = { answers: [...values.slice(0, -1), withAttachments(values.at(-1) ?? "", files)] };
+      }
       if (!this.served!.answerQuestion(entry, request.requestId, result)) throw new BridgeError(409, "This question is no longer pending. Refresh the conversation.");
       return;
     }
     if (target.source !== "codex" || (!entry && !await this.supported())) throw new BridgeError(409, "This connection needs the question answered in the terminal.");
     z.string().uuid().parse(target.session);
     const questions = await pendingAsyncQuestion(await transcriptPath("codex", target.session), id);
+    const files = await answerAttachments(target.session, data);
     // A pane on the Hook's app-server gets the answer in its running turn, as
     // Codex's TUI sends it; `codex queue` would hold it until the turn ends.
-    const reply = entry ? asyncQuestionReply(id, questions, data.answers) : questionReply(questions, data.answers);
+    // Attached pictures go in as images, and every file is named below.
+    const reply = entry ? asyncQuestionReply(id, questions, data.answers) : withAttachments(questionReply(questions, data.answers), files);
+    const extra: Json[] = entry && files.length ? [{ type: "text", text: attachedFiles(files), text_elements: [] },
+      ...files.filter(file => IMAGE_NAME.test(file)).map(file => ({ type: "localImage", path: file }))] : [];
     const pane = await validateTarget(target);
     if (await paneIdentity(target.server, pane, true) !== target.session) throw new BridgeError(409, "This pane's conversation changed. Reopen the chat.");
     // Record before invoking the provider: a timeout can mean it accepted the
@@ -269,7 +291,7 @@ export class CodexQuestions {
     await receipt.close();
     try {
       // Explicit UUID, no session-name lookup, no shell, no terminal keystrokes.
-      if (entry) await this.served!.steer(entry, reply);
+      if (entry) await this.served!.steer(entry, reply, extra);
       else await exec(this.executable, ["queue", "--thread", target.session, "--message", reply], { timeout: 8000, maxBuffer: 65_536 });
       await writeFile(receiptPath, "submitted", { mode: 0o600 });
     } catch { throw new BridgeError(409, "Codex did not confirm the answer. Check the conversation; Phren has not retried it."); }

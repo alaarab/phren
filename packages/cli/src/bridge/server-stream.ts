@@ -178,6 +178,8 @@ export function transcriptStreams(ctx: StreamContext) {
               ...(historyHealth.stalled ? { historyStalled: true, historyStalledSince: historyHealth.since } : {}),
               modules: info.modules, store: info.store, profile: info.profile, generation: info.generation,
               capabilities: { ...activeCapabilities, asyncQuestions: codexQuestions.availableFor(target),
+                // Answers to Codex questions may carry the phone's uploads.
+                ...(codexQuestions.availableFor(target) ? { questionAttachments: true } : {}),
                 // Claude's AskUserQuestion is answered in its terminal dialog
                 // through /v1/questions/answer, whether or not a hold caught it.
                 ...(target.source === "claude" || servedQuestion ? { questions: true } : {}) }, branch } });

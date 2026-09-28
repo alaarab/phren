@@ -20,12 +20,14 @@ export function formatQuestionReply(id: string, entries: { question: string; ans
     questionItemId: JSON.stringify(["request_user_input_async", id, index]) })))}\n${CLOSE}`;
 }
 
-/** The entries of a question reply, or undefined for any other message. */
+/** The entries of a question reply, or undefined for any other message.
+ * Anything after the closing tag (the files attached to the answer, which
+ * Codex joins into the same message) is not part of the entries. */
 export function parseQuestionReply(text: string): QuestionReplyEntry[] | undefined {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith(OPEN) || !trimmed.endsWith(CLOSE)) return undefined;
+  const trimmed = text.trim(), end = trimmed.indexOf(CLOSE);
+  if (!trimmed.startsWith(OPEN) || end < 0) return undefined;
   let rows: unknown;
-  try { rows = JSON.parse(trimmed.slice(OPEN.length, -CLOSE.length)); } catch { return undefined; }
+  try { rows = JSON.parse(trimmed.slice(OPEN.length, end)); } catch { return undefined; }
   if (!Array.isArray(rows)) return undefined;
   const entries = objects(rows).flatMap(row => {
     if (typeof row.answer !== "string" || typeof row.question !== "string") return [];
@@ -39,7 +41,12 @@ export function parseQuestionReply(text: string): QuestionReplyEntry[] | undefin
   return entries.length ? entries : undefined;
 }
 
-/** A question reply as chat text: each question quoted, then its answer. */
+/** A question reply as chat text: each question quoted, then its answer,
+ * then whatever followed the reply in the same text. */
 export function readableQuestionReply(text: string): string | undefined {
-  return parseQuestionReply(text)?.map(entry => entry.question.split("\n").map(line => `> ${line}`).join("\n") + "\n\n" + entry.answer).join("\n\n");
+  const entries = parseQuestionReply(text);
+  if (!entries) return undefined;
+  const trimmed = text.trim(), rest = trimmed.slice(trimmed.indexOf(CLOSE) + CLOSE.length).trim();
+  const answers = entries.map(entry => entry.question.split("\n").map(line => `> ${line}`).join("\n") + "\n\n" + entry.answer).join("\n\n");
+  return rest ? `${answers}\n\n${rest}` : answers;
 }
