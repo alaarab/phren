@@ -233,7 +233,8 @@ The phone waits for this response before drawing its picker. See
 The iPhone explicitly renews a 25-second approval watch with
 `GET /v1/workspaces?watchApprovals=1`. Ordinary overview reads do not hold prompts.
 Pending tabs expose `approvalPending`; the exact conversation's status stream
-provides the action ID, input and expiry. Requests wait at most 55 seconds, then
+provides the action ID, input and expiry. Requests wait at most 55 seconds (a
+Codex pane on a Phren-owned app-server has no limit, see below), then
 return to the agent's terminal prompt without approving anything. Answers are
 single use and validated against the exact provider conversation. An opencode
 permission ask is not a lifecycle callback: the plugin writes it under the
@@ -254,6 +255,57 @@ background refreshes. These need no APNs key or relay, but cannot promise
 delivery while the phone is suspended. Approval IDs are deduplicated on the
 device, and tapping rechecks the live request. Direct APNs remains an optional,
 separate path for owners with their own credentials.
+
+### Codex panes on a Phren-owned app-server
+
+A Codex worker the Hook launches (a dispatch, a scheduled run, or a phone
+launch with role `agent`) runs on its own `codex app-server`, one per pane,
+instead of a Codex the Hook types into. Conductors keep the typed path.
+
+- **Launch.** The Hook creates the pane, then starts
+  `codex app-server --listen unix://<bridge>/codex-servers/<id>/app.sock`
+  (folder 0700) detached, with the pane's own terminal variables (so Codex's
+  hooks inside the server report that pane) and `PHREN_CODEX_SERVER=<id>`.
+  It starts the thread itself (`thread/start` with the folder, the model and
+  `config.model_reasoning_effort`), and the pane runs
+  `codex resume <thread> --remote unix://<socket>`: the TUI is a second client
+  of the Hook's thread. A brief is sent as the thread's first turn before the
+  pane starts, and its acknowledged turn id is the dispatch receipt.
+- **Sending.** `POST /v1/prompt` to such a pane starts a turn on its thread
+  (`turn/start`) and answers `{ "ok": true, "delivered": true, "turnId": … }`
+  as soon as Codex acknowledges it. Nothing is typed. A slash command is the
+  TUI's own and is still typed; a server that cannot be reached falls back to
+  typing. A message sent while a turn runs steers that turn (Codex takes it at
+  its next step, like a mid-turn Claude message) rather than waiting for it to
+  end.
+- **`/new` and `/resume`.** The Hook follows the pane's TUI to the thread it
+  switched to, so the phone's messages, approvals and Escape go where the pane
+  is.
+- **Approvals.** Command, file-change and permission requests arrive as server
+  requests and become the same approval card and push as a held
+  PermissionRequest, answered over RPC (`accept` or `decline`, a permission
+  grant or none) with no 55-second hold: the card stays until someone answers.
+  Answered in the pane's TUI first, the card goes away. The PermissionRequest
+  callback for these threads returns at once, so there is one card, not two.
+  Questions (`request_user_input`) and MCP elicitations stay in the pane.
+- **Escape.** `/v1/keys` Escape on such a pane with a running turn declines the
+  thread's parked requests, then interrupts the turn (`turn/interrupt`).
+- **Restart.** Servers outlive the Hook. A restarted Hook reads
+  `<bridge>/codex-servers/*/server.json`, reconnects to each live server and
+  rejoins its thread; Codex replays requests still waiting, so their cards come
+  back. Each 5-second tick forgets a server whose process ended and stops one
+  whose pane closed, or whose pane or terminal server has shown no Codex for
+  two minutes.
+- **Returns.** Each registered thread's running turn and its last finished turn
+  (id and status: `completed`, `interrupted`, `failed`) are kept in its
+  `server.json` for the returns loop.
+
+`PHREN_CODEX_APP_SERVER=off` in the Hook's environment keeps every Codex launch
+on the typed path. A server that fails to start falls back to it for that
+launch.
+
+Known gaps: questions and MCP elicitations are answered in the pane only; all
+servers share one `CODEX_HOME` (one sign-in, one refresh token).
 
 ### Approval push with your own APNs key
 

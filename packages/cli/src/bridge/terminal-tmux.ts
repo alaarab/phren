@@ -414,6 +414,13 @@ export const tmuxTerminal: TerminalProvider = {
       await deps.sleep(250);
     }
   },
+  // tmuxPaneFromEnv reads the socket from TMUX's first field and the pane
+  // from TMUX_PANE; the server pid and session index are not used.
+  paneEnv(server, { pane }) {
+    const socket = socketOf(server), folder = tmuxSocketFolders()[0];
+    const file = socketPaths.get(socket) ?? (folder ? path.join(folder, socket) : undefined);
+    return file ? { TMUX: `${file},0,0`, TMUX_PANE: toTmuxId(pane, "p") } : undefined;
+  },
   async focusPane(server, pane) {
     const target = toTmuxId(pane, "p");
     await tmux(server, ["select-window", "-t", target]);

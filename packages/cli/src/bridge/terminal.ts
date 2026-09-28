@@ -106,6 +106,10 @@ export interface TerminalProvider {
   /** Opens a pane; the caller finds it in the next `listPanes`. */
   create(server: string, placement: PanePlacement): Promise<void>;
   startAgent(server: string, pane: string, agent: AgentStart): Promise<void>;
+  /** The variables a process started for `pane` outside it needs to be
+   * recognized as running there (a Codex app-server whose hooks report the
+   * pane). Absent where the multiplexer has none. */
+  paneEnv?(server: string, place: { workspace: string; tab: string; pane: string }): Record<string, string> | undefined;
   focusPane(server: string, pane: string): Promise<void>;
   /** Focuses, renames or closes a whole tab (when `tab` is set) or workspace. */
   groupAction(server: string, operation: "focus" | "rename" | "close", group: { workspace?: string; tab?: string }, label?: string): Promise<void>;
@@ -139,6 +143,7 @@ export const routedTerminal: TerminalProvider = {
   prompt: (server, pane, text, signal) => route(server).prompt(server, pane, text, signal),
   create: (server, placement) => route(server).create(server, placement),
   startAgent: (server, pane, agent) => route(server).startAgent(server, pane, agent),
+  paneEnv: (server, place) => route(server).paneEnv?.(server, place),
   focusPane: (server, pane) => route(server).focusPane(server, pane),
   groupAction: (server, operation, group, label) => route(server).groupAction(server, operation, group, label),
 };

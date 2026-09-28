@@ -177,6 +177,11 @@ nothing to that checkout.
   scheduled run), `<bridge>/briefs/<id>/` holds its brief (`brief.md`, 0600)
   and what the worker's hooks reported (`arrival.json`), kept seven days and
   at most 256;
+  `<bridge>/codex-servers/<id>/` (0700) holds one Codex pane's Phren-owned
+  app-server: its socket (`app.sock`), its registry record (`server.json`: the
+  pane, process id, thread id, folder and last turn state, no prompt text) and
+  its stderr (`server.log`). The Hook removes the folder when the server exits
+  or stops it when its pane closes;
   `<bridge>/conductor.yaml` holds standing grants and `<bridge>/hooks.yaml`
   holds the verified peer directory.
 

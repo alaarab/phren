@@ -31,7 +31,8 @@ export default defineConfig({
     testTimeout: 15000,
     // A developer or CI machine with tmux installed must not turn every
     // "no Herdr running" test into a tmux one; tmux tests opt back in.
-    env: { PHREN_TMUX: "off" },
+    // Codex launches stay on the typed path unless a test opts in.
+    env: { PHREN_TMUX: "off", PHREN_CODEX_APP_SERVER: "off" },
     include: [
       "packages/cli/src/**/*.test.ts",
       "packages/code/src/**/*.test.ts",

@@ -2,7 +2,7 @@
 // socket API. It calls herdr.ts's exported `rpc`, the seam the bridge tests
 // fake, so a test that records Herdr requests sees exactly what it did before
 // the provider existed.
-import { rpc, snapshot } from "./herdr.js";
+import { herdrSocketPath, rpc, snapshot } from "./herdr.js";
 import { object, objects, type Json } from "./protocol.js";
 import type { PaneProcesses, TerminalPane, TerminalProvider } from "./terminal.js";
 
@@ -52,6 +52,10 @@ export const herdrTerminal: TerminalProvider = {
   async startAgent(server, pane, { name, kind, args, timeoutMs }) {
     // Herdr waits up to `timeout_ms` for the agent to become ready; the socket waits a little longer.
     await rpc(server, "agent.start", { name, kind, pane_id: pane, timeout_ms: timeoutMs, ...(args.length ? { args } : {}) }, undefined, timeoutMs + 5_000);
+  },
+  // What Herdr sets in its own panes (herdrPaneFromEnv reads them back).
+  paneEnv(server, { workspace, tab, pane }) {
+    return { HERDR_ENV: "1", HERDR_SOCKET_PATH: herdrSocketPath(server), HERDR_WORKSPACE_ID: workspace, HERDR_TAB_ID: tab, HERDR_PANE_ID: pane };
   },
   async focusPane(server, pane) { await rpc(server, "pane.focus", { pane_id: pane }); },
   async groupAction(server, operation, { workspace, tab }, label) {
