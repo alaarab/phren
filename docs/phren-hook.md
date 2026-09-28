@@ -113,10 +113,12 @@ node packages/cli/dist/index.js bridge doctor
 Install the helper on every connected computer before updating the phone app.
 The installer restarts its user service and preserves existing authorization and
 agent configuration. Review new or changed Codex hook definitions in `/hooks`;
-Phren does not bypass Codex's trust checks for interactive sessions. Scheduled
-headless Codex runs are the documented exception: they pass
-`--skip-git-repo-check` and write `trust_level = "trusted"` for the project
-directory into `config.toml` (see [schedules](schedules.md)).
+Phren does not answer Codex's or Claude's trust screens. It marks a folder trusted
+only when the Hook chose it: a dispatched or scheduled project's folder and a
+worktree it created, before starting Claude or Codex there (see
+[footprint](footprint.md#folder-trust-for-launches-the-hook-places));
+`PHREN_PRETRUST=off` turns that off. Scheduled headless Codex runs also pass
+`--skip-git-repo-check` (see [schedules](schedules.md)).
 
 ## What connects
 

@@ -671,12 +671,15 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
     });
     await new Promise<void>(resolve => herdr.listen(path.join(root, "herdr/herdr.sock"), resolve));
     await mkdir(path.join(root, "bridge/changes"), { recursive: true });
+    // Claude's global config, where a launch into a Hook-chosen folder records folder trust.
+    await mkdir(path.join(root, "claude-config"), { recursive: true });
+    await writeFile(path.join(root, "claude-config/.claude.json"), JSON.stringify({ numStartups: 3, projects: {} }, null, 2));
     const expired = path.join(root, "bridge/changes/expired.jsonl");
     await writeFile(expired, "{}\n"); await utimes(expired, 1, 1);
     hook = spawn(process.execPath, [hookBundle, "serve"], { env: { ...process.env,
       PATH: `${path.join(root, "bin")}:${process.env.PATH}`, PHREN_PATH: path.join(root, ".phren"),
       HOME: root, XDG_CONFIG_HOME: path.join(root, ".config"), PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex"),
-      NODE_ENV: "test", PHREN_TEST_MODEL_CATALOG: path.join(root, "model-catalog.json"),
+      CLAUDE_CONFIG_DIR: path.join(root, "claude-config"), NODE_ENV: "test", PHREN_TEST_MODEL_CATALOG: path.join(root, "model-catalog.json"),
       ELEVENLABS_API_KEY: "", NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: `http://127.0.0.1:${(egress!.address() as { port: number }).port}`, NO_PROXY: "localhost,127.0.0.1,::1",
       PHREN_APPROVAL_HOLD_MS: "2500", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SHELL_READY_MS: "1500", PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
       stdio: ["ignore", "ignore", "pipe"] });
@@ -922,6 +925,8 @@ schedules:
       expect(launched.data.run).toMatchObject({ scheduleId: "7f3a2c1d", project: "demo", status: "running",
         launch: { mode: "herdr" } });
       expect(commands.some(command => command.method === "agent.prompt" && command.params.text === "Run the test suite.")).toBe(true);
+      // The project's folder was trusted for Codex before the interactive launch.
+      expect(await readFile(path.join(root, "codex/config.toml"), "utf8")).toContain(`[projects.${JSON.stringify(root)}]\ntrust_level = "trusted"\n`);
       expect((await api("/v1/schedules/run", { project: "demo", id: "7f3a2c1d" })).status).toBe(409);
       const history = await api("/v1/schedules/history", { project: "demo", id: "7f3a2c1d", limit: 10 });
       expect(history.status).toBe(200);
@@ -1033,6 +1038,8 @@ schedules:
       expect(launched.data).toMatchObject({ ok: true, workspaceId: "w9", tabId: "w9:t1", paneId: "w9:p1", agent: "claude", agentStatus: "idle" });
       expect(commands.find(c => c.method === "workspace.create")?.params).toMatchObject({ label: "phren", cwd: await realpathAsync(root), focus: false });
       expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ name: "phren", kind: "claude", pane_id: "w9:p1", timeout_ms: 45_000 });
+      // A folder the phone named is never marked trusted for Claude.
+      expect(JSON.parse(await readFile(path.join(root, "claude-config/.claude.json"), "utf8")).projects).toEqual({});
       // The new pane is now a chat target the overview can see.
       const overview = await api("/v1/workspaces?mux=herdr:default");
       expect(overview.data.groups.some((g: any) => g.id === "w9" && g.children[0].agent === "claude")).toBe(true);
@@ -2840,6 +2847,10 @@ schedules:
         expect(launched.data.worktree).toEqual({ path: worktree, branch: "phren/fix-login" });
         expect(commands.filter(c => c.method === "workspace.create").at(-1)?.params).toMatchObject({ label: "wt", cwd: worktree });
         expect(commands.filter(c => c.method === "agent.start").at(-1)?.params).toMatchObject({ name: "wt", kind: "claude" });
+        // The worktree the Hook just made is trusted for Claude before the agent starts, and only it.
+        const claudeConfig = JSON.parse(await readFile(path.join(root, "claude-config/.claude.json"), "utf8"));
+        expect(claudeConfig).toMatchObject({ numStartups: 3, projects: { [worktree]: { hasTrustDialogAccepted: true } } });
+        expect(Object.keys(claudeConfig.projects)).toEqual([worktree]);
         // The branch starts at the project's current HEAD.
         expect((await git("rev-parse", "phren/fix-login")).stdout).toBe((await git("rev-parse", "HEAD")).stdout);
         // Changes > Workers lists the worktree, named for the agent working there.

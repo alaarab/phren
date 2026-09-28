@@ -54,7 +54,9 @@ suggested from the task's first line or `phren/<short-id>`. The Hook sends
 `worktree: { branch }` to `git worktree add`, from the project's current HEAD
 into `<repo>/.claude/worktrees/<name>`, and starts the agent there. It refuses
 a folder that is not a Git repository and a branch that already exists, with a
-message the phone shows. The worktree then appears in the session's Changes >
+message the phone shows. A Claude or Codex agent's new worktree is marked
+trusted for that harness first, so it does not stop on the folder-trust screen
+(see [footprint](footprint.md#folder-trust-for-launches-the-hook-places)). The worktree then appears in the session's Changes >
 Workers tab, named for the agent working in it.
 
 A computer runs at most one conductor, and a connected group (this computer
@@ -157,6 +159,11 @@ Each placement writes a private receipt in `<bridge>/dispatches/<id>.json`
 without retaining the prompt. States are `launching`, `sending`, `accepted`,
 `uncertain` and `failed`. `accepted` confirms first-prompt delivery, not worker
 completion; completion arrives as a return (see [Returns](#returns)).
+
+Before a Claude or Codex worker starts, the receiving Hook marks the project's
+resolved folder trusted for that harness (`PHREN_PRETRUST=off` turns this off;
+see [footprint](footprint.md#folder-trust-for-launches-the-hook-places)), so the
+folder-trust screen does not appear.
 
 Claude and Codex workers start with the brief as their first prompt, so nothing
 is typed into a starting pane. The receiving Hook writes the brief to
