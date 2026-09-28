@@ -317,6 +317,12 @@ instead of a Codex the Hook types into. Conductors keep the typed path.
   not the async tool or a plain-text question, so a worker waits for the
   owner's answer instead of carrying on without it
   (`PHREN_CODEX_BLOCKING_QUESTIONS=off` leaves both out).
+- **Sign-in.** Every Codex process on the computer shares `auth.json`, and the
+  refresh token rotates on use. The Hook checks it hourly and, once the sign-in
+  is six days old, refreshes it once (`account/read` with `refreshToken`, on a
+  running server or a short-lived one), so the other processes find it fresh
+  instead of refreshing together and spending a used token
+  (`PHREN_CODEX_AUTH_REFRESH=off` turns this off).
 - **Escape.** `/v1/keys` Escape on such a pane with a running turn declines the
   thread's parked requests, then interrupts the turn (`turn/interrupt`).
 - **Restart.** Servers outlive the Hook. A restarted Hook reads

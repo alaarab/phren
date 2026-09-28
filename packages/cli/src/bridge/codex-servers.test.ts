@@ -246,6 +246,19 @@ describe.skipIf(process.platform === "win32")("driving the thread", () => {
     expect(servers.answerQuestion(entry, 21, { answers: {} })).toBe(false);
   });
 
+  it("refreshes the shared sign-in through a running server, or a short-lived one when none runs", async () => {
+    await servers.refreshAuth();
+    expect(spawned).toHaveLength(1);
+    expect(fakes[0].sent("account/read")[0].params).toEqual({ refreshToken: true });
+    expect(alive.has(4242)).toBe(false);
+    // The fake hands every server pid 4242; the short-lived one's stop cleared it.
+    const entry = await launched(); alive.add(4242);
+    await servers.refreshAuth();
+    expect(spawned).toHaveLength(2);
+    expect(fakes[1].sent("account/read")[0].params).toEqual({ refreshToken: true });
+    expect(entry.pid).toBe(4242);
+  });
+
   it("declines parked requests before interrupting the running turn", async () => {
     const entry = await launched();
     expect(await servers.interrupt(entry)).toBe(false);
