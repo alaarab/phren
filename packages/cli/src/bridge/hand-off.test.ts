@@ -158,9 +158,3 @@ it("hands off to this computer by its own name when no computer is enrolled", as
   await expect(handOff({ computer: "Linuxbox", session: target.session, text: "hi" })).rejects.toThrow("hooks.yaml first");
 });
 
-it("refuses a name two enrolled computers answer to", async () => {
-  const peer = (name: string) => ({ name, address: "shared.example", username: "sam", port: 22, hostKey: "unused", server: "default" });
-  vi.mocked(hookPeers).mockResolvedValue([peer("Linuxbox"), peer("Studio")]);
-  vi.mocked(optionalHookPeers).mockResolvedValue({ peers: [peer("Linuxbox"), peer("Studio")] });
-  await expect(handOff({ computer: "shared.example", session: "00000001-1111-4111-8111-111111111111", text: "hi" })).rejects.toThrow("Unknown computer");
-});

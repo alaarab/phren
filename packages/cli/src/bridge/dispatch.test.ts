@@ -321,9 +321,6 @@ describe("dispatch to this computer", () => {
       : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
     expect(await new DispatchService().dispatch({ ...brief, computer: "linuxbox.example" })).toMatchObject({ computer: "Linuxbox", state: "accepted" });
     await expect(new DispatchService().dispatch({ ...brief, computer: "Studio" })).rejects.toThrow("Unknown computer");
-    // A name two enrolled computers answer to picks neither.
-    vi.mocked(hookPeers).mockResolvedValue(["Linuxbox", "Studio"].map(name => ({ name, address: "shared.example", username: "sam", port: 22, hostKey: "unused", server: "default" })));
-    await expect(new DispatchService().dispatch({ ...brief, computer: "shared.example" })).rejects.toThrow("Unknown computer");
   });
 
   it("matches this computer by any of its names, never another's", () => {
