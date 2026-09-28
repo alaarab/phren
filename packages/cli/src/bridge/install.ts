@@ -12,6 +12,7 @@ import { promisify } from "node:util";
 import { bridgeRoot, object, objects, atomic, socketPath } from "./protocol.js";
 import { herdrRoot } from "./herdr.js";
 import { health } from "./transport.js";
+import { FAST_HOOK_SOURCE, fastHookPath } from "./hook-fast.js";
 import { readStoredVoice, SPEECH_VOICE_ENV, writeSpeechVoice } from "./speech-voice.js";
 
 const exec = promisify(execFile);
@@ -220,6 +221,7 @@ export async function install(version: string, noService = false): Promise<void>
     root, herdr, store: modules.store, profile: modules.profile, node: process.execPath,
     bundle: path.join(root, "current/bridge-hook.mjs"), socket: socketPath(), timing: path.join(root, "gateway.json"),
   }), 0o700);
+  await atomic(fastHookPath(root), FAST_HOOK_SOURCE);
   const environmentPath = [path.dirname(process.execPath), path.join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin"].join(":");
   const program = path.join(root, "current/bridge-hook.mjs");
   if (!noService) {
@@ -297,6 +299,7 @@ export async function uninstall() {
   if (process.platform === "darwin") await unlink(launchAgentPlist()).catch(() => {});
   else { await exec("systemctl", ["--user", "disable", unit]).catch(() => {}); await unlink(path.join(homedir(), ".config/systemd/user", unit)).catch(() => {}); await exec("systemctl", ["--user", "daemon-reload"]).catch(() => {}); }
   await applyAgentHooks(await planAgentHooks(path.join(bridgeRoot(), "current/bridge-hook.mjs"), true));
+  await unlink(fastHookPath(bridgeRoot())).catch(() => {});
   await applyOpencodePlugin(true);
   // Preserve journal, settings, uploaded images, rollback version and SSH backups.
   console.log("Phren Hook stopped and its background service removed. Remove phren-iphone, phren-android and phren-computer keys from authorized_keys to revoke device access. Local data remains in " + bridgeRoot());
@@ -329,8 +332,11 @@ export async function planAgentHooks(program: string, remove = false, modules?: 
     const config = object(parsed);
     if (config.hooks !== undefined && (!config.hooks || typeof config.hooks !== "object" || Array.isArray(config.hooks))) throw new Error(`Invalid hook configuration: ${file}`);
     const hooks = object(config.hooks);
-    const command = `${quote(process.execPath)} ${quote(program)} hook ${source}`;
-    const ownHook = (entry: unknown) => typeof entry === "string" && entry.endsWith(` ${quote(program)} hook ${source}`);
+    // Claude's callbacks run the small forwarder beside `current/` (hook-fast.ts)
+    // instead of loading the whole bundle for every event.
+    const fast = fastHookPath(path.dirname(path.dirname(program)));
+    const command = source === "claude" ? `${quote(process.execPath)} ${quote(fast)} claude` : `${quote(process.execPath)} ${quote(program)} hook ${source}`;
+    const ownHook = (entry: unknown) => typeof entry === "string" && (entry.endsWith(` ${quote(program)} hook ${source}`) || (source === "claude" && entry.endsWith(` ${quote(fast)} claude`)));
     if (remove || modules?.has("hook") === false) {
       const owned = Object.values(hooks).flatMap(objects).some(group => ownHook(group.command) || ownHook(group.bash) || objects(group.hooks).some(hook => ownHook(hook.command)));
       const statusChanged = source === "claude" && JSON.stringify(usageStatusLine(config.statusLine, program, true)) !== JSON.stringify(config.statusLine);
@@ -344,7 +350,7 @@ export async function planAgentHooks(program: string, remove = false, modules?: 
       config.version = 1;
       for (const event of ["SessionStart", "UserPromptSubmit"]) {
         const entries = objects(hooks[event]).filter(h => !ownHook(h.bash) && !ownHook(h.command));
-        hooks[event] = remove || modules?.has("hook") === false ? entries : [...entries, { type: "command", bash: command, timeoutSec: 3 }];
+        hooks[event] = remove || modules?.has("hook") === false ? entries : [...entries, { type: "command", bash: command, timeoutSec: 15 }];
       }
     } else {
       for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "PreToolUse", "PostToolUse", ...(source === "claude" ? ["PreCompact"] : [])]) {
@@ -354,7 +360,7 @@ export async function planAgentHooks(program: string, remove = false, modules?: 
         // Codex names tools differently across versions; filter its callbacks
         // inside the Hook. Claude can narrow its registration here.
         const group = event.endsWith("ToolUse") ? { ...(source === "claude" ? { matcher: "Bash|Write|Edit|MultiEdit|NotebookEdit|apply_patch|str_replace_editor" } : {}), hooks: [{ type: "command", command, timeout: 10 }] }
-          : { hooks: [{ type: "command", command, timeout: event === "PermissionRequest" ? 60 : 3 }] };
+          : { hooks: [{ type: "command", command, timeout: event === "PermissionRequest" ? 60 : 15 }] };
         const owner = event.endsWith("ToolUse") ? "git" : "hook";
         hooks[event] = remove || modules?.has("hook") === false || modules?.has(owner) === false ? groups : [...groups, group];
       }
@@ -437,6 +443,7 @@ export async function reconcileModuleHooks(store: string, profile?: string): Pro
   const root = bridgeRoot();
   // Synced enablement alone never installs a host service or enrolls a key.
   if (!await missingFile(readFile(path.join(root, "installed.json")))) return;
+  if (modules.has("hook")) await atomic(fastHookPath(root), FAST_HOOK_SOURCE);
   await applyAgentHooks(await planAgentHooks(path.join(root, "current/bridge-hook.mjs"), false, modules));
   await applyOpencodePlugin(!modules.has("hook"));
   if (!modules.has("hook")) await stopService();

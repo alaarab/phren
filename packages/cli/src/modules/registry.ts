@@ -75,8 +75,8 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       "bridge fanouts archive", "canary", "computers", "computers mcp", "usage",
     ],
     agentHooks: [
-      { agents: ["codex", "claude"], events: ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest"], handler: "bridge-hook.mjs hook <agent>" },
-      { agents: ["claude"], events: ["PreCompact"], handler: "bridge-hook.mjs hook claude" },
+      { agents: ["codex"], events: ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest"], handler: "bridge-hook.mjs hook codex" },
+      { agents: ["claude"], events: ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "PreCompact"], handler: "claude-hook.mjs claude" },
       { agents: ["copilot"], events: ["SessionStart", "UserPromptSubmit"], handler: "bridge-hook.mjs hook copilot" },
     ],
     hookRoutes: [
@@ -102,7 +102,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       "files", "repositoryFiles", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechVoices", "transcribe", "promptOnce", "resources",
     ],
     storeFiles: [".runtime/sessions/opencode-*.events.jsonl", ".runtime/approvals/opencode-*.json"],
-    localFiles: ["<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily"],
+    localFiles: ["<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/claude-hook.mjs", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily"],
     phoneScreens: [{ screen: "LiveSessionsView", capability: "hook" }, { screen: "AgentChatView", capability: "transcript" }],
     skills: [],
   },
@@ -110,7 +110,8 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     schemaVersion: 1, name: "git", version: VERSION, defaultEnabled: false, requires: ["memory"],
     tools: full(["auto_extract_findings"]), cliCommands: ["maintain extract", "extract-memories"],
     agentHooks: [
-      { agents: ["codex", "claude"], events: ["PreToolUse", "PostToolUse"], handler: "bridge-hook.mjs hook <agent>" },
+      { agents: ["codex"], events: ["PreToolUse", "PostToolUse"], handler: "bridge-hook.mjs hook codex" },
+      { agents: ["claude"], events: ["PreToolUse", "PostToolUse"], handler: "claude-hook.mjs claude" },
     ],
     hookRoutes: routes("POST", [
       "/v1/diff", "/v1/web-servers/session", "/v1/git/status", "/v1/git/log", "/v1/git/branches", "/v1/git/pulls",

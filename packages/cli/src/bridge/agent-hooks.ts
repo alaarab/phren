@@ -1366,7 +1366,7 @@ export async function agentHook(source: Provider) {
     ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}),
     ...(event === "Stop" ? stopFacts(value) : {}) });
   await new Promise<void>(resolve => {
-    const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? 8_000 : 1500,
+    const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? 8_000 : 12_000,
       headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, res => {
       let result = "";
       res.on("data", chunk => { result += chunk.toString(); if (result.length > 16_384) req.destroy(); });
