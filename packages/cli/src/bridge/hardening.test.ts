@@ -45,8 +45,10 @@ describe("transcript export hardening", () => {
   it.each(["hello", [{ type: "text", text: "hello" }]])("allowlists Claude top-level fields on the wire", async content => {
     const transcript = path.join(home, "claude.jsonl");
     const publicFields = { type: "user", uuid: "u", parentUuid: "p", timestamp: "t", message: { role: "user", content }, gitBranch: "main", cwd: home,
-      requestId: "r", isMeta: false, isSidechain: false, isCompactSummary: false, phrenQueued: true, phrenQueueKey: "q", phrenBackground: false };
-    await writeFile(transcript, JSON.stringify({ ...publicFields, toolUseResult: { originalFile: "SECRET" }, permissionMode: "SECRET", wireToolInputs: "SECRET", futureField: "SECRET" }) + "\n");
+      requestId: "r", isMeta: false, isSidechain: false, isCompactSummary: false, phrenQueued: true, phrenQueueKey: "q", phrenBackground: false,
+      // The mode the turn ran in is public now: the phone's permission chip shows it.
+      permissionMode: "acceptEdits" };
+    await writeFile(transcript, JSON.stringify({ ...publicFields, toolUseResult: { originalFile: "SECRET" }, wireToolInputs: "SECRET", futureField: "SECRET" }) + "\n");
     const page = await new TranscriptReader(transcript, "claude").read();
     expect(page.entries[0].raw).toEqual(publicFields);
     expect(JSON.stringify(page)).not.toContain("SECRET");
