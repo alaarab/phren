@@ -58,7 +58,7 @@ export type GraphPayload = {
   topics?: RawTopic[];
 };
 
-export type NodeKind = "project" | "finding" | "task" | "entity" | "reference" | "other";
+export type NodeKind = "project" | "finding" | "task" | "entity" | "reference" | "topic" | "note" | "other";
 export type NodeHealth = "healthy" | "decaying" | "stale";
 
 export type RuntimeNode = RawNode & {
@@ -84,6 +84,8 @@ export type NodeDetail = RuntimeNode & {
     tasks: number;
     entities: number;
     references: number;
+    topics: number;
+    notes: number;
   };
   score?: ScoreEntry;
   /** Values supplied by the project pane's inline editor on save. */
@@ -125,6 +127,7 @@ export const KIND_COLORS = {
   project: "#f5b342",
   entity: "#38e1ff",
   reference: "#42e099",
+  note: "#c9a67a",
   "task-active": "#3ae374",
   "task-queue": "#48b2ff",
   "task-done": "#5c6b8a",

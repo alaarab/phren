@@ -117,6 +117,8 @@ function dotSize(node: FGNode["raw"]): number {
   if (node.kind === "finding") return node.tagged ? 3 : 2.6;
   if (node.kind === "task") return 2.8;
   if (node.kind === "reference") return 2.2;
+  if (node.kind === "topic") return 3.4;
+  if (node.kind === "note") return 2.2;
   return 2; // entity
 }
 
@@ -127,6 +129,7 @@ function dotColor(node: FGNode["raw"]): THREE.Color {
   if (node.kind === "finding") return c.lerp(new THREE.Color(0xffffff), node.tagged ? 0.5 : 0.35);
   if (node.kind === "entity") return c.lerp(new THREE.Color(0xffffff), 0.12).multiplyScalar(0.72);
   if (node.kind === "reference") return c.lerp(new THREE.Color(0xffffff), 0.2).multiplyScalar(0.8);
+  if (node.kind === "topic") return c.lerp(new THREE.Color(0xffffff), 0.25);
   return c.lerp(new THREE.Color(0xffffff), 0.3);
 }
 
