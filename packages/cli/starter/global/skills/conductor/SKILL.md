@@ -104,9 +104,9 @@ Prefer handing work to a session that already owns the project and is idle or
 doing related work; call `hand_off` in full or `phren_admin(action: "hand_off",
 computer?, target|session, text)` in core. Otherwise dispatch a new worker.
 Write one short line either way. Call `dispatch` in full or
-`phren_admin(action: "dispatch", computer, project, harness, model?, prompt, label)`
+`phren_admin(action: "dispatch", computer, project, harness, model?, effort?, prompt, label)`
 in core. The CLI equivalent is `phren dispatch <computer|anywhere> <project>
---harness <harness> --label <label> --prompt <brief> [--model <model>]`.
+--harness <harness> --label <label> --prompt <brief> [--model <model>] [--effort <effort>]`.
 `anywhere` chooses the connected computer with the fewest working agents. Place
 briefs sequentially, respecting busy/rate-limit responses. Keep their dispatch
 IDs. Do not send local filesystem paths as remote project names.

@@ -18,11 +18,11 @@ export async function runDispatch(args: string[]): Promise<number> {
     console.log(JSON.stringify(await listLiveSessions(), null, 2)); return 0;
   }
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
-    harness: { type: "string", default: "codex" }, model: { type: "string" }, prompt: { type: "string" }, label: { type: "string" },
+    harness: { type: "string", default: "codex" }, model: { type: "string" }, effort: { type: "string" }, prompt: { type: "string" }, label: { type: "string" },
     "parent-provider": { type: "string" }, "parent-session": { type: "string" }, "parent-computer": { type: "string" },
     "parent-server": { type: "string" }, "parent-workspace": { type: "string" }, "parent-tab": { type: "string" }, "parent-pane": { type: "string" },
   } });
-  if (positionals.length !== 2) throw new Error("Usage: phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>] [explicit parent flags]");
+  if (positionals.length !== 2) throw new Error("Usage: phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>] [--effort minimal|low|medium|high|xhigh|max] [explicit parent flags]");
   const parentValues = ["parent-provider", "parent-session", "parent-computer", "parent-server", "parent-workspace", "parent-tab", "parent-pane"] as const;
   const hasParent = parentValues.some(key => values[key] !== undefined);
   const parent = hasParent ? {

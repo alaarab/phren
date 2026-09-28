@@ -106,3 +106,6 @@ export async function atomicInPrivateDir(file: string, value: unknown, mode?: nu
 export function targetFromURL(url: URL): Target {
   return targetSchema.parse(Object.fromEntries(["server", "workspace", "tab", "pane", "source", "session"].map(k => [k, url.searchParams.get(k)])));
 }
+
+/** The reasoning efforts a launch or a dispatch may ask a harness for. */
+export const launchEfforts = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
