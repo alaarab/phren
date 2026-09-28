@@ -249,6 +249,10 @@ Claude queue messages preserve these phone markers:
 - `phrenQueued: true` and `phrenQueueKey`: only an ordinary enqueue whose trimmed
   content does not start with `<` becomes a user bubble. Internal XML-like
   queues, including cross-session messages, do not become the person's bubble.
+  A picture-only enqueue (Claude's `[Image #N]` labels and the phone's
+  `Attached files on this computer:` footer, no words) reads
+  `[Image attachment]`, as a picture-only turn does; its key is still the
+  SHA-256 of the original content.
 - `type: "phren_queue_consumed"`: every string-content removal emits only its
   SHA-256 content key and timestamp, including internal removals. The key scheme
   is unchanged.
