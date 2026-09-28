@@ -58,6 +58,13 @@ terminal ID, provider, and PID set; concurrent lookups share the same work.
 Sending checks bypass the cache. At most 16 WebSocket clients remain connected;
 a seventeenth closes the oldest client.
 
+The receiving agent's UserPromptSubmit hook confirms a prompt as
+`{ "ok": true, "delivered": true }`. The Hook waits up to 1.5 s for it, and
+0.3 s for a working agent other than Claude, which queues typed text until
+its turn ends. Claude Code takes a message typed mid-turn at once and runs
+the hook about a third of a second later, so it gets the full wait. A client
+that needs a confirmed turn treats a bare `ok` as typed but not yet taken.
+
 After `agent.prompt` returns, the Hook takes a fresh snapshot and rechecks
 `paneIdentity`. A mismatch or unavailable check returns
 `{ "ok": true, "deliveryUncertain": true }`. It never retries. Herdr resolves the
