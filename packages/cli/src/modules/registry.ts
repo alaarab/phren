@@ -102,7 +102,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       "files", "repositoryFiles", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechVoices", "transcribe", "promptOnce", "resources",
     ],
     storeFiles: [".runtime/sessions/opencode-*.events.jsonl", ".runtime/approvals/opencode-*.json"],
-    localFiles: ["<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/claude-hook.mjs", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily"],
+    localFiles: ["<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily"],
     phoneScreens: [{ screen: "LiveSessionsView", capability: "hook" }, { screen: "AgentChatView", capability: "transcript" }],
     skills: [],
   },

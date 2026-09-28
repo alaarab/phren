@@ -14,7 +14,7 @@ describe.skipIf(process.platform === "win32")("claude-hook.mjs", () => {
   beforeEach(async () => {
     root = await mkdtemp("/tmp/phren-fast-");
     await mkdir(path.join(root, "herdr")); await mkdir(path.join(root, "current"));
-    await writeFile(fastHookPath(root), FAST_HOOK_SOURCE);
+    await writeFile(fastHookPath(path.join(root, "current")), FAST_HOOK_SOURCE);
     bodies = []; reply = "{}";
     server = createServer(async (req, res) => {
       const chunks: Buffer[] = [];
@@ -29,7 +29,7 @@ describe.skipIf(process.platform === "win32")("claude-hook.mjs", () => {
   const herdr = () => ({ HERDR_ENV: "1", HERDR_SOCKET_PATH: path.join(root, "herdr/herdr.sock"), HERDR_WORKSPACE_ID: "w1", HERDR_TAB_ID: "w1:t1", HERDR_PANE_ID: "w1:p2" });
   function run(input: unknown, env: Record<string, string>, args = ["claude"]): Promise<{ stdout: string; code: number | null }> {
     return new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [fastHookPath(root), ...args], {
+      const child = spawn(process.execPath, [fastHookPath(path.join(root, "current")), ...args], {
         env: { PATH: process.env.PATH, HOME: root, PHREN_BRIDGE_HOME: root, PHREN_HERDR_HOME: path.join(root, "herdr"), ...env } });
       let stdout = "";
       child.stdout.on("data", chunk => { stdout += chunk; });

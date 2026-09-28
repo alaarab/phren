@@ -2,7 +2,8 @@
 // ~2 MB Hook bundle for each one cost a loaded machine past Claude's timeout
 // ("UserPromptSubmit hook timed out", output discarded), losing delivery
 // confirmation, dispatch returns and turn records. Install writes this small
-// script next to the bundle instead: in a Herdr pane it sends the same /hook
+// script into each version's folder next to its bundle, so `current/` always
+// pairs the script with the daemon it talks to: in a Herdr pane it sends the same /hook
 // body agentHook (agent-hooks.ts) builds over agent.sock and prints the same
 // reply; anything it cannot place itself (a tmux pane, another agent) runs the
 // bundle's full handler in the same process.
@@ -12,9 +13,9 @@
 // when it is off, so the store's module config is not read here.
 import path from "node:path";
 
-/** The script's file name in the Hook's root, beside `current/`. */
+/** The script's file name in a version's folder, beside `bridge-hook.mjs`. */
 export const FAST_HOOK_FILE = "claude-hook.mjs";
-export const fastHookPath = (root: string) => path.join(root, FAST_HOOK_FILE);
+export const fastHookPath = (versionDir: string) => path.join(versionDir, FAST_HOOK_FILE);
 
 export const FAST_HOOK_SOURCE = `// Installed by Phren Hook: Claude Code's hook events, forwarded to the running Hook.
 import { request } from "node:http";
@@ -23,7 +24,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 const env = process.env, source = process.argv[2];
 async function full() {
-  const bundle = path.join(path.dirname(fileURLToPath(import.meta.url)), "current", "bridge-hook.mjs");
+  const bundle = path.join(path.dirname(fileURLToPath(import.meta.url)), "bridge-hook.mjs");
   process.argv = [process.argv[0], bundle, "hook", source];
   await import(pathToFileURL(bundle).href);
 }

@@ -3,7 +3,7 @@ import { defaultPhrenPath } from "../shared.js";
 import { disabledHint } from "../modules/registry.js";
 import { execFile } from "node:child_process";
 import { usageStatusLine } from "./usage.js";
-import { chmod, copyFile, mkdir, open, readFile, rename, symlink, unlink, lstat, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, mkdir, open, readFile, rename, symlink, unlink, lstat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { codexHome, claudeConfigDir } from "../home-paths.js";
 import path from "node:path";
@@ -215,13 +215,13 @@ export async function install(version: string, noService = false): Promise<void>
   const previousBundle = await missingFile(readFile(installedBundle));
   const stagedBundle = installedBundle + `.phren-${process.pid}`;
   await copyFile(bundle, stagedBundle); await rename(stagedBundle, installedBundle);
+  await atomic(fastHookPath(destination), FAST_HOOK_SOURCE);
   const previous = await readFile(path.join(root, "installed.json"), "utf8").then(v => JSON.parse(v) as { version: string; previous?: string }).catch(() => null);
   const gateway = await detectGateway();
   await atomic(path.join(root, "dispatch"), gatewayScript(gateway, {
     root, herdr, store: modules.store, profile: modules.profile, node: process.execPath,
     bundle: path.join(root, "current/bridge-hook.mjs"), socket: socketPath(), timing: path.join(root, "gateway.json"),
   }), 0o700);
-  await atomic(fastHookPath(root), FAST_HOOK_SOURCE);
   const environmentPath = [path.dirname(process.execPath), path.join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin"].join(":");
   const program = path.join(root, "current/bridge-hook.mjs");
   if (!noService) {
@@ -299,7 +299,6 @@ export async function uninstall() {
   if (process.platform === "darwin") await unlink(launchAgentPlist()).catch(() => {});
   else { await exec("systemctl", ["--user", "disable", unit]).catch(() => {}); await unlink(path.join(homedir(), ".config/systemd/user", unit)).catch(() => {}); await exec("systemctl", ["--user", "daemon-reload"]).catch(() => {}); }
   await applyAgentHooks(await planAgentHooks(path.join(bridgeRoot(), "current/bridge-hook.mjs"), true));
-  await unlink(fastHookPath(bridgeRoot())).catch(() => {});
   await applyOpencodePlugin(true);
   // Preserve journal, settings, uploaded images, rollback version and SSH backups.
   console.log("Phren Hook stopped and its background service removed. Remove phren-iphone, phren-android and phren-computer keys from authorized_keys to revoke device access. Local data remains in " + bridgeRoot());
@@ -314,7 +313,11 @@ async function missingFile<T>(operation: Promise<T>): Promise<T | undefined> {
   }
 }
 
-export async function planAgentHooks(program: string, remove = false, modules?: ModuleSnapshot): Promise<SettingsEdit[]> {
+/** Whether the version `current/` points at ships the Claude forwarder; one
+ * from before it does not, and its Claude callbacks run the bundle. */
+const currentHasFastHook = (root: string) => access(fastHookPath(path.join(root, "current"))).then(() => true, () => false);
+
+export async function planAgentHooks(program: string, remove = false, modules?: ModuleSnapshot, fastClaude = true): Promise<SettingsEdit[]> {
   const edits: SettingsEdit[] = [];
   for (const [source, file] of [
     ["codex", path.join(codexHome(), "hooks.json")],
@@ -332,10 +335,10 @@ export async function planAgentHooks(program: string, remove = false, modules?: 
     const config = object(parsed);
     if (config.hooks !== undefined && (!config.hooks || typeof config.hooks !== "object" || Array.isArray(config.hooks))) throw new Error(`Invalid hook configuration: ${file}`);
     const hooks = object(config.hooks);
-    // Claude's callbacks run the small forwarder beside `current/` (hook-fast.ts)
+    // Claude's callbacks run the small forwarder beside the bundle (hook-fast.ts)
     // instead of loading the whole bundle for every event.
-    const fast = fastHookPath(path.dirname(path.dirname(program)));
-    const command = source === "claude" ? `${quote(process.execPath)} ${quote(fast)} claude` : `${quote(process.execPath)} ${quote(program)} hook ${source}`;
+    const fast = fastHookPath(path.dirname(program));
+    const command = source === "claude" && fastClaude ? `${quote(process.execPath)} ${quote(fast)} claude` : `${quote(process.execPath)} ${quote(program)} hook ${source}`;
     const ownHook = (entry: unknown) => typeof entry === "string" && (entry.endsWith(` ${quote(program)} hook ${source}`) || (source === "claude" && entry.endsWith(` ${quote(fast)} claude`)));
     if (remove || modules?.has("hook") === false) {
       const owned = Object.values(hooks).flatMap(objects).some(group => ownHook(group.command) || ownHook(group.bash) || objects(group.hooks).some(hook => ownHook(hook.command)));
@@ -435,6 +438,11 @@ export async function rollback() {
   const config = JSON.parse(await readFile(path.join(bridgeRoot(), "installed.json"), "utf8")) as { version: string; previous?: string };
   if (!config.previous || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(config.previous)) throw new Error("No previous helper version is available.");
   await stopService(); await activate(config.previous); await startService();
+  // The version now in `current/` decides whether Claude's callbacks run its
+  // forwarder or, from before the forwarder, its bundle.
+  const root = bridgeRoot();
+  await applyAgentHooks(await planAgentHooks(path.join(root, "current/bridge-hook.mjs"), false,
+    moduleSnapshot(defaultPhrenPath(), undefined, true), await currentHasFastHook(root)));
   await atomic(path.join(bridgeRoot(), "installed.json"), JSON.stringify({ version: config.previous, previous: config.version }) + "\n");
 }
 
@@ -443,8 +451,7 @@ export async function reconcileModuleHooks(store: string, profile?: string): Pro
   const root = bridgeRoot();
   // Synced enablement alone never installs a host service or enrolls a key.
   if (!await missingFile(readFile(path.join(root, "installed.json")))) return;
-  if (modules.has("hook")) await atomic(fastHookPath(root), FAST_HOOK_SOURCE);
-  await applyAgentHooks(await planAgentHooks(path.join(root, "current/bridge-hook.mjs"), false, modules));
+  await applyAgentHooks(await planAgentHooks(path.join(root, "current/bridge-hook.mjs"), false, modules, await currentHasFastHook(root)));
   await applyOpencodePlugin(!modules.has("hook"));
   if (!modules.has("hook")) await stopService();
 }
