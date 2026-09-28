@@ -118,7 +118,9 @@ export async function runBridge(args: string[], version: string): Promise<number
       const [, action = "show", id] = args;
       if (action === "set" && id && args.length === 3) {
         if (!speechModelId.safeParse(id).success) throw new Error(`"${id}" is not an ElevenLabs model id (e.g. ${DEFAULT_SPEECH_MODEL} or ${FALLBACK_SPEECH_MODEL}).`);
-        console.log(`Talk mode now speaks with ${await writeSpeechModel(id)} (stored in ${speechVoiceFile()}), falling back to ${FALLBACK_SPEECH_MODEL} when it fails or is slow. Install and update keep it.`);
+        const model = await writeSpeechModel(id);
+        const fallback = model === FALLBACK_SPEECH_MODEL ? "" : `, falling back to ${FALLBACK_SPEECH_MODEL} when it fails or is slow`;
+        console.log(`Talk mode now speaks with ${model} (stored in ${speechVoiceFile()})${fallback}. Install and update keep it.`);
       } else if (action === "clear" && args.length === 2) {
         await clearSpeechModel();
         console.log(`Cleared the stored model; talk mode uses ${DEFAULT_SPEECH_MODEL} (default).`);

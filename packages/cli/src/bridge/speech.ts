@@ -55,8 +55,12 @@ export const speechRequest = z.object({
   /** A voice the phone picked; otherwise this computer's setting. */
   voice: voiceId.optional(),
   /** The output formats the phone plays (`SPEECH_FORMATS` names). Without
-   * it, pcm_24000, which older phones assume. Unknown names are ignored. */
-  formats: z.array(z.string().max(40)).max(16).optional(),
+   * it, pcm_24000, which older phones assume. Names this Hook doesn't know
+   * (a newer phone's) are dropped before validation, never refused. */
+  formats: z.preprocess(
+    value => Array.isArray(value) ? [...new Set(value)].filter(name => (SPEECH_FORMATS as readonly unknown[]).includes(name)) : undefined,
+    z.array(z.enum(SPEECH_FORMATS)).max(SPEECH_FORMATS.length).optional(),
+  ),
 });
 
 /** What the Hook learned about this account: formats its plan refused and
@@ -232,9 +236,10 @@ async function elevenLabs(endpoint: "stream" | "with-timestamps", text: string, 
   const chosen = options.model ?? (await resolveSpeechModel()).model;
   const models = chosen === FALLBACK_SPEECH_MODEL ? [chosen] : state.benchedReason(chosen) ? [FALLBACK_SPEECH_MODEL] : [chosen, FALLBACK_SPEECH_MODEL];
   const accepted = new Set(options.formats ?? []);
-  const formats = SPEECH_FORMATS.filter(format => format === BASE_FORMAT || (accepted.has(format) && state.formatAllowed(format)));
   let failure: BridgeError | undefined;
   models: for (const model of models) {
+    // Per model, so a format refused under one isn't tried again under the next.
+    const formats = SPEECH_FORMATS.filter(format => format === BASE_FORMAT || (accepted.has(format) && state.formatAllowed(format)));
     for (const format of formats) {
       const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}/${endpoint}?output_format=${format}`;
       const started = now();

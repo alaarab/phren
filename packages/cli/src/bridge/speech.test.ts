@@ -247,6 +247,30 @@ describe("speech output format", () => {
     expect(JSON.parse(mp3.bytes.toString())).toMatchObject({ audioFormat: "mp3;rate=44100;bitrate=192000;channels=1", sampleRate: 44_100, format: "mp3_44100_192", model: DEFAULT_SPEECH_MODEL });
   });
 
+  it("ignores format names it doesn't know, however many, instead of refusing the request", async () => {
+    const eleven = upstream(() => undefined);
+    const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch });
+    servers.push(server);
+    const unknown = Array.from({ length: 40 }, (_, i) => `opus_48000_${i}`);
+    const reply = await post({ text: "Hello.", formats: [...unknown, 7, null, "pcm_44100", "pcm_44100"] });
+    expect(reply.status).toBe(200);
+    expect(reply.headers["x-phren-audio-rate"]).toBe("44100");
+    expect((await post({ text: "Hello.", formats: "pcm_44100" })).headers["x-phren-audio-rate"]).toBe("24000");
+    expect((await post({ text: "Hello.", formats: ["flac_96000"] })).headers["x-phren-audio-rate"]).toBe("24000");
+  });
+
+  it("doesn't retry a format refused under v4 Turbo when the same reply falls back to Flash", async () => {
+    const eleven = upstream((format, model) => format === "mp3_44100_192" ? refusal(403, "output_format_not_allowed")
+      : model === DEFAULT_SPEECH_MODEL ? refusal(400, "model_not_found") : undefined);
+    const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch });
+    servers.push(server);
+    const reply = await post({ text: "Hello.", formats: ["mp3_44100_192", "pcm_24000"] });
+    expect(reply.status).toBe(200);
+    expect(eleven.calls.map(call => `${call.model}/${call.format}`)).toEqual([
+      `${DEFAULT_SPEECH_MODEL}/mp3_44100_192`, `${DEFAULT_SPEECH_MODEL}/pcm_24000`, `${FALLBACK_SPEECH_MODEL}/pcm_24000`,
+    ]);
+  });
+
   it("reports the sample rate in the timestamped reply, 24 kHz for an older phone", async () => {
     const eleven = upstream(() => timedReply());
     const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch });
