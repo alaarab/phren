@@ -2,7 +2,7 @@ import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, sy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { claudeGlobalConfigFile, codexTrustedText, ensureClaudeFolderTrusted, ensureCodexDirTrusted, pretrustEnabled, pretrustFolder } from "./folder-trust.js";
+import { claudeGlobalConfigFile, claudeProjectKey, codexTrustedText, ensureClaudeFolderTrusted, ensureCodexDirTrusted, pretrustEnabled, pretrustFolder } from "./folder-trust.js";
 
 describe("folder trust", () => {
   const temporary: string[] = [];
@@ -18,6 +18,13 @@ describe("folder trust", () => {
     return { home, env, project, claudeFile: path.join(home, "claude", ".claude.json"), codexFile: path.join(home, "codex", "config.toml") };
   }
 
+  it("keys Claude's projects the way Claude does: forward slashes on Windows", () => {
+    expect(claudeProjectKey("/home/me/repo", "linux")).toBe("/home/me/repo");
+    expect(claudeProjectKey("/home/me/./repo", "linux")).toBe("/home/me/repo");
+    expect(claudeProjectKey("C:\\Users\\me\\repo", "win32")).toBe("C:/Users/me/repo");
+    expect(claudeProjectKey("C:\\Users\\me\\.\\repo\\", "win32")).toBe("C:/Users/me/repo/");
+  });
+
   it("resolves Claude's config file the way Claude does", async () => {
     const { home, env } = await sandbox();
     expect(await claudeGlobalConfigFile(env)).toBe(path.join(home, "claude", ".claude.json"));
@@ -31,14 +38,14 @@ describe("folder trust", () => {
     const { env, claudeFile, project } = await sandbox();
     const original = { numStartups: 7, oauthAccount: { emailAddress: "a@b.c" }, projects: {
       "/elsewhere": { allowedTools: ["Bash"], hasTrustDialogAccepted: false },
-      [project]: { allowedTools: ["Read"], hasClaudeMdExternalIncludesApproved: false },
+      [claudeProjectKey(project)]: { allowedTools: ["Read"], hasClaudeMdExternalIncludesApproved: false },
     } };
     await writeFile(claudeFile, JSON.stringify(original, null, 2), { mode: 0o600 });
     await chmod(claudeFile, 0o640);
     expect(await ensureClaudeFolderTrusted(project, env)).toBe("trusted");
     const written = JSON.parse(await readFile(claudeFile, "utf8"));
     expect(written).toEqual({ ...original, projects: { ...original.projects,
-      [project]: { allowedTools: ["Read"], hasClaudeMdExternalIncludesApproved: false, hasTrustDialogAccepted: true } } });
+      [claudeProjectKey(project)]: { allowedTools: ["Read"], hasClaudeMdExternalIncludesApproved: false, hasTrustDialogAccepted: true } } });
     expect((await stat(claudeFile)).mode & 0o777).toBe(0o640);
     // Nothing left behind: no lock directory, no temporary file.
     expect((await readdir(path.dirname(claudeFile))).sort()).toEqual([".claude.json"]);
@@ -60,7 +67,7 @@ describe("folder trust", () => {
     await writeFile(target, JSON.stringify({ projects: {} }));
     await symlink(target, claudeFile);
     expect(await ensureClaudeFolderTrusted(project, env)).toBe("trusted");
-    expect(JSON.parse(await readFile(target, "utf8")).projects[project]).toEqual({ hasTrustDialogAccepted: true });
+    expect(JSON.parse(await readFile(target, "utf8")).projects[claudeProjectKey(project)]).toEqual({ hasTrustDialogAccepted: true });
     expect((await lstat(claudeFile)).isSymbolicLink()).toBe(true);
   });
 
@@ -78,7 +85,7 @@ describe("folder trust", () => {
     const other = path.join(project, "..", "other");
     await mkdir(other);
     await expect(ensureClaudeFolderTrusted(other, env)).rejects.toThrow(/held by another process/);
-    expect(JSON.parse(await readFile(claudeFile, "utf8")).projects[other]).toBeUndefined();
+    expect(JSON.parse(await readFile(claudeFile, "utf8")).projects[claudeProjectKey(other)]).toBeUndefined();
   });
 
   it("writes a quoted trusted-project entry for a dotted Codex project directory", async () => {
@@ -113,7 +120,7 @@ describe("folder trust", () => {
     const linked = path.join(home, "linked-demo");
     await symlink(project, linked);
     expect(await pretrustFolder("claude", linked, "test", env)).toBe("trusted");
-    expect(Object.keys(JSON.parse(await readFile(claudeFile, "utf8")).projects).sort()).toEqual([linked, project].sort());
+    expect(Object.keys(JSON.parse(await readFile(claudeFile, "utf8")).projects).sort()).toEqual([linked, project].map(dir => claudeProjectKey(dir)).sort());
     expect(await pretrustFolder("claude", project, "test", env)).toBe("already");
     expect(await pretrustFolder("codex", project, "test", env)).toBe("trusted");
     expect(await readFile(codexFile, "utf8")).toBe(`[projects.${JSON.stringify(project)}]\ntrust_level = "trusted"\n`);
@@ -128,7 +135,7 @@ describe("folder trust", () => {
     expect(pretrustEnabled({})).toBe(true);
     expect(await pretrustFolder("claude", other, "test", { ...env, PHREN_PRETRUST: "off" })).toBe("skipped");
     expect(await pretrustFolder("codex", other, "test", { ...env, PHREN_PRETRUST: "0" })).toBe("skipped");
-    expect(JSON.parse(await readFile(claudeFile, "utf8")).projects[other]).toBeUndefined();
+    expect(JSON.parse(await readFile(claudeFile, "utf8")).projects[claudeProjectKey(other)]).toBeUndefined();
     expect(await readFile(codexFile, "utf8")).not.toContain(other);
     // A failure is logged, never thrown: the launch goes on.
     await writeFile(claudeFile, "not json");

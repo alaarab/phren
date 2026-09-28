@@ -13,6 +13,7 @@ import { shard } from "../test-shard.js";
 import { WebSocket } from "ws";
 import { ApprovalWatchLeases, permissionPrompt, terminalChoice, visibleTerminalChoice } from "./agent-hooks.js";
 import { capturesChanges, namedPaths, outputCallIds, ToolChanges } from "./changes.js";
+import { claudeProjectKey } from "./folder-trust.js";
 import { herdrSocketError, rpc, workspaceSnapshot } from "./herdr.js";
 import { planAgentHooks, upgradeKeys } from "./install.js";
 import { locateProject } from "./locate.js";
@@ -2849,7 +2850,7 @@ schedules:
         expect(commands.filter(c => c.method === "agent.start").at(-1)?.params).toMatchObject({ name: "wt", kind: "claude" });
         // The worktree the Hook just made is trusted for Claude before the agent starts, and only it.
         const claudeConfig = JSON.parse(await readFile(path.join(root, "claude-config/.claude.json"), "utf8"));
-        expect(claudeConfig).toMatchObject({ numStartups: 3, projects: { [worktree]: { hasTrustDialogAccepted: true } } });
+        expect(claudeConfig).toMatchObject({ numStartups: 3, projects: { [claudeProjectKey(worktree)]: { hasTrustDialogAccepted: true } } });
         expect(Object.keys(claudeConfig.projects)).toEqual([worktree]);
         // The branch starts at the project's current HEAD.
         expect((await git("rev-parse", "phren/fix-login")).stdout).toBe((await git("rev-parse", "HEAD")).stdout);

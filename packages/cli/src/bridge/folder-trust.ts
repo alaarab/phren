@@ -41,6 +41,17 @@ export async function claudeGlobalConfigFile(env: NodeJS.ProcessEnv = process.en
   return path.join(configured ? path.resolve(configured) : homeDir(env), ".claude.json");
 }
 
+/**
+ * The `projects` key Claude reads for `dir`: the normalized path, with
+ * forward slashes on Windows (`C:/Users/me/repo`). Claude 2.1.280 builds
+ * every lookup and write key this way (`normalize`, then
+ * `replaceAll("\\", "/")` when the platform is Windows) and looks the key up
+ * exactly, so a backslash key is never read there.
+ */
+export function claudeProjectKey(dir: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? path.win32.normalize(dir).replaceAll("\\", "/") : path.posix.normalize(dir);
+}
+
 /** Claude takes `<file>.lock` (a proper-lockfile directory) around each config write; so does this. */
 const LOCK_WAIT_MS = 3_000, LOCK_STALE_MS = 10_000;
 
@@ -74,8 +85,7 @@ export async function ensureClaudeFolderTrusted(dir: string, env: NodeJS.Process
   const configured = await claudeGlobalConfigFile(env);
   // Write through a symlinked config to its target, never over the link.
   const file = await realpath(configured).catch(() => configured);
-  // Claude keys projects by forward-slash paths on Windows.
-  const key = process.platform === "win32" ? dir.replaceAll("\\", "/") : dir;
+  const key = claudeProjectKey(dir);
   return withClaudeLock(file, async () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       const before = await stat(file).catch(error => {
