@@ -10,7 +10,6 @@ import {
   finalTurnFromLines,
   ownerQuestion,
   computerMatches,
-  ensureCodexDirTrusted,
   headlessCommand,
   nextRun,
   parseSchedule,
@@ -189,38 +188,6 @@ describe("scheduled startup prompts", () => {
       const command = headlessCommand(schedule({ harness, model: "test-model" }), cwd);
       expect(command.args.indexOf("--model")).toBeGreaterThanOrEqual(0);
       expect(command.args[command.args.indexOf("--model") + 1]).toBe("test-model");
-    }
-  });
-
-  it("writes a quoted trusted-project entry for a dotted Codex project directory", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "phren-codex-")); temporary.push(home);
-    const previous = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = home;
-    try {
-      const dotted = path.join(home, "my.repo");
-      await ensureCodexDirTrusted(dotted);
-      const written = await readFile(path.join(home, "config.toml"), "utf8");
-      expect(written).toContain(`[projects.${JSON.stringify(dotted)}]`);
-      expect(written).toContain('trust_level = "trusted"');
-      expect(written).not.toContain(`projects.${dotted}.trust_level`);
-      await ensureCodexDirTrusted(dotted);
-      const again = await readFile(path.join(home, "config.toml"), "utf8");
-      expect(again.match(/\[projects\./g)).toHaveLength(1);
-      expect(again.match(/trust_level/g)).toHaveLength(1);
-    } finally {
-      if (previous === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previous;
-    }
-  });
-
-  it("refuses to touch an unreadable Codex config and says why", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "phren-codex-")); temporary.push(home);
-    await mkdir(path.join(home, "config.toml"));
-    const previous = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = home;
-    try {
-      await expect(ensureCodexDirTrusted(path.join(home, "repo"))).rejects.toMatchObject({ code: "EISDIR" });
-    } finally {
-      if (previous === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previous;
     }
   });
 

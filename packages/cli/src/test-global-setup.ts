@@ -47,6 +47,11 @@ function sandboxHomeDir(): void {
   // resolves exactly as on a clean CI machine: the sandbox store if a test
   // makes one, otherwise no store. A test that needs the walk clears this.
   process.env.PHREN_PATH = path.join(sandboxHome, ".phren");
+  // The Hook writes folder trust into Claude's and Codex's own config
+  // (bridge/folder-trust.ts). A developer's CLAUDE_CONFIG_DIR or CODEX_HOME
+  // would point that at their real files, so both fall back to the sandbox.
+  delete process.env.CLAUDE_CONFIG_DIR;
+  delete process.env.CODEX_HOME;
 }
 
 export async function teardown(): Promise<void> {

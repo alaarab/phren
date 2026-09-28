@@ -1,14 +1,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdir, readFile, stat } from "node:fs/promises";
-import { codexHome } from "../home-paths.js";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { finished as streamFinished } from "node:stream/promises";
 import { fanoutRoot } from "./fanouts.js";
+import { pretrustFolder } from "./folder-trust.js";
 import { findPane, paneIdentity, servers, snapshot } from "./herdr.js";
 import { agentNotReady, terminalProvider } from "./terminal.js";
-import { atomic, atomicInPrivateDir, BridgeError, type Json } from "./protocol.js";
-import { logger } from "../logger.js";
+import { atomicInPrivateDir, BridgeError, type Json } from "./protocol.js";
 import { defaultPhrenPath } from "../shared.js";
 import type { Schedule, ScheduleLauncher, ScheduleLaunchContext, ScheduleLaunchRecord, ScheduleLaunchResult, ScheduleRun, ScheduleRunOutcome } from "./schedule-format.js";
 import { watchHerdrRun } from "./schedule-watch.js";
@@ -101,8 +100,8 @@ async function launchHeadless(context: ScheduleLaunchContext, store: string, sta
   await writeManifest(jobDir, manifest);
   const command = headlessCommand(context.schedule, context.cwd);
   // An untrusted directory only costs Codex a prompt; the run still starts, and the log says why.
-  if (context.schedule.harness === "codex") await ensureCodexDirTrusted(context.cwd).catch(error =>
-    logger.warn("schedule", `Could not mark ${path.basename(context.cwd)} trusted for Codex (run ${context.runId}): ${error instanceof Error ? error.message.split("\n")[0] : String(error)}`));
+  // Headless Claude (`-p`) has no trust screen, so only Codex needs it here.
+  if (context.schedule.harness === "codex") await pretrustFolder("codex", context.cwd, `scheduled run ${context.runId}`);
   let child: ChildProcess;
   try { child = spawn(command.file, command.args, { cwd: command.cwd, env: process.env, stdio: ["pipe", "pipe", "pipe"] }); }
   catch (error) { await writeManifest(jobDir, { ...manifest, status: "failed", updatedAt: new Date().toISOString(), finishedAt: new Date().toISOString() }); throw error; }
@@ -140,45 +139,6 @@ export function headlessCommand(schedule: Schedule, cwd: string): { file: string
     "--skip-git-repo-check", "--json", "-"] };
   if (schedule.harness === "opencode") return { file: "opencode", cwd, args: ["run", "--format", "json", "--dir", cwd, ...model] };
   return { file: "claude", cwd, args: ["-p", "--output-format", "stream-json", "--settings", CLAUDE_SCHEDULE_SETTINGS, ...model] };
-}
-
-function tomlQuote(value: string): string {
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-}
-
-export async function ensureCodexDirTrusted(cwd: string): Promise<void> {
-  const directory = codexHome();
-  const file = path.join(directory, "config.toml");
-  let text = "";
-  try { text = await readFile(file, "utf8"); }
-  // An unreadable config is left untouched; the caller logs why.
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  const header = `[projects.${tomlQuote(cwd)}]`;
-  const trustLine = 'trust_level = "trusted"';
-  let next: string;
-  const at = text.indexOf(header);
-  if (at >= 0) {
-    const bodyStart = at + header.length;
-    const rest = text.slice(bodyStart);
-    const nextTable = rest.search(/^\s*\[/m);
-    const section = nextTable >= 0 ? rest.slice(0, nextTable) : rest;
-    if (new RegExp(`trust_level\\s*=\\s*"trusted"`).test(section)) return;
-    const existing = /^[ \t]*trust_level\s*=.*$/m.exec(section);
-    if (existing) {
-      const replaced = section.replace(existing[0], existing[0].match(/^[ \t]*/)![0] + trustLine);
-      next = text.slice(0, bodyStart) + replaced + rest.slice(section.length);
-    } else {
-      const newline = section.startsWith("\n") || section.startsWith("\r\n") ? "" : "\n";
-      next = text.slice(0, bodyStart) + newline + trustLine + (section.startsWith("\n") || section.startsWith("\r\n") ? section : "\n" + section) + rest.slice(section.length);
-    }
-  } else {
-    const separator = text && !text.endsWith("\n") ? "\n\n" : text ? "\n" : "";
-    next = text + `${separator}${header}\n${trustLine}\n`;
-  }
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  const metadata = await stat(file).catch(() => undefined);
-  const mode = metadata ? metadata.mode & 0o777 : 0o600;
-  await atomic(file, next, mode);
 }
 
 async function writeManifest(jobDir: string, manifest: Record<string, unknown>): Promise<void> {

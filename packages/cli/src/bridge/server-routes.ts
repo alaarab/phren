@@ -530,7 +530,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             const cwd = storeRooted ? await launchDirectory(defaultPhrenPath(), [], [defaultPhrenPath()])
               : data.project !== undefined ? await dispatchProjectDirectory(data.project)
               : await launchDirectory(data.cwd, await journal.recent(), locatedDirectories);
-            return launchSession(selectedServer(url), { ...data, cwd });
+            // A project the Hook resolved (a dispatch) is a folder it may trust; a folder the phone named is not.
+            return launchSession(selectedServer(url), { ...data, cwd }, { trustFolder: data.project !== undefined });
           });
         } else if (url.pathname.startsWith("/v1/workspaces/")) {
           const operation = url.pathname.split("/").at(-1)!;
