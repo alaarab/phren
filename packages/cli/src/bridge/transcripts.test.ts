@@ -312,6 +312,15 @@ describe("pasted_content wrappers on Claude user turns", () => {
   });
 });
 
+describe("model and effort in effect", () => {
+  it("keeps Claude's per-row effort and Codex's turn effort", () => {
+    const claude = { type: "assistant", uuid: "u1", effort: "high", message: { role: "assistant", model: "claude-opus-5-5", content: [{ type: "text", text: "Done." }] } };
+    expect(visibleEvent(claude, "claude")).toMatchObject({ effort: "high", message: { model: "claude-opus-5-5" } });
+    const codex = { type: "turn_context", timestamp: "t", payload: { model: "gpt-6-sol", effort: "xhigh", cwd: "/private", approval_policy: "never" } };
+    expect(visibleEvent(codex, "codex")).toEqual({ type: "turn_context", timestamp: "t", payload: { model: "gpt-6-sol", effort: "xhigh" } });
+  });
+});
+
 describe("Codex async question answers", () => {
   it("shows Codex's question reply envelope as the question and its answer", () => {
     const text = '<send_user_message_question_reply>\n[{"answer":"Yes, clear the day-old lock","question":"May I release the lock?","questionItemId":"[\\"request_user_input_async\\",\\"call_q\\",0]"}]\n</send_user_message_question_reply>';

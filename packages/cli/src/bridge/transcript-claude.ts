@@ -183,7 +183,9 @@ async function claudeChildBelongsTo(file: string, parent: string, agentId: strin
   } catch { return false; }
 }
 
-const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message", "gitBranch", "cwd", "requestId", "isMeta", "isSidechain", "isCompactSummary", "phrenQueued", "phrenQueueKey", "phrenBackground", "phrenCompacted"]);
+// `effort` rides on each assistant row (Claude Code 2.1): with `message.model`
+// it is what the phone's model chip shows as in effect.
+const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message", "gitBranch", "cwd", "requestId", "isMeta", "isSidechain", "isCompactSummary", "phrenQueued", "phrenQueueKey", "phrenBackground", "phrenCompacted", "effort"]);
 export const harnessPreamble = (text: string) => /^<(?:environment_context>|user_instructions>|permission_profile|system-reminder>|turn_context>)/.test(text.trimStart());
 
 function taskNotification(content: string): string | undefined {

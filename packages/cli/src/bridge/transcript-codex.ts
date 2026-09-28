@@ -80,9 +80,10 @@ export function visibleCodexEvent(raw: Json): Json | undefined {
   }
   const execEvent = visibleCodexExecEvent(raw); if (execEvent) return execEvent;
   const p = object(raw.payload);
-  // The model answering this turn is the only field of turn_context the
+  // The model answering this turn and its effort are the only fields of turn_context the
   // phone shows; its policies and instructions stay on the computer.
-  if (raw.type === "turn_context") return typeof p.model === "string" ? { type: "turn_context", timestamp: raw.timestamp, payload: { model: p.model } } : undefined;
+  if (raw.type === "turn_context") return typeof p.model === "string" ? { type: "turn_context", timestamp: raw.timestamp,
+    payload: { model: p.model, ...(typeof p.effort === "string" && p.effort.length <= 20 ? { effort: p.effort } : {}) } } : undefined;
   if (raw.type === "event_msg" && p.type === "error") return { type: raw.type, timestamp: raw.timestamp,
     payload: { type: "error", ...(typeof p.message === "string" ? { message: p.message } : {}) } };
   if (raw.type === "event_msg" && ["token_count", "task_started", "task_complete", "task_completed", "turn_aborted", "task_aborted", "error"].includes(String(p.type))) return raw;
