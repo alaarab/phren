@@ -197,7 +197,7 @@ WebSockets on the same socket.
 | `POST /v1/push/register` | Register this authenticated phone for suspended approval delivery: its APNs `token` (sent direct with the Hook's own `apns.json` key), or a `relay` registration `{url, relayId, secret, key}` from the phren push relay, whose alerts are encrypted with the phone's `key` (ChaCha20-Poly1305) so the relay can't read them. A relay `410` drops the phone until it registers again. Stored mode 0600 on the computer. |
 | `POST /v1/push/answer` | Consume a one-time push binding with Approve or Deny. The binding outlives the 55-second hold for ten minutes: once the hold ends it answers the dialog the agent draws in its terminal. The APNs payload never carries the provider action or conversation identity. |
 | `POST /v1/push/target` | Where a live push binding's request is (server, workspace, tab, pane, source), without spending it, so a tapped notification opens that session's details. |
-| `POST /v1/questions/answer` | Answer an exact pending Codex `request_user_input_async` call through `codex queue --thread <UUID> --message <quoted answer>`. Choices and typed answers are checked against the original acknowledged transcript call, the pane identity is rechecked, and a durable receipt prevents resending an uncertain result. Synchronous `request_user_input` remains unsupported on terminal-only connections. For a served OpenCode pane it takes Claude's question body (`questions`, `answers` with `optionIndexes` and `text`) and replies to OpenCode's pending question with the chosen labels. |
+| `POST /v1/questions/answer` | Answer an exact pending Codex `request_user_input_async` call: on a pane the Hook runs on its own app-server, by `turn/steer` into the running turn with Codex's `<send_user_message_question_reply>` message (`turn/start` when none runs); elsewhere through `codex queue --thread <UUID> --message <quoted answer>`, which Codex holds until the turn ends. A `toolUseId` of `request:<id>` answers a question parked on that app-server (`item/tool/requestUserInput`, or a single-value form MCP elicitation) as the reply to that request. Choices and typed answers are checked against the original acknowledged transcript call, the pane identity is rechecked, and a durable receipt prevents resending an uncertain result. Synchronous `request_user_input` remains unsupported on terminal-only connections. For a served OpenCode pane it takes Claude's question body (`questions`, `answers` with `optionIndexes` and `text`) and replies to OpenCode's pending question with the chosen labels. |
 
 Approval pushes use the existing version 1 binding and category. Their alert title is
 `<Agent> · <project> on <computer>` with missing parts omitted; the body is a
@@ -267,8 +267,10 @@ WebSocket-on-UDS (`codex-app-server.ts`) as client `phren_hook`.
   `{decision:"decline"}` (`permissions:{}`). `serverRequest/resolved` drops the
   card. A replayed request keeps its card and is answered on the new
   connection. The PermissionRequest callback for a registered thread answers
-  `{}` at once. `item/tool/requestUserInput` and `mcpServer/elicitation/request`
-  are left to the pane.
+  `{}` at once. `item/tool/requestUserInput` and form
+  `mcpServer/elicitation/request` requests the phone can show are listed in the
+  status frame's `pendingQuestions` as `request:<id>`; secret inputs, URL
+  elicitations and multi-select fields are left to the pane.
 - `/v1/keys` Escape on that target with a running turn answers the thread's
   parked requests with their cancel shapes, then sends `turn/interrupt`.
 - The 5-second tick removes a record whose process exited and stops (process

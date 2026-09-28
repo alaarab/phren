@@ -312,6 +312,17 @@ describe("pasted_content wrappers on Claude user turns", () => {
   });
 });
 
+describe("Codex async question answers", () => {
+  it("shows Codex's question reply envelope as the question and its answer", () => {
+    const text = '<send_user_message_question_reply>\n[{"answer":"Yes, clear the day-old lock","question":"May I release the lock?","questionItemId":"[\\"request_user_input_async\\",\\"call_q\\",0]"}]\n</send_user_message_question_reply>';
+    const raw = { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text }] } };
+    expect(visibleEvent(raw, "codex")).toEqual({ type: "response_item", payload: { type: "message", role: "user",
+      content: [{ type: "input_text", text: "> May I release the lock?\n\nYes, clear the day-old lock" }] } });
+    const plain = { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Keep going" }] } };
+    expect(visibleEvent(plain, "codex")).toBe(plain);
+  });
+});
+
 describe("Codex code-mode projection", () => {
   let root: string, file: string;
   beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-codemode-")); file = path.join(root, "rollout.jsonl"); });

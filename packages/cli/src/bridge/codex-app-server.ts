@@ -76,6 +76,9 @@ export interface AppServerClient {
   threadLoadedList(): Promise<string[]>;
   /** `turn/start` → the queued turn's id (transcript-turn.jsonl id 4). */
   turnStart(params: TurnStartParams): Promise<{ turnId: string }>;
+  /** `turn/steer`: input for the running turn `expectedTurnId`, as the TUI
+   * sends a message typed mid-turn or the answer to an async question. */
+  turnSteer(params: { threadId: string; expectedTurnId: string; input: AppServerTurnInput[] }): Promise<{ turnId: string }>;
   /** `turn/interrupt` (transcript-interrupt.jsonl id 5). */
   turnInterrupt(params: { threadId: string; turnId: string }): Promise<unknown>;
   /** Decline every pending server request of the thread, then interrupt, so a
@@ -280,6 +283,12 @@ class AppServerConnection implements AppServerClient {
     const result = object(await this.request("turn/start", params));
     const turnId = object(result.turn).id;
     if (typeof turnId !== "string") throw new Error("codex app-server turn/start returned no turn id");
+    return { turnId };
+  }
+
+  async turnSteer(params: { threadId: string; expectedTurnId: string; input: AppServerTurnInput[] }): Promise<{ turnId: string }> {
+    const turnId = object(await this.request("turn/steer", params)).turnId;
+    if (typeof turnId !== "string") throw new Error("codex app-server turn/steer returned no turn id");
     return { turnId };
   }
 

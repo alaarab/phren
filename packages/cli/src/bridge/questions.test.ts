@@ -3,7 +3,10 @@ import { appendFile, copyFile, mkdir, mkdtemp, writeFile, readFile, rm } from "n
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CodexQuestions, pendingAsyncQuestion, pendingAsyncQuestions, questionReply } from "./questions.js";
+import { CodexQuestions, pendingAsyncQuestion, pendingAsyncQuestions, questionReply, serverQuestion, type ServedCodex } from "./questions.js";
+import { formatQuestionReply, readableQuestionReply } from "./codex-question-reply.js";
+import type { PendingServerRequest } from "./codex-app-server.js";
+import type { CodexServerEntry } from "./codex-servers.js";
 
 const state = vi.hoisted(() => ({ file: "", root: "", session: "aaaaaaaa-1111-4111-8111-111111111111" }));
 vi.mock("./herdr.js", () => ({ validateTarget: vi.fn(async () => ({})), paneIdentity: vi.fn(async () => state.session) }));
@@ -155,5 +158,79 @@ sleep 30
       await bridge.answer(target, { toolUseId: "call_neutralQuestion0001", answers: [{ optionIndexes: [], text: "Yes" }] });
       expect(JSON.parse((await readFile(path.join(directory, "sent.jsonl"), "utf8")).trim())[0]).toBe("queue");
     } finally { vi.unstubAllEnvs(); }
+  });
+});
+
+describe("Codex questions on the Hook's own app-server", () => {
+  const entry = { id: "0123456789ab", threadId: target.session } as CodexServerEntry;
+  function served(parked: PendingServerRequest[] = []) {
+    const steered: string[] = [], answered: { requestId: unknown; result: unknown }[] = [];
+    const codex: ServedCodex = {
+      forTarget: where => where.pane === target.pane ? entry : undefined,
+      steer: async (_entry, text) => { steered.push(text); return { turnId: "turn-1" }; },
+      questions: () => parked,
+      answerQuestion: (_entry, requestId, result) => {
+        const index = parked.findIndex(request => request.requestId === requestId);
+        if (index < 0) return false;
+        parked.splice(index, 1); answered.push({ requestId, result }); return true;
+      },
+    };
+    return { codex, steered, answered };
+  }
+
+  it("clears a question Codex's own reply answers and shows that reply as the question and answer", async () => {
+    const reply = formatQuestionReply("call-1", [{ question: "Which screens?", answer: "Both" }]);
+    expect(reply).toBe('<send_user_message_question_reply>\n[{"answer":"Both","question":"Which screens?","questionItemId":"[\\"request_user_input_async\\",\\"call-1\\",0]"}]\n</send_user_message_question_reply>');
+    await transcript([call, accepted, message(reply)]);
+    expect(await pendingAsyncQuestions(state.file)).toEqual([]);
+    expect(readableQuestionReply(reply)).toBe("> Which screens?\n\nBoth");
+    expect(readableQuestionReply("Both")).toBeUndefined();
+  });
+
+  it("answers an async question in the running turn, as Codex's TUI does, never through codex queue", async () => {
+    const { codex, steered } = served();
+    const bridge = new CodexQuestions(path.join(directory, "missing-codex"), codex);
+    expect(bridge.availableFor(target)).toBe(true);
+    await bridge.answer(target, { toolUseId: "call-1", answers: [{ optionIndexes: [], text: "Only the lock screen" }] });
+    expect(steered).toEqual([formatQuestionReply("call-1", [{ question: "Which screens?", answer: "Only the lock screen" }])]);
+    await expect(readFile(path.join(directory, "sent.jsonl"))).rejects.toThrow();
+    await expect(bridge.answer(target, { toolUseId: "call-1", answers: [{ optionIndexes: [0] }] })).rejects.toThrow("already submitted");
+    expect(steered).toHaveLength(1);
+    expect(await bridge.pending(target)).toEqual([]);
+  });
+
+  it("shows a parked request_user_input as a card and answers the request itself", async () => {
+    const asked: PendingServerRequest = { requestId: 7, method: "item/tool/requestUserInput", threadId: target.session, params: { threadId: target.session, turnId: "t", itemId: "i", isBlocking: true,
+      questions: [{ id: "screens", header: "Screens", question: "Which screens?", options: [{ label: "Both", description: "" }, { label: "Lock screen", description: "" }] },
+        { id: "note", header: "Note", question: "Anything else?", isOther: true, options: null }] } };
+    const { codex, answered, steered } = served([asked]);
+    const bridge = new CodexQuestions(path.join(directory, "missing-codex"), codex);
+    const [card] = await bridge.pending(target);
+    expect(card).toEqual({ toolUseId: "request:7", isAsync: true, submitted: false, questions: [
+      { question: "Which screens?", options: [{ label: "Both" }, { label: "Lock screen" }] }, { question: "Anything else?", options: [], kind: "text" }] });
+    await expect(bridge.answer(target, { toolUseId: "request:7", answers: [{ optionIndexes: [], text: "Neither" }, { optionIndexes: [], text: "No" }] })).rejects.toThrow("offered answers");
+    await bridge.answer(target, { toolUseId: "request:7", answers: [{ optionIndexes: [1] }, { optionIndexes: [], text: "Ship it" }] });
+    expect(answered).toEqual([{ requestId: 7, result: { answers: { screens: { answers: ["Lock screen"] }, note: { answers: ["Ship it"] } } } }]);
+    expect(steered).toEqual([]);
+    await expect(bridge.answer(target, { toolUseId: "request:7", answers: [{ optionIndexes: [0] }, { optionIndexes: [], text: "x" }] })).rejects.toThrow("no longer pending");
+  });
+
+  it("turns a form elicitation into questions and accepts it with typed values", () => {
+    const shown = serverQuestion({ requestId: "e1", method: "mcpServer/elicitation/request", params: { serverName: "deploy", threadId: target.session, mode: "form", message: "Deploy settings",
+      requestedSchema: { type: "object", properties: {
+        confirm: { type: "boolean", title: "Deploy now?" },
+        region: { type: "string", title: "Region", oneOf: [{ const: "us-east-1", title: "US East" }, { const: "eu-west-1", title: "EU West" }] },
+        replicas: { type: "integer", title: "Replicas" },
+        label: { type: "string" } } } } });
+    expect(shown?.questions).toEqual([{ title: "Deploy settings\n\nDeploy now?", options: ["Yes", "No"] }, { title: "Region", options: ["US East", "EU West"] },
+      { title: "Replicas" }, { title: "label" }]);
+    expect(shown?.result(["Yes", "EU West", "3", "blue"])).toEqual({ action: "accept", content: { confirm: true, region: "eu-west-1", replicas: 3, label: "blue" } });
+    expect(() => shown?.result(["Yes", "EU West", "2.5", "blue"])).toThrow("number");
+  });
+
+  it("leaves secret inputs, URL elicitations and multi-select fields in the pane", () => {
+    expect(serverQuestion({ requestId: 1, method: "item/tool/requestUserInput", params: { questions: [{ id: "k", header: "Key", question: "API key?", isSecret: true }] } })).toBeUndefined();
+    expect(serverQuestion({ requestId: 2, method: "mcpServer/elicitation/request", params: { mode: "url", message: "Sign in", url: "https://example.com", elicitationId: "x" } })).toBeUndefined();
+    expect(serverQuestion({ requestId: 3, method: "mcpServer/elicitation/request", params: { mode: "form", message: "Pick", requestedSchema: { properties: { tags: { type: "array", items: { enum: ["a"] } } } } } })).toBeUndefined();
   });
 });
