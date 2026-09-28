@@ -108,8 +108,10 @@ describe("names a peer reports about itself", () => {
   });
 
   it("resolve an ambiguous first label to nothing", () => {
-    const rows = foldComputers({ local: { names: ["Desk"] }, peers: [{ name: "Box", address: "box.lan" }, { name: "Box2", address: "box.example" }], machines: {} });
-    expect(resolveComputer(rows, "box.other")).toBeUndefined();
+    // Folding keeps names unique; rows from elsewhere may not be.
+    const row = (name: string, aliases: string[]) => ({ name, aliases, local: false, linked: true });
+    expect(resolveComputer([row("Box", ["box.lan"]), row("Box2", ["box.example"])], "box.other")).toBeUndefined();
+    expect(resolveComputer([row("Box", ["shared"]), row("Box2", ["shared"])], "shared")).toBeUndefined();
   });
 
   it.skipIf(process.platform === "win32")("do not steer addGrant's canonical names, even after a probe", async () => {
