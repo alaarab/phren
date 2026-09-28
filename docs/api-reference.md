@@ -213,6 +213,15 @@ effort level to" below that confirmation (a cap's lower level is returned as
 `effort`); the level must be one the catalogue lists for the model, or low,
 medium, high, xhigh or max when it lists none.
 OpenCode returns 422 with a direction to use its terminal `/models` picker.
+A Codex pane on the Hook's own app-server is not driven through its menu: the
+model and effort are checked against the catalogue and held for the pane's next
+Hook-sent turn (`turn/start` overrides, which Codex keeps for later turns). The
+reply adds `applies: "next-turn"`, and the switch is accepted while the agent
+works.
+
+What is in effect is in the transcript: Claude's assistant rows carry
+`message.model` and a top-level `effort`, and Codex's `turn_context` rows carry
+`model` and `effort`.
 
 A working pane returns 409 before any model command is typed. `/v1/prompt`
 also refuses every slash command while working, except Claude Code's

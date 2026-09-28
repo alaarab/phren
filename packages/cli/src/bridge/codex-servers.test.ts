@@ -259,6 +259,17 @@ describe.skipIf(process.platform === "win32")("driving the thread", () => {
     expect(entry.pid).toBe(4242);
   });
 
+  it("sends a chosen model and effort with the next turn only", async () => {
+    const entry = await launched();
+    servers.setNextTurn(entry, "gpt-6-sol", "high");
+    await servers.prompt(entry, "first");
+    expect(fakes[0].sent("turn/start").at(-1)?.params).toMatchObject({ threadId: "thread-1", model: "gpt-6-sol", effort: "high" });
+    await servers.prompt(entry, "second");
+    const later = fakes[0].sent("turn/start").at(-1)?.params as Json;
+    expect(later.model).toBeUndefined();
+    expect(later.effort).toBeUndefined();
+  });
+
   it("declines parked requests before interrupting the running turn", async () => {
     const entry = await launched();
     expect(await servers.interrupt(entry)).toBe(false);

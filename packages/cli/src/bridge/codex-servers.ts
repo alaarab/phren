@@ -44,6 +44,9 @@ const entrySchema = z.object({
   dispatchId: z.string().optional(),
   activeTurn: z.string().optional(),
   lastTurn: z.object({ id: z.string(), status: z.string(), at: z.string() }).optional(),
+  /** A model and effort the phone chose, sent with the Hook's next `turn/start`
+   * (Codex keeps them for the thread's later turns too). */
+  nextTurn: z.object({ model: z.string().min(1).max(200), effort: z.string().min(1).max(20).optional() }).strict().optional(),
 }).strict();
 export type CodexServerEntry = z.infer<typeof entrySchema>;
 
@@ -256,7 +259,21 @@ export class CodexServers {
   async prompt(entry: CodexServerEntry, text: string): Promise<{ turnId: string }> {
     if (!entry.threadId) throw new CodexServerUnavailable("The Codex pane has not started its thread yet.");
     const client = await this.client(entry);
-    return client.turnStart({ threadId: entry.threadId, input: [{ type: "text", text, text_elements: [] }] });
+    const live = this.live.get(entry.id)?.entry ?? entry, next = live.nextTurn;
+    const started = await client.turnStart({ threadId: entry.threadId, input: [{ type: "text", text, text_elements: [] }],
+      ...(next ? { model: next.model, ...(next.effort ? { effort: next.effort } : {}) } : {}) });
+    // Codex took the override with the turn; the turn's own record shows it.
+    if (next && live.nextTurn === next) { delete live.nextTurn; void this.save(live).catch(() => undefined); }
+    return started;
+  }
+
+  /** Holds a model and effort for the pane's next Hook-sent turn. Nothing is
+   * typed into the TUI and a running turn is not disturbed. */
+  setNextTurn(entry: CodexServerEntry, model: string, effort?: string): void {
+    const live = this.live.get(entry.id)?.entry;
+    if (!live) throw new CodexServerUnavailable("This Codex server is no longer registered.");
+    live.nextTurn = { model, ...(effort ? { effort } : {}) };
+    void this.save(live).catch(() => undefined);
   }
 
   /** Input for the thread's running turn (`turn/steer`, as the TUI sends an
