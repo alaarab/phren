@@ -14,6 +14,8 @@ import { childAgent, childAgentTree, refreshTranscript, targetTranscriptPath, Tr
 import type { ModuleSnapshot } from "../modules/runtime.js";
 import { countTick } from "./metrics.js";
 import { approvalSummary } from "./approval-summary.js";
+import { codexServers } from "./codex-servers.js";
+import { settingsCapabilities, type SettingsSwitcher } from "./settings-switch.js";
 
 /** The WebSocket transcript and status streams: the backlog, appended rows and
  * previews on a tick loop, older pages on request, and the pane's status. */
@@ -23,6 +25,7 @@ export interface StreamContext {
   agentHooks: AgentHooks;
   codexQuestions: CodexQuestions;
   sideQuestions?: SideQuestions;
+  settingsSwitcher?: SettingsSwitcher;
   info: HookInfo;
   activeCapabilities: Record<string, unknown>;
 }
@@ -54,7 +57,7 @@ export function streamCloseReason(error: unknown): string {
 }
 
 export function transcriptStreams(ctx: StreamContext) {
-  const { modules, agentHooks, codexQuestions, sideQuestions, info, activeCapabilities } = ctx;
+  const { modules, agentHooks, codexQuestions, sideQuestions, settingsSwitcher, info, activeCapabilities } = ctx;
   /** A conversation the agent has identified but not written yet (Claude
    * Code creates its file on the first turn) is an empty transcript, not a
    * missing one: `reader` stays undefined until the file appears. */
@@ -170,6 +173,10 @@ export function transcriptStreams(ctx: StreamContext) {
                     choice: { title: queued.title, options: queued.options },
                   } : undefined).catch(() => undefined)
                 : undefined);
+            // Claude's own state comes from its footer, which leads the transcript.
+            const codexServed = target.source === "codex" && !!codexServers.forTarget(target);
+            const { settings, settingsState } = settingsSwitcher ? await settingsSwitcher.streamSettings(target, pane.terminal_id, codexServed)
+              : { settings: settingsCapabilities(target.source, codexServed), settingsState: undefined };
             const historyHealth = target.source === "codex" ? await threadHealth(target.session, pane.agent_status) : { stalled: false };
             send(client, { agentStatus: { source: target.source, session: target.session,
               status: pendingApproval || servedQuestion ? "waiting" : pane.agent_status, pendingApproval, pendingQuestions, terminalPrompt,
@@ -182,7 +189,9 @@ export function transcriptStreams(ctx: StreamContext) {
                 ...(codexQuestions.availableFor(target) ? { questionAttachments: true } : {}),
                 // Claude's AskUserQuestion is answered in its terminal dialog
                 // through /v1/questions/answer, whether or not a hold caught it.
-                ...(target.source === "claude" || servedQuestion ? { questions: true } : {}) }, branch } });
+                ...(target.source === "claude" || servedQuestion ? { questions: true } : {}),
+                // What the composer's permission, plan and fast chips can change here.
+                ...(settings ? { settings } : {}) }, ...(settingsState ? { settingsState } : {}), branch } });
           }
           if (sideAnswers && sideQuestions) {
             for (const { revision, ...side } of sideQuestions.list(target)) {

@@ -174,7 +174,7 @@ describe("prompts", () => {
 
   it("routes a phone prompt over the API for a served pane and types otherwise", async () => {
     registerPaneServer(paneServersDir(), entry());
-    const context = { agentHooks: new AgentHooks(), modelSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as never;
+    const context = { agentHooks: new AgentHooks(), modelSwitcher: { assertAvailable() {} }, settingsSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as never;
     const send = (text: string, deliveryId?: string) => paneRoute(context, new URL("http://phren.local/v1/prompt"), { target, text, ...(deliveryId ? { deliveryId } : {}) }, {} as never);
     expect(await send("hello", "delivery-served-1")).toEqual({ ok: true, delivered: true });
     expect(await send("hello", "delivery-served-1")).toEqual({ ok: true, delivered: true, replayed: true });
@@ -188,7 +188,7 @@ describe("prompts", () => {
   });
 
   it("types into a pane the Hook did not start", async () => {
-    const context = { agentHooks: new AgentHooks(), modelSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as never;
+    const context = { agentHooks: new AgentHooks(), modelSwitcher: { assertAvailable() {} }, settingsSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as never;
     await paneRoute(context, new URL("http://phren.local/v1/prompt"), { target, text: "hello" }, {} as never).catch(() => undefined);
     expect(typed).toEqual(["hello"]);
     expect(server.state.prompts).toEqual([]);
@@ -284,7 +284,7 @@ describe("asks", () => {
     registerPaneServer(paneServersDir(), entry());
     const hooks = new AgentHooks();
     await hooks.servedAsks(entry(), server.client, asks({ questions: [question] }));
-    const context = { agentHooks: hooks, modelSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} }, codexQuestions: { answer: vi.fn() } } as never;
+    const context = { agentHooks: hooks, modelSwitcher: { assertAvailable() {} }, settingsSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} }, codexQuestions: { answer: vi.fn() } } as never;
     expect(await paneRoute(context, new URL("http://phren.local/v1/questions/answer"),
       { target, questions: [{ question: "Red or blue?", options: ["Red", "Blue"] }], answers: [{ optionIndexes: [0] }] }, {} as never)).toEqual({ ok: true });
     expect(server.state.answers).toEqual([["que_1", [["Red"]]]]);
@@ -316,7 +316,7 @@ describe("asks", () => {
   it("stops a working served pane from the phone's Esc without typing it", async () => {
     registerPaneServer(paneServersDir(), entry());
     vi.mocked(validateTarget).mockResolvedValueOnce({ agent_status: "working" });
-    const context = { agentHooks: new AgentHooks(), modelSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as never;
+    const context = { agentHooks: new AgentHooks(), modelSwitcher: { assertAvailable() {} }, settingsSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as never;
     expect(await paneRoute(context, new URL("http://phren.local/v1/keys"), { target, keys: ["Escape"] }, {} as never)).toEqual({ ok: true });
     expect(server.state.aborted).toEqual(["ses_root"]);
     expect(keys).toEqual([]);

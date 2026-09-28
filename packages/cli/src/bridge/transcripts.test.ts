@@ -317,7 +317,26 @@ describe("model and effort in effect", () => {
     const claude = { type: "assistant", uuid: "u1", effort: "high", message: { role: "assistant", model: "claude-opus-5-5", content: [{ type: "text", text: "Done." }] } };
     expect(visibleEvent(claude, "claude")).toMatchObject({ effort: "high", message: { model: "claude-opus-5-5" } });
     const codex = { type: "turn_context", timestamp: "t", payload: { model: "gpt-6-sol", effort: "xhigh", cwd: "/private", approval_policy: "never" } };
-    expect(visibleEvent(codex, "codex")).toEqual({ type: "turn_context", timestamp: "t", payload: { model: "gpt-6-sol", effort: "xhigh" } });
+    expect(visibleEvent(codex, "codex")).toEqual({ type: "turn_context", timestamp: "t", payload: { model: "gpt-6-sol", effort: "xhigh", approval_policy: "never" } });
+  });
+});
+
+describe("permission and plan state", () => {
+  it("keeps Claude's permission-mode rows, user-row modes and fast speed, nothing else of the row", () => {
+    expect(visibleEvent({ type: "permission-mode", permissionMode: "plan", sessionId: "s", cwd: "/private" }, "claude")).toEqual({ type: "permission-mode", permissionMode: "plan" });
+    expect(visibleEvent({ type: "permission-mode", permissionMode: "a b" }, "claude")).toBeUndefined();
+    expect(visibleEvent({ type: "user", uuid: "u", permissionMode: "acceptEdits", message: { role: "user", content: "hi" } }, "claude")).toMatchObject({ permissionMode: "acceptEdits" });
+    expect(visibleEvent({ type: "assistant", uuid: "a", message: { role: "assistant", model: "m", usage: { speed: "fast" }, content: [{ type: "text", text: "ok" }] } }, "claude"))
+      .toMatchObject({ message: { usage: { speed: "fast" } } });
+  });
+
+  it("keeps only the safe form of Codex's turn settings", () => {
+    const codex = { type: "turn_context", timestamp: "t", payload: { model: "gpt-6-sol", cwd: "/private", developer_instructions: "secret", approval_policy: "on-request", approvals_reviewer: "auto_review",
+      sandbox_policy: { type: "workspace-write", writable_roots: ["/private"] }, collaboration_mode: { mode: "plan", settings: { developer_instructions: "secret" } } } };
+    expect(visibleEvent(codex, "codex")).toEqual({ type: "turn_context", timestamp: "t", payload: { model: "gpt-6-sol", approval_policy: "on-request",
+      approvals_reviewer: "auto_review", sandbox_policy: { type: "workspace-write" }, collaboration_mode: { mode: "plan" } } });
+    const granular = { type: "turn_context", payload: { model: "m", approval_policy: { granular: { rules: true } } } };
+    expect(visibleEvent(granular, "codex")).toEqual({ type: "turn_context", payload: { model: "m", approval_policy: "granular" } });
   });
 });
 

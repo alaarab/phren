@@ -31,7 +31,7 @@ class FakeAppServer {
         const params = (message.params ?? {}) as Json;
         let result: Json = {};
         if (method === "initialize") result = { userAgent: "fake" };
-        else if (method === "thread/start") result = { thread: { id: "thread-1" }, reasoningEffort: (params.config as Json | undefined)?.model_reasoning_effort ?? null };
+        else if (method === "thread/start") result = { thread: { id: "thread-1" }, model: "gpt-6-luna", reasoningEffort: (params.config as Json | undefined)?.model_reasoning_effort ?? null };
         else if (method === "thread/resume") result = { thread: { id: params.threadId, status: { type: this.threadStatus } } };
         else if (method === "turn/start") result = { turn: { id: `turn-${++this.turns}`, status: "inProgress" } };
         else if (method === "turn/steer") {
@@ -271,6 +271,25 @@ describe.skipIf(process.platform === "win32")("driving the thread", () => {
     const later = fakes[0].sent("turn/start").at(-1)?.params as Json;
     expect(later.model).toBeUndefined();
     expect(later.effort).toBeUndefined();
+  });
+
+  it("sends held permission and plan settings once, merged with a pending model, the plan naming the thread's model", async () => {
+    const entry = await launched();
+    servers.holdSettings(entry, { approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandboxPolicy: { type: "workspaceWrite" } });
+    servers.holdSettings(entry, { collaborationMode: { mode: "plan" } });
+    servers.setNextTurn(entry, "gpt-6-sol", "high");
+    await servers.prompt(entry, "first");
+    expect(fakes[0].sent("turn/start").at(-1)?.params).toMatchObject({ model: "gpt-6-sol", effort: "high", approvalPolicy: "on-request", approvalsReviewer: "auto_review",
+      sandboxPolicy: { type: "workspaceWrite" }, collaborationMode: { mode: "plan", settings: { model: "gpt-6-sol", reasoning_effort: "high", developer_instructions: null } } });
+    servers.holdSettings(entry, { collaborationMode: { mode: "default" } });
+    await servers.prompt(entry, "second");
+    const params = fakes[0].sent("turn/start").at(-1)?.params as Json;
+    expect(params.collaborationMode).toEqual({ mode: "default", settings: { model: "gpt-6-luna", reasoning_effort: null, developer_instructions: null } });
+    expect(params.approvalPolicy).toBeUndefined();
+    await servers.prompt(entry, "third");
+    expect((fakes[0].sent("turn/start").at(-1)?.params as Json).collaborationMode).toBeUndefined();
+    // The registry saves run behind the calls; let them land before teardown.
+    await new Promise(resolve => setTimeout(resolve, 50));
   });
 
   it("declines parked requests before interrupting the running turn", async () => {

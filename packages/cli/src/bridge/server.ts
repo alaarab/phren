@@ -27,6 +27,7 @@ import { TabActivityStore } from "./tab-activity.js";
 import { childAgentTree } from "./transcripts.js";
 import { ModelCatalog } from "./models.js";
 import { ModelSwitcher } from "./model-switch.js";
+import { SettingsSwitcher } from "./settings-switch.js";
 import { SideQuestions } from "./side-questions.js";
 import { AccountUsageReader } from "./usage.js";
 import { ResourceMonitor } from "./resources.js";
@@ -77,6 +78,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   }
   const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
+  const settingsSwitcher = new SettingsSwitcher(agentHooks);
   const sideQuestions = new SideQuestions();
   const contextUsage = new WorkspaceContextUsage();
   const accountUsage = options.accountUsage ?? new AccountUsageReader();
@@ -128,7 +130,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
 
   const stopRetention = modules.has("git") ? await startChangeRetention() : () => {};
   if (modules.has("git")) await rm(path.join(root, "changes-scratch"), { recursive: true, force: true });
-  const streams = transcriptStreams({ modules, agentHooks, codexQuestions, sideQuestions, info, activeCapabilities });
+  const streams = transcriptStreams({ modules, agentHooks, codexQuestions, sideQuestions, settingsSwitcher, info, activeCapabilities });
   const { stream } = streams;
   // The phone's overview, pushed over a WebSocket when it changes.
   const overview = overviewStream({
@@ -138,7 +140,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     resources: () => resources.read(),
   });
   const http = createServer(createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
-    journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
+    journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
     fanoutMessages, canary, streams, returns }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
