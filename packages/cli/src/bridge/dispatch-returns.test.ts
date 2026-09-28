@@ -116,13 +116,18 @@ describe("recording transitions", () => {
     expect(value.worker!.state).toBe("gone");
   });
 
-  it("waits for an idle worker that never started, and upgrades a starting target", () => {
+  it("waits for an idle worker that never started, however long, and upgrades a starting target", () => {
     const starting = { server: "default", workspace: "w1P", tab: "w1P:t2", pane: "w1P:p2", source: "claude" as const, starting: true as const, startingToken: "a".repeat(64) };
     const value = receipt({ target: starting, createdAt: new Date(0).toISOString() });
     observe(value, { state: "idle", session: workerTarget.session, completed: false }, 1000);
     expect(value.worker!.state).toBe("working");
     expect(value.target).toEqual(workerTarget);
+    // No idle guess: a worker never seen working with no finished turn has not returned.
     observe(value, { state: "idle", completed: false }, 10 * 60 * 1000);
+    expect(value.returned).toBeUndefined();
+    // Seen working, then idle with no turn in the transcript, is the old sign it stopped.
+    observe(value, { state: "working" }, 11 * 60 * 1000);
+    observe(value, { state: "idle", completed: false }, 12 * 60 * 1000);
     expect(value.returned).toMatchObject({ state: "done" });
   });
 
@@ -142,7 +147,7 @@ describe("the dispatching Hook's returns loop", () => {
   let remote: Json;
   let local: Json;
   let finalTurn: { completed: boolean; lastAssistant?: string } | undefined;
-  const deliver = vi.fn(async () => ({ delivered: true }));
+  const deliver = vi.fn(async (_target: unknown, _text: string, _id: string) => ({ delivered: true }));
 
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), "phren-returns-")); vi.stubEnv("PHREN_BRIDGE_HOME", root);

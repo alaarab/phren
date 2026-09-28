@@ -36,6 +36,30 @@ export async function opencodeProcessStatus(pids: number[], root = phrenStoreRoo
   return current;
 }
 
+type TurnStamps = { session: string; at: string; busyAt?: string; idleAt?: string };
+
+/** The turn stamps phren's OpenCode plugin last recorded for any of `pids`,
+ * newest first: when the session went busy and when it went idle after that.
+ * Undefined when no file has them (an older plugin). */
+export async function opencodeTurnStamps(pids: number[], root = phrenStoreRoot()): Promise<TurnStamps | undefined> {
+  const folder = path.join(root, ".runtime", "sessions");
+  let current: TurnStamps | undefined, latest = -Infinity;
+  for (const pid of pids.slice(0, 16)) {
+    const file = await open(path.join(folder, `opencode-status-${pid}.json`), "r").catch(() => undefined);
+    if (!file) continue;
+    try {
+      if ((await file.stat()).size > 4_096) continue;
+      const value = object(JSON.parse((await file.readFile()).toString("utf8")));
+      const at = Date.parse(String(value.at));
+      if (typeof value.session !== "string" || !(at > latest)) continue;
+      const busyAt = typeof value.busyAt === "string" ? value.busyAt : undefined, idleAt = typeof value.idleAt === "string" ? value.idleAt : undefined;
+      if (!busyAt && !idleAt) continue;
+      current = { session: value.session, at: String(value.at), ...(busyAt ? { busyAt } : {}), ...(idleAt ? { idleAt } : {}) }; latest = at;
+    } catch { continue; } finally { await file.close(); }
+  }
+  return current;
+}
+
 /** The status a Copilot session log's lines leave the session in; undefined
  * when none of them says. Copilot writes a turn_start/turn_end pair per model
  * call, so only the turn that carried the final answer ends the work. */

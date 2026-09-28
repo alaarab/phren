@@ -8,7 +8,8 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { readFileSync } from "node:fs";
-import { copilotProcessStatus, copilotStatusFromEvents, opencodeProcessStatus } from "./harness-status.js";
+import { copilotProcessStatus, copilotStatusFromEvents, opencodeProcessStatus, opencodeTurnStamps } from "./harness-status.js";
+import { opencodeTurn, turnPhase } from "./turn-records.js";
 import { dialogStatus, notePaneStatus, resetPaneStatus, screenDialog, settleBlockedPane } from "./pane-status.js";
 import { resetTmuxBinary, setTmuxDeps, tmuxHealth, tmuxServers, tmuxSnapshot, tmuxSocketsIn } from "./terminal-tmux.js";
 import { terminalPaneFromEnv } from "./terminal.js";
@@ -144,6 +145,28 @@ describe("OpenCode's status from phren's plugin", () => {
     await event("session.idle", { sessionID: "ses_main1" });
     expect(await status()).toBe("idle");
     expect(await opencodeProcessStatus([process.pid], home)).toBe("idle");
+    // The same transitions stamp the turn dispatch returns read: busy, then idle after it.
+    const stamps = await opencodeTurnStamps([process.pid], home);
+    expect(stamps).toMatchObject({ session: "ses_main1", busyAt: expect.any(String), idleAt: expect.any(String) });
+    expect(Date.parse(stamps!.idleAt!)).toBeGreaterThanOrEqual(Date.parse(stamps!.busyAt!));
+    await handlers["chat.message"]({ sessionID: "ses_main1" }, { message: { id: "msg_2", role: "user" }, parts: [] });
+    const next = await opencodeTurnStamps([process.pid], home);
+    expect(next!.idleAt).toBeUndefined();
+    expect(Date.parse(next!.busyAt!)).toBeGreaterThanOrEqual(Date.parse(stamps!.idleAt!));
+  });
+
+  it("turns the plugin's stamps into a turn record, and an older plugin's record into none", async () => {
+    const folder = path.join(home, ".runtime", "sessions");
+    await mkdir(folder, { recursive: true });
+    await writeFile(path.join(folder, "opencode-status-21.json"), JSON.stringify({ status: "idle", session: "ses_abc", at: "2026-09-01T00:00:02Z",
+      busyAt: "2026-09-01T00:00:01Z", idleAt: "2026-09-01T00:00:02Z" }));
+    await writeFile(path.join(folder, "opencode-status-22.json"), JSON.stringify({ status: "idle", session: "ses_abc", at: "2026-09-01T00:00:03Z" }));
+    await writeFile(path.join(folder, "opencode-status-23.json"), JSON.stringify({ status: "working", session: "ses_abc", at: "2026-09-01T00:00:04Z",
+      busyAt: "2026-09-01T00:00:04Z" }));
+    vi.stubEnv("PHREN_PATH", home);
+    expect(turnPhase((await opencodeTurn([21, 22], "term-o"))!)).toEqual({ phase: "ended", at: "2026-09-01T00:00:02Z" });
+    expect(turnPhase((await opencodeTurn([21, 23], "term-o"))!)).toEqual({ phase: "working", since: "2026-09-01T00:00:04Z" });
+    expect(await opencodeTurn([22], "term-o")).toBeUndefined();
   });
 
   it("takes the newest record among a pane's processes", async () => {
