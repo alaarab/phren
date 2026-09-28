@@ -240,7 +240,11 @@ Codex pane on a Phren-owned app-server has no limit, see below), then
 return to the agent's terminal prompt without approving anything. Answers are
 single use and validated against the exact provider conversation. An opencode
 permission ask is not a lifecycle callback: the plugin writes it under the
-store's `.runtime/approvals`, and the Hook watches that directory, maps the ask
+store's `.runtime/approvals` (OpenCode 1.18 never calls the plugin's
+`permission.ask` hook, so the plugin takes the ask from its `permission.asked`
+event, keeps the card up to 30 minutes while the TUI's own prompt waits, and
+replies to the phone's answer through the process's own API; an answer in the
+TUI withdraws the card), and the Hook watches that directory, maps the ask
 to its pane through the recorded session binding or Herdr's opencode session id,
 and pushes it to registered phones with the ask's title and message. The same
 `POST /v1/approvals/answer` route writes the plugin's answer file.

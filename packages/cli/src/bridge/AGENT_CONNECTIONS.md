@@ -139,8 +139,13 @@ For a registered pane:
   answer. An ask answered in the TUI leaves the list, and its card and push
   binding go with it. The pane's screen is not read for dialogs, and the
   OpenCode plugin writes no request file for a process whose own command line
-  carries the `--port` named by `PHREN_OPENCODE_PORT` (OpenCode 1.18.31 does not
-  call the plugin's `permission.ask` hook at all; older releases did).
+  carries the `--port` named by `PHREN_OPENCODE_PORT`. OpenCode 1.18.31 does not
+  call the plugin's `permission.ask` hook at all (older releases did). For an
+  OpenCode started by hand the plugin relays the `permission.asked` event
+  instead: it writes the same request file (expiring after 30 minutes, since
+  the TUI keeps its own prompt), replies to the answer file's decision with
+  `postSessionIdPermissionsPermissionId` (`once` / `reject`), and removes the
+  file when `permission.replied` says the TUI answered first.
 - `POST /v1/keys`: Escape declines a pending question, or aborts a working
   turn with `session.abort` (a failed abort falls back to the key); a digit
   answers a pending single-question, single-choice set. Other keys go to the

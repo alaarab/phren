@@ -17,6 +17,9 @@ const STOP_REASONS = { stop: "end_turn", "tool-calls": "tool_use", length: "max_
 const OPENCODE_SESSION = /^ses_[0-9A-Za-z]{1,64}$/;
 const APPROVAL_POLL_MS = 200;
 const APPROVAL_DEADLINE_MS = 50_000;
+// An ask relayed from its event blocks nothing: the TUI keeps its own prompt,
+// so the phone's card can wait as long as the ask does.
+const RELAYED_DEADLINE_MS = 30 * 60_000;
 
 function storeRoot() {
   if (PHREN_STORE && !PHREN_STORE.startsWith("__")) return PHREN_STORE;
@@ -250,7 +253,9 @@ function writePidBinding(sessionID) {
  * whose terminal does not watch its agents (tmux); Herdr has its own. */
 const statusFile = () => path.join(storeRoot(), ".runtime", "sessions", `opencode-status-${process.pid}.json`);
 
-export const PhrenTranscriptPlugin = async () => {
+export const PhrenTranscriptPlugin = async input => {
+  // The process's own API, bound to its in-process server (no port needed).
+  const client = input?.client;
   const sessions = new Map();
   // Subagent sessions run inside the same process; the pane shows their parent.
   const children = new Set();
@@ -283,6 +288,51 @@ export const PhrenTranscriptPlugin = async () => {
   const timers = new Map();
   const written = new Map();
   const pendingApprovals = new Set();
+  // Asks the permission.ask hook took (OpenCode before 1.18), and asks relayed
+  // from their event, by id; `done` once the terminal answered one.
+  const hookAsks = new Set();
+  const relayed = new Map();
+
+  /** OpenCode 1.18 never calls the permission.ask hook: its TUI draws the ask
+   * from the `permission.asked` event. For an OpenCode started by hand the ask
+   * goes to the phone through the same request file, and the phone's answer
+   * is replied through this process's own API. Whichever answers first wins;
+   * an answer in the terminal (`permission.replied`) withdraws the card. */
+  const relayAsk = async ask => {
+    const id = text(ask?.id), sessionID = text(ask?.sessionID);
+    if (process.env.PHREN_FANOUT_JOB || !id || hookAsks.has(id) || relayed.has(id) || !OPENCODE_SESSION.test(sessionID)
+      || typeof client?.postSessionIdPermissionsPermissionId !== "function" || servedByHook() || pendingApprovals.has(sessionID)) return;
+    const shown = { type: text(ask.permission) || text(ask.type), pattern: Array.isArray(ask.patterns) ? ask.patterns : ask.pattern,
+      metadata: ask.metadata, title: ask.title };
+    const state = { done: false };
+    relayed.set(id, state); pendingApprovals.add(sessionID);
+    const { request, answer } = approvalPaths(sessionID);
+    try {
+      mkdirSync(approvalDirectory(), { recursive: true });
+      removeFile(answer);
+      const created = Date.now();
+      writeJsonAtomic(request, { id, sessionID, type: shown.type || "action",
+        title: text(shown.title) || `Allow ${shown.type || "action"}?`, message: permissionMessage(shown),
+        createdAt: new Date(created).toISOString(), expiresAt: new Date(created + RELAYED_DEADLINE_MS).toISOString() });
+      let decision;
+      while (!state.done && Date.now() < created + RELAYED_DEADLINE_MS) {
+        await sleep(APPROVAL_POLL_MS);
+        try {
+          const info = lstatSync(answer);
+          if (!info.isFile() || info.size > 65_536) continue;
+          const value = JSON.parse(readFileSync(answer, "utf8"));
+          if (value && value.id === id && (value.decision === "approve" || value.decision === "deny")) { decision = value.decision; break; }
+        } catch {}
+      }
+      if (decision && !state.done) {
+        await client.postSessionIdPermissionsPermissionId({ path: { id: sessionID, permissionID: id },
+          body: { response: decision === "approve" ? "once" : "reject" } });
+      }
+    } catch {} finally {
+      removeFile(answer); removeFile(request);
+      pendingApprovals.delete(sessionID); relayed.delete(id);
+    }
+  };
 
   const sessionState = sessionID => {
     let state = sessions.get(sessionID);
@@ -375,7 +425,7 @@ export const PhrenTranscriptPlugin = async () => {
       // The ask blocks the process until it is answered: here from the
       // phone, or in the terminal (permission.replied below).
       const askId = text(input?.id);
-      if (askId) { asking.add(askId); recordStatus("blocked", text(input?.sessionID)); }
+      if (askId) { hookAsks.add(askId); asking.add(askId); recordStatus("blocked", text(input?.sessionID)); }
       try {
         const sessionID = text(input?.sessionID), id = text(input?.id);
         if (!OPENCODE_SESSION.test(sessionID) || !id || servedByHook()) { setStatus(output, "ask"); return; }
@@ -411,6 +461,7 @@ export const PhrenTranscriptPlugin = async () => {
         if (pendingSession) pendingApprovals.delete(pendingSession);
         // Answered from the phone: back to work. Otherwise the terminal asks.
         if (askId && (decision === "approve" || decision === "deny")) { asking.delete(askId); recordStatus("working", pendingSession); }
+        if (askId) hookAsks.delete(askId);
       }
     },
     event: async ({ event }) => {
@@ -423,9 +474,12 @@ export const PhrenTranscriptPlugin = async () => {
       if (event?.type === "permission.updated" || event?.type === "permission.asked") {
         const id = permissionId(properties);
         if (id) { asking.add(id); recordStatus("blocked", text(sessionID)); }
+        if (event.type === "permission.asked") void relayAsk(properties).catch(() => {});
       } else if (event?.type === "permission.replied") {
         const id = permissionId(properties);
         if (id) asking.delete(id); else asking.clear();
+        const relay = id && relayed.get(id);
+        if (relay) relay.done = true;
         recordStatus("working", text(sessionID));
       }
       if (!OPENCODE_SESSION.test(text(sessionID))) return;
