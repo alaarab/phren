@@ -42,6 +42,8 @@ const KIND_LABEL: Record<NodeKind, string> = {
   task: "task",
   entity: "fragment",
   reference: "reference",
+  topic: "topic",
+  note: "note",
   other: "node",
 };
 

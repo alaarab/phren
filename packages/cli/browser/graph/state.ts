@@ -65,6 +65,8 @@ export const state = {
     task: true,
     entity: true,
     reference: true,
+    topic: true,
+    note: true,
   },
   filterTopics: {} as Record<string, boolean>,
   filterHealth: "all",

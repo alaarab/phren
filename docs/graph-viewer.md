@@ -1,6 +1,6 @@
 # Memory Viewer (3D Graph)
 
-The memory viewer renders your store as a 3D graph, projects as containment fields, findings/tasks/fragments/references as nodes inside them. The same renderer (a shared browser bundle built from `packages/cli/browser/graph/`) powers three hosts:
+The memory viewer renders your store as a 3D graph, projects as containment fields, findings/tasks/fragments/references as nodes inside them. Hosts that build their own payload can also send `topic` (group `"topic"`, hub with `topicSlug` and `refCount`) and `note` (group `"note"`, with `project` and `date`) nodes; `topic:<slug>` groups stay findings. The same renderer (a shared browser bundle built from `packages/cli/browser/graph/`) powers three hosts:
 
 - the **web UI** Graph tab (`phren web-ui`)
 - the **VS Code extension** webview (Phren Fragment Graph panel)

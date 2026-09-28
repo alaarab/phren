@@ -34,7 +34,7 @@ const noStoreColor = () => null;
 
 function filters(overrides: Partial<GraphFilters> = {}): GraphFilters {
   return {
-    filterTypes: { project: true, finding: true, task: true, entity: true, reference: true },
+    filterTypes: { project: true, finding: true, task: true, entity: true, reference: true, topic: true, note: true },
     filterTopics: {},
     filterHealth: "all",
     filterProject: "all",
@@ -125,7 +125,7 @@ describe("adjacency + detail", () => {
   it("ignores links to unknown ids and counts neighbours by kind", () => {
     const m = model();
     expect(m.fullAdjacency.get("p:hub")!.has("ghost")).toBe(false);
-    expect(connectionCounts(m, "p:hub")).toEqual({ total: 4, projects: 0, findings: 2, tasks: 1, entities: 1, references: 0 });
+    expect(connectionCounts(m, "p:hub")).toEqual({ total: 4, projects: 0, findings: 2, tasks: 1, entities: 1, references: 0, topics: 0, notes: 0 });
     expect(connectionCounts(m, "e:1").projects).toBe(2);
   });
 
@@ -136,6 +136,41 @@ describe("adjacency + detail", () => {
     expect(detail.qualityScore).toBe(1); // 0.55 + 0.3 + 0.2 clamps to 1
     expect(detail.health).toBe("healthy");
     expect(nodeDetail(m, "nope")).toBeNull();
+  });
+});
+
+describe("topic and note kinds", () => {
+  const TOPIC: RawNode = { id: "tp:1", label: "Architecture", group: "topic", project: "hub", topicSlug: "architecture", topicLabel: "Architecture", refCount: 9 };
+  const NOTE: RawNode = { id: "n:1", label: "2026-09-28", group: "note", project: "hub", date: "2026-09-28" };
+
+  it("derives topic and note exactly, leaving topic:<slug> a finding", () => {
+    expect(deriveKind(TOPIC)).toBe("topic");
+    expect(deriveKind(NOTE)).toBe("note");
+    expect(deriveKind({ id: "x", label: "x", group: "topic:x" })).toBe("finding");
+  });
+
+  it("colours, sizes and labels them", () => {
+    const topic = normalizeNode(TOPIC, {}, () => null);
+    const note = normalizeNode(NOTE, {}, () => null);
+    expect(topic.baseColor).toBe(TOPIC_COLORS.architecture);
+    expect(note.baseColor).toBe(KIND_COLORS.note);
+    expect(topic.size).toBeGreaterThanOrEqual(11);
+    expect(topic.forceLabel).toBe(true);
+    expect(normalizeNode({ ...TOPIC, refCount: 3 }, {}, () => null).forceLabel).toBe(false);
+    expect(note.forceLabel).toBe(false);
+  });
+
+  it("stay visible under the default filters", () => {
+    const rawNodes = [TOPIC, NOTE].map((node) => normalizeNode(node, {}, noStoreColor));
+    const links = [{ source: "p:hub", target: "tp:1" }, { source: "p:hub", target: "n:1" }];
+    const m = model();
+    m.rawNodes.push(...rawNodes);
+    for (const node of rawNodes) m.nodeById.set(node.id, node);
+    m.fullAdjacency = buildFullAdjacency(m.rawNodes, [...LINKS, ...links]);
+    const visible = m.rawNodes.filter((node) => nodeMatchesFilters(node, filters())).map((node) => node.id);
+    expect(visible).toContain("tp:1");
+    expect(visible).toContain("n:1");
+    expect(connectionCounts(m, "p:hub")).toMatchObject({ topics: 1, notes: 1 });
   });
 });
 
@@ -161,7 +196,7 @@ describe("filters + visibility", () => {
 
   it("hides project nodes with no visible edges once projects are filtered out", () => {
     const m = model();
-    const noProjects = filters({ filterTypes: { project: false, finding: true, task: true, entity: true, reference: true } });
+    const noProjects = filters({ filterTypes: { project: false, finding: true, task: true, entity: true, reference: true, topic: true, note: true } });
     const visible = buildVisibleData(m, noProjects, null);
     expect(visible.nodes.some((node) => node.kind === "project")).toBe(false);
   });
