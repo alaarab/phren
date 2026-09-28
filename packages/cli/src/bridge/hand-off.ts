@@ -9,7 +9,7 @@ import { BridgeError, errorCode, object, objects, sessionId, targetSchema, type 
 import { findPhrenPath } from "../phren-paths.js";
 import { listMachines } from "../profile-store.js";
 import { localNames } from "./computer-names.js";
-import { computerLabel, foldComputers, type PeerFacts } from "./computer-identity.js";
+import { computerLabel, foldComputers, linkedComputer, type PeerFacts } from "./computer-identity.js";
 
 export { computerLabel };
 
@@ -66,9 +66,19 @@ export async function handOff(input: unknown, options: { deliveryId?: string } =
   let peer: HookPeer | undefined;
   if (data.computer === undefined) request = (route, body) => hookRequest(route, body);
   else {
-    peer = (await hookPeers()).find(candidate => candidate.name === data.computer);
-    if (!peer) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
-    request = (route, body) => peerRequest(peer!, route, body);
+    // No hooks.yaml only matters when the name turns out to be another computer.
+    let peersError: unknown;
+    const peers = await hookPeers().catch(error => { peersError = error; return [] as HookPeer[]; });
+    // An alias or hostname (`Mac`, `Desk.local`) names the same computer as its hooks.yaml name.
+    const named = peers.some(candidate => candidate.name === data.computer) ? undefined : await linkedComputer(data.computer).catch(() => undefined);
+    if (named && "local" in named) request = (route, body) => hookRequest(route, body);
+    else {
+      if (peersError) throw peersError;
+      const found = peers.find(candidate => candidate.name === (named && "peer" in named ? named.peer : data.computer));
+      if (!found) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
+      peer = found;
+      request = (route, body) => peerRequest(found, route, body);
+    }
   }
   const resolved = data.target ? undefined : await targetFromOverview(request, data.session!, peer?.server, data.account);
   const target = data.target ?? resolved!.target;
