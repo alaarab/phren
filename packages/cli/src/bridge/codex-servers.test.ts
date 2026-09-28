@@ -159,8 +159,13 @@ describe.skipIf(process.platform === "win32")("launching a pane's Codex server",
     // /resume of an older thread, as the TUI's SessionStart hook reports it.
     expect(servers.follow("default", "w1:p1", "thread-old")).toBe(true);
     expect(servers.follow("default", "w9:p9", "thread-old")).toBe(false);
-    await new Promise(resolve => setTimeout(resolve, 50));
-    expect(await registry(entry)).toMatchObject({ threadId: "thread-old" });
+    // Registry writes are ordered: the file ends on the thread followed last.
+    let saved: Json = {};
+    for (let i = 0; i < 100 && saved.threadId !== "thread-old"; i++) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      saved = await registry(entry).catch(() => ({}));
+    }
+    expect(saved).toMatchObject({ threadId: "thread-old" });
     // Events of the thread it left no longer count.
     fakes[0].send({ id: 12, method: "item/commandExecution/requestApproval", params: { threadId: "thread-2", turnId: "t", itemId: "j" } });
     await new Promise(resolve => setTimeout(resolve, 50));

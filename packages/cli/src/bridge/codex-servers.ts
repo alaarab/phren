@@ -141,6 +141,8 @@ export class CodexServers {
     return () => { this.deps = previous; };
   }
 
+  private readonly saving = new Map<string, Promise<void>>();
+
   setSink(sink: CodexApprovalSink | undefined): void { this.sink = sink; }
 
   entries(): CodexServerEntry[] { return [...this.live.values()].map(live => live.entry); }
@@ -477,8 +479,15 @@ export class CodexServers {
     } catch { return undefined; }
   }
 
-  private async save(entry: CodexServerEntry): Promise<void> {
-    await atomic(path.join(codexServersRoot(), entry.id, "server.json"), entrySchema.parse(entry));
+  /** One server's registry writes run in order, each with the entry as it is
+   * then, so an earlier write that finishes late never lands over a newer one. */
+  private save(entry: CodexServerEntry): Promise<void> {
+    const file = path.join(codexServersRoot(), entry.id, "server.json");
+    const next = (this.saving.get(entry.id) ?? Promise.resolve()).catch(() => undefined)
+      .then(() => atomic(file, entrySchema.parse(entry)));
+    this.saving.set(entry.id, next);
+    void next.catch(() => undefined).finally(() => { if (this.saving.get(entry.id) === next) this.saving.delete(entry.id); });
+    return next;
   }
 }
 
