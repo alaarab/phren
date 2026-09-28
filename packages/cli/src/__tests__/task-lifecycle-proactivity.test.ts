@@ -229,6 +229,22 @@ describe("task lifecycle task proactivity gating", () => {
     });
   }
 
+  // 2026-09-28: a worker launched with its brief as the first prompt filed that
+  // prompt as a task in the real store (bid:11114198). The dispatch tracks it.
+  it.each([
+    "Read and follow the brief in /tmp/phren test/brief's.md",
+    "Read and follow the brief in /home/me/.local/share/phren/bridge/briefs/3f0e9c2a-0000-4000-8000-000000000001/brief.md",
+  ])("never files a launch brief prompt as a task: %s", (prompt) => {
+    process.env.PHREN_PROACTIVITY_TASKS = "high";
+    const result = handleTaskPromptLifecycle({ phrenPath: tmp.path, prompt, project, sessionId: "session-brief", intent: "build", taskLevel: "high" });
+    expect(result.noticeLines).toEqual([]);
+    const tasks = readTasks(tmp.path, project);
+    expect(tasks.ok).toBe(true);
+    if (!tasks.ok) return;
+    expect(tasks.data.items.Queue).toHaveLength(0);
+    expect(tasks.data.items.Active).toHaveLength(0);
+  });
+
   it.each([
     "Investigate ticket 43062 — Power Portal reports tile not loading",
     "Update the regex in src/utils.ts to handle empty input",

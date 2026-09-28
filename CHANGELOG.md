@@ -13,6 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Task auto-capture no longer files a dispatched or scheduled worker's first prompt ("Read and follow the brief in <file>") as a task. The dispatch already tracks that work; since briefs became the launch argument, every dispatched Claude worker filed one.
 - A launch brief's folder appears in `<bridge>/briefs/` only with its `brief.md` already inside. It is filled in `<bridge>/briefs-staging/` and renamed into place. Before, the folder existed for a moment before the file, and a reader that listed `briefs/` then (the dispatch test on a loaded CI runner) found no brief.
 - A dispatched or phone-opened Codex that Herdr has not finished starting gets its first prompt once it is ready. Herdr refused it with "agent w34:p1 is not an active named agent" (`agent_not_ready`, nothing typed). The Hook gave up at once, so the dispatch came back "uncertain" and the worker sat at its prompt with no brief. The first prompt now retries that refusal for up to 20 s, as scheduled runs already did.
 - `phren bridge update` on macOS keeps every LaunchAgent environment variable it doesn't manage. It rewrote the plist and dropped the owner's `PHREN_SPEECH_VOICE`, so talk mode fell back to the default voice. The value moves into the new voice setting, as it also does the first time the Hook reads it from its environment.
