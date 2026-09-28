@@ -4,6 +4,7 @@ import { object, objects, sessionId, type Json } from "./protocol.js";
 import { visibleCodexExecEvent } from "./fanouts.js";
 import { harnessPreamble } from "./transcript-claude.js";
 import type { Entry, LocalChildAgentRelation } from "./transcripts.js";
+import { readableQuestionReply } from "./codex-question-reply.js";
 
 /** Codex's transcript reader: SubAgentActivity child links, the public rows
  * of a rollout, and code-mode calls projected into ordinary tool calls. */
@@ -91,7 +92,11 @@ export function visibleCodexEvent(raw: Json): Json | undefined {
   if (wrapper) return wrapper.images.length ? imageCall(raw, wrapper) : undefined;
   if (p.type === "message" && ["user", "assistant"].includes(String(p.role)) && p.channel !== "analysis") {
     const text = typeof p.content === "string" ? p.content : objects(p.content).map(b => typeof b.text === "string" ? b.text : "").join("\n");
-    return p.role === "user" && harnessPreamble(text) ? undefined : raw;
+    if (p.role === "user" && harnessPreamble(text)) return undefined;
+    // An answer to an async question reads as the question and its answer,
+    // not as the envelope Codex's TUI (or the Hook) sent it in.
+    const answered = p.role === "user" ? readableQuestionReply(text) : undefined;
+    return answered ? { ...raw, payload: { ...p, content: [{ type: "input_text", text: answered }] } } : raw;
   }
   if (["function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output"].includes(String(p.type))) return raw;
   return undefined;

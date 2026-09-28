@@ -168,11 +168,13 @@ No extra request per iPhone row is needed.
   connection and has no chat, transcript, or approvals.
 - Codex/Claude approvals through Phren's lifecycle callbacks while you watch a
   conversation or the foreground session overview. Codex asynchronous questions
-  can be answered in chat when the installed Codex supports its exact-thread
-  inbox command (`codex queue --thread … --message …`). The Hook runs the real
-  `codex` binary for this, skipping the session wrapper `phren init` can put at
-  `~/.local/bin/codex`. Synchronous questions and unsupported provider
-  interactions open in Phren's terminal.
+  can be answered in chat. A Codex pane the Hook runs on its own app-server
+  gets the answer in its running turn (see below). Any other Codex pane needs
+  the installed Codex's exact-thread inbox command (`codex queue --thread …
+  --message …`), which holds the answer until the turn ends. The Hook runs the
+  real `codex` binary for this, skipping the session wrapper `phren init` can
+  put at `~/.local/bin/codex`. On those other panes, synchronous questions and
+  unsupported provider interactions open in Phren's terminal.
 - Git diffs, local HTTP app discovery, and SSH browser previews.
 - The project's code index, when the `code` module is on and the project has
   been indexed: what changed, finding functions and types by name, file outlines,
@@ -298,7 +300,14 @@ instead of a Codex the Hook types into. Conductors keep the typed path.
   grant or none) with no 55-second hold: the card stays until someone answers.
   Answered in the pane's TUI first, the card goes away. The PermissionRequest
   callback for these threads returns at once, so there is one card, not two.
-  Questions (`request_user_input`) and MCP elicitations stay in the pane.
+- **Questions.** An async question (`request_user_input_async`) is answered by
+  a `turn/steer` into the running turn with Codex's own
+  `<send_user_message_question_reply>` message, as the TUI sends it (a new
+  turn when none is running). A synchronous `request_user_input` and a form MCP
+  elicitation with single-value fields (text, number, yes/no, one choice) are
+  question cards in chat, answered as the reply to that server request.
+  Secret inputs, URL elicitations and multi-select fields stay in the pane.
+  Chat shows a question reply as the question and its answer.
 - **Escape.** `/v1/keys` Escape on such a pane with a running turn declines the
   thread's parked requests, then interrupts the turn (`turn/interrupt`).
 - **Restart.** Servers outlive the Hook. A restarted Hook reads
@@ -315,8 +324,7 @@ instead of a Codex the Hook types into. Conductors keep the typed path.
 on the typed path. A server that fails to start falls back to it for that
 launch.
 
-Known gaps: questions and MCP elicitations are answered in the pane only; all
-servers share one `CODEX_HOME` (one sign-in, one refresh token).
+Known gap: all servers share one `CODEX_HOME` (one sign-in, one refresh token).
 
 ### Approval push with your own APNs key
 

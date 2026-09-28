@@ -16,6 +16,8 @@ class FakeAppServer {
   readonly sockets: WebSocket[] = [];
   readonly received: Json[] = [];
   threadStatus = "idle";
+  /** The turn `turn/steer` accepts; any other expected turn is refused. */
+  running?: string;
   private turns = 0;
 
   constructor() {
@@ -32,6 +34,10 @@ class FakeAppServer {
         else if (method === "thread/start") result = { thread: { id: "thread-1" }, reasoningEffort: (params.config as Json | undefined)?.model_reasoning_effort ?? null };
         else if (method === "thread/resume") result = { thread: { id: params.threadId, status: { type: this.threadStatus } } };
         else if (method === "turn/start") result = { turn: { id: `turn-${++this.turns}`, status: "inProgress" } };
+        else if (method === "turn/steer") {
+          if (params.expectedTurnId !== this.running) { socket.send(JSON.stringify({ id, error: { code: -32600, message: "no active turn to steer" } })); return; }
+          result = { turnId: params.expectedTurnId };
+        }
         socket.send(JSON.stringify({ id, result }));
       });
     });
@@ -207,6 +213,29 @@ describe.skipIf(process.platform === "win32")("driving the thread", () => {
     await until(() => resolved.length === 1, "the resolution");
     expect(resolved[0]).toEqual({ target, requestId: 9 });
     expect(entry.threadId).toBe("thread-1");
+  });
+
+  it("steers an answer into the running turn, starts one when that turn has ended, and answers parked questions", async () => {
+    const entry = await launched();
+    fakes[0].running = "turn-5";
+    fakes[0].send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-5" } } });
+    await until(() => entry.activeTurn === "turn-5", "the running turn");
+    expect(await servers.steer(entry, "an answer")).toEqual({ turnId: "turn-5" });
+    expect(fakes[0].sent("turn/steer")[0].params).toEqual({ threadId: "thread-1", expectedTurnId: "turn-5", input: [{ type: "text", text: "an answer", text_elements: [] }] });
+    expect(fakes[0].sent("turn/start")).toEqual([]);
+    fakes[0].running = undefined;
+    expect(await servers.steer(entry, "a late answer")).toEqual({ turnId: "turn-1" });
+    expect(fakes[0].sent("turn/start")[0].params).toMatchObject({ threadId: "thread-1", input: [{ type: "text", text: "a late answer" }] });
+
+    fakes[0].send({ id: 21, method: "item/tool/requestUserInput", params: { threadId: "thread-1", turnId: "turn-5", itemId: "i", isBlocking: true, questions: [] } });
+    fakes[0].send({ id: 22, method: "item/tool/requestUserInput", params: { threadId: "another", turnId: "t", itemId: "j", isBlocking: true, questions: [] } });
+    fakes[0].send({ id: 23, method: "item/commandExecution/requestApproval", params: { threadId: "thread-1", turnId: "turn-5", itemId: "k" } });
+    await until(() => requests.length === 2, "the thread's question and approval");
+    expect(servers.questions(entry).map(request => request.requestId)).toEqual([21]);
+    expect(servers.answerQuestion(entry, 21, { answers: {} })).toBe(true);
+    await until(() => fakes[0].received.some(message => message.id === 21 && !message.method), "the answer");
+    expect(fakes[0].received.find(message => message.id === 21 && !message.method)).toEqual({ id: 21, result: { answers: {} } });
+    expect(servers.answerQuestion(entry, 21, { answers: {} })).toBe(false);
   });
 
   it("declines parked requests before interrupting the running turn", async () => {
