@@ -129,10 +129,15 @@ export type DeliveryOutcome = "delivered" | "blocked" | "pending";
 interface Delivery { source: Provider; session: string; settle: (outcome: DeliveryOutcome) => void; timer: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
 
 /** What the agent hands its UserPromptSubmit hook is the terminal's pasted
- * form of what Phren typed; compare the words, not the wrapping. */
+ * form of what Phren typed; compare the words, not the wrapping. Claude Code
+ * also takes each attached picture's path line out of the text and puts an
+ * "[Image #N]" label at the front, so neither side keeps picture paths or
+ * labels. */
 function promptKey(text: string): string {
-  return unwrapPastedContent(text).replace(/\s+/g, " ").trim();
+  return unwrapPastedContent(text).split("\n").filter(line => !PICTURE_PATH_LINE.test(line)).join("\n")
+    .replace(/\[Image #\d+\]/g, " ").replace(/\s+/g, " ").trim();
 }
+const PICTURE_PATH_LINE = /^\s*\/.*\.(?:png|jpe?g|gif|webp)\s*$/i;
 
 /** This socket is deliberately separate from the phone's HTTP pipe. Only local
  * agent callbacks can register identities or create an approval request. */

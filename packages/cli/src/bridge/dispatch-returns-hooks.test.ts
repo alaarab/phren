@@ -251,6 +251,14 @@ describe.skipIf(process.platform === "win32")("the Hook recording a worker's tur
     expect(turnPhase((await readTurn("default", "w1:p2"))!)).toMatchObject({ phase: "ended", background: 1, reply: "Started the suite." });
   });
 
+  it("confirms a picture send, which Claude submits with an [Image #N] label in place of its path", async () => {
+    await post({ target, event: "SessionStart" });
+    const typed = "Look at this probe picture\n\nAttached files on this computer:\n/Users/me/.local/share/phren/bridge/uploads/s/1c74-Screen Shot.png";
+    const delivery = hooks.expectDelivery(target, typed);
+    expect(await post({ target, event: "UserPromptSubmit", prompt: "[Image #26]Look at this probe picture\nAttached files on this computer:" })).toBe("{}");
+    expect(await delivery).toBe("delivered");
+  });
+
   it("records no turn for a prompt it refused because it was meant for another conversation", async () => {
     await post({ target, event: "SessionStart" });
     const meant = { ...target, session: "00000009-1111-4111-8111-111111111111" };
