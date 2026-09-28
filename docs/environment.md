@@ -155,8 +155,9 @@ Feature flags follow a convention: set to `0`, `false`, `off`, or `no` to disabl
 ### Phren Hook locations
 
 The optional iPhone helper is installed with `phren bridge install`; it uses
-`PHREN_SPEECH_VOICE` to choose the ElevenLabs voice id for talk mode's spoken replies
-(`POST /v1/speech`; the default is River), `ELEVENLABS_API_KEY` for the ElevenLabs key
+`PHREN_SPEECH_VOICE` only as a legacy ElevenLabs voice id for talk mode when
+`phren bridge speech-voice set` has stored none (it is then copied into
+`~/.local/share/phren/bridge/speech.json`; the default is River), `ELEVENLABS_API_KEY` for the ElevenLabs key
 behind spoken replies and Scribe dictation (it wins over the stored
 `~/.local/share/phren/bridge/elevenlabs.json`, which `phren bridge speech-key set`
 writes; the Hook service doesn't see shell env, so store the key there too), `PHREN_BRIDGE_HOME` to override `~/.local/share/phren/bridge` for isolated tests,

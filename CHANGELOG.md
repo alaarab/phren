@@ -5,8 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- `phren bridge speech-voice [show | set <voice-id> | clear]` stores the ElevenLabs voice talk mode speaks with in the Hook's own directory (`speech.json`). The Hook reads it on every reply and install and update keep it. `POST /v1/speech` takes a `voice` the phone picked, and `GET /v1/speech/voices` (capability `speechVoices`) lists the account's voices for a picker. New computers still speak with River.
+
 ### Fixed
 
+- `phren bridge update` on macOS keeps every LaunchAgent environment variable it doesn't manage. It rewrote the plist and dropped the owner's `PHREN_SPEECH_VOICE`, so talk mode fell back to the default voice. The value moves into the new voice setting, as it also does the first time the Hook reads it from its environment.
 - A message sent from the phone to a Claude agent that is mid-turn is confirmed as delivered again. Since phren-apps #62 the phone needs `delivered: true`, but the Hook waited only 300 ms on a working pane and Claude runs UserPromptSubmit about 340 ms after a mid-turn message is typed. Every such send came back as a bare `ok`, and the phone showed "Delivery wasn't confirmed" and "Not confirmed in chat" until the queued row landed. A working Claude now gets the same 1.5 s wait as an idle one; the wait ends when the hook arrives.
 - Dispatch resolves a project to this computer's folder the way the rest of phren does: the store's `sourcePaths` entry for this machine wins over the shared `sourcePath`, and with neither here a `~/Projects/<name>` git checkout is used. Linuxbox had refused project `phren` with "Project is not on this computer" even after `sourcePaths: omarchy:` was added.
 - A dispatched Codex or Claude that has no conversation until its first prompt now gets its brief on its starting binding. Before, the dispatch waited 15 s for a session and left the pane idle with the brief unsent and the receipt "uncertain".

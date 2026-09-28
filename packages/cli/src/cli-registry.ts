@@ -211,7 +211,7 @@ export const REGISTRY: Command[] = [
     },
   },
   {
-    name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall|enroll-computer|discover|link|fanouts archive|speech-key set>",
+    name: "bridge", topic: "setup", usage: "phren bridge <install|status|doctor|update|rollback|uninstall|enroll-computer|discover|link|fanouts archive|speech-key set|speech-voice>",
     summary: "Install Phren Hook and enroll phone or computer connections",
     subcommands: [
       { name: "enroll-computer", usage: "phren bridge enroll-computer <name> [--accept <public-key-file>]", summary: "Print or accept a restricted computer dispatch key" },
@@ -219,6 +219,7 @@ export const REGISTRY: Command[] = [
       { name: "link", usage: "phren bridge link <ssh-host> [--name <name>] [--as <name>] [--back-address <address>] [--yes]", summary: "Link this computer and an ssh host both ways in one step, after confirming" },
       { name: "fanouts archive", usage: "phren bridge fanouts archive [--dry-run] [--parent <session-id>] [--older-than <minutes>]", summary: "Archive finished fan-out jobs older than 24 hours, or one parent chat's, or older than N minutes" },
       { name: "speech-key set", usage: "phren bridge speech-key set", summary: "Store this computer's ElevenLabs key for spoken replies and dictation (read from stdin, mode 600)" },
+      { name: "speech-voice", usage: "phren bridge speech-voice [show | set <voice-id> | clear]", summary: "Show or set the ElevenLabs voice talk mode speaks with; kept across install and update" },
     ],
     run: async args => {
       const { runBridge } = await import("./bridge/command.js");

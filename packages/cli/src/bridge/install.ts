@@ -12,6 +12,7 @@ import { promisify } from "node:util";
 import { bridgeRoot, object, objects, atomic, socketPath } from "./protocol.js";
 import { herdrRoot } from "./herdr.js";
 import { health } from "./transport.js";
+import { readStoredVoice, SPEECH_VOICE_ENV, writeSpeechVoice } from "./speech-voice.js";
 
 const exec = promisify(execFile);
 const label = "com.phren.hook";
@@ -52,6 +53,34 @@ export function upgradeKeys(text: string): { text: string; changed: number } {
 }
 const quote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
 const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/** The service environment install writes. Any other key in an existing
+ * LaunchAgent (a voice, a proxy, an API override someone added by hand) is
+ * kept: before, `phren bridge update` rewrote the plist and dropped it. */
+const MANAGED_ENVIRONMENT = new Set(["PATH", "PHREN_BRIDGE_HOME", "PHREN_HERDR_HOME", "PHREN_PATH", "PHREN_PROFILE"]);
+
+/** The existing LaunchAgent's own EnvironmentVariables beyond phren's, read
+ * with plutil. A missing or unreadable plist has none. */
+export async function extraLaunchAgentEnvironment(file: string,
+  read: (file: string) => Promise<string> = async f => (await exec("plutil", ["-convert", "json", "-o", "-", f])).stdout): Promise<Record<string, string>> {
+  let parsed: unknown;
+  try { parsed = JSON.parse(await read(file)); } catch { return {}; }
+  const extra: Record<string, string> = {};
+  for (const [key, value] of Object.entries(object(object(parsed).EnvironmentVariables))) {
+    if (!MANAGED_ENVIRONMENT.has(key) && /^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key) && typeof value === "string") extra[key] = value;
+  }
+  return extra;
+}
+
+export interface LaunchAgentValues { label: string; node: string; program: string; path: string; root: string; herdr: string; store: string; profile: string }
+
+/** The Hook's LaunchAgent: phren's own environment first, then every kept key. */
+export function launchAgentXml(values: LaunchAgentValues, extra: Record<string, string> = {}): string {
+  const environment: [string, string][] = [["PATH", values.path], ["PHREN_BRIDGE_HOME", values.root], ["PHREN_HERDR_HOME", values.herdr],
+    ["PHREN_PATH", values.store], ["PHREN_PROFILE", values.profile], ...Object.entries(extra).filter(([key]) => !MANAGED_ENVIRONMENT.has(key))];
+  const env = environment.map(([key, value]) => `<key>${xml(key)}</key><string>${xml(value)}</string>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${xml(values.label)}</string><key>ProgramArguments</key><array><string>${xml(values.node)}</string><string>${xml(values.program)}</string><string>serve</string></array><key>Umask</key><integer>63</integer><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>5</integer><key>Nice</key><integer>-5</integer><key>EnvironmentVariables</key><dict>${env}</dict><key>StandardErrorPath</key><string>${xml(path.join(values.root, "service.log"))}</string></dict></plist>\n`;
+}
 const systemdQuote = (s: string) => '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%") + '"';
 
 /** The forwarder the forced command uses for the phone's byte pipe. */
@@ -196,7 +225,11 @@ export async function install(version: string, noService = false): Promise<void>
   if (!noService) {
     if (process.platform === "darwin") {
       const folder = path.join(homedir(), "Library/LaunchAgents"); await mkdir(folder, { recursive: true });
-      await atomic(path.join(folder, `${label}.plist`), `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>${xml(program)}</string><string>serve</string></array><key>Umask</key><integer>63</integer><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>5</integer><key>Nice</key><integer>-5</integer><key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(environmentPath)}</string><key>PHREN_BRIDGE_HOME</key><string>${xml(root)}</string><key>PHREN_HERDR_HOME</key><string>${xml(herdr)}</string><key>PHREN_PATH</key><string>${xml(modules.store)}</string><key>PHREN_PROFILE</key><string>${xml(modules.profile)}</string></dict><key>StandardErrorPath</key><string>${xml(path.join(root, "service.log"))}</string></dict></plist>\n`);
+      const plist = path.join(folder, `${label}.plist`);
+      const extra = await extraLaunchAgentEnvironment(plist);
+      // The talk-mode voice used to live only here; it moves to the Hook's own setting.
+      if (extra[SPEECH_VOICE_ENV] && !(await readStoredVoice())) await writeSpeechVoice(extra[SPEECH_VOICE_ENV]).catch(() => {});
+      await atomic(plist, launchAgentXml({ label, node: process.execPath, program, path: environmentPath, root, herdr, store: modules.store, profile: modules.profile }, extra));
     } else {
       const folder = path.join(homedir(), ".config/systemd/user"); await mkdir(folder, { recursive: true });
       await atomic(path.join(folder, unit), `[Unit]\nDescription=Phren Hook\n[Service]\nExecStart=${systemdQuote(process.execPath)} ${systemdQuote(program)} serve\nNice=-5\nEnvironment=${systemdQuote("PATH=" + environmentPath)} ${systemdQuote("PHREN_BRIDGE_HOME=" + root)} ${systemdQuote("PHREN_HERDR_HOME=" + herdr)} ${systemdQuote("PHREN_PATH=" + modules.store)} ${systemdQuote("PHREN_PROFILE=" + modules.profile)}\nRestart=on-failure\nRestartSec=3\nUMask=0077\n[Install]\nWantedBy=default.target\n`);
