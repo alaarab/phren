@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
+import { BridgeError } from "./protocol.js";
 import { CLAUDE_MENU, claudeName, ModelCatalog, readClaudeModels, readOpenCodeModels } from "./models.js";
 
 vi.mock("node:child_process", async importOriginal => {
@@ -89,6 +90,28 @@ describe("model catalogue", () => {
     expect(await catalog.list("codex")).toEqual([{ id: "gpt-x", name: "X" }]);
     expect(calls).toBe(1);
     expect(await catalog.list("copilot")).toEqual([]);
+  });
+
+  it("keys the cache by source and account and reads the account's own home", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "phren-acct-models-")), previous = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      await mkdir(path.join(home, ".claude-work"), { recursive: true });
+      await writeFile(path.join(home, ".claude-work", ".claude.json"), "{}");
+      const dirs: (string | undefined)[] = [];
+      const catalog = new ModelCatalog(async () => [], async dir => { dirs.push(dir); return [{ id: `m-${dir ?? "default"}`, name: "M" }]; });
+      await catalog.list("claude"); await catalog.list("claude", "default"); await catalog.list("claude", "work"); await catalog.list("claude", "work");
+      expect(dirs).toEqual([undefined, path.join(home, ".claude-work")]);
+      expect((await catalog.list("claude", "work"))[0].id).toContain(".claude-work");
+      const unknown = await catalog.list("claude", "nope").catch(error => error);
+      expect(unknown).toBeInstanceOf(BridgeError);
+      expect(unknown).toMatchObject({ status: 404, details: { code: "account_unavailable" } });
+      await expect(catalog.list("codex", "work")).rejects.toMatchObject({ details: { code: "account_unavailable" } });
+      expect(await catalog.list("codex", "default")).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env.HOME; else process.env.HOME = previous;
+      await rm(home, { recursive: true, force: true });
+    }
   });
 
   // The fake opencode is a /bin/sh script, which Windows cannot execute.

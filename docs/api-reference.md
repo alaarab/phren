@@ -33,6 +33,8 @@ directly. The local Hook must be running. Enroll the sender's computer key on th
 receiver with `phren bridge enroll-computer <name>` and its `--accept` command,
 then configure verified SSH peers in the local Hook's private `hooks.yaml`.
 See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
+`phren bridge accounts` lists this computer's harnesses and Claude accounts; see
+[Accounts](accounts.md).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -171,9 +173,9 @@ history.
 
 ## Model catalogue
 
-`GET /v1/models?source=<codex|claude|opencode>` on Phren Hook returns the
+`GET /v1/models?source=<codex|claude|opencode>[&account=<id>]` on Phren Hook returns the
 `/model` menu of the agent that source names, shaped as
-`{ "models": [ { "id", "name", "description", "isDefault" } ] }`:
+`{ "models": [ { "id", "name", "description", "isDefault" } ] }`. `account` names a Claude home (default `default`) and reads that home's catalogue cache; an account that is not on this computer, or a non-default one for another source, answers 404 with `code: "account_unavailable"`:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -1218,7 +1220,7 @@ the conversation.
 
 ### `GET /v1/usage`
 
-Account limits and spend for the phone's Account usage screen: `{accounts: [...]}`, each account carrying `source` (`codex`, `claude`, `opencode`, `opencode-go`, `openrouter`, `copilot`), `windows`, optional `updatedAt`, `message`, `spend`, `accountName`, `accountId` and, for Claude, `origin`. The optional `?sources=` comma list names the sources the phone understands; an older phone that sends none gets the original four so it never meets a source it cannot read. `copilot` is GitHub Copilot's own quota report read through the GitHub CLI's sign-in (`gh api /copilot_internal/user`): one window per limited quota (premium requests) with its monthly reset, unlimited quotas named in `message`; the token never reaches Phren. OpenCode Go's windows come from Go's own account report (`GET https://opencode.ai/zen/go/v1/usage`, with the local Go key sent only there): `opencode-go:plan:5h|7d|30d` with `usedPercent`, `resetsAt` and `limited: true` while Go refuses requests on that window. They are account-wide, so they already count every computer. They carry no dollar amounts, and are sent only with `?goPlan=1`, since older phones reject a Go window with a percentage and no dollar limit. The Go account's `message` says which limit is reached and how many requests OpenCode's own log shows refused with "usage limit exceeded" in the last day. The log is read incrementally; the first read covers at most its last 64 MB. With `?peers=1` the answer adds `computer` and `peers: [{name, computer, accounts} | {name, error, code?}]`, each linked computer's own answer over its pinned SSH pipe.
+Account limits and spend for the phone's Account usage screen: `{accounts: [...]}`, each account carrying `source` (`codex`, `claude`, `opencode`, `opencode-go`, `openrouter`, `copilot`), `windows`, optional `updatedAt`, `message`, `spend`, `accountName`, `accountId`, for Claude `origin`, and `account: {id, label, key}` on Claude and Codex rows. By default there is one `claude` row, the default home; `?accounts=all` adds one row per extra Claude home (`~/.claude-<id>`), default first, since a phone built before accounts refuses two rows of one source. Extra homes have no live read on macOS and use the status-line snapshot (`usage/claude-<id>.json`) plus their own `.claude.json`. The optional `?sources=` comma list names the sources the phone understands; an older phone that sends none gets the original four so it never meets a source it cannot read. `copilot` is GitHub Copilot's own quota report read through the GitHub CLI's sign-in (`gh api /copilot_internal/user`): one window per limited quota (premium requests) with its monthly reset, unlimited quotas named in `message`; the token never reaches Phren. OpenCode Go's windows come from Go's own account report (`GET https://opencode.ai/zen/go/v1/usage`, with the local Go key sent only there): `opencode-go:plan:5h|7d|30d` with `usedPercent`, `resetsAt` and `limited: true` while Go refuses requests on that window. They are account-wide, so they already count every computer. They carry no dollar amounts, and are sent only with `?goPlan=1`, since older phones reject a Go window with a percentage and no dollar limit. The Go account's `message` says which limit is reached and how many requests OpenCode's own log shows refused with "usage limit exceeded" in the last day. The log is read incrementally; the first read covers at most its last 64 MB. With `?peers=1` the answer adds `computer` and `peers: [{name, computer, accounts} | {name, error, code?}]`, each linked computer's own answer over its pinned SSH pipe.
 
 ### `GET /v1/resources`
 

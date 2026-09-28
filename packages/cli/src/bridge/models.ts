@@ -3,7 +3,8 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { claudeConfigDir } from "../home-paths.js";
 import path from "node:path";
-import { object, objects, type Json } from "./protocol.js";
+import { BridgeError, object, objects, type Json } from "./protocol.js";
+import { claudeHome, DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { codexExecutable } from "./codex-binary.js";
 
 /** One entry of a `/model` menu as the phone draws it. */
@@ -207,16 +208,28 @@ export function claudeName(id: string): string {
   return id.endsWith("[1m]") ? `${name} (1M context)` : name;
 }
 
-/** Catalogues change rarely and app-server takes seconds to start. */
+/** The account a request names is not one on this computer (or has no catalogue for that source). */
+export const accountUnavailable = (account: string) =>
+  new BridgeError(404, `"${account}" is not an account on this computer.`, { code: "account_unavailable" });
+
+/** Catalogues change rarely and app-server takes seconds to start. Cached per
+ * `${source}:${account}`; only Claude has accounts, each reading its own home. */
 export class ModelCatalog {
   private cache = new Map<string, { at: number; value: Promise<AgentModel[]> }>();
-  constructor(private readonly codex = () => readCodexModels(), private readonly claude = () => readClaudeModels(),
+  constructor(private readonly codex = () => readCodexModels(), private readonly claude: (configDir?: string) => Promise<AgentModel[]> = dir => readClaudeModels(dir),
               private readonly opencode = () => readOpenCodeModels(), private readonly cacheMs = 600_000) {}
-  list(source: string): Promise<AgentModel[]> {
-    const cached = this.cache.get(source);
+  list(source: string, account?: string): Promise<AgentModel[]> {
+    const id = account?.trim() || DEFAULT_ACCOUNT;
+    let dir: string | undefined;
+    if (source === "claude") {
+      const home = claudeHome(id);
+      if (!home) return Promise.reject(accountUnavailable(id));
+      dir = home.isDefault ? undefined : home.dir;
+    } else if (id !== DEFAULT_ACCOUNT) return Promise.reject(accountUnavailable(id));
+    const key = `${source}:${id}`, cached = this.cache.get(key);
     if (cached && Date.now() - cached.at < this.cacheMs) return cached.value;
-    const value = (source === "codex" ? this.codex() : source === "claude" ? this.claude() : source === "opencode" ? this.opencode() : Promise.resolve([])).catch(() => [] as AgentModel[]);
-    this.cache.set(source, { at: Date.now(), value });
+    const value = (source === "codex" ? this.codex() : source === "claude" ? this.claude(dir) : source === "opencode" ? this.opencode() : Promise.resolve([])).catch(() => [] as AgentModel[]);
+    this.cache.set(key, { at: Date.now(), value });
     return value;
   }
 }

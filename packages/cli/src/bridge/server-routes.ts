@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { harnessInventory, harnessInventoryWithin } from "./harnesses.js";
 import path from "node:path";
 import { z } from "zod";
 import { saveCodeNote } from "./code-note.js";
@@ -21,7 +22,7 @@ import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { storeRoute } from "./memory-store.js";
-import { paneChatState, panes, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
+import { paneAccountField, paneChatState, panes, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { gitRoot, launchDirectory, repositoryBranch, webServers } from "./projects.js";
@@ -200,6 +201,8 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       if (agents.length !== 1) continue;
       const chat = chatStates.get(agents[0]);
       if (chat?.starting === true) tab.starting = true;
+      // After the identity probe above, which is what learns a pane's transcript.
+      Object.assign(tab, paneAccountField(server, agents[0]));
       if (typeof chat?.sessionId === "string" && provider.safeParse(agents[0].agent).success) {
         tab.target = { server, workspace: group.id, tab: tab.id, pane: agents[0].pane_id, source: agents[0].agent, session: chat.sessionId };
       }
@@ -291,11 +294,14 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/conductor/grants": result = { grants: await listGrants() }; break;
           // Asked by linked peers before they start a conductor: one per connected group.
           case "/v1/conductor": result = { computer: info.computer, conductor: await localConductor() ?? null }; break;
+          case "/v1/harnesses": result = await harnessInventory(); break;
           case "/v1/dispatch/capacity": {
             const live = await servers();
             const snapshots = await Promise.all(live.map(server => snapshot(String(server.session))));
             result = { product: "phren-hook", protocol: PROTOCOL, computer: info.computer, servers: live.map(server => server.session),
-              working: snapshots.reduce((sum, value) => sum + objects(value.panes).filter(pane => pane.agent && pane.agent_status === "working").length, 0) };
+              working: snapshots.reduce((sum, value) => sum + objects(value.panes).filter(pane => pane.agent && pane.agent_status === "working").length, 0),
+              // Bounded so a peer's capacity probe never waits on a cold `claude auth status`; missing means unknown.
+              ...await harnessInventoryWithin(2_500).then(inventory => inventory ? { harnesses: inventory.harnesses } : {}) };
             break;
           }
           case "/v1/speech/voices": {
@@ -337,7 +343,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
               url.searchParams.get("version") ?? undefined);
             break;
           }
-          case "/v1/models": result = { models: await modelCatalog.list(String(url.searchParams.get("source") ?? "")) }; break;
+          case "/v1/models": result = { models: await modelCatalog.list(String(url.searchParams.get("source") ?? ""), url.searchParams.get("account") ?? undefined) }; break;
           case "/v1/projects/files": {
             const candidates = await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent());
             const directory = url.searchParams.get("directory");
@@ -361,11 +367,14 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             // they go only to callers that ask with `goPlan=1`; others keep the
             // Go account and its message without windows.
             const goPlan = url.searchParams.get("goPlan") === "1";
-            const usage = await accountUsage.read(known);
+            // Likewise one `claude` row: a phone that shipped before accounts refuses
+            // two rows with one source, so extra Claude homes come only with `accounts=all`.
+            const allAccounts = url.searchParams.get("accounts") === "all";
+            const usage = await accountUsage.read(known, allAccounts);
             result = { ...usage, accounts: usageForCaller(usage.accounts, known, goPlan) };
             // `peers=1` (the memory-free `phren usage`): each linked computer's own answer too.
             if (url.searchParams.get("peers") === "1") result = { ...result as Json, computer: info.computer,
-              ...await fromPeers(`/v1/usage?${new URLSearchParams({ sources: [...known].join(","), ...(goPlan ? { goPlan: "1" } : {}) })}`) };
+              ...await fromPeers(`/v1/usage?${new URLSearchParams({ sources: [...known].join(","), ...(goPlan ? { goPlan: "1" } : {}), ...(allAccounts ? { accounts: "all" } : {}) })}`) };
             break;
           }
           case "/v1/resources": {
