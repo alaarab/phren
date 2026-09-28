@@ -13,6 +13,7 @@ import { intervalFromEnv } from "./limits.js";
 import { countHerdr, countIdentity } from "./metrics.js";
 import { phrenStoreRoot } from "./transcripts.js";
 import { assignDaemonConversation, daemonRollouts, processTable, sameDirectory, startedAt, type CodexPaneStart } from "./codex-daemon.js";
+import { codexServers } from "./codex-servers.js";
 
 // terminal.ts and terminal-tmux.ts import this module, so it reaches them at
 // call time; a static import back would be an import cycle.
@@ -281,7 +282,10 @@ async function resolveIdentity(server: string, pane: Json, fresh: boolean): Prom
   const reported = object(pane.agent_session);
   // Copilot's report lags a conversation switch (see copilotForegroundSession);
   // its own process log is read first and the report is the fallback.
-  if (pane.agent !== "copilot" && reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) { countIdentity("reported"); return { sessionId: reported.value }; }
+  // A Codex pane on the Hook's own app-server: the registry follows `/new`
+  // and `/resume` as they happen, while Herdr's report waits for a hook.
+  const owned = pane.agent === "codex" && !!codexServers.forPane(server, String(pane.pane_id))?.threadId;
+  if (pane.agent !== "copilot" && !owned && reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) { countIdentity("reported"); return { sessionId: reported.value }; }
   const pids = await foregroundPids(server, pane);
   const key = identityKey(server, pane, pids);
   const cached = identities.get(key);
@@ -368,6 +372,15 @@ async function identityFromProcesses(server: string, pane: Json, pids: number[])
     const reported = object(pane.agent_session);
     if (reported.kind === "id" && reported.agent === "copilot" && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) return { sessionId: reported.value, noTranscriptLogs: false };
   }
+  if (pane.agent === "codex") {
+    // A pane the Hook launched on its own app-server shows the thread the
+    // Hook started, while its TUI still runs against that server's socket.
+    const owned = codexServers.forPane(server, String(pane.pane_id));
+    if (owned?.threadId) {
+      const rows = await processTable();
+      if (rows.some(row => pids.includes(row.pid) && row.command.includes(`unix://${owned.socket}`))) return { sessionId: owned.threadId, noTranscriptLogs: false };
+    }
+  }
   const files = await processLogs(pids);
   const candidates = files.flatMap(file => {
     const match = pane.agent === "codex" ? (/rollout-.*-([a-f0-9-]{36})\.jsonl$/i.exec(file) ?? /thread-writer-locks\/([a-f0-9-]{36})\.lock$/i.exec(file))
@@ -415,7 +428,8 @@ async function codexDaemonIdentity(server: string, pane: Json, pids: number[]): 
   // time. Their bindings are not trusted here: before this fix the daemon's
   // hooks wrote them for the pane that started the daemon.
   const s = await (await terminal()).terminalProvider().snapshot(server).catch(() => ({} as Json));
-  const claimed = new Set<string>(), rivals: CodexPaneStart[] = [];
+  // Threads the Hook's own app-servers run belong to their own panes.
+  const claimed = new Set<string>(codexServers.entries().flatMap(entry => entry.threadId ? [entry.threadId] : [])), rivals: CodexPaneStart[] = [];
   for (const peer of objects(s.panes).filter(p => p.agent === "codex" && p.pane_id !== pane.pane_id).slice(0, 16)) {
     if (!await sameDirectory(paneCwd(peer), cwd)) continue;
     const peerPids = await foregroundPids(server, peer).catch(() => [] as number[]);

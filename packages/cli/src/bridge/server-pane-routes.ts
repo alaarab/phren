@@ -10,6 +10,8 @@ import { gitWorktrees, resolveWorktree, type WorktreeWorker } from "./git-worktr
 import { gitCommit, gitPullRequest, gitPush } from "./git-publish.js";
 import { findPane, paneAgentName, paneChatState, paneIdentity, snapshot, startingPane, trustedDirectory, validateStartingTarget, validateTarget } from "./herdr.js";
 import { agentNotReady, terminalProvider } from "./terminal.js";
+import { AppServerRpcError } from "./codex-app-server.js";
+import { CodexServerUnavailable, codexServers } from "./codex-servers.js";
 import { refuseWorkingSlash, type ModelSwitcher } from "./model-switch.js";
 import { sessionWebServers } from "./session-servers.js";
 import { repositoryDiff } from "./projects.js";
@@ -325,6 +327,22 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
       return { ok: true, delivered: true, sideQuestion: await sideQuestions.ask(target, pane, text) };
     }
     if (target.source === "codex" && /^\s*\/model\s+\S/i.test(text)) throw new BridgeError(422, "Use the model picker to switch Codex models.");
+    // A Codex pane on the Hook's own app-server takes the prompt as a turn on
+    // its thread, acknowledged with the turn id; nothing is typed. A slash
+    // command is the TUI's own and is still typed. An unreachable server
+    // sent nothing, so the pane is typed into instead; a request that may
+    // have reached it is reported uncertain and never retried.
+    const owned = text.trim().startsWith("/") ? undefined : codexServers.forTarget(target);
+    if (owned) {
+      typing();
+      try {
+        const { turnId } = await codexServers.prompt(owned, text);
+        return { ok: true, delivered: true, turnId };
+      } catch (error) {
+        if (error instanceof AppServerRpcError) throw new BridgeError(409, `Codex refused the message: ${error.message}`);
+        if (!(error instanceof CodexServerUnavailable)) return { ok: true, deliveryUncertain: true };
+      }
+    }
     const busy = String(pane.agent_status) === "working";
     const expected = agentHooks.expectDelivery(target, text, busy && target.source !== "claude" ? 300 : 1_500);
     typing();
@@ -372,8 +390,14 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     // prompt the agent is holding: a menu, a y/n, a trust question.
     if (!cancelled && !holding && (keys.every(key => key === "Escape") ? !["working", "blocked", "waiting", "unknown"].includes(status)
       : !["blocked", "waiting", "unknown"].includes(status))) throw new BridgeError(409, keys.every(key => key === "Escape") ? "This agent is no longer working." : "This agent is not waiting for an answer.");
+    // Esc on a working Codex pane the Hook runs on its own app-server:
+    // decline the thread's parked requests, then interrupt the turn.
+    const owned = !cancelled && !holding && keys.every(key => key === "Escape") ? codexServers.forTarget(target) : undefined;
     if (cancelled) {
       result = { ok: true };
+    } else if (owned && await codexServers.interrupt(owned).catch(() => false)) {
+      agentHooks.clearTerminalPrompt(target);
+      result = { ok: true, interrupted: true };
     // An older phone answers a released AskUserQuestion one question at
     // a time with its digits; the Hook walks that question in the pane
     // and submits the set after the last.

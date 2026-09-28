@@ -38,6 +38,7 @@ import { typedMuxRequest } from "./mux-wire.js";
 import { overviewStream } from "./server-overview.js";
 import { transcriptStreams } from "./server-stream.js";
 import { launchSession } from "./server-launch.js";
+import { codexServers } from "./codex-servers.js";
 import { localNames } from "./computer-names.js";
 
 export { capabilities, capabilitiesForModules, requireRoute } from "./server-routes.js";
@@ -162,6 +163,11 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   await new Promise<void>((resolve, reject) => { http.once("error", reject); http.listen(socketPath(), () => resolve()); });
   await chmod(socketPath(), 0o600);
   await agentHooks.start();
+  // Codex panes on the Hook's own app-servers: their requests become
+  // approval cards, and servers a previous Hook started are rejoined.
+  codexServers.setSink({ request: (target, request, answer) => agentHooks.codexRequest(target, request, answer),
+    resolved: (target, requestId) => agentHooks.codexResolved(target, requestId) });
+  await codexServers.adopt().catch(() => {});
   void scheduler?.tick().catch(() => {});
   const scheduleTimer = scheduler ? setInterval(() => { countTick("schedules"); void scheduler.tick().catch(() => {}); }, 30_000) : undefined;
   // Off unless PHREN_CANARY_DAILY=1 or `phren canary --daily on`.
@@ -183,6 +189,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
           const name = String(server.session), current = await sharedSnapshot(name, 4000);
           await tabActivity.observe(name, current);
           await journal.record(name, objects(current.panes));
+          // A Codex app-server whose pane closed is stopped; a dead one forgotten.
+          await codexServers.reap(name, current).catch(() => {});
           // Approvals drawn in a terminal reach a phone with phren closed.
           await agentHooks.observeWaitingPanes(name, objects(current.panes), async pane => {
             const state = await paneChatState(name, pane, { tokenWhenIdentified: false });
@@ -193,13 +201,14 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
         }
         catch { /* A disconnected computer keeps its previous local activity. */ }
       }
+      await codexServers.sweep(live.map(server => String(server.session))).catch(() => {});
       // Dispatch returns ride this tick and its shared snapshots. The returns
       // loop throttles its own peer polls and never holds up activity.
       void returns?.tick();
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});

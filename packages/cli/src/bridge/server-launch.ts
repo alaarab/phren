@@ -7,10 +7,13 @@ import { agentNames, findPane, isConductorName, paneAgentName, paneChatState, pa
 import { type AgentStart, agentNotReady, terminalName, terminalProvider } from "./terminal.js";
 import { intervalFromEnv } from "./limits.js";
 import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from "./launch-worktree.js";
-import { briefArgs, DISPATCH_ID_ENV, launchBriefSchema, launchesWithBrief, writeLaunchBrief } from "./launch-brief.js";
+import { briefArgs, DISPATCH_ID_ENV, launchBriefSchema, launchesWithBrief, recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
 import { groupConductor, type GroupConductor } from "./conductor-group.js";
 import { pretrustFolder } from "./folder-trust.js";
 import { optionalHookPeers } from "./peers.js";
+import { AppServerRpcError } from "./codex-app-server.js";
+import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
+import { logger } from "../logger.js";
 import { atomic, BridgeError, bridgeRoot, id, type Json, objects, provider } from "./protocol.js";
 
 /** Starting agents in Herdr from the phone: the launch route's harness
@@ -184,8 +187,12 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   if (role === "agent" && workspace && objects(before.panes).some(pane => pane.workspace_id === workspace && isConductorName(paneAgentName(before, pane)))) workspace = undefined;
   const args = role === "conductor" ? await prepareConductor(kind, effort, model)
     : [...(model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort))];
-  const briefLaunch = brief && launchesWithBrief(kind) ? briefArgs(kind, await writeLaunchBrief(brief)) : undefined;
-  if (briefLaunch) args.push(...briefLaunch);
+  // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
+  // pane joins the thread the Hook started, and the brief is that thread's
+  // first turn. The typed arguments below stay the fallback.
+  const structured = kind === "codex" && role === "agent" && !options.canary && codexAppServerEnabled();
+  const briefFile = brief && (launchesWithBrief(kind) || structured) ? await writeLaunchBrief(brief) : undefined;
+  const briefLaunch = brief && briefFile && launchesWithBrief(kind) ? briefArgs(kind, briefFile) : undefined;
   const env = brief ? { [DISPATCH_ID_ENV]: brief.id } : undefined;
   if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
   const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));
@@ -213,9 +220,32 @@ export async function launchSession(server: string, data: Json, options: LaunchO
     } else await new Promise(resolve => setTimeout(resolve, 200));
   }
   if (!created) throw new BridgeError(409, `${terminalName(server)} created "${label}" but its pane did not appear. Check ${terminalName(server)} on the computer.`);
+  const place = { workspace: created.workspaceId, tab: created.tabId, pane: created.paneId };
+  const structuredLaunch = structured ? await codexServers.launch({ server, ...place }, { cwd, ...(model ? { model } : {}),
+    ...(data.effort === undefined ? {} : { effort }), env: { ...(terminalProvider().paneEnv?.(server, place) ?? {}), ...(env ?? {}) },
+    ...(brief ? { dispatchId: brief.id } : {}), startThread: !!brief }).catch(error => {
+    logger.warn("launch", `Codex app-server unavailable, typing instead: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }) : undefined;
+  const appServer = structuredLaunch?.entry;
+  const binding = { server, workspace: created.workspaceId, tab: created.tabId, pane: created.paneId, source: kind };
+  // The brief is the thread's first turn, acknowledged with its id before
+  // the pane even starts; the pane's TUI shows it running when it joins.
+  // Refused outright, nothing was sent and the caller types it; a lost
+  // reply may have started it, so it is not offered for typing again.
+  let briefTurn: "sent" | "uncertain" | undefined;
+  if (appServer?.threadId && brief) {
+    try {
+      await codexServers.prompt(appServer, brief.text);
+      briefTurn = "sent";
+      await recordBriefArrival(brief.id, "UserPromptSubmit", { ...binding, session: appServer.threadId }).catch(() => undefined);
+    } catch (error) { briefTurn = error instanceof AppServerRpcError ? undefined : "uncertain"; }
+  }
+  const agentArgs = structuredLaunch ? structuredLaunch.args : [...args, ...(briefLaunch ?? [])];
   try {
-    await startWhenShellReady(server, created.paneId, { name, kind, args, timeoutMs: timeout, ...(env ? { env } : {}) });
+    await startWhenShellReady(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(env ? { env } : {}) });
   } catch (error) {
+    if (appServer && !agentNotReady(error)) await codexServers.stop(appServer).catch(() => undefined);
     // A first-run screen (Claude's folder trust, a login notice) holds the
     // agent at startup. It did start: hand the pane back so the owner answers
     // that screen from the chat instead of stranding the workspace.
@@ -227,17 +257,18 @@ export async function launchSession(server: string, data: Json, options: LaunchO
     throw new BridgeError(409, `${host} couldn't start ${kind} in the new "${label}" pane (${reason}). The workspace was created and is still open on the computer — open it from ${host === "Herdr" ? "Herdr workspaces" : "its tmux session"}.`);
     }
   }
+  // Without a brief the pane's TUI started the thread; the Hook heard it.
+  if (appServer && !appServer.threadId) await codexServers.awaitThread(appServer);
   const after = await snapshot(server);
   const pane = findPane(after, { workspace: created.workspaceId, tab: created.tabId, pane: created.paneId });
   const agentStatus = typeof pane?.agent_status === "string" ? pane.agent_status : undefined;
-  const sessionId = pane && pane.agent === kind ? await paneIdentity(server, pane) : undefined;
+  const sessionId = appServer?.threadId ?? (pane && pane.agent === kind ? await paneIdentity(server, pane) : undefined);
   const chat = !sessionId && pane && pane.agent === kind ? await paneChatState(server, pane).catch((): Json => ({})) : {};
-  const binding = { server, workspace: created.workspaceId, tab: created.tabId, pane: created.paneId, source: kind };
   const target = sessionId ? { ...binding, session: sessionId }
     : chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
   return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(unchecked.length ? { unchecked } : {}),
     // The caller types the brief itself unless it went with the launch.
-    ...(brief ? { briefLaunched: !!briefLaunch } : {}),
+    ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch } : {}),
     ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}) };
 }
 export async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {

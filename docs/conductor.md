@@ -182,6 +182,18 @@ does the harness submits the brief itself. An unconfirmed brief is asked about
 again on each returns poll, so the receipt turns `accepted` when the worker
 confirms it. Briefs are kept for seven days (at most 256).
 
+A Codex worker runs on its own Phren-owned `codex app-server` instead (see
+[Phren Hook](phren-hook.md#codex-panes-on-a-phren-owned-app-server)). The
+receiving Hook starts the server, starts the thread in the project folder with
+the dispatch's model and effort, and sends the brief text as the thread's first
+turn; the receipt turns `accepted` on the server's acknowledgement of that turn
+(its turn id), before the pane has even started. The pane then runs
+`codex resume <thread> --remote unix://<socket>` and shows the brief already
+running. The worker's approvals reach the phone as ordinary approval cards with
+no 55-second hold, and the Hook records each finished turn's status for the
+returns loop. When the server cannot start, the worker falls back to the
+launch-argument path above.
+
 OpenCode, and a receiving Hook too old to take the brief at launch, get it
 typed as before, with a `deliveryId` of `dispatch-<id>` so the receiving Hook
 types it at most once. A new agent that has not written a conversation yet
