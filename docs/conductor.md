@@ -157,7 +157,12 @@ Each placement writes a private receipt in `<bridge>/dispatches/<id>.json`
 without retaining the prompt. States are `launching`, `sending`, `accepted`,
 `uncertain` and `failed`. `accepted` confirms first-prompt delivery, not worker
 completion; completion arrives as a return (see [Returns](#returns)). A lost acknowledgement leaves an uncertain receipt and is never
-automatically retried. Receipts survive restart; interrupted placement states
+automatically retried. A new agent that has not written a conversation yet takes
+its brief on its starting binding, as the phone's first message does. One held
+on a startup screen of its own (Claude's folder trust, a sign-in) gets no brief:
+its receipt is `failed` with a `needs-you` return naming the pane, and the Hook
+never answers that screen. An agent that never shows a target is `failed` with
+the brief unsent and its pane left open. Receipts survive restart; interrupted placement states
 are reported as uncertain. Only one placement runs at a time per service.
 
 An optional `parent` and `parentTarget` must be supplied together. The Hook

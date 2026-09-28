@@ -455,7 +455,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
   let holdSnapshot = false, releaseSnapshot: (() => void) | undefined;
   let replaceBeforeMutation = false;
   let deliveries: { method: string; session: string }[];
-  let extraWorkspaces: Record<string, unknown>[] = [], extraTabs: Record<string, unknown>[] = [], extraPanes: Record<string, unknown>[] = [], failAgentStart = false, blockAgentStart = false, promptNotReady = 0;
+  let extraWorkspaces: Record<string, unknown>[] = [], extraTabs: Record<string, unknown>[] = [], extraPanes: Record<string, unknown>[] = [], failAgentStart = false, busyAgentStarts = 0, blockAgentStart = false, promptNotReady = 0;
   let helperPIDs: number[] = [];
   let paneLines = "", drawConfirmation = false;
   // Outbound HTTPS from the Hook (ElevenLabs) goes to this proxy, which records
@@ -533,7 +533,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
   function resetVars(): void {
     paneCwd = undefined; commands = []; current = session; agentStatus = "working"; reportIdentity = true; foregroundPID = process.pid; terminalID = "term-one"; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     replaceBeforeMutation = false; deliveries = [];
-    extraWorkspaces = []; extraTabs = []; extraPanes = []; agentNames = new Map(); failAgentStart = false; promptNotReady = 0; helperPIDs = []; remoteHook = undefined;
+    extraWorkspaces = []; extraTabs = []; extraPanes = []; agentNames = new Map(); failAgentStart = false; busyAgentStarts = 0; promptNotReady = 0; helperPIDs = []; remoteHook = undefined;
     paneLines = ""; drawConfirmation = false; paneAgent = "codex"; fakeClaude = undefined;
     confirmationHasKeys = true;
     menuHighlight = undefined; confirmedMenuRow = undefined; ignoredMenuMoves = 0; menuPane = permissionsMenu;
@@ -642,7 +642,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
           }
           const target = extraPanes.find(p => p.pane_id === req.params.pane_id);
           if (!target) { fail("agent_pane_not_found", `agent target pane ${req.params.pane_id} not found`); return; }
-          if (failAgentStart) { fail("agent_pane_busy", `agent target pane ${req.params.pane_id} is not an available shell`); return; }
+          if (failAgentStart || busyAgentStarts-- > 0) { fail("agent_pane_busy", `agent target pane ${req.params.pane_id} is not an available shell`); return; }
           agentNames.set(String(target.pane_id), req.params.name);
           target.agent = req.params.kind;
           if (blockAgentStart) {
@@ -678,7 +678,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
       HOME: root, XDG_CONFIG_HOME: path.join(root, ".config"), PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex"),
       NODE_ENV: "test", PHREN_TEST_MODEL_CATALOG: path.join(root, "model-catalog.json"),
       ELEVENLABS_API_KEY: "", NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: `http://127.0.0.1:${(egress!.address() as { port: number }).port}`, NO_PROXY: "localhost,127.0.0.1,::1",
-      PHREN_APPROVAL_HOLD_MS: "2500", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
+      PHREN_APPROVAL_HOLD_MS: "2500", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SHELL_READY_MS: "1500", PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
       stdio: ["ignore", "ignore", "pipe"] });
     hook.stderr!.on("data", bytes => log += bytes);
     let ready = false;
@@ -1062,6 +1062,15 @@ schedules:
       expect(launched.data).toMatchObject({ workspaceId: "w1", tabId: "w1:t2", paneId: "w1:p2", agent: "codex" });
       expect(commands.find(c => c.method === "tab.create")?.params).toMatchObject({ workspace_id: "w1", label: "second", cwd: await realpathAsync(root) });
       expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ name: "codex-here", pane_id: "w1:p2", timeout_ms: 3_001 });
+    });
+
+    // Seen 2026-09-27 on Linuxbox: three launches in a row failed because the
+    // new pane's login shell had not reached its prompt when agent.start ran.
+    it("starts the agent once a new pane's shell reaches its prompt", async () => {
+      busyAgentStarts = 2;
+      const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "slow shell", kind: "claude" });
+      expect(launched.status, JSON.stringify(launched.data)).toBe(200);
+      expect(commands.filter(c => c.method === "agent.start")).toHaveLength(3);
     });
 
     it("reports a failed agent start without hiding the workspace it created", async () => {

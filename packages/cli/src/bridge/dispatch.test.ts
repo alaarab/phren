@@ -1,8 +1,9 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DispatchService, dispatchStatus } from "./dispatch.js";
+import { DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
+import { getMachineName } from "../machine-identity.js";
 import { addGrant } from "./grants.js";
 import { BridgeError } from "./protocol.js";
 import { hookPeers, peerRequest } from "./peers.js";
@@ -107,12 +108,44 @@ describe("dispatch receipts and selection", () => {
     expect(prompts()).toBe(2);
   }, 15_000);
 
-  it("leaves a pane that really waits on terminal input to the owner", async () => {
+  // Seen 2026-09-27 on Linuxbox: a Claude worker in a folder it had not trusted
+  // held "Quick safety check: do you trust this folder" and the receipt said uncertain.
+  it("reports a startup screen as needing the owner, with the brief unsent", async () => {
     const prompts = refusingWhileUnknown(["blocked"]);
     const result = await new DispatchService().dispatch({ ...brief, computer: "Desk" });
-    expect(result).toMatchObject({ ok: false, state: "uncertain", error: "This agent needs input in the terminal first." });
+    expect(result).toMatchObject({ ok: false, state: "failed", target,
+      returned: { state: "needs-you", read: false, question: expect.stringContaining("startup screen (folder trust or sign-in)") } });
+    expect(result.error).toContain("The brief was not sent.");
     expect(prompts()).toBe(1);
   }, 15_000);
+
+  function launchingWithoutTarget(pane: Record<string, unknown> | undefined) {
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route) => {
+      if (route === "/v1/dispatch/capacity") return { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 };
+      if (route.startsWith("/v1/workspaces/launch")) return { ok: true, workspaceId: "w1", tabId: "t1", paneId: "p1", agent: "codex", agentStatus: "idle" };
+      if (route.startsWith("/v1/workspaces/panes")) return { panes: pane ? [{ id: "p1", label: "1", agent: "codex", ...pane }] : [] };
+      return { ok: true };
+    });
+  }
+
+  // Seen 2026-09-27: local Codex "send-confirm" sat idle and starting with no brief.
+  it("sends the brief to a new agent that has only a starting binding yet", async () => {
+    launchingWithoutTarget({ agentStatus: "idle", starting: true, startingToken: target.startingToken });
+    const result = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" });
+    expect(result).toMatchObject({ ok: true, state: "accepted", target });
+    expect(vi.mocked(peerRequest).mock.calls.find(call => call[1] === "/v1/prompt")?.[2]).toEqual({ target, text: brief.prompt });
+  });
+
+  it("says the brief was not sent when a new agent never shows a target", async () => {
+    launchingWithoutTarget({ agentStatus: "idle" });
+    const result = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" });
+    expect(result).toMatchObject({ ok: false, state: "failed" });
+    expect(result.error).toContain("so the brief was not sent");
+    expect(vi.mocked(peerRequest).mock.calls.some(call => call[1] === "/v1/prompt")).toBe(false);
+    launchingWithoutTarget({ agentStatus: "blocked" });
+    expect(await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" }))
+      .toMatchObject({ ok: false, state: "failed", returned: { state: "needs-you" } });
+  });
 
   it("retains ambiguous launches and refuses to prompt a mismatched target", async () => {
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
@@ -219,3 +252,34 @@ describe("dispatch to this computer", () => {
   });
 });
 
+
+describe("the project folder a dispatch launches in", () => {
+  let root: string;
+  beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-dispatch-project-")); vi.stubEnv("PHREN_PATH", path.join(root, "store")); vi.stubEnv("PROJECTS_DIR", ""); });
+  afterEach(async () => { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
+  const register = async (name: string, config: string) => {
+    await mkdir(path.join(root, "store", name), { recursive: true });
+    await writeFile(path.join(root, "store", name, "phren.project.yaml"), config);
+  };
+
+  // Seen 2026-09-27: Linuxbox refused project phren although the store named
+  // its folder under `sourcePaths: omarchy:`, because dispatch read only sourcePath.
+  it("takes this computer's sourcePaths entry over the shared sourcePath", async () => {
+    const here = path.join(root, "linux", "phren");
+    await mkdir(here, { recursive: true });
+    await register("phren", `sourcePath: /Users/someone-else/Projects/phren\nsourcePaths:\n  ${JSON.stringify(getMachineName())}: ${here}\n`);
+    expect(await dispatchProjectDirectory("phren", path.join(root, "home"))).toBe(await realpath(here));
+  });
+
+  it("falls back to a git checkout named after the project in a usual root", async () => {
+    await register("phren-apps", "sourcePath: /Users/someone-else/Sites/phren-apps\n");
+    const checkout = path.join(root, "home", "Projects", "phren-apps");
+    await mkdir(checkout, { recursive: true });
+    await expect(dispatchProjectDirectory("phren-apps", path.join(root, "home"))).rejects.toThrow(/Project phren-apps is not on this computer/);
+    await mkdir(path.join(checkout, ".git"));
+    expect(await dispatchProjectDirectory("phren-apps", path.join(root, "home"))).toBe(await realpath(checkout));
+    // No folder anywhere: the refusal names this computer.
+    await register("global", "");
+    await expect(dispatchProjectDirectory("global", path.join(root, "home"))).rejects.toThrow(/names no folder for/);
+  });
+});

@@ -99,7 +99,7 @@ WebSockets on the same socket.
 | `POST /v1/dispatch/returns` | Unread worker returns (done, needs-you, failed, blocked, gone), marked read as they are returned. |
 | `GET /v1/muxes?typed=1` | Herdr and tmux sources together, with typed `id`, `kind`, `session` and `running`. A failed source does not remove other sources. Without `typed=1`, discovery retains legacy Herdr aliases, with accurate additive `mux` descriptors for tmux. |
 | `GET /v1/workspaces`, `/v1/workspaces/panes` | Workspace overview, pane identity, context, branch, activity and watched approvals. Select with `mux=herdr:<session>` or `mux=tmux:<server>`; replies include `mux: {id, kind, session}`. Typed tmux selectors return `kind: "tmux"`; legacy selectors retain the `kind: "herdr"` envelope for installed clients. The same negotiation applies to the overview WebSocket. |
-| `POST /v1/workspaces/launch` | Create a workspace/tab and start the selected agent. Accepts the phone's `cwd` or a mutually exclusive `project` slug resolved from this computer's registered sourcePath. Returns a session or starting `target` when identity is available. |
+| `POST /v1/workspaces/launch` | Create a workspace/tab and start the selected agent. Accepts the phone's `cwd` or a mutually exclusive `project` slug resolved to this computer's folder for it (see computer dispatch below). A new pane whose shell has not reached its prompt yet (Herdr `agent_pane_busy`) is retried for up to `PHREN_SHELL_READY_MS` (default 15000). Returns a session or starting `target` when identity is available. |
 | `POST /v1/schedules` | List every store schedule with its project, this computer's next run, latest local run, and running state. A schedule assigned to another computer has `nextRun: null`. |
 | `POST /v1/schedules/run` | Launch `{ project, id }` immediately through the same Herdr or headless scheduler path. Unknown schedules are 404; an active run or another computer assignment is 409. |
 | `POST /v1/schedules/history` | Newest-first computer-local schedule runs, filtered by optional `project` and `id`; `limit` defaults to 50 and is capped at 500. |
@@ -178,8 +178,10 @@ Computer dispatch keys reuse the phone's `restrict,pty` forced-command line;
 enrolls it on a receiver. This grants the full phone boundary above, including
 project shells and loopback services, not only dispatch. Private keys and
 verified peers in `hooks.yaml` stay under the Hook runtime directory. A dispatch
-project's registered absolute `sourcePath` is resolved on the receiver and must
-exist; the sender cannot supply a directory. See [Conductor](../../../../docs/conductor.md)
+project's folder is resolved on the receiver and must exist there: the store's
+`sourcePaths` entry for that computer, else its shared `sourcePath`, else a git
+checkout named after the project in a usual project root (`~/Projects/<name>`
+and the like). The sender cannot supply a directory. See [Conductor](../../../../docs/conductor.md)
 for setup, receipt states, scheduling and follow-on report/tree contracts.
 
 `/v1/diff` accepts extra `paths` only within the pane repository, the phren store,

@@ -170,7 +170,8 @@ Claude window is 60000); tests shorten it. Tests also shorten
 is reused, default `2000`) and `PHREN_DIALOG_THROTTLE_MS` (how often a waiting
 pane's terminal dialog is read, and on tmux how often a working pane's screen is
 checked for one, default `3000`); the Hook reads all three once
-at startup. `PHREN_SNAPSHOT_SHARE_MS` sets how old a Herdr `session.snapshot`
+at startup. `PHREN_SHELL_READY_MS` is how long a launch keeps asking Herdr to
+start the agent while the new pane's shell is still starting (default `15000`). `PHREN_SNAPSHOT_SHARE_MS` sets how old a Herdr `session.snapshot`
 may be for the chat and status streams and the activity timer to share it
 (default `2500`; `0` stops reusing answers), and `PHREN_SERVER_LIST_REUSE_MS` how
 long the activity timer reuses the list of running Herdr servers (default
