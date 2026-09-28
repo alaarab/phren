@@ -19,8 +19,11 @@ describe("a brief that goes with the launch", () => {
     const file = await writeLaunchBrief({ id, text: "Line one\nLine two" });
     expect(file).toBe(path.join(root, "briefs", id, "brief.md"));
     expect(await readFile(file, "utf8")).toBe("Line one\nLine two\n");
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
-    expect((await stat(path.dirname(file))).mode & 0o777).toBe(0o700);
+    // Windows reports no POSIX modes (a file reads back as 0o666).
+    if (process.platform !== "win32") {
+      expect((await stat(file)).mode & 0o777).toBe(0o600);
+      expect((await stat(path.dirname(file))).mode & 0o777).toBe(0o700);
+    }
     // Claude may read outside its folder only with permission; `--add-dir` is variadic, so it follows the prompt.
     expect(briefArgs("claude", file)).toEqual([`Read and follow the brief in ${file}`, "--add-dir", path.dirname(file)]);
     expect(briefArgs("codex", file)).toEqual([`Read and follow the brief in ${file}`]);
