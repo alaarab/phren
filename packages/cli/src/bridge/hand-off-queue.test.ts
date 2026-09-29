@@ -1,8 +1,8 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HandOffQueue } from "./hand-off-queue.js";
+import { HAND_OFF_MAX_ROWS, HAND_OFF_RETENTION_MS, HandOffQueue } from "./hand-off-queue.js";
 import { BridgeError, type Json, type Target } from "./protocol.js";
 
 const target: Target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude", session: "11111111-1111-4111-8111-111111111111" };
@@ -67,5 +67,48 @@ describe("durable Hook hand-off queue", () => {
     const origin = { ...target, pane: "sender" }, q = queue();
     await q.enqueue({ ...message(), origin }); pane.agent_status = "idle"; await q.tick(); await q.tick(); await q.tick();
     expect(send.mock.calls.map(call => call[1])).toEqual(["Review parser", "Hand-off handoff-0001: delivered."]);
+  });
+  describe("retention", () => {
+    const DAY = 86_400_000;
+    const names = async () => (await readdir(root)).sort();
+    it("drops settled rows past retention but never a queued or attempting one", async () => {
+      let clock = Date.parse("2026-01-01T00:00:00Z");
+      const q = new HandOffQueue({ root, validate, send, now: () => clock });
+      pane.agent_status = "idle"; await q.enqueue(message("handoff-done")); // delivered
+      send.mockImplementationOnce(async () => { throw new BridgeError(409, "gone"); });
+      await q.enqueue(message("handoff-fail", "Other")); // failed before typing
+      const other = { ...target, pane: "p2" };
+      pane.agent_status = "working"; await q.enqueue({ deliveryId: "handoff-wait", target: other, text: "Later" }); // queued
+      const file = path.join(root, "handoff-stuck.json");
+      await writeFile(file, JSON.stringify({ ...JSON.parse(await readFile(path.join(root, "handoff-wait.json"), "utf8")), deliveryId: "handoff-stuck", target: { ...target, pane: "p3" }, state: "attempting" }));
+      clock += HAND_OFF_RETENTION_MS + DAY; await q.tick();
+      // The attempting row recovers as uncertain on read and is kept this sweep; the queued row stays queued.
+      expect(await names()).toEqual(["handoff-stuck.json", "handoff-wait.json"]);
+      expect(await q.status("handoff-wait", other)).toMatchObject({ queued: true });
+    });
+    it("sweeps at most daily from tick", async () => {
+      let clock = Date.parse("2026-01-01T00:00:00Z");
+      const q = new HandOffQueue({ root, validate, send, now: () => clock });
+      pane.agent_status = "idle"; await q.enqueue(message());
+      const HOUR = 3_600_000;
+      clock += HAND_OFF_RETENTION_MS - HOUR; await q.tick(); expect(await names()).toEqual(["handoff-0001.json"]); // swept, not yet old
+      clock += 2 * HOUR; await q.tick(); expect(await names()).toEqual(["handoff-0001.json"]); // old, but swept an hour ago
+      clock += DAY; await q.tick(); expect(await names()).toEqual([]);
+    });
+    it("caps the directory, dropping the oldest settled rows first and keeping queued ones", async () => {
+      let clock = Date.parse("2026-01-01T00:00:00Z");
+      const q = new HandOffQueue({ root, validate, send, now: () => clock });
+      const busy = { ...target, pane: "busy" }, row = (id: string, state: string, t: Target = target) => ({ target: t, text: "x", deliveryId: id, terminal: "term1", state,
+        createdAt: new Date(clock).toISOString(), updatedAt: new Date(clock).toISOString() });
+      await writeFile(path.join(root, "handoff-queued-old.json"), JSON.stringify(row("handoff-queued-old", "queued", busy)));
+      for (let i = 0; i < HAND_OFF_MAX_ROWS + 5; i++) { clock += 1000; const id = `handoff-${String(i).padStart(4, "0")}`; await writeFile(path.join(root, `${id}.json`), JSON.stringify(row(id, "delivered"))); }
+      clock += 1000; pane.agent_status = "working";
+      await q.enqueue({ deliveryId: "handoff-new", target: busy, text: "y" });
+      const left = await names();
+      expect(left).toHaveLength(HAND_OFF_MAX_ROWS);
+      expect(left).toContain("handoff-queued-old.json"); expect(left).toContain("handoff-new.json");
+      for (const i of [0, 1, 2, 3, 4, 5, 6]) expect(left).not.toContain(`handoff-${String(i).padStart(4, "0")}.json`);
+      expect(left).toContain("handoff-0007.json");
+    });
   });
 });
