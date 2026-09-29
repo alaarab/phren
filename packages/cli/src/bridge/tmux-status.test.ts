@@ -10,7 +10,7 @@ import path from "node:path";
 import { readFileSync } from "node:fs";
 import { copilotProcessStatus, copilotStatusFromEvents, opencodeProcessStatus, opencodeTurnStamps } from "./harness-status.js";
 import { opencodeTurn, turnPhase } from "./turn-records.js";
-import { dialogStatus, notePaneStatus, resetPaneStatus, screenDialog, settleBlockedPane } from "./pane-status.js";
+import { codexStartupStatus, dialogStatus, notePaneStatus, resetPaneStatus, screenDialog, settleBlockedPane, startupStatus } from "./pane-status.js";
 import { resetTmuxBinary, setTmuxDeps, tmuxHealth, tmuxServers, tmuxSnapshot, tmuxSocketsIn } from "./terminal-tmux.js";
 import { terminalPaneFromEnv } from "./terminal.js";
 import { canaryServer } from "./canary.js";
@@ -18,6 +18,9 @@ import { describeTerminal, terminalHealth } from "./health.js";
 import { resetSharedHerdrState } from "./herdr.js";
 
 const CLAUDE_DIALOG = " Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend";
+const CODEX_HOOKS_MENU = "  Hooks need review\n  3 hooks are new or changed.\n  Hooks can run outside the sandbox after you trust them.\n\n\u203a 1. Review hooks\n  2. Trust all and continue\n  3. Continue without trusting (hooks won't run)\n\n  enter confirm \u00b7 esc skip";
+const CODEX_TRUST_MENU = "  Folder access\n  /tmp/repro\n  Trust this folder? Codex can read, edit, and run files here.\n\n\u203a 1. Trust and continue\n  2. Back to Agent Command Center\n\n  enter continue \u00b7 esc back";
+const CODEX_COMPOSER = "  >_ OpenAI Codex (v0.158.0)\n     ~/Projects/phren\n\n\u26a0 Heads up, you have less than 25% of your weekly limit left.\n\n\u203a Ask Codex to do anything\n  GPT-6-Astra xhigh \u00b7 ~/Projects/phren\n  \u2190 for agents \u00b7 ? for shortcuts";
 const CODEX_DIALOG = "Would you like to run the following command?\n\n  $ rm -rf build\n\n› 1. Yes, proceed (y)\n  2. Yes, and don't ask again for this command (p)\n  3. No, and tell Codex what to do differently (esc)\n\n  Press enter to confirm or esc to cancel";
 const OPENCODE_DIALOG = [
   "  ┃  △ Permission required",
@@ -28,9 +31,9 @@ const OPENCODE_DIALOG = [
 const row = (values: Record<string, string>) => ["session_id", "session_name", "session_attached", "session_activity", "window_id", "window_name",
   "window_active", "pane_id", "pane_pid", "pane_tty", "pane_active", "pane_current_path", "pane_current_command", "@phren_agent", "pane_title", "@phren_label"]
   .map(field => values[field] ?? "").join("\t");
-const pane = (id: string, tty: string, command: string) => row({ session_id: "$1", session_name: "work", session_attached: "1", session_activity: "1",
+const pane = (id: string, tty: string, command: string, title = "") => row({ session_id: "$1", session_name: "work", session_attached: "1", session_activity: "1",
   window_id: `@${id}`, window_name: command, window_active: "1", pane_id: `%${id}`, pane_pid: `${id}00`, pane_tty: `/dev/${tty}`, pane_active: "1",
-  pane_current_path: "/repo", pane_current_command: command });
+  pane_current_path: "/repo", pane_current_command: command, pane_title: title });
 
 function fakeTmux(options: { panes?: string; ps?: string; screens?: Record<string, string>; sockets?: string[]; answering?: string[] } = {}) {
   const calls: { socket: string; args: string[] }[] = [];
@@ -115,6 +118,44 @@ describe("dialogs on a working pane's screen", () => {
     now += 1_000;
     expect(await dialogStatus("tmux", "p2", "p2:1", "codex", working, read)).toMatchObject({ status: "working" });
     expect(read).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a fresh Codex before its first lifecycle event", () => {
+  // Codex runs SessionStart only with its first turn, so until then its screen is all there is.
+  it("reads a startup menu as blocked, a turn as working, its composer as idle, anything else as still starting", () => {
+    expect(codexStartupStatus(CODEX_HOOKS_MENU)).toBe("blocked");
+    expect(codexStartupStatus(CODEX_TRUST_MENU)).toBe("blocked");
+    expect(codexStartupStatus(CODEX_COMPOSER)).toBe("idle");
+    expect(codexStartupStatus(`\x1b[1m\u203a\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m\n  \x1b[1m?\x1b[0m for shortcuts`)).toBe("idle");
+    expect(codexStartupStatus(CODEX_COMPOSER.replace("\u203a Ask Codex", "\u2022 Working (3s \u2022 esc to interrupt)\n\n\u203a Ask Codex"))).toBe("working");
+    expect(codexStartupStatus("  >_ OpenAI Codex (v0.158.0)\n")).toBeUndefined();
+    expect(codexStartupStatus("\u203a Ask Codex to do anything\n")).toBeUndefined();
+  });
+
+  it("reads the screen at most once per window, only for Codex, and keeps its reading when a read fails", async () => {
+    let now = 3_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let screen = CODEX_HOOKS_MENU;
+    const read = vi.fn(async () => screen);
+    expect(await startupStatus("tmux", "p5", "p5:1", "claude", read)).toBeUndefined();
+    expect(read).not.toHaveBeenCalled();
+    const blocked = await startupStatus("tmux", "p5", "p5:1", "codex", read);
+    expect(blocked).toMatchObject({ status: "blocked" });
+    screen = CODEX_COMPOSER;
+    expect(await startupStatus("tmux", "p5", "p5:1", "codex", read)).toEqual(blocked);
+    now += 3_000;
+    const idle = await startupStatus("tmux", "p5", "p5:1", "codex", read);
+    expect(idle).toMatchObject({ status: "idle" });
+    expect(idle!.seq).toBeGreaterThan(blocked!.seq);
+    now += 3_000;
+    read.mockRejectedValueOnce(new Error("gone"));
+    expect(await startupStatus("tmux", "p5", "p5:1", "codex", read)).toEqual(idle);
+    // Another terminal in the pane starts over.
+    now += 3_000;
+    screen = "";
+    expect(await startupStatus("tmux", "p5", "p5:2", "codex", read)).toBeUndefined();
+    expect(read).toHaveBeenCalledTimes(4);
   });
 });
 
@@ -242,6 +283,13 @@ describe("the tmux snapshot's status for every harness", () => {
     // phren-agent reports turns through its lifecycle events.
     notePaneStatus("tmux", "p4", "p4:400", "working");
     expect(((await tmuxSnapshot("tmux")).panes as { agent_status?: string }[])[3].agent_status).toBe("working");
+  });
+
+  it("Codex with no lifecycle event yet from its screen, and its title without the spinner", async () => {
+    vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
+    const fake = fakeTmux({ panes: pane("3", "ttys003", "codex", "\u2838 Fix the tests"), ps: "  310   310   310 ttys003  codex", screens: { "%3": CODEX_COMPOSER } });
+    restore = fake.restore;
+    expect((await tmuxSnapshot("tmux")).panes).toEqual([expect.objectContaining({ agent: "codex", agent_status: "idle", title: "Fix the tests" })]);
   });
 });
 

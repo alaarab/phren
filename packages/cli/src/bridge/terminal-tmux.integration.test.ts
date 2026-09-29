@@ -8,7 +8,7 @@ import path from "node:path";
 import { request } from "node:http";
 import { AgentHooks } from "./agent-hooks.js";
 import { localSocket } from "./agent-hook-stores.js";
-import { paneIdentity, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
+import { paneChatState, paneIdentity, snapshot, validateStartingTarget, validateTarget, workspaceSnapshot } from "./herdr.js";
 import { objects } from "./protocol.js";
 import type { ApprovalPushService } from "./push.js";
 import { launchSession, localConductor, stopConductor } from "./server-launch.js";
@@ -51,6 +51,14 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
       + `const dialog = ${JSON.stringify(CLAUDE_DIALOG)};\nprocess.stdout.write("fake claude ready\\n");\n`
       + `rl.on("line", line => process.stdout.write(line === "DIALOG" ? dialog : line === "CLEAR" ? "\\x1b[2J\\x1b[H" : "got: " + line + "\\n"));\n`);
     await chmod(path.join(folder, "claude"), 0o755);
+    // A stand-in for a fresh Codex: its startup menu (hooks to review), then,
+    // once "3" answers it, its composer. It sends no lifecycle event, as Codex
+    // holds SessionStart until the first turn, and sets a spinning title.
+    await writeFile(path.join(folder, "codex"), `#!${process.execPath}\nconst rl = require("node:readline").createInterface({ input: process.stdin });\n`
+      + `const menu = ${JSON.stringify(CODEX_MENU)}, composer = ${JSON.stringify(CODEX_COMPOSER)};\n`
+      + `process.stdout.write("\\x1b]0;\\u2838 Fix the tests\\x07" + menu);\nlet ready = false;\n`
+      + `rl.on("line", line => { if (!ready && line === "3") { ready = true; process.stdout.write("\\x1b[2J\\x1b[H" + composer); } else process.stdout.write("got: " + line + "\\n"); });\n`);
+    await chmod(path.join(folder, "codex"), 0o755);
     process.env.SHELL = "/bin/sh";
     process.env.PATH = `${folder}${path.delimiter}${process.env.PATH}`;
   });
@@ -122,6 +130,26 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
     } finally { hooks.close(); }
   }, 60_000);
 
+  it("takes the first chat message for a Codex it launched without a terminal visit", async () => {
+    const launched = await launchSession(server, { cwd: folder, label: "codex launch", kind: "codex" });
+    expect(launched).toMatchObject({ ok: true, agent: "codex" });
+    const place = { server, workspace: String(launched.workspaceId), tab: String(launched.tabId), pane: String(launched.paneId) };
+    const pane = async () => objects((await tmuxSnapshot(server)).panes).find(p => p.pane_id === place.pane);
+    // No lifecycle event yet: its startup menu blocks it, and the title loses its spinner.
+    expect(await until(async () => (await pane())?.agent_status, value => value === "blocked", 12_000)).toBe("blocked");
+    expect((await pane())?.title).toBe("Fix the tests");
+    await tmuxTerminal.sendKeys(server, place.pane, ["3", "enter"]);
+    // Its composer is up: idle, so the phone's first message is taken.
+    expect(await until(async () => (await pane())?.agent_status, value => value === "idle", 12_000)).toBe("idle");
+    const current = (await pane())!;
+    const state = await paneChatState(server, current);
+    expect(state).toMatchObject({ starting: true, startingToken: expect.any(String) });
+    const target = { ...place, source: "codex" as const, starting: true as const, startingToken: String(state.startingToken) };
+    await expect(validateStartingTarget(target)).resolves.toMatchObject({ agent: "codex", agent_status: "idle" });
+    await tmuxTerminal.prompt(server, place.pane, "hi");
+    expect(await until(() => tmuxTerminal.readScreen(server, place.pane, { scope: "agent", source: "recent", lines: 50 }), text => text.includes("got: hi"))).toContain("got: hi");
+  }, 60_000);
+
   it("keeps the conductor role on its pane when tmux loses the name and the agent restarts", async () => {
     const launched = await launchSession(server, { cwd: folder, label: "it conductor", kind: "claude", role: "conductor" });
     expect(launched).toMatchObject({ ok: true, role: "conductor" });
@@ -158,6 +186,8 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
 });
 
 const CLAUDE_DIALOG = " Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend\n";
+const CODEX_MENU = "  Hooks need review\n  3 hooks are new or changed.\n\n\u203a 1. Review hooks\n  2. Trust all and continue\n  3. Continue without trusting (hooks won't run)\n\n  enter confirm \u00b7 esc skip\n";
+const CODEX_COMPOSER = "  >_ OpenAI Codex (v0.158.0)\n\n\u203a Ask Codex to do anything\n  GPT-6-Luna high \u00b7 ~/work\n  \u2190 for agents \u00b7 ? for shortcuts\n";
 const SESSION = "bbbbbbbb-2222-4222-8222-222222222222";
 /** Claude's hook process: one lifecycle event posted to the Hook's agent socket. */
 function hook(body: Record<string, unknown>): Promise<string> {
