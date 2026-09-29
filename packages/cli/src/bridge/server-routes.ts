@@ -23,7 +23,7 @@ import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { storeRoute } from "./memory-store.js";
-import { markBackground, paneRecord, recordedBackground, recordTitle } from "./session-activity.js";
+import { liveBackground, markBackground, paneRecord, recordTitle } from "./session-activity.js";
 import { paneAccountField, paneChatState, panes, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
@@ -42,12 +42,15 @@ import { currentModel, currentStep } from "./steps.js";
 import { type AccountUsageReader, usageForCaller } from "./usage.js";
 import type { ResourceMonitor } from "./resources.js";
 import type { Scheduler } from "./schedules.js";
+import { readFinalTurn } from "./schedule-watch.js";
 import { healthDetails, listsCaller } from "./health.js";
 import { defaultPhrenPath } from "../shared.js";
 import { loadCodePackage, loadedFrom } from "../modules/code-package.js";
 import { gitRepository, paneRoute, uploadBody } from "./server-pane-routes.js";
 import { renameSession } from "./session-rename.js";
-import { launchSession, localConductor, workspaceAction } from "./server-launch.js";
+import { launchSession, makeConductor, stopConductor, workspaceAction } from "./server-launch.js";
+import { conductorAnswer, nameSet, readSets } from "./conductor-sets.js";
+import { conductorPane } from "./conductor-role.js";
 import type { TranscriptStreams } from "./server-stream.js";
 import { hookMetrics } from "./metrics.js";
 import { SPEECH_FORMATS, streamSpeech } from "./speech.js";
@@ -124,7 +127,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, resources: true };
+  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, resources: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -189,7 +192,9 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     await journal.record(server, objects(s.panes));
     const chatStates = new Map(await Promise.all(objects(s.panes).filter(p => p.agent).map(async p =>
       [p, await paneChatState(server, p, { tokenWhenIdentified: false }).catch((): Json => ({}))] as const)));
-    const workspaces = workspaceSnapshot(s, context, agentHooks.pendingPanes(server, s), lastChanged);
+    // The Hook's record says which pane is the conductor, whatever the agent is named.
+    const conductor = await conductorPane(server, s).catch(() => undefined);
+    const workspaces = workspaceSnapshot(s, context, agentHooks.pendingPanes(server, s), lastChanged, conductor ? String(conductor.pane_id) : null);
     // The branch each tab's agent is on, for the session cards.
     const agentsByTab = new Map<string, Json[]>();
     for (const pane of objects(s.panes)) {
@@ -227,9 +232,12 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
       const session = agents.length === 1 && object(tab.target).session;
       const record = typeof session === "string" ? await paneRecord(server, agents[0], session) : undefined;
-      const title = await recordTitle(record, { paneLabel: tab.paneLabel, harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label });
+      const [title, background] = await Promise.all([
+        recordTitle(record, { paneLabel: tab.paneLabel, harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label }),
+        liveBackground(record, readFinalTurn),
+      ]);
       if (expired) return;
-      markBackground(tab, recordedBackground(record));
+      markBackground(tab, background);
       tab.title = title;
     }));
     let nextTab = 0;
@@ -318,8 +326,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           // One row per real computer, however many names machines.yaml and the network give it.
           case "/v1/computers": { const { computers, peerError } = await readComputers({ probe: true, local: { id: info.computer.id } });
             result = { computers, ...(peerError ? { peerError } : {}) }; break; }
-          // Asked by linked peers before they start a conductor: one per connected group.
-          case "/v1/conductor": result = { computer: info.computer, conductor: await localConductor() ?? null }; break;
+          // Asked by linked peers to place this computer in a set, and before they start a conductor: one per set.
+          case "/v1/conductor": result = await conductorAnswer(info, url); break;
+          case "/v1/sets": result = await readSets(info); break;
           // Bounded like capacity: a cold `claude auth status` per home can take seconds. Without
           // `harnesses` the phone treats the computer as unknown and offers everything; the probe keeps
           // running, so the next request answers from cache.
@@ -327,7 +336,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/dispatch/capacity": {
             const live = await servers();
             const snapshots = await Promise.all(live.map(server => snapshot(String(server.session))));
-            result = { product: "phren-hook", protocol: PROTOCOL, computer: info.computer, servers: live.map(server => server.session),
+            // Asked by a conductor with its name or host key: whether this computer links it back, so it dispatches only within its set.
+            const caller = z.object({ name: z.string().max(253).optional(), hostKey: z.string().max(512).optional() })
+              .parse({ name: url.searchParams.get("name") ?? undefined, hostKey: url.searchParams.get("hostKey") ?? undefined });
+            const linksBack = caller.name || caller.hostKey ? { knowsCaller: (await listsCaller(caller)).knowsCaller } : {};
+            result = { product: "phren-hook", protocol: PROTOCOL, computer: info.computer, servers: live.map(server => server.session), ...linksBack,
               working: snapshots.reduce((sum, value) => sum + objects(value.panes).filter(pane => pane.agent && pane.agent_status === "working").length, 0),
               // Bounded so a peer's capacity probe never waits on a cold `claude auth status`; missing means unknown.
               // PHREN_LAUNCH_CHECK=off turns this Hook's availability checks off, including what it advertises to dispatch.
@@ -543,6 +556,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           await ctx.returns!.answerApproval(body.id, body.decision, body.actionId, body.origin); result = { ok: true };
         } else if (url.pathname === "/v1/conductor/grants") {
           result = { ok: true, grant: await addGrant(data) };
+        } else if (url.pathname === "/v1/conductor/make") {
+          // Serialized with launches, so a conductor launch and a make cannot both pass the set check.
+          result = await launches.run(async () => makeConductor(selectedServer(url), data));
+        } else if (url.pathname === "/v1/conductor/stop") {
+          result = await launches.run(async () => stopConductor(data));
+        } else if (url.pathname === "/v1/sets/name") {
+          result = await nameSet(data);
         } else if (url.pathname === "/v1/push/register") {
           // Registration is kept for when a key is added; the reply says whether push works now.
           await agentHooks.push.register(data); result = { ok: true, configured: agentHooks.push.status.configured };

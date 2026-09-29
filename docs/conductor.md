@@ -59,21 +59,39 @@ trusted for that harness first, so it does not stop on the folder-trust screen
 (see [footprint](footprint.md#folder-trust-for-launches-the-hook-places)). The worktree then appears in the session's Changes >
 Workers tab, named for the agent working in it.
 
-A computer runs at most one conductor, and a connected group (this computer
-and the peers in its `hooks.yaml`) shares one. Before launching a conductor the
-Hook checks its own Herdr servers, then asks each peer's `GET /v1/conductor`
-over the pinned connection. A live conductor on this computer or any peer
-refuses the launch with 409, naming the computer and the existing target. A
-peer that cannot answer (offline, or a Hook too old to have the route) does not
-block the launch; its name comes back in the launch result's `unchecked` list.
-The phone also offers an existing conductor it can associate with the store.
-Workspace overviews and chat show the conductor role.
+A computer runs at most one conductor, and a set of linked computers shares
+one. Two computers are linked when each one's `hooks.yaml` lists the other
+(what `phren bridge link` writes); a set is the computers joined that way.
+Before launching a conductor the Hook checks its own record, then asks each
+peer's `GET /v1/conductor` over the pinned connection. A live conductor on
+this computer or any member refuses the launch with 409, naming the computer
+and the existing target. A peer that does not list this computer back is in
+another set and does not refuse it. A member that cannot answer (offline, or a
+Hook too old to have the route) does not block the launch; its name comes back
+in the launch result's `unchecked` list, as does a computer a member links that
+this computer does not. The phone also offers an existing conductor it can
+associate with the store. Workspace overviews and chat show the conductor role.
 
-Only the session launched as the conductor carries that role. A worker's Herdr
-name never starts with `conductor`, whatever its label says, and a worker asked
-to open in the conductor's workspace gets its own workspace, so it is never
-listed under the conductor's name. `live_sessions` names a worker already in
-the conductor's workspace by its own tab.
+The Hook, not the terminal, holds the role. It records the conductor's pane in
+`<bridge>/conductor-role.json`, and the role stays with that pane when its
+agent restarts or the owner logs in again. The pane closing ends it. The Herdr
+agent name (`conductor-*`) or tmux `@phren_agent` is a label for people; a
+conductor from before the record is recognized by that name once and recorded.
+A worker's name never starts with `conductor`, whatever its label says, and a
+worker asked to open in the conductor's workspace gets its own workspace, so it
+is never listed under the conductor's name. `live_sessions` names a worker
+already in the conductor's workspace by its own tab.
+
+```sh
+phren conductor make              # the agent in this pane becomes this computer's conductor
+phren conductor stop              # it keeps running, without the role
+phren conductor sets              # sets, their computers, reachability and conductors, plus unlinked computers
+phren conductor sets name Home    # name this computer's set on every reachable member
+```
+
+A conductor dispatches only within its set: a peer that does not link back is
+refused by name and skipped by `anywhere`. Design and routes are in
+[Conductor sets](conductor-sets.md).
 
 Computers that are not linked can each run their own conductor. They
 coordinate through the synced store by claiming tasks: `claim_task` (or
@@ -379,7 +397,10 @@ into its per-process status file. From that record:
 - a Stop after the prompt is `done` (or `needs-you`, or `failed` when the
   transcript shows the turn ended on an error). When background tasks were
   still in flight the worker stays `working`: the harness wakes it with a new
-  prompt when a task ends, and that turn's Stop decides. A worker still
+  prompt when a task ends, and that turn's Stop decides. A task whose
+  task-notification the transcript records after the Stop no longer counts,
+  even when no new turn follows (a notification can wait in an idle session's
+  queue), and the worker is `done` once none is left. A worker still
   waiting on background work two hours after its Stop (a dev server it left
   running) counts as `done`, with `background` set. The wait is measured from
   the latest Stop and every task that finishes wakes the worker with a new
