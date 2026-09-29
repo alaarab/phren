@@ -84,10 +84,12 @@ export function meaningfulLabel(value: unknown): string | undefined {
  * ✳), bullets, circles and hourglasses. */
 const GLYPHS_AROUND = /^[\u2800-\u28ff\u2700-\u27bf\u25a0-\u25ff\u23f0-\u23ff\u2022\u00b7\u2219\u22c5\u2605\u2606\s]+|[\s\u2800-\u28ff\u2700-\u27bf\u25a0-\u25ff\u23f0-\u23ff\u2022\u00b7\u2219\u22c5\u2605\u2606]+$/gu;
 
-/** A terminal title without the spinner or status glyphs around it; undefined when nothing else is left. */
+/** A terminal title without the spinner or status glyphs around it, nor the
+ * separator they leave dangling (Codex's "⠸ | phren" before its thread has a
+ * title); undefined when nothing else is left. */
 export function plainTitle(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  const text = value.replace(GLYPHS_AROUND, "").trim();
+  const text = value.replace(GLYPHS_AROUND, "").replace(/^\|\s+|\s+\|$/g, "").replace(GLYPHS_AROUND, "").trim();
   return text || undefined;
 }
 
