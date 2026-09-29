@@ -1200,9 +1200,17 @@ schedules:
       expect(await submit(other, "typed at the keyboard")).toEqual({ status: 200 });
       // A busy agent submits queued text long after the phone stopped waiting;
       // the record outlives that wait, so a wrong conversation is still refused.
-      expect((await api("/v1/prompt", { target, text: "queued while busy" })).data).toEqual({ ok: true });
+      // Still the same conversation: queued, and its delivery id says when it lands.
+      expect((await api("/v1/prompt", { target, text: "queued while busy", deliveryId: "queued-000001" })).data).toEqual({ ok: true, queued: true });
+      expect((await api("/v1/prompt/status", { target, deliveryId: "queued-000001" })).data).toEqual({ ok: true, state: "queued" });
       expect(await submit(other, "queued while busy")).toMatchObject({ decision: "block" });
+      expect((await api("/v1/prompt/status", { target, deliveryId: "queued-000001" })).data).toEqual({ ok: true, state: "blocked" });
       expect(await submit(session, "queued while busy")).toEqual({ status: 200 });
+      expect((await api("/v1/prompt", { target, text: "lands later", deliveryId: "queued-000002" })).data).toEqual({ ok: true, queued: true });
+      expect(await submit(session, "lands later")).toEqual({ status: 200 });
+      expect((await api("/v1/prompt/status", { target, deliveryId: "queued-000002" })).data).toEqual({ ok: true, state: "delivered" });
+      expect((await api("/v1/prompt/status", { target: { ...target, session: other }, deliveryId: "queued-000002" })).status).toBe(409);
+      expect((await api("/v1/prompt/status", { target, deliveryId: "never-sent-01" })).data).toEqual({ ok: true, state: "unknown" });
     }, 15_000);
 
     // Seen on the phone: an idle Claude Code redrawing (an update notice)
@@ -1247,7 +1255,7 @@ schedules:
       const claude = { ...target, source: "claude" as const };
       const enters = () => commands.filter(c => c.method === "agent.send_keys" && JSON.stringify(c.params.keys) === '["enter"]').length;
       const before = enters();
-      expect((await api("/v1/prompt", { target: claude, text: "hand off the parser review" })).data).toEqual({ ok: true });
+      expect((await api("/v1/prompt", { target: claude, text: "hand off the parser review" })).data).toEqual({ ok: true, queued: true });
       await sleep(2_500);
       expect(enters()).toBe(before);
       agentStatus = "idle";
@@ -1787,12 +1795,12 @@ schedules:
         api("/v1/prompt", { target, text: "Look what happened", deliveryId }),
         sleep(50).then(() => api("/v1/prompt", { target, text: "Look what happened", deliveryId })),
       ]);
-      expect(first).toEqual({ status: 200, data: { ok: true } });
-      expect(second).toEqual({ status: 200, data: { ok: true, replayed: true } });
+      expect(first).toEqual({ status: 200, data: { ok: true, queued: true } });
+      expect(second).toEqual({ status: 200, data: { ok: true, queued: true, replayed: true } });
       expect(prompts()).toBe(1);
       // A later retry, even after the pane's conversation changed, answers the same.
       current = "bbbbbbbb-1111-4111-8111-111111111111";
-      expect(await api("/v1/prompt", { target, text: "Look what happened", deliveryId })).toEqual({ status: 200, data: { ok: true, replayed: true } });
+      expect(await api("/v1/prompt", { target, text: "Look what happened", deliveryId })).toEqual({ status: 200, data: { ok: true, queued: true, replayed: true } });
       expect(prompts()).toBe(1);
       // The id belongs to that message; other text under it is refused untyped.
       expect((await api("/v1/prompt", { target, text: "something else", deliveryId })).status).toBe(409);
@@ -1802,7 +1810,7 @@ schedules:
       expect((await api("/v1/prompt", { target, text: "retry me", deliveryId: fresh })).status).toBe(409);
       expect(prompts()).toBe(1);
       current = session;
-      expect(await api("/v1/prompt", { target, text: "retry me", deliveryId: fresh })).toEqual({ status: 200, data: { ok: true } });
+      expect(await api("/v1/prompt", { target, text: "retry me", deliveryId: fresh })).toEqual({ status: 200, data: { ok: true, queued: true } });
       expect(prompts()).toBe(2);
       // No id: every request types, as before. A malformed id is a 400.
       await api("/v1/prompt", { target, text: "Look what happened" });

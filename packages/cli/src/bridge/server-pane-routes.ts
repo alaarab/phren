@@ -391,7 +391,8 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     // walk it with keys for the next half minute. The command rides
     // along so a Codex /permissions walk can find its confirmation.
     if (/^\/[a-z][a-z0-9_-]*$/i.test(text.trim())) agentHooks.menuOpened(target, text.trim());
-    if (outcome === "delivered") { result = { ok: true, delivered: true }; }
+    const deliveryId = deliveryIdSchema.parse(data.deliveryId);
+    if (outcome === "delivered") { result = { ok: true, delivered: true }; if (deliveryId) agentHooks.trackDelivery(deliveryId, target, text, "delivered"); }
     else if (outcome === "unsubmitted") { result = { ok: true, deliveryUncertain: true, unsubmitted: true }; }
     else {
       // The agent has not submitted it yet (a busy agent queues typed
@@ -404,8 +405,17 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
         const current = findPane(await snapshot(target.server), target);
         confirmed = !!current && current.terminal_id === pane.terminal_id && await paneIdentity(target.server, current, true) === target.session;
       } catch { /* No reliable post-delivery identity. */ }
-      result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : {}) };
+      // Still this conversation, in the same terminal: the agent holds the
+      // message (a busy turn queues it) and its hook has not submitted it
+      // yet. Queued, not delivered; `/v1/prompt/status` says when it lands.
+      if (confirmed && deliveryId) agentHooks.trackDelivery(deliveryId, target, text, "queued");
+      result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : { queued: true }) };
     }
+  } else if (url.pathname === "/v1/prompt/status") {
+    // Asked by the phone's own delivery id, so no text is matched again.
+    const id = deliveryIdSchema.parse(data.deliveryId);
+    if (!id) throw new BridgeError(400, "Name the message by its deliveryId.");
+    result = { ok: true, state: agentHooks.deliveryState(id, target) };
   } else if (url.pathname === "/v1/side-question/dismiss") {
     result = sideQuestions.dismiss(target, z.string().uuid().parse(data.id));
   } else if (url.pathname === "/v1/model") {
