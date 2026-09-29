@@ -243,7 +243,7 @@ export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json
       // Herdr's per-pane state_change_seq climbs with every agent status
       // change; the phone orders "just finished" ahead of "finished an hour ago" by it.
       const changed = Math.max(0, ...panes.map(p => Number.isSafeInteger(p.state_change_seq) ? Number(p.state_change_seq) : 0));
-      return { id: t.tab_id, label: t.label, title: agent?.title || agent?.terminal_title_stripped,
+      return { id: t.tab_id, label: t.label, paneLabel: agent?.label || undefined, title: agent?.title || agent?.terminal_title_stripped,
         agent: agent?.agent, agentStatus: t.agent_status, cwd: agent?.foreground_cwd || agent?.cwd,
         role: isConductorName(paneAgentName(s, agent)) ? "conductor" : undefined,
         changedSeq: changed || undefined,
@@ -533,7 +533,7 @@ export async function panes(server: string, workspace: string, tab: string): Pro
       const t = objects(s.tabs).find(candidate => candidate.tab_id === tab && candidate.workspace_id === workspace);
       const w = objects(s.workspaces).find(candidate => candidate.workspace_id === workspace);
       return { id: p.pane_id, label: p.label || p.pane_id, agent: p.agent, agentStatus: p.agent_status,
-        title: await recordTitle(record, { harnessTitle: p.title || p.terminal_title_stripped, tabLabel: t?.label, workspaceLabel: w?.label, fallbackLabel: p.label || p.pane_id }),
+        title: await recordTitle(record, { paneLabel: p.label, harnessTitle: p.title || p.terminal_title_stripped, tabLabel: t?.label, workspaceLabel: w?.label, fallbackLabel: p.label || p.pane_id }),
         cwd: p.foreground_cwd || p.cwd, ...chat, ...paneAccountField(server, p) };
     })) };
 }

@@ -43,6 +43,7 @@ export interface PaneServerEntry {
 export interface OpenCodeSession {
   id: string;
   directory?: string;
+  title?: string;
   /** Set on a subagent's session; the TUI shows its root session. */
   parentID?: string;
   time?: { created?: number; updated?: number };
@@ -194,6 +195,8 @@ export interface PaneClient {
   /** Asks the TUI to show `id`. A TUI still starting drops the request, so
    * the caller checks the pane and asks again. */
   selectSession(id: string): Promise<void>;
+  /** Renames the session (`PATCH /session/{id}`) and returns the title the server now holds. */
+  setTitle(sessionId: string, title: string): Promise<string | undefined>;
   prompt(sessionId: string, text: string, opts?: PromptOptions): Promise<PromptResult>;
   permissions(): Promise<OpenCodePermission[]>;
   replyPermission(id: string, reply: PermissionReply, message?: string): Promise<void>;
@@ -260,6 +263,10 @@ export function openPaneClient(entry: PaneServerEntry, fetchImpl: typeof fetch =
     },
     async selectSession(id) {
       await json<unknown>("POST", "/tui/select-session", { sessionID: id });
+    },
+    async setTitle(sessionId, title) {
+      const renamed = await json<OpenCodeSession>("PATCH", `/session/${encodeURIComponent(sessionId)}`, { title });
+      return typeof renamed?.title === "string" ? renamed.title : undefined;
     },
     async currentSession() {
       const list = (await sessionList()).filter(session => typeof session.id === "string" && !session.parentID);

@@ -37,6 +37,7 @@ function fakeServer() {
     sessions: async () => [...state.sessions.values()],
     session: async id => state.sessions.get(id),
     currentSession: async () => state.sessions.get("ses_root"),
+    setTitle: async (_session, title) => title,
     createSession: async () => { const id = `ses_new${++state.created}`; state.sessions.set(id, { id }); return { id }; },
     selectSession: async id => { state.selected.push(id); },
     prompt: async (session, text, options) => { state.prompts.push({ session, text, options }); return state.deliver ? { delivered: true, messageId: "msg_1" } : { delivered: false, reason: "timeout" }; },

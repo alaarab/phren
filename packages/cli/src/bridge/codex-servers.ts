@@ -285,6 +285,13 @@ export class CodexServers {
     return started;
   }
 
+  /** `thread/name/set` on the pane's thread: Codex's own rename, which its TUI
+   * shows and `session_index.jsonl` keeps. Allowed while a turn runs. */
+  async renameThread(entry: CodexServerEntry, name: string): Promise<void> {
+    if (!entry.threadId) throw new CodexServerUnavailable("The Codex pane has not started its thread yet.");
+    await (await this.client(entry)).request("thread/name/set", { threadId: entry.threadId, name });
+  }
+
   /** Holds a model and effort for the pane's next Hook-sent turn. Nothing is
    * typed into the TUI and a running turn is not disturbed. */
   setNextTurn(entry: CodexServerEntry, model: string, effort?: string): void {

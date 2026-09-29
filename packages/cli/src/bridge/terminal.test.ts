@@ -21,7 +21,7 @@ function fakeTerminal(screen: () => string): TerminalProvider & { keys: string[]
     processes: async () => ({ foregroundPids: [] }),
     readScreen: async (_server, _pane, read) => { reads.push(read); return screen(); },
     sendKeys: async (_server, _pane, sent) => { keys.push(sent); },
-    prompt: refuse, create: refuse, startAgent: refuse, focusPane: refuse, groupAction: refuse };
+    prompt: refuse, create: refuse, startAgent: refuse, focusPane: refuse, renamePane: refuse, groupAction: refuse };
 }
 
 describe("the Hook through a terminal provider", () => {
@@ -71,6 +71,7 @@ describe("the Herdr provider", () => {
     await herdrTerminal.create("s", { label: "L", cwd: "/tmp", env: { PHREN_DISPATCH_ID: "dispatch-1" } });
     await herdrTerminal.startAgent("s", "p", { name: "n", kind: "claude", args: [], timeoutMs: 1_000 });
     await herdrTerminal.focusPane("s", "p");
+    await herdrTerminal.renamePane("s", "p", "Named");
     await herdrTerminal.groupAction("s", "rename", { workspace: "w", tab: "t" }, "New");
     await herdrTerminal.groupAction("s", "close", { workspace: "w" });
     await herdrTerminal.ping("s");
@@ -86,6 +87,7 @@ describe("the Herdr provider", () => {
       ["s", "workspace.create", { workspace_id: undefined, label: "L", cwd: "/tmp", focus: false, env: { PHREN_DISPATCH_ID: "dispatch-1" } }],
       ["s", "agent.start", { name: "n", kind: "claude", pane_id: "p", timeout_ms: 1_000 }, undefined, 6_000],
       ["s", "pane.focus", { pane_id: "p" }],
+      ["s", "pane.rename", { pane_id: "p", label: "Named" }],
       ["s", "tab.rename", { tab_id: "t", label: "New" }],
       ["s", "workspace.close", { workspace_id: "w" }],
       ["s", "ping"],
