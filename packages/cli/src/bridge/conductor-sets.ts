@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { askPeers, buildSets, localCaller } from "./conductor-group.js";
+import { askPeers, buildSets, indirectMembers, localCaller } from "./conductor-group.js";
 import { readSetName, saveSetName } from "./conductor-role.js";
-import { readComputers } from "./computer-identity.js";
+import { type Computer, computerLabel, readComputers } from "./computer-identity.js";
 import { localNames } from "./computer-names.js";
 import { listsCaller } from "./health.js";
 import { optionalHookPeers, peerRequest } from "./peers.js";
-import { type Json } from "./protocol.js";
+import { object, type Json } from "./protocol.js";
 import { localConductor } from "./server-launch.js";
 
 /** The Hook routes for linked computer sets (docs/conductor-sets.md). */
@@ -29,8 +29,23 @@ export async function readSets(info: LocalInfo): Promise<Json> {
   const [{ peers, peerError }, conductor, set, { computers }] = await Promise.all([optionalHookPeers(), localConductor(), readSetName(),
     readComputers({ local: { id: info.computer.id } })]);
   const answers = await askPeers(peers, await localCaller());
+  // Old /v1/conductor replies list peer names without ids. Resolve unknown
+  // names through the existing identity directory, also on older Hooks.
+  // Skip this extra round when names already identify every member.
+  const indirect = new Set(indirectMembers(answers, [info.computer.name, ...(info.computer.aliases ?? []), ...localNames()]).map(computerLabel));
+  const reportedComputers = (await Promise.all(answers.map(async answer => {
+    if (!answer.ok || answer.knowsCaller === false || !answer.peers?.some(name => indirect.has(computerLabel(name)))) return [];
+    try {
+      const directory = await peerRequest(answer.peer, "/v1/computers", undefined, 12_000);
+      return (Array.isArray(directory.computers) ? directory.computers.slice(0, 64) : []).flatMap(value => {
+        const row = object(value);
+        return typeof row.id === "string" && typeof row.name === "string" ? [{ id: row.id, name: row.name,
+          aliases: (Array.isArray(row.aliases) ? row.aliases : []).filter((name): name is string => typeof name === "string").slice(0, 64) }] : [];
+      });
+    } catch { return []; } // Missing or offline identity directory keeps the name-only view.
+  }))).flat() satisfies Pick<Computer, "id" | "name" | "aliases">[];
   const view = buildSets({ local: { name: info.computer.name, id: info.computer.id, ...(conductor ? { conductor } : {}), ...(set ? { set } : {}),
-    names: [info.computer.name, ...(info.computer.aliases ?? []), ...localNames()] }, answers, computers });
+    names: [info.computer.name, ...(info.computer.aliases ?? []), ...localNames()] }, answers, computers, reportedComputers });
   return { ...view, ...(peerError ? { peerError } : {}) } as unknown as Json;
 }
 

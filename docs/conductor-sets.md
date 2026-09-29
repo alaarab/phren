@@ -46,7 +46,12 @@ conductor, although the owner runs several separate groups of computers.
    `link: "indirect"` and a hint to link it directly. A peer that does not
    list this computer back (`link: "one-way"`) is shown in its own set. A peer
    that cannot be reached, or whose Hook is too old to say, is treated as a
-   member (`link: "unknown"`), as before.
+   member (`link: "unknown"`), as before. When a peer uses a friendly name
+   for this computer (for example, `Linuxbox` for hostname `omarchy`), the
+   Hook resolves unresolved names through that peer's `/v1/computers`
+   directory. A matching computer id folds the name into the `self` row,
+   which displays the friendly name and never carries a link hint. Name
+   similarity alone does not establish that identity.
 8. **One conductor per set.** Launching or making a conductor is refused (409)
    when this computer or a member already has a live one. One-way peers are
    outside the set and do not refuse. A member that cannot answer, or an
@@ -138,6 +143,17 @@ phren conductor sets name "Home"    # or --clear
   computers' names when unnamed), each computer's reachability and `link`
   state with its `hint`, and the conductor badge on the computer that has one.
   Put `unlinked` last with the hint to run `phren bridge link` on a computer.
+- Computer identity: use `id` when present; `name` is a display label and can
+  change from a hostname to the friendly name its peers use. The local row
+  keeps `local: true`, `reachable: true` and `link: "self"`, with no `hint`.
+  Its conductor and the set's `conductor.computer` use the same display name;
+  folding an alias does not add to `conductors`. The response shape is
+  unchanged. Shared example:
+  `packages/cli/fixtures/conformance/sets-local-friendly-name.json`.
+- Loading: unresolved peer names may require a second parallel SSH round to
+  `/v1/computers` (up to 12 seconds after the conductor replies, themselves
+  bounded by 8 seconds). Known names skip this round. A missing or offline
+  identity directory retains the name-only view.
 - Rename set: `POST /v1/sets/name` on any reachable member of that set.
 - Session menu: "Make conductor" posts `/v1/conductor/make` to the session's
   computer with its workspace, tab and pane ids; a 409 shows the message and
