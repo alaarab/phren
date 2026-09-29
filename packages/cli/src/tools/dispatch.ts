@@ -38,12 +38,13 @@ export function register(server: McpServer): void {
   });
   server.registerTool("owner_inbox", {
     title: "◆ phren · owner inbox",
-    description: "One owner inbox on this conductor's Hook: list open needs-you returns, blocked prompts and manual items; add a title and optional project; resolve an id with an optional resolution. Reading returns does not resolve inbox items. Resolving an inbox item does not answer or approve a worker prompt. includeResolved lists history. Keep an id on retried adds.",
-    inputSchema: ownerInboxSchema,
+    description: "One owner inbox on this conductor's Hook: list open needs-you returns, blocked prompts and manual items; add a title and optional project; resolve an id with an optional resolution. Reading returns does not resolve inbox items. Resolving an inbox item does not answer or approve a worker prompt. Use operation add, list or resolve (also through phren_admin action owner_inbox). includeResolved lists history. Keep an id on retried adds.",
+    inputSchema: ownerInboxSchema.omit({ action: true }).extend({ operation: ownerInboxSchema.shape.action }),
   }, async input => {
     try {
-      const result = await hookRequest("/v1/owner-inbox", input);
-      return mcpResponse({ ok: result.ok === true, data: result, message: input.action === "add" ? "Added to the owner inbox." : input.action === "resolve" ? "Owner inbox item resolved." : `${Array.isArray(result.items) ? result.items.length : 0} owner inbox items.` });
+      const { operation, ...rest } = input;
+      const result = await hookRequest("/v1/owner-inbox", { ...rest, action: operation ?? "list" });
+      return mcpResponse({ ok: result.ok === true, data: result, message: input.operation === "add" ? "Added to the owner inbox." : input.operation === "resolve" ? "Owner inbox item resolved." : `${Array.isArray(result.items) ? result.items.length : 0} owner inbox items.` });
     } catch (error) { return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not read the owner inbox." }); }
   });
   server.registerTool("dispatch_returns", {

@@ -180,7 +180,7 @@ describe("the worker's Hook answering from turn events", () => {
   it("is done when a Stop arrived after the prompt, with the Stop's own reply", async () => {
     record = turn(["UserPromptSubmit"], ["Stop", { reply: "Parser checks done." }]);
     final = { completed: false };
-    expect(await ask()).toEqual({ state: "done", session, hook: true, completed: true, endedAt: record!.stop!.at, reply: "Parser checks done." });
+    expect(await ask()).toEqual({ state: "done", session, hook: true, completed: true, endedAt: record!.stop!.at, stopSeq: record!.stop!.seq, reply: "Parser checks done." });
     // The transcript still carries a usage limit Codex ended the turn on.
     final = { completed: true, error: "You've hit your usage limit." };
     expect(await ask()).toMatchObject({ state: "done", error: "You've hit your usage limit." });
@@ -214,7 +214,7 @@ describe("the worker's Hook answering from turn events", () => {
     expect(await ask()).toEqual({ state: "working", session, hook: true, background: 1 });
     final = { completed: true, finishedTasks: [at(-5_000), at(60_000), at(90_000)] };
     const done = await ask();
-    expect(done).toEqual({ state: "done", session, hook: true, completed: true, endedAt: expect.any(String), reply: "Suite started." });
+    expect(done).toEqual({ state: "done", session, hook: true, completed: true, endedAt: expect.any(String), stopSeq: record!.stop!.seq, reply: "Suite started." });
     observe(value, done, now);
     expect(noticeLine([value])).toContain("parser checks done (after 2 background tasks finished), Suite started.");
   });

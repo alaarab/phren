@@ -9,7 +9,7 @@ import { arrivalOf, dispatchStatus, updateReceipt, type OriginPane, type Receipt
 import { briefArrival, briefId, type BriefArrival } from "./launch-brief.js";
 import { codexServers, LOST_TURN, type LostTurn } from "./codex-servers.js";
 import { findGrant } from "./grants.js";
-import { findPane, paneIdentity, sharedSnapshot } from "./herdr.js";
+import { findPane, paneIdentity, sharedSnapshot, snapshot } from "./herdr.js";
 import { handOff } from "./hand-off.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
@@ -34,6 +34,9 @@ export { truncateUtf8 } from "./turn-records.js";
 export const REPLY_LIMIT = TURN_REPLY_LIMIT;
 /** How often the dispatching Hook asks peers about open dispatches. */
 export const POLL_MS = 15_000;
+/** Allow the new process and its terminal identity to appear before declaring
+ * an unobserved launch gone. An observed worker never gets this grace. */
+export const LAUNCH_GRACE_MS = 60_000;
 /** Shortest gap between two notices typed into the same dispatching pane. */
 export const NOTICE_MS = 120_000;
 /** Receipts older than this are no longer watched. */
@@ -80,6 +83,7 @@ export interface WorkerObservation {
 
 export interface WorkerReaders {
   snapshot: (server: string) => Promise<Json>;
+  freshSnapshot?: (server: string) => Promise<Json>;
   identity: (server: string, pane: Json) => Promise<string | undefined>;
   finalTurn: (source: Provider, session: string) => Promise<FinalTurn | undefined>;
   /** The turn record the pane's agent reported through its hooks (or OpenCode's plugin). */
@@ -100,6 +104,7 @@ export async function paneTurn(server: string, pane: Json, source: Provider): Pr
 
 const defaultReaders: WorkerReaders = {
   snapshot: server => sharedSnapshot(server, SNAPSHOT_AGE_MS),
+  freshSnapshot: snapshot,
   identity: (server, pane) => paneIdentity(server, pane),
   finalTurn: (source, session) => source === "codex" || source === "claude" || source === "opencode" ? readFinalTurn(source, session) : Promise.resolve(undefined),
   turn: paneTurn,
@@ -160,13 +165,22 @@ async function fromTurn(record: TurnRecord, session: string, status: string, sou
 export async function workerStates(input: unknown, readers: WorkerReaders = defaultReaders): Promise<{ workers: WorkerObservation[] }> {
   const { targets } = workerRequestSchema.parse(input);
   const snapshots = new Map<string, Promise<Json>>();
+  const freshSnapshots = new Map<string, Promise<Json>>();
   const workers = await Promise.all(targets.map(async (target): Promise<WorkerObservation> => {
     let s: Json;
     try {
       if (!snapshots.has(target.server)) snapshots.set(target.server, readers.snapshot(target.server));
       s = await snapshots.get(target.server)!;
     } catch { return { state: "unavailable" }; }
-    const pane = findPane(s, target);
+    let pane = findPane(s, target);
+    // Never turn a cached pre-launch snapshot into a terminal gone return.
+    if (readers.freshSnapshot && (!pane || await intentionallyClosed(target))) {
+      try {
+        if (!freshSnapshots.has(target.server)) freshSnapshots.set(target.server, readers.freshSnapshot(target.server));
+        s = await freshSnapshots.get(target.server)!;
+        pane = findPane(s, target);
+      } catch { return { state: "unavailable" }; }
+    }
     if (!pane) return { state: await intentionallyClosed(target) ? "closed" : "gone" };
     const current = await readers.identity(target.server, pane).catch(() => undefined);
     const expected = "session" in target ? target.session : undefined;
@@ -206,7 +220,7 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
   return { workers: workers.map((seen, index) => {
     const { dispatch: _dispatch, ...target } = targets[index];
     const full = "session" in target ? targetSchema.safeParse(target) : undefined;
-    const approval = full?.success && seen.state !== "gone" && seen.state !== "unavailable" ? readers.approval?.(full.data) : undefined;
+    const approval = full?.success && seen.state !== "gone" && seen.state !== "closed" && seen.state !== "unavailable" ? readers.approval?.(full.data) : undefined;
     return approval ? { ...seen, approval } : seen;
   }) };
 }
@@ -245,8 +259,11 @@ function turnKey(value: string | undefined): string | undefined {
 /** Apply one observation to a receipt. Returns true when the receipt changed. */
 export function observe(receipt: Receipt, value: unknown, now: number): boolean {
   const parsed = observationSchema.safeParse(value);
+  if (receipt.closedAt) return false;
   if (!parsed.success || parsed.data.state === "unavailable" || parsed.data.state === "unknown") return false;
-  if (parsed.data.state === "closed") { if (receipt.closedAt) return false; receipt.closedAt = new Date(now).toISOString(); return true; }
+  if (parsed.data.state === "closed") { receipt.closedAt = new Date(now).toISOString(); return true; }
+  if (parsed.data.state === "gone" && receipt.brief === "launch" && !receipt.worker?.sawWorking && !receipt.returned
+    && now - Date.parse(receipt.createdAt) < LAUNCH_GRACE_MS) return false;
   const state = observeState(receipt, parsed.data, now);
   return observeApproval(receipt, parsed.data.approval, now) || state;
 }
@@ -613,28 +630,35 @@ export class DispatchReturns {
   async forwardPrs(): Promise<void> {
     const configured = await readIntegrator();
     for (const receipt of await dispatchStatus()) {
-      const result = receipt.returned, integrator = receipt.integrator ?? configured;
-      if (!integrator || result?.state !== "done" || !result.prs) continue;
-      if (result.integratorDelivery) {
-        if (result.integratorDelivery.state !== "queued") continue;
-        const status = await handOff({ ...integrator, deliveryId: result.integratorDelivery.deliveryId, status: true }, { notifySender: false }).catch(() => undefined);
-        if (!status || !["delivered", "uncertain", "failed"].includes(String(status.state))) continue;
-        await updateReceipt(receipt.id, current => {
-          if (current.returned?.at !== result.at || current.returned.integratorDelivery?.deliveryId !== result.integratorDelivery!.deliveryId) return false;
-          current.returned.integratorDelivery!.state = status.state as "delivered" | "uncertain" | "failed"; return true;
+      const result = receipt.returned;
+      if (result?.state !== "done" || !result.prs) continue;
+      const integrator = result.integratorDelivery?.integrator ?? receipt.integrator ?? configured;
+      if (!integrator) continue;
+      let delivery = result.integratorDelivery;
+      if (!delivery) {
+        delivery = { deliveryId: `pr-${createHash("sha256").update(`${receipt.id}@${result.turn ?? result.at}`).digest("hex").slice(0, 40)}`,
+          state: "pending", at: new Date(this.now()).toISOString(), integrator };
+        const current = await updateReceipt(receipt.id, current => {
+          if (current.returned?.at !== result.at || current.returned.turn !== result.turn || current.returned.integratorDelivery) return false;
+          current.returned.integratorDelivery = delivery; return true;
         });
-        continue;
+        if (!current || current.returned?.turn !== result.turn || current.returned?.at !== result.at) continue;
+        delivery = current.returned.integratorDelivery;
       }
-      const deliveryId = `pr-${createHash("sha256").update(`${receipt.id}@${result.at}`).digest("hex").slice(0, 40)}`;
-      const sent = await handOff({ ...integrator, text: `PR ready: ${receipt.computer} ${receipt.label}\n${JSON.stringify({ dispatch: receipt.id, project: receipt.project, prs: result.prs })}`, deliveryId }, { notifySender: false }).catch(() => undefined);
-      if (!sent) continue; // A lost transport reply retries only the same durable id.
+      if (!delivery || !["pending", "queued"].includes(delivery.state)) continue;
+      const statusOnly = delivery.state === "queued";
+      const sent = await handOff({ ...integrator, deliveryId: delivery.deliveryId,
+        ...(statusOnly ? { status: true } : { text: `PR ready: ${receipt.computer} ${receipt.label}\n${JSON.stringify({ dispatch: receipt.id, project: receipt.project, prs: result.prs })}` }) },
+        { notifySender: false }).catch(() => undefined);
+      if (!sent) continue; // Retry this saved target and id after a lost transport reply.
       const state = sent.delivered ? "delivered" : sent.queued ? "queued" : sent.deliveryUncertain ? "uncertain" : "failed";
       await updateReceipt(receipt.id, current => {
-        if (current.returned?.at !== result.at || current.returned.integratorDelivery) return false;
-        current.returned.integratorDelivery = { deliveryId, state, at: new Date(this.now()).toISOString() }; return true;
+        if (current.returned?.at !== result.at || current.returned.turn !== result.turn || current.returned.integratorDelivery?.deliveryId !== delivery!.deliveryId) return false;
+        current.returned.integratorDelivery.state = state; return true;
       });
     }
   }
+
   async cleanup(): Promise<void> {
     for (const receipt of await dispatchStatus()) {
       if (!receipt.closePending || receipt.closedAt || receipt.returned?.at !== receipt.closePending.at || receipt.returned.state !== "done" || !receipt.returned.read) continue;
@@ -667,10 +691,7 @@ export class DispatchReturns {
         return true;
       }).catch(() => undefined);
       // A concurrent take already handed this one over.
-      if (marked && current?.returned) {
-        rows.push(returnRow(current));
-
-      }
+      if (marked && current?.returned) rows.push(returnRow(current));
     }
     await this.forwardPrs(); await this.cleanup();
     return rows;

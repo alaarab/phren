@@ -591,13 +591,15 @@ Configure the default integrator on the dispatching Hook with
 `phren conductor integrator`, or clear with `--clear`. A dispatch can override
 it with `integrator:{computer?,target}`. The Hook forwards a done return's `prs`
 through the durable hand-off queue, with one stable delivery id. Receipts carry
-`integratorDelivery:{deliveryId,state,at}`. Queued forwarding is checked until
+`integratorDelivery:{deliveryId,state,at,integrator?}`. A saved pending delivery
+keeps its original integrator target on retries, even if the default changes.
+Queued forwarding is checked until
 delivered; uncertain forwarding stays uncertain. A restarted integrator needs
 its new target configured. Workers need no direct messaging or GitHub comment.
 
 ## Owner inbox
 
-`owner_inbox(action:"list")` and `phren owner-inbox list` show needs-you returns,
+`owner_inbox(operation:"list")` and `phren owner-inbox list` show needs-you returns,
 blocked prompts and manual items across the linked computers. The owning Hook
 persists each item. An item's `inboxComputer` tells clients where to resolve it;
 its `computer` can instead name the remote worker. Unreachable inboxes are

@@ -172,5 +172,13 @@ export class HandOffQueue {
       }
     });
   }
+  /** Hold enqueues and delivery while the Hook validates and closes a worker.
+   * A new hand-off cannot be accepted between the pending check and closure. */
+  whenNoPending(target: Target, close: () => Promise<Json>): Promise<Json> {
+    return this.serial(async () => {
+      if ((await this.rows()).some(row => sameTarget(row.target, target) && ["queued", "attempting", "uncertain"].includes(row.state))) return { ok: true, closed: false };
+      return close();
+    });
+  }
   hasPending(target: Target): Promise<boolean> { return this.serial(async () => (await this.rows()).some(row => sameTarget(row.target, target) && ["queued", "attempting", "uncertain"].includes(row.state))); }
 }

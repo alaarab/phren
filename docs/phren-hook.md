@@ -852,7 +852,7 @@ check the relevant capability before offering the new surface.
   `POST` on the same path accepts `{integrator:{computer?,target}|null}`.
   The target is a complete live session target. Dispatch can set its own
   `integrator` override. Forwarded receipts have
-  `integratorDelivery:{deliveryId,state:"queued"|"delivered"|"uncertain"|"failed",at}`.
+  `integratorDelivery:{deliveryId,state:"pending"|"queued"|"delivered"|"uncertain"|"failed",at,integrator?}`.
 - `POST /v1/dispatch/close`: `{target,dispatch,turn}`. `turn` is the done
   return's opaque fingerprint. It returns `{ok:true,closed:boolean}`; true may
   carry `replayed:true`. The route rechecks the ended turn, terminal, current

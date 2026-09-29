@@ -165,7 +165,8 @@ Configure the integrator once with `phren conductor integrator --session <id>
 [--computer <name>]`; list with `phren conductor integrator`, clear with
 `--clear`. A dispatch can override it with `integrator: {computer?, target}`.
 The integrator's full target is bound to that conversation. Workers report
-structured PR evidence with `dispatch_report` before finishing; they do not
+structured PR evidence with `dispatch_report(prs)` in full or
+`phren_admin(action:"dispatch_report", prs)` in core before finishing; they do not
 need direct messaging or a GitHub comment to reach it. Inspect `prs` and
 `integratorDelivery` in receipts and verify the evidence before integration.
 
@@ -178,7 +179,9 @@ tasks, queued messages or uncertain delivery. Intentional closes do not return
 Keep one owner inbox item for each decision or action that waits on the owner.
 Needs-you returns and blocked prompts appear automatically, even if their
 returns were read. Add other actions such as restarting the router with
-`owner_inbox(action:"add", title, project?, id?)`; keep the id on retries.
+`owner_inbox(operation:"add", title, project?, id?)` in full or
+`phren_admin(action:"owner_inbox", operation:"add", title, project?, id?)` in
+core; keep the id on retries.
 Resolve an item only once the owner decided or completed the action. Resolution
 does not send an answer, approve a prompt, or mark a task complete. Send an
 owner's answer separately with queued `hand_off`. A source that stopped waiting
