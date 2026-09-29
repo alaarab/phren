@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -211,11 +211,10 @@ describe.skipIf(process.platform === "win32")("interruptTurn", () => {
   });
 });
 
-describe.skipIf(process.platform === "win32")("spawnAppServer", () => {
-  it("starts the binary, makes the socket's folder owner-only, and stops it", async () => {
-    const wsModule = createRequire(import.meta.url).resolve("ws");
-    const codex = path.join(root, "fake-codex.cjs");
-    await writeFile(codex, `#!/usr/bin/env node
+async function fakeCodex(): Promise<string> {
+  const wsModule = createRequire(import.meta.url).resolve("ws");
+  const codex = path.join(root, "fake-codex.cjs");
+  await writeFile(codex, `#!/usr/bin/env node
 const { WebSocketServer } = require(${JSON.stringify(wsModule)});
 const http = require("node:http");
 const { mkdirSync } = require("node:fs");
@@ -232,6 +231,12 @@ wss.on("connection", socket => socket.on("message", raw => {
 }));
 httpServer.listen(socketPath);
 `, { mode: 0o755 });
+  return codex;
+}
+
+describe.skipIf(process.platform === "win32")("spawnAppServer", () => {
+  it("starts the binary, makes the socket's folder owner-only, and stops it", async () => {
+    const codex = await fakeCodex();
     const own = await mkdtemp(path.join(tmpdir(), "phren-as-"));
     const ownSocket = path.join(own, "nested", "worker.sock");
     const handle = await spawnAppServer({ codexBin: codex, socketPath: ownSocket, cwd: root, config: ["features.x=true", 'y="a b"'] });
@@ -246,5 +251,21 @@ httpServer.listen(socketPath);
     handles = handles.filter(other => other !== handle);
     expect(handle.child.exitCode !== null || handle.child.signalCode !== null).toBe(true);
     await rm(own, { recursive: true, force: true });
+  });
+
+  it("starts the server through systemd-run in its own scope, which execs it in place", async () => {
+    const codex = await fakeCodex();
+    const bin = path.join(root, "bin"), calls = path.join(root, "systemd-run.json");
+    await mkdir(bin, { recursive: true });
+    // What systemd-run does after the scope exists: exec the command, same pid.
+    await writeFile(path.join(bin, "systemd-run"), `#!/bin/sh\nprintf '%s\\n' "$$" "$@" > ${JSON.stringify(calls)}\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n`, { mode: 0o755 });
+    const socket = path.join(root, "scoped", "app.sock");
+    const handle = await spawnAppServer({ codexBin: codex, socketPath: socket, cwd: root, detached: true, scope: "phren-codex-0123456789ab.scope",
+      env: { PATH: `${bin}:${process.env.PATH}` } });
+    handles.push(handle);
+    const [pid, ...args] = (await readFile(calls, "utf8")).trim().split("\n");
+    expect(Number(pid)).toBe(handle.child.pid);
+    expect(args).toEqual(["--user", "--scope", "--quiet", "--collect", "--unit=phren-codex-0123456789ab.scope", "--", codex, "app-server", "--listen", `unix://${socket}`]);
+    (await connectAppServer(socket, { clientName: "phren_test" })).close();
   });
 });

@@ -62,7 +62,7 @@ it.skipIf(process.platform === "win32")("runs the Linux unit at a lower nice val
   await install("0.2.14");
   const unitFile = await readFile(path.join(state.home, ".config/systemd/user/phren-hook.service"), "utf8");
   expect(unitFile).toContain("Nice=-5\n");
-  expect(unitFile).toContain("Restart=on-failure");
+  expect(unitFile).toContain("Restart=always");
 });
 
 it.skipIf(process.platform === "win32")("reconciles Hook and Git owners independently and preserves user hooks", async () => {
@@ -96,6 +96,49 @@ it.skipIf(process.platform === "win32")("reconciles Hook and Git owners independ
   config = JSON.parse(await readFile(settings, "utf8"));
   expect(JSON.stringify(config.hooks.PostToolUse)).toContain("claude-hook.mjs");
   expect(config.hooks.PostToolUse[0]).toEqual(own);
+});
+
+it.skipIf(process.platform === "win32")("leaves the Hook alone when init or link reconciles another store", async () => {
+  const { reconcileModuleHooks } = await import("./install.js");
+  const { initializeModules, setModuleEnabled } = await import("../modules/config.js");
+  vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+  const store = path.join(state.home, "store"), scratch = path.join(state.home, "scratch");
+  vi.stubEnv("PHREN_PATH", store);
+  initializeModules(store); setModuleEnabled(store, "hook", true);
+  await install("0.2.14", true);
+  expect(JSON.parse(await readFile(path.join(process.env.PHREN_BRIDGE_HOME!, "installed.json"), "utf8")).store).toBe(store);
+  const settings = await readFile(claudeSettings(), "utf8");
+  // A scratch store has no Hook module: before, this stopped the real service.
+  initializeModules(scratch);
+  state.exec.mockClear();
+  await reconcileModuleHooks(scratch);
+  expect(state.exec).not.toHaveBeenCalled();
+  expect(await readFile(claudeSettings(), "utf8")).toBe(settings);
+  // The Hook's own store still turns it off.
+  setModuleEnabled(store, "hook", false);
+  await reconcileModuleHooks(store);
+  expect(state.exec).toHaveBeenCalledWith("systemctl", ["--user", "stop", "phren-hook.service"]);
+});
+
+it.skipIf(process.platform === "win32")("names the Codex workers a restart would stop and waits for their running turns", async () => {
+  const { waitForCodexWorkers } = await import("./install.js");
+  vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+  const worker = { id: "0123456789ab", server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p2", socket: "/s", pid: 7, cwd: "/", startedAt: "", dispatchId: "07eebc09-2fa3", activeTurn: "turn-1" };
+  const idle = { ...worker, id: "ba9876543210", pane: "w1:p3", activeTurn: undefined, dispatchId: undefined };
+  const lines: string[] = [];
+  const polls = [[worker, idle], [worker, idle], [idle]];
+  await waitForCodexWorkers(60_000, async () => polls.shift() ?? [idle], line => lines.push(line), 1);
+  expect(lines[0]).toContain("2 Codex workers run inside the Phren Hook's service");
+  expect(lines[0]).toContain("w1:p2 (dispatch 07eebc09), turn running; w1:p3, idle");
+  expect(lines.filter(line => line.startsWith("Waiting"))).toHaveLength(2);
+  expect(lines.at(-1)).toMatch(/^Waiting/);
+  // A turn still running when the wait runs out is named.
+  lines.length = 0;
+  await waitForCodexWorkers(0, async () => [worker], line => lines.push(line), 1);
+  expect(lines.at(-1)).toBe("Restarting anyway: w1:p2 (dispatch 07eebc09), turn running will stop mid-turn and return failed.");
+  lines.length = 0;
+  await waitForCodexWorkers(60_000, async () => [], line => lines.push(line), 1);
+  expect(lines).toEqual([]);
 });
 
 const quoted = (file: string) => `'${file.replace(/'/g, "'\\''")}'`;

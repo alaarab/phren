@@ -52,6 +52,12 @@ function sandboxHomeDir(): void {
   // would point that at their real files, so both fall back to the sandbox.
   delete process.env.CLAUDE_CONFIG_DIR;
   delete process.env.CODEX_HOME;
+  // A run inside a Hook-launched worker inherits the Hook's own service
+  // variables. PHREN_BRIDGE_HOME pointed every install and init test at the
+  // real Hook, and `phren init` on a scratch store ran a real
+  // `systemctl --user stop phren-hook.service`. Unset, each falls back to
+  // the sandbox home, as on a clean machine.
+  for (const name of ["PHREN_BRIDGE_HOME", "PHREN_HERDR_HOME", "PHREN_PROFILE", "PHREN_DISPATCH_ID", "PHREN_CODEX_SERVER"]) delete process.env[name];
 }
 
 export async function teardown(): Promise<void> {

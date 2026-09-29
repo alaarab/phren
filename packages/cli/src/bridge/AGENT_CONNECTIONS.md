@@ -259,7 +259,12 @@ WebSocket-on-UDS (`codex-app-server.ts`) as client `phren_hook`.
 - The registry record `<id>/server.json` holds server, workspace, tab, pane,
   socket, pid, thread id, folder, dispatch id, running turn and last finished
   turn (id, status). No prompt text. A restarted Hook reconnects to every
-  record whose pid is alive and resumes its thread; the rest are removed.
+  record whose pid is alive and resumes its thread; the rest are removed. On
+  Linux each server runs in its own systemd scope (`phren-codex-<id>.scope`),
+  so stopping the Hook's service does not end it. A record removed with a
+  running turn is kept in memory for a day as a lost turn, and
+  `/v1/dispatch/workers` reports that pane's dispatch `done` with an error, so
+  the dispatcher records it `failed`.
 - `/new` or `/resume` in the pane is followed: a top-level `thread/started`
   in the pane's folder, or the pane's trusted SessionStart callback naming
   another thread, rebinds the record to that thread (its old cards are

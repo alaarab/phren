@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -17,7 +18,9 @@ import { atomic, bridgeRoot, id, type Json, object, objects, serverName, type Ta
  * approvals (server requests, no hold timeout); whatever the owner does in the
  * pane reaches the same thread. The registry under
  * `<bridge>/codex-servers/<id>/server.json` lets a restarted Hook find each
- * running server again and reconnect to its thread.
+ * running server again and reconnect to its thread. Under systemd each server
+ * runs in its own scope (`phren-codex-<id>.scope`), outside the Hook's
+ * service, so stopping or restarting the Hook does not end it.
  */
 
 const REGISTRY = "codex-servers";
@@ -26,6 +29,8 @@ const MAX_SOCKET_PATH = 100;
 /** A pane that shows no Codex for this long no longer runs the worker. */
 const AGENT_GONE_MS = 120_000;
 const CLIENT_NAME = "phren_hook";
+/** How long a turn lost with its server is reported to the returns loop. */
+const LOST_MS = 24 * 60 * 60 * 1000;
 const QUESTION_METHODS = new Set(["item/tool/requestUserInput", "mcpServer/elicitation/request"]);
 
 const entrySchema = z.object({
@@ -72,6 +77,8 @@ export interface CodexServerDeps {
   /** True while `pid` is a running process. */
   alive(pid: number): boolean;
   kill(pid: number): void;
+  /** The systemd scope a new server runs in, or undefined to run it in the Hook's own process tree. */
+  scope?(serverId: string): string | undefined;
 }
 
 const defaultDeps: CodexServerDeps = {
@@ -82,7 +89,18 @@ const defaultDeps: CodexServerDeps = {
     // The detached server leads its own process group: end the group.
     try { process.kill(-pid, "SIGTERM"); } catch { try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ } }
   },
+  scope: serverId => process.platform === "linux" && serviceCgroup() ? `phren-codex-${serverId}.scope` : undefined,
 };
+
+/** The systemd service cgroup a process runs in (`/proc/<pid>/cgroup`, cgroup
+ * v2), or undefined outside a service: a terminal, a scope, macOS. */
+export function serviceCgroup(pid: number | "self" = "self"): string | undefined {
+  try {
+    const line = readFileSync(`/proc/${pid}/cgroup`, "utf8").split("\n").find(candidate => candidate.startsWith("0::"));
+    const group = line?.slice(3).trim();
+    return group?.endsWith(".service") ? group : undefined;
+  } catch { return undefined; }
+}
 
 /** `PHREN_CODEX_APP_SERVER=off` keeps every Codex launch on the typed path. */
 export function codexAppServerEnabled(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): boolean {
@@ -146,6 +164,11 @@ interface Live {
   fileChanges?: Map<string, Json[]>;
 }
 
+/** A turn whose server ended before it did: the Hook restarted with the
+ * server inside its service, or the server crashed. Nothing will finish it. */
+export interface LostTurn { threadId: string; turn: string; dispatchId?: string; at: string }
+export const LOST_TURN = "The worker's Codex server stopped before its turn finished (the Phren Hook restarted with it, or it crashed), so the turn will not finish. Resume the thread or dispatch the work again.";
+
 /** Nothing was sent: the server could not be reached. */
 export class CodexServerUnavailable extends Error {
   constructor(message: string) { super(message); this.name = "CodexServerUnavailable"; }
@@ -165,6 +188,8 @@ export interface LaunchOptions {
 
 export class CodexServers {
   private live = new Map<string, Live>();
+  /** Turns lost with their server, by `<server>\n<pane>`. */
+  private lost = new Map<string, LostTurn>();
   private sink?: CodexApprovalSink;
   private closed = false;
   constructor(private deps: CodexServerDeps = defaultDeps) {}
@@ -208,8 +233,17 @@ export class CodexServers {
     if (Buffer.byteLength(socket) > MAX_SOCKET_PATH) throw new Error(`The Codex server socket path is too long: ${socket}`);
     await mkdir(codexServersRoot(), { recursive: true, mode: 0o700 });
     await mkdir(directory, { recursive: true, mode: 0o700 });
-    const handle = await this.deps.spawn({ socketPath: socket, cwd: options.cwd, detached: true, logFile: path.join(directory, "server.log"),
-      config: serverConfig(), replaceEnv: true, env: serverEnvironment(process.env, { ...(options.env ?? {}), [CODEX_SERVER_ENV]: serverId }) }).catch(async error => {
+    const spawnOptions = { socketPath: socket, cwd: options.cwd, detached: true, logFile: path.join(directory, "server.log"),
+      config: serverConfig(), replaceEnv: true, env: serverEnvironment(process.env, { ...(options.env ?? {}), [CODEX_SERVER_ENV]: serverId }) };
+    const scope = this.deps.scope?.(serverId);
+    const handle = await (scope
+      // No systemd-run, or no user manager to ask: the server runs in the
+      // Hook's service as before, and a Hook restart ends it.
+      ? this.deps.spawn({ ...spawnOptions, scope }).catch(error => {
+        logger.warn("codex-servers", `Could not start the Codex server in its own scope ${scope}; it will stop with the Hook: ${error instanceof Error ? error.message : String(error)}`);
+        return this.deps.spawn(spawnOptions);
+      })
+      : this.deps.spawn(spawnOptions)).catch(async error => {
       await rm(directory, { recursive: true, force: true }).catch(() => undefined);
       throw error;
     });
@@ -234,6 +268,7 @@ export class CodexServers {
       }
       await this.save(entry);
       this.live.set(serverId, live);
+      this.lost.delete(paneKey(place.server, place.pane));
       const args = entry.threadId ? ["resume", entry.threadId, "--remote", `unix://${socket}`]
         : ["--remote", `unix://${socket}`, ...(options.model ? ["--model", options.model] : []), ...(options.effort ? ["-c", `model_reasoning_effort=${options.effort}`] : []), ...(options.remoteArgs ?? [])];
       return { entry, args };
@@ -260,8 +295,8 @@ export class CodexServers {
     const names = await readdir(codexServersRoot()).catch(() => [] as string[]);
     for (const name of names.slice(0, 256)) {
       if (!codexServerId.safeParse(name).success || [...this.live.values()].some(live => live.entry.id === name)) continue;
-      const entry = await this.read(name);
-      if (!entry || !this.deps.alive(entry.pid)) { await this.forget(name); continue; }
+      const entry = await readEntry(name);
+      if (!entry || !this.deps.alive(entry.pid)) { if (entry) this.markLost(entry); await this.forget(name); continue; }
       const live: Live = { entry };
       this.live.set(name, live);
       await this.connect(live).catch(error => logger.warn("codex-servers", `Could not reconnect to Codex server ${name}: ${error instanceof Error ? error.message : String(error)}`));
@@ -387,6 +422,15 @@ export class CodexServers {
     return true;
   }
 
+  /** The turn the pane's worker lost with its server, while that pane still
+   * shows `threadId` (any thread when not given). */
+  lostTurn(server: string, pane: string, threadId?: string, now = Date.now()): LostTurn | undefined {
+    const key = paneKey(server, pane), lost = this.lost.get(key);
+    if (!lost) return undefined;
+    if (now - Date.parse(lost.at) >= LOST_MS) { this.lost.delete(key); return undefined; }
+    return threadId === undefined || threadId === lost.threadId ? lost : undefined;
+  }
+
   /** The last finished turn of a registered thread and the running one, for
    * the returns loop. */
   turnState(threadId: string): { activeTurn?: string; lastTurn?: CodexServerEntry["lastTurn"] } | undefined {
@@ -402,7 +446,7 @@ export class CodexServers {
     for (const live of [...this.live.values()]) {
       const entry = live.entry;
       if (entry.server !== server) continue;
-      if (!this.deps.alive(entry.pid)) { await this.drop(live); continue; }
+      if (!this.deps.alive(entry.pid)) { this.markLost(entry); await this.drop(live); continue; }
       const pane = panes.find(candidate => candidate.pane_id === entry.pane);
       if (!pane) { await this.stop(entry); continue; }
       if (pane.agent === "codex") live.agentGoneSince = undefined;
@@ -421,7 +465,7 @@ export class CodexServers {
   async sweep(running: string[], now = Date.now()): Promise<void> {
     for (const live of [...this.live.values()]) {
       if (running.includes(live.entry.server)) continue;
-      if (!this.deps.alive(live.entry.pid)) { await this.drop(live); continue; }
+      if (!this.deps.alive(live.entry.pid)) { this.markLost(live.entry); await this.drop(live); continue; }
       live.agentGoneSince ??= now;
       if (now - live.agentGoneSince >= AGENT_GONE_MS) await this.stop(live.entry);
     }
@@ -469,7 +513,7 @@ export class CodexServers {
   }
 
   /** For tests: forget everything without touching processes. */
-  reset(): void { this.close(); this.closed = false; }
+  reset(): void { this.close(); this.lost.clear(); this.closed = false; }
 
   /** Resolves once every registry write started so far has finished. */
   async saved(): Promise<void> {
@@ -568,6 +612,14 @@ export class CodexServers {
     live.off = () => { off(); offClose?.(); };
   }
 
+  /** A server that ended on its own mid-turn: the returns loop reports the turn failed. */
+  private markLost(entry: CodexServerEntry): void {
+    if (!entry.activeTurn || !entry.threadId) return;
+    logger.warn("codex-servers", `The Codex server for ${entry.server} ${entry.pane} ended during turn ${entry.activeTurn}`);
+    this.lost.set(paneKey(entry.server, entry.pane), { threadId: entry.threadId, turn: entry.activeTurn,
+      ...(entry.dispatchId ? { dispatchId: entry.dispatchId } : {}), at: new Date().toISOString() });
+  }
+
   private async drop(live: Live): Promise<void> {
     live.off?.(); live.client?.close(); live.client = undefined;
     this.live.delete(live.entry.id);
@@ -576,13 +628,6 @@ export class CodexServers {
 
   private async forget(serverId: string): Promise<void> {
     await rm(path.join(codexServersRoot(), codexServerId.parse(serverId)), { recursive: true, force: true }).catch(() => undefined);
-  }
-
-  private async read(serverId: string): Promise<CodexServerEntry | undefined> {
-    try {
-      const parsed = entrySchema.safeParse(JSON.parse(await readFile(path.join(codexServersRoot(), serverId, "server.json"), "utf8")));
-      return parsed.success && parsed.data.id === serverId ? parsed.data : undefined;
-    } catch { return undefined; }
   }
 
   /** One server's registry writes run in order, each with the entry as it is
@@ -595,6 +640,24 @@ export class CodexServers {
     void next.catch(() => undefined).finally(() => { if (this.saving.get(entry.id) === next) this.saving.delete(entry.id); });
     return next;
   }
+}
+
+const paneKey = (server: string, pane: string) => `${server}\n${pane}`;
+
+async function readEntry(serverId: string): Promise<CodexServerEntry | undefined> {
+  try {
+    const parsed = entrySchema.safeParse(JSON.parse(await readFile(path.join(codexServersRoot(), serverId, "server.json"), "utf8")));
+    return parsed.success && parsed.data.id === serverId ? parsed.data : undefined;
+  } catch { return undefined; }
+}
+
+/** Registered servers still running inside the systemd service `unit`
+ * (`phren-hook.service`): stopping it ends them and cuts off their turns.
+ * Servers a Hook with scopes started run outside it. */
+export async function serversInService(unit: string, cgroup: (pid: number) => string | undefined = serviceCgroup): Promise<CodexServerEntry[]> {
+  const names = await readdir(codexServersRoot()).catch(() => [] as string[]);
+  const entries = await Promise.all(names.filter(name => codexServerId.safeParse(name).success).slice(0, 256).map(readEntry));
+  return entries.filter((entry): entry is CodexServerEntry => !!entry && cgroup(entry.pid)?.endsWith(`/${unit}`) === true);
 }
 
 /** The Hook's servers: launch, prompt and keys routes, identity and the

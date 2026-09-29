@@ -114,6 +114,12 @@ export interface SpawnAppServerOptions {
   /** Config overrides for every thread the server runs, as `-c key=value`
    * (the value is TOML). */
   config?: string[];
+  /** Run the server in this transient systemd user scope (`systemd-run
+   * --user --scope`). `detached` alone does not leave the Hook's service:
+   * systemd stops a unit by killing its whole cgroup, so a Hook restart would
+   * end every server and the tools its turn runs. systemd-run execs the
+   * server in place, so the child's pid is the server's. */
+  scope?: string;
 }
 
 /** Start one `codex app-server --listen unix://<socketPath>` and wait until its
@@ -128,8 +134,10 @@ export async function spawnAppServer(options: SpawnAppServerOptions): Promise<Ap
   await rm(options.socketPath, { force: true });
   const log = options.logFile ? await open(options.logFile, "a", 0o600) : undefined;
   let child: ChildProcess;
+  const command = [codexBin, "app-server", ...(options.config ?? []).flatMap(value => ["-c", value]), "--listen", `unix://${options.socketPath}`];
+  const [file, ...args] = options.scope ? ["systemd-run", "--user", "--scope", "--quiet", "--collect", `--unit=${options.scope}`, "--", ...command] : command;
   try {
-    child = spawn(codexBin, ["app-server", ...(options.config ?? []).flatMap(value => ["-c", value]), "--listen", `unix://${options.socketPath}`], {
+    child = spawn(file, args, {
       cwd: options.cwd,
       env,
       detached: options.detached === true,

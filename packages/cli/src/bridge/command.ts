@@ -154,7 +154,7 @@ export async function runBridge(args: string[], version: string): Promise<number
       break;
     }
     case "ssh": await dispatch(process.env.SSH_ORIGINAL_COMMAND || ""); break;
-    case "install": case "update": await install(version, args.includes("--no-service")); break;
+    case "install": case "update": await install(version, args.includes("--no-service"), args.includes("--force")); break;
     case "uninstall": await uninstall(); break;
     case "rollback": await rollback(); break;
     case "status": console.log(JSON.stringify(await health(), null, 2)); break;

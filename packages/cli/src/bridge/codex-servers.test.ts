@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { SpawnAppServerOptions } from "./codex-app-server.js";
-import { BLOCKING_QUESTION_INSTRUCTIONS, type CodexServerEntry, CodexServers, codexServersRoot, CODEX_SERVER_ENV, serverConfig, serverEnvironment } from "./codex-servers.js";
+import { BLOCKING_QUESTION_INSTRUCTIONS, type CodexServerEntry, CodexServers, codexServersRoot, CODEX_SERVER_ENV, serverConfig, serverEnvironment, serversInService } from "./codex-servers.js";
 import type { Json, Target } from "./protocol.js";
 
 /** A `codex app-server` as far as the Hook's client can tell: answers its
@@ -192,6 +192,22 @@ describe.skipIf(process.platform === "win32")("launching a pane's Codex server",
     expect(env).toEqual({ PATH: "/bin", HERDR_ENV: "1", HERDR_PANE_ID: "w1:p1" });
   });
 
+  it("runs the server in its own systemd scope, and in the Hook's tree when the scope cannot start", async () => {
+    const scoped = new CodexServers({ spawn: async options => {
+      spawned.push(options);
+      if (options.scope) throw new Error("systemd-run: Failed to connect to bus");
+      const fake = new FakeAppServer();
+      await fake.listen(options.socketPath);
+      fakes.push(fake);
+      return { child: { pid: 4242 } as never, socketPath: options.socketPath, stop: async () => undefined };
+    }, connect: (await import("./codex-app-server.js")).connectAppServer, alive: pid => alive.has(pid), kill: () => undefined, scope: id => `phren-codex-${id}.scope` });
+    const { entry } = await scoped.launch(place, { cwd: root, startThread: true });
+    expect(spawned.map(options => options.scope)).toEqual([`phren-codex-${entry.id}.scope`, undefined]);
+    expect(spawned[1]).toEqual({ ...spawned[0], scope: undefined });
+    expect(entry.threadId).toBe("thread-1");
+    scoped.reset();
+  });
+
   it("stops the server and leaves nothing registered when the thread cannot start", async () => {
     const failing = new CodexServers({
       spawn: async options => { const fake = new FakeAppServer(); await fake.listen(options.socketPath); fakes.push(fake); fake.wss.removeAllListeners("connection"); fake.wss.on("connection", socket => socket.close()); return { child: { pid: 4242 } as never, socketPath: options.socketPath, stop: async () => { alive.delete(4242); } }; },
@@ -341,6 +357,34 @@ describe.skipIf(process.platform === "win32")("a restarted Hook", () => {
     await until(() => requests.length === 1, "the replayed approval");
   });
 
+  it("reports a turn lost with a server that died with the old Hook, until the pane runs a new one", async () => {
+    const entry = await launched({ dispatchId: "dispatch-1234" });
+    const idle = await launched();
+    await writeFile(path.join(codexServersRoot(), entry.id, "server.json"), JSON.stringify({ ...entry, activeTurn: "turn-9", pid: 999 }));
+    await writeFile(path.join(codexServersRoot(), idle.id, "server.json"), JSON.stringify({ ...idle, pane: "w1:p2", pid: 999 }));
+    servers.reset();
+    await servers.adopt();
+    expect(servers.entries()).toEqual([]);
+    const lost = servers.lostTurn("default", "w1:p1", "thread-1");
+    expect(lost).toMatchObject({ threadId: "thread-1", turn: "turn-9", dispatchId: "dispatch-1234" });
+    expect(servers.lostTurn("default", "w1:p1")).toBe(lost);
+    // Another thread in the pane, an idle server's pane, a day later: nothing lost.
+    expect(servers.lostTurn("default", "w1:p1", "thread-2")).toBeUndefined();
+    expect(servers.lostTurn("default", "w1:p2")).toBeUndefined();
+    expect(servers.lostTurn("default", "w1:p1", "thread-1", Date.parse(lost!.at) + 24 * 60 * 60 * 1000)).toBeUndefined();
+    expect(servers.lostTurn("default", "w1:p1")).toBeUndefined();
+  });
+
+  it("forgets a lost turn once the pane runs a new server", async () => {
+    const entry = await launched();
+    await writeFile(path.join(codexServersRoot(), entry.id, "server.json"), JSON.stringify({ ...entry, activeTurn: "turn-9", pid: 999 }));
+    servers.reset();
+    await servers.adopt();
+    expect(servers.lostTurn("default", "w1:p1")).toBeDefined();
+    await launched();
+    expect(servers.lostTurn("default", "w1:p1")).toBeUndefined();
+  });
+
   it("clears a turn that ended while no Hook listened", async () => {
     const entry = await launched();
     entry.activeTurn = "turn-9";
@@ -396,5 +440,27 @@ describe.skipIf(process.platform === "win32")("reaping", () => {
     await servers.reap("default", pane("codex"));
     expect(servers.entries()).toEqual([]);
     expect(killed).toEqual([]);
+    expect(servers.lostTurn("default", "w1:p1")).toBeUndefined();
+  });
+
+  it("reports the turn of a server that ended mid-turn as lost", async () => {
+    const entry = await launched();
+    fakes[0].send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-3" } } });
+    await until(() => entry.activeTurn === "turn-3", "the turn");
+    alive.clear();
+    await servers.reap("default", pane("codex"));
+    expect(servers.lostTurn("default", "w1:p1", "thread-1")).toMatchObject({ turn: "turn-3" });
+  });
+});
+
+describe.skipIf(process.platform === "win32")("servers inside the Hook's service", () => {
+  it("lists the registered servers whose process runs in the service's cgroup", async () => {
+    const inside = await launched();
+    const outside = await launched();
+    const cgroups: Record<number, string> = { 4242: "/user.slice/user-1000.slice/user@1000.service/app.slice/phren-hook.service" };
+    await writeFile(path.join(codexServersRoot(), outside.id, "server.json"), JSON.stringify({ ...outside, pid: 5151 }));
+    const found = await serversInService("phren-hook.service", pid => cgroups[pid]);
+    expect(found.map(entry => entry.id)).toEqual([inside.id]);
+    expect(await serversInService("other.service", pid => cgroups[pid])).toEqual([]);
   });
 });
