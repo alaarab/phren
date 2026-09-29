@@ -91,4 +91,13 @@ describe("session titles", () => {
     expect(sessionTitle({ harnessTitle: "Fix it", dispatched: false, fallbackLabel: "" })).toBe("Fix it");
     expect(sessionTitle({ dispatched: true, fallbackLabel: "" })).toBeUndefined();
   });
+
+  it("names a session by its pane label ahead of the dispatch label, harness title and tab label", () => {
+    const base = { harnessTitle: "Fix the parser", tabLabel: "nav", workspaceLabel: "app" };
+    expect(sessionTitle({ ...base, dispatched: false, paneLabel: "Tide charts" })).toBe("Tide charts");
+    expect(sessionTitle({ ...base, dispatched: true, dispatchLabel: "parser checks", paneLabel: "Tide charts" })).toBe("Tide charts");
+    // A pane has no label until someone sets one, and Herdr's bare numbering is not a name.
+    expect(sessionTitle({ ...base, dispatched: true, dispatchLabel: "parser checks", paneLabel: undefined })).toBe("parser checks");
+    expect(sessionTitle({ ...base, dispatched: false, paneLabel: "2" })).toBe("Fix the parser");
+  });
 });
