@@ -553,7 +553,10 @@ export async function tmuxScroll(server: string, pane: string | undefined, lines
     const event = before.sgr ? `\x1b[<${button};${x};${y}M` : `\x1b[M${String.fromCharCode(32 + button, 32 + x, 32 + y)}`;
     const buffer = `phren-scroll-${process.pid}-${Date.now().toString(36)}`;
     await tmux(server, ["load-buffer", "-b", buffer, "-"], { input: event.repeat(Math.abs(lines)) });
-    await tmux(server, ["paste-buffer", "-d", "-r", "-b", buffer, "-t", target]);
+    // Newer tmux shows a paste's control characters as text (ESC as "^[")
+    // unless -S, a flag older tmux, which pastes them as they are, refuses.
+    const paste = (flags: string[]) => tmux(server, ["paste-buffer", ...flags, "-d", "-r", "-b", buffer, "-t", target]);
+    await paste(["-S"]).catch(error => /unknown flag|invalid option/i.test(String(error?.message)) ? paste([]) : Promise.reject(error));
     return { history: false };
   }
   if (lines < 0 && !copy) return { history: false };
