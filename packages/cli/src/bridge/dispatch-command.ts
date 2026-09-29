@@ -4,7 +4,7 @@ import { dispatchSchema } from "./dispatch.js";
 import { handOff } from "./hand-off.js";
 import { terminalPaneFromEnv } from "./terminal.js";
 import { addGrant, grantSchema, listNamedGrants, removeGrant } from "./grants.js";
-import { sessionId } from "./protocol.js";
+import { sessionId, type Json } from "./protocol.js";
 
 export async function runDispatch(args: string[]): Promise<number> {
   if (args.length === 1 && args[0] === "status") {
@@ -54,9 +54,66 @@ export async function runHandOff(args: string[]): Promise<number> {
   return result.ok ? 0 : 1;
 }
 
+const CONDUCTOR_USAGE = "Usage: phren conductor status | make [--pane <id>] [--mux herdr:<name>|tmux:<name>] | stop [--pane <id>] | sets [--json] | sets name <name>|--clear | grants [list|add|remove]";
+
+/** The Hook route for a pane's multiplexer: `--mux`, else the pane the command runs in. */
+function muxQuery(mux: string | undefined, here: { server: string } | undefined): string {
+  if (mux) return `?mux=${encodeURIComponent(mux)}`;
+  return here ? `?server=${encodeURIComponent(here.server)}` : "";
+}
+
+/** One line per computer: name, reachability, link and conductor. */
+export function formatSets(view: Json): string {
+  const lines: string[] = [];
+  const rows = (value: unknown) => Array.isArray(value) ? value.filter((item): item is Json => !!item && typeof item === "object") : [];
+  for (const set of rows(view.sets)) {
+    const conductors = typeof set.conductors === "number" ? set.conductors : 0;
+    lines.push(`${typeof set.name === "string" ? set.name : "Unnamed set"}${set.local ? " (this computer)" : ""}${conductors > 1 ? `: ${conductors} conductors, stop all but one` : ""}`);
+    for (const computer of rows(set.computers)) {
+      const state = computer.link === "self" ? "this computer" : computer.reachable === true ? "reachable" : computer.reachable === false ? "unreachable" : "not asked";
+      const link = computer.link === "self" ? "" : `, ${String(computer.link)} link`;
+      lines.push(`  ${String(computer.name)}: ${state}${link}${computer.conductor ? ", conductor" : ""}${typeof computer.hint === "string" ? `. ${computer.hint}` : typeof computer.error === "string" ? `. ${computer.error}` : ""}`);
+    }
+  }
+  const unlinked = rows(view.unlinked);
+  if (unlinked.length) {
+    lines.push("Not linked");
+    for (const computer of unlinked) lines.push(`  ${String(computer.name)}. Link it with phren bridge link ${String(computer.name)}.`);
+  }
+  return lines.join("\n");
+}
+
 export async function runConductor(args: string[]): Promise<number> {
-  const [namespace, action = "list", ...rest] = args;
-  if (namespace !== "grants") throw new Error("Usage: phren conductor grants [list|add|remove]");
+  const [namespace = "status", action = "list", ...rest] = args;
+  if (namespace === "status") { console.log(JSON.stringify(await hookRequest("/v1/conductor"), null, 2)); return 0; }
+  if (namespace === "make" || namespace === "stop") {
+    const { values } = parseArgs({ args: args.slice(1), options: { pane: { type: "string" }, mux: { type: "string" } } });
+    const here = await terminalPaneFromEnv();
+    if (namespace === "make") {
+      const pane = values.pane ?? here?.pane;
+      if (!pane) throw new Error("Run phren conductor make inside the agent's pane, or name it with --pane <id>.");
+      const place = values.pane ? { paneId: values.pane } : { workspaceId: here!.workspace, tabId: here!.tab, paneId: here!.pane };
+      const result = await hookRequest(`/v1/conductor/make${muxQuery(values.mux, values.pane ? undefined : here)}`, place);
+      console.log(JSON.stringify(result, null, 2));
+      return result.ok === true ? 0 : 1;
+    }
+    const result = await hookRequest("/v1/conductor/stop", values.pane ? { paneId: values.pane } : {});
+    console.log(result.stopped ? "This computer has no conductor now." : "This computer had no conductor.");
+    return 0;
+  }
+  if (namespace === "sets") {
+    if (action === "name") {
+      const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { clear: { type: "boolean" } } });
+      const name = values.clear ? null : positionals.join(" ").trim();
+      if (name === "") throw new Error("Usage: phren conductor sets name <name>|--clear");
+      console.log(JSON.stringify(await hookRequest("/v1/sets/name", { name }), null, 2));
+      return 0;
+    }
+    const view = await hookRequest("/v1/sets", undefined, undefined, 60_000);
+    console.log(args.includes("--json") ? JSON.stringify(view, null, 2) : formatSets(view));
+    return 0;
+  }
+  if (namespace !== "grants") throw new Error(CONDUCTOR_USAGE);
   if (action === "list") {
     console.log(JSON.stringify(await listNamedGrants(), null, 2));
     return 0;
@@ -87,5 +144,5 @@ export async function runConductor(args: string[]): Promise<number> {
     console.log(JSON.stringify(await removeGrant(index !== undefined ? { index } : { scope: values.scope }), null, 2));
     return 0;
   }
-  throw new Error("Usage: phren conductor grants [list|add|remove]");
+  throw new Error(CONDUCTOR_USAGE);
 }

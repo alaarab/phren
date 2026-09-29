@@ -11,6 +11,8 @@ import { dispatchParentSchema, validateDispatchParent } from "./dispatch-tree.js
 import { findGrant, grantLabel, permissionModeAllowed, DEFAULT_MAX_PERMISSION_MODE } from "./grants.js";
 import { checkAgentDispatch, projectAuthority, readAuthority, RELEASE_ACTIONS, releaseAction, type AuthorityCheck } from "./authority.js";
 import { hookPeers } from "./peers.js";
+import { callerQuery, localCaller, oneWayHint } from "./conductor-group.js";
+import { recordedConductor } from "./conductor-role.js";
 import { linkedComputer } from "./computer-identity.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
 import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
@@ -172,17 +174,21 @@ export async function dispatchStatus(): Promise<Receipt[]> {
   return receipts.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-async function capacity(host: DispatchHost): Promise<{ working: number; computerId: string; harnesses?: HarnessInventory["harnesses"] }> {
-  const value = await host.request("/v1/dispatch/capacity");
+/** `caller` (a conductor's name and host key) asks a peer whether it links this computer back:
+ * `outside` is a peer in another set, which a conductor does not dispatch to. */
+async function capacity(host: DispatchHost, caller?: string): Promise<{ working: number; computerId: string; harnesses?: HarnessInventory["harnesses"]; outside?: true }> {
+  const value = await host.request(caller && !host.local ? `/v1/dispatch/capacity?${caller}` : "/v1/dispatch/capacity");
   const result = z.object({ product: z.literal("phren-hook"), protocol: z.literal(PROTOCOL), working: z.number().int().nonnegative(),
     servers: z.array(z.string()), computer: z.object({ id: z.string().uuid() }).passthrough(),
     // Missing from an older Hook, or when its inventory was not ready in time: unknown, not unavailable.
     harnesses: z.array(z.object({ source: z.string(), installed: z.boolean(), usable: z.boolean(), reason: z.string().optional(),
-      accounts: z.array(z.object({ id: z.string(), usable: z.boolean(), reason: z.string().optional() }).passthrough()).optional() }).passthrough()).optional() }).parse(value);
+      accounts: z.array(z.object({ id: z.string(), usable: z.boolean(), reason: z.string().optional() }).passthrough()).optional() }).passthrough()).optional(),
+    knowsCaller: z.boolean().optional() }).parse(value);
   // This computer places on whichever Herdr server its own Hook runs.
   if (host.local && !result.servers.includes(host.server) && result.servers[0]) host.server = result.servers[0];
   if (!result.servers.includes(host.server)) throw new BridgeError(503, "Herdr is not running on the selected computer. Headless dispatch is not installed yet.");
-  return { working: result.working, computerId: result.computer.id, ...(result.harnesses ? { harnesses: result.harnesses as HarnessInventory["harnesses"] } : {}) };
+  return { working: result.working, computerId: result.computer.id, ...(result.harnesses ? { harnesses: result.harnesses as HarnessInventory["harnesses"] } : {}),
+    ...(caller && result.knowsCaller === false ? { outside: true as const } : {}) };
 }
 
 /** Why a computer cannot run this dispatch's harness and account, or undefined when it can or cannot yet be told.
@@ -315,6 +321,8 @@ export class DispatchService {
       const toLocal = data.computer !== "anywhere" && (isLocalComputer(data.computer, here.names) || (named !== undefined && "local" in named));
       const peerName = named && "peer" in named ? named.peer : data.computer;
       const enrolled = await hookPeers().catch(error => { if (toLocal || data.computer === "anywhere") return []; throw error; });
+      // A conductor dispatches only within its set: each peer says whether it links this computer back.
+      const caller = await this.conductorCaller(originValue);
       const peers: DispatchHost[] = [...enrolled.map(candidate => peerHost(candidate)), here];
       let peer: DispatchHost | undefined;
       let remoteComputerID: string | undefined;
@@ -322,7 +330,7 @@ export class DispatchService {
       let incapable = false;
       if (data.computer === "anywhere") {
         const available = await Promise.all(peers.map(async candidate => {
-          try { return { peer: candidate, ...await capacity(candidate) }; } catch (error) {
+          try { return { peer: candidate, ...await capacity(candidate, caller) }; } catch (error) {
             // A peer that cannot report capacity sits out this placement, and the receipt says why.
             skipped.push({ computer: candidate.name, reason: failureReason(error) });
             return undefined;
@@ -330,6 +338,7 @@ export class DispatchService {
         }));
         skipped.sort((a, b) => a.computer.localeCompare(b.computer));
         const capable = available.filter((item): item is NonNullable<typeof item> => !!item).filter(item => {
+          if (item.outside) { skipped.push({ computer: item.peer.name, reason: oneWayHint(item.peer.name) }); return false; }
           const reason = unusable(data, item.harnesses, true);
           if (reason) incapable = true;
           if (reason) skipped.push({ computer: item.peer.name, reason: reason.slice(0, 200) });
@@ -344,7 +353,8 @@ export class DispatchService {
       } else {
         peer = toLocal ? peers.find(candidate => candidate.local) : peers.find(candidate => !candidate.local && candidate.name === peerName);
         if (!peer) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
-        const reported = await capacity(peer);
+        const reported = await capacity(peer, caller);
+        if (reported.outside) throw new BridgeError(409, `${peer.name} is not in this conductor's set. ${oneWayHint(peer.name)}`, { code: "outside_set" });
         remoteComputerID = reported.computerId;
         // A Hook that reports what it can run is believed. An older one that does not is left to answer the launch
         // itself, except for a non-default account: it would ignore `account` and launch under its default login.
@@ -445,6 +455,14 @@ export class DispatchService {
     receipt.error = `${receipt.harness} started with the brief on ${receipt.computer} but has not confirmed it yet (last status ${status ?? "unknown"}). The Hook keeps checking.`.slice(0, 500);
   }
 
+  /** The query a conductor's dispatch sends with each capacity probe; undefined for any other caller. */
+  private async conductorCaller(value: unknown): Promise<string | undefined> {
+    const pane = originPaneSchema.safeParse(value);
+    if (!pane.success) return undefined;
+    const conductor = await recordedConductor().catch(() => undefined);
+    if (!conductor || conductor.server !== pane.data.server || conductor.pane !== pane.data.pane) return undefined;
+    return callerQuery(await localCaller());
+  }
   private async origin(value: unknown): Promise<Receipt["origin"]> {
     const pane = originPaneSchema.safeParse(value);
     if (!pane.success || !this.identity?.originAgent) return undefined;

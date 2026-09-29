@@ -11,7 +11,8 @@ import { localSocket } from "./agent-hook-stores.js";
 import { paneIdentity, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import { objects } from "./protocol.js";
 import type { ApprovalPushService } from "./push.js";
-import { launchSession } from "./server-launch.js";
+import { launchSession, localConductor, stopConductor } from "./server-launch.js";
+import { conductorPane } from "./conductor-role.js";
 import { resetTmuxBinary, tmuxBinary, tmuxHealth, tmuxPaneFromEnv, tmuxServers, tmuxSnapshot, tmuxTerminal, toTmuxId } from "./terminal-tmux.js";
 
 const saved = process.env.PHREN_TMUX;
@@ -119,6 +120,32 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
       expect(workspaceSnapshot(await snapshot(server)).groups).toContainEqual(expect.objectContaining({ label: "phone launch",
         children: [expect.objectContaining({ agent: "claude", agentStatus: "idle" })] }));
     } finally { hooks.close(); }
+  }, 60_000);
+
+  it("keeps the conductor role on its pane when tmux loses the name and the agent restarts", async () => {
+    const launched = await launchSession(server, { cwd: folder, label: "it conductor", kind: "claude", role: "conductor" });
+    expect(launched).toMatchObject({ ok: true, role: "conductor" });
+    const pane = String(launched.paneId), socket = server.slice("tmux-".length);
+    const role = async () => {
+      const s = await snapshot(server);
+      const recorded = await conductorPane(server, s);
+      return objects(objects(workspaceSnapshot(s, undefined, undefined, undefined, recorded ? String(recorded.pane_id) : null).groups)
+        .find(group => group.label === "it conductor")?.children)[0]?.role;
+    };
+    expect(await role()).toBe("conductor");
+    // The name was only a label: without it, and across a restart in the same pane, the role stays.
+    execFileSync(binary!, ["-L", socket, "set-option", "-p", "-u", "-t", toTmuxId(pane, "p"), "@phren_agent"]);
+    expect(await role()).toBe("conductor");
+    // Claude exited (/exit): the pane falls back to its login shell, the same process.
+    await tmuxTerminal.sendKeys(server, pane, ["ctrl+d"]);
+    await until(() => tmuxSnapshot(server), s => !objects(s.panes).find(p => p.pane_id === pane)?.agent);
+    await tmuxTerminal.prompt(server, pane, "claude");
+    await until(() => tmuxSnapshot(server), s => objects(s.panes).find(p => p.pane_id === pane)?.agent === "claude");
+    expect(objects((await tmuxSnapshot(server)).panes).find(p => p.pane_id === pane)?.agent_name).toBeUndefined();
+    expect(await role()).toBe("conductor");
+    expect(await localConductor({ server, snapshot: await snapshot(server) })).toMatchObject({ server, target: { pane } });
+    await stopConductor({ paneId: pane });
+    expect(await role()).toBeUndefined();
   }, 60_000);
 
   it("finds this test's socket among the owner's servers and reports tmux's health", async () => {

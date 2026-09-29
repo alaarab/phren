@@ -11,7 +11,7 @@ import { isLocalComputer } from "./dispatch-hosts.js";
 import { BridgeError, objects, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { ownerQuestion, readFinalTurn, type FinalTurn } from "./schedule-watch.js";
 import { terminalProvider } from "./terminal.js";
-import { opencodeTurn, readTurn, TURN_REPLY_LIMIT, truncateUtf8, turnPhase, type TurnRecord } from "./turn-records.js";
+import { backgroundLeft, opencodeTurn, readTurn, TURN_REPLY_LIMIT, truncateUtf8, turnPhase, type TurnRecord } from "./turn-records.js";
 
 export { truncateUtf8 } from "./turn-records.js";
 
@@ -133,7 +133,8 @@ async function fromTurn(record: TurnRecord, session: string, status: string, sou
     if (!final?.completed || final.background) return { state: "working", ...base };
     return { state: "done", ...base, completed: true, ...(final.error ? { error: final.error } : {}), ...replyFields(final.lastAssistant) };
   }
-  const background = phase.background ?? (final?.completed ? final.background : undefined);
+  const background = phase.background !== undefined ? backgroundLeft(phase.background, phase.at, final?.finishedTasks) || undefined
+    : final?.completed ? final.background : undefined;
   const now = (readers.now ?? Date.now)();
   if (background && now - Date.parse(phase.at) < BACKGROUND_WAIT_MS) return { state: "working", ...base, background };
   return { state: "done", ...base, completed: true, endedAt: phase.at, ...(background ? { background } : {}),

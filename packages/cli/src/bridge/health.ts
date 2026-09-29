@@ -182,7 +182,7 @@ export async function lastScheduledRun(store: string, runsFile = scheduleRunsFil
 }
 
 /** This computer's public SSH host key, the pin a peer's hooks.yaml holds for it. */
-async function ownHostKey(): Promise<string | undefined> {
+export async function ownHostKey(): Promise<string | undefined> {
   try { return publicComputerKey(await readFile("/etc/ssh/ssh_host_ed25519_key.pub", "utf8")); } catch { return undefined; }
 }
 

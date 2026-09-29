@@ -3,13 +3,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { homeDir } from "../home-paths.js";
-import { agentNames, findPane, isConductorName, paneAgentName, paneChatState, paneIdentity, servers, snapshot } from "./herdr.js";
+import { agentNames, findPane, isConductorName, paneChatState, paneIdentity, servers, snapshot } from "./herdr.js";
 import { type AgentStart, agentNotReady, terminalName, terminalProvider } from "./terminal.js";
 import { intervalFromEnv } from "./limits.js";
 import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from "./launch-worktree.js";
 import { briefArgs, DISPATCH_ID_ENV, launchBriefSchema, launchesWithBrief, recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
 import { prepareServedLaunch, registerServedPane, sendServedBrief } from "./opencode-panes.js";
 import { groupConductor, type GroupConductor } from "./conductor-group.js";
+import { clearConductor, conductorPane, noteConductorSession, readRoleState, recordConductor, runsAgent } from "./conductor-role.js";
+import { localNames } from "./computer-names.js";
 import { pretrustFolder } from "./folder-trust.js";
 import { claudeHome, claudeLaunchEnv, isAccountSlug, DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { harnessInventoryWithin, hasUsable, launchCheckOff, type HarnessInventory } from "./harnesses.js";
@@ -88,17 +90,73 @@ async function targetForPane(server: string, pane: Json): Promise<Json | undefin
   return chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
 }
 
-/** The live conductor on this computer, on any Herdr server, as a target.
- * `known` reuses a snapshot the caller already took. */
+/** The live conductor on this computer, as a target: the pane the Hook
+ * recorded (docs/conductor-sets.md), or before any record, a pane named as a
+ * conductor on any server, which is then recorded. `known` reuses a snapshot
+ * the caller already took. */
 export async function localConductor(known?: { server: string; snapshot: Json }): Promise<{ server: string; target?: Json } | undefined> {
-  const names = [...new Set([...(known ? [known.server] : []), ...(await servers()).map(item => String(item.session))])];
+  const state = await readRoleState();
+  if (state?.conductor === null) return undefined;
+  const live = new Set((await servers()).map(item => String(item.session)));
+  if (known) live.add(known.server);
+  const names = state?.conductor ? [state.conductor.server].filter(name => live.has(name)) : [...live];
   for (const name of names) {
-    const value = known && name === known.server ? known.snapshot : await snapshot(name);
-    const existing = objects(value.panes).find(pane => isConductorName(paneAgentName(value, pane))
-      && provider.safeParse(pane.agent).success && !["completed", "exited", "failed", "stopped"].includes(String(pane.agent_status)));
-    if (existing) return { server: name, target: await targetForPane(name, existing) };
+    const value = known && name === known.server ? known.snapshot : await snapshot(name).catch(() => undefined);
+    if (!value) continue;
+    const pane = await conductorPane(name, value);
+    if (!runsAgent(pane)) continue;
+    const target = await targetForPane(name, pane);
+    // A restart or a new login in the same pane: the role stays, the session is new.
+    if (typeof target?.session === "string") await noteConductorSession(name, String(pane.pane_id), target.session);
+    return { server: name, target };
   }
   return undefined;
+}
+
+/** Refuses a second conductor in this computer's set: a live one here on
+ * another pane, or on any member. Members that could not say come back as `unchecked`. */
+async function requireNoConductor(server: string, before: Json, except?: string): Promise<GroupConductor["unchecked"]> {
+  const existing = await localConductor({ server, snapshot: before });
+  if (existing && !(except && existing.server === server && existing.target?.pane === except)) {
+    throw new BridgeError(409, "A conductor is already running on this computer. Stop it first.", { target: existing.target });
+  }
+  const group = await groupConductor((await optionalHookPeers()).peers, localNames());
+  if (group.found) throw new BridgeError(409, `A conductor is already running on ${group.found.computer}, which is in this computer's set. A set of linked computers shares one conductor.`,
+    { computer: group.found.computer, target: group.found.target });
+  return group.unchecked;
+}
+
+/** The phone names the pane's workspace and tab too; the CLI may know only the pane. */
+const paneRequest = z.object({ workspaceId: id.optional(), tabId: id.optional(), paneId: id }).strict();
+
+/** "Make conductor": the owner gives an agent already running in a pane on this computer the role. */
+export async function makeConductor(server: string, data: Json): Promise<Json> {
+  const place = paneRequest.parse(data);
+  const before = await snapshot(server);
+  const pane = objects(before.panes).find(p => p.pane_id === place.paneId && (place.workspaceId === undefined || p.workspace_id === place.workspaceId)
+    && (place.tabId === undefined || p.tab_id === place.tabId));
+  if (!pane) throw new BridgeError(409, "The pane changed.");
+  if (!runsAgent(pane)) throw new BridgeError(409, "No agent is running in this pane.");
+  if (pane.agent === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
+  const unchecked = await requireNoConductor(server, before, place.paneId);
+  const target = await targetForPane(server, pane);
+  await recordConductor(server, pane, "owner", typeof target?.session === "string" ? target.session : undefined);
+  return { ok: true, conductor: { server, ...(target ? { target } : {}) }, ...(unchecked.length ? { unchecked } : {}) };
+}
+
+/** "Stop being conductor": the pane keeps its agent and loses the role. With
+ * `paneId`, only that pane's role ends. */
+export async function stopConductor(data: Json): Promise<Json> {
+  const pane = data.paneId === undefined ? undefined : id.parse(data.paneId);
+  const state = await readRoleState();
+  if (pane !== undefined && state?.conductor === undefined) {
+    // Before any record a named pane may still be the conductor; settle that first.
+    await localConductor();
+  }
+  const held = (await readRoleState())?.conductor;
+  if (pane !== undefined && held && held.pane !== pane) throw new BridgeError(409, "That pane is not this computer's conductor.");
+  const stopped = await clearConductor(pane);
+  return { ok: true, stopped: !!stopped };
 }
 
 /** How long a pane the Hook just created may take to reach its shell prompt. */
@@ -202,19 +260,12 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const taken = agentNames(before);
   let name = wanted;
   for (let n = 2; taken.has(name) && n < 100; n++) name = `${wanted.slice(0, 32 - String(n).length - 1)}-${n}`;
-  // One conductor per connected group: this computer and every linked peer.
-  let unchecked: GroupConductor["unchecked"] = [];
-  if (role === "conductor" && !options.canary) {
-    const existing = await localConductor({ server, snapshot: before });
-    if (existing) throw new BridgeError(409, "A conductor is already running on this computer.", { target: existing.target });
-    const group = await groupConductor((await optionalHookPeers()).peers);
-    if (group.found) throw new BridgeError(409, `A conductor is already running on ${group.found.computer}, which is linked with this computer. A connected group shares one conductor.`,
-      { computer: group.found.computer, target: group.found.target });
-    unchecked = group.unchecked;
-  }
+  // One conductor per set of linked computers.
+  const unchecked: GroupConductor["unchecked"] = role === "conductor" && !options.canary ? await requireNoConductor(server, before) : [];
   // A worker opened in the conductor's workspace would be listed under the
   // conductor's name; it gets its own workspace instead.
-  if (role === "agent" && workspace && objects(before.panes).some(pane => pane.workspace_id === workspace && isConductorName(paneAgentName(before, pane)))) workspace = undefined;
+  const conductorHere = role === "agent" && workspace ? await conductorPane(server, before) : undefined;
+  if (conductorHere && conductorHere.workspace_id === workspace) workspace = undefined;
   const args = role === "conductor" ? await prepareConductor(kind, effort, model)
     : [...(model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
       ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : [])];
@@ -320,6 +371,9 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const agentStatus = typeof pane?.agent_status === "string" ? pane.agent_status : undefined;
   if (kind === "claude" && account) recordPaneAccount(paneAccountKey(server, created.paneId), account, typeof pane?.terminal_id === "string" ? pane.terminal_id : undefined);
   const sessionId = appServer?.threadId ?? (pane && pane.agent === kind ? await paneIdentity(server, pane) : undefined) ?? servedBrief?.session;
+  // The Hook, not the agent name, holds the role from here on.
+  if (role === "conductor" && !options.canary) await recordConductor(server, pane ?? { pane_id: created.paneId, workspace_id: created.workspaceId, tab_id: created.tabId, agent: kind },
+    "launch", sessionId);
   const chat = !sessionId && pane && pane.agent === kind ? await paneChatState(server, pane).catch((): Json => ({})) : {};
   const target = sessionId ? { ...binding, session: sessionId }
     : chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;

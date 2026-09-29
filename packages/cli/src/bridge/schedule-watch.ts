@@ -59,8 +59,10 @@ export interface StartupWatchEnv {
  * `interrupted`: the owner stopped the last turn (Claude's "[Request interrupted by user]",
  * Codex's turn_aborted); the harness sends no Stop for it.
  * `background`: Claude Code background tasks (shells, subagents, monitors) started in
- * the transcript's tail with no task-notification or TaskStop ending them yet. */
-export interface FinalTurn { completed: boolean; lastAssistant?: string; error?: string; interrupted?: boolean; background?: number }
+ * the transcript's tail with no task-notification or TaskStop ending them yet.
+ * `finishedTasks`: when each Claude background task the tail shows finishing
+ * finished (its first final task-notification's timestamp), one per task. */
+export interface FinalTurn { completed: boolean; lastAssistant?: string; error?: string; interrupted?: boolean; background?: number; finishedTasks?: string[] }
 
 /** The public text of one assistant row, without reasoning or tool output. */
 export function publicAssistant(raw: Json, source: Provider): string | undefined {
@@ -120,8 +122,11 @@ function turnInterrupted(raw: Json, source: ScheduleHarness): boolean {
 /** Claude Code background work a transcript line starts or ends, by task id:
  * a backgrounded Bash call, an async subagent or a Monitor start one; a
  * task-notification with a final status, or a TaskStop, ends it. A
- * persistent monitor runs for the whole session and is never waited on. */
-function backgroundTasks(raw: Json, running: Set<string>): void {
+ * persistent monitor runs for the whole session and is never waited on.
+ * `finished` keeps when each task's first final notification was written.
+ * A notification reaching an idle session is written as a queue-operation
+ * row, and may stay there with no new turn to deliver it. */
+function backgroundTasks(raw: Json, running: Set<string>, finished: Map<string, string>): void {
   const result = object(raw.toolUseResult);
   const started = typeof result.backgroundTaskId === "string" ? result.backgroundTaskId
     : result.isAsync === true && typeof result.agentId === "string" ? result.agentId
@@ -129,11 +134,14 @@ function backgroundTasks(raw: Json, running: Set<string>): void {
   if (started) running.add(started);
   if (typeof result.task_id === "string" && typeof result.message === "string" && /\bstopped\b/i.test(result.message)) running.delete(result.task_id);
   const content = object(raw.message).content, attachment = object(raw.attachment);
-  const notices = [typeof content === "string" ? content : "", typeof attachment.prompt === "string" ? attachment.prompt : ""];
+  const notices = [typeof content === "string" ? content : "", typeof attachment.prompt === "string" ? attachment.prompt : "",
+    raw.type === "queue-operation" && typeof raw.content === "string" ? raw.content : ""];
   // A monitor's events arrive as notifications too, without a final status.
   for (const block of notices.flatMap(notice => notice.split("<task-notification>").slice(1))) {
     const id = /<task-id>([^<\s]{1,100})<\/task-id>/.exec(block)?.[1];
-    if (id && /<status>(?:completed|failed|killed|stopped)<\/status>/.test(block)) running.delete(id);
+    if (!id || !/<status>(?:completed|failed|killed|stopped)<\/status>/.test(block)) continue;
+    running.delete(id);
+    if (!finished.has(id) && typeof raw.timestamp === "string" && !Number.isNaN(Date.parse(raw.timestamp))) finished.set(id, raw.timestamp);
   }
 }
 
@@ -141,13 +149,13 @@ function backgroundTasks(raw: Json, running: Set<string>): void {
  * A person's message after the reply opens a new turn, so it clears both. */
 export function finalTurnFromLines(lines: readonly string[], source: ScheduleHarness): FinalTurn {
   let completed = false, lastAssistant: string | undefined, error: string | undefined, interrupted = false;
-  const running = new Set<string>();
+  const running = new Set<string>(), finished = new Map<string, string>();
   for (const line of lines) {
     if (!line.trim()) continue;
     let raw: Json;
     try { raw = object(JSON.parse(line)); } catch { continue; }
     const payload = object(raw.payload);
-    if (source === "claude") backgroundTasks(raw, running);
+    if (source === "claude") backgroundTasks(raw, running, finished);
     if (turnInterrupted(raw, source)) { interrupted = true; completed = false; continue; }
     const userTurn = source === "claude" ? raw.type === "user" && !raw.isMeta && typeof object(raw.message).content === "string"
       : source === "codex" ? raw.type === "response_item" && payload.type === "message" && payload.role === "user"
@@ -158,7 +166,8 @@ export function finalTurnFromLines(lines: readonly string[], source: ScheduleHar
     if (turnEnded(raw, source)) { completed = true; interrupted = false; error = turnError(raw, source); }
   }
   return { completed, ...(lastAssistant ? { lastAssistant } : {}), ...(completed && error ? { error } : {}),
-    ...(interrupted ? { interrupted: true } : {}), ...(completed && running.size ? { background: running.size } : {}) };
+    ...(interrupted ? { interrupted: true } : {}), ...(completed && running.size ? { background: running.size } : {}),
+    ...(finished.size ? { finishedTasks: [...finished.values()] } : {}) };
 }
 
 /** The final turn of a conversation, read from the tail of its transcript. */

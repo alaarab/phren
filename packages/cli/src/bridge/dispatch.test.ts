@@ -11,6 +11,7 @@ import { hookPeers, peerRequest } from "./peers.js";
 import { hookRequest } from "./client.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { DispatchReturns } from "./dispatch-returns.js";
+import { resetRoleState } from "./conductor-role.js";
 
 vi.mock("./peers.js", () => {
   const hookPeers = vi.fn();
@@ -197,6 +198,34 @@ describe("dispatch receipts and selection", () => {
 
     it("rejects a malformed account", async () => {
       await expect(new DispatchService().dispatch({ ...claude, account: "../x" })).rejects.toThrow();
+    });
+  });
+
+  describe("a conductor's set", () => {
+    const origin = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1" };
+    beforeEach(async () => {
+      resetRoleState();
+      await writeFile(path.join(root, "conductor-role.json"), JSON.stringify({ version: 1,
+        conductor: { server: "default", pane: "w1:p1", workspace: "w1", tab: "w1:t1", since: "2026-09-29T10:00:00.000Z", by: "owner" } }));
+      // Linuxbox does not list this computer back.
+      vi.mocked(peerRequest).mockImplementation(async (peer, route) => route.startsWith("/v1/dispatch/capacity")
+        ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: peer.name === "Desk" ? 3 : 1,
+          ...(route.includes("?") ? { knowsCaller: peer.name !== "Linuxbox" } : {}) }
+        : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
+    });
+    afterEach(() => resetRoleState());
+
+    it("places a conductor's work only on computers that link back", async () => {
+      const result = await new DispatchService().dispatch(brief, origin);
+      expect(result).toMatchObject({ ok: true, computer: "Desk", skipped: [{ computer: "Linuxbox", reason: "Linuxbox does not link back. Run phren bridge link Linuxbox." }] });
+      expect(vi.mocked(peerRequest).mock.calls.filter(call => call[1].startsWith("/v1/dispatch/capacity")).every(call => call[1].includes("?name="))).toBe(true);
+      await expect(new DispatchService().dispatch({ ...brief, computer: "Linuxbox" }, origin)).rejects.toMatchObject({ status: 409, details: { code: "outside_set" } });
+    });
+
+    it("leaves other sessions' dispatches as they were", async () => {
+      const result = await new DispatchService().dispatch(brief, { ...origin, pane: "w2:p1" });
+      expect(result).toMatchObject({ ok: true, computer: "Linuxbox" });
+      expect(vi.mocked(peerRequest).mock.calls.some(call => call[1].includes("?name="))).toBe(false);
     });
   });
 

@@ -194,6 +194,24 @@ canonical name. See [Conductor](conductor.md) for scope and matching rules.
 machines.yaml names folded in, this computer first. Part of the `conductor`
 module. Folding rules are in [Conductor](conductor.md#computers).
 
+### Conductor role and linked sets
+
+The Hook records which pane is this computer's conductor in
+`<bridge>/conductor-role.json`; the Herdr agent name or tmux `@phren_agent` is
+only a label. A restart or new login in the same pane keeps the role.
+`GET /v1/conductor` returns this computer's live `conductor` (or `null`), its
+`peers` (hooks.yaml names), `set` (`{ name, namedAt }`) and, when asked with
+`?name=` or `?hostKey=`, `knowsCaller`. `GET /v1/sets` returns `{ sets,
+unlinked }`: each set's `id`, `name`, `computers` (`name`, `id`, `reachable`,
+`link` of `self`, `two-way`, `one-way`, `indirect` or `unknown`, `conductor`,
+`hint`), `conductor` and `conductors`. `POST /v1/conductor/make` takes
+`{ workspaceId?, tabId?, paneId }` (and `?mux=`) for a pane already running an
+agent; a second conductor in the set is refused with 409. `POST
+/v1/conductor/stop` takes an optional `paneId`. `POST /v1/sets/name` takes
+`{ name }` (1 to 60 characters, or `null`) and tells every reachable member.
+`/v1/health` lists `conductorSets` among its capabilities. See
+[Conductor sets](conductor-sets.md).
+
 ### Hook workspace launch fields
 
 `POST /v1/workspaces/launch` accepts `role: "agent" | "conductor"` (default
@@ -204,9 +222,10 @@ sandbox settings, and OpenCode, Copilot and conductors are refused with 400
 before any pane exists. The reply repeats `permissionMode` when it was applied,
 so a caller can tell an older Hook that ignored it. A
 conductor launch supports Claude, Codex and OpenCode, attaches the shipped
-conductor brief, prefixes the Herdr agent name with `conductor-`, and returns
-`role: "conductor"`. Workspace overview tabs report that role. A second running
-conductor for the store is rejected with status 409 and the existing target.
+conductor brief, prefixes the Herdr agent name with `conductor-`, records the
+pane as this computer's conductor and returns `role: "conductor"`. Workspace
+overview tabs report that role. A second running conductor in this computer's
+set of linked computers is rejected with status 409 and the existing target.
 
 An agent launch may add `worktree: { branch }`. The Hook runs `git worktree add
 -b <branch> <repo>/.claude/worktrees/<name> HEAD` from the project folder's
@@ -1315,7 +1334,10 @@ work still runs is `agentStatus: "working"` with `backgroundTasks: <n>`,
 where Herdr or tmux say idle or done. `n` is the larger of the Stop hook's
 count of Claude background tasks (shells, subagents, monitors) and the running
 Codex or Claude subagents and fanout jobs (`runningChildren`), never their
-sum. `backgroundTasks` is absent on a tab that is working, blocked or waiting
+sum. The Stop's count is lowered by each task the transcript shows finishing
+after that Stop (a task-notification with a final status, including one still
+queued in an idle session), and is ignored two hours after the Stop, so an old
+count never keeps a finished session working. `backgroundTasks` is absent on a tab that is working, blocked or waiting
 on its own turn, and such a tab has no `currentStep`. The Hook's `live_sessions`
 list carries the same field. `title` is the dispatch label for a dispatched
 worker (kept in `<bridge>/briefs/<id>/label`); a dispatch sent before labels
