@@ -131,11 +131,11 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
   },
   {
     schemaVersion: 1, name: "conductor", version: VERSION, defaultEnabled: false, requires: ["memory", "hook"],
-    tools: full(["dispatch", "dispatch_returns", "dispatch_approve", "hand_off", "live_sessions"]), cliCommands: ["dispatch", "dispatch status", "dispatch returns", "dispatch sessions", "hand-off", "conductor", "conductor grants", "bridge enroll-computer"], agentHooks: [],
-    hookRoutes: [...routes("GET", ["/v1/dispatch", "/v1/dispatch/capacity", "/v1/dispatch/arrival", "/v1/conductor", "/v1/conductor/grants", "/v1/computers"]),
-      ...routes("POST", ["/v1/dispatch", "/v1/dispatch/workers", "/v1/dispatch/returns", "/v1/dispatch/approve", "/v1/conductor/grants"]), ...routes("DELETE", ["/v1/conductor/grants"])],
+    tools: full(["dispatch", "dispatch_returns", "dispatch_approve", "hand_off", "live_sessions", "authority"]), cliCommands: ["dispatch", "dispatch status", "dispatch returns", "dispatch sessions", "hand-off", "conductor", "conductor grants", "authority", "bridge enroll-computer"], agentHooks: [],
+    hookRoutes: [...routes("GET", ["/v1/dispatch", "/v1/dispatch/capacity", "/v1/dispatch/arrival", "/v1/conductor", "/v1/conductor/grants", "/v1/computers", "/v1/authority"]),
+      ...routes("POST", ["/v1/dispatch", "/v1/dispatch/workers", "/v1/dispatch/returns", "/v1/dispatch/approve", "/v1/conductor/grants", "/v1/authority", "/v1/authority/confirm"]), ...routes("DELETE", ["/v1/conductor/grants", "/v1/authority"])],
     capabilities: ["dispatch"], storeFiles: ["global/skills/conductor/**"],
-    localFiles: ["<bridge>/hooks.yaml", "<bridge>/conductor.yaml", "<bridge>/dispatches/*.json"], phoneScreens: [], skills: ["conductor"],
+    localFiles: ["<bridge>/hooks.yaml", "<bridge>/conductor.yaml", "<bridge>/authority.yaml", "<bridge>/authority-confirmations.json", "<bridge>/dispatches/*.json"], phoneScreens: [], skills: ["conductor"],
   },
   {
     schemaVersion: 1, name: "fanout", version: VERSION, defaultEnabled: false, requires: ["memory", "hook"],

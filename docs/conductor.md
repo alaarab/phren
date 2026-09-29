@@ -327,6 +327,23 @@ asking sentence and ordered radio options, with action arguments folded under
 Action details and terminal access in the header. Conductor grant choices use
 the same phren controls as other permissions.
 
+## Release authority
+
+The owner's release authority policy (`<bridge>/authority.yaml`) says per
+project which release actions (`merge`, `publish`, `deploy`, `app-store`,
+`github-admin`) a conductor may send a worker to do on its own and which are
+ask-first. Read it with the `authority` tool or `phren authority show
+<project>`, quote its `line` in the brief, and declare the actions in
+dispatch's `releaseActions`. An ask-first action is refused with 403 until the
+owner confirms it; ask them. An ask-first project also lowers the permission
+mode an agent may start its workers in. Only the owner changes the policy.
+
+The policy only restricts. Lifting a worker's own permission checks, such as
+Claude Code's auto mode refusing a merge or an App Store upload, is only
+possible through the owner's own Claude Code settings (or Codex's and
+OpenCode's own config); phren never installs permission rules for a worker.
+See [authority.md](authority.md).
+
 ## Returns
 
 ```sh

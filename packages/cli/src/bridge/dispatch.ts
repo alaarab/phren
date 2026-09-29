@@ -8,7 +8,8 @@ import { getMachineName } from "../machine-identity.js";
 import { getProjectSourcePath } from "../project-config.js";
 import { computerName } from "./computers.js";
 import { dispatchParentSchema, validateDispatchParent } from "./dispatch-tree.js";
-import { findGrant, grantLabel, permissionModeAllowed } from "./grants.js";
+import { findGrant, grantLabel, permissionModeAllowed, DEFAULT_MAX_PERMISSION_MODE } from "./grants.js";
+import { checkAgentDispatch, projectAuthority, readAuthority, RELEASE_ACTIONS, releaseAction, type AuthorityCheck } from "./authority.js";
 import { hookPeers } from "./peers.js";
 import { linkedComputer } from "./computer-identity.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
@@ -29,6 +30,8 @@ export const dispatchSchema = z.object({
   account: z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").optional()
     .describe("Claude account id to run the worker under (default, or a slug from `phren bridge accounts`). anywhere only picks computers where that account is signed in; a named computer without it fails."),
   permissionMode: z.enum(PERMISSION_MODES).optional().describe("Permission mode the worker starts in: supervised, auto-edits, auto or full-access (Claude and Codex only); otherwise the receiving computer's own default."),
+  releaseActions: z.array(releaseAction).min(1).max(RELEASE_ACTIONS.length).optional()
+    .describe("Release-type actions the brief asks the worker to do (merge, publish, deploy, app-store, github-admin). Ask-first projects refuse them from an agent unless the owner confirmed."),
   prompt: z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value)).describe("Worker brief, at most 32768 characters."),
   label: text(200).describe("Short task label."),
   parent: dispatchParentSchema.optional().describe("Explicit local conversation parent for work-tree attachment."),
@@ -50,6 +53,8 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   brief: z.enum(["launch", "typed"]).optional()
     .describe("How the brief reached the worker: as its first prompt at launch (confirmed by the worker's hook), or typed into its pane."),
   granted: z.string().max(200).optional().describe("Scope of the conductor grant that allowed this call."),
+  authority: z.string().max(600).optional().describe("The release authority policy's line for this project, as a conductor quotes it."),
+  authorityConfirmed: z.string().datetime().optional().describe("When the owner confirmed the ask-first release actions this agent dispatch used."),
   skipped: z.array(z.object({ computer: computerName, reason: z.string().max(200) }).strict()).max(32).optional()
     .describe("Computers left out of anywhere placement, with the reason each could not report capacity."),
   origin: originPaneSchema.extend({ agent: provider, terminal: z.string().min(1).max(200) }).strict().optional()
@@ -349,15 +354,23 @@ export class DispatchService {
       const grant = await findGrant({ action: "dispatch", project: data.project, computer: peer.name });
       // An agent (a call that names its pane) may start a worker only up to its grant's
       // permission ceiling; the owner, calling from the phone or the CLI without a pane, is not capped.
-      if (data.permissionMode && originPaneSchema.safeParse(originValue).success && !permissionModeAllowed(data.permissionMode, grant)) {
+      const agent = originPaneSchema.safeParse(originValue).success;
+      if (data.permissionMode && agent && !permissionModeAllowed(data.permissionMode, grant)) {
         throw new BridgeError(403, `No standing grant lets an agent start a worker in ${data.permissionMode} on ${peer.name}. Add maxPermissionMode: ${data.permissionMode} to a grant in conductor.yaml, or dispatch it yourself.`);
       }
+      // The owner's release authority policy binds an agent's dispatch (and may
+      // lower its mode); the owner's own dispatch only carries the policy's line.
+      const checked: AuthorityCheck | undefined = agent ? await checkAgentDispatch(data, grant?.maxPermissionMode ?? DEFAULT_MAX_PERMISSION_MODE) : undefined;
+      if (checked?.permissionMode) data.permissionMode = checked.permissionMode;
+      const authority = checked?.authority ?? await readAuthority().then(policy => projectAuthority(policy, data.project)).catch(() => undefined);
       const origin = await this.origin(originValue);
       // Prompts are sent over the pipe, never stored in the dispatch ledger.
       const { prompt, ...metadata } = data;
       const receipt: Receipt = { ...metadata, computer: peer.name, computerId: remoteComputerID!, id: randomUUID(),
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "launching",
-        ...(grant ? { granted: grantLabel(grant) } : {}), ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}) };
+        ...(grant ? { granted: grantLabel(grant) } : {}), ...(authority?.listed ? { authority: authority.line.slice(0, 600) } : {}),
+        ...(checked?.confirmation ? { authorityConfirmed: checked.confirmation.confirmedAt } : {}),
+        ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}) };
       await save(receipt);
       try {
         // The brief goes with the launch: a Hook that can start the harness

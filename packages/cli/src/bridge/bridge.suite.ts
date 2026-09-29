@@ -2474,6 +2474,28 @@ schedules:
       expect((await api("/v1/conductor/grants", { scope: "global" }, "DELETE")).status).toBe(404);
     });
 
+    it("reads the release authority policy for anyone and takes changes only without an agent pane", async () => {
+      const listed = await api("/v1/authority");
+      expect(listed.status).toBe(200);
+      expect(listed.data).toMatchObject({ source: "defaults", confirmations: [] });
+      expect(listed.data.projects.map((row: { project: string }) => row.project)).toEqual(["hub", "mina", "safety"]);
+      expect((await api("/v1/authority?project=phren")).data.authority).toMatchObject({ listed: false, ask: [] });
+      const agent = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1" };
+      expect((await api("/v1/authority", { project: "hub", origin: agent })).status).toBe(403);
+      expect((await api("/v1/authority/confirm", { project: "hub", actions: ["merge"], origin: agent })).status).toBe(403);
+      expect((await api("/v1/authority", { project: "hub", origin: agent }, "DELETE")).status).toBe(403);
+      const set = await api("/v1/authority", { project: "hub", default: "ask", actions: { merge: "go" } });
+      expect(set.status).toBe(200);
+      expect(set.data.authority).toMatchObject({ go: ["merge"], maxPermissionMode: "auto-edits" });
+      expect((await api("/v1/authority")).data).toMatchObject({ source: "file", updatedBy: "phone" });
+      expect((await api("/v1/authority", { project: "hub", default: "maybe" })).status).toBe(400);
+      const confirmed = await api("/v1/authority/confirm", { project: "hub", actions: ["deploy"], minutes: 5 });
+      expect(confirmed.data.confirmation).toMatchObject({ project: "hub", actions: ["deploy"], by: "phone" });
+      expect((await api("/v1/authority")).data.confirmations).toHaveLength(1);
+      expect((await api("/v1/authority", { project: "safety" }, "DELETE")).data.authority).toMatchObject({ listed: false });
+      expect((await api("/v1/authority", { project: "safety" }, "DELETE")).status).toBe(404);
+    });
+
     it("lists one row per computer on GET /v1/computers, this computer first and an unreachable peer marked", async () => {
       const health = (await api("/v1/health")).data.computer;
       await writeFile(path.join(root, "bridge/hooks.yaml"), JSON.stringify({ version: 1, computers: [
