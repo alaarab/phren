@@ -30,6 +30,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Claude usage no longer shows stale numbers. A saved window whose reset time has passed is sent as `reset: true` with no percent, windows reported over three days ago are dropped, and every Claude row carries the login's `account.email` next to its key so one login on several computers merges into one named card.
 - Hand-offs retry a fresh agent that is not yet named for up to 20 seconds. Each retry checks the conversation and terminal again; potentially delivered writes are never retried.
 - Hand-offs require explicit submission confirmation before reporting delivered, so text left in a Codex remote pane composer is reported uncertain.
 - Claude background children finish after a successful matching TaskStop result or a stopped or killed notification, including text blocks and queued-command attachments.

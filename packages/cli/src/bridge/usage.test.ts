@@ -17,6 +17,7 @@ import {
   openCodeFailure,
   openCodeUsage,
   readClaudeToken,
+  settleClaudeUsage,
   readCodexLimits,
   readCopilotUsage,
   openCodeGoPlan,
@@ -458,5 +459,35 @@ describe("Claude accounts in usage", () => {
     setEnv("CLAUDE_CONFIG_DIR", path.join(home, ".claude-nowhere"));
     feed(); await captureClaudeUsage("bnVsbA==");
     await expect(readFile(path.join(bridge, "usage", "claude.json"))).rejects.toThrow();
+  });
+  it("labels each Claude row with its login's email and key, even from a status-line snapshot", async () => {
+    await writeFile(path.join(home, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: "uuid-1", emailAddress: "me@example.com" } }));
+    await mkdir(path.join(bridge, "usage"), { recursive: true });
+    await writeFile(path.join(bridge, "usage", "claude.json"), JSON.stringify({ rate_limits: { five_hour: { used_percentage: 20 } }, updatedAt: new Date(0).toISOString() }));
+    const usage = await reader("darwin", async () => undefined).read(undefined, true);
+    const row = usage.accounts.find(a => a.source === "claude" && a.account?.id === "default")!;
+    expect(row.origin).toBe("status-line");
+    expect(row.account).toMatchObject({ email: "me@example.com" });
+    expect(row.account?.key).toMatch(/^claude:[0-9a-f]{12}$/);
+    expect(usage.accounts.find(a => a.account?.id === "work")!.account).not.toHaveProperty("email");
+  });
+  it("reports a window past its reset as reset without its old percent, and drops reports older than three days", () => {
+    const day = 86_400_000, at = Date.parse("2026-09-26T16:18:46.273Z");
+    const saved = { source: "claude" as const, origin: "status-line" as const, updatedAt: new Date(at).toISOString(), windows: [
+      { id: "five_hour", name: "5-hour limit", usedPercent: 4, resetsAt: "2026-09-26T19:40:00.000Z" },
+      { id: "seven_day", name: "7-day, all models", usedPercent: 96, resetsAt: "2026-09-26T20:00:00.000Z" },
+      { id: "seven_day_fable", name: "7-day, Fable", usedPercent: 50, resetsAt: "2026-10-01T00:00:00.000Z", asOf: new Date(at + 2 * day).toISOString() },
+    ] };
+    const beforeReset = settleClaudeUsage(saved, Date.parse("2026-09-26T19:00:00Z"));
+    expect(beforeReset.windows.map(w => [w.id, w.usedPercent, w.reset])).toEqual([["five_hour", 4, undefined], ["seven_day", 96, undefined], ["seven_day_fable", 50, undefined]]);
+    const afterReset = settleClaudeUsage(saved, Date.parse("2026-09-27T12:00:00Z"));
+    expect(afterReset.windows.map(w => [w.id, w.usedPercent, w.reset])).toEqual([["five_hour", undefined, true], ["seven_day", undefined, true], ["seven_day_fable", 50, undefined]]);
+    expect(afterReset.windows[1]).not.toHaveProperty("usedPercent");
+    // The status-line windows are over three days old; the fresher per-model window stays.
+    expect(settleClaudeUsage(saved, at + 3 * day + 1).windows.map(w => w.id)).toEqual(["seven_day_fable"]);
+    const gone = settleClaudeUsage(saved, at + 6 * day);
+    expect(gone.windows).toEqual([]);
+    expect(gone.message).toBe("No usage report from Claude on this computer since 2026-09-26. It updates when Claude Code runs here.");
+    expect(gone.message).not.toContain("\u2014");
   });
 });

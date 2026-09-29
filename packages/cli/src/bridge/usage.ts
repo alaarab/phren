@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { atomicInPrivateDir, bridgeRoot, type Json, object } from "./protocol.js";
 import { stripTerminal } from "../terminal-text.js";
 import { codexExecutable } from "./codex-binary.js";
-import { CODEX_ACCOUNT, claudeAccountRef, claudeHomeOfEnv, claudeHomes, type AccountRef, type ClaudeHome } from "./claude-accounts.js";
+import { CODEX_ACCOUNT, claudeAccountEmail, claudeAccountRef, claudeHomeOfEnv, claudeHomes, type AccountRef, type ClaudeHome } from "./claude-accounts.js";
 
 const exec = promisify(execFile);
 
@@ -26,6 +26,8 @@ export interface UsageWindow {
   /** The service says this window is refusing requests now (OpenCode Go's `rate-limited`). */
   limited?: boolean;
   asOf?: string;
+  /** The window's reset time passed after its report: no percent is known, so none is sent. */
+  reset?: boolean;
 }
 export interface UsageSpend { amountUSD: number; period: "rolling_7_days" | "rolling_30_days" | "calendar_week" }
 export interface AccountUsage {
@@ -544,6 +546,31 @@ export async function readCopilotUsage(now = new Date(), run: (file: string, arg
   }
 }
 
+/** A Claude report older than this says nothing about the account now. */
+export const CLAUDE_REPORT_MAX_AGE_MS = 3 * 86_400_000;
+
+/**
+ * What a saved Claude report still says at `now`: a window whose reset time
+ * has passed is reported as reset without its old percent, and a report
+ * older than three days is dropped, so a stale number never reaches the
+ * phone's cards, rings or widgets.
+ */
+export function settleClaudeUsage(usage: AccountUsage, now: number): AccountUsage {
+  if (!usage.windows.length) return usage;
+  const reported = (w: UsageWindow) => Date.parse(w.asOf ?? usage.updatedAt ?? "");
+  const windows = usage.windows
+    .filter(w => { const at = reported(w); return !Number.isFinite(at) || now - at < CLAUDE_REPORT_MAX_AGE_MS; })
+    .map(w => {
+      const reset = w.resetsAt ? Date.parse(w.resetsAt) : NaN;
+      if (!Number.isFinite(reset) || reset > now) return w;
+      const { usedPercent: _old, ...rest } = w;
+      return { ...rest, reset: true };
+    });
+  if (windows.length) return { ...usage, windows };
+  const since = usage.updatedAt?.slice(0, 10);
+  return { ...usage, windows, message: `No usage report from Claude on this computer${since ? ` since ${since}` : ""}. It updates when Claude Code runs here.` };
+}
+
 export class AccountUsageReader {
   private cached?: { at: number; value: AccountUsage };
   private pending?: Promise<AccountUsage>;
@@ -567,7 +594,11 @@ export class AccountUsageReader {
     const codex = this.pending ?? Promise.resolve(this.cached!.value);
     // Every home, default first; the labels and keys are read once per poll.
     const homes = allAccounts ? claudeHomes() : claudeHomes().slice(0, 1);
-    const [codexValue, claude, spending] = await Promise.all([codex, Promise.all(homes.map(async home => ({ ...await this.claude(home), account: claudeAccountRef(home) }))),
+    const claudeRow = async (home: ClaudeHome): Promise<AccountUsage> => {
+      const email = claudeAccountEmail(home);
+      return { ...settleClaudeUsage(await this.claude(home), this.now()), account: { ...claudeAccountRef(home), ...(email ? { email } : {}) } };
+    };
+    const [codexValue, claude, spending] = await Promise.all([codex, Promise.all(homes.map(claudeRow)),
       this.spending(sources?.has("copilot") ?? true)]);
     return { accounts: [{ ...codexValue, account: CODEX_ACCOUNT }, ...claude, ...spending] };
   }

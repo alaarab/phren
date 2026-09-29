@@ -25,7 +25,7 @@ export interface ClaudeHome {
 }
 
 /** What rows, usage and receipts carry to name an account. */
-export interface AccountRef { id: string; label: string; key: string }
+export interface AccountRef { id: string; label: string; key: string; email?: string }
 
 export function isAccountSlug(value: string): boolean { return value === DEFAULT_ACCOUNT || SLUG.test(value); }
 
@@ -119,9 +119,9 @@ export async function setAccountLabel(id: string, label: string): Promise<void> 
 
 // ── identity (.claude.json oauthAccount, no tokens) ─────────────────────────
 
-const identityCache = new Map<string, { mtimeMs: number; size: number; uuid?: string; plan?: string }>();
+const identityCache = new Map<string, { mtimeMs: number; size: number; uuid?: string; email?: string }>();
 
-function oauthIdentity(configFile: string): { uuid?: string; plan?: string } {
+function oauthIdentity(configFile: string): { uuid?: string; email?: string } {
   try {
     const stat = statSync(configFile);
     if (!stat.isFile() || stat.size > 16_777_216) return {};
@@ -130,7 +130,8 @@ function oauthIdentity(configFile: string): { uuid?: string; plan?: string } {
     const config = JSON.parse(readFileSync(configFile, "utf8")) as Record<string, unknown>;
     const account = config.oauthAccount && typeof config.oauthAccount === "object" ? config.oauthAccount as Record<string, unknown> : {};
     const uuid = typeof account.accountUuid === "string" && account.accountUuid ? account.accountUuid : undefined;
-    const value = { mtimeMs: stat.mtimeMs, size: stat.size, uuid };
+    const email = typeof account.emailAddress === "string" && /^[^\s@]{1,64}@[^\s@]{1,190}$/.test(account.emailAddress) ? account.emailAddress : undefined;
+    const value = { mtimeMs: stat.mtimeMs, size: stat.size, uuid, email };
     identityCache.set(configFile, value);
     return value;
   } catch { return {}; }
@@ -141,6 +142,9 @@ export function claudeAccountKey(home: ClaudeHome): string {
   const { uuid } = oauthIdentity(home.configFile);
   return uuid ? "claude:" + createHash("sha256").update(uuid).digest("hex").slice(0, 12) : `claude:home:${home.id}`;
 }
+
+/** The login's email, so the phone can name a card merged across computers. Usage rows only. */
+export function claudeAccountEmail(home: ClaudeHome): string | undefined { return oauthIdentity(home.configFile).email; }
 
 export function claudeAccountRef(home: ClaudeHome, labels = readLabels()): AccountRef {
   return { id: home.id, label: accountLabel(home.id, labels), key: claudeAccountKey(home) };
