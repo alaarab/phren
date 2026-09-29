@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.12] - 2026-09-29
+
 ### Added
 
 - A release authority policy (`<bridge>/authority.yaml`, private like `conductor.yaml`) lists per project which release actions (`merge`, `publish`, `deploy`, `app-store`, `github-admin`) are `go` and which are ask-first. It only restricts. `hub` and `safety` start ask-first, and `mina` is `go` for `app-store`. An ask-first project lowers the permission ceiling for workers an agent dispatches there (`auto-edits` unless it names one), and a worker with no mode starts at that ceiling. An agent's dispatch that declares an ask-first action in the new `releaseActions` is refused with 403 until the owner confirms it once, on the phone or with `phren authority confirm`. The owner's own dispatches are not checked. Conductors read the policy with the `authority` tool, `phren authority list|show` or `GET /v1/authority`, and quote its `line` in briefs; receipts carry it as `authority`. Only the owner writes it: the phone (`POST`/`DELETE /v1/authority`, `POST /v1/authority/confirm`, refused when the call names an agent pane) or `phren authority set|clear|confirm` at an interactive terminal outside an agent's shell. Phren never lifts a worker's own permission checks; that is only possible through the owner's own harness settings. See docs/authority.md.
