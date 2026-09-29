@@ -379,7 +379,10 @@ into its per-process status file. From that record:
 - a Stop after the prompt is `done` (or `needs-you`, or `failed` when the
   transcript shows the turn ended on an error). When background tasks were
   still in flight the worker stays `working`: the harness wakes it with a new
-  prompt when a task ends, and that turn's Stop decides. A worker still
+  prompt when a task ends, and that turn's Stop decides. A task whose
+  task-notification the transcript records after the Stop no longer counts,
+  even when no new turn follows (a notification can wait in an idle session's
+  queue), and the worker is `done` once none is left. A worker still
   waiting on background work two hours after its Stop (a dev server it left
   running) counts as `done`, with `background` set. The wait is measured from
   the latest Stop and every task that finishes wakes the worker with a new

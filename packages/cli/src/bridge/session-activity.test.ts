@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { isBriefTitle, markBackground, meaningfulLabel, ownRecord, recordedBackground, sessionTitle } from "./session-activity.js";
+import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, recordedBackground, sessionTitle } from "./session-activity.js";
 import { nextTurn, type TurnRecord } from "./turn-records.js";
 
 const session = "00000001-1111-4111-8111-111111111111";
 const pane = { pane_id: "w1:p1", terminal_id: "term_a" };
-function record(background?: number, dispatch?: string): TurnRecord {
-  let value = nextTurn(undefined, { event: "UserPromptSubmit", terminal: "term_a", source: "claude", session, dispatch })!;
-  value = nextTurn(value, { event: "Stop", terminal: "term_a", source: "claude", session, background })!;
+function record(background?: number, dispatch?: string, at?: number, source: "claude" | "codex" = "claude"): TurnRecord {
+  let value = nextTurn(undefined, { event: "UserPromptSubmit", terminal: "term_a", source, session, dispatch, at })!;
+  value = nextTurn(value, { event: "Stop", terminal: "term_a", source, session, background, at })!;
   return value;
 }
 
@@ -43,6 +43,41 @@ describe("background work keeps a session working", () => {
     expect(idle).toEqual({ agentStatus: "idle" });
     // A turn still running has no ended Stop to count.
     expect(recordedBackground(nextTurn(undefined, { event: "UserPromptSubmit", terminal: "term_a", source: "claude", session }))).toBeUndefined();
+  });
+
+  it("lowers the Stop's count as the transcript shows its tasks finishing, and clears it at zero", () => {
+    const stop = Date.parse("2026-09-29T08:30:00Z"), iso = (minutes: number) => new Date(stop + minutes * 60_000).toISOString();
+    const value = record(4, undefined, stop);
+    expect(recordedBackground(value, [], stop + 60_000)).toBe(4);
+    // A task that finished before the Stop was not in its count.
+    expect(recordedBackground(value, [iso(-1), iso(10)], stop + 20 * 60_000)).toBe(3);
+    expect(recordedBackground(value, [iso(10), iso(20), iso(30)], stop + 40 * 60_000)).toBe(1);
+    const tab: Record<string, unknown> = { agentStatus: "idle" };
+    markBackground(tab, recordedBackground(value, [iso(10), iso(20), iso(30), iso(31)], stop + 40 * 60_000));
+    expect(tab).toEqual({ agentStatus: "idle" });
+  });
+
+  it("never lets an old count keep a row working", () => {
+    // m4l-builder, 2026-09-29: 4 in background at Stop, idle at the prompt 7.5 hours later.
+    const stop = Date.parse("2026-09-29T08:30:00Z"), value = record(4, undefined, stop);
+    expect(recordedBackground(value, [], stop + BACKGROUND_STALE_MS - 1)).toBe(4);
+    expect(recordedBackground(value, [], stop + BACKGROUND_STALE_MS)).toBeUndefined();
+    const tab: Record<string, unknown> = { agentStatus: "idle" };
+    markBackground(tab, recordedBackground(value, [], stop + 7.5 * 60 * 60_000));
+    expect(tab).toEqual({ agentStatus: "idle" });
+  });
+
+  it("reads a Claude transcript only when the Stop left background work", async () => {
+    const stop = Date.now() - 60_000, reads: string[] = [];
+    const read = async (_source: string, id: string | undefined) => { reads.push(String(id)); return { completed: true, finishedTasks: [new Date(stop + 1000).toISOString()] }; };
+    expect(await liveBackground(record(2, undefined, stop), read)).toBe(1);
+    expect(await liveBackground(record(1, undefined, stop), read)).toBeUndefined();
+    expect(await liveBackground(record(0, undefined, stop), read)).toBeUndefined();
+    expect(await liveBackground(record(2, undefined, stop, "codex"), read)).toBeUndefined();
+    expect(await liveBackground(undefined, read)).toBeUndefined();
+    expect(reads).toEqual([session, session]);
+    // An unreadable transcript leaves the Stop's count.
+    expect(await liveBackground(record(2, undefined, stop), async () => { throw new Error("gone"); })).toBe(2);
   });
 
   it("trusts a record only for this pane's terminal, agent and conversation", () => {

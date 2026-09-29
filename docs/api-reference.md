@@ -1303,7 +1303,10 @@ work still runs is `agentStatus: "working"` with `backgroundTasks: <n>`,
 where Herdr or tmux say idle or done. `n` is the larger of the Stop hook's
 count of Claude background tasks (shells, subagents, monitors) and the running
 Codex or Claude subagents and fanout jobs (`runningChildren`), never their
-sum. `backgroundTasks` is absent on a tab that is working, blocked or waiting
+sum. The Stop's count is lowered by each task the transcript shows finishing
+after that Stop (a task-notification with a final status, including one still
+queued in an idle session), and is ignored two hours after the Stop, so an old
+count never keeps a finished session working. `backgroundTasks` is absent on a tab that is working, blocked or waiting
 on its own turn, and such a tab has no `currentStep`. The Hook's `live_sessions`
 list carries the same field. `title` is the dispatch label for a dispatched
 worker (kept in `<bridge>/briefs/<id>/label`); a dispatch sent before labels

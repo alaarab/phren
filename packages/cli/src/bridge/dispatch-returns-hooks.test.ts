@@ -99,6 +99,17 @@ describe("the transcript's own record of a turn", () => {
     expect(finalTurnFromLines(ended, "claude")).toEqual({ completed: true, lastAssistant: "All done." });
   });
 
+  it("reads finishes an idle session only queued, and when each task finished", () => {
+    const queued = (operation: string, id: string, timestamp: string) => line({ type: "queue-operation", operation, timestamp, content: notice(id, "completed") });
+    const lines = [line({ type: "user", message: { role: "user", content: "Build" } }),
+      result({ backgroundTaskId: "bshell001" }), result({ backgroundTaskId: "bshell002" }), assistant("Building."),
+      queued("enqueue", "bshell001", "2026-09-29T09:01:00.000Z"),
+      // Its later removal is the same finish, not a second one.
+      queued("remove", "bshell001", "2026-09-29T09:05:00.000Z"),
+      line({ type: "queue-operation", operation: "enqueue", timestamp: "2026-09-29T09:02:00.000Z", content: notice("bmonitor01") })];
+    expect(finalTurnFromLines(lines, "claude")).toEqual({ completed: true, lastAssistant: "Building.", background: 1, finishedTasks: ["2026-09-29T09:01:00.000Z"] });
+  });
+
   it("marks a turn the owner interrupted, in Claude and in Codex", () => {
     const claude = [line({ type: "user", message: { role: "user", content: "Go" } }),
       line({ type: "user", message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user]" }] } })];
@@ -155,6 +166,22 @@ describe("the worker's Hook answering from turn events", () => {
     observe(value, late, now);
     expect(value.returned).toMatchObject({ state: "done", background: 2 });
     expect(noticeLine([value])).toContain("parser checks done (2 background tasks still running), Suite started.");
+  });
+
+  it("counts the Stop's background tasks down as they finish, and returns once none are left", async () => {
+    record = turn(["UserPromptSubmit"], ["Stop", { background: 2, reply: "Suite started." }]);
+    const value = receipt();
+    observe(value, await ask(), now);
+    const at = (ms: number) => new Date(now + ms).toISOString();
+    // A finish from before the Stop was not in its count.
+    final = { completed: true, finishedTasks: [at(-5_000), at(60_000)] };
+    now += 120_000;
+    expect(await ask()).toEqual({ state: "working", session, hook: true, background: 1 });
+    final = { completed: true, finishedTasks: [at(-5_000), at(60_000), at(90_000)] };
+    const done = await ask();
+    expect(done).toEqual({ state: "done", session, hook: true, completed: true, endedAt: expect.any(String), reply: "Suite started." });
+    observe(value, done, now);
+    expect(noticeLine([value])).toContain("parser checks done (after 2 background tasks finished), Suite started.");
   });
 
   it("reads background work from the transcript when the Stop said nothing about it", async () => {

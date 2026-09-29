@@ -1,6 +1,7 @@
 import { briefLabel } from "./launch-brief.js";
 import { type Json, provider } from "./protocol.js";
-import { readTurn, turnPhase, type TurnRecord } from "./turn-records.js";
+import type { FinalTurn } from "./schedule-watch.js";
+import { backgroundLeft, readTurn, turnPhase, type TurnRecord } from "./turn-records.js";
 
 /**
  * What a live session's row says about itself beyond Herdr's own status and
@@ -8,8 +9,9 @@ import { readTurn, turnPhase, type TurnRecord } from "./turn-records.js";
  * (launch-brief.ts):
  *
  * - A Claude turn that ended while background shells or subagents still run
- *   (its Stop's `background` count), or a Codex session with running
- *   subagents or fanout jobs, is still working. Herdr reports it idle, so the
+ *   (its Stop's `background` count, less the tasks its transcript shows
+ *   finishing since, for at most BACKGROUND_STALE_MS), or a Codex session with
+ *   running subagents or fanout jobs, is still working. Herdr reports it idle, so the
  *   phone listed it under IDLE with a moon badge. The tab keeps
  *   `agentStatus: "working"` and gains `backgroundTasks`, the count.
  * - A dispatched worker is named by its dispatch label. Claude and Codex title
@@ -31,11 +33,29 @@ export async function paneRecord(server: string, pane: Json, session: string | u
   return ownRecord(await readTurn(server, String(pane.pane_id)).catch(() => undefined), pane, pane.agent, session);
 }
 
-/** Background tasks the recorded turn ended with, when it ended with any. */
-export function recordedBackground(record: TurnRecord | undefined): number | undefined {
+/** How long after its Stop a background count may keep a row working. A task
+ * whose finish the transcript never shows (a dev server left running, a
+ * persistent monitor, a notification the tail no longer holds) would
+ * otherwise keep it working forever. Matches dispatch returns' wait. */
+export const BACKGROUND_STALE_MS = 2 * 60 * 60 * 1000;
+
+/** Background tasks the recorded turn ended with that are still running:
+ * the Stop's count less those `finishedTasks` (FinalTurn's) says finished
+ * after it. Undefined once none are left or the Stop is BACKGROUND_STALE_MS old. */
+export function recordedBackground(record: TurnRecord | undefined, finishedTasks?: readonly string[], now = Date.now()): number | undefined {
   if (!record) return undefined;
   const phase = turnPhase(record);
-  return phase.phase === "ended" ? phase.background : undefined;
+  if (phase.phase !== "ended" || !(now - Date.parse(phase.at) < BACKGROUND_STALE_MS)) return undefined;
+  return backgroundLeft(phase.background, phase.at, finishedTasks) || undefined;
+}
+
+/** `recordedBackground` for a pane, reading the transcript (`readFinalTurn`,
+ * passed in: schedule-watch imports herdr, which imports this) only when the
+ * Stop left background work. Only Claude's Stop reports a count. */
+export async function liveBackground(record: TurnRecord | undefined, readFinal: (source: "claude", session: string) => Promise<FinalTurn | undefined>, now = Date.now()): Promise<number | undefined> {
+  if (!record || record.source !== "claude" || !recordedBackground(record, [], now)) return undefined;
+  const final = await readFinal("claude", record.session).catch(() => undefined);
+  return recordedBackground(record, final?.finishedTasks, now);
 }
 
 /**
