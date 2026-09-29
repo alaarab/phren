@@ -3,14 +3,17 @@ import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { lstat, open, readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { claudeConfigDir } from "../home-paths.js";
+import { claudeConfigDir, codexHome } from "../home-paths.js";
 import path from "node:path";
 import { promisify } from "node:util";
 import { atomicInPrivateDir, bridgeRoot, type Json, object } from "./protocol.js";
 import { stripTerminal } from "../terminal-text.js";
 import { codexExecutable } from "./codex-binary.js";
 import { readSpeechKey } from "./speech-key.js";
-import { CODEX_ACCOUNT, claudeAccountEmail, claudeAccountRef, claudeHomeOfEnv, claudeHomes, type AccountRef, type ClaudeHome } from "./claude-accounts.js";
+import { CODEX_ACCOUNT, claudeAccountSubscription, claudeAccountEmail, claudeAccountRef, claudeHomeOfEnv, claudeHomes, type AccountRef, type ClaudeHome } from "./claude-accounts.js";
+
+import { planName, subscriptionDate, type Subscription } from "./subscription.js";
+export type { Subscription } from "./subscription.js";
 
 const exec = promisify(execFile);
 
@@ -40,6 +43,7 @@ export interface AccountUsage {
   updatedAt?: string;
   message?: string;
   spend?: UsageSpend;
+  subscription?: Subscription;
   /** Opaque key identity used only to avoid counting one OpenRouter key twice. */
   accountId?: string;
   /** Which Claude report fed this account: the status-line rate_limits payload
@@ -82,6 +86,33 @@ export function codexUsage(value: unknown, now = new Date()): AccountUsage {
   }
   return { source: "codex", windows, updatedAt: now.toISOString(),
     ...(!windows.length ? { message: "Codex has not reported account limits. Sign in with your ChatGPT account in Codex on this computer." } : {}) };
+}
+
+/** Display metadata from the ID token's claims only, never an authentication decision. */
+export function codexSubscription(idToken: unknown, now = new Date()): Subscription | undefined {
+  if (typeof idToken !== "string" || idToken.length > 65_536) return undefined;
+  const parts = idToken.split(".");
+  if (parts.length !== 3 || !/^[A-Za-z0-9_-]+$/.test(parts[1])) return undefined;
+  try {
+    const claims = object(JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")));
+    const auth = object(claims["https://api.openai.com/auth"]);
+    const plan = planName(auth.chatgpt_plan_type);
+    if (!plan) return undefined;
+    const startedAt = subscriptionDate(auth.chatgpt_subscription_active_start);
+    const renewsAt = subscriptionDate(auth.chatgpt_subscription_active_until);
+    return { plan, ...(startedAt ? { startedAt } : {}), ...(renewsAt ? { renewsAt } : {}), checkedAt: now.toISOString() };
+  } catch { return undefined; }
+}
+
+export async function readCodexSubscription(file = path.join(codexHome(), "auth.json"), now = new Date()): Promise<Subscription | undefined> {
+  try {
+    const handle = await open(file, "r");
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size > 131_072) return undefined;
+      return codexSubscription(object(object(JSON.parse(await handle.readFile("utf8"))).tokens).id_token, now);
+    } finally { await handle.close(); }
+  } catch { return undefined; }
 }
 
 /** Parse OpenCode's own cost ledger. `stats --days 7` is a rolling local view. */
@@ -245,7 +276,9 @@ export function openCodeGoUsage(windows: UsageWindow[], refusals: GoRefusals | u
     reached.length ? `Go is refusing requests: the ${reached.join(" and ")} limit is reached.` : undefined,
     refused,
   ].filter(Boolean).join(" ");
-  return { source: "opencode-go", windows, updatedAt: now.toISOString(), ...(message ? { message } : {}) };
+  const renewsAt = windows.find(w => w.id === "opencode-go:plan:30d")?.resetsAt;
+  const subscription: Subscription | undefined = hasKey ? { plan: "Go", ...(renewsAt ? { renewsAt } : {}), checkedAt: now.toISOString() } : undefined;
+  return { source: "opencode-go", windows, ...(subscription ? { subscription } : {}), updatedAt: now.toISOString(), ...(message ? { message } : {}) };
 }
 
 /** The accounts one caller can read: the sources it names, and Go's plan
@@ -317,12 +350,16 @@ async function liveOpenRouterUsage(now: Date): Promise<AccountUsage | undefined>
 export function elevenLabsUsage(value: unknown, now = new Date()): AccountUsage {
   const sub = object(value);
   const used = sub.character_count, limit = sub.character_limit;
+  const plan = planName(sub.tier);
+  const renewsAt = subscriptionDate(object(sub.next_invoice).next_payment_attempt_unix);
+  const subscription: Subscription | undefined = plan ? { plan, ...(renewsAt ? { renewsAt } : {}), checkedAt: now.toISOString() } : undefined;
+  const metadata = subscription ? { subscription } : {};
   const count = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
   if (!count(used) || !count(limit) || limit === 0) {
-    return { source: "elevenlabs", windows: [], updatedAt: now.toISOString(), message: "ElevenLabs did not report a character limit for this key." };
+    return { source: "elevenlabs", ...metadata, windows: [], updatedAt: now.toISOString(), message: "ElevenLabs did not report a character limit for this key." };
   }
   const entry = window("elevenlabs:characters", "Characters this period", Math.min(100, Math.round(used / limit * 1000) / 10), sub.next_character_count_reset_unix);
-  return { source: "elevenlabs", windows: entry ? [{ ...entry, usedCharacters: used, limitCharacters: limit }] : [], updatedAt: now.toISOString() };
+  return { source: "elevenlabs", ...metadata, windows: entry ? [{ ...entry, usedCharacters: used, limitCharacters: limit }] : [], updatedAt: now.toISOString() };
 }
 
 /** The key the Hook already uses for /v1/speech, sent only to ElevenLabs; the answer carries counts, never the key. */
@@ -560,9 +597,10 @@ export function copilotUsage(value: unknown, now = new Date()): AccountUsage {
     if (typeof remaining !== "number" || !Number.isFinite(remaining) || remaining < 0 || remaining > 100) continue;
     windows.push({ id: key, name: names[key] ?? key, usedPercent: Math.round((100 - remaining) * 10) / 10, ...(reset ? { resetsAt: reset } : {}) });
   }
-  const plan = safeText(result.copilot_plan);
-  const notes = [plan ? `Plan: ${plan}.` : "", unlimited.length ? `Unlimited: ${unlimited.join(", ")}.` : ""].filter(Boolean).join(" ");
+  const plan = planName(result.copilot_plan);
+  const notes = [safeText(result.copilot_plan) ? `Plan: ${safeText(result.copilot_plan)}.` : "", unlimited.length ? `Unlimited: ${unlimited.join(", ")}.` : ""].filter(Boolean).join(" ");
   return { source: "copilot", windows, updatedAt: now.toISOString(),
+    ...(plan ? { subscription: { plan, ...(reset ? { renewsAt: reset } : {}), checkedAt: now.toISOString() } } : {}),
     ...(notes || !windows.length ? { message: notes || "GitHub reported no Copilot quotas for this account." } : {}) };
 }
 
@@ -674,10 +712,11 @@ export class AccountUsageReader {
     const homes = allAccounts ? claudeHomes() : claudeHomes().slice(0, 1);
     const claudeRow = async (home: ClaudeHome): Promise<AccountUsage> => {
       const email = claudeAccountEmail(home);
-      return { ...settleClaudeUsage(await this.claude(home), this.now()), account: { ...claudeAccountRef(home), ...(email ? { email } : {}) } };
+      const subscription = claudeAccountSubscription(home, new Date(this.now()));
+      return { ...settleClaudeUsage(await this.claude(home), this.now()), ...(subscription ? { subscription } : {}), account: { ...claudeAccountRef(home), ...(email ? { email } : {}) } };
     };
-    const [codexValue, claude] = await Promise.all([codex, Promise.all(homes.map(claudeRow))]);
-    return [{ ...codexValue, account: CODEX_ACCOUNT }, ...claude];
+    const [codexValue, claude, subscription] = await Promise.all([codex, Promise.all(homes.map(claudeRow)), readCodexSubscription(undefined, new Date(this.now()))]);
+    return [{ ...codexValue, ...(subscription ? { subscription } : {}), account: CODEX_ACCOUNT }, ...claude];
   }
   /** ElevenLabs is read only when the caller shows it: every read spends a request against the key's quota. */
   private async spending(includeCopilot: boolean, includeElevenLabs: boolean): Promise<AccountUsage[]> {

@@ -11,6 +11,8 @@ import { dump, load } from "js-yaml";
 import { claudeConfigDir, homeDir } from "../home-paths.js";
 import { atomic, bridgeRoot } from "./protocol.js";
 
+import { monthlyAnniversary, planName, subscriptionDate, type Subscription } from "./subscription.js";
+
 export const DEFAULT_ACCOUNT = "default";
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
 
@@ -119,9 +121,9 @@ export async function setAccountLabel(id: string, label: string): Promise<void> 
 
 // ── identity (.claude.json oauthAccount, no tokens) ─────────────────────────
 
-const identityCache = new Map<string, { mtimeMs: number; size: number; uuid?: string; email?: string }>();
+const identityCache = new Map<string, { mtimeMs: number; size: number; uuid?: string; email?: string; plan?: string; startedAt?: string }>();
 
-function oauthIdentity(configFile: string): { uuid?: string; email?: string } {
+function oauthIdentity(configFile: string): { uuid?: string; email?: string; plan?: string; startedAt?: string } {
   try {
     const stat = statSync(configFile);
     if (!stat.isFile() || stat.size > 16_777_216) return {};
@@ -131,7 +133,10 @@ function oauthIdentity(configFile: string): { uuid?: string; email?: string } {
     const account = config.oauthAccount && typeof config.oauthAccount === "object" ? config.oauthAccount as Record<string, unknown> : {};
     const uuid = typeof account.accountUuid === "string" && account.accountUuid ? account.accountUuid : undefined;
     const email = typeof account.emailAddress === "string" && /^[^\s@]{1,64}@[^\s@]{1,190}$/.test(account.emailAddress) ? account.emailAddress : undefined;
-    const value = { mtimeMs: stat.mtimeMs, size: stat.size, uuid, email };
+    const tier = planName(account.organizationRateLimitTier);
+    const billing = typeof account.billingType === "string" && /^(?:claude_)?(?:pro|max|team|enterprise)(?:_subscription)?$/.test(account.billingType)
+      ? planName(account.billingType.replace(/_subscription$/, "")) : undefined;
+    const value = { mtimeMs: stat.mtimeMs, size: stat.size, uuid, email, plan: tier ?? billing, startedAt: subscriptionDate(account.subscriptionCreatedAt) };
     identityCache.set(configFile, value);
     return value;
   } catch { return {}; }
@@ -145,6 +150,14 @@ export function claudeAccountKey(home: ClaudeHome): string {
 
 /** The login's email, so the phone can name a card merged across computers. Usage rows only. */
 export function claudeAccountEmail(home: ClaudeHome): string | undefined { return oauthIdentity(home.configFile).email; }
+
+/** The account home's own subscription, independent of the quota snapshot's age. */
+export function claudeAccountSubscription(home: ClaudeHome, now = new Date()): Subscription | undefined {
+  const { plan, startedAt } = oauthIdentity(home.configFile);
+  if (!plan) return undefined;
+  const renewsAt = startedAt ? monthlyAnniversary(startedAt, now) : undefined;
+  return { plan, ...(startedAt ? { startedAt } : {}), ...(renewsAt ? { renewsAt, renewsEstimated: true } : {}), checkedAt: now.toISOString() };
+}
 
 export function claudeAccountRef(home: ClaudeHome, labels = readLabels()): AccountRef {
   return { id: home.id, label: accountLabel(home.id, labels), key: claudeAccountKey(home) };

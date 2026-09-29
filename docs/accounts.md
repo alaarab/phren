@@ -122,3 +122,13 @@ phren bridge accounts                          # the Hook's view: claude default
 ```
 
 To name the existing login, run `phren bridge accounts label default Personal`. The existing `~/.claude` login is not changed.
+
+### Subscription metadata
+
+Usage rows optionally carry `subscription: { plan, startedAt?, renewsAt?, renewsEstimated?, checkedAt? }`. Dates are ISO 8601 UTC strings; unknown fields are omitted. `checkedAt` is when the metadata was read, separate from the quota report's `updatedAt`. The phone and `account_usage` retain the newest subscription by `checkedAt` within the existing account group, falling back to that report's `updatedAt` for older Hooks. A newer quota report without subscription metadata does not erase a known plan.
+
+Codex reads only the claims payload of the ID token in this home's `auth.json`, using the `https://api.openai.com/auth` claims `chatgpt_plan_type`, `chatgpt_subscription_active_start` and `chatgpt_subscription_active_until`. The token, header, signature and other claims never enter a usage response or log; these claims are display metadata, not authentication proof. Claude reads each home's `.claude.json` `oauthAccount`: `organizationRateLimitTier`, recognizable plan values in `billingType`, and `subscriptionCreatedAt`. Claude provides no renewal date, so the next monthly anniversary is estimated in UTC, clamped to the last day of short months while retaining the original day for later months (`renewsEstimated: true`).
+
+ElevenLabs uses `tier` and `next_invoice.next_payment_attempt_unix` from the existing subscription read, with no extra request. The character reset remains a separate quota date. Copilot uses its known plan and monthly quota reset; OpenCode Go uses the Go plan and monthly window reset. Those two reset dates describe the provider's known monthly cycle, not a separately verified invoice. OpenCode's local spend and OpenRouter keys have no known subscription, so no plan is invented.
+
+Account usage cards show a muted line under the title, for example `Pro · since Jul 13 · renews Oct 6`; estimated dates read `renews about Oct 13`. Missing dates simply leave out that part of the line.
