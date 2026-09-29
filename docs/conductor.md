@@ -424,3 +424,40 @@ requires Herdr on the receiving computer.
 
 See [API reference](api-reference.md#cross-computer-dispatch) for fields and
 [Fan-out workers](fanout.md) for the separate local worker manifest protocol.
+
+## Worker approvals
+
+A dispatched worker that hits a permission prompt is no longer stuck until
+someone opens its computer. While a dispatching Hook follows a worker, each
+poll keeps that pane's permission requests held on the worker's Hook for
+about 45 seconds, and the Hook forwards what the worker waits on in its
+`POST /v1/dispatch/workers` answer as `approval`: the tool, a short request
+line and whether it is a terminal dialog (a trust prompt or a numbered choice
+the pane draws itself). The request's full text is not sent.
+
+The dispatching Hook records a new request as a `blocked` return whose
+`question` starts with `Approval:`, and the row carries `approval` with its
+`actionId`. `dispatch_approve` (MCP, `POST /v1/dispatch/approve`) answers it
+with `approve` or `deny`; the answer goes to the worker's Hook through its
+`/v1/approvals/answer`, which types the pane's own keys for a terminal dialog.
+Your [standing grants](#standing-grants) already answer the `dispatch` and
+`hand_off` requests they cover, on the dispatching computer, before any return
+is recorded. When this Hook has a paired phone, it also pushes the request
+there (unless the worker's Hook already pushed it), and the notification's
+answer takes the same path.
+
+Only the dispatching agent (or the owner's phone) can answer, and the call must
+name the approval's `actionId`, so one that changed since you read it is
+refused. The worker cannot approve itself: a `dispatch_approve` from its own
+pane, or from any pane other than the dispatch's origin, fails with 403. A
+worker dispatched from the phone or the CLI records no origin pane, so no
+agent can answer for it; only the owner, calling without a pane, can. The pane
+is the one the caller names, so this keeps agents apart on a trusted computer;
+it is not a boundary against code that can already reach the Hook's socket.
+
+A terminal dialog is answered only if the pane's screen, read just before the
+keys are typed, still shows the same question and command that was forwarded.
+
+A request that ends in the worker's terminal (answered there, or its hold ran
+out) clears `approval`; answering one that is gone returns 409.
+

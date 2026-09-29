@@ -440,6 +440,7 @@ describe("task auto-capture prompt gate", () => {
     ["a computer and agent PR report", "From desktop codex: release checklist PR #27 opened"],
     ["a dispatch return notice", "Return: Linuxbox parser checks done, Parser checks passed. (dispatch 40000000-0000-4000-8000-000000000001). Call dispatch_returns."],
     ["a dispatch returns notice", "Returns: 2 dispatches (Linuxbox parser checks done, Fix parser regression; Desk nav checks gone). Call dispatch_returns."],
+    ["a dispatch approval notice", "Return: Linuxbox parser checks needs approval, Run: rm -rf build (dispatch 40000000-0000-4000-8000-000000000001; answer with dispatch_approve). Call dispatch_returns."],
     ["a bare commit report", "Parser checks complete, committed as 42002c1"],
     ["a bare push report", "Parity slice 3 complete, pushed as 42002c1"],
     ["a bare PR report", "Release checklist PR #27 opened"],

@@ -17,7 +17,7 @@ import { startChangeRetention } from "./changes.js";
 import { CodeReindexer, CodeRoutes } from "./code-routes.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { DispatchService } from "./dispatch.js";
-import { DispatchReturns } from "./dispatch-returns.js";
+import { DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { findPane, paneChatState, recentServers, sharedSnapshot, snapshot, validateTarget } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
@@ -67,11 +67,22 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
         return agent.success && typeof pane?.terminal_id === "string" ? { agent: agent.data, terminal: pane.terminal_id } : undefined;
       } })
     : undefined;
-  // Follows what dispatched workers do and tells the dispatching agent.
-  const returns = dispatches ? new DispatchReturns() : undefined;
   const locatedDirectories = new Set<string>();
   const journal = new ActivityJournal();
   const agentHooks = new AgentHooks(undefined, modules);
+  // Follows what dispatched workers do and tells the dispatching agent.
+  const returns: DispatchReturns | undefined = dispatches ? new DispatchReturns({
+    localWorkers: hookWorkers(agentHooks),
+    localAnswer: (target, actionId, decision) => agentHooks.answer(target, actionId, decision),
+    // A worker's request the worker's own Hook did not push reaches this Hook's phone.
+    onApproval: (receipt, approval) => {
+      if (approval.pushed || !agentHooks.push.available) return;
+      agentHooks.pushForwarded({ provider: receipt.harness, computer: receipt.computer, project: receipt.project,
+        request: approval.request ?? approval.title ?? approval.tool, ...(approval.requestKind ? { requestKind: approval.requestKind } : {}) },
+      decision => returns!.answerApproval(receipt.id, decision, approval.actionId));
+      return true;
+    },
+  }) : undefined;
   // Push is offered only once an APNs sender loaded; phones may still register.
   if ("approvalPush" in activeCapabilities) {
     Object.defineProperty(activeCapabilities, "approvalPush", { enumerable: true, get: () => approvalPushCapability(agentHooks.push.status) });
