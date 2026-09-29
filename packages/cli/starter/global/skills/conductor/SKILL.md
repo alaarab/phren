@@ -35,12 +35,24 @@ Your tools, use these instead of exploring the CLI or the Hook's files:
 - `hand_off`: send a prompt to one of those sessions. A busy session queues it
   durably in its Hook. Keep its `deliveryId`; `queued` means waiting, `delivered`
   means confirmed. Check with `hand_off(target|session, computer?, deliveryId,
+  status:true)` and no text. Never resend with a new id because it is busy. A busy session queues it
+  durably in its Hook. Keep its `deliveryId`; `queued` means waiting, `delivered`
+  means confirmed. Check with `hand_off(target|session, computer?, deliveryId,
   status:true)` and no text. Never resend with a new id because it is busy.
 - `dispatch`: start a new worker on a computer (or `anywhere`).
 - `dispatch_returns` (CLI `phren dispatch returns`): what your workers sent
   back since you last asked: done with the final reply, needs-you with the
   question, stalled with an unchanged screen and transcript, failed with the error (a usage limit), blocked, or gone. Reading them marks them read. In core use
   `phren_admin(action: "dispatch_returns")`.
+- `dispatch_report`: workers record `prs`, an array of `{url, repo, branch,
+  tests, notes?}`, on their own Hook before ending the turn. The done return
+  carries that evidence, and the Hook queues it to the configured integrator.
+  In core use `phren_admin(action: "dispatch_report", prs)`.
+- `owner_inbox` (CLI `phren owner-inbox`): list what waits on the owner across
+  linked computers, add a title with optional project, or resolve an id with
+  optional resolution. In core use `phren_admin(action: "owner_inbox", ...)`.
+  Use an item's `inboxComputer` as `computer` when resolving a remote item;
+  omit it for `local`. Say which computers were unreachable.
 - `phren dispatch status`: receipts of what you dispatched.
 - `get_tasks`, `get_project_summary`, `search_knowledge`: the store's memory.
 
@@ -148,6 +160,32 @@ owner's own harness settings can allow it.
 skips one whose account for that harness is exhausted. Place
 briefs sequentially, respecting busy/rate-limit responses. Keep their dispatch
 IDs. Do not send local filesystem paths as remote project names.
+
+Configure the integrator once with `phren conductor integrator --session <id>
+[--computer <name>]`; list with `phren conductor integrator`, clear with
+`--clear`. A dispatch can override it with `integrator: {computer?, target}`.
+The integrator's full target is bound to that conversation. Workers report
+structured PR evidence with `dispatch_report(prs)` in full or
+`phren_admin(action:"dispatch_report", prs)` in core before finishing; they do not
+need direct messaging or a GitHub comment to reach it. Inspect `prs` and
+`integratorDelivery` in receipts and verify the evidence before integration.
+
+Finished worker panes close after their done return is read. Use
+`closeOnFinish:false` (`--keep-open` in the CLI) for a worker you will reuse.
+The Hook rechecks its ended turn and skips a pane with new work, background
+tasks, queued messages or uncertain delivery. Intentional closes do not return
+`gone`. Reading returns can close panes, so record any follow-up first.
+
+Keep one owner inbox item for each decision or action that waits on the owner.
+Needs-you returns and blocked prompts appear automatically, even if their
+returns were read. Add other actions such as restarting the router with
+`owner_inbox(operation:"add", title, project?, id?)` in full or
+`phren_admin(action:"owner_inbox", operation:"add", title, project?, id?)` in
+core; keep the id on retries.
+Resolve an item only once the owner decided or completed the action. Resolution
+does not send an answer, approve a prompt, or mark a task complete. Send an
+owner's answer separately with queued `hand_off`. A source that stopped waiting
+is retained as `live:false` until resolved; a resolved source stays resolved.
 
 `accepted` on a receipt is prompt acceptance, not worker completion. Returns
 arrive on their own: the Hook follows every worker you dispatch, and when you

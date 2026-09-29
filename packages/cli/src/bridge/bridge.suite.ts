@@ -471,7 +471,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
   let ignoredMenuMoves = 0, loseMenuHighlight = false, replaceMenuAfterMove = false;
   /** The pane a moving highlight redraws; the permissions menu unless a test sets its own. */
   let menuPane: (highlight: number | undefined) => string = permissionsMenu;
-  let paneAgent = "codex";
+  let paneAgent = "codex", mainClosed = false;
   let paneCwd: string | undefined;
   let remoteHook: ChildProcess | undefined;
   // The Hook's identity cache (2 s) and terminal-dialog throttle (3 s), shortened so tests do not wait them out.
@@ -494,7 +494,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
     workspace_id: pane.workspace_id, tab_id: pane.tab_id, pane_id: pane.pane_id, focused: pane.focused,
     cwd: pane.cwd, foreground_cwd: pane.foreground_cwd, revision: pane.revision });
   function fakeSnapshot(): Record<string, unknown> {
-    const panes = [mainPane(), ...extraPanes];
+    const panes = [...(!mainClosed ? [mainPane()] : []), ...extraPanes];
     // A tab or workspace reports the status of the agent it holds.
     const status = (match: (pane: Record<string, unknown>) => boolean) => panes.find(p => match(p) && p.agent)?.agent_status ?? "unknown";
     return { version: recordedSnapshot.version, protocol: recordedSnapshot.protocol,
@@ -537,7 +537,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
     paneCwd = undefined; commands = []; current = session; agentStatus = "working"; reportIdentity = true; foregroundPID = process.pid; terminalID = "term-one"; log = ""; holdSnapshot = false; releaseSnapshot = undefined;
     replaceBeforeMutation = false; deliveries = [];
     extraWorkspaces = []; extraTabs = []; extraPanes = []; agentNames = new Map(); failAgentStart = false; busyAgentStarts = 0; promptNotReady = 0; helperPIDs = []; remoteHook = undefined;
-    paneLines = ""; drawConfirmation = false; paneAgent = "codex"; fakeClaude = undefined;
+    mainClosed = false; paneLines = ""; drawConfirmation = false; paneAgent = "codex"; fakeClaude = undefined;
     confirmationHasKeys = true;
     menuHighlight = undefined; confirmedMenuRow = undefined; ignoredMenuMoves = 0; menuPane = permissionsMenu;
     loseMenuHighlight = false; replaceMenuAfterMove = false;
@@ -585,7 +585,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
           socket.end(JSON.stringify({ id, error: { code, message } }) + "\n");
         const invalid = herdrRequestProblem(req.method, req.params);
         if (invalid) { fail("invalid_request", invalid, ""); return; }
-        const panes = () => [mainPane(), ...extraPanes];
+        const panes = () => [...(!mainClosed ? [mainPane()] : []), ...extraPanes];
         const agentTarget = typeof req.params?.target === "string" ? req.params.target : undefined;
         if (agentTarget !== undefined && !panes().some(p => p.pane_id === agentTarget || agentNames.get(String(p.pane_id)) === agentTarget)) {
           fail("agent_not_found", `agent target ${agentTarget} not found`); return;
@@ -654,6 +654,10 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
           }
           target.agent_status = "idle";
           created = { type: "agent_started", agent: agentInfo(target), argv: [req.params.kind, ...(req.params.args ?? [])] };
+        }
+        if (req.method === "pane.close") {
+          if (req.params.pane_id === "w1:p1") mainClosed = true;
+          else extraPanes = extraPanes.filter(p => p.pane_id !== req.params.pane_id);
         }
         const readPane = (paneId: string) => {
           const pane = panes().find(p => p.pane_id === paneId || agentNames.get(String(p.pane_id)) === paneId)!;
@@ -2586,6 +2590,72 @@ schedules:
       expect(workers.data.workers[0]).toMatchObject({ state: "working", stalled: true });
       await appendFile(record, JSON.stringify(row("New progress")) + "\n");
       expect((await api("/v1/dispatch/workers", { targets: [target] })).data.workers[0]).not.toHaveProperty("stalled");
+    });
+
+    it("refreshes a pre-launch snapshot before reporting a new Codex pane gone in a real Hook", async () => {
+      await api("/v1/dispatch/workers", { targets: [target] });
+      const launched = { ...target, workspace: "w9", tab: "w9:t1", pane: "w9:p1", session: "00000009-1111-4111-8111-111111111111" };
+      extraWorkspaces.push(workspaceInfo("w9", "New worker", 2)); extraTabs.push(tabInfo("w9", "w9:t1", "1", 1));
+      extraPanes.push({ ...paneInfo("w9", "w9:t1", "w9:p1", "new-terminal", root), agent: "codex", agent_status: "working",
+        agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: launched.session } });
+      const workers = await api("/v1/dispatch/workers", { targets: [launched] });
+      expect(workers.status).toBe(200); expect(workers.data.workers[0]).toMatchObject({ state: "working", session: launched.session });
+    });
+
+    it("suppresses gone after an explicit pane close through a real Hook", async () => {
+      const closed = await api("/v1/workspaces/close", { paneId: target.pane });
+      expect(closed.status, JSON.stringify(closed.data)).toBe(200);
+      expect(commands.filter(c => c.method === "pane.close")).toHaveLength(1);
+      expect((await api("/v1/dispatch/workers", { targets: [target] })).data.workers[0]).toHaveProperty("state", "closed");
+    });
+
+    it("adds, lists and resolves owner inbox items through the real Hook routes", async () => {
+      const id = "70000000-0000-4000-8000-000000000001";
+      const added = await api("/v1/owner-inbox", { action: "add", id, title: "Restart the router", project: "phren" });
+      expect(added.status, JSON.stringify(added.data)).toBe(200);
+      expect(added.data.item).toMatchObject({ id, kind: "manual", state: "open" });
+      await api("/v1/owner-inbox", { action: "add", id, title: "Restart the router", project: "phren" });
+      expect((await api("/v1/owner-inbox?local=1")).data.items.filter((row: any) => row.id === id)).toHaveLength(1);
+      expect((await api("/v1/owner-inbox", { action: "resolve", id, resolution: "Restarted" })).data.item).toMatchObject({ state: "resolved" });
+      expect((await api("/v1/owner-inbox?local=1")).data.items.filter((row: any) => row.id === id)).toHaveLength(0);
+      expect((await api("/v1/owner-inbox?local=1&includeResolved=true")).data.items).toMatchObject([{ id, resolution: "Restarted" }]);
+    });
+
+    it("reports PRs, queues the integrator, closes after a read and suppresses gone in a real Hook", async () => {
+      const workerId = "70000000-0000-4000-8000-000000000002";
+      const hookEvent = (event: string, extra: object = {}) => new Promise<void>((resolve, reject) => {
+        const payload = JSON.stringify({ target, event, dispatchId: workerId, ...extra });
+        const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST", headers: { "Content-Length": Buffer.byteLength(payload) } }, res => { res.resume(); res.on("end", resolve); });
+        req.on("error", reject); req.end(payload);
+      });
+      await waitFor(() => stat(path.join(root, "bridge/agent.sock")).catch(() => undefined));
+      await hookEvent("UserPromptSubmit", { prompt: "Run checks" });
+      const prs = [{ url: "https://github.com/alaarab/phren/pull/999", repo: "alaarab/phren", branch: "feat/checks", tests: "12 passed", notes: "Ready for review" }];
+      const report = await api("/v1/dispatch/report", { origin: { server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane }, prs });
+      expect(report.status, JSON.stringify(report.data)).toBe(200);
+      await hookEvent("Stop", { last_assistant_message: "Checks passed", background_tasks: [] }); agentStatus = "done";
+      const seen = (await api("/v1/dispatch/workers", { targets: [{ ...target, dispatch: workerId }] })).data.workers[0];
+      expect(seen).toMatchObject({ state: "done", prs });
+      const integration = { ...target, workspace: "w9", tab: "w9:t1", pane: "w9:p1", session: "00000009-1111-4111-8111-111111111111" };
+      extraWorkspaces.push(workspaceInfo("w9", "Integrator", 2)); extraTabs.push(tabInfo("w9", "w9:t1", "1", 1));
+      extraPanes.push({ ...paneInfo("w9", "w9:t1", "w9:p1", "integrator-terminal", root), agent: "codex", agent_status: "working", agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: integration.session } });
+      expect((await api("/v1/conductor/integrator", { integrator: { target: integration } })).status).toBe(200);
+      const at = new Date().toISOString(), value = { id: workerId, computer: (await api("/v1/health")).data.computer.name, project: "phren", harness: "codex", label: "Checks", state: "accepted", target, createdAt: at, updatedAt: at };
+      const { observe } = await import("./dispatch-returns.js"); observe(value as never, seen, Date.now());
+      await mkdir(path.join(root, "bridge/dispatches"), { recursive: true });
+      await writeFile(path.join(root, "bridge/dispatches", `${workerId}.json`), JSON.stringify(value));
+      expect(commands.filter(c => c.method === "pane.close")).toHaveLength(0);
+      const result = await api("/v1/dispatch/returns", {});
+      expect(result.status, JSON.stringify(result.data)).toBe(200);
+      expect(result.data.returns).toMatchObject([{ state: "done", prs }]);
+      expect(commands.filter(c => c.method === "pane.close")).toHaveLength(1);
+      const status = (await api("/v1/dispatch")).data.dispatches[0];
+      expect(status).toHaveProperty("closedAt"); expect(status.returned.integratorDelivery).toHaveProperty("state", "queued");
+      await waitFor(async () => (await api("/v1/dispatch/workers", { targets: [target] })).data.workers[0].state === "closed", 6000);
+      expect((await api("/v1/dispatch/workers", { targets: [target] })).data.workers[0]).toHaveProperty("state", "closed");
+      expect((await api("/v1/dispatch/returns", {})).data.returns).toEqual([]);
+      expect(commands.filter(c => c.method === "agent.prompt" && c.params.target === integration.pane)).toHaveLength(0);
+      expect((await api("/v1/conductor/integrator", { integrator: null })).status).toBe(200);
     });
 
     it("lists, adds, and revokes conductor grants over the Hook routes", async () => {

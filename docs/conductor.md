@@ -568,3 +568,53 @@ Working sessions whose visible screen and transcript both stay unchanged for
 Their dispatch produces a `stalled` return with the same fields. Progress resets
 the flag. Failed reads do not count as inactivity. A stall is a supervision
 signal; it does not interrupt the worker or authorize a replacement.
+
+## Finish cleanup and PR-ready reports
+
+Dispatches default to `closeOnFinish:true`. Pass `closeOnFinish:false` or CLI
+`--keep-open` for a worker you will reuse. Reading a done return records a
+pending close on the sender's Hook. The worker's Hook rechecks the conversation,
+terminal and ended turn before closing only that pane. New work, background
+work, queued messages and uncertain hand-offs keep it open. Offline close
+requests remain pending across restarts. Intentional pane, tab and workspace
+closes are recorded before the terminal action and never produce gone returns.
+
+Before ending its turn, a worker calls `dispatch_report(prs)` or
+`phren dispatch report --prs '<JSON array>'`. Each entry has `url` (HTTPS),
+`repo` (`owner/name`), `branch`, `tests` (summary) and optional `notes`.
+At most 16 PRs and 24000 UTF-8 bytes are accepted. The report belongs to that
+submitted turn and terminal. It is evidence supplied by the worker, not a
+verification by the Hook.
+
+Configure the default integrator on the dispatching Hook with
+`phren conductor integrator --session <id> [--computer <name>]`; show it with
+`phren conductor integrator`, or clear with `--clear`. A dispatch can override
+it with `integrator:{computer?,target}`. The Hook forwards a done return's `prs`
+through the durable hand-off queue, with one stable delivery id. Receipts carry
+`integratorDelivery:{deliveryId,state,at,integrator?}`. A saved pending delivery
+keeps its original integrator target on retries, even if the default changes.
+Queued forwarding is checked until
+delivered; uncertain forwarding stays uncertain. A restarted integrator needs
+its new target configured. Workers need no direct messaging or GitHub comment.
+
+## Owner inbox
+
+`owner_inbox(operation:"list")` and `phren owner-inbox list` show needs-you returns,
+blocked prompts and manual items across the linked computers. The owning Hook
+persists each item. An item's `inboxComputer` tells clients where to resolve it;
+its `computer` can instead name the remote worker. Unreachable inboxes are
+reported. `add` takes `title`, optional `project` and an optional stable UUID
+`id` to keep on retries. `resolve` takes `id`, optional `computer` (the
+`inboxComputer`, omitted for local) and optional `resolution`. CLI examples:
+
+```sh
+phren owner-inbox add "Restart the router" --project phren
+phren owner-inbox list --all
+phren owner-inbox resolve <id> --computer <name> --resolution "Restarted"
+```
+
+Reading dispatch returns does not resolve inbox items. Sources that disappear
+remain open with `live:false` until resolved. Resolving does not approve or
+answer an agent, and the same source stays resolved on later polls; a new
+question creates a new item. The phone UI is a follow-up using the contract in
+[Phren Hook](phren-hook.md#owner-inbox-phone-contract).

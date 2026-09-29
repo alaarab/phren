@@ -1,3 +1,6 @@
+import { intentionallyClosed } from "./worker-close.js";
+import { workerPrs, readIntegrator } from "./worker-reports.js";
+import { prsSchema, type PullRequest } from "./return-contract.js";
 import { sessionStalls } from "./stalls.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -6,7 +9,7 @@ import { arrivalOf, dispatchStatus, updateReceipt, type OriginPane, type Receipt
 import { briefArrival, briefId, type BriefArrival } from "./launch-brief.js";
 import { codexServers, LOST_TURN, type LostTurn } from "./codex-servers.js";
 import { findGrant } from "./grants.js";
-import { findPane, paneIdentity, sharedSnapshot } from "./herdr.js";
+import { findPane, paneIdentity, sharedSnapshot, snapshot } from "./herdr.js";
 import { handOff } from "./hand-off.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
@@ -31,6 +34,9 @@ export { truncateUtf8 } from "./turn-records.js";
 export const REPLY_LIMIT = TURN_REPLY_LIMIT;
 /** How often the dispatching Hook asks peers about open dispatches. */
 export const POLL_MS = 15_000;
+/** Allow the new process and its terminal identity to appear before declaring
+ * an unobserved launch gone. An observed worker never gets this grace. */
+export const LAUNCH_GRACE_MS = 60_000;
 /** Shortest gap between two notices typed into the same dispatching pane. */
 export const NOTICE_MS = 120_000;
 /** Receipts older than this are no longer watched. */
@@ -53,7 +59,7 @@ export const workerRequestSchema = z.object({ targets: z.array(workerTarget).min
 /** What a worker pane shows right now, as its own computer reads it. */
 export interface WorkerObservation {
   /** Herdr's status for the pane, or gone when the pane or its conversation is no longer there. */
-  state: "working" | "idle" | "done" | "blocked" | "unknown" | "gone" | "unavailable";
+  state: "working" | "idle" | "done" | "blocked" | "unknown" | "gone" | "closed" | "unavailable";
   session?: string;
   completed?: boolean;
   reply?: string;
@@ -63,7 +69,7 @@ export interface WorkerObservation {
   /** The state comes from the agent's own turn events, not from how the pane looks. */
   hook?: true;
   /** When the turn's Stop arrived, on the worker's clock; names the turn. */
-  endedAt?: string;
+  endedAt?: string; stopSeq?: number;
   /** Background tasks the harness still runs: waited on while `working`,
    * left running when `done` after BACKGROUND_WAIT_MS. */
   background?: number;
@@ -71,11 +77,13 @@ export interface WorkerObservation {
   interrupted?: true;
   /** A permission request the pane's worker is waiting on, forwarded by its Hook (`AgentHooks.workerApproval`). */
   approval?: Json;
+  prs?: PullRequest[];
   stalled?: boolean; stalledSince?: string; stallFor?: number;
 }
 
 export interface WorkerReaders {
   snapshot: (server: string) => Promise<Json>;
+  freshSnapshot?: (server: string) => Promise<Json>;
   identity: (server: string, pane: Json) => Promise<string | undefined>;
   finalTurn: (source: Provider, session: string) => Promise<FinalTurn | undefined>;
   /** The turn record the pane's agent reported through its hooks (or OpenCode's plugin). */
@@ -88,7 +96,7 @@ export interface WorkerReaders {
   lost?: (server: string, pane: string, session?: string) => LostTurn | undefined;
 }
 
-async function paneTurn(server: string, pane: Json, source: Provider): Promise<TurnRecord | undefined> {
+export async function paneTurn(server: string, pane: Json, source: Provider): Promise<TurnRecord | undefined> {
   if (source !== "opencode") return readTurn(server, String(pane.pane_id));
   if (typeof pane.terminal_id !== "string") return undefined;
   return opencodeTurn((await terminalProvider().processes(server, String(pane.pane_id))).foregroundPids, pane.terminal_id);
@@ -96,6 +104,7 @@ async function paneTurn(server: string, pane: Json, source: Provider): Promise<T
 
 const defaultReaders: WorkerReaders = {
   snapshot: server => sharedSnapshot(server, SNAPSHOT_AGE_MS),
+  freshSnapshot: snapshot,
   identity: (server, pane) => paneIdentity(server, pane),
   finalTurn: (source, session) => source === "codex" || source === "claude" || source === "opencode" ? readFinalTurn(source, session) : Promise.resolve(undefined),
   turn: paneTurn,
@@ -145,7 +154,7 @@ async function fromTurn(record: TurnRecord, session: string, status: string, sou
     : final?.completed ? final.background : undefined;
   const now = (readers.now ?? Date.now)();
   if (background && now - Date.parse(phase.at) < BACKGROUND_WAIT_MS) return { state: "working", ...base, background };
-  return { state: "done", ...base, completed: true, endedAt: phase.at, ...(background ? { background } : {}),
+  return { state: "done", ...base, completed: true, endedAt: phase.at, stopSeq: record.stop?.seq, ...(background ? { background } : {}),
     ...(final?.completed && final.error ? { error: final.error } : {}),
     ...(phase.reply ? replyFields(phase.reply, phase.truncated) : replyFields(final?.lastAssistant)) };
 }
@@ -156,18 +165,27 @@ async function fromTurn(record: TurnRecord, session: string, status: string, sou
 export async function workerStates(input: unknown, readers: WorkerReaders = defaultReaders): Promise<{ workers: WorkerObservation[] }> {
   const { targets } = workerRequestSchema.parse(input);
   const snapshots = new Map<string, Promise<Json>>();
+  const freshSnapshots = new Map<string, Promise<Json>>();
   const workers = await Promise.all(targets.map(async (target): Promise<WorkerObservation> => {
     let s: Json;
     try {
       if (!snapshots.has(target.server)) snapshots.set(target.server, readers.snapshot(target.server));
       s = await snapshots.get(target.server)!;
     } catch { return { state: "unavailable" }; }
-    const pane = findPane(s, target);
-    if (!pane) return { state: "gone" };
+    let pane = findPane(s, target);
+    // Never turn a cached pre-launch snapshot into a terminal gone return.
+    if (readers.freshSnapshot && (!pane || await intentionallyClosed(target))) {
+      try {
+        if (!freshSnapshots.has(target.server)) freshSnapshots.set(target.server, readers.freshSnapshot(target.server));
+        s = await freshSnapshots.get(target.server)!;
+        pane = findPane(s, target);
+      } catch { return { state: "unavailable" }; }
+    }
+    if (!pane) return { state: await intentionallyClosed(target) ? "closed" : "gone" };
     const current = await readers.identity(target.server, pane).catch(() => undefined);
     const expected = "session" in target ? target.session : undefined;
     // Another conversation in the same pane means the worker is gone.
-    if (expected && current && current !== expected) return { state: "gone" };
+    if (expected && current && current !== expected) return { state: await intentionallyClosed(target) ? "closed" : "gone" };
     const lost = target.source === "codex" ? readers.lost?.(target.server, String(pane.pane_id), expected ?? current) : undefined;
     if (lost) return { state: "done", session: lost.threadId, completed: true, endedAt: lost.at, error: LOST_TURN };
     const status = String(pane.agent_status);
@@ -180,7 +198,8 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     if (own) {
       const seen = await fromTurn(own, own.session, status, target.source, readers);
       const full = targetSchema.safeParse({ ...target, session: seen.session });
-      return { ...seen, ...(full.success && seen.state === "working" ? await readers.stall?.(full.data, { ...pane, agent_status: "working" }) : {}) };
+      const prs = full.success && seen.state === "done" ? await workerPrs(full.data, own) : undefined;
+      return { ...seen, ...(prs ? { prs } : {}), ...(full.success && seen.state === "working" ? await readers.stall?.(full.data, { ...pane, agent_status: "working" }) : {}) };
     }
     const session = expected ?? current;
     const state = (["working", "idle", "done", "blocked"] as const).find(value => value === status) ?? "unknown";
@@ -201,16 +220,18 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
   return { workers: workers.map((seen, index) => {
     const { dispatch: _dispatch, ...target } = targets[index];
     const full = "session" in target ? targetSchema.safeParse(target) : undefined;
-    const approval = full?.success && seen.state !== "gone" && seen.state !== "unavailable" ? readers.approval?.(full.data) : undefined;
+    const approval = full?.success && seen.state !== "gone" && seen.state !== "closed" && seen.state !== "unavailable" ? readers.approval?.(full.data) : undefined;
     return approval ? { ...seen, approval } : seen;
   }) };
 }
 
 const observationSchema = z.object({
-  state: z.enum(["working", "idle", "done", "blocked", "unknown", "gone", "unavailable"]),
+  state: z.enum(["working", "idle", "done", "blocked", "unknown", "gone", "closed", "unavailable"]),
   session: z.string().max(200).optional(), completed: z.boolean().optional(),
   reply: z.string().max(REPLY_LIMIT).optional(), truncated: z.boolean().optional(), error: z.string().max(500).optional(),
+  stopSeq: z.number().int().nonnegative().optional(),
   hook: z.boolean().optional(), endedAt: z.string().max(40).optional(), background: z.number().int().min(0).max(999).optional(),
+  prs: prsSchema.optional(),
   stalled: z.boolean().optional(), stalledSince: z.string().datetime().optional(), stallFor: z.number().nonnegative().optional(),
   interrupted: z.boolean().optional(), approval: z.unknown().optional(),
 }).passthrough();
@@ -227,6 +248,10 @@ export type ObservedApproval = z.infer<typeof approvalObservation>;
 /** What the owner is told when the worker's turn was interrupted in its terminal. */
 export const INTERRUPTED = "The worker's turn was interrupted in its terminal before it finished.";
 
+export function workerTurnKey(seen: { endedAt?: string; stopSeq?: number; reply?: string }, error?: string): string | undefined {
+  return turnKey(seen.endedAt ? `${seen.endedAt}${seen.stopSeq !== undefined ? `#${seen.stopSeq}` : ""}\n${error ?? ""}` : error ?? seen.reply);
+}
+
 function turnKey(value: string | undefined): string | undefined {
   return value ? createHash("sha256").update(value).digest("hex").slice(0, 16) : undefined;
 }
@@ -234,7 +259,11 @@ function turnKey(value: string | undefined): string | undefined {
 /** Apply one observation to a receipt. Returns true when the receipt changed. */
 export function observe(receipt: Receipt, value: unknown, now: number): boolean {
   const parsed = observationSchema.safeParse(value);
+  if (receipt.closedAt) return false;
   if (!parsed.success || parsed.data.state === "unavailable" || parsed.data.state === "unknown") return false;
+  if (parsed.data.state === "closed") { receipt.closedAt = new Date(now).toISOString(); return true; }
+  if (parsed.data.state === "gone" && receipt.brief === "launch" && !receipt.worker?.sawWorking && !receipt.returned
+    && now - Date.parse(receipt.createdAt) < LAUNCH_GRACE_MS) return false;
   const state = observeState(receipt, parsed.data, now);
   return observeApproval(receipt, parsed.data.approval, now) || state;
 }
@@ -299,7 +328,7 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
   else next = !seen.hook && sawWorking ? "done" : "working";
   // A Stop's time names its turn; without one, the final reply does.
   const turn = next === "done" || next === "needs-you" || next === "failed"
-    ? turnKey(seen.endedAt ? `${seen.endedAt}\n${failed ?? ""}` : next === "failed" ? failed : seen.reply) : undefined;
+    ? workerTurnKey(seen, failed) : undefined;
   const previous = receipt.worker?.state;
   // The same finished state with a different final reply is a new turn: the
   // worker took more work (a hand_off) and finished again between two polls.
@@ -318,6 +347,7 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
   if (next !== "working") {
     receipt.returned = { state: next, at, read: false,
       ...(seen.reply && (next === "done" || next === "needs-you") ? { reply: seen.reply, ...(seen.truncated ? { truncated: true } : {}) } : {}),
+      ...(next === "done" && seen.prs ? { prs: seen.prs } : {}),
       ...(next === "stalled" ? { stalledSince: seen.stalledSince, stallFor: seen.stallFor } : {}),
       ...(failed ? { error: failed } : {}), ...(question ? { question } : {}), ...(turn ? { turn } : {}),
       ...((next === "done" || next === "needs-you") && seen.background ? { background: seen.background } : {}),
@@ -353,6 +383,8 @@ export function noticeLine(receipts: readonly Receipt[]): string {
 export function returnRow(receipt: Receipt): Json {
   const returned = receipt.returned!;
   return { id: receipt.id, computer: receipt.computer, project: receipt.project, label: receipt.label, harness: receipt.harness,
+    ...(returned.prs ? { prs: returned.prs } : {}),
+    ...(returned.integratorDelivery ? { integratorDelivery: returned.integratorDelivery } : {}),
     ...(returned.state === "stalled" ? { stalled: true, stalledSince: returned.stalledSince, stallFor: returned.stallFor } : {}),
     state: returned.state, at: returned.at, ...(returned.reply !== undefined ? { reply: returned.reply } : {}),
     ...(returned.truncated ? { truncated: true } : {}), ...(returned.error ? { error: returned.error } : {}), ...(returned.question ? { question: returned.question } : {}),
@@ -384,6 +416,7 @@ export interface DispatchReturnsOptions {
   localAnswer?: (target: Target, actionId: string, decision: "approve" | "deny") => Promise<unknown>;
   /** A worker's new forwarded request was recorded. Returns true when this Hook pushed it to its phone. */
   onApproval?: (receipt: Receipt, approval: NonNullable<Receipt["approval"]>) => boolean | void;
+  close?: (receipt: Receipt) => Promise<Json>;
   now?: () => number;
 }
 
@@ -408,6 +441,7 @@ export class DispatchReturns {
   private readonly grant: typeof findGrant;
   private readonly localAnswer?: DispatchReturnsOptions["localAnswer"];
   private readonly onApproval?: DispatchReturnsOptions["onApproval"];
+  private readonly close?: DispatchReturnsOptions["close"];
   private lastPoll = -Infinity;
   private readonly lastNotice = new Map<string, number>();
   /** A return is waiting for a dispatching agent that was busy: try again on
@@ -416,6 +450,7 @@ export class DispatchReturns {
   private running?: Promise<void>;
 
   constructor(options: DispatchReturnsOptions = {}) {
+    this.close = options.close;
     this.peers = options.peers ?? hookPeers;
     this.request = options.request ?? peerRequest;
     this.localWorkers = options.localWorkers ?? (input => workerStates(input));
@@ -472,7 +507,7 @@ export class DispatchReturns {
     const poll = this.now() - this.lastPoll >= POLL_MS;
     if (!poll && !this.noticesDue) return Promise.resolve();
     if (poll) this.lastPoll = this.now();
-    this.running = (async () => { if (poll) await this.poll(); await this.notify(); })()
+    this.running = (async () => { if (poll) await this.poll(); await this.forwardPrs(); await this.cleanup(); await this.notify(); })()
       .catch(() => {}).finally(() => { this.running = undefined; });
     return this.running;
   }
@@ -506,7 +541,7 @@ export class DispatchReturns {
     await this.confirmArrivals(await this.peers().catch(() => [] as HookPeer[]));
     const now = this.now();
     const open = (await dispatchStatus()).filter(receipt => (receipt.state === "accepted" || receipt.state === "uncertain")
-      && receipt.target && receipt.worker?.state !== "gone" && now - Date.parse(receipt.createdAt) < WATCH_MS);
+      && receipt.target && !receipt.closedAt && receipt.worker?.state !== "gone" && now - Date.parse(receipt.createdAt) < WATCH_MS);
     if (!open.length) return;
     const peers = await this.peers().catch(() => [] as HookPeer[]);
     const byComputer = new Map<string, Receipt[]>();
@@ -590,6 +625,57 @@ export class DispatchReturns {
     this.noticesDue = busy;
   }
 
+  /** Forward a structured report with one stable id; queued is a durable
+   * acceptance, while uncertain is retained and never replaced. */
+  async forwardPrs(): Promise<void> {
+    const configured = await readIntegrator();
+    for (const receipt of await dispatchStatus()) {
+      const result = receipt.returned;
+      if (result?.state !== "done" || !result.prs) continue;
+      const integrator = result.integratorDelivery?.integrator ?? receipt.integrator ?? configured;
+      if (!integrator) continue;
+      let delivery = result.integratorDelivery;
+      if (!delivery) {
+        delivery = { deliveryId: `pr-${createHash("sha256").update(`${receipt.id}@${result.turn ?? result.at}`).digest("hex").slice(0, 40)}`,
+          state: "pending", at: new Date(this.now()).toISOString(), integrator };
+        const current = await updateReceipt(receipt.id, current => {
+          if (current.returned?.at !== result.at || current.returned.turn !== result.turn || current.returned.integratorDelivery) return false;
+          current.returned.integratorDelivery = delivery; return true;
+        });
+        if (!current || current.returned?.turn !== result.turn || current.returned?.at !== result.at) continue;
+        delivery = current.returned.integratorDelivery;
+      }
+      if (!delivery || !["pending", "queued"].includes(delivery.state)) continue;
+      const statusOnly = delivery.state === "queued";
+      const sent = await handOff({ ...integrator, deliveryId: delivery.deliveryId,
+        ...(statusOnly ? { status: true } : { text: `PR ready: ${receipt.computer} ${receipt.label}\n${JSON.stringify({ dispatch: receipt.id, project: receipt.project, prs: result.prs })}` }) },
+        { notifySender: false }).catch(() => undefined);
+      if (!sent) continue; // Retry this saved target and id after a lost transport reply.
+      const state = sent.delivered ? "delivered" : sent.queued ? "queued" : sent.deliveryUncertain ? "uncertain" : "failed";
+      await updateReceipt(receipt.id, current => {
+        if (current.returned?.at !== result.at || current.returned.turn !== result.turn || current.returned.integratorDelivery?.deliveryId !== delivery!.deliveryId) return false;
+        current.returned.integratorDelivery.state = state; return true;
+      });
+    }
+  }
+
+  async cleanup(): Promise<void> {
+    for (const receipt of await dispatchStatus()) {
+      if (!receipt.closePending || receipt.closedAt || receipt.returned?.at !== receipt.closePending.at || receipt.returned.state !== "done" || !receipt.returned.read) continue;
+      const result = await (this.close ? this.close(receipt) : this.closeRemote(receipt)).catch(() => undefined);
+      if (result?.closed === true) await updateReceipt(receipt.id, current => {
+        if (current.closePending?.at !== receipt.closePending!.at) return false;
+        current.closedAt = new Date(this.now()).toISOString(); delete current.closePending; return true;
+      });
+      else if (result?.closed === false) await updateReceipt(receipt.id, current => { delete current.closePending; return true; });
+    }
+  }
+  private async closeRemote(receipt: Receipt): Promise<Json> {
+    const peer = (await this.peers()).find(peer => peer.name === receipt.computer);
+    if (!peer) return { closed: false };
+    return this.request(peer, "/v1/dispatch/close", { target: receipt.target, dispatch: receipt.id, turn: receipt.closePending!.turn });
+  }
+
   /** Every unread return, oldest first, marked read as it is handed over. */
   async take(): Promise<Json[]> {
     const unread = (await dispatchStatus()).filter(receipt => receipt.returned && !receipt.returned.read)
@@ -599,11 +685,15 @@ export class DispatchReturns {
       let marked = false;
       const current = await updateReceipt(receipt.id, value => {
         if (!value.returned || value.returned.read) return false;
-        value.returned.read = true; marked = true; return true;
+        value.returned.read = true; marked = true;
+        if (value.returned.state === "done" && value.closeOnFinish !== false && !value.returned.background && value.returned.turn && !value.closedAt)
+          value.closePending = { at: value.returned.at, turn: value.returned.turn };
+        return true;
       }).catch(() => undefined);
       // A concurrent take already handed this one over.
       if (marked && current?.returned) rows.push(returnRow(current));
     }
+    await this.forwardPrs(); await this.cleanup();
     return rows;
   }
 }

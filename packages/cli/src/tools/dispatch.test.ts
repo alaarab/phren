@@ -25,6 +25,28 @@ describe("dispatch entry points", () => {
     expect(hookRequest).toHaveBeenCalledWith("/v1/dispatch", brief, undefined, 180_000);
   });
 
+  it.each(["core", "full"] as const)("adds and resolves owner work through the %s MCP profile", async profile => {
+    const exposed = new Map<string, ToolHandler>();
+    const gate = createToolGate({ profile, register: (name, _config, handler) => exposed.set(name, handler) });
+    register({ registerTool: gate.registerTool } as unknown as McpServer); gate.finish();
+    vi.mocked(hookRequest).mockResolvedValue({ ok: true });
+    const call = (operation: string, rest: object) => exposed.get(profile === "full" ? "owner_inbox" : "phren_admin")!({ operation, ...rest, ...(profile === "core" ? { action: "owner_inbox" } : {}) });
+    await call("add", { title: "Restart the router" });
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox", { action: "add", title: "Restart the router" });
+    await call("resolve", { id: session });
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox", { action: "resolve", id: session });
+  });
+
+  it("routes the inbox CLI and preserves dispatch's keep-open option", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.mocked(hookRequest).mockResolvedValue({ ok: true });
+    const context = { phrenPath: () => "unused", profile: () => "unused" };
+    await lookupCommand("owner-inbox")!.run(["resolve", session, "--computer", "Desk", "--resolution", "Approved"], context);
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/owner-inbox", { action: "resolve", id: session, computer: "Desk", resolution: "Approved" });
+    await lookupCommand("dispatch")!.run(["Desk", "phren", "--label", "Checks", "--prompt", "Run checks", "--keep-open"], context);
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/dispatch", { ...brief, closeOnFinish: false }, undefined, 180_000);
+  });
+
   it("routes CLI dispatch and status and returns failure for uncertain delivery", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     const command = lookupCommand("dispatch")!;
