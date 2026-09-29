@@ -470,6 +470,16 @@ What works:
   terminal (`phren-hook v1 terminal tmux` attaches the phone's SSH terminal to
   the server), and launching Claude Code, Codex, Copilot or OpenCode into
   `tmux-phren`.
+- Scrolling the phone's terminal: tmux draws on the alternate screen, so the
+  phone keeps no history of its own. With `set -g mouse on` tmux turns on the
+  phone's mouse reporting and a swipe is a wheel event, as under Herdr. With
+  tmux's default `mouse off` the phone asks `POST /v1/workspaces/scroll`
+  (`paneId`, signed `lines`, positive for older output; without `paneId`, the
+  pane of the last active client), which does what tmux's own wheel binding
+  does: an app tracking the mouse (Claude, Codex) gets the wheel events, and
+  any other pane scrolls in `copy-mode -e`, which ends at the bottom. `lines: 0`
+  leaves copy mode, which the phone sends before typing. The reply's `history`
+  says whether the pane is still in copy mode. Refused for Herdr servers.
 - Dispatch: `phren dispatch` and the `dispatch` MCP tool, run from an agent in
   a tmux pane, remember that pane (from `TMUX` and `TMUX_PANE`) for the
   workers' return notices, as they do in Herdr.

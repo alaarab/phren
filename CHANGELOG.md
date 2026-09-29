@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Swiping in the phone's terminal scrolls a tmux pane when tmux's `mouse` option is off, its default. tmux draws on the alternate screen and then never turns on the phone's mouse reporting, so a swipe had nothing to scroll. The new `POST /v1/workspaces/scroll` does what tmux's wheel binding does: an app tracking the mouse (Claude, Codex) gets wheel events, any other pane scrolls in `copy-mode -e` and returns to live output at the bottom, and `lines: 0` leaves copy mode before the phone types. With `set -g mouse on` the phone keeps sending wheel events itself.
+
 ## [0.3.12] - 2026-09-29
 
 ### Added
