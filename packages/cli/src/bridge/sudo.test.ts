@@ -26,18 +26,21 @@ const check = (processes = chain(), stdout: "sudo" | "other" | "unknown" = "sudo
   stdout: async (pid: number, allowed: number[]) => { expect([pid, allowed]).toEqual([ASKPASS, [SCRIPT, SUDO]]); return stdout; },
   connection: async (pid: number) => { expect(pid).toBe(ASKPASS); return connection; } });
 
-function broker(options: { push?: boolean | "fails"; holdMs?: number; refused?: boolean } = {}) {
+function broker(options: { push?: boolean | "fails"; holdMs?: number; refused?: boolean; sudoRunning?: () => boolean; deliver?: SudoReply } = {}) {
   const pushed: SudoRequestView[] = [];
   const push = options.push === undefined || options.push === false ? undefined : {
     available: true,
     notifySudo: async (value: SudoRequestView) => { pushed.push(value); return options.push !== "fails"; },
   };
-  const value = new SudoBroker({ computer: () => "Mini", holdMs: options.holdMs ?? 60_000, now: () => Date.parse("2026-09-29T18:00:00Z"),
+  const value = new SudoBroker({ computer: () => "Mini", account: "me", outcomeMs: 1_000,
+    processes: async pid => pid === SUDO && (options.sudoRunning?.() ?? false) ? { ppid: 1, euid: 0, name: "sudo", argv: sudoArgv, line: "", started: "Tue Sep 29 11:00:00 2026" } : undefined,
+    holdMs: options.holdMs ?? 60_000, now: () => Date.parse("2026-09-29T18:00:00Z"),
     ...(push ? { push } : {}),
     verify: async pid => {
       if (options.refused) return { refused: "phren askpass only answers sudo -A." };
       const verified = await verifyAsker(pid, check());
-      return "refused" in verified ? verified : { ...verified, deliver: async (password: string) => ({ password }) };
+      return "refused" in verified ? verified
+        : { ...verified, sudo: { ...verified.sudo, started: "Tue Sep 29 11:00:00 2026" }, deliver: async (password: string) => options.deliver ?? { password } };
     },
     describe: async place => place.pane === "w1:p1" ? { source: "claude", label: "phren" } : undefined });
   return { broker: value, pushed };
@@ -65,12 +68,13 @@ describe("sudo command line", () => {
 describe("sudo answers", () => {
   const id = "5b0e6a3e-6f53-4b4c-9d1a-0d7c1c1b2a11";
   it("accepts a one-line password or a deny", () => {
-    expect(sudoAnswer({ id, password: "p a$$ 'w\"" })).toEqual({ id, answer: { password: "p a$$ 'w\"" } });
-    expect(sudoAnswer({ id, deny: true })).toEqual({ id, answer: { deny: true } });
+    expect(sudoAnswer({ id, password: "p a$$ 'w\"" })).toEqual({ id, answer: { password: "p a$$ 'w\"" }, outcome: false });
+    expect(sudoAnswer({ id, password: "pw", outcome: true })).toEqual({ id, answer: { password: "pw" }, outcome: true });
+    expect(sudoAnswer({ id, deny: true })).toEqual({ id, answer: { deny: true }, outcome: false });
   });
   it("refuses what sudo would cut, without echoing it", () => {
     for (const bad of [{ id, password: "" }, { id, password: "two\nlines" }, { id, password: "nul\0" }, { id, password: "x".repeat(1_025) },
-      { id: "nope", password: "secret-value" }, { id, password: 7 }, { id, deny: true, password: "both" }]) {
+      { id: "nope", password: "secret-value" }, { id, password: 7 }, { id, deny: true, password: "both" }, { id, password: "secret-value", outcome: "yes" }]) {
       let message = "";
       try { sudoAnswer(bad as Json); } catch (error) { message = String(error); }
       expect(message).toMatch(/Send an id and a password, or deny/);
@@ -81,7 +85,7 @@ describe("sudo answers", () => {
 
 describe("askpass chain", () => {
   it("accepts this Hook's node and bundle, under its script, under a root sudo, writing to sudo alone", async () => {
-    expect(await verifyAsker(ASKPASS, check())).toEqual({ sudo: expect.objectContaining({ euid: 0, argv: sudoArgv }) });
+    expect(await verifyAsker(ASKPASS, check())).toEqual({ sudo: expect.objectContaining({ euid: 0, argv: sudoArgv }), sudoPid: SUDO });
   });
   const refusals: [string, Parameters<typeof chain>[0], RegExp][] = [
     // Anything of the owner's can name itself sudo; only the real one runs as root.
@@ -144,11 +148,11 @@ describe("sudo broker", () => {
     const out = replies();
     await value.ask({ pid: ASKPASS, cwd: "/Users/me/project", place: { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1" } }, out.respond);
     const [request] = value.list();
-    expect(request).toEqual({ id: expect.any(String), computer: "Mini", command: "killall -HUP mDNSResponder", cwd: "/Users/me/project",
+    expect(request).toEqual({ id: expect.any(String), computer: "Mini", command: "killall -HUP mDNSResponder", account: "me", cwd: "/Users/me/project",
       session: { source: "claude", label: "phren", server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1" },
       askedAt: "2026-09-29T18:00:00.000Z", expiresAt: "2026-09-29T18:01:00.000Z" });
     expect(pushed).toEqual([request]);
-    expect(value.answer(request.id, { password: "hunter2" })).toBe(true);
+    expect(value.answer(request.id, { password: "hunter2" })).toBeTruthy();
     await settle();
     expect(out.list).toEqual([{ password: "hunter2" }]);
     // Single use: gone from the list, a second answer finds nothing.
@@ -203,6 +207,74 @@ describe("sudo broker", () => {
     await value.ask({ pid: ASKPASS }, out.respond);
     expect(out.list[0]).toMatchObject({ status: 429 });
     value.close();
+  });
+});
+
+describe("whether sudo took the password", () => {
+  afterEach(() => { vi.useRealTimers(); });
+  const answered = async (value: SudoBroker) => {
+    await value.ask({ pid: ASKPASS }, () => {});
+    const result = value.answer(value.list()[0].id, { password: "pw" });
+    if (!result) throw new Error("not pending");
+    // Wrapped: an async function returning the promise itself would wait for it.
+    return { outcome: result.outcome };
+  };
+
+  it("is rejected when the same sudo asks again", async () => {
+    const { broker: value } = broker({ push: true });
+    const { outcome } = await answered(value);
+    await settle();
+    await value.ask({ pid: ASKPASS }, () => {});
+    expect(await outcome).toBe("rejected");
+    expect(value.list()).toHaveLength(1);
+    value.close();
+  });
+
+  it("is rejected even when the second ask cannot reach a phone", async () => {
+    const { broker: value } = broker({ push: false });
+    const stop = value.subscribe(() => {});
+    const { outcome } = await answered(value);
+    await settle();
+    stop();
+    const out = replies();
+    await value.ask({ pid: ASKPASS }, out.respond);
+    expect(out.list[0]).toMatchObject({ status: 503 });
+    expect(await outcome).toBe("rejected");
+  });
+
+  it("is accepted when sudo does not ask again on an early try, or is still running", async () => {
+    vi.useFakeTimers();
+    const { broker: value } = broker({ push: true });
+    const { outcome } = await answered(value);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await outcome).toBe("accepted");
+  });
+
+  it("is unknown after the last try when sudo is gone, accepted when it still runs", async () => {
+    vi.useFakeTimers();
+    let running = false;
+    const { broker: value } = broker({ push: true, sudoRunning: () => running });
+    const first = (await answered(value)).outcome; await vi.advanceTimersByTimeAsync(0);
+    await value.ask({ pid: ASKPASS }, () => {}); expect(await first).toBe("rejected");
+    const second = value.answer(value.list()[0].id, { password: "pw" }); if (!second) throw new Error("not pending");
+    await vi.advanceTimersByTimeAsync(0);
+    await value.ask({ pid: ASKPASS }, () => {}); expect(await second.outcome).toBe("rejected");
+    const third = value.answer(value.list()[0].id, { password: "pw" }); if (!third) throw new Error("not pending");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await third.outcome).toBe("unknown");
+    running = true;
+    await value.ask({ pid: ASKPASS }, () => {});
+    const fourth = value.answer(value.list()[0].id, { password: "pw" }); if (!fourth) throw new Error("not pending");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await fourth.outcome).toBe("accepted");
+  });
+
+  it("is unknown when the password could not be handed over, and absent for a deny", async () => {
+    const { broker: value } = broker({ push: true, deliver: { status: 410, error: "askpass went away." } });
+    expect(await (await answered(value)).outcome).toBe("unknown");
+    await value.ask({ pid: ASKPASS }, () => {});
+    const denied = value.answer(value.list()[0].id, { deny: true });
+    expect(denied && await denied.outcome).toBeUndefined();
   });
 });
 

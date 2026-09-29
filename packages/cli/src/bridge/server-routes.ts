@@ -129,7 +129,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, resources: true, sudo: true };
+  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, resources: true, sudo: true, sudoOutcome: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -586,8 +586,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/sudo/answer") {
           let parsed: ReturnType<typeof sudoAnswer>;
           try { parsed = sudoAnswer(data); } catch { throw new BridgeError(400, "Send an id and a password, or deny."); }
-          if (!agentHooks.sudo.answer(parsed.id, parsed.answer)) throw new BridgeError(404, "This sudo request is no longer pending.");
-          result = { ok: true };
+          const answered = agentHooks.sudo.answer(parsed.id, parsed.answer);
+          if (!answered) throw new BridgeError(404, "This sudo request is no longer pending.");
+          // Asked for: whether sudo took the password, so the phone knows to save or forget it.
+          const outcome = parsed.outcome ? await answered.outcome : undefined;
+          result = { ok: true, ...(outcome ? { outcome } : {}) };
         } else if (url.pathname === "/v1/push/answer") {
           await agentHooks.answerPush(z.string().uuid().parse(data.binding), data.decision); result = { ok: true };
         } else if (url.pathname === "/v1/push/target") {

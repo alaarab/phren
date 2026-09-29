@@ -639,7 +639,9 @@ The password goes from the phone to the Hook to askpass's stdout, which only
 sudo reads. It is used once: the request is forgotten as soon as it is
 answered, and the password is never logged, written to disk, put in a push, a
 transcript or a frame, or shown to the agent. A wrong password makes sudo ask
-again, which is a new request. Deny, no answer within two minutes
+again, which is a new request; the Hook tells the phone the last one was refused,
+and after a password sudo accepted the phone can offer to keep it in its
+saved passwords (on the phone only, behind Face ID). Deny, no answer within two minutes
 (`PHREN_SUDO_TIMEOUT_MS`), the asker going away, or no phone that can answer
 (no approval push set up and no Phren app open) makes askpass exit 1, so sudo
 fails with a short reason instead of hanging.

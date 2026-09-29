@@ -6,6 +6,7 @@ import { open, readdir, readFile, readlink, unlink } from "node:fs/promises";
 import { request, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { promisify } from "node:util";
+import { userInfo } from "node:os";
 import { atomic, bridgeRoot, object, type Json } from "./protocol.js";
 import { localSocket } from "./agent-hook-stores.js";
 import { intervalFromEnv } from "./limits.js";
@@ -38,6 +39,12 @@ import { briefId } from "./launch-brief.js";
 export const SUDO_HOLD_MS = intervalFromEnv("PHREN_SUDO_TIMEOUT_MS", 120_000, 1_000, 600_000);
 /** Held askpass requests at once; more are refused. */
 export const MAX_SUDO_PENDING = 8;
+/** How long after a password is handed over the Hook waits to see whether
+ * sudo asks again, before calling it accepted. */
+export const SUDO_OUTCOME_MS = intervalFromEnv("PHREN_SUDO_OUTCOME_MS", 6_000, 100, 30_000);
+/** sudo's default `passwd_tries`: after the last one it gives up instead of asking again. */
+const SUDO_TRIES = 3;
+export type SudoOutcome = "accepted" | "rejected" | "unknown";
 export const ASKPASS_FILE = "askpass";
 export const askpassPath = () => path.join(bridgeRoot(), ASKPASS_FILE);
 export const askpassInstalled = () => existsSync(askpassPath());
@@ -61,7 +68,8 @@ export async function removeAskpass(): Promise<void> { await unlink(askpassPath(
 export interface SudoSession { source?: string; label?: string; server?: string; workspace?: string; tab?: string; pane?: string }
 /** What the phone sees. Never carries a password. */
 export interface SudoRequestView {
-  id: string; computer: string; command: string; user?: string; cwd?: string; session?: SudoSession;
+  /** `account` is whose password sudo asks for (the invoking user); `user` is who the command runs as. */
+  id: string; computer: string; command: string; account?: string; user?: string; cwd?: string; session?: SudoSession;
   askedAt: string; expiresAt: string;
 }
 /** What askpass gets: the password to print, word that the Hook wrote it into
@@ -115,6 +123,8 @@ export interface ProcessRecord {
   line: string;
   /** Environment names, where the platform shows them (Linux). */
   env?: string[];
+  /** When it started (`ps -o lstart`), to tell it from a later process with its pid. */
+  started?: string;
 }
 const exec = promisify(execFile);
 /** One process's parent, effective uid, name and arguments. */
@@ -126,12 +136,13 @@ export async function readProcess(pid: number): Promise<ProcessRecord | undefine
     if (!match) return undefined;
     const args = await exec("ps", ["-ww", "-o", "args=", "-p", String(pid)], { timeout: 3_000, maxBuffer: 65_536 });
     const line = args.stdout.trim();
+    const started = (await exec("ps", ["-o", "lstart=", "-p", String(pid)], { timeout: 3_000, maxBuffer: 4_096 }).catch(() => ({ stdout: "" }))).stdout.trim();
     let argv = line.split(/\s+/).filter(Boolean), env: string[] | undefined;
     if (process.platform === "linux") {
       argv = await readFile(`/proc/${pid}/cmdline`, "utf8").then(text => text.split("\0").filter(Boolean)).catch(() => argv);
       env = await readFile(`/proc/${pid}/environ`, "utf8").then(text => text.split("\0").filter(Boolean).map(item => item.split("=", 1)[0])).catch(() => undefined);
     }
-    return { ppid: Number(match[1]), euid: Number(match[2]), name: path.basename(match[3]), argv, line, ...(env ? { env } : {}) };
+    return { ppid: Number(match[1]), euid: Number(match[2]), name: path.basename(match[3]), argv, line, ...(env ? { env } : {}), ...(started ? { started } : {}) };
   } catch { return undefined; }
 }
 
@@ -209,7 +220,7 @@ export interface AskerCheck { processes: (pid: number) => Promise<ProcessRecord 
 /** What would run other code in the shell script (which drops the rest) or in node. */
 const PRELOADS = ["LD_PRELOAD", "DYLD_INSERT_LIBRARIES"], NODE_LOADERS = [...PRELOADS, "NODE_OPTIONS"];
 /** The chain from askpass up to sudo, or why it is refused. */
-export async function verifyAsker(pid: number, check: AskerCheck): Promise<{ sudo: ProcessRecord } | { refused: string }> {
+export async function verifyAsker(pid: number, check: AskerCheck): Promise<{ sudo: ProcessRecord; sudoPid: number } | { refused: string }> {
   const asker = await check.processes(pid);
   if (!asker) return { refused: "phren askpass only answers sudo -A." };
   const script = await check.processes(asker.ppid);
@@ -226,10 +237,14 @@ export async function verifyAsker(pid: number, check: AskerCheck): Promise<{ sud
   if (readers !== "sudo") return { refused: readers === "other" ? "askpass's output must go to sudo alone." : "Phren Hook could not check where askpass's output goes." };
   const connection = await check.connection(pid);
   if (connection !== "asker") return { refused: connection === "other" ? "Only askpass itself may ask for its password." : "Phren Hook could not check who asked." };
-  return { sudo };
+  return { sudo, sudoPid: script.ppid };
 }
 
-interface Pending { view: SudoRequestView; respond: (reply: SudoReply | Promise<SudoReply>) => void; deliver: Verified["deliver"]; timer: NodeJS.Timeout }
+interface Pending { view: SudoRequestView; respond: (reply: SudoReply | Promise<SudoReply>) => void; deliver: Verified["deliver"]; timer: NodeJS.Timeout;
+  /** The sudo process (pid and start time) and which of its password tries this is. */
+  sudo: { key: string; pid: number; started?: string; attempt: number } }
+/** One sudo process's password tries, so a second ask from it shows the last password was wrong. */
+interface SudoTries { attempts: number; waiting?: (outcome: SudoOutcome) => void }
 
 export interface SudoBrokerOptions {
   computer: () => string;
@@ -237,9 +252,14 @@ export interface SudoBrokerOptions {
   /** Label and agent for the pane that asked, when the Hook can place it. */
   describe?: (place: { server: string; workspace: string; tab: string; pane: string }) => Promise<Pick<SudoSession, "source" | "label"> | undefined>;
   label?: (dispatchId: string) => Promise<string | undefined>;
+  /** Reads a process, to see whether sudo is still running; tests replace it. */
+  processes?: (pid: number) => Promise<ProcessRecord | undefined>;
   /** The askpass chain check and how the password then reaches it; tests replace it. */
   verify?: (pid: number, hookFd: number | undefined) => Promise<Verified | { refused: string }>;
   holdMs?: number;
+  outcomeMs?: number;
+  /** Whose password sudo asks for; this Hook's user. */
+  account?: string;
   now?: () => number;
 }
 
@@ -251,7 +271,7 @@ function placeFrom(value: unknown) {
   return Object.fromEntries(fields.map(key => [key, item[key] as string])) as { server: string; workspace: string; tab: string; pane: string };
 }
 
-export interface Verified { sudo: ProcessRecord; deliver: (password: string) => Promise<SudoReply> }
+export interface Verified { sudo: ProcessRecord; sudoPid: number; deliver: (password: string) => Promise<SudoReply> }
 /** The chain check against this Hook's own node, bundle and script. */
 async function defaultVerify(pid: number, hookFd: number | undefined): Promise<Verified | { refused: string }> {
   const linux = process.platform === "linux";
@@ -264,13 +284,14 @@ async function defaultVerify(pid: number, hookFd: number | undefined): Promise<V
     // The real-Hook tests stand a copy of bash named sudo in for sudo, which cannot run as root.
     unprivilegedSudo: process.env.NODE_ENV === "test" && process.env.PHREN_SUDO_TEST_PARENT === "1" });
   if ("refused" in result) return result;
-  return { sudo: result.sudo, deliver: linux ? password => writeToAsker(pid, start!, password) : async password => ({ password }) };
+  return { sudo: result.sudo, sudoPid: result.sudoPid, deliver: linux ? password => writeToAsker(pid, start!, password) : async password => ({ password }) };
 }
 
 export class SudoBroker {
   private pending = new Map<string, Pending>();
   private events = new EventEmitter();
   private watchers = 0;
+  private tries = new Map<string, SudoTries>();
   constructor(private options: SudoBrokerOptions) { this.events.setMaxListeners(64); }
   private get now() { return this.options.now ?? Date.now; }
 
@@ -290,14 +311,22 @@ export class SudoBroker {
    * an answer, a timeout, or `cancel` (the caller went away). */
   async ask(body: Json, respond: (reply: SudoReply) => void, hookFd?: number): Promise<{ cancel: () => void }> {
     const none = { cancel: () => {} };
-    if (this.pending.size >= MAX_SUDO_PENDING) { respond({ status: 429, error: "Too many sudo requests are waiting for the phone." }); return none; }
-    if (this.watchers === 0 && this.options.push?.available !== true) {
-      respond({ status: 503, error: "No phone can answer sudo right now. Open Phren on your phone, or set up approval push (phren bridge doctor)." });
-      return none;
-    }
     const verified = await (this.options.verify ?? defaultVerify)(Number(body.pid), hookFd);
     if ("refused" in verified) { respond({ status: 400, error: verified.refused }); return none; }
     const sudo = verified.sudo, pushable = this.options.push?.available === true;
+    // A second ask from the same sudo means it refused the last password,
+    // whether or not this ask can reach the phone.
+    const key = `${verified.sudoPid}\n${sudo.started ?? ""}`;
+    const tries = this.tries.get(key) ?? { attempts: 0 };
+    tries.waiting?.("rejected"); tries.waiting = undefined;
+    tries.attempts++;
+    this.tries.delete(key); this.tries.set(key, tries);
+    while (this.tries.size > 64) this.tries.delete(this.tries.keys().next().value!);
+    if (this.pending.size >= MAX_SUDO_PENDING) { respond({ status: 429, error: "Too many sudo requests are waiting for the phone." }); return none; }
+    if (this.watchers === 0 && !pushable) {
+      respond({ status: 503, error: "No phone can answer sudo right now. Open Phren on your phone, or set up approval push (phren bridge doctor)." });
+      return none;
+    }
     const place = placeFrom(body.place);
     const dispatch = briefId.safeParse(body.dispatchId).success ? String(body.dispatchId) : undefined;
     const described = place && this.options.describe ? await this.options.describe(place).catch(() => undefined) : undefined;
@@ -307,7 +336,8 @@ export class SudoBroker {
       ? { ...(described?.source ? { source: described.source } : {}), ...(label ? { label: label.slice(0, 120) } : {}), ...place } : undefined;
     const cwd = typeof body.cwd === "string" && path.isAbsolute(body.cwd) && body.cwd.length <= 1_024 ? body.cwd : undefined;
     const at = this.now(), hold = this.options.holdMs ?? SUDO_HOLD_MS;
-    const view: SudoRequestView = { id: randomUUID(), computer: this.options.computer(), ...sudoCommand(sudo.argv),
+    const account = this.options.account ?? userName();
+    const view: SudoRequestView = { id: randomUUID(), computer: this.options.computer(), ...sudoCommand(sudo.argv), ...(account ? { account } : {}),
       ...(cwd ? { cwd } : {}), ...(session ? { session } : {}),
       askedAt: new Date(at).toISOString(), expiresAt: new Date(at + hold).toISOString() };
     const finish = (reply: SudoReply | Promise<SudoReply>) => {
@@ -317,7 +347,8 @@ export class SudoBroker {
       void Promise.resolve(reply).catch(() => ({ status: 410, error: "askpass went away." })).then(respond);
     };
     const timer = setTimeout(() => finish({ status: 408, error: "No answer from the phone in time." }), hold);
-    this.pending.set(view.id, { view, respond: finish, deliver: verified.deliver, timer });
+    this.pending.set(view.id, { view, respond: finish, deliver: verified.deliver, timer,
+      sudo: { key, pid: verified.sudoPid, ...(sudo.started ? { started: sudo.started } : {}), attempt: tries.attempts } });
     this.changed();
     if (pushable) {
       void this.options.push!.notifySudo(view).catch(() => false).then(delivered => {
@@ -327,12 +358,34 @@ export class SudoBroker {
     return { cancel: () => { const entry = this.pending.get(view.id); if (!entry) return; clearTimeout(entry.timer); this.pending.delete(view.id); this.changed(); } };
   }
 
-  /** The phone's answer. Single use: the request is gone once answered. */
-  answer(id: string, answer: { password: string } | { deny: true }): boolean {
+  /** The phone's answer. Single use: the request is gone once answered.
+   * `outcome` resolves to whether sudo took the password: rejected when the
+   * same sudo asks again, accepted when it has not within `outcomeMs` (or
+   * is still running then), unknown when it gave up or the Hook cannot tell. */
+  answer(id: string, answer: { password: string } | { deny: true }): false | { outcome: Promise<SudoOutcome | undefined> } {
     const entry = this.pending.get(id);
     if (!entry) return false;
-    entry.respond("password" in answer ? entry.deliver(answer.password) : { status: 403, error: "Denied on the phone." });
-    return true;
+    if (!("password" in answer)) { entry.respond({ status: 403, error: "Denied on the phone." }); return { outcome: Promise.resolve(undefined) }; }
+    const delivered = entry.deliver(answer.password);
+    entry.respond(delivered);
+    return { outcome: delivered.then(reply => "status" in reply ? "unknown" as const : this.watchOutcome(entry.sudo), () => "unknown" as const) };
+  }
+
+  private watchOutcome(sudo: Pending["sudo"]): Promise<SudoOutcome> {
+    const tries = this.tries.get(sudo.key);
+    if (!tries) return Promise.resolve("unknown");
+    return new Promise(resolve => {
+      const timer = setTimeout(() => {
+        if (tries.waiting !== settle) return;
+        tries.waiting = undefined;
+        void (this.options.processes ?? readProcess)(sudo.pid).then(now => {
+          const running = now !== undefined && (sudo.started ? now.started === sudo.started : now.name === "sudo");
+          resolve(running || sudo.attempt < SUDO_TRIES ? "accepted" : "unknown");
+        }, () => resolve("unknown"));
+      }, this.options.outcomeMs ?? SUDO_OUTCOME_MS);
+      const settle = (outcome: SudoOutcome) => { clearTimeout(timer); resolve(outcome); };
+      tries.waiting = settle;
+    });
   }
 
   close() {
@@ -356,18 +409,21 @@ export class SudoBroker {
   }
 }
 
+function userName(): string | undefined { try { return userInfo().username || undefined; } catch { return undefined; } }
+
 /** A password as sudo reads it from askpass: one line, nothing it would cut. */
-export function sudoAnswer(data: Json): { id: string; answer: { password: string } | { deny: true } } {
+export function sudoAnswer(data: Json): { id: string; answer: { password: string } | { deny: true }; outcome: boolean } {
   const id = typeof data.id === "string" && /^[0-9a-f-]{36}$/i.test(data.id) ? data.id : undefined;
   if (!id) throw new SudoAnswerError();
   if (data.deny !== undefined) {
-    if (data.deny === true && data.password === undefined) return { id, answer: { deny: true } };
+    if (data.deny === true && data.password === undefined && data.outcome === undefined) return { id, answer: { deny: true }, outcome: false };
     throw new SudoAnswerError();
   }
   const password = data.password;
   // Checked by hand: a schema error could echo the value it refused.
   if (typeof password !== "string" || password.length < 1 || password.length > 1_024 || /[\x00\n\r]/.test(password)) throw new SudoAnswerError();
-  return { id, answer: { password } };
+  if (data.outcome !== undefined && typeof data.outcome !== "boolean") throw new SudoAnswerError();
+  return { id, answer: { password }, outcome: data.outcome === true };
 }
 export class SudoAnswerError extends Error { constructor() { super("Send an id and a password, or deny."); } }
 
