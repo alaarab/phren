@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A Codex started in tmux takes the phone's first chat message without a visit to its terminal. Codex runs its SessionStart hook only with its first turn, so a fresh tmux pane had sent no lifecycle event and stayed `unknown`, which held the phone's message and made the Hook refuse it ("This agent needs input in the terminal first"). Until its first event the Hook now reads the pane's screen, at most once per `PHREN_DIALOG_THROTTLE_MS`: a startup menu (folder trust, hooks to review, sign-in) is `blocked`, Codex's composer `idle`, its interrupt hint `working`.
+- Session titles drop the spinner and status glyphs a harness spins around its terminal title (Codex's Braille frames, Claude's star, bullets, circles, checks) and a separator left dangling by them, on Herdr and tmux alike.
+- The tmux provider passes `-u` on every call. Without a UTF-8 locale, as under a service manager, tmux 3.7 prints a list format's tabs as `_` and the Hook saw no tmux panes at all.
+
 ## [0.3.12] - 2026-09-29
 
 ### Added

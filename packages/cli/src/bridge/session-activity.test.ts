@@ -96,6 +96,9 @@ describe("session titles", () => {
     expect(plainTitle("\u2733 Claude Code")).toBe("Claude Code");
     expect(plainTitle("\u25cf \u23f3 Build app \u2714")).toBe("Build app");
     expect(plainTitle("\u2807")).toBeUndefined();
+    expect(plainTitle("\u2838 \u2838 | phren")).toBe("phren");
+    expect(plainTitle("Fix it | \u2838")).toBe("Fix it");
+    expect(plainTitle("a | b")).toBe("a | b");
     expect(plainTitle("Fix a \u2022 bullet - and * star")).toBe("Fix a \u2022 bullet - and * star");
     expect(sessionTitle({ dispatched: false, harnessTitle: "\u280b Respond to meeting" })).toBe("Respond to meeting");
   });
