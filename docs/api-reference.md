@@ -260,6 +260,20 @@ Claude's `permission-mode` rows (written when a prompt is submitted), `permissio
 `message.usage.speed`; Codex's `turn_context` `approval_policy`,
 `approvals_reviewer`, `sandbox_policy.type` and `collaboration_mode.mode`.
 
+`POST /v1/prompt { target, text, deliveryId? }` answers with how far the
+message got: `{ ok, delivered: true }` once the conversation's own
+UserPromptSubmit hook took it; `{ ok, queued: true }` when the agent holds it
+unsubmitted (a busy turn queues typed input) and the pane still shows the same
+conversation in the same terminal; `{ ok, deliveryUncertain: true }` when that
+could not be checked (`unsubmitted: true` when an idle agent never took it).
+409 means another conversation in the pane took it and refused it, so nothing
+was delivered. A retry under the same `deliveryId` types nothing and returns
+the first reply with `replayed: true`. `POST /v1/prompt/status { target,
+deliveryId }` (capability `promptStatus`) returns `{ ok, state }`, where
+`state` is `queued`, `delivered`, `blocked` (another conversation in the pane
+took it) or `unknown` (not tracked, another conversation, or older than ten
+minutes), for a message the Hook answered as queued or delivered.
+
 A working pane returns 409 before any model command is typed. `/v1/prompt`
 also refuses every slash command while working, except Claude Code's
 `/btw <question>` side question, which is made to run beside a turn.

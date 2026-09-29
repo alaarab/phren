@@ -262,6 +262,21 @@ describe.skipIf(process.platform === "win32")("the Hook recording a worker's tur
     expect(await delivery).toBe("delivered");
   });
 
+  it("settles the same words sent to two conversations by conversation, not by which was typed first", async () => {
+    await post({ target, event: "SessionStart" });
+    const first = { ...target, session: "00000009-1111-4111-8111-111111111111" };
+    const toFirst = hooks.expectDelivery(first, "Same words"), toThis = hooks.expectDelivery(target, "Same words");
+    hooks.trackDelivery("same-words-1", first, "Same words", "queued");
+    hooks.trackDelivery("same-words-2", target, "Same words", "queued");
+    expect(await post({ target, event: "UserPromptSubmit", prompt: "Same words" })).toBe("{}");
+    expect(await toThis).toBe("delivered");
+    expect(hooks.deliveryState("same-words-2", target)).toBe("delivered");
+    expect(hooks.deliveryState("same-words-1", first)).toBe("queued");
+    expect(hooks.deliveryState("same-words-2", first)).toBe("unknown");
+    expect(hooks.deliveryPending(first, "Same words")).toBe(true);
+    void toFirst;
+  });
+
   it("records no turn for a prompt it refused because it was meant for another conversation", async () => {
     await post({ target, event: "SessionStart" });
     const meant = { ...target, session: "00000009-1111-4111-8111-111111111111" };
