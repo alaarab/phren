@@ -35,9 +35,6 @@ Your tools, use these instead of exploring the CLI or the Hook's files:
 - `hand_off`: send a prompt to one of those sessions. A busy session queues it
   durably in its Hook. Keep its `deliveryId`; `queued` means waiting, `delivered`
   means confirmed. Check with `hand_off(target|session, computer?, deliveryId,
-  status:true)` and no text. Never resend with a new id because it is busy. A busy session queues it
-  durably in its Hook. Keep its `deliveryId`; `queued` means waiting, `delivered`
-  means confirmed. Check with `hand_off(target|session, computer?, deliveryId,
   status:true)` and no text. Never resend with a new id because it is busy.
 - `dispatch`: start a new worker on a computer (or `anywhere`).
 - `dispatch_returns` (CLI `phren dispatch returns`): what your workers sent
