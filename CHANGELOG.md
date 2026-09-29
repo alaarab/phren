@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.14] - 2026-09-29
+
 ### Fixed
 
 - A Hook restart no longer kills the Codex workers it runs. Each pane's `codex app-server` was detached, but systemd stops `phren-hook.service` by killing its whole cgroup, so every Hook restart or stop ended every Hook-run Codex worker mid-turn along with the commands its turn ran: the rollout stopped, the pane was left without its server, `hand_off` came back "delivery not confirmed", and no dispatch return ever came. On Linux the Hook now starts each server in its own systemd scope (`phren-codex-<id>.scope`), so it keeps running across a Hook restart and the restarted Hook rejoins its thread. A server that ends mid-turn anyway (it crashed, or was started by an older Hook) makes its dispatch return `failed` with the reason instead of staying `working`.
