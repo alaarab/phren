@@ -11,9 +11,15 @@ const sessions: Record<string, string> = {
 };
 vi.mock("./herdr.js", async importOriginal => ({ ...await importOriginal<object>(), paneChatState: async (_server: string, pane: Json) => ({ sessionId: sessions[String(pane.pane_id)] }) }));
 vi.mock("./steps.js", () => ({ currentModel: async () => undefined, currentStep: async () => ({ text: "stale step" }) }));
-// Two Codex subagents run under the Codex pane, nothing under the others.
+// Two Codex subagents run under the Codex pane, one Claude sub-agent under
+// w1P:p1 (plus one finished), nothing under the others.
 vi.mock("./transcripts.js", async importOriginal => ({ ...await importOriginal<object>(),
-  childAgentTree: async (source: string) => source === "codex" ? [{ state: "running", provider: "codex", children: [] }, { state: "running", provider: "codex", children: [] }] : [] }));
+  childAgentTree: async (source: string, session: string) => source === "codex" ? [{ state: "running", provider: "codex", children: [] }, { state: "running", provider: "codex", children: [] }]
+    : session === sessions["w1P:p1"] ? [{ state: "running", provider: "claude", children: [] }, { state: "completed", provider: "claude", children: [] }] : [] }));
+// What each Claude transcript's tail says its ended turn still awaits.
+const awaited: Record<string, number | undefined> = {};
+vi.mock("./schedule-watch.js", async importOriginal => ({ ...await importOriginal<object>(),
+  readFinalTurn: async (_source: string, session: string) => ({ completed: true, ...(awaited[session] ? { awaited: awaited[session] } : {}) }) }));
 
 const { workspacesReader } = await import("./server-routes.js");
 const { noteTurn } = await import("./turn-records.js");
@@ -49,10 +55,12 @@ describe("session rows on a computer with background work and dispatched workers
     await turn("w1P:p2", String(byId("w1P:p2").terminal_id), [["UserPromptSubmit", { dispatch: dispatchId }], ["Stop", { background: 0 }]]);
     await turn("w13:p2", String(byId("w13:p2").terminal_id), [["UserPromptSubmit"], ["Stop", { background: 3 }], ["UserPromptSubmit"]]);
     await writeLaunchBrief({ id: dispatchId, text: "Do it" }, Date.now(), "parser checks");
+    awaited[sessions["w1P:p1"]] = 3;
 
     const answer = await read(snapshot);
     const idleWithBackground = tabOf(answer, "w1P:p1", snapshot);
-    expect(idleWithBackground).toMatchObject({ agentStatus: "working", backgroundTasks: 7 });
+    // Of the Stop's 7, three shells are awaited; the running sub-agent adds one.
+    expect(idleWithBackground).toMatchObject({ agentStatus: "working", backgroundTasks: 4, runningChildren: 1 });
     expect(idleWithBackground).not.toHaveProperty("currentStep");
     // A finished dispatched worker with nothing pending stays done, under its label.
     const worker = tabOf(answer, "w1P:p2", snapshot);
@@ -64,6 +72,22 @@ describe("session rows on a computer with background work and dispatched workers
     const codex = tabOf(answer, "w1S:p1", snapshot);
     expect(codex).toMatchObject({ agentStatus: "working", backgroundTasks: 2, title: "worker" });
     expect(codex).not.toHaveProperty("currentStep");
+  });
+
+  it("does not keep a session working for shells left over from earlier exchanges", async () => {
+    // m4l-builder on the Mini, 2026-09-29: 6 shells running, the turn done, nobody waiting.
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w13:p2")!;
+    pane.agent_status = "idle";
+    objects(snapshot.tabs).find(tab => tab.tab_id === pane.tab_id)!.agent_status = "idle";
+    await turn("w13:p2", String(pane.terminal_id), [["UserPromptSubmit"], ["Stop", { background: 6 }]]);
+    awaited[sessions["w13:p2"]] = undefined;
+    const tab = tabOf(await read(snapshot), "w13:p2", snapshot);
+    expect(tab.agentStatus).not.toBe("working");
+    expect(tab).not.toHaveProperty("backgroundTasks");
+    // One build started since the owner's last prompt is still counted.
+    awaited[sessions["w13:p2"]] = 1;
+    expect(tabOf(await read(snapshot), "w13:p2", snapshot)).toMatchObject({ agentStatus: "working", backgroundTasks: 1 });
   });
 
   it("shows a renamed session under its pane label, ahead of a dispatch label and the harness title", async () => {

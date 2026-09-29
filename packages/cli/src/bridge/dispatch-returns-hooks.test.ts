@@ -13,7 +13,7 @@ import { dispatchStatus, type Receipt } from "./dispatch.js";
 import { BACKGROUND_WAIT_MS, DispatchReturns, INTERRUPTED, noticeDeliveryId, noticeLine, observe, POLL_MS, workerStates, type WorkerReaders } from "./dispatch-returns.js";
 import { rpc, snapshot } from "./herdr.js";
 import { atomicInPrivateDir, type Json, type Target } from "./protocol.js";
-import { finalTurnFromLines, type FinalTurn } from "./schedule-watch.js";
+import { ENDLESS_COMMAND, finalTurnFromLines, type FinalTurn } from "./schedule-watch.js";
 import { nextTurn, noteTurn, readTurn, turnPhase, type TurnRecord } from "./turn-records.js";
 
 vi.mock("./herdr.js", async importOriginal => ({
@@ -107,7 +107,42 @@ describe("the transcript's own record of a turn", () => {
       // Its later removal is the same finish, not a second one.
       queued("remove", "bshell001", "2026-09-29T09:05:00.000Z"),
       line({ type: "queue-operation", operation: "enqueue", timestamp: "2026-09-29T09:02:00.000Z", content: notice("bmonitor01") })];
-    expect(finalTurnFromLines(lines, "claude")).toEqual({ completed: true, lastAssistant: "Building.", background: 1, finishedTasks: ["2026-09-29T09:01:00.000Z"] });
+    expect(finalTurnFromLines(lines, "claude")).toEqual({ completed: true, lastAssistant: "Building.", background: 1, finishedTasks: ["2026-09-29T09:01:00.000Z"], awaited: 1 });
+  });
+
+  it("awaits only shells and monitors started since the owner's last prompt, and no endless stream", () => {
+    // talk-while-working on the Mini, 2026-09-29: 8 shells running, none of them waited on.
+    const launch = (id: string, command: string) => [
+      line({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: `toolu_${id}`, name: "Bash", input: { command, run_in_background: true } }] } }),
+      line({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: `toolu_${id}`, content: "ok" }] }, toolUseResult: { backgroundTaskId: id } })];
+    const owner = (content: string) => line({ type: "user", message: { role: "user", content } });
+    const earlier = [owner("Build and watch the simulator"), ...launch("bbuild0", "pnpm build"), ...launch("btail00", "xcrun simctl spawn booted log stream --level debug"),
+      ...launch("bfollow", "tail -F /tmp/app.log"), ...launch("bwatch0", "pnpm vitest --watch"), ...launch("bserve0", "pnpm run dev"),
+      result({ taskId: "bmonitor01", timeoutMs: 600000, persistent: false }), result({ isAsync: true, status: "async_launched", agentId: "aagent0001" }), assistant("Building.")];
+    // The build, the monitor and the agent run; the agent is the child tree's to count.
+    expect(finalTurnFromLines(earlier, "claude")).toMatchObject({ completed: true, background: 7, awaited: 2 });
+    // A notification waking the session is not the owner moving on.
+    const woken = [...earlier, user(notice("bmonitor01", "completed")), assistant("The monitor fired.")];
+    expect(finalTurnFromLines(woken, "claude")).toMatchObject({ completed: true, background: 6, awaited: 1 });
+    // Once the owner moves on, what earlier turns left running is a leftover.
+    const later = [...woken, owner("Thanks, what next?"), assistant("Next is the icon.")];
+    const final = finalTurnFromLines(later, "claude");
+    expect(final).toMatchObject({ completed: true, background: 6 });
+    expect(final.awaited).toBeUndefined();
+    // A new build started after that prompt is awaited again, until it ends.
+    const again = [...later, ...launch("bbuild1", "xcodebuild test"), assistant("Testing.")];
+    expect(finalTurnFromLines(again, "claude")).toMatchObject({ background: 7, awaited: 1 });
+    expect(finalTurnFromLines([...again, user(notice("bbuild1", "failed")), assistant("Tests failed.")], "claude").awaited).toBeUndefined();
+  });
+
+  it("recognizes commands that run until killed", () => {
+    for (const command of ["tail -f log", "tail -F /tmp/x", "tail --follow=name x", "journalctl --user -fu phren-hook", "log stream --predicate x",
+      "adb logcat", "watch -n1 ls", "tsc --watch", "inotifywait -m .", "fswatch src", "npm run dev", "pnpm dev", "bun preview", "python3 -m http.server 8000", "sleep infinity"]) {
+      expect(ENDLESS_COMMAND.test(command), command).toBe(true);
+    }
+    for (const command of ["pnpm build", "tail -n 50 log", "xcodebuild test", "npm test", "sleep 60 && curl x", "journalctl -n 20", "git log --stat", "npm run devtools-build"]) {
+      expect(ENDLESS_COMMAND.test(command), command).toBe(false);
+    }
   });
 
   it("marks a turn the owner interrupted, in Claude and in Codex", () => {
