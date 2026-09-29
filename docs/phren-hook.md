@@ -466,6 +466,12 @@ What works:
   dialog is gone. Only a harness's own dialog counts: Claude's and phren-agent's
   numbered rows with their "Esc to cancel" footer, Codex's and Copilot's
   choice rows, OpenCode's "Permission required" prompt.
+- A fresh Codex: Codex runs its SessionStart hook only with its first turn, so
+  a Codex that has just opened has sent no lifecycle event. Until it does, the
+  Hook reads its screen on the same throttle: a startup menu (folder trust,
+  hooks to review, sign-in) is blocked, its composer idle, its interrupt hint
+  working. The phone's first message then goes through without a visit to the
+  terminal.
 - Chat, sends (pasted as one bracketed paste, then Enter), keys, approvals, the
   terminal (`phren-hook v1 terminal tmux` attaches the phone's SSH terminal to
   the server), and launching Claude Code, Codex, Copilot or OpenCode into

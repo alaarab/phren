@@ -18,7 +18,8 @@ import { hostname, userInfo } from "node:os";
 import path from "node:path";
 import { BridgeError, objects, serverName, type Json } from "./protocol.js";
 import { harnessStatus } from "./harness-status.js";
-import { dialogStatus, notePaneStatus, paneStatus } from "./pane-status.js";
+import { dialogStatus, notePaneStatus, paneStatus, startupStatus } from "./pane-status.js";
+import { plainTitle } from "./session-activity.js";
 import type { TerminalPane, TerminalProvider } from "./terminal.js";
 import { herdrPanes } from "./terminal-herdr.js";
 
@@ -126,7 +127,9 @@ const defaultDeps: TmuxDeps = {
   run: (socket, args, options = {}) => new Promise((resolve, reject) => {
     const binary = tmuxBinary();
     if (!binary) { reject(new BridgeError(503, "tmux is not installed on this computer.")); return; }
-    const child = execFile(binary, [...socketFlags(socket), ...args], { timeout: options.timeoutMs ?? 5_000, maxBuffer: 4_194_304, env: tmuxEnvironment(), signal: options.signal },
+    // -u: without a UTF-8 locale (launchd and systemd services often have
+    // none) tmux 3.7 prints a format's tabs as "_" and no pane parses.
+    const child = execFile(binary, ["-u", ...socketFlags(socket), ...args], { timeout: options.timeoutMs ?? 5_000, maxBuffer: 4_194_304, env: tmuxEnvironment(), signal: options.signal },
       (error, stdout, stderr) => { if (error) reject(tmuxError(String(stderr), error)); else resolve(String(stdout)); });
     if (options.input !== undefined) child.stdin?.end(options.input); else child.stdin?.end();
   }),
@@ -239,7 +242,9 @@ async function agentStatus(server: string, pane: string, terminal: string, agent
     const recorded = await harnessStatus(agent, pids).catch(() => undefined);
     status = recorded ? notePaneStatus(server, pane, terminal, recorded) : undefined;
   } else status = await paneStatus(server, pane, terminal);
-  return dialogStatus(server, pane, terminal, agent, status, () => tmuxTerminal.readScreen(server, pane, { scope: "pane", source: "visible", lines: 40, format: "ansi", timeoutMs: 2_000 }));
+  const read = () => tmuxTerminal.readScreen(server, pane, { scope: "pane", source: "visible", lines: 40, format: "ansi", timeoutMs: 2_000 });
+  // Codex runs SessionStart only with its first turn; until then its screen says.
+  return await dialogStatus(server, pane, terminal, agent, status, read) ?? startupStatus(server, pane, terminal, agent, read);
 }
 
 const STATUS_RANK = ["blocked", "waiting", "working", "done", "idle"];
@@ -267,7 +272,8 @@ export async function tmuxSnapshot(server: string): Promise<Json> {
     // others count as idle until their own records say otherwise.
     const hooked = agent === "claude" || agent === "codex";
     const name = row["@phren_agent"] || undefined;
-    const title = row.pane_title && row.pane_title !== host && row.pane_title !== short ? row.pane_title : undefined;
+    // A harness spins a glyph in front of its title while it works.
+    const title = row.pane_title && row.pane_title !== host && row.pane_title !== short ? plainTitle(row.pane_title) : undefined;
     panes.push({ pane_id: pane, tab_id: tab, workspace_id: workspace, terminal_id: terminal, cwd: row.pane_current_path || undefined,
       foreground_cwd: row.pane_current_path || undefined, title, ...(row["@phren_label"] ? { label: row["@phren_label"] } : {}),
       ...(agent ? { agent, agent_status: status?.status ?? (hooked ? "unknown" : "idle"), ...(status?.seq ? { state_change_seq: status.seq } : {}) } : {}),
