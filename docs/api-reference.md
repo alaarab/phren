@@ -1331,13 +1331,17 @@ selector that would resolve to Herdr returns 409 `mux-kind-mismatch`.
 Each tab in the `/v1/workspaces` and `WS /v1/overview` replies carries
 `agentStatus` and `title`. A session whose main turn ended while background
 work still runs is `agentStatus: "working"` with `backgroundTasks: <n>`,
-where Herdr or tmux say idle or done. `n` is the larger of the Stop hook's
-count of Claude background tasks (shells, subagents, monitors) and the running
-Codex or Claude subagents and fanout jobs (`runningChildren`), never their
-sum. The Stop's count is lowered by each task the transcript shows finishing
-after that Stop (a task-notification with a final status, including one still
-queued in an idle session), and is ignored two hours after the Stop, so an old
-count never keeps a finished session working. `backgroundTasks` is absent on a tab that is working, blocked or waiting
+where Herdr or tmux say idle or done. `n` counts the work the session is
+waiting on: its running Codex or Claude sub-agents, teammates, workflow agents
+and fanout jobs (`runningChildren`), plus, for Claude, the background shells
+and monitors started since the owner's last prompt that still run. A shell
+that follows a log, watches files or serves a dev build (`tail -f`,
+`log stream`, `--watch`, `npm run dev`) never counts, and neither does a
+shell left running from an earlier exchange. The shells counted are at most
+the Stop hook's count of Claude background tasks less each task the
+transcript shows finishing after that Stop (a task-notification with a final
+status, including one still queued in an idle session), and none count two
+hours after the Stop, so an old count never keeps a finished session working. `backgroundTasks` is absent on a tab that is working, blocked or waiting
 on its own turn, and such a tab has no `currentStep`. The Hook's `live_sessions`
 list carries the same field. `title` is the dispatch label for a dispatched
 worker (kept in `<bridge>/briefs/<id>/label`); a dispatch sent before labels

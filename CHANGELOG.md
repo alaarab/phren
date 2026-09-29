@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A session row's "N in background" counts only work someone is waiting on: running sub-agents, teammates, workflow agents and fanout jobs, and background shells and monitors started since the owner's last prompt. Shells left running from earlier exchanges, and log tails, watchers and dev servers, no longer keep a finished session working (on the Mini, tabs showed 6 and 8 in background with every turn done).
+- `/v1/subagents` and `runningChildren` find more of Claude Code's child agents, so the phone's running-agents icon shows for them again: an agent resumed with SendMessage runs again until its next final notification, background skills (`/code-review` run as `@code-review`) are listed until their transcript ends on a finished reply or goes quiet for 30 minutes, Workflow runs list their agents from the run's journal, and a named teammate is found by the name in its `.meta.json` (Claude Code 2.1.2xx no longer puts the name in the file name).
+
 ## [0.3.12] - 2026-09-29
 
 ### Added
