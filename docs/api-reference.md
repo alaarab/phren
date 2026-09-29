@@ -38,7 +38,7 @@ See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `computer` | string | yes | Enrolled name, or `anywhere` for the connected peer with the fewest working agents. A tie goes to the computer with more room on the account the dispatch would run under (see below). |
+| `computer` | string | yes | Enrolled name, or `anywhere` for the connected peer with the fewest working agents, skipping one whose account for this harness has no quota left (see below). |
 | `project` | string | yes | Project slug whose `phren.project.yaml` sourcePath exists on the receiver. No local checkout paths. |
 | `harness` | enum | yes | `codex`, `claude`, or `opencode`. |
 | `model` | string | no | Explicit remote model, up to 200 characters; otherwise its configured default. |
@@ -67,13 +67,16 @@ the Hook follows the worker (see `dispatch_returns`), and receipts gain
 
 With `anywhere`, the Hook asks each computer's `GET /v1/dispatch/capacity`,
 which returns `working`, `harnesses` and `usage: [{ source, account?,
-leftPercent? }]`: the least room left on Codex and on each Claude home there,
-read in parallel with the harness inventory and bounded to 2.5 seconds. A
-missing `usage` (an older Hook or a slow read) or a missing `leftPercent` means
-unknown. The least busy computer wins. A tie goes by room on the account the
-dispatch would run under (Codex's, or the named Claude home, `default` when
-none): 20% or more left first, then unknown, then near a limit, then more room,
-then name.
+leftPercent?, exhausted?, until? }]`: the least room left on Codex and on each
+Claude home there, and `exhausted: true` (with `until`, when its last spent
+window resets) once a window is at 100% or refusing requests. It is read in
+parallel with the harness inventory and bounded to 2.5 seconds; a missing
+`usage` (an older Hook or a slow read) means unknown. A computer whose account
+for this dispatch (Codex's, or the named Claude home, `default` when none) is
+exhausted sits out and is named in `skipped`; when no computer is left for that
+reason the dispatch fails with code `out_of_quota`. Low quota is not a reason
+to skip one: the least busy computer wins, then name. A named computer is never
+refused for quota.
 
 CLI equivalent:
 `phren dispatch Desk phren --harness codex --label 'Checks' --prompt 'Run the assigned checks'`.
@@ -167,8 +170,8 @@ before it dispatches. The tool asks this Hook (`GET /v1/health` and
 and each `hooks.yaml` peer over its pinned SSH pipe (the same routes), as
 `live_sessions` does. ElevenLabs is left out, since each read of it spends
 quota. No parameters. `message` is a one-line summary: how many accounts, which
-are near a limit or stale, and a warning when every account with limits is near
-one.
+are out of quota (do not dispatch to them), which are low but usable, which are
+stale, and a warning when every account with limits is out of quota.
 
 One account is one allowance whichever computers report it. Rows merge by `id`,
 which is `source` or `source|key` (the phone's card key); a Claude row whose key
@@ -179,12 +182,15 @@ counted once per key.
 
 Each row carries `id`, `harness`, `name`, `account` (the login's email, else its
 label), `windows`, `leftPercent` (the least room on any window), `nearLimit`
-(under 20% left, or a limited window), `spend`, `updatedAt`, `age`, `stale`,
+(under 20% left: information, not a reason to avoid the account), `exhausted`
+(a window at 100% or refusing requests: never dispatch to it) with
+`availableIn` (when its last spent window resets), `spend`, `updatedAt`, `age`, `stale`,
 `from`, `computers: [{ name, account? }]` and `message`. `account` on a
 computer is the Claude account id `dispatch`'s `account` takes there. Each
 window carries `usedPercent`, `leftPercent`, `resetsAt` and `resetsIn`; once
 its reset time has passed it says `reset: true` and has no percent, and while
 the service refuses requests it says `limited: true` with `leftPercent` 0. A
+window at 100% or limited also says `exhausted: true`. A
 row is `stale` when its report is over 15 minutes old, has no timestamp, or has
 a window that reset since the report.
 

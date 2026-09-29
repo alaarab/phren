@@ -2652,7 +2652,7 @@ schedules:
       expect(claude, JSON.stringify(view.accounts)).toHaveLength(1);
       // The remote's report is the only timed one, so it stands whole; the passed window says reset.
       expect(claude[0]).toMatchObject({ id: expect.stringMatching(/^claude\|claude:[0-9a-f]{12}$/), account: "sam@example.com", from: "Linuxbox",
-        computers: [{ name: hostname(), account: "default" }, { name: "Linuxbox", account: "default" }], leftPercent: 15, nearLimit: true, stale: true });
+        computers: [{ name: hostname(), account: "default" }, { name: "Linuxbox", account: "default" }], leftPercent: 15, nearLimit: true, exhausted: false, stale: true });
       expect(claude[0].windows).toEqual([{ id: "five_hour", name: "5-hour limit", reset: true },
         expect.objectContaining({ id: "seven_day", usedPercent: 85, leftPercent: 15, resetsIn: expect.any(String) })]);
       // The capacity probe carries each account's room for anywhere's tie-break.

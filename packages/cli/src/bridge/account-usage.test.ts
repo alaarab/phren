@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { accountIdentity, formatAccountUsage, mergeAccountUsage, readAccountUsage, settleWindow, usageSummary, type ComputerUsage } from "./account-usage.js";
 import { BridgeError } from "./protocol.js";
 import { capacityRoom, type AccountUsage } from "./usage.js";
-import { roomFor, roomRank } from "./dispatch.js";
+import { outOfQuota, roomFor } from "./dispatch.js";
 
 const now = Date.parse("2026-09-29T12:00:00.000Z");
 const at = (minutesAgo: number) => new Date(now - minutesAgo * 60_000).toISOString();
@@ -62,12 +62,17 @@ describe("account usage merged by account", () => {
     expect(untimed).not.toHaveProperty("age");
   });
 
-  it("puts an account under 20% left, or refusing requests, near its limit", () => {
+  it("marks under 20% left as near a limit but usable, and only 100% or refusing requests as exhausted", () => {
     const [tight] = mergeAccountUsage([{ computer: "Desk", accounts: [codex(83)] }], now).accounts;
-    expect(tight).toMatchObject({ leftPercent: 17, nearLimit: true });
+    expect(tight).toMatchObject({ leftPercent: 17, nearLimit: true, exhausted: false });
+    // 99.6% used rounds to 0% left but still has quota.
+    const [almost] = mergeAccountUsage([{ computer: "Desk", accounts: [codex(99.6)] }], now).accounts;
+    expect(almost).toMatchObject({ leftPercent: 0, exhausted: false });
+    const [spent] = mergeAccountUsage([{ computer: "Desk", accounts: [codex(100)] }], now).accounts;
+    expect(spent).toMatchObject({ leftPercent: 0, exhausted: true, availableIn: "3d 18h", windows: [{ exhausted: true }] });
     const go: AccountUsage = { source: "opencode-go", updatedAt: at(1), windows: [{ id: "opencode-go:plan:5h", name: "5-hour limit", usedPercent: 30, resetsAt: later(1), limited: true }] };
     const [limited] = mergeAccountUsage([{ computer: "Desk", accounts: [go] }], now).accounts;
-    expect(limited).toMatchObject({ leftPercent: 0, nearLimit: true, windows: [{ limited: true, leftPercent: 0, usedPercent: 30 }] });
+    expect(limited).toMatchObject({ leftPercent: 0, nearLimit: true, exhausted: true, availableIn: "1h 0m", windows: [{ limited: true, exhausted: true, leftPercent: 0, usedPercent: 30 }] });
   });
 
   it("adds OpenCode's local spend across computers and counts one OpenRouter key once", () => {
@@ -92,18 +97,22 @@ describe("account usage merged by account", () => {
     expect(noData).toEqual([{ harness: "copilot", name: "GitHub Copilot", computers: ["Desk", "Linuxbox"], message: "GitHub CLI is not signed in." }]);
   });
 
-  it("summarizes tight and stale accounts and warns when every account is near a limit", () => {
-    const view = { ...mergeAccountUsage([{ computer: "Desk", accounts: [codex(90), claude("claude:48e1529451f8", "default", at(30), 85)] }], now),
-      computers: ["Desk"], unreachable: [{ computer: "Studio", error: "ssh: connect timed out" }], notLinked: [{ name: "Laptop" }], enrolled: 1 };
+  it("reports low accounts as usable, names exhausted ones, and warns only when every account is out of quota", () => {
+    const extra = { computers: ["Desk"], unreachable: [{ computer: "Studio", error: "ssh: connect timed out" }], notLinked: [{ name: "Laptop" }], enrolled: 1 };
+    const view = { ...mergeAccountUsage([{ computer: "Desk", accounts: [codex(90), claude("claude:48e1529451f8", "default", at(30), 100)] }], now), ...extra };
     const summary = usageSummary(view);
     expect(summary).toContain("2 accounts across 1 computer.");
-    expect(summary).toContain("Near a limit: Claude · sam@example.com (15% left, resets in 3d 0h); Codex (10% left, resets in 3d 18h).");
-    expect(summary).toContain("Every account with limits is near one: tell the owner before dispatching.");
+    expect(summary).toContain("Out of quota, do not dispatch to: Claude · sam@example.com (back in 3d 0h).");
+    expect(summary).toContain("Low but usable: Codex (10% left, resets in 3d 18h).");
+    expect(summary).not.toContain("Every account");
     expect(summary).toContain("Stale: Claude · sam@example.com (reported 30m ago).");
     expect(summary).toContain("Unreachable: Studio.");
     expect(summary).toContain("Not linked, so not checked: Laptop.");
+    const allOut = { ...mergeAccountUsage([{ computer: "Desk", accounts: [codex(100), claude("claude:48e1529451f8", "default", at(1), 100)] }], now), ...extra };
+    expect(usageSummary(allOut)).toContain("Every account with limits is out of quota: tell the owner before dispatching.");
     const text = formatAccountUsage(view);
-    expect(text).toContain("Codex  on Desk  (near limit, 10% left; 1m ago)");
+    expect(text).toContain("Codex  on Desk  (low, 10% left; 1m ago)");
+    expect(text).toContain("Claude · sam@example.com  on Desk  (out of quota, back in 3d 0h; stale, reported 30m ago)");
     expect(text).toMatch(/Unreachable\n {2}Studio: ssh: connect timed out/);
     expect(text).not.toContain("—");
   });
@@ -139,19 +148,22 @@ describe("reading every Hook's usage", () => {
 });
 
 describe("usage as a dispatch tie-break", () => {
-  it("reports each Codex and Claude account's least room, and none for a reset window", () => {
-    const reset = { ...codex(0), windows: [{ id: "codex:primary", name: "5-hour", usedPercent: 99, resetsAt: at(1) }] };
-    expect(capacityRoom([codex(83), claude("claude:1", "work", at(1), 40), reset], now)).toEqual([
-      { source: "codex", account: "default", leftPercent: 17 }, { source: "claude", account: "work", leftPercent: 60 }, { source: "codex", account: "default" }]);
+  it("reports each Codex and Claude account's least room, whether it has none, and none for a reset window", () => {
+    const reset = { ...codex(0), windows: [{ id: "codex:primary", name: "5-hour", usedPercent: 100, resetsAt: at(1) }] };
+    expect(capacityRoom([codex(83), claude("claude:1", "work", at(1), 100), reset], now)).toEqual([
+      { source: "codex", account: "default", leftPercent: 17 },
+      { source: "claude", account: "work", leftPercent: 0, exhausted: true, until: later(72) },
+      { source: "codex", account: "default" }]);
   });
 
-  it("reads room for the account the worker would run under, and ranks room first, unknown next, near a limit last", () => {
-    const usage = [{ source: "codex", account: "default", leftPercent: 12 }, { source: "claude", account: "default", leftPercent: 90 }, { source: "claude", account: "work", leftPercent: 5 }];
-    expect(roomFor({ harness: "codex" }, usage)).toBe(12);
-    expect(roomFor({ harness: "claude" }, usage)).toBe(90);
-    expect(roomFor({ harness: "claude", account: "work" }, usage)).toBe(5);
-    expect(roomFor({ harness: "opencode" }, usage)).toBeUndefined();
-    expect(roomFor({ harness: "codex" }, undefined)).toBeUndefined();
-    expect([roomRank(50), roomRank(undefined), roomRank(19)]).toEqual([0, 1, 2]);
+  it("rules out only the worker's account when it has no quota, never a low one", () => {
+    const usage = [{ source: "codex", account: "default", leftPercent: 3 }, { source: "claude", account: "default", leftPercent: 0, exhausted: true, until: later(5) },
+      { source: "claude", account: "work", leftPercent: 60 }];
+    expect(outOfQuota({ harness: "codex" }, usage, now)).toBeUndefined();
+    expect(outOfQuota({ harness: "claude" }, usage, now)).toBe("Its claude account default has no quota left for about 5 more hours.");
+    expect(outOfQuota({ harness: "claude", account: "work" }, usage, now)).toBeUndefined();
+    expect(outOfQuota({ harness: "opencode" }, usage, now)).toBeUndefined();
+    expect(outOfQuota({ harness: "codex" }, undefined, now)).toBeUndefined();
+    expect(roomFor({ harness: "claude", account: "work" }, usage)).toEqual({ source: "claude", account: "work", leftPercent: 60 });
   });
 });

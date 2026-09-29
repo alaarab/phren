@@ -105,17 +105,20 @@ run` or `codex exec`, a launch script, nohup) has no manifest, so the phone and
 you cannot see, resume or review it. Workers that exist only as processes do
 not count as dispatched.
 
-Check `account_usage` before you dispatch, once per batch. Pick the harness,
-account and computer with room: skip a row with `nearLimit` (under about 20%
-left on any window, such as Codex's weekly limit), and for Claude pass the
-`account` id the row's `computers` list gives for the computer you pick. A
+Check `account_usage` before you dispatch, once per batch. The one hard rule:
+never dispatch to an account that is `exhausted` (a window at 100%, or
+refusing requests), until its `availableIn` passes. Low quota is information,
+not a reason to steer away: `nearLimit` (under 20% left) is still usable, and
+the owner often wants quota used up before it resets, so an account with quota
+left that resets soon is a good pick; use it before it resets. For Claude, pass
+the `account` id the row's `computers` list gives for the computer you pick. A
 `stale` row's numbers may be out of date, and a window marked `reset` has
 rolled over with no new number yet: say so rather than quoting them. Name the
-choice in the dispatch line, such as "Desk has the parser checks on Claude,
-since Codex is down to 12% for the week." When every option is near a limit,
-tell the owner before dispatching and let them choose. An explicit harness from
-the owner still wins. Usage on `unreachable` and `notLinked` computers is
-unknown, not zero.
+choice in the dispatch line, such as "Desk has the parser checks on Codex,
+using its last 15% before the week resets tomorrow." When every account is
+exhausted, tell the owner before dispatching. The owner's explicit choice of
+harness or account always wins. Usage on `unreachable` and `notLinked`
+computers is unknown, not zero.
 
 Prefer handing work to a session that already owns the project and is idle or
 doing related work; call `hand_off` in full or `phren_admin(action: "hand_off",
@@ -135,7 +138,7 @@ ask them, and never confirm or change the policy yourself. The policy only
 restricts; when a worker's own harness still refuses release work, only the
 owner's own harness settings can allow it.
 `anywhere` chooses the connected computer with the fewest working agents, and
-breaks a tie by room on the account the worker would use. Place
+skips one whose account for that harness is exhausted. Place
 briefs sequentially, respecting busy/rate-limit responses. Keep their dispatch
 IDs. Do not send local filesystem paths as remote project names.
 
