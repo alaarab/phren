@@ -102,6 +102,17 @@ export function turnPhase(record: TurnRecord): TurnPhase {
     ...(stop.reply ? { reply: stop.reply, ...(stop.truncated ? { truncated: true } : {}) } : {}) };
 }
 
+/** The background tasks of a Stop at `stoppedAt` still running: the Stop's
+ * count less the tasks whose finish the transcript recorded after it
+ * (`FinalTurn.finishedTasks`). No turn ran since that Stop, so every task
+ * finishing after it is one the count included; a finish does not always
+ * bring a new Stop (its notification can wait in an idle session's queue). */
+export function backgroundLeft(count: number | undefined, stoppedAt: string, finishedTasks: readonly string[] = []): number {
+  if (!count) return 0;
+  const stopped = Date.parse(stoppedAt);
+  return Math.max(0, count - finishedTasks.filter(at => Date.parse(at) >= stopped).length);
+}
+
 async function readRecord(file: string): Promise<TurnRecord | undefined> {
   try {
     const info = await lstat(file);
