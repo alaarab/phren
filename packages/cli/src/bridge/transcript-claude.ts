@@ -92,6 +92,12 @@ export async function claudeChildAgents(file: string, session: string): Promise<
   }
   const launches = new Map<string, { path: string; callId: string; state: "running" | "completed" }>();
   const stops = new Map<string, string>();
+  // A background skill (`/code-review` run as `@code-review`) is announced in
+  // a local-command row, not a tool result, and its end is read from its own
+  // transcript (claudeSkillFinished).
+  const skills = new Set<string>();
+  // A Workflow run, by its task id: its agents are in the run's journal.
+  const workflows = new Map<string, { runId: string; name: string; callId: string; state: "running" | "completed" }>();
   // Named teammates (the Agent tool with a `name`) run as their own session
   // and never post a task-notification: they announce themselves idle in a
   // teammate-message instead, and may be woken again later. Their file is
@@ -106,6 +112,22 @@ export async function claudeChildAgents(file: string, session: string): Promise<
       if (/^[A-Za-z0-9._-]{1,128}$/.test(agentId) && ["async_launched", "running"].includes(status)) {
         const callId = String(blocks.find(b => b.type === "tool_result")?.tool_use_id ?? "");
         if (callId) launches.set(agentId, { path: String(result.description || result.name || "Agent").slice(0, 200), callId, state: "running" });
+      }
+      // SendMessage to a finished agent resumes it until its next final notification.
+      const resumed = typeof result.resumedAgentId === "string" ? launches.get(result.resumedAgentId) : undefined;
+      if (resumed && typeof result.message === "string" && /^Resuming agent\b/i.test(result.message)) resumed.state = "running";
+      if (result.taskType === "local_workflow" && status === "async_launched" && typeof result.taskId === "string"
+          && typeof result.runId === "string" && /^wf_[A-Za-z0-9-]{1,64}$/.test(result.runId)) {
+        const callId = String(blocks.find(b => b.type === "tool_result")?.tool_use_id ?? "");
+        workflows.set(result.taskId, { runId: result.runId, name: String(result.workflowName || "Workflow").slice(0, 200), callId, state: "running" });
+      }
+      if (raw.type === "system" && typeof raw.content === "string" && raw.content.includes("<forked-skill-launch>")) {
+        const launch = object(JSON.parse(/<forked-skill-launch>([\s\S]*?)<\/forked-skill-launch>/.exec(raw.content)?.[1] ?? "{}"));
+        const id = String(launch.agentId ?? "");
+        if (/^[A-Za-z0-9._-]{1,128}$/.test(id)) {
+          launches.set(id, { path: String(launch.description || (launch.skillName ? `/${launch.skillName}` : "Skill")).slice(0, 200), callId: `skill:${id}`, state: "running" });
+          skills.add(id);
+        }
       }
       if (raw.type === "assistant") {
         for (const block of blocks) {
@@ -127,7 +149,7 @@ export async function claudeChildAgents(file: string, session: string): Promise<
           const task = stops.get(block.tool_use_id);
           if (!task) continue;
           stops.delete(block.tool_use_id);
-          const previous = launches.get(task);
+          const previous = launches.get(task) ?? workflows.get(task);
           if (previous && block.is_error !== true && result.task_id === task && typeof result.message === "string"
               && /^Successfully stopped task\b/i.test(result.message)) previous.state = "completed";
         }
@@ -141,7 +163,7 @@ export async function claudeChildAgents(file: string, session: string): Promise<
         for (const match of notice.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
           const child = /<task-id>([^<>]{1,128})<\/task-id>/.exec(match[1])?.[1], taskStatus = /<status>([^<>]+)<\/status>/.exec(match[1])?.[1].trim();
           // Terminal notifications end only the child named in that envelope.
-          const previous = child && launches.get(child);
+          const previous = child && (launches.get(child) ?? workflows.get(child));
           if (previous && ["completed", "failed", "cancelled", "canceled", "killed", "stopped"].includes(taskStatus ?? "")) previous.state = "completed";
         }
       }
@@ -156,13 +178,18 @@ export async function claudeChildAgents(file: string, session: string): Promise<
   // Claude Code records the launch in the parent before the child's own
   // file exists. A launch without a transcript yet is looked for again
   // shortly, rather than being missed until the parent next changes.
-  let awaiting = false;
+  // Children whose end the parent does not record (background skills,
+  // workflow agents) are looked at again on a timer too.
+  let awaiting = false, live = false;
   const root = await realpath(path.join(path.dirname(file), session, "subagents")).catch(() => undefined);
   for (const [agentId, launch] of launches) {
     const childFile = root && await realpath(path.join(root, `agent-${agentId}.jsonl`)).catch(() => undefined);
     if (!childFile || !childFile.startsWith(root + path.sep) || !await claudeChildBelongsTo(childFile, session, agentId)) {
       if (launch.state === "running") awaiting = true;
       continue;
+    }
+    if (skills.has(agentId) && launch.state === "running") {
+      if (await claudeSkillFinished(childFile).catch(() => false)) launch.state = "completed"; else live = true;
     }
     const model = await claudeChildModel(childFile).catch(() => undefined);
     const checkout = await claudeChildCheckout(childFile).catch(() => ({}));
@@ -171,10 +198,20 @@ export async function claudeChildAgents(file: string, session: string): Promise<
       ...(model !== undefined ? { model } : {}), ...checkout, children: [] });
   }
   if (teammates.size && root) {
-    const names = (await readdir(root).catch(() => [] as string[])).filter(n => /^agent-a[A-Za-z0-9][A-Za-z0-9_-]{0,63}-[0-9a-f]{8,32}\.jsonl$/.test(n));
+    const entries = await readdir(root).catch(() => [] as string[]);
+    const names = entries.filter(n => /^agent-a[A-Za-z0-9][A-Za-z0-9_-]{0,63}-[0-9a-f]{8,32}\.jsonl$/.test(n));
+    // Claude Code 2.1.2xx names a teammate's file by id and keeps its name in
+    // the `.meta.json` beside it.
+    let named: Map<string, string> | undefined;
     for (const [name, launch] of teammates) {
-      const fileName = names.find(n => n.startsWith(`agent-a${name}-`));
+      let fileName = names.find(n => n.startsWith(`agent-a${name}-`));
+      if (!fileName) {
+        named ??= await claudeChildNames(root, entries);
+        fileName = named.get(name);
+      }
       const agentId = fileName?.slice("agent-".length, -".jsonl".length);
+      // A named agent launched in the background is already listed by its launch.
+      if (agentId && launches.has(agentId)) continue;
       const childFile = agentId && await realpath(path.join(root, fileName!)).catch(() => undefined);
       if (!agentId || !childFile || !childFile.startsWith(root + path.sep) || !await claudeChildBelongsTo(childFile, session, agentId)) {
         if (launch.state === "running") awaiting = true;
@@ -190,8 +227,80 @@ export async function claudeChildAgents(file: string, session: string): Promise<
         ...(model !== undefined ? { model } : {}), ...checkout, children: [] });
     }
   }
-  claudeRelationCache.set(file, { signature, relations, ...(awaiting ? { recheckAt: Date.now() + 2_000 } : {}) });
+  if (workflows.size && root) {
+    const seen = new Set(relations.map(relation => relation.session));
+    for (const workflow of workflows.values()) {
+      for (const child of await claudeWorkflowAgents(root, session, workflow)) {
+        if (seen.has(child.session!)) continue;
+        seen.add(child.session!); relations.push(child);
+        if (child.state === "running") live = true;
+      }
+    }
+  }
+  claudeRelationCache.set(file, { signature, relations, ...(awaiting || live ? { recheckAt: Date.now() + (awaiting ? 2_000 : 5_000) } : {}) });
   while (claudeRelationCache.size > 64) claudeRelationCache.delete(claudeRelationCache.keys().next().value!);
+  return relations;
+}
+
+/** How long a background skill's transcript may sit unchanged before it is
+ * taken as finished: the parent records no end for it, and a session that
+ * exited mid-skill leaves it without a final reply. */
+export const CLAUDE_SKILL_QUIET_MS = 30 * 60 * 1000;
+
+/** A background skill is done once its transcript ends on a finished reply,
+ * or has not changed for CLAUDE_SKILL_QUIET_MS. */
+async function claudeSkillFinished(file: string, now = Date.now()): Promise<boolean> {
+  const metadata = await stat(file);
+  if (now - metadata.mtimeMs >= CLAUDE_SKILL_QUIET_MS) return true;
+  const start = Math.max(0, metadata.size - 65_536), chunks: Buffer[] = [];
+  for await (const chunk of createReadStream(file, { start })) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  const last = Buffer.concat(chunks).toString("utf8").split("\n").filter(line => line.trim()).at(-1);
+  try {
+    const raw = object(JSON.parse(last ?? ""));
+    return raw.type === "assistant" && object(raw.message).stop_reason === "end_turn";
+  } catch { return false; }
+}
+
+/** Sub-agent files by the name their `.meta.json` gives them. */
+async function claudeChildNames(root: string, entries: string[]): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  for (const entry of entries) {
+    if (!/^agent-[A-Za-z0-9._-]{1,128}\.meta\.json$/.test(entry)) continue;
+    const meta = await readFile(path.join(root, entry), "utf8").then(v => object(JSON.parse(v))).catch(() => ({} as Json));
+    if (typeof meta.name === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(meta.name)) names.set(meta.name, entry.slice(0, -".meta.json".length) + ".jsonl");
+  }
+  return names;
+}
+
+/** A Workflow run's agents from its journal: each `started` agent runs until
+ * the journal records another row for it or the run itself finishes. */
+async function claudeWorkflowAgents(root: string, session: string, workflow: { runId: string; name: string; callId: string; state: "running" | "completed" }): Promise<ChildAgentRelation[]> {
+  const directory = await realpath(path.join(root, "workflows", workflow.runId)).catch(() => undefined);
+  if (!directory || !directory.startsWith(root + path.sep)) return [];
+  const journal = path.join(directory, "journal.jsonl");
+  const info = await stat(journal).catch(() => undefined);
+  if (!info?.isFile() || info.size > 16 * 1024 * 1024) return [];
+  const agents = new Map<string, boolean>();
+  for (const line of (await readFile(journal, "utf8")).split("\n")) {
+    try {
+      const row = object(JSON.parse(line)), id = String(row.agentId ?? "");
+      if (!/^[A-Za-z0-9._-]{1,128}$/.test(id)) continue;
+      agents.set(id, row.type === "started" ? agents.get(id) ?? false : true);
+    } catch { /* A row still being written. */ }
+  }
+  const relations: ChildAgentRelation[] = [];
+  for (const [agentId, done] of agents) {
+    const childFile = await realpath(path.join(directory, `agent-${agentId}.jsonl`)).catch(() => undefined);
+    if (!childFile || !childFile.startsWith(directory + path.sep) || !await claudeChildBelongsTo(childFile, session, agentId)) continue;
+    const meta = await readFile(childFile.slice(0, -".jsonl".length) + ".meta.json", "utf8").then(v => object(JSON.parse(v))).catch(() => ({} as Json));
+    const model = await claudeChildModel(childFile).catch(() => undefined);
+    const checkout = await claudeChildCheckout(childFile).catch(() => ({}));
+    relations.push({ id: createHash("sha256").update(`claude\0${session}\0${agentId}`).digest("hex").slice(0, 32),
+      session: agentId, transcript: childFile, provider: "claude",
+      path: String(meta.description || workflow.name).slice(0, 200), callId: workflow.callId || `workflow:${workflow.runId}`,
+      state: done || workflow.state === "completed" ? "completed" : "running",
+      ...(model !== undefined ? { model } : {}), ...checkout, children: [] });
+  }
   return relations;
 }
 

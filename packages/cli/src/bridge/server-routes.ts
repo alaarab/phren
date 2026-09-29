@@ -229,6 +229,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     // turn still has background work, and which dispatch it is. It runs ahead
     // of the slower reads so the status does not flicker between answers, but
     // inside the budget, so a stuck disk cannot hold the overview either.
+    const awaited = new Map<Json, number>();
     const records = Promise.all(tabs.map(async ({ group, tab }) => {
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
       const session = agents.length === 1 && object(tab.target).session;
@@ -238,6 +239,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         liveBackground(record, readFinalTurn),
       ]);
       if (expired) return;
+      if (background) awaited.set(tab, background);
       markBackground(tab, background);
       tab.title = title;
     }));
@@ -267,8 +269,9 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         // A row finished after the answer left belongs to the next read.
         if (!expired) {
           Object.assign(tab, Object.fromEntries(Object.entries(found).filter(([, value]) => value !== undefined)));
-          // Codex subagents and fanout jobs keep an idle-looking session working too.
-          markBackground(tab, typeof found.runningChildren === "number" ? found.runningChildren : undefined);
+          // Running sub-agents and fan-out jobs keep an idle-looking session
+          // working too, on top of the shells its last turn is waiting on.
+          markBackground(tab, (awaited.get(tab) ?? 0) + (typeof found.runningChildren === "number" ? found.runningChildren : 0));
         }
       }
     })));
