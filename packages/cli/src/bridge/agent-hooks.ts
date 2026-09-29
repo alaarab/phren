@@ -6,7 +6,7 @@ import { request, createServer, type Server } from "node:http";
 import { mkdir, readFile, chmod, unlink, lstat } from "node:fs/promises";
 import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { findPane, knownPanes, paneForCodexSession, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
@@ -140,6 +140,13 @@ interface ServedQuestion { key: string; server: string; pane: string; target?: T
 
 export type DeliveryOutcome = "delivered" | "blocked" | "pending";
 interface Delivery { source: Provider; session: string; settle: (outcome: DeliveryOutcome) => void; timer: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
+/** A phone message the Hook answered as delivered or queued, kept under the
+ * phone's delivery id so the phone can ask what became of it by that id.
+ * Holds a hash of the prompt's words, never the prompt. */
+interface TrackedDelivery { source: Provider; session: string; key: string; state: "queued" | "delivered" | "blocked"; at: number }
+export type TrackedState = TrackedDelivery["state"] | "unknown";
+/** As long as a typed prompt's own record guards it (`expectDelivery`). */
+const TRACK_MS = 600_000;
 
 /** What the agent hands its UserPromptSubmit hook is the terminal's pasted
  * form of what Phren typed; compare the words, not the wrapping. Claude Code
@@ -151,6 +158,7 @@ function promptKey(text: string): string {
     .replace(/\[Image #\d+\]/g, " ").replace(/\s+/g, " ").trim();
 }
 const PICTURE_PATH_LINE = /^\s*\/.*\.(?:png|jpe?g|gif|webp)\s*$/i;
+const trackKey = (text: string) => createHash("sha256").update(promptKey(text)).digest("hex");
 
 /** This socket is deliberately separate from the phone's HTTP pipe. Only local
  * agent callbacks can register identities or create an approval request. */
@@ -163,6 +171,8 @@ export class AgentHooks {
    * party that knows which conversation consumed the text, so it is the one
    * that can refuse it when that is not the conversation the phone meant. */
   private deliveries = new Map<string, Delivery[]>();
+  /** Phone messages by delivery id, until TRACK_MS: see `trackDelivery`. */
+  private tracked = new Map<string, TrackedDelivery>();
   /** The permission request a conversation is drawing in its own terminal
    * because nobody was there to hold it: what the phone shows above its
    * answer keys until the pane stops waiting. `dialog` marks a choice parsed
@@ -515,18 +525,27 @@ export class AgentHooks {
    * after `waitMs`: a busy agent queues typed input and submits it only when
    * its turn ends, so the record outlives the wait (up to ten minutes) and a
    * late submission to the wrong conversation is still refused. */
-  expectDelivery(target: Target, text: string, waitMs = 1_500): Promise<DeliveryOutcome> {
+  expectDelivery(target: Target, text: string, waitMs = 1_500, signal?: AbortSignal): Promise<DeliveryOutcome> {
     const key = promptKey(text);
-    if (!key) return Promise.resolve("pending");
+    if (!key || signal?.aborted) return Promise.resolve("pending");
     return new Promise<DeliveryOutcome>(resolve => {
       let settled = false;
       const list = this.deliveries.get(key) ?? [];
-      const remove = () => { const current = this.deliveries.get(key) ?? []; const index = current.indexOf(delivery); if (index >= 0) current.splice(index, 1); if (!current.length) this.deliveries.delete(key); };
+      const remove = () => {
+        signal?.removeEventListener("abort", cancel);
+        const current = this.deliveries.get(key) ?? []; const index = current.indexOf(delivery);
+        if (index >= 0) current.splice(index, 1);
+        if (!current.length) this.deliveries.delete(key);
+      };
       const settle = (outcome: DeliveryOutcome) => {
         if (!settled) { settled = true; resolve(outcome); } else if (outcome !== "pending") delivery.late?.(outcome);
         if (outcome !== "pending") { clearTimeout(delivery.timer); remove(); }
       };
       const delivery: Delivery = { source: target.source, session: target.session, settle, timer: setTimeout(() => settle("pending"), waitMs) };
+      // Only cancel after a provider explicitly refused before writing. A
+      // possibly delivered paste keeps its guard against the wrong session.
+      const cancel = () => { clearTimeout(delivery.timer); settle("pending"); remove(); };
+      signal?.addEventListener("abort", cancel, { once: true });
       delivery.timer.unref?.();
       const expiry = setTimeout(remove, 600_000); expiry.unref?.();
       list.push(delivery); this.deliveries.set(key, list);
@@ -548,6 +567,30 @@ export class AgentHooks {
       delivery.late = outcome => { clearTimeout(timer); delivery.late = undefined; resolve(outcome); };
     });
   }
+  /** Remember a phone message's outcome under its delivery id. A queued one
+   * is tracked only while its typed record still waits for the agent's hook,
+   * so the hook's later answer always reaches it (`settleTracked`). */
+  trackDelivery(id: string, target: Target, text: string, state: "queued" | "delivered"): void {
+    if (state === "queued" && !this.deliveryPending(target, text)) return;
+    const now = Date.now();
+    for (const [key, entry] of this.tracked) if (now - entry.at > TRACK_MS) this.tracked.delete(key);
+    while (this.tracked.size >= 512) this.tracked.delete(this.tracked.keys().next().value!);
+    this.tracked.set(id, { source: target.source, session: target.session, key: trackKey(text), state, at: now });
+  }
+  /** What became of the phone message `id` sent to `target`'s conversation:
+   * queued until the agent submits it, then delivered, or blocked when
+   * another conversation in the pane took it. Unknown when the Hook did not
+   * track it, it was for another conversation, or it is older than TRACK_MS. */
+  deliveryState(id: string, target: Target): TrackedState {
+    const entry = this.tracked.get(id);
+    return entry && entry.source === target.source && entry.session === target.session && Date.now() - entry.at <= TRACK_MS ? entry.state : "unknown";
+  }
+  /** The oldest queued message tracked for `delivery`'s conversation with these words. */
+  private settleTracked(delivery: Delivery, prompt: string, state: "delivered" | "blocked"): void {
+    const key = trackKey(prompt);
+    const entry = [...this.tracked.values()].find(item => item.state === "queued" && item.key === key && item.source === delivery.source && item.session === delivery.session);
+    if (entry) entry.state = state;
+  }
   /** The conversation `target` just submitted `prompt`. Nothing Phren typed
    * matches: a locally typed prompt, always allowed. Otherwise the oldest
    * matching delivery decides: its own conversation consumes it; any other
@@ -555,9 +598,13 @@ export class AgentHooks {
    * wrong agent and the phone can safely send it again. */
   private submitted(target: Target, prompt: string): Json {
     const list = this.deliveries.get(promptKey(prompt));
-    const delivery = list?.[0];
+    // The same words sent to two conversations at once: each one's own
+    // submission settles its own record, not whichever was typed first.
+    const delivery = list?.find(entry => entry.source === target.source && entry.session === target.session) ?? list?.[0];
     if (!delivery) return {};
-    if (delivery.source === target.source && delivery.session === target.session) { delivery.settle("delivered"); return {}; }
+    const own = delivery.source === target.source && delivery.session === target.session;
+    this.settleTracked(delivery, prompt, own ? "delivered" : "blocked");
+    if (own) { delivery.settle("delivered"); return {}; }
     delivery.settle("blocked");
     return { decision: "block", reason: "Phren sent this message to a different conversation in this pane; it was not delivered here. Send it again from the phone." };
   }
