@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchStatus, updateReceipt, type Receipt } from "./dispatch.js";
-import { BACKGROUND_WAIT_MS, DispatchReturns, NOTICE_MS, noticeLine, observe, POLL_MS, REPLY_LIMIT, returnRow, workerStates, type WorkerReaders } from "./dispatch-returns.js";
+import { BACKGROUND_WAIT_MS, DispatchReturns, hookWorkers, NOTICE_MS, noticeLine, observe, POLL_MS, REPLY_LIMIT, returnRow, workerStates, type WorkerReaders } from "./dispatch-returns.js";
 import { findPane } from "./herdr.js";
 import { localHost } from "./dispatch-hosts.js";
 import { hookPeers, peerRequest } from "./peers.js";
@@ -72,6 +72,28 @@ describe("the receiving Hook's worker states", () => {
     expect(answer.workers[0]).toEqual({ state: "working", session: workerTarget.session, completed: true, background: 4, reply: "Started." });
     const settled = await workerStates({ targets: [workerTarget] }, readers(() => herdrSnapshot(), { completed: true, lastAssistant: "Done." }));
     expect(settled.workers[0]).toMatchObject({ state: "done", completed: true });
+  });
+
+  it("carries what the worker waits on from the approval reader, for a full target only", async () => {
+    const card = { actionId: "act-1", tool: "Bash", request: "Run: rm -rf build" };
+    const approval = vi.fn((_target: unknown) => card);
+    const answer = await workerStates({ targets: [workingTarget, { ...workerTarget, pane: "w1P:p9" }] },
+      { ...readers(() => herdrSnapshot()), approval });
+    expect(answer.workers[0]).toEqual({ state: "working", session: workingTarget.session, approval: card });
+    expect(answer.workers[1]).toEqual({ state: "gone" });
+    // The reader gets the plain target, without the dispatch id.
+    expect(approval).toHaveBeenCalledTimes(1);
+    expect(approval).toHaveBeenCalledWith(workingTarget);
+    const starting = { server: "default", workspace: "w13", tab: "w13:t2", pane: "w13:p2", source: "claude" as const, starting: true, startingToken: "a".repeat(64) };
+    expect((await workerStates({ targets: [starting] }, { ...readers(() => herdrSnapshot()), approval })).workers[0]).not.toHaveProperty("approval");
+    expect(approval).toHaveBeenCalledTimes(1);
+  });
+
+  it("leases the panes and reads approvals through the Hook's own methods", async () => {
+    const hooks = { leaseDispatch: vi.fn(), workerApproval: vi.fn() };
+    const seen = hookWorkers(hooks);
+    await seen({ targets: [{ ...workingTarget, dispatch: remoteID }] }).catch(() => undefined);
+    expect(hooks.leaseDispatch).toHaveBeenCalledWith([expect.objectContaining({ pane: workingTarget.pane, server: "default" })]);
   });
 
   it("reports an unreachable Herdr as unavailable and refuses malformed requests", async () => {
@@ -371,5 +393,167 @@ describe("the dispatching Hook's returns loop", () => {
     const { writeFile } = await import("node:fs/promises");
     await writeFile(file, JSON.stringify({ ...JSON.parse(await readFile(file, "utf8")), state: "sending" }));
     expect(await updateReceipt(String(placed.id), () => true)).toBeUndefined();
+  });
+});
+
+describe("worker approvals", () => {
+  const ask = { actionId: "action-1", tool: "Bash", request: "Run: rm -rf build", requestKind: "command" };
+  const withAsk = (extra: Json = {}) => ({ state: "blocked", hook: true, approval: { ...ask, ...extra } });
+
+  it("records a new approval as an unread blocked return with its question, once", () => {
+    const value = receipt();
+    expect(observe(value, withAsk(), 1000)).toBe(true);
+    expect(value.approval).toEqual({ ...ask, at: new Date(1000).toISOString() });
+    expect(value.returned).toEqual({ state: "blocked", at: new Date(1000).toISOString(), read: false, question: "Approval: Run: rm -rf build" });
+    value.returned!.read = true;
+    expect(observe(value, withAsk(), 2000)).toBe(false);
+    expect(value.returned!.read).toBe(true);
+    // A different request is a new return.
+    expect(observe(value, withAsk({ actionId: "action-2", request: undefined, title: "Trust this folder?" }), 3000)).toBe(true);
+    expect(value.returned).toMatchObject({ read: false, question: "Approval: Trust this folder?", at: new Date(3000).toISOString() });
+  });
+
+  it("clears the approval when the worker no longer waits, and ignores an invalid one", () => {
+    const value = receipt();
+    observe(value, withAsk(), 1000);
+    expect(observe(value, { state: "blocked", hook: true, approval: { tool: 3 } }, 2000)).toBe(false);
+    expect(value.approval).toBeDefined();
+    expect(observe(value, { state: "working", hook: true }, 3000)).toBe(true);
+    expect(value.approval).toBeUndefined();
+    expect(observe(value, { state: "working", hook: true }, 4000)).toBe(false);
+  });
+
+  it("says who needs approval in the notice and the row, and the notice still reads as a return", () => {
+    const value = receipt();
+    observe(value, withAsk({ terminal: true }), 1000);
+    const line = noticeLine([value]);
+    expect(line).toBe(`Return: Linuxbox parser checks needs approval, Run: rm -rf build (dispatch ${value.id}; answer with dispatch_approve). Call dispatch_returns.`);
+    expect(line).toMatch(/^\s*returns?:\s+[^\n]+\bCall dispatch_returns\.\s*$/i);
+    expect(noticeLine([value, receipt({ id: "40000000-0000-4000-8000-000000000002" })].map(item => { if (!item.returned) observe(item, { state: "gone" }, 2000); return item; })))
+      .toMatch(/^Returns: 2 dispatches \(Linuxbox parser checks needs approval, Run: rm -rf build; .*\)\. Call dispatch_returns\.$/);
+    expect(returnRow(value)).toMatchObject({ state: "blocked", approval: { actionId: "action-1", tool: "Bash", request: "Run: rm -rf build", terminal: true } });
+    expect(returnRow(value).approval).not.toHaveProperty("expiresAt");
+  });
+
+  describe("through the returns loop", () => {
+    let root: string;
+    let clock: number;
+    let observed: Json;
+    let owner: Record<string, unknown> | undefined;
+    const answers: Json[] = [];
+    const peer = { name: "Linuxbox", address: "linuxbox.example", username: "sam", port: 22, hostKey: "unused", server: "default" };
+    const request = vi.fn(async (_peer: unknown, route: string, data?: Json) => {
+      if (route === "/v1/dispatch/workers") return { workers: [observed] };
+      if (route === "/v1/approvals/answer") { answers.push(data!); if (owner) throw owner; }
+      return { ok: true };
+    });
+    const onApproval = vi.fn((_receipt: Receipt, _approval: unknown): boolean | void => undefined);
+    const grants = vi.fn(async (_query: unknown) => undefined as { scope: string } | undefined);
+    const loop = (extra: Record<string, unknown> = {}) => new DispatchReturns({ peers: async () => [peer], request: request as never, now: () => clock, findGrant: grants as never,
+      snapshot: async () => ({}), identity: recordedIdentity, deliver: async () => ({ delivered: true }), onApproval, ...extra });
+    const seed = async (overrides: Partial<Receipt> = {}) => {
+      const value = receipt({ createdAt: new Date(clock).toISOString(), updatedAt: new Date(clock).toISOString(), ...overrides });
+      const { writeFile, mkdir } = await import("node:fs/promises");
+      await mkdir(path.join(root, "dispatches"), { recursive: true });
+      await writeFile(path.join(root, "dispatches", `${value.id}.json`), JSON.stringify(value));
+      return value;
+    };
+
+    beforeEach(async () => {
+      root = await mkdtemp(path.join(tmpdir(), "phren-approvals-")); vi.stubEnv("PHREN_BRIDGE_HOME", root);
+      clock = Date.parse("2026-09-23T12:00:00Z"); answers.length = 0; owner = undefined;
+      observed = { state: "blocked", session: workerTarget.session, hook: true, approval: ask };
+      request.mockClear(); onApproval.mockReset(); grants.mockReset().mockResolvedValue(undefined);
+    });
+    afterEach(async () => { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
+
+    it("calls onApproval once per new approval, and never for a poll that sees the same one", async () => {
+      await seed();
+      const returns = loop();
+      await returns.poll();
+      expect(onApproval).toHaveBeenCalledTimes(1);
+      expect(onApproval).toHaveBeenCalledWith(expect.objectContaining({ computer: "Linuxbox" }), expect.objectContaining({ actionId: "action-1" }));
+      await returns.poll();
+      expect(onApproval).toHaveBeenCalledTimes(1);
+      const [saved] = await dispatchStatus();
+      expect(saved.approval).toMatchObject({ actionId: "action-1", tool: "Bash" });
+      expect(saved.approval).not.toHaveProperty("pushed");
+      expect(saved.returned).toMatchObject({ state: "blocked", read: false, question: "Approval: Run: rm -rf build" });
+    });
+
+    it("records that this Hook pushed it, and skips what the worker's Hook already pushed", async () => {
+      await seed();
+      onApproval.mockReturnValue(true);
+      await loop().poll();
+      expect((await dispatchStatus())[0].approval).toMatchObject({ pushed: true });
+      onApproval.mockClear();
+      observed = { ...observed, approval: { ...ask, actionId: "action-2", pushed: true } };
+      await loop().poll();
+      expect(onApproval).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ actionId: "action-2", pushed: true }));
+    });
+
+    it("answers a conductor call under a standing grant, and it never becomes a return", async () => {
+      await seed();
+      const conductor = { action: "dispatch", project: "phren", computer: "Linuxbox" };
+      observed = { state: "blocked", session: workerTarget.session, hook: true, approval: { ...ask, tool: "mcp__phren__dispatch", conductor } };
+      grants.mockResolvedValue({ scope: "global" });
+      await loop().poll();
+      expect(grants).toHaveBeenCalledWith({ action: "dispatch", project: "phren", computer: "Linuxbox" });
+      expect(answers).toEqual([{ target: workerTarget, actionId: "action-1", decision: "approve" }]);
+      expect(request.mock.calls.find(call => call[1] === "/v1/approvals/answer")![0]).toBe(peer);
+      const [saved] = await dispatchStatus();
+      expect(saved.approval).toBeUndefined();
+      expect(saved.returned?.question).toBeUndefined();
+      expect(onApproval).not.toHaveBeenCalled();
+    });
+
+    it("leaves a conductor call with no grant, or whose answer failed, for the owner", async () => {
+      await seed();
+      const conductor = { action: "hand_off", computer: "Linuxbox" };
+      observed = { state: "blocked", session: workerTarget.session, hook: true, approval: { ...ask, conductor } };
+      await loop().poll();
+      expect(answers).toEqual([]);
+      expect((await dispatchStatus())[0].approval).toMatchObject({ actionId: "action-1", conductor });
+      await rm(path.join(root, "dispatches"), { recursive: true }); await seed();
+      grants.mockResolvedValue({ scope: "global" }); owner = { message: "offline" };
+      await loop().poll();
+      expect(answers).toHaveLength(1);
+      expect((await dispatchStatus())[0].approval).toBeDefined();
+    });
+
+    it("sends the decision to the worker's peer and clears the approval", async () => {
+      const value = await seed();
+      const returns = loop();
+      await returns.poll();
+      await returns.answerApproval(value.id, "deny", "action-1");
+      expect(answers).toEqual([{ target: workerTarget, actionId: "action-1", decision: "deny" }]);
+      const [saved] = await dispatchStatus();
+      expect(saved.approval).toBeUndefined();
+      // The return stays for the conductor to read.
+      expect(saved.returned).toMatchObject({ state: "blocked", read: false });
+      await expect(returns.answerApproval(value.id, "approve")).rejects.toMatchObject({ status: 409, message: "This worker is not waiting on an approval." });
+    });
+
+    it("refuses a different action id, and clears an approval its Hook says is no longer pending", async () => {
+      const value = await seed();
+      const returns = loop();
+      await returns.poll();
+      await expect(returns.answerApproval(value.id, "approve", "action-9")).rejects.toMatchObject({ status: 409 });
+      expect(answers).toEqual([]);
+      const { BridgeError } = await import("./protocol.js");
+      owner = new BridgeError(409, "This approval is no longer pending.") as never;
+      await expect(returns.answerApproval(value.id, "approve")).rejects.toMatchObject({ status: 409, message: "This approval is no longer pending." });
+      expect((await dispatchStatus())[0].approval).toBeUndefined();
+    });
+
+    it("answers a dispatch placed on this computer without SSH", async () => {
+      const value = await seed({ computer: "Laptop" });
+      const localAnswer = vi.fn(async () => {});
+      const returns = loop({ peers: async () => [], isLocal: (computer: string) => computer === "Laptop", localWorkers: async () => ({ workers: [observed] }), localAnswer });
+      await returns.poll();
+      await returns.answerApproval(value.id, "approve");
+      expect(localAnswer).toHaveBeenCalledWith(workerTarget, "action-1", "approve");
+      expect(request).not.toHaveBeenCalled();
+    });
   });
 });

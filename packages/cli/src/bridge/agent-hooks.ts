@@ -98,6 +98,18 @@ export function appServerDecision(request: PendingServerRequest, allow: boolean)
   return { decision: allow ? "accept" : "decline" };
 }
 
+/** What a dispatched worker's Hook tells the dispatching Hook it is waiting on:
+ * a card without the request's full message or details, which can run to 32 KB
+ * and cross SSH on every poll. */
+export interface ForwardedApproval { actionId: string; tool: string; title?: string; request?: string; requestKind?: RequestKind; expiresAt?: string;
+  /** The pane is drawing this as a terminal dialog; the answer types its keys. */
+  terminal?: true; conductor?: Pending["conductor"];
+  /** This Hook already pushed the request to a phone, so the dispatching Hook does not push it again. */
+  pushed?: true }
+
+/** How long a dispatching Hook's poll keeps a worker pane's permission asks held. */
+const DISPATCH_LEASE_MS = 45_000;
+
 /** A conductor `dispatch` or `hand_off` permission ask the Hook can answer
  * itself under a standing grant, or offer the phone two grant-writing answers. */
 export function conductorCall(tool: string, input: unknown): Pending["conductor"] | undefined {
@@ -184,6 +196,12 @@ export class AgentHooks {
    * action, what an answer from the notification types. */
   private dialogPushes = new Map<string, { action: string; title: string }>();
   private dialogActions = new Map<string, { target: Target; choice: TerminalChoice; expiresAt: number }>();
+  /** Terminal dialogs offered to a dispatching Hook, by pane: the `dialog-` action minted for the dialog's current title. */
+  private forwardedDialogs = new Map<string, { action: string; title: string }>();
+  /** Requests this Hook pushed to its own phone on behalf of a dispatched worker on another computer: action -> the answer to send back. */
+  private forwardedPushes = new Map<string, (decision: "approve" | "deny") => Promise<void>>();
+  /** Panes a dispatching Hook polled lately (`server\npane\nsource` -> expiry). */
+  private dispatchLeases = new Map<string, number>();
   /** opencode permission asks seen on disk or listed by a served pane, by request id. */
   private opencode = new Map<string, OpencodeHeld>();
   /** Questions served OpenCode panes are asking, by question id. */
@@ -899,6 +917,15 @@ export class AgentHooks {
     this.opencode.delete(id); this.pushBindings.dropAction(id);
   }
   async answer(target: Target, id: string, decision: unknown, updatedInput?: unknown) {
+    // A terminal dialog offered to a dispatching Hook (`workerApproval`) or pushed: answered with the pane's own keys.
+    if (id.startsWith("dialog-")) {
+      const dialog = this.dialogActions.get(id);
+      if (!dialog || JSON.stringify(dialog.target) !== JSON.stringify(target)) throw new BridgeError(409, "This approval is no longer pending.");
+      if (updatedInput !== undefined || !["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
+      await this.answerDialog(id, decision as "approve" | "deny");
+      this.dropForwardedDialog(JSON.stringify(target));
+      return;
+    }
     const worker = [...this.opencode.entries()].find(([, held]) => held.fanout?.actionId === id && JSON.stringify(held.target) === JSON.stringify(target));
     if (worker) {
       if (updatedInput !== undefined) throw new BridgeError(400, "Answers go with an approval.");
@@ -980,6 +1007,9 @@ export class AgentHooks {
     if (!["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
     const linked = this.pushBindings.consume(binding);
     if (!linked) throw new BridgeError(409, "This approval is no longer pending.");
+    // A worker's request on another computer: the callback answers it there.
+    const forwarded = this.forwardedPushes.get(linked.action);
+    if (forwarded) { this.forwardedPushes.delete(linked.action); await forwarded(decision as "approve" | "deny"); return; }
     const pending = this.pending.get(linked.action);
     if (pending) { await this.answer(pending.target, linked.action, decision); return; }
     const released = [...this.releasedHolds].find(([, hold]) => hold.action === linked.action);
@@ -1058,6 +1088,86 @@ export class AgentHooks {
     for (const [key, pushed] of this.dialogPushes) {
       if (!waiting.has(key) && JSON.parse(key).server === server) { this.dialogActions.delete(pushed.action); this.dropPushBindings(pushed.action); this.dialogPushes.delete(key); }
     }
+    for (const key of this.forwardedDialogs.keys()) if (!waiting.has(key) && JSON.parse(key).server === server) this.dropForwardedDialog(key);
+  }
+  /** Keeps the held asks of these dispatched panes for the dispatching Hook's
+   * next polls: without a phone, a watcher or push here, a worker's request
+   * would go straight to its terminal and only its `blocked` state would
+   * reach the conductor. Keyed by pane, since a worker that has not yet
+   * reported a conversation has no session. */
+  leaseDispatch(targets: readonly { server: string; pane: string; source: string }[]): void {
+    const now = Date.now();
+    for (const [key, expiry] of this.dispatchLeases) if (expiry <= now) this.dispatchLeases.delete(key);
+    for (const target of targets) {
+      const key = `${target.server}\n${target.pane}\n${target.source}`;
+      this.dispatchLeases.delete(key);
+      while (this.dispatchLeases.size >= 256) this.dispatchLeases.delete(this.dispatchLeases.keys().next().value!);
+      this.dispatchLeases.set(key, now + DISPATCH_LEASE_MS);
+    }
+  }
+  private dispatchLeased(target: Target): boolean {
+    return (this.dispatchLeases.get(`${target.server}\n${target.pane}\n${target.source}`) ?? 0) > Date.now();
+  }
+  private dropForwardedDialog(key: string) {
+    const forwarded = this.forwardedDialogs.get(key);
+    if (!forwarded) return;
+    this.forwardedDialogs.delete(key);
+    if (this.dialogPushes.get(key)?.action !== forwarded.action) this.dialogActions.delete(forwarded.action);
+  }
+  /** What this pane's worker is waiting on, for the dispatching Hook: the held
+   * or app-server request, else the terminal dialog the pane draws (offered
+   * under a `dialog-` action the answer route accepts). */
+  workerApproval(target: Target): ForwardedApproval | undefined {
+    const clip = (value: unknown, max: number) => typeof value === "string" && value ? value.slice(0, max) : undefined;
+    const held = this.approval(target);
+    if (held) {
+      const actionId = String(held.actionId), pending = this.pending.get(actionId);
+      const pushed = pending ? this.pushedHolds.has(actionId) || (!!pending.appServer && this.push.available) : this.push.available;
+      const title = clip(held.title, 200), request = clip(held.request, 500), expiresAt = clip(held.expiresAt, 40);
+      const conductor = held.conductor as Pending["conductor"] | undefined;
+      return { actionId, tool: clip(held.toolName, 200) ?? "action", ...(title ? { title } : {}), ...(request ? { request } : {}),
+        ...(pending ? { requestKind: pending.requestKind } : {}), ...(expiresAt ? { expiresAt } : {}), ...(conductor ? { conductor } : {}), ...(pushed ? { pushed: true as const } : {}) };
+    }
+    const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
+    const title = entry && (entry.dialog || entry.released) ? entry.choice?.title : undefined;
+    if (!entry?.choice || !title) return undefined;
+    const pushedDialog = this.dialogPushes.get(key);
+    let action = pushedDialog?.title === title && this.dialogActions.has(pushedDialog.action) ? pushedDialog.action : undefined;
+    if (!action) {
+      const known = this.forwardedDialogs.get(key);
+      if (known?.title === title && (this.dialogActions.get(known.action)?.expiresAt ?? 0) > Date.now()) action = known.action;
+      else {
+        this.dropForwardedDialog(key);
+        while (this.forwardedDialogs.size >= 64) this.dropForwardedDialog(this.forwardedDialogs.keys().next().value!);
+        action = `dialog-${randomUUID()}`;
+        this.forwardedDialogs.set(key, { action, title });
+        this.dialogActions.set(action, { target, choice: entry.choice, expiresAt: Date.now() + DIALOG_PUSH_MS });
+      }
+    }
+    const request = clip(entry.request ?? approvalSummary({ tool: entry.tool, message: title }).request, 500);
+    return { actionId: action, tool: entry.tool.slice(0, 200), title: title.slice(0, 200), ...(request ? { request } : {}),
+      ...(entry.requestKind ? { requestKind: entry.requestKind } : {}),
+      expiresAt: new Date(this.dialogActions.get(action)!.expiresAt).toISOString(), terminal: true,
+      ...(pushedDialog?.action === action ? { pushed: true as const } : {}) };
+  }
+  /** A worker's request on another computer, sent to this Hook's own phone:
+   * the notification's answer calls `answer`, which sends it back over the
+   * dispatch path. */
+  pushForwarded(summary: { provider: string; computer: string; project?: string; request: string; requestKind?: RequestKind },
+    answer: (decision: "approve" | "deny") => Promise<void>): void {
+    if (!this.push.available || this.closed) return;
+    const action = `forward-${randomUUID()}`, binding = randomUUID(), expiresAt = Date.now() + DIALOG_PUSH_MS;
+    while (this.forwardedPushes.size >= 64) {
+      const oldest = this.forwardedPushes.keys().next().value!;
+      this.forwardedPushes.delete(oldest); this.dropPushBindings(oldest);
+    }
+    this.forwardedPushes.set(action, answer);
+    this.pushBindings.add(binding, { action, expiresAt });
+    const drop = () => { this.forwardedPushes.delete(action); this.dropPushBindings(action); };
+    void this.push.notify({ binding, provider: summary.provider, question: false, expiresAt: new Date(expiresAt).toISOString(),
+      ...(summary.project ? { project: summary.project } : {}), computer: summary.computer, request: summary.request,
+      ...(summary.requestKind ? { requestKind: summary.requestKind } : {}) })
+      .then(delivered => { if (!delivered) drop(); }).catch(drop);
   }
   private adoptReleasedHold(key: string, target: Target, choice: TerminalChoice, title: string): boolean {
     const hold = this.releasedHolds.get(key);
@@ -1231,7 +1341,7 @@ export class AgentHooks {
         // lets Codex ask for it at once instead of holding a second card.
         if (body.event === "PermissionRequest" && target.source === "codex" && codexServers.forThread(target.session)) { res.end("{}"); return; }
         if (body.event !== "PermissionRequest" || target.source === "copilot"
-          || (!this.watching.has(JSON.stringify(target)) && !this.overview.has(target.server) && !this.push.available)) {
+          || (!this.watching.has(JSON.stringify(target)) && !this.overview.has(target.server) && !this.push.available && !this.dispatchLeased(target))) {
           if (body.event === "PermissionRequest") this.rememberTerminalPrompt(target, body);
           res.end("{}"); return;
         }
@@ -1241,7 +1351,7 @@ export class AgentHooks {
         const action = randomUUID();
         this.dialogReads.delete(JSON.stringify(target));
         const conductor = body.event === "PermissionRequest" ? conductorCall(String(body.tool || "action"), body.input) : undefined;
-        const locallyWatched = this.watching.has(JSON.stringify(target)) || this.overview.has(target.server);
+        const locallyWatched = this.watching.has(JSON.stringify(target)) || this.overview.has(target.server) || this.dispatchLeased(target);
         const cwd = typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane).catch(() => undefined);
         // When the hold ends the request stays in the terminal. A pushed
         // notification keeps working: its binding waits for the pane's dialog
@@ -1313,7 +1423,7 @@ export class AgentHooks {
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.response.end("{}"); }
     this.pending.clear(); this.server?.close(); this.server?.closeAllConnections();
     this.pushBindings.clear();
-    this.opencode.clear();
+    this.opencode.clear(); this.forwardedPushes.clear();
     this.paneServers.close(); this.servedQuestions.clear();
     if (this.opencodeDebounce) clearTimeout(this.opencodeDebounce);
     if (this.opencodePoll) clearInterval(this.opencodePoll);

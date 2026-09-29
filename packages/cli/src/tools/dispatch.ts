@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
 import { hookRequest } from "../bridge/client.js";
 import { dispatchSchema } from "../bridge/dispatch.js";
 import { handOff, handOffSchema, listLiveSessions } from "../bridge/hand-off.js";
@@ -22,7 +23,7 @@ export function register(server: McpServer): void {
   });
   server.registerTool("dispatch_returns", {
     title: "◆ phren · dispatch returns",
-    description: "List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), failed (the harness ended the turn on an error such as a usage limit, with the error), is blocked on terminal input, or its pane is gone. A worker that ended its turn with background tasks pending is waited on for up to two hours; a row has `waited` (the most tasks it waited on) or, if some were still running after that, `background`. Each row has the dispatch id, computer, project, label and the worker's target for hand_off.",
+    description: "List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), failed (the harness ended the turn on an error such as a usage limit, with the error), is blocked on terminal input, or its pane is gone. A blocked row with an `approval` field (actionId, tool, request) is a permission request the worker is waiting on, forwarded from its computer: answer it with dispatch_approve. A worker that ended its turn with background tasks pending is waited on for up to two hours; a row has `waited` (the most tasks it waited on) or, if some were still running after that, `background`. Each row has the dispatch id, computer, project, label and the worker's target for hand_off.",
     inputSchema: {},
   }, async () => {
     try {
@@ -31,6 +32,22 @@ export function register(server: McpServer): void {
       return mcpResponse({ ok: true, data: result, message: returns.length ? `${returns.length} unread returns.` : "No unread returns." });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not read dispatch returns." });
+    }
+  });
+  server.registerTool("dispatch_approve", {
+    title: "◆ phren · dispatch approve",
+    description: "Answer the permission request a dispatched worker is waiting on, forwarded from its computer: a dispatch_returns row with an approval field names it. The owner's standing grants already answer the dispatch and hand_off requests they cover. Deny when unsure and ask the owner.",
+    inputSchema: {
+      id: z.string().uuid().describe("Dispatch id from dispatch_returns."),
+      decision: z.enum(["approve", "deny"]),
+      actionId: z.string().max(200).optional().describe("The approval's actionId from dispatch_returns, so a request that has since changed is not answered by mistake."),
+    },
+  }, async input => {
+    try {
+      const result = await hookRequest("/v1/dispatch/approve", input);
+      return mcpResponse({ ok: result.ok === true, data: result, message: input.decision === "approve" ? "Approved." : "Denied." });
+    } catch (error) {
+      return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not answer the approval." });
     }
   });
   server.registerTool("live_sessions", {

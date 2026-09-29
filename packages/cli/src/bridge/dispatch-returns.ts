@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { logger } from "../logger.js";
 import { arrivalOf, dispatchStatus, updateReceipt, type OriginPane, type Receipt, type WorkerState } from "./dispatch.js";
 import { briefArrival, briefId, type BriefArrival } from "./launch-brief.js";
+import { findGrant } from "./grants.js";
 import { findPane, paneIdentity, sharedSnapshot } from "./herdr.js";
 import { handOff } from "./hand-off.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
-import { objects, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
+import { BridgeError, objects, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { ownerQuestion, readFinalTurn, type FinalTurn } from "./schedule-watch.js";
 import { terminalProvider } from "./terminal.js";
 import { opencodeTurn, readTurn, TURN_REPLY_LIMIT, truncateUtf8, turnPhase, type TurnRecord } from "./turn-records.js";
@@ -65,6 +67,8 @@ export interface WorkerObservation {
   background?: number;
   /** The owner stopped the turn in the worker's terminal. */
   interrupted?: true;
+  /** A permission request the pane's worker is waiting on, forwarded by its Hook (`AgentHooks.workerApproval`). */
+  approval?: Json;
 }
 
 export interface WorkerReaders {
@@ -73,6 +77,8 @@ export interface WorkerReaders {
   finalTurn: (source: Provider, session: string) => Promise<FinalTurn | undefined>;
   /** The turn record the pane's agent reported through its hooks (or OpenCode's plugin). */
   turn?: (server: string, pane: Json, source: Provider) => Promise<TurnRecord | undefined>;
+  /** What the worker in this conversation is waiting on, from the Hook that runs it. */
+  approval?: (target: Target) => Json | undefined;
   now?: () => number;
 }
 
@@ -88,6 +94,20 @@ const defaultReaders: WorkerReaders = {
   finalTurn: (source, session) => source === "codex" || source === "claude" || source === "opencode" ? readFinalTurn(source, session) : Promise.resolve(undefined),
   turn: paneTurn,
 };
+
+/** The default readers with the approval reader of the Hook that runs the workers. */
+export const workerReaders = (approval: NonNullable<WorkerReaders["approval"]>): WorkerReaders => ({ ...defaultReaders, approval });
+
+/** The receiving side of `/v1/dispatch/workers` on a Hook: leases the panes'
+ * permission asks for the dispatching Hook's next polls and reads what each
+ * worker is waiting on. */
+export function hookWorkers(hooks: { leaseDispatch: (targets: readonly { server: string; pane: string; source: string }[]) => void;
+  workerApproval: (target: Target) => object | undefined }): (input: unknown) => Promise<{ workers: WorkerObservation[] }> {
+  return input => {
+    hooks.leaseDispatch(workerRequestSchema.parse(input).targets);
+    return workerStates(input, workerReaders(target => hooks.workerApproval(target) as Json | undefined));
+  };
+}
 
 function replyFields(text: string | undefined, truncated?: boolean): Pick<WorkerObservation, "reply" | "truncated"> {
   if (!text) return {};
@@ -159,7 +179,13 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     return { state, session, completed: turn?.completed === true, ...(turn?.error ? { error: turn.error } : {}),
       ...(turn?.interrupted ? { interrupted: true as const } : {}), ...replyFields(turn?.lastAssistant) };
   }));
-  return { workers };
+  // Only a conversation this dispatch named can be answered; a starting target has no session yet.
+  return { workers: workers.map((seen, index) => {
+    const { dispatch: _dispatch, ...target } = targets[index];
+    const full = "session" in target ? targetSchema.safeParse(target) : undefined;
+    const approval = full?.success && seen.state !== "gone" && seen.state !== "unavailable" ? readers.approval?.(full.data) : undefined;
+    return approval ? { ...seen, approval } : seen;
+  }) };
 }
 
 const observationSchema = z.object({
@@ -167,8 +193,17 @@ const observationSchema = z.object({
   session: z.string().max(200).optional(), completed: z.boolean().optional(),
   reply: z.string().max(REPLY_LIMIT).optional(), truncated: z.boolean().optional(), error: z.string().max(500).optional(),
   hook: z.boolean().optional(), endedAt: z.string().max(40).optional(), background: z.number().int().min(0).max(999).optional(),
-  interrupted: z.boolean().optional(),
+  interrupted: z.boolean().optional(), approval: z.unknown().optional(),
 }).passthrough();
+
+/** A worker's forwarded permission request as its Hook sent it; an invalid one is ignored, not a reason to drop the state. */
+const approvalObservation = z.object({
+  actionId: z.string().min(1).max(200), tool: z.string().max(200).default("action"), title: z.string().max(200).optional(), request: z.string().max(500).optional(),
+  requestKind: z.enum(["command", "tool", "edit", "question", "other"]).optional(), terminal: z.boolean().optional(),
+  conductor: z.object({ action: z.enum(["dispatch", "hand_off"]), project: z.string().max(200).optional(), computer: z.string().max(200).optional() }).strict().optional(),
+  expiresAt: z.string().max(40).optional(), pushed: z.boolean().optional(),
+});
+export type ObservedApproval = z.infer<typeof approvalObservation>;
 
 /** What the owner is told when the worker's turn was interrupted in its terminal. */
 export const INTERRUPTED = "The worker's turn was interrupted in its terminal before it finished.";
@@ -181,7 +216,31 @@ function turnKey(value: string | undefined): string | undefined {
 export function observe(receipt: Receipt, value: unknown, now: number): boolean {
   const parsed = observationSchema.safeParse(value);
   if (!parsed.success || parsed.data.state === "unavailable" || parsed.data.state === "unknown") return false;
-  let seen = parsed.data;
+  const state = observeState(receipt, parsed.data, now);
+  return observeApproval(receipt, parsed.data.approval, now) || state;
+}
+
+/** Follow the request the worker is waiting on: a new one is a fresh unread
+ * blocked return that carries it, the same one is nothing new, and none means
+ * it was answered or gone. */
+function observeApproval(receipt: Receipt, value: unknown, now: number): boolean {
+  const parsed = value === undefined ? undefined : approvalObservation.safeParse(value);
+  if (parsed && !parsed.success) return false;
+  if (!parsed) {
+    if (!receipt.approval) return false;
+    delete receipt.approval; return true;
+  }
+  const seen = parsed.data;
+  if (receipt.approval?.actionId === seen.actionId) return false;
+  const at = new Date(now).toISOString();
+  const { conductor, requestKind, terminal, pushed, ...rest } = seen;
+  receipt.approval = { ...rest, ...(requestKind ? { requestKind } : {}), ...(terminal ? { terminal } : {}), ...(conductor ? { conductor } : {}), ...(pushed ? { pushed } : {}), at };
+  receipt.returned = { state: "blocked", at, read: false, question: `Approval: ${seen.request ?? seen.title ?? seen.tool}`.slice(0, 200) };
+  return true;
+}
+
+function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema>, now: number): boolean {
+  let seen = parsed;
   const at = new Date(now).toISOString();
   let changed = false;
   // A worker that started without a conversation id gets its full target once one exists.
@@ -254,14 +313,18 @@ export function noticeLine(receipts: readonly Receipt[]): string {
   const word = { "done": "done", "needs-you": "needs you", "failed": "failed", "blocked": "blocked", "gone": "gone" } as const;
   const describe = (receipt: Receipt, room: number) => {
     const returned = receipt.returned!;
-    const detail = returned.state === "needs-you" ? returned.question : returned.state === "failed" ? returned.error
+    const asking = returned.state === "blocked" ? receipt.approval : undefined;
+    const detail = asking ? asking.request ?? asking.title ?? asking.tool : returned.state === "needs-you" ? returned.question : returned.state === "failed" ? returned.error
       : returned.state === "done" ? returned.reply?.split("\n").find(line => line.trim()) : undefined;
     const excerpt = detail ? clean(detail.replace(/[*_`#>]+/g, ""), room) : "";
     const tasks = (count: number) => `${count} background task${count === 1 ? "" : "s"}`;
     const left = returned.background ? ` (${tasks(returned.background)} still running)` : returned.waited ? ` (after ${tasks(returned.waited)} finished)` : "";
-    return `${clean(receipt.computer, 60)} ${clean(receipt.label, 80)} ${word[returned.state]}${left}${excerpt ? `, ${excerpt}` : ""}`;
+    return `${clean(receipt.computer, 60)} ${clean(receipt.label, 80)} ${asking ? "needs approval" : word[returned.state]}${left}${excerpt ? `, ${excerpt}` : ""}`;
   };
-  if (receipts.length === 1) return `Return: ${describe(receipts[0], 100)} (dispatch ${receipts[0].id}). Call dispatch_returns.`;
+  if (receipts.length === 1) {
+    const [only] = receipts;
+    return `Return: ${describe(only, 100)} (dispatch ${only.id}${only.approval && only.returned?.state === "blocked" ? "; answer with dispatch_approve" : ""}). Call dispatch_returns.`;
+  }
   const items = receipts.slice(0, 4).map(receipt => describe(receipt, 40)).join("; ");
   return `Returns: ${receipts.length} dispatches (${items}${receipts.length > 4 ? "; more" : ""}). Call dispatch_returns.`;
 }
@@ -274,6 +337,9 @@ export function returnRow(receipt: Receipt): Json {
     ...(returned.truncated ? { truncated: true } : {}), ...(returned.error ? { error: returned.error } : {}), ...(returned.question ? { question: returned.question } : {}),
     ...(returned.background ? { background: returned.background } : {}),
     ...(returned.waited && !returned.background ? { waited: returned.waited } : {}),
+    ...(receipt.approval && returned.state === "blocked" ? { approval: { actionId: receipt.approval.actionId, tool: receipt.approval.tool,
+      ...(receipt.approval.request ? { request: receipt.approval.request } : {}), ...(receipt.approval.title ? { title: receipt.approval.title } : {}),
+      ...(receipt.approval.terminal ? { terminal: true } : {}) } } : {}),
     ...(receipt.target ? { target: receipt.target } : {}) };
 }
 
@@ -291,6 +357,12 @@ export interface DispatchReturnsOptions {
   deliver?: (target: Target, text: string, deliveryId: string) => Promise<{ delivered: boolean }>;
   /** What a worker's hooks reported for a brief launched on this computer. */
   localArrival?: (id: string) => Promise<BriefArrival | undefined>;
+  /** The standing grant for a conductor call, on this computer. */
+  findGrant?: typeof findGrant;
+  /** Answers a worker's approval placed on this computer, without SSH (the Hook's own `AgentHooks.answer`). */
+  localAnswer?: (target: Target, actionId: string, decision: "approve" | "deny") => Promise<unknown>;
+  /** A worker's new forwarded request was recorded. Returns true when this Hook pushed it to its phone. */
+  onApproval?: (receipt: Receipt, approval: NonNullable<Receipt["approval"]>) => boolean | void;
   now?: () => number;
 }
 
@@ -312,6 +384,9 @@ export class DispatchReturns {
   private readonly deliver: (target: Target, text: string, deliveryId: string) => Promise<{ delivered: boolean }>;
   private readonly localArrival: (id: string) => Promise<BriefArrival | undefined>;
   private readonly now: () => number;
+  private readonly grant: typeof findGrant;
+  private readonly localAnswer?: DispatchReturnsOptions["localAnswer"];
+  private readonly onApproval?: DispatchReturnsOptions["onApproval"];
   private lastPoll = -Infinity;
   private readonly lastNotice = new Map<string, number>();
   /** A return is waiting for a dispatching agent that was busy: try again on
@@ -329,6 +404,37 @@ export class DispatchReturns {
     this.deliver = options.deliver ?? ((target, text, deliveryId) => handOff({ target, text }, { deliveryId }));
     this.localArrival = options.localArrival ?? briefArrival;
     this.now = options.now ?? Date.now;
+    this.grant = options.findGrant ?? findGrant;
+    this.localAnswer = options.localAnswer;
+    this.onApproval = options.onApproval;
+  }
+
+  /** Send a decision for a worker's request to the Hook that runs it. */
+  private async sendAnswer(receipt: Receipt, actionId: string, decision: "approve" | "deny"): Promise<void> {
+    const target = receipt.target;
+    if (!target || !("session" in target)) throw new BridgeError(409, "This worker is not waiting on an approval.");
+    const peer = (await this.peers().catch(() => [] as HookPeer[])).find(candidate => candidate.name === receipt.computer);
+    if (peer) { await this.request(peer, "/v1/approvals/answer", { target, actionId, decision }); return; }
+    if (!this.localAnswer || !this.isLocal(receipt.computer)) throw new BridgeError(503, `${receipt.computer} is not reachable from here.`);
+    await this.localAnswer(target, actionId, decision);
+  }
+
+  /** Answer the permission request a dispatched worker is waiting on. It is
+   * cleared from the receipt once answered, or once its Hook says it is no
+   * longer pending (answered in the terminal, or timed out). */
+  async answerApproval(id: string, decision: "approve" | "deny", actionId?: string): Promise<void> {
+    const receipt = (await dispatchStatus()).find(candidate => candidate.id === id);
+    const approval = receipt?.approval;
+    if (!receipt || !approval || (actionId && approval.actionId !== actionId)) throw new BridgeError(409, "This worker is not waiting on an approval.");
+    const clear = () => updateReceipt(id, current => {
+      if (current.approval?.actionId !== approval.actionId) return false;
+      delete current.approval; return true;
+    }).catch(() => undefined);
+    try { await this.sendAnswer(receipt, approval.actionId, decision); } catch (error) {
+      if (error instanceof BridgeError && error.status === 409) await clear();
+      throw error;
+    }
+    await clear();
   }
 
   /** Called from the Hook's activity tick. Polls peers at most every POLL_MS;
@@ -391,10 +497,39 @@ export class DispatchReturns {
         const workers = objects(answer?.workers);
         if (workers.length !== batch.length) continue;
         for (const [index, receipt] of batch.entries()) {
-          await updateReceipt(receipt.id, current => observe(current, workers[index], this.now())).catch(() => undefined);
+          const seen = await this.grantAnswered(receipt, workers[index]);
+          let fresh: NonNullable<Receipt["approval"]> | undefined;
+          const current = await updateReceipt(receipt.id, value => {
+            const before = value.approval?.actionId, changed = observe(value, seen, this.now());
+            if (value.approval && value.approval.actionId !== before) fresh = value.approval;
+            return changed;
+          }).catch(() => undefined);
+          if (!fresh || !current) continue;
+          const pushed = await Promise.resolve(this.onApproval?.(current, fresh)).catch(() => undefined);
+          if (pushed === true) {
+            await updateReceipt(receipt.id, value => {
+              if (value.approval?.actionId !== fresh!.actionId || value.approval.pushed) return false;
+              value.approval.pushed = true; return true;
+            }).catch(() => undefined);
+          }
         }
       }
     }));
+  }
+
+  /** A conductor call the owner's standing grant covers is answered here at
+   * once, and its request is left off the observation so it never becomes a
+   * return. Anything else, or an answer that failed, is left for the owner. */
+  private async grantAnswered(receipt: Receipt, worker: Json): Promise<Json> {
+    const parsed = approvalObservation.safeParse(worker.approval);
+    const conductor = parsed.success ? parsed.data.conductor : undefined;
+    if (!parsed.success || !conductor) return worker;
+    const grant = await this.grant({ action: conductor.action, project: conductor.project, computer: conductor.computer }).catch(() => undefined);
+    if (!grant) return worker;
+    try { await this.sendAnswer(receipt, parsed.data.actionId, "approve"); } catch { return worker; }
+    logger.info("dispatch", `Approved ${conductor.action} for ${receipt.computer} ${receipt.label} under grant ${grant.scope}.`);
+    const { approval: _answered, ...rest } = worker;
+    return rest;
   }
 
   /** Type one line into each idle dispatching agent that has returns it was

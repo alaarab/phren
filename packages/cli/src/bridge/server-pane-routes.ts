@@ -512,7 +512,7 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
   else if (url.pathname === "/v1/approvals/answer") {
     const actionId = target.source === "opencode"
       ? z.string().regex(/^[A-Za-z0-9_]{1,200}$/).parse(data.actionId)
-      : z.string().uuid().parse(data.actionId);
+      : z.union([z.string().uuid(), z.string().regex(/^dialog-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)]).parse(data.actionId);
     await agentHooks.answer(target, actionId, data.decision, data.updatedInput); result = { ok: true };
   } else if (url.pathname === "/v1/questions/answer") {
     // Only a Codex answer can carry the phone's uploads (codex-questions).

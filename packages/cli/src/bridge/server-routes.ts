@@ -13,7 +13,7 @@ import { homeDir } from "../home-paths.js";
 import { resolveCodeStore, CodeRoutes } from "./code-routes.js";
 import type { WorkspaceContextUsage } from "./context.js";
 import { type DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
-import { type DispatchReturns, workerStates } from "./dispatch-returns.js";
+import { type DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { remoteChildren } from "./dispatch-tree.js";
 import { briefArrival, briefId } from "./launch-brief.js";
 import { addGrant, listNamedGrants, removeGrant } from "./grants.js";
@@ -535,9 +535,12 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           const { origin, ...brief } = data;
           result = await dispatches!.dispatch(brief, origin);
         } else if (url.pathname === "/v1/dispatch/workers") {
-          result = await workerStates(data);
+          result = await hookWorkers(agentHooks)(data);
         } else if (url.pathname === "/v1/dispatch/returns") {
           result = { returns: await ctx.returns!.take() };
+        } else if (url.pathname === "/v1/dispatch/approve") {
+          const body = z.object({ id: z.string().uuid(), decision: z.enum(["approve", "deny"]), actionId: z.string().min(1).max(200).optional() }).strict().parse(data);
+          await ctx.returns!.answerApproval(body.id, body.decision, body.actionId); result = { ok: true };
         } else if (url.pathname === "/v1/conductor/grants") {
           result = { ok: true, grant: await addGrant(data) };
         } else if (url.pathname === "/v1/push/register") {
