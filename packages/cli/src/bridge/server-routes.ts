@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { harnessInventoryWithin, launchCheckOff } from "./harnesses.js";
 import path from "node:path";
 import { z } from "zod";
+import { sudoAnswer } from "./sudo.js";
 import { saveCodeNote } from "./code-note.js";
 import type { FanoutMessages } from "./fanout-messages.js";
 import { handOff } from "./hand-off.js";
@@ -131,7 +132,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, resources: true };
+  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, resources: true, sudo: true, sudoOutcome: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -450,6 +451,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             break;
           }
           case "/v1/push/status": result = agentHooks.push.status; break;
+          case "/v1/sudo": result = { requests: agentHooks.sudo.list() }; break;
           case "/v1/projects/locate": {
             const candidates = await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent());
             for (const candidate of candidates) {
@@ -600,6 +602,16 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/push/register") {
           // Registration is kept for when a key is added; the reply says whether push works now.
           await agentHooks.push.register(data); result = { ok: true, configured: agentHooks.push.status.configured };
+        } else if (url.pathname === "/v1/sudo/answer") {
+          // The owner answers from the phone; an agent's call names its pane.
+          if (data && typeof data === "object" && "origin" in data) throw new BridgeError(403, "Only the owner answers a sudo request, from the phone.");
+          let parsed: ReturnType<typeof sudoAnswer>;
+          try { parsed = sudoAnswer(data); } catch { throw new BridgeError(400, "Send an id and a password, or deny."); }
+          const answered = agentHooks.sudo.answer(parsed.id, parsed.answer);
+          if (!answered) throw new BridgeError(404, "This sudo request is no longer pending.");
+          // Asked for: whether sudo took the password, so the phone knows to save or forget it.
+          const outcome = parsed.outcome ? await answered.outcome : undefined;
+          result = { ok: true, ...(outcome ? { outcome } : {}) };
         } else if (url.pathname === "/v1/push/answer") {
           await agentHooks.answerPush(z.string().uuid().parse(data.binding), data.decision); result = { ok: true };
         } else if (url.pathname === "/v1/push/target") {

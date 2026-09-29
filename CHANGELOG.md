@@ -19,6 +19,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - `GET /v1/dispatch/capacity` also returns `usage: [{ source, account?, leftPercent?, exhausted?, until? }]` for Codex and each Claude home, read within 2.5 seconds alongside the harness inventory. `dispatch` to `anywhere` still picks the least busy computer, and now skips one whose account for the dispatch (Codex's, or the named Claude home) is exhausted, naming it in `skipped`; with none left it fails with code `out_of_quota`. Low quota never steers placement, since the owner often wants quota used before it resets.
+### Added
+
+- sudo from the phone. `sudo -A` (and the new `phren sudo <command...>`) asks the phone for the password when there is no terminal, such as a Claude Code `!` command or an agent's shell. `phren bridge install` writes the `<bridge>/askpass` helper; the Hook checks the chain (its own node and bundle, under that script, under a sudo running as root, writing to a pipe only sudo reads, on a connection only it holds), reads the exact command from that sudo, pushes it to the phone (category `PHREN_SUDO`) and lists it at `GET /v1/sudo` and in `{type: "sudo"}` overview frames (`sudo=1`). `POST /v1/sudo/answer` hands the password to askpass once; deny, a two-minute timeout (`PHREN_SUDO_TIMEOUT_MS`) or no reachable phone makes askpass exit 1. The password is never logged, stored or shown to the agent. Dispatched workers, conductors and scheduled runs get `SUDO_ASKPASS`. Capability `sudo`. Requests name the `account` whose password sudo wants, and `outcome: true` on an answer reports whether sudo accepted it (it asks again when it did not), so the phone can save or forget a password (capability `sudoOutcome`).
 
 ## [0.3.12] - 2026-09-29
 

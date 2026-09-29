@@ -3,6 +3,7 @@ import { createWriteStream } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { finished as streamFinished } from "node:stream/promises";
+import { askpassEnv } from "./sudo.js";
 import { claudeHome, claudeLaunchEnv } from "./claude-accounts.js";
 import { fanoutRoot } from "./fanouts.js";
 import { pretrustFolder } from "./folder-trust.js";
@@ -91,8 +92,10 @@ async function promptWhenReady(server: string, paneId: string, text: string, sig
   }
 }
 
-/** The environment a headless run gets: this Hook's, plus the chosen Claude account's config directory. */
+/** The environment a headless run gets: this Hook's, SUDO_ASKPASS, plus the chosen Claude account's config directory. */
 export function headlessEnv(schedule: Schedule, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const askpass = askpassEnv();
+  if (askpass.SUDO_ASKPASS) env = { ...env, ...askpass };
   if (!schedule.account || schedule.harness !== "claude") return env;
   const home = claudeHome(schedule.account, env);
   if (!home) throw new Error(`Schedule "${schedule.name}" uses Claude account "${schedule.account}", which is not set up on this computer. Run \`phren bridge accounts\`.`);
