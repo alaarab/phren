@@ -520,7 +520,10 @@ or `phren hand-off local --session <id> --status --delivery-id <id>`.
 A local sender receives a queued delivery notice when the outcome changes.
 
 The queue is private to the receiving computer under `<bridge>/hand-offs/`.
-It survives service restarts and retains delivery tombstones. The Hook writes
+It survives service restarts and retains delivery tombstones for 7 days, so a
+retried delivery id replays its outcome instead of typing again. Settled
+records past that age are pruned, and the directory is capped at 512 records,
+oldest settled first; a queued or attempting record is never pruned. The Hook writes
 an attempting marker before input. A restart in the acknowledgement gap or
 an unconfirmed input yields `state:"uncertain", deliveryUncertain:true` and
 is never retried automatically. Only Herdr's `agent_not_ready`, which guarantees
