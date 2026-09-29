@@ -41,7 +41,7 @@ describe("dispatch entry points", () => {
     const exposed = new Map<string, ToolHandler>();
     const gate = createToolGate({ profile, register: (name, _config, handler) => exposed.set(name, handler) });
     register({ registerTool: gate.registerTool } as unknown as McpServer); gate.finish();
-    vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/workspaces" ? overview : { ok: true });
+    vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/workspaces" ? overview : { ok: true, delivered: true });
     const input = { session, text: "Please take this next step" };
     const result = await exposed.get(profile === "full" ? "hand_off" : "phren_admin")!({ ...input, ...(profile === "core" ? { action: "hand_off" } : {}) });
     expect(JSON.parse((result as { content: { text: string }[] }).content[0].text).data).toMatchObject({ ok: true, delivered: true, target });
@@ -54,7 +54,7 @@ describe("dispatch entry points", () => {
     register({ registerTool: gate.registerTool } as unknown as McpServer); gate.finish();
     const peer = { name: "Desk", server: "default" } as Awaited<ReturnType<typeof hookPeers>>[number];
     vi.mocked(hookPeers).mockResolvedValue([peer]);
-    vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route.startsWith("/v1/workspaces") ? overview : { ok: true });
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route.startsWith("/v1/workspaces") ? overview : { ok: true, delivered: true });
     const result = await exposed.get("hand_off")!({ computer: "Desk", session, text: "Review the current work" });
     expect(JSON.parse((result as { content: { text: string }[] }).content[0].text).data).toMatchObject({ delivered: true, target });
     expect(peerRequest).toHaveBeenLastCalledWith(peer, "/v1/prompt", { target, text: "Review the current work" });
@@ -63,7 +63,7 @@ describe("dispatch entry points", () => {
 
   it("routes the hand-off CLI command to a local session", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/workspaces" ? overview : { ok: true });
+    vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/workspaces" ? overview : { ok: true, delivered: true });
     const command = lookupCommand("hand-off")!;
     const context = { phrenPath: () => "unused", profile: () => "unused" };
     expect(await command.run(["local", "--session", session, "--text", "Continue here"], context)).toBe(0);

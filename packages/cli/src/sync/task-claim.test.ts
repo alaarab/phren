@@ -5,6 +5,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { readTasks } from "../data/tasks.js";
 import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 import { claimTaskSynced } from "./task-claim.js";
+import { captureTaskWrites } from "../data/task-receipts.js";
+import * as sessionGit from "../cli/session-git.js";
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" }).trim();
 
@@ -36,7 +38,7 @@ beforeEach(() => {
 // The claims below carry fixed times; pin the clock just after them so the
 // first one stays fresh (under a day old) whatever day the suite runs.
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-09-25T05:02:00Z") }); });
-afterEach(() => { vi.useRealTimers(); tmp.cleanup(); });
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); tmp.cleanup(); });
 
 const task = (store: string, bid: string) => {
   const doc = readTasks(store, "phren");
@@ -45,13 +47,16 @@ const task = (store: string, bid: string) => {
 };
 
 it("gives a task to the first conductor that claims it and turns the other away until it is released", async () => {
-  const claimed = await claimTaskSynced(mini, "phren", "bid:aaaa1111", { computer: "Mini", at: "2026-09-25T04:30:00Z", session: "w22-p1" });
+  const { result: claimed, write } = await captureTaskWrites(() => claimTaskSynced(mini, "phren", "bid:aaaa1111", { computer: "Mini", at: "2026-09-25T04:30:00Z", session: "w22-p1" }));
   expect(claimed).toMatchObject({ claimed: true, synced: true });
+  expect(write).toEqual({ path: path.join(mini, "phren", "tasks.md"), commit: git(mini, "rev-parse", "HEAD") });
+  expect(git(mini, "show", `${write!.commit}:phren/tasks.md`)).toContain("Claimed: Mini 2026-09-25T04:30:00Z session:w22-p1");
   // The claim reached the remote as the Active task's Claimed line.
   expect(git(tmp.path, "--git-dir=remote.git", "show", "main:phren/tasks.md")).toContain(
     "## Active\n\n- [ ] Port the parser <!-- bid:aaaa1111 rank:1 -->\n  Claimed: Mini 2026-09-25T04:30:00Z session:w22-p1\n");
 
-  const refused = await claimTaskSynced(laptop, "phren", "bid:aaaa1111", { computer: "Laptop", at: "2026-09-25T04:31:00Z" });
+  const { result: refused, write: refusedWrite } = await captureTaskWrites(() => claimTaskSynced(laptop, "phren", "bid:aaaa1111", { computer: "Laptop", at: "2026-09-25T04:31:00Z" }));
+  expect(refusedWrite).toBeNull();
 expect(refused).toMatchObject({ claimed: false, error: "Mini claimed this task at 2026-09-25T04:30:00Z." });
   expect(task(laptop, "aaaa1111")).toMatchObject({ section: "Active", claim: { computer: "Mini" } });
   // force takes over only a claim more than a day old, never a fresh one.
@@ -63,4 +68,27 @@ expect(refused).toMatchObject({ claimed: false, error: "Mini claimed this task a
     .toMatchObject({ claimed: true, synced: true });
   expect(task(mini, "aaaa1111")?.claim).toBeUndefined();
   expect(task(laptop, "aaaa1111")).toMatchObject({ section: "Active", claim: { computer: "Laptop", at: "2026-09-25T05:01:00Z" } });
+});
+
+it("keeps the verified local commit when the claim cannot be pushed", async () => {
+  const actual = sessionGit.runBestEffortGit;
+  vi.spyOn(sessionGit, "runBestEffortGit").mockImplementation((args, cwd) => args[0] === "push"
+    ? Promise.resolve({ ok: false, output: "", error: "push unavailable" }) : actual(args, cwd));
+  const { result, write } = await captureTaskWrites(() => claimTaskSynced(mini, "phren", "bid:aaaa1111", { computer: "Mini", at: "2026-09-25T05:00:00Z" }));
+  expect(result).toMatchObject({ claimed: true, synced: false });
+  expect(write).toEqual({ path: path.join(mini, "phren", "tasks.md"), commit: git(mini, "rev-parse", "HEAD") });
+  expect(git(mini, "show", `${write!.commit}:phren/tasks.md`)).toContain("Claimed: Mini");
+  expect(git(tmp.path, "--git-dir=remote.git", "show", "main:phren/tasks.md")).not.toContain("Claimed: Mini");
+});
+
+it("returns a written path but no commit when the claim commit fails", async () => {
+  const head = git(mini, "rev-parse", "HEAD");
+  const actual = sessionGit.runBestEffortGit;
+  vi.spyOn(sessionGit, "runBestEffortGit").mockImplementation((args, cwd) => args.includes("commit")
+    ? Promise.resolve({ ok: false, output: "", error: "commit rejected" }) : actual(args, cwd));
+  const { result, write } = await captureTaskWrites(() => claimTaskSynced(mini, "phren", "bid:aaaa1111", { computer: "Mini", at: "2026-09-25T05:00:00Z" }));
+  expect(result).toMatchObject({ claimed: true, synced: false });
+  expect(write).toEqual({ path: path.join(mini, "phren", "tasks.md"), commit: null });
+  expect(fs.readFileSync(write!.path, "utf8")).toContain("Claimed: Mini");
+  expect(git(mini, "rev-parse", "HEAD")).toBe(head);
 });

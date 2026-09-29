@@ -91,6 +91,7 @@ export async function claudeChildAgents(file: string, session: string): Promise<
     return cached.relations;
   }
   const launches = new Map<string, { path: string; callId: string; state: "running" | "completed" }>();
+  const stops = new Map<string, string>();
   // Named teammates (the Agent tool with a `name`) run as their own session
   // and never post a task-notification: they announce themselves idle in a
   // teammate-message instead, and may be woken again later. Their file is
@@ -100,25 +101,49 @@ export async function claudeChildAgents(file: string, session: string): Promise<
   for await (const line of lines) {
     try {
       const raw = object(JSON.parse(line)), result = object(raw.toolUseResult);
+      const blocks = objects(object(raw.message).content);
       const agentId = String(result.agentId ?? ""), status = String(result.status ?? "");
       if (/^[A-Za-z0-9._-]{1,128}$/.test(agentId) && ["async_launched", "running"].includes(status)) {
-        const blocks = objects(object(raw.message).content), callId = String(blocks.find(b => b.type === "tool_result")?.tool_use_id ?? "");
+        const callId = String(blocks.find(b => b.type === "tool_result")?.tool_use_id ?? "");
         if (callId) launches.set(agentId, { path: String(result.description || result.name || "Agent").slice(0, 200), callId, state: "running" });
       }
       if (raw.type === "assistant") {
-        for (const block of objects(object(raw.message).content)) {
-          if (block.type !== "tool_use" || block.name !== "Agent") continue;
+        for (const block of blocks) {
+          if (block.type !== "tool_use") continue;
+          if (block.name === "TaskStop" && typeof block.id === "string" && typeof object(block.input).task_id === "string") {
+            stops.set(block.id, String(object(block.input).task_id));
+          }
+          if (block.name !== "Agent") continue;
           const input = object(block.input), name = String(input.name ?? "");
           if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(name) || typeof block.id !== "string") continue;
           teammates.set(name, { path: String(input.description || name).slice(0, 200), callId: block.id.slice(0, 200), state: "running" });
         }
       }
+      // A stop request alone proves nothing. Its successful, matching result
+      // ends the child even when no later task notification is recorded.
+      if (raw.type === "user") {
+        for (const block of blocks) {
+          if (block.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
+          const task = stops.get(block.tool_use_id);
+          if (!task) continue;
+          stops.delete(block.tool_use_id);
+          const previous = launches.get(task);
+          if (previous && block.is_error !== true && result.task_id === task && typeof result.message === "string"
+              && /^Successfully stopped task\b/i.test(result.message)) previous.state = "completed";
+        }
+      }
       const content = typeof raw.content === "string" ? raw.content : typeof object(raw.message).content === "string" ? String(object(raw.message).content) : "";
-      if (content.includes("<task-notification>")) {
-        const child = /<task-id>([^<>]{1,128})<\/task-id>/.exec(content)?.[1], taskStatus = /<status>([^<>]+)<\/status>/.exec(content)?.[1];
-        // A stopped agent's notification says "killed"; it is finished as
-        // much as a completed one and must leave the running count.
-        const previous = child && launches.get(child); if (previous && ["completed", "failed", "cancelled", "killed"].includes(taskStatus ?? "")) previous.state = "completed";
+      const attachment = object(raw.attachment);
+      const notices = [raw.type === "queue-operation" || raw.type === "user" ? content : "",
+        ...(raw.type === "user" ? blocks.filter(block => block.type === "text" && typeof block.text === "string").map(block => String(block.text)) : []),
+        raw.type === "attachment" && attachment.type === "queued_command" && attachment.commandMode === "task-notification" && typeof attachment.prompt === "string" ? attachment.prompt : ""];
+      for (const notice of notices) {
+        for (const match of notice.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
+          const child = /<task-id>([^<>]{1,128})<\/task-id>/.exec(match[1])?.[1], taskStatus = /<status>([^<>]+)<\/status>/.exec(match[1])?.[1].trim();
+          // Terminal notifications end only the child named in that envelope.
+          const previous = child && launches.get(child);
+          if (previous && ["completed", "failed", "cancelled", "canceled", "killed", "stopped"].includes(taskStatus ?? "")) previous.state = "completed";
+        }
       }
       if (content.includes("<teammate-message")) {
         const from = /<teammate-message teammate_id="([A-Za-z0-9][A-Za-z0-9_-]{0,63})"/.exec(content)?.[1];

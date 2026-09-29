@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assess, collectResources, heavyProcesses, parseMeminfo, parsePmset, parsePs, parseSwap, type ProcessRow, ResourceMonitor } from "./resources.js";
+import { assess, collectResources, heavyKind, heavyProcesses, parseMeminfo, parsePmset, parsePs, parseSwap, type ProcessRow, ResourceMonitor } from "./resources.js";
 
 const GB = 1024 ** 3;
 const row = (pid: number, ppid: number, cpu: number, rssMB: number, command: string, args = command): ProcessRow =>
@@ -73,9 +73,33 @@ describe("resources", () => {
       row(60, 1, 0, 1, "/bin/launchd_sim"),
     ]);
     expect(jobs.map(j => [j.name, j.processes, j.resourceReason])).toEqual([
-      ["Codex", 1, "cpu"], ["Codex app server", 2, "memory"], ["Codex MCP server", 1, "memory"], ["Simulator", 1, "tracked"],
+      ["Codex", 1, "cpu"], ["Codex app server", 2, "memory"], ["Codex MCP server", 1, "memory"],
     ]);
     expect(jobs.filter(j => j.kind === "codex").reduce((sum, j) => sum + j.memoryBytes, 0)).toBe(481 * 1024 ** 2);
+  });
+
+  it("classifies executables without matching names in unrelated arguments", () => {
+    for (const command of ["/bin/sh", "/usr/bin/python", "/some/tool/2.1.283"]) {
+      expect(heavyKind(row(10, 1, 80, 500, command,
+        `${command} investigate /sdk/emulator/qemu/bin/qemu-system-aarch64 claude codex`))).toBeUndefined();
+    }
+    expect(heavyKind(row(10, 1, 10, 200, "/Users/me/.local/share/claude/versions/2.1.283", "worker --prompt")))
+      .toEqual({ kind: "claude", name: "Claude Code" });
+    expect(heavyKind(row(10, 1, 10, 200, "/sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64")))
+      .toEqual({ kind: "emulator", name: "Android emulator" });
+    expect(heavyKind(row(10, 1, 10, 200, "/usr/bin/node", "node unrelated.js /usr/local/bin/codex"))).toBeUndefined();
+    expect(heavyProcesses([row(10, 1, 80, 500, "/bin/sh", "sh -c /sdk/emulator/qemu/bin/codex")])[0])
+      .toMatchObject({ kind: "busy", name: "sh" });
+  });
+
+  it("requires CPU or memory use for every known job, including simulators and emulators", () => {
+    for (const command of ["/bin/launchd_sim", "/sdk/emulator", "/bin/codex", "/bin/claude", "/bin/opencode", "/bin/java", "/bin/xcodebuild"]) {
+      expect(heavyProcesses([row(10, 1, 9.9, 199, command)])).toEqual([]);
+      expect(heavyProcesses([row(10, 1, 10, 1, command)])[0]).toMatchObject({ resourceReason: "cpu" });
+      expect(heavyProcesses([row(10, 1, 0, 200, command)])[0]).toMatchObject({ resourceReason: "memory" });
+      expect(heavyProcesses([row(10, 1, 0, 1, command), row(11, 10, 10, 1, "/bin/helper")])[0])
+        .toMatchObject({ pid: 10, processes: 2, resourceReason: "cpu" });
+    }
   });
 
   it("reads battery, swap and Linux memory", () => {

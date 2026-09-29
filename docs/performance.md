@@ -668,3 +668,32 @@ there to lay out; the first row comes 130 ms (no round trip) to 780 ms
 (one round trip) sooner. A live reply preview parses only its unsettled
 tail: settled paragraphs, up to the last blank line outside a fence, parse
 once (`ChatRichTextDocumentCache.streaming`).
+
+
+### Herdr CPU investigation, September 29, 2026
+
+Task `bid:3bbc36d9` reported continuous 97 to 99% Herdr CPU on a Mac mini
+on September 28. A read-only inspection at 03:23 to 03:24 UTC on September
+29 did not reproduce it. The server had been running for 4 days, 15 hours
+and 43 minutes; it had not been restarted for this investigation. Two `ps`
+readings showed 0.9% and 1.0% CPU. During the same inspection its CPU
+time increased from 482:15.93 to 482:16.47 over 35 seconds, as measured
+by the elapsed-process-time column, about 1.5% of one core.
+
+A three-second `sample` at 10 ms intervals found the main thread parked in
+a condition wait in 211 of 213 samples, with the API listener waiting in
+`accept`. This is evidence of an idle server during that window, not a
+profile of the reported spike. The Hook remained running throughout.
+
+The Hook's `/v1/metrics` last complete minute reported 40 `session.snapshot`,
+69 `pane.process_info`, 6 `agent.read`, and 10 `ping` calls, alongside 12
+activity ticks. Source review found the five-second activity timer has an
+overlap guard, shared snapshots join concurrent polling requests, and
+resource collection caches and coalesces reads. These measurements do not
+establish whether earlier polling caused the historical spike.
+
+No polling change is justified by this capture. Keep the incident open for
+a capture while Herdr is consuming a core: collect `ps` CPU-time readings,
+a short `sample`, and `/v1/metrics` over the same interval before restarting
+anything. Compare the hot stack with RPC rates to distinguish a server loop
+from work driven by the Hook.

@@ -78,6 +78,15 @@ writes `exit.txt`. If its process disappears before Stop, the reader reports
 the worker as gone. No usage routing or wrapper permission policy applies to
 workers started directly with `claude -p`.
 
+Claude's background `Task` and `Agent` children count as finished when the
+parent records a successful, matching `TaskStop` result or a task notification
+with status `completed`, `failed`, `cancelled`, `canceled`, `killed` or `stopped`.
+Notifications can arrive in queue rows, user text or queued-command attachments.
+A stop request, failed stop, unknown status or missing child transcript is not
+evidence of completion. For launcher-managed fanouts, the manifest's terminal
+states remain `completed`, `failed` and `cancelled`; failed and cancelled jobs
+appear as `completed` with `failed: true` in the public child tree.
+
 ## Environment the launcher sets
 
 | Variable | Meaning |

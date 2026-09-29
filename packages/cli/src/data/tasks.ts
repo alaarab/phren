@@ -17,6 +17,7 @@ import { withSafeLock, ensureProject } from "../shared/data-utils.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
 import { storeAwareProjectPath } from "../store-routing.js";
 import { TASKS_FILENAME } from "../filenames.js";
+import { recordTaskWrite } from "./task-receipts.js";
 
 const ACTIVE_HEADINGS = new Set(["active", "in progress", "in-progress", "current", "wip"]);
 const QUEUE_HEADINGS = new Set(["queue", "queued", "task", "todo", "upcoming", "next"]);
@@ -425,8 +426,10 @@ function taskItemNotFound(project: string, match: string): PhrenResult<never> {
 
 function writeTaskDoc(doc: TaskDoc): void {
   const tmpPath = `${doc.path}.tmp-${randomUUID()}`;
-  fs.writeFileSync(tmpPath, renderTask(doc));
+  const content = renderTask(doc);
+  fs.writeFileSync(tmpPath, content);
   fs.renameSync(tmpPath, doc.path);
+  recordTaskWrite(doc.path, content);
 }
 
 function taskArchivePath(phrenPath: string, project: string): string {

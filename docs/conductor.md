@@ -243,6 +243,22 @@ the ordinary `/v1/prompt` path and returns `ok`, `delivered`, `target` and an
 optional matching grant label. It does not launch a new agent. The MCP input
 also accepts `project` for project-scoped grant matching.
 
+`delivered: true` requires the harness to acknowledge the prompt, through its
+submission hook or its API. A successful terminal paste and Enter alone leaves
+`ok: false`, `delivered: false`, `deliveryUncertain: true`, including when a busy
+pane may have queued the text. A Codex `resume --remote` composer can retain the
+paste without submitting it. The Hook does not resend that text or press Enter
+again for Codex. Inspect the pane before sending another hand-off. If the prompt
+route reports `unsubmitted`, hand-off preserves that flag. An older Hook that
+returns only `ok` cannot confirm delivery either.
+
+A freshly dispatched session may appear before Herdr accepts prompts for its
+named agent. On the explicit `agent_not_ready` refusal, the receiving Hook
+retries every half second for up to 20 seconds. Each retry checks the same
+conversation and terminal instance, its status and any input reservations.
+A changed target or an input screen stops the retry. Once text may have reached
+the pane, a lost reply or missing submission acknowledgement is never retried.
+
 ## Standing grants
 
 Grants live in private `<bridge>/conductor.yaml`, outside the synced store.

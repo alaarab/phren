@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts, fanoutChildren, parseFanoutArchiveFlags, visibleCodexExecEvent, visibleOpenCodeRunEvent } from "./fanouts.js";
 import type { ChangedFile } from "./changes.js";
 import { visibleClaudeEvent } from "./transcript-claude.js";
+import { publicChildAgents } from "./transcripts.js";
 import { object, objects } from "./protocol.js";
 
 const parent = "aaaaaaaa-1111-4111-8111-111111111111";
@@ -88,6 +89,39 @@ describe("fan-out manifests", () => {
 
     const queued = await fixture("job-queued-time", { status: "queued" });
     expect((await fanoutChildren("codex", parent, queued.env))[0].startedAt).toBeUndefined();
+  });
+
+  it.each(["completed", "failed", "cancelled"])("counts a %s manifest as finished even without an exit stamp", async status => {
+    const { directory, env } = await fixture(`job-${status}`, { status });
+    const check = async () => {
+      const found = await fanoutChildren("codex", parent, env);
+      expect(found).toHaveLength(1);
+      expect(found[0]).toMatchObject({ state: status === "completed" ? "completed" : "failed" });
+      expect(found[0].finishedAt).toBeDefined();
+      expect(found.filter(child => child.state === "running")).toHaveLength(0);
+      expect(publicChildAgents(found)[0]).toMatchObject({ state: "completed", ...(status === "completed" ? {} : { failed: true }) });
+    };
+    await check();
+    // A zero exit does not undo an explicit failure or cancellation.
+    await writeFile(path.join(directory, "exit.txt"), "0\n");
+    await check();
+  });
+
+  it.each(["queued", "running"])("does not finish a %s manifest from a stale exit stamp", async status => {
+    const { directory, env } = await fixture(`job-${status}`, { status });
+    await writeFile(path.join(directory, "exit.txt"), "130\n");
+    const found = await fanoutChildren("codex", parent, env);
+    expect(found).toHaveLength(1);
+    expect(found[0].state).toBe("running");
+    expect(found[0].finishedAt).toBeUndefined();
+  });
+
+  it.each([undefined, "unknown", "killed", "stopped", "canceled"])("does not invent a finished fanout from unrecognized manifest status %s", async status => {
+    const { directory, env } = await fixture("job-unknown-status", { status });
+    await writeFile(path.join(directory, "exit.txt"), "130\n");
+    expect(await fanoutChildren("codex", parent, env)).toEqual([]);
+    await rm(path.join(directory, "manifest.json"));
+    expect(await fanoutChildren("codex", parent, env)).toEqual([]);
   });
 
   it("accepts legacy parents and scopes a new computer-bound parent when supplied", async () => {

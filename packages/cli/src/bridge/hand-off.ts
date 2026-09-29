@@ -60,7 +60,7 @@ async function targetFromOverview(request: Request, session: string, server?: st
 /** `deliveryId` names this one message on the receiving Hook, which then types
  * it at most once however often it is sent (the Hook's own callers retry;
  * the MCP tool does not take one). */
-export async function handOff(input: unknown, options: { deliveryId?: string } = {}): Promise<{ ok: boolean; delivered: boolean; target: Target; label?: string; granted?: string }> {
+export async function handOff(input: unknown, options: { deliveryId?: string } = {}): Promise<{ ok: boolean; delivered: boolean; target: Target; deliveryUncertain?: boolean; unsubmitted?: boolean; label?: string; granted?: string }> {
   const data = handOffSchema.parse(input);
   let request: Request;
   let peer: HookPeer | undefined;
@@ -85,13 +85,18 @@ export async function handOff(input: unknown, options: { deliveryId?: string } =
   if (peer && target.server !== peer.server) throw new BridgeError(400, "The target belongs to a different Herdr server on that computer.");
   const grant = await findGrant({ action: "hand_off", project: data.project, computer: data.computer });
   const result = await request("/v1/prompt", { target, text: data.text, ...(options.deliveryId ? { deliveryId: options.deliveryId } : {}) });
-  const delivered = result.ok === true && result.deliveryUncertain !== true;
+  // A bare ok only acknowledges typing. Even an unchanged, busy Codex pane
+  // may have kept the text in its composer instead of submitting a turn.
+  const delivered = result.ok === true && result.delivered === true && result.deliveryUncertain !== true && result.unsubmitted !== true;
   // A session id was resolved from the overview already; an explicit target
   // is looked up once more, best effort, for its label.
   const label = resolved ? resolved.label
     : await findInOverview(request, found => found.pane === target.pane && found.session === target.session, peer?.server)
       .then(found => found?.label, () => undefined);
-  return { ok: delivered, delivered, target, ...(label ? { label } : {}), ...(grant ? { granted: grantLabel(grant) } : {}) };
+  return { ok: delivered, delivered, target,
+    ...(!delivered && (result.ok === true || result.deliveryUncertain === true) ? { deliveryUncertain: true } : {}),
+    ...(result.unsubmitted === true ? { unsubmitted: true } : {}),
+    ...(label ? { label } : {}), ...(grant ? { granted: grantLabel(grant) } : {}) };
 }
 
 /** One live agent pane, on this computer or an enrolled one. */

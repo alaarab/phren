@@ -28,6 +28,7 @@ import {
   promoteTask,
 } from "../data/access.js";
 import { applyGravity } from "../data/tasks.js";
+import { captureTaskWrites } from "../data/task-receipts.js";
 import {
   buildTaskIssueBody,
   createGithubIssueForTask,
@@ -127,7 +128,14 @@ function buildTaskSummary(doc: TaskDoc, includedSections: TaskSection[]): string
 }
 
 export function register(server: McpServer, ctx: McpContext): void {
-  const { phrenPath, profile, withWriteQueue, updateFileInIndex } = ctx;
+  const { phrenPath, profile, updateFileInIndex } = ctx;
+  const withWriteQueue = (fn: () => Promise<ReturnType<typeof mcpResponse>>) => ctx.withWriteQueue(async () => {
+    const { result, write } = await captureTaskWrites(fn);
+    // Preserve each handler's existing data, including per-item batch errors.
+    const payload = JSON.parse(result.content[0].text);
+    if (write || payload.ok) payload.data = { ...payload.data, write };
+    return mcpResponse(payload);
+  });
 
   server.registerTool(
     "get_tasks",

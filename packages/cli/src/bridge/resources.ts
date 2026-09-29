@@ -84,7 +84,7 @@ export function heavyKind(row: ProcessRow): { kind: HeavyKind; name: string } | 
   if (base === "launchd_sim") {
     return { kind: "simulator", name: /XCTestDevices|Clone \d+ of /.test(args) ? "Simulator test clone" : "Simulator" };
   }
-  if (/^qemu-system/.test(base) || base === "emulator" || /^emulator\d*-/.test(base) || /(?:^|\/)emulator\/qemu\//.test(args)) return { kind: "emulator", name: "Android emulator" };
+  if (/^qemu-system/.test(base) || base === "emulator" || /^emulator\d*-/.test(base)) return { kind: "emulator", name: "Android emulator" };
   if (base === "xcodebuild") return { kind: "xcodebuild", name: "xcodebuild" };
   if (base === "java") {
     if (/Gradle(?:Daemon|Worker|Main)|gradle-launcher|org\.gradle\./.test(args)) return { kind: "gradle", name: /Kotlin/.test(args) ? "Kotlin daemon" : "Gradle" };
@@ -96,7 +96,7 @@ export function heavyKind(row: ProcessRow): { kind: HeavyKind; name: string } | 
     return { kind: "codex", name: service === "app-server" ? "Codex app server" : service === "mcp-server" ? "Codex MCP server" : "Codex" };
   }
   if (base === "opencode" || base === ".opencode") return { kind: "opencode", name: "OpenCode" };
-  if (base === "claude" || /^\d+\.\d+\.\d+$/.test(base) && /(?:^|\/)claude(?:\s|$)/.test(args)) return { kind: "claude", name: "Claude Code" };
+  if (base === "claude" || /(?:^|\/)claude\/versions\/\d+\.\d+\.\d+$/.test(row.command)) return { kind: "claude", name: "Claude Code" };
   return undefined;
 }
 
@@ -105,7 +105,7 @@ export function heavyKind(row: ProcessRow): { kind: HeavyKind; name: string } | 
  * heavy ancestor-or-self, so a Codex worker running xcodebuild shows both,
  * each with only its own share. Any other program shows as `busy` when its
  * processes together hold half a core. Known programs below both a core's
- * tenth and 200 MiB are left out (simulators/emulators stay visible).
+ * tenth and 200 MiB are left out, including simulators and emulators.
  * A memory-only row can be an idle session or helper; it is not evidence of
  * agent activity. Counts include OS helpers, not just the named executable.
  * On Linux, ps pcpu is a process lifetime average, so these cutoffs can miss
@@ -169,7 +169,7 @@ export function heavyProcesses(rows: ProcessRow[], owners: Map<number, PaneRef> 
     totals.set(group.pid, { ...group, ...(pane ? { pane } : {}) });
   }
   return [...totals.values()]
-    .filter(item => item.kind === "simulator" || item.kind === "emulator" || item.kind === "busy" || item.cpuPercent >= 10 || item.memoryBytes >= 200 * 1024 ** 2)
+    .filter(item => item.kind === "busy" || item.cpuPercent >= 10 || item.memoryBytes >= 200 * 1024 ** 2)
     .map(item => ({ ...item, cpuPercent: Math.round(item.cpuPercent * 10) / 10,
       resourceReason: (item.cpuPercent >= 10 ? "cpu" : item.memoryBytes >= 200 * 1024 ** 2 ? "memory" : "tracked") as HeavyProcess["resourceReason"] }))
     .sort((a, b) => b.cpuPercent - a.cpuPercent || b.memoryBytes - a.memoryBytes)

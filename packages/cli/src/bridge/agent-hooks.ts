@@ -497,18 +497,27 @@ export class AgentHooks {
    * after `waitMs`: a busy agent queues typed input and submits it only when
    * its turn ends, so the record outlives the wait (up to ten minutes) and a
    * late submission to the wrong conversation is still refused. */
-  expectDelivery(target: Target, text: string, waitMs = 1_500): Promise<DeliveryOutcome> {
+  expectDelivery(target: Target, text: string, waitMs = 1_500, signal?: AbortSignal): Promise<DeliveryOutcome> {
     const key = promptKey(text);
-    if (!key) return Promise.resolve("pending");
+    if (!key || signal?.aborted) return Promise.resolve("pending");
     return new Promise<DeliveryOutcome>(resolve => {
       let settled = false;
       const list = this.deliveries.get(key) ?? [];
-      const remove = () => { const current = this.deliveries.get(key) ?? []; const index = current.indexOf(delivery); if (index >= 0) current.splice(index, 1); if (!current.length) this.deliveries.delete(key); };
+      const remove = () => {
+        signal?.removeEventListener("abort", cancel);
+        const current = this.deliveries.get(key) ?? []; const index = current.indexOf(delivery);
+        if (index >= 0) current.splice(index, 1);
+        if (!current.length) this.deliveries.delete(key);
+      };
       const settle = (outcome: DeliveryOutcome) => {
         if (!settled) { settled = true; resolve(outcome); } else if (outcome !== "pending") delivery.late?.(outcome);
         if (outcome !== "pending") { clearTimeout(delivery.timer); remove(); }
       };
       const delivery: Delivery = { source: target.source, session: target.session, settle, timer: setTimeout(() => settle("pending"), waitMs) };
+      // Only cancel after a provider explicitly refused before writing. A
+      // possibly delivered paste keeps its guard against the wrong session.
+      const cancel = () => { clearTimeout(delivery.timer); settle("pending"); remove(); };
+      signal?.addEventListener("abort", cancel, { once: true });
       delivery.timer.unref?.();
       const expiry = setTimeout(remove, 600_000); expiry.unref?.();
       list.push(delivery); this.deliveries.set(key, list);

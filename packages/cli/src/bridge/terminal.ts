@@ -101,7 +101,8 @@ export interface TerminalProvider {
   processes(server: string, pane: string): Promise<PaneProcesses>;
   readScreen(server: string, pane: string, read: ScreenRead): Promise<string>;
   sendKeys(server: string, pane: string, keys: string[]): Promise<void>;
-  /** Types `text` into the pane's agent and submits it. */
+  /** Types `text` and sends the submit key. Success acknowledges transport,
+   * not a submitted turn; the harness must confirm that separately. */
   prompt(server: string, pane: string, text: string, signal?: AbortSignal): Promise<void>;
   /** Opens a pane; the caller finds it in the next `listPanes`. */
   create(server: string, placement: PanePlacement): Promise<void>;

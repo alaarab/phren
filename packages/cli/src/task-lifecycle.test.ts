@@ -443,6 +443,10 @@ describe("task auto-capture prompt gate", () => {
     ["a bare commit report", "Parser checks complete, committed as 42002c1"],
     ["a bare push report", "Parity slice 3 complete, pushed as 42002c1"],
     ["a bare PR report", "Release checklist PR #27 opened"],
+    ["a longer sender with a handle", "From the Mini backlog runner (phren-f3): fix complete, pushed ce76826 on hook/retry; all checks passed"],
+    ["a longer relay containing a request", "From the Mini backlog runner (phren-f3): fix the retry backoff and update the docs"],
+    ["a mid-sentence push report", "Parser fix pushed ce76826 on hook/retry; all checks passed"],
+    ["a mid-sentence commit report", "Parser fix committed as ce76826, ready for review"],
     ["a pasted relay", '<pasted_content id="a1">\nFrom the conductor: fix the retry backoff in the sync worker\n</pasted_content id="a1">'],
   ];
   for (const [label, prompt] of relayed) {
@@ -466,8 +470,10 @@ describe("task auto-capture prompt gate", () => {
       ["session-settings", "From the settings page, add a toggle for sync notifications"],
       ["session-pr-request", "Investigate why PR #27 opened"],
       ["session-polite-pr-request", "Could someone investigate why PR #28 opened"],
+      ["session-push-request", "Investigate why the parser fix pushed ce76826 on hook/retry failed"],
+      ["session-path-request", "From the project settings page, add a sync toggle"],
     ]) expect(capture(prompt, session).noticeLines.join("\n")).toContain("Queued task");
-    expect(taskCount()).toBe(3);
+    expect(taskCount()).toBe(5);
   });
 
   it("never rewrites the Context of the session's tracked task or a matched task", () => {
