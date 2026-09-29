@@ -45,7 +45,7 @@ describe("dispatch entry points", () => {
     const input = { session, text: "Please take this next step" };
     const result = await exposed.get(profile === "full" ? "hand_off" : "phren_admin")!({ ...input, ...(profile === "core" ? { action: "hand_off" } : {}) });
     expect(JSON.parse((result as { content: { text: string }[] }).content[0].text).data).toMatchObject({ ok: true, delivered: true, target });
-    expect(hookRequest).toHaveBeenLastCalledWith("/v1/prompt", { target, text: input.text });
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/hand-off", { target, text: input.text, deliveryId: expect.any(String) });
   });
 
   it("hands off through a named peer and resolves its session from that peer's overview", async () => {
@@ -57,7 +57,7 @@ describe("dispatch entry points", () => {
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route.startsWith("/v1/workspaces") ? overview : { ok: true, delivered: true });
     const result = await exposed.get("hand_off")!({ computer: "Desk", session, text: "Review the current work" });
     expect(JSON.parse((result as { content: { text: string }[] }).content[0].text).data).toMatchObject({ delivered: true, target });
-    expect(peerRequest).toHaveBeenLastCalledWith(peer, "/v1/prompt", { target, text: "Review the current work" });
+    expect(peerRequest).toHaveBeenLastCalledWith(peer, "/v1/hand-off", { target, text: "Review the current work", deliveryId: expect.any(String) });
     expect(hookRequest).not.toHaveBeenCalled();
   });
 
@@ -67,6 +67,8 @@ describe("dispatch entry points", () => {
     const command = lookupCommand("hand-off")!;
     const context = { phrenPath: () => "unused", profile: () => "unused" };
     expect(await command.run(["local", "--session", session, "--text", "Continue here"], context)).toBe(0);
-    expect(hookRequest).toHaveBeenLastCalledWith("/v1/prompt", { target, text: "Continue here" });
+    expect(hookRequest).toHaveBeenLastCalledWith("/v1/hand-off", { target, text: "Continue here", deliveryId: expect.any(String) });
   });
 });
+
+vi.mock("../bridge/terminal.js", async original => ({ ...await original<object>(), terminalPaneFromEnv: async () => undefined }));

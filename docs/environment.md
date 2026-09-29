@@ -229,3 +229,7 @@ Workers write manifests, event logs, stderr and exit records under
 Phone-local notification switches, the approval dedupe ledger and pending
 schedule reminders live on the iPhone. They require no Hook environment
 setting, APNs key or relay. Optional direct APNs remains separate.
+
+`PHREN_STALL_MS`: unchanged screen and transcript duration before a working
+session is flagged stalled. Default 300000 ms; 0 disables. Missing screen or
+transcript data resets the observation clock.

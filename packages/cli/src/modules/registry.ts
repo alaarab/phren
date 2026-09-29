@@ -133,9 +133,9 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     schemaVersion: 1, name: "conductor", version: VERSION, defaultEnabled: false, requires: ["memory", "hook"],
     tools: full(["dispatch", "dispatch_returns", "dispatch_approve", "hand_off", "live_sessions", "account_usage", "authority"]), cliCommands: ["dispatch", "dispatch status", "dispatch returns", "dispatch sessions", "dispatch usage", "hand-off", "conductor", "conductor grants", "conductor status", "conductor make", "conductor stop", "conductor sets", "authority", "bridge enroll-computer"], agentHooks: [],
     hookRoutes: [...routes("GET", ["/v1/dispatch", "/v1/dispatch/capacity", "/v1/dispatch/arrival", "/v1/conductor", "/v1/conductor/grants", "/v1/computers", "/v1/sets", "/v1/authority"]),
-      ...routes("POST", ["/v1/dispatch", "/v1/dispatch/workers", "/v1/dispatch/returns", "/v1/dispatch/approve", "/v1/conductor/grants", "/v1/conductor/make", "/v1/conductor/stop", "/v1/sets/name", "/v1/authority", "/v1/authority/confirm"]), ...routes("DELETE", ["/v1/conductor/grants", "/v1/authority"])],
+      ...routes("POST", ["/v1/dispatch", "/v1/dispatch/workers", "/v1/dispatch/returns", "/v1/dispatch/approve", "/v1/hand-off", "/v1/hand-off/status", "/v1/conductor/grants", "/v1/conductor/make", "/v1/conductor/stop", "/v1/sets/name", "/v1/authority", "/v1/authority/confirm"]), ...routes("DELETE", ["/v1/conductor/grants", "/v1/authority"])],
     capabilities: ["dispatch", "conductorSets"], storeFiles: ["global/skills/conductor/**"],
-    localFiles: ["<bridge>/hooks.yaml", "<bridge>/conductor.yaml", "<bridge>/conductor-role.json", "<bridge>/authority.yaml", "<bridge>/authority-confirmations.json", "<bridge>/dispatches/*.json"], phoneScreens: [], skills: ["conductor"],
+    localFiles: ["<bridge>/hooks.yaml", "<bridge>/conductor.yaml", "<bridge>/conductor-role.json", "<bridge>/authority.yaml", "<bridge>/authority-confirmations.json", "<bridge>/dispatches/*.json", "<bridge>/hand-offs/*.json"], phoneScreens: [], skills: ["conductor"],
   },
   {
     schemaVersion: 1, name: "fanout", version: VERSION, defaultEnabled: false, requires: ["memory", "hook"],
