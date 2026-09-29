@@ -532,6 +532,20 @@ async function activeClientPane(server: string): Promise<string> {
  */
 export async function tmuxScroll(server: string, pane: string | undefined, lines: number): Promise<{ history: boolean }> {
   const target = pane ? toTmuxId(pane, "p") : await activeClientPane(server);
+  // One scroll per pane at a time: two overlapping swipes could otherwise
+  // enter and cancel copy mode out of order and leave the pane in it, where
+  // it would swallow the next typed prompt.
+  const key = `${server}\0${target}`;
+  const run = (scrollQueues.get(key) ?? Promise.resolve()).then(() => scrollPane(server, target, lines), () => scrollPane(server, target, lines));
+  const settled = run.catch(() => undefined);
+  scrollQueues.set(key, settled);
+  void settled.then(() => { if (scrollQueues.get(key) === settled) scrollQueues.delete(key); });
+  return run;
+}
+
+const scrollQueues = new Map<string, Promise<unknown>>();
+
+async function scrollPane(server: string, target: string, lines: number): Promise<{ history: boolean }> {
   const state = async () => {
     const [mode, mouse, sgr, width, height] = (await tmux(server, ["display-message", "-p", "-t", target,
       "#{pane_mode}\t#{mouse_any_flag}\t#{mouse_sgr_flag}\t#{pane_width}\t#{pane_height}"])).replace(/\n$/, "").split("\t");
