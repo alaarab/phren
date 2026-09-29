@@ -127,7 +127,9 @@ const defaultDeps: TmuxDeps = {
   run: (socket, args, options = {}) => new Promise((resolve, reject) => {
     const binary = tmuxBinary();
     if (!binary) { reject(new BridgeError(503, "tmux is not installed on this computer.")); return; }
-    const child = execFile(binary, [...socketFlags(socket), ...args], { timeout: options.timeoutMs ?? 5_000, maxBuffer: 4_194_304, env: tmuxEnvironment(), signal: options.signal },
+    // -u: without a UTF-8 locale (launchd and systemd services often have
+    // none) tmux 3.7 prints a format's tabs as "_" and no pane parses.
+    const child = execFile(binary, ["-u", ...socketFlags(socket), ...args], { timeout: options.timeoutMs ?? 5_000, maxBuffer: 4_194_304, env: tmuxEnvironment(), signal: options.signal },
       (error, stdout, stderr) => { if (error) reject(tmuxError(String(stderr), error)); else resolve(String(stdout)); });
     if (options.input !== undefined) child.stdin?.end(options.input); else child.stdin?.end();
   }),
