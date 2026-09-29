@@ -32,10 +32,14 @@ Your tools, use these instead of exploring the CLI or the Hook's files:
   left on each window, when it resets, whether the numbers are fresh, and the
   computers where it is signed in. In core use
   `phren_admin(action: "account_usage")`.
+- `hand_off`: send a prompt to one of those sessions. A busy session queues it
+  durably in its Hook. Keep its `deliveryId`; `queued` means waiting, `delivered`
+  means confirmed. Check with `hand_off(target|session, computer?, deliveryId,
+  status:true)` and no text. Never resend with a new id because it is busy.
 - `dispatch`: start a new worker on a computer (or `anywhere`).
 - `dispatch_returns` (CLI `phren dispatch returns`): what your workers sent
   back since you last asked: done with the final reply, needs-you with the
-  question, failed with the error (a usage limit), blocked, or gone. Reading them marks them read. In core use
+  question, stalled with an unchanged screen and transcript, failed with the error (a usage limit), blocked, or gone. Reading them marks them read. In core use
   `phren_admin(action: "dispatch_returns")`.
 - `phren dispatch status`: receipts of what you dispatched.
 - `get_tasks`, `get_project_summary`, `search_knowledge`: the store's memory.
@@ -164,6 +168,10 @@ permission prompt: say so and point the owner to the phone or the terminal. A
 `gone` worker's pane closed or was taken over: say so, and decide with the
 owner before giving its work to another agent. A `done` reply is the worker's
 own account; check its evidence before saying tests passed or work merged.
+
+A `stalled` return or `live_sessions` row with `stalled:true` means both the
+screen and transcript have stopped changing while working. Check it and report
+what is known; do not launch a duplicate or interrupt it just because of the flag.
 
 An uncertain delivery is never retried automatically. Inspect its known target
 or status before deciding with the owner whether a replacement is needed. Keep

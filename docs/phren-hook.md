@@ -732,3 +732,18 @@ check) and `phren bridge doctor` (`speechKey`) say whether this computer has a
 key and where it comes from, without showing it. Neither route changes the
 `speech` and `transcribe` capabilities: a computer without a key still offers
 them and answers `speech-unconfigured` or `transcribe-unconfigured`.
+
+### Conductor hand-off queue
+
+`POST /v1/hand-off` takes `{target, text, deliveryId?, origin?}` and returns
+`{ok, target, deliveryId, state, queued, delivered, deliveryUncertain?, error?}`.
+`origin` is the sending session's full target, for a delivery notice.
+`POST /v1/hand-off/status` takes `{target, deliveryId}` and returns the same
+record without sending input, even after the worker's pane closes. States are
+`queued`, `delivered`, `uncertain`, and `failed`. A reused id with different
+text or target is a 409. These routes require the conductor module. The phone
+can show the queued message, then its confirmed or uncertain outcome by id.
+
+The overview and `/v1/dispatch/workers` observations carry `stalled:true`,
+`stalledSince` (ISO time) and `stallFor` (seconds) when both the screen and
+transcript are unchanged while working for `PHREN_STALL_MS`.

@@ -1451,3 +1451,12 @@ Each Claude number has one documented source:
 - A per-model weekly window such as `seven_day_fable` ("7-day, Fable") comes from Claude Code's own usage snapshot in `~/.claude.json` (`cachedUsageUtilization`, `kind: weekly_scoped`) when the status line does not carry it, and then carries its own `asOf` so the phone can show how old it is; the live endpoint reports the same window without `asOf`.
 
 Every window carries its own `resetsAt`. A per-model window is its own allowance with its own denominator, not a subset of `seven_day`, so it can show a higher percentage than the all-models window without contradicting it; the phone labels it "only" (for example "7-day, Fable only") and shows its own reset time. The Live sessions header ring binds to `five_hour`, the window the Account usage page shows first, never a higher window.
+
+
+Hand-off delivery: `text` is required for sending. `deliveryId` is optional
+on the first call and required on retries. Use `status:true` with the id and
+target or session, without text, to read the durable receiving-Hook record.
+`queued:true` acknowledges a persisted message awaiting idle; `delivered:true`
+confirms submission. `deliveryUncertain:true` never authorizes an automatic
+retry with a new id. Working rows may carry `stalled:true`, `stalledSince` and
+`stallFor` (seconds); dispatch returns use state `stalled` for that transition.
