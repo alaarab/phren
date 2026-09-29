@@ -110,8 +110,9 @@ its computer. Parameters: `id` (the dispatch ID from `dispatch_returns`),
 `actionId`, so a request that has changed since is never answered blind).
 Only the agent that dispatched the worker can answer: the tool sends the
 caller's own pane as `origin`, and a call from any other pane, or from the
-worker's own pane, fails with 403. A call with no pane (the owner's phone, the
-CLI) is not restricted. The owner's standing grants already answer the `dispatch` and `hand_off`
+worker's own pane, fails with 403. A worker dispatched from the phone or the
+CLI has no origin pane, so any call from a pane fails with 403 for it. A call
+with no pane (the owner's phone, the CLI) is not restricted. The owner's standing grants already answer the `dispatch` and `hand_off`
 requests they cover. Fails with 409 when the worker is not waiting on an
 approval. In the core profile use `phren_admin(action: "dispatch_approve")`.
 

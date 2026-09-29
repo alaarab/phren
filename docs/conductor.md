@@ -449,7 +449,14 @@ answer takes the same path.
 Only the dispatching agent (or the owner's phone) can answer, and the call must
 name the approval's `actionId`, so one that changed since you read it is
 refused. The worker cannot approve itself: a `dispatch_approve` from its own
-pane, or from any pane other than the dispatch's origin, fails with 403.
+pane, or from any pane other than the dispatch's origin, fails with 403. A
+worker dispatched from the phone or the CLI records no origin pane, so no
+agent can answer for it; only the owner, calling without a pane, can. The pane
+is the one the caller names, so this keeps agents apart on a trusted computer;
+it is not a boundary against code that can already reach the Hook's socket.
+
+A terminal dialog is answered only if the pane's screen, read just before the
+keys are typed, still shows the same question and command that was forwarded.
 
 A request that ends in the worker's terminal (answered there, or its hold ran
 out) clears `approval`; answering one that is gone returns 409.

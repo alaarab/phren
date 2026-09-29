@@ -699,13 +699,7 @@ export class AgentHooks {
       return;
     }
     if (question) { this.terminalPrompts.delete(key); return; }
-    // Codex draws "> 1. Yes, proceed (y)" rows and Copilot a boxed select
-    // with a cursor row, both answered by moving to a row; the other
-    // fallbacks number rows without a key in the label.
-    const dialog = ["codex", "copilot"].includes(target.source) ? visibleTerminalChoice(text)
-      // OpenCode's prompt is one row of options; its cursor is only a color.
-      : target.source === "opencode" ? opencodePermissionDialog(await this.paneAnsi(target))?.choice ?? numberedDialog(text)
-      : numberedDialog(text);
+    const dialog = await this.screenDialog(target, text);
     if (entry && !entry.dialog) {
       // The permission the pane still shows after its hook let go: keep the
       // request's own details and answer it with the dialog's rows, so the
@@ -1231,6 +1225,15 @@ export class AgentHooks {
     if (!pushed) return;
     this.dialogActions.delete(pushed.action); this.dropPushBindings(pushed.action); this.dialogPushes.delete(key);
   }
+  /** The dialog a pane's screen shows now. Codex draws "> 1. Yes, proceed (y)"
+   * rows and Copilot a boxed select with a cursor row, both answered by moving
+   * to a row; OpenCode's prompt is one row of options whose cursor is only a
+   * color; the other fallbacks number rows without a key in the label. */
+  private async screenDialog(target: Target, text: string) {
+    return ["codex", "copilot"].includes(target.source) ? visibleTerminalChoice(text)
+      : target.source === "opencode" ? opencodePermissionDialog(await this.paneAnsi(target))?.choice ?? numberedDialog(text)
+      : numberedDialog(text);
+  }
   /** Approve picks the dialog's yes/allow row (else its first), Deny its
    * no/deny row (else Escape), typed as the pane's own keys. */
   private async answerDialog(action: string, decision: "approve" | "deny") {
@@ -1243,7 +1246,10 @@ export class AgentHooks {
       if (!this.dialogActions.has(action)) this.dialogActions.set(action, dialog);
       throw error;
     }
-    const live = this.terminalPrompts.get(key)?.choice;
+    // Read the screen now, not the activity tick's cached prompt: in the seconds
+    // since that tick the dialog may have been answered and replaced by another
+    // with the same title, and the keys must only ever answer the one forwarded.
+    const live = await this.screenDialog(dialog.target, await this.paneLines(dialog.target));
     if (!live || live.title !== dialog.choice.title || live.body !== dialog.choice.body) { this.dropDialogPush(key); throw new BridgeError(409, "That question in the terminal has changed. Open phren to answer it."); }
     const option = decision === "approve"
       ? live.options.find(row => /^(yes|allow|approve|proceed|continue|run)\b/i.test(row.label)) ?? live.options[0]

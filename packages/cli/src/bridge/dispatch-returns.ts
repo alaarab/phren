@@ -429,7 +429,8 @@ export class DispatchReturns {
     // A caller pane is an agent asking over MCP: only the one that dispatched the worker, never the worker itself. No pane (phone, CLI) answers as the owner.
     if (caller) {
       const same = (pane?: { server: string; pane: string }) => !!pane && pane.server === caller.server && pane.pane === caller.pane;
-      if ((receipt.origin && !same(receipt.origin)) || (this.isLocal(receipt.computer) && same(receipt.target))) throw new BridgeError(403, "Only the agent that dispatched this worker can answer its approvals.");
+      // A worker dispatched from the phone or CLI records no dispatching pane, so no agent may answer for it; the owner answers without a pane.
+      if (!receipt.origin || !same(receipt.origin) || (this.isLocal(receipt.computer) && same(receipt.target))) throw new BridgeError(403, "Only the agent that dispatched this worker can answer its approvals.");
     }
     const clear = () => updateReceipt(id, current => {
       if (current.approval?.actionId !== approval.actionId) return false;

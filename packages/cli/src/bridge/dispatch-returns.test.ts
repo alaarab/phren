@@ -559,11 +559,12 @@ describe("worker approvals", () => {
       expect(answers).toHaveLength(1);
     });
 
-    it("lets a worker's own pane be refused even when the dispatch has no recorded origin", async () => {
+    it("lets no agent pane answer a dispatch with no recorded origin, only the owner without a pane", async () => {
       const value = await seed();
       const returns = loop({ peers: async () => [], isLocal: (computer: string) => computer === "Linuxbox", localWorkers: async () => ({ workers: [observed] }), localAnswer: async () => {} });
       await returns.poll();
       await expect(returns.answerApproval(value.id, "approve", "action-1", { server: workerTarget.server, workspace: workerTarget.workspace, tab: workerTarget.tab, pane: workerTarget.pane })).rejects.toMatchObject({ status: 403 });
+      await expect(returns.answerApproval(value.id, "approve", "action-1", { server: "default", workspace: "w3", tab: "w3:t1", pane: "w3:p1" })).rejects.toMatchObject({ status: 403 });
       await expect(returns.answerApproval(value.id, "approve", "action-1")).resolves.toBeUndefined();
     });
 
