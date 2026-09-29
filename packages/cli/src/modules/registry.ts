@@ -72,7 +72,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     cliCommands: [
       "bridge", "bridge install", "bridge update", "bridge uninstall", "bridge rollback", "bridge status",
       "bridge doctor", "bridge usage", "bridge usage-statusline", "bridge hook", "bridge serve", "bridge ssh", "pair",
-      "bridge fanouts archive", "bridge accounts", "canary", "computers", "computers mcp", "usage",
+      "bridge fanouts archive", "bridge accounts", "bridge askpass", "canary", "computers", "computers mcp", "usage", "sudo",
     ],
     agentHooks: [
       { agents: ["codex"], events: ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest"], handler: "bridge-hook.mjs hook codex" },
@@ -84,7 +84,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
         "/v1/health", "/v1/health/details", "/v1/health/peers", "/v1/muxes", "/v1/activity", "/v1/metrics", "/v1/web-servers", "/v1/simulators",
         "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/files", "/v1/models", "/v1/harnesses", "/v1/projects/files",
         "/v1/uploads/image", "/v1/files/range", "/v1/usage", "/v1/resources", "/v1/speech/voices", "/v1/push/status", "/v1/projects/locate", "/v1/projects/repos",
-        "/v1/workspaces", "/v1/workspaces/panes", "/v1/transcripts/blob", "/v1/transcripts/history",
+        "/v1/workspaces", "/v1/workspaces/panes", "/v1/transcripts/blob", "/v1/transcripts/history", "/v1/sudo",
         "/v1/subagents", "/v1/subagents/transcript", "/v1/subagents/messages",
       ]),
       ...routes("POST", [
@@ -92,17 +92,17 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
         "/v1/workspaces/launch", "/v1/workspaces/create", "/v1/workspaces/focus", "/v1/workspaces/rename",
         "/v1/workspaces/close", "/v1/sessions/rename", "/v1/prompt", "/v1/prompt/status", "/v1/model", "/v1/settings", "/v1/side-question/dismiss", "/v1/keys", "/v1/secret", "/v1/upload",
         "/v1/approvals/answer", "/v1/questions/answer", "/v1/subagents/resume", "/v1/subagents/archive-finished", "/v1/canary",
-        "/v1/speech",
+        "/v1/speech", "/v1/sudo/answer",
       ]),
       ...routes("WS", ["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe"]),
     ],
     capabilities: [
       "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "herdr",
       "webServers", "webPreview", "activity", "approvals", "questions", "accountUsage", "providers",
-      "files", "repositoryFiles", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "resources", "sessionRename",
+      "files", "repositoryFiles", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "resources", "sessionRename", "sudo",
     ],
     storeFiles: [".runtime/sessions/opencode-*.events.jsonl", ".runtime/approvals/opencode-*.json"],
-    localFiles: ["<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily"],
+    localFiles: ["<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/askpass", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily"],
     phoneScreens: [{ screen: "LiveSessionsView", capability: "hook" }, { screen: "AgentChatView", capability: "transcript" }],
     skills: [],
   },

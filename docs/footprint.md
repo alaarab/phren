@@ -91,7 +91,8 @@ markers are left untouched.
 
 `phren bridge install` is separate from the memory-store setup. It installs a
 standalone helper in `~/.local/share/phren/bridge/versions/<version>`, with a
-`current` symlink, `dispatch` entry point, and `installed.json` rollback record.
+`current` symlink, `dispatch` entry point, `askpass` helper for `sudo -A` (0700),
+and `installed.json` rollback record.
 The root is private (0700); its `hook.sock` and agent-only `agent.sock` are 0600.
 `computer-id`, process-bound `bindings/`, per-pane turn records in `turns/`
 (last prompt and Stop times, the Stop's final message up to 4000 bytes, for

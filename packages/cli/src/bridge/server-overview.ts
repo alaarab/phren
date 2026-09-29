@@ -25,6 +25,8 @@ import { streamCloseReason } from "./server-stream.js";
  * `{ type: "heartbeat", phren }`. A phone that asks with `resources=1` also
  * gets `{ type: "resources", resources }` after the first overview, then at
  * `OVERVIEW_RESOURCES_MS` intervals (an older phone never asks, so never meets it).
+ * One that asks with `sudo=1` gets `{ type: "sudo", requests }` after the first
+ * overview and whenever the pending sudo requests change.
  */
 export const OVERVIEW_TICK_MS = intervalFromEnv("PHREN_OVERVIEW_TICK_MS", 5_000, 250, 60_000);
 export const OVERVIEW_REFRESH_MS = intervalFromEnv("PHREN_OVERVIEW_REFRESH_MS", 10_000, 1_000, 120_000);
@@ -37,6 +39,8 @@ export interface OverviewStreamOptions {
   info: () => Json;
   /** Renews the approval watch lease `watchApprovals=1` asks for. */
   renew: (server: string) => void;
+  /** Pending sudo requests (`GET /v1/sudo`), for phones that ask with `sudo=1`. */
+  sudo?: { list(): unknown[]; subscribe(listener: (requests: unknown[]) => void): () => void };
   /** This computer's resources (`GET /v1/resources`), for phones that ask. */
   resources?: () => Promise<unknown>;
   snapshot?: (server: string, maxAgeMs: number) => Promise<Json>;
@@ -77,8 +81,11 @@ export function overviewStream(options: OverviewStreamOptions) {
 
   /** Streams one server's overview until the client closes. Returns the
    * tick function, for tests that drive time themselves. */
-  return function stream(client: OverviewClient, server: string, watchApprovals: boolean, withResources = false, typedMux = false) {
-    let closed = false, busy = false, resourcesPending = false, first = true;
+  return function stream(client: OverviewClient, server: string, watchApprovals: boolean, withResources = false, typedMux = false, withSudo = false) {
+    let closed = false, busy = false, resourcesPending = false, first = true, overviewSent = false;
+    // Subscribed at once, so the phone counts as able to answer while the first overview builds.
+    const unsubscribe = withSudo && options.sudo
+      ? options.sudo.subscribe(requests => { if (!closed && overviewSent) send(client, { type: "sudo", requests }); }) : undefined;
     let snapshotKey = "", builtAt = 0, sentKey = "", sentAt = 0, resourcesAt = -Infinity;
     const collectResources = () => {
       const at = now();
@@ -108,7 +115,11 @@ export function overviewStream(options: OverviewStreamOptions) {
           const { phren: _phren, ...rows } = overview;
           const rowsKey = JSON.stringify(rows);
           if (first || rowsKey !== sentKey) {
-            if (send(client, { type: "overview", ...overview })) { sentKey = rowsKey; sentAt = at; }
+            if (send(client, { type: "overview", ...overview })) {
+              sentKey = rowsKey; sentAt = at;
+              if (!overviewSent && unsubscribe) send(client, { type: "sudo", requests: options.sudo!.list() });
+              overviewSent = true;
+            }
             first = false;
             return;
           }
@@ -129,7 +140,7 @@ export function overviewStream(options: OverviewStreamOptions) {
       }
     };
     const timer = setInterval(() => { void tick(); }, tickMs);
-    const stop = () => { closed = true; clearInterval(timer); };
+    const stop = () => { closed = true; clearInterval(timer); unsubscribe?.(); };
     client.once("close", stop);
     client.once("error", stop);
     void tick();

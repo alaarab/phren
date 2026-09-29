@@ -7,6 +7,7 @@ import { agentNames, findPane, isConductorName, paneChatState, paneIdentity, ser
 import { type AgentStart, agentNotReady, terminalName, terminalProvider } from "./terminal.js";
 import { intervalFromEnv } from "./limits.js";
 import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from "./launch-worktree.js";
+import { askpassEnv } from "./sudo.js";
 import { briefArgs, DISPATCH_ID_ENV, launchBriefSchema, launchesWithBrief, recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
 import { prepareServedLaunch, registerServedPane, sendServedBrief } from "./opencode-panes.js";
 import { groupConductor, type GroupConductor } from "./conductor-group.js";
@@ -281,7 +282,8 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   if (served) args.push(...served.args);
   const briefFile = brief && (launchesWithBrief(kind) || structured || served) ? await writeLaunchBrief(brief, Date.now(), label) : undefined;
   const briefLaunch = brief && briefFile && launchesWithBrief(kind) ? briefArgs(kind, briefFile) : undefined;
-  const variables = { ...(brief ? { [DISPATCH_ID_ENV]: brief.id } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
+  // sudo -A in the new agent asks the phone for the password (sudo.ts).
+  const variables = { ...askpassEnv(), ...(brief ? { [DISPATCH_ID_ENV]: brief.id } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
   const env = Object.keys(variables).length ? variables : undefined;
   if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
   const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));

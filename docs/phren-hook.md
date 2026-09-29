@@ -598,6 +598,72 @@ land on the next permission. Tapping the notification opens the session's
 details on the phone, led by the request, through `POST /v1/push/target`,
 which names the session without answering it.
 
+### sudo from the phone
+
+A `sudo` with no terminal, such as a Claude Code `!` command or an agent's
+shell tool, fails with "a terminal is required to read the password". The Hook
+installs an askpass helper so the phone can answer it instead:
+
+```bash
+phren sudo killall -HUP mDNSResponder     # manual use, and inside a `!` command
+sudo -A killall -HUP mDNSResponder        # what an agent runs; SUDO_ASKPASS is already set
+```
+
+`phren bridge install` writes `<bridge>/askpass` (mode 0700), a short script
+that clears `NODE_OPTIONS` and preload variables and runs the installed
+bundle's `askpass`. `sudo -A` runs it with its prompt, and it asks the Hook
+over the owner-only `agent.sock`. Before the phone hears anything, the Hook
+checks the whole chain, so the password can only reach sudo:
+
+- the asker is the Hook's own node running its bundle's `askpass`, with no
+  node flags (and, on Linux, no `NODE_OPTIONS` or `LD_PRELOAD` in its
+  environment);
+- its parent is `<bridge>/askpass` itself, not some other `SUDO_ASKPASS`;
+- that script's parent is `sudo` running as root (effective uid 0, which no
+  program of yours can fake);
+- the asker's stdout is a pipe that no other process of yours holds, so the
+  password goes to sudo and nowhere else (`lsof` on macOS, `/proc` on Linux);
+- the request came from that process: on macOS the other end of the
+  connection must be held by the asker alone, and on Linux the Hook writes the
+  password straight into the asker's stdout rather than back over the
+  connection, so a program that names another process gets nothing.
+
+It then reads that sudo's command line itself (`ps`, or `/proc/<pid>/cmdline`
+on Linux) and shows the phone the computer, the command without sudo's own
+flags, the target user when not root, and the session that asked when the
+helper runs in a Herdr or tmux pane. The
+phone gets an approval push ("sudo on Mini", the command) and, while Phren is
+open, a sheet with a password field, Approve and Deny.
+
+The password goes from the phone to the Hook to askpass's stdout, which only
+sudo reads. It is used once: the request is forgotten as soon as it is
+answered, and the password is never logged, written to disk, put in a push, a
+transcript or a frame, or shown to the agent. A wrong password makes sudo ask
+again, which is a new request. Deny, no answer within two minutes
+(`PHREN_SUDO_TIMEOUT_MS`), the asker going away, or no phone that can answer
+(no approval push set up and no Phren app open) makes askpass exit 1, so sudo
+fails with a short reason instead of hanging.
+
+Agents the Hook starts (dispatched workers, conductors, scheduled runs, and
+headless schedules) get `SUDO_ASKPASS` in their environment, so `sudo -A`
+works in them without setup. sudo only uses the helper when asked: plain
+`sudo` with no terminal still fails, so agents must pass `-A`. In your own
+shell, `export SUDO_ASKPASS=~/.local/share/phren/bridge/askpass` makes
+`sudo -A` work there too.
+
+- **macOS**: works with the system sudo as installed. sudo caches the
+  credential as usual (per terminal, or per parent process when there is no
+  terminal), so a second `sudo -A` soon after may not ask again.
+- **Linux**: the same with sudo 1.8 or newer. A sudoers `Defaults requiretty`
+  refuses every sudo without a terminal, askpass or not; drop it for your user
+  to use this. PAM setups that ask for a second factor still ask for it.
+
+Any program running as your user can ask for a sudo, as it could type `sudo`
+in a terminal, so the phone always shows the exact command before you type
+the password: deny what you did not expect. The chain check stops a program
+from simply collecting the password; one that attaches a debugger to the
+askpass process is beyond what a Hook running as you can prevent.
+
 ### Spoken replies for talk mode
 
 The phone's talk mode reads an agent's replies aloud. `POST /v1/speech` with
