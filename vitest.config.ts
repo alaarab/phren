@@ -33,7 +33,7 @@ export default defineConfig({
     // "no Herdr running" test into a tmux one; tmux tests opt back in.
     // Codex launches stay on the typed path unless a test opts in.
     // Launches skip the installed-harness check (it probes real binaries); tests of it inject an inventory.
-    env: { PHREN_TMUX: "off", PHREN_CODEX_APP_SERVER: "off", PHREN_LAUNCH_CHECK: "off" },
+    env: { PHREN_TMUX: "off", PHREN_CODEX_APP_SERVER: "off", PHREN_LAUNCH_CHECK: "off", PHREN_ELEVENLABS_USAGE: "off" },
     include: [
       "packages/cli/src/**/*.test.ts",
       "packages/code/src/**/*.test.ts",

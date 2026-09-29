@@ -9,7 +9,8 @@ import { promisify } from "node:util";
 import { atomicInPrivateDir, bridgeRoot, type Json, object } from "./protocol.js";
 import { stripTerminal } from "../terminal-text.js";
 import { codexExecutable } from "./codex-binary.js";
-import { CODEX_ACCOUNT, claudeAccountRef, claudeHomeOfEnv, claudeHomes, type AccountRef, type ClaudeHome } from "./claude-accounts.js";
+import { readSpeechKey } from "./speech-key.js";
+import { CODEX_ACCOUNT, claudeAccountEmail, claudeAccountRef, claudeHomeOfEnv, claudeHomes, type AccountRef, type ClaudeHome } from "./claude-accounts.js";
 
 const exec = promisify(execFile);
 
@@ -22,14 +23,19 @@ export interface UsageWindow {
   usedUSD?: number;
   limitUSD?: number;
   usedTokens?: number;
+  /** ElevenLabs' character quota, next to its percentage. */
+  usedCharacters?: number;
+  limitCharacters?: number;
   resetsAt?: string;
   /** The service says this window is refusing requests now (OpenCode Go's `rate-limited`). */
   limited?: boolean;
   asOf?: string;
+  /** The window's reset time passed after its report: no percent is known, so none is sent. */
+  reset?: boolean;
 }
 export interface UsageSpend { amountUSD: number; period: "rolling_7_days" | "rolling_30_days" | "calendar_week" }
 export interface AccountUsage {
-  source: "codex" | "claude" | "opencode" | "opencode-go" | "openrouter" | "copilot";
+  source: "codex" | "claude" | "opencode" | "opencode-go" | "openrouter" | "copilot" | "elevenlabs";
   windows: UsageWindow[];
   updatedAt?: string;
   message?: string;
@@ -307,6 +313,43 @@ async function liveOpenRouterUsage(now: Date): Promise<AccountUsage | undefined>
   }
 }
 
+/** ElevenLabs' subscription: characters used this billing period against the plan's limit. */
+export function elevenLabsUsage(value: unknown, now = new Date()): AccountUsage {
+  const sub = object(value);
+  const used = sub.character_count, limit = sub.character_limit;
+  const count = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+  if (!count(used) || !count(limit) || limit === 0) {
+    return { source: "elevenlabs", windows: [], updatedAt: now.toISOString(), message: "ElevenLabs did not report a character limit for this key." };
+  }
+  const entry = window("elevenlabs:characters", "Characters this period", Math.min(100, Math.round(used / limit * 1000) / 10), sub.next_character_count_reset_unix);
+  return { source: "elevenlabs", windows: entry ? [{ ...entry, usedCharacters: used, limitCharacters: limit }] : [], updatedAt: now.toISOString() };
+}
+
+/** The key the Hook already uses for /v1/speech, sent only to ElevenLabs; the answer carries counts, never the key. */
+export async function fetchElevenLabsUsage(key: string, fetchImpl: typeof fetch = fetch, now = new Date()): Promise<AccountUsage> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const response = await fetchImpl("https://api.elevenlabs.io/v1/user/subscription", {
+      headers: { "xi-api-key": key, accept: "application/json" },
+      redirect: "error",
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`ElevenLabs subscription endpoint returned ${response.status}.`);
+    return elevenLabsUsage(await response.json(), now);
+  } finally { clearTimeout(timer); }
+}
+
+/** No row without a key: most computers have no spoken replies set up. `PHREN_ELEVENLABS_USAGE=off` skips it (the test suite does). */
+async function liveElevenLabsUsage(now: Date): Promise<AccountUsage | undefined> {
+  if (typeof fetch !== "function" || process.env.PHREN_ELEVENLABS_USAGE === "off") return undefined;
+  const key = await readSpeechKey().catch(() => undefined);
+  if (!key) return undefined;
+  try { return await fetchElevenLabsUsage(key, fetch, now); } catch {
+    return { source: "elevenlabs", windows: [], updatedAt: now.toISOString(), message: "Could not read ElevenLabs usage. Check this computer's ElevenLabs key." };
+  }
+}
+
 /** "seven_day_fable" → "7-day, Fable"; weekly-all stays explicit. */
 function claudeWindowName(key: string): string {
   const spans: [string, string][] = [["five_hour", "5-hour"], ["seven_day", "7-day"], ["one_hour", "1-hour"], ["one_day", "1-day"]];
@@ -544,20 +587,46 @@ export async function readCopilotUsage(now = new Date(), run: (file: string, arg
   }
 }
 
+/** A Claude report older than this says nothing about the account now. */
+export const CLAUDE_REPORT_MAX_AGE_MS = 3 * 86_400_000;
+
+/**
+ * What a saved Claude report still says at `now`: a window whose reset time
+ * has passed is reported as reset without its old percent, and a report
+ * older than three days is dropped, so a stale number never reaches the
+ * phone's cards, rings or widgets.
+ */
+export function settleClaudeUsage(usage: AccountUsage, now: number): AccountUsage {
+  if (!usage.windows.length) return usage;
+  const reported = (w: UsageWindow) => Date.parse(w.asOf ?? usage.updatedAt ?? "");
+  const windows = usage.windows
+    .filter(w => { const at = reported(w); return !Number.isFinite(at) || now - at < CLAUDE_REPORT_MAX_AGE_MS; })
+    .map(w => {
+      const reset = w.resetsAt ? Date.parse(w.resetsAt) : NaN;
+      if (!Number.isFinite(reset) || reset > now) return w;
+      const { usedPercent: _old, ...rest } = w;
+      return { ...rest, reset: true };
+    });
+  if (windows.length) return { ...usage, windows };
+  const since = usage.updatedAt?.slice(0, 10);
+  return { ...usage, windows, message: `No usage report from Claude on this computer${since ? ` since ${since}` : ""}. It updates when Claude Code runs here.` };
+}
+
 export class AccountUsageReader {
   private cached?: { at: number; value: AccountUsage };
   private pending?: Promise<AccountUsage>;
   private claudeCached = new Map<string, { at: number; value?: AccountUsage }>();
   private claudePending = new Map<string, Promise<AccountUsage | undefined>>();
-  private spendingCached = new Map<boolean, { at: number; value: AccountUsage[] }>();
-  private spendingPending = new Map<boolean, Promise<AccountUsage[]>>();
+  private spendingCached = new Map<string, { at: number; value: AccountUsage[] }>();
+  private spendingPending = new Map<string, Promise<AccountUsage[]>>();
   constructor(private readCodex = readCodexLimits, private now = Date.now,
               private readClaudeLive: (now: Date, home: ClaudeHome) => Promise<AccountUsage | undefined> = liveClaudeUsage,
               private readOpenCode: (now: Date) => Promise<AccountUsage> = now => readOpenCodeUsage("opencode", now),
               private readOpenRouter: (now: Date) => Promise<AccountUsage | undefined> = liveOpenRouterUsage,
               private readOpenCodeGo: (now: Date) => Promise<AccountUsage> = readOpenCodeGoUsage,
               private readCopilot: (now: Date) => Promise<AccountUsage> = readCopilotUsage,
-              private platform: NodeJS.Platform = process.platform) {}
+              private platform: NodeJS.Platform = process.platform,
+              private readElevenLabs: (now: Date) => Promise<AccountUsage | undefined> = liveElevenLabsUsage) {}
   /** `allAccounts`: one Claude row per home. Otherwise only the default home's, as
    *  before accounts existed, since older phones refuse two rows of one source. */
   async read(sources?: Set<string>, allAccounts = false): Promise<{ accounts: AccountUsage[] }> {
@@ -567,24 +636,31 @@ export class AccountUsageReader {
     const codex = this.pending ?? Promise.resolve(this.cached!.value);
     // Every home, default first; the labels and keys are read once per poll.
     const homes = allAccounts ? claudeHomes() : claudeHomes().slice(0, 1);
-    const [codexValue, claude, spending] = await Promise.all([codex, Promise.all(homes.map(async home => ({ ...await this.claude(home), account: claudeAccountRef(home) }))),
-      this.spending(sources?.has("copilot") ?? true)]);
+    const claudeRow = async (home: ClaudeHome): Promise<AccountUsage> => {
+      const email = claudeAccountEmail(home);
+      return { ...settleClaudeUsage(await this.claude(home), this.now()), account: { ...claudeAccountRef(home), ...(email ? { email } : {}) } };
+    };
+    const [codexValue, claude, spending] = await Promise.all([codex, Promise.all(homes.map(claudeRow)),
+      this.spending(sources?.has("copilot") ?? true, sources?.has("elevenlabs") ?? true)]);
     return { accounts: [{ ...codexValue, account: CODEX_ACCOUNT }, ...claude, ...spending] };
   }
-  private async spending(includeCopilot: boolean): Promise<AccountUsage[]> {
-    const cached = this.spendingCached.get(includeCopilot);
+  /** ElevenLabs is read only when the caller shows it: every read spends a request against the key's quota. */
+  private async spending(includeCopilot: boolean, includeElevenLabs: boolean): Promise<AccountUsage[]> {
+    const key = `${includeCopilot}:${includeElevenLabs}`;
+    const cached = this.spendingCached.get(key);
     if (!cached || this.now() - cached.at >= 60_000) {
       const at = this.now();
-      if (!this.spendingPending.has(includeCopilot)) {
+      if (!this.spendingPending.has(key)) {
         const pending = Promise.all([this.readOpenCode(new Date(at)), this.readOpenCodeGo(new Date(at)), this.readOpenRouter(new Date(at)),
-          includeCopilot ? this.readCopilot(new Date(at)) : Promise.resolve(undefined)])
-          .then(([openCode, openCodeGo, openRouter, copilot]) => [openCode, openCodeGo, ...(openRouter ? [openRouter] : []), ...(copilot ? [copilot] : [])])
-          .then(value => { this.spendingCached.set(includeCopilot, { at, value }); return value; })
-          .finally(() => { this.spendingPending.delete(includeCopilot); });
-        this.spendingPending.set(includeCopilot, pending);
+          includeCopilot ? this.readCopilot(new Date(at)) : Promise.resolve(undefined),
+          includeElevenLabs ? this.readElevenLabs(new Date(at)).catch(() => undefined) : Promise.resolve(undefined)])
+          .then(([openCode, openCodeGo, openRouter, copilot, elevenLabs]) => [openCode, openCodeGo, ...(openRouter ? [openRouter] : []), ...(copilot ? [copilot] : []), ...(elevenLabs ? [elevenLabs] : [])])
+          .then(value => { this.spendingCached.set(key, { at, value }); return value; })
+          .finally(() => { this.spendingPending.delete(key); });
+        this.spendingPending.set(key, pending);
       }
     }
-    return this.spendingPending.get(includeCopilot) ?? cached!.value;
+    return this.spendingPending.get(key) ?? cached!.value;
   }
   /** Live first, so the phone's minute-by-minute poll keeps Claude current
    *  even when Claude Code is not running; the local snapshot is the backup.
