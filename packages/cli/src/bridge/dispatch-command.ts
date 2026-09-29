@@ -64,6 +64,7 @@ export async function runConductor(args: string[]): Promise<number> {
   if (action === "add") {
     const { values } = parseArgs({ args: rest, allowPositionals: true, options: {
       scope: { type: "string" }, actions: { type: "string" }, computers: { type: "string" }, until: { type: "string" },
+      "max-permission-mode": { type: "string" },
     } });
     const actions = (values.actions ?? "dispatch,hand_off").split(",").map(value => value.trim()).filter(Boolean);
     const grant = grantSchema.parse({
@@ -71,6 +72,7 @@ export async function runConductor(args: string[]): Promise<number> {
       actions,
       ...(values.computers ? { computers: values.computers.split(",").map(value => value.trim()).filter(Boolean) } : {}),
       ...(values.until ? { until: values.until } : {}),
+      ...(values["max-permission-mode"] ? { maxPermissionMode: values["max-permission-mode"] } : {}),
     });
     console.log(JSON.stringify(await addGrant(grant), null, 2));
     return 0;

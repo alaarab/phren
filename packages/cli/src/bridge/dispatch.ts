@@ -8,7 +8,7 @@ import { getMachineName } from "../machine-identity.js";
 import { getProjectSourcePath } from "../project-config.js";
 import { computerName } from "./computers.js";
 import { dispatchParentSchema, validateDispatchParent } from "./dispatch-tree.js";
-import { findGrant, grantLabel } from "./grants.js";
+import { findGrant, grantLabel, permissionModeAllowed } from "./grants.js";
 import { hookPeers } from "./peers.js";
 import { linkedComputer } from "./computer-identity.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
@@ -341,6 +341,11 @@ export class DispatchService {
         if (reason) throw new BridgeError(409, `${peer.name} cannot run ${data.harness}${data.account ? ` account ${data.account}` : ""}: ${reason}`);
       }
       const grant = await findGrant({ action: "dispatch", project: data.project, computer: peer.name });
+      // An agent (a call that names its pane) may start a worker only up to its grant's
+      // permission ceiling; the owner, calling from the phone or the CLI without a pane, is not capped.
+      if (data.permissionMode && originPaneSchema.safeParse(originValue).success && !permissionModeAllowed(data.permissionMode, grant)) {
+        throw new BridgeError(403, `No standing grant lets an agent start a worker in ${data.permissionMode} on ${peer.name}. Add maxPermissionMode: ${data.permissionMode} to a grant in conductor.yaml, or dispatch it yourself.`);
+      }
       const origin = await this.origin(originValue);
       // Prompts are sent over the pipe, never stored in the dispatch ledger.
       const { prompt, ...metadata } = data;
