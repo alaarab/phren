@@ -3,6 +3,7 @@ import { z } from "zod";
 import { hookRequest } from "../bridge/client.js";
 import { dispatchSchema } from "../bridge/dispatch.js";
 import { handOff, handOffSchema, listLiveSessions } from "../bridge/hand-off.js";
+import { readAccountUsage, usageSummary } from "../bridge/account-usage.js";
 import { terminalPaneFromEnv } from "../bridge/terminal.js";
 import { mcpResponse } from "./types.js";
 
@@ -65,6 +66,19 @@ export function register(server: McpServer): void {
       return mcpResponse({ ok: true, data: result, message: `${result.sessions.length} live sessions across ${result.enrolled + 1} computers.${note}${unlinked}` });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not list live sessions." });
+    }
+  });
+  server.registerTool("account_usage", {
+    title: "◆ phren · account usage",
+    description: "Agent usage on this computer and every enrolled computer, merged by account: one row per Claude login, Codex, OpenCode, OpenCode Go, OpenRouter and GitHub Copilot, with its windows (percent used, percent left, reset time), leftPercent (the least room on any window), nearLimit (under 20% left or refusing requests), freshness (updatedAt, age, stale), and the computers where it is signed in with the Claude account id dispatch takes there. A window whose reset passed says reset and has no percent; a report over 15 minutes old is stale. Call it before dispatch to pick a harness, account and computer with room. Harnesses no computer reported are in noData; unreachable computers and computers not linked in hooks.yaml are listed separately: their usage is unknown, not zero.",
+    inputSchema: {},
+  }, async () => {
+    try {
+      const result = await readAccountUsage();
+      const note = result.peerError ? ` Enrolled computers were skipped: ${result.peerError}` : "";
+      return mcpResponse({ ok: true, data: result, message: `${usageSummary(result)}${note}` });
+    } catch (error) {
+      return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not read account usage." });
     }
   });
   server.registerTool("authority", {

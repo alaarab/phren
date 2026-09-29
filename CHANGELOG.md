@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- `account_usage` (MCP, conductor module) and `phren dispatch usage [--json]` show agent usage on this computer and every computer in `hooks.yaml`, merged by account the way the phone's cards are: one row per Claude login, Codex, OpenCode, OpenCode Go, OpenRouter and GitHub Copilot, with each window's percent used and left and reset time, `leftPercent` (the least room on any window), `nearLimit` (under 20% left, or refusing requests now), freshness (`age`, `stale` after 15 minutes or once a window resets) and the computers where it is signed in, with the Claude account id `dispatch` takes there. The freshest whole report stands; OpenCode and OpenCode Go spend adds up across computers and OpenRouter counts once per key. A Claude login with no identity stays per computer. Unreachable and unlinked computers are listed apart, since their usage is unknown. ElevenLabs is left out because each read spends quota. In core MCP use `phren_admin(action: "account_usage")`.
+
+### Changed
+
+- `GET /v1/dispatch/capacity` also returns `usage: [{ source, account?, leftPercent? }]`, the least room left on Codex and each Claude home, read within 2.5 seconds alongside the harness inventory. `dispatch` to `anywhere` still picks the least busy computer, and now breaks a tie by room on the account the dispatch would run under (Codex's, or the named Claude home): 20% or more left first, then unknown, then near a limit, then more room, then name.
+
 ## [0.3.12] - 2026-09-29
 
 ### Added

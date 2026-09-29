@@ -587,6 +587,25 @@ export async function readCopilotUsage(now = new Date(), run: (file: string, arg
   }
 }
 
+/** Under this much left on any window, an account is near its limit. */
+export const NEAR_LIMIT_LEFT = 20;
+
+/** Percent left on a window at `now`: none once its reset passed or with no percent, 0 while the service refuses requests. */
+export function windowLeft(window: UsageWindow, now: number): number | undefined {
+  const reset = window.resetsAt ? Date.parse(window.resetsAt) : NaN;
+  if (window.reset || Number.isFinite(reset) && reset <= now) return undefined;
+  if (window.limited) return 0;
+  return typeof window.usedPercent === "number" ? Math.max(0, Math.min(100, Math.round(100 - window.usedPercent))) : undefined;
+}
+
+/** What a capacity probe says about room: each Codex and Claude account's least room left. */
+export function capacityRoom(accounts: readonly AccountUsage[], now: number): Array<{ source: string; account?: string; leftPercent?: number }> {
+  return accounts.map(usage => {
+    const left = usage.windows.map(window => windowLeft(window, now)).filter((value): value is number => value !== undefined);
+    return { source: usage.source, ...(usage.account?.id ? { account: usage.account.id } : {}), ...(left.length ? { leftPercent: Math.min(...left) } : {}) };
+  });
+}
+
 /** A Claude report older than this says nothing about the account now. */
 export const CLAUDE_REPORT_MAX_AGE_MS = 3 * 86_400_000;
 
@@ -630,6 +649,12 @@ export class AccountUsageReader {
   /** `allAccounts`: one Claude row per home. Otherwise only the default home's, as
    *  before accounts existed, since older phones refuse two rows of one source. */
   async read(sources?: Set<string>, allAccounts = false): Promise<{ accounts: AccountUsage[] }> {
+    const [limits, spending] = await Promise.all([this.limits(allAccounts),
+      this.spending(sources?.has("copilot") ?? true, sources?.has("elevenlabs") ?? true)]);
+    return { accounts: [...limits, ...spending] };
+  }
+  /** Codex and every Claude home, without the spend readers: what a dispatch capacity probe asks. */
+  async limits(allAccounts = true): Promise<AccountUsage[]> {
     if (!this.cached || this.now() - this.cached.at >= 60_000) {
       this.pending ??= this.readCodex().then(value => { this.cached = { at: this.now(), value }; return value; }).finally(() => { this.pending = undefined; });
     }
@@ -640,9 +665,8 @@ export class AccountUsageReader {
       const email = claudeAccountEmail(home);
       return { ...settleClaudeUsage(await this.claude(home), this.now()), account: { ...claudeAccountRef(home), ...(email ? { email } : {}) } };
     };
-    const [codexValue, claude, spending] = await Promise.all([codex, Promise.all(homes.map(claudeRow)),
-      this.spending(sources?.has("copilot") ?? true, sources?.has("elevenlabs") ?? true)]);
-    return { accounts: [{ ...codexValue, account: CODEX_ACCOUNT }, ...claude, ...spending] };
+    const [codexValue, claude] = await Promise.all([codex, Promise.all(homes.map(claudeRow))]);
+    return [{ ...codexValue, account: CODEX_ACCOUNT }, ...claude];
   }
   /** ElevenLabs is read only when the caller shows it: every read spends a request against the key's quota. */
   private async spending(includeCopilot: boolean, includeElevenLabs: boolean): Promise<AccountUsage[]> {
