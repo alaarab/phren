@@ -1,0 +1,15 @@
+{
+  "sets": [
+    {
+      "id": "set:42ceb0c6-283c-44a9-991f-08ceb110125e",
+      "local": true,
+      "computers": [
+        { "name": "Linuxbox", "id": "adb03b73-cc59-4e41-b4a2-3eb73b90ef2c", "local": true, "reachable": true, "link": "self" },
+        { "name": "Mini", "id": "5756fce7-b731-407a-9ddb-24f559888421", "reachable": true, "link": "two-way" },
+        { "name": "MacBook", "id": "42ceb0c6-283c-44a9-991f-08ceb110125e", "reachable": true, "link": "two-way" }
+      ],
+      "conductors": 0
+    }
+  ],
+  "unlinked": []
+}
