@@ -584,6 +584,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           // Registration is kept for when a key is added; the reply says whether push works now.
           await agentHooks.push.register(data); result = { ok: true, configured: agentHooks.push.status.configured };
         } else if (url.pathname === "/v1/sudo/answer") {
+          // The owner answers from the phone; an agent's call names its pane.
+          if (data && typeof data === "object" && "origin" in data) throw new BridgeError(403, "Only the owner answers a sudo request, from the phone.");
           let parsed: ReturnType<typeof sudoAnswer>;
           try { parsed = sudoAnswer(data); } catch { throw new BridgeError(400, "Send an id and a password, or deny."); }
           const answered = agentHooks.sudo.answer(parsed.id, parsed.answer);

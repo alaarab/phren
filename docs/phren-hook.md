@@ -646,6 +646,14 @@ saved passwords (on the phone only, behind Face ID). Deny, no answer within two 
 (no approval push set up and no Phren app open) makes askpass exit 1, so sudo
 fails with a short reason instead of hanging.
 
+The answer route trusts its caller the way every Hook route does: the phone
+reaches it over its paired SSH key, and a call that names an agent's pane is
+refused. Anything else that can already reach this computer's Hook socket
+(a process running as you, or a linked computer over its SSH key) could deny
+a pending request or answer it, but an answer carries a password, so it only
+gets sudo to run if it already knows your password. The password itself never
+passes through anything another process can read.
+
 Agents the Hook starts (dispatched workers, conductors, scheduled runs, and
 headless schedules) get `SUDO_ASKPASS` in their environment, so `sudo -A`
 works in them without setup. sudo only uses the helper when asked: plain
