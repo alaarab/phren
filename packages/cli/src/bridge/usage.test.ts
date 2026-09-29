@@ -149,7 +149,8 @@ describe("account usage", () => {
         premium_interactions: { quota_id: "premium_interactions", unlimited: false, percent_remaining: 67.3, quota_remaining: 67305.9 },
       } };
     const value = copilotUsage(report, now);
-    expect(value).toEqual({ source: "copilot", updatedAt: now.toISOString(), message: "Plan: enterprise. Unlimited: chat, completions.",
+    expect(value).toEqual({ source: "copilot", updatedAt: now.toISOString(),
+      subscription: { plan: "Enterprise", renewsAt: "2026-10-01T00:00:00.000Z", checkedAt: now.toISOString() }, message: "Plan: enterprise. Unlimited: chat, completions.",
       windows: [{ id: "premium_interactions", name: "Premium requests · monthly", usedPercent: 32.7, resetsAt: "2026-10-01T00:00:00.000Z" }] });
     expect(JSON.stringify(value)).not.toContain("ghu_secret");
     const signedOut = await readCopilotUsage(now, async () => { throw new Error("gh: not logged in"); });
