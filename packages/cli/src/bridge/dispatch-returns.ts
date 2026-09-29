@@ -4,6 +4,7 @@ import { z } from "zod";
 import { logger } from "../logger.js";
 import { arrivalOf, dispatchStatus, updateReceipt, type OriginPane, type Receipt, type WorkerState } from "./dispatch.js";
 import { briefArrival, briefId, type BriefArrival } from "./launch-brief.js";
+import { codexServers, LOST_TURN, type LostTurn } from "./codex-servers.js";
 import { findGrant } from "./grants.js";
 import { findPane, paneIdentity, sharedSnapshot } from "./herdr.js";
 import { handOff } from "./hand-off.js";
@@ -83,6 +84,8 @@ export interface WorkerReaders {
   approval?: (target: Target) => Json | undefined;
   now?: () => number;
   stall?: typeof sessionStalls.observe;
+  /** The turn a Codex pane lost with its app-server, which no Stop will end. */
+  lost?: (server: string, pane: string, session?: string) => LostTurn | undefined;
 }
 
 async function paneTurn(server: string, pane: Json, source: Provider): Promise<TurnRecord | undefined> {
@@ -97,6 +100,7 @@ const defaultReaders: WorkerReaders = {
   finalTurn: (source, session) => source === "codex" || source === "claude" || source === "opencode" ? readFinalTurn(source, session) : Promise.resolve(undefined),
   turn: paneTurn,
   stall: (target, pane) => sessionStalls.observe(target, pane),
+  lost: (server, pane, session) => codexServers.lostTurn(server, pane, session),
 };
 
 /** The default readers with the approval reader of the Hook that runs the workers. */
@@ -164,6 +168,8 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     const expected = "session" in target ? target.session : undefined;
     // Another conversation in the same pane means the worker is gone.
     if (expected && current && current !== expected) return { state: "gone" };
+    const lost = target.source === "codex" ? readers.lost?.(target.server, String(pane.pane_id), expected ?? current) : undefined;
+    if (lost) return { state: "done", session: lost.threadId, completed: true, endedAt: lost.at, error: LOST_TURN };
     const status = String(pane.agent_status);
     // The record counts only for the conversation this dispatch started, in
     // the terminal still there, and never for another dispatch's worker.

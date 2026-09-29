@@ -18,6 +18,7 @@ import { FAST_HOOK_SOURCE, fastHookPath } from "./hook-fast.js";
 import { installAskpass, removeAskpass } from "./sudo.js";
 import { readStoredVoice, SPEECH_VOICE_ENV, writeSpeechVoice } from "./speech-voice.js";
 import { carryCodexHookTrust } from "./codex-hook-trust.js";
+import { type CodexServerEntry, serversInService } from "./codex-servers.js";
 
 const exec = promisify(execFile);
 const label = "com.phren.hook";
@@ -192,6 +193,30 @@ async function startService(): Promise<string | undefined> {
   else { await exec("systemctl", ["--user", "daemon-reload"]); await exec("systemctl", ["--user", "enable", "--now", unit]); }
 }
 
+/** How long install waits for Codex turns that would stop with the Hook. */
+export const CODEX_TURN_WAIT_MS = 10 * 60 * 1000;
+
+/** Codex workers still running inside the Hook's service (started by a Hook
+ * from before each server got its own scope) stop with it, mid-turn or not.
+ * Say which, and wait up to `waitMs` for the running turns to finish. */
+export async function waitForCodexWorkers(waitMs = CODEX_TURN_WAIT_MS, inService: () => Promise<CodexServerEntry[]> = () => serversInService(unit),
+  log: (line: string) => void = console.log, pollMs = 5_000): Promise<void> {
+  if (process.platform !== "linux") return;
+  const describe = (entry: CodexServerEntry) => `${entry.pane}${entry.dispatchId ? ` (dispatch ${entry.dispatchId.slice(0, 8)})` : ""}${entry.activeTurn ? ", turn running" : ", idle"}`;
+  let workers = await inService();
+  if (!workers.length) return;
+  log(`${workers.length} Codex worker${workers.length === 1 ? "" : "s"} run inside the Phren Hook's service and will stop when it restarts: ${workers.map(describe).join("; ")}.`
+    + " Hooks from this version on start each Codex server in its own scope, so later restarts leave them running.");
+  const deadline = Date.now() + waitMs;
+  while (workers.some(entry => entry.activeTurn) && Date.now() < deadline) {
+    log(`Waiting up to ${Math.ceil((deadline - Date.now()) / 60_000)} min for ${workers.filter(entry => entry.activeTurn).length} running Codex turn(s) to finish. Pass --force to restart now.`);
+    await new Promise(resolve => setTimeout(resolve, pollMs));
+    workers = await inService();
+  }
+  const cut = workers.filter(entry => entry.activeTurn);
+  if (cut.length) log(`Restarting anyway: ${cut.map(describe).join("; ")} will stop mid-turn and return failed.`);
+}
+
 async function serviceReady(version: string): Promise<boolean> {
   for (let i = 0; i < 50; i++) {
     try { if ((await health()).version === version) return true; } catch { /* Hook is still starting */ }
@@ -200,7 +225,7 @@ async function serviceReady(version: string): Promise<boolean> {
   return false;
 }
 
-export async function install(version: string, noService = false): Promise<void> {
+export async function install(version: string, noService = false, force = false): Promise<void> {
   if (!["darwin", "linux"].includes(process.platform)) throw new Error("Phren Hook supports macOS and Linux.");
   if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) throw new Error("Invalid helper version.");
   const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
@@ -239,8 +264,9 @@ export async function install(version: string, noService = false): Promise<void>
       await atomic(plist, launchAgentXml({ label, node: process.execPath, program, path: environmentPath, root, herdr, store: modules.store, profile: modules.profile }, extra));
     } else {
       const folder = path.join(homedir(), ".config/systemd/user"); await mkdir(folder, { recursive: true });
-      await atomic(path.join(folder, unit), `[Unit]\nDescription=Phren Hook\n[Service]\nExecStart=${systemdQuote(process.execPath)} ${systemdQuote(program)} serve\nNice=-5\nEnvironment=${systemdQuote("PATH=" + environmentPath)} ${systemdQuote("PHREN_BRIDGE_HOME=" + root)} ${systemdQuote("PHREN_HERDR_HOME=" + herdr)} ${systemdQuote("PHREN_PATH=" + modules.store)} ${systemdQuote("PHREN_PROFILE=" + modules.profile)}\nRestart=on-failure\nRestartSec=3\nUMask=0077\n[Install]\nWantedBy=default.target\n`);
+      await atomic(path.join(folder, unit), `[Unit]\nDescription=Phren Hook\n[Service]\nExecStart=${systemdQuote(process.execPath)} ${systemdQuote(program)} serve\nNice=-5\nEnvironment=${systemdQuote("PATH=" + environmentPath)} ${systemdQuote("PHREN_BRIDGE_HOME=" + root)} ${systemdQuote("PHREN_HERDR_HOME=" + herdr)} ${systemdQuote("PHREN_PATH=" + modules.store)} ${systemdQuote("PHREN_PROFILE=" + modules.profile)}\nRestart=always\nRestartSec=3\nUMask=0077\n[Install]\nWantedBy=default.target\n`);
     }
+    if (!force) await waitForCodexWorkers();
     await stopService();
   }
   await activate(version);
@@ -283,7 +309,7 @@ export async function install(version: string, noService = false): Promise<void>
       }
       console.log(`Updated ${after.changed} Phren iPhone key(s); other keys were preserved.`);
     }
-    await atomic(path.join(root, "installed.json"), JSON.stringify({ version, previous: previous?.version === version ? previous.previous : previous?.version, node: process.execPath, gateway }, null, 2) + "\n");
+    await atomic(path.join(root, "installed.json"), JSON.stringify({ version, previous: previous?.version === version ? previous.previous : previous?.version, node: process.execPath, gateway, store: modules.store }, null, 2) + "\n");
     // Last, so a failed install restores hooks.json without leaving trust for entries it no longer has.
     await carryCodexHookTrust(program, codexHooksBefore(hookEdits));
     console.log("Agent hooks installed. In Codex, review the new Phren entries in /hooks. Existing agents may need to resume before new hooks load.");
@@ -452,7 +478,7 @@ async function restoreAgentHooks(edits: SettingsEdit[]) {
 }
 
 export async function rollback() {
-  const config = JSON.parse(await readFile(path.join(bridgeRoot(), "installed.json"), "utf8")) as { version: string; previous?: string };
+  const config = JSON.parse(await readFile(path.join(bridgeRoot(), "installed.json"), "utf8")) as { version: string; previous?: string; store?: string };
   if (!config.previous || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(config.previous)) throw new Error("No previous helper version is available.");
   await stopService(); await activate(config.previous); await startService();
   // The version now in `current/` decides whether Claude's callbacks run its
@@ -462,14 +488,20 @@ export async function rollback() {
   const edits = await planAgentHooks(program, false, moduleSnapshot(defaultPhrenPath(), undefined, true), await currentHasFastHook(root));
   await applyAgentHooks(edits);
   await carryCodexHookTrust(program, codexHooksBefore(edits));
-  await atomic(path.join(bridgeRoot(), "installed.json"), JSON.stringify({ version: config.previous, previous: config.version }) + "\n");
+  await atomic(path.join(bridgeRoot(), "installed.json"), JSON.stringify({ version: config.previous, previous: config.version, ...(config.store ? { store: config.store } : {}) }) + "\n");
 }
 
 export async function reconcileModuleHooks(store: string, profile?: string): Promise<void> {
   const modules = moduleSnapshot(store, profile);
   const root = bridgeRoot();
   // Synced enablement alone never installs a host service or enrolls a key.
-  if (!await missingFile(readFile(path.join(root, "installed.json")))) return;
+  const installed = await missingFile(readFile(path.join(root, "installed.json"), "utf8"));
+  if (!installed) return;
+  // The Hook serves the store it was installed with. `phren init` or `link`
+  // on another store (a scratch store, a test's) must not stop it or rewrite
+  // its agent hooks: a test run inside a Hook-launched worker did exactly that.
+  const served = (() => { try { return object(JSON.parse(installed)).store; } catch { return undefined; } })();
+  if (typeof served === "string" && path.resolve(served) !== path.resolve(store)) return;
   const program = path.join(root, "current/bridge-hook.mjs");
   const edits = await planAgentHooks(program, false, modules, await currentHasFastHook(root));
   await applyAgentHooks(edits);
