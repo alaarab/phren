@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { conductorAnswer, nameSet } from "./conductor-sets.js";
+import { conductorAnswer, nameSet, readSets } from "./conductor-sets.js";
 import { readSetName, resetRoleState } from "./conductor-role.js";
 import { formatSets } from "./dispatch-command.js";
 import { BridgeError, type Json } from "./protocol.js";
@@ -27,6 +27,38 @@ describe("GET /v1/conductor", () => {
     expect(asked).toEqual({ computer: info.computer, conductor: null, peers: ["Mini"], knowsCaller: true });
     expect((await conductorAnswer(info, new URL("http://phren.local/v1/conductor?name=Laptop"))).knowsCaller).toBe(false);
     expect(await conductorAnswer(info, new URL("http://phren.local/v1/conductor"))).not.toHaveProperty("knowsCaller");
+  });
+});
+
+describe("GET /v1/sets", () => {
+  it("resolves a peer-reported local name by id through the existing phone identity contract", async () => {
+    mocks.peers = [peer("Mini")];
+    mocks.request.mockImplementation(async (_to: Json, route: string) => route === "/v1/computers"
+      ? { computers: [{ id: info.computer.id, name: "Linuxbox", aliases: ["Omarchy"], local: false, linked: true }] }
+      : { computer: { id: "30000000-0000-4000-8000-000000000001", name: "Mini" }, peers: ["Linuxbox"], knowsCaller: true });
+    const view = await readSets(info);
+    expect(view).toMatchObject({ sets: [{ local: true, computers: [
+      { name: "Linuxbox", id: info.computer.id, local: true, reachable: true, link: "self" },
+      { name: "Mini", link: "two-way" },
+    ] }] });
+    expect(formatSets(view)).toBe("Unnamed set (this computer)\n  Linuxbox: this computer\n  Mini: reachable, two-way link");
+    expect(mocks.request.mock.calls.filter(call => call[1] === "/v1/computers")).toHaveLength(1);
+  });
+
+  it("keeps the old name-only view when a peer's identity directory is unavailable", async () => {
+    mocks.peers = [peer("Mini")];
+    mocks.request.mockImplementation(async (_to: Json, route: string) => {
+      if (route === "/v1/computers") throw new BridgeError(404, "Unknown Phren Hook route.");
+      return { computer: { name: "Mini" }, peers: ["Server"], knowsCaller: true };
+    });
+    expect(formatSets(await readSets(info))).toContain("Server: not asked, indirect link. Link it with phren bridge link Server.");
+  });
+
+  it("does not probe identity directories when every reported name is already known", async () => {
+    mocks.peers = [peer("Mini")];
+    mocks.request.mockResolvedValue({ computer: { name: "Mini" }, peers: ["Omarchy"], knowsCaller: true });
+    await readSets(info);
+    expect(mocks.request).toHaveBeenCalledTimes(1);
   });
 });
 

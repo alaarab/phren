@@ -4,7 +4,7 @@ import { hookRequest } from "./client.js";
 import { notLinkedFrom, type NotLinkedComputer } from "./hand-off.js";
 import { optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { errorCode, object, type Json } from "./protocol.js";
-import { NEAR_LIMIT_LEFT, windowExhausted, windowLeft, type AccountUsage, type UsageWindow } from "./usage.js";
+import { NEAR_LIMIT_LEFT, windowExhausted, windowLeft, type AccountUsage, type Subscription, type UsageWindow } from "./usage.js";
 
 export { NEAR_LIMIT_LEFT };
 
@@ -66,6 +66,7 @@ export interface AccountUsageRow {
   /** When the last exhausted window resets, as "3h 10m". */
   availableIn?: string;
   spend?: { amountUSD: number; period: string };
+  subscription?: Subscription;
   updatedAt?: string;
   /** How old the standing report is, as "4m" or "2d 3h". */
   age?: string;
@@ -93,7 +94,7 @@ export interface AccountUsageView {
 export interface ComputerUsage { computer: string; accounts: AccountUsage[] }
 
 const date = (value: string | undefined) => value ? Date.parse(value) : NaN;
-const hasData = (usage: AccountUsage) => usage.windows.length > 0 || Boolean(usage.spend);
+const hasData = (usage: AccountUsage) => usage.windows.length > 0 || Boolean(usage.spend) || Boolean(usage.subscription);
 const newer = <T extends { usage: AccountUsage }>(a: T, b: T): T => (date(b.usage.updatedAt) || 0) > (date(a.usage.updatedAt) || 0) ? b : a;
 
 export function ageText(ms: number): string {
@@ -160,6 +161,9 @@ export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.
       continue;
     }
     const source = group[0].usage.source;
+    const subscriptions = group.filter(item => item.usage.subscription);
+    const subscription = subscriptions.sort((a, b) =>
+      (date(b.usage.subscription?.checkedAt) || date(b.usage.updatedAt) || 0) - (date(a.usage.subscription?.checkedAt) || date(a.usage.updatedAt) || 0))[0]?.usage.subscription;
     // One allowance: the freshest report with windows stands whole, never mixed with another read.
     const withWindows = reporting.filter(item => item.usage.windows.length);
     const standing = (withWindows.length ? withWindows : reporting).reduce(newer);
@@ -179,6 +183,7 @@ export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.
       nearLimit: windows.some(w => w.limited) || leftPercent !== undefined && leftPercent < NEAR_LIMIT_LEFT,
       exhausted: exhausted.length > 0, ...(availableIn ? { availableIn } : {}),
       ...(spend ? { spend } : {}),
+      ...(subscription ? { subscription } : {}),
       ...(standing.usage.updatedAt ? { updatedAt: standing.usage.updatedAt } : {}),
       ...(Number.isFinite(updated) ? { age: ageText(now - updated) } : {}),
       stale: !Number.isFinite(updated) || now - updated > STALE_AFTER_MS || windows.some(w => w.reset),
@@ -286,6 +291,10 @@ export function formatAccountUsage(view: AccountUsageView): string {
     const flags = [row.exhausted ? `out of quota${row.availableIn ? `, back in ${row.availableIn}` : ""}` : row.nearLimit ? `low, ${row.leftPercent ?? 0}% left` : row.leftPercent !== undefined ? `${row.leftPercent}% left` : "",
       row.stale ? `stale${row.age ? `, reported ${ago(row.age)}` : ""}` : row.age ? ago(row.age) : ""].filter(Boolean).join("; ");
     lines.push(`${title(row)}  on ${where}${flags ? `  (${flags})` : ""}`);
+    if (row.subscription) {
+      const sub = row.subscription;
+      lines.push(`  ${[sub.plan, sub.startedAt ? `since ${sub.startedAt.slice(0, 10)}` : "", sub.renewsAt ? `renews ${sub.renewsEstimated ? "about " : ""}${sub.renewsAt.slice(0, 10)}` : ""].filter(Boolean).join(" · ")}`);
+    }
     for (const w of row.windows) {
       const used = w.reset ? "reset, no new report" : w.usedPercent !== undefined ? `${w.usedPercent}% used` : w.usedUSD !== undefined ? `$${w.usedUSD.toFixed(2)}${w.limitUSD !== undefined ? ` of $${w.limitUSD.toFixed(2)}` : ""}` : "";
       lines.push(`  ${w.name.padEnd(30)} ${used.padEnd(22)}${w.limited ? "limited now  " : ""}${w.resetsIn ? `resets in ${w.resetsIn}` : ""}`.trimEnd());

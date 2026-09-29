@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 74 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 76 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -184,7 +184,7 @@ Each row carries `id`, `harness`, `name`, `account` (the login's email, else its
 label), `windows`, `leftPercent` (the least room on any window), `nearLimit`
 (under 20% left: information, not a reason to avoid the account), `exhausted`
 (a window at 100% or refusing requests: never dispatch to it) with
-`availableIn` (when its last spent window resets), `spend`, `updatedAt`, `age`, `stale`,
+`availableIn` (when its last spent window resets), `spend`, `subscription`, `updatedAt`, `age`, `stale`,
 `from`, `computers: [{ name, account? }]` and `message`. `account` on a
 computer is the Claude account id `dispatch`'s `account` takes there. Each
 window carries `usedPercent`, `leftPercent`, `resetsAt` and `resetsIn`; once
@@ -264,6 +264,11 @@ unlinked }`: each set's `id`, `name`, `computers` (`name`, `id`, `reachable`,
 agent; a second conductor in the set is refused with 409. `POST
 /v1/conductor/stop` takes an optional `paneId`. `POST /v1/sets/name` takes
 `{ name }` (1 to 60 characters, or `null`) and tells every reachable member.
+Peer-reported names with the local computer id fold into `self`, using the
+friendly peer name for display and keeping its conductor. The `self` row has
+no link hint; clients should key computers by `id` when present. Unresolved
+names are checked through peers' `/v1/computers` directories in a second
+parallel round; unavailable directories retain the name-only view.
 `/v1/health` lists `conductorSets` among its capabilities. See
 [Conductor sets](conductor-sets.md).
 
@@ -1428,6 +1433,8 @@ the conversation.
 
 Account limits and spend for the phone's Account usage screen: `{accounts: [...]}`, each account carrying `source` (`codex`, `claude`, `opencode`, `opencode-go`, `openrouter`, `copilot`, `elevenlabs`), `windows`, optional `updatedAt`, `message`, `spend`, `accountName`, `accountId`, for Claude `origin`, and `account: {id, label, key}` on Claude and Codex rows (Claude rows add `email` when the login names one). A Claude window whose reset passed after its report is sent as `reset: true` without `usedPercent`, and Claude windows reported over three days ago are dropped. By default there is one `claude` row, the default home; `?accounts=all` adds one row per extra Claude home (`~/.claude-<id>`), default first, since a phone built before accounts refuses two rows of one source. Extra homes have no live read on macOS and use the status-line snapshot (`usage/claude-<id>.json`) plus their own `.claude.json`. The optional `?sources=` comma list names the sources the phone understands; an older phone that sends none gets the original four so it never meets a source it cannot read. `elevenlabs` appears only on a computer with the ElevenLabs key spoken replies use (`phren bridge speech-key set`): the Hook reads `GET https://api.elevenlabs.io/v1/user/subscription` with that key, sent only there, and reports one `elevenlabs:characters` window with `usedPercent`, `usedCharacters`, `limitCharacters` and `resetsAt`; the key never reaches the phone. `copilot` is GitHub Copilot's own quota report read through the GitHub CLI's sign-in (`gh api /copilot_internal/user`): one window per limited quota (premium requests) with its monthly reset, unlimited quotas named in `message`; the token never reaches Phren. OpenCode Go's windows come from Go's own account report (`GET https://opencode.ai/zen/go/v1/usage`, with the local Go key sent only there): `opencode-go:plan:5h|7d|30d` with `usedPercent`, `resetsAt` and `limited: true` while Go refuses requests on that window. They are account-wide, so they already count every computer. They carry no dollar amounts, and are sent only with `?goPlan=1`, since older phones reject a Go window with a percentage and no dollar limit. The Go account's `message` says which limit is reached and how many requests OpenCode's own log shows refused with "usage limit exceeded" in the last day. The log is read incrementally; the first read covers at most its last 64 MB. With `?peers=1` the answer adds `computer` and `peers: [{name, computer, accounts} | {name, error, code?}]`, each linked computer's own answer over its pinned SSH pipe.
 
+Usage rows may also carry `subscription: { plan, startedAt?, renewsAt?, renewsEstimated?, checkedAt? }`. Dates are ISO 8601 UTC; missing metadata is omitted. Subscription freshness is independent of quota freshness and is preserved by `account_usage` when merging each account. See [subscription metadata](accounts.md#subscription-metadata) for provider fields and estimated renewals.
+
 ### `GET /v1/resources`
 
 This computer's live resources, `{computer, resources}`, collected at most once per `PHREN_RESOURCES_MAX_AGE_MS` (10 s) by `bridge/resources.ts`: `cpu` (`cores`, `load1`/`load5`/`load15`, `loadPerCore`), `memory` (`totalBytes`, `availablePercent`, `pressure` normal/warn/critical, `swapUsedBytes`), `disk` (the home volume's `totalBytes` and `freeBytes`), `battery` (`percent`, `charging`, `onAC`) when there is one, `uptimeSeconds`, and `heavy`: simulators (one per `launchd_sim`, test clones named as such), Android emulators, xcodebuild, Gradle and Kotlin daemons, Java, Codex, OpenCode and Claude Code, each with its processes, CPU and memory and the Herdr or tmux pane that started it (`pane: {server, workspace, pane, agent, label}`) when one did; any other program whose processes together hold half a core shows as `busy`. `processes` counts OS processes, including helpers, never active agents or sessions. Known programs, including simulators and emulators, are included at 10% CPU or 200 MiB resident memory. Classification uses executable names and explicit interpreter launchers, not arbitrary command-line mentions. `resourceReason` is `cpu` or `memory` (`tracked` may appear from older Hooks): memory-only rows may be idle sessions or background services, and resource use alone does not establish session status. Codex app/MCP servers are named explicitly; an npm launcher and its native Codex child share one group, including both processes in CPU/RSS totals. Other processes count toward their nearest heavy ancestor, so a Codex worker running xcodebuild shows both without double-counting. CPU is the OS `ps` percentage (a lifetime average on Linux), and resident-memory totals may include shared pages. `pressure` (`cpu`, `memory`, `disk`, `overall`, 0 to 1) fills every client's gauge the same way, `level` is `ok`, `busy` or `stressed`, and `warnings` lists `load-high` (load above twice the cores), `disk-low` (under 10 GB free), `memory-low` and `battery-low`. macOS reads sysctl, pmset and ps; Linux reads /proc, /sys and ps. With `?peers=1` it adds `peers`, as `/v1/usage` does. Advertised as `capabilities.resources`. A phone that opens `WS /v1/overview` with `resources=1` also gets `{type: "resources", resources}` first and every `PHREN_OVERVIEW_RESOURCES_MS` (12 s) after.
@@ -1468,3 +1475,26 @@ target or session, without text, to read the durable receiving-Hook record.
 confirms submission. `deliveryUncertain:true` never authorizes an automatic
 retry with a new id. Working rows may carry `stalled:true`, `stalledSince` and
 `stallFor` (seconds); dispatch returns use state `stalled` for that transition.
+
+### `dispatch_report`
+
+Worker tool, full profile or `phren_admin(action:"dispatch_report",prs)` in core.
+`prs` is an array of `{url,repo,branch,tests,notes?}` bound to the caller's own
+terminal and submitted turn. HTTPS URLs only, at most 16 rows and 24000 UTF-8
+bytes. The done return carries the report and the Hook queues it to the
+configured integrator. CLI: `phren dispatch report --prs '<JSON array>'`.
+
+### `owner_inbox`
+
+Full profile or `phren_admin(action:"owner_inbox",...)` in core. `operation` defaults
+to `list`; optional `includeResolved` shows history. `add` requires `title`, with
+optional `project` and stable UUID `id`. `resolve` requires `id`, with optional
+`resolution` and `computer` (the listed item's `inboxComputer`, omitted for
+local). A resolve does not answer or approve a prompt. Lists include local and
+linked computers' inboxes plus `unreachable` entries.
+
+Dispatch additions: optional `closeOnFinish` defaults to true, closing a
+verified finished pane after reading its done return; false keeps it open.
+Optional `integrator:{computer?,target}` overrides the configured default.
+Done returns can carry `prs` and `integratorDelivery`; receipts also retain
+`closedAt` and pending closes. CLI dispatch `--keep-open` opts out of closure.

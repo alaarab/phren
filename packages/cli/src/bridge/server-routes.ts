@@ -1,3 +1,7 @@
+import { ownerInboxView } from "./owner-inbox-view.js";
+import type { OwnerInbox } from "./owner-inbox.js";
+import { closeFinishedWorker } from "./worker-close.js";
+import { reportWorker, readIntegrator, setIntegrator } from "./worker-reports.js";
 import { sessionStalls } from "./stalls.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -91,6 +95,7 @@ export interface RouteContext {
   dispatches?: DispatchService;
   returns?: DispatchReturns;
   handOffs?: HandOffQueue;
+  inbox?: OwnerInbox;
   agentHooks: AgentHooks;
   journal: ActivityJournal;
   tabActivity: TabActivityStore;
@@ -132,7 +137,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, resources: true, sudo: true, sudoOutcome: true };
+  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, resources: true, sudo: true, sudoOutcome: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -336,6 +341,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
               .parse({ name: url.searchParams.get("name") ?? undefined, hostKey: url.searchParams.get("hostKey") ?? undefined });
             result = { computer: info.computer, version, ...await listsCaller(caller) }; break;
           }
+          case "/v1/owner-inbox": result = await ownerInboxView(ctx.inbox!, { action: "list", includeResolved: url.searchParams.get("includeResolved") === "true" }, url.searchParams.get("local") === "1"); break;
+          case "/v1/conductor/integrator": result = { integrator: await readIntegrator() ?? null }; break;
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
           // Receiving side of a launched brief: what the worker's hooks reported for it.
           case "/v1/dispatch/arrival": result = { arrival: await briefArrival(briefId.parse(url.searchParams.get("id"))) ?? null }; break;
@@ -572,6 +579,14 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           // Audio, not JSON: the route writes its own response.
           await streamSpeech(data, response);
           return;
+        } else if (url.pathname === "/v1/owner-inbox") {
+          result = await ownerInboxView(ctx.inbox!, data);
+        } else if (url.pathname === "/v1/conductor/integrator") {
+          result = await setIntegrator(data.integrator);
+        } else if (url.pathname === "/v1/dispatch/report") {
+          result = await reportWorker(data);
+        } else if (url.pathname === "/v1/dispatch/close") {
+          result = await closeFinishedWorker(data, ctx.handOffs);
         } else if (url.pathname === "/v1/hand-off") {
           result = await ctx.handOffs!.enqueue(data);
         } else if (url.pathname === "/v1/hand-off/status") {

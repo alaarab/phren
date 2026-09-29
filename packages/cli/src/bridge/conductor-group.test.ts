@@ -83,6 +83,50 @@ describe("the sets view", () => {
     expect(view.unlinked).toEqual([unlinked]);
   });
 
+  it("folds a peer's friendly name into self by id and keeps its conductor", async () => {
+    const answers = await askPeers([peer("Mini"), peer("MacBook")], caller, async to => ({
+      computer: { id: to.name === "Mini" ? id(1) : id(3), name: to.name },
+      peers: ["Linuxbox", to.name === "Mini" ? "MacBook" : "Mini"], knowsCaller: true,
+    }));
+    const conductor = { server: "tmux", target };
+    const view = buildSets({ local: { name: "omarchy", id: id(2), names: ["omarchy"], conductor }, answers,
+      computers: [unlinked, { id: id(2), name: "Linuxbox", aliases: [], local: false, linked: false }],
+      reportedComputers: [
+        { id: id(2), name: "Linuxbox", aliases: ["omarchy"] },
+        { id: id(2), name: "Linuxbox", aliases: ["omarchy.local"] },
+      ] });
+    expect(view.sets[0].computers).toEqual([
+      { name: "Linuxbox", id: id(2), local: true, reachable: true, link: "self", conductor },
+      { name: "Mini", id: id(1), reachable: true, link: "two-way" },
+      { name: "MacBook", id: id(3), reachable: true, link: "two-way" },
+    ]);
+    expect(view.sets[0]).toMatchObject({ conductor: { computer: "Linuxbox", target }, conductors: 1 });
+    expect(view.unlinked).toEqual([unlinked]);
+  });
+
+  it("does not fold a different id or a report without an id into self", async () => {
+    const answers = await askPeers([peer("Mini")], caller, async () => ({
+      computer: { id: id(1), name: "Mini" }, peers: ["Linuxbox", "Server"], knowsCaller: true,
+    }));
+    const view = buildSets({ local: { name: "omarchy", id: id(2), names: ["omarchy"] }, answers, computers: [],
+      reportedComputers: [{ id: id(3), name: "Linuxbox", aliases: [] }, { name: "Server", aliases: [] }] });
+    expect(view.sets[0].computers.slice(2)).toEqual([
+      { name: "Linuxbox", link: "indirect", hint: "Link it with phren bridge link Linuxbox." },
+      { name: "Server", link: "indirect", hint: "Link it with phren bridge link Server." },
+    ]);
+  });
+
+  it.each([true, false])("folds a direct peer with the local id even when knowsCaller is %s", async knowsCaller => {
+    const answers = await askPeers([peer("Linuxbox")], caller, async () => ({
+      computer: { id: id(2), name: "omarchy" }, peers: ["Linuxbox"], knowsCaller, conductor: { server: "default", target },
+    }));
+    const view = buildSets({ local: { name: "omarchy", id: id(2), names: ["omarchy"], conductor: { server: "default", target } }, answers, computers: [] });
+    expect(view.sets).toHaveLength(1);
+    expect(view.sets[0]).toMatchObject({ conductors: 1, conductor: { computer: "Linuxbox", target },
+      computers: [{ name: "Linuxbox", id: id(2), local: true, reachable: true, link: "self" }] });
+    expect(view.sets[0].computers).toHaveLength(1);
+  });
+
   it("shows two conductors in one set, from before the computers were linked", async () => {
     const answers = await askPeers([peer("Mini")], caller, async () => ({ computer: { id: id(1), name: "Mini" }, conductor: { server: "default", target }, peers: ["Omarchy"], knowsCaller: true }));
     const local = { server: "tmux", target: { ...target, server: "tmux", pane: "p1" } };

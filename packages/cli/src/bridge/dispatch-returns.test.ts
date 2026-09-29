@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchStatus, updateReceipt, type Receipt } from "./dispatch.js";
-import { BACKGROUND_WAIT_MS, DispatchReturns, hookWorkers, NOTICE_MS, noticeLine, observe, POLL_MS, REPLY_LIMIT, returnRow, workerStates, type WorkerReaders } from "./dispatch-returns.js";
+import { BACKGROUND_WAIT_MS, LAUNCH_GRACE_MS, DispatchReturns, hookWorkers, NOTICE_MS, noticeLine, observe, POLL_MS, REPLY_LIMIT, returnRow, workerStates, type WorkerReaders } from "./dispatch-returns.js";
 import { findPane } from "./herdr.js";
 import { LOST_TURN } from "./codex-servers.js";
 import { localHost } from "./dispatch-hosts.js";
@@ -66,6 +66,29 @@ describe("the receiving Hook's worker states", () => {
     expect(answer.workers[3]).toEqual({ state: "gone" });
     const blocked = await workerStates({ targets: [workerTarget] }, readers(() => herdrSnapshot({ "w1P:p2": "blocked" })));
     expect(blocked.workers[0]).toEqual({ state: "blocked", session: workerTarget.session });
+  });
+
+  it("refreshes a cached snapshot once before calling a new Codex pane gone", async () => {
+    const freshSnapshot = vi.fn(async () => herdrSnapshot());
+    const answer = await workerStates({ targets: [workerTarget, workingTarget] }, {
+      ...readers(() => ({ panes: [] })), freshSnapshot,
+    });
+    expect(answer.workers.map(row => row.state)).toEqual(["done", "working"]);
+    expect(freshSnapshot).toHaveBeenCalledTimes(1);
+    freshSnapshot.mockRejectedValueOnce(new Error("offline"));
+    expect((await workerStates({ targets: [workerTarget] }, { ...readers(() => ({ panes: [] })), freshSnapshot })).workers[0].state).toBe("unavailable");
+  });
+
+  it("allows a new Codex launch to appear, but reports a missing established worker immediately", () => {
+    const fresh = receipt({ brief: "launch", harness: "codex", target: { ...workerTarget, source: "codex" } });
+    expect(observe(fresh, { state: "gone" }, LAUNCH_GRACE_MS - 1)).toBe(false);
+    expect(fresh.returned).toBeUndefined();
+    expect(observe(fresh, { state: "gone" }, LAUNCH_GRACE_MS)).toBe(true);
+    expect(fresh.returned?.state).toBe("gone");
+    const established = receipt(); observe(established, { state: "working" }, 1);
+    observe(established, { state: "gone" }, 2); expect(established.returned?.state).toBe("gone");
+    established.closedAt = new Date(3).toISOString();
+    expect(observe(established, { state: "gone" }, 4)).toBe(false);
   });
 
   it("keeps an idle pane with no turn record working while its finished turn left background tasks", async () => {

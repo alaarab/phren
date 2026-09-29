@@ -1,3 +1,5 @@
+import { ownerInboxSchema } from "./owner-inbox.js";
+import { prsSchema } from "./return-contract.js";
 import { parseArgs } from "node:util";
 import { hookRequest } from "./client.js";
 import { dispatchSchema } from "./dispatch.js";
@@ -7,6 +9,12 @@ import { addGrant, grantSchema, listNamedGrants, removeGrant } from "./grants.js
 import { sessionId, type Json } from "./protocol.js";
 
 export async function runDispatch(args: string[]): Promise<number> {
+  if (args[0] === "report") {
+    const { values } = parseArgs({ args: args.slice(1), options: { prs: { type: "string" } } });
+    const origin = await terminalPaneFromEnv();
+    if (!origin || !values.prs) throw new Error("Usage inside a worker pane: phren dispatch report --prs <JSON array>");
+    console.log(JSON.stringify(await hookRequest("/v1/dispatch/report", { origin, prs: prsSchema.parse(JSON.parse(values.prs)) }), null, 2)); return 0;
+  }
   if (args.length === 1 && args[0] === "status") {
     console.log(JSON.stringify(await hookRequest("/v1/dispatch"), null, 2)); return 0;
   }
@@ -23,6 +31,7 @@ export async function runDispatch(args: string[]): Promise<number> {
     console.log(JSON.stringify(await listLiveSessions(), null, 2)); return 0;
   }
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
+    "keep-open": { type: "boolean" },
     harness: { type: "string", default: "codex" }, model: { type: "string" }, effort: { type: "string" }, account: { type: "string" }, "permission-mode": { type: "string" }, prompt: { type: "string" }, label: { type: "string" },
     "parent-provider": { type: "string" }, "parent-session": { type: "string" }, "parent-computer": { type: "string" },
     "parent-server": { type: "string" }, "parent-workspace": { type: "string" }, "parent-tab": { type: "string" }, "parent-pane": { type: "string" },
@@ -37,8 +46,8 @@ export async function runDispatch(args: string[]): Promise<number> {
     server: values["parent-server"], workspace: values["parent-workspace"], tab: values["parent-tab"], pane: values["parent-pane"],
     source: values["parent-provider"], session: values["parent-session"],
   } : undefined;
-  const { "permission-mode": permissionMode, ...rest } = values;
-  const ordinary = { ...Object.fromEntries(Object.entries(rest).filter(([key]) => !key.startsWith("parent-"))), ...(permissionMode !== undefined ? { permissionMode } : {}) };
+  const { "permission-mode": permissionMode, "keep-open": keepOpen, ...rest } = values;
+  const ordinary = { ...Object.fromEntries(Object.entries(rest).filter(([key]) => !key.startsWith("parent-"))), ...(permissionMode !== undefined ? { permissionMode } : {}), ...(keepOpen ? { closeOnFinish: false } : {}) };
   const input = dispatchSchema.parse({ computer: positionals[0], project: positionals[1], ...ordinary,
     ...(parent ? { parent, parentTarget } : {}) });
   // Run inside an agent's pane, the dispatch remembers that pane for return notices.
@@ -106,6 +115,15 @@ export async function runConductor(args: string[]): Promise<number> {
     console.log(result.stopped ? "This computer has no conductor now." : "This computer had no conductor.");
     return 0;
   }
+  if (namespace === "integrator") {
+    const { values } = parseArgs({ args: args.slice(1), options: { session: { type: "string" }, computer: { type: "string" }, clear: { type: "boolean" } } });
+    if (values.clear) { console.log(JSON.stringify(await hookRequest("/v1/conductor/integrator", { integrator: null }), null, 2)); return 0; }
+    if (!values.session) { console.log(JSON.stringify(await hookRequest("/v1/conductor/integrator"), null, 2)); return 0; }
+    const { listLiveSessions } = await import("./hand-off.js");
+    const live = await listLiveSessions(), session = live.sessions.find(row => row.target?.session === values.session && (values.computer ? row.computer === values.computer : row.local));
+    if (!session?.target) throw new Error("That integrator is not a live session on the selected computer.");
+    console.log(JSON.stringify(await hookRequest("/v1/conductor/integrator", { integrator: { target: session.target, ...(!session.local ? { computer: session.computer } : {}) } }), null, 2)); return 0;
+  }
   if (namespace === "sets") {
     if (action === "name") {
       const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { clear: { type: "boolean" } } });
@@ -150,4 +168,14 @@ export async function runConductor(args: string[]): Promise<number> {
     return 0;
   }
   throw new Error(CONDUCTOR_USAGE);
+}
+
+export async function runOwnerInbox(args: string[]): Promise<number> {
+  const [action = "list", ...rest] = args;
+  const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { computer: { type: "string" }, project: { type: "string" }, id: { type: "string" }, resolution: { type: "string" }, all: { type: "boolean" } } });
+  const input = ownerInboxSchema.parse({ action, ...(values.computer ? { computer: values.computer === "local" ? undefined : values.computer } : {}),
+    ...(action === "add" ? { title: positionals.join(" "), project: values.project, id: values.id } : {}),
+    ...(action === "resolve" ? { id: positionals[0], resolution: values.resolution } : {}),
+    ...(values.all ? { includeResolved: true } : {}) });
+  console.log(JSON.stringify(await hookRequest("/v1/owner-inbox", input), null, 2)); return 0;
 }

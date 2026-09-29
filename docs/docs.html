@@ -1062,8 +1062,8 @@ phren hooks errors --limit 5</code></pre>
 
         <h2 id="ios-hook">Phren Hook <a href="#ios-hook" class="anchor-link">#</a></h2>
         <p>Phren Hook is a local helper that connects your phone to the agents on a computer. It needs macOS or Linux, Node.js 20+, <a href="https://herdr.dev">Herdr</a>, SSH, and <code>lsof</code>. Install it as the user who runs your agents:</p>
-        <pre><code>npx --yes @phren/cli@0.3.14 bridge install
-npx --yes @phren/cli@0.3.14 bridge doctor</code></pre>
+        <pre><code>npx --yes @phren/cli@0.3.15 bridge install
+npx --yes @phren/cli@0.3.15 bridge doctor</code></pre>
         <p>Then open <strong>Agents &rarr; Add computer</strong> in the app and follow the steps. <a href="phren-hook.html">The Phren Hook page</a> covers setup, updates, and troubleshooting.</p>
       </section>
 
@@ -1644,11 +1644,12 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
           <div class="ref-card-desc">Show local schedule runs.</div>
         </div>
 
+        <p><code>phren owner-inbox list|add|resolve</code> collects owner work. <code>phren conductor integrator --session &lt;id&gt; [--computer &lt;name&gt;]</code> chooses who receives structured PR reports. Workers use <code>phren dispatch report --prs &lt;JSON&gt;</code> before ending their turn.</p>
         <h2 id="cli-dispatch">Dispatch <a href="#cli-dispatch" class="anchor-link">#</a></h2>
         <p>Send work to agents on your enrolled computers through Phren Hook. Needs the <code>conductor</code> module.</p>
 
         <div class="ref-card">
-          <div class="ref-card-name">phren dispatch &lt;computer|anywhere&gt; &lt;project&gt; --label &lt;label&gt; --prompt &lt;brief&gt; [--harness codex|claude|opencode] [--model &lt;model&gt;]</div>
+          <div class="ref-card-name">phren dispatch &lt;computer|anywhere&gt; &lt;project&gt; --label &lt;label&gt; --prompt &lt;brief&gt; [--harness codex|claude|opencode] [--model &lt;model&gt;] [--keep-open]</div>
           <div class="ref-card-desc">Start a worker on a named computer, or on the least busy one.</div>
         </div>
 
@@ -1723,7 +1724,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
       <!-- ============================================================ -->
       <section class="docs-section" id="mcp-tools">
         <h1>MCP Tools</h1>
-        <p class="docs-subtitle">The phren MCP server has 71 tools. By default an agent sees 10 of them. Every tool returns <code>{ ok, message, data?, error? }</code>.</p>
+        <p class="docs-subtitle">The phren MCP server has 76 tools. By default an agent sees 10 of them. Every tool returns <code>{ ok, message, data?, error? }</code>.</p>
 
         <h2 id="mcp-profiles">Tool Profiles <a href="#mcp-profiles" class="anchor-link">#</a></h2>
         <p>The server exposes one of two profiles. Switch with <code>phren config mcp-profile core</code> or <code>phren config mcp-profile full</code>, or set <code>PHREN_MCP_PROFILE</code>.</p>
@@ -1866,14 +1867,18 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <details class="ref-card"><summary><span class="ref-card-name">code_outline</span><span class="ref-card-desc">A file's functions, types and variables in source order</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, path)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">code_usage</span><span class="ref-card-desc">Most and least used functions and types</span></summary><div class="ref-card-details"><div class="ref-card-params">(project, top?)</div></div></details>
 
-        <h2 id="mcp-dispatch">Dispatch <span class="cat-badge cat-session">5 tools</span> <a href="#mcp-dispatch" class="anchor-link">#</a></h2>
+        <h2 id="mcp-dispatch">Dispatch <span class="cat-badge cat-session">9 tools</span> <a href="#mcp-dispatch" class="anchor-link">#</a></h2>
         <p>Needs the <code>conductor</code> module and a running <a href="phren-hook.html">Phren Hook</a>.</p>
-        <details class="ref-card"><summary><span class="ref-card-name">dispatch</span><span class="ref-card-desc">Send a worker brief to an enrolled computer</span></summary><div class="ref-card-details"><div class="ref-card-params">(computer, project, harness, model?, prompt, label, parent?, parentTarget?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">dispatch</span><span class="ref-card-desc">Send a worker brief to an enrolled computer</span></summary><div class="ref-card-details"><div class="ref-card-params">(computer, project, harness, model?, prompt, label, parent?, parentTarget?, closeOnFinish?, integrator?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">dispatch_returns</span><span class="ref-card-desc">Unread returns from dispatched workers</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">live_sessions</span><span class="ref-card-desc">Live agent sessions on this and every enrolled computer</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">account_usage</span><span class="ref-card-desc">Agent usage on this and every enrolled computer, by account</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">hand_off</span><span class="ref-card-desc">Queue a prompt at a busy session, confirm delivery by id</span></summary><div class="ref-card-details"><div class="ref-card-params">(computer?, target?, session?, project?, text?, deliveryId?, status?)</div></div></details>
 
+        <details class="ref-card"><summary><span class="ref-card-name">dispatch_report</span><span class="ref-card-desc">PR evidence for the done return and integrator queue</span></summary><div class="ref-card-details"><div class="ref-card-params">(prs: [{url,repo,branch,tests,notes?}])</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">owner_inbox</span><span class="ref-card-desc">List, add or resolve what waits on the owner</span></summary><div class="ref-card-details"><div class="ref-card-params">(operation?, title?, project?, id?, resolution?, includeResolved?, computer?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">dispatch_approve</span><span class="ref-card-desc">Answer a dispatched worker's permission request</span></summary><div class="ref-card-details"><div class="ref-card-params">(id, decision, actionId)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">authority</span><span class="ref-card-desc">Read the owner's release authority policy</span></summary><div class="ref-card-details"><div class="ref-card-params">(project?)</div></div></details>
         <h2 id="mcp-return">Return Format <a href="#mcp-return" class="anchor-link">#</a></h2>
         <pre><code>{
   "ok": true,
@@ -2825,7 +2830,7 @@ phren team join git@github.com:example-org/phren-arc.git
       <span class="dot-sep">&#9829;</span>
       <span>made with love by <a href="https://github.com/alaarab" style="color:var(--text-muted);text-decoration:none;">@alaarab</a> &amp; claude</span>
       <span class="dot-sep">•</span>
-      <span style="opacity:0.5;font-size:11px">v0.3.14</span>
+      <span style="opacity:0.5;font-size:11px">v0.3.15</span>
     </div>
     <div class="footer-right">
       <a href="https://github.com/alaarab/phren" target="_blank" rel="noopener">GitHub</a>

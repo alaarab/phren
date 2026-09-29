@@ -155,10 +155,23 @@ export function buildSets(input: {
   local: { name: string; id?: string; conductor?: Json; set?: SetName; names: readonly string[] };
   answers: readonly PeerAnswer[];
   computers: readonly Computer[];
+  /** Identity rows from peers, used only to recognize names in their set reports. */
+  reportedComputers?: readonly Pick<Computer, "id" | "name" | "aliases">[];
 }): { sets: ComputerSet[]; unlinked: Computer[] } {
-  const { local, answers } = input;
+  const { local } = input;
+  // A peer's directory can name this computer differently from its hostname.
+  // Only a matching id establishes that the peer's name belongs to self.
+  const reports = input.reportedComputers ?? [];
+  const selfReports = local.id ? reports.filter(row => row.id === local.id) : [];
+  const selfAnswers = input.answers.filter(answer => answer.ok && local.id && answer.id === local.id);
+  const selfNames = [...local.names, local.name, ...selfReports.flatMap(row => [row.name, ...row.aliases]),
+    ...selfAnswers.flatMap(answer => [answer.peer.name, answer.peer.address, ...(answer.ok ? answer.names : [])])];
+  const reportedSelf = indirectMembers(input.answers, local.names).find(name => selfReports.some(row =>
+    [row.name, ...row.aliases].some(alias => computerLabel(alias) === computerLabel(name))));
+  const selfName = reportedSelf ?? selfAnswers.map(answer => answer.peer.name).sort()[0] ?? local.name;
+  const answers = input.answers.filter(answer => !(answer.ok && local.id && answer.id === local.id));
   const members = answers.filter(answer => !oneWay(answer));
-  const computers: SetComputer[] = [{ name: local.name, ...(local.id ? { id: local.id } : {}), local: true, reachable: true, link: "self",
+  const computers: SetComputer[] = [{ name: selfName, ...(local.id ? { id: local.id } : {}), local: true, reachable: true, link: "self",
     ...(local.conductor ? { conductor: local.conductor } : {}) }];
   for (const answer of members) {
     if (answer.ok) computers.push({ name: answer.peer.name, ...(answer.id ? { id: answer.id } : {}), reachable: true,
@@ -166,12 +179,12 @@ export function buildSets(input: {
       ...(answer.knowsCaller === undefined ? { hint: "Its Hook cannot say whether it links back. Update it with phren bridge update." } : {}) });
     else computers.push({ name: answer.peer.name, reachable: !!answer.disabled, link: "unknown", error: answer.error, ...(answer.code ? { code: answer.code } : {}) });
   }
-  const indirect = indirectMembers(answers, local.names);
+  const indirect = indirectMembers(answers, selfNames);
   for (const name of indirect) computers.push({ name, link: "indirect", hint: linkHint(name) });
   const name = newest([local.set, ...members.map(answer => answer.ok ? answer.set : undefined)]);
   const own: ComputerSet = { id: setId([local.id, ...members.map(answer => answer.ok ? answer.id : undefined)], local.name),
     ...(name?.name ? { name: name.name, namedAt: name.namedAt } : {}), local: true, computers,
-    ...conductorOf([{ computer: local.name, conductor: local.conductor }, ...members.map(answer => ({ computer: answer.peer.name, conductor: answer.ok ? answer.conductor : undefined }))]) };
+    ...conductorOf([{ computer: selfName, conductor: local.conductor }, ...members.map(answer => ({ computer: answer.peer.name, conductor: answer.ok ? answer.conductor : undefined }))]) };
   const others: ComputerSet[] = answers.flatMap(answer => {
     if (!answer.ok || !oneWay(answer)) return [];
     return [{ id: setId([answer.id], answer.peer.name), ...(answer.set?.name ? { name: answer.set.name, namedAt: answer.set.namedAt } : {}), local: false,
@@ -180,6 +193,8 @@ export function buildSets(input: {
       ...conductorOf([{ computer: answer.peer.name, conductor: answer.conductor }]) }];
   });
   const indirectLabels = new Set(indirect.map(computerLabel));
-  const unlinked = input.computers.filter(row => !row.linked && ![row.name, ...row.aliases].some(known => indirectLabels.has(computerLabel(known))));
+  const selfLabels = new Set(selfNames.map(computerLabel));
+  const unlinked = input.computers.filter(row => !row.local && !row.linked && !(local.id && row.id === local.id)
+    && ![row.name, ...row.aliases].some(known => selfLabels.has(computerLabel(known)) || indirectLabels.has(computerLabel(known))));
   return { sets: [own, ...others], unlinked };
 }
