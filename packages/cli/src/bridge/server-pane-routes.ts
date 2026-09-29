@@ -387,7 +387,9 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     else {
       // The agent has not submitted it yet (a busy agent queues typed
       // input). Recheck fresh identity and never retry; a late
-      // submission to another conversation is still refused above.
+      // submission to another conversation is still refused above. A bare
+      // ok acknowledges transport only, even if this is still the same
+      // conversation. Callers needing a submitted turn require delivered.
       let confirmed = false;
       try {
         const current = findPane(await snapshot(target.server), target);
