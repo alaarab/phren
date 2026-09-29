@@ -131,6 +131,10 @@ describe("a fresh Codex before its first lifecycle event", () => {
     expect(codexStartupStatus(CODEX_COMPOSER.replace("\u203a Ask Codex", "\u2022 Working (3s \u2022 esc to interrupt)\n\n\u203a Ask Codex"))).toBe("working");
     expect(codexStartupStatus("  >_ OpenAI Codex (v0.158.0)\n")).toBeUndefined();
     expect(codexStartupStatus("\u203a Ask Codex to do anything\n")).toBeUndefined();
+    // Codex 0.155 draws only its model line under the composer.
+    expect(codexStartupStatus("\u203a Ok\n\u2022 Sounds good.\n  done 11:24 AM\n\u203a Ask Codex to do anything\n  gpt-6-luna medium \u00b7 ~ \u00b7 Respond to greeting")).toBe("idle");
+    // An earlier prompt row with output below it is not the composer.
+    expect(codexStartupStatus("\u203a Ok\n\u2022 One\n\u2022 Two\n\u2022 Three\n\u2022 Four")).toBeUndefined();
   });
 
   it("reads the screen at most once per window, only for Codex, and keeps its reading when a read fails", async () => {
