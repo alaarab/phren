@@ -16,6 +16,7 @@ import { herdrRoot } from "./herdr.js";
 import { health } from "./transport.js";
 import { FAST_HOOK_SOURCE, fastHookPath } from "./hook-fast.js";
 import { readStoredVoice, SPEECH_VOICE_ENV, writeSpeechVoice } from "./speech-voice.js";
+import { carryCodexHookTrust } from "./codex-hook-trust.js";
 
 const exec = promisify(execFile);
 const label = "com.phren.hook";
@@ -281,6 +282,8 @@ export async function install(version: string, noService = false): Promise<void>
       console.log(`Updated ${after.changed} Phren iPhone key(s); other keys were preserved.`);
     }
     await atomic(path.join(root, "installed.json"), JSON.stringify({ version, previous: previous?.version === version ? previous.previous : previous?.version, node: process.execPath, gateway }, null, 2) + "\n");
+    // Last, so a failed install restores hooks.json without leaving trust for entries it no longer has.
+    await carryCodexHookTrust(program, codexHooksBefore(hookEdits));
     console.log("Agent hooks installed. In Codex, review the new Phren entries in /hooks. Existing agents may need to resume before new hooks load.");
     console.log(`SSH gateway: ${gateway}${gateway === "node" ? " (no socat or nc -U found)" : ""}.`);
     console.log(`Phren Hook ${version} installed${noService ? " (service not started)" : " and running"}. Run phren bridge doctor.`);
@@ -434,6 +437,9 @@ async function applyAgentHooks(edits: SettingsEdit[]) {
   }
 }
 
+/** Codex's hooks.json as it stood before `edits` rewrote it, when they did. */
+const codexHooksBefore = (edits: SettingsEdit[]) => edits.find(edit => edit.file === path.join(codexHome(), "hooks.json"))?.before;
+
 async function restoreAgentHooks(edits: SettingsEdit[]) {
   for (const { file, before, after } of edits) {
     // A concurrent user edit always wins over rollback.
@@ -449,8 +455,10 @@ export async function rollback() {
   // The version now in `current/` decides whether Claude's callbacks run its
   // forwarder or, from before the forwarder, its bundle.
   const root = bridgeRoot();
-  await applyAgentHooks(await planAgentHooks(path.join(root, "current/bridge-hook.mjs"), false,
-    moduleSnapshot(defaultPhrenPath(), undefined, true), await currentHasFastHook(root)));
+  const program = path.join(root, "current/bridge-hook.mjs");
+  const edits = await planAgentHooks(program, false, moduleSnapshot(defaultPhrenPath(), undefined, true), await currentHasFastHook(root));
+  await applyAgentHooks(edits);
+  await carryCodexHookTrust(program, codexHooksBefore(edits));
   await atomic(path.join(bridgeRoot(), "installed.json"), JSON.stringify({ version: config.previous, previous: config.version }) + "\n");
 }
 
@@ -459,7 +467,10 @@ export async function reconcileModuleHooks(store: string, profile?: string): Pro
   const root = bridgeRoot();
   // Synced enablement alone never installs a host service or enrolls a key.
   if (!await missingFile(readFile(path.join(root, "installed.json")))) return;
-  await applyAgentHooks(await planAgentHooks(path.join(root, "current/bridge-hook.mjs"), false, modules, await currentHasFastHook(root)));
+  const program = path.join(root, "current/bridge-hook.mjs");
+  const edits = await planAgentHooks(program, false, modules, await currentHasFastHook(root));
+  await applyAgentHooks(edits);
+  await carryCodexHookTrust(program, codexHooksBefore(edits));
   await applyOpencodePlugin(!modules.has("hook"));
   if (!modules.has("hook")) await stopService();
 }
