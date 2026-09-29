@@ -109,3 +109,7 @@ export function targetFromURL(url: URL): Target {
 
 /** The reasoning efforts a launch or a dispatch may ask a harness for. */
 export const launchEfforts = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+/** The permission modes a worker may start in, in the phone's words (T3's). */
+export const PERMISSION_MODES = ["supervised", "auto-edits", "auto", "full-access"] as const;
+export type PermissionMode = (typeof PERMISSION_MODES)[number];

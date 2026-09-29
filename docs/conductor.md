@@ -300,7 +300,16 @@ answer to resolves to no computer.
 phren conductor grants list
 phren conductor grants add --scope project:demo --actions dispatch,hand_off --computers Desk
 phren conductor grants remove --scope project:demo
+phren conductor grants add --scope project:demo --actions dispatch --max-permission-mode full-access
 ```
+
+A grant also caps the permission mode an agent may start a dispatched worker
+in (`maxPermissionMode`: `supervised`, `auto-edits`, `auto` or `full-access`).
+Without a grant, or with one that names no ceiling, an agent may ask for up to
+`auto`; `full-access` needs a grant that names it. A call above the ceiling
+fails with 403 before any receipt is saved. The owner, dispatching from the
+phone or the CLI without a pane, is never capped. A grant that differs only in
+its ceiling is the same grant: remove it and add it again to change the ceiling.
 
 The phone exposes grants from conductor chat options. A conductor permission
 card can approve once, allow for its project or allow everywhere. The latter
