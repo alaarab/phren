@@ -168,7 +168,9 @@ use the defaults. Transcript and callback settings respect `CODEX_HOME`,
 `CLAUDE_CONFIG_DIR`, and `COPILOT_HOME`. `PHREN_APPROVAL_HOLD_MS` overrides how
 long the Hook holds a permission ask for the phone (default `55000`, the whole
 Claude window is 60000); tests shorten it. `PHREN_SUDO_TIMEOUT_MS` is how long
-a `sudo -A` request waits for the phone's password (default `120000`). The
+a `sudo -A` request waits for the phone's password (default `120000`), and
+`PHREN_SUDO_OUTCOME_MS` how long after handing it over the Hook waits to see
+whether sudo asks again before calling it accepted (default `6000`). The
 real-Hook tests set `PHREN_SUDO_TEST_PARENT=1`, honored only with
 `NODE_ENV=test`, so a stand-in `sudo` that is not root may ask. Tests also shorten
 `PHREN_IDENTITY_CACHE_MS` (how long a pane's process-based conversation probe

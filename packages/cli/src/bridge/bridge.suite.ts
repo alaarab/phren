@@ -5,7 +5,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { appendFile, chmod, copyFile, mkdir, mkdtemp, open, readdir, readFile, realpath as realpathAsync, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer, request, type Server as HttpServer } from "node:http";
 import { createConnection, createServer as createNetServer, type Server, type Socket } from "node:net";
-import { hostname, tmpdir } from "node:os";
+import { hostname, tmpdir, userInfo } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
@@ -684,7 +684,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
       HOME: root, XDG_CONFIG_HOME: path.join(root, ".config"), PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex"),
       CLAUDE_CONFIG_DIR: path.join(root, "claude-config"), NODE_ENV: "test", PHREN_TEST_MODEL_CATALOG: path.join(root, "model-catalog.json"),
       ELEVENLABS_API_KEY: "", NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: `http://127.0.0.1:${(egress!.address() as { port: number }).port}`, NO_PROXY: "localhost,127.0.0.1,::1",
-      PHREN_APPROVAL_HOLD_MS: "2500", PHREN_SUDO_TEST_PARENT: "1", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SHELL_READY_MS: "1500", PHREN_OPENCODE_PID_MS: "0", PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
+      PHREN_APPROVAL_HOLD_MS: "2500", PHREN_SUDO_TEST_PARENT: "1", PHREN_SUDO_OUTCOME_MS: "800", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SHELL_READY_MS: "1500", PHREN_OPENCODE_PID_MS: "0", PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
       stdio: ["ignore", "ignore", "pipe"] });
     hook.stderr!.on("data", bytes => log += bytes);
     let ready = false;
@@ -2523,6 +2523,19 @@ schedules:
       await waitFor(() => frames.at(-1)?.requests?.length === 1, 15_000);
       expect(await api("/v1/sudo/answer", { id: frames.at(-1).requests[0].id, deny: true })).toEqual({ status: 200, data: { ok: true } });
       expect(await denied).toEqual({ code: 1, out: "", err: "phren askpass: Denied on the phone.\n" });
+
+      // The phone learns whether sudo took the password: this stand-in, like
+      // sudo, asks again after a wrong one.
+      expect((await api("/v1/health")).data.capabilities.sudoOutcome).toBe(true);
+      await writeFile(script, `out=$(exec "$ASKPASS" "[sudo] password:" 2>"$0.err")\n[ "$out" = right ] || out=$(exec "$ASKPASS" "[sudo] password:" 2>>"$0.err"); code=$?\nprintf '%s\\n%s' "$code" "$out"\n`);
+      const retried = runSudo();
+      await waitFor(() => frames.at(-1)?.requests?.length === 1, 15_000);
+      const first = frames.at(-1).requests[0];
+      expect(first.account).toBe(userInfo().username);
+      expect(await api("/v1/sudo/answer", { id: first.id, password: "wrong", outcome: true })).toEqual({ status: 200, data: { ok: true, outcome: "rejected" } });
+      await waitFor(() => frames.at(-1)?.requests?.length === 1 && frames.at(-1).requests[0].id !== first.id, 15_000);
+      expect(await api("/v1/sudo/answer", { id: frames.at(-1).requests[0].id, password: "right", outcome: true })).toEqual({ status: 200, data: { ok: true, outcome: "accepted" } });
+      expect(await retried).toEqual({ code: 0, out: "right", err: "" });
 
       // An askpass whose output goes somewhere sudo does not read is refused.
       await writeFile(script, `"$ASKPASS" "[sudo] password:" 2>"$0.err" | cat >/dev/null; printf '%s\\n' "$?"\n`);
