@@ -257,3 +257,27 @@ it.skipIf(process.platform === "win32")("prints the exact launchctl commands whe
   expect(String(error)).toContain(`launchctl kickstart -k gui/${uid}/com.phren.hook`);
   expect(String(error)).toContain(`launchctl bootstrap gui/${uid} '${path.join(state.home, "Library/LaunchAgents/com.phren.hook.plist")}'`);
 });
+
+it.skipIf(process.platform === "win32")("keeps the owner's Codex trust when install changes Phren's hook timeouts", async () => {
+  const { codexHookHash } = await import("./codex-hook-trust.js");
+  const codex = process.env.CODEX_HOME!, hooksFile = path.join(codex, "hooks.json");
+  const quote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'";
+  const command = `${quote(process.execPath)} ${quote(path.join(process.env.PHREN_BRIDGE_HOME!, "current/bridge-hook.mjs"))} hook codex`;
+  const user = { hooks: [{ type: "command", command: "user-callback" }] };
+  const hooks = { SessionStart: [user, { hooks: [{ type: "command", command, timeout: 3 }] }], Stop: [{ hooks: [{ type: "command", command, timeout: 3 }] }] };
+  await mkdir(codex, { recursive: true });
+  await writeFile(hooksFile, JSON.stringify({ hooks }, null, 2));
+  const trusted = (key: string, hash: string) => `[hooks.state."${hooksFile}:${key}"]\ntrusted_hash = "${hash}"\n\n`;
+  const config = 'model = "x"\n\n' + trusted("session_start:0:0", codexHookHash("SessionStart", user, user.hooks[0]))
+    + trusted("session_start:1:0", codexHookHash("SessionStart", {}, hooks.SessionStart[1].hooks[0])) + "[tui]\n";
+  await writeFile(path.join(codex, "config.toml"), config);
+  await install("0.2.14", true);
+  const after = JSON.parse(await readFile(hooksFile, "utf8")) as { hooks: Record<string, { hooks: Record<string, unknown>[] }[]> };
+  const session = after.hooks.SessionStart[1].hooks[0];
+  expect(session.timeout).toBe(15);
+  const text = await readFile(path.join(codex, "config.toml"), "utf8");
+  expect(text).toContain(`trusted_hash = "${codexHookHash("SessionStart", {}, session)}"`);
+  // Stop was never trusted, so it still waits for the owner's review.
+  expect(text).not.toContain(":stop:");
+  expect(text.startsWith('model = "x"\n\n')).toBe(true);
+});

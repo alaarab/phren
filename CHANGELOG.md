@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Codex no longer loses the owner's trust in Phren's own hooks when a Hook install changes them. Codex 0.158+ runs a `hooks.json` callback only when `config.toml` holds its `trusted_hash`, which covers the timeout; the 0.3.12 install raised Phren's Codex SessionStart, UserPromptSubmit and Stop timeouts from 3 s to 15 s, so Codex skipped all three and every new Codex opened on "Hooks need review". Install, update, rollback and module reconcile now write the new hash for a Phren callback when the owner had trusted Phren's callback for that event (the same command at a timeout Phren has shipped, or the entry that stood there before the rewrite), including on a computer an earlier install already left untrusted. Callbacks the owner never trusted and anyone else's callbacks are left alone. `PHREN_PRETRUST=off` turns it off.
+
 ## [0.3.12] - 2026-09-29
 
 ### Added
