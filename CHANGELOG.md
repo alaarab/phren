@@ -32,6 +32,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A Claude session no longer shows "working, N in background" after its background tasks finish. The Stop's count stood until the next Stop, and a task that finishes while the session is idle can leave only a queued task-notification with no new turn (m4l-builder read "4 in background" 7.5 hours after its tasks ended). Session rows and dispatch returns now subtract each task the transcript shows finishing after the Stop, queued notifications included, and clear the count at zero; a session row also ignores a count older than two hours. Codex rows already count running children live and are unchanged.
 - Hand-offs retry a fresh agent that is not yet named for up to 20 seconds. Each retry checks the conversation and terminal again; potentially delivered writes are never retried.
 - Hand-offs require explicit submission confirmation before reporting delivered, so text left in a Codex remote pane composer is reported uncertain.
 - Claude background children finish after a successful matching TaskStop result or a stopped or killed notification, including text blocks and queued-command attachments.
