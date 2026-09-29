@@ -168,6 +168,17 @@ describe("account usage", () => {
     expect(ghCalls).toBe(1);
     expect(withCopilot.accounts.some(account => account.source === "copilot")).toBe(true);
   });
+  it("does not spend an ElevenLabs request when the caller excludes ElevenLabs", async () => {
+    let elevenCalls = 0;
+    const reader = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0,
+      async () => undefined, openCode, noOpenRouter, noOpenCodeGo, async () => ({ source: "copilot", windows: [] }), process.platform,
+      async date => { elevenCalls++; return { source: "elevenlabs", windows: [], updatedAt: date.toISOString() }; });
+    await reader.read(new Set(["codex", "claude", "opencode", "opencode-go"]));
+    expect(elevenCalls).toBe(0);
+    const withSpeech = await reader.read(new Set(["codex", "elevenlabs"]));
+    expect(elevenCalls).toBe(1);
+    expect(withSpeech.accounts.some(account => account.source === "elevenlabs")).toBe(true);
+  });
   it("explains a Copilot 404 as a missing subscription", async () => {
     const error = Object.assign(new Error("Command failed"), { stderr: "gh: Not Found (HTTP 404)" });
     const usage = await readCopilotUsage(now, async () => { throw error; });

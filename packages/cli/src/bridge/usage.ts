@@ -617,8 +617,8 @@ export class AccountUsageReader {
   private pending?: Promise<AccountUsage>;
   private claudeCached = new Map<string, { at: number; value?: AccountUsage }>();
   private claudePending = new Map<string, Promise<AccountUsage | undefined>>();
-  private spendingCached = new Map<boolean, { at: number; value: AccountUsage[] }>();
-  private spendingPending = new Map<boolean, Promise<AccountUsage[]>>();
+  private spendingCached = new Map<string, { at: number; value: AccountUsage[] }>();
+  private spendingPending = new Map<string, Promise<AccountUsage[]>>();
   constructor(private readCodex = readCodexLimits, private now = Date.now,
               private readClaudeLive: (now: Date, home: ClaudeHome) => Promise<AccountUsage | undefined> = liveClaudeUsage,
               private readOpenCode: (now: Date) => Promise<AccountUsage> = now => readOpenCodeUsage("opencode", now),
@@ -641,23 +641,26 @@ export class AccountUsageReader {
       return { ...settleClaudeUsage(await this.claude(home), this.now()), account: { ...claudeAccountRef(home), ...(email ? { email } : {}) } };
     };
     const [codexValue, claude, spending] = await Promise.all([codex, Promise.all(homes.map(claudeRow)),
-      this.spending(sources?.has("copilot") ?? true)]);
+      this.spending(sources?.has("copilot") ?? true, sources?.has("elevenlabs") ?? true)]);
     return { accounts: [{ ...codexValue, account: CODEX_ACCOUNT }, ...claude, ...spending] };
   }
-  private async spending(includeCopilot: boolean): Promise<AccountUsage[]> {
-    const cached = this.spendingCached.get(includeCopilot);
+  /** ElevenLabs is read only when the caller shows it: every read spends a request against the key's quota. */
+  private async spending(includeCopilot: boolean, includeElevenLabs: boolean): Promise<AccountUsage[]> {
+    const key = `${includeCopilot}:${includeElevenLabs}`;
+    const cached = this.spendingCached.get(key);
     if (!cached || this.now() - cached.at >= 60_000) {
       const at = this.now();
-      if (!this.spendingPending.has(includeCopilot)) {
+      if (!this.spendingPending.has(key)) {
         const pending = Promise.all([this.readOpenCode(new Date(at)), this.readOpenCodeGo(new Date(at)), this.readOpenRouter(new Date(at)),
-          includeCopilot ? this.readCopilot(new Date(at)) : Promise.resolve(undefined), this.readElevenLabs(new Date(at)).catch(() => undefined)])
+          includeCopilot ? this.readCopilot(new Date(at)) : Promise.resolve(undefined),
+          includeElevenLabs ? this.readElevenLabs(new Date(at)).catch(() => undefined) : Promise.resolve(undefined)])
           .then(([openCode, openCodeGo, openRouter, copilot, elevenLabs]) => [openCode, openCodeGo, ...(openRouter ? [openRouter] : []), ...(copilot ? [copilot] : []), ...(elevenLabs ? [elevenLabs] : [])])
-          .then(value => { this.spendingCached.set(includeCopilot, { at, value }); return value; })
-          .finally(() => { this.spendingPending.delete(includeCopilot); });
-        this.spendingPending.set(includeCopilot, pending);
+          .then(value => { this.spendingCached.set(key, { at, value }); return value; })
+          .finally(() => { this.spendingPending.delete(key); });
+        this.spendingPending.set(key, pending);
       }
     }
-    return this.spendingPending.get(includeCopilot) ?? cached!.value;
+    return this.spendingPending.get(key) ?? cached!.value;
   }
   /** Live first, so the phone's minute-by-minute poll keeps Claude current
    *  even when Claude Code is not running; the local snapshot is the backup.
