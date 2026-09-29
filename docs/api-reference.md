@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 71 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 72 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -96,6 +96,38 @@ Call dispatch_returns.` It never types into a working agent; a return waiting
 on a working agent is tried again every 5 seconds, under the same `deliveryId`.
 
 CLI equivalent: `phren dispatch returns`.
+
+A `blocked` row with an `approval` object is a permission request the worker is
+waiting on, forwarded by its Hook: `actionId`, `tool`, and, when known,
+`request`, `title` and `terminal` (a dialog the pane draws itself). Answer it
+with `dispatch_approve`. See [Worker approvals](conductor.md#worker-approvals).
+
+### `dispatch_approve`
+
+Answer the permission request a dispatched worker is waiting on, forwarded from
+its computer. Parameters: `id` (the dispatch ID from `dispatch_returns`),
+`decision` (`approve` or `deny`) and `actionId` (required: the approval's
+`actionId`, so a request that has changed since is never answered blind).
+Only the agent that dispatched the worker can answer: the tool sends the
+caller's own pane as `origin`, and a call from any other pane, or from the
+worker's own pane, fails with 403. A worker dispatched from the phone or the
+CLI has no origin pane, so any call from a pane fails with 403 for it. A call
+with no pane (the owner's phone, the CLI) is not restricted. The owner's standing grants already answer the `dispatch` and `hand_off`
+requests they cover. Fails with 409 when the worker is not waiting on an
+approval. In the core profile use `phren_admin(action: "dispatch_approve")`.
+
+Route: `POST /v1/dispatch/approve` with `{ "id": "<uuid>", "decision":
+"approve" | "deny", "actionId"?: "<id>" }` returns `{ "ok": true }`. The Hook
+sends the answer to the worker's Hook at `POST /v1/approvals/answer`.
+
+On the receiving computer, each observation in the `POST /v1/dispatch/workers`
+answer may carry `approval`: `{ actionId, tool, title?, request?,
+requestKind?, terminal?, conductor?, expiresAt?, pushed? }`, with `request` at
+most 500 characters and `title` at most 200. The request also keeps that
+pane's permission requests held for about 45 seconds. `actionId` is a UUID for
+a held request, or `dialog-<uuid>` for a terminal dialog; `POST
+/v1/approvals/answer` accepts both, refuses `updatedInput` for a `dialog-` id,
+and refuses a target that is not the dialog's own.
 
 ### `live_sessions`
 
