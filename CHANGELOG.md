@@ -12,6 +12,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Session titles drop the spinner and status glyphs a harness spins around its terminal title (Codex's Braille frames, Claude's star, bullets, circles, checks) and a separator left dangling by them, on Herdr and tmux alike.
 - The tmux provider passes `-u` on every call. Without a UTF-8 locale, as under a service manager, tmux 3.7 prints a list format's tabs as `_` and the Hook saw no tmux panes at all.
 - Swiping in the phone's terminal scrolls a tmux pane when tmux's `mouse` option is off, its default. tmux draws on the alternate screen and then never turns on the phone's mouse reporting, so a swipe had nothing to scroll. The new `POST /v1/workspaces/scroll` does what tmux's wheel binding does: an app tracking the mouse (Claude, Codex) gets wheel events, any other pane scrolls in `copy-mode -e` and returns to live output at the bottom, and `lines: 0` leaves copy mode before the phone types. With `set -g mouse on` the phone keeps sending wheel events itself.
+### Added
+
+- `account_usage` (MCP, conductor module) and `phren dispatch usage [--json]` show agent usage on this computer and every computer in `hooks.yaml`, merged by account the way the phone's cards are: one row per Claude login, Codex, OpenCode, OpenCode Go, OpenRouter and GitHub Copilot, with each window's percent used and left and reset time, `leftPercent` (the least room on any window), `nearLimit` (under 20% left, shown as information), `exhausted` (a window at 100% or refusing requests, with `availableIn`), freshness (`age`, `stale` after 15 minutes or once a window resets) and the computers where it is signed in, with the Claude account id `dispatch` takes there. The freshest whole report stands; OpenCode and OpenCode Go spend adds up across computers and OpenRouter counts once per key. A Claude login with no identity stays per computer. Unreachable and unlinked computers are listed apart, since their usage is unknown. ElevenLabs is left out because each read spends quota. In core MCP use `phren_admin(action: "account_usage")`.
+
+### Changed
+
+- `GET /v1/dispatch/capacity` also returns `usage: [{ source, account?, leftPercent?, exhausted?, until? }]` for Codex and each Claude home, read within 2.5 seconds alongside the harness inventory. `dispatch` to `anywhere` still picks the least busy computer, and now skips one whose account for the dispatch (Codex's, or the named Claude home) is exhausted, naming it in `skipped`; with none left it fails with code `out_of_quota`. Low quota never steers placement, since the owner often wants quota used before it resets.
 
 ## [0.3.12] - 2026-09-29
 

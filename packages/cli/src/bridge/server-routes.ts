@@ -40,7 +40,7 @@ import type { ModelSwitcher } from "./model-switch.js";
 import type { SettingsSwitcher } from "./settings-switch.js";
 import type { SideQuestions } from "./side-questions.js";
 import { currentModel, currentStep } from "./steps.js";
-import { type AccountUsageReader, usageForCaller } from "./usage.js";
+import { type AccountUsageReader, capacityRoom, usageForCaller } from "./usage.js";
 import type { ResourceMonitor } from "./resources.js";
 import type { Scheduler } from "./schedules.js";
 import { readFinalTurn } from "./schedule-watch.js";
@@ -280,6 +280,13 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
 }
 
 /** One read-only GET to every linked peer, each answer or its error by computer name. */
+/** The value, or undefined once `ms` passes or it fails: a probe never waits on a slow reader. */
+async function within<T>(ms: number, value: Promise<T>): Promise<T | undefined> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), ms); timer.unref(); });
+  try { return await Promise.race([value.catch(() => undefined), late]); } finally { clearTimeout(timer); }
+}
+
 async function fromPeers(route: string): Promise<{ peers: Json[]; peerError?: string }> {
   const { peers, peerError } = await optionalHookPeers();
   const answers = await Promise.all(peers.map(async peer => {
@@ -350,11 +357,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             const caller = z.object({ name: z.string().max(253).optional(), hostKey: z.string().max(512).optional() })
               .parse({ name: url.searchParams.get("name") ?? undefined, hostKey: url.searchParams.get("hostKey") ?? undefined });
             const linksBack = caller.name || caller.hostKey ? { knowsCaller: (await listsCaller(caller)).knowsCaller } : {};
+            // Both bounded so a peer's capacity probe never waits on a cold `claude auth status` or usage read; missing means unknown.
+            // PHREN_LAUNCH_CHECK=off turns this Hook's availability checks off, including what it advertises to dispatch.
+            // `usage` is the room left per Codex and Claude account, so `anywhere` can break a tie by it.
+            const [inventory, limits] = await Promise.all([launchCheckOff() ? undefined : harnessInventoryWithin(2_500), within(2_500, accountUsage.limits(true))]);
             result = { product: "phren-hook", protocol: PROTOCOL, computer: info.computer, servers: live.map(server => server.session), ...linksBack,
               working: snapshots.reduce((sum, value) => sum + objects(value.panes).filter(pane => pane.agent && pane.agent_status === "working").length, 0),
-              // Bounded so a peer's capacity probe never waits on a cold `claude auth status`; missing means unknown.
-              // PHREN_LAUNCH_CHECK=off turns this Hook's availability checks off, including what it advertises to dispatch.
-              ...(launchCheckOff() ? {} : await harnessInventoryWithin(2_500).then(inventory => inventory ? { harnesses: inventory.harnesses } : {})) };
+              ...(inventory ? { harnesses: inventory.harnesses } : {}), ...(limits ? { usage: capacityRoom(limits, Date.now()) } : {}) };
             break;
           }
           case "/v1/speech/voices": {

@@ -54,6 +54,33 @@ describe("dispatch receipts and selection", () => {
     expect((await dispatchStatus())[0]).toMatchObject({ state: "accepted", computer: "Linuxbox" });
   });
 
+  it("keeps anywhere on the least busy computer whatever its quota, skipping only an account with none left", async () => {
+    const harnesses = [{ source: "codex", installed: true, usable: true },
+      { source: "claude", installed: true, usable: true, accounts: [{ id: "default", usable: true }, { id: "work", usable: true }] }];
+    const room = (codex: Record<string, unknown>, work: Record<string, unknown> = { leftPercent: 50 }) =>
+      [{ source: "codex", account: "default", ...codex }, { source: "claude", account: "work", ...work }];
+    const probe = (usage: Record<string, ReturnType<typeof room>>, working: Record<string, number> = {}) =>
+      vi.mocked(peerRequest).mockImplementation(async (peer, route) => route === "/v1/dispatch/capacity"
+        ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: working[peer.name] ?? 1, usage: usage[peer.name], harnesses }
+        : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
+    // Low quota is not avoided: Desk has 3% of its Codex week left and still wins the tie by name.
+    probe({ Desk: room({ leftPercent: 3 }), Linuxbox: room({ leftPercent: 90 }) });
+    expect(await new DispatchService().dispatch(brief)).toMatchObject({ computer: "Desk" });
+    // An account with none left sits out, and the receipt says why.
+    const until = new Date(Date.now() + 3 * 3_600_000).toISOString();
+    probe({ Desk: room({ leftPercent: 0, exhausted: true, until }), Linuxbox: room({ leftPercent: 90 }) }, { Linuxbox: 2 });
+    const placed = await new DispatchService().dispatch(brief);
+    expect(placed).toMatchObject({ computer: "Linuxbox", skipped: [{ computer: "Desk", reason: "Its codex has no quota left for about 3 more hours." }] });
+    // The Claude work account is judged on its own: Desk's exhausted Codex does not matter to it.
+    probe({ Desk: room({ leftPercent: 0, exhausted: true }), Linuxbox: room({ leftPercent: 90 }, { leftPercent: 0, exhausted: true }) });
+    expect(await new DispatchService().dispatch({ ...brief, harness: "claude", account: "work" })).toMatchObject({ computer: "Desk" });
+    // Nowhere with quota, this computer included: refused with its own code, never placed.
+    probe({ Desk: room({ exhausted: true }), Linuxbox: room({ exhausted: true }) });
+    vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/dispatch/capacity"
+      ? { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 9, usage: room({ exhausted: true }), harnesses } : { ok: true });
+    await expect(new DispatchService().dispatch(brief)).rejects.toMatchObject({ status: 503, message: "No connected computer has codex quota left right now.", details: { code: "out_of_quota" } });
+  });
+
   it("launches the worker with the dispatch's model and effort and keeps them on the receipt", async () => {
     const result = await new DispatchService().dispatch({ ...brief, model: "gpt-5.6-terra", effort: "high" });
     const launch = vi.mocked(peerRequest).mock.calls.find(call => call[1].startsWith("/v1/workspaces/launch"))?.[2];

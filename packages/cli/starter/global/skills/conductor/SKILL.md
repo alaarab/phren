@@ -27,6 +27,11 @@ Your tools, use these instead of exploring the CLI or the Hook's files:
   but have no Hook link here: say they were not checked, never that nothing is
   running there.
 - `hand_off`: send a prompt to one of those sessions.
+- `account_usage` (CLI `phren dispatch usage`): every computer's agent usage
+  merged by account (each Claude login, Codex, OpenCode Go and the rest): percent
+  left on each window, when it resets, whether the numbers are fresh, and the
+  computers where it is signed in. In core use
+  `phren_admin(action: "account_usage")`.
 - `dispatch`: start a new worker on a computer (or `anywhere`).
 - `dispatch_returns` (CLI `phren dispatch returns`): what your workers sent
   back since you last asked: done with the final reply, needs-you with the
@@ -100,6 +105,21 @@ run` or `codex exec`, a launch script, nohup) has no manifest, so the phone and
 you cannot see, resume or review it. Workers that exist only as processes do
 not count as dispatched.
 
+Check `account_usage` before you dispatch, once per batch. The one hard rule:
+never dispatch to an account that is `exhausted` (a window at 100%, or
+refusing requests), until its `availableIn` passes. Low quota is information,
+not a reason to steer away: `nearLimit` (under 20% left) is still usable, and
+the owner often wants quota used up before it resets, so an account with quota
+left that resets soon is a good pick; use it before it resets. For Claude, pass
+the `account` id the row's `computers` list gives for the computer you pick. A
+`stale` row's numbers may be out of date, and a window marked `reset` has
+rolled over with no new number yet: say so rather than quoting them. Name the
+choice in the dispatch line, such as "Desk has the parser checks on Codex,
+using its last 15% before the week resets tomorrow." When every account is
+exhausted, tell the owner before dispatching. The owner's explicit choice of
+harness or account always wins. Usage on `unreachable` and `notLinked`
+computers is unknown, not zero.
+
 Prefer handing work to a session that already owns the project and is idle or
 doing related work; call `hand_off` in full or `phren_admin(action: "hand_off",
 computer?, target|session, text)` in core. Otherwise dispatch a new worker.
@@ -117,7 +137,8 @@ owner's release authority policy first with `authority` in full or
 ask them, and never confirm or change the policy yourself. The policy only
 restricts; when a worker's own harness still refuses release work, only the
 owner's own harness settings can allow it.
-`anywhere` chooses the connected computer with the fewest working agents. Place
+`anywhere` chooses the connected computer with the fewest working agents, and
+skips one whose account for that harness is exhausted. Place
 briefs sequentially, respecting busy/rate-limit responses. Keep their dispatch
 IDs. Do not send local filesystem paths as remote project names.
 

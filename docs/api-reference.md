@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 73 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 74 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -38,7 +38,7 @@ See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `computer` | string | yes | Enrolled name, or `anywhere` for the connected peer with the fewest working agents. |
+| `computer` | string | yes | Enrolled name, or `anywhere` for the connected peer with the fewest working agents, skipping one whose account for this harness has no quota left (see below). |
 | `project` | string | yes | Project slug whose `phren.project.yaml` sourcePath exists on the receiver. No local checkout paths. |
 | `harness` | enum | yes | `codex`, `claude`, or `opencode`. |
 | `model` | string | no | Explicit remote model, up to 200 characters; otherwise its configured default. |
@@ -64,6 +64,19 @@ through `phren dispatch status`. Remote leads and their workers appear in
 the receipt keeps that pane as `origin` for return notices. After placement
 the Hook follows the worker (see `dispatch_returns`), and receipts gain
 `worker` (its last observed state) and `returned` (the latest return).
+
+With `anywhere`, the Hook asks each computer's `GET /v1/dispatch/capacity`,
+which returns `working`, `harnesses` and `usage: [{ source, account?,
+leftPercent?, exhausted?, until? }]`: the least room left on Codex and on each
+Claude home there, and `exhausted: true` (with `until`, when its last spent
+window resets) once a window is at 100% or refusing requests. It is read in
+parallel with the harness inventory and bounded to 2.5 seconds; a missing
+`usage` (an older Hook or a slow read) means unknown. A computer whose account
+for this dispatch (Codex's, or the named Claude home, `default` when none) is
+exhausted sits out and is named in `skipped`; when no computer is left for that
+reason the dispatch fails with code `out_of_quota`. Low quota is not a reason
+to skip one: the least busy computer wins, then name. A named computer is never
+refused for quota.
 
 CLI equivalent:
 `phren dispatch Desk phren --harness codex --label 'Checks' --prompt 'Run the assigned checks'`.
@@ -147,6 +160,48 @@ says why none were read when `hooks.yaml` is broken. No parameters. In the
 core profile use `phren_admin(action: "live_sessions")`.
 
 CLI equivalent: `phren dispatch sessions`.
+
+### `account_usage`
+
+List agent usage on this computer and each enrolled computer, merged by
+account, so a conductor can pick a harness, account and computer with room
+before it dispatches. The tool asks this Hook (`GET /v1/health` and
+`GET /v1/usage?sources=claude,codex,copilot,opencode,opencode-go,openrouter&goPlan=1&accounts=all`)
+and each `hooks.yaml` peer over its pinned SSH pipe (the same routes), as
+`live_sessions` does. ElevenLabs is left out, since each read of it spends
+quota. No parameters. `message` is a one-line summary: how many accounts, which
+are out of quota (do not dispatch to them), which are low but usable, which are
+stale, and a warning when every account with limits is out of quota.
+
+One account is one allowance whichever computers report it. Rows merge by `id`,
+which is `source` or `source|key` (the phone's card key); a Claude row whose key
+is `claude:home:<id>` (a login with no identity) stays per computer. The
+freshest whole report with windows stands, and `from` names its computer.
+OpenCode and OpenCode Go spend is summed across computers; OpenRouter spend is
+counted once per key.
+
+Each row carries `id`, `harness`, `name`, `account` (the login's email, else its
+label), `windows`, `leftPercent` (the least room on any window), `nearLimit`
+(under 20% left: information, not a reason to avoid the account), `exhausted`
+(a window at 100% or refusing requests: never dispatch to it) with
+`availableIn` (when its last spent window resets), `spend`, `updatedAt`, `age`, `stale`,
+`from`, `computers: [{ name, account? }]` and `message`. `account` on a
+computer is the Claude account id `dispatch`'s `account` takes there. Each
+window carries `usedPercent`, `leftPercent`, `resetsAt` and `resetsIn`; once
+its reset time has passed it says `reset: true` and has no percent, and while
+the service refuses requests it says `limited: true` with `leftPercent` 0. A
+window at 100% or limited also says `exhausted: true`. A
+row is `stale` when its report is over 15 minutes old, has no timestamp, or has
+a window that reset since the report.
+
+The view also returns `noData: [{ harness, name, computers, message? }]` for
+harnesses no computer reported numbers for, `computers` (those that answered,
+this one first), `unreachable: [{ computer, error, code? }]`,
+`notLinked: [{ name, aliases? }]` (their usage is unknown, not zero),
+`enrolled` and `peerError` when `hooks.yaml` is broken. In the core profile use
+`phren_admin(action: "account_usage")`.
+
+CLI equivalent: `phren dispatch usage` (text; `--json` for the view).
 
 ### `authority`
 
