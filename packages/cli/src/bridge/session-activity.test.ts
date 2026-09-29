@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, recordedBackground, sessionTitle } from "./session-activity.js";
+import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, plainTitle, recordedBackground, sessionTitle } from "./session-activity.js";
 import { nextTurn, type TurnRecord } from "./turn-records.js";
 
 const session = "00000001-1111-4111-8111-111111111111";
@@ -91,6 +91,15 @@ describe("background work keeps a session working", () => {
 });
 
 describe("session titles", () => {
+  it("drops the spinner and status glyphs a harness spins around its terminal title", () => {
+    expect(plainTitle("\u2838 Respond to meeting | alaarab")).toBe("Respond to meeting | alaarab");
+    expect(plainTitle("\u2733 Claude Code")).toBe("Claude Code");
+    expect(plainTitle("\u25cf \u23f3 Build app \u2714")).toBe("Build app");
+    expect(plainTitle("\u2807")).toBeUndefined();
+    expect(plainTitle("Fix a \u2022 bullet - and * star")).toBe("Fix a \u2022 bullet - and * star");
+    expect(sessionTitle({ dispatched: false, harnessTitle: "\u280b Respond to meeting" })).toBe("Respond to meeting");
+  });
+
   it("recognizes the titles a brief launch produces", () => {
     for (const title of ["Read and follow the brief in /x/briefs/abc/brief.md", "read and follow the brief", "Fix /home/a/briefs/x/brief.md",
       "Brief d35c6189", "Brief ec1340da-5c34-…", "Brief ec1340da-5c34-4b1a...", "Brief ec1340da-5c34-4b1a-9c1d-000000000001"]) expect(isBriefTitle(title), title).toBe(true);
