@@ -127,7 +127,8 @@ describe("codex hook trust", () => {
     expect(codexHookTrustText('model = "x"\n', hooksJson(15), PROGRAM, [HOOKS_PATH], hooksJson(3))).toBeUndefined();
   });
 
-  it("repairs $CODEX_HOME in place, keeps the mode, and stands down with PHREN_PRETRUST=off", async () => {
+  // File modes and the Hook install exist on macOS and Linux only.
+  it.skipIf(process.platform === "win32")("repairs $CODEX_HOME in place, keeps the mode, and stands down with PHREN_PRETRUST=off", async () => {
     const home = await realpath(await mkdtemp(path.join(tmpdir(), "phren-codex-hooks-"))); temporary.push(home);
     const codex = path.join(home, "codex"); await mkdir(codex);
     const hooksFile = path.join(codex, "hooks.json"), configFile = path.join(codex, "config.toml");
