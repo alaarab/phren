@@ -221,12 +221,17 @@ export function findPane(s: Json, address: PaneAddress): Json | undefined {
     && (address.source === undefined || p.agent === address.source));
 }
 
-/** A conductor's Herdr name: "conductor", or "conductor-" plus its label. */
+/** A conductor's Herdr name: "conductor", or "conductor-" plus its label. Only
+ * a label since the Hook records the role (conductor-role.ts): read to migrate
+ * a conductor from before that record, and kept off workers' names. */
 export function isConductorName(name: string | undefined): boolean {
   return name === "conductor" || !!name?.startsWith("conductor-");
 }
 
-export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json, number>, approvalPanes?: ReadonlySet<string>, lastChanged?: ReadonlyMap<string, string>): Json {
+/** `conductorPane` is the pane the Hook records as the conductor (null for
+ * none); left out, the agent's name decides, as before the record. */
+export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json, number>, approvalPanes?: ReadonlySet<string>, lastChanged?: ReadonlyMap<string, string>,
+  conductorPane?: string | null): Json {
   const focusedPane = objects(s.panes).find(p => p.pane_id === s.focused_pane_id
     && p.tab_id === s.focused_tab_id && p.workspace_id === s.focused_workspace_id);
   const focus = focusedPane && id.safeParse(s.focused_workspace_id).success
@@ -245,7 +250,7 @@ export function workspaceSnapshot(s: Json, contextUsedPercent?: ReadonlyMap<Json
       const changed = Math.max(0, ...panes.map(p => Number.isSafeInteger(p.state_change_seq) ? Number(p.state_change_seq) : 0));
       return { id: t.tab_id, label: t.label, paneLabel: agent?.label || undefined, title: agent?.title || agent?.terminal_title_stripped,
         agent: agent?.agent, agentStatus: t.agent_status, cwd: agent?.foreground_cwd || agent?.cwd,
-        role: isConductorName(paneAgentName(s, agent)) ? "conductor" : undefined,
+        role: (conductorPane === undefined ? isConductorName(paneAgentName(s, agent)) : !!agent && agent.pane_id === conductorPane) ? "conductor" : undefined,
         changedSeq: changed || undefined,
         lastChangedAt: lastChanged?.get(tabActivityKey(t.workspace_id, t.tab_id)),
         approvalPending: panes.some(p => approvalPanes?.has(String(p.pane_id))) || undefined,

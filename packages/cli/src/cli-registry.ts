@@ -262,8 +262,12 @@ export const REGISTRY: Command[] = [
   },
   {
     name: "conductor", topic: "core", usage: "phren conductor <subcommand>",
-    summary: "Manage conductor standing grants",
+    summary: "Make or stop this computer's conductor, list linked computer sets, and manage standing grants",
     subcommands: [
+      { name: "status", usage: "phren conductor status", summary: "This computer's conductor and the set name it holds" },
+      { name: "make", usage: "phren conductor make [--pane <id>] [--mux herdr:<name>|tmux:<name>]", summary: "Make the agent in this pane (or --pane) this computer's conductor" },
+      { name: "stop", usage: "phren conductor stop [--pane <id>]", summary: "End this computer's conductor role; the agent keeps running" },
+      { name: "sets", usage: "phren conductor sets [--json] | phren conductor sets name <name>|--clear", summary: "List linked computer sets with reachability and conductors, or name this computer's set" },
       { name: "grants", usage: "phren conductor grants [list|add|remove]", summary: "List, add, or remove conductor grants" },
     ],
     run: async args => (await import("./bridge/dispatch-command.js")).runConductor(args),
