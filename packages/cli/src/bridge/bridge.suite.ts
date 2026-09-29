@@ -2624,6 +2624,43 @@ schedules:
       expect(connections.every(args => args.includes("IdentityAgent=none"))).toBe(true);
     });
 
+    it("merges one Claude login's usage across two real Hooks by account, and reports room on the capacity probe", async () => {
+      await dispatchFixture();
+      // One login on both computers: each Hook reads it from its own home's .claude.json.
+      const login = { oauthAccount: { accountUuid: "0f0f0f0f-1111-4111-8111-111111111111", emailAddress: "sam@example.com" } };
+      await writeFile(path.join(root, "claude-config/.claude.json"), JSON.stringify({ numStartups: 3, projects: {}, ...login }));
+      await writeFile(path.join(root, ".claude.json"), JSON.stringify(login));
+      // The remote has no live read, so its status-line snapshot stands: a live window and one whose reset passed.
+      const seconds = (ms: number) => Math.floor((Date.now() + ms) / 1000);
+      await mkdir(path.join(root, "remote/usage"), { recursive: true });
+      await writeFile(path.join(root, "remote/usage/claude.json"), JSON.stringify({ updatedAt: new Date().toISOString(),
+        rate_limits: { five_hour: { used_percentage: 30, resets_at: seconds(-60_000) }, seven_day: { used_percentage: 85, resets_at: seconds(86_400_000) } } }));
+      const store = path.join(root, "usage-store");
+      await mkdir(store, { recursive: true });
+      await writeFile(path.join(store, "machines.yaml"), "Studio: home\n");
+      const { readAccountUsage } = await import("./account-usage.js");
+      // The linked Hook is read over the fake ssh pipe, with this Hook's dispatch key.
+      const saved = { bridge: process.env.PHREN_BRIDGE_HOME, path: process.env.PATH };
+      process.env.PHREN_BRIDGE_HOME = path.join(root, "bridge"); process.env.PATH = `${path.join(root, "bin")}:${process.env.PATH}`;
+      let view: Awaited<ReturnType<typeof readAccountUsage>>;
+      try { view = await readAccountUsage({ store, hook: route => api(route).then(answer => answer.data) }); }
+      finally { process.env.PHREN_BRIDGE_HOME = saved.bridge; process.env.PATH = saved.path; if (saved.bridge === undefined) delete process.env.PHREN_BRIDGE_HOME; }
+      expect(view.computers).toEqual([hostname(), "Linuxbox"]);
+      expect(view.unreachable).toEqual([]);
+      expect(view.notLinked).toEqual([{ name: "Studio" }]);
+      const claude = view.accounts.filter(row => row.harness === "claude");
+      expect(claude, JSON.stringify(view.accounts)).toHaveLength(1);
+      // The remote's report is the only timed one, so it stands whole; the passed window says reset.
+      expect(claude[0]).toMatchObject({ id: expect.stringMatching(/^claude\|claude:[0-9a-f]{12}$/), account: "sam@example.com", from: "Linuxbox",
+        computers: [{ name: hostname(), account: "default" }, { name: "Linuxbox", account: "default" }], leftPercent: 15, nearLimit: true, exhausted: false, stale: true });
+      expect(claude[0].windows).toEqual([{ id: "five_hour", name: "5-hour limit", reset: true },
+        expect.objectContaining({ id: "seven_day", usedPercent: 85, leftPercent: 15, resetsIn: expect.any(String) })]);
+      // The capacity probe carries each account's room for anywhere's tie-break.
+      const capacity = await api("/v1/dispatch/capacity");
+      expect(capacity.status, JSON.stringify(capacity.data)).toBe(200);
+      expect(capacity.data.usage).toEqual(expect.arrayContaining([{ source: "codex", account: "default" }, { source: "claude", account: "default", leftPercent: 100 }]));
+    }, 60_000);
+
     it("reports health details, with a peer that does not list this computer back as one-way", async () => {
       await dispatchFixture();
       const details = await api("/v1/health/details");

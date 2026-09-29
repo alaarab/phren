@@ -13,6 +13,11 @@ export async function runDispatch(args: string[]): Promise<number> {
   if (args.length === 1 && args[0] === "returns") {
     console.log(JSON.stringify(await hookRequest("/v1/dispatch/returns", {}), null, 2)); return 0;
   }
+  if (args[0] === "usage" && args.slice(1).every(arg => arg === "--json")) {
+    const { readAccountUsage, formatAccountUsage } = await import("./account-usage.js");
+    const view = await readAccountUsage();
+    console.log(args.includes("--json") ? JSON.stringify(view, null, 2) : formatAccountUsage(view)); return 0;
+  }
   if (args.length === 1 && args[0] === "sessions") {
     const { listLiveSessions } = await import("./hand-off.js");
     console.log(JSON.stringify(await listLiveSessions(), null, 2)); return 0;

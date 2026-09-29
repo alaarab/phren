@@ -238,7 +238,8 @@ without making an index a requirement for file browsing.
 
 `GET /v1/harnesses` reports which harnesses (Claude, Codex, OpenCode, Copilot) are
 installed and usable on this computer, and each Claude account's sign-in state; the
-same list rides on `GET /v1/dispatch/capacity` as `harnesses`. `phren bridge accounts`
+same list rides on `GET /v1/dispatch/capacity` as `harnesses`, next to `usage` (the
+room left on Codex and each Claude account, and whether it is exhausted, which `anywhere` uses to skip an account with no quota left). `phren bridge accounts`
 prints it, `phren bridge accounts add <slug> [--label <name>]` creates another Claude
 home, and `phren bridge accounts label <id> <label>` names one. See
 [Accounts](accounts.md).

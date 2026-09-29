@@ -2,7 +2,8 @@
 
 A conductor is an agent session that sends bounded work to other sessions.
 The optional `conductor` module supplies `dispatch`, `dispatch_returns`,
-`hand_off`, `live_sessions`, standing grants and the shipped conductor brief.
+`hand_off`, `live_sessions`, `account_usage`, standing grants and the shipped
+conductor brief.
 It requires `memory` and `hook`.
 
 ```sh
@@ -158,6 +159,35 @@ flag a link that runs only one way (see [Phren Hook](phren-hook.md#health-and-th
 A conductor starts in the phren store and has no
 project; its Herdr name is `conductor` (or `conductor-<label>`).
 
+```sh
+phren dispatch usage
+phren dispatch usage --json
+```
+
+`account_usage` (MCP) and `phren dispatch usage` read agent usage from this
+computer and each computer in `hooks.yaml`, merged by account: one row per
+Claude login, Codex, OpenCode, OpenCode Go, OpenRouter and GitHub Copilot, with
+each window's percent used and left and its reset time, `leftPercent` (the least
+room on any window), `nearLimit` (under 20% left), `exhausted` (a window at
+100% or refusing requests, with `availableIn`), freshness (`age`, `stale`) and the computers where it is signed in. A window
+whose reset passed says `reset` with no percent, and a report over 15 minutes
+old is stale. Unreachable and unlinked computers are listed apart, as in
+`live_sessions`: their usage is unknown, not zero. Fields are in the
+[API reference](api-reference.md#account_usage).
+
+### Choosing by usage
+
+Check usage before dispatching. The one hard rule is never to dispatch to an
+`exhausted` account (a window at 100%, or refusing requests). Low quota is
+information, not a reason to steer away: the owner often wants quota used up
+before it resets, so an account with quota left that resets soon is a good
+pick. Name the choice in the dispatch line (for example "Codex has the parser
+checks, using its last 15% before the week resets tomorrow"). When every
+account is exhausted, tell the owner before sending work. The owner's explicit
+choice of harness or account always wins. `anywhere` follows the same rule: it
+skips a computer whose account for the dispatch is exhausted, and otherwise
+ignores quota.
+
 ## Dispatch new work
 
 ```sh
@@ -172,7 +202,9 @@ model, label and prompt. The receiving Hook resolves the project's checkout.
 Callers do not pass a checkout path. This computer needs no `hooks.yaml` entry
 and no SSH enrollment: its placement goes through its own Hook's socket, and
 the returns loop reads its workers in process. `anywhere` chooses the least
-busy responding computer, this one included, with names breaking ties. Capacity preflight requires a compatible Hook and the configured Herdr
+busy responding computer, this one included, with names breaking ties. A
+computer whose account for the dispatch (Codex's, or the named Claude home,
+`default` when none) has no quota left sits out; low quota does not. Capacity preflight requires a compatible Hook and the configured Herdr
 server. Peers that fail it sit out and are named with their reason in the
 receipt's `skipped` list (and in the error when none is left). Placement
 currently requires Herdr.
