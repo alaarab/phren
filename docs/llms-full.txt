@@ -6,7 +6,7 @@ Quick start:
   This creates ~/.phren, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Open a prompt in your project directory. Context injection starts immediately.
 
-MCP Tools (75 across 16 catalog modules):
+MCP Tools (76 across 16 catalog modules):
 
   Search and browse:
     search_knowledge(query, type?, limit?, project?, tag?, since?, status?, include_history?, synthesize?) - FTS5 search with synonym expansion, filterable by tag/date/lifecycle
@@ -330,7 +330,7 @@ Conductor: hand_off queues busy workers durably; keep deliveryId, query status:t
 dispatch_report(prs): record this worker's turn-bound PR evidence, each row
 {url,repo,branch,tests,notes?}; the done return carries it to the configured
 integrator through queued hand_off. phren dispatch report --prs <JSON>.
-owner_inbox(action?,title?,project?,id?,resolution?,includeResolved?,computer?):
+owner_inbox(operation?,title?,project?,id?,resolution?,includeResolved?,computer?):
 list, add or resolve owner work across linked computers. Reading returns does
 not dismiss it; resolving does not approve or answer a prompt.
 phren owner-inbox list [--all] | add <title> [--project <slug>] [--id <uuid>] |

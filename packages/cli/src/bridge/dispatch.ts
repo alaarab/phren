@@ -74,7 +74,7 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
     state: z.enum(["done", "needs-you", "failed", "blocked", "stalled", "gone"]), at: timestamp,
     reply: z.string().max(4000).optional(), error: z.string().max(500).optional(), truncated: z.boolean().optional(), question: z.string().max(200).optional(),
     prs: prsSchema.optional(),
-    integratorDelivery: z.object({ deliveryId: z.string(), state: z.enum(["queued", "delivered", "uncertain", "failed"]), at: timestamp }).strict().optional(),
+    integratorDelivery: z.object({ deliveryId: z.string(), state: z.enum(["pending", "queued", "delivered", "uncertain", "failed"]), at: timestamp, integrator: integratorSchema.optional() }).strict().optional(),
     stalledSince: timestamp.optional(), stallFor: z.number().nonnegative().optional(),
     turn: z.string().regex(/^[a-f0-9]{16}$/).optional(), read: z.boolean(), notifiedAt: timestamp.optional(),
     background: z.number().int().min(1).max(999).optional().describe("Background tasks the worker left running when it was counted done."),

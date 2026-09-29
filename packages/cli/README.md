@@ -6,7 +6,7 @@ On startup it walks your phren directory, reads all `.md` files, and builds an i
 
 Periodic remote checks are off by default. Enable them with `phren config pull-interval 60` to check shared Git stores every minute while running, coordinated across MCP clients using the same store. Changed refs are fetched and applied only as clean fast-forwards; dirty or diverged stores are deferred. Pulled changes refresh the index and existing managed skill/instruction mirrors. Configure this machine with `phren config pull-interval 600` (ten minutes) or `phren config pull-interval off`. Periodic checks are disabled for project-local stores and the manual preset; existing lifecycle hooks are configured separately.
 
-Public surface: 59 MCP tools across 13 modules (search, tasks, findings, notes, memory, data, graph, sessions, ops/review, skills, hooks, config, extraction).
+Public surface: 76 MCP implementation tools across 16 catalog modules (search, tasks, findings, notes, memory, data, graph, sessions, ops/review, skills, hooks, config, extraction).
 
 Notable shipped capabilities:
 - finding lifecycle tools: `supersede_finding`, `retract_finding`, `resolve_contradiction`, `get_contradictions`

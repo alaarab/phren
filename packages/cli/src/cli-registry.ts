@@ -230,7 +230,7 @@ export const REGISTRY: Command[] = [
     },
   },
   {
-    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>]",
+    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>] [--keep-open]",
     summary: "Dispatch a worker brief through Phren Hook",
     subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List local dispatch receipts" },
       { name: "returns", usage: "phren dispatch returns", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read" },
@@ -258,7 +258,7 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./computers/command.js")).runUsage(args),
   },
   {
-    name: "owner-inbox", topic: "core", usage: "phren owner-inbox [list [--all] | add <title> [--project <slug>] [--id <uuid>] | resolve <id> [--resolution <text>]]",
+    name: "owner-inbox", topic: "core", usage: "phren owner-inbox [list [--all] | add <title> [--project <slug>] [--id <uuid>] | resolve <id> [--computer <name>] [--resolution <text>]]",
     summary: "List, add and resolve what waits on the owner",
     run: async args => (await import("./bridge/dispatch-command.js")).runOwnerInbox(args),
   },

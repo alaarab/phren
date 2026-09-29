@@ -2592,6 +2592,23 @@ schedules:
       expect((await api("/v1/dispatch/workers", { targets: [target] })).data.workers[0]).not.toHaveProperty("stalled");
     });
 
+    it("refreshes a pre-launch snapshot before reporting a new Codex pane gone in a real Hook", async () => {
+      await api("/v1/dispatch/workers", { targets: [target] });
+      const launched = { ...target, workspace: "w9", tab: "w9:t1", pane: "w9:p1", session: "00000009-1111-4111-8111-111111111111" };
+      extraWorkspaces.push(workspaceInfo("w9", "New worker", 2)); extraTabs.push(tabInfo("w9", "w9:t1", "1", 1));
+      extraPanes.push({ ...paneInfo("w9", "w9:t1", "w9:p1", "new-terminal", root), agent: "codex", agent_status: "working",
+        agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: launched.session } });
+      const workers = await api("/v1/dispatch/workers", { targets: [launched] });
+      expect(workers.status).toBe(200); expect(workers.data.workers[0]).toMatchObject({ state: "working", session: launched.session });
+    });
+
+    it("suppresses gone after an explicit pane close through a real Hook", async () => {
+      const closed = await api("/v1/workspaces/close", { paneId: target.pane });
+      expect(closed.status, JSON.stringify(closed.data)).toBe(200);
+      expect(commands.filter(c => c.method === "pane.close")).toHaveLength(1);
+      expect((await api("/v1/dispatch/workers", { targets: [target] })).data.workers[0]).toHaveProperty("state", "closed");
+    });
+
     it("adds, lists and resolves owner inbox items through the real Hook routes", async () => {
       const id = "70000000-0000-4000-8000-000000000001";
       const added = await api("/v1/owner-inbox", { action: "add", id, title: "Restart the router", project: "phren" });
@@ -2611,6 +2628,7 @@ schedules:
         const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST", headers: { "Content-Length": Buffer.byteLength(payload) } }, res => { res.resume(); res.on("end", resolve); });
         req.on("error", reject); req.end(payload);
       });
+      await waitFor(() => stat(path.join(root, "bridge/agent.sock")).catch(() => undefined));
       await hookEvent("UserPromptSubmit", { prompt: "Run checks" });
       const prs = [{ url: "https://github.com/alaarab/phren/pull/999", repo: "alaarab/phren", branch: "feat/checks", tests: "12 passed", notes: "Ready for review" }];
       const report = await api("/v1/dispatch/report", { origin: { server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane }, prs });

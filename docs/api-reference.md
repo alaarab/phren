@@ -1479,7 +1479,7 @@ configured integrator. CLI: `phren dispatch report --prs '<JSON array>'`.
 
 ### `owner_inbox`
 
-Full profile or `phren_admin(action:"owner_inbox",...)` in core. `action` defaults
+Full profile or `phren_admin(action:"owner_inbox",...)` in core. `operation` defaults
 to `list`; optional `includeResolved` shows history. `add` requires `title`, with
 optional `project` and stable UUID `id`. `resolve` requires `id`, with optional
 `resolution` and `computer` (the listed item's `inboxComputer`, omitted for

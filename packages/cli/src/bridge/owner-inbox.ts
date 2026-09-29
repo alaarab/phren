@@ -41,7 +41,7 @@ export class OwnerInbox {
       const sources: InboxSource[] = [];
       for (const receipt of await dispatchStatus()) {
         const returned = receipt.returned;
-        if (!returned || !["needs-you", "blocked"].includes(returned.state)) continue;
+        if (receipt.closedAt || !returned || !["needs-you", "blocked"].includes(returned.state)) continue;
         if (receipt.worker && receipt.worker.state !== returned.state && !receipt.approval) continue;
         const actionId = receipt.approval?.actionId;
         sources.push({ source: `dispatch:${receipt.id}:${actionId ?? returned.at}`, kind: returned.state as "needs-you" | "blocked",

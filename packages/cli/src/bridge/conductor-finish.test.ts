@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Json, type Target, atomicInPrivateDir } from "./protocol.js";
 import { snapshot, sharedSnapshot, paneIdentity, validateTarget } from "./herdr.js";
-import { closeFinishedWorker } from "./worker-close.js";
+import { closeFinishedWorker, markWorkerClosed } from "./worker-close.js";
 import { reportWorker } from "./worker-reports.js";
 import { DispatchReturns, observe, workerStates } from "./dispatch-returns.js";
 import { dispatchStatus, type Receipt } from "./dispatch.js";
@@ -55,13 +55,44 @@ describe("finished worker lifecycle", () => {
     const current = (await dispatchStatus())[0]; observe(current, closed, Date.now()); expect(current.returned!.state).toBe("done");
     await returns.take(); await returns.cleanup(); expect(closePane).toHaveBeenCalledTimes(1);
   });
+  it("keeps a genuine gone return after the terminal refuses an automatic close", async () => {
+    const value = receipt(); observe(value, (await workerStates({ targets: [target] })).workers[0], Date.now()); await save(value);
+    closePane.mockRejectedValueOnce(new Error("close refused"));
+    const returns = new DispatchReturns({ peers: async () => [], close: current => closeFinishedWorker({ target, dispatch, turn: current.closePending!.turn }) });
+    await returns.take(); panes = [];
+    expect((await workerStates({ targets: [target] })).workers[0].state).toBe("gone");
+  });
+  it("suppresses gone for a deliberate conductor close without requiring a done return", async () => {
+    await markWorkerClosed(target, "term1"); panes = [];
+    expect((await workerStates({ targets: [target] })).workers[0].state).toBe("closed");
+    const value = receipt(); observe(value, { state: "closed" }, Date.now()); expect(value.returned).toBeUndefined();
+  });
+  it("keeps a worker open if another completed turn appears during the final binding check", async () => {
+    const value = receipt(); observe(value, (await workerStates({ targets: [target] })).workers[0], Date.now()); await save(value);
+    vi.mocked(validateTarget).mockResolvedValueOnce({ ...pane }).mockImplementationOnce(async () => {
+      await event("UserPromptSubmit"); await event("Stop"); return { ...pane };
+    });
+    const returns = new DispatchReturns({ peers: async () => [], close: current => closeFinishedWorker({ target, dispatch, turn: current.closePending!.turn }) });
+    await returns.take(); expect(closePane).not.toHaveBeenCalled();
+  });
+  it("retains the original integrator target across an offline retry and configuration change", async () => {
+    const value = receipt(); observe(value, { state: "done", completed: true, reply: "Checks passed", prs }, Date.now()); await save(value);
+    const original = { target: { ...target, pane: "integrator" } };
+    await writeFile(path.join(root, "integrator.json"), JSON.stringify(original));
+    vi.mocked(handOff).mockRejectedValueOnce(new Error("lost reply"));
+    const returns = new DispatchReturns({ peers: async () => [] }); await returns.forwardPrs();
+    expect((await dispatchStatus())[0].returned!.integratorDelivery).toMatchObject({ state: "pending", integrator: original });
+    await writeFile(path.join(root, "integrator.json"), JSON.stringify({ target: { ...target, pane: "replacement" } }));
+    await returns.forwardPrs();
+    expect(vi.mocked(handOff).mock.calls[1][0]).toMatchObject({ target: original.target, deliveryId: (vi.mocked(handOff).mock.calls[0][0] as Json).deliveryId });
+  });
   it.each(["working", "new turn", "queued message", "opt out"])("preserves a finished pane with %s", async reason => {
     const value = receipt(); observe(value, (await workerStates({ targets: [target] })).workers[0], Date.now());
     if (reason === "working") pane.agent_status = "working";
     if (reason === "new turn") { await event("UserPromptSubmit"); await event("Stop"); }
     if (reason === "opt out") value.closeOnFinish = false;
     await save(value);
-    const queue = { hasPending: async () => reason === "queued message" };
+    const queue = { whenNoPending: async (_target: Target, close: () => Promise<Json>) => reason === "queued message" ? { ok: true, closed: false } : close() };
     const returns = new DispatchReturns({ peers: async () => [], close: current => closeFinishedWorker({ target, dispatch, turn: current.closePending!.turn }, queue as never) });
     await returns.take(); expect(closePane).not.toHaveBeenCalled();
   });
