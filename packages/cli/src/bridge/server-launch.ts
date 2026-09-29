@@ -18,7 +18,8 @@ import { optionalHookPeers } from "./peers.js";
 import { AppServerRpcError } from "./codex-app-server.js";
 import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { logger } from "../logger.js";
-import { atomic, BridgeError, bridgeRoot, id, type Json, launchEfforts, objects, provider } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, id, type Json, launchEfforts, objects, PERMISSION_MODES, provider } from "./protocol.js";
+import { CLAUDE_NAMES, CODEX_MODES, codexModeFlags } from "./settings-switch.js";
 
 /** Starting agents in Herdr from the phone: the launch route's harness
  * arguments, the conductor brief, and workspace, tab and pane actions. */
@@ -167,6 +168,10 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const kind = z.enum(launchKinds).parse(data.kind);
   const effort = z.enum(launchEfforts).default("medium").parse(data.effort);
   const account = data.account === undefined || data.account === null ? undefined : z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(data.account);
+  const permissionMode = z.enum(PERMISSION_MODES).optional().parse(data.permissionMode ?? undefined);
+  if (permissionMode && role === "conductor") throw new BridgeError(400, "A conductor starts with its own permissions; permissionMode is for workers.");
+  if (permissionMode && kind === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude and Codex workers.");
+  if (permissionMode && kind === "copilot") throw new BridgeError(400, "Copilot takes its permissions from its own settings; permissionMode is for Claude and Codex workers.");
   if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
   // A dispatched worker's or scheduled run's first prompt. It rides on the
   // launch where the harness takes one; elsewhere the caller types it.
@@ -211,7 +216,8 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   // conductor's name; it gets its own workspace instead.
   if (role === "agent" && workspace && objects(before.panes).some(pane => pane.workspace_id === workspace && isConductorName(paneAgentName(before, pane)))) workspace = undefined;
   const args = role === "conductor" ? await prepareConductor(kind, effort, model)
-    : [...(model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort))];
+    : [...(model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
+      ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : [])];
   // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
   // pane joins the thread the Hook started, and the brief is that thread's
   // first turn. The typed arguments below stay the fallback.
@@ -256,7 +262,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const place = { workspace: created.workspaceId, tab: created.tabId, pane: created.paneId };
   const structuredLaunch = structured ? await codexServers.launch({ server, ...place }, { cwd, ...(model ? { model } : {}),
     ...(data.effort === undefined ? {} : { effort }), env: { ...(terminalProvider().paneEnv?.(server, place) ?? {}), ...(env ?? {}) },
-    ...(brief ? { dispatchId: brief.id } : {}), startThread: !!brief }).catch(error => {
+    ...(brief ? { dispatchId: brief.id } : {}), startThread: !!brief, ...(permissionMode ? { remoteArgs: codexModeFlags(permissionMode) } : {}) }).catch(error => {
     logger.warn("launch", `Codex app-server unavailable, typing instead: ${error instanceof Error ? error.message : String(error)}`);
     return undefined;
   }) : undefined;
@@ -269,6 +275,8 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   let briefTurn: "sent" | "uncertain" | undefined;
   if (appServer?.threadId && brief) {
     try {
+      // The thread's first turn carries the mode; the TUI joining it has no flags to set.
+      if (permissionMode) codexServers.holdSettings(appServer, { ...CODEX_MODES[permissionMode] });
       await codexServers.prompt(appServer, brief.text);
       briefTurn = "sent";
       await recordBriefArrival(brief.id, "UserPromptSubmit", { ...binding, session: appServer.threadId }).catch(() => undefined);
@@ -315,7 +323,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const chat = !sessionId && pane && pane.agent === kind ? await paneChatState(server, pane).catch((): Json => ({})) : {};
   const target = sessionId ? { ...binding, session: sessionId }
     : chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
-  return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(account ? { account } : {}), ...(unchecked.length ? { unchecked } : {}),
+  return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(account ? { account } : {}), ...(permissionMode ? { permissionMode } : {}), ...(unchecked.length ? { unchecked } : {}),
     // The caller types the brief itself unless it went with the launch.
     ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief } : {}),
     ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}) };

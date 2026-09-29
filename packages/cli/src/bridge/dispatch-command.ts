@@ -18,11 +18,11 @@ export async function runDispatch(args: string[]): Promise<number> {
     console.log(JSON.stringify(await listLiveSessions(), null, 2)); return 0;
   }
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
-    harness: { type: "string", default: "codex" }, model: { type: "string" }, effort: { type: "string" }, account: { type: "string" }, prompt: { type: "string" }, label: { type: "string" },
+    harness: { type: "string", default: "codex" }, model: { type: "string" }, effort: { type: "string" }, account: { type: "string" }, "permission-mode": { type: "string" }, prompt: { type: "string" }, label: { type: "string" },
     "parent-provider": { type: "string" }, "parent-session": { type: "string" }, "parent-computer": { type: "string" },
     "parent-server": { type: "string" }, "parent-workspace": { type: "string" }, "parent-tab": { type: "string" }, "parent-pane": { type: "string" },
   } });
-  if (positionals.length !== 2) throw new Error("Usage: phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>] [--effort minimal|low|medium|high|xhigh|max] [--account <id>] [explicit parent flags]");
+  if (positionals.length !== 2) throw new Error("Usage: phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>] [--effort minimal|low|medium|high|xhigh|max] [--account <id>] [--permission-mode supervised|auto-edits|auto|full-access] [explicit parent flags]");
   const parentValues = ["parent-provider", "parent-session", "parent-computer", "parent-server", "parent-workspace", "parent-tab", "parent-pane"] as const;
   const hasParent = parentValues.some(key => values[key] !== undefined);
   const parent = hasParent ? {
@@ -32,7 +32,8 @@ export async function runDispatch(args: string[]): Promise<number> {
     server: values["parent-server"], workspace: values["parent-workspace"], tab: values["parent-tab"], pane: values["parent-pane"],
     source: values["parent-provider"], session: values["parent-session"],
   } : undefined;
-  const ordinary = Object.fromEntries(Object.entries(values).filter(([key]) => !key.startsWith("parent-")));
+  const { "permission-mode": permissionMode, ...rest } = values;
+  const ordinary = { ...Object.fromEntries(Object.entries(rest).filter(([key]) => !key.startsWith("parent-"))), ...(permissionMode !== undefined ? { permissionMode } : {}) };
   const input = dispatchSchema.parse({ computer: positionals[0], project: positionals[1], ...ordinary,
     ...(parent ? { parent, parentTarget } : {}) });
   // Run inside an agent's pane, the dispatch remembers that pane for return notices.
@@ -63,6 +64,7 @@ export async function runConductor(args: string[]): Promise<number> {
   if (action === "add") {
     const { values } = parseArgs({ args: rest, allowPositionals: true, options: {
       scope: { type: "string" }, actions: { type: "string" }, computers: { type: "string" }, until: { type: "string" },
+      "max-permission-mode": { type: "string" },
     } });
     const actions = (values.actions ?? "dispatch,hand_off").split(",").map(value => value.trim()).filter(Boolean);
     const grant = grantSchema.parse({
@@ -70,6 +72,7 @@ export async function runConductor(args: string[]): Promise<number> {
       actions,
       ...(values.computers ? { computers: values.computers.split(",").map(value => value.trim()).filter(Boolean) } : {}),
       ...(values.until ? { until: values.until } : {}),
+      ...(values["max-permission-mode"] ? { maxPermissionMode: values["max-permission-mode"] } : {}),
     });
     console.log(JSON.stringify(await addGrant(grant), null, 2));
     return 0;

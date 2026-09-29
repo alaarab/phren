@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
 import { getMachineName } from "../machine-identity.js";
-import { addGrant } from "./grants.js";
+import { addGrant, removeGrant } from "./grants.js";
 import { BridgeError } from "./protocol.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { hookRequest } from "./client.js";
@@ -58,6 +58,61 @@ describe("dispatch receipts and selection", () => {
     expect(launch).toMatchObject({ kind: "codex", model: "gpt-5.6-terra", effort: "high" });
     expect((await dispatchStatus())[0]).toMatchObject({ id: result.id, model: "gpt-5.6-terra", effort: "high" });
     await expect(new DispatchService().dispatch({ ...brief, effort: "turbo" } as never)).rejects.toThrow();
+  });
+
+  describe("permission mode", () => {
+    const launchBody = () => vi.mocked(peerRequest).mock.calls.find(call => call[1].startsWith("/v1/workspaces/launch"))?.[2] as Record<string, unknown>;
+    it("goes to the launch, stays on the receipt and needs no note from a Hook that applied it", async () => {
+      vi.mocked(peerRequest).mockImplementation(async (peer, route) => route === "/v1/dispatch/capacity"
+        ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: peer.name === "Desk" ? 3 : 1 }
+        : route.startsWith("/v1/workspaces/launch") ? { ok: true, target, permissionMode: "auto-edits" } : { ok: true });
+      const result = await new DispatchService().dispatch({ ...brief, permissionMode: "auto-edits" });
+      expect(launchBody()).toMatchObject({ kind: "codex", permissionMode: "auto-edits" });
+      expect(result).toMatchObject({ state: "accepted", permissionMode: "auto-edits" });
+      expect(result.error).toBeUndefined();
+      expect((await dispatchStatus())[0]).toMatchObject({ id: result.id, permissionMode: "auto-edits" });
+    });
+
+    it("sends nothing when no mode was asked for, and rejects an unknown one", async () => {
+      await new DispatchService().dispatch(brief);
+      expect(launchBody()).not.toHaveProperty("permissionMode");
+      await expect(new DispatchService().dispatch({ ...brief, permissionMode: "yolo" } as never)).rejects.toThrow();
+    });
+
+    it("notes on the receipt that an older Hook ignored it, and keeps going", async () => {
+      const result = await new DispatchService().dispatch({ ...brief, permissionMode: "full-access" });
+      expect(result).toMatchObject({ state: "accepted", permissionMode: "full-access", error: expect.stringContaining("older and ignored permissionMode") });
+      expect((await dispatchStatus())[0].error).toContain("Update its Hook");
+    });
+
+    // conductor.yaml must be mode 0600; Windows files carry no POSIX mode bits.
+    it.skipIf(process.platform === "win32")("caps an agent at its grant's ceiling, auto by default, and never caps the owner", async () => {
+      const agent = { server: "default", workspace: "w9", tab: "w9:t1", pane: "w9:p1" };
+      // An agent with no grant gets up to auto, never full-access.
+      await expect(new DispatchService().dispatch({ ...brief, computer: "Desk", permissionMode: "auto" }, agent)).resolves.toMatchObject({ state: "accepted" });
+      await expect(new DispatchService().dispatch({ ...brief, computer: "Desk", permissionMode: "full-access" }, agent)).rejects.toMatchObject({ status: 403 });
+      // A grant with no ceiling keeps that default.
+      await addGrant({ scope: "project:phren", actions: ["dispatch"], computers: ["Desk"] }, root);
+      await expect(new DispatchService().dispatch({ ...brief, computer: "Desk", permissionMode: "full-access" }, agent)).rejects.toMatchObject({ status: 403 });
+      const receipts = (await dispatchStatus()).length;
+      // A lower ceiling binds; the refusal saves no receipt and launches nothing.
+      await removeGrant({ scope: "project:phren", actions: ["dispatch"], computers: ["Desk"] }, root);
+      await addGrant({ scope: "project:phren", actions: ["dispatch"], computers: ["Desk"], maxPermissionMode: "auto-edits" }, root);
+      await expect(new DispatchService().dispatch({ ...brief, computer: "Desk", permissionMode: "auto" }, agent)).rejects.toMatchObject({ status: 403 });
+      expect(await dispatchStatus()).toHaveLength(receipts);
+      // A grant that names full-access allows it.
+      await removeGrant({ scope: "project:phren", actions: ["dispatch"], computers: ["Desk"] }, root);
+      await addGrant({ scope: "project:phren", actions: ["dispatch"], computers: ["Desk"], maxPermissionMode: "full-access" }, root);
+      await expect(new DispatchService().dispatch({ ...brief, computer: "Desk", permissionMode: "full-access" }, agent)).resolves.toMatchObject({ state: "accepted" });
+      // The owner (no pane) is never capped, grant or not.
+      await expect(new DispatchService().dispatch({ ...brief, computer: "Linuxbox", permissionMode: "full-access" })).resolves.toMatchObject({ state: "accepted" });
+    });
+
+    it("refuses OpenCode before a receipt is saved", async () => {
+      await expect(new DispatchService().dispatch({ ...brief, harness: "opencode", permissionMode: "auto" })).rejects.toMatchObject({ status: 400 });
+      expect(await dispatchStatus()).toEqual([]);
+      expect(vi.mocked(peerRequest).mock.calls.filter(call => call[1].startsWith("/v1/workspaces/launch"))).toHaveLength(0);
+    });
   });
 
   describe("account targeting", () => {

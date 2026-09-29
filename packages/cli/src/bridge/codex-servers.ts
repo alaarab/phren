@@ -156,6 +156,8 @@ export interface LaunchOptions {
   cwd: string;
   model?: string;
   effort?: string;
+  /** Extra flags for a pane whose TUI starts the thread (no brief), such as a permission mode. */
+  remoteArgs?: string[];
   /** Layered over the Hook's environment for the server and its hooks. */
   env?: Record<string, string>;
   dispatchId?: string;
@@ -233,7 +235,7 @@ export class CodexServers {
       await this.save(entry);
       this.live.set(serverId, live);
       const args = entry.threadId ? ["resume", entry.threadId, "--remote", `unix://${socket}`]
-        : ["--remote", `unix://${socket}`, ...(options.model ? ["--model", options.model] : []), ...(options.effort ? ["-c", `model_reasoning_effort=${options.effort}`] : [])];
+        : ["--remote", `unix://${socket}`, ...(options.model ? ["--model", options.model] : []), ...(options.effort ? ["-c", `model_reasoning_effort=${options.effort}`] : []), ...(options.remoteArgs ?? [])];
       return { entry, args };
     } catch (error) {
       client?.close();

@@ -3,7 +3,7 @@ import { lstat, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { dump, load } from "js-yaml";
 import { z } from "zod";
-import { atomic, BridgeError, bridgeRoot, computerName } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, computerName, PERMISSION_MODES, type PermissionMode } from "./protocol.js";
 import { readComputers, resolveComputer, type Computer } from "./computer-identity.js";
 
 const grantAction = z.enum(["dispatch", "hand_off"]);
@@ -16,6 +16,7 @@ export const grantSchema = z.object({
   actions: z.array(grantAction).min(1).max(2).describe("Which conductor actions this grant covers."),
   computers: z.array(computerName).min(1).max(32).optional().describe("Named verified peers; omitted means any."),
   until: z.string().datetime({ offset: true }).optional().describe("Expiry timestamp; omitted means until revoked."),
+  maxPermissionMode: z.enum(PERMISSION_MODES).optional().describe("Highest permission mode an agent may start a dispatched worker in; omitted means auto (never full-access)."),
 }).strict();
 export type Grant = z.infer<typeof grantSchema>;
 const grantFile = (root = bridgeRoot()) => path.join(root, "conductor.yaml");
@@ -125,6 +126,15 @@ export async function listNamedGrants(root = bridgeRoot()): Promise<Grant[]> {
   const grants = await listGrants(root);
   const known = await knownFor(root, grants);
   return grants.map(grant => nameComputers(grant, known));
+}
+
+/** The highest permission mode an agent may ask for under a grant. Without a
+ * grant, or with one that names no ceiling, that is auto: full-access needs a
+ * grant that says so. */
+export const DEFAULT_MAX_PERMISSION_MODE: PermissionMode = "auto";
+export function permissionModeAllowed(mode: PermissionMode, grant: Grant | undefined): boolean {
+  const ceiling = grant?.maxPermissionMode ?? DEFAULT_MAX_PERMISSION_MODE;
+  return PERMISSION_MODES.indexOf(mode) <= PERMISSION_MODES.indexOf(ceiling);
 }
 
 export function grantLabel(grant: Grant): string {

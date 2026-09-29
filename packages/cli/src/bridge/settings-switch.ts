@@ -5,18 +5,14 @@ import { codexServers, type CodexNextTurn } from "./codex-servers.js";
 import { validateTarget } from "./herdr.js";
 import { intervalFromEnv } from "./limits.js";
 import { emptyComposer } from "./model-switch.js";
-import { BridgeError, object, type Json, type Target } from "./protocol.js";
+import { BridgeError, object, PERMISSION_MODES, type Json, type PermissionMode, type Target } from "./protocol.js";
 import { terminalProvider } from "./terminal.js";
 import { transcriptPath } from "./transcripts.js";
 import { stripTerminal } from "../terminal-text.js";
 
-/** The phone's permission modes, in T3's words. */
-export const PERMISSION_MODES = ["supervised", "auto-edits", "auto", "full-access"] as const;
-type PermissionMode = (typeof PERMISSION_MODES)[number];
-
 /** T3's CodexSessionRuntime mapping. The reviewer is always sent: leaving it
  * out would keep `auto_review` from an earlier turn. */
-const CODEX_MODES: Record<PermissionMode, Pick<CodexNextTurn, "approvalPolicy" | "approvalsReviewer" | "sandboxPolicy">> = {
+export const CODEX_MODES: Record<PermissionMode, Pick<CodexNextTurn, "approvalPolicy" | "approvalsReviewer" | "sandboxPolicy">> = {
   supervised: { approvalPolicy: "untrusted", approvalsReviewer: "user", sandboxPolicy: { type: "readOnly" } },
   "auto-edits": { approvalPolicy: "on-request", approvalsReviewer: "user", sandboxPolicy: { type: "workspaceWrite" } },
   auto: { approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandboxPolicy: { type: "workspaceWrite" } },
@@ -24,7 +20,14 @@ const CODEX_MODES: Record<PermissionMode, Pick<CodexNextTurn, "approvalPolicy" |
 };
 /** Claude Code's `permissionMode` values, as the phone names them. */
 const CLAUDE_MODES: Record<string, PermissionMode | "plan"> = { default: "supervised", acceptEdits: "auto-edits", auto: "auto", bypassPermissions: "full-access", plan: "plan" };
-const CLAUDE_NAMES = Object.fromEntries(Object.entries(CLAUDE_MODES).map(([raw, phone]) => [phone, raw]));
+export const CLAUDE_NAMES: Record<string, string> = Object.fromEntries(Object.entries(CLAUDE_MODES).map(([raw, phone]) => [phone, raw]));
+
+/** The same Codex mode as command-line flags, for a Codex started with no thread yet. */
+export function codexModeFlags(mode: PermissionMode): string[] {
+  const { approvalPolicy, approvalsReviewer, sandboxPolicy } = CODEX_MODES[mode];
+  const sandbox = { readOnly: "read-only", workspaceWrite: "workspace-write", dangerFullAccess: "danger-full-access" }[String(sandboxPolicy?.type)];
+  return ["-a", String(approvalPolicy), "-s", String(sandbox), ...(approvalsReviewer === "auto_review" ? ["-c", 'approvals_reviewer="auto_review"'] : [])];
+}
 
 const MAX_PRESSES = 6, STEP_WAIT_MS = 2_000;
 
