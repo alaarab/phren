@@ -211,3 +211,7 @@ data. The ledger stores no prompt text. Schedule reminders and displayed alert
 text are registered with the phone's notification center. Failed-worker
 dismissals and view preferences also stay on that device. These do not add
 files to the synced store or require a notification relay.
+
+Conductor hand-offs retain private `<bridge>/hand-offs/<deliveryId>.json`
+records (prompt, target, terminal binding and outcome) for restart recovery
+and deduplication. They are not synced into the memory store.

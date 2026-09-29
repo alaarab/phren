@@ -1,3 +1,5 @@
+import { sessionStalls } from "./stalls.js";
+import type { HandOffQueue } from "./hand-off-queue.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { harnessInventoryWithin, launchCheckOff } from "./harnesses.js";
 import path from "node:path";
@@ -87,6 +89,7 @@ export interface RouteContext {
   scheduler?: Scheduler;
   dispatches?: DispatchService;
   returns?: DispatchReturns;
+  handOffs?: HandOffQueue;
   agentHooks: AgentHooks;
   journal: ActivityJournal;
   tabActivity: TabActivityStore;
@@ -239,6 +242,8 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       ]);
       if (expired) return;
       markBackground(tab, background);
+      const target = targetSchema.safeParse(tab.target);
+      if (target.success && agents.length === 1) Object.assign(tab, await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }));
       tab.title = title;
     }));
     let nextTab = 0;
@@ -553,6 +558,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           // Audio, not JSON: the route writes its own response.
           await streamSpeech(data, response);
           return;
+        } else if (url.pathname === "/v1/hand-off") {
+          result = await ctx.handOffs!.enqueue(data);
+        } else if (url.pathname === "/v1/hand-off/status") {
+          const body = z.object({ deliveryId: z.string().min(8).max(64), target: targetSchema }).strict().parse(data);
+          result = await ctx.handOffs!.status(body.deliveryId, body.target);
         } else if (url.pathname === "/v1/dispatch") {
           // `origin` is the caller's own pane, added by the MCP tool or CLI from Herdr's variables.
           const { origin, ...brief } = data;

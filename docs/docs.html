@@ -1871,7 +1871,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <details class="ref-card"><summary><span class="ref-card-name">dispatch</span><span class="ref-card-desc">Send a worker brief to an enrolled computer</span></summary><div class="ref-card-details"><div class="ref-card-params">(computer, project, harness, model?, prompt, label, parent?, parentTarget?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">dispatch_returns</span><span class="ref-card-desc">Unread returns from dispatched workers</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">live_sessions</span><span class="ref-card-desc">Live agent sessions on this and every enrolled computer</span></summary><div class="ref-card-details"><div class="ref-card-params">()</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">hand_off</span><span class="ref-card-desc">Send a prompt to an existing agent session</span></summary><div class="ref-card-details"><div class="ref-card-params">(computer?, target?, session?, project?, text)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">hand_off</span><span class="ref-card-desc">Queue a prompt at a busy session, confirm delivery by id</span></summary><div class="ref-card-details"><div class="ref-card-params">(computer?, target?, session?, project?, text?, deliveryId?, status?)</div></div></details>
 
         <h2 id="mcp-return">Return Format <a href="#mcp-return" class="anchor-link">#</a></h2>
         <pre><code>{

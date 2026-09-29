@@ -683,7 +683,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
       HOME: root, XDG_CONFIG_HOME: path.join(root, ".config"), PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex"),
       CLAUDE_CONFIG_DIR: path.join(root, "claude-config"), NODE_ENV: "test", PHREN_TEST_MODEL_CATALOG: path.join(root, "model-catalog.json"),
       ELEVENLABS_API_KEY: "", NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: `http://127.0.0.1:${(egress!.address() as { port: number }).port}`, NO_PROXY: "localhost,127.0.0.1,::1",
-      PHREN_APPROVAL_HOLD_MS: "2500", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SHELL_READY_MS: "1500", PHREN_OPENCODE_PID_MS: "0", PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
+      PHREN_STALL_MS: "1000", PHREN_APPROVAL_HOLD_MS: "2500", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SHELL_READY_MS: "1500", PHREN_OPENCODE_PID_MS: "0", PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
       stdio: ["ignore", "ignore", "pipe"] });
     hook.stderr!.on("data", bytes => log += bytes);
     let ready = false;
@@ -2458,6 +2458,39 @@ schedules:
   describeAll("isolated fixture", () => {
     beforeEach(startFixture);
     afterEach(stopFixture);
+
+    it("queues a busy hand-off in a real Hook and delivers it once on the next idle", async () => {
+      const message = { target, deliveryId: "route-handoff-001", text: "Review the parser next" };
+      const queued = await api("/v1/hand-off", message);
+      expect(queued.status, JSON.stringify(queued.data)).toBe(200);
+      expect(queued.data).toMatchObject({ ok: true, queued: true, state: "queued" });
+      expect(commands.filter(c => c.method === "agent.prompt")).toHaveLength(0);
+      expect((await api("/v1/hand-off", message)).data).toHaveProperty("replayed", true);
+      expect((await api("/v1/hand-off", { ...message, text: "another message" })).status).toBe(409);
+      agentStatus = "idle";
+      await waitFor(() => commands.some(c => c.method === "agent.prompt" && c.params.text === message.text), 8_000);
+      const payload = JSON.stringify({ target, event: "UserPromptSubmit", prompt: message.text });
+      await new Promise<void>((resolve, reject) => {
+        const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST", headers: { "Content-Length": Buffer.byteLength(payload) } }, res => { res.resume(); res.on("end", resolve); });
+        req.on("error", reject); req.end(payload);
+      });
+      await waitFor(async () => (await api("/v1/hand-off/status", { target, deliveryId: message.deliveryId })).data.state === "delivered", 3_000);
+      expect((await api("/v1/hand-off/status", { target, deliveryId: message.deliveryId })).data).toMatchObject({ delivered: true, queued: false });
+      await api("/v1/hand-off", message);
+      expect(commands.filter(c => c.method === "agent.prompt" && c.params.text === message.text)).toHaveLength(1);
+    });
+
+    it("reports stalled working sessions in overview and worker observations through a real Hook", async () => {
+      // Fixture threshold is short; both screen and transcript must stay fixed.
+      await api("/v1/workspaces");
+      await sleep(1100);
+      const overview = (await api("/v1/workspaces")).data;
+      expect(overview.groups[0].children[0]).toMatchObject({ agentStatus: "working", stalled: true });
+      const workers = await api("/v1/dispatch/workers", { targets: [target] });
+      expect(workers.data.workers[0]).toMatchObject({ state: "working", stalled: true });
+      await appendFile(record, JSON.stringify(row("New progress")) + "\n");
+      expect((await api("/v1/dispatch/workers", { targets: [target] })).data.workers[0]).not.toHaveProperty("stalled");
+    });
 
     it("lists, adds, and revokes conductor grants over the Hook routes", async () => {
       expect((await api("/v1/conductor/grants")).data).toEqual({ grants: [] });

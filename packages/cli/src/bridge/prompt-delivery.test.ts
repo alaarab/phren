@@ -33,9 +33,12 @@ beforeEach(() => {
   prompt.mockResolvedValue(undefined);
   expectDelivery.mockResolvedValue("pending");
   restore = setTerminalProvider({ prompt, sendKeys } as unknown as TerminalProvider);
-  vi.mocked(hookRequest).mockImplementation(async (route, body) => route === "/v1/prompt"
-    ? await paneRoute(context, new URL(`http://phren.local${route}`), body!, {} as never) as Json
-    : {});
+  vi.mocked(hookRequest).mockImplementation(async (route, body) => {
+    if (route !== "/v1/hand-off") return {};
+    const result = await paneRoute(context, new URL("http://phren.local/v1/prompt"), body!, {} as never) as Json;
+    // The durable outbox treats a transport-only composer queue as uncertain.
+    return result.queued ? { ...result, queued: false, deliveryUncertain: true } : result;
+  });
 });
 afterEach(() => { restore(); vi.restoreAllMocks(); vi.resetAllMocks(); });
 
@@ -161,3 +164,5 @@ describe("startup hand-off", () => {
     expect(prompt).toHaveBeenCalledTimes(1);
   });
 });
+
+vi.mock("./terminal.js", async original => ({ ...await original<object>(), terminalPaneFromEnv: async () => undefined }));

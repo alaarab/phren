@@ -26,7 +26,7 @@ it("resolves an existing session and delivers one prompt through its live target
   vi.mocked(hookRequest).mockResolvedValueOnce({ groups: [{ children: [{ target }] }] }).mockResolvedValueOnce({ ok: true, delivered: true });
   expect(await handOff({ session: target.session, text: "Review the tests" })).toEqual({ ok: true, delivered: true, target });
   expect(vi.mocked(hookRequest).mock.calls).toEqual([
-    ["/v1/workspaces", undefined], ["/v1/prompt", { target, text: "Review the tests" }],
+    ["/v1/workspaces", undefined], ["/v1/hand-off", { target, text: "Review the tests", deliveryId: expect.any(String) }],
   ]);
 });
 
@@ -52,7 +52,7 @@ it.each([
     ok: false, delivered: false, target, deliveryUncertain: true,
     ...("unsubmitted" in result ? { unsubmitted: true } : {}),
   });
-  expect(vi.mocked(hookRequest).mock.calls.filter(call => call[0] === "/v1/prompt")).toHaveLength(1);
+  expect(vi.mocked(hookRequest).mock.calls.filter(call => call[0] === "/v1/hand-off")).toHaveLength(1);
 });
 
 // hooks.yaml must be mode 0600; Windows files carry no POSIX mode bits, so the
@@ -149,7 +149,7 @@ it("hands off by session only to a session of the requested account, counting a 
   await expect(handOff({ session: target.session, account: "default", text: "Go" })).rejects.toMatchObject({ status: 409, details: { code: "account_mismatch" } });
   vi.mocked(hookRequest).mockReset().mockResolvedValueOnce(overview()).mockResolvedValueOnce({ ok: true, delivered: true });
   expect(await handOff({ session: target.session, account: "default", text: "Go" })).toMatchObject({ ok: true });
-  expect(vi.mocked(hookRequest).mock.calls.filter(call => call[0] === "/v1/prompt")).toHaveLength(1);
+  expect(vi.mocked(hookRequest).mock.calls.filter(call => call[0] === "/v1/hand-off")).toHaveLength(1);
   await expect(handOff({ session: target.session, account: "../x", text: "Go" })).rejects.toThrow();
 });
 
@@ -163,7 +163,7 @@ it("hands off to a computer named by an alias, and to this computer by its own n
   expect(vi.mocked(peerRequest).mock.calls.map(call => call[0].name)).toEqual(["Linuxbox", "Linuxbox"]);
   vi.mocked(hookRequest).mockResolvedValueOnce({ groups: [{ children: [{ target }] }] }).mockResolvedValueOnce({ ok: true, delivered: true });
   expect(await handOff({ computer: "Desk.local", session: target.session, text: "hi" })).toMatchObject({ delivered: true });
-  expect(vi.mocked(hookRequest).mock.calls.map(call => call[0])).toContain("/v1/prompt");
+  expect(vi.mocked(hookRequest).mock.calls.map(call => call[0])).toContain("/v1/hand-off");
 });
 
 it("hands off to this computer by its own name when no computer is enrolled", async () => {
@@ -175,3 +175,5 @@ it("hands off to this computer by its own name when no computer is enrolled", as
   expect(await handOff({ computer: "Desk.local", session: target.session, text: "hi" })).toMatchObject({ delivered: true });
   await expect(handOff({ computer: "Linuxbox", session: target.session, text: "hi" })).rejects.toThrow("hooks.yaml first");
 });
+
+vi.mock("./terminal.js", async original => ({ ...await original<object>(), terminalPaneFromEnv: async () => undefined }));
