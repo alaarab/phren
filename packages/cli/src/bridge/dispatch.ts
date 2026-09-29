@@ -19,6 +19,7 @@ import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, P
 import { phrenStoreRoot } from "./transcripts.js";
 import { isAccountSlug } from "./claude-accounts.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
+import { NEAR_LIMIT_LEFT } from "./usage.js";
 import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
@@ -176,19 +177,34 @@ export async function dispatchStatus(): Promise<Receipt[]> {
 
 /** `caller` (a conductor's name and host key) asks a peer whether it links this computer back:
  * `outside` is a peer in another set, which a conductor does not dispatch to. */
-async function capacity(host: DispatchHost, caller?: string): Promise<{ working: number; computerId: string; harnesses?: HarnessInventory["harnesses"]; outside?: true }> {
+type Room = { source: string; account?: string; leftPercent?: number };
+async function capacity(host: DispatchHost, caller?: string): Promise<{ working: number; computerId: string; harnesses?: HarnessInventory["harnesses"]; usage?: Room[]; outside?: true }> {
   const value = await host.request(caller && !host.local ? `/v1/dispatch/capacity?${caller}` : "/v1/dispatch/capacity");
   const result = z.object({ product: z.literal("phren-hook"), protocol: z.literal(PROTOCOL), working: z.number().int().nonnegative(),
     servers: z.array(z.string()), computer: z.object({ id: z.string().uuid() }).passthrough(),
     // Missing from an older Hook, or when its inventory was not ready in time: unknown, not unavailable.
     harnesses: z.array(z.object({ source: z.string(), installed: z.boolean(), usable: z.boolean(), reason: z.string().optional(),
       accounts: z.array(z.object({ id: z.string(), usable: z.boolean(), reason: z.string().optional() }).passthrough()).optional() }).passthrough()).optional(),
+    // Missing from an older Hook or a slow read: no tie-break by usage for that computer.
+    usage: z.array(z.object({ source: z.string(), account: z.string().optional(), leftPercent: z.number().min(0).max(100).optional() }).passthrough()).max(64).optional(),
     knowsCaller: z.boolean().optional() }).parse(value);
   // This computer places on whichever Herdr server its own Hook runs.
   if (host.local && !result.servers.includes(host.server) && result.servers[0]) host.server = result.servers[0];
   if (!result.servers.includes(host.server)) throw new BridgeError(503, "Herdr is not running on the selected computer. Headless dispatch is not installed yet.");
   return { working: result.working, computerId: result.computer.id, ...(result.harnesses ? { harnesses: result.harnesses as HarnessInventory["harnesses"] } : {}),
+    ...(result.usage ? { usage: result.usage } : {}),
     ...(caller && result.knowsCaller === false ? { outside: true as const } : {}) };
+}
+
+/** Least room left on the account this dispatch would run under there: Codex's one, or the named Claude home. */
+export function roomFor(data: { harness: string; account?: string }, usage: readonly Room[] | undefined): number | undefined {
+  const account = data.account ?? "default";
+  return usage?.find(item => item.source === data.harness && (data.harness !== "claude" || (item.account ?? "default") === account))?.leftPercent;
+}
+
+/** Room enough first, then unknown, then near a limit. */
+export function roomRank(left: number | undefined): number {
+  return left === undefined ? 1 : left < NEAR_LIMIT_LEFT ? 2 : 0;
 }
 
 /** Why a computer cannot run this dispatch's harness and account, or undefined when it can or cannot yet be told.
@@ -345,8 +361,10 @@ export class DispatchService {
           return !reason;
         });
         skipped.sort((a, b) => a.computer.localeCompare(b.computer));
+        // Least busy first; a tie goes to the computer whose account for this harness has room, then by name.
+        const room = (item: { usage?: Room[] }) => roomFor(data, item.usage);
         const selected = capable
-          .sort((a, b) => a.working - b.working || a.peer.name.localeCompare(b.peer.name))[0];
+          .sort((a, b) => a.working - b.working || roomRank(room(a)) - roomRank(room(b)) || (room(b) ?? 0) - (room(a) ?? 0) || a.peer.name.localeCompare(b.peer.name))[0];
         peer = selected?.peer;
         remoteComputerID = selected?.computerId;
         if (!peer) throw new BridgeError(503, incapable ? `No enrolled computer with a running Herdr can run ${data.harness}${data.account ? ` account ${data.account}` : ""}.` : "No enrolled computer with a running Herdr is connected.", skipped.length ? { skipped } : undefined);

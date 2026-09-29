@@ -2,7 +2,8 @@
 
 A conductor is an agent session that sends bounded work to other sessions.
 The optional `conductor` module supplies `dispatch`, `dispatch_returns`,
-`hand_off`, `live_sessions`, standing grants and the shipped conductor brief.
+`hand_off`, `live_sessions`, `account_usage`, standing grants and the shipped
+conductor brief.
 It requires `memory` and `hook`.
 
 ```sh
@@ -158,6 +159,32 @@ flag a link that runs only one way (see [Phren Hook](phren-hook.md#health-and-th
 A conductor starts in the phren store and has no
 project; its Herdr name is `conductor` (or `conductor-<label>`).
 
+```sh
+phren dispatch usage
+phren dispatch usage --json
+```
+
+`account_usage` (MCP) and `phren dispatch usage` read agent usage from this
+computer and each computer in `hooks.yaml`, merged by account: one row per
+Claude login, Codex, OpenCode, OpenCode Go, OpenRouter and GitHub Copilot, with
+each window's percent used and left and its reset time, `leftPercent` (the least
+room on any window), `nearLimit` (under 20% left, or refusing requests now),
+freshness (`age`, `stale`) and the computers where it is signed in. A window
+whose reset passed says `reset` with no percent, and a report over 15 minutes
+old is stale. Unreachable and unlinked computers are listed apart, as in
+`live_sessions`: their usage is unknown, not zero. Fields are in the
+[API reference](api-reference.md#account_usage).
+
+### Choosing by usage
+
+Check usage before dispatching. Skip an account near its limit, for example
+Codex under about 20% left on its weekly window, and pick another harness,
+Claude account or computer with room. Name the choice in the dispatch line
+(for example "Codex is at 12% weekly, sending to Claude work on Desk"). When
+every option is near a limit, tell the owner before sending work. `anywhere`
+also uses usage: among the least busy computers, it prefers the one with more
+room on the account the dispatch would run under.
+
 ## Dispatch new work
 
 ```sh
@@ -172,7 +199,10 @@ model, label and prompt. The receiving Hook resolves the project's checkout.
 Callers do not pass a checkout path. This computer needs no `hooks.yaml` entry
 and no SSH enrollment: its placement goes through its own Hook's socket, and
 the returns loop reads its workers in process. `anywhere` chooses the least
-busy responding computer, this one included, with names breaking ties. Capacity preflight requires a compatible Hook and the configured Herdr
+busy responding computer, this one included. A tie goes to the computer with
+room of 20% or more on the account the dispatch would run under (Codex's, or
+the named Claude home, `default` when none), then unknown, then near a limit,
+then more room, then name. Capacity preflight requires a compatible Hook and the configured Herdr
 server. Peers that fail it sit out and are named with their reason in the
 receipt's `skipped` list (and in the error when none is left). Placement
 currently requires Herdr.

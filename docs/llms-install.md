@@ -70,7 +70,7 @@ Team stores sync independently via git. Findings, notes, and tasks in a team sto
 
 Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
 
-## MCP Tools (73)
+## MCP Tools (74)
 
 ### Search and Browse
 
@@ -217,6 +217,7 @@ Parameters for these are in [api-reference.md](api-reference.md).
 | `dispatch_approve` | see api-reference.md | Answer the permission request a dispatched worker is waiting on, by dispatch id and the approval's actionId. Only the agent that dispatched the worker (or the owner's phone) can answer, never the worker itself. |
 | `hand_off` | see api-reference.md | Deliver a prompt to an existing local or enrolled-computer agent session through Phren Hook. Prefer a session that already owns the project and is idle or doing related work. |
 | `live_sessions` | see api-reference.md | List the live agent sessions on this computer and every enrolled computer: computer, project, harness, status, idleFor (seconds since the tab last changed), role and the target hand_off takes. Computers that could not be reached are listed separately, and computers registered in the store but not linked in hooks.yaml come back in notLinked: their sessions are unknown, not absent. |
+| `account_usage` | see api-reference.md | Agent usage on this computer and every enrolled computer, merged by account: one row per Claude login, Codex, OpenCode, OpenCode Go, OpenRouter and GitHub Copilot, with its windows (percent used, percent left, reset time), leftPercent (the least room on any window), nearLimit (under 20% left or refusing requests), freshness (updatedAt, age, stale) and the computers where it is signed in, with the Claude account id dispatch takes there. Call it before dispatch to pick a harness, account and computer with room. Harnesses no computer reported are in noData; unreachable and unlinked computers are listed separately: their usage is unknown, not zero. |
 | `get_topic_summaries` | see api-reference.md | What each topic archive of a project amounts to: every reference/topics file with its bullet count, its current '## Now' text and whether that text is structural or prose. Pass `topic` to also get that topic's newest bullets, the raw material for writing its paragraph yourself (see /phren-summarize). |
 | `set_topic_summary` | see api-reference.md | Store the paragraph you wrote for a topic archive as its '## Now' block, and refresh the project's 'What phren knows' block. Refused if the paragraph names anything the topic's bullets do not (the invented names are returned): fix the paragraph rather than the check. |
 | `store_list` | see api-reference.md | List all registered phren stores and their sync status. Shows the primary store plus any team or readonly stores from the store registry. |
