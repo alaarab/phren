@@ -178,7 +178,9 @@ A worker the Hook launched with its brief runs with `PHREN_DISPATCH_ID` set to
 its dispatch or scheduled-run ID; its hooks echo it back as the delivery receipt.
 `PHREN_PRETRUST=off` stops the Hook from marking a dispatched or scheduled
 project's folder, or a worktree it created, trusted in Claude's and Codex's
-config before launching there (see [footprint](footprint.md)).
+config before launching there, and from carrying the owner's Codex trust
+forward to Phren's own Codex hooks when an install rewrites them (see
+[footprint](footprint.md)).
 `PHREN_CODEX_APP_SERVER=off` keeps Codex workers the Hook launches on the typed
 path instead of a Phren-owned `codex app-server` per pane; those servers run
 their hooks with `PHREN_CODEX_SERVER` set to the server's registry ID, and

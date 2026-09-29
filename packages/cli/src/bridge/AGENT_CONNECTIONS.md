@@ -223,6 +223,16 @@ doesn't mark the pane blocked. If Codex hands the request back to the owner, it
 draws its own approval dialog, and the waiting-pane dialog read pushes that like
 any other. Other sessions keep the normal hold.
 
+Codex 0.158+ runs a `hooks.json` callback only when `config.toml` holds its
+`trusted_hash` (`[hooks.state."<path>:<event>:<group>:<handler>"]`), and the
+hash covers the timeout. Install, update, rollback and module reconcile run
+`bridge/codex-hook-trust.ts` after rewriting Phren's Codex callbacks: a Phren
+callback whose hash no longer matches gets the new hash only when the owner had
+trusted Phren's callback for that event before (same command at a shipped
+timeout, or the pre-rewrite entry). Without this a timeout change leaves Phren's
+SessionStart, UserPromptSubmit and Stop skipped and every Codex on "Hooks need
+review". `PHREN_PRETRUST=off` turns it off.
+
 ### Codex panes on the Hook's own app-server
 
 A Codex agent the Hook launches with role `agent` (dispatch, schedule, phone)
