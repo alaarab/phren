@@ -436,6 +436,7 @@ export const tmuxTerminal: TerminalProvider = {
     await tmux(server, ["select-window", "-t", target]);
     await tmux(server, ["select-pane", "-t", target]);
   },
+  async closePane(server, pane) { await tmux(server, ["kill-pane", "-t", toTmuxId(pane, "p")]); },
   async groupAction(server, operation, { workspace, tab }, label) {
     if (tab) {
       const target = toTmuxId(tab, "w");

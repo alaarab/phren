@@ -6,7 +6,7 @@ Quick start:
   This creates ~/.phren, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
   Open a prompt in your project directory. Context injection starts immediately.
 
-MCP Tools (59 across 13 modules):
+MCP Tools (75 across 16 catalog modules):
 
   Search and browse:
     search_knowledge(query, type?, limit?, project?, tag?, since?, status?, include_history?, synthesize?) - FTS5 search with synonym expansion, filterable by tag/date/lifecycle
@@ -326,3 +326,15 @@ Docs: https://alaarab.github.io/phren/
 Source: https://github.com/alaarab/phren
 
 Conductor: hand_off queues busy workers durably; keep deliveryId, query status:true without text. Uncertain deliveries never retry automatically. PHREN_STALL_MS (300000, zero off) flags working sessions whose screen and transcript are unchanged; live_sessions and dispatch_returns expose stalled fields.
+
+dispatch_report(prs): record this worker's turn-bound PR evidence, each row
+{url,repo,branch,tests,notes?}; the done return carries it to the configured
+integrator through queued hand_off. phren dispatch report --prs <JSON>.
+owner_inbox(action?,title?,project?,id?,resolution?,includeResolved?,computer?):
+list, add or resolve owner work across linked computers. Reading returns does
+not dismiss it; resolving does not approve or answer a prompt.
+phren owner-inbox list [--all] | add <title> [--project <slug>] [--id <uuid>] |
+resolve <id> [--computer <name>] [--resolution <text>].
+phren conductor integrator [--session <id> [--computer <name>] | --clear].
+dispatch accepts closeOnFinish:false (CLI --keep-open) to preserve a finished
+pane; otherwise it closes after the done return is read and revalidated.

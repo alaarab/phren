@@ -1,3 +1,4 @@
+import { integratorSchema, prsSchema } from "./return-contract.js";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
@@ -36,6 +37,8 @@ export const dispatchSchema = z.object({
     .describe("Release-type actions the brief asks the worker to do (merge, publish, deploy, app-store, github-admin). Ask-first projects refuse them from an agent unless the owner confirmed."),
   prompt: z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value)).describe("Worker brief, at most 32768 characters."),
   label: text(200).describe("Short task label."),
+  closeOnFinish: z.boolean().optional().describe("Close the finished worker pane after its done return is read. Defaults to true; false keeps it open."),
+  integrator: integratorSchema.optional().describe("Forward structured PR reports to this integrator, overriding the Hook default."),
   parent: dispatchParentSchema.optional().describe("Explicit local conversation parent for work-tree attachment."),
   parentTarget: targetSchema.optional().describe("Complete live target for the explicit parent."),
 }).strict();
@@ -61,6 +64,8 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
     .describe("Computers left out of anywhere placement, with the reason each could not report capacity."),
   origin: originPaneSchema.extend({ agent: provider, terminal: z.string().min(1).max(200) }).strict().optional()
     .describe("The local agent pane that placed this dispatch; return notices go there."),
+  closedAt: timestamp.optional(),
+  closePending: z.object({ at: timestamp, turn: z.string().optional() }).strict().optional(),
   worker: z.object({ state: z.enum(workerStates), since: timestamp, checkedAt: timestamp, sawWorking: z.boolean(),
     background: z.number().int().min(0).max(999).optional().describe("The most background tasks seen running while the worker was working."),
     waitingSince: timestamp.optional().describe("When the dispatching Hook first saw the worker's finished turn waiting on background tasks; bounds that wait.") }).strict().optional()
@@ -68,6 +73,8 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   returned: z.object({
     state: z.enum(["done", "needs-you", "failed", "blocked", "stalled", "gone"]), at: timestamp,
     reply: z.string().max(4000).optional(), error: z.string().max(500).optional(), truncated: z.boolean().optional(), question: z.string().max(200).optional(),
+    prs: prsSchema.optional(),
+    integratorDelivery: z.object({ deliveryId: z.string(), state: z.enum(["queued", "delivered", "uncertain", "failed"]), at: timestamp }).strict().optional(),
     stalledSince: timestamp.optional(), stallFor: z.number().nonnegative().optional(),
     turn: z.string().regex(/^[a-f0-9]{16}$/).optional(), read: z.boolean(), notifiedAt: timestamp.optional(),
     background: z.number().int().min(1).max(999).optional().describe("Background tasks the worker left running when it was counted done."),
