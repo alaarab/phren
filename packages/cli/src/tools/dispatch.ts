@@ -3,6 +3,7 @@ import { z } from "zod";
 import { hookRequest } from "../bridge/client.js";
 import { dispatchSchema } from "../bridge/dispatch.js";
 import { handOff, handOffSchema, listLiveSessions } from "../bridge/hand-off.js";
+import { readAccountUsage, usageSummary } from "../bridge/account-usage.js";
 import { terminalPaneFromEnv } from "../bridge/terminal.js";
 import { mcpResponse } from "./types.js";
 
@@ -67,6 +68,19 @@ export function register(server: McpServer): void {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not list live sessions." });
     }
   });
+  server.registerTool("account_usage", {
+    title: "◆ phren · account usage",
+    description: "Agent usage on this computer and every enrolled computer, merged by account: one row per Claude login, Codex, OpenCode, OpenCode Go, OpenRouter and GitHub Copilot, with its windows (percent used, percent left, reset time), leftPercent (the least room on any window), nearLimit (under 20% left: information, not a reason to avoid it), exhausted (a window at 100% or refusing requests, with availableIn), freshness (updatedAt, age, stale), and the computers where it is signed in with the Claude account id dispatch takes there. A window whose reset passed says reset and has no percent; a report over 15 minutes old is stale. Call it before dispatch: never send work to an exhausted account; a low one is fine, and one that resets soon is worth using before it does. Harnesses no computer reported are in noData; unreachable computers and computers not linked in hooks.yaml are listed separately: their usage is unknown, not zero.",
+    inputSchema: {},
+  }, async () => {
+    try {
+      const result = await readAccountUsage();
+      const note = result.peerError ? ` Enrolled computers were skipped: ${result.peerError}` : "";
+      return mcpResponse({ ok: true, data: result, message: `${usageSummary(result)}${note}` });
+    } catch (error) {
+      return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not read account usage." });
+    }
+  });
   server.registerTool("authority", {
     title: "◆ phren · release authority",
     description: "Read the owner's release authority policy: per project, which release-type actions (merge, publish, deploy, app-store, github-admin) are go and which are ask-first, and the highest permission mode an agent may start a worker in there. Quote the project's `line` in a brief that asks for release work, and declare those actions in dispatch's releaseActions. An ask-first action needs the owner's confirmation first; ask the owner, never try to confirm it yourself. Read-only: only the owner changes the policy. Without project, lists every project the policy names.",
@@ -82,12 +96,12 @@ export function register(server: McpServer): void {
   });
   server.registerTool("hand_off", {
     title: "◆ phren · hand off",
-    description: "Deliver a prompt to an existing local or enrolled-computer agent session through Phren Hook. Prefer a session that already owns the project and is idle or doing related work.",
+    description: "Deliver a prompt to an existing local or enrolled-computer agent session through Phren Hook. Busy workers receive a durable queued message at their next idle. Keep deliveryId on retries. Use status:true with deliveryId and target or session to read queued, delivered, uncertain or failed without sending. Uncertain delivery is never retried automatically.",
     inputSchema: handOffSchema,
   }, async input => {
     try {
       const result = await handOff(input);
-      return mcpResponse({ ok: result.ok, data: result, message: result.delivered ? "Prompt delivered to the existing session." : "Prompt delivery was not confirmed." });
+      return mcpResponse({ ok: result.ok, data: result, message: result.delivered ? "Prompt delivered to the existing session." : result.queued ? `Prompt queued as ${result.deliveryId}. The Hook will deliver it at idle and notify the sender.` : "Prompt delivery was not confirmed; do not resend with a new id." });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Hand-off failed." });
     }

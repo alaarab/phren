@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, recordedBackground, sessionTitle } from "./session-activity.js";
+import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, plainTitle, recordedBackground, sessionTitle } from "./session-activity.js";
 import { nextTurn, type TurnRecord } from "./turn-records.js";
 
 const session = "00000001-1111-4111-8111-111111111111";
@@ -20,7 +20,7 @@ describe("background work keeps a session working", () => {
     expect(done).toEqual({ agentStatus: "working", backgroundTasks: 1 });
   });
 
-  it("takes the larger of two counts, never the sum", () => {
+  it("keeps the larger of two counts", () => {
     const tab: Record<string, unknown> = { agentStatus: "idle" };
     markBackground(tab, 5); markBackground(tab, 2);
     expect(tab.backgroundTasks).toBe(5);
@@ -67,17 +67,31 @@ describe("background work keeps a session working", () => {
     expect(tab).toEqual({ agentStatus: "idle" });
   });
 
-  it("reads a Claude transcript only when the Stop left background work", async () => {
+  it("reads a Claude transcript only when the Stop left background work, and counts the shells it awaits", async () => {
     const stop = Date.now() - 60_000, reads: string[] = [];
-    const read = async (_source: string, id: string | undefined) => { reads.push(String(id)); return { completed: true, finishedTasks: [new Date(stop + 1000).toISOString()] }; };
+    const read = async (_source: string, id: string | undefined) => { reads.push(String(id)); return { completed: true, finishedTasks: [new Date(stop + 1000).toISOString()], awaited: 2 }; };
+    // Never more than the Stop's count less what finished since.
     expect(await liveBackground(record(2, undefined, stop), read)).toBe(1);
+    expect(await liveBackground(record(4, undefined, stop), read)).toBe(2);
     expect(await liveBackground(record(1, undefined, stop), read)).toBeUndefined();
     expect(await liveBackground(record(0, undefined, stop), read)).toBeUndefined();
     expect(await liveBackground(record(2, undefined, stop, "codex"), read)).toBeUndefined();
     expect(await liveBackground(undefined, read)).toBeUndefined();
-    expect(reads).toEqual([session, session]);
-    // An unreadable transcript leaves the Stop's count.
-    expect(await liveBackground(record(2, undefined, stop), async () => { throw new Error("gone"); })).toBe(2);
+    expect(reads).toEqual([session, session, session]);
+    // Leftover shells and sub-agents alone (the Mini's tabs, 2026-09-29) keep nothing working here.
+    expect(await liveBackground(record(8, undefined, stop), async () => ({ completed: true }))).toBeUndefined();
+    // The Stop's count alone cannot tell a build from a log tail.
+    expect(await liveBackground(record(2, undefined, stop), async () => { throw new Error("gone"); })).toBeUndefined();
+  });
+
+  it("adds running sub-agents to the shells a turn awaits", () => {
+    // The overview marks the awaited shells first, then their sum with the child tree's running children.
+    const tab: Record<string, unknown> = { agentStatus: "idle" };
+    markBackground(tab, 1); markBackground(tab, 1 + 2);
+    expect(tab).toEqual({ agentStatus: "working", backgroundTasks: 3 });
+    const agentsOnly: Record<string, unknown> = { agentStatus: "done" };
+    markBackground(agentsOnly, undefined); markBackground(agentsOnly, 0 + 1);
+    expect(agentsOnly).toEqual({ agentStatus: "working", backgroundTasks: 1 });
   });
 
   it("trusts a record only for this pane's terminal, agent and conversation", () => {
@@ -91,6 +105,18 @@ describe("background work keeps a session working", () => {
 });
 
 describe("session titles", () => {
+  it("drops the spinner and status glyphs a harness spins around its terminal title", () => {
+    expect(plainTitle("\u2838 Respond to meeting | alaarab")).toBe("Respond to meeting | alaarab");
+    expect(plainTitle("\u2733 Claude Code")).toBe("Claude Code");
+    expect(plainTitle("\u25cf \u23f3 Build app \u2714")).toBe("Build app");
+    expect(plainTitle("\u2807")).toBeUndefined();
+    expect(plainTitle("\u2838 \u2838 | phren")).toBe("phren");
+    expect(plainTitle("Fix it | \u2838")).toBe("Fix it");
+    expect(plainTitle("a | b")).toBe("a | b");
+    expect(plainTitle("Fix a \u2022 bullet - and * star")).toBe("Fix a \u2022 bullet - and * star");
+    expect(sessionTitle({ dispatched: false, harnessTitle: "\u280b Respond to meeting" })).toBe("Respond to meeting");
+  });
+
   it("recognizes the titles a brief launch produces", () => {
     for (const title of ["Read and follow the brief in /x/briefs/abc/brief.md", "read and follow the brief", "Fix /home/a/briefs/x/brief.md",
       "Brief d35c6189", "Brief ec1340da-5c34-…", "Brief ec1340da-5c34-4b1a...", "Brief ec1340da-5c34-4b1a-9c1d-000000000001"]) expect(isBriefTitle(title), title).toBe(true);

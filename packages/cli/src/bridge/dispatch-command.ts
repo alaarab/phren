@@ -13,6 +13,11 @@ export async function runDispatch(args: string[]): Promise<number> {
   if (args.length === 1 && args[0] === "returns") {
     console.log(JSON.stringify(await hookRequest("/v1/dispatch/returns", {}), null, 2)); return 0;
   }
+  if (args[0] === "usage" && args.slice(1).every(arg => arg === "--json")) {
+    const { readAccountUsage, formatAccountUsage } = await import("./account-usage.js");
+    const view = await readAccountUsage();
+    console.log(args.includes("--json") ? JSON.stringify(view, null, 2) : formatAccountUsage(view)); return 0;
+  }
   if (args.length === 1 && args[0] === "sessions") {
     const { listLiveSessions } = await import("./hand-off.js");
     console.log(JSON.stringify(await listLiveSessions(), null, 2)); return 0;
@@ -45,11 +50,11 @@ export async function runDispatch(args: string[]): Promise<number> {
 
 export async function runHandOff(args: string[]): Promise<number> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
-    session: { type: "string" }, text: { type: "string" }, project: { type: "string" }, account: { type: "string" },
+    "delivery-id": { type: "string" }, status: { type: "boolean" }, session: { type: "string" }, text: { type: "string" }, project: { type: "string" }, account: { type: "string" },
   } });
-  if (positionals.length !== 1 || !values.session || !values.text) throw new Error("Usage: phren hand-off <computer|local> --session <id> --text <prompt> [--project <slug>] [--account <id>]");
+  if (positionals.length !== 1 || !values.session || (!values.status && !values.text) || (values.status && !values["delivery-id"])) throw new Error("Usage: phren hand-off <computer|local> --session <id> --text <prompt> [--project <slug>] [--account <id>]");
   const computer = positionals[0] === "local" ? undefined : positionals[0];
-  const result = await handOff({ ...(computer ? { computer } : {}), project: values.project, ...(values.account ? { account: values.account } : {}), session: sessionId.parse(values.session), text: values.text });
+  const result = await handOff({ ...(computer ? { computer } : {}), project: values.project, ...(values.account ? { account: values.account } : {}), session: sessionId.parse(values.session), ...(values.status ? { status: true } : { text: values.text }), ...(values["delivery-id"] ? { deliveryId: values["delivery-id"] } : {}) });
   console.log(JSON.stringify(result, null, 2));
   return result.ok ? 0 : 1;
 }

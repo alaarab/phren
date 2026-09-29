@@ -91,7 +91,8 @@ markers are left untouched.
 
 `phren bridge install` is separate from the memory-store setup. It installs a
 standalone helper in `~/.local/share/phren/bridge/versions/<version>`, with a
-`current` symlink, `dispatch` entry point, and `installed.json` rollback record.
+`current` symlink, `dispatch` entry point, `askpass` helper for `sudo -A` (0700),
+and `installed.json` rollback record.
 The root is private (0700); its `hook.sock` and agent-only `agent.sock` are 0600.
 `computer-id`, process-bound `bindings/`, per-pane turn records in `turns/`
 (last prompt and Stop times, the Stop's final message up to 4000 bytes, for
@@ -117,6 +118,23 @@ opencode sessions into the store's `.runtime/sessions`. Recognized `phren-iphone
 PTY support. Other hooks and keys remain intact. Changed settings and key files
 receive sibling `.phren-hook-<timestamp>.bak` backups. Codex requires review of
 new callbacks in `/hooks`.
+
+### Codex hook trust the Hook carries forward
+
+Codex runs a `hooks.json` callback only while `$CODEX_HOME/config.toml` holds a
+matching `trusted_hash` under `[hooks.state."<hooks.json path>:<event>:<group>:<handler>"]`.
+The hash covers the command, timeout and matcher, so when install, update,
+rollback or a module change rewrites one of Phren's own Codex callbacks (a new
+timeout, a new node path, a moved group), the trust the owner gave it would be
+lost and every new Codex would open on "Hooks need review". After each of those
+runs, whether or not `hooks.json` changed, the Hook updates the `trusted_hash`
+line of a Phren callback (or adds its table next to the other `hooks.state`
+tables) only when `config.toml` already trusts Phren's callback for that event:
+the same command at a timeout Phren has shipped, or the Phren callback that
+stood in `hooks.json` before the rewrite. A Phren callback the owner never
+trusted still needs review in `/hooks`, and other callbacks are never touched.
+The rest of the file is kept as it was, and the write goes through a temporary
+file and rename. `PHREN_PRETRUST=off` turns this off too.
 
 ### Folder trust for launches the Hook places
 
@@ -211,3 +229,9 @@ data. The ledger stores no prompt text. Schedule reminders and displayed alert
 text are registered with the phone's notification center. Failed-worker
 dismissals and view preferences also stay on that device. These do not add
 files to the synced store or require a notification relay.
+
+Conductor hand-offs retain private `<bridge>/hand-offs/<deliveryId>.json`
+records (prompt, target, terminal binding and outcome) for restart recovery
+and deduplication. Settled records are pruned after 7 days and the directory
+is capped at 512 records; queued ones stay until delivered. They are not
+synced into the memory store.

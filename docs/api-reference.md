@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 73 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 74 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -38,7 +38,7 @@ See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `computer` | string | yes | Enrolled name, or `anywhere` for the connected peer with the fewest working agents. |
+| `computer` | string | yes | Enrolled name, or `anywhere` for the connected peer with the fewest working agents, skipping one whose account for this harness has no quota left (see below). |
 | `project` | string | yes | Project slug whose `phren.project.yaml` sourcePath exists on the receiver. No local checkout paths. |
 | `harness` | enum | yes | `codex`, `claude`, or `opencode`. |
 | `model` | string | no | Explicit remote model, up to 200 characters; otherwise its configured default. |
@@ -64,6 +64,19 @@ through `phren dispatch status`. Remote leads and their workers appear in
 the receipt keeps that pane as `origin` for return notices. After placement
 the Hook follows the worker (see `dispatch_returns`), and receipts gain
 `worker` (its last observed state) and `returned` (the latest return).
+
+With `anywhere`, the Hook asks each computer's `GET /v1/dispatch/capacity`,
+which returns `working`, `harnesses` and `usage: [{ source, account?,
+leftPercent?, exhausted?, until? }]`: the least room left on Codex and on each
+Claude home there, and `exhausted: true` (with `until`, when its last spent
+window resets) once a window is at 100% or refusing requests. It is read in
+parallel with the harness inventory and bounded to 2.5 seconds; a missing
+`usage` (an older Hook or a slow read) means unknown. A computer whose account
+for this dispatch (Codex's, or the named Claude home, `default` when none) is
+exhausted sits out and is named in `skipped`; when no computer is left for that
+reason the dispatch fails with code `out_of_quota`. Low quota is not a reason
+to skip one: the least busy computer wins, then name. A named computer is never
+refused for quota.
 
 CLI equivalent:
 `phren dispatch Desk phren --harness codex --label 'Checks' --prompt 'Run the assigned checks'`.
@@ -147,6 +160,48 @@ says why none were read when `hooks.yaml` is broken. No parameters. In the
 core profile use `phren_admin(action: "live_sessions")`.
 
 CLI equivalent: `phren dispatch sessions`.
+
+### `account_usage`
+
+List agent usage on this computer and each enrolled computer, merged by
+account, so a conductor can pick a harness, account and computer with room
+before it dispatches. The tool asks this Hook (`GET /v1/health` and
+`GET /v1/usage?sources=claude,codex,copilot,opencode,opencode-go,openrouter&goPlan=1&accounts=all`)
+and each `hooks.yaml` peer over its pinned SSH pipe (the same routes), as
+`live_sessions` does. ElevenLabs is left out, since each read of it spends
+quota. No parameters. `message` is a one-line summary: how many accounts, which
+are out of quota (do not dispatch to them), which are low but usable, which are
+stale, and a warning when every account with limits is out of quota.
+
+One account is one allowance whichever computers report it. Rows merge by `id`,
+which is `source` or `source|key` (the phone's card key); a Claude row whose key
+is `claude:home:<id>` (a login with no identity) stays per computer. The
+freshest whole report with windows stands, and `from` names its computer.
+OpenCode and OpenCode Go spend is summed across computers; OpenRouter spend is
+counted once per key.
+
+Each row carries `id`, `harness`, `name`, `account` (the login's email, else its
+label), `windows`, `leftPercent` (the least room on any window), `nearLimit`
+(under 20% left: information, not a reason to avoid the account), `exhausted`
+(a window at 100% or refusing requests: never dispatch to it) with
+`availableIn` (when its last spent window resets), `spend`, `updatedAt`, `age`, `stale`,
+`from`, `computers: [{ name, account? }]` and `message`. `account` on a
+computer is the Claude account id `dispatch`'s `account` takes there. Each
+window carries `usedPercent`, `leftPercent`, `resetsAt` and `resetsIn`; once
+its reset time has passed it says `reset: true` and has no percent, and while
+the service refuses requests it says `limited: true` with `leftPercent` 0. A
+window at 100% or limited also says `exhausted: true`. A
+row is `stale` when its report is over 15 minutes old, has no timestamp, or has
+a window that reset since the report.
+
+The view also returns `noData: [{ harness, name, computers, message? }]` for
+harnesses no computer reported numbers for, `computers` (those that answered,
+this one first), `unreachable: [{ computer, error, code? }]`,
+`notLinked: [{ name, aliases? }]` (their usage is unknown, not zero),
+`enrolled` and `peerError` when `hooks.yaml` is broken. In the core profile use
+`phren_admin(action: "account_usage")`.
+
+CLI equivalent: `phren dispatch usage` (text; `--json` for the view).
 
 ### `authority`
 
@@ -1331,13 +1386,17 @@ selector that would resolve to Herdr returns 409 `mux-kind-mismatch`.
 Each tab in the `/v1/workspaces` and `WS /v1/overview` replies carries
 `agentStatus` and `title`. A session whose main turn ended while background
 work still runs is `agentStatus: "working"` with `backgroundTasks: <n>`,
-where Herdr or tmux say idle or done. `n` is the larger of the Stop hook's
-count of Claude background tasks (shells, subagents, monitors) and the running
-Codex or Claude subagents and fanout jobs (`runningChildren`), never their
-sum. The Stop's count is lowered by each task the transcript shows finishing
-after that Stop (a task-notification with a final status, including one still
-queued in an idle session), and is ignored two hours after the Stop, so an old
-count never keeps a finished session working. `backgroundTasks` is absent on a tab that is working, blocked or waiting
+where Herdr or tmux say idle or done. `n` counts the work the session is
+waiting on: its running Codex or Claude sub-agents, teammates, workflow agents
+and fanout jobs (`runningChildren`), plus, for Claude, the background shells
+and monitors started since the owner's last prompt that still run. A shell
+that follows a log, watches files or serves a dev build (`tail -f`,
+`log stream`, `--watch`, `npm run dev`) never counts, and neither does a
+shell left running from an earlier exchange. The shells counted are at most
+the Stop hook's count of Claude background tasks less each task the
+transcript shows finishing after that Stop (a task-notification with a final
+status, including one still queued in an idle session), and none count two
+hours after the Stop, so an old count never keeps a finished session working. `backgroundTasks` is absent on a tab that is working, blocked or waiting
 on its own turn, and such a tab has no `currentStep`. The Hook's `live_sessions`
 list carries the same field. `title` is the dispatch label for a dispatched
 worker (kept in `<bridge>/briefs/<id>/label`); a dispatch sent before labels
@@ -1373,6 +1432,10 @@ Account limits and spend for the phone's Account usage screen: `{accounts: [...]
 
 This computer's live resources, `{computer, resources}`, collected at most once per `PHREN_RESOURCES_MAX_AGE_MS` (10 s) by `bridge/resources.ts`: `cpu` (`cores`, `load1`/`load5`/`load15`, `loadPerCore`), `memory` (`totalBytes`, `availablePercent`, `pressure` normal/warn/critical, `swapUsedBytes`), `disk` (the home volume's `totalBytes` and `freeBytes`), `battery` (`percent`, `charging`, `onAC`) when there is one, `uptimeSeconds`, and `heavy`: simulators (one per `launchd_sim`, test clones named as such), Android emulators, xcodebuild, Gradle and Kotlin daemons, Java, Codex, OpenCode and Claude Code, each with its processes, CPU and memory and the Herdr or tmux pane that started it (`pane: {server, workspace, pane, agent, label}`) when one did; any other program whose processes together hold half a core shows as `busy`. `processes` counts OS processes, including helpers, never active agents or sessions. Known programs, including simulators and emulators, are included at 10% CPU or 200 MiB resident memory. Classification uses executable names and explicit interpreter launchers, not arbitrary command-line mentions. `resourceReason` is `cpu` or `memory` (`tracked` may appear from older Hooks): memory-only rows may be idle sessions or background services, and resource use alone does not establish session status. Codex app/MCP servers are named explicitly; an npm launcher and its native Codex child share one group, including both processes in CPU/RSS totals. Other processes count toward their nearest heavy ancestor, so a Codex worker running xcodebuild shows both without double-counting. CPU is the OS `ps` percentage (a lifetime average on Linux), and resident-memory totals may include shared pages. `pressure` (`cpu`, `memory`, `disk`, `overall`, 0 to 1) fills every client's gauge the same way, `level` is `ok`, `busy` or `stressed`, and `warnings` lists `load-high` (load above twice the cores), `disk-low` (under 10 GB free), `memory-low` and `battery-low`. macOS reads sysctl, pmset and ps; Linux reads /proc, /sys and ps. With `?peers=1` it adds `peers`, as `/v1/usage` does. Advertised as `capabilities.resources`. A phone that opens `WS /v1/overview` with `resources=1` also gets `{type: "resources", resources}` first and every `PHREN_OVERVIEW_RESOURCES_MS` (12 s) after.
 
+
+### `GET /v1/sudo`, `POST /v1/sudo/answer`
+
+Pending `sudo -A` requests from this computer's askpass helper (`<bridge>/askpass`, see docs/phren-hook.md, *sudo from the phone*), and the phone's answer. `GET` returns `{requests: [{id, computer, command, account?, user?, cwd?, session?, askedAt, expiresAt}]}`, oldest first; `account` is whose password sudo asks for (the user running sudo), `user` who the command runs as; `command` is what sudo will run, read by the Hook from the sudo process itself, and `session` (`source`, `label`, `server`, `workspace`, `tab`, `pane`) names the pane that asked when the helper ran in one. `POST /v1/sudo/answer` takes `{id, password}` (1 to 1024 characters, no newline, carriage return or NUL) or `{id, deny: true}` and answers `{ok: true}`. With `outcome: true` next to a password it answers, within about `PHREN_SUDO_OUTCOME_MS` (6 s), `{ok: true, outcome}`: `rejected` when the same sudo process (pid and start time) asked again, `accepted` when it did not on an earlier try or is still running, `unknown` when it gave up after its last try or the password could not be handed over (capability `sudoOutcome`; the phone uses it to save a typed password or forget a saved one that failed). The request is then gone, and an unknown, answered or expired id is 404. A request lasts `PHREN_SUDO_TIMEOUT_MS` (120 s). The password is handed to the waiting askpass once and never logged, stored or sent anywhere else. A phone that opens `WS /v1/overview` with `sudo=1` gets `{type: "sudo", requests}` after the first overview and whenever the list changes, and phones registered for approval pushes get one push per request (category `PHREN_SUDO`, `phren.kind: "sudo"`, with `id`, `computer`, `command`, `expiresAt`, never a password). Advertised as `capabilities.sudo`.
 ### `POST /v1/speech`
 
 Voices `text` (1 to 2,000 characters) for talk mode with this computer's ElevenLabs key. Inputs: `text`, optional `timestamps` (answer JSON with the character alignment), `voice` (an ElevenLabs voice id) and `formats`, the output formats the phone plays, from `capabilities.speechFormats` (`pcm_44100`, `mp3_44100_192`, `pcm_24000`). The Hook serves the first the phone plays and the ElevenLabs plan allows, learning refusals from ElevenLabs' `output_format_not_allowed` and skipping them for 6 hours; without `formats` it is always `pcm_24000`. The streamed reply carries `X-Phren-Audio` (e.g. `pcm_s16le;rate=44100;channels=1`), `X-Phren-Audio-Rate` and `X-Phren-Speech-Model`; the timestamped JSON is `{audio, audioFormat, sampleRate, format, model, alignment}` with alignment times in seconds. The model is `phren bridge speech-model` (default `eleven_v4_turbo`), replaced by `eleven_flash_v2_5` for 10 minutes when it errors or the median of its last three short replies took more than 1.5 s to start. See [spoken replies](phren-hook.md#spoken-replies-for-talk-mode).
@@ -1396,3 +1459,12 @@ Each Claude number has one documented source:
 - A per-model weekly window such as `seven_day_fable` ("7-day, Fable") comes from Claude Code's own usage snapshot in `~/.claude.json` (`cachedUsageUtilization`, `kind: weekly_scoped`) when the status line does not carry it, and then carries its own `asOf` so the phone can show how old it is; the live endpoint reports the same window without `asOf`.
 
 Every window carries its own `resetsAt`. A per-model window is its own allowance with its own denominator, not a subset of `seven_day`, so it can show a higher percentage than the all-models window without contradicting it; the phone labels it "only" (for example "7-day, Fable only") and shows its own reset time. The Live sessions header ring binds to `five_hour`, the window the Account usage page shows first, never a higher window.
+
+
+Hand-off delivery: `text` is required for sending. `deliveryId` is optional
+on the first call and required on retries. Use `status:true` with the id and
+target or session, without text, to read the durable receiving-Hook record.
+`queued:true` acknowledges a persisted message awaiting idle; `delivered:true`
+confirms submission. `deliveryUncertain:true` never authorizes an automatic
+retry with a new id. Working rows may carry `stalled:true`, `stalledSince` and
+`stallFor` (seconds); dispatch returns use state `stalled` for that transition.

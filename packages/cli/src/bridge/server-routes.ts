@@ -1,7 +1,10 @@
+import { sessionStalls } from "./stalls.js";
+import type { HandOffQueue } from "./hand-off-queue.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { harnessInventoryWithin, launchCheckOff } from "./harnesses.js";
 import path from "node:path";
 import { z } from "zod";
+import { sudoAnswer } from "./sudo.js";
 import { saveCodeNote } from "./code-note.js";
 import type { FanoutMessages } from "./fanout-messages.js";
 import { handOff } from "./hand-off.js";
@@ -40,7 +43,7 @@ import type { ModelSwitcher } from "./model-switch.js";
 import type { SettingsSwitcher } from "./settings-switch.js";
 import type { SideQuestions } from "./side-questions.js";
 import { currentModel, currentStep } from "./steps.js";
-import { type AccountUsageReader, usageForCaller } from "./usage.js";
+import { type AccountUsageReader, capacityRoom, usageForCaller } from "./usage.js";
 import type { ResourceMonitor } from "./resources.js";
 import type { Scheduler } from "./schedules.js";
 import { readFinalTurn } from "./schedule-watch.js";
@@ -87,6 +90,7 @@ export interface RouteContext {
   scheduler?: Scheduler;
   dispatches?: DispatchService;
   returns?: DispatchReturns;
+  handOffs?: HandOffQueue;
   agentHooks: AgentHooks;
   journal: ActivityJournal;
   tabActivity: TabActivityStore;
@@ -128,7 +132,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, resources: true };
+  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, resources: true, sudo: true, sudoOutcome: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -229,6 +233,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     // turn still has background work, and which dispatch it is. It runs ahead
     // of the slower reads so the status does not flicker between answers, but
     // inside the budget, so a stuck disk cannot hold the overview either.
+    const awaited = new Map<Json, number>();
     const records = Promise.all(tabs.map(async ({ group, tab }) => {
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
       const session = agents.length === 1 && object(tab.target).session;
@@ -238,7 +243,10 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         liveBackground(record, readFinalTurn),
       ]);
       if (expired) return;
+      if (background) awaited.set(tab, background);
       markBackground(tab, background);
+      const target = targetSchema.safeParse(tab.target);
+      if (target.success && agents.length === 1) Object.assign(tab, await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }));
       tab.title = title;
     }));
     let nextTab = 0;
@@ -267,8 +275,9 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
         // A row finished after the answer left belongs to the next read.
         if (!expired) {
           Object.assign(tab, Object.fromEntries(Object.entries(found).filter(([, value]) => value !== undefined)));
-          // Codex subagents and fanout jobs keep an idle-looking session working too.
-          markBackground(tab, typeof found.runningChildren === "number" ? found.runningChildren : undefined);
+          // Running sub-agents and fan-out jobs keep an idle-looking session
+          // working too, on top of the shells its last turn is waiting on.
+          markBackground(tab, (awaited.get(tab) ?? 0) + (typeof found.runningChildren === "number" ? found.runningChildren : 0));
         }
       }
     })));
@@ -280,6 +289,13 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
 }
 
 /** One read-only GET to every linked peer, each answer or its error by computer name. */
+/** The value, or undefined once `ms` passes or it fails: a probe never waits on a slow reader. */
+async function within<T>(ms: number, value: Promise<T>): Promise<T | undefined> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), ms); timer.unref(); });
+  try { return await Promise.race([value.catch(() => undefined), late]); } finally { clearTimeout(timer); }
+}
+
 async function fromPeers(route: string): Promise<{ peers: Json[]; peerError?: string }> {
   const { peers, peerError } = await optionalHookPeers();
   const answers = await Promise.all(peers.map(async peer => {
@@ -350,11 +366,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             const caller = z.object({ name: z.string().max(253).optional(), hostKey: z.string().max(512).optional() })
               .parse({ name: url.searchParams.get("name") ?? undefined, hostKey: url.searchParams.get("hostKey") ?? undefined });
             const linksBack = caller.name || caller.hostKey ? { knowsCaller: (await listsCaller(caller)).knowsCaller } : {};
+            // Both bounded so a peer's capacity probe never waits on a cold `claude auth status` or usage read; missing means unknown.
+            // PHREN_LAUNCH_CHECK=off turns this Hook's availability checks off, including what it advertises to dispatch.
+            // `usage` is the room left per Codex and Claude account, so `anywhere` can break a tie by it.
+            const [inventory, limits] = await Promise.all([launchCheckOff() ? undefined : harnessInventoryWithin(2_500), within(2_500, accountUsage.limits(true))]);
             result = { product: "phren-hook", protocol: PROTOCOL, computer: info.computer, servers: live.map(server => server.session), ...linksBack,
               working: snapshots.reduce((sum, value) => sum + objects(value.panes).filter(pane => pane.agent && pane.agent_status === "working").length, 0),
-              // Bounded so a peer's capacity probe never waits on a cold `claude auth status`; missing means unknown.
-              // PHREN_LAUNCH_CHECK=off turns this Hook's availability checks off, including what it advertises to dispatch.
-              ...(launchCheckOff() ? {} : await harnessInventoryWithin(2_500).then(inventory => inventory ? { harnesses: inventory.harnesses } : {})) };
+              ...(inventory ? { harnesses: inventory.harnesses } : {}), ...(limits ? { usage: capacityRoom(limits, Date.now()) } : {}) };
             break;
           }
           case "/v1/speech/voices": {
@@ -436,6 +454,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             break;
           }
           case "/v1/push/status": result = agentHooks.push.status; break;
+          case "/v1/sudo": result = { requests: agentHooks.sudo.list() }; break;
           case "/v1/projects/locate": {
             const candidates = await locateProject(String(url.searchParams.get("project") ?? ""), await journal.recent());
             for (const candidate of candidates) {
@@ -553,6 +572,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           // Audio, not JSON: the route writes its own response.
           await streamSpeech(data, response);
           return;
+        } else if (url.pathname === "/v1/hand-off") {
+          result = await ctx.handOffs!.enqueue(data);
+        } else if (url.pathname === "/v1/hand-off/status") {
+          const body = z.object({ deliveryId: z.string().min(8).max(64), target: targetSchema }).strict().parse(data);
+          result = await ctx.handOffs!.status(body.deliveryId, body.target);
         } else if (url.pathname === "/v1/dispatch") {
           // `origin` is the caller's own pane, added by the MCP tool or CLI from Herdr's variables.
           const { origin, ...brief } = data;
@@ -581,6 +605,16 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/push/register") {
           // Registration is kept for when a key is added; the reply says whether push works now.
           await agentHooks.push.register(data); result = { ok: true, configured: agentHooks.push.status.configured };
+        } else if (url.pathname === "/v1/sudo/answer") {
+          // The owner answers from the phone; an agent's call names its pane.
+          if (data && typeof data === "object" && "origin" in data) throw new BridgeError(403, "Only the owner answers a sudo request, from the phone.");
+          let parsed: ReturnType<typeof sudoAnswer>;
+          try { parsed = sudoAnswer(data); } catch { throw new BridgeError(400, "Send an id and a password, or deny."); }
+          const answered = agentHooks.sudo.answer(parsed.id, parsed.answer);
+          if (!answered) throw new BridgeError(404, "This sudo request is no longer pending.");
+          // Asked for: whether sudo took the password, so the phone knows to save or forget it.
+          const outcome = parsed.outcome ? await answered.outcome : undefined;
+          result = { ok: true, ...(outcome ? { outcome } : {}) };
         } else if (url.pathname === "/v1/push/answer") {
           await agentHooks.answerPush(z.string().uuid().parse(data.binding), data.decision); result = { ok: true };
         } else if (url.pathname === "/v1/push/target") {

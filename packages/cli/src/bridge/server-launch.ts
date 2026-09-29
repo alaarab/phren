@@ -4,9 +4,11 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { homeDir } from "../home-paths.js";
 import { agentNames, findPane, isConductorName, paneChatState, paneIdentity, servers, snapshot } from "./herdr.js";
-import { type AgentStart, agentNotReady, terminalName, terminalProvider } from "./terminal.js";
+import { type AgentStart, agentNotReady, terminalKind, terminalName, terminalProvider } from "./terminal.js";
+import { tmuxScroll } from "./terminal-tmux.js";
 import { intervalFromEnv } from "./limits.js";
 import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from "./launch-worktree.js";
+import { askpassEnv } from "./sudo.js";
 import { briefArgs, DISPATCH_ID_ENV, launchBriefSchema, launchesWithBrief, recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
 import { prepareServedLaunch, registerServedPane, sendServedBrief } from "./opencode-panes.js";
 import { groupConductor, type GroupConductor } from "./conductor-group.js";
@@ -281,7 +283,8 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   if (served) args.push(...served.args);
   const briefFile = brief && (launchesWithBrief(kind) || structured || served) ? await writeLaunchBrief(brief, Date.now(), label) : undefined;
   const briefLaunch = brief && briefFile && launchesWithBrief(kind) ? briefArgs(kind, briefFile) : undefined;
-  const variables = { ...(brief ? { [DISPATCH_ID_ENV]: brief.id } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
+  // sudo -A in the new agent asks the phone for the password (sudo.ts).
+  const variables = { ...askpassEnv(), ...(brief ? { [DISPATCH_ID_ENV]: brief.id } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
   const env = Object.keys(variables).length ? variables : undefined;
   if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
   const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));
@@ -383,11 +386,17 @@ export async function launchSession(server: string, data: Json, options: LaunchO
     ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}) };
 }
 export async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {
-  if (!["focus", "rename", "create", "close"].includes(operation)) throw new BridgeError(400, "Unsupported Herdr action.");
-  const s = await snapshot(server);
+  if (!["focus", "rename", "create", "close", "scroll"].includes(operation)) throw new BridgeError(400, "Unsupported Herdr action.");
   const workspace = typeof data.workspaceId === "string" ? data.workspaceId : undefined;
   const tab = typeof data.tabId === "string" ? data.tabId : undefined;
   const pane = typeof data.paneId === "string" ? data.paneId : undefined;
+  if (operation === "scroll") {
+    // Every swipe step lands here, so it skips the snapshot: tmux itself
+    // refuses a pane that is gone.
+    if (terminalKind(server) !== "tmux") throw new BridgeError(400, "Herdr scrolls in the terminal itself.");
+    return { ok: true, ...await tmuxScroll(server, pane, z.number().int().min(-200).max(200).parse(data.lines)) };
+  }
+  const s = await snapshot(server);
   if (workspace && !objects(s.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
   if (tab && !objects(s.tabs).some(t => t.tab_id === tab && (!workspace || t.workspace_id === workspace))) throw new BridgeError(409, "The tab changed.");
   if (pane && !objects(s.panes).some(p => p.pane_id === pane && (!tab || p.tab_id === tab) && (!workspace || p.workspace_id === workspace))) throw new BridgeError(409, "The pane changed.");
