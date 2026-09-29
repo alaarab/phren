@@ -333,7 +333,8 @@ describe("askpass install", () => {
   beforeEach(async () => { previous = process.env.PHREN_BRIDGE_HOME; home = await mkdtemp(path.join(tmpdir(), "phren-askpass-")); process.env.PHREN_BRIDGE_HOME = home; });
   afterEach(async () => { if (previous === undefined) delete process.env.PHREN_BRIDGE_HOME; else process.env.PHREN_BRIDGE_HOME = previous; await rm(home, { recursive: true, force: true }); });
 
-  it("writes an owner-only script sudo can run, and launches carry SUDO_ASKPASS only once it exists", async () => {
+  // sudo and file modes exist on macOS and Linux only.
+  it.skipIf(process.platform === "win32")("writes an owner-only script sudo can run, and launches carry SUDO_ASKPASS only once it exists", async () => {
     expect(askpassEnv()).toEqual({});
     expect(headlessEnv({ harness: "codex" } as never, { PATH: "/bin" })).toEqual({ PATH: "/bin" });
     await installAskpass("/opt/node's/bin/node", path.join(home, "current/bridge-hook.mjs"));
