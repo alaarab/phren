@@ -25,6 +25,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Hand-offs retry a fresh agent that is not yet named for up to 20 seconds. Each retry checks the conversation and terminal again; potentially delivered writes are never retried.
 - Hand-offs require explicit submission confirmation before reporting delivered, so text left in a Codex remote pane composer is reported uncertain.
 - Claude background children finish after a successful matching TaskStop result or a stopped or killed notification, including text blocks and queued-command attachments.
 - Heavy jobs use executable names and explicit interpreter launchers for classification. All known jobs, including simulators and emulators, must use at least 10% CPU or 200 MiB resident memory to appear.

@@ -252,6 +252,13 @@ again for Codex. Inspect the pane before sending another hand-off. If the prompt
 route reports `unsubmitted`, hand-off preserves that flag. An older Hook that
 returns only `ok` cannot confirm delivery either.
 
+A freshly dispatched session may appear before Herdr accepts prompts for its
+named agent. On the explicit `agent_not_ready` refusal, the receiving Hook
+retries every half second for up to 20 seconds. Each retry checks the same
+conversation and terminal instance, its status and any input reservations.
+A changed target or an input screen stops the retry. Once text may have reached
+the pane, a lost reply or missing submission acknowledgement is never retried.
+
 ## Standing grants
 
 Grants live in private `<bridge>/conductor.yaml`, outside the synced store.
