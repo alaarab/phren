@@ -324,3 +324,5 @@ Security and governance notes:
 
 Docs: https://alaarab.github.io/phren/
 Source: https://github.com/alaarab/phren
+
+Conductor: hand_off queues busy workers durably; keep deliveryId, query status:true without text. Uncertain deliveries never retry automatically. PHREN_STALL_MS (300000, zero off) flags working sessions whose screen and transcript are unchanged; live_sessions and dispatch_returns expose stalled fields.

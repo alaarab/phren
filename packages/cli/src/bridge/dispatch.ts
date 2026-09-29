@@ -44,7 +44,7 @@ const remoteTarget = z.union([targetSchema, startingTargetSchema]);
 /** The local pane that asked for the dispatch, where return notices go. */
 export const originPaneSchema = z.object({ server: serverName, workspace: id, tab: id, pane: id }).strict();
 export type OriginPane = z.infer<typeof originPaneSchema>;
-export const workerStates = ["working", "done", "needs-you", "failed", "blocked", "gone"] as const;
+export const workerStates = ["working", "done", "needs-you", "failed", "blocked", "stalled", "gone"] as const;
 export type WorkerState = typeof workerStates[number];
 const timestamp = z.string().datetime();
 const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
@@ -66,8 +66,9 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
     waitingSince: timestamp.optional().describe("When the dispatching Hook first saw the worker's finished turn waiting on background tasks; bounds that wait.") }).strict().optional()
     .describe("The worker pane's last observed state."),
   returned: z.object({
-    state: z.enum(["done", "needs-you", "failed", "blocked", "gone"]), at: timestamp,
+    state: z.enum(["done", "needs-you", "failed", "blocked", "stalled", "gone"]), at: timestamp,
     reply: z.string().max(4000).optional(), error: z.string().max(500).optional(), truncated: z.boolean().optional(), question: z.string().max(200).optional(),
+    stalledSince: timestamp.optional(), stallFor: z.number().nonnegative().optional(),
     turn: z.string().regex(/^[a-f0-9]{16}$/).optional(), read: z.boolean(), notifiedAt: timestamp.optional(),
     background: z.number().int().min(1).max(999).optional().describe("Background tasks the worker left running when it was counted done."),
     waited: z.number().int().min(1).max(999).optional().describe("The most background tasks the worker waited on before it finished."),
@@ -176,19 +177,41 @@ export async function dispatchStatus(): Promise<Receipt[]> {
 
 /** `caller` (a conductor's name and host key) asks a peer whether it links this computer back:
  * `outside` is a peer in another set, which a conductor does not dispatch to. */
-async function capacity(host: DispatchHost, caller?: string): Promise<{ working: number; computerId: string; harnesses?: HarnessInventory["harnesses"]; outside?: true }> {
+type Room = { source: string; account?: string; leftPercent?: number; exhausted?: boolean; until?: string };
+async function capacity(host: DispatchHost, caller?: string): Promise<{ working: number; computerId: string; harnesses?: HarnessInventory["harnesses"]; usage?: Room[]; outside?: true }> {
   const value = await host.request(caller && !host.local ? `/v1/dispatch/capacity?${caller}` : "/v1/dispatch/capacity");
   const result = z.object({ product: z.literal("phren-hook"), protocol: z.literal(PROTOCOL), working: z.number().int().nonnegative(),
     servers: z.array(z.string()), computer: z.object({ id: z.string().uuid() }).passthrough(),
     // Missing from an older Hook, or when its inventory was not ready in time: unknown, not unavailable.
     harnesses: z.array(z.object({ source: z.string(), installed: z.boolean(), usable: z.boolean(), reason: z.string().optional(),
       accounts: z.array(z.object({ id: z.string(), usable: z.boolean(), reason: z.string().optional() }).passthrough()).optional() }).passthrough()).optional(),
+    // Missing from an older Hook or a slow read: that computer's quota is unknown, so it is never ruled out by it.
+    usage: z.array(z.object({ source: z.string(), account: z.string().optional(), leftPercent: z.number().min(0).max(100).optional(),
+      exhausted: z.boolean().optional(), until: z.string().max(40).optional() }).passthrough()).max(64).optional(),
     knowsCaller: z.boolean().optional() }).parse(value);
   // This computer places on whichever Herdr server its own Hook runs.
   if (host.local && !result.servers.includes(host.server) && result.servers[0]) host.server = result.servers[0];
   if (!result.servers.includes(host.server)) throw new BridgeError(503, "Herdr is not running on the selected computer. Headless dispatch is not installed yet.");
   return { working: result.working, computerId: result.computer.id, ...(result.harnesses ? { harnesses: result.harnesses as HarnessInventory["harnesses"] } : {}),
+    ...(result.usage ? { usage: result.usage } : {}),
     ...(caller && result.knowsCaller === false ? { outside: true as const } : {}) };
+}
+
+/** The account this dispatch would run under there, as its capacity probe reports it: Codex's one, or the named Claude home. */
+export function roomFor(data: { harness: string; account?: string }, usage: readonly Room[] | undefined): Room | undefined {
+  const account = data.account ?? "default";
+  return usage?.find(item => item.source === data.harness && (data.harness !== "claude" || (item.account ?? "default") === account));
+}
+
+/** Why `anywhere` must not pick a computer for quota: only an account with none left (at 100% or refusing requests).
+ *  Low quota is not a reason; the owner often wants it used before it resets. */
+export function outOfQuota(data: { harness: string; account?: string }, usage: readonly Room[] | undefined, now = Date.now()): string | undefined {
+  const room = roomFor(data, usage);
+  if (!room?.exhausted) return undefined;
+  const until = room.until ? Date.parse(room.until) : NaN;
+  const minutes = Number.isFinite(until) ? Math.max(1, Math.round((until - now) / 60_000)) : undefined;
+  const back = minutes === undefined ? "" : minutes >= 1440 ? ` for about ${Math.round(minutes / 1440)} more days` : minutes >= 60 ? ` for about ${Math.round(minutes / 60)} more hours` : ` for about ${minutes} more minutes`;
+  return `Its ${data.harness}${data.harness === "claude" ? ` account ${data.account ?? "default"}` : ""} has no quota left${back}.`;
 }
 
 /** Why a computer cannot run this dispatch's harness and account, or undefined when it can or cannot yet be told.
@@ -327,7 +350,7 @@ export class DispatchService {
       let peer: DispatchHost | undefined;
       let remoteComputerID: string | undefined;
       const skipped: Skipped[] = [];
-      let incapable = false;
+      let incapable = false, spentSeen = false;
       if (data.computer === "anywhere") {
         const available = await Promise.all(peers.map(async candidate => {
           try { return { peer: candidate, ...await capacity(candidate, caller) }; } catch (error) {
@@ -342,13 +365,18 @@ export class DispatchService {
           const reason = unusable(data, item.harnesses, true);
           if (reason) incapable = true;
           if (reason) skipped.push({ computer: item.peer.name, reason: reason.slice(0, 200) });
-          return !reason;
+          if (reason) return false;
+          // The one quota rule: never place a worker on an account with none left. Low quota still counts as room.
+          const spent = outOfQuota(data, item.usage);
+          if (spent) { spentSeen = true; skipped.push({ computer: item.peer.name, reason: spent }); }
+          return !spent;
         });
         skipped.sort((a, b) => a.computer.localeCompare(b.computer));
         const selected = capable
           .sort((a, b) => a.working - b.working || a.peer.name.localeCompare(b.peer.name))[0];
         peer = selected?.peer;
         remoteComputerID = selected?.computerId;
+        if (!peer && spentSeen) throw new BridgeError(503, `No connected computer has ${data.harness}${data.harness === "claude" ? ` account ${data.account ?? "default"}` : ""} quota left right now.`, { code: "out_of_quota", skipped });
         if (!peer) throw new BridgeError(503, incapable ? `No enrolled computer with a running Herdr can run ${data.harness}${data.account ? ` account ${data.account}` : ""}.` : "No enrolled computer with a running Herdr is connected.", skipped.length ? { skipped } : undefined);
       } else {
         peer = toLocal ? peers.find(candidate => candidate.local) : peers.find(candidate => !candidate.local && candidate.name === peerName);

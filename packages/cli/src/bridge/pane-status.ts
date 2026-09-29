@@ -14,6 +14,11 @@
 // looks "working" to all of that. While a pane is working its screen is read,
 // at most once per DIALOG_READ_MS, and a dialog there makes the pane blocked
 // until the dialog is gone.
+//
+// Codex holds its SessionStart hook until the first turn, so a Codex that has
+// just opened has sent nothing yet and would stay "unknown", which refuses
+// the phone's first message. Until its first event its screen says instead:
+// a menu (folder trust, hooks to review) is blocked, its composer idle.
 import { readFile } from "node:fs/promises";
 import { stripTerminal } from "../terminal-text.js";
 import { bindingPath } from "./agent-hook-stores.js";
@@ -124,5 +129,48 @@ export async function dialogStatus(server: string, pane: string, terminal: strin
   return { status: base.status, seq: Math.max(base.seq, entry.cleared ?? 0) };
 }
 
+/** A Codex that has not sent its first lifecycle event, read from its
+ * screen: blocked on a startup menu (folder trust, hooks to review), working
+ * while it shows its interrupt hint (a turn whose hooks did not run), idle
+ * once its composer and footer are drawn, else undefined (still starting). */
+export function codexStartupStatus(screen: string): "blocked" | "working" | "idle" | undefined {
+  const text = stripTerminal(screen);
+  if (visibleTerminalChoice(text)) return "blocked";
+  if (/\besc to interrupt\b/i.test(text)) return "working";
+  const lines = text.split(/\r?\n/).map(line => line.trimEnd()).filter(line => line.trim());
+  let composer = lines.length - 1;
+  while (composer >= 0 && !/^\u203a(?:\s|$)/.test(lines[composer])) composer -= 1;
+  // The composer sits above a footer or two: "? for shortcuts" (0.158), or
+  // just the model line (0.155). A "\u203a" row higher up is an earlier prompt.
+  return composer >= 0 && composer >= lines.length - 3 && lines.length - composer > 1 ? "idle" : undefined;
+}
+
+interface Startup { terminal: string; readAt: number; status?: { status: string; seq: number } }
+const startups = new Map<string, Startup>();
+
+/** The status of a hooked agent in `pane` that has sent no lifecycle event
+ * yet: Codex's screen read (`codexStartupStatus`) at most once per
+ * DIALOG_READ_MS, else undefined. Its first event takes over for good. */
+export async function startupStatus(server: string, pane: string, terminal: string, agent: string,
+  read: () => Promise<string>): Promise<{ status: string; seq: number } | undefined> {
+  if (agent !== "codex") return undefined;
+  const id = key(server, pane);
+  let entry = startups.get(id);
+  if (!entry || entry.terminal !== terminal) {
+    entry = { terminal, readAt: 0 };
+    startups.delete(id);
+    while (startups.size >= 512) startups.delete(startups.keys().next().value!);
+    startups.set(id, entry);
+  }
+  const now = Date.now();
+  if (now - entry.readAt >= DIALOG_READ_MS) {
+    entry.readAt = now;
+    // A failed read says nothing: the pane keeps what it had.
+    const seen = await read().then(codexStartupStatus, () => entry!.status?.status);
+    if (seen !== entry.status?.status) entry.status = seen ? { status: seen, seq: ++sequence } : undefined;
+  }
+  return entry.status;
+}
+
 /** For tests. */
-export function resetPaneStatus(): void { entries.clear(); dialogs.clear(); }
+export function resetPaneStatus(): void { entries.clear(); dialogs.clear(); startups.clear(); }

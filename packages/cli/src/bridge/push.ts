@@ -5,6 +5,7 @@ import path from "node:path";
 import { z } from "zod";
 import { atomic, bridgeRoot } from "./protocol.js";
 import { approvalTitle, shortApproval, type RequestKind } from "./approval-summary.js";
+import type { SudoRequestView } from "./sudo.js";
 
 /** A phone registered through the phren push relay: the relay knows where to
  * deliver, and `key` (32 bytes, base64url) encrypts what the notification says
@@ -68,6 +69,20 @@ export function approvalPushPayload(value: ApprovalPush, host?: string): Record<
     phren: { version: 1, binding: value.binding, expiresAt: value.expiresAt, ...(host ? { host } : {}),
       agent: value.provider, ...(value.project ? { project: value.project } : {}), ...(value.computer ? { computer: value.computer } : {}),
       request, requestKind: value.requestKind ?? (value.question ? "question" : "other") },
+  };
+}
+
+/** A sudo request waiting for its password. The command is what the owner
+ * approves; the password itself is typed only in the app, never in a
+ * notification action. */
+export function sudoPushPayload(value: SudoRequestView, host?: string): Record<string, unknown> {
+  const command = shortApproval(value.command) || "sudo";
+  return {
+    aps: {
+      alert: { title: `sudo on ${value.computer}`, body: command },
+      sound: "default", category: "PHREN_SUDO", "interruption-level": "time-sensitive",
+    },
+    phren: { version: 1, kind: "sudo", id: value.id, ...(host ? { host } : {}), computer: value.computer, command, expiresAt: value.expiresAt },
   };
 }
 
@@ -253,6 +268,13 @@ export class ApprovalPushService {
     if (!devices.length) return false;
     return (await Promise.all(devices.map(device => this.send(device, approvalPushPayload(value, device.hostID), {
       expiration: String(Math.floor(Date.parse(value.expiresAt) / 1000)), collapseId: value.binding,
+    })))).some(Boolean);
+  }
+  async notifySudo(value: SudoRequestView): Promise<boolean> {
+    const devices = this.reachable.filter(device => device.kinds.includes("approval"));
+    if (!devices.length) return false;
+    return (await Promise.all(devices.map(device => this.send(device, sudoPushPayload(value, device.hostID), {
+      expiration: String(Math.floor(Date.parse(value.expiresAt) / 1000)), collapseId: `sudo-${value.id}`,
     })))).some(Boolean);
   }
   /** A headless worker whose permission the plugin refused. Approval-registered

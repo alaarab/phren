@@ -1,3 +1,7 @@
+import { handOff } from "./hand-off.js";
+import { sessionStalls } from "./stalls.js";
+import { HandOffQueue } from "./hand-off-queue.js";
+import { paneRouteOnce } from "./server-pane-routes.js";
 import { FanoutMessages } from "./fanout-messages.js";
 import { activateModules as moduleSnapshot } from "../modules/runtime.js";
 import { disabledHint } from "../modules/registry.js";
@@ -91,6 +95,12 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
   const settingsSwitcher = new SettingsSwitcher(agentHooks);
   const sideQuestions = new SideQuestions();
+  const handOffs = dispatches ? new HandOffQueue({
+    validate: target => validateTarget(target, false, true),
+    notify: (target, text, deliveryId, computer) => handOff({ computer, target, text, deliveryId }, { notifySender: false }),
+    send: async (target, text, deliveryId, typing) => await paneRouteOnce({ agentHooks, modelSwitcher, settingsSwitcher, codexQuestions, sideQuestions },
+      new URL("http://phren.local/v1/prompt"), { target, text, deliveryId, hookQueued: true }, {} as never, typing) as Record<string, unknown>,
+  }) : undefined;
   const contextUsage = new WorkspaceContextUsage();
   const accountUsage = options.accountUsage ?? new AccountUsageReader();
   const resources = new ResourceMonitor();
@@ -149,10 +159,11 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     info: () => ({ ...info, capabilities: info.capabilities }),
     renew: server => agentHooks.overview.renew(server),
     resources: () => resources.read(),
+    sudo: agentHooks.sudo,
   });
   const http = createServer(createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
     journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
-    fanoutMessages, canary, streams, returns }));
+    fanoutMessages, canary, streams, returns, handOffs }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
   http.on("upgrade", (request, socket, head) => {
@@ -168,7 +179,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
           oldest.close(1008, "Too many connections; reconnect"); oldest.terminate();
           ws.clients.delete(oldest);
         }
-        if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1", url.searchParams.get("resources") === "1", typedMuxRequest(url)); return; }
+        if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1", url.searchParams.get("resources") === "1", typedMuxRequest(url), url.searchParams.get("sudo") === "1"); return; }
         if (url.pathname === "/v1/speech/transcribe") { void relayTranscription(client, url.searchParams).catch(() => client.close(1011, "Transcription unavailable")); return; }
         void stream(client, url).catch(() => client.close(1011, "Conversation unavailable; refresh"));
       });
@@ -216,6 +227,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
             const state = await paneChatState(name, pane, { tokenWhenIdentified: false });
             const parsed = targetSchema.safeParse({ server: name, workspace: pane.workspace_id, tab: pane.tab_id, pane: pane.pane_id,
               source: pane.agent, session: state.sessionId });
+            if (parsed.success) await sessionStalls.observe(parsed.data, pane);
             return parsed.success ? parsed.data : undefined;
           });
         }
@@ -224,6 +236,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       await codexServers.sweep(live.map(server => String(server.session))).catch(() => {});
       // Dispatch returns ride this tick and its shared snapshots. The returns
       // loop throttles its own peer polls and never holds up activity.
+      void handOffs?.tick().catch(() => {});
       void returns?.tick();
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);

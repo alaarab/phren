@@ -579,3 +579,18 @@ describe("worker approvals", () => {
     });
   });
 });
+
+
+it("returns a stall once, then watches progress without claiming completion", () => {
+  const current = receipt();
+  const seen = { state: "working", stalled: true, stalledSince: new Date(0).toISOString(), stallFor: 301 };
+  expect(observe(current, seen, 301000)).toBe(true);
+  expect(returnRow(current)).toMatchObject({ state: "stalled", stalled: true, stallFor: 301 });
+  current.returned!.read = true;
+  observe(current, seen, 302000);
+  expect(current.returned!.read).toBe(true);
+  observe(current, { state: "working" }, 303000);
+  expect(current.worker!.state).toBe("working");
+  observe(current, { state: "done", completed: true, reply: "Checks passed" }, 304000);
+  expect(returnRow(current)).toMatchObject({ state: "done", reply: "Checks passed" });
+});

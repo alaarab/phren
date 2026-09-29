@@ -5,6 +5,7 @@ import { install, rollback, uninstall } from "./install.js";
 import { servers } from "./herdr.js";
 import { describeTerminal, terminalHealth } from "./health.js";
 import { agentHook } from "./agent-hooks.js";
+import { askpass } from "./sudo.js";
 import { object, provider, type Json } from "./protocol.js";
 import { apnsSetupSteps } from "./push.js";
 import { speechKeyFile, speechKeyStatus, writeSpeechKey } from "./speech-key.js";
@@ -133,6 +134,8 @@ export async function runBridge(args: string[], version: string): Promise<number
     case "usage-statusline": await captureClaudeUsage(args[1] || ""); break;
     case "usage": console.log(JSON.stringify(await new AccountUsageReader().read(), null, 2)); break;
     case "hook": await agentHook(provider.parse(args[1])).catch(() => {}); break;
+    // sudo -A runs <bridge>/askpass, which runs this: the password on stdout, or exit 1.
+    case "askpass": return askpass(args[1]);
     case "serve": {
       // The subprocess bridge suite supplies this fixture; no agent binaries or
       // machine-specific catalogue caches should affect its HTTP assertions.

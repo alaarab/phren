@@ -167,18 +167,25 @@ Hook from falling back to tmux when no Herdr server answers. `PHREN_LAUNCH_CHECK
 use the defaults. Transcript and callback settings respect `CODEX_HOME`,
 `CLAUDE_CONFIG_DIR`, and `COPILOT_HOME`. `PHREN_APPROVAL_HOLD_MS` overrides how
 long the Hook holds a permission ask for the phone (default `55000`, the whole
-Claude window is 60000); tests shorten it. Tests also shorten
+Claude window is 60000); tests shorten it. `PHREN_SUDO_TIMEOUT_MS` is how long
+a `sudo -A` request waits for the phone's password (default `120000`), and
+`PHREN_SUDO_OUTCOME_MS` how long after handing it over the Hook waits to see
+whether sudo asks again before calling it accepted (default `6000`). The
+real-Hook tests set `PHREN_SUDO_TEST_PARENT=1`, honored only with
+`NODE_ENV=test`, so a stand-in `sudo` that is not root may ask. Tests also shorten
 `PHREN_IDENTITY_CACHE_MS` (how long a pane's process-based conversation probe
 is reused, default `2000`) and `PHREN_DIALOG_THROTTLE_MS` (how often a waiting
 pane's terminal dialog is read, and on tmux how often a working pane's screen is
-checked for one, default `3000`); the Hook reads all three once
+checked for one and a fresh Codex's screen is read for its status, default `3000`); the Hook reads all three once
 at startup. `PHREN_SHELL_READY_MS` is how long a launch keeps asking Herdr to
 start the agent while the new pane's shell is still starting (default `15000`).
 A worker the Hook launched with its brief runs with `PHREN_DISPATCH_ID` set to
 its dispatch or scheduled-run ID; its hooks echo it back as the delivery receipt.
 `PHREN_PRETRUST=off` stops the Hook from marking a dispatched or scheduled
 project's folder, or a worktree it created, trusted in Claude's and Codex's
-config before launching there (see [footprint](footprint.md)).
+config before launching there, and from carrying the owner's Codex trust
+forward to Phren's own Codex hooks when an install rewrites them (see
+[footprint](footprint.md)).
 `PHREN_CODEX_APP_SERVER=off` keeps Codex workers the Hook launches on the typed
 path instead of a Phren-owned `codex app-server` per pane; those servers run
 their hooks with `PHREN_CODEX_SERVER` set to the server's registry ID, and
@@ -227,3 +234,7 @@ Workers write manifests, event logs, stderr and exit records under
 Phone-local notification switches, the approval dedupe ledger and pending
 schedule reminders live on the iPhone. They require no Hook environment
 setting, APNs key or relay. Optional direct APNs remains separate.
+
+`PHREN_STALL_MS`: unchanged screen and transcript duration before a working
+session is flagged stalled. Default 300000 ms; 0 disables. Missing screen or
+transcript data resets the observation clock.

@@ -1,3 +1,4 @@
+import { sessionStalls } from "./stalls.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { logger } from "../logger.js";
@@ -69,6 +70,7 @@ export interface WorkerObservation {
   interrupted?: true;
   /** A permission request the pane's worker is waiting on, forwarded by its Hook (`AgentHooks.workerApproval`). */
   approval?: Json;
+  stalled?: boolean; stalledSince?: string; stallFor?: number;
 }
 
 export interface WorkerReaders {
@@ -80,6 +82,7 @@ export interface WorkerReaders {
   /** What the worker in this conversation is waiting on, from the Hook that runs it. */
   approval?: (target: Target) => Json | undefined;
   now?: () => number;
+  stall?: typeof sessionStalls.observe;
 }
 
 async function paneTurn(server: string, pane: Json, source: Provider): Promise<TurnRecord | undefined> {
@@ -93,6 +96,7 @@ const defaultReaders: WorkerReaders = {
   identity: (server, pane) => paneIdentity(server, pane),
   finalTurn: (source, session) => source === "codex" || source === "claude" || source === "opencode" ? readFinalTurn(source, session) : Promise.resolve(undefined),
   turn: paneTurn,
+  stall: (target, pane) => sessionStalls.observe(target, pane),
 };
 
 /** The default readers with the approval reader of the Hook that runs the workers. */
@@ -167,10 +171,17 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     const own = record && record.terminal === pane.terminal_id && record.source === target.source
       && record.session === (expected ?? current ?? record.session)
       && !(target.dispatch && record.dispatch && target.dispatch !== record.dispatch) ? record : undefined;
-    if (own) return fromTurn(own, own.session, status, target.source, readers);
+    if (own) {
+      const seen = await fromTurn(own, own.session, status, target.source, readers);
+      const full = targetSchema.safeParse({ ...target, session: seen.session });
+      return { ...seen, ...(full.success && seen.state === "working" ? await readers.stall?.(full.data, { ...pane, agent_status: "working" }) : {}) };
+    }
     const session = expected ?? current;
     const state = (["working", "idle", "done", "blocked"] as const).find(value => value === status) ?? "unknown";
-    if ((state !== "idle" && state !== "done") || !session) return { state, ...(session ? { session } : {}) };
+    if ((state !== "idle" && state !== "done") || !session) {
+      const full = targetSchema.safeParse({ ...target, session });
+      return { state, ...(session ? { session } : {}), ...(full.success && state === "working" ? await readers.stall?.(full.data, pane) : {}) };
+    }
     const turn = await readers.finalTurn(target.source, session).catch(() => undefined);
     // A finished turn that left background work is still the worker's turn. There is no Stop to time the wait
     // from, so it carries what a finished turn would and the dispatching Hook bounds the wait (see observe).
@@ -194,6 +205,7 @@ const observationSchema = z.object({
   session: z.string().max(200).optional(), completed: z.boolean().optional(),
   reply: z.string().max(REPLY_LIMIT).optional(), truncated: z.boolean().optional(), error: z.string().max(500).optional(),
   hook: z.boolean().optional(), endedAt: z.string().max(40).optional(), background: z.number().int().min(0).max(999).optional(),
+  stalled: z.boolean().optional(), stalledSince: z.string().datetime().optional(), stallFor: z.number().nonnegative().optional(),
   interrupted: z.boolean().optional(), approval: z.unknown().optional(),
 }).passthrough();
 
@@ -272,7 +284,7 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
   const question = seen.completed && seen.reply && !failed ? ownerQuestion(seen.reply) : undefined;
   let next: WorkerState;
   if (seen.state === "gone") next = "gone";
-  else if (seen.state === "working") next = "working";
+  else if (seen.state === "working") next = seen.stalled ? "stalled" : "working";
   else if (seen.state === "blocked") next = "blocked";
   else if (failed) next = "failed";
   else if (seen.completed) next = question ? "needs-you" : "done";
@@ -300,6 +312,7 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
   if (next !== "working") {
     receipt.returned = { state: next, at, read: false,
       ...(seen.reply && (next === "done" || next === "needs-you") ? { reply: seen.reply, ...(seen.truncated ? { truncated: true } : {}) } : {}),
+      ...(next === "stalled" ? { stalledSince: seen.stalledSince, stallFor: seen.stallFor } : {}),
       ...(failed ? { error: failed } : {}), ...(question ? { question } : {}), ...(turn ? { turn } : {}),
       ...((next === "done" || next === "needs-you") && seen.background ? { background: seen.background } : {}),
       // Nothing still running: say what it waited on.
@@ -311,7 +324,7 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
 /** One line for the dispatching agent: who returned, how, and where to read it. */
 export function noticeLine(receipts: readonly Receipt[]): string {
   const clean = (value: string, max: number) => value.replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
-  const word = { "done": "done", "needs-you": "needs you", "failed": "failed", "blocked": "blocked", "gone": "gone" } as const;
+  const word = { "done": "done", "needs-you": "needs you", "failed": "failed", "blocked": "blocked", "gone": "gone", "stalled": "stalled" } as const;
   const describe = (receipt: Receipt, room: number) => {
     const returned = receipt.returned!;
     const asking = returned.state === "blocked" ? receipt.approval : undefined;
@@ -334,6 +347,7 @@ export function noticeLine(receipts: readonly Receipt[]): string {
 export function returnRow(receipt: Receipt): Json {
   const returned = receipt.returned!;
   return { id: receipt.id, computer: receipt.computer, project: receipt.project, label: receipt.label, harness: receipt.harness,
+    ...(returned.state === "stalled" ? { stalled: true, stalledSince: returned.stalledSince, stallFor: returned.stallFor } : {}),
     state: returned.state, at: returned.at, ...(returned.reply !== undefined ? { reply: returned.reply } : {}),
     ...(returned.truncated ? { truncated: true } : {}), ...(returned.error ? { error: returned.error } : {}), ...(returned.question ? { question: returned.question } : {}),
     ...(returned.background ? { background: returned.background } : {}),

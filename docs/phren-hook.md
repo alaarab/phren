@@ -238,7 +238,8 @@ without making an index a requirement for file browsing.
 
 `GET /v1/harnesses` reports which harnesses (Claude, Codex, OpenCode, Copilot) are
 installed and usable on this computer, and each Claude account's sign-in state; the
-same list rides on `GET /v1/dispatch/capacity` as `harnesses`. `phren bridge accounts`
+same list rides on `GET /v1/dispatch/capacity` as `harnesses`, next to `usage` (the
+room left on Codex and each Claude account, and whether it is exhausted, which `anywhere` uses to skip an account with no quota left). `phren bridge accounts`
 prints it, `phren bridge accounts add <slug> [--label <name>]` creates another Claude
 home, and `phren bridge accounts label <id> <label>` names one. See
 [Accounts](accounts.md).
@@ -466,10 +467,26 @@ What works:
   dialog is gone. Only a harness's own dialog counts: Claude's and phren-agent's
   numbered rows with their "Esc to cancel" footer, Codex's and Copilot's
   choice rows, OpenCode's "Permission required" prompt.
+- A fresh Codex: Codex runs its SessionStart hook only with its first turn, so
+  a Codex that has just opened has sent no lifecycle event. Until it does, the
+  Hook reads its screen on the same throttle: a startup menu (folder trust,
+  hooks to review, sign-in) is blocked, its composer idle, its interrupt hint
+  working. The phone's first message then goes through without a visit to the
+  terminal.
 - Chat, sends (pasted as one bracketed paste, then Enter), keys, approvals, the
   terminal (`phren-hook v1 terminal tmux` attaches the phone's SSH terminal to
   the server), and launching Claude Code, Codex, Copilot or OpenCode into
   `tmux-phren`.
+- Scrolling the phone's terminal: tmux draws on the alternate screen, so the
+  phone keeps no history of its own. With `set -g mouse on` tmux turns on the
+  phone's mouse reporting and a swipe is a wheel event, as under Herdr. With
+  tmux's default `mouse off` the phone asks `POST /v1/workspaces/scroll`
+  (`paneId`, signed `lines`, positive for older output; without `paneId`, the
+  pane of the last active client), which does what tmux's own wheel binding
+  does: an app tracking the mouse (Claude, Codex) gets the wheel events, and
+  any other pane scrolls in `copy-mode -e`, which ends at the bottom. `lines: 0`
+  leaves copy mode, which the phone sends before typing. The reply's `history`
+  says whether the pane is still in copy mode. Refused for Herdr servers.
 - Dispatch: `phren dispatch` and the `dispatch` MCP tool, run from an agent in
   a tmux pane, remember that pane (from `TMUX` and `TMUX_PANE`) for the
   workers' return notices, as they do in Herdr.
@@ -598,6 +615,82 @@ land on the next permission. Tapping the notification opens the session's
 details on the phone, led by the request, through `POST /v1/push/target`,
 which names the session without answering it.
 
+### sudo from the phone
+
+A `sudo` with no terminal, such as a Claude Code `!` command or an agent's
+shell tool, fails with "a terminal is required to read the password". The Hook
+installs an askpass helper so the phone can answer it instead:
+
+```bash
+phren sudo killall -HUP mDNSResponder     # manual use, and inside a `!` command
+sudo -A killall -HUP mDNSResponder        # what an agent runs; SUDO_ASKPASS is already set
+```
+
+`phren bridge install` writes `<bridge>/askpass` (mode 0700), a short script
+that clears `NODE_OPTIONS` and preload variables and runs the installed
+bundle's `askpass`. `sudo -A` runs it with its prompt, and it asks the Hook
+over the owner-only `agent.sock`. Before the phone hears anything, the Hook
+checks the whole chain, so the password can only reach sudo:
+
+- the asker is the Hook's own node running its bundle's `askpass`, with no
+  node flags (and, on Linux, no `NODE_OPTIONS` or `LD_PRELOAD` in its
+  environment);
+- its parent is `<bridge>/askpass` itself, not some other `SUDO_ASKPASS`;
+- that script's parent is `sudo` running as root (effective uid 0, which no
+  program of yours can fake);
+- the asker's stdout is a pipe that no other process of yours holds, so the
+  password goes to sudo and nowhere else (`lsof` on macOS, `/proc` on Linux);
+- the request came from that process: on macOS the other end of the
+  connection must be held by the asker alone, and on Linux the Hook writes the
+  password straight into the asker's stdout rather than back over the
+  connection, so a program that names another process gets nothing.
+
+It then reads that sudo's command line itself (`ps`, or `/proc/<pid>/cmdline`
+on Linux) and shows the phone the computer, the command without sudo's own
+flags, the target user when not root, and the session that asked when the
+helper runs in a Herdr or tmux pane. The
+phone gets an approval push ("sudo on Mini", the command) and, while Phren is
+open, a sheet with a password field, Approve and Deny.
+
+The password goes from the phone to the Hook to askpass's stdout, which only
+sudo reads. It is used once: the request is forgotten as soon as it is
+answered, and the password is never logged, written to disk, put in a push, a
+transcript or a frame, or shown to the agent. A wrong password makes sudo ask
+again, which is a new request; the Hook tells the phone the last one was refused,
+and after a password sudo accepted the phone can offer to keep it in its
+saved passwords (on the phone only, behind Face ID). Deny, no answer within two minutes
+(`PHREN_SUDO_TIMEOUT_MS`), the asker going away, or no phone that can answer
+(no approval push set up and no Phren app open) makes askpass exit 1, so sudo
+fails with a short reason instead of hanging.
+
+The answer route trusts its caller the way every Hook route does: the phone
+reaches it over its paired SSH key, and a call that names an agent's pane is
+refused. Anything else that can already reach this computer's Hook socket
+(a process running as you, or a linked computer over its SSH key) could deny
+a pending request or answer it, but an answer carries a password, so it only
+gets sudo to run if it already knows your password. The password itself never
+passes through anything another process can read.
+
+Agents the Hook starts (dispatched workers, conductors, scheduled runs, and
+headless schedules) get `SUDO_ASKPASS` in their environment, so `sudo -A`
+works in them without setup. sudo only uses the helper when asked: plain
+`sudo` with no terminal still fails, so agents must pass `-A`. In your own
+shell, `export SUDO_ASKPASS=~/.local/share/phren/bridge/askpass` makes
+`sudo -A` work there too.
+
+- **macOS**: works with the system sudo as installed. sudo caches the
+  credential as usual (per terminal, or per parent process when there is no
+  terminal), so a second `sudo -A` soon after may not ask again.
+- **Linux**: the same with sudo 1.8 or newer. A sudoers `Defaults requiretty`
+  refuses every sudo without a terminal, askpass or not; drop it for your user
+  to use this. PAM setups that ask for a second factor still ask for it.
+
+Any program running as your user can ask for a sudo, as it could type `sudo`
+in a terminal, so the phone always shows the exact command before you type
+the password: deny what you did not expect. The chain check stops a program
+from simply collecting the password; one that attaches a debugger to the
+askpass process is beyond what a Hook running as you can prevent.
+
 ### Spoken replies for talk mode
 
 The phone's talk mode reads an agent's replies aloud. `POST /v1/speech` with
@@ -715,3 +808,18 @@ check) and `phren bridge doctor` (`speechKey`) say whether this computer has a
 key and where it comes from, without showing it. Neither route changes the
 `speech` and `transcribe` capabilities: a computer without a key still offers
 them and answers `speech-unconfigured` or `transcribe-unconfigured`.
+
+### Conductor hand-off queue
+
+`POST /v1/hand-off` takes `{target, text, deliveryId?, origin?}` and returns
+`{ok, target, deliveryId, state, queued, delivered, deliveryUncertain?, error?}`.
+`origin` is the sending session's full target, for a delivery notice.
+`POST /v1/hand-off/status` takes `{target, deliveryId}` and returns the same
+record without sending input, even after the worker's pane closes. States are
+`queued`, `delivered`, `uncertain`, and `failed`. A reused id with different
+text or target is a 409. These routes require the conductor module. The phone
+can show the queued message, then its confirmed or uncertain outcome by id.
+
+The overview and `/v1/dispatch/workers` observations carry `stalled:true`,
+`stalledSince` (ISO time) and `stallFor` (seconds) when both the screen and
+transcript are unchanged while working for `PHREN_STALL_MS`.
