@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 74 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 76 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -1468,3 +1468,26 @@ target or session, without text, to read the durable receiving-Hook record.
 confirms submission. `deliveryUncertain:true` never authorizes an automatic
 retry with a new id. Working rows may carry `stalled:true`, `stalledSince` and
 `stallFor` (seconds); dispatch returns use state `stalled` for that transition.
+
+### `dispatch_report`
+
+Worker tool, full profile or `phren_admin(action:"dispatch_report",prs)` in core.
+`prs` is an array of `{url,repo,branch,tests,notes?}` bound to the caller's own
+terminal and submitted turn. HTTPS URLs only, at most 16 rows and 24000 UTF-8
+bytes. The done return carries the report and the Hook queues it to the
+configured integrator. CLI: `phren dispatch report --prs '<JSON array>'`.
+
+### `owner_inbox`
+
+Full profile or `phren_admin(action:"owner_inbox",...)` in core. `action` defaults
+to `list`; optional `includeResolved` shows history. `add` requires `title`, with
+optional `project` and stable UUID `id`. `resolve` requires `id`, with optional
+`resolution` and `computer` (the listed item's `inboxComputer`, omitted for
+local). A resolve does not answer or approve a prompt. Lists include local and
+linked computers' inboxes plus `unreachable` entries.
+
+Dispatch additions: optional `closeOnFinish` defaults to true, closing a
+verified finished pane after reading its done return; false keeps it open.
+Optional `integrator:{computer?,target}` overrides the configured default.
+Done returns can carry `prs` and `integratorDelivery`; receipts also retain
+`closedAt` and pending closes. CLI dispatch `--keep-open` opts out of closure.

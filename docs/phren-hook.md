@@ -836,3 +836,54 @@ can show the queued message, then its confirmed or uncertain outcome by id.
 The overview and `/v1/dispatch/workers` observations carry `stalled:true`,
 `stalledSince` (ISO time) and `stallFor` (seconds) when both the screen and
 transcript are unchanged while working for `PHREN_STALL_MS`.
+
+### Worker report and finish contract
+
+With the conductor module enabled, health capabilities `queuedHandOff`,
+`workerReports` and `ownerInbox` are true. Older Hooks omit them. The phone must
+check the relevant capability before offering the new surface.
+
+- `POST /v1/dispatch/report`: `{origin:{server,workspace,tab,pane},prs:[{url,repo,branch,tests,notes?}]}`.
+  The Hook resolves the live conversation, requires its submitted turn record,
+  and returns `{ok:true,target,prs}`. A missing or changed binding is a 409.
+  Done worker observations and returns include `prs`. The evidence is limited
+  to 16 entries and 24000 UTF-8 bytes total.
+- `GET /v1/conductor/integrator`: `{integrator:{computer?,target}|null}`.
+  `POST` on the same path accepts `{integrator:{computer?,target}|null}`.
+  The target is a complete live session target. Dispatch can set its own
+  `integrator` override. Forwarded receipts have
+  `integratorDelivery:{deliveryId,state:"queued"|"delivered"|"uncertain"|"failed",at}`.
+- `POST /v1/dispatch/close`: `{target,dispatch,turn}`. `turn` is the done
+  return's opaque fingerprint. It returns `{ok:true,closed:boolean}`; true may
+  carry `replayed:true`. The route rechecks the ended turn, terminal, current
+  status and pending hand-offs. False means the worker has resumed or cannot
+  safely close. An unreachable Hook leaves the sender's close request pending.
+  It never closes another pane in the same tab.
+
+### Owner inbox phone contract
+
+`GET /v1/owner-inbox` or `POST /v1/owner-inbox` with `{action:"list"}` returns
+`{ok:true,items:[Item],unreachable:[{computer,error}]}` across linked computers.
+`GET ?local=1` reads only this Hook (used by peer aggregation, no recursion).
+`includeResolved=true` in GET, or `includeResolved:true` in POST, includes history.
+
+`Item` is `{id,kind:"manual"|"needs-you"|"blocked",title,state:"open"|"resolved",
+createdAt,updatedAt,inboxComputer,project?,computer?,target?,dispatch?,actionId?,
+source?,live?,resolvedAt?,resolution?}`. All times are ISO timestamps. `target`
+is a full session target or a starting target for a startup dialog. `id` is a
+UUID; `source` is opaque. `inboxComputer:"local"` means the connected Hook owns
+it; another name means send the action to that Hook. `computer` describes the
+worker, which can differ from the inbox owner.
+
+`POST /v1/owner-inbox` accepts `{action:"add",title,project?,id?,computer?}` or
+`{action:"resolve",id,resolution?,computer?}` and returns `{ok:true,item}`.
+`computer` routes to the named linked Hook; omit it for local. A reused manual
+id with different content is a 409; missing resolve ids are 404. Repeating an
+identical add or resolve is idempotent. Resolve changes only inbox state.
+
+The follow-up phone screen should show one open list with source, project,
+computer, question and a link to `target`; show unreachable computers as
+unknown. A Done action sends resolve to `inboxComputer`, with optional notes.
+Keep permission and question answers on their existing routes. Keep items with
+`live:false` visible until resolved, show history on demand, retain ids across
+retries, and refresh after actions. No phone UI changes are included here.

@@ -1,3 +1,5 @@
+import { prsSchema } from "../bridge/return-contract.js";
+import { ownerInboxSchema } from "../bridge/owner-inbox.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { hookRequest } from "../bridge/client.js";
@@ -22,9 +24,31 @@ export function register(server: McpServer): void {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Dispatch failed." });
     }
   });
+  server.registerTool("dispatch_report", {
+    title: "◆ phren · report PRs",
+    description: "Report PR evidence to this worker's own Hook before finishing the turn. The done return carries prs (url, repo, branch, tests summary, notes), and the Hook queues it to the configured integrator. No direct worker messaging or GitHub comment is needed. Does not claim tests passed or complete a task.",
+    inputSchema: { prs: prsSchema },
+  }, async input => {
+    try {
+      const origin = await terminalPaneFromEnv();
+      if (!origin) throw new Error("Run dispatch_report inside the worker's terminal pane.");
+      const result = await hookRequest("/v1/dispatch/report", { ...input, origin });
+      return mcpResponse({ ok: result.ok === true, data: result, message: "PR evidence recorded for this turn's done return." });
+    } catch (error) { return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not report PR evidence." }); }
+  });
+  server.registerTool("owner_inbox", {
+    title: "◆ phren · owner inbox",
+    description: "One owner inbox on this conductor's Hook: list open needs-you returns, blocked prompts and manual items; add a title and optional project; resolve an id with an optional resolution. Reading returns does not resolve inbox items. Resolving an inbox item does not answer or approve a worker prompt. includeResolved lists history. Keep an id on retried adds.",
+    inputSchema: ownerInboxSchema,
+  }, async input => {
+    try {
+      const result = await hookRequest("/v1/owner-inbox", input);
+      return mcpResponse({ ok: result.ok === true, data: result, message: input.action === "add" ? "Added to the owner inbox." : input.action === "resolve" ? "Owner inbox item resolved." : `${Array.isArray(result.items) ? result.items.length : 0} owner inbox items.` });
+    } catch (error) { return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not read the owner inbox." }); }
+  });
   server.registerTool("dispatch_returns", {
     title: "◆ phren · dispatch returns",
-    description: "List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), failed (the harness ended the turn on an error such as a usage limit, with the error), is blocked on terminal input, or its pane is gone. A blocked row with an `approval` field (actionId, tool, request) is a permission request the worker is waiting on, forwarded from its computer: answer it with dispatch_approve. A worker that ended its turn with background tasks pending is waited on for up to two hours; a row has `waited` (the most tasks it waited on) or, if some were still running after that, `background`. Each row has the dispatch id, computer, project, label and the worker's target for hand_off.",
+    description: "List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), failed (the harness ended the turn on an error such as a usage limit, with the error), is blocked on terminal input, or its pane is gone. A blocked row with an `approval` field (actionId, tool, request) is a permission request the worker is waiting on, forwarded from its computer: answer it with dispatch_approve. A worker that ended its turn with background tasks pending is waited on for up to two hours; a row has `waited` (the most tasks it waited on) or, if some were still running after that, `background`. A stalled row flags an unchanged working screen and transcript. A done row can include structured prs and integratorDelivery. Reading a done return closes its finished pane unless closeOnFinish:false was specified, after rechecking new and queued work. Each row has the dispatch id, computer, project, label and the worker's target for hand_off.",
     inputSchema: {},
   }, async () => {
     try {

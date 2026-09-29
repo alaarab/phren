@@ -1,3 +1,4 @@
+import { markPaneClosed } from "./worker-close.js";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -405,7 +406,17 @@ export async function workspaceAction(server: string, operation: string, data: J
   if (operation === "create") await terminalProvider().create(server, { workspace, label, cwd });
   else if (!workspace && !tab && !pane) throw new BridgeError(400, "Choose a Herdr destination.");
   else if (pane && operation === "focus") await terminalProvider().focusPane(server, pane);
+  else if (pane && operation === "close") {
+    const row = objects(s.panes).find(p => p.pane_id === pane)!;
+    await markPaneClosed(server, row);
+    await terminalProvider().closePane(server, pane);
+  }
   else if (pane) throw new BridgeError(400, "This pane action is not available.");
-  else await terminalProvider().groupAction(server, operation as "focus" | "rename" | "close", { workspace, tab }, label);
+  else {
+    if (operation === "close") for (const row of objects(s.panes).filter(row => (!workspace || row.workspace_id === workspace) && (!tab || row.tab_id === tab))) {
+      await markPaneClosed(server, row);
+    }
+    await terminalProvider().groupAction(server, operation as "focus" | "rename" | "close", { workspace, tab }, label);
+  }
   return { ok: true };
 }

@@ -235,3 +235,9 @@ records (prompt, target, terminal binding and outcome) for restart recovery
 and deduplication. Settled records are pruned after 7 days and the directory
 is capped at 512 records; queued ones stay until delivered. They are not
 synced into the memory store.
+
+Conductor finish supervision also writes `<bridge>/worker-reports/*.json`
+(PR evidence bound to turns), `<bridge>/closed-workers/*.json` (intentional
+closure tombstones), `<bridge>/integrator.json` (the chosen session target), and
+`<bridge>/owner-inbox.json` (open and resolved owner items). These private,
+local files do not sync into the memory store.
