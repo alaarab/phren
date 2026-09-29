@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchStatus, updateReceipt, type Receipt } from "./dispatch.js";
 import { BACKGROUND_WAIT_MS, DispatchReturns, hookWorkers, NOTICE_MS, noticeLine, observe, POLL_MS, REPLY_LIMIT, returnRow, workerStates, type WorkerReaders } from "./dispatch-returns.js";
 import { findPane } from "./herdr.js";
+import { LOST_TURN } from "./codex-servers.js";
 import { localHost } from "./dispatch-hosts.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { object, objects, provider, type Json } from "./protocol.js";
@@ -94,6 +95,23 @@ describe("the receiving Hook's worker states", () => {
     const seen = hookWorkers(hooks);
     await seen({ targets: [{ ...workingTarget, dispatch: remoteID }] }).catch(() => undefined);
     expect(hooks.leaseDispatch).toHaveBeenCalledWith([expect.objectContaining({ pane: workingTarget.pane, server: "default" })]);
+  });
+
+  it("returns a Codex worker whose app-server ended mid-turn as failed, not working forever", async () => {
+    const codex = { ...workingTarget, source: "codex" as const };
+    const at = new Date(5_000).toISOString();
+    const lost = vi.fn((_server: string, _pane: string, session?: string) => session === codex.session ? { threadId: codex.session, turn: "turn-1", at } : undefined);
+    // The recorded pane, running Codex.
+    const snapshot = () => { const value = herdrSnapshot(); value.panes = objects(value.panes).map(pane => pane.pane_id === codex.pane ? { ...pane, agent: "codex" } : pane); return value; };
+    const answer = await workerStates({ targets: [codex, { ...workerTarget }] }, { ...readers(snapshot), lost });
+    expect(answer.workers[0]).toEqual({ state: "done", session: codex.session, completed: true, endedAt: at, error: LOST_TURN });
+    // Only a Codex pane can lose its app-server.
+    expect(answer.workers[1]).toMatchObject({ state: "done", session: workerTarget.session });
+    expect(lost).toHaveBeenCalledTimes(1);
+    const value = receipt({ target: codex });
+    observe(value, { state: "working", session: codex.session }, 1_000);
+    expect(observe(value, answer.workers[0], 6_000)).toBe(true);
+    expect(value.returned).toMatchObject({ state: "failed", error: LOST_TURN });
   });
 
   it("reports an unreachable Herdr as unavailable and refuses malformed requests", async () => {

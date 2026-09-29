@@ -344,12 +344,20 @@ instead of a Codex the Hook types into. Conductors keep the typed path.
   (`PHREN_CODEX_AUTH_REFRESH=off` turns this off).
 - **Escape.** `/v1/keys` Escape on such a pane with a running turn declines the
   thread's parked requests, then interrupts the turn (`turn/interrupt`).
-- **Restart.** Servers outlive the Hook. A restarted Hook reads
+- **Restart.** Servers outlive the Hook, and a turn keeps running while the
+  Hook restarts. On Linux the Hook starts each server in its own systemd scope
+  (`systemd-run --user --scope`, unit `phren-codex-<id>.scope`), because
+  stopping `phren-hook.service` kills every process in its cgroup, detached or
+  not; without systemd-run the server runs in the Hook's service and stops
+  with it. On macOS the detached server leads its own process group, which
+  launchd leaves alone. A restarted Hook reads
   `<bridge>/codex-servers/*/server.json`, reconnects to each live server and
   rejoins its thread; Codex replays requests still waiting, so their cards come
   back. Each 5-second tick forgets a server whose process ended and stops one
   whose pane closed, or whose pane or terminal server has shown no Codex for
-  two minutes.
+  two minutes. A server that ended during a turn (it crashed, or stopped with
+  an older Hook) cannot finish it, so the pane's dispatch returns `failed`
+  with that reason instead of working forever.
 - **Returns.** Each registered thread's running turn and its last finished turn
   (id and status: `completed`, `interrupted`, `failed`) are kept in its
   `server.json` for the returns loop.
@@ -511,7 +519,12 @@ npx --yes @phren/cli@0.3.13 bridge uninstall
 ```
 
 `update` installs the version of the CLI you invoke; choose an explicit newer
-version when upgrading. The standalone bundle survives npm cache cleanup.
+version when upgrading. On Linux, Codex workers started by an earlier Hook
+(before scoped servers) run inside the Hook's service and stop when it restarts: `install` and
+`update` name them and wait up to ten minutes for their running turns to
+finish (`--force` restarts at once). The systemd unit uses `Restart=always`,
+so a Hook that exits on its own comes back; `systemctl --user stop` still
+stops it. The standalone bundle survives npm cache cleanup.
 `rollback` activates the prior installed version; it leaves migrated key
 restrictions in place. Rolling back to a helper without `ssh-exec` previews
 therefore keeps previews unavailable until the helper is updated again.

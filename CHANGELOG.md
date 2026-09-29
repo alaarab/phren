@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A Hook restart no longer kills the Codex workers it runs. Each pane's `codex app-server` was detached, but systemd stops `phren-hook.service` by killing its whole cgroup, so every Hook restart or stop ended every Hook-run Codex worker mid-turn along with the commands its turn ran: the rollout stopped, the pane was left without its server, `hand_off` came back "delivery not confirmed", and no dispatch return ever came. On Linux the Hook now starts each server in its own systemd scope (`phren-codex-<id>.scope`), so it keeps running across a Hook restart and the restarted Hook rejoins its thread. A server that ends mid-turn anyway (it crashed, or was started by an older Hook) makes its dispatch return `failed` with the reason instead of staying `working`.
+- `phren bridge install` and `update` name the Codex workers still running inside the Hook's service, which a restart would stop, and wait up to ten minutes for their running turns to finish. `--force` restarts at once.
+- The Hook no longer stops itself when a test suite runs inside one of its workers. The worker inherited the Hook's `PHREN_BRIDGE_HOME`, the test setup did not sandbox it, and `phren init` and `link` tests on scratch stores then ran a real `systemctl --user stop phren-hook.service`. The test setup now unsets the Hook's service variables, and `init` and `link` leave the Hook alone unless they reconcile the store it was installed with (`installed.json` now records it).
+- The systemd unit restarts the Hook whenever it exits (`Restart=always`, was `on-failure`), matching launchd's `KeepAlive`. An explicit `systemctl --user stop` still stops it.
+
 ## [0.3.13] - 2026-09-29
 
 ### Fixed
