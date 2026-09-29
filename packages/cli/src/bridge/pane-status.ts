@@ -140,7 +140,9 @@ export function codexStartupStatus(screen: string): "blocked" | "working" | "idl
   const lines = text.split(/\r?\n/).map(line => line.trimEnd()).filter(line => line.trim());
   let composer = lines.length - 1;
   while (composer >= 0 && !/^\u203a(?:\s|$)/.test(lines[composer])) composer -= 1;
-  return composer >= 0 && lines.slice(composer + 1).some(line => /\? for shortcuts\b/.test(line)) ? "idle" : undefined;
+  // The composer sits above a footer or two: "? for shortcuts" (0.158), or
+  // just the model line (0.155). A "\u203a" row higher up is an earlier prompt.
+  return composer >= 0 && composer >= lines.length - 3 && lines.length - composer > 1 ? "idle" : undefined;
 }
 
 interface Startup { terminal: string; readAt: number; status?: { status: string; seq: number } }
