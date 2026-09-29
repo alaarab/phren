@@ -12,11 +12,14 @@ import {
   claudeUsage,
   codexUsage,
   copilotUsage,
+  elevenLabsUsage,
+  fetchElevenLabsUsage,
   fetchClaudeUsage,
   fetchOpenRouterUsage,
   openCodeFailure,
   openCodeUsage,
   readClaudeToken,
+  settleClaudeUsage,
   readCodexLimits,
   readCopilotUsage,
   openCodeGoPlan,
@@ -164,6 +167,17 @@ describe("account usage", () => {
     const withCopilot = await reader.read(new Set(["codex", "copilot"]));
     expect(ghCalls).toBe(1);
     expect(withCopilot.accounts.some(account => account.source === "copilot")).toBe(true);
+  });
+  it("does not spend an ElevenLabs request when the caller excludes ElevenLabs", async () => {
+    let elevenCalls = 0;
+    const reader = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0,
+      async () => undefined, openCode, noOpenRouter, noOpenCodeGo, async () => ({ source: "copilot", windows: [] }), process.platform,
+      async date => { elevenCalls++; return { source: "elevenlabs", windows: [], updatedAt: date.toISOString() }; });
+    await reader.read(new Set(["codex", "claude", "opencode", "opencode-go"]));
+    expect(elevenCalls).toBe(0);
+    const withSpeech = await reader.read(new Set(["codex", "elevenlabs"]));
+    expect(elevenCalls).toBe(1);
+    expect(withSpeech.accounts.some(account => account.source === "elevenlabs")).toBe(true);
   });
   it("explains a Copilot 404 as a missing subscription", async () => {
     const error = Object.assign(new Error("Command failed"), { stderr: "gh: Not Found (HTTP 404)" });
@@ -458,5 +472,67 @@ describe("Claude accounts in usage", () => {
     setEnv("CLAUDE_CONFIG_DIR", path.join(home, ".claude-nowhere"));
     feed(); await captureClaudeUsage("bnVsbA==");
     await expect(readFile(path.join(bridge, "usage", "claude.json"))).rejects.toThrow();
+  });
+  it("labels each Claude row with its login's email and key, even from a status-line snapshot", async () => {
+    await writeFile(path.join(home, ".claude.json"), JSON.stringify({ oauthAccount: { accountUuid: "uuid-1", emailAddress: "me@example.com" } }));
+    await mkdir(path.join(bridge, "usage"), { recursive: true });
+    await writeFile(path.join(bridge, "usage", "claude.json"), JSON.stringify({ rate_limits: { five_hour: { used_percentage: 20 } }, updatedAt: new Date(0).toISOString() }));
+    const usage = await reader("darwin", async () => undefined).read(undefined, true);
+    const row = usage.accounts.find(a => a.source === "claude" && a.account?.id === "default")!;
+    expect(row.origin).toBe("status-line");
+    expect(row.account).toMatchObject({ email: "me@example.com" });
+    expect(row.account?.key).toMatch(/^claude:[0-9a-f]{12}$/);
+    expect(usage.accounts.find(a => a.account?.id === "work")!.account).not.toHaveProperty("email");
+  });
+  it("reports a window past its reset as reset without its old percent, and drops reports older than three days", () => {
+    const day = 86_400_000, at = Date.parse("2026-09-26T16:18:46.273Z");
+    const saved = { source: "claude" as const, origin: "status-line" as const, updatedAt: new Date(at).toISOString(), windows: [
+      { id: "five_hour", name: "5-hour limit", usedPercent: 4, resetsAt: "2026-09-26T19:40:00.000Z" },
+      { id: "seven_day", name: "7-day, all models", usedPercent: 96, resetsAt: "2026-09-26T20:00:00.000Z" },
+      { id: "seven_day_fable", name: "7-day, Fable", usedPercent: 50, resetsAt: "2026-10-01T00:00:00.000Z", asOf: new Date(at + 2 * day).toISOString() },
+    ] };
+    const beforeReset = settleClaudeUsage(saved, Date.parse("2026-09-26T19:00:00Z"));
+    expect(beforeReset.windows.map(w => [w.id, w.usedPercent, w.reset])).toEqual([["five_hour", 4, undefined], ["seven_day", 96, undefined], ["seven_day_fable", 50, undefined]]);
+    const afterReset = settleClaudeUsage(saved, Date.parse("2026-09-27T12:00:00Z"));
+    expect(afterReset.windows.map(w => [w.id, w.usedPercent, w.reset])).toEqual([["five_hour", undefined, true], ["seven_day", undefined, true], ["seven_day_fable", 50, undefined]]);
+    expect(afterReset.windows[1]).not.toHaveProperty("usedPercent");
+    // The status-line windows are over three days old; the fresher per-model window stays.
+    expect(settleClaudeUsage(saved, at + 3 * day + 1).windows.map(w => w.id)).toEqual(["seven_day_fable"]);
+    const gone = settleClaudeUsage(saved, at + 6 * day);
+    expect(gone.windows).toEqual([]);
+    expect(gone.message).toBe("No usage report from Claude on this computer since 2026-09-26. It updates when Claude Code runs here.");
+    expect(gone.message).not.toContain("\u2014");
+  });
+});
+
+describe("ElevenLabs usage", () => {
+  it("reports characters used against the limit with the reset, and sends the key only to ElevenLabs", async () => {
+    let seen: { url: string; key?: string } | undefined;
+    const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+      seen = { url: String(url), key: (init?.headers as Record<string, string>)["xi-api-key"] };
+      return { ok: true, status: 200, json: async () => ({ tier: "creator", character_count: 12_345, character_limit: 100_000, next_character_count_reset_unix: 1_900_000_000 }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    const usage = await fetchElevenLabsUsage("xi-secret", fetchImpl, now);
+    expect(seen).toEqual({ url: "https://api.elevenlabs.io/v1/user/subscription", key: "xi-secret" });
+    expect(usage.source).toBe("elevenlabs");
+    expect(usage.windows).toEqual([{ id: "elevenlabs:characters", name: "Characters this period", usedPercent: 12.3,
+      usedCharacters: 12_345, limitCharacters: 100_000, resetsAt: new Date(1_900_000_000_000).toISOString() }]);
+    expect(JSON.stringify(usage)).not.toContain("xi-secret");
+    const failing = (async () => ({ ok: false, status: 401 }) as unknown as Response) as unknown as typeof fetch;
+    await expect(fetchElevenLabsUsage("xi-secret", failing, now)).rejects.toThrow("401");
+  });
+  it("caps overage at 100% and explains a missing limit", () => {
+    expect(elevenLabsUsage({ character_count: 120, character_limit: 100 }, now).windows[0]).toMatchObject({ usedPercent: 100, usedCharacters: 120 });
+    const none = elevenLabsUsage({ character_count: 5 }, now);
+    expect(none.windows).toEqual([]);
+    expect(none.message).toContain("did not report a character limit");
+  });
+  it("adds an ElevenLabs row only for callers that name the source", async () => {
+    const reader = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0, async () => undefined,
+      openCode, noOpenRouter, noOpenCodeGo, noCopilot, "linux", async date => elevenLabsUsage({ character_count: 10, character_limit: 100 }, date));
+    const usage = await reader.read();
+    expect(usage.accounts.filter(a => a.source === "elevenlabs").map(a => a.windows[0].usedPercent)).toEqual([10]);
+    expect(usageForCaller(usage.accounts, new Set(["codex", "claude", "opencode", "openrouter"]), false).some(a => a.source === "elevenlabs")).toBe(false);
+    expect(usageForCaller(usage.accounts, new Set(["elevenlabs"]), false).map(a => a.source)).toEqual(["elevenlabs"]);
   });
 });

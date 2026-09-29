@@ -95,6 +95,9 @@ A Claude row in `GET /v1/workspaces`, `WS /v1/overview` and `GET /v1/workspaces/
 - On Linux, live limits for every home come from that home's `.credentials.json`.
 - On macOS, `default` keeps its live keychain read. Other homes use the status-line snapshot plus Claude's own `cachedUsageUtilization` in that home's `.claude.json`, until each home's keychain item name has been confirmed on a signed-in second home.
 - The status line records to `usage/claude.json` for `default` and to `usage/claude-<id>.json` for other homes. It picks the file from the `CLAUDE_CONFIG_DIR` that Claude passes to its status-line command.
+- Every Claude row, live or from a snapshot, carries the login's `key` and, when `.claude.json` names it, `account.email`, so one login on several computers merges into one card named by its email.
+- A saved window whose reset time has passed comes back as `reset: true` without `usedPercent`. Windows reported more than three days ago are dropped, and a row left with none says since when there has been no report.
+- The live read needs a current access token. The Hook never refreshes Claude's token itself (that would rotate Claude Code's refresh token under it), so a computer where Claude Code has not run for a few hours falls back to the snapshot until Claude runs there again.
 
 ### Install
 

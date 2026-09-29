@@ -163,7 +163,7 @@ behind spoken replies and Scribe dictation (it wins over the stored
 `~/.local/share/phren/bridge/elevenlabs.json`, which `phren bridge speech-key set`
 writes; the Hook service doesn't see shell env, so store the key there too), `PHREN_BRIDGE_HOME` to override `~/.local/share/phren/bridge` for isolated tests,
 `PHREN_HERDR_HOME` to override `~/.config/herdr`, and `PHREN_TMUX=off` to stop the
-Hook from falling back to tmux when no Herdr server answers. `PHREN_LAUNCH_CHECK=off` turns off the Hook's harness and account checks: launches are not refused early, and `/v1/dispatch/capacity` advertises no `harnesses` (tests set it). Normal phone installations
+Hook from falling back to tmux when no Herdr server answers. `PHREN_LAUNCH_CHECK=off` turns off the Hook's harness and account checks: launches are not refused early, and `/v1/dispatch/capacity` advertises no `harnesses` (tests set it). `PHREN_ELEVENLABS_USAGE=off` stops `/v1/usage` from reading ElevenLabs' subscription with the speech key (tests set it). Normal phone installations
 use the defaults. Transcript and callback settings respect `CODEX_HOME`,
 `CLAUDE_CONFIG_DIR`, and `COPILOT_HOME`. `PHREN_APPROVAL_HOLD_MS` overrides how
 long the Hook holds a permission ask for the phone (default `55000`, the whole
