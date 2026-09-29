@@ -23,7 +23,7 @@ import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { storeRoute } from "./memory-store.js";
-import { markBackground, paneRecord, recordedBackground, recordTitle } from "./session-activity.js";
+import { liveBackground, markBackground, paneRecord, recordTitle } from "./session-activity.js";
 import { paneAccountField, paneChatState, panes, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
@@ -42,6 +42,7 @@ import { currentModel, currentStep } from "./steps.js";
 import { type AccountUsageReader, usageForCaller } from "./usage.js";
 import type { ResourceMonitor } from "./resources.js";
 import type { Scheduler } from "./schedules.js";
+import { readFinalTurn } from "./schedule-watch.js";
 import { healthDetails, listsCaller } from "./health.js";
 import { defaultPhrenPath } from "../shared.js";
 import { loadCodePackage, loadedFrom } from "../modules/code-package.js";
@@ -227,9 +228,12 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
       const session = agents.length === 1 && object(tab.target).session;
       const record = typeof session === "string" ? await paneRecord(server, agents[0], session) : undefined;
-      const title = await recordTitle(record, { paneLabel: tab.paneLabel, harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label });
+      const [title, background] = await Promise.all([
+        recordTitle(record, { paneLabel: tab.paneLabel, harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label }),
+        liveBackground(record, readFinalTurn),
+      ]);
       if (expired) return;
-      markBackground(tab, recordedBackground(record));
+      markBackground(tab, background);
       tab.title = title;
     }));
     let nextTab = 0;
