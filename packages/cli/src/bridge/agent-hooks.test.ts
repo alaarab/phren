@@ -152,6 +152,16 @@ describe("terminal dialogs reach a phone with phren closed", () => {
     expect(keys()).toEqual([["esc"]]);
   });
 
+  it("reads the screen before typing, so an answer never lands on a different command's dialog", async () => {
+    await hooks.observeWaitingPanes("default", [pane], resolve);
+    const binding = (notify.mock.calls[0][0] as { binding: string }).binding;
+    // Answered in the terminal and replaced by the same question for another
+    // command before the next activity tick refreshed the cached prompt.
+    screen = dialog.replace("rm -rf build", "rm -rf ~");
+    await expect(hooks.answerPush(binding, "approve")).rejects.toThrow(/has changed/);
+    expect(keys()).toEqual([]);
+  });
+
   it("drops the push when the pane stops waiting", async () => {
     await hooks.observeWaitingPanes("default", [pane], resolve);
     const binding = (notify.mock.calls[0][0] as { binding: string }).binding;

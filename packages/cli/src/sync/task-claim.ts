@@ -2,12 +2,13 @@ import { runBestEffortGit } from "../cli/session-git.js";
 import { claimTask, resolveTaskItem, type TaskClaim, type TaskItem } from "../data/tasks.js";
 import { withFileLock } from "../governance/locks.js";
 import { runtimeFile } from "../phren-paths.js";
+import { trackTaskWriteCommits } from "../data/task-receipts.js";
 import { mergeStoreUpstream, type RunStoreGit } from "./store-merge.js";
 
-const git: RunStoreGit = async (cwd, args) => {
+const git: RunStoreGit = trackTaskWriteCommits(async (cwd, args) => {
   const result = await runBestEffortGit(args, cwd);
   return { ok: result.ok, output: result.output ?? "", error: result.error };
-};
+});
 
 export interface ClaimOutcome {
   /** True when this computer holds the claim after syncing; false after a release. */

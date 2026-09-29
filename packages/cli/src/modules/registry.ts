@@ -90,7 +90,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ...routes("POST", [
         "/v1/push/register", "/v1/push/answer", "/v1/push/target", "/v1/files", "/v1/projects/add", "/v1/simulators/action",
         "/v1/workspaces/launch", "/v1/workspaces/create", "/v1/workspaces/focus", "/v1/workspaces/rename",
-        "/v1/workspaces/close", "/v1/sessions/rename", "/v1/prompt", "/v1/model", "/v1/settings", "/v1/side-question/dismiss", "/v1/keys", "/v1/secret", "/v1/upload",
+        "/v1/workspaces/close", "/v1/sessions/rename", "/v1/prompt", "/v1/prompt/status", "/v1/model", "/v1/settings", "/v1/side-question/dismiss", "/v1/keys", "/v1/secret", "/v1/upload",
         "/v1/approvals/answer", "/v1/questions/answer", "/v1/subagents/resume", "/v1/subagents/archive-finished", "/v1/canary",
         "/v1/speech",
       ]),
@@ -99,7 +99,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     capabilities: [
       "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "herdr",
       "webServers", "webPreview", "activity", "approvals", "questions", "accountUsage", "providers",
-      "files", "repositoryFiles", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechVoices", "speechFormats", "transcribe", "promptOnce", "resources", "sessionRename",
+      "files", "repositoryFiles", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "resources", "sessionRename",
     ],
     storeFiles: [".runtime/sessions/opencode-*.events.jsonl", ".runtime/approvals/opencode-*.json"],
     localFiles: ["<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily"],
@@ -131,9 +131,9 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
   },
   {
     schemaVersion: 1, name: "conductor", version: VERSION, defaultEnabled: false, requires: ["memory", "hook"],
-    tools: full(["dispatch", "dispatch_returns", "hand_off", "live_sessions"]), cliCommands: ["dispatch", "dispatch status", "dispatch returns", "dispatch sessions", "hand-off", "conductor", "conductor grants", "bridge enroll-computer"], agentHooks: [],
+    tools: full(["dispatch", "dispatch_returns", "dispatch_approve", "hand_off", "live_sessions"]), cliCommands: ["dispatch", "dispatch status", "dispatch returns", "dispatch sessions", "hand-off", "conductor", "conductor grants", "bridge enroll-computer"], agentHooks: [],
     hookRoutes: [...routes("GET", ["/v1/dispatch", "/v1/dispatch/capacity", "/v1/dispatch/arrival", "/v1/conductor", "/v1/conductor/grants", "/v1/computers"]),
-      ...routes("POST", ["/v1/dispatch", "/v1/dispatch/workers", "/v1/dispatch/returns", "/v1/conductor/grants"]), ...routes("DELETE", ["/v1/conductor/grants"])],
+      ...routes("POST", ["/v1/dispatch", "/v1/dispatch/workers", "/v1/dispatch/returns", "/v1/dispatch/approve", "/v1/conductor/grants"]), ...routes("DELETE", ["/v1/conductor/grants"])],
     capabilities: ["dispatch"], storeFiles: ["global/skills/conductor/**"],
     localFiles: ["<bridge>/hooks.yaml", "<bridge>/conductor.yaml", "<bridge>/dispatches/*.json"], phoneScreens: [], skills: ["conductor"],
   },

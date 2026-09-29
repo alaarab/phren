@@ -22,6 +22,7 @@ import { childAgent, childAgentTree, conversationNamedPaths, targetTranscriptPat
 import { sideQuestionText, type SideQuestions } from "./side-questions.js";
 import { saveUpload } from "./uploads.js";
 import { deliveryIdSchema, PromptOnce, promptScope } from "./prompt-once.js";
+import { promptWithStartupRetry } from "./prompt-startup.js";
 import { sendServedPrompt, servedPane } from "./opencode-panes.js";
 
 /** Routes that act on one pane's conversation: prompts, answer keys, typed
@@ -191,20 +192,6 @@ async function submitStartingPrompt(server: string, target: { workspace: string;
   return second !== "idle" && second !== "gone";
 }
 
-/** Herdr refuses a prompt to an agent it has not finished starting ("agent
- * w34:p1 is not an active named agent", `agent_not_ready`) without typing
- * anything. A Codex dispatched a moment ago read that way on 2026-09-28 and
- * sat at its prompt with no brief; wait for it as a schedule run does. */
-async function promptStartingAgent(server: string, pane: string, text: string, waitMs = 20_000): Promise<void> {
-  const deadline = Date.now() + waitMs;
-  for (;;) {
-    try { await terminalProvider().prompt(server, pane, text); return; } catch (error) {
-      if (!agentNotReady(error) || Date.now() >= deadline) throw error;
-      await sleep(500);
-    }
-  }
-}
-
 /** One key per character; Herdr's send_keys takes single characters and named
  * keys only, and a tty password read is corrupted by a bracketed paste. */
 function secretKeys(text: string): string[] {
@@ -292,7 +279,15 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     const served = await servedPrompt(target, undefined, text, typing);
     if (served) return served;
     typing();
-    await promptStartingAgent(target.server, target.pane, text);
+    await promptWithStartupRetry(() => terminalProvider().prompt(target.server, target.pane, text), async () => {
+      const current = await validateStartingTarget(target);
+      if (current.terminal_id !== pane.terminal_id) throw new BridgeError(409, "This agent pane changed. Reopen the chat.");
+      if (typeof current.startingSession === "string") {
+        const resolved = { ...target, session: current.startingSession };
+        modelSwitcher.assertAvailable(resolved); settingsSwitcher.assertAvailable(resolved); sideQuestions.assertAvailable(resolved);
+      }
+      refuseWorkingSlash(current, text);
+    });
     // A dispatched worker's brief is often long enough for Claude Code to
     // swallow the Enter; a slash command opens a menu an Enter would answer.
     const submitted = target.source !== "claude" || text.trim().startsWith("/")
@@ -366,11 +361,25 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
         if (!(error instanceof CodexServerUnavailable)) return { ok: true, deliveryUncertain: true };
       }
     }
-    const busy = String(pane.agent_status) === "working";
-    const expected = agentHooks.expectDelivery(target, text, busy && target.source !== "claude" ? 300 : 1_500);
-    typing();
-    await terminalProvider().prompt(target.server, target.pane, text);
-    let outcome: DeliveryOutcome | "unsubmitted" = await expected;
+    let busy = String(pane.agent_status) === "working";
+    let outcome: DeliveryOutcome | "unsubmitted" = await promptWithStartupRetry(async () => {
+      const refused = new AbortController();
+      const expected = agentHooks.expectDelivery(target, text, busy && target.source !== "claude" ? 300 : 1_500, refused.signal);
+      typing();
+      try { await terminalProvider().prompt(target.server, target.pane, text); } catch (error) {
+        if (agentNotReady(error)) refused.abort();
+        throw error;
+      }
+      return expected;
+    }, async () => {
+      // The same conversation can move to another terminal instance. A
+      // retry must retain both bindings and all input reservations.
+      const current = await validateTarget(target, true, true);
+      if (current.terminal_id !== pane.terminal_id) throw new BridgeError(409, "This agent pane changed. Reopen the chat.");
+      modelSwitcher.assertAvailable(target); settingsSwitcher.assertAvailable(target); sideQuestions.assertAvailable(target);
+      refuseWorkingSlash(current, text, target.source);
+      busy = String(current.agent_status) === "working";
+    });
     // Only Claude confirms plain prompts through its hook, and a slash
     // command opens a menu that a second Enter would answer.
     if (outcome === "pending" && target.source === "claude" && !text.trim().startsWith("/")) {
@@ -382,19 +391,31 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     // walk it with keys for the next half minute. The command rides
     // along so a Codex /permissions walk can find its confirmation.
     if (/^\/[a-z][a-z0-9_-]*$/i.test(text.trim())) agentHooks.menuOpened(target, text.trim());
-    if (outcome === "delivered") { result = { ok: true, delivered: true }; }
+    const deliveryId = deliveryIdSchema.parse(data.deliveryId);
+    if (outcome === "delivered") { result = { ok: true, delivered: true }; if (deliveryId) agentHooks.trackDelivery(deliveryId, target, text, "delivered"); }
     else if (outcome === "unsubmitted") { result = { ok: true, deliveryUncertain: true, unsubmitted: true }; }
     else {
       // The agent has not submitted it yet (a busy agent queues typed
       // input). Recheck fresh identity and never retry; a late
-      // submission to another conversation is still refused above.
+      // submission to another conversation is still refused above. A bare
+      // ok acknowledges transport only, even if this is still the same
+      // conversation. Callers needing a submitted turn require delivered.
       let confirmed = false;
       try {
         const current = findPane(await snapshot(target.server), target);
         confirmed = !!current && current.terminal_id === pane.terminal_id && await paneIdentity(target.server, current, true) === target.session;
       } catch { /* No reliable post-delivery identity. */ }
-      result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : {}) };
+      // Still this conversation, in the same terminal: the agent holds the
+      // message (a busy turn queues it) and its hook has not submitted it
+      // yet. Queued, not delivered; `/v1/prompt/status` says when it lands.
+      if (confirmed && deliveryId) agentHooks.trackDelivery(deliveryId, target, text, "queued");
+      result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : { queued: true }) };
     }
+  } else if (url.pathname === "/v1/prompt/status") {
+    // Asked by the phone's own delivery id, so no text is matched again.
+    const id = deliveryIdSchema.parse(data.deliveryId);
+    if (!id) throw new BridgeError(400, "Name the message by its deliveryId.");
+    result = { ok: true, state: agentHooks.deliveryState(id, target) };
   } else if (url.pathname === "/v1/side-question/dismiss") {
     result = sideQuestions.dismiss(target, z.string().uuid().parse(data.id));
   } else if (url.pathname === "/v1/model") {
@@ -512,7 +533,7 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
   else if (url.pathname === "/v1/approvals/answer") {
     const actionId = target.source === "opencode"
       ? z.string().regex(/^[A-Za-z0-9_]{1,200}$/).parse(data.actionId)
-      : z.string().uuid().parse(data.actionId);
+      : z.union([z.string().uuid(), z.string().regex(/^dialog-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)]).parse(data.actionId);
     await agentHooks.answer(target, actionId, data.decision, data.updatedInput); result = { ok: true };
   } else if (url.pathname === "/v1/questions/answer") {
     // Only a Codex answer can carry the phone's uploads (codex-questions).

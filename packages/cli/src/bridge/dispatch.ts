@@ -65,6 +65,12 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
     background: z.number().int().min(1).max(999).optional().describe("Background tasks the worker left running when it was counted done."),
     waited: z.number().int().min(1).max(999).optional().describe("The most background tasks the worker waited on before it finished."),
   }).strict().optional().describe("The latest return: the worker finished, needs the owner, failed, is blocked or is gone."),
+  approval: z.object({
+    actionId: z.string().min(1).max(200), tool: z.string().max(200), title: z.string().max(200).optional(), request: z.string().max(500).optional(),
+    requestKind: z.enum(["command", "tool", "edit", "question", "other"]).optional(), terminal: z.boolean().optional(),
+    conductor: z.object({ action: z.enum(["dispatch", "hand_off"]), project: z.string().max(200).optional(), computer: z.string().max(200).optional() }).strict().optional(),
+    expiresAt: z.string().max(40).optional(), at: timestamp, pushed: z.boolean().optional(),
+  }).strict().optional().describe("A permission request the worker is waiting on, forwarded by its Hook; answer it with dispatch_approve."),
 });
 export type Receipt = z.infer<typeof receiptSchema>;
 type Skipped = { computer: string; reason: string };

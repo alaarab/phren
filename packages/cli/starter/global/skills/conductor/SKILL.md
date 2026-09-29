@@ -122,6 +122,11 @@ also call it whenever you want the current state; do not poll it in a loop, and
 do not read remote transcripts by hand to learn whether a worker finished. Tell
 the owner a return time as an expectation, not a promise.
 
+A return with an `approval` is a permission request a worker is waiting on.
+Answer it with `dispatch_approve` when it is plainly what the brief asked for;
+deny when unsure and ask the owner. Standing grants already answer `dispatch`
+and `hand_off` requests they cover.
+
 For a `needs-you` return, surface the worker's question in the owner's chat
 with its choices as the worker wrote them; do not rewrite or answer it for the
 owner unless the owner already decided. Send the answer back with `hand_off`

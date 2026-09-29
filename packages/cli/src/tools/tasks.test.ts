@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
+import { execFileSync } from "node:child_process";
 import { makeTempDir, initTestPhrenRoot } from "../test-helpers.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -24,6 +25,7 @@ const SAMPLE = `# demo
 
 let tmp: { path: string; cleanup: () => void };
 let manage: ToolHandler;
+let add: ToolHandler;
 
 const parse = (res: unknown) => JSON.parse((res as { content: { text: string }[] }).content[0].text);
 
@@ -49,6 +51,7 @@ beforeEach(() => {
   registerTask(gate as never, ctx);
   gate.finish();
   manage = registered.get("manage_task")!.handler;
+  add = registered.get("add_task")!.handler;
 });
 
 afterEach(() => {
@@ -62,6 +65,94 @@ function queueLines(): string[] {
   if (!after.ok) return [];
   return after.data.items.Queue.map((entry) => entry.line);
 }
+
+describe("task write receipts", () => {
+  const receipt = () => ({ path: path.join(tmp.path, PROJECT, TASKS_FILENAME), commit: null });
+
+  it("preserves scalar add data and names the file written without Git", async () => {
+    const res = parse(await add({ project: PROJECT, item: "scalar task", scope: "builder" }));
+    expect(res.data).toEqual({ project: PROJECT, item: "scalar task", scope: "builder", write: receipt() });
+    expect(fs.readFileSync(res.data.write.path, "utf8")).toContain("scalar task");
+  });
+
+  it("retains batch successes and errors alongside the receipt", async () => {
+    const res = parse(await add({ project: PROJECT, item: ["first task", "", "second task"] }));
+    expect(res.ok).toBe(true);
+    expect(res.data).toEqual({ project: PROJECT, added: ["first task", "second task"], errors: [""], write: receipt() });
+  });
+
+  it("reports an actual formatting write even when every batch item fails", async () => {
+    const res = parse(await add({ project: PROJECT, item: ["", " "] }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("No tasks added");
+    expect(res.data).toEqual({ project: PROJECT, added: [], errors: ["", " "], write: receipt() });
+  });
+
+  it("does not mistake an existing store HEAD for a commit of the new task", async () => {
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: tmp.path, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    git("init", "--initial-branch=main");
+    git("add", ".");
+    git("-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-qm", "seed");
+    const head = git("rev-parse", "HEAD");
+    const res = parse(await add({ project: PROJECT, item: ["uncommitted task"] }));
+    expect(res.data.write).toEqual(receipt());
+    expect(git("rev-parse", "HEAD")).toBe(head);
+    expect(git("show", `${head}:${PROJECT}/${TASKS_FILENAME}`)).not.toContain("uncommitted task");
+  });
+
+  it("uses the owning team store path", async () => {
+    const team = path.join(tmp.path, "team-store");
+    initTestPhrenRoot(team);
+    fs.mkdirSync(path.join(team, PROJECT), { recursive: true });
+    fs.writeFileSync(path.join(team, PROJECT, TASKS_FILENAME), SAMPLE);
+    fs.mkdirSync(path.join(tmp.path, ".runtime"), { recursive: true });
+    fs.writeFileSync(path.join(tmp.path, ".runtime", "attached-stores.yaml"), JSON.stringify({
+      version: 1,
+      stores: [{ id: "11111111", name: "team", path: team, role: "team", sync: "managed-git", projects: [PROJECT] }],
+    }));
+    const res = parse(await add({ project: `team/${PROJECT}`, item: ["team task"] }));
+    expect(res.ok).toBe(true);
+    expect(res.data.write).toEqual({ path: path.join(team, PROJECT, TASKS_FILENAME), commit: null });
+    expect(fs.readFileSync(res.data.write.path, "utf8")).toContain("team task");
+    expect(fs.readFileSync(path.join(tmp.path, PROJECT, TASKS_FILENAME), "utf8")).toBe(SAMPLE);
+  });
+
+  it.each([
+    { action: "complete", item: "original task" },
+    { action: "remove", item: "original task" },
+    { action: "update", item: "original task", updates: { text: "changed task" } },
+    { action: "pin", item: "original task" },
+    { action: "claim", item: "original task" },
+  ])("forwards the receipt through manage_task $action", async (args) => {
+    const res = parse(await manage({ project: PROJECT, ...args }));
+    expect(res.ok).toBe(true);
+    expect(res.data.write).toEqual(receipt());
+  });
+
+  it("retains partial completion and removal failures through the composite", async () => {
+    const completed = parse(await manage({ action: "complete", project: PROJECT, item: ["original task", "absent"] }));
+    expect(completed.data).toMatchObject({ completed: ["original task line"], errors: ["absent"], write: receipt() });
+    const removed = parse(await manage({ action: "remove", project: PROJECT, item: ["original task", "absent"] }));
+    expect(removed.data).toMatchObject({ removed: ["original task line"], errors: ["absent"], write: receipt() });
+  });
+
+  it("distinguishes dry runs and tidy no-ops from an archive write", async () => {
+    const noop = parse(await manage({ action: "tidy", project: PROJECT, keep: 0 }));
+    expect(noop.data.write).toBeNull();
+    await manage({ action: "complete", project: PROJECT, item: "original task" });
+    const dry = parse(await manage({ action: "tidy", project: PROJECT, keep: 0, dry_run: true }));
+    expect(dry.data.write).toBeNull();
+    const archived = parse(await manage({ action: "tidy", project: PROJECT, keep: 0 }));
+    expect(archived.data.write).toEqual(receipt());
+  });
+
+  it("does not attach a previous call's receipt to a validation error", async () => {
+    await add({ project: PROJECT, item: ["a task"] });
+    const res = parse(await manage({ action: "update", project: PROJECT, item: "absent", updates: { text: "new text" } }));
+    expect(res.ok).toBe(false);
+    expect(res.data).toBeUndefined();
+  });
+});
 
 describe("manage_task action=update through the composite", () => {
   it("applies section, priority and text when updates arrives as an object", async () => {
@@ -150,6 +241,13 @@ describe("manage_task over the MCP wire", () => {
     const res = await call({ action: "complete", project: PROJECT, item: ["bid:aaaaaaaa", "bid:bbbbbbbb"] });
     expect(res.ok).toBe(true);
     expect(doneLines().sort()).toEqual(["alpha one", "beta two"]);
+    expect(res.data.write).toEqual({ path: path.join(tmp.path, PROJECT, TASKS_FILENAME), commit: null });
+  });
+
+  it("returns a receipt for add_task after the wire schema normalizes a scalar", async () => {
+    const res = parse(await client.callTool({ name: "add_task", arguments: { project: PROJECT, item: "wire task" } }));
+    expect(res.ok).toBe(true);
+    expect(res.data).toMatchObject({ added: ["wire task"], errors: [], write: { path: path.join(tmp.path, PROJECT, TASKS_FILENAME), commit: null } });
   });
 
   it("passes an updates object through as an object", async () => {
