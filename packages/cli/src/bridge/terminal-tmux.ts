@@ -208,7 +208,7 @@ function foreground(processes: Proc[], paneTty: string): Proc[] {
 }
 
 const FIELDS = ["session_id", "session_name", "session_attached", "session_activity", "window_id", "window_name", "window_active",
-  "pane_id", "pane_pid", "pane_tty", "pane_active", "pane_current_path", "pane_current_command", "@phren_agent", "pane_title"] as const;
+  "pane_id", "pane_pid", "pane_tty", "pane_active", "pane_current_path", "pane_current_command", "@phren_agent", "pane_title", "@phren_label"] as const;
 type Row = Record<(typeof FIELDS)[number], string>;
 const FORMAT = FIELDS.map(field => `#{${field}}`).join("\t");
 
@@ -269,7 +269,7 @@ export async function tmuxSnapshot(server: string): Promise<Json> {
     const name = row["@phren_agent"] || undefined;
     const title = row.pane_title && row.pane_title !== host && row.pane_title !== short ? row.pane_title : undefined;
     panes.push({ pane_id: pane, tab_id: tab, workspace_id: workspace, terminal_id: terminal, cwd: row.pane_current_path || undefined,
-      foreground_cwd: row.pane_current_path || undefined, title,
+      foreground_cwd: row.pane_current_path || undefined, title, ...(row["@phren_label"] ? { label: row["@phren_label"] } : {}),
       ...(agent ? { agent, agent_status: status?.status ?? (hooked ? "unknown" : "idle"), ...(status?.seq ? { state_change_seq: status.seq } : {}) } : {}),
       ...(agent && name ? { agent_name: name } : {}) });
     if (agent && name) agents.push({ name, pane_id: pane });
@@ -420,6 +420,10 @@ export const tmuxTerminal: TerminalProvider = {
     const socket = socketOf(server), folder = tmuxSocketFolders()[0];
     const file = socketPaths.get(socket) ?? (folder ? path.join(folder, socket) : undefined);
     return file ? { TMUX: `${file},0,0`, TMUX_PANE: toTmuxId(pane, "p") } : undefined;
+  },
+  // A pane user option, not `select-pane -T`: agents overwrite the pane title.
+  async renamePane(server, pane, label) {
+    await tmux(server, ["set-option", "-p", "-t", toTmuxId(pane, "p"), "@phren_label", label.replace(/[\x00-\x1f\x7f]/g, " ")]);
   },
   async focusPane(server, pane) {
     const target = toTmuxId(pane, "p");

@@ -58,6 +58,7 @@ export const herdrTerminal: TerminalProvider = {
     return { HERDR_ENV: "1", HERDR_SOCKET_PATH: herdrSocketPath(server), HERDR_WORKSPACE_ID: workspace, HERDR_TAB_ID: tab, HERDR_PANE_ID: pane };
   },
   async focusPane(server, pane) { await rpc(server, "pane.focus", { pane_id: pane }); },
+  async renamePane(server, pane, label) { await rpc(server, "pane.rename", { pane_id: pane, label }); },
   async groupAction(server, operation, { workspace, tab }, label) {
     await rpc(server, `${tab ? "tab" : "workspace"}.${operation}`, { ...(tab ? { tab_id: tab } : { workspace_id: workspace }), ...(label ? { label } : {}) });
   },

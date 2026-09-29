@@ -27,6 +27,7 @@ interface Fake {
   abortPaths: string[];
   created: unknown[];
   selected: unknown[];
+  patched: Array<{ pathname: string; body: unknown }>;
   rejectedQuestions: string[];
   /** A status the prompt route answers with instead of accepting. */
   refusePrompt?: number;
@@ -47,7 +48,7 @@ afterEach(async () => {
  * Basic auth or `directory` query does not match, and records what it got. */
 async function startFake(): Promise<Fake> {
   const fake: Fake = { port: 0, seen: [], sessions: [], messages: [], permissions: [], questions: [],
-    promptBodies: [], permissionBodies: [], questionBodies: [], abortPaths: [], created: [], selected: [], rejectedQuestions: [], unauthorized: 0, echoPrompt: true,
+    promptBodies: [], permissionBodies: [], questionBodies: [], abortPaths: [], created: [], selected: [], patched: [], rejectedQuestions: [], unauthorized: 0, echoPrompt: true,
     close: () => new Promise(resolve => server.close(() => resolve())) };
   const server = http.createServer((req, res) => {
     let raw = "";
@@ -71,6 +72,7 @@ async function startFake(): Promise<Fake> {
       if (req.method === "POST" && url.pathname === "/session") { fake.created.push(body); res.end(JSON.stringify({ id: "ses_created", directory: DIRECTORY })); return; }
       if (req.method === "POST" && url.pathname === "/tui/select-session") { fake.selected.push(body); res.end("true"); return; }
       const one = /^\/session\/([^/]+)$/.exec(url.pathname);
+      if (req.method === "PATCH" && one) { fake.patched.push({ pathname: url.pathname, body }); res.end(JSON.stringify({ id: one[1], title: (body as { title: string }).title })); return; }
       if (req.method === "GET" && one) {
         const found = (fake.sessions as Array<{ id: string }>).find(value => value.id === one[1]);
         if (!found) { res.writeHead(404); res.end("{}"); return; }
@@ -164,6 +166,13 @@ it("confirms a prompt once the new user message lands", async () => {
   expect(result).toEqual({ delivered: true, messageId: "msg_new" });
   expect(fake.promptBodies).toEqual([{ model: { providerID: "openrouter", modelID: "anthropic/claude" }, agent: "build",
     parts: [{ type: "text", text: "hello world" }] }]);
+});
+
+it("renames a session with PATCH /session/{id} and returns the title the server holds", async () => {
+  const fake = await startFake();
+  const client = openPaneClient(entryFor(fake));
+  expect(await client.setTitle("ses_1", "Tide charts")).toBe("Tide charts");
+  expect(fake.patched).toEqual([{ pathname: "/session/ses_1", body: { title: "Tide charts" } }]);
 });
 
 it("reports a timeout when no new user message arrives", async () => {

@@ -46,6 +46,7 @@ import { healthDetails, listsCaller } from "./health.js";
 import { defaultPhrenPath } from "../shared.js";
 import { loadCodePackage, loadedFrom } from "../modules/code-package.js";
 import { gitRepository, paneRoute, uploadBody } from "./server-pane-routes.js";
+import { renameSession } from "./session-rename.js";
 import { launchSession, localConductor, workspaceAction } from "./server-launch.js";
 import type { TranscriptStreams } from "./server-stream.js";
 import { hookMetrics } from "./metrics.js";
@@ -121,7 +122,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 }
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
-  terminal: "ssh-pty", shell: "ssh-pty", herdr: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
+  terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
   files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, resources: true };
 
@@ -226,7 +227,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
       const session = agents.length === 1 && object(tab.target).session;
       const record = typeof session === "string" ? await paneRecord(server, agents[0], session) : undefined;
-      const title = await recordTitle(record, { harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label });
+      const title = await recordTitle(record, { paneLabel: tab.paneLabel, harnessTitle: tab.title, tabLabel: tab.label, workspaceLabel: group.label, fallbackLabel: tab.label });
       if (expired) return;
       markBackground(tab, recordedBackground(record));
       tab.title = title;
@@ -512,6 +513,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             return dispatches.dispatch({ computer: "anywhere", project: note.project,
               harness: note.target && "harness" in note.target ? note.target.harness : "codex", prompt, label: `Code note: ${note.symbol}`.slice(0, 200) });
           } : undefined);
+        } else if (url.pathname === "/v1/sessions/rename") {
+          result = await renameSession(selectedServer(url), data);
         } else if (url.pathname === "/v1/schedules") {
           result = await scheduler!.statuses();
         } else if (url.pathname === "/v1/schedules/run") {

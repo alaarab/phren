@@ -66,6 +66,20 @@ describe("session rows on a computer with background work and dispatched workers
     expect(codex).not.toHaveProperty("currentStep");
   });
 
+  it("shows a renamed session under its pane label, ahead of a dispatch label and the harness title", async () => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w1P:p2")!;
+    await turn("w1P:p2", String(pane.terminal_id), [["UserPromptSubmit", { dispatch: dispatchId }], ["Stop"]]);
+    await writeLaunchBrief({ id: dispatchId, text: "Do it" }, Date.now(), "parser checks");
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot).title).toBe("parser checks");
+    pane.label = "Tide charts";
+    const renamed = tabOf(await read(snapshot), "w1P:p2", snapshot);
+    expect(renamed).toMatchObject({ title: "Tide charts", paneLabel: "Tide charts" });
+    // Herdr's bare numbering is not a rename.
+    pane.label = "2";
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot).title).toBe("parser checks");
+  });
+
   it("uses the tab or workspace label for a dispatch that has no stored label, and ignores another terminal's record", async () => {
     const snapshot = structuredClone(recorded);
     const pane = objects(snapshot.panes).find(p => p.pane_id === "w1P:p2")!;

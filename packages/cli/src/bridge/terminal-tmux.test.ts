@@ -15,11 +15,11 @@ import { notePaneStatus, paneStatus, resetPaneStatus, settleBlockedPane } from "
 import { terminalKind } from "./terminal.js";
 import { paneChatState, paneIdentity, panes, resetSharedHerdrState, servers, validateTarget } from "./herdr.js";
 import { bindingPath } from "./agent-hook-stores.js";
-import type { Target } from "./protocol.js";
+import { objects, type Target } from "./protocol.js";
 
 const SESSION = "aaaaaaaa-1111-4111-8111-111111111111";
 const row = (values: Record<string, string>) => ["session_id", "session_name", "session_attached", "session_activity", "window_id", "window_name",
-  "window_active", "pane_id", "pane_pid", "pane_tty", "pane_active", "pane_current_path", "pane_current_command", "@phren_agent", "pane_title"]
+  "window_active", "pane_id", "pane_pid", "pane_tty", "pane_active", "pane_current_path", "pane_current_command", "@phren_agent", "pane_title", "@phren_label"]
   .map(field => values[field] ?? "").join("\t");
 
 /** A tmux server with one attached session: Claude in one window, a shell in another. */
@@ -167,6 +167,19 @@ describe("the tmux provider", () => {
     restore(); restore = setTmuxDeps({ binary: () => "/usr/bin/tmux", run: async (_s, args) => { calls.push(args); return "x"; } });
     await tmuxTerminal.readScreen("tmux", "p1", { scope: "pane", source: "recent", lines: 40, format: "ansi" });
     expect(calls).toEqual([["capture-pane", "-p", "-t", "%1", "-e", "-S", "-40"]]);
+  });
+
+  it("sets the pane label as a pane user option, and reads it back as the pane's label", async () => {
+    const calls: string[][] = [];
+    restore = setTmuxDeps({ binary: () => "/usr/bin/tmux", run: async (_s, args) => { calls.push(args); return ""; } });
+    await tmuxTerminal.renamePane("tmux", "p1", "Tide charts\n");
+    expect(calls).toEqual([["set-option", "-p", "-t", "%1", "@phren_label", "Tide charts "]]);
+    restore();
+    ({ restore } = fakeTmux({ panes: row({ session_id: "$1", session_name: "work", session_attached: "1", session_activity: "200", window_id: "@1", window_name: "claude",
+      window_active: "1", pane_id: "%1", pane_pid: "500", pane_tty: "/dev/ttys001", pane_active: "1", pane_current_path: "/repo", pane_current_command: "2.1.3", "@phren_label": "Tide charts" }) }));
+    const s = await tmuxSnapshot("tmux");
+    expect(objects(s.panes)[0]).toMatchObject({ pane_id: "p1", label: "Tide charts" });
+    expect(await tmuxTerminal.listPanes("tmux")).toMatchObject([{ pane: "p1", label: "Tide charts" }]);
   });
 
   it("opens a session or a window for a launch", async () => {

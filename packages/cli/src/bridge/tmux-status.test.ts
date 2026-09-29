@@ -26,7 +26,7 @@ const OPENCODE_DIALOG = [
   "  ┃   \x1b[48;2;245;167;66mAllow once\x1b[0m\x1b[48;2;30;30;30m   Allow always   \x1b[48;2;30;30;30mReject\x1b[0m",
 ].join("\n");
 const row = (values: Record<string, string>) => ["session_id", "session_name", "session_attached", "session_activity", "window_id", "window_name",
-  "window_active", "pane_id", "pane_pid", "pane_tty", "pane_active", "pane_current_path", "pane_current_command", "@phren_agent", "pane_title"]
+  "window_active", "pane_id", "pane_pid", "pane_tty", "pane_active", "pane_current_path", "pane_current_command", "@phren_agent", "pane_title", "@phren_label"]
   .map(field => values[field] ?? "").join("\t");
 const pane = (id: string, tty: string, command: string) => row({ session_id: "$1", session_name: "work", session_attached: "1", session_activity: "1",
   window_id: `@${id}`, window_name: command, window_active: "1", pane_id: `%${id}`, pane_pid: `${id}00`, pane_tty: `/dev/${tty}`, pane_active: "1",

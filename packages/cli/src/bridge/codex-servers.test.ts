@@ -262,6 +262,13 @@ describe.skipIf(process.platform === "win32")("driving the thread", () => {
     expect(entry.pid).toBe(4242);
   });
 
+  it("renames the pane's thread with thread/name/set, and refuses a pane with no thread yet", async () => {
+    const entry = await launched();
+    await servers.renameThread(entry, "Tides");
+    expect(fakes[0].sent("thread/name/set")[0].params).toEqual({ threadId: "thread-1", name: "Tides" });
+    await expect(servers.renameThread({ ...entry, threadId: undefined }, "Tides")).rejects.toThrow(/has not started its thread/);
+  });
+
   it("sends a chosen model and effort with the next turn only", async () => {
     const entry = await launched();
     servers.setNextTurn(entry, "gpt-6-sol", "high");
