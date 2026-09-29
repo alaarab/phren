@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, open, readFile, readdir } from "node:fs/promises";
+import { lstat, open, readFile, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, type Json, type Target, targetSchema, computerName } from "./protocol.js";
@@ -24,15 +24,25 @@ export interface QueueOptions {
   now?: () => number;
   root?: string;
 }
+const DAY = 86_400_000;
+/** Settled rows (and notice tombstones) are kept this long, so a late retry of
+ * an old delivery id still replays instead of typing again. */
+export const HAND_OFF_RETENTION_MS = 7 * DAY;
+/** At most this many rows stay on disk; the oldest settled rows go first. */
+export const HAND_OFF_MAX_ROWS = 512;
+const settled = (row: Row) => row.state !== "queued" && row.state !== "attempting";
 const sameTarget = (a: Target, b: Target) => ["server", "workspace", "tab", "pane", "source", "session"].every(key => a[key as keyof Target] === b[key as keyof Target]);
 
 /** A durable outbox on the receiving Hook. Persist 'attempting' before input,
  * so a crash in the input/ack gap recovers as uncertain, never as a retry.
- * Tombstones are retained: an old delivery id can never type a second time. */
+ * Tombstones are retained for HAND_OFF_RETENTION_MS, so a retried delivery id
+ * replays instead of typing a second time; a queued or attempting row is never
+ * pruned. The sweep runs on enqueue and at most daily from tick(). */
 export class HandOffQueue {
   private pending: Promise<unknown> = Promise.resolve();
   private root: string;
   private now: () => number;
+  private lastPrune = -Infinity;
   constructor(private options: QueueOptions) { this.root = options.root ?? path.join(bridgeRoot(), "hand-offs"); this.now = options.now ?? Date.now; }
   private serial<T>(run: () => Promise<T>): Promise<T> {
     const result = this.pending.then(run); this.pending = result.catch(() => {}); return result;
@@ -42,9 +52,11 @@ export class HandOffQueue {
     row.updatedAt = new Date(this.now()).toISOString();
     const file = this.file(row.deliveryId);
     await atomicInPrivateDir(file, rowSchema.parse(row));
-    const handle = await open(file, "r"); try { await handle.sync(); } finally { await handle.close(); }
     // Ensure the renamed entry survives a host crash as well as a service restart.
-    if (process.platform !== "win32") { const dir = await open(this.root, "r"); try { await dir.sync(); } finally { await dir.close(); } }
+    // Windows refuses fsync on a read-only handle (EPERM) and on directories.
+    if (process.platform !== "win32") for (const target of [file, this.root]) {
+      const handle = await open(target, "r"); try { await handle.sync(); } finally { await handle.close(); }
+    }
   }
   private async read(id: string): Promise<Row | undefined> {
     const file = this.file(id), info = await lstat(file).catch(error => {
@@ -63,6 +75,22 @@ export class HandOffQueue {
       const row = await this.read(name.slice(0, -5)); if (row) rows.push(row);
     }
     return rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.deliveryId.localeCompare(b.deliveryId));
+  }
+  /** Drops settled rows past retention, then the oldest settled rows over the
+   * cap (those still owing their sender a notice last). Returns what is kept. */
+  private async prune(rows: Row[]): Promise<Row[]> {
+    this.lastPrune = this.now();
+    const now = this.now(), drop = new Set<string>();
+    for (const row of rows) if (settled(row) && now - Date.parse(row.updatedAt) > HAND_OFF_RETENTION_MS) drop.add(row.deliveryId);
+    let excess = rows.length - drop.size - HAND_OFF_MAX_ROWS;
+    if (excess > 0) {
+      const owesNotice = (row: Row) => (row.origin && !row.notified ? 1 : 0);
+      const candidates = rows.filter(row => settled(row) && !drop.has(row.deliveryId))
+        .sort((a, b) => owesNotice(a) - owesNotice(b) || a.updatedAt.localeCompare(b.updatedAt) || a.deliveryId.localeCompare(b.deliveryId));
+      for (const row of candidates) { if (excess-- <= 0) break; drop.add(row.deliveryId); }
+    }
+    for (const id of drop) await unlink(this.file(id)).catch(error => { if (error.code !== "ENOENT") throw error; });
+    return drop.size ? rows.filter(row => !drop.has(row.deliveryId)) : rows;
   }
   private reply(row: Row): Json {
     return { ok: row.state === "delivered" || row.state === "queued", delivered: row.state === "delivered", queued: row.state === "queued",
@@ -83,7 +111,7 @@ export class HandOffQueue {
       const row: Row = { ...data, deliveryId: id, terminal: pane.terminal_id, state: "queued", createdAt: at, updatedAt: at };
       await this.save(row);
       // Older queued messages take precedence even if this one arrives at idle.
-      const ahead = (await this.rows()).some(other => other.deliveryId !== id && sameTarget(other.target, row.target) && other.state === "queued");
+      const ahead = (await this.prune(await this.rows())).some(other => other.deliveryId !== id && sameTarget(other.target, row.target) && other.state === "queued");
       if (!ahead) await this.attempt(row, pane);
       return this.reply(row);
     });
@@ -117,7 +145,9 @@ export class HandOffQueue {
   }
   tick(): Promise<void> {
     return this.serial(async () => {
-      const rows = await this.rows(), attempted = new Set<string>();
+      let rows = await this.rows();
+      if (this.now() - this.lastPrune >= DAY) rows = await this.prune(rows);
+      const attempted = new Set<string>();
       for (const row of rows) if (row.state === "queued") {
         const key = JSON.stringify(row.target);
         if (attempted.has(key)) continue;
