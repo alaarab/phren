@@ -214,4 +214,6 @@ files to the synced store or require a notification relay.
 
 Conductor hand-offs retain private `<bridge>/hand-offs/<deliveryId>.json`
 records (prompt, target, terminal binding and outcome) for restart recovery
-and deduplication. They are not synced into the memory store.
+and deduplication. Settled records are pruned after 7 days and the directory
+is capped at 512 records; queued ones stay until delivered. They are not
+synced into the memory store.
