@@ -272,7 +272,7 @@ describe.skipIf(process.platform === "win32")("the Hook recording a worker's tur
   afterEach(() => hooks.close());
 
   it("records the prompt and the Stop with its background count and reply", async () => {
-    await post({ target, event: "SessionStart", dispatchId: "40000000-0000-4000-8000-000000000001" });
+    expect(await post({ target, event: "SessionStart", dispatchId: "40000000-0000-4000-8000-000000000001" })).toBe("{}");
     expect((await readTurn("default", "w1:p2"))!.dispatch).toBe("40000000-0000-4000-8000-000000000001");
     expect(turnPhase((await readTurn("default", "w1:p2"))!)).toEqual({ phase: "unprompted" });
     expect(await post({ target, event: "UserPromptSubmit", prompt: "Run the parser checks" })).toBe("{}");

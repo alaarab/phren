@@ -82,12 +82,12 @@ export function register(server: McpServer): void {
   });
   server.registerTool("hand_off", {
     title: "◆ phren · hand off",
-    description: "Deliver a prompt to an existing local or enrolled-computer agent session through Phren Hook. Prefer a session that already owns the project and is idle or doing related work.",
+    description: "Deliver a prompt to an existing local or enrolled-computer agent session through Phren Hook. Busy workers receive a durable queued message at their next idle. Keep deliveryId on retries. Use status:true with deliveryId and target or session to read queued, delivered, uncertain or failed without sending. Uncertain delivery is never retried automatically.",
     inputSchema: handOffSchema,
   }, async input => {
     try {
       const result = await handOff(input);
-      return mcpResponse({ ok: result.ok, data: result, message: result.delivered ? "Prompt delivered to the existing session." : "Prompt delivery was not confirmed." });
+      return mcpResponse({ ok: result.ok, data: result, message: result.delivered ? "Prompt delivered to the existing session." : result.queued ? `Prompt queued as ${result.deliveryId}. The Hook will deliver it at idle and notify the sender.` : "Prompt delivery was not confirmed; do not resend with a new id." });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Hand-off failed." });
     }

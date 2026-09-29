@@ -227,11 +227,11 @@ const promptOnce = new PromptOnce();
  * when it has none) and confirmed by the user turn appearing there. Undefined
  * when the pane has no server entry, the text is a slash command (the TUI's
  * own menus), or nothing reached OpenCode; the caller then types it. */
-async function servedPrompt(target: { server: string; pane: string; source: string }, session: string | undefined, text: string, typing: () => void): Promise<Json | undefined> {
+async function servedPrompt(target: { server: string; pane: string; source: string }, session: string | undefined, text: string, typing: () => void | Promise<void>): Promise<Json | undefined> {
   if (target.source !== "opencode" || text.trim().startsWith("/")) return undefined;
   const entry = servedPane(target.server, target.pane);
   if (!entry) return undefined;
-  typing();
+  await typing();
   const sent = await sendServedPrompt(entry, session, text);
   if (!sent.sent) return undefined;
   return sent.delivered ? { ok: true, delivered: true } : { ok: true, deliveryUncertain: true };
@@ -246,7 +246,7 @@ export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, res
     async typing => object(await paneRouteOnce(ctx, url, data, response, typing)));
 }
 
-async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse, typing: () => void): Promise<unknown> {
+export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse, typing: () => void | Promise<void>): Promise<unknown> {
   const { agentHooks, modelSwitcher, settingsSwitcher, codexQuestions, sideQuestions } = ctx;
   let result: unknown;
   if (url.pathname === "/v1/keys" && object(data.target).starting === true) {
@@ -278,7 +278,7 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     refuseWorkingSlash(pane, text);
     const served = await servedPrompt(target, undefined, text, typing);
     if (served) return served;
-    typing();
+    await typing();
     await promptWithStartupRetry(() => terminalProvider().prompt(target.server, target.pane, text), async () => {
       const current = await validateStartingTarget(target);
       if (current.terminal_id !== pane.terminal_id) throw new BridgeError(409, "This agent pane changed. Reopen the chat.");
@@ -319,6 +319,7 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     // is pending there: an approval the Hook holds or saw, or a
     // status Herdr cannot read. Otherwise the answer keys are the way.
     const status = String(pane.agent_status);
+    if (data.hookQueued === true && !["idle", "done"].includes(status)) throw new BridgeError(409, "The worker is busy; the hand-off remains queued.", { code: "hand-off-busy" });
     if (status === "unknown" || (["blocked", "waiting"].includes(status) && (agentHooks.approval(target) || agentHooks.terminalPrompt(target) || agentHooks.servedQuestion(target)))) {
       throw new BridgeError(409, "This agent needs input in the terminal first.");
     }
@@ -341,7 +342,7 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     if (sideQuestionText(target.source, text) !== undefined) {
       // Claude's `/btw` runs beside the turn and never reaches the transcript:
       // the Hook reads its panel and the answer arrives as a side-answer frame.
-      typing();
+      await typing();
       return { ok: true, delivered: true, sideQuestion: await sideQuestions.ask(target, pane, text) };
     }
     if (target.source === "codex" && /^\s*\/model\s+\S/i.test(text)) throw new BridgeError(422, "Use the model picker to switch Codex models.");
@@ -352,7 +353,7 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     // have reached it is reported uncertain and never retried.
     const owned = text.trim().startsWith("/") ? undefined : codexServers.forTarget(target);
     if (owned) {
-      typing();
+      await typing();
       try {
         const { turnId } = await codexServers.prompt(owned, text);
         return { ok: true, delivered: true, turnId };
@@ -365,7 +366,7 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
     let outcome: DeliveryOutcome | "unsubmitted" = await promptWithStartupRetry(async () => {
       const refused = new AbortController();
       const expected = agentHooks.expectDelivery(target, text, busy && target.source !== "claude" ? 300 : 1_500, refused.signal);
-      typing();
+      await typing();
       try { await terminalProvider().prompt(target.server, target.pane, text); } catch (error) {
         if (agentNotReady(error)) refused.abort();
         throw error;
@@ -379,7 +380,7 @@ async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, respon
       modelSwitcher.assertAvailable(target); settingsSwitcher.assertAvailable(target); sideQuestions.assertAvailable(target);
       refuseWorkingSlash(current, text, target.source);
       busy = String(current.agent_status) === "working";
-    });
+    }, data.hookQueued === true ? 0 : 20_000);
     // Only Claude confirms plain prompts through its hook, and a slash
     // command opens a menu that a second Enter would answer.
     if (outcome === "pending" && target.source === "claude" && !text.trim().startsWith("/")) {

@@ -508,3 +508,28 @@ keys are typed, still shows the same question and command that was forwarded.
 A request that ends in the worker's terminal (answered there, or its hold ran
 out) clears `approval`; answering one that is gone returns 409.
 
+
+## Queued hand-off and stalled workers
+
+`hand_off` uses the receiving Hook's durable queue. A busy worker returns
+`{ok:true, queued:true, delivered:false, deliveryId, state:"queued", target}`.
+The Hook waits for idle or done in the same conversation and terminal, then
+attempts the message once. Keep `deliveryId` on any retry. Query it with
+`hand_off(target|session, computer?, deliveryId, status:true)` and no text,
+or `phren hand-off local --session <id> --status --delivery-id <id>`.
+A local sender receives a queued delivery notice when the outcome changes.
+
+The queue is private to the receiving computer under `<bridge>/hand-offs/`.
+It survives service restarts and retains delivery tombstones. The Hook writes
+an attempting marker before input. A restart in the acknowledgement gap or
+an unconfirmed input yields `state:"uncertain", deliveryUncertain:true` and
+is never retried automatically. Only Herdr's `agent_not_ready`, which guarantees
+no input was written, is retried at a later idle. A replaced conversation or
+terminal produces a retained failed record. An offline worker remains queued.
+
+Working sessions whose visible screen and transcript both stay unchanged for
+`PHREN_STALL_MS` (default 300000, zero disables) carry `stalled:true`,
+`stalledSince` and `stallFor` in seconds in the overview and `live_sessions`.
+Their dispatch produces a `stalled` return with the same fields. Progress resets
+the flag. Failed reads do not count as inactivity. A stall is a supervision
+signal; it does not interrupt the worker or authorize a replacement.

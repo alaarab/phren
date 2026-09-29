@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { deliveryIdSchema } from "./prompt-once.js";
+import { terminalPaneFromEnv } from "./terminal.js";
 import { z } from "zod";
 import { computerName } from "./computers.js";
 import { hookRequest } from "./client.js";
@@ -22,8 +25,11 @@ export const handOffSchema = z.object({
   project: projectName.optional().describe("Project slug this hand-off belongs to, for conductor grant matching."),
   account: z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").optional()
     .describe("Claude account id the session must run under (default, or a slug). A session of another account is refused; a row without an account counts as default."),
-  text: promptText.describe("Prompt to deliver to the existing session, at most 32768 characters."),
+  deliveryId: deliveryIdSchema.describe("Stable message id to keep on retries or to check status."),
+  status: z.boolean().optional().describe("Read delivery status without sending; requires deliveryId."),
+  text: promptText.optional().describe("Prompt to deliver to the existing session, at most 32768 characters."),
 }).strict().superRefine((value, context) => {
+  if (value.status ? !value.deliveryId || value.text !== undefined : !value.text) context.addIssue({ code: "custom", message: "A send requires text; a status query requires deliveryId and no text." });
   if ((value.target === undefined) === (value.session === undefined)) context.addIssue({ code: "custom", message: "Provide exactly one of target or session." });
 });
 export type HandOffInput = z.infer<typeof handOffSchema>;
@@ -57,10 +63,9 @@ async function targetFromOverview(request: Request, session: string, server?: st
   return found;
 }
 
-/** `deliveryId` names this one message on the receiving Hook, which then types
- * it at most once however often it is sent (the Hook's own callers retry;
- * the MCP tool does not take one). */
-export async function handOff(input: unknown, options: { deliveryId?: string } = {}): Promise<{ ok: boolean; delivered: boolean; target: Target; deliveryUncertain?: boolean; unsubmitted?: boolean; label?: string; granted?: string }> {
+/** A stable delivery id names a message on the receiving Hook. The Hook
+ * queues busy targets and retains outcomes across restarts. */
+export async function handOff(input: unknown, options: { deliveryId?: string; notifySender?: boolean } = {}): Promise<{ ok: boolean; delivered: boolean; target: Target; queued?: boolean; deliveryId?: string; state?: string; deliveryUncertain?: boolean; unsubmitted?: boolean; label?: string; granted?: string }> {
   const data = handOffSchema.parse(input);
   let request: Request;
   let peer: HookPeer | undefined;
@@ -84,7 +89,15 @@ export async function handOff(input: unknown, options: { deliveryId?: string } =
   const target = data.target ?? resolved!.target;
   if (peer && target.server !== peer.server) throw new BridgeError(400, "The target belongs to a different Herdr server on that computer.");
   const grant = await findGrant({ action: "hand_off", project: data.project, computer: data.computer });
-  const result = await request("/v1/prompt", { target, text: data.text, ...(options.deliveryId ? { deliveryId: options.deliveryId } : {}) });
+  let origin: Target | undefined;
+  if (!data.status && options.notifySender !== false) {
+    const here = await terminalPaneFromEnv();
+    if (here) origin = await findInOverview((route, body) => hookRequest(route, body), found => found.server === here.server && found.pane === here.pane, here.server).then(found => found?.target, () => undefined);
+  }
+  const originComputer = peer && origin ? await hookRequest("/v1/health").then(health => object(health.computer).name, () => undefined) : undefined;
+  const deliveryId = data.deliveryId ?? options.deliveryId ?? randomUUID().replaceAll("-", "");
+  const result = await request(data.status ? "/v1/hand-off/status" : "/v1/hand-off", { target, deliveryId,
+    ...(!data.status ? { text: data.text, ...(origin ? { origin, ...(typeof originComputer === "string" ? { originComputer } : {}) } : {}) } : {}) });
   // A bare ok only acknowledges typing. Even an unchanged, busy Codex pane
   // may have kept the text in its composer instead of submitting a turn.
   const delivered = result.ok === true && result.delivered === true && result.deliveryUncertain !== true && result.unsubmitted !== true;
@@ -93,8 +106,12 @@ export async function handOff(input: unknown, options: { deliveryId?: string } =
   const label = resolved ? resolved.label
     : await findInOverview(request, found => found.pane === target.pane && found.session === target.session, peer?.server)
       .then(found => found?.label, () => undefined);
-  return { ok: delivered, delivered, target,
-    ...(!delivered && (result.ok === true || result.deliveryUncertain === true) ? { deliveryUncertain: true } : {}),
+  const queued = result.queued === true && result.deliveryUncertain !== true;
+  return { ok: delivered || queued, delivered, target,
+    ...(queued ? { queued: true } : {}),
+    ...(typeof result.deliveryId === "string" ? { deliveryId: result.deliveryId } : {}),
+    ...(typeof result.state === "string" ? { state: result.state } : {}),
+    ...(!delivered && !queued && (result.ok === true || result.deliveryUncertain === true) ? { deliveryUncertain: true } : {}),
     ...(result.unsubmitted === true ? { unsubmitted: true } : {}),
     ...(label ? { label } : {}), ...(grant ? { granted: grantLabel(grant) } : {}) };
 }
@@ -109,6 +126,7 @@ export interface LiveSession {
   idleFor?: number;
   /** Set when the main turn ended and this many background tasks keep the session `working`. */
   backgroundTasks?: number;
+  stalled?: boolean; stallFor?: number; stalledSince?: string;
 }
 
 function sessionsFrom(overview: Json, computer: string, local: boolean, now = Date.now()): LiveSession[] {
@@ -128,6 +146,7 @@ function sessionsFrom(overview: Json, computer: string, local: boolean, now = Da
       title: text(tab.title), agent: tab.agent, status: text(tab.agentStatus), role: text(tab.role),
       branch: text(tab.branch), model: text(tab.model), ...(typeof object(tab.account).id === "string" ? { account: String(object(tab.account).id) } : {}), ...(target.success ? { target: target.data } : {}),
       ...(typeof tab.backgroundTasks === "number" && tab.backgroundTasks > 0 ? { backgroundTasks: tab.backgroundTasks } : {}),
+      ...(tab.stalled === true ? { stalled: true, stallFor: Number(tab.stallFor), stalledSince: String(tab.stalledSince) } : {}),
       ...(Number.isFinite(changedAt) ? { idleFor: Math.max(0, Math.floor((now - changedAt) / 1000)) } : {}) });
   }
   return sessions;
