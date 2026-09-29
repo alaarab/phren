@@ -2,10 +2,10 @@ import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { readFileSync, realpathSync } from "node:fs";
-import { appendFile, chmod, mkdir, mkdtemp, open, readdir, readFile, realpath as realpathAsync, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { appendFile, chmod, copyFile, mkdir, mkdtemp, open, readdir, readFile, realpath as realpathAsync, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer, request, type Server as HttpServer } from "node:http";
 import { createConnection, createServer as createNetServer, type Server, type Socket } from "node:net";
-import { hostname, tmpdir } from "node:os";
+import { hostname, tmpdir, userInfo } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
@@ -22,6 +22,7 @@ import { BridgeError, object } from "./protocol.js";
 import { herdrAgentName, streamCloseReason } from "./server.js";
 import { historicalImage, phrenStoreRoot, TranscriptReader, transcriptPath, visibleEvent } from "./transcripts.js";
 import { dispatch } from "./transport.js";
+import { askpassScript } from "./sudo.js";
 import { enrollComputer, publicComputerKey } from "./computers.js";
 import { FakeClaude } from "./__fixtures__/claude-questions/fake-claude.js";
 
@@ -683,7 +684,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
       HOME: root, XDG_CONFIG_HOME: path.join(root, ".config"), PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"), CODEX_HOME: path.join(root, "codex"),
       CLAUDE_CONFIG_DIR: path.join(root, "claude-config"), NODE_ENV: "test", PHREN_TEST_MODEL_CATALOG: path.join(root, "model-catalog.json"),
       ELEVENLABS_API_KEY: "", NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: `http://127.0.0.1:${(egress!.address() as { port: number }).port}`, NO_PROXY: "localhost,127.0.0.1,::1",
-      PHREN_STALL_MS: "1000", PHREN_APPROVAL_HOLD_MS: "2500", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SHELL_READY_MS: "1500", PHREN_OPENCODE_PID_MS: "0", PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
+      PHREN_STALL_MS: "1000", PHREN_APPROVAL_HOLD_MS: "2500", PHREN_SUDO_TEST_PARENT: "1", PHREN_SUDO_OUTCOME_MS: "800", PHREN_IDENTITY_CACHE_MS: String(IDENTITY_CACHE_MS), PHREN_DIALOG_THROTTLE_MS: String(DIALOG_THROTTLE_MS), PHREN_SHELL_READY_MS: "1500", PHREN_OPENCODE_PID_MS: "0", PHREN_SNAPSHOT_SHARE_MS: String(IDENTITY_CACHE_MS) },
       stdio: ["ignore", "ignore", "pipe"] });
     hook.stderr!.on("data", bytes => log += bytes);
     let ready = false;
@@ -2452,6 +2453,101 @@ schedules:
       await appendFile(record, next.slice(30) + "\n"); expect((await reader.read()).entries[0].line).toBe(2);
       await writeFile(record, JSON.stringify(row("Reset")) + "\n");
       const reset = await reader.read(); expect(reset.reset).toBe(true); expect(reset.entries[0].line).toBe(0);
+    });
+
+    it("hands sudo -A the password the phone typed, once, and never writes it down", async () => {
+      // A copy of bash named sudo stands in for sudo: it hands askpass a pipe
+      // and reads it, as sudo does. The Hook accepts a sudo that is not root
+      // only under PHREN_SUDO_TEST_PARENT.
+      const bin = path.join(root, "fake-sudo"), sudo = path.join(bin, "sudo"), script = path.join(bin, "run.sh"), askpass = path.join(root, "bridge/askpass");
+      await mkdir(bin, { recursive: true });
+      await copyFile("/bin/bash", sudo); await chmod(sudo, 0o755);
+      // macOS kills a copied system binary until it is signed again, ad hoc.
+      if (process.platform === "darwin") await promisify(execFile)("codesign", ["-f", "-s", "-", sudo]);
+      await writeFile(askpass, askpassScript(process.execPath, hookBundle), { mode: 0o700 });
+      await writeFile(script, `out=$(exec "$ASKPASS" "[sudo] password:" 2>"$0.err"); code=$?\nprintf '%s\\n%s' "$code" "$out"\n`);
+      const env = { ...process.env, HOME: root, PHREN_BRIDGE_HOME: path.join(root, "bridge"), ASKPASS: askpass, HERDR_ENV: "", TMUX: "" };
+      const runSudo = () => new Promise<{ code: number; out: string; err: string }>((resolve, reject) => {
+        execFile(sudo, [script, "killall", "-HUP", "mDNSResponder"], { env, timeout: 30_000 }, (error, stdout) => {
+          if (error) { reject(error); return; }
+          const [code, ...out] = stdout.split("\n");
+          void readFile(`${script}.err`, "utf8").then(err => resolve({ code: Number(code), out: out.join("\n"), err }), reject);
+        });
+      });
+      // No phone: askpass fails at once instead of hanging sudo.
+      expect(await runSudo()).toMatchObject({ code: 1, out: "", err: expect.stringContaining("No phone can answer sudo") });
+
+      const frames: any[] = [];
+      const phone = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/overview?sudo=1`);
+      phone.on("message", data => frames.push(JSON.parse(String(data))));
+      await waitFor(() => frames.some(frame => frame.type === "sudo"), 10_000);
+      expect(frames.filter(frame => frame.type === "sudo")).toEqual([{ type: "sudo", requests: [] }]);
+      expect((await api("/v1/health")).data.capabilities.sudo).toBe(true);
+      // Not under sudo: refused before the phone hears of it.
+      const direct = await new Promise<{ code: number | null; err: string }>(resolve => {
+        const child = spawn(askpass, [], { env, stdio: ["ignore", "ignore", "pipe"] });
+        let err = ""; child.stderr!.on("data", b => err += b); child.on("exit", code => resolve({ code, err }));
+      });
+      expect(direct).toEqual({ code: 1, err: "phren askpass: phren askpass only answers sudo -A.\n" });
+      expect(frames.filter(frame => frame.type === "sudo")).toHaveLength(1);
+
+      const approved = runSudo();
+      await waitFor(() => frames.at(-1)?.type === "sudo" && frames.at(-1).requests.length === 1, 15_000);
+      const [asked] = frames.at(-1).requests;
+      expect(asked).toMatchObject({ computer: expect.any(String), command: expect.stringMatching(/run\.sh killall -HUP mDNSResponder$/), cwd: expect.any(String) });
+      expect(Date.parse(asked.expiresAt) - Date.parse(asked.askedAt)).toBe(120_000);
+      expect((await api("/v1/sudo")).data).toEqual({ requests: [asked] });
+      // Another process that names the waiting askpass's pid gets nothing. On
+      // Linux the Hook writes the password into the asker's own stdout instead,
+      // so there is no connection to check.
+      if (process.platform !== "linux") {
+        const [askerPid] = (await promisify(execFile)("pgrep", ["-f", `${hookBundle} askpass`])).stdout.trim().split("\n").map(Number);
+        const spoof = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+          const payload = JSON.stringify({ pid: askerPid });
+          const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/sudo", method: "POST", headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
+            let body = ""; res.on("data", b => body += b); res.on("end", () => resolve({ status: res.statusCode!, body }));
+          });
+          req.on("error", reject); req.end(payload);
+        });
+        expect(spoof).toEqual({ status: 400, body: JSON.stringify({ error: "Only askpass itself may ask for its password." }) });
+        expect((await api("/v1/sudo")).data).toEqual({ requests: [asked] });
+      }
+      expect(await api("/v1/sudo/answer", { id: asked.id, password: "correct horse\nnext line" })).toEqual({ status: 400, data: { error: "Send an id and a password, or deny." } });
+      expect(await api("/v1/sudo/answer", { id: asked.id, password: "correct horse 9!" })).toEqual({ status: 200, data: { ok: true } });
+      expect(await approved).toEqual({ code: 0, out: "correct horse 9!", err: "" });
+      expect(await api("/v1/sudo/answer", { id: asked.id, password: "correct horse 9!" })).toEqual({ status: 404, data: { error: "This sudo request is no longer pending." } });
+      await waitFor(() => frames.at(-1)?.requests?.length === 0);
+      expect((await api("/v1/sudo")).data).toEqual({ requests: [] });
+
+      const denied = runSudo();
+      await waitFor(() => frames.at(-1)?.requests?.length === 1, 15_000);
+      expect(await api("/v1/sudo/answer", { id: frames.at(-1).requests[0].id, deny: true })).toEqual({ status: 200, data: { ok: true } });
+      expect(await denied).toEqual({ code: 1, out: "", err: "phren askpass: Denied on the phone.\n" });
+
+      // The phone learns whether sudo took the password: this stand-in, like
+      // sudo, asks again after a wrong one.
+      expect((await api("/v1/health")).data.capabilities.sudoOutcome).toBe(true);
+      await writeFile(script, `out=$(exec "$ASKPASS" "[sudo] password:" 2>"$0.err")\n[ "$out" = right ] || out=$(exec "$ASKPASS" "[sudo] password:" 2>>"$0.err"); code=$?\nprintf '%s\\n%s' "$code" "$out"\n`);
+      const retried = runSudo();
+      await waitFor(() => frames.at(-1)?.requests?.length === 1, 15_000);
+      const first = frames.at(-1).requests[0];
+      expect(first.account).toBe(userInfo().username);
+      expect(await api("/v1/sudo/answer", { id: first.id, password: "wrong", outcome: true })).toEqual({ status: 200, data: { ok: true, outcome: "rejected" } });
+      await waitFor(() => frames.at(-1)?.requests?.length === 1 && frames.at(-1).requests[0].id !== first.id, 15_000);
+      expect(await api("/v1/sudo/answer", { id: frames.at(-1).requests[0].id, password: "right", outcome: true })).toEqual({ status: 200, data: { ok: true, outcome: "accepted" } });
+      expect(await retried).toEqual({ code: 0, out: "right", err: "" });
+
+      // An askpass whose output goes somewhere sudo does not read is refused.
+      await writeFile(script, `"$ASKPASS" "[sudo] password:" 2>"$0.err" | cat >/dev/null; printf '%s\\n' "$?"\n`);
+      expect(await runSudo()).toMatchObject({ err: "phren askpass: askpass's output must go to sudo alone.\n" });
+      phone.close();
+
+      // The password reached sudo's pipe and nothing else: not the frames, the log, or any file the Hook keeps.
+      expect(JSON.stringify(frames)).not.toContain("correct horse");
+      expect(log).not.toContain("correct horse");
+      const written = await promisify(execFile)("grep", ["-rlD", "skip", "correct horse", path.join(root, "bridge")])
+        .then(r => r.stdout, (error: { code?: number; message: string }) => error.code === 1 ? "" : `grep failed: ${error.message}`);
+      expect(written).toBe("");
     });
   });
 

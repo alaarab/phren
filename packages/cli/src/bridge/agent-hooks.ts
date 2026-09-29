@@ -31,7 +31,8 @@ import { notePaneTranscript, paneAccountKey } from "./pane-accounts.js";
 import { eventStatus, notePaneStatus, settleBlockedPane } from "./pane-status.js";
 import { noteTurn as recordTurn } from "./turn-records.js";
 import { countTick } from "./metrics.js";
-import { briefId, briefIdInPrompt, DISPATCH_ID_ENV, recordBriefArrival } from "./launch-brief.js";
+import { briefId, briefIdInPrompt, briefLabel, DISPATCH_ID_ENV, recordBriefArrival } from "./launch-brief.js";
+import { SudoBroker } from "./sudo.js";
 import type { AppServerRequestId, PendingServerRequest } from "./codex-app-server.js";
 import { CODEX_SERVER_ENV, codexServerId, codexServers } from "./codex-servers.js";
 import { paneClient, paneKey, PaneServerWatcher, rootSession, servedPane, type PaneAsks } from "./opencode-panes.js";
@@ -233,8 +234,20 @@ export class AgentHooks {
   /** The name the phone paired with (macOS Computer Name), for approval alerts;
    * the short host name until that lookup answers. */
   private computerName = hostname().replace(/\.local$/i, "").split(".")[0] || "Computer";
+  /** sudo -A requests from askpass, answered from the phone (sudo.ts). */
+  readonly sudo: SudoBroker;
   constructor(readonly push = new ApprovalPushService(), private modules?: ModuleSnapshot) {
     void computerDisplayName().then(name => { this.computerName = name; }, () => {});
+    this.sudo = new SudoBroker({ computer: () => this.computerName, push, label: briefLabel,
+      describe: async place => {
+        const s = await snapshot(place.server);
+        const pane = findPane(s, place);
+        if (!pane) return undefined;
+        const tab = objects(s.tabs).find(item => item.tab_id === place.tab && item.workspace_id === place.workspace);
+        const workspace = objects(s.workspaces).find(item => item.workspace_id === place.workspace);
+        const label = [tab?.label, workspace?.label].find(value => typeof value === "string" && value.trim()) as string | undefined;
+        return { ...(typeof pane.agent === "string" ? { source: pane.agent } : {}), ...(label ? { label } : {}) };
+      } });
   }
   private approvalsDirectory(): string { return path.join(phrenStoreRoot(), ".runtime", "approvals"); }
   private scheduleOpencodeSweep() {
@@ -1314,6 +1327,7 @@ export class AgentHooks {
     this.server = createServer(async (req, res) => {
       res.setHeader("Content-Type", "application/json");
       try {
+        if (req.method === "POST" && req.url === "/sudo") { await this.sudo.handle(req, res); return; }
         if (req.method !== "POST" || req.url !== "/hook") throw new Error("Invalid callback");
         let size = 0; const chunks: Buffer[] = [];
         for await (const bytes of req) { size += bytes.length; if (size > 1_048_576) throw new Error("Oversized hook"); chunks.push(bytes); }
@@ -1479,6 +1493,7 @@ export class AgentHooks {
   }
   close() {
     this.closed = true;
+    this.sudo.close();
     void this.changes.close().catch(() => {});
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.response.end("{}"); }
     this.pending.clear(); this.server?.close(); this.server?.closeAllConnections();
