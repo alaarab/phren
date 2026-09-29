@@ -17,6 +17,7 @@ import { type DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { remoteChildren } from "./dispatch-tree.js";
 import { briefArrival, briefId } from "./launch-brief.js";
 import { addGrant, listNamedGrants, removeGrant } from "./grants.js";
+import { clearProjectAuthority, confirmAuthority, listConfirmations, projectAuthority, readAuthority, setProjectAuthority } from "./authority.js";
 import { readComputers } from "./computer-identity.js";
 import { optionalHookPeers, peerRequest } from "./peers.js";
 import { candidateRepos, enrollProject } from "./enroll.js";
@@ -323,6 +324,15 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           // Receiving side of a launched brief: what the worker's hooks reported for it.
           case "/v1/dispatch/arrival": result = { arrival: await briefArrival(briefId.parse(url.searchParams.get("id"))) ?? null }; break;
           case "/v1/conductor/grants": result = { grants: await listNamedGrants() }; break;
+          // The owner's release authority policy, which conductors read and quote in briefs.
+          case "/v1/authority": {
+            const policy = await readAuthority();
+            const project = url.searchParams.get("project");
+            result = project !== null ? { authority: projectAuthority(policy, z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/).parse(project)) }
+              : { source: policy.source, ...(policy.updatedAt ? { updatedAt: policy.updatedAt } : {}), ...(policy.updatedBy ? { updatedBy: policy.updatedBy } : {}),
+                projects: Object.keys(policy.projects).sort().map(name => projectAuthority(policy, name)), confirmations: await listConfirmations() };
+            break;
+          }
           // One row per real computer, however many names machines.yaml and the network give it.
           case "/v1/computers": { const { computers, peerError } = await readComputers({ probe: true, local: { id: info.computer.id } });
             result = { computers, ...(peerError ? { peerError } : {}) }; break; }
@@ -556,6 +566,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           await ctx.returns!.answerApproval(body.id, body.decision, body.actionId, body.origin); result = { ok: true };
         } else if (url.pathname === "/v1/conductor/grants") {
           result = { ok: true, grant: await addGrant(data) };
+        } else if (url.pathname === "/v1/authority" || url.pathname === "/v1/authority/confirm") {
+          // The owner writes the policy from the phone; an agent's call names its pane.
+          if (data.origin !== undefined) throw new BridgeError(403, "Only the owner changes the release authority policy, from the phone or `phren authority` in their own terminal.");
+          result = url.pathname === "/v1/authority" ? { ok: true, authority: await setProjectAuthority(data, "phone") }
+            : { ok: true, confirmation: await confirmAuthority(data, "phone") };
         } else if (url.pathname === "/v1/conductor/make") {
           // Serialized with launches, so a conductor launch and a make cannot both pass the set check.
           result = await launches.run(async () => makeConductor(selectedServer(url), data));
@@ -607,9 +622,12 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         }
       }
       } else if (request.method === "DELETE") {
-        if (url.pathname !== "/v1/conductor/grants") throw new BridgeError(404, "Unknown Phren Hook route.");
+        if (url.pathname !== "/v1/conductor/grants" && url.pathname !== "/v1/authority") throw new BridgeError(404, "Unknown Phren Hook route.");
         const data = await body(request);
-        result = { ok: true, grant: await removeGrant(data) };
+        if (url.pathname === "/v1/authority") {
+          if (data.origin !== undefined) throw new BridgeError(403, "Only the owner changes the release authority policy, from the phone or `phren authority` in their own terminal.");
+          result = { ok: true, authority: await clearProjectAuthority(data, "phone") };
+        } else result = { ok: true, grant: await removeGrant(data) };
       } else throw new BridgeError(405, "Unsupported request method.");
       const payload = JSON.stringify(result);
       if (Buffer.byteLength(payload) > MAX_FRAME) throw new BridgeError(413, "The response is too large.");

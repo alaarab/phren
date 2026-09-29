@@ -27,7 +27,7 @@ Claude / Copilot / Cursor / Codex
                 v
 +---------------+---------------+
 | MCP Server (phren-mcp)       |
-| 72 tools · core profile: 10  |
+| 73 tools · core profile: 10  |
 +---------------+---------------+
                 |
                 v

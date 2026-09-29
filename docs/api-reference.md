@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 72 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 73 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -45,6 +45,7 @@ See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
 | `effort` | enum | no | Reasoning effort: `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; otherwise the harness default. Codex takes it as `model_reasoning_effort`, Claude as `--effort`, OpenCode as `--variant`. |
 | `account` | string | no | Claude account id (`default` or a slug from `phren bridge accounts`). `anywhere` skips computers whose `harnesses` do not report that account usable (an older Hook that reports none is skipped too) and lists each in `skipped`; a named computer that lacks it fails before launching. Recorded on the receipt. |
 | `permissionMode` | enum | no | Permission mode the worker starts in: `supervised`, `auto-edits`, `auto` or `full-access`; otherwise the receiving computer's own default. Claude and Codex only; `opencode` is refused with 400 before a receipt is saved. |
+| `releaseActions` | string[] | no | Release actions the brief asks for: `merge`, `publish`, `deploy`, `app-store`, `github-admin`. From an agent, an action the project's release authority policy marks ask-first is refused with 403 until the owner confirms it. An ask-first project also lowers the agent's permission ceiling there and starts a worker with no mode at it. See docs/authority.md. |
 | `prompt` | string | yes | Worker brief, up to 32768 characters. |
 | `label` | string | yes | Task label, up to 200 characters. |
 | `parent` | object | no | Conversation identity to retain in the dispatch receipt. |
@@ -146,6 +147,17 @@ says why none were read when `hooks.yaml` is broken. No parameters. In the
 core profile use `phren_admin(action: "live_sessions")`.
 
 CLI equivalent: `phren dispatch sessions`.
+
+### `authority`
+
+Read the owner's release authority policy. With `project`, returns
+`{ authority: { project, listed, go, ask, maxPermissionMode?, note?, line } }`;
+without, `{ source, updatedAt?, updatedBy?, projects, confirmations }`.
+Read-only: the owner changes it from the phone or `phren authority`. In the
+core profile use `phren_admin(action: "authority")`. Route: `GET /v1/authority`.
+See docs/authority.md.
+
+CLI equivalent: `phren authority list` and `phren authority show <project>`.
 
 ### `hand_off`
 

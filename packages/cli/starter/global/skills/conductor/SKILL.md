@@ -109,6 +109,14 @@ in core. The CLI equivalent is `phren dispatch <computer|anywhere> <project>
 --harness <harness> --label <label> --prompt <brief> [--model <model>] [--effort <effort>]
 [--permission-mode supervised|auto-edits|auto|full-access]`. `permissionMode` sets how the
 worker starts (Claude and Codex only).
+For release work (merge, publish, deploy, app-store, github-admin), read the
+owner's release authority policy first with `authority` in full or
+`phren_admin(action: "authority", project)` in core (CLI: `phren authority show
+<project>`), quote its `line` in the brief, and list the actions in
+`releaseActions`. An ask-first action is refused until the owner confirms it:
+ask them, and never confirm or change the policy yourself. The policy only
+restricts; when a worker's own harness still refuses release work, only the
+owner's own harness settings can allow it.
 `anywhere` chooses the connected computer with the fewest working agents. Place
 briefs sequentially, respecting busy/rate-limit responses. Keep their dispatch
 IDs. Do not send local filesystem paths as remote project names.

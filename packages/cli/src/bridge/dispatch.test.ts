@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DispatchService, dispatchProjectDirectory, dispatchStatus } from "./dispatch.js";
 import { getMachineName } from "../machine-identity.js";
 import { addGrant, removeGrant } from "./grants.js";
+import { confirmAuthority } from "./authority.js";
 import { BridgeError } from "./protocol.js";
 import { hookPeers, peerRequest } from "./peers.js";
 import { hookRequest } from "./client.js";
@@ -107,6 +108,36 @@ describe("dispatch receipts and selection", () => {
       await expect(new DispatchService().dispatch({ ...brief, computer: "Desk", permissionMode: "full-access" }, agent)).resolves.toMatchObject({ state: "accepted" });
       // The owner (no pane) is never capped, grant or not.
       await expect(new DispatchService().dispatch({ ...brief, computer: "Linuxbox", permissionMode: "full-access" })).resolves.toMatchObject({ state: "accepted" });
+    });
+
+    // authority.yaml must be mode 0600, as conductor.yaml.
+    it.skipIf(process.platform === "win32")("holds an agent to the release authority policy and leaves the owner's dispatch alone", async () => {
+      const agent = { server: "default", workspace: "w9", tab: "w9:t1", pane: "w9:p1" };
+      const hub = { ...brief, computer: "Desk", project: "hub" };
+      const launches = () => vi.mocked(peerRequest).mock.calls.filter(call => call[1].startsWith("/v1/workspaces/launch")).map(call => call[2] as Record<string, unknown>);
+      // hub is ask-first by default: an agent's worker starts at auto-edits, not the receiving default.
+      const started = await new DispatchService().dispatch(hub, agent);
+      expect(launches().at(-1)).toMatchObject({ project: "hub", permissionMode: "auto-edits" });
+      expect(started).toMatchObject({ state: "accepted", permissionMode: "auto-edits", authority: expect.stringContaining("ask-first for merge") });
+      await expect(new DispatchService().dispatch({ ...hub, permissionMode: "auto" }, agent)).rejects.toMatchObject({ status: 403 });
+      // An ask-first release is refused before any receipt or launch.
+      const receipts = (await dispatchStatus()).length, launched = launches().length;
+      await expect(new DispatchService().dispatch({ ...hub, releaseActions: ["merge"] }, agent)).rejects.toMatchObject({ status: 403 });
+      expect(await dispatchStatus()).toHaveLength(receipts);
+      expect(launches()).toHaveLength(launched);
+      // The owner's confirmation lets one through, and the receipt says so.
+      const confirmation = await confirmAuthority({ project: "hub", actions: ["merge"] }, "phone", root);
+      const confirmed = await new DispatchService().dispatch({ ...hub, releaseActions: ["merge"] }, agent);
+      expect(confirmed).toMatchObject({ state: "accepted", releaseActions: ["merge"], authorityConfirmed: confirmation.confirmedAt });
+      await expect(new DispatchService().dispatch({ ...hub, releaseActions: ["merge"] }, agent)).rejects.toMatchObject({ status: 403 });
+      // The owner (no pane) is neither refused nor lowered, and still gets the line to read.
+      const owner = await new DispatchService().dispatch({ ...hub, releaseActions: ["merge", "deploy"] });
+      expect(owner).toMatchObject({ state: "accepted", authority: expect.stringContaining("hub") });
+      expect(launches().at(-1)).not.toHaveProperty("permissionMode");
+      // A project the policy does not name is untouched, and its receipt carries no line.
+      const plain = await new DispatchService().dispatch({ ...brief, computer: "Desk", releaseActions: ["publish"] }, agent);
+      expect(plain.authority).toBeUndefined();
+      expect(launches().at(-1)).not.toHaveProperty("permissionMode");
     });
 
     it("refuses OpenCode before a receipt is saved", async () => {
