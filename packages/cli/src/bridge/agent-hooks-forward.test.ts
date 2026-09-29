@@ -115,6 +115,39 @@ describe.skipIf(process.platform === "win32")("a dispatched worker's approval, f
     await expect(hooks.answer(target, card.actionId, "approve")).rejects.toThrow(/no longer pending|changed/);
   });
 
+  it("answers a dialog once: a concurrent second answer gets a 409 and types no keys", async () => {
+    hooks.leaseDispatch([lease]);
+    await ask();
+    await vi.waitFor(async () => {
+      await hooks.observeWaitingPanes("default", [pane], async () => target);
+      expect(hooks.workerApproval(target)).toBeDefined();
+    });
+    const { actionId } = hooks.workerApproval(target)!;
+    const results = await Promise.allSettled([hooks.answer(target, actionId, "approve"), hooks.answer(target, actionId, "approve")]);
+    expect(results.map(result => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect((results.find(result => result.status === "rejected") as PromiseRejectedResult).reason).toMatchObject({ status: 409 });
+    expect(keys()).toEqual([["1"]]);
+  });
+
+  it("tells two dialogs with the same title and different commands apart", async () => {
+    hooks.leaseDispatch([lease]);
+    await ask();
+    await vi.waitFor(async () => {
+      await hooks.observeWaitingPanes("default", [pane], async () => target);
+      expect(hooks.workerApproval(target)).toBeDefined();
+    });
+    // The pane's generic title is shared; the command rides in the choice's body.
+    const prompts = (hooks as unknown as { terminalPrompts: Map<string, { choice: { body?: string } }> }).terminalPrompts;
+    const entry = prompts.get(JSON.stringify(target))!;
+    entry.choice.body = "rm -rf build";
+    const first = hooks.workerApproval(target)!.actionId;
+    expect(hooks.workerApproval(target)!.actionId).toBe(first);
+    entry.choice.body = "rm -rf src";
+    expect(hooks.workerApproval(target)!.actionId).not.toBe(first);
+    await expect(hooks.answer(target, first, "approve")).rejects.toMatchObject({ status: 409 });
+    expect(keys()).toEqual([]);
+  });
+
   it("forgets a forwarded dialog once its pane stops waiting", async () => {
     hooks.leaseDispatch([lease]);
     await ask();

@@ -446,6 +446,11 @@ is recorded. When this Hook has a paired phone, it also pushes the request
 there (unless the worker's Hook already pushed it), and the notification's
 answer takes the same path.
 
+Only the dispatching agent (or the owner's phone) can answer, and the call must
+name the approval's `actionId`, so one that changed since you read it is
+refused. The worker cannot approve itself: a `dispatch_approve` from its own
+pane, or from any pane other than the dispatch's origin, fails with 403.
+
 A request that ends in the worker's terminal (answered there, or its hold ran
 out) clears `approval`; answering one that is gone returns 409.
 

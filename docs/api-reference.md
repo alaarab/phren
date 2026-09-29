@@ -106,9 +106,12 @@ with `dispatch_approve`. See [Worker approvals](conductor.md#worker-approvals).
 
 Answer the permission request a dispatched worker is waiting on, forwarded from
 its computer. Parameters: `id` (the dispatch ID from `dispatch_returns`),
-`decision` (`approve` or `deny`) and optional `actionId` (the approval's
-`actionId`, so a request that has changed since is not answered by mistake).
-The owner's standing grants already answer the `dispatch` and `hand_off`
+`decision` (`approve` or `deny`) and `actionId` (required: the approval's
+`actionId`, so a request that has changed since is never answered blind).
+Only the agent that dispatched the worker can answer: the tool sends the
+caller's own pane as `origin`, and a call from any other pane, or from the
+worker's own pane, fails with 403. A call with no pane (the owner's phone, the
+CLI) is not restricted. The owner's standing grants already answer the `dispatch` and `hand_off`
 requests they cover. Fails with 409 when the worker is not waiting on an
 approval. In the core profile use `phren_admin(action: "dispatch_approve")`.
 

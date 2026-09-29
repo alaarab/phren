@@ -422,10 +422,15 @@ export class DispatchReturns {
   /** Answer the permission request a dispatched worker is waiting on. It is
    * cleared from the receipt once answered, or once its Hook says it is no
    * longer pending (answered in the terminal, or timed out). */
-  async answerApproval(id: string, decision: "approve" | "deny", actionId?: string): Promise<void> {
+  async answerApproval(id: string, decision: "approve" | "deny", actionId: string, caller?: OriginPane): Promise<void> {
     const receipt = (await dispatchStatus()).find(candidate => candidate.id === id);
     const approval = receipt?.approval;
-    if (!receipt || !approval || (actionId && approval.actionId !== actionId)) throw new BridgeError(409, "This worker is not waiting on an approval.");
+    if (!receipt || !approval || approval.actionId !== actionId) throw new BridgeError(409, "This worker is not waiting on an approval.");
+    // A caller pane is an agent asking over MCP: only the one that dispatched the worker, never the worker itself. No pane (phone, CLI) answers as the owner.
+    if (caller) {
+      const same = (pane?: { server: string; pane: string }) => !!pane && pane.server === caller.server && pane.pane === caller.pane;
+      if ((receipt.origin && !same(receipt.origin)) || (this.isLocal(receipt.computer) && same(receipt.target))) throw new BridgeError(403, "Only the agent that dispatched this worker can answer its approvals.");
+    }
     const clear = () => updateReceipt(id, current => {
       if (current.approval?.actionId !== approval.actionId) return false;
       delete current.approval; return true;

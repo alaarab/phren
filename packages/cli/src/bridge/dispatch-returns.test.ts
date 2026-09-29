@@ -531,7 +531,7 @@ describe("worker approvals", () => {
       expect(saved.approval).toBeUndefined();
       // The return stays for the conductor to read.
       expect(saved.returned).toMatchObject({ state: "blocked", read: false });
-      await expect(returns.answerApproval(value.id, "approve")).rejects.toMatchObject({ status: 409, message: "This worker is not waiting on an approval." });
+      await expect(returns.answerApproval(value.id, "approve", "action-1")).rejects.toMatchObject({ status: 409, message: "This worker is not waiting on an approval." });
     });
 
     it("refuses a different action id, and clears an approval its Hook says is no longer pending", async () => {
@@ -542,8 +542,29 @@ describe("worker approvals", () => {
       expect(answers).toEqual([]);
       const { BridgeError } = await import("./protocol.js");
       owner = new BridgeError(409, "This approval is no longer pending.") as never;
-      await expect(returns.answerApproval(value.id, "approve")).rejects.toMatchObject({ status: 409, message: "This approval is no longer pending." });
+      await expect(returns.answerApproval(value.id, "approve", "action-1")).rejects.toMatchObject({ status: 409, message: "This approval is no longer pending." });
       expect((await dispatchStatus())[0].approval).toBeUndefined();
+    });
+
+    it("lets only the dispatching agent answer, never the worker itself, and anyone with no pane", async () => {
+      const origin = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", agent: "claude" as const, terminal: "term-1" };
+      const value = await seed({ origin });
+      const returns = loop({ peers: async () => [], isLocal: (computer: string) => computer === "Linuxbox", localWorkers: async () => ({ workers: [observed] }), localAnswer: async (target: unknown, actionId: string, decision: string) => { answers.push({ target, actionId, decision } as never); } });
+      await returns.poll();
+      const pane = (over: object) => ({ server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", ...over });
+      await expect(returns.answerApproval(value.id, "approve", "action-1", pane({ pane: "w9:p9" }))).rejects.toMatchObject({ status: 403 });
+      await expect(returns.answerApproval(value.id, "approve", "action-1", pane({ workspace: "w1P", tab: "w1P:t2", pane: workerTarget.pane, server: workerTarget.server }))).rejects.toMatchObject({ status: 403 });
+      expect(answers).toEqual([]);
+      await returns.answerApproval(value.id, "approve", "action-1", pane({}));
+      expect(answers).toHaveLength(1);
+    });
+
+    it("lets a worker's own pane be refused even when the dispatch has no recorded origin", async () => {
+      const value = await seed();
+      const returns = loop({ peers: async () => [], isLocal: (computer: string) => computer === "Linuxbox", localWorkers: async () => ({ workers: [observed] }), localAnswer: async () => {} });
+      await returns.poll();
+      await expect(returns.answerApproval(value.id, "approve", "action-1", { server: workerTarget.server, workspace: workerTarget.workspace, tab: workerTarget.tab, pane: workerTarget.pane })).rejects.toMatchObject({ status: 403 });
+      await expect(returns.answerApproval(value.id, "approve", "action-1")).resolves.toBeUndefined();
     });
 
     it("answers a dispatch placed on this computer without SSH", async () => {
@@ -551,7 +572,7 @@ describe("worker approvals", () => {
       const localAnswer = vi.fn(async () => {});
       const returns = loop({ peers: async () => [], isLocal: (computer: string) => computer === "Laptop", localWorkers: async () => ({ workers: [observed] }), localAnswer });
       await returns.poll();
-      await returns.answerApproval(value.id, "approve");
+      await returns.answerApproval(value.id, "approve", "action-1");
       expect(localAnswer).toHaveBeenCalledWith(workerTarget, "action-1", "approve");
       expect(request).not.toHaveBeenCalled();
     });

@@ -36,15 +36,16 @@ export function register(server: McpServer): void {
   });
   server.registerTool("dispatch_approve", {
     title: "◆ phren · dispatch approve",
-    description: "Answer the permission request a dispatched worker is waiting on, forwarded from its computer: a dispatch_returns row with an approval field names it. The owner's standing grants already answer the dispatch and hand_off requests they cover. Deny when unsure and ask the owner.",
+    description: "Answer the permission request a dispatched worker is waiting on, forwarded from its computer: a dispatch_returns row with an approval field names it. The owner's standing grants already answer the dispatch and hand_off requests they cover. Only the agent that dispatched the worker can answer, never the worker itself. Pass the approval's actionId, so a request that changed since you read it is never answered blind. Deny when unsure and ask the owner.",
     inputSchema: {
       id: z.string().uuid().describe("Dispatch id from dispatch_returns."),
       decision: z.enum(["approve", "deny"]),
-      actionId: z.string().max(200).optional().describe("The approval's actionId from dispatch_returns, so a request that has since changed is not answered by mistake."),
+      actionId: z.string().min(1).max(200).describe("The approval's actionId from dispatch_returns; a request that has since changed is refused."),
     },
   }, async input => {
     try {
-      const result = await hookRequest("/v1/dispatch/approve", input);
+      const origin = await terminalPaneFromEnv();
+      const result = await hookRequest("/v1/dispatch/approve", { ...input, ...(origin ? { origin } : {}) });
       return mcpResponse({ ok: result.ok === true, data: result, message: input.decision === "approve" ? "Approved." : "Denied." });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not answer the approval." });

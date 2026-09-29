@@ -207,7 +207,7 @@ export class AgentHooks {
   private dialogPushes = new Map<string, { action: string; title: string }>();
   private dialogActions = new Map<string, { target: Target; choice: TerminalChoice; expiresAt: number }>();
   /** Terminal dialogs offered to a dispatching Hook, by pane: the `dialog-` action minted for the dialog's current title. */
-  private forwardedDialogs = new Map<string, { action: string; title: string }>();
+  private forwardedDialogs = new Map<string, { action: string; title: string; body?: string }>();
   /** Requests this Hook pushed to its own phone on behalf of a dispatched worker on another computer: action -> the answer to send back. */
   private forwardedPushes = new Map<string, (decision: "approve" | "deny") => Promise<void>>();
   /** Panes a dispatching Hook polled lately (`server\npane\nsource` -> expiry). */
@@ -1179,15 +1179,17 @@ export class AgentHooks {
     const title = entry && (entry.dialog || entry.released) ? entry.choice?.title : undefined;
     if (!entry?.choice || !title) return undefined;
     const pushedDialog = this.dialogPushes.get(key);
-    let action = pushedDialog?.title === title && this.dialogActions.has(pushedDialog.action) ? pushedDialog.action : undefined;
+    // A dialog is the same one only with the same title and command: Claude and Codex share generic titles.
+    const pushedAction = pushedDialog && this.dialogActions.get(pushedDialog.action);
+    let action = pushedDialog?.title === title && pushedAction && pushedAction.choice.body === entry.choice.body ? pushedDialog.action : undefined;
     if (!action) {
       const known = this.forwardedDialogs.get(key);
-      if (known?.title === title && (this.dialogActions.get(known.action)?.expiresAt ?? 0) > Date.now()) action = known.action;
+      if (known?.title === title && known.body === entry.choice.body && (this.dialogActions.get(known.action)?.expiresAt ?? 0) > Date.now()) action = known.action;
       else {
         this.dropForwardedDialog(key);
         while (this.forwardedDialogs.size >= 64) this.dropForwardedDialog(this.forwardedDialogs.keys().next().value!);
         action = `dialog-${randomUUID()}`;
-        this.forwardedDialogs.set(key, { action, title });
+        this.forwardedDialogs.set(key, { action, title, body: entry.choice.body });
         this.dialogActions.set(action, { target, choice: entry.choice, expiresAt: Date.now() + DIALOG_PUSH_MS });
       }
     }
@@ -1234,10 +1236,15 @@ export class AgentHooks {
   private async answerDialog(action: string, decision: "approve" | "deny") {
     const dialog = this.dialogActions.get(action);
     if (!dialog || dialog.expiresAt <= Date.now()) throw new BridgeError(409, "This approval is no longer pending.");
+    // Claimed before any await: a second answer for the same dialog gets a 409 instead of typing the keys twice.
+    this.dialogActions.delete(action);
     const key = JSON.stringify(dialog.target);
-    await validateTarget(dialog.target, false, true);
+    try { await validateTarget(dialog.target, false, true); } catch (error) {
+      if (!this.dialogActions.has(action)) this.dialogActions.set(action, dialog);
+      throw error;
+    }
     const live = this.terminalPrompts.get(key)?.choice;
-    if (!live || live.title !== dialog.choice.title) { this.dropDialogPush(key); throw new BridgeError(409, "That question in the terminal has changed. Open phren to answer it."); }
+    if (!live || live.title !== dialog.choice.title || live.body !== dialog.choice.body) { this.dropDialogPush(key); throw new BridgeError(409, "That question in the terminal has changed. Open phren to answer it."); }
     const option = decision === "approve"
       ? live.options.find(row => /^(yes|allow|approve|proceed|continue|run)\b/i.test(row.label)) ?? live.options[0]
       : live.options.find(row => /^(no|deny|reject|don'?t|cancel|skip)\b/i.test(row.label));
