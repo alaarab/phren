@@ -61,8 +61,11 @@ export interface StartupWatchEnv {
  * `background`: Claude Code background tasks (shells, subagents, monitors) started in
  * the transcript's tail with no task-notification or TaskStop ending them yet.
  * `finishedTasks`: when each Claude background task the tail shows finishing
- * finished (its first final task-notification's timestamp), one per task. */
-export interface FinalTurn { completed: boolean; lastAssistant?: string; error?: string; interrupted?: boolean; background?: number; finishedTasks?: string[] }
+ * finished (its first final task-notification's timestamp), one per task.
+ * `awaited`: those of the running tasks that are shells or monitors started
+ * since the owner's last prompt, other than streams that never end (a log
+ * tail, a watcher, a dev server). Sub-agents are left to the child tree. */
+export interface FinalTurn { completed: boolean; lastAssistant?: string; error?: string; interrupted?: boolean; background?: number; finishedTasks?: string[]; awaited?: number }
 
 /** The public text of one assistant row, without reasoning or tool output. */
 export function publicAssistant(raw: Json, source: Provider): string | undefined {
@@ -126,13 +129,31 @@ function turnInterrupted(raw: Json, source: ScheduleHarness): boolean {
  * `finished` keeps when each task's first final notification was written.
  * A notification reaching an idle session is written as a queue-operation
  * row, and may stay there with no new turn to deliver it. */
-function backgroundTasks(raw: Json, running: Set<string>, finished: Map<string, string>): void {
-  const result = object(raw.toolUseResult);
-  const started = typeof result.backgroundTaskId === "string" ? result.backgroundTaskId
-    : result.isAsync === true && typeof result.agentId === "string" ? result.agentId
-    : typeof result.taskId === "string" && result.persistent !== true && typeof result.timeoutMs === "number" ? result.taskId : undefined;
+/** A backgrounded command that runs until killed rather than finishing:
+ * following a log, watching files, serving a dev build. Nobody waits on it. */
+export const ENDLESS_COMMAND = /\btail\s+(?:-[a-zA-Z]*[fF][a-zA-Z]*\b|--follow\b)|\bjournalctl\b[^|;&]*\s(?:-[a-zA-Z]*f[a-zA-Z]*\b|--follow\b)|\blog\s+stream\b|\blogcat\b|\bwatch\s|--watch\b|\binotifywait\b[^|;&]*\s-m\b|\bfswatch\b|\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:dev|serve|preview)\b|\bhttp\.server\b|\bsleep\s+infinity\b/;
+
+/** What the tail knows of each Claude background task besides whether it runs. */
+interface TaskTail { commands: Map<string, string>; awaited: Set<string> }
+
+function backgroundTasks(raw: Json, running: Set<string>, finished: Map<string, string>, tail: TaskTail): void {
+  const result = object(raw.toolUseResult), blocks = objects(object(raw.message).content);
+  if (raw.type === "assistant") {
+    for (const block of blocks) {
+      const input = object(block.input);
+      if (block.type === "tool_use" && typeof block.id === "string" && input.run_in_background === true && typeof input.command === "string") tail.commands.set(block.id, input.command.slice(0, 2_000));
+    }
+  }
+  const shell = typeof result.backgroundTaskId === "string" ? result.backgroundTaskId : undefined;
+  const monitor = typeof result.taskId === "string" && result.persistent !== true && typeof result.timeoutMs === "number" ? result.taskId : undefined;
+  const started = shell ?? (result.isAsync === true && typeof result.agentId === "string" ? result.agentId : monitor);
   if (started) running.add(started);
-  if (typeof result.task_id === "string" && typeof result.message === "string" && /\bstopped\b/i.test(result.message)) running.delete(result.task_id);
+  if (shell) {
+    const call = blocks.find(block => block.type === "tool_result")?.tool_use_id;
+    const command = typeof call === "string" ? tail.commands.get(call) : undefined;
+    if (!command || !ENDLESS_COMMAND.test(command)) tail.awaited.add(shell);
+  } else if (monitor) tail.awaited.add(monitor);
+  if (typeof result.task_id === "string" && typeof result.message === "string" && /\bstopped\b/i.test(result.message)) { running.delete(result.task_id); tail.awaited.delete(result.task_id); }
   const content = object(raw.message).content, attachment = object(raw.attachment);
   const notices = [typeof content === "string" ? content : "", typeof attachment.prompt === "string" ? attachment.prompt : "",
     raw.type === "queue-operation" && typeof raw.content === "string" ? raw.content : ""];
@@ -140,7 +161,7 @@ function backgroundTasks(raw: Json, running: Set<string>, finished: Map<string, 
   for (const block of notices.flatMap(notice => notice.split("<task-notification>").slice(1))) {
     const id = /<task-id>([^<\s]{1,100})<\/task-id>/.exec(block)?.[1];
     if (!id || !/<status>(?:completed|failed|killed|stopped)<\/status>/.test(block)) continue;
-    running.delete(id);
+    running.delete(id); tail.awaited.delete(id);
     if (!finished.has(id) && typeof raw.timestamp === "string" && !Number.isNaN(Date.parse(raw.timestamp))) finished.set(id, raw.timestamp);
   }
 }
@@ -149,13 +170,18 @@ function backgroundTasks(raw: Json, running: Set<string>, finished: Map<string, 
  * A person's message after the reply opens a new turn, so it clears both. */
 export function finalTurnFromLines(lines: readonly string[], source: ScheduleHarness): FinalTurn {
   let completed = false, lastAssistant: string | undefined, error: string | undefined, interrupted = false;
-  const running = new Set<string>(), finished = new Map<string, string>();
+  const running = new Set<string>(), finished = new Map<string, string>(), tail: TaskTail = { commands: new Map(), awaited: new Set() };
   for (const line of lines) {
     if (!line.trim()) continue;
     let raw: Json;
     try { raw = object(JSON.parse(line)); } catch { continue; }
     const payload = object(raw.payload);
-    if (source === "claude") backgroundTasks(raw, running, finished);
+    if (source === "claude") {
+      backgroundTasks(raw, running, finished, tail);
+      // The owner moving on leaves what earlier turns started behind: a
+      // shell still running from then is a leftover, not work in flight.
+      if (ownerPrompt(raw)) tail.awaited.clear();
+    }
     if (turnInterrupted(raw, source)) { interrupted = true; completed = false; continue; }
     const userTurn = source === "claude" ? raw.type === "user" && !raw.isMeta && typeof object(raw.message).content === "string"
       : source === "codex" ? raw.type === "response_item" && payload.type === "message" && payload.role === "user"
@@ -167,7 +193,16 @@ export function finalTurnFromLines(lines: readonly string[], source: ScheduleHar
   }
   return { completed, ...(lastAssistant ? { lastAssistant } : {}), ...(completed && error ? { error } : {}),
     ...(interrupted ? { interrupted: true } : {}), ...(completed && running.size ? { background: running.size } : {}),
-    ...(finished.size ? { finishedTasks: [...finished.values()] } : {}) };
+    ...(finished.size ? { finishedTasks: [...finished.values()] } : {}), ...(tail.awaited.size ? { awaited: tail.awaited.size } : {}) };
+}
+
+/** A prompt the owner (or a dispatcher) typed, not a task's notification or
+ * a teammate's message waking the session. */
+function ownerPrompt(raw: Json): boolean {
+  const content = object(raw.message).content;
+  if (raw.type !== "user" || raw.isMeta || typeof content !== "string") return false;
+  const text = content.trimStart();
+  return !text.startsWith("<task-notification>") && !text.startsWith("<teammate-message");
 }
 
 /** The final turn of a conversation, read from the tail of its transcript. */

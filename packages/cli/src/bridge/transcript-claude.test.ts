@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { claudeChildAgents, visibleClaudeEvent } from "./transcript-claude.js";
+import { CLAUDE_SKILL_QUIET_MS, claudeChildAgents, visibleClaudeEvent } from "./transcript-claude.js";
 import type { Json } from "./protocol.js";
 
 describe("Claude child completion", () => {
@@ -118,6 +118,88 @@ describe("Claude child completion", () => {
     await writeFile(path.join(f.directory, "agent-worker.jsonl"), JSON.stringify({ type: "fork-context-ref", parentSessionId: session, agentId: "worker" }) + "\n");
     await f.append(envelopes[0].row(notice("unknown")));
     expect(await states(f)).toEqual(running);
+  });
+});
+
+describe("Claude children the parent records without a task launch", () => {
+  const roots: string[] = [];
+  const session = "dddddddd-4444-4444-8444-444444444444";
+  afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+  const sidechain = (agentId: string, ...rows: Json[]) => [{ type: "user", isSidechain: true, sessionId: session, agentId, message: { role: "user", content: "Go" } }, ...rows]
+    .map(row => JSON.stringify(row)).join("\n") + "\n";
+  const notice = (task: string, status = "completed") => ({ type: "queue-operation", operation: "enqueue", content: `<task-notification><task-id>${task}</task-id><status>${status}</status></task-notification>` });
+  const result = (toolUseResult: Json, call = "call-1") => ({ type: "user", toolUseResult, message: { role: "user", content: [{ type: "tool_result", tool_use_id: call, content: "ok" }] } });
+
+  async function parent(...rows: Json[]) {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-child-kinds-")); roots.push(root);
+    const directory = path.join(root, session, "subagents"); await mkdir(directory, { recursive: true });
+    const file = path.join(root, `${session}.jsonl`);
+    await writeFile(file, rows.map(row => JSON.stringify(row)).join("\n") + "\n");
+    return { directory, file, append: (...more: Json[]) => appendFile(file, more.map(row => JSON.stringify(row)).join("\n") + "\n"),
+      states: async () => (await claudeChildAgents(file, session)).map(({ session: id, path: label, state }) => ({ id, label, state })) };
+  }
+
+  it("runs an agent again once SendMessage resumes it, until its next final notification", async () => {
+    const f = await parent(result({ status: "async_launched", isAsync: true, agentId: "aworker", description: "Trace the icon" }), notice("aworker"));
+    await writeFile(path.join(f.directory, "agent-aworker.jsonl"), sidechain("aworker"));
+    expect(await f.states()).toEqual([{ id: "aworker", label: "Trace the icon", state: "completed" }]);
+    await f.append(result({ success: true, message: "Resuming agent aworker", resumedAgentId: "aworker" }, "call-2"));
+    expect(await f.states()).toEqual([{ id: "aworker", label: "Trace the icon", state: "running" }]);
+    await f.append(notice("aworker"));
+    expect(await f.states()).toEqual([{ id: "aworker", label: "Trace the icon", state: "completed" }]);
+    // A resume of an agent this session never launched adds nothing.
+    await f.append(result({ success: true, message: "Resuming agent astranger", resumedAgentId: "astranger" }, "call-3"));
+    expect(await f.states()).toHaveLength(1);
+  });
+
+  it("lists a background skill until its transcript ends on a finished reply", async () => {
+    const f = await parent({ type: "system", subtype: "local_command",
+      content: '<local-command-stdout>Running in the background as @code-review</local-command-stdout>\n<forked-skill-launch>{"agentId":"askill","skillName":"code-review","description":"/code-review"}</forked-skill-launch>' });
+    const child = path.join(f.directory, "agent-askill.jsonl");
+    await writeFile(child, sidechain("askill", { type: "assistant", message: { role: "assistant", stop_reason: "tool_use", content: [] } }));
+    expect(await f.states()).toEqual([{ id: "askill", label: "/code-review", state: "running" }]);
+    // The parent does not change; the child is looked at again on a timer.
+    await appendFile(child, JSON.stringify({ type: "assistant", message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "No findings." }] } }) + "\n");
+    vi.useFakeTimers({ now: Date.now() + 6_000, toFake: ["Date"] });
+    try { expect(await f.states()).toEqual([{ id: "askill", label: "/code-review", state: "completed" }]); } finally { vi.useRealTimers(); }
+  });
+
+  it("takes a background skill whose transcript went quiet as finished", async () => {
+    const f = await parent({ type: "system", subtype: "local_command", content: '<forked-skill-launch>{"agentId":"aquiet","skillName":"audit"}</forked-skill-launch>' });
+    const child = path.join(f.directory, "agent-aquiet.jsonl");
+    await writeFile(child, sidechain("aquiet"));
+    expect(await f.states()).toEqual([{ id: "aquiet", label: "/audit", state: "running" }]);
+    const old = new Date(Date.now() - CLAUDE_SKILL_QUIET_MS - 1_000);
+    await utimes(child, old, old);
+    await f.append({ type: "system", subtype: "informational", content: "later" });
+    expect(await f.states()).toEqual([{ id: "aquiet", label: "/audit", state: "completed" }]);
+  });
+
+  it("lists a workflow's agents from its journal until each reports or the run ends", async () => {
+    const f = await parent(result({ status: "async_launched", taskId: "wtask01", taskType: "local_workflow", workflowName: "cleanup-wave0", runId: "wf_43bbdee2-dc0" }, "call-wf"));
+    const run = path.join(f.directory, "workflows", "wf_43bbdee2-dc0"); await mkdir(run, { recursive: true });
+    for (const id of ["afirst", "asecond"]) await writeFile(path.join(run, `agent-${id}.jsonl`), sidechain(id));
+    await writeFile(path.join(run, "agent-afirst.meta.json"), JSON.stringify({ agentType: "general-purpose", description: "Shared test scaffolding" }));
+    const journal = path.join(run, "journal.jsonl");
+    await writeFile(journal, [{ type: "started", key: "k1", agentId: "afirst" }, { type: "started", key: "k2", agentId: "asecond" }].map(row => JSON.stringify(row)).join("\n") + "\n");
+    expect(await f.states()).toEqual([{ id: "afirst", label: "Shared test scaffolding", state: "running" }, { id: "asecond", label: "cleanup-wave0", state: "running" }]);
+    await appendFile(journal, JSON.stringify({ type: "result", key: "k1", agentId: "afirst", result: {} }) + "\n");
+    vi.useFakeTimers({ now: Date.now() + 6_000, toFake: ["Date"] });
+    try { expect((await f.states()).map(child => child.state)).toEqual(["completed", "running"]); } finally { vi.useRealTimers(); }
+    await f.append(notice("wtask01", "killed"));
+    expect((await f.states()).map(child => child.state)).toEqual(["completed", "completed"]);
+  });
+
+  it("finds a named teammate by the name in its meta file, and lists a named background agent once", async () => {
+    const f = await parent({ type: "assistant", message: { role: "assistant", content: [
+      { type: "tool_use", id: "call-mate", name: "Agent", input: { name: "reviewer", description: "Review the diff", prompt: "Review" } },
+      { type: "tool_use", id: "call-bg", name: "Agent", input: { name: "builder", description: "Build it", prompt: "Build", run_in_background: true } }] } },
+    result({ status: "async_launched", isAsync: true, agentId: "abuilder1", description: "Build it" }, "call-bg"));
+    await writeFile(path.join(f.directory, "agent-amate01.jsonl"), sidechain("amate01"));
+    await writeFile(path.join(f.directory, "agent-amate01.meta.json"), JSON.stringify({ agentType: "general-purpose", name: "reviewer" }));
+    await writeFile(path.join(f.directory, "agent-abuilder1.jsonl"), sidechain("abuilder1"));
+    await writeFile(path.join(f.directory, "agent-abuilder1.meta.json"), JSON.stringify({ agentType: "general-purpose", name: "builder" }));
+    expect(await f.states()).toEqual([{ id: "abuilder1", label: "Build it", state: "running" }, { id: "amate01", label: "Review the diff", state: "running" }]);
   });
 });
 
