@@ -67,6 +67,19 @@ export function register(server: McpServer): void {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not list live sessions." });
     }
   });
+  server.registerTool("authority", {
+    title: "◆ phren · release authority",
+    description: "Read the owner's release authority policy: per project, which release-type actions (merge, publish, deploy, app-store, github-admin) are go and which are ask-first, and the highest permission mode an agent may start a worker in there. Quote the project's `line` in a brief that asks for release work, and declare those actions in dispatch's releaseActions. An ask-first action needs the owner's confirmation first; ask the owner, never try to confirm it yourself. Read-only: only the owner changes the policy. Without project, lists every project the policy names.",
+    inputSchema: { project: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/).optional().describe("Project slug; omit to list the whole policy.") },
+  }, async input => {
+    try {
+      const result = await hookRequest(`/v1/authority${input.project ? `?project=${encodeURIComponent(input.project)}` : ""}`);
+      const one = result.authority as { line?: string } | undefined;
+      return mcpResponse({ ok: true, data: result, message: one?.line ?? `${Array.isArray(result.projects) ? result.projects.length : 0} projects in the release authority policy.` });
+    } catch (error) {
+      return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not read the release authority policy." });
+    }
+  });
   server.registerTool("hand_off", {
     title: "◆ phren · hand off",
     description: "Deliver a prompt to an existing local or enrolled-computer agent session through Phren Hook. Prefer a session that already owns the project and is idle or doing related work.",

@@ -272,6 +272,18 @@ export const REGISTRY: Command[] = [
     ],
     run: async args => (await import("./bridge/dispatch-command.js")).runConductor(args),
   },
+  {
+    name: "authority", topic: "core", usage: "phren authority [list | show <project> | set <project> ... | clear <project> | confirm <project> <actions>]",
+    summary: "Read the owner's release authority policy; the owner changes it or confirms an ask-first release",
+    subcommands: [
+      { name: "list", usage: "phren authority list", summary: "Every project the policy names, and confirmations waiting to be used" },
+      { name: "show", usage: "phren authority show <project>", summary: "One project's go and ask-first actions, ceiling, and the line to quote in a brief" },
+      { name: "set", usage: "phren authority set <project> [--default go|ask] [--go <actions>] [--ask <actions>] [--max-permission-mode <mode>|none] [--note <text>]", summary: "Change a project's entry (owner, interactive terminal)" },
+      { name: "clear", usage: "phren authority clear <project>", summary: "Remove a project's entry (owner, interactive terminal)" },
+      { name: "confirm", usage: "phren authority confirm <project> <actions> [--minutes <n>]", summary: "Let one agent dispatch do ask-first release actions (owner, interactive terminal)" },
+    ],
+    run: async args => (await import("./bridge/authority-command.js")).runAuthority(args),
+  },
   // Setup (featured: init, quickstart)
   {
     name: "init",
