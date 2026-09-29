@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -67,6 +67,32 @@ describe("the conductor role on Herdr", () => {
     objects(moved.panes)[0].tab_id = "w1:t2";
     expect((await conductorPane("default", moved))?.pane_id).toBe("w1:p1");
     expect((await saved()).conductor).toMatchObject({ tab: "w1:t2", by: "launch" });
+  });
+
+  it("runs a moved-pane note and a stop one after the other, so the stop is never undone", async () => {
+    await recordConductor("default", objects(herdr().panes)[0], "owner");
+    const moved = herdr();
+    objects(moved.panes)[0].tab_id = "w1:t2";
+    await Promise.all([conductorPane("default", moved), clearConductor()]);
+    expect((await saved()).conductor).toBeNull();
+    resetRoleState();
+    expect((await readRoleState())?.conductor).toBeNull();
+  });
+
+  it("reads a damaged, oversized or linked role file as no conductor, never a crash or a return to names", async () => {
+    const file = path.join(root, "conductor-role.json");
+    await writeFile(file, "{not json");
+    expect((await readRoleState())?.conductor).toBeNull();
+    resetRoleState();
+    await writeFile(file, JSON.stringify({ version: 1, conductor: null, pad: "x".repeat(70_000) }));
+    expect((await readRoleState())?.conductor).toBeNull();
+    resetRoleState();
+    await rm(file);
+    const elsewhere = path.join(root, "elsewhere.json");
+    await writeFile(elsewhere, JSON.stringify({ version: 1, conductor: { server: "default", pane: "w1:p1", since: new Date().toISOString(), by: "owner" } }));
+    await symlink(elsewhere, file);
+    expect((await readRoleState())?.conductor).toBeNull();
+    expect(await conductorPane("default", herdr({ name: "conductor" }))).toBeUndefined();
   });
 
   it("stops only the pane asked about", async () => {

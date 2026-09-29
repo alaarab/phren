@@ -106,6 +106,21 @@ All under the `conductor` module.
 (for example, two groups linked later); the view shows both and the owner
 stops one.
 
+### Who may change the role
+
+`/v1/conductor/make` and `/v1/conductor/stop` trust their caller the way every
+other Hook route does: anything that reaches this computer's Hook socket, and a
+linked computer over its verified SSH pipe, acts as the owner. They do not
+check that the caller is the pane it names, and a stop with no `paneId` ends
+whichever role is held. So the role keeps agents from mistaking one another for
+the conductor. It is not a boundary against code that can already reach the
+socket.
+
+`conductor-role.json` has one writer, the Hook, and every read-modify-write of
+it runs one at a time, so a poll that notes a moved pane cannot bring back a
+role a stop just ended. The file is read only when it is a regular file of at
+most 64 KiB; anything else counts as no conductor.
+
 ## CLI
 
 ```sh

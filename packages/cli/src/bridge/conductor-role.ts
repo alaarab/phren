@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { isConductorName, paneAgentName } from "./herdr.js";
@@ -38,7 +38,11 @@ export async function readRoleState(): Promise<RoleState | undefined> {
   // Read once per process and synchronously: the overview's time budget
   // should not wait on disk for a file of a few hundred bytes.
   let text: string | undefined;
-  try { text = readFileSync(file, "utf8"); } catch { text = undefined; }
+  try {
+    const info = lstatSync(file);
+    // Only a small regular file the Hook wrote is read; anything else counts as damaged.
+    text = info.isFile() && info.size <= 65_536 ? readFileSync(file, "utf8") : "";
+  } catch { text = undefined; }
   let state: RoleState | undefined;
   if (text !== undefined) {
     // A damaged file is a state with no conductor, never a return to names.
@@ -52,6 +56,16 @@ async function writeRoleState(state: RoleState): Promise<void> {
   const file = roleFile();
   await atomicInPrivateDir(file, JSON.stringify(state, null, 2) + "\n");
   cached = { file, state };
+}
+
+/** Every read-modify-write of the state runs one at a time: an overview poll
+ * noting a moved pane must not interleave with a make or stop and bring back
+ * the record it replaced. */
+let queue: Promise<unknown> = Promise.resolve();
+function serialized<T>(run: () => Promise<T>): Promise<T> {
+  const next = queue.then(run, run);
+  queue = next.catch(() => undefined);
+  return next;
 }
 
 /** For tests: forget the cached state. */
@@ -85,24 +99,26 @@ function recordedPane(record: ConductorRecord, s: Json): Json | undefined {
  * agent runs there right now. A recorded pane gone from the snapshot ends the
  * role. In legacy mode a live pane with a conductor name is adopted and saved.
  */
-export async function conductorPane(server: string, s: Json): Promise<Json | undefined> {
-  const state = await readRoleState();
-  if (state?.conductor === undefined) {
-    const named = objects(s.panes).find(pane => isConductorName(paneAgentName(s, pane)) && runsAgent(pane));
-    if (!named) return undefined;
-    await writeRoleState({ ...state, version: 1, conductor: recordFor(server, named, "migrated") });
-    return named;
-  }
-  const record = state.conductor;
-  if (!record || record.server !== server) return undefined;
-  const pane = recordedPane(record, s);
-  if (!pane) { await writeRoleState({ ...state, conductor: null }); return undefined; }
-  // Keep the place current: a pane moved to another tab or workspace is the same pane.
-  const moved = (id.safeParse(pane.workspace_id).success && pane.workspace_id !== record.workspace) || (id.safeParse(pane.tab_id).success && pane.tab_id !== record.tab)
-    || (provider.safeParse(pane.agent).success && pane.agent !== record.source);
-  if (moved) await writeRoleState({ ...state, conductor: { ...record, workspace: String(pane.workspace_id), tab: String(pane.tab_id),
-    ...(provider.safeParse(pane.agent).success ? { source: pane.agent as ConductorRecord["source"] } : {}) } });
-  return pane;
+export function conductorPane(server: string, s: Json): Promise<Json | undefined> {
+  return serialized(async () => {
+    const state = await readRoleState();
+    if (state?.conductor === undefined) {
+      const named = objects(s.panes).find(pane => isConductorName(paneAgentName(s, pane)) && runsAgent(pane));
+      if (!named) return undefined;
+      await writeRoleState({ ...state, version: 1, conductor: recordFor(server, named, "migrated") });
+      return named;
+    }
+    const record = state.conductor;
+    if (!record || record.server !== server) return undefined;
+    const pane = recordedPane(record, s);
+    if (!pane) { await writeRoleState({ ...state, conductor: null }); return undefined; }
+    // Keep the place current: a pane moved to another tab or workspace is the same pane.
+    const moved = (id.safeParse(pane.workspace_id).success && pane.workspace_id !== record.workspace) || (id.safeParse(pane.tab_id).success && pane.tab_id !== record.tab)
+      || (provider.safeParse(pane.agent).success && pane.agent !== record.source);
+    if (moved) await writeRoleState({ ...state, conductor: { ...record, workspace: String(pane.workspace_id), tab: String(pane.tab_id),
+      ...(provider.safeParse(pane.agent).success ? { source: pane.agent as ConductorRecord["source"] } : {}) } });
+    return pane;
+  });
 }
 
 /** The recorded conductor, whatever its server; undefined in legacy mode or with none. */
@@ -111,30 +127,36 @@ export async function recordedConductor(): Promise<ConductorRecord | undefined> 
 }
 
 /** Makes `pane` on `server` this computer's conductor, replacing any record. */
-export async function recordConductor(server: string, pane: Json, by: ConductorRecord["by"], session?: string): Promise<ConductorRecord> {
-  const state = await readRoleState() ?? { version: 1 as const };
-  const record = recordFor(server, pane, by, session);
-  await writeRoleState({ ...state, conductor: record });
-  return record;
+export function recordConductor(server: string, pane: Json, by: ConductorRecord["by"], session?: string): Promise<ConductorRecord> {
+  return serialized(async () => {
+    const state = await readRoleState() ?? { version: 1 as const };
+    const record = recordFor(server, pane, by, session);
+    await writeRoleState({ ...state, conductor: record });
+    return record;
+  });
 }
 
 /** The session now running in the conductor's pane: a restart or new login reattaches here. */
-export async function noteConductorSession(server: string, pane: string, session: string): Promise<void> {
-  const state = await readRoleState();
-  const record = state?.conductor;
-  if (!state || !record || record.server !== server || record.pane !== pane || record.session === session) return;
-  await writeRoleState({ ...state, conductor: { ...record, session } });
+export function noteConductorSession(server: string, pane: string, session: string): Promise<void> {
+  return serialized(async () => {
+    const state = await readRoleState();
+    const record = state?.conductor;
+    if (!state || !record || record.server !== server || record.pane !== pane || record.session === session) return;
+    await writeRoleState({ ...state, conductor: { ...record, session } });
+  });
 }
 
 /** Ends the role. With `pane`, only when that pane holds it. Returns what was stopped. */
-export async function clearConductor(pane?: string): Promise<ConductorRecord | undefined> {
-  const state = await readRoleState();
-  const record = state?.conductor ?? undefined;
-  if (record && pane !== undefined && record.pane !== pane) return undefined;
-  // Written even with nothing to clear: a stop also ends legacy mode, so a
-  // leftover conductor name is not adopted again.
-  await writeRoleState({ ...state, version: 1, conductor: null });
-  return record;
+export function clearConductor(pane?: string): Promise<ConductorRecord | undefined> {
+  return serialized(async () => {
+    const state = await readRoleState();
+    const record = state?.conductor ?? undefined;
+    if (record && pane !== undefined && record.pane !== pane) return undefined;
+    // Written even with nothing to clear: a stop also ends legacy mode, so a
+    // leftover conductor name is not adopted again.
+    await writeRoleState({ ...state, version: 1, conductor: null });
+    return record;
+  });
 }
 
 /** The set name this Hook holds. */
@@ -143,10 +165,12 @@ export async function readSetName(): Promise<SetName | undefined> {
 }
 
 /** Keeps `name` when it is newer than the one held; `null` clears. Returns whether it changed. */
-export async function saveSetName(name: string | null, namedAt: string): Promise<boolean> {
-  const state = await readRoleState();
-  const held = state?.set;
-  if (held && Date.parse(held.namedAt) >= Date.parse(namedAt)) return false;
-  await writeRoleState({ ...state, version: 1, set: { name, namedAt } });
-  return held?.name !== name;
+export function saveSetName(name: string | null, namedAt: string): Promise<boolean> {
+  return serialized(async () => {
+    const state = await readRoleState();
+    const held = state?.set;
+    if (held && Date.parse(held.namedAt) >= Date.parse(namedAt)) return false;
+    await writeRoleState({ ...state, version: 1, set: { name, namedAt } });
+    return held?.name !== name;
+  });
 }
