@@ -12,6 +12,8 @@ import {
   claudeUsage,
   codexUsage,
   copilotUsage,
+  elevenLabsUsage,
+  fetchElevenLabsUsage,
   fetchClaudeUsage,
   fetchOpenRouterUsage,
   openCodeFailure,
@@ -489,5 +491,37 @@ describe("Claude accounts in usage", () => {
     expect(gone.windows).toEqual([]);
     expect(gone.message).toBe("No usage report from Claude on this computer since 2026-09-26. It updates when Claude Code runs here.");
     expect(gone.message).not.toContain("\u2014");
+  });
+});
+
+describe("ElevenLabs usage", () => {
+  it("reports characters used against the limit with the reset, and sends the key only to ElevenLabs", async () => {
+    let seen: { url: string; key?: string } | undefined;
+    const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+      seen = { url: String(url), key: (init?.headers as Record<string, string>)["xi-api-key"] };
+      return { ok: true, status: 200, json: async () => ({ tier: "creator", character_count: 12_345, character_limit: 100_000, next_character_count_reset_unix: 1_900_000_000 }) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    const usage = await fetchElevenLabsUsage("xi-secret", fetchImpl, now);
+    expect(seen).toEqual({ url: "https://api.elevenlabs.io/v1/user/subscription", key: "xi-secret" });
+    expect(usage.source).toBe("elevenlabs");
+    expect(usage.windows).toEqual([{ id: "elevenlabs:characters", name: "Characters this period", usedPercent: 12.3,
+      usedCharacters: 12_345, limitCharacters: 100_000, resetsAt: new Date(1_900_000_000_000).toISOString() }]);
+    expect(JSON.stringify(usage)).not.toContain("xi-secret");
+    const failing = (async () => ({ ok: false, status: 401 }) as unknown as Response) as unknown as typeof fetch;
+    await expect(fetchElevenLabsUsage("xi-secret", failing, now)).rejects.toThrow("401");
+  });
+  it("caps overage at 100% and explains a missing limit", () => {
+    expect(elevenLabsUsage({ character_count: 120, character_limit: 100 }, now).windows[0]).toMatchObject({ usedPercent: 100, usedCharacters: 120 });
+    const none = elevenLabsUsage({ character_count: 5 }, now);
+    expect(none.windows).toEqual([]);
+    expect(none.message).toContain("did not report a character limit");
+  });
+  it("adds an ElevenLabs row only for callers that name the source", async () => {
+    const reader = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => 0, async () => undefined,
+      openCode, noOpenRouter, noOpenCodeGo, noCopilot, "linux", async date => elevenLabsUsage({ character_count: 10, character_limit: 100 }, date));
+    const usage = await reader.read();
+    expect(usage.accounts.filter(a => a.source === "elevenlabs").map(a => a.windows[0].usedPercent)).toEqual([10]);
+    expect(usageForCaller(usage.accounts, new Set(["codex", "claude", "opencode", "openrouter"]), false).some(a => a.source === "elevenlabs")).toBe(false);
+    expect(usageForCaller(usage.accounts, new Set(["elevenlabs"]), false).map(a => a.source)).toEqual(["elevenlabs"]);
   });
 });

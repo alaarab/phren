@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { atomicInPrivateDir, bridgeRoot, type Json, object } from "./protocol.js";
 import { stripTerminal } from "../terminal-text.js";
 import { codexExecutable } from "./codex-binary.js";
+import { readSpeechKey } from "./speech-key.js";
 import { CODEX_ACCOUNT, claudeAccountEmail, claudeAccountRef, claudeHomeOfEnv, claudeHomes, type AccountRef, type ClaudeHome } from "./claude-accounts.js";
 
 const exec = promisify(execFile);
@@ -22,6 +23,9 @@ export interface UsageWindow {
   usedUSD?: number;
   limitUSD?: number;
   usedTokens?: number;
+  /** ElevenLabs' character quota, next to its percentage. */
+  usedCharacters?: number;
+  limitCharacters?: number;
   resetsAt?: string;
   /** The service says this window is refusing requests now (OpenCode Go's `rate-limited`). */
   limited?: boolean;
@@ -31,7 +35,7 @@ export interface UsageWindow {
 }
 export interface UsageSpend { amountUSD: number; period: "rolling_7_days" | "rolling_30_days" | "calendar_week" }
 export interface AccountUsage {
-  source: "codex" | "claude" | "opencode" | "opencode-go" | "openrouter" | "copilot";
+  source: "codex" | "claude" | "opencode" | "opencode-go" | "openrouter" | "copilot" | "elevenlabs";
   windows: UsageWindow[];
   updatedAt?: string;
   message?: string;
@@ -306,6 +310,43 @@ async function liveOpenRouterUsage(now: Date): Promise<AccountUsage | undefined>
   if (!key) return undefined;
   try { return await fetchOpenRouterUsage(key, fetch, now); } catch {
     return { source: "openrouter", windows: [], message: "Could not read OpenRouter spend. Check its key in OpenCode." };
+  }
+}
+
+/** ElevenLabs' subscription: characters used this billing period against the plan's limit. */
+export function elevenLabsUsage(value: unknown, now = new Date()): AccountUsage {
+  const sub = object(value);
+  const used = sub.character_count, limit = sub.character_limit;
+  const count = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+  if (!count(used) || !count(limit) || limit === 0) {
+    return { source: "elevenlabs", windows: [], updatedAt: now.toISOString(), message: "ElevenLabs did not report a character limit for this key." };
+  }
+  const entry = window("elevenlabs:characters", "Characters this period", Math.min(100, Math.round(used / limit * 1000) / 10), sub.next_character_count_reset_unix);
+  return { source: "elevenlabs", windows: entry ? [{ ...entry, usedCharacters: used, limitCharacters: limit }] : [], updatedAt: now.toISOString() };
+}
+
+/** The key the Hook already uses for /v1/speech, sent only to ElevenLabs; the answer carries counts, never the key. */
+export async function fetchElevenLabsUsage(key: string, fetchImpl: typeof fetch = fetch, now = new Date()): Promise<AccountUsage> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const response = await fetchImpl("https://api.elevenlabs.io/v1/user/subscription", {
+      headers: { "xi-api-key": key, accept: "application/json" },
+      redirect: "error",
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`ElevenLabs subscription endpoint returned ${response.status}.`);
+    return elevenLabsUsage(await response.json(), now);
+  } finally { clearTimeout(timer); }
+}
+
+/** No row without a key: most computers have no spoken replies set up. `PHREN_ELEVENLABS_USAGE=off` skips it (the test suite does). */
+async function liveElevenLabsUsage(now: Date): Promise<AccountUsage | undefined> {
+  if (typeof fetch !== "function" || process.env.PHREN_ELEVENLABS_USAGE === "off") return undefined;
+  const key = await readSpeechKey().catch(() => undefined);
+  if (!key) return undefined;
+  try { return await fetchElevenLabsUsage(key, fetch, now); } catch {
+    return { source: "elevenlabs", windows: [], updatedAt: now.toISOString(), message: "Could not read ElevenLabs usage. Check this computer's ElevenLabs key." };
   }
 }
 
@@ -584,7 +625,8 @@ export class AccountUsageReader {
               private readOpenRouter: (now: Date) => Promise<AccountUsage | undefined> = liveOpenRouterUsage,
               private readOpenCodeGo: (now: Date) => Promise<AccountUsage> = readOpenCodeGoUsage,
               private readCopilot: (now: Date) => Promise<AccountUsage> = readCopilotUsage,
-              private platform: NodeJS.Platform = process.platform) {}
+              private platform: NodeJS.Platform = process.platform,
+              private readElevenLabs: (now: Date) => Promise<AccountUsage | undefined> = liveElevenLabsUsage) {}
   /** `allAccounts`: one Claude row per home. Otherwise only the default home's, as
    *  before accounts existed, since older phones refuse two rows of one source. */
   async read(sources?: Set<string>, allAccounts = false): Promise<{ accounts: AccountUsage[] }> {
@@ -608,8 +650,8 @@ export class AccountUsageReader {
       const at = this.now();
       if (!this.spendingPending.has(includeCopilot)) {
         const pending = Promise.all([this.readOpenCode(new Date(at)), this.readOpenCodeGo(new Date(at)), this.readOpenRouter(new Date(at)),
-          includeCopilot ? this.readCopilot(new Date(at)) : Promise.resolve(undefined)])
-          .then(([openCode, openCodeGo, openRouter, copilot]) => [openCode, openCodeGo, ...(openRouter ? [openRouter] : []), ...(copilot ? [copilot] : [])])
+          includeCopilot ? this.readCopilot(new Date(at)) : Promise.resolve(undefined), this.readElevenLabs(new Date(at)).catch(() => undefined)])
+          .then(([openCode, openCodeGo, openRouter, copilot, elevenLabs]) => [openCode, openCodeGo, ...(openRouter ? [openRouter] : []), ...(copilot ? [copilot] : []), ...(elevenLabs ? [elevenLabs] : [])])
           .then(value => { this.spendingCached.set(includeCopilot, { at, value }); return value; })
           .finally(() => { this.spendingPending.delete(includeCopilot); });
         this.spendingPending.set(includeCopilot, pending);
