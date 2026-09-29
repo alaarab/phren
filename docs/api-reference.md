@@ -44,12 +44,13 @@ See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
 | `model` | string | no | Explicit remote model, up to 200 characters; otherwise its configured default. |
 | `effort` | enum | no | Reasoning effort: `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; otherwise the harness default. Codex takes it as `model_reasoning_effort`, Claude as `--effort`, OpenCode as `--variant`. |
 | `account` | string | no | Claude account id (`default` or a slug from `phren bridge accounts`). `anywhere` skips computers whose `harnesses` do not report that account usable (an older Hook that reports none is skipped too) and lists each in `skipped`; a named computer that lacks it fails before launching. Recorded on the receipt. |
+| `permissionMode` | enum | no | Permission mode the worker starts in: `supervised`, `auto-edits`, `auto` or `full-access`; otherwise the receiving computer's own default. Claude and Codex only; `opencode` is refused with 400 before a receipt is saved. |
 | `prompt` | string | yes | Worker brief, up to 32768 characters. |
 | `label` | string | yes | Task label, up to 200 characters. |
 | `parent` | object | no | Conversation identity to retain in the dispatch receipt. |
 | `parentTarget` | object | no | Live local target used to validate the parent identity. |
 
-Returns the receipt in `data`: dispatch ID, computer, project, harness/model/effort,
+Returns the receipt in `data`: dispatch ID, computer, project, harness/model/effort/permissionMode,
 label, timestamps, state, remote target when known, grant match (`granted`), and an optional error.
 `accepted` means first-prompt acceptance, not task completion: for Claude and
 Codex the brief goes with the launch and the worker's own hook confirms it by
@@ -152,7 +153,12 @@ module. Folding rules are in [Conductor](conductor.md#computers).
 ### Hook workspace launch fields
 
 `POST /v1/workspaces/launch` accepts `role: "agent" | "conductor"` (default
-`agent`) and `effort: "low" | "medium" | "high"` (default `medium`). A
+`agent`) and `effort: "low" | "medium" | "high"` (default `medium`). Workers
+also take an optional `permissionMode` (`supervised`, `auto-edits`, `auto` or
+`full-access`): Claude gets `--permission-mode`, Codex gets its approval and
+sandbox settings, and OpenCode, Copilot and conductors are refused with 400
+before any pane exists. The reply repeats `permissionMode` when it was applied,
+so a caller can tell an older Hook that ignored it. A
 conductor launch supports Claude, Codex and OpenCode, attaches the shipped
 conductor brief, prefixes the Herdr agent name with `conductor-`, and returns
 `role: "conductor"`. Workspace overview tabs report that role. A second running

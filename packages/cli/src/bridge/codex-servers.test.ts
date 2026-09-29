@@ -129,6 +129,14 @@ describe.skipIf(process.platform === "win32")("launching a pane's Codex server",
     expect(servers.forTarget({ ...target, session: "other" })).toBeUndefined();
   });
 
+  it("adds a permission mode's flags to a pane whose TUI starts the thread, and not to a resume", async () => {
+    const flags = ["-a", "never", "-s", "danger-full-access"];
+    const { entry, args } = await servers.launch(place, { cwd: root, remoteArgs: flags });
+    expect(args).toEqual(["--remote", `unix://${entry.socket}`, ...flags]);
+    const resumed = await servers.launch({ ...place, pane: "w1:p3" }, { cwd: root, startThread: true, remoteArgs: flags });
+    expect(resumed.args).toEqual(["resume", "thread-1", "--remote", `unix://${resumed.entry.socket}`]);
+  });
+
   it("without a brief, lets the pane's TUI start the thread and learns it from thread/started", async () => {
     const { entry, args } = await servers.launch(place, { cwd: root, model: "gpt-5.4", effort: "low" });
     expect(args).toEqual(["--remote", `unix://${entry.socket}`, "--model", "gpt-5.4", "-c", "model_reasoning_effort=low"]);

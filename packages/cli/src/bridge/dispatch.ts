@@ -12,7 +12,7 @@ import { findGrant, grantLabel } from "./grants.js";
 import { hookPeers } from "./peers.js";
 import { linkedComputer } from "./computer-identity.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
-import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
 import { isAccountSlug } from "./claude-accounts.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
@@ -28,6 +28,7 @@ export const dispatchSchema = z.object({
   effort: z.enum(launchEfforts).optional().describe("Reasoning effort for the worker (minimal, low, medium, high, xhigh, max), otherwise the harness default."),
   account: z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").optional()
     .describe("Claude account id to run the worker under (default, or a slug from `phren bridge accounts`). anywhere only picks computers where that account is signed in; a named computer without it fails."),
+  permissionMode: z.enum(PERMISSION_MODES).optional().describe("Permission mode the worker starts in: supervised, auto-edits, auto or full-access (Claude and Codex only); otherwise the receiving computer's own default."),
   prompt: z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value)).describe("Worker brief, at most 32768 characters."),
   label: text(200).describe("Short task label."),
   parent: dispatchParentSchema.optional().describe("Explicit local conversation parent for work-tree attachment."),
@@ -101,6 +102,7 @@ async function save(receipt: Receipt): Promise<void> {
   await atomic(path.join(root, `${receipt.id}.json`), receipt);
 }
 
+const IGNORED_MODE = "The receiving Hook is older and ignored permissionMode; the worker runs in that computer's default mode. Update its Hook.";
 const MAX_RECEIPT_BYTES = 65_536;
 let receiptUpdates: Promise<unknown> = Promise.resolve();
 
@@ -285,6 +287,7 @@ export class DispatchService {
    * Herdr variables name it; a pane without a running agent is left out. */
   async dispatch(input: unknown, originValue?: unknown): Promise<Json> {
     const data = dispatchSchema.parse(input);
+    if (data.permissionMode && data.harness === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude and Codex workers.");
     if (this.active) throw new BridgeError(429, "A dispatch is already being placed. Try again after its receipt arrives.");
     this.active = true;
     try {
@@ -349,10 +352,13 @@ export class DispatchService {
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
-          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ? { account: data.account } : {}), label: data.label, brief: { id: receipt.id, text: prompt } });
+          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ? { account: data.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), label: data.label, brief: { id: receipt.id, text: prompt } });
+        // An older Hook ignores the field and starts the worker in its own default mode.
+        const ignored = data.permissionMode && launched.permissionMode !== data.permissionMode ? IGNORED_MODE : undefined;
         if (launched.briefLaunched === true) {
           receipt.brief = "launch";
           await this.confirmLaunched(peer, receipt, launched);
+          if (ignored) receipt.error = [receipt.error, ignored].filter(Boolean).join(" ").slice(0, 500);
           receipt.updatedAt = new Date().toISOString(); await save(receipt);
           return { ok: receipt.state === "accepted", ...receipt };
         }
@@ -368,6 +374,7 @@ export class DispatchService {
         receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt);
         const result = await sendBrief(peer, receipt.target, prompt, `dispatch-${receipt.id}`);
         receipt.state = result.ok === true && result.deliveryUncertain !== true ? "accepted" : "uncertain";
+        if (ignored) receipt.error = ignored;
       } catch (error) {
         if (error instanceof StartupScreen) {
           // Known, not uncertain: the brief never reached the pane. Say where
