@@ -25,6 +25,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Task auto-capture ignores relays with long sender names and parenthesized handles, and commit or push reports whose hash occurs before the end of the message.
 - A Claude or Codex session whose main turn ended but which still runs background shells or subagents is listed as working, not idle. Each tab in `/v1/workspaces` and `/v1/overview` (and `live_sessions`) keeps `agentStatus: "working"` and gains `backgroundTasks`, from the pane's last Stop count or the running subagents and fanout jobs, whichever is larger.
 - Dispatch returns wait for background work to settle: a stopped worker still running background tasks stays working for up to two hours after its latest Stop (was 30 minutes), and an idle pane with no turn record but a finished turn that left background work is no longer counted done. A worker that finishes after waiting reports `waited` in its return and notice ("done (after 7 background tasks finished)").
 - Dispatched workers are titled by their dispatch label on the phone, not "Read and follow the brief..." or "Brief d35c6189". The receiving Hook keeps the label beside the brief (`<bridge>/briefs/<id>/label`); `/v1/workspaces` and `/v1/workspaces/panes` drop harness titles made from the brief prompt.

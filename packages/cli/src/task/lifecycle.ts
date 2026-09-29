@@ -72,8 +72,9 @@ const CONVERSATIONAL_FILLER_RE = /\b(?:lmao|lmfao|rofl|lol+|haha+|idk|idc|tbh|ng
 const PASTED_CONTENT_WRAPPER_RE = /<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content\b[^>]*>/g;
 // Relays may name one sender ("From tidy-phren:") or a computer and agent
 // ("From macbook android-codex:"). Keep "From now on" as a request.
-// A two-word sender needs the colon, so "From the settings page, add …" stays a request.
-const RELAYED_MESSAGE_RE = /^\s*from\s+(?:the\s+)?(?!(?:now|here|there|then|scratch|today|tomorrow)\b)(?:[\w.-]+\s*[,:]|[\w.-]+\s+[\w.-]+\s*:)/i;
+// A two-word sender needs the colon; longer names need a parenthesized handle.
+// "From the settings page, add …" stays a request.
+const RELAYED_MESSAGE_RE = /^\s*from\s+(?:the\s+)?(?!(?:now|here|there|then|scratch|today|tomorrow)\b)(?:[\w.-]+\s*[,:]|[\w.-]+\s+[\w.-]+\s*:|[\w.-]+(?:[ \t]+[\w.-]+)*[ \t]+\([\w.-]+\)[ \t]*:)/i;
 // Dispatch returns are typed into an idle agent as ordinary prompts.
 const DISPATCH_RETURN_NOTICE_RE = /^\s*returns?:\s+[^\n]+\bCall dispatch_returns\.\s*$/i;
 // A dispatched or scheduled worker's first prompt names its brief file
@@ -81,8 +82,9 @@ const DISPATCH_RETURN_NOTICE_RE = /^\s*returns?:\s+[^\n]+\bCall dispatch_returns
 // own hook must not file it again: every dispatched Claude filed one task.
 const LAUNCH_BRIEF_PROMPT_RE = /^\s*Read and follow the brief in \/[^\n]+$/;
 // Completed-work reports can arrive without a relay prefix. Only a status
-// ending in a commit, push or opened PR is excluded; imperative requests stay eligible.
-const AGENT_STATUS_REPORT_RE = /(?:\b(?:committed|pushed)\s+as\s+[0-9a-f]{7,40}|\bPR\s+#\d+\s+opened)\s*[.!]?\s*$/i;
+// reporting a commit or push, or ending in an opened PR, is excluded;
+// imperative requests stay eligible even when they mention a pushed commit.
+const AGENT_STATUS_REPORT_RE = /(?:\b(?:committed|pushed)\s+(?:as\s+)?[0-9a-f]{7,40}\b|\bPR\s+#\d+\s+opened\s*[.!]?\s*$)/i;
 // Frames another agent or the harness put in the prompt: a cross-session message, a
 // sub-agent hand-back, a delivery/idle notice, a task or system notification, a system
 // reminder. Not the person's request. Matched anywhere, since a harness may put the
