@@ -15,6 +15,7 @@ import { bridgeRoot, object, objects, atomic, socketPath } from "./protocol.js";
 import { herdrRoot } from "./herdr.js";
 import { health } from "./transport.js";
 import { FAST_HOOK_SOURCE, fastHookPath } from "./hook-fast.js";
+import { installAskpass, removeAskpass } from "./sudo.js";
 import { readStoredVoice, SPEECH_VOICE_ENV, writeSpeechVoice } from "./speech-voice.js";
 
 const exec = promisify(execFile);
@@ -224,6 +225,7 @@ export async function install(version: string, noService = false): Promise<void>
     root, herdr, store: modules.store, profile: modules.profile, node: process.execPath,
     bundle: path.join(root, "current/bridge-hook.mjs"), socket: socketPath(), timing: path.join(root, "gateway.json"),
   }), 0o700);
+  await installAskpass(process.execPath, path.join(root, "current/bridge-hook.mjs"));
   const environmentPath = [path.dirname(process.execPath), path.join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin"].join(":");
   const program = path.join(root, "current/bridge-hook.mjs");
   if (!noService) {
@@ -304,6 +306,7 @@ export async function uninstall() {
   else { await exec("systemctl", ["--user", "disable", unit]).catch(() => {}); await unlink(path.join(homedir(), ".config/systemd/user", unit)).catch(() => {}); await exec("systemctl", ["--user", "daemon-reload"]).catch(() => {}); }
   await applyAgentHooks(await planAgentHooks(path.join(bridgeRoot(), "current/bridge-hook.mjs"), true));
   await applyOpencodePlugin(true);
+  await removeAskpass();
   // Preserve journal, settings, uploaded images, rollback version and SSH backups.
   console.log("Phren Hook stopped and its background service removed. Remove phren-iphone, phren-android and phren-computer keys from authorized_keys to revoke device access. Local data remains in " + bridgeRoot());
 }

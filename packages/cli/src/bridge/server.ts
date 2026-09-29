@@ -149,6 +149,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     info: () => ({ ...info, capabilities: info.capabilities }),
     renew: server => agentHooks.overview.renew(server),
     resources: () => resources.read(),
+    sudo: agentHooks.sudo,
   });
   const http = createServer(createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
     journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
@@ -168,7 +169,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
           oldest.close(1008, "Too many connections; reconnect"); oldest.terminate();
           ws.clients.delete(oldest);
         }
-        if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1", url.searchParams.get("resources") === "1", typedMuxRequest(url)); return; }
+        if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1", url.searchParams.get("resources") === "1", typedMuxRequest(url), url.searchParams.get("sudo") === "1"); return; }
         if (url.pathname === "/v1/speech/transcribe") { void relayTranscription(client, url.searchParams).catch(() => client.close(1011, "Transcription unavailable")); return; }
         void stream(client, url).catch(() => client.close(1011, "Conversation unavailable; refresh"));
       });

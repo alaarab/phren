@@ -238,6 +238,11 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./bridge/dispatch-command.js")).runDispatch(args),
   },
   {
+    name: "sudo", topic: "core", standalone: true, usage: "phren sudo <command...>",
+    summary: "Run sudo -A with Phren Hook's askpass: your phone shows the command and asks for the password, for `!` commands and agents with no terminal",
+    run: async args => (await import("./bridge/sudo.js")).runSudo(args),
+  },
+  {
     name: "computers", topic: "core", standalone: true,
     usage: "phren computers [<name>] [--resources] [--pick [mac|linux|any]] [--exclude a,b] [--local] [--json] | phren computers mcp",
     summary: "Each computer's load, memory, disk, battery and heavy jobs from Phren Hook, without Phren memory; `mcp` serves them read-only to agents",

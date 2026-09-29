@@ -30,6 +30,10 @@ Worth saving: decisions and why, pitfalls with the fix, patterns that worked, me
 
 Every agent follows these rules, and tells phren about non-obvious findings before handing work back.
 
+## sudo
+
+With no terminal, run `sudo -A <command>` (or `phren sudo <command>`): the owner types the password on their phone. Plain `sudo` fails there. Never ask for, store or echo the password.
+
 ## Where things are
 
 `~/.phren` (or `$PHREN_PATH`) is a git repo: `global/` for everything-everywhere, `<project>/` for each project's AGENTS.md, findings, tasks and skills, `profiles/` and `machines.yaml` for which projects belong on which machine. `phren doctor` explains anything that is off. If the MCP server is not running, phren still injects context through hooks; the CLI (`phren search`, `phren add-finding`) does the rest.
