@@ -4,7 +4,7 @@ import { hookRequest } from "./client.js";
 import { notLinkedFrom, type NotLinkedComputer } from "./hand-off.js";
 import { optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { errorCode, object, type Json } from "./protocol.js";
-import { NEAR_LIMIT_LEFT, windowLeft, type AccountUsage, type UsageWindow } from "./usage.js";
+import { NEAR_LIMIT_LEFT, windowExhausted, windowLeft, type AccountUsage, type UsageWindow } from "./usage.js";
 
 export { NEAR_LIMIT_LEFT };
 
@@ -20,6 +20,10 @@ export { NEAR_LIMIT_LEFT };
  * (`claude:home:<id>`) stays per computer, since two unknown logins are not
  * one account. A window whose reset time has passed says `reset` and has no
  * percent, and a report older than STALE_AFTER_MS is flagged stale.
+ *
+ * `nearLimit` is information: the owner often wants quota used before it
+ * resets. Only `exhausted` (a window at 100% or refusing requests) rules an
+ * account out.
  */
 
 /** A report older than this is flagged: the Hook reads each account at most once a minute. */
@@ -39,6 +43,8 @@ export interface AccountWindow {
   reset?: true;
   /** The service is refusing requests on this window now. */
   limited?: true;
+  /** At 100% or refused: no quota on this window until it resets. */
+  exhausted?: true;
   usedUSD?: number;
   limitUSD?: number;
 }
@@ -53,7 +59,12 @@ export interface AccountUsageRow {
   windows: AccountWindow[];
   /** Least room on any window with a percent; `limited` counts as 0. */
   leftPercent?: number;
+  /** Under 20% left on some window. Information, not a reason to avoid the account. */
   nearLimit: boolean;
+  /** A window is at 100% or refusing requests: never dispatch to it until `availableIn`. */
+  exhausted: boolean;
+  /** When the last exhausted window resets, as "3h 10m". */
+  availableIn?: string;
   spend?: { amountUSD: number; period: string };
   updatedAt?: string;
   /** How old the standing report is, as "4m" or "2d 3h". */
@@ -109,6 +120,7 @@ export function settleWindow(window: UsageWindow, now: number): AccountWindow {
   if (left !== undefined) out.leftPercent = left;
   if (window.resetsAt && !reset) { out.resetsAt = window.resetsAt; const until = resetsIn(window.resetsAt, now); if (until) out.resetsIn = until; }
   if (window.limited && !reset) out.limited = true;
+  if (windowExhausted(window, now)) out.exhausted = true;
   if (window.usedUSD !== undefined) out.usedUSD = window.usedUSD;
   if (window.limitUSD !== undefined) out.limitUSD = window.limitUSD;
   return out;
@@ -155,6 +167,9 @@ export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.
     const spend = mergedSpend(source, reporting);
     const updated = date(standing.usage.updatedAt);
     const leftPercent = roomLeft(windows);
+    const exhausted = windows.filter(w => w.exhausted);
+    const availableAt = exhausted.map(w => w.resetsAt).filter((value): value is string => Boolean(value)).sort().at(-1);
+    const availableIn = availableAt ? resetsIn(availableAt, now) : undefined;
     const name = accountName(standing.usage);
     const computers = reporting.map(item => ({ name: item.computer, ...(source === "claude" && item.usage.account?.id ? { account: item.usage.account.id } : {}) }))
       .filter((item, index, list) => list.findIndex(other => other.name === item.name && other.account === item.account) === index);
@@ -162,6 +177,7 @@ export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.
       id, harness: source, name: HARNESS_NAMES[source] ?? source, ...(name ? { account: name } : {}), windows,
       ...(leftPercent !== undefined ? { leftPercent } : {}),
       nearLimit: windows.some(w => w.limited) || leftPercent !== undefined && leftPercent < NEAR_LIMIT_LEFT,
+      exhausted: exhausted.length > 0, ...(availableIn ? { availableIn } : {}),
       ...(spend ? { spend } : {}),
       ...(standing.usage.updatedAt ? { updatedAt: standing.usage.updatedAt } : {}),
       ...(Number.isFinite(updated) ? { age: ageText(now - updated) } : {}),
@@ -245,10 +261,12 @@ const title = (row: AccountUsageRow) => row.account ? `${row.name} · ${row.acco
 /** The one-line answer a conductor reads first: how many, and which accounts are tight or stale. */
 export function usageSummary(view: AccountUsageView): string {
   const parts = [`${view.accounts.length} account${view.accounts.length === 1 ? "" : "s"} across ${view.computers.length} computer${view.computers.length === 1 ? "" : "s"}.`];
-  const near = view.accounts.filter(row => row.nearLimit);
-  if (near.length) parts.push(`Near a limit: ${near.map(row => `${title(row)} (${row.leftPercent ?? 0}% left${tightest(row)?.resetsIn ? `, resets in ${tightest(row)!.resetsIn}` : ""})`).join("; ")}.`);
-  const withRoom = view.accounts.filter(row => !row.nearLimit && row.leftPercent !== undefined);
-  if (view.accounts.some(row => row.leftPercent !== undefined) && !withRoom.length) parts.push("Every account with limits is near one: tell the owner before dispatching.");
+  const out = view.accounts.filter(row => row.exhausted);
+  if (out.length) parts.push(`Out of quota, do not dispatch to: ${out.map(row => `${title(row)}${row.availableIn ? ` (back in ${row.availableIn})` : ""}`).join("; ")}.`);
+  const near = view.accounts.filter(row => row.nearLimit && !row.exhausted);
+  if (near.length) parts.push(`Low but usable: ${near.map(row => `${title(row)} (${row.leftPercent ?? 0}% left${tightest(row)?.resetsIn ? `, resets in ${tightest(row)!.resetsIn}` : ""})`).join("; ")}.`);
+  const limitedRows = view.accounts.filter(row => row.leftPercent !== undefined || row.exhausted);
+  if (limitedRows.length && limitedRows.every(row => row.exhausted)) parts.push("Every account with limits is out of quota: tell the owner before dispatching.");
   const stale = view.accounts.filter(row => row.stale);
   if (stale.length) parts.push(`Stale: ${stale.map(row => `${title(row)} (${row.windows.some(w => w.reset) ? "a window reset since its report" : `reported ${row.age ? ago(row.age) : "at an unknown time"}`})`).join("; ")}.`);
   if (view.unreachable.length) parts.push(`Unreachable: ${view.unreachable.map(item => item.computer).join(", ")}.`);
@@ -265,7 +283,7 @@ export function formatAccountUsage(view: AccountUsageView): string {
   const lines = [`Usage by account from ${view.computers.join(", ")}`];
   for (const row of view.accounts) {
     const where = row.computers.map(c => c.account && c.account !== "default" ? `${c.name} (${c.account})` : c.name).join(", ");
-    const flags = [row.nearLimit ? `near limit, ${row.leftPercent ?? 0}% left` : row.leftPercent !== undefined ? `${row.leftPercent}% left` : "",
+    const flags = [row.exhausted ? `out of quota${row.availableIn ? `, back in ${row.availableIn}` : ""}` : row.nearLimit ? `low, ${row.leftPercent ?? 0}% left` : row.leftPercent !== undefined ? `${row.leftPercent}% left` : "",
       row.stale ? `stale${row.age ? `, reported ${ago(row.age)}` : ""}` : row.age ? ago(row.age) : ""].filter(Boolean).join("; ");
     lines.push(`${title(row)}  on ${where}${flags ? `  (${flags})` : ""}`);
     for (const w of row.windows) {

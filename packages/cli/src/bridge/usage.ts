@@ -587,8 +587,15 @@ export async function readCopilotUsage(now = new Date(), run: (file: string, arg
   }
 }
 
-/** Under this much left on any window, an account is near its limit. */
+/** Under this much left on any window, an account is near its limit: information for the owner, never a reason to avoid it. */
 export const NEAR_LIMIT_LEFT = 20;
+
+/** No quota on this window now: at 100% or refused by the service, and its reset not yet passed. */
+export function windowExhausted(window: UsageWindow, now: number): boolean {
+  const reset = window.resetsAt ? Date.parse(window.resetsAt) : NaN;
+  if (window.reset || Number.isFinite(reset) && reset <= now) return false;
+  return window.limited === true || typeof window.usedPercent === "number" && window.usedPercent >= 100;
+}
 
 /** Percent left on a window at `now`: none once its reset passed or with no percent, 0 while the service refuses requests. */
 export function windowLeft(window: UsageWindow, now: number): number | undefined {
@@ -598,11 +605,15 @@ export function windowLeft(window: UsageWindow, now: number): number | undefined
   return typeof window.usedPercent === "number" ? Math.max(0, Math.min(100, Math.round(100 - window.usedPercent))) : undefined;
 }
 
-/** What a capacity probe says about room: each Codex and Claude account's least room left. */
-export function capacityRoom(accounts: readonly AccountUsage[], now: number): Array<{ source: string; account?: string; leftPercent?: number }> {
+/** What a capacity probe says about room: each Codex and Claude account's least room left, and whether it has none
+ *  (`exhausted`, with `until` the last reset that frees it). */
+export function capacityRoom(accounts: readonly AccountUsage[], now: number): Array<{ source: string; account?: string; leftPercent?: number; exhausted?: true; until?: string }> {
   return accounts.map(usage => {
     const left = usage.windows.map(window => windowLeft(window, now)).filter((value): value is number => value !== undefined);
-    return { source: usage.source, ...(usage.account?.id ? { account: usage.account.id } : {}), ...(left.length ? { leftPercent: Math.min(...left) } : {}) };
+    const out = usage.windows.filter(window => windowExhausted(window, now));
+    const until = out.map(window => window.resetsAt).filter((value): value is string => Boolean(value)).sort().at(-1);
+    return { source: usage.source, ...(usage.account?.id ? { account: usage.account.id } : {}), ...(left.length ? { leftPercent: Math.min(...left) } : {}),
+      ...(out.length ? { exhausted: true as const, ...(until ? { until } : {}) } : {}) };
   });
 }
 

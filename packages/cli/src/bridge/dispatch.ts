@@ -19,7 +19,6 @@ import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, P
 import { phrenStoreRoot } from "./transcripts.js";
 import { isAccountSlug } from "./claude-accounts.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
-import { NEAR_LIMIT_LEFT } from "./usage.js";
 import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
@@ -177,7 +176,7 @@ export async function dispatchStatus(): Promise<Receipt[]> {
 
 /** `caller` (a conductor's name and host key) asks a peer whether it links this computer back:
  * `outside` is a peer in another set, which a conductor does not dispatch to. */
-type Room = { source: string; account?: string; leftPercent?: number };
+type Room = { source: string; account?: string; leftPercent?: number; exhausted?: boolean; until?: string };
 async function capacity(host: DispatchHost, caller?: string): Promise<{ working: number; computerId: string; harnesses?: HarnessInventory["harnesses"]; usage?: Room[]; outside?: true }> {
   const value = await host.request(caller && !host.local ? `/v1/dispatch/capacity?${caller}` : "/v1/dispatch/capacity");
   const result = z.object({ product: z.literal("phren-hook"), protocol: z.literal(PROTOCOL), working: z.number().int().nonnegative(),
@@ -185,8 +184,9 @@ async function capacity(host: DispatchHost, caller?: string): Promise<{ working:
     // Missing from an older Hook, or when its inventory was not ready in time: unknown, not unavailable.
     harnesses: z.array(z.object({ source: z.string(), installed: z.boolean(), usable: z.boolean(), reason: z.string().optional(),
       accounts: z.array(z.object({ id: z.string(), usable: z.boolean(), reason: z.string().optional() }).passthrough()).optional() }).passthrough()).optional(),
-    // Missing from an older Hook or a slow read: no tie-break by usage for that computer.
-    usage: z.array(z.object({ source: z.string(), account: z.string().optional(), leftPercent: z.number().min(0).max(100).optional() }).passthrough()).max(64).optional(),
+    // Missing from an older Hook or a slow read: that computer's quota is unknown, so it is never ruled out by it.
+    usage: z.array(z.object({ source: z.string(), account: z.string().optional(), leftPercent: z.number().min(0).max(100).optional(),
+      exhausted: z.boolean().optional(), until: z.string().max(40).optional() }).passthrough()).max(64).optional(),
     knowsCaller: z.boolean().optional() }).parse(value);
   // This computer places on whichever Herdr server its own Hook runs.
   if (host.local && !result.servers.includes(host.server) && result.servers[0]) host.server = result.servers[0];
@@ -196,15 +196,21 @@ async function capacity(host: DispatchHost, caller?: string): Promise<{ working:
     ...(caller && result.knowsCaller === false ? { outside: true as const } : {}) };
 }
 
-/** Least room left on the account this dispatch would run under there: Codex's one, or the named Claude home. */
-export function roomFor(data: { harness: string; account?: string }, usage: readonly Room[] | undefined): number | undefined {
+/** The account this dispatch would run under there, as its capacity probe reports it: Codex's one, or the named Claude home. */
+export function roomFor(data: { harness: string; account?: string }, usage: readonly Room[] | undefined): Room | undefined {
   const account = data.account ?? "default";
-  return usage?.find(item => item.source === data.harness && (data.harness !== "claude" || (item.account ?? "default") === account))?.leftPercent;
+  return usage?.find(item => item.source === data.harness && (data.harness !== "claude" || (item.account ?? "default") === account));
 }
 
-/** Room enough first, then unknown, then near a limit. */
-export function roomRank(left: number | undefined): number {
-  return left === undefined ? 1 : left < NEAR_LIMIT_LEFT ? 2 : 0;
+/** Why `anywhere` must not pick a computer for quota: only an account with none left (at 100% or refusing requests).
+ *  Low quota is not a reason; the owner often wants it used before it resets. */
+export function outOfQuota(data: { harness: string; account?: string }, usage: readonly Room[] | undefined, now = Date.now()): string | undefined {
+  const room = roomFor(data, usage);
+  if (!room?.exhausted) return undefined;
+  const until = room.until ? Date.parse(room.until) : NaN;
+  const minutes = Number.isFinite(until) ? Math.max(1, Math.round((until - now) / 60_000)) : undefined;
+  const back = minutes === undefined ? "" : minutes >= 1440 ? ` for about ${Math.round(minutes / 1440)} more days` : minutes >= 60 ? ` for about ${Math.round(minutes / 60)} more hours` : ` for about ${minutes} more minutes`;
+  return `Its ${data.harness}${data.harness === "claude" ? ` account ${data.account ?? "default"}` : ""} has no quota left${back}.`;
 }
 
 /** Why a computer cannot run this dispatch's harness and account, or undefined when it can or cannot yet be told.
@@ -343,7 +349,7 @@ export class DispatchService {
       let peer: DispatchHost | undefined;
       let remoteComputerID: string | undefined;
       const skipped: Skipped[] = [];
-      let incapable = false;
+      let incapable = false, spentSeen = false;
       if (data.computer === "anywhere") {
         const available = await Promise.all(peers.map(async candidate => {
           try { return { peer: candidate, ...await capacity(candidate, caller) }; } catch (error) {
@@ -358,15 +364,18 @@ export class DispatchService {
           const reason = unusable(data, item.harnesses, true);
           if (reason) incapable = true;
           if (reason) skipped.push({ computer: item.peer.name, reason: reason.slice(0, 200) });
-          return !reason;
+          if (reason) return false;
+          // The one quota rule: never place a worker on an account with none left. Low quota still counts as room.
+          const spent = outOfQuota(data, item.usage);
+          if (spent) { spentSeen = true; skipped.push({ computer: item.peer.name, reason: spent }); }
+          return !spent;
         });
         skipped.sort((a, b) => a.computer.localeCompare(b.computer));
-        // Least busy first; a tie goes to the computer whose account for this harness has room, then by name.
-        const room = (item: { usage?: Room[] }) => roomFor(data, item.usage);
         const selected = capable
-          .sort((a, b) => a.working - b.working || roomRank(room(a)) - roomRank(room(b)) || (room(b) ?? 0) - (room(a) ?? 0) || a.peer.name.localeCompare(b.peer.name))[0];
+          .sort((a, b) => a.working - b.working || a.peer.name.localeCompare(b.peer.name))[0];
         peer = selected?.peer;
         remoteComputerID = selected?.computerId;
+        if (!peer && spentSeen) throw new BridgeError(503, `No connected computer has ${data.harness}${data.harness === "claude" ? ` account ${data.account ?? "default"}` : ""} quota left right now.`, { code: "out_of_quota", skipped });
         if (!peer) throw new BridgeError(503, incapable ? `No enrolled computer with a running Herdr can run ${data.harness}${data.account ? ` account ${data.account}` : ""}.` : "No enrolled computer with a running Herdr is connected.", skipped.length ? { skipped } : undefined);
       } else {
         peer = toLocal ? peers.find(candidate => candidate.local) : peers.find(candidate => !candidate.local && candidate.name === peerName);
