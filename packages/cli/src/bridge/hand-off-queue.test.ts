@@ -11,7 +11,7 @@ const validate = vi.fn(async () => pane);
 const send = vi.fn(async (_target, _text, _id, typing) => { await typing(); return { delivered: true }; });
 const queue = () => new HandOffQueue({ root, validate, send });
 const message = (deliveryId = "handoff-0001", text = "Review parser") => ({ deliveryId, target, text });
-beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-outbox-")); pane = { terminal_id: "term1", agent_status: "working" }; validate.mockClear(); send.mockClear(); send.mockImplementation(async (_t, _s, _i, typing) => { await typing(); return { delivered: true }; }); });
+beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-outbox-")); pane = { terminal_id: "term1", agent_status: "working" }; validate.mockClear(); validate.mockImplementation(async () => pane); send.mockClear(); send.mockImplementation(async (_t, _s, _i, typing) => { await typing(); return { delivered: true }; }); });
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 describe("durable Hook hand-off queue", () => {
@@ -26,6 +26,23 @@ describe("durable Hook hand-off queue", () => {
     expect(await queue().enqueue(message())).toMatchObject({ delivered: true, replayed: true });
     expect(send).toHaveBeenCalledTimes(1);
   });
+  it("holds concurrent enqueues until closure finishes and refuses closing with queued work", async () => {
+    const q = queue(), closed = vi.fn(async () => ({ closed: true }));
+    await q.enqueue(message()); expect(await q.whenNoPending(target, closed)).toMatchObject({ closed: false });
+    expect(closed).not.toHaveBeenCalled();
+    pane.agent_status = "idle"; await q.tick();
+    let release!: () => void, entered!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    let exists = true;
+    validate.mockImplementation(async () => { if (!exists) throw new BridgeError(409, "pane closed"); return pane; });
+    const closing = q.whenNoPending(target, async () => { entered(); await waiting; exists = false; return { closed: true }; });
+    await started;
+    const incoming = q.enqueue(message("handoff-0002")).catch(error => error);
+    release(); expect(await closing).toMatchObject({ closed: true });
+    expect(await incoming).toMatchObject({ status: 409 });
+  });
+
   it("retains FIFO order across busy turns and rejects message id reuse", async () => {
     const q = queue(); await q.enqueue(message()); await q.enqueue(message("handoff-0002", "Next change"));
     await expect(q.enqueue(message("handoff-0001", "Changed text"))).rejects.toThrow("different message");

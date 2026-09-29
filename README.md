@@ -139,13 +139,13 @@ A project's `schedules.yaml` runs an agent on an assigned computer at a local ti
 One conversation reads the project's tasks and sends independent briefs to enrolled computers with `phren dispatch`, which places a first prompt over pinned SSH and returns a durable receipt instead of a completion claim ([docs/conductor.md](docs/conductor.md)).
 
 ### iOS app
-[phren for iOS](https://alaarab.github.io/phren/ios.html) is a closed-source app for project memory and running agents; its source is not in this repository. GitHub sync keeps findings, notes, tasks and skills on your phone. Phren Hook adds Codex, Claude Code, Copilot and OpenCode chat, terminals, repository changes, the Code index and local app previews over pinned SSH/Tailscale. Steer working agents, remember notes about a function and send them to its agent, and reach a conductor through Siri or the Action button. Memory offers map and list views; local schedule and approval notifications need no relay. [Set up Phren Hook](https://alaarab.github.io/phren/phren-hook.html) on each computer with `npx --yes @phren/cli@0.3.14 bridge install`.
+[phren for iOS](https://alaarab.github.io/phren/ios.html) is a closed-source app for project memory and running agents; its source is not in this repository. GitHub sync keeps findings, notes, tasks and skills on your phone. Phren Hook adds Codex, Claude Code, Copilot and OpenCode chat, terminals, repository changes, the Code index and local app previews over pinned SSH/Tailscale. Steer working agents, remember notes about a function and send them to its agent, and reach a conductor through Siri or the Action button. Memory offers map and list views; local schedule and approval notifications need no relay. [Set up Phren Hook](https://alaarab.github.io/phren/phren-hook.html) on each computer with `npx --yes @phren/cli@0.3.15 bridge install`.
 
 ---
 
 ## CLI quick reference
 
-`phren` has 59 registered commands: 40 you will use (setup, projects, core, skills, hooks, config, maintain, stores, team) and 19 internal ones that hooks and background jobs call. `phren --help` prints the cheat sheet; `phren help <command>` the details.
+`phren` has 75 registered commands: 56 you will use (setup, projects, core, skills, hooks, config, maintain, stores, team) and 19 internal ones that hooks and background jobs call. `phren --help` prints the cheat sheet; `phren help <command>` the details.
 
 ```bash
 phren                                   Interactive memory shell
@@ -194,7 +194,7 @@ All use the same phren store. No vendor lock-in.
 
 | Package | Description |
 |---------|-------------|
-| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (59 commands; 10 MCP tools by default, 61 in the full profile; FTS5, hooks), the interactive shell and terminal graph, the web UI |
+| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (75 commands; 10 MCP tools by default, 76 implementation tools gated by enabled modules; FTS5, hooks), the interactive shell and terminal graph, the web UI |
 | [`phren-vscode`](packages/vscode) | VS Code extension (sidebar, graph, onboarding) |
 | [`integrations/herdr`](integrations/herdr) | Herdr plugin: keybinding → `phren shell --here` in a pane |
 | [`integrations/omarchy`](integrations/omarchy) | Omarchy plugin: bar widget + app launcher entries for the shell and web viewer |

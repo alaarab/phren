@@ -113,6 +113,7 @@ export interface TerminalProvider {
   paneEnv?(server: string, place: { workspace: string; tab: string; pane: string }): Record<string, string> | undefined;
   focusPane(server: string, pane: string): Promise<void>;
   /** Sets the pane's own label (Herdr's pane label, a tmux pane option), shown by the Hook as the session's name. */
+  closePane(server: string, pane: string): Promise<void>;
   renamePane(server: string, pane: string, label: string): Promise<void>;
   /** Focuses, renames or closes a whole tab (when `tab` is set) or workspace. */
   groupAction(server: string, operation: "focus" | "rename" | "close", group: { workspace?: string; tab?: string }, label?: string): Promise<void>;
@@ -148,6 +149,7 @@ export const routedTerminal: TerminalProvider = {
   startAgent: (server, pane, agent) => route(server).startAgent(server, pane, agent),
   paneEnv: (server, place) => route(server).paneEnv?.(server, place),
   focusPane: (server, pane) => route(server).focusPane(server, pane),
+  closePane: (server, pane) => route(server).closePane(server, pane),
   renamePane: (server, pane, label) => route(server).renamePane(server, pane, label),
   groupAction: (server, operation, group, label) => route(server).groupAction(server, operation, group, label),
 };

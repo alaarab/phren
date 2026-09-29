@@ -1,3 +1,7 @@
+import { OwnerInbox, inboxTargetSchema } from "./owner-inbox.js";
+import { closeFinishedWorker } from "./worker-close.js";
+import { isLocalComputer } from "./dispatch-hosts.js";
+import { hookPeers, peerRequest } from "./peers.js";
 import { handOff } from "./hand-off.js";
 import { sessionStalls } from "./stalls.js";
 import { HandOffQueue } from "./hand-off-queue.js";
@@ -77,6 +81,13 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   // Follows what dispatched workers do and tells the dispatching agent.
   const returns: DispatchReturns | undefined = dispatches ? new DispatchReturns({
     localWorkers: hookWorkers(agentHooks),
+    close: async receipt => {
+      const data = { target: receipt.target, dispatch: receipt.id, turn: receipt.closePending!.turn };
+      if (isLocalComputer(receipt.computer)) return closeFinishedWorker(data, handOffs);
+      const peer = (await hookPeers()).find(peer => peer.name === receipt.computer);
+      if (!peer) throw new BridgeError(503, "The worker's computer is offline.");
+      return peerRequest(peer, "/v1/dispatch/close", data);
+    },
     localAnswer: (target, actionId, decision) => agentHooks.answer(target, actionId, decision),
     // A worker's request the worker's own Hook did not push reaches this Hook's phone.
     onApproval: (receipt, approval) => {
@@ -91,6 +102,27 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   if ("approvalPush" in activeCapabilities) {
     Object.defineProperty(activeCapabilities, "approvalPush", { enumerable: true, get: () => approvalPushCapability(agentHooks.push.status) });
   }
+  const inbox = dispatches ? new OwnerInbox(async () => {
+    const items = [];
+    for (const server of await recentServers()) {
+      const name = String(server.session), state = await sharedSnapshot(name, 4000);
+      for (const pane of objects(state.panes)) {
+        const chat = await paneChatState(name, pane, { tokenWhenIdentified: false }).catch(() => ({} as Record<string, unknown>));
+        const parsed = inboxTargetSchema.safeParse({ server: name, workspace: pane.workspace_id, tab: pane.tab_id, pane: pane.pane_id, source: pane.agent,
+          ...(chat.sessionId ? { session: chat.sessionId } : { starting: true, startingToken: chat.startingToken }) });
+        if (!parsed.success) continue;
+        const target = parsed.data, approval = "session" in target ? agentHooks.workerApproval(target) : undefined,
+          question = "session" in target ? agentHooks.servedQuestion(target) : undefined, terminal = "session" in target ? agentHooks.terminalPrompt(target) : undefined;
+        const request = approval?.request ?? (question ? "The worker has a question for the owner." : undefined) ?? terminal?.message
+          ?? (["blocked", "waiting"].includes(String(pane.agent_status)) ? `${pane.agent} needs terminal input.` : undefined);
+        if (!request) continue;
+        const source = `prompt:${JSON.stringify(target)}:${approval?.actionId ?? JSON.stringify(question ?? terminal)}`;
+        items.push({ source, kind: "blocked" as const, title: String(request).replace(/[\x00-\x1f\x7f]+/g, " ").slice(0, 500), target,
+          ...(approval?.actionId ? { actionId: approval.actionId } : {}) });
+      }
+    }
+    return items;
+  }) : undefined;
   const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
   const settingsSwitcher = new SettingsSwitcher(agentHooks);
@@ -163,7 +195,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   });
   const http = createServer(createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
     journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
-    fanoutMessages, canary, streams, returns, handOffs }));
+    fanoutMessages, canary, streams, returns, handOffs, inbox }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
   http.on("upgrade", (request, socket, head) => {
@@ -238,6 +270,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       // loop throttles its own peer polls and never holds up activity.
       void handOffs?.tick().catch(() => {});
       void returns?.tick();
+      void inbox?.tick().catch(() => {});
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {

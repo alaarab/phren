@@ -230,12 +230,13 @@ export const REGISTRY: Command[] = [
     },
   },
   {
-    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>]",
+    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>] [--keep-open]",
     summary: "Dispatch a worker brief through Phren Hook",
     subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List local dispatch receipts" },
       { name: "returns", usage: "phren dispatch returns", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read" },
       { name: "sessions", usage: "phren dispatch sessions", summary: "List live agent sessions on this and every enrolled computer" },
-      { name: "usage", usage: "phren dispatch usage [--json]", summary: "Show agent usage on this and every enrolled computer, merged by account" }],
+      { name: "usage", usage: "phren dispatch usage [--json]", summary: "Show agent usage on this and every enrolled computer, merged by account" },
+      { name: "report", usage: "phren dispatch report --prs <JSON>", summary: "Record this worker turn's PR evidence for the integrator" }],
     run: async args => (await import("./bridge/dispatch-command.js")).runDispatch(args),
   },
   {
@@ -257,6 +258,11 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./computers/command.js")).runUsage(args),
   },
   {
+    name: "owner-inbox", topic: "core", usage: "phren owner-inbox [list [--all] | add <title> [--project <slug>] [--id <uuid>] | resolve <id> [--computer <name>] [--resolution <text>]]",
+    summary: "List, add and resolve what waits on the owner",
+    run: async args => (await import("./bridge/dispatch-command.js")).runOwnerInbox(args),
+  },
+  {
     name: "hand-off", topic: "core", usage: "phren hand-off <computer|local> --session <id> --text <prompt> [--account <id>]",
     summary: "Send work to an existing agent session through Phren Hook",
     run: async args => (await import("./bridge/dispatch-command.js")).runHandOff(args),
@@ -270,6 +276,7 @@ export const REGISTRY: Command[] = [
     name: "conductor", topic: "core", usage: "phren conductor <subcommand>",
     summary: "Make or stop this computer's conductor, list linked computer sets, and manage standing grants",
     subcommands: [
+      { name: "integrator", usage: "phren conductor integrator [--session <id> [--computer <name>] | --clear]", summary: "Configure the session that receives structured PR-ready reports" },
       { name: "status", usage: "phren conductor status", summary: "This computer's conductor and the set name it holds" },
       { name: "make", usage: "phren conductor make [--pane <id>] [--mux herdr:<name>|tmux:<name>]", summary: "Make the agent in this pane (or --pane) this computer's conductor" },
       { name: "stop", usage: "phren conductor stop [--pane <id>]", summary: "End this computer's conductor role; the agent keeps running" },
