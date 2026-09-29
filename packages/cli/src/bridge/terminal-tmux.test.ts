@@ -9,7 +9,7 @@ const state = vi.hoisted(() => ({ exec: vi.fn() }));
 vi.mock("node:child_process", async importOriginal => ({ ...await importOriginal<typeof import("node:child_process")>(),
   execFile: Object.assign(() => {}, { [Symbol.for("nodejs.util.promisify.custom")]: state.exec }),
 }));
-import { agentFromCommand, fromTmuxId, parsePanes, sendKeysCalls, setTmuxDeps, tmuxKey, tmuxPaneFromEnv, tmuxServerName, tmuxServers,
+import { agentFromCommand, fromTmuxId, parsePanes, sendKeysCalls, setTmuxDeps, tmuxKey, tmuxScroll, tmuxPaneFromEnv, tmuxServerName, tmuxServers,
   tmuxSnapshot, tmuxSocketName, tmuxTerminal, toTmuxId } from "./terminal-tmux.js";
 import { notePaneStatus, paneStatus, resetPaneStatus, settleBlockedPane } from "./pane-status.js";
 import { terminalKind } from "./terminal.js";
@@ -328,5 +328,30 @@ describe("identity and status without Herdr's hints", () => {
     expect(state.sessionId).toBeUndefined();
     expect(state.startingToken).toMatch(/^[a-f0-9]{64}$/);
     expect(state.starting).toBe(true);
+  });
+});
+
+describe("tmux scroll", () => {
+  it("runs one scroll per pane at a time, so copy mode is never entered and cancelled out of order", async () => {
+    let inFlight = 0, most = 0;
+    const calls: string[][] = [];
+    const restore = setTmuxDeps({
+      binary: () => "/usr/bin/tmux", version: async () => "tmux 3.4\n", processes: async () => "", sockets: async () => [], sleep: async () => {},
+      run: async (_socket, args) => {
+        inFlight++; most = Math.max(most, inFlight); calls.push(args);
+        await new Promise(resolve => setTimeout(resolve, 5));
+        inFlight--;
+        // No app tracks the mouse and the pane is in normal mode, so scrolling uses copy mode.
+        return args[0] === "display-message" ? "\t0\t0\t80\t24\n" : "";
+      },
+    });
+    try {
+      await Promise.all([tmuxScroll("tmux", "p1", 5), tmuxScroll("tmux", "p1", 0), tmuxScroll("tmux", "p1", 3)]);
+      expect(most).toBe(1);
+      // In order: the first scroll enters copy mode before the return to live runs.
+      const first = calls.findIndex(args => args[0] === "copy-mode");
+      expect(first).toBeGreaterThan(-1);
+      expect(calls.findIndex(args => args.includes("scroll-up"))).toBeGreaterThan(first);
+    } finally { restore(); }
   });
 });

@@ -518,6 +518,73 @@ export async function tmuxPaneFromEnv(env: NodeJS.ProcessEnv = process.env): Pro
   } catch { return undefined; }
 }
 
+/** The pane of the client that last did anything on `server`: the phone's
+ * attach, when it names no pane. */
+async function activeClientPane(server: string): Promise<string> {
+  const rows = (await tmux(server, ["list-clients", "-F", "#{client_activity}\t#{pane_id}"])).split("\n").filter(Boolean).map(row => row.split("\t"));
+  const newest = rows.sort((a, b) => Number(b[0]) - Number(a[0]))[0]?.[1];
+  if (!newest || !fromTmuxId(newest)) throw new BridgeError(409, "No terminal is attached to this tmux server.");
+  return newest;
+}
+
+/**
+ * Scrolls one pane for a phone whose terminal gets no wheel events of its
+ * own: a server with `mouse off` (tmux's default) never turns on the phone's
+ * mouse reporting, and tmux draws on the alternate screen, so the phone has
+ * no local history either. Does what tmux's default WheelUpPane binding does:
+ * an app tracking the mouse (Claude, Codex) gets wheel events, and anything
+ * else scrolls in `copy-mode -e`, which ends by itself at the bottom.
+ * `lines` > 0 is older output; 0 leaves copy mode so typing reaches the pane.
+ */
+export async function tmuxScroll(server: string, pane: string | undefined, lines: number): Promise<{ history: boolean }> {
+  const target = pane ? toTmuxId(pane, "p") : await activeClientPane(server);
+  // One scroll per pane at a time: two overlapping swipes could otherwise
+  // enter and cancel copy mode out of order and leave the pane in it, where
+  // it would swallow the next typed prompt.
+  const key = `${server}\0${target}`;
+  const run = (scrollQueues.get(key) ?? Promise.resolve()).then(() => scrollPane(server, target, lines), () => scrollPane(server, target, lines));
+  const settled = run.catch(() => undefined);
+  scrollQueues.set(key, settled);
+  void settled.then(() => { if (scrollQueues.get(key) === settled) scrollQueues.delete(key); });
+  return run;
+}
+
+const scrollQueues = new Map<string, Promise<unknown>>();
+
+async function scrollPane(server: string, target: string, lines: number): Promise<{ history: boolean }> {
+  const state = async () => {
+    const [mode, mouse, sgr, width, height] = (await tmux(server, ["display-message", "-p", "-t", target,
+      "#{pane_mode}\t#{mouse_any_flag}\t#{mouse_sgr_flag}\t#{pane_width}\t#{pane_height}"])).replace(/\n$/, "").split("\t");
+    return { mode, mouse: mouse === "1", sgr: sgr === "1", width: Number(width) || 80, height: Number(height) || 24 };
+  };
+  const before = await state();
+  const copy = before.mode === "copy-mode";
+  if (lines === 0) {
+    if (copy) await tmux(server, ["send-keys", "-t", target, "-X", "cancel"]);
+    return { history: false };
+  }
+  // Another mode (the tree chooser, the clock) is the owner's; leave it.
+  if (before.mode && !copy) return { history: false };
+  if (!copy && before.mouse) {
+    // tmux's `send -M`, as raw bytes: a paste without brackets reaches the
+    // app as typed input. The pane's middle keeps X10 coordinates ASCII.
+    const button = lines > 0 ? 64 : 65;
+    const x = Math.min(95, Math.ceil(before.width / 2)), y = Math.min(95, Math.ceil(before.height / 2));
+    const event = before.sgr ? `\x1b[<${button};${x};${y}M` : `\x1b[M${String.fromCharCode(32 + button, 32 + x, 32 + y)}`;
+    const buffer = `phren-scroll-${process.pid}-${Date.now().toString(36)}`;
+    await tmux(server, ["load-buffer", "-b", buffer, "-"], { input: event.repeat(Math.abs(lines)) });
+    // Newer tmux shows a paste's control characters as text (ESC as "^[")
+    // unless -S, a flag older tmux, which pastes them as they are, refuses.
+    const paste = (flags: string[]) => tmux(server, ["paste-buffer", ...flags, "-d", "-r", "-b", buffer, "-t", target]);
+    await paste(["-S"]).catch(error => /unknown flag|invalid option/i.test(String(error?.message)) ? paste([]) : Promise.reject(error));
+    return { history: false };
+  }
+  if (lines < 0 && !copy) return { history: false };
+  if (!copy) await tmux(server, ["copy-mode", "-e", "-t", target]);
+  await tmux(server, ["send-keys", "-t", target, "-X", "-N", String(Math.abs(lines)), lines > 0 ? "scroll-up" : "scroll-down"]);
+  return { history: (await state()).mode === "copy-mode" };
+}
+
 /** The command that attaches the phone's SSH terminal to a tmux server. */
 export function tmuxAttach(server: string): { file: string; args: string[] } {
   const binary = deps.binary();
