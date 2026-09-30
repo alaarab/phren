@@ -13,7 +13,7 @@ import { agentNotReady, terminalProvider } from "./terminal.js";
 import { AppServerRpcError } from "./codex-app-server.js";
 import { CodexServerUnavailable, codexServers } from "./codex-servers.js";
 import { refuseWorkingSlash, type ModelSwitcher } from "./model-switch.js";
-import { PERMISSION_MODE_VALUES, type PermissionModeSwitcher } from "./permission-mode.js";
+import { PERMISSION_MODE_VALUES, refuseAgentOrigin, type PermissionModeSwitcher } from "./permission-mode.js";
 import type { SettingsSwitcher } from "./settings-switch.js";
 import { sessionWebServers } from "./session-servers.js";
 import { repositoryDiff } from "./projects.js";
@@ -426,9 +426,11 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
   } else if (url.pathname === "/v1/settings") {
     result = await settingsSwitcher.switch(target, data);
   } else if (url.pathname === "/v1/agents/permission-mode") {
-    // The owner's own choice: no authority ceiling applies here. The reply
-    // names who chose it (`setBy`) beside the mode the footer confirmed.
-    result = await permissionModeSwitcher.set(target, z.enum(PERMISSION_MODE_VALUES).parse(data.mode), data.origin);
+    // The owner's own choice from the phone: no authority ceiling applies.
+    // An agent's call carries its pane as `origin` and is refused, so no
+    // agent can raise its own or another pane's mode past its ceiling.
+    refuseAgentOrigin(data && typeof data === "object" && "origin" in data ? data.origin ?? null : undefined);
+    result = await permissionModeSwitcher.set(target, z.enum(PERMISSION_MODE_VALUES).parse(data.mode));
   } else if (url.pathname === "/v1/keys" && await agentHooks.servedKeys(target, z.array(z.enum(ANSWER_KEYS)).min(1).max(4).parse(data.keys), String(pane.agent_status))) {
     // A served OpenCode pane: Esc aborts its turn or declines its question,
     // a digit answers its question, over its own API.

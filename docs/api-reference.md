@@ -391,17 +391,19 @@ Claude's `permission-mode` rows (written when a prompt is submitted), `permissio
 `message.usage.speed`; Codex's `turn_context` `approval_policy`,
 `approvals_reviewer`, `sandbox_policy.type` and `collaboration_mode.mode`.
 
-`POST /v1/agents/permission-mode { target, mode, origin? }` is the phone's mode
+`POST /v1/agents/permission-mode { target, mode }` is the phone's mode
 picker. `mode` is Claude's own permission name — `default`, `acceptEdits`, `plan`
 or `auto`, and `bypassPermissions` only where the session was launched allowing
 bypass. The Hook presses Shift+Tab through the pane's existing key path,
 re-reading the footer after each press, for at most one full cycle plus one
-press, and replies `{ ok, permissionMode, setBy, setByPane? }` with the mode the
+press, and replies `{ ok, permissionMode, setBy: "owner" }` with the mode the
 footer confirmed. A working agent or an open permission prompt/dialog is 409;
 another harness, or a mode this session does not offer, is 422. This is the
-owner's own choice, so the authority `maxPermissionMode` ceiling does not apply;
-`setBy` is `"owner"` from the phone, or `"agent"` with `setByPane` when a local
-agent named its pane as `origin`.
+owner's own choice, so the authority `maxPermissionMode` ceiling does not apply.
+Only the owner may make it: a request that names a pane as `origin` (an agent's
+call) is refused with 403, whatever the mode, so no agent can lift itself or
+another pane past its ceiling or into `bypassPermissions`. Same rule as
+`/v1/sudo/answer`.
 
 The footer read is also published on the chat status frame as
 `agentStatus.permissionMode` (`default`, `acceptEdits`, `plan` or `auto`) beside
