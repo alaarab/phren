@@ -347,8 +347,14 @@ export class TranscriptReader {
       // instead of silently merging two disjoint windows. A pending diff
       // holds its row for a later poll and is not a completed page.
       const skippedLiveLines = before === undefined && held === undefined && cursor > lower;
-      return { entries: entries.reverse(), totalLines: index.lines, startLine: cursor, hasMore: cursor > 0,
-        reset: (resuming && !pastEnd ? false : reset) || skippedLiveLines };
+      // The phone resumes after `totalLines - 1`, so a live page does not
+      // count a held row or what follows it: those are still owed. An older
+      // page is never a replacement. The history route reads with a fresh
+      // reader, and a reset there made the phone drop every recent row it
+      // held and keep only the older page.
+      return { entries: entries.reverse(), totalLines: held ?? index.lines,
+        startLine: cursor, hasMore: cursor > 0,
+        reset: before !== undefined ? false : (resuming && !pastEnd ? false : reset) || skippedLiveLines };
     }, signal);
   }
 }

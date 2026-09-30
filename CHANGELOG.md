@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The phone's chat no longer loses its most recent turns when it scrolls up. `/v1/transcripts/history` reads with a fresh reader, so every older page it returned said `reset: true` and counted the whole file in `totalLines`. The phone took that page as a replacement: it dropped every recent row it held, kept only the older page, and moved its resume cursor to the end of the file, so a reconnect never brought the dropped rows back. The terminal still showed them. An older page is now never a replacement.
+- A live transcript page that holds a Bash result while its diff is taken no longer counts the held rows in `totalLines`. The phone resumes after `totalLines - 1`, so a socket that dropped before the next poll skipped that result and the reply after it.
+
 ## [0.3.15] - 2026-09-29
 
 ## [0.3.14] - 2026-09-29
