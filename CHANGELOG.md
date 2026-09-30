@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- `/v1/speech` also serves `mp3_44100_128`: it is tried after `mp3_44100_192` and before `pcm_24000` when the phone plays it and the plan allows it, so a plan below Creator that refuses the 192 kbps tier still gets mp3 at 44.1 kHz instead of plain 24 kHz PCM. A phone that names no `formats` still gets `pcm_24000`, and `X-Phren-Audio` reports the 128 kbps format.
+
 ## [0.3.16] - 2026-09-29
 
 ### Fixed
