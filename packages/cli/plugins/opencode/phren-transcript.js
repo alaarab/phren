@@ -321,12 +321,12 @@ export const PhrenTranscriptPlugin = async input => {
           const info = lstatSync(answer);
           if (!info.isFile() || info.size > 65_536) continue;
           const value = JSON.parse(readFileSync(answer, "utf8"));
-          if (value && value.id === id && (value.decision === "approve" || value.decision === "deny")) { decision = value.decision; break; }
+          if (value && value.id === id && (value.decision === "approve" || value.decision === "deny" || value.decision === "always")) { decision = value.decision; break; }
         } catch {}
       }
       if (decision && !state.done) {
         await client.postSessionIdPermissionsPermissionId({ path: { id: sessionID, permissionID: id },
-          body: { response: decision === "approve" ? "once" : "reject" } });
+          body: { response: decision === "approve" ? "once" : decision === "always" ? "always" : "reject" } });
       }
     } catch {} finally {
       removeFile(answer); removeFile(request);
@@ -452,7 +452,7 @@ export const PhrenTranscriptPlugin = async input => {
             if (value && value.id === id) { decision = value.decision; break; }
           } catch {}
         }
-        setStatus(output, decision === "approve" ? "allow" : decision === "deny" ? "deny" : "ask");
+        setStatus(output, decision === "approve" || decision === "always" ? "allow" : decision === "deny" ? "deny" : "ask");
       } catch {
         setStatus(output, "ask");
       } finally {
@@ -460,7 +460,7 @@ export const PhrenTranscriptPlugin = async input => {
         if (request) removeFile(request);
         if (pendingSession) pendingApprovals.delete(pendingSession);
         // Answered from the phone: back to work. Otherwise the terminal asks.
-        if (askId && (decision === "approve" || decision === "deny")) { asking.delete(askId); recordStatus("working", pendingSession); }
+        if (askId && (decision === "approve" || decision === "deny" || decision === "always")) { asking.delete(askId); recordStatus("working", pendingSession); }
         if (askId) hookAsks.delete(askId);
       }
     },

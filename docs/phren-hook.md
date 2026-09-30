@@ -266,7 +266,12 @@ replies to the phone's answer through the process's own API; an answer in the
 TUI withdraws the card), and the Hook watches that directory, maps the ask
 to its pane through the recorded session binding or Herdr's opencode session id,
 and pushes it to registered phones with the ask's title and message. The same
-`POST /v1/approvals/answer` route writes the plugin's answer file.
+`POST /v1/approvals/answer` route writes the plugin's answer file. The card's
+`options` offer once, "Allow for this project", "Allow everywhere" and Deny;
+both grant scopes map to OpenCode's `always` reply (which lasts the running
+session), and "Allow everywhere" also adds the tool to
+`~/.config/opencode/opencode.json` as an allow rule under a lock with an atomic
+rename.
 
 An OpenCode the Hook launches serves its own HTTP API: it runs as
 `opencode --port <free port>` with a random `OPENCODE_SERVER_PASSWORD`, and the

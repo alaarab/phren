@@ -13,7 +13,7 @@ import { findPane, paneIdentity, sharedSnapshot, snapshot } from "./herdr.js";
 import { handOff } from "./hand-off.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
-import { BridgeError, objects, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
+import { BridgeError, objects, startingTargetSchema, targetSchema, type ApprovalDecision, type Json, type Provider, type Target } from "./protocol.js";
 import { ownerQuestion, readFinalTurn, type FinalTurn } from "./schedule-watch.js";
 import { terminalProvider } from "./terminal.js";
 import { backgroundLeft, opencodeTurn, readTurn, TURN_REPLY_LIMIT, truncateUtf8, turnPhase, type TurnRecord } from "./turn-records.js";
@@ -413,7 +413,7 @@ export interface DispatchReturnsOptions {
   /** The standing grant for a conductor call, on this computer. */
   findGrant?: typeof findGrant;
   /** Answers a worker's approval placed on this computer, without SSH (the Hook's own `AgentHooks.answer`). */
-  localAnswer?: (target: Target, actionId: string, decision: "approve" | "deny") => Promise<unknown>;
+  localAnswer?: (target: Target, actionId: string, decision: ApprovalDecision) => Promise<unknown>;
   /** A worker's new forwarded request was recorded. Returns true when this Hook pushed it to its phone. */
   onApproval?: (receipt: Receipt, approval: NonNullable<Receipt["approval"]>) => boolean | void;
   close?: (receipt: Receipt) => Promise<Json>;
@@ -466,7 +466,7 @@ export class DispatchReturns {
   }
 
   /** Send a decision for a worker's request to the Hook that runs it. */
-  private async sendAnswer(receipt: Receipt, actionId: string, decision: "approve" | "deny"): Promise<void> {
+  private async sendAnswer(receipt: Receipt, actionId: string, decision: ApprovalDecision): Promise<void> {
     const target = receipt.target;
     if (!target || !("session" in target)) throw new BridgeError(409, "This worker is not waiting on an approval.");
     const peer = (await this.peers().catch(() => [] as HookPeer[])).find(candidate => candidate.name === receipt.computer);
@@ -478,7 +478,7 @@ export class DispatchReturns {
   /** Answer the permission request a dispatched worker is waiting on. It is
    * cleared from the receipt once answered, or once its Hook says it is no
    * longer pending (answered in the terminal, or timed out). */
-  async answerApproval(id: string, decision: "approve" | "deny", actionId: string, caller?: OriginPane): Promise<void> {
+  async answerApproval(id: string, decision: ApprovalDecision, actionId: string, caller?: OriginPane): Promise<void> {
     const receipt = (await dispatchStatus()).find(candidate => candidate.id === id);
     const approval = receipt?.approval;
     if (!receipt || !approval || approval.actionId !== actionId) throw new BridgeError(409, "This worker is not waiting on an approval.");
