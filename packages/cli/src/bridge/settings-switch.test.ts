@@ -150,7 +150,7 @@ describe("settings route transaction", () => {
 
   it("reports the footer's state and offers full access once bypass shows", async () => {
     expect(await switcher.streamSettings(claude, "t1", false)).toEqual({ settings: { permissionModes: ["supervised", "auto-edits", "auto"], plan: true, fast: true },
-      settingsState: { permissionMode: "supervised", plan: false } });
+      settingsState: { permissionMode: "supervised", plan: false }, permissionMode: "default", permissionModes: ["default", "acceptEdits", "plan", "auto"] });
     modes.push("plan");
     const fresh = new SettingsSwitcher(new AgentHooks(), 30);
     expect((await fresh.streamSettings(claude, "t1", false)).settingsState).toEqual({ plan: true });

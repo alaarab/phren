@@ -44,6 +44,7 @@ import { childAgentTree, historicalImage, publicChildAgents, refreshTranscript, 
 import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import type { ModelCatalog } from "./models.js";
 import type { ModelSwitcher } from "./model-switch.js";
+import type { PermissionModeSwitcher } from "./permission-mode.js";
 import type { SettingsSwitcher } from "./settings-switch.js";
 import type { SideQuestions } from "./side-questions.js";
 import { currentModel, currentStep } from "./steps.js";
@@ -103,6 +104,7 @@ export interface RouteContext {
   modelCatalog: ModelCatalog;
   modelSwitcher: ModelSwitcher;
   settingsSwitcher: SettingsSwitcher;
+  permissionModeSwitcher: PermissionModeSwitcher;
   sideQuestions: SideQuestions;
   accountUsage: AccountUsageReader;
   resources: ResourceMonitor;
