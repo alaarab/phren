@@ -7,6 +7,7 @@ import { dispatchSchema } from "../bridge/dispatch.js";
 import { handOff, handOffSchema, listLiveSessions } from "../bridge/hand-off.js";
 import { readAccountUsage, usageSummary } from "../bridge/account-usage.js";
 import { terminalPaneFromEnv } from "../bridge/terminal.js";
+import { approvalDecisions } from "../bridge/protocol.js";
 import { mcpResponse } from "./types.js";
 
 export function register(server: McpServer): void {
@@ -65,14 +66,14 @@ export function register(server: McpServer): void {
     description: "Answer the permission request a dispatched worker is waiting on, forwarded from its computer: a dispatch_returns row with an approval field names it. The owner's standing grants already answer the dispatch and hand_off requests they cover. Only the agent that dispatched the worker can answer, never the worker itself. Pass the approval's actionId, so a request that changed since you read it is never answered blind. Deny when unsure and ask the owner.",
     inputSchema: {
       id: z.string().uuid().describe("Dispatch id from dispatch_returns."),
-      decision: z.enum(["approve", "deny"]),
+      decision: z.enum(approvalDecisions),
       actionId: z.string().min(1).max(200).describe("The approval's actionId from dispatch_returns; a request that has since changed is refused."),
     },
   }, async input => {
     try {
       const origin = await terminalPaneFromEnv();
       const result = await hookRequest("/v1/dispatch/approve", { ...input, ...(origin ? { origin } : {}) });
-      return mcpResponse({ ok: result.ok === true, data: result, message: input.decision === "approve" ? "Approved." : "Denied." });
+      return mcpResponse({ ok: result.ok === true, data: result, message: input.decision === "deny" ? "Denied." : "Approved." });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not answer the approval." });
     }

@@ -195,8 +195,9 @@ it("sends the permission reply body shape and the abort route", async () => {
   const client = openPaneClient(entryFor(fake));
   await client.replyPermission("per_1", "reject", "not this time");
   await client.replyPermission("per_2", "once");
+  await client.replyPermission("per_3", "always");
   await client.abort("ses_9");
-  expect(fake.permissionBodies).toEqual([{ reply: "reject", message: "not this time" }, { reply: "once" }]);
+  expect(fake.permissionBodies).toEqual([{ reply: "reject", message: "not this time" }, { reply: "once" }, { reply: "always" }]);
   expect(fake.abortPaths).toEqual(["/session/ses_9/abort"]);
 });
 

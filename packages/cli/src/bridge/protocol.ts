@@ -32,6 +32,10 @@ export const startingTargetSchema = targetSchema.omit({ session: true }).extend(
 });
 export type StartingTarget = z.infer<typeof startingTargetSchema>;
 export type Json = Record<string, unknown>;
+/** The decisions an approval answer may carry. An OpenCode permission ask
+ * accepts both grant scopes; every other provider approves or denies only. */
+export const approvalDecisions = ["approve", "deny", "allow-project", "allow-everywhere"] as const;
+export type ApprovalDecision = typeof approvalDecisions[number];
 /** `value` when it is a plain object, else an empty one. */
 export function object(value: unknown): Json { return isRecord(value) ? value : {}; }
 export function objects(value: unknown): Json[] { return Array.isArray(value) ? value.map(object) : []; }

@@ -27,20 +27,23 @@ function fakePush() {
 }
 
 describe("opencode file approvals", () => {
-  let store: string, bridge: string, previousPath: string | undefined, previousBridge: string | undefined;
+  let store: string, bridge: string, config: string, previousPath: string | undefined, previousBridge: string | undefined, previousXdg: string | undefined;
   beforeEach(async () => {
     vi.clearAllMocks();
     store = await mkdtemp(path.join(tmpdir(), "phren-opencode-"));
     bridge = await mkdtemp(path.join(tmpdir(), "phren-bridge-"));
-    previousPath = process.env.PHREN_PATH; previousBridge = process.env.PHREN_BRIDGE_HOME;
-    process.env.PHREN_PATH = store; process.env.PHREN_BRIDGE_HOME = bridge;
+    config = await mkdtemp(path.join(tmpdir(), "phren-home-"));
+    previousPath = process.env.PHREN_PATH; previousBridge = process.env.PHREN_BRIDGE_HOME; previousXdg = process.env.XDG_CONFIG_HOME;
+    process.env.PHREN_PATH = store; process.env.PHREN_BRIDGE_HOME = bridge; process.env.XDG_CONFIG_HOME = config;
     await mkdir(path.dirname(requestFile(store)), { recursive: true });
   });
   afterEach(async () => {
     if (previousPath === undefined) delete process.env.PHREN_PATH; else process.env.PHREN_PATH = previousPath;
     if (previousBridge === undefined) delete process.env.PHREN_BRIDGE_HOME; else process.env.PHREN_BRIDGE_HOME = previousBridge;
+    if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = previousXdg;
     await rm(store, { recursive: true, force: true });
     await rm(bridge, { recursive: true, force: true });
+    await rm(config, { recursive: true, force: true });
   });
 
   it("surfaces a live opencode request and marks its pane", async () => {
@@ -49,7 +52,9 @@ describe("opencode file approvals", () => {
       expiresAt: new Date(Date.now() + 30_000).toISOString() }));
     const hooks = new AgentHooks();
     expect(hooks.approval(target)).toMatchObject({ actionId: "per_abc123", toolName: "bash", title: "Allow bash?",
-      message: "bash: rm -rf /tmp/x", request: "Run: rm -rf /tmp/x" });
+      message: "bash: rm -rf /tmp/x", request: "Run: rm -rf /tmp/x",
+      options: [{ label: "Allow once", decision: "approve" }, { label: "Allow for this project", decision: "allow-project" },
+        { label: "Allow everywhere", decision: "allow-everywhere" }, { label: "Deny", decision: "deny" }] });
     const state = { panes: [{ pane_id: "w1:p1", workspace_id: "w1", tab_id: "w1:t1", agent: "opencode",
       agent_session: { kind: "id", agent: "opencode", value: session } }] };
     expect(hooks.pendingPanes("default", state)).toEqual(new Set(["w1:p1"]));
@@ -76,6 +81,23 @@ describe("opencode file approvals", () => {
     expect(validateTarget).toHaveBeenCalledWith(target);
     expect(JSON.parse(await readFile(answerFile(store), "utf8"))).toEqual({ id: "per_abc123", decision: "approve" });
     await expect(hooks.answer(target, "per_abc123", "maybe")).rejects.toThrow("not valid");
+  });
+
+  it("maps both grant scopes to OpenCode's always, and writes the config only for everywhere", async () => {
+    const configFile = path.join(config, "opencode", "opencode.json");
+    const write = async (id: string, type: string) => writeFile(requestFile(store), JSON.stringify({ id, sessionID: session, type,
+      title: `Allow ${type}?`, message: `${type}: x`, expiresAt: new Date(Date.now() + 30_000).toISOString() }));
+    const hooks = new AgentHooks();
+    // Project scope: always, no config write.
+    await write("per_proj", "bash");
+    await hooks.answer(target, "per_proj", "allow-project");
+    expect(JSON.parse(await readFile(answerFile(store), "utf8"))).toEqual({ id: "per_proj", decision: "always" });
+    await expect(readFile(configFile, "utf8")).rejects.toThrow();
+    // Everywhere: always, and the tool is allowed in the user's config.
+    await write("per_all", "external_directory");
+    await hooks.answer(target, "per_all", "allow-everywhere");
+    expect(JSON.parse(await readFile(answerFile(store), "utf8"))).toEqual({ id: "per_all", decision: "always" });
+    expect(JSON.parse(await readFile(configFile, "utf8"))).toEqual({ permission: { external_directory: "allow" } });
   });
 
   it("pushes a bound opencode request and lists it", async () => {

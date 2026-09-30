@@ -8,6 +8,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - `/v1/speech` also serves `mp3_44100_128`: it is tried after `mp3_44100_192` and before `pcm_24000` when the phone plays it and the plan allows it, so a plan below Creator that refuses the 192 kbps tier still gets mp3 at 44.1 kHz instead of plain 24 kHz PCM. A phone that names no `formats` still gets `pcm_24000`, and `X-Phren-Audio` reports the 128 kbps format.
+### Fixed
+
+- The phone's OpenCode approval card offers "Allow for this project" and "Allow everywhere" instead of leaving them greyed out. The card now advertises the scopes as its `options` list, and both grant answers map to OpenCode's `always` permission reply (which lasts the running session). "Allow everywhere" also adds the tool to `~/.config/opencode/opencode.json` as an allow rule, under a lock with an atomic rename that keeps every other key. The plugin and fan-out launcher now carry `always` alongside `once` and `reject`.
 
 ## [0.3.16] - 2026-09-29
 
