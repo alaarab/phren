@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - `/v1/speech` also serves `mp3_44100_128`: it is tried after `mp3_44100_192` and before `pcm_24000` when the phone plays it and the plan allows it, so a plan below Creator that refuses the 192 kbps tier still gets mp3 at 44.1 kHz instead of plain 24 kHz PCM. A phone that names no `formats` still gets `pcm_24000`, and `X-Phren-Audio` reports the 128 kbps format.
+- `phren init` probes for installed tools once per run instead of several times, and its post-init check reads the running Node version in-process. A full init spawns fewer child processes, which matters most on Windows where each process creation is slow.
 
 ### Fixed
 
