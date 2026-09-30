@@ -19,7 +19,7 @@ const text = "Review the parser";
 let pane: Json, restore: () => void, sequence = 0, deliveryId: string;
 const prompt = vi.fn(), sendKeys = vi.fn(), expectDelivery = vi.fn();
 const context = { agentHooks: { expectDelivery, trackDelivery: vi.fn() }, modelSwitcher: { assertAvailable() {} },
-  settingsSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as unknown as PaneRouteContext;
+  settingsSwitcher: { assertAvailable() {} }, permissionModeSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as unknown as PaneRouteContext;
 const hand = (where = target) => handOff({ target: where, text }, { deliveryId });
 
 beforeEach(() => {
