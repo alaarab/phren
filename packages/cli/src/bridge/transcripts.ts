@@ -97,6 +97,14 @@ export function childAgent(tree: ChildAgentRelation[], id: string): LocalChildAg
   }
 }
 
+/** The running children of a child-agent tree, at any depth: the sub-agents,
+ * teammates, workflow agents and fan-out jobs a finished turn still waits on. */
+export function runningChildAgents(tree: ChildAgentRelation[]): ChildAgentRelation[] {
+  return tree.flatMap(function visit(child): ChildAgentRelation[] {
+    return [child, ...child.children.flatMap(visit)];
+  }).filter(child => child.state === "running");
+}
+
 /** Preserve content positions and image types; original bytes stay in the
  * transcript for the separate image route. Only provider content blocks are
  * interpreted, never text strings or arbitrary tool arguments. */
