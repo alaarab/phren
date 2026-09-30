@@ -1559,6 +1559,33 @@ schedules:
       } finally { socket.terminate(); }
     });
 
+    it("streams Claude's suggested next prompt between turns and drops it when a turn starts or the owner types", async () => {
+      paneAgent = "claude"; agentStatus = "done";
+      paneLines = recorded("claude/2.1.284/next-suggestion-herdr.ansi");
+      const claude = { ...target, source: "claude" as const };
+      const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/status?${new URLSearchParams(claude)}`);
+      const frames: any[] = []; socket.on("message", data => frames.push(JSON.parse(data.toString())));
+      await once(socket, "open");
+      const status = (from: number) => frames.slice(from).map(f => f.agentStatus).filter(Boolean);
+      try {
+        await waitFor(() => status(0).some(s => s.suggestion === "merged 313 and 314"), 5_000);
+        // A turn hides it at once, while the pane still shows the old one.
+        agentStatus = "working";
+        let from = frames.length;
+        await waitFor(() => status(from).some(s => s.status === "working"), 5_000);
+        expect(status(from).filter(s => s.status === "working").some(s => "suggestion" in s)).toBe(false);
+        // After the turn a fresh read offers it again.
+        agentStatus = "done"; from = frames.length;
+        await waitFor(() => status(from).some(s => s.suggestion === "merged 313 and 314"), 5_000);
+        // The owner types in the pane: their text is plain, so it is gone.
+        paneLines = recorded("claude/2.1.284/owner-typing-tmux.ansi"); from = frames.length;
+        await waitFor(() => status(from).some(s => s.status === "done" && !("suggestion" in s)), 5_000);
+        const since = frames.length;
+        await waitFor(() => status(since).length >= 2, 5_000);
+        expect(status(since).some(s => "suggestion" in s)).toBe(false);
+      } finally { socket.terminate(); }
+    });
+
     it("publishes a Claude terminal numbered dialog, answers it with Enter, and drops it when the pane works", async () => {
       paneAgent = "claude"; agentStatus = "blocked";
       paneLines = "Parser aborted (timeout, resource limit, or over-length)\n"

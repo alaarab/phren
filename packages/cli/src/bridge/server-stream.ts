@@ -87,6 +87,7 @@ export function transcriptStreams(ctx: StreamContext) {
     let busy = false, ready = false, first = true;
     let awaitingTranscript = false, lastTranscriptLookup = 0;
     let initialPane: Json;
+    let busyAt = 0;
     const pending: number[] = [];
     const stop = () => { abort.abort(); clearInterval(timer); unwatch?.(); pending.length = 0; };
     client.once("close", stop); client.once("error", stop);
@@ -175,13 +176,20 @@ export function transcriptStreams(ctx: StreamContext) {
                 : undefined);
             // Claude's own state comes from its footer, which leads the transcript.
             const codexServed = target.source === "codex" && !!codexServers.forTarget(target);
-            const { settings, settingsState } = settingsSwitcher ? await settingsSwitcher.streamSettings(target, pane.terminal_id, codexServed)
-              : { settings: settingsCapabilities(target.source, codexServed), settingsState: undefined };
+            const { settings, settingsState, suggestion } = settingsSwitcher ? await settingsSwitcher.streamSettings(target, pane.terminal_id, codexServed)
+              : { settings: settingsCapabilities(target.source, codexServed), settingsState: undefined, suggestion: undefined };
+            // Claude's suggested next prompt, only between turns. The footer
+            // read can be a throttle old, so one from before a turn this
+            // stream saw start is stale: the turn cleared it.
+            const between = ["idle", "done"].includes(String(pane.agent_status)) && !pendingApproval && !servedQuestion;
+            if (!between) busyAt = Date.now();
+            const nextPrompt = between && suggestion && suggestion.readAt > busyAt ? suggestion.text : undefined;
             const historyHealth = target.source === "codex" ? await threadHealth(target.session, pane.agent_status) : { stalled: false };
             send(client, { agentStatus: { source: target.source, session: target.session,
               status: pendingApproval || servedQuestion ? "waiting" : pane.agent_status, pendingApproval, pendingQuestions, terminalPrompt,
               ...(waiting && agentHooks.passwordPrompt(target) ? { passwordPrompt: true } : {}),
               compacting: agentHooks.compacting(target),
+              ...(nextPrompt ? { suggestion: nextPrompt } : {}),
               ...(historyHealth.stalled ? { historyStalled: true, historyStalledSince: historyHealth.since } : {}),
               modules: info.modules, store: info.store, profile: info.profile, generation: info.generation,
               capabilities: { ...activeCapabilities, asyncQuestions: codexQuestions.availableFor(target),
