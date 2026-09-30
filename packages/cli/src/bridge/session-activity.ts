@@ -53,6 +53,33 @@ export function recordedBackground(record: TurnRecord | undefined, finishedTasks
   return backgroundLeft(phase.background, phase.at, finishedTasks) || undefined;
 }
 
+/** The background shells and monitors a turn still awaits, from its transcript
+ * final turn. A recorded ended turn bounds `FinalTurn.awaited` by the Stop's
+ * count less the tasks that finished since, and by the 2-hour cap; a Stop that
+ * named no count leaves the transcript's own awaited shells, and a Stop the
+ * Hook never saw falls back to them too. Undefined once none is awaited. A log
+ * tail, a watcher or a shell left from an earlier exchange is not awaited, so
+ * it never holds a turn open. */
+export function awaitedShells(record: TurnRecord | undefined, final: FinalTurn | undefined, now = Date.now()): number | undefined {
+  const phase = record ? turnPhase(record) : undefined;
+  if (phase?.phase === "ended") {
+    if (!(now - Date.parse(phase.at) < BACKGROUND_STALE_MS)) return undefined;
+    const recorded = backgroundLeft(phase.background, phase.at, final?.finishedTasks);
+    const shells = phase.background !== undefined ? recorded : final?.awaited ?? 0;
+    return shells && final?.awaited ? Math.min(shells, final.awaited) : undefined;
+  }
+  return final?.completed ? final.awaited || undefined : undefined;
+}
+
+/** The live work a finished turn still waits on: its awaited shells and
+ * monitors plus the running children (sub-agents, teammates, workflows,
+ * fan-out jobs) the caller counted. Leftover shells are awaited by neither, so
+ * they do not hold a session or a dispatched worker open. */
+export function liveWork(record: TurnRecord | undefined, final: FinalTurn | undefined, runningChildren = 0, now = Date.now()): number | undefined {
+  const total = (awaitedShells(record, final, now) ?? 0) + runningChildren;
+  return total || undefined;
+}
+
 /** The background shells and monitors a pane's ended Claude turn is waiting
  * on (`FinalTurn.awaited`), at most `recordedBackground`. Reads the transcript
  * (`readFinalTurn`, passed in: schedule-watch imports herdr, which imports
@@ -63,8 +90,7 @@ export function recordedBackground(record: TurnRecord | undefined, finishedTasks
 export async function liveBackground(record: TurnRecord | undefined, readFinal: (source: "claude", session: string) => Promise<FinalTurn | undefined>, now = Date.now()): Promise<number | undefined> {
   if (!record || record.source !== "claude" || !recordedBackground(record, [], now)) return undefined;
   const final = await readFinal("claude", record.session).catch(() => undefined);
-  const left = recordedBackground(record, final?.finishedTasks, now);
-  return left && final?.awaited ? Math.min(left, final.awaited) : undefined;
+  return awaitedShells(record, final, now);
 }
 
 /**
