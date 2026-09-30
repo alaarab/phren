@@ -39,7 +39,8 @@ export function formatResources(name: string, r: ComputerResources, detail: bool
     const heavy = detail ? r.heavy : r.heavy.slice(0, 4);
     if (heavy.length) lines.push("  heavy");
     for (const job of heavy) {
-      const pane = job.pane ? `  ${[job.pane.workspace, job.pane.pane, job.pane.agent].filter(Boolean).join(" · ")}` : "";
+      const owner = job.pane ? [job.pane.workspace, job.pane.pane, job.pane.agent ?? job.agent].filter(Boolean).join(" · ") : job.agent;
+      const pane = owner ? `  ${owner}` : "";
       lines.push(`    ${job.name.padEnd(22)} ${String(job.cpuPercent).padStart(6)}% cpu ${(job.memoryBytes / GB).toFixed(1).padStart(5)} GB${job.processes > 1 ? ` ×${job.processes}` : ""}${pane}`);
     }
     if (!detail && r.heavy.length > heavy.length) lines.push(`    … ${r.heavy.length - heavy.length} more (phren computers --resources <name>)`);

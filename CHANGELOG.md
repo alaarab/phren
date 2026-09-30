@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- The Hook records each dispatched or scheduled worker it launches (`<bridge>/jobs.json`) and resolves its process group, so the resources report names the agent that owns a heavy process, including detached servers and builds. `POST /v1/jobs/cleanup` ends a leftover worker's process group only when every terminal server listed its panes and the worker's pane isn't among them, its 5-minute lease has passed, a process in the group still runs the launched command, and the group's leader (if still running) is the same process that was recorded, checked by its start time. It never touches the Hook's own group, the owner's sessions or any unregistered process.
+
 ### Changed
 
 - `/v1/speech` also serves `mp3_44100_128`: it is tried after `mp3_44100_192` and before `pcm_24000` when the phone plays it and the plan allows it, so a plan below Creator that refuses the 192 kbps tier still gets mp3 at 44.1 kHz instead of plain 24 kHz PCM. A phone that names no `formats` still gets `pcm_24000`, and `X-Phren-Audio` reports the 128 kbps format.
