@@ -12,3 +12,7 @@
 *.png binary
 *.gif binary
 *.pdf binary
+
+# Recorded terminal screens keep their bytes: Herdr ends each line with "\r",
+# and the parsers must be tested against exactly what a pane read returns.
+*.ansi -text

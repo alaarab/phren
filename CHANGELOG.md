@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- The chat status stream carries Claude's suggested next prompt as `agentStatus.suggestion`, so the phone can offer it in its composer. Claude Code draws the prediction as dim text in its empty input box after a turn and writes it nowhere else, so the Hook reads it from the same styled screen read that already gives the footer's settings (no extra pane reads). It is sent only between turns, dropped as soon as a turn starts or the owner types in the pane, and never for Claude's own placeholders or a suggestion a narrow pane cut short. Codex, OpenCode and Copilot have no equivalent and send nothing.
+
 ### Changed
 
 - `/v1/speech` also serves `mp3_44100_128`: it is tried after `mp3_44100_192` and before `pcm_24000` when the phone plays it and the plan allows it, so a plan below Creator that refuses the 192 kbps tier still gets mp3 at 44.1 kHz instead of plain 24 kHz PCM. A phone that names no `formats` still gets `pcm_24000`, and `X-Phren-Audio` reports the 128 kbps format.
