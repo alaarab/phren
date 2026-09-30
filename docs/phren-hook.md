@@ -430,8 +430,9 @@ lists your tmux servers:
   in the phone's list with chat, status, approvals and the terminal.
 - `tmux-<name>`: any other tmux server of yours that answers, such as one
   started with `tmux -L work` (`tmux-work`). The Hook looks for sockets in
-  `$TMUX_TMPDIR/tmux-<uid>/` and `/tmp/tmux-<uid>/` and lists every socket that
-  answers, keeping the recently active ones first. A server started with
+  `$TMUX_TMPDIR/tmux-<uid>/` and `/tmp/tmux-<uid>/`: the 16 most recently
+  active servers that answer, so stale sockets left by killed runs never hide a
+  live one. A server started with
   `tmux -S <path>` elsewhere is not found.
 - `tmux-phren`: a hidden tmux server on its own socket, where sessions the phone
   starts run. It starts with the first launch. Each launch is a tmux session
