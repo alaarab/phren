@@ -1,6 +1,7 @@
 import { open, stat } from "node:fs/promises";
 import { z } from "zod";
 import { AgentHooks, visibleTerminalChoice } from "./agent-hooks.js";
+import { claudeSuggestion } from "./claude-suggestion.js";
 import { codexServers, type CodexNextTurn } from "./codex-servers.js";
 import { validateTarget } from "./herdr.js";
 import { intervalFromEnv } from "./limits.js";
@@ -67,12 +68,13 @@ export interface SettingsState { permissionMode?: string; plan?: boolean; fast?:
 
 /** A Claude pane's settings as its footer shows them, read at most once per
  * `PHREN_DIALOG_THROTTLE_MS` like the dialog check, and whether bypass was
- * ever seen in it (which is when full access is offered). */
+ * ever seen in it (which is when full access is offered). The same read, with
+ * its styles, carries the suggested next prompt in the input box. */
 export class ClaudeSettingsReader {
-  private cache = new Map<string, { terminal: unknown; at: number; mode?: string; bypass: boolean }>();
+  private cache = new Map<string, { terminal: unknown; at: number; mode?: string; bypass: boolean; suggestion?: string }>();
   constructor(private readonly hooks: AgentHooks, private readonly every = intervalFromEnv("PHREN_DIALOG_THROTTLE_MS", 3_000)) {}
 
-  async read(target: Target, terminal: unknown): Promise<{ state?: SettingsState; bypass: boolean }> {
+  async read(target: Target, terminal: unknown): Promise<{ state?: SettingsState; bypass: boolean; suggestion?: { text: string; readAt: number } }> {
     const key = `${target.server}:${target.pane}`;
     let entry = this.cache.get(key);
     if (!entry || entry.terminal !== terminal) entry = { terminal, at: 0, bypass: false };
@@ -80,12 +82,15 @@ export class ClaudeSettingsReader {
     this.cache.delete(key); this.cache.set(key, entry);
     if (Date.now() - entry.at >= this.every) {
       entry.at = Date.now();
-      entry.mode = await this.hooks.paneLines(target).then(claudeFooterMode, () => entry!.mode);
+      const screen = await this.hooks.paneAnsi(target).catch(() => undefined);
+      if (screen !== undefined) entry.mode = claudeFooterMode(screen);
+      entry.suggestion = screen === undefined ? undefined : claudeSuggestion(screen);
       if (entry.mode === "bypassPermissions") entry.bypass = true;
       while (this.cache.size > 64) this.cache.delete(this.cache.keys().next().value!);
     }
     const phone = entry.mode ? CLAUDE_MODES[entry.mode] : undefined;
-    return { bypass: entry.bypass, ...(phone ? { state: phone === "plan" ? { plan: true } : { permissionMode: phone, plan: false } } : {}) };
+    return { bypass: entry.bypass, ...(phone ? { state: phone === "plan" ? { plan: true } : { permissionMode: phone, plan: false } } : {}),
+      ...(entry.suggestion ? { suggestion: { text: entry.suggestion, readAt: entry.at } } : {}) };
   }
 }
 
@@ -117,11 +122,12 @@ export class SettingsSwitcher {
   private readonly reader: ClaudeSettingsReader;
   constructor(private readonly hooks: AgentHooks, private readonly wait = STEP_WAIT_MS) { this.reader = new ClaudeSettingsReader(hooks); }
 
-  /** A Claude pane's footer-read settings and capabilities for the stream. */
-  async streamSettings(target: Target, terminal: unknown, codexServed: boolean): Promise<{ settings?: SettingsCapabilities; settingsState?: SettingsState }> {
+  /** A Claude pane's footer-read settings and capabilities for the stream,
+   * with the suggested next prompt its input box shows. */
+  async streamSettings(target: Target, terminal: unknown, codexServed: boolean): Promise<{ settings?: SettingsCapabilities; settingsState?: SettingsState; suggestion?: { text: string; readAt: number } }> {
     if (target.source !== "claude") { const settings = settingsCapabilities(target.source, codexServed); return settings ? { settings } : {}; }
-    const { state, bypass } = await this.reader.read(target, terminal);
-    return { settings: settingsCapabilities("claude", false, bypass), ...(state ? { settingsState: state } : {}) };
+    const { state, bypass, suggestion } = await this.reader.read(target, terminal);
+    return { settings: settingsCapabilities("claude", false, bypass), ...(state ? { settingsState: state } : {}), ...(suggestion ? { suggestion } : {}) };
   }
 
   private key(target: Target): string { return `${target.server}:${target.pane}`; }
