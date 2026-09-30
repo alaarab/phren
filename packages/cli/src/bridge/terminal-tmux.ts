@@ -121,7 +121,9 @@ export async function tmuxSocketsIn(folder: string): Promise<string[]> {
     if (folder !== primary && !socketPaths.has(name) && !existsSync(path.join(primary ?? folder, name))) socketPaths.set(name, path.join(folder, name));
   }
   found.sort((a, b) => b.at - a.at);
-  return found.map(entry => entry.name);
+  // Most recent first, then capped: each candidate costs a tmux process
+  // per snapshot, and stale files from killed runs sort to the end.
+  return found.slice(0, 32).map(entry => entry.name);
 }
 
 const defaultDeps: TmuxDeps = {
@@ -458,12 +460,13 @@ export const tmuxTerminal: TerminalProvider = {
 
 /** The owner's tmux servers that answer, by Hook server name: the default
  * socket and every other socket in the user's tmux folders (`tmux -L work`
- * is "tmux-work"). Every candidate is pinged, so a live server is never
- * dropped by a socket-count cut; stale socket files from killed runs simply
- * fail to answer. The hidden server is not among them. */
+ * is "tmux-work"), the 16 most recently active. Sockets are ordered by
+ * activity, so stale socket files from killed runs can't crowd out a live
+ * server. The hidden server is not among them. */
 async function ownerServers(): Promise<string[]> {
   const sockets = [...new Set(["default", ...await deps.sockets().catch(() => [] as string[])])].filter(socket => socket !== "phren");
-  const names = sockets.flatMap(socket => tmuxServerName(socket) ?? []);
+  // Sockets arrive most recently active first, so the cap keeps live servers.
+  const names = sockets.flatMap(socket => tmuxServerName(socket) ?? []).slice(0, 16);
   const running = await Promise.all(names.map(name => tmuxTerminal.ping(name).then(() => true, () => false)));
   return names.filter((_, index) => running[index]);
 }
