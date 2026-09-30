@@ -69,6 +69,17 @@ it("relays an OpenCode 1.18 ask from its event and replies with the phone's answ
   expect(await approvals()).toEqual([]);
 });
 
+it("carries a grant scope through the plugin's own reply as always", async () => {
+  ps.command = "/opt/opencode";
+  const reply = vi.fn(async () => ({ data: true }));
+  const handlers = await plugin({ client: { postSessionIdPermissionsPermissionId: reply } });
+  await handlers.event(asked("per_6"));
+  await until(async () => (await approvals()).includes(path.basename(requestFile())));
+  await writeFile(path.join(store, ".runtime", "approvals", `opencode-${session}.answer.json`), JSON.stringify({ id: "per_6", decision: "always" }));
+  await until(() => reply.mock.calls.length > 0);
+  expect(reply).toHaveBeenCalledWith({ path: { id: session, permissionID: "per_6" }, body: { response: "always" } });
+});
+
 it("withdraws a relayed ask the terminal answered first", async () => {
   ps.command = "/opt/opencode";
   const reply = vi.fn(async () => ({ data: true }));

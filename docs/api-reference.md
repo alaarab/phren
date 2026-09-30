@@ -132,8 +132,10 @@ requests they cover. Fails with 409 when the worker is not waiting on an
 approval. In the core profile use `phren_admin(action: "dispatch_approve")`.
 
 Route: `POST /v1/dispatch/approve` with `{ "id": "<uuid>", "decision":
-"approve" | "deny", "actionId"?: "<id>" }` returns `{ "ok": true }`. The Hook
-sends the answer to the worker's Hook at `POST /v1/approvals/answer`.
+"approve" | "deny" | "allow-project" | "allow-everywhere", "actionId"?: "<id>" }`
+returns `{ "ok": true }`. The two grant scopes answer an OpenCode worker's
+permission ask with `always`. The Hook sends the answer to the worker's Hook at
+`POST /v1/approvals/answer`.
 
 On the receiving computer, each observation in the `POST /v1/dispatch/workers`
 answer may carry `approval`: `{ actionId, tool, title?, request?,
