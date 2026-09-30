@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdtemp, writeFile, appendFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -157,6 +158,18 @@ describe("settings route transaction", () => {
     const seen = await new SettingsSwitcher(new AgentHooks(), 30).streamSettings(claude, "t2", false);
     expect(seen.settings?.permissionModes).toContain("full-access");
     expect(seen.settingsState).toEqual({ permissionMode: "full-access", plan: false });
+  });
+
+  it("carries Claude's suggested next prompt from the same styled footer read, stamped with the read's time", async () => {
+    const suggested = readFileSync(new URL("./fixtures/claude/2.1.284/next-suggestion-herdr.ansi", import.meta.url), "utf8");
+    vi.mocked(rpc).mockImplementation(async (_server, method, params) => method === "agent.read" && params?.format === "ansi" ? { read: { text: suggested } } : {});
+    const before = Date.now();
+    const read = await switcher.streamSettings(claude, "t1", false);
+    expect(read.suggestion?.text).toBe("merged 313 and 314");
+    expect(read.suggestion?.readAt).toBeGreaterThanOrEqual(before);
+    expect(read.settingsState).toEqual({ permissionMode: "auto", plan: false });
+    expect(vi.mocked(rpc).mock.calls.filter(call => call[1] === "agent.read")).toHaveLength(1);
+    expect(await switcher.streamSettings(codex, "t1", false)).not.toHaveProperty("suggestion");
   });
 
   it("refuses a busy Claude pane and never types into it", async () => {

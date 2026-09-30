@@ -391,6 +391,17 @@ Claude's `permission-mode` rows (written when a prompt is submitted), `permissio
 `message.usage.speed`; Codex's `turn_context` `approval_policy`,
 `approvals_reviewer`, `sandbox_policy.type` and `collaboration_mode.mode`.
 
+The same footer read gives a Claude pane's `agentStatus.suggestion`: the
+predicted next prompt Claude Code draws as dim text in its empty input box
+after a turn. The screen is its only source for a live pane: Claude keeps it in
+memory and writes it to no transcript, file or hook event. It is present only
+while the pane is idle or done with nothing pending, and only from a read taken
+after the last busy status this stream saw, so a new turn drops it at once and
+the owner typing in the pane drops it with the next read. Claude's other dim
+input text (`Try "…"`, the queued-message hints, `Message @…`) and a suggestion
+a narrow pane cut short with `…` are never sent. Codex, OpenCode and Copilot
+have no such prediction and never send it.
+
 `POST /v1/prompt { target, text, deliveryId? }` answers with how far the
 message got: `{ ok, delivered: true }` once the conversation's own
 UserPromptSubmit hook took it; `{ ok, queued: true }` when the agent holds it

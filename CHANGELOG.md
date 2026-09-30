@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - The Hook records each dispatched or scheduled worker it launches (`<bridge>/jobs.json`) and resolves its process group, so the resources report names the agent that owns a heavy process, including detached servers and builds. `POST /v1/jobs/cleanup` ends a leftover worker's process group only when every terminal server listed its panes and the worker's pane isn't among them, its 5-minute lease has passed, a process in the group still runs the launched command, and the group's leader (if still running) is the same process that was recorded, checked by its start time. It never touches the Hook's own group, the owner's sessions or any unregistered process.
+- The chat status stream carries Claude's suggested next prompt as `agentStatus.suggestion`, so the phone can offer it in its composer. Claude Code draws the prediction as dim text in its empty input box after a turn and writes it nowhere else, so the Hook reads it from the same styled screen read that already gives the footer's settings (no extra pane reads). It is sent only between turns, dropped as soon as a turn starts or the owner types in the pane, and never for Claude's own placeholders or a suggestion a narrow pane cut short. Codex, OpenCode and Copilot have no equivalent and send nothing.
 
 ### Changed
 
