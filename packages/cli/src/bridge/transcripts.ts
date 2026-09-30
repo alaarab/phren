@@ -10,7 +10,7 @@ import { BridgeError, object, objects, sessionId, type Json, type Provider, type
 import { materializeCodexThread, materializedRoot } from "./codex-threads.js";
 import { namedPaths, SHELL_TOOLS, outputCallIds, type ChangeLookup } from "./changes.js";
 import { fanoutChildren } from "./fanouts.js";
-import { claudeChildAgents, visibleClaudeEvent } from "./transcript-claude.js";
+import { claudeChildAgents, visibleClaudeEvent, type ClaudeQueueState } from "./transcript-claude.js";
 import { childTranscriptBelongsTo, codeModeOutputCall, directChildAgents, findCodeModeCall, projectCodeModeOutput, projectCodexRow,
   rewriteProjectedOutput, visibleCodexEvent } from "./transcript-codex.js";
 import { visibleCopilotEvent } from "./transcript-copilot.js";
@@ -253,10 +253,10 @@ export async function refreshTranscript(file: string, source: Provider, session:
 }
 
 /** Public conversation/tool events and real usage only. Never export private reasoning. */
-export function visibleEvent(raw: Json, source: Provider, includeSidechain = false, cwd?: string): Json | undefined {
+export function visibleEvent(raw: Json, source: Provider, includeSidechain = false, cwd?: string, queue?: ClaudeQueueState): Json | undefined {
   if (source === "phren" || source === "opencode") return visibleOpencodeEvent(raw, source, cwd);
   if (source === "codex") return visibleCodexEvent(raw);
-  if (source === "claude") return visibleClaudeEvent(raw, includeSidechain);
+  if (source === "claude") return visibleClaudeEvent(raw, includeSidechain, queue);
   return visibleCopilotEvent(raw);
 }
 
@@ -296,11 +296,14 @@ export class TranscriptReader {
       const entryBudget = opening ? 60 : 200;
       const byteBudget = opening ? 1_048_576 : 4_194_304;
       let bytes = 0, cursor = end, held: number | undefined;
+      // Claude's queue pairing: the row scan is newest-first, so a prompt turn
+      // is seen before the content-free dequeue that delivered it.
+      const queue: ClaudeQueueState = {};
       for await (const row of index.rows(handle, end, lower, signal)) {
         signal?.throwIfAborted();
         let rows: Json[] = [];
         try {
-          let raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), this.source, this.includeSidechain, this.cwd);
+          let raw = row.bytes && visibleEvent(object(JSON.parse(row.bytes.toString())), this.source, this.includeSidechain, this.cwd, queue);
           // A child agent's transcript is the sidechain. Its rows are that
           // conversation's own turns, not something for the reader to skip.
           if (raw && this.includeSidechain && raw.isSidechain === true) { const { isSidechain: _sidechain, ...own } = raw; raw = own; }

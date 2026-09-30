@@ -404,9 +404,19 @@ Claude queue messages preserve these phone markers:
   `Attached files on this computer:` footer, no words) reads
   `[Image attachment]`, as a picture-only turn does; its key is still the
   SHA-256 of the original content.
-- `type: "phren_queue_consumed"`: every string-content removal emits only its
-  SHA-256 content key and timestamp, including internal removals. The key scheme
-  is unchanged.
+- `type: "phren_queue_consumed"`: consumption emits the queue row's SHA-256
+  content key and timestamp, never the payload. A `remove` carries its content,
+  so its key is the same as the enqueue's, including internal removals. A
+  `dequeue` carries no content: a newest-first read keys it by the prompt turn
+  the queue handed to the model (the same SHA-256 the enqueue exported), and
+  sets `scheduled: true` when the agent scheduled that turn for itself (a cron,
+  `/loop` or ScheduleWakeup fire, or an auto-continuation). A dequeue whose
+  prompt turn is not in the read window is exported without a key. The key
+  scheme is unchanged.
+- `type: "phren_queue_returned"`: a `popAll` (queued prompts pulled back into
+  the input) emits its SHA-256 content key and timestamp. The prompt was
+  neither consumed nor scheduled, so the phone can drop its queued caption
+  without drawing a scheduled check.
 - `phrenBackground: true`: task notifications become system rows whose user-role
   string content is a rebuilt `<task-notification>` block. Only direct
   `task-id`, `tool-use-id`, `status`, and `summary` tags survive; summaries are
