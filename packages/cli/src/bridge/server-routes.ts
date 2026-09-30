@@ -40,7 +40,7 @@ import { approvalDecisions, BridgeError, bridgeRoot, type Json, MAX_FRAME, objec
 import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
 import type { TabActivityStore } from "./tab-activity.js";
-import { childAgentTree, historicalImage, publicChildAgents, refreshTranscript, targetTranscriptPath } from "./transcripts.js";
+import { childAgentTree, historicalImage, publicChildAgents, refreshTranscript, runningChildAgents, targetTranscriptPath } from "./transcripts.js";
 import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import type { ModelCatalog } from "./models.js";
 import type { ModelSwitcher } from "./model-switch.js";
@@ -124,9 +124,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
   const key = `${source}\0${session}`, now = Date.now(), cached = childActivityCache.get(key);
   if (cached && now - cached.at < CHILD_ACTIVITY_CACHE_MS) return cached.result;
   const result = childAgentTree(source, session).then(tree => {
-    const running = tree.flatMap(function visit(child): typeof tree {
-      return [child, ...child.children.flatMap(visit)];
-    }).filter(child => child.state === "running");
+    const running = runningChildAgents(tree);
     return { runningChildren: running.length, childProviders: [...new Set(running.map(child => child.provider))].sort() };
   }).catch(() => ({ runningChildren: 0, childProviders: [] as Provider[] }));
   childActivityCache.set(key, { at: now, result });
