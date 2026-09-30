@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CLAUDE_SKILL_QUIET_MS, claudeChildAgents, visibleClaudeEvent } from "./transcript-claude.js";
+import { CLAUDE_SKILL_QUIET_MS, claudeChildAgents, visibleClaudeEvent, type ClaudeQueueState } from "./transcript-claude.js";
+import { TranscriptReader } from "./transcripts.js";
 import type { Json } from "./protocol.js";
 
 describe("Claude child completion", () => {
@@ -253,5 +254,127 @@ describe("skill bodies", () => {
     expect(visibleClaudeEvent(meta("Base directory for this skill: x", { sourceToolUseID: undefined }))).toBeUndefined();
     expect(visibleClaudeEvent(meta("Base directory for this skill: x", { isSidechain: true }))).toBeUndefined();
     expect(visibleClaudeEvent(meta("Base directory for this skill: x", { isMeta: false }))).not.toMatchObject({ message: { content: [{ phrenSkillBody: true }] } });
+  });
+});
+
+describe("Claude queue consumption", () => {
+  const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+  const queueState = (turn: Json): ClaudeQueueState => {
+    const state: ClaudeQueueState = {};
+    visibleClaudeEvent(turn, false, state);
+    return state;
+  };
+  // Redacted shapes from a Claude Code 2.1.263 transcript: a queued prompt
+  // enqueues with its content, then a content-free dequeue when it is handed
+  // to the model. A self-scheduled prompt (cron, /loop, ScheduleWakeup or an
+  // auto-continuation) is delivered as a hidden isMeta user turn.
+  const humanTurn = { type: "user", isSidechain: false, promptSource: "queued", origin: { kind: "human" }, timestamp: "2026-09-16T08:55:00.192Z",
+    message: { role: "user", content: "Do a pull" } };
+  const scheduledTurn = { type: "user", isSidechain: false, isMeta: true, promptSource: "system", scheduledTaskId: "926a7a84",
+    scheduledFireId: "41d141b3-0e28-454f-9946-b7093d045570", turnOrigin: "scheduled", timestamp: "2026-09-16T08:55:00.192Z",
+    message: { role: "user", content: "Check CI on PR #256 (gh pr checks 256)" } };
+
+  it("keys a remove by its content", () => {
+    expect(visibleClaudeEvent({ type: "queue-operation", operation: "remove", timestamp: "t", content: "absorbed mid-turn" }))
+      .toEqual({ type: "phren_queue_consumed", key: digest("absorbed mid-turn"), timestamp: "t" });
+  });
+
+  it("marks a dequeue as consumption, keyless when the prompt turn is not in view", () => {
+    expect(visibleClaudeEvent({ type: "queue-operation", operation: "dequeue", timestamp: "t" }))
+      .toEqual({ type: "phren_queue_consumed", timestamp: "t" });
+  });
+
+  it("keys a dequeue by the human prompt turn it delivered", () => {
+    expect(visibleClaudeEvent({ type: "queue-operation", operation: "dequeue", timestamp: "t" }, false, queueState(humanTurn)))
+      .toEqual({ type: "phren_queue_consumed", key: digest("Do a pull"), timestamp: "t" });
+  });
+
+  it("pairs one prompt turn with one dequeue, so an older dequeue stays keyless", () => {
+    const state = queueState(scheduledTurn);
+    visibleClaudeEvent({ type: "queue-operation", operation: "dequeue", timestamp: "t2" }, false, state);
+    expect(visibleClaudeEvent({ type: "queue-operation", operation: "dequeue", timestamp: "t1" }, false, state))
+      .toEqual({ type: "phren_queue_consumed", timestamp: "t1" });
+  });
+
+  it("keys a dequeue by the scheduled turn and flags it", () => {
+    expect(visibleClaudeEvent({ type: "queue-operation", operation: "dequeue", timestamp: "t" }, false, queueState(scheduledTurn)))
+      .toEqual({ type: "phren_queue_consumed", key: digest("Check CI on PR #256 (gh pr checks 256)"), scheduled: true, timestamp: "t" });
+  });
+
+  it("flags an auto-continuation's dequeue as scheduled too", () => {
+    const turn = { type: "user", isSidechain: false, isMeta: true, promptSource: "system", origin: { kind: "auto-continuation" },
+      timestamp: "t", message: { role: "user", content: "You can continue now." } };
+    expect(visibleClaudeEvent({ type: "queue-operation", operation: "dequeue", timestamp: "t" }, false, queueState(turn)))
+      .toEqual({ type: "phren_queue_consumed", key: digest("You can continue now."), scheduled: true, timestamp: "t" });
+  });
+
+  it("returns a popAll to the input so leftovers are not drawn as a scheduled check", () => {
+    expect(visibleClaudeEvent({ type: "queue-operation", operation: "popAll", timestamp: "t", content: "tell me what to mssg that agent" }))
+      .toEqual({ type: "phren_queue_returned", key: digest("tell me what to mssg that agent"), timestamp: "t" });
+  });
+
+  it("keys a dequeue for a pasted phone message by its unwrapped content", () => {
+    const pasted = '<pasted_content id="57d2">\nAm I on the latest version?\n</pasted_content id="57d2">';
+    const state: ClaudeQueueState = {};
+    visibleClaudeEvent({ type: "user", promptSource: "queued", timestamp: "t", message: { role: "user", content: "\n\n" + pasted } }, false, state);
+    expect(visibleClaudeEvent({ type: "queue-operation", operation: "dequeue", timestamp: "t" }, false, state))
+      .toEqual({ type: "phren_queue_consumed", key: digest("Am I on the latest version?"), timestamp: "t" });
+  });
+
+  it("keeps a queued bubble but does not flag an ordinary peer notice as scheduled", () => {
+    const peer = { type: "user", isSidechain: false, isMeta: true, promptSource: "system", origin: { kind: "peer" },
+      timestamp: "t", message: { role: "user", content: "Another Claude session sent a message:\n<agent-message />" } };
+    expect(visibleClaudeEvent({ type: "queue-operation", operation: "dequeue", timestamp: "t" }, false, queueState(peer)))
+      .toEqual({ type: "phren_queue_consumed", key: digest("Another Claude session sent a message:\n<agent-message />"), timestamp: "t" });
+  });
+});
+
+describe("Claude queue consumption through the transcript reader", () => {
+  const roots: string[] = [];
+  const session = "eeeeeeee-5555-4555-8555-555555555555";
+  afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+
+  async function read(rows: Json[]) {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-queue-")); roots.push(root);
+    const file = path.join(root, `${session}.jsonl`);
+    await writeFile(file, rows.map(row => JSON.stringify(row)).join("\n") + "\n");
+    const page = await new TranscriptReader(file, "claude").read();
+    return page.entries.map(entry => entry.raw);
+  }
+
+  const enqueue = (content: string) => ({ type: "queue-operation", operation: "enqueue", timestamp: "2026-09-16T08:55:00.165Z", sessionId: session, content });
+  const dequeue = { type: "queue-operation", operation: "dequeue", timestamp: "2026-09-16T08:55:00.184Z", sessionId: session };
+  const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+
+  it("exports an absorbed prompt's remove", async () => {
+    const rows = await read([enqueue("Another thing we should track"), { type: "queue-operation", operation: "remove", timestamp: "2026-09-16T08:55:00.184Z",
+      sessionId: session, content: "Another thing we should track", reason: "absorbed_mid_turn" }]);
+    expect(rows.find(row => row.phrenQueued)).toMatchObject({ type: "user", phrenQueued: true, message: { role: "user", content: "Another thing we should track" } });
+    expect(rows.find(row => row.type === "phren_queue_consumed"))
+      .toEqual({ type: "phren_queue_consumed", key: digest("Another thing we should track"), timestamp: "2026-09-16T08:55:00.184Z" });
+  });
+
+  it("exports a human queued prompt's dequeue as its consumption", async () => {
+    const rows = await read([enqueue("Do a pull"), dequeue,
+      { type: "user", isSidechain: false, promptSource: "queued", origin: { kind: "human" }, uuid: "u1", timestamp: "2026-09-16T08:55:00.192Z",
+        message: { role: "user", content: "Do a pull" } }]);
+    expect(rows.find(row => row.phrenQueued)).toMatchObject({ phrenQueueKey: digest("Do a pull") });
+    expect(rows.find(row => row.type === "phren_queue_consumed"))
+      .toEqual({ type: "phren_queue_consumed", key: digest("Do a pull"), timestamp: "2026-09-16T08:55:00.184Z" });
+  });
+
+  it("exports a scheduled prompt's dequeue with the scheduled flag", async () => {
+    const rows = await read([enqueue("Check CI on PR #256 (gh pr checks 256)"), dequeue,
+      { parentUuid: "p1", isSidechain: false, type: "system", subtype: "scheduled_task_fire", isMeta: false, taskId: "926a7a84",
+        content: "Claude resuming /loop wakeup (Sep 16 1:55am)", prompt: "Check CI on PR #256 (gh pr checks 256)", taskKind: "loop",
+        cron: "55 1 * * *", timestamp: "2026-09-16T08:55:00.162Z", sessionId: session, uuid: "s1" },
+      { parentUuid: "s1", isSidechain: false, type: "user", isMeta: true, promptSource: "system", scheduledTaskId: "926a7a84",
+        scheduledFireId: "41d141b3-0e28-454f-9946-b7093d045570", turnOrigin: "scheduled", uuid: "u2", timestamp: "2026-09-16T08:55:00.192Z",
+        message: { role: "user", content: "Check CI on PR #256 (gh pr checks 256)" } }]);
+    expect(rows.find(row => row.phrenQueued)).toMatchObject({ phrenQueued: true, phrenQueueKey: digest("Check CI on PR #256 (gh pr checks 256)") });
+    expect(rows.find(row => row.type === "phren_queue_consumed"))
+      .toEqual({ type: "phren_queue_consumed", key: digest("Check CI on PR #256 (gh pr checks 256)"), scheduled: true, timestamp: "2026-09-16T08:55:00.184Z" });
+    // The scheduled turn itself stays hidden.
+    expect(rows.some(row => row.isMeta === true)).toBe(false);
   });
 });

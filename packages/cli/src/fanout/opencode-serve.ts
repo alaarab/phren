@@ -102,6 +102,7 @@ export async function driveOpencode(child: ChildProcess, o: DriveOptions): Promi
     if (decision === "stopped") return;
     line("phren/permission", { permission: asked.permission, patterns: asked.patterns, decision });
     await call("POST", `/permission/${encodeURIComponent(asked.id)}/reply`, decision === "approve" ? { reply: "once" }
+      : decision === "always" ? { reply: "always" }
       : { reply: "reject", message: decision === "deny" ? DENIED_FEEDBACK : UNANSWERED_FEEDBACK });
   };
   const reader = events.body.getReader(), decoder = new TextDecoder();
@@ -155,7 +156,7 @@ export async function driveOpencode(child: ChildProcess, o: DriveOptions): Promi
 /** Publishes one ask where the Hook looks for OpenCode approvals and waits
  * for the phone's answer. The request carries the fan-out job so the Hook
  * can find the worker's parent conversation. */
-async function relay(o: DriveOptions, session: string, asked: Asked, signal: AbortSignal): Promise<"approve" | "deny" | "timeout" | "stopped"> {
+async function relay(o: DriveOptions, session: string, asked: Asked, signal: AbortSignal): Promise<"approve" | "deny" | "always" | "timeout" | "stopped"> {
   const directory = path.join(o.store, ".runtime", "approvals");
   const request = path.join(directory, `opencode-${session}.request.json`), answer = path.join(directory, `opencode-${session}.answer.json`);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -170,7 +171,7 @@ async function relay(o: DriveOptions, session: string, asked: Asked, signal: Abo
       if (signal.aborted) return "stopped";
       try {
         const value = JSON.parse(fs.readFileSync(answer, "utf8")) as { id?: unknown; decision?: unknown };
-        if (value.id === asked.id && (value.decision === "approve" || value.decision === "deny")) return value.decision;
+        if (value.id === asked.id && (value.decision === "approve" || value.decision === "deny" || value.decision === "always")) return value.decision;
       } catch { /* Not answered yet. */ }
     }
     return "timeout";

@@ -247,6 +247,24 @@ describe("speech output format", () => {
     expect(JSON.parse(mp3.bytes.toString())).toMatchObject({ audioFormat: "mp3;rate=44100;bitrate=192000;channels=1", sampleRate: 44_100, format: "mp3_44100_192", model: DEFAULT_SPEECH_MODEL });
   });
 
+  it("falls to 128 kbps mp3 when the plan refuses the 192 tier, before plain PCM, and remembers the refusal", async () => {
+    // A plan below Creator serves mp3_44100_128 but not mp3_44100_192.
+    const eleven = upstream(format => format === "mp3_44100_192" ? refusal(403, "output_format_not_allowed") : undefined);
+    const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch });
+    servers.push(server);
+    const reply = await post({ text: "Hello.", formats: ["mp3_44100_192", "mp3_44100_128", "pcm_24000"] });
+    expect(reply.status).toBe(200);
+    expect(reply.headers["x-phren-audio"]).toBe("mp3;rate=44100;bitrate=128000;channels=1");
+    expect(reply.headers["x-phren-audio-rate"]).toBe("44100");
+    expect(eleven.calls.map(call => call.format)).toEqual(["mp3_44100_192", "mp3_44100_128"]);
+
+    // The refusal is remembered: the next reply skips straight to 128 kbps.
+    eleven.calls.length = 0;
+    const again = await post({ text: "Hi.", formats: ["mp3_44100_192", "mp3_44100_128", "pcm_24000"] });
+    expect(again.headers["x-phren-audio"]).toBe("mp3;rate=44100;bitrate=128000;channels=1");
+    expect(eleven.calls.map(call => call.format)).toEqual(["mp3_44100_128"]);
+  });
+
   it("ignores format names it doesn't know, however many, instead of refusing the request", async () => {
     const eleven = upstream(() => undefined);
     const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch });
@@ -279,6 +297,14 @@ describe("speech output format", () => {
     expect(json).toMatchObject({ audioFormat: SPEECH_AUDIO, sampleRate: 24_000, format: "pcm_24000", alignment: null });
     const hifi = JSON.parse((await post({ text: "Hi.", timestamps: true, formats: ["pcm_44100"] })).bytes.toString());
     expect(hifi).toMatchObject({ audioFormat: "pcm_s16le;rate=44100;channels=1", sampleRate: 44_100 });
+  });
+
+  it("reports 128 kbps mp3 in the timestamped reply, with the same 44.1 kHz rate", async () => {
+    const eleven = upstream(() => timedReply());
+    const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch });
+    servers.push(server);
+    const json = JSON.parse((await post({ text: "Hi.", timestamps: true, formats: ["mp3_44100_128"] })).bytes.toString());
+    expect(json).toMatchObject({ audioFormat: "mp3;rate=44100;bitrate=128000;channels=1", sampleRate: 44_100, format: "mp3_44100_128" });
   });
 });
 

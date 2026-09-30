@@ -12,8 +12,8 @@ Linux uses a systemd user service; macOS uses a LaunchAgent in your signed-in
 user session. Without Herdr the Hook uses tmux; see [Without Herdr: tmux](#without-herdr-tmux).
 
 ```sh
-npx --yes @phren/cli@0.3.16 bridge install
-npx --yes @phren/cli@0.3.16 bridge doctor
+npx --yes @phren/cli@0.3.17 bridge install
+npx --yes @phren/cli@0.3.17 bridge doctor
 ```
 
 Keep Tailscale connected on the iPhone and computer for remote access. Funnel and
@@ -266,7 +266,12 @@ replies to the phone's answer through the process's own API; an answer in the
 TUI withdraws the card), and the Hook watches that directory, maps the ask
 to its pane through the recorded session binding or Herdr's opencode session id,
 and pushes it to registered phones with the ask's title and message. The same
-`POST /v1/approvals/answer` route writes the plugin's answer file.
+`POST /v1/approvals/answer` route writes the plugin's answer file. The card's
+`options` offer once, "Allow for this project", "Allow everywhere" and Deny;
+both grant scopes map to OpenCode's `always` reply (which lasts the running
+session), and "Allow everywhere" also adds the tool to
+`~/.config/opencode/opencode.json` as an allow rule under a lock with an atomic
+rename.
 
 An OpenCode the Hook launches serves its own HTTP API: it runs as
 `opencode --port <free port>` with a random `OPENCODE_SERVER_PASSWORD`, and the
@@ -425,8 +430,10 @@ lists your tmux servers:
   in the phone's list with chat, status, approvals and the terminal.
 - `tmux-<name>`: any other tmux server of yours that answers, such as one
   started with `tmux -L work` (`tmux-work`). The Hook looks for sockets in
-  `$TMUX_TMPDIR/tmux-<uid>/` and `/tmp/tmux-<uid>/`, at most 16 servers.
-  A server started with `tmux -S <path>` elsewhere is not found.
+  `$TMUX_TMPDIR/tmux-<uid>/` and `/tmp/tmux-<uid>/`: the 16 most recently
+  active servers that answer, so stale sockets left by killed runs never hide a
+  live one. A server started with
+  `tmux -S <path>` elsewhere is not found.
 - `tmux-phren`: a hidden tmux server on its own socket, where sessions the phone
   starts run. It starts with the first launch. Each launch is a tmux session
   named after it, with the agent started under your login shell in the project
@@ -512,10 +519,10 @@ alone.
 ## Maintain and diagnose
 
 ```sh
-npx --yes @phren/cli@0.3.16 bridge status
-npx --yes @phren/cli@0.3.16 bridge update
-npx --yes @phren/cli@0.3.16 bridge rollback
-npx --yes @phren/cli@0.3.16 bridge uninstall
+npx --yes @phren/cli@0.3.17 bridge status
+npx --yes @phren/cli@0.3.17 bridge update
+npx --yes @phren/cli@0.3.17 bridge rollback
+npx --yes @phren/cli@0.3.17 bridge uninstall
 ```
 
 `update` installs the version of the CLI you invoke; choose an explicit newer
@@ -726,15 +733,15 @@ never switches model.
 
 The audio format is the best the phone plays and the ElevenLabs plan allows,
 tried in this order: `pcm_44100` (16-bit little-endian mono PCM at 44.1 kHz,
-Pro plans and above), `mp3_44100_192` (Creator and above), `pcm_24000` (every
-plan). The phone lists what it plays in `formats` (names from the
-`speechFormats` capability); a phone that sends none gets `pcm_24000`, as every
-phone did before. A format the plan refuses (403 `output_format_not_allowed`)
-is skipped for 6 hours. The streamed reply names what it sends in
-`X-Phren-Audio` (`pcm_s16le;rate=24000;channels=1`,
-`pcm_s16le;rate=44100;channels=1` or `mp3;rate=44100;bitrate=192000;channels=1`)
-and `X-Phren-Audio-Rate` (`24000` or `44100`), and the model in
-`X-Phren-Speech-Model`.
+Pro plans and above), `mp3_44100_192` (Creator and above), `mp3_44100_128`,
+then `pcm_24000` (every plan, the base). The phone lists what it plays in
+`formats` (names from the `speechFormats` capability); a phone that sends none
+gets `pcm_24000`, as every phone did before. A format the plan refuses (403
+`output_format_not_allowed`) is skipped for 6 hours. The streamed reply names
+what it sends in `X-Phren-Audio` (`pcm_s16le;rate=24000;channels=1`,
+`pcm_s16le;rate=44100;channels=1`, `mp3;rate=44100;bitrate=192000;channels=1`
+or `mp3;rate=44100;bitrate=128000;channels=1`) and `X-Phren-Audio-Rate`
+(`24000` or `44100`), and the model in `X-Phren-Speech-Model`.
 
 With `"timestamps": true` (the `speechTimestamps` capability) the Hook calls
 ElevenLabs' `with-timestamps` endpoint instead and answers JSON: `{ "audio":

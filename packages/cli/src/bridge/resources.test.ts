@@ -1,19 +1,43 @@
 import { describe, expect, it } from "vitest";
-import { assess, collectResources, heavyKind, heavyProcesses, parseMeminfo, parsePmset, parsePs, parseSwap, type ProcessRow, ResourceMonitor } from "./resources.js";
+import { assess, collectResources, heavyKind, heavyProcesses, parseEtime, parseMeminfo, parsePmset, parsePs, parseSwap, type ProcessRow, ResourceMonitor, withStartTimes } from "./resources.js";
 
 const GB = 1024 ** 3;
-const row = (pid: number, ppid: number, cpu: number, rssMB: number, command: string, args = command): ProcessRow =>
-  ({ pid, ppid, cpu, rssKB: rssMB * 1024, command, args });
+const row = (pid: number, ppid: number, cpu: number, rssMB: number, command: string, args = command, pgid = pid): ProcessRow =>
+  ({ pid, ppid, pgid, cpu, rssKB: rssMB * 1024, command, args });
 
 describe("resources", () => {
-  it("parses ps output with spaces in program paths", () => {
+  it("reads process start times from ps etime", () => {
+    expect(parseEtime("05:07")).toBe(307);
+    expect(parseEtime("01:02:03")).toBe(3723);
+    expect(parseEtime("2-01:02:03")).toBe(2 * 86_400 + 3723);
+    expect(parseEtime("junk")).toBeUndefined();
+    const rows = withStartTimes([row(10, 1, 0, 1, "/bin/claude"), row(11, 1, 0, 1, "/bin/zsh")], "   10       00:30\n", 100_000);
+    expect(rows[0].startedAt).toBe(70_000);
+    expect(rows[1].startedAt).toBeUndefined();
+  });
+
+  it("ends nothing when the pane listing is incomplete", async () => {
+    let killed = 0;
+    const jobs = { list: async () => [], reconcile: async () => [],
+      cleanup: async (_rows: unknown, live: Set<string>, options: { panesKnown?: boolean; servers?: Set<string> }) => {
+        if (options.panesKnown !== false && options.servers) killed++;
+        return { killed: [], kept: [], forgotten: [], live: live.size };
+      } };
+    const monitor = new ResourceMonitor({ processes: async () => [], owners: async () => new Map(), panes: async () => undefined, jobs: jobs as never });
+    await monitor.cleanupJobs();
+    expect(killed).toBe(0);
+  });
+
+  it("parses ps output with spaces in program paths and a process group", () => {
     const rows = parsePs(
-      "  10     1  12.5  2048 /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild\n  11    10   3.0  1024 /Library/Some Dir/launchd_sim\n",
+      "  10     1   10  12.5  2048 /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild\n  11    10   10   3.0  1024 /Library/Some Dir/launchd_sim\n",
       "  10 xcodebuild test -scheme Phren\n  11 launchd_sim /Users/me/Library/Developer/XCTestDevices/ABC/data\n");
     expect(rows).toEqual([
-      { pid: 10, ppid: 1, cpu: 12.5, rssKB: 2048, command: "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild", args: "xcodebuild test -scheme Phren" },
-      { pid: 11, ppid: 10, cpu: 3, rssKB: 1024, command: "/Library/Some Dir/launchd_sim", args: "launchd_sim /Users/me/Library/Developer/XCTestDevices/ABC/data" },
+      { pid: 10, ppid: 1, pgid: 10, cpu: 12.5, rssKB: 2048, command: "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild", args: "xcodebuild test -scheme Phren" },
+      { pid: 11, ppid: 10, pgid: 10, cpu: 3, rssKB: 1024, command: "/Library/Some Dir/launchd_sim", args: "launchd_sim /Users/me/Library/Developer/XCTestDevices/ABC/data" },
     ]);
+    // The older five-column listing still parses, with no group.
+    expect(parsePs("  10     1  12.5  2048 /bin/xcodebuild\n", "  10 xcodebuild\n")[0]).toMatchObject({ pid: 10, pgid: 0 });
   });
 
   it("attributes each process to its nearest heavy job and names the pane that started it", () => {

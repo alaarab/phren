@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -209,7 +209,9 @@ describe("asks", () => {
     server.state.permissions = [permission];
     await hooks.servedAsks(entry(), server.client, asks({ permissions: [permission] }));
     await hooks.servedAsks(entry(), server.client, asks({ permissions: [permission] }));
-    expect(hooks.approval(target)).toMatchObject({ actionId: "per_1", toolName: "bash", title: "Allow bash?", message: "bash: rm -rf /tmp/x" });
+    expect(hooks.approval(target)).toMatchObject({ actionId: "per_1", toolName: "bash", title: "Allow bash?", message: "bash: rm -rf /tmp/x",
+      options: [{ label: "Allow once", decision: "approve" }, { label: "Allow for this project", decision: "allow-project" },
+        { label: "Allow everywhere", decision: "allow-everywhere" }, { label: "Deny", decision: "deny" }] });
     expect(hooks.pendingPanes("default", { panes: [{ pane_id: "w1:p1", workspace_id: "w1", tab_id: "w1:t1", agent: "opencode" }] })).toEqual(new Set(["w1:p1"]));
     expect(push.sent).toHaveLength(1);
     expect(push.sent[0]).toMatchObject({ provider: "opencode" });
@@ -230,6 +232,24 @@ describe("asks", () => {
     await expect(hooks.answer({ ...target, session: "ses_other" }, "per_1", "approve")).rejects.toThrow("no longer pending");
     await hooks.answer(target, "per_1", "deny");
     expect(server.state.replies).toEqual([["per_1", "reject"]]);
+  });
+
+  it("maps both served grant scopes to always, writing the config only for everywhere", async () => {
+    registerPaneServer(paneServersDir(), entry());
+    const home = await mkdtemp(path.join(tmpdir(), "phren-oc-home-"));
+    vi.stubEnv("XDG_CONFIG_HOME", home);
+    try {
+      const hooks = new AgentHooks();
+      await hooks.servedAsks(entry(), server.client, asks({ permissions: [permission] }));
+      await hooks.answer(target, "per_1", "allow-project");
+      expect(server.state.replies).toEqual([["per_1", "always"]]);
+      await expect(readFile(path.join(home, "opencode", "opencode.json"), "utf8")).rejects.toThrow();
+      const again: OpenCodePermission = { ...permission, id: "per_2" };
+      await hooks.servedAsks(entry(), server.client, asks({ permissions: [again] }));
+      await hooks.answer(target, "per_2", "allow-everywhere");
+      expect(server.state.replies).toEqual([["per_1", "always"], ["per_2", "always"]]);
+      expect(JSON.parse(await readFile(path.join(home, "opencode", "opencode.json"), "utf8"))).toEqual({ permission: { bash: "allow" } });
+    } finally { await rm(home, { recursive: true, force: true }); }
   });
 
   it("keeps an ask OpenCode still lists on the phone, and answerable from its push, past any single horizon", async () => {

@@ -36,11 +36,11 @@ import { paneAccountField, paneChatState, panes, servers, snapshot, validateTarg
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { gitRoot, launchDirectory, repositoryBranch, webServers } from "./projects.js";
-import { BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, targetFromURL, targetSchema } from "./protocol.js";
+import { approvalDecisions, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, targetFromURL, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
 import type { TabActivityStore } from "./tab-activity.js";
-import { childAgentTree, historicalImage, publicChildAgents, refreshTranscript, targetTranscriptPath } from "./transcripts.js";
+import { childAgentTree, historicalImage, publicChildAgents, refreshTranscript, runningChildAgents, targetTranscriptPath } from "./transcripts.js";
 import { listUploads, saveUpload, uploadImage } from "./uploads.js";
 import type { ModelCatalog } from "./models.js";
 import type { ModelSwitcher } from "./model-switch.js";
@@ -124,9 +124,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
   const key = `${source}\0${session}`, now = Date.now(), cached = childActivityCache.get(key);
   if (cached && now - cached.at < CHILD_ACTIVITY_CACHE_MS) return cached.result;
   const result = childAgentTree(source, session).then(tree => {
-    const running = tree.flatMap(function visit(child): typeof tree {
-      return [child, ...child.children.flatMap(visit)];
-    }).filter(child => child.state === "running");
+    const running = runningChildAgents(tree);
     return { runningChildren: running.length, childProviders: [...new Set(running.map(child => child.provider))].sort() };
   }).catch(() => ({ runningChildren: 0, childProviders: [] as Provider[] }));
   childActivityCache.set(key, { at: now, result });
@@ -564,6 +562,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           } : undefined);
         } else if (url.pathname === "/v1/sessions/rename") {
           result = await renameSession(selectedServer(url), data);
+        } else if (url.pathname === "/v1/jobs/cleanup") {
+          // Ends only registered worker process groups whose pane is gone.
+          result = { ok: true, ...await ctx.resources.cleanupJobs() };
         } else if (url.pathname === "/v1/schedules") {
           result = await scheduler!.statuses();
         } else if (url.pathname === "/v1/schedules/run") {
@@ -601,7 +602,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/dispatch/returns") {
           result = { returns: await ctx.returns!.take() };
         } else if (url.pathname === "/v1/dispatch/approve") {
-          const body = z.object({ id: z.string().uuid(), decision: z.enum(["approve", "deny"]), actionId: z.string().min(1).max(200), origin: originPaneSchema.optional() }).strict().parse(data);
+          const body = z.object({ id: z.string().uuid(), decision: z.enum(approvalDecisions), actionId: z.string().min(1).max(200), origin: originPaneSchema.optional() }).strict().parse(data);
           await ctx.returns!.answerApproval(body.id, body.decision, body.actionId, body.origin); result = { ok: true };
         } else if (url.pathname === "/v1/conductor/grants") {
           result = { ok: true, grant: await addGrant(data) };

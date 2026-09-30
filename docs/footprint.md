@@ -241,3 +241,10 @@ Conductor finish supervision also writes `<bridge>/worker-reports/*.json`
 closure tombstones), `<bridge>/integrator.json` (the chosen session target), and
 `<bridge>/owner-inbox.json` (open and resolved owner items). These private,
 local files do not sync into the memory store.
+
+Dispatched and scheduled workers are tracked in `<bridge>/jobs.json`: one
+record per worker (owning pane, session, harness, label, start time and, once
+the process table shows it, the worker's process group). The resources report
+uses it to name the agent a heavy process belongs to, and `POST
+/v1/jobs/cleanup` ends only a registered process group whose pane is gone and
+whose lease has passed. The file is private and does not sync either.

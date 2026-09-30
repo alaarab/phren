@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { open, stat } from "node:fs/promises";
 import { object, objects, sessionId, type Json } from "./protocol.js";
 import { visibleCodexExecEvent } from "./fanouts.js";
 import { harnessPreamble } from "./transcript-claude.js";
@@ -12,6 +12,9 @@ import { readableQuestionReply } from "./codex-question-reply.js";
 export type DirectRelation = Pick<LocalChildAgentRelation, "session" | "path" | "callId" | "state">;
 type ChildRelationCache = {
   dev: number; ino: number; fileSize: number; completeOffset: number; mtimeMs: number;
+  /** The last bytes before `completeOffset`, to tell a real append from a
+   * file rewritten in place (same inode) that has since grown past its old size. */
+  tail: Buffer;
   relations: Map<string, DirectRelation>;
 };
 const childRelationCache = new Map<string, ChildRelationCache>();
@@ -32,6 +35,23 @@ function addChildRelation(line: string, found: Map<string, DirectRelation>): voi
   } catch { /* Ignore malformed/private rows. */ }
 }
 
+const TAIL_CHECK = 256;
+
+async function readAt(file: string, position: number, length: number): Promise<Buffer> {
+  const handle = await open(file, "r");
+  try {
+    const buffer = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, position);
+    return buffer.subarray(0, bytesRead);
+  } finally { await handle.close(); }
+}
+
+/** Whether `file` still holds `expected` at `position`. */
+async function sameBytes(file: string, position: number, expected: Buffer): Promise<boolean> {
+  if (position < 0) return false;
+  return (await readAt(file, position, expected.length).catch(() => Buffer.alloc(0))).equals(expected);
+}
+
 export async function directChildAgents(file: string): Promise<DirectRelation[]> {
   const metadata = await stat(file), cached = childRelationCache.get(file);
   if (cached && cached.dev === metadata.dev && cached.ino === metadata.ino
@@ -39,7 +59,8 @@ export async function directChildAgents(file: string): Promise<DirectRelation[]>
   // Codex rollouts are append-only. Keep the byte position of the last full
   // JSONL row so a live transcript only scans new rows as its chat advances.
   // A truncate, replacement, or in-place rewrite starts from zero.
-  const append = cached && cached.dev === metadata.dev && cached.ino === metadata.ino && metadata.size > cached.fileSize;
+  const append = cached && cached.dev === metadata.dev && cached.ino === metadata.ino && metadata.size > cached.fileSize
+    && await sameBytes(file, cached.completeOffset - cached.tail.length, cached.tail);
   const start = append ? cached.completeOffset : 0;
   const found = append ? new Map(cached.relations) : new Map<string, DirectRelation>();
   let pending = Buffer.alloc(0), completeOffset = start;
@@ -52,8 +73,9 @@ export async function directChildAgents(file: string): Promise<DirectRelation[]>
       completeOffset += newline + 1; pending = pending.subarray(newline + 1);
     }
   }
+  const tail = completeOffset > 0 ? await readAt(file, Math.max(0, completeOffset - TAIL_CHECK), Math.min(TAIL_CHECK, completeOffset)) : Buffer.alloc(0);
   const entry = { dev: metadata.dev, ino: metadata.ino, fileSize: metadata.size, completeOffset,
-    mtimeMs: metadata.mtimeMs, relations: found };
+    mtimeMs: metadata.mtimeMs, tail, relations: found };
   childRelationCache.set(file, entry);
   while (childRelationCache.size > 64) childRelationCache.delete(childRelationCache.keys().next().value!);
   return [...found.values()];

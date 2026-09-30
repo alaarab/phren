@@ -1,12 +1,12 @@
 // Phone swipes on a tmux server with tmux's defaults (`mouse off`), against a
 // real tmux on a private socket. Skipped when this computer has no tmux.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { workspaceAction } from "./server-launch.js";
-import { fromTmuxId, resetTmuxBinary, tmuxBinary, tmuxScroll } from "./terminal-tmux.js";
+import { fromTmuxId, resetTmuxBinary, tmuxBinary, tmuxScroll, tmuxSocketFolders } from "./terminal-tmux.js";
 
 const saved = process.env.PHREN_TMUX;
 delete process.env.PHREN_TMUX;
@@ -58,6 +58,9 @@ describe.skipIf(!binary || process.platform === "win32")("tmux scrolling for the
   });
   afterAll(async () => {
     try { tmux("kill-server"); } catch { /* already gone */ }
+    // tmux can leave the socket file behind when the server is killed; remove
+    // it so a killed run does not seed the next one's stale-socket pile.
+    for (const dir of tmuxSocketFolders()) await unlink(path.join(dir, socket)).catch(() => undefined);
     if (saved === undefined) delete process.env.PHREN_TMUX; else process.env.PHREN_TMUX = saved;
     resetTmuxBinary();
     await rm(folder, { recursive: true, force: true });

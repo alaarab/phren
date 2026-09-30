@@ -132,8 +132,10 @@ requests they cover. Fails with 409 when the worker is not waiting on an
 approval. In the core profile use `phren_admin(action: "dispatch_approve")`.
 
 Route: `POST /v1/dispatch/approve` with `{ "id": "<uuid>", "decision":
-"approve" | "deny", "actionId"?: "<id>" }` returns `{ "ok": true }`. The Hook
-sends the answer to the worker's Hook at `POST /v1/approvals/answer`.
+"approve" | "deny" | "allow-project" | "allow-everywhere", "actionId"?: "<id>" }`
+returns `{ "ok": true }`. The two grant scopes answer an OpenCode worker's
+permission ask with `always`. The Hook sends the answer to the worker's Hook at
+`POST /v1/approvals/answer`.
 
 On the receiving computer, each observation in the `POST /v1/dispatch/workers`
 answer may carry `approval`: `{ actionId, tool, title?, request?,
@@ -388,6 +390,17 @@ footer can't be read:
 Claude's `permission-mode` rows (written when a prompt is submitted), `permissionMode` on user rows and
 `message.usage.speed`; Codex's `turn_context` `approval_policy`,
 `approvals_reviewer`, `sandbox_policy.type` and `collaboration_mode.mode`.
+
+The same footer read gives a Claude pane's `agentStatus.suggestion`: the
+predicted next prompt Claude Code draws as dim text in its empty input box
+after a turn. The screen is its only source for a live pane: Claude keeps it in
+memory and writes it to no transcript, file or hook event. It is present only
+while the pane is idle or done with nothing pending, and only from a read taken
+after the last busy status this stream saw, so a new turn drops it at once and
+the owner typing in the pane drops it with the next read. Claude's other dim
+input text (`Try "…"`, the queued-message hints, `Message @…`) and a suggestion
+a narrow pane cut short with `…` are never sent. Codex, OpenCode and Copilot
+have no such prediction and never send it.
 
 `POST /v1/prompt { target, text, deliveryId? }` answers with how far the
 message got: `{ ok, delivered: true }` once the conversation's own
@@ -1445,7 +1458,7 @@ This computer's live resources, `{computer, resources}`, collected at most once 
 Pending `sudo -A` requests from this computer's askpass helper (`<bridge>/askpass`, see docs/phren-hook.md, *sudo from the phone*), and the phone's answer. `GET` returns `{requests: [{id, computer, command, account?, user?, cwd?, session?, askedAt, expiresAt}]}`, oldest first; `account` is whose password sudo asks for (the user running sudo), `user` who the command runs as; `command` is what sudo will run, read by the Hook from the sudo process itself, and `session` (`source`, `label`, `server`, `workspace`, `tab`, `pane`) names the pane that asked when the helper ran in one. `POST /v1/sudo/answer` takes `{id, password}` (1 to 1024 characters, no newline, carriage return or NUL) or `{id, deny: true}` and answers `{ok: true}`. With `outcome: true` next to a password it answers, within about `PHREN_SUDO_OUTCOME_MS` (6 s), `{ok: true, outcome}`: `rejected` when the same sudo process (pid and start time) asked again, `accepted` when it did not on an earlier try or is still running, `unknown` when it gave up after its last try or the password could not be handed over (capability `sudoOutcome`; the phone uses it to save a typed password or forget a saved one that failed). The request is then gone, and an unknown, answered or expired id is 404. A request lasts `PHREN_SUDO_TIMEOUT_MS` (120 s). The password is handed to the waiting askpass once and never logged, stored or sent anywhere else. A phone that opens `WS /v1/overview` with `sudo=1` gets `{type: "sudo", requests}` after the first overview and whenever the list changes, and phones registered for approval pushes get one push per request (category `PHREN_SUDO`, `phren.kind: "sudo"`, with `id`, `computer`, `command`, `expiresAt`, never a password). Advertised as `capabilities.sudo`.
 ### `POST /v1/speech`
 
-Voices `text` (1 to 2,000 characters) for talk mode with this computer's ElevenLabs key. Inputs: `text`, optional `timestamps` (answer JSON with the character alignment), `voice` (an ElevenLabs voice id) and `formats`, the output formats the phone plays, from `capabilities.speechFormats` (`pcm_44100`, `mp3_44100_192`, `pcm_24000`). The Hook serves the first the phone plays and the ElevenLabs plan allows, learning refusals from ElevenLabs' `output_format_not_allowed` and skipping them for 6 hours; without `formats` it is always `pcm_24000`. The streamed reply carries `X-Phren-Audio` (e.g. `pcm_s16le;rate=44100;channels=1`), `X-Phren-Audio-Rate` and `X-Phren-Speech-Model`; the timestamped JSON is `{audio, audioFormat, sampleRate, format, model, alignment}` with alignment times in seconds. The model is `phren bridge speech-model` (default `eleven_v4_turbo`), replaced by `eleven_flash_v2_5` for 10 minutes when it errors or the median of its last three short replies took more than 1.5 s to start. See [spoken replies](phren-hook.md#spoken-replies-for-talk-mode).
+Voices `text` (1 to 2,000 characters) for talk mode with this computer's ElevenLabs key. Inputs: `text`, optional `timestamps` (answer JSON with the character alignment), `voice` (an ElevenLabs voice id) and `formats`, the output formats the phone plays, from `capabilities.speechFormats` (`pcm_44100`, `mp3_44100_192`, `mp3_44100_128`, `pcm_24000`). The Hook serves the first the phone plays and the ElevenLabs plan allows, learning refusals from ElevenLabs' `output_format_not_allowed` and skipping them for 6 hours; without `formats` it is always `pcm_24000`. The streamed reply carries `X-Phren-Audio` (e.g. `pcm_s16le;rate=44100;channels=1`), `X-Phren-Audio-Rate` and `X-Phren-Speech-Model`; the timestamped JSON is `{audio, audioFormat, sampleRate, format, model, alignment}` with alignment times in seconds. The model is `phren bridge speech-model` (default `eleven_v4_turbo`), replaced by `eleven_flash_v2_5` for 10 minutes when it errors or the median of its last three short replies took more than 1.5 s to start. See [spoken replies](phren-hook.md#spoken-replies-for-talk-mode).
 
 ## Computers and usage without memory
 

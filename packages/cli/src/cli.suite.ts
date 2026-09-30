@@ -1030,7 +1030,13 @@ describe("CLI integration: inspect-index and debug-injection", () => {
 // CLI integration: init (subprocess-based, #96)
 // ────────────────────────────────────────────────────────────────────────────
 
-const CLI_INTEGRATION_TIMEOUT_MS = process.platform === "win32" ? 20000 : 15000;
+// A full `phren init` is a subprocess that itself spawns git, `where.exe` and
+// node; a case that runs a full init (sometimes twice, plus verify/uninstall)
+// pays for all of that. Windows process creation is several times dearer than
+// POSIX, and the sharded suite runs many workers at once, so give those cases
+// headroom there. The spawns themselves were trimmed (commandExists caching,
+// no `node --version`), this is only the remaining Windows tax.
+const CLI_INTEGRATION_TIMEOUT_MS = process.platform === "win32" ? 30000 : 15000;
 
 describe("CLI integration: init", () => {
   let cliEnv: IsolatedCliEnv;
@@ -1422,7 +1428,7 @@ describe("CLI integration: uninstall", () => {
     expect(stdout).toContain("installed data removed");
     expect(fs.existsSync(phrenDir)).toBe(false);
     expect(fs.existsSync(machineFile)).toBe(false);
-  });
+  }, CLI_INTEGRATION_TIMEOUT_MS);
 
   it("handles missing settings file gracefully", () => {
     const { stdout, exitCode } = runCli(
