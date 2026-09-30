@@ -453,8 +453,11 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false, queue?: 
   // (a newest-first read sees that turn first) and flagged when the agent's
   // own schedule fired it.
   if (raw.type === "queue-operation" && raw.operation === "dequeue") {
-    return { type: "phren_queue_consumed", ...(queue?.key ? { key: queue.key } : {}),
-      ...(queue?.key && queue.scheduled ? { scheduled: true } : {}), timestamp: raw.timestamp };
+    const key = queue?.key, scheduled = queue?.scheduled;
+    // One prompt turn answers one dequeue: an older dequeue must not reuse
+    // this key and mark a different queued message consumed.
+    if (queue) { queue.key = undefined; queue.scheduled = undefined; }
+    return { type: "phren_queue_consumed", ...(key ? { key } : {}), ...(key && scheduled ? { scheduled: true } : {}), timestamp: raw.timestamp };
   }
   // popAll pulls queued prompts back into the input: they were neither
   // consumed nor scheduled, so the phone must not draw the leftovers as a

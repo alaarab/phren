@@ -289,6 +289,13 @@ describe("Claude queue consumption", () => {
       .toEqual({ type: "phren_queue_consumed", key: digest("Do a pull"), timestamp: "t" });
   });
 
+  it("pairs one prompt turn with one dequeue, so an older dequeue stays keyless", () => {
+    const state = queueState(scheduledTurn);
+    visibleClaudeEvent({ type: "queue-operation", operation: "dequeue", timestamp: "t2" }, false, state);
+    expect(visibleClaudeEvent({ type: "queue-operation", operation: "dequeue", timestamp: "t1" }, false, state))
+      .toEqual({ type: "phren_queue_consumed", timestamp: "t1" });
+  });
+
   it("keys a dequeue by the scheduled turn and flags it", () => {
     expect(visibleClaudeEvent({ type: "queue-operation", operation: "dequeue", timestamp: "t" }, false, queueState(scheduledTurn)))
       .toEqual({ type: "phren_queue_consumed", key: digest("Check CI on PR #256 (gh pr checks 256)"), scheduled: true, timestamp: "t" });
