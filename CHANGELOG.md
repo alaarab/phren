@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- `phren init` probes for installed tools once per run instead of several times, and its post-init check reads the running Node version in-process. A full init spawns fewer child processes, which matters most on Windows where each process creation is slow.
+
 ## [0.3.16] - 2026-09-29
 
 ### Fixed
