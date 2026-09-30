@@ -105,21 +105,23 @@ function socketFlags(socket: string): string[] {
   return file ? ["-S", file] : ["-L", socket];
 }
 
-/** The tmux sockets in `folder` this user owns, by name (at most 32). A socket
- * outside the first folder of `tmuxSocketFolders` is remembered by path. */
+/** The tmux sockets in `folder` this user owns, by name, most recently active
+ * first, so a live server sorts ahead of stale socket files left by killed
+ * runs. A socket outside the first folder of `tmuxSocketFolders` is remembered
+ * by path. */
 export async function tmuxSocketsIn(folder: string): Promise<string[]> {
   const uid = process.getuid?.(), primary = tmuxSocketFolders()[0];
   const names = (await readdir(folder).catch(() => [] as string[])).slice(0, 256);
-  const found: string[] = [];
+  const found: { name: string; at: number }[] = [];
   for (const name of names) {
-    if (found.length >= 32) break;
     if (!tmuxServerName(name)) continue;
     const info = await lstat(path.join(folder, name)).catch(() => undefined);
     if (!info?.isSocket() || (uid !== undefined && info.uid !== uid)) continue;
-    found.push(name);
+    found.push({ name, at: info.mtimeMs });
     if (folder !== primary && !socketPaths.has(name) && !existsSync(path.join(primary ?? folder, name))) socketPaths.set(name, path.join(folder, name));
   }
-  return found;
+  found.sort((a, b) => b.at - a.at);
+  return found.map(entry => entry.name);
 }
 
 const defaultDeps: TmuxDeps = {
@@ -456,10 +458,12 @@ export const tmuxTerminal: TerminalProvider = {
 
 /** The owner's tmux servers that answer, by Hook server name: the default
  * socket and every other socket in the user's tmux folders (`tmux -L work`
- * is "tmux-work"), at most 16. The hidden server is not among them. */
+ * is "tmux-work"). Every candidate is pinged, so a live server is never
+ * dropped by a socket-count cut; stale socket files from killed runs simply
+ * fail to answer. The hidden server is not among them. */
 async function ownerServers(): Promise<string[]> {
   const sockets = [...new Set(["default", ...await deps.sockets().catch(() => [] as string[])])].filter(socket => socket !== "phren");
-  const names = sockets.flatMap(socket => tmuxServerName(socket) ?? []).slice(0, 16);
+  const names = sockets.flatMap(socket => tmuxServerName(socket) ?? []);
   const running = await Promise.all(names.map(name => tmuxTerminal.ping(name).then(() => true, () => false)));
   return names.filter((_, index) => running[index]);
 }
