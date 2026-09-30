@@ -36,6 +36,7 @@ import { childAgentTree } from "./transcripts.js";
 import { ModelCatalog } from "./models.js";
 import { ModelSwitcher } from "./model-switch.js";
 import { SettingsSwitcher } from "./settings-switch.js";
+import { PermissionModeSwitcher } from "./permission-mode.js";
 import { SideQuestions } from "./side-questions.js";
 import { AccountUsageReader } from "./usage.js";
 import { ResourceMonitor } from "./resources.js";
@@ -126,11 +127,12 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
   const settingsSwitcher = new SettingsSwitcher(agentHooks);
+  const permissionModeSwitcher = new PermissionModeSwitcher(agentHooks);
   const sideQuestions = new SideQuestions();
   const handOffs = dispatches ? new HandOffQueue({
     validate: target => validateTarget(target, false, true),
     notify: (target, text, deliveryId, computer) => handOff({ computer, target, text, deliveryId }, { notifySender: false }),
-    send: async (target, text, deliveryId, typing) => await paneRouteOnce({ agentHooks, modelSwitcher, settingsSwitcher, codexQuestions, sideQuestions },
+    send: async (target, text, deliveryId, typing) => await paneRouteOnce({ agentHooks, modelSwitcher, settingsSwitcher, permissionModeSwitcher, codexQuestions, sideQuestions },
       new URL("http://phren.local/v1/prompt"), { target, text, deliveryId, hookQueued: true }, {} as never, typing) as Record<string, unknown>,
   }) : undefined;
   const contextUsage = new WorkspaceContextUsage();
@@ -194,7 +196,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     sudo: agentHooks.sudo,
   });
   const http = createServer(createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
-    journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
+    journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, permissionModeSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
     fanoutMessages, canary, streams, returns, handOffs, inbox }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });

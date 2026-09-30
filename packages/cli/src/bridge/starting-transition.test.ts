@@ -29,7 +29,7 @@ async function starting(): Promise<StartingTarget> {
   expect(state.starting).toBe(true);
   return { server: "default", workspace: "w1", tab: "w1:t1", pane: String(pane.pane_id), source: "codex", starting: true, startingToken: String(state.startingToken) };
 }
-const context = { modelSwitcher: { assertAvailable() {} }, settingsSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as never;
+const context = { modelSwitcher: { assertAvailable() {} }, settingsSwitcher: { assertAvailable() {} }, permissionModeSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as never;
 const send = (target: Json, deliveryId = `delivery-${sequence}`) => paneRoute(context, new URL("http://phren.local/v1/prompt"), { target, text: "hello", deliveryId }, {} as never);
 
 it("delivers a first send across token -> session identity exactly once, including a session-target retry", async () => {

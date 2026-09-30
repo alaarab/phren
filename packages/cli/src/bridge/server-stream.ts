@@ -176,8 +176,8 @@ export function transcriptStreams(ctx: StreamContext) {
                 : undefined);
             // Claude's own state comes from its footer, which leads the transcript.
             const codexServed = target.source === "codex" && !!codexServers.forTarget(target);
-            const { settings, settingsState, suggestion } = settingsSwitcher ? await settingsSwitcher.streamSettings(target, pane.terminal_id, codexServed)
-              : { settings: settingsCapabilities(target.source, codexServed), settingsState: undefined, suggestion: undefined };
+            const { settings, settingsState, suggestion, permissionMode, permissionModes } = settingsSwitcher ? await settingsSwitcher.streamSettings(target, pane.terminal_id, codexServed)
+              : { settings: settingsCapabilities(target.source, codexServed), settingsState: undefined, suggestion: undefined, permissionMode: undefined, permissionModes: undefined };
             // Claude's suggested next prompt, only between turns. The footer
             // read can be a throttle old, so one from before a turn this
             // stream saw start is stale: the turn cleared it.
@@ -190,6 +190,9 @@ export function transcriptStreams(ctx: StreamContext) {
               ...(waiting && agentHooks.passwordPrompt(target) ? { passwordPrompt: true } : {}),
               compacting: agentHooks.compacting(target),
               ...(nextPrompt ? { suggestion: nextPrompt } : {}),
+              // The mode Claude's footer shows and the cycle its picker offers,
+              // only from a confident read (a Claude pane's readable footer).
+              ...(permissionMode ? { permissionMode, permissionModes } : {}),
               ...(historyHealth.stalled ? { historyStalled: true, historyStalledSince: historyHealth.since } : {}),
               modules: info.modules, store: info.store, profile: info.profile, generation: info.generation,
               capabilities: { ...activeCapabilities, asyncQuestions: codexQuestions.availableFor(target),
