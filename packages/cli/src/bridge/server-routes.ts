@@ -36,7 +36,7 @@ import { paneAccountField, paneChatState, panes, servers, snapshot, validateTarg
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { gitRoot, launchDirectory, repositoryBranch, webServers } from "./projects.js";
-import { BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, targetFromURL, targetSchema } from "./protocol.js";
+import { approvalDecisions, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, targetFromURL, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
 import type { TabActivityStore } from "./tab-activity.js";
@@ -601,7 +601,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/dispatch/returns") {
           result = { returns: await ctx.returns!.take() };
         } else if (url.pathname === "/v1/dispatch/approve") {
-          const body = z.object({ id: z.string().uuid(), decision: z.enum(["approve", "deny"]), actionId: z.string().min(1).max(200), origin: originPaneSchema.optional() }).strict().parse(data);
+          const body = z.object({ id: z.string().uuid(), decision: z.enum(approvalDecisions), actionId: z.string().min(1).max(200), origin: originPaneSchema.optional() }).strict().parse(data);
           await ctx.returns!.answerApproval(body.id, body.decision, body.actionId, body.origin); result = { ok: true };
         } else if (url.pathname === "/v1/conductor/grants") {
           result = { ok: true, grant: await addGrant(data) };

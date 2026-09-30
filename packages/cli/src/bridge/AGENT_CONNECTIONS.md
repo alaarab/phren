@@ -127,8 +127,12 @@ For a registered pane:
   30 s) and, on connect and on every permission or question event, lists
   `/permission` and `/question`. A permission becomes the same card and push as
   a plugin ask (`actionId` is OpenCode's `per_…` id), shown on the root of the
-  asking session, and `POST /v1/approvals/answer` or its push replies `once` or
-  `reject` over HTTP. It stays answerable while OpenCode lists it, with no 50 s
+  asking session, and `POST /v1/approvals/answer` or its push replies `once`,
+  `always` or `reject` over HTTP. Its card advertises `once`, "Allow for this
+  project", "Allow everywhere" and Deny as `options`; both grant scopes reply
+  `always` (OpenCode's `always` lasts the running session), and "Allow
+  everywhere" also adds the tool to `~/.config/opencode/opencode.json` as an
+  allow rule. It stays answerable while OpenCode lists it, with no 50 s
   deadline: the Hook lists every live pane again on its five-second tick, and
   each listing that still returns the ask moves its `expiresAt` (and its push
   binding) an hour ahead. The card goes only when the ask is no longer listed
@@ -144,7 +148,7 @@ For a registered pane:
   OpenCode started by hand the plugin relays the `permission.asked` event
   instead: it writes the same request file (expiring after 30 minutes, since
   the TUI keeps its own prompt), replies to the answer file's decision with
-  `postSessionIdPermissionsPermissionId` (`once` / `reject`), and removes the
+  `postSessionIdPermissionsPermissionId` (`once` / `always` / `reject`), and removes the
   file when `permission.replied` says the TUI answered first.
 - `POST /v1/keys`: Escape declines a pending question, or aborts a working
   turn with `session.abort` (a failed abort falls back to the key); a digit
@@ -198,7 +202,7 @@ WebSockets on the same socket.
 | `GET /v1/web-servers` | Discover local web servers; discovery does not constrain the SSH web relay. |
 | `GET /v1/simulators`, `/v1/simulators/apps`, `/v1/simulators/screenshot` | Booted simulators, installed apps and a selected device screenshot on macOS. |
 | `POST /v1/simulators/action` | Validated simulator lifecycle, launch, URL, tap, home/lock and text actions. |
-| `POST /v1/approvals/answer` | Answer an exact, live watched approval request. For Claude Code's `AskUserQuestion` an approval may carry `updatedInput`: the original input plus `answers` keyed by question text (a label, labels for multiSelect, any other string for a typed "Other") and an optional `response`; the hook then allows the call with that input. Rewritten questions, answers on another tool, or answers with a denial are refused (400). An opencode permission ask the plugin writes to `.runtime/approvals` is watched the same way: the Hook maps it to its pane through the recorded session binding or Herdr's opencode session id, pushes it to registered phones, and this route writes the plugin's answer file. A fan-out worker's ask (its request names the job, whose manifest must confirm the worker session) is shown on the worker's parent conversation under an action id of the parent's shape (a UUID, or 32 hex characters for an opencode parent); answering it there or from its push writes the answer the fan-out launcher waits on. A served OpenCode pane's ask (see *OpenCode panes the Hook starts*) is answered over that pane's HTTP API with `once` or `reject`. |
+| `POST /v1/approvals/answer` | Answer an exact, live watched approval request. For Claude Code's `AskUserQuestion` an approval may carry `updatedInput`: the original input plus `answers` keyed by question text (a label, labels for multiSelect, any other string for a typed "Other") and an optional `response`; the hook then allows the call with that input. Rewritten questions, answers on another tool, or answers with a denial are refused (400). An opencode permission ask the plugin writes to `.runtime/approvals` is watched the same way: the Hook maps it to its pane through the recorded session binding or Herdr's opencode session id, pushes it to registered phones, and this route writes the plugin's answer file. A fan-out worker's ask (its request names the job, whose manifest must confirm the worker session) is shown on the worker's parent conversation under an action id of the parent's shape (a UUID, or 32 hex characters for an opencode parent); answering it there or from its push writes the answer the fan-out launcher waits on. A served OpenCode pane's ask (see *OpenCode panes the Hook starts*) is answered over that pane's HTTP API with `once`, `always` or `reject`: the card's "Allow for this project" and "Allow everywhere" both reply `always`, and "Allow everywhere" also writes an allow rule for the tool into `~/.config/opencode/opencode.json`. |
 | `POST /v1/push/register` | Register this authenticated phone for suspended approval delivery: its APNs `token` (sent direct with the Hook's own `apns.json` key), or a `relay` registration `{url, relayId, secret, key}` from the phren push relay, whose alerts are encrypted with the phone's `key` (ChaCha20-Poly1305) so the relay can't read them. A relay `410` drops the phone until it registers again. Stored mode 0600 on the computer. |
 | `POST /v1/push/answer` | Consume a one-time push binding with Approve or Deny. The binding outlives the 55-second hold for ten minutes: once the hold ends it answers the dialog the agent draws in its terminal. The APNs payload never carries the provider action or conversation identity. |
 | `GET /v1/sudo` | Pending `sudo -A` requests from this computer's askpass helper: `{ requests: [{ id, computer, command, account?, user?, cwd?, session?: { source?, label?, server?, workspace?, tab?, pane? }, askedAt, expiresAt }] }`, oldest first. `command` is what sudo will run, without sudo's own flags (the whole line when there is none, such as `sudo -v`). Never carries a password. Capability `sudo`. |

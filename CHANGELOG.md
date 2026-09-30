@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The phone's OpenCode approval card offers "Allow for this project" and "Allow everywhere" instead of leaving them greyed out. The card now advertises the scopes as its `options` list, and both grant answers map to OpenCode's `always` permission reply (which lasts the running session). "Allow everywhere" also adds the tool to `~/.config/opencode/opencode.json` as an allow rule, under a lock with an atomic rename that keeps every other key. The plugin and fan-out launcher now carry `always` alongside `once` and `reject`.
+
 ## [0.3.16] - 2026-09-29
 
 ### Fixed

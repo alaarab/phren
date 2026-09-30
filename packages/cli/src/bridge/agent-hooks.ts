@@ -26,6 +26,7 @@ import { answerClaudeQuestionDialog, claudeQuestionDialog, type DialogAnswer, ty
 import { answeredQuestionInput, numberedDialog, opencodePermissionDialog, passwordLine, permissionPrompt, questionChoice, terminalChoice, terminalQuestions, visibleTerminalChoice,
   type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
 import { directoryNames, opencodeApprovalFile, opencodeRequest, readOpencodeRequest } from "./opencode-approvals.js";
+import { allowOpencodeToolEverywhere } from "./opencode-permissions.js";
 import { ApprovalWatchLeases, bindingPath, localSocket, PushBindingStore } from "./agent-hook-stores.js";
 import { notePaneTranscript, paneAccountKey } from "./pane-accounts.js";
 import { eventStatus, notePaneStatus, settleBlockedPane } from "./pane-status.js";
@@ -138,6 +139,28 @@ interface OpencodeHeld { target?: Target; request: Json; requestLine: string; ex
   served?: { key: string; server: string; pane: string } }
 /** A structured question a served OpenCode pane is asking. */
 interface ServedQuestion { key: string; server: string; pane: string; target?: Target; question: OpenCodeQuestion; questions: TerminalQuestion[]; at: number }
+
+/** The decisions an OpenCode permission ask offers the phone. OpenCode's
+ * `always` covers the current session, so both grant answers reply `always`;
+ * `allow-everywhere` additionally writes an allow rule into the user's
+ * OpenCode config. Advertised as the approval card's `options`, the same
+ * shape the phone already renders for a provider-supplied option list. */
+export const OPENCODE_APPROVAL_OPTIONS: Json[] = [
+  { label: "Allow once", decision: "approve" },
+  { label: "Allow for this project", decision: "allow-project" },
+  { label: "Allow everywhere", decision: "allow-everywhere" },
+  { label: "Deny", decision: "deny" },
+];
+
+/** The OpenCode permission reply a card decision maps to: both grant scopes
+ * are `always`, a plain approve is `once`, a deny is `reject`. Undefined for
+ * anything else. */
+export function opencodePermissionReply(decision: unknown): "once" | "always" | "reject" | undefined {
+  if (decision === "approve") return "once";
+  if (decision === "deny") return "reject";
+  if (decision === "allow-project" || decision === "allow-everywhere") return "always";
+  return undefined;
+}
 
 export type DeliveryOutcome = "delivered" | "blocked" | "pending";
 interface Delivery { source: Provider; session: string; settle: (outcome: DeliveryOutcome) => void; timer: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
@@ -407,10 +430,14 @@ export class AgentHooks {
   }
   /** Answers a served pane's permission ask over its own API. */
   private async answerServed(id: string, held: OpencodeHeld, decision: unknown): Promise<void> {
-    if (!["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
+    const reply = opencodePermissionReply(decision);
+    if (!reply) throw new BridgeError(400, "The approval answer is not valid.");
     const served = held.served!;
     const client = this.servedClient(served.server, served.pane);
-    try { await client.replyPermission(id, decision === "approve" ? "once" : "reject"); }
+    // Everywhere writes the user's config before the pane is unblocked, so a
+    // failed write leaves the ask answerable rather than half-answered.
+    if (decision === "allow-everywhere") await allowOpencodeToolEverywhere(held.request.type);
+    try { await client.replyPermission(id, reply); }
     catch { throw new BridgeError(409, "This approval is no longer pending."); }
     this.opencode.delete(id); this.pushBindings.dropAction(id);
   }
@@ -910,15 +937,15 @@ export class AgentHooks {
     // A fan-out worker this conversation started is waiting on the owner.
     const worker = this.fanoutHeld(target)[0];
     return worker?.fanout ? { actionId: worker.fanout.actionId, toolName: worker.request.type, title: worker.request.title,
-      message: worker.request.message, request: worker.requestLine, expiresAt: worker.request.expiresAt } : undefined;
+      message: worker.request.message, request: worker.requestLine, expiresAt: worker.request.expiresAt, options: OPENCODE_APPROVAL_OPTIONS } : undefined;
   }
   private opencodeApproval(target: Target): Json | undefined {
     const held = [...this.opencode.values()].find(value => !value.fanout && JSON.stringify(value.target) === JSON.stringify(target));
-    if (held) return { actionId: held.request.id, toolName: held.request.type, title: held.request.title, message: held.request.message, request: held.requestLine, expiresAt: held.request.expiresAt };
+    if (held) return { actionId: held.request.id, toolName: held.request.type, title: held.request.title, message: held.request.message, request: held.requestLine, expiresAt: held.request.expiresAt, options: OPENCODE_APPROVAL_OPTIONS };
     const request = opencodeRequest(target.session);
     return request ? { actionId: request.id, toolName: request.type, title: request.title, message: request.message,
       request: approvalSummary({ tool: String(request.type ?? ""), input: request, message: typeof request.message === "string" ? request.message : undefined }).request,
-      expiresAt: request.expiresAt } : undefined;
+      expiresAt: request.expiresAt, options: OPENCODE_APPROVAL_OPTIONS } : undefined;
   }
   /** Live fan-out worker asks shown on this parent conversation, oldest first. */
   private fanoutHeld(target: Target): OpencodeHeld[] {
@@ -964,10 +991,13 @@ export class AgentHooks {
   }
   /** Hands the owner's answer to the fan-out launcher waiting on the worker's session. */
   private async answerFanout(id: string, held: OpencodeHeld, decision: unknown) {
-    if (!["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
+    const reply = opencodePermissionReply(decision);
+    if (!reply) throw new BridgeError(400, "The approval answer is not valid.");
     const file = held.fanout && opencodeApprovalFile(held.fanout.session, "answer");
     if (!held.fanout || !file || opencodeRequest(held.fanout.session)?.id !== id) throw new BridgeError(409, "This approval is no longer pending.");
-    await atomicInPrivateDir(file, JSON.stringify({ id, decision }));
+    if (decision === "allow-everywhere") await allowOpencodeToolEverywhere(held.request.type);
+    // The launcher reads the same approve/deny/always vocabulary the plugin does.
+    await atomicInPrivateDir(file, JSON.stringify({ id, decision: decision === "approve" || decision === "deny" ? decision : "always" }));
     this.opencode.delete(id); this.pushBindings.dropAction(id);
   }
   async answer(target: Target, id: string, decision: unknown, updatedInput?: unknown) {
@@ -996,12 +1026,17 @@ export class AgentHooks {
       return;
     }
     if (target.source === "opencode") {
-      if (!["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
+      const reply = opencodePermissionReply(decision);
+      if (!reply) throw new BridgeError(400, "The approval answer is not valid.");
       const file = opencodeApprovalFile(target.session, "answer");
       if (!file) throw new BridgeError(400, "Invalid conversation identity.");
       await validateTarget(target);
-      if (opencodeRequest(target.session)?.id !== id) throw new BridgeError(409, "This approval is no longer pending.");
-      await atomicInPrivateDir(file, JSON.stringify({ id, decision }));
+      const request = opencodeRequest(target.session);
+      if (request?.id !== id) throw new BridgeError(409, "This approval is no longer pending.");
+      // Everywhere also writes the user's OpenCode config, before the plugin
+      // is unblocked so a failed write leaves the ask answerable.
+      if (decision === "allow-everywhere") await allowOpencodeToolEverywhere(request.type);
+      await atomicInPrivateDir(file, JSON.stringify({ id, decision: decision === "approve" || decision === "deny" ? decision : "always" }));
       this.opencode.delete(id); this.pushBindings.dropAction(id);
       return;
     }
