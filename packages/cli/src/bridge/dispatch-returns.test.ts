@@ -42,7 +42,7 @@ const workingTarget = { server: "default", workspace: "w13", tab: "w13:t2", pane
 const remoteID = "30000000-0000-4000-8000-000000000001";
 const brief = { computer: "Linuxbox", project: "phren", harness: "claude", prompt: "Run the parser checks", label: "parser checks" };
 
-function readers(snapshot: () => Json, reply?: { completed: boolean; lastAssistant?: string; background?: number }): WorkerReaders {
+function readers(snapshot: () => Json, reply?: { completed: boolean; lastAssistant?: string; background?: number; awaited?: number }): WorkerReaders {
   return { snapshot: async () => snapshot(), identity: recordedIdentity, finalTurn: async () => reply };
 }
 
@@ -91,11 +91,27 @@ describe("the receiving Hook's worker states", () => {
     expect(observe(established, { state: "gone" }, 4)).toBe(false);
   });
 
-  it("keeps an idle pane with no turn record working while its finished turn left background tasks", async () => {
-    const answer = await workerStates({ targets: [workerTarget] }, readers(() => herdrSnapshot(), { completed: true, lastAssistant: "Started.", background: 4 }));
+  it("keeps an idle pane with no turn record working while its finished turn still awaits shells", async () => {
+    const answer = await workerStates({ targets: [workerTarget] }, readers(() => herdrSnapshot(), { completed: true, lastAssistant: "Started.", awaited: 4 }));
     expect(answer.workers[0]).toEqual({ state: "working", session: workerTarget.session, completed: true, background: 4, reply: "Started." });
     const settled = await workerStates({ targets: [workerTarget] }, readers(() => herdrSnapshot(), { completed: true, lastAssistant: "Done." }));
     expect(settled.workers[0]).toMatchObject({ state: "done", completed: true });
+  });
+
+  it("returns a worker whose only running task is an idle leftover shell done promptly", async () => {
+    // The Mini's tabs, 2026-09-29: a finished turn that left a log tail or a
+    // dev server running. The raw count names it, but no one awaits it, so it
+    // must not hold the return for BACKGROUND_WAIT_MS.
+    const answer = await workerStates({ targets: [workerTarget] }, readers(() => herdrSnapshot(), { completed: true, lastAssistant: "Left the server running.", background: 6 }));
+    expect(answer.workers[0]).toEqual({ state: "done", session: workerTarget.session, completed: true, reply: "Left the server running." });
+  });
+
+  it("keeps a worker working while a sub-agent it started still runs", async () => {
+    const answer = await workerStates({ targets: [workerTarget] }, {
+      ...readers(() => herdrSnapshot(), { completed: true, lastAssistant: "Sub-agent started." }),
+      children: async () => 1,
+    });
+    expect(answer.workers[0]).toEqual({ state: "working", session: workerTarget.session, completed: true, background: 1, reply: "Sub-agent started." });
   });
 
   it("carries what the worker waits on from the approval reader, for a full target only", async () => {
@@ -288,7 +304,7 @@ describe("the dispatching Hook's returns loop", () => {
   let clock: number;
   let remote: Json;
   let local: Json;
-  let finalTurn: { completed: boolean; lastAssistant?: string; background?: number } | undefined;
+  let finalTurn: { completed: boolean; lastAssistant?: string; background?: number; awaited?: number } | undefined;
   const deliver = vi.fn(async (_target: unknown, _text: string, _id: string) => ({ delivered: true }));
 
   beforeEach(async () => {
@@ -319,7 +335,7 @@ describe("the dispatching Hook's returns loop", () => {
 
   it("carries the background work the worker waited on through the receipt file into the return", async () => {
     remote = herdrSnapshot();
-    finalTurn = { completed: true, lastAssistant: "Started the gate.", background: 5 };
+    finalTurn = { completed: true, lastAssistant: "Started the gate.", awaited: 5 };
     const placed = await service().dispatch(brief, conductorPane);
     const returns = loop();
     await returns.tick();
