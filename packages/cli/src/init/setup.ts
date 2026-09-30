@@ -40,7 +40,7 @@ import {
 import { TASKS_FILENAME } from "../data/tasks.js";
 import { writeSkillMd } from "../link/skills.js";
 import { syncScopeSkillsToDir } from "../skill/files.js";
-import { detectInstalledTools } from "../hooks.js";
+import { isCopilotInstalled } from "../hooks.js";
 import { logger } from "../logger.js";
 import { migrateStoreAgentInstructions } from "../agent-instructions.js";
 
@@ -342,7 +342,7 @@ function ensureGeneratedSkillArtifacts(phrenPath: string, preferredHome: string)
 
   const copilotSkillsDir = path.join(preferredHome, ".copilot", "skills");
   const hadCopilotSkillsDir = fs.existsSync(copilotSkillsDir);
-  if (detectInstalledTools().has("copilot")) {
+  if (isCopilotInstalled()) {
     try {
       syncScopeSkillsToDir(phrenPath, "global", copilotSkillsDir);
       if (!hadCopilotSkillsDir && fs.existsSync(copilotSkillsDir)) created.push("~/.copilot/skills/");
@@ -891,7 +891,10 @@ export function runPostInitVerify(phrenPath: string): { ok: boolean; checks: Pos
   const prefs = readInstallPreferences(phrenPath);
   const manifest = readRootManifest(phrenPath);
   const gitVersion = commandVersion("git");
-  const nodeVersion = commandVersion("node");
+  // The CLI is running on the node we are checking, so read the version in
+  // process instead of paying for another `node --version` spawn (expensive on
+  // Windows, and init already runs enough processes).
+  const nodeVersion = process.version;
   checks.push({
     name: "git-installed",
     ok: Boolean(gitVersion),
