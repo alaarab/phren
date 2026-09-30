@@ -1,15 +1,18 @@
 import { open, stat } from "node:fs/promises";
 import { z } from "zod";
+import { stripTerminal } from "../terminal-text.js";
 import { AgentHooks, visibleTerminalChoice } from "./agent-hooks.js";
 import { claudeSuggestion } from "./claude-suggestion.js";
-import { codexServers, type CodexNextTurn } from "./codex-servers.js";
+import { type CodexNextTurn, codexServers } from "./codex-servers.js";
 import { validateTarget } from "./herdr.js";
 import { intervalFromEnv } from "./limits.js";
 import { emptyComposer } from "./model-switch.js";
-import { BridgeError, object, PERMISSION_MODES, type Json, type PermissionMode, type Target } from "./protocol.js";
+import { claudeFooterMode, type PermissionModeName, permissionModes } from "./permission-mode.js";
+import { BridgeError, type Json, object, PERMISSION_MODES, type PermissionMode, type Target } from "./protocol.js";
 import { terminalProvider } from "./terminal.js";
 import { transcriptPath } from "./transcripts.js";
-import { stripTerminal } from "../terminal-text.js";
+
+export { claudeFooterMode } from "./permission-mode.js";
 
 /** T3's CodexSessionRuntime mapping. The reviewer is always sent: leaving it
  * out would keep `auto_review` from an earlier turn. */
@@ -47,23 +50,6 @@ export function settingsCapabilities(source: string, codexServed: boolean, claud
 const request = z.object({ permissionMode: z.enum(PERMISSION_MODES).optional(), plan: z.boolean().optional(), fast: z.boolean().optional() })
   .strict().refine(value => value.permissionMode !== undefined || value.plan !== undefined || value.fast !== undefined, "Choose a setting to change.");
 
-/** Claude's permission mode from the footer line its TUI draws under the
- * composer. The transcript lags it: a `permission-mode` row is written only
- * when a prompt is submitted, and a fresh session has no file yet. The line may
- * trail hints ("(shift+tab to cycle) · 1 agent"), so only its start counts. */
-export function claudeFooterMode(screen: string): string | undefined {
-  for (const line of stripTerminal(screen).split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(-8).reverse()) {
-    const text = line.replace(/^[⏵⏸]+\s*/, "");
-    if (text === line) continue;
-    if (/bypass permissions on/i.test(text)) return "bypassPermissions";
-    if (/^manual mode on\b/i.test(text)) return "default";
-    if (/^accept edits on\b/i.test(text)) return "acceptEdits";
-    if (/^plan mode on\b/i.test(text)) return "plan";
-    if (/^auto mode on\b/i.test(text)) return "auto";
-  }
-  return undefined;
-}
-
 export interface SettingsState { permissionMode?: string; plan?: boolean; fast?: boolean }
 
 /** A Claude pane's settings as its footer shows them, read at most once per
@@ -71,10 +57,10 @@ export interface SettingsState { permissionMode?: string; plan?: boolean; fast?:
  * ever seen in it (which is when full access is offered). The same read, with
  * its styles, carries the suggested next prompt in the input box. */
 export class ClaudeSettingsReader {
-  private cache = new Map<string, { terminal: unknown; at: number; mode?: string; bypass: boolean; suggestion?: string }>();
+  private cache = new Map<string, { terminal: unknown; at: number; mode?: PermissionModeName; bypass: boolean; suggestion?: string }>();
   constructor(private readonly hooks: AgentHooks, private readonly every = intervalFromEnv("PHREN_DIALOG_THROTTLE_MS", 3_000)) {}
 
-  async read(target: Target, terminal: unknown): Promise<{ state?: SettingsState; bypass: boolean; suggestion?: { text: string; readAt: number } }> {
+  async read(target: Target, terminal: unknown): Promise<{ state?: SettingsState; bypass: boolean; suggestion?: { text: string; readAt: number }; permissionMode?: PermissionModeName; permissionModes?: PermissionModeName[] }> {
     const key = `${target.server}:${target.pane}`;
     let entry = this.cache.get(key);
     if (!entry || entry.terminal !== terminal) entry = { terminal, at: 0, bypass: false };
@@ -90,7 +76,10 @@ export class ClaudeSettingsReader {
     }
     const phone = entry.mode ? CLAUDE_MODES[entry.mode] : undefined;
     return { bypass: entry.bypass, ...(phone ? { state: phone === "plan" ? { plan: true } : { permissionMode: phone, plan: false } } : {}),
-      ...(entry.suggestion ? { suggestion: { text: entry.suggestion, readAt: entry.at } } : {}) };
+      ...(entry.suggestion ? { suggestion: { text: entry.suggestion, readAt: entry.at } } : {}),
+      // The raw Claude mode the phone's mode picker shows, only when the footer
+      // was read: an unreadable one is not a confident "default".
+      ...(entry.mode ? { permissionMode: entry.mode, permissionModes: permissionModes(entry.bypass) } : {}) };
   }
 }
 
@@ -123,11 +112,13 @@ export class SettingsSwitcher {
   constructor(private readonly hooks: AgentHooks, private readonly wait = STEP_WAIT_MS) { this.reader = new ClaudeSettingsReader(hooks); }
 
   /** A Claude pane's footer-read settings and capabilities for the stream,
-   * with the suggested next prompt its input box shows. */
-  async streamSettings(target: Target, terminal: unknown, codexServed: boolean): Promise<{ settings?: SettingsCapabilities; settingsState?: SettingsState; suggestion?: { text: string; readAt: number } }> {
+   * with the suggested next prompt its input box shows and the raw permission
+   * mode (`agentStatus.permissionMode`) its picker offers. */
+  async streamSettings(target: Target, terminal: unknown, codexServed: boolean): Promise<{ settings?: SettingsCapabilities; settingsState?: SettingsState; suggestion?: { text: string; readAt: number }; permissionMode?: PermissionModeName; permissionModes?: PermissionModeName[] }> {
     if (target.source !== "claude") { const settings = settingsCapabilities(target.source, codexServed); return settings ? { settings } : {}; }
-    const { state, bypass, suggestion } = await this.reader.read(target, terminal);
-    return { settings: settingsCapabilities("claude", false, bypass), ...(state ? { settingsState: state } : {}), ...(suggestion ? { suggestion } : {}) };
+    const { state, bypass, suggestion, permissionMode, permissionModes } = await this.reader.read(target, terminal);
+    return { settings: settingsCapabilities("claude", false, bypass), ...(state ? { settingsState: state } : {}), ...(suggestion ? { suggestion } : {}),
+      ...(permissionMode ? { permissionMode, permissionModes } : {}) };
   }
 
   private key(target: Target): string { return `${target.server}:${target.pane}`; }
