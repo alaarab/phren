@@ -2045,6 +2045,13 @@ schedules:
         ...Array.from({ length: 70 }, (_, i) => JSON.stringify(row(`Child step ${i}`)))].join("\n") + "\n");
       await appendFile(record, JSON.stringify(activity("started")) + "\n");
       const tree = await api("/v1/subagents?" + new URLSearchParams(target));
+      if (!tree.data?.agents?.[0]) {
+        const { readdirSync, readFileSync } = await import("node:fs");
+        const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]);
+        console.log("DEBUG-TREE", JSON.stringify(tree.data), "TARGET", JSON.stringify(target), "RECORD", record);
+        console.log("DEBUG-FILES", JSON.stringify(walk(path.join(root, "codex")).map(f => f.slice(root.length))));
+        console.log("DEBUG-RECORD", readFileSync(record, "utf8").slice(-1500));
+      }
       expect(tree.status).toBe(200);
       expect(tree.data.agents[0]).toMatchObject({ provider: "codex", callId: "spawn-1", state: "running" });
       const id = tree.data.agents[0].id as string;
