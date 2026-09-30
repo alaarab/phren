@@ -19,6 +19,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A Codex chat's sub-agents are found again after its rollout file was rewritten in place and then grew past the size the Hook had cached. The Hook used to resume reading from its old offset, in the middle of unrelated rows, and missed the new sub-agent; it now checks the bytes before that offset before treating the growth as an append.
 - The phone's OpenCode approval card offers "Allow for this project" and "Allow everywhere" instead of leaving them greyed out. The card now advertises the scopes as its `options` list, and both grant answers map to OpenCode's `always` permission reply (which lasts the running session). "Allow everywhere" also adds the tool to `~/.config/opencode/opencode.json` as an allow rule, under a lock with an atomic rename that keeps every other key. The plugin and fan-out launcher now carry `always` alongside `once` and `reject`.
 
 ## [0.3.16] - 2026-09-29
