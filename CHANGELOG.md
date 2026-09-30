@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.16] - 2026-09-29
+
 ### Fixed
 
 - The phone's chat no longer loses its most recent turns when it scrolls up. `/v1/transcripts/history` reads with a fresh reader, so every older page it returned said `reset: true` and counted the whole file in `totalLines`. The phone took that page as a replacement: it dropped every recent row it held, kept only the older page, and moved its resume cursor to the end of the file, so a reconnect never brought the dropped rows back. The terminal still showed them. An older page is now never a replacement.
