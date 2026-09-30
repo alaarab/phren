@@ -26,10 +26,13 @@ export interface HookError {
 // is cheap; on Windows every `where.exe` is a full process creation, and init
 // already spawns git and node. Cache results and key the cache on PATH so a
 // caller (or a test) that edits PATH still gets a fresh probe.
+// Entries also expire: the MCP server and the Hook are long-lived, and a tool
+// installed after a probe must show up without a restart.
+const COMMAND_EXISTS_TTL_MS = 60_000;
 let commandExistsPath: string | undefined;
-const commandExistsCache = new Map<string, boolean>();
+const commandExistsCache = new Map<string, { found: boolean; at: number }>();
 
-function commandExistsCacheForCurrentPath(): Map<string, boolean> {
+function commandExistsCacheForCurrentPath(): Map<string, { found: boolean; at: number }> {
   const path = process.env.PATH ?? "";
   if (commandExistsPath !== path) {
     commandExistsCache.clear();
@@ -41,7 +44,7 @@ function commandExistsCacheForCurrentPath(): Map<string, boolean> {
 export function commandExists(cmd: string): boolean {
   const cache = commandExistsCacheForCurrentPath();
   const cached = cache.get(cmd);
-  if (cached !== undefined) return cached;
+  if (cached && Date.now() - cached.at < COMMAND_EXISTS_TTL_MS) return cached.found;
   let found: boolean;
   try {
     const whichCmd = process.platform === "win32" ? "where.exe" : "which";
@@ -51,7 +54,7 @@ export function commandExists(cmd: string): boolean {
     debugLog(`commandExists: ${cmd} not found: ${errorMessage(err)}`);
     found = false;
   }
-  cache.set(cmd, found);
+  cache.set(cmd, { found, at: Date.now() });
   return found;
 }
 
