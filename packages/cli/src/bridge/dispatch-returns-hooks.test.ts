@@ -186,8 +186,9 @@ describe("the worker's Hook answering from turn events", () => {
     expect(await ask()).toMatchObject({ state: "done", error: "You've hit your usage limit." });
   });
 
-  it("waits on background tasks the Stop reported, then counts the worker done with them noted", async () => {
+  it("waits on the awaited tasks the transcript shows, then counts the worker done once the wait expires", async () => {
     record = turn(["UserPromptSubmit"], ["Stop", { background: 2, reply: "Suite started." }]);
+    final = { completed: true, awaited: 2 };
     expect(await ask()).toEqual({ state: "working", session, hook: true, background: 2 });
     const value = receipt();
     observe(value, await ask(), now);
@@ -197,19 +198,20 @@ describe("the worker's Hook answering from turn events", () => {
     expect(await ask()).toMatchObject({ state: "working", background: 2 });
     now += 1;
     const late = await ask();
-    expect(late).toMatchObject({ state: "done", background: 2, reply: "Suite started." });
+    expect(late).toMatchObject({ state: "done", reply: "Suite started." });
     observe(value, late, now);
-    expect(value.returned).toMatchObject({ state: "done", background: 2 });
-    expect(noticeLine([value])).toContain("parser checks done (2 background tasks still running), Suite started.");
+    expect(value.returned).toMatchObject({ state: "done" });
+    expect(noticeLine([value])).toContain("parser checks done (after 2 background tasks finished), Suite started.");
   });
 
-  it("counts the Stop's background tasks down as they finish, and returns once none are left", async () => {
+  it("counts the Stop's awaited tasks down as the transcript shows them finish, and returns once none are left", async () => {
     record = turn(["UserPromptSubmit"], ["Stop", { background: 2, reply: "Suite started." }]);
     const value = receipt();
+    final = { completed: true, awaited: 2 };
     observe(value, await ask(), now);
     const at = (ms: number) => new Date(now + ms).toISOString();
-    // A finish from before the Stop was not in its count.
-    final = { completed: true, finishedTasks: [at(-5_000), at(60_000)] };
+    // A finish from before the Stop was not in its count; one after it was.
+    final = { completed: true, awaited: 1, finishedTasks: [at(-5_000), at(60_000)] };
     now += 120_000;
     expect(await ask()).toEqual({ state: "working", session, hook: true, background: 1 });
     final = { completed: true, finishedTasks: [at(-5_000), at(60_000), at(90_000)] };
@@ -219,10 +221,20 @@ describe("the worker's Hook answering from turn events", () => {
     expect(noticeLine([value])).toContain("parser checks done (after 2 background tasks finished), Suite started.");
   });
 
-  it("reads background work from the transcript when the Stop said nothing about it", async () => {
+  it("reads awaited background work from the transcript when the Stop said nothing about it", async () => {
     record = turn(["UserPromptSubmit"], ["Stop"]);
-    final = { completed: true, lastAssistant: "Started the gate.", background: 1 };
+    final = { completed: true, lastAssistant: "Started the gate.", awaited: 1 };
     expect(await ask()).toEqual({ state: "working", session, hook: true, background: 1 });
+  });
+
+  it("returns a worker whose Stop named only a leftover shell done, and one whose sub-agent still runs working", async () => {
+    // A Stop whose count is a log tail or a dev server no one awaits.
+    record = turn(["UserPromptSubmit"], ["Stop", { background: 6, reply: "Left it running." }]);
+    final = { completed: true };
+    expect(await ask()).toEqual({ state: "done", session, hook: true, completed: true, endedAt: record!.stop!.at, stopSeq: record!.stop!.seq, reply: "Left it running." });
+    // The same Stop with a sub-agent the child tree still reports running.
+    const withChild = await workerStates({ targets: [target] }, { ...readers(), children: async () => 1 });
+    expect(withChild.workers[0]).toEqual({ state: "working", session, hook: true, background: 1 });
   });
 
   it("reports an interrupted turn as failed, and a finished turn whose Stop never arrived as done", async () => {

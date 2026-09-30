@@ -21,25 +21,57 @@ export interface HookError {
   message: string;
 }
 
+// Tool probes (`which`/`where.exe`) are deterministic for a given PATH but run
+// several times for the same command during one `phren init`. On POSIX a spawn
+// is cheap; on Windows every `where.exe` is a full process creation, and init
+// already spawns git and node. Cache results and key the cache on PATH so a
+// caller (or a test) that edits PATH still gets a fresh probe.
+// Entries also expire: the MCP server and the Hook are long-lived, and a tool
+// installed after a probe must show up without a restart.
+const COMMAND_EXISTS_TTL_MS = 60_000;
+let commandExistsPath: string | undefined;
+const commandExistsCache = new Map<string, { found: boolean; at: number }>();
+
+function commandExistsCacheForCurrentPath(): Map<string, { found: boolean; at: number }> {
+  const path = process.env.PATH ?? "";
+  if (commandExistsPath !== path) {
+    commandExistsCache.clear();
+    commandExistsPath = path;
+  }
+  return commandExistsCache;
+}
+
 export function commandExists(cmd: string): boolean {
+  const cache = commandExistsCacheForCurrentPath();
+  const cached = cache.get(cmd);
+  if (cached && Date.now() - cached.at < COMMAND_EXISTS_TTL_MS) return cached.found;
+  let found: boolean;
   try {
     const whichCmd = process.platform === "win32" ? "where.exe" : "which";
     execFileSync(whichCmd, [cmd], { stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS });
-    return true;
+    found = true;
   } catch (err: unknown) {
     debugLog(`commandExists: ${cmd} not found: ${errorMessage(err)}`);
-    return false;
+    found = false;
   }
+  cache.set(cmd, { found, at: Date.now() });
+  return found;
 }
 
-export function detectInstalledTools(): Set<string> {
-  const tools = new Set<string>();
-  if (
+/** Whether the GitHub Copilot CLI is present. Cheaper than
+ *  `detectInstalledTools()` for the one call site that only needs copilot. */
+export function isCopilotInstalled(): boolean {
+  return (
     commandExists("copilot")
     || commandExists("github-copilot-cli")
     || fs.existsSync(homePath(".local", "share", "gh", "extensions", "gh-copilot"))
     || fs.existsSync(homePath(".copilot", "config.json"))
-  ) {
+  );
+}
+
+export function detectInstalledTools(): Set<string> {
+  const tools = new Set<string>();
+  if (isCopilotInstalled()) {
     tools.add("copilot");
   }
   if (commandExists("cursor")) {
@@ -52,6 +84,10 @@ export function detectInstalledTools(): Set<string> {
 }
 
 function resolveToolBinary(tool: string): string | null {
+  // The probe above already established presence; skip the extra `which -a` /
+  // `where` spawn (and its null result) when the tool is not installed. The
+  // cache makes this check free at sites that probed the tool already.
+  if (!commandExists(tool)) return null;
   try {
     const wrapperPath = path.resolve(homePath(".local", "bin", tool));
     const whichCmd = process.platform === "win32" ? "where.exe" : "which";

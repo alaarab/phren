@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { homeDir } from "../home-paths.js";
 import { recentServers, sharedSnapshot } from "./herdr.js";
+import { JobRegistry, jobPgids, paneKey, type CleanupReport, type JobSource, type ProcessLike, type TrackedJob } from "./job-registry.js";
 import { intervalFromEnv } from "./limits.js";
 import { objects } from "./protocol.js";
 
@@ -40,6 +41,10 @@ export interface HeavyProcess {
   memoryBytes: number;
   /** Why this process group is listed; resource use does not establish session activity. */
   resourceReason?: "cpu" | "memory" | "tracked";
+  /** The harness that owns the job, when a pane or a registered group says so. */
+  agent?: string;
+  /** True when the group is one the Hook registered for a dispatched worker. */
+  tracked?: boolean;
   pane?: PaneRef;
 }
 
@@ -58,9 +63,11 @@ export interface ComputerResources {
   warnings: Array<"load-high" | "memory-low" | "disk-low" | "battery-low">;
 }
 
-export interface ProcessRow { pid: number; ppid: number; cpu: number; rssKB: number; command: string; args: string }
+/** A `ps` row; `pgid` is the process group the job registry attributes work by. */
+export interface ProcessRow extends ProcessLike { cpu: number; rssKB: number; command: string; args: string }
 
-/** `ps -axo pid=,ppid=,pcpu=,rss=,comm=` paired with the `args=` listing by pid. */
+/** `ps -axo pid=,ppid=,pgid=,pcpu=,rss=,comm=` paired with the `args=` listing by
+ * pid. The older five-column stats (no pgid) still parse, with pgid 0. */
 export function parsePs(stats: string, args: string): ProcessRow[] {
   const argv = new Map<number, string>();
   for (const line of args.split("\n")) {
@@ -69,10 +76,15 @@ export function parsePs(stats: string, args: string): ProcessRow[] {
   }
   const rows: ProcessRow[] = [];
   for (const line of stats.split("\n")) {
-    const match = /^\s*(\d+)\s+(\d+)\s+([\d.]+)\s+(\d+)\s+(.*)$/.exec(line);
+    const six = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+([\d.]+)\s+(\d+)\s+(.*)$/.exec(line);
+    const five = six ? undefined : /^\s*(\d+)\s+(\d+)\s+([\d.]+)\s+(\d+)\s+(.*)$/.exec(line);
+    const match = six ?? five;
     if (!match) continue;
     const pid = Number(match[1]);
-    rows.push({ pid, ppid: Number(match[2]), cpu: Number(match[3]), rssKB: Number(match[4]), command: match[5].trim(), args: argv.get(pid) ?? match[5].trim() });
+    const pgid = six ? Number(match[3]) : 0;
+    const command = (six ? match[6] : match[5]).trim();
+    rows.push({ pid, ppid: Number(match[2]), pgid, cpu: Number(six ? match[4] : match[3]), rssKB: Number(six ? match[5] : match[4]),
+      command, args: argv.get(pid) ?? command });
   }
   return rows;
 }
@@ -111,7 +123,7 @@ export function heavyKind(row: ProcessRow): { kind: HeavyKind; name: string } | 
  * On Linux, ps pcpu is a process lifetime average, so these cutoffs can miss
  * daemons that spike briefly.
  */
-export function heavyProcesses(rows: ProcessRow[], owners: Map<number, PaneRef> = new Map(), limit = 12): HeavyProcess[] {
+export function heavyProcesses(rows: ProcessRow[], owners: Map<number, PaneRef> = new Map(), jobs: readonly TrackedJob[] = [], limit = 12): HeavyProcess[] {
   const byPid = new Map(rows.map(row => [row.pid, row]));
   const kinds = new Map<number, { kind: HeavyKind; name: string }>();
   for (const row of rows) { const kind = heavyKind(row); if (kind) kinds.set(row.pid, kind); }
@@ -124,6 +136,9 @@ export function heavyProcesses(rows: ProcessRow[], owners: Map<number, PaneRef> 
       kinds.delete(row.pid);
     }
   }
+  // Registered process groups: their pane names the job even when a detached
+  // process has been reparented away from it.
+  const jobsByPgid = jobPgids(jobs);
   const totals = new Map<number, HeavyProcess>();
   const busy = new Map<string, HeavyProcess & { top: number; row: ProcessRow }>();
   const claim = (row: ProcessRow): number | undefined => {
@@ -133,23 +148,37 @@ export function heavyProcesses(rows: ProcessRow[], owners: Map<number, PaneRef> 
     }
     return undefined;
   };
+  // The pane that owns a process: by the registered process group first, then
+  // by following its ancestry to a pane's shell or foreground process.
   const owner = (row: ProcessRow): PaneRef | undefined => {
     for (let at: ProcessRow | undefined = row, hops = 0; at && hops < 64; at = byPid.get(at.ppid), hops++) {
       const pane = owners.get(at.pid);
       if (pane) return pane;
+      const job = jobsByPgid.get(at.pgid);
+      if (job?.pane) return job.pane;
       if (at.ppid === at.pid || at.ppid <= 1) break;
     }
-    return undefined;
+    return jobsByPgid.get(row.pgid)?.pane;
   };
+  const trackedRoots = new Set<number>();
   for (const row of rows) {
     const root = claim(row);
+    if (root !== undefined && jobsByPgid.has(row.pgid)) trackedRoots.add(root);
+  }
+  for (const row of rows) {
+    const root = claim(row);
+    const tracked = jobsByPgid.has(row.pgid) || (root !== undefined && trackedRoots.has(root));
     if (root === undefined) {
-      // Unclaimed work groups by program: twelve swift-frontends at 40% each are one busy job.
+      // Unclaimed work groups by program: twelve swift-frontends at 40% each
+      // are one busy job. A registered group keeps its own bucket, so two
+      // workers' helpers are not merged under one pane.
       const name = path.basename(row.command).slice(0, 60);
-      const group = busy.get(name);
-      if (!group) busy.set(name, { kind: "busy", name, pid: row.pid, processes: 1, cpuPercent: row.cpu, memoryBytes: row.rssKB * 1024, top: row.cpu, row });
+      const key = tracked ? `job:${row.pgid}\0${name}` : name;
+      const group = busy.get(key);
+      if (!group) busy.set(key, { kind: "busy", name, pid: row.pid, processes: 1, cpuPercent: row.cpu, memoryBytes: row.rssKB * 1024, top: row.cpu, row, ...(tracked ? { tracked: true } : {}) });
       else {
         group.processes++; group.cpuPercent += row.cpu; group.memoryBytes += row.rssKB * 1024;
+        if (tracked) group.tracked = true;
         if (row.cpu > group.top) { group.top = row.cpu; group.pid = row.pid; group.row = row; }
       }
       continue;
@@ -158,18 +187,20 @@ export function heavyProcesses(rows: ProcessRow[], owners: Map<number, PaneRef> 
     if (!total) {
       const { kind, name } = kinds.get(root)!;
       const pane = owner(byPid.get(root)!);
-      total = { kind, name, pid: root, processes: 0, cpuPercent: 0, memoryBytes: 0, ...(pane ? { pane } : {}) };
+      total = { kind, name, pid: root, processes: 0, cpuPercent: 0, memoryBytes: 0, ...(tracked ? { tracked: true } : {}),
+        ...(pane ? { pane } : {}), ...(pane?.agent ? { agent: pane.agent } : {}) };
       totals.set(root, total);
     }
     total.processes++; total.cpuPercent += row.cpu; total.memoryBytes += row.rssKB * 1024;
+    if (tracked) total.tracked = true;
   }
   for (const { top: _top, row, ...group } of busy.values()) {
-    if (group.cpuPercent < 50) continue;
+    if (group.cpuPercent < 50 && !group.tracked) continue;
     const pane = owner(row);
-    totals.set(group.pid, { ...group, ...(pane ? { pane } : {}) });
+    totals.set(group.pid, { ...group, ...(pane ? { pane } : {}), ...(pane?.agent ? { agent: pane.agent } : {}) });
   }
   return [...totals.values()]
-    .filter(item => item.kind === "busy" || item.cpuPercent >= 10 || item.memoryBytes >= 200 * 1024 ** 2)
+    .filter(item => item.kind === "busy" || item.cpuPercent >= 10 || item.memoryBytes >= 200 * 1024 ** 2 || item.tracked)
     .map(item => ({ ...item, cpuPercent: Math.round(item.cpuPercent * 10) / 10,
       resourceReason: (item.cpuPercent >= 10 ? "cpu" : item.memoryBytes >= 200 * 1024 ** 2 ? "memory" : "tracked") as HeavyProcess["resourceReason"] }))
     .sort((a, b) => b.cpuPercent - a.cpuPercent || b.memoryBytes - a.memoryBytes)
@@ -253,8 +284,45 @@ async function linuxBattery(): Promise<ComputerResources["battery"]> {
 }
 
 async function processTable(): Promise<ProcessRow[]> {
-  const [stats, args] = await Promise.all([run("/bin/ps", ["-axo", "pid=,ppid=,pcpu=,rss=,comm="]), run("/bin/ps", ["-axo", "pid=,args="])]);
-  return parsePs(stats, args);
+  const [stats, args, elapsed] = await Promise.all([run("/bin/ps", ["-axo", "pid=,ppid=,pgid=,pcpu=,rss=,comm="]), run("/bin/ps", ["-axo", "pid=,args="]),
+    run("/bin/ps", ["-axo", "pid=,etime="]).catch(() => "")]);
+  return withStartTimes(parsePs(stats, args), elapsed, Date.now());
+}
+
+/** Seconds from `ps`'s `etime` (`[[dd-]hh:]mm:ss`), or undefined. */
+export function parseEtime(value: string): number | undefined {
+  const match = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(value.trim());
+  if (!match) return undefined;
+  return Number(match[1] ?? 0) * 86_400 + Number(match[2] ?? 0) * 3_600 + Number(match[3]) * 60 + Number(match[4]);
+}
+
+/** Each row's start time (epoch ms, to about a second) from a `pid=,etime=`
+ * listing. The job registry checks a process group's leader by it, so a group
+ * id the system reused for another program is never signalled. */
+export function withStartTimes(rows: ProcessRow[], elapsed: string, now: number): ProcessRow[] {
+  const started = new Map<number, number>();
+  for (const line of elapsed.split("\n")) {
+    const match = /^\s*(\d+)\s+(\S+)\s*$/.exec(line);
+    const seconds = match ? parseEtime(match[2]) : undefined;
+    if (match && seconds !== undefined) started.set(Number(match[1]), now - seconds * 1000);
+  }
+  return rows.map(row => started.has(row.pid) ? { ...row, startedAt: started.get(row.pid) } : row);
+}
+
+/** Every pane of every terminal server this computer knows, or undefined when
+ * any server's snapshot could not be read. Cleanup ends a job only when its
+ * pane is missing from a complete listing: a pane that merely failed to
+ * answer, or sat past a display cap, must never look gone. */
+export async function livePanes(): Promise<{ panes: Set<string>; servers: Set<string> } | undefined> {
+  const panes = new Set<string>(), servers = new Set<string>();
+  for (const server of await recentServers()) {
+    const name = String(server.session);
+    const s = await sharedSnapshot(name, RESOURCES_MAX_AGE_MS).catch(() => undefined);
+    if (!s) return undefined;
+    servers.add(name);
+    for (const pane of objects(s.panes)) panes.add(paneKey({ server: name, pane: String(pane.pane_id) }));
+  }
+  return { panes, servers };
 }
 
 /** Every pid a Herdr or tmux pane holds (its shell and foreground), for naming a job's pane. */
@@ -286,13 +354,17 @@ export interface ResourceDeps {
   home: () => string;
   processes: () => Promise<ProcessRow[]>;
   owners: () => Promise<Map<number, PaneRef>>;
+  /** Every live pane and the servers listed, or undefined when the listing is incomplete (see `livePanes`). */
+  panes: () => Promise<{ panes: Set<string>; servers: Set<string> } | undefined>;
+  jobs?: JobSource;
 }
 
 export async function collectResources(deps: ResourceDeps): Promise<ComputerResources> {
   const [one, five, fifteen] = loadavg();
   const cores = cpus().length || 1;
   const platform = deps.platform;
-  const [memory, disk, battery, rows] = await Promise.all([
+  const registry = deps.jobs ?? new JobRegistry();
+  const [memory, disk, battery, rows, registered] = await Promise.all([
     platform === "darwin" ? darwinMemory()
       : platform === "linux" ? readFile("/proc/meminfo", "utf8").then(parseMeminfo).catch(() => ({ totalBytes: totalmem() }))
       : Promise.resolve({ totalBytes: totalmem() }),
@@ -300,16 +372,20 @@ export async function collectResources(deps: ResourceDeps): Promise<ComputerReso
     platform === "darwin" ? run("/usr/bin/pmset", ["-g", "batt"]).then(parsePmset).catch(() => undefined)
       : platform === "linux" ? linuxBattery() : Promise.resolve(undefined),
     deps.processes().catch(() => [] as ProcessRow[]),
+    registry.list().catch(() => [] as TrackedJob[]),
   ]);
   // Pane pids cost one terminal call per pane: only when there is a job to name.
-  const preliminary = heavyProcesses(rows);
-  const owners = preliminary.length ? await deps.owners().catch(() => new Map<number, PaneRef>()) : new Map<number, PaneRef>();
+  const preliminary = heavyProcesses(rows, new Map(), registered);
+  const owners = preliminary.length || registered.length ? await deps.owners().catch(() => new Map<number, PaneRef>()) : new Map<number, PaneRef>();
+  // Resolve registered workers' process groups and pane names from the table,
+  // so a detached job keeps the agent that owns it.
+  const jobs = owners.size ? await registry.reconcile(rows, owners).catch(() => registered) : registered;
   const round = (n: number) => Math.round(n * 100) / 100;
   const value = {
     collectedAt: new Date(deps.now()).toISOString(), platform, uptimeSeconds: Math.round(uptime()),
     cpu: { cores, load1: round(one), load5: round(five), load15: round(fifteen), loadPerCore: round(one / cores) },
     memory, ...(disk ? { disk } : {}), ...(battery ? { battery } : {}),
-    heavy: owners.size ? heavyProcesses(rows, owners) : preliminary,
+    heavy: owners.size || jobs.length ? heavyProcesses(rows, owners, jobs) : preliminary,
   };
   return { ...value, ...assess(value) };
 }
@@ -319,8 +395,10 @@ export class ResourceMonitor {
   private cached?: { at: number; value: ComputerResources };
   private pending?: Promise<ComputerResources>;
   private readonly deps: ResourceDeps;
+  private readonly registry: JobSource;
   constructor(deps: Partial<ResourceDeps> = {}, private maxAgeMs = RESOURCES_MAX_AGE_MS) {
-    this.deps = { platform: process.platform, now: Date.now, home: homeDir, processes: processTable, owners: paneOwners, ...deps };
+    this.registry = deps.jobs ?? new JobRegistry();
+    this.deps = { platform: process.platform, now: Date.now, home: homeDir, processes: processTable, owners: paneOwners, panes: livePanes, ...deps, jobs: this.registry };
   }
   async read(): Promise<ComputerResources> {
     if (this.cached && this.deps.now() - this.cached.at < this.maxAgeMs) return this.cached.value;
@@ -328,5 +406,22 @@ export class ResourceMonitor {
       .then(value => { this.cached = { at: this.deps.now(), value }; return value; })
       .finally(() => { this.pending = undefined; });
     return this.pending;
+  }
+  /**
+   * End only the registered process groups whose owning pane is gone. The
+   * registry (job-registry.ts) does the safety checks; a failed pane read ends
+   * nothing. Never the Hook's own service, never an owner's session, never an
+   * unregistered process.
+   */
+  async cleanupJobs(): Promise<CleanupReport> {
+    const rows = await this.deps.processes().catch(() => [] as ProcessRow[]);
+    const owners = await this.deps.owners().catch(() => new Map<number, PaneRef>());
+    // Gone means absent from a complete listing of every server's panes; the
+    // owners map skips panes whose process read failed, so it can't say that.
+    const live = await this.deps.panes().catch(() => undefined);
+    const report = await this.registry.cleanup(rows, live?.panes ?? new Set<string>(),
+      { owners, panesKnown: live !== undefined, ...(live ? { servers: live.servers } : {}) });
+    this.cached = undefined;
+    return report;
   }
 }

@@ -18,10 +18,11 @@ export { DEFAULT_SPEECH_MODEL, DEFAULT_SPEECH_VOICE, FALLBACK_SPEECH_MODEL } fro
 export const SPEECH_AUDIO = "pcm_s16le;rate=24000;channels=1";
 
 /** ElevenLabs output formats the Hook can serve, best first. Each account
- * plan allows some of them (Creator refuses pcm_44100, which is Pro and
- * above); the Hook learns which from ElevenLabs' refusal rather than a
- * hard-coded plan table. pcm_24000 works on every plan and every phone. */
-export const SPEECH_FORMATS = ["pcm_44100", "mp3_44100_192", "pcm_24000"] as const;
+ * plan allows some of them (pcm_44100 is Pro and above, mp3_44100_192 is
+ * Creator and above); the Hook learns which from ElevenLabs' refusal rather
+ * than a hard-coded plan table. pcm_24000 works on every plan and every
+ * phone, so it is the base every request falls back to. */
+export const SPEECH_FORMATS = ["pcm_44100", "mp3_44100_192", "mp3_44100_128", "pcm_24000"] as const;
 export type SpeechFormat = typeof SPEECH_FORMATS[number];
 const BASE_FORMAT: SpeechFormat = "pcm_24000";
 /** How each format is described to the phone: `audioFormat` in the JSON reply
@@ -29,6 +30,7 @@ const BASE_FORMAT: SpeechFormat = "pcm_24000";
 export const SPEECH_FORMAT_INFO: Record<SpeechFormat, { audio: string; sampleRate: number; contentType: string }> = {
   pcm_44100: { audio: "pcm_s16le;rate=44100;channels=1", sampleRate: 44_100, contentType: "application/octet-stream" },
   mp3_44100_192: { audio: "mp3;rate=44100;bitrate=192000;channels=1", sampleRate: 44_100, contentType: "audio/mpeg" },
+  mp3_44100_128: { audio: "mp3;rate=44100;bitrate=128000;channels=1", sampleRate: 44_100, contentType: "audio/mpeg" },
   pcm_24000: { audio: SPEECH_AUDIO, sampleRate: 24_000, contentType: "application/octet-stream" },
 };
 

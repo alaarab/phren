@@ -321,6 +321,32 @@ async function claudeChildBelongsTo(file: string, parent: string, agentId: strin
 // it is what the phone's model chip shows as in effect. `permissionMode` on a
 // user row is the mode that turn ran in (the phone's permission chip).
 const CLAUDE_KEYS = new Set(["type", "uuid", "parentUuid", "timestamp", "message", "gitBranch", "cwd", "requestId", "isMeta", "isSidechain", "isCompactSummary", "phrenQueued", "phrenQueueKey", "phrenBackground", "phrenCompacted", "effort", "permissionMode"]);
+
+/** State one newest-first pass over a Claude transcript keeps so a
+ * content-free `dequeue` can name the prompt turn it delivered: the queue key
+ * of that turn and whether the agent's own schedule (a cron, /loop or
+ * ScheduleWakeup fire, or an auto-continuation) injected it. */
+export interface ClaudeQueueState { key?: string; scheduled?: boolean }
+
+/** The `phrenQueueKey` of the prompt turn a queued message was delivered as:
+ * the same SHA-256 of the unwrapped content the enqueue row exports. Undefined
+ * for a tool result, a harness envelope, or a turn that is not the person's. */
+function queuePromptKey(raw: Json): string | undefined {
+  if (raw.type !== "user" || raw.isSidechain === true) return undefined;
+  const content = object(raw.message).content;
+  const text = unwrapPastedContent(typeof content === "string" ? content
+    : objects(content).filter(block => block.type === "text").map(block => String(block.text ?? "")).join("\n"));
+  if (!text.trim() || text.trimStart().startsWith("<")) return undefined;
+  return createHash("sha256").update(text).digest("hex");
+}
+
+/** A prompt the agent scheduled for itself, which Claude Code delivers as a
+ * hidden user turn (`isMeta`). Auto-continuation names its origin rather than
+ * a task id. */
+function scheduledPromptTurn(raw: Json): boolean {
+  return raw.turnOrigin === "scheduled" || typeof raw.scheduledTaskId === "string"
+    || object(raw.origin).kind === "auto-continuation";
+}
 export const harnessPreamble = (text: string) => /^<(?:environment_context>|user_instructions>|permission_profile|system-reminder>|turn_context>)/.test(text.trimStart());
 
 function taskNotification(content: string): string | undefined {
@@ -413,7 +439,7 @@ export function phrenHookContext(raw: Json, includeSidechain = false): Json | un
 /** Claude Code rows the phone may see: user, assistant and system turns with
  * private reasoning redacted, queued phone messages, background task
  * notifications and compaction markers. */
-export function visibleClaudeEvent(raw: Json, includeSidechain = false): Json | undefined {
+export function visibleClaudeEvent(raw: Json, includeSidechain = false, queue?: ClaudeQueueState): Json | undefined {
   // A follow-up the phone sent a Claude fan-out worker, written into its
   // event log by the Hook before the resumed run.
   if (raw.type === "phren/fanout-message" && typeof raw.text === "string") {
@@ -422,6 +448,23 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false): Json | 
   // A queued phone message carries the same wrapper; unwrap before the
   // digest so enqueue and remove keep matching keys.
   if (raw.type === "queue-operation" && typeof raw.content === "string") raw = { ...raw, content: unwrapPastedContent(raw.content) };
+  // A dequeue is the queue head handed to a turn. Unlike `remove` it carries
+  // no content, so its consumption is keyed by the prompt turn it delivered
+  // (a newest-first read sees that turn first) and flagged when the agent's
+  // own schedule fired it.
+  if (raw.type === "queue-operation" && raw.operation === "dequeue") {
+    const key = queue?.key, scheduled = queue?.scheduled;
+    // One prompt turn answers one dequeue: an older dequeue must not reuse
+    // this key and mark a different queued message consumed.
+    if (queue) { queue.key = undefined; queue.scheduled = undefined; }
+    return { type: "phren_queue_consumed", ...(key ? { key } : {}), ...(key && scheduled ? { scheduled: true } : {}), timestamp: raw.timestamp };
+  }
+  // popAll pulls queued prompts back into the input: they were neither
+  // consumed nor scheduled, so the phone must not draw the leftovers as a
+  // "Scheduled check" after the next reply.
+  if (raw.type === "queue-operation" && raw.operation === "popAll" && typeof raw.content === "string") {
+    return { type: "phren_queue_returned", key: createHash("sha256").update(raw.content).digest("hex"), timestamp: raw.timestamp };
+  }
   if (raw.type === "queue-operation" && raw.operation === "remove" && typeof raw.content === "string") {
     return { type: "phren_queue_consumed", key: createHash("sha256").update(raw.content).digest("hex"), timestamp: raw.timestamp };
   }
@@ -479,6 +522,12 @@ export function visibleClaudeEvent(raw: Json, includeSidechain = false): Json | 
   // The row Claude writes when the permission mode changes; nothing else of it.
   if (raw.type === "permission-mode" && typeof raw.permissionMode === "string" && /^[A-Za-z]{1,30}$/.test(raw.permissionMode)) {
     return { type: "permission-mode", permissionMode: raw.permissionMode, ...(typeof raw.timestamp === "string" ? { timestamp: raw.timestamp } : {}) };
+  }
+  // Remember the prompt turn a queued message was delivered as, so the
+  // content-free dequeue written before it can be keyed and flagged scheduled.
+  if (queue && raw.type === "user") {
+    const key = queuePromptKey(raw);
+    if (key !== undefined) { queue.key = key; queue.scheduled = scheduledPromptTurn(raw); }
   }
   if (raw.isMeta || (raw.isSidechain && !includeSidechain) || !["user", "assistant", "system"].includes(String(raw.type))) return undefined;
   raw = Object.fromEntries(Object.entries(raw).filter(([key]) => CLAUDE_KEYS.has(key)));

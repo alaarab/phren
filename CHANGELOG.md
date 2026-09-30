@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.17] - 2026-09-30
+
+### Added
+
+- The Hook records each dispatched or scheduled worker it launches (`<bridge>/jobs.json`) and resolves its process group, so the resources report names the agent that owns a heavy process, including detached servers and builds. `POST /v1/jobs/cleanup` ends a leftover worker's process group only when every terminal server listed its panes and the worker's pane isn't among them, its 5-minute lease has passed, a process in the group still runs the launched command, and the group's leader (if still running) is the same process that was recorded, checked by its start time. It never touches the Hook's own group, the owner's sessions or any unregistered process.
+- The chat status stream carries Claude's suggested next prompt as `agentStatus.suggestion`, so the phone can offer it in its composer. Claude Code draws the prediction as dim text in its empty input box after a turn and writes it nowhere else, so the Hook reads it from the same styled screen read that already gives the footer's settings (no extra pane reads). It is sent only between turns, dropped as soon as a turn starts or the owner types in the pane, and never for Claude's own placeholders or a suggestion a narrow pane cut short. Codex, OpenCode and Copilot have no equivalent and send nothing.
+
+### Changed
+
+- `/v1/speech` also serves `mp3_44100_128`: it is tried after `mp3_44100_192` and before `pcm_24000` when the phone plays it and the plan allows it, so a plan below Creator that refuses the 192 kbps tier still gets mp3 at 44.1 kHz instead of plain 24 kHz PCM. A phone that names no `formats` still gets `pcm_24000`, and `X-Phren-Audio` reports the 128 kbps format.
+- `phren init` probes for installed tools once per run instead of several times, and its post-init check reads the running Node version in-process. A full init spawns fewer child processes, which matters most on Windows where each process creation is slow.
+
+### Fixed
+
+- A Codex chat's sub-agents are found again after its rollout file was rewritten in place and then grew past the size the Hook had cached. The Hook used to resume reading from its old offset, in the middle of unrelated rows, and missed the new sub-agent; it now checks the bytes before that offset before treating the growth as an append.
+- The phone's OpenCode approval card offers "Allow for this project" and "Allow everywhere" instead of leaving them greyed out. The card now advertises the scopes as its `options` list, and both grant answers map to OpenCode's `always` permission reply (which lasts the running session). "Allow everywhere" also adds the tool to `~/.config/opencode/opencode.json` as an allow rule, under a lock with an atomic rename that keeps every other key. The plugin and fan-out launcher now carry `always` alongside `once` and `reject`.
+
 ## [0.3.16] - 2026-09-29
 
 ### Fixed
