@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.17] - 2026-09-30
+
 ### Added
 
 - The Hook records each dispatched or scheduled worker it launches (`<bridge>/jobs.json`) and resolves its process group, so the resources report names the agent that owns a heavy process, including detached servers and builds. `POST /v1/jobs/cleanup` ends a leftover worker's process group only when every terminal server listed its panes and the worker's pane isn't among them, its 5-minute lease has passed, a process in the group still runs the launched command, and the group's leader (if still running) is the same process that was recorded, checked by its start time. It never touches the Hook's own group, the owner's sessions or any unregistered process.
