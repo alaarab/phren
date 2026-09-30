@@ -7,6 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.3.18] - 2026-09-30
 
+### Added
+
+- The chat status stream reports a Claude pane's permission mode (`agentStatus.permissionMode`, Claude's own names: `default`, `acceptEdits`, `plan`, `auto`, `bypassPermissions`) and the modes its Shift+Tab cycle offers (`permissionModes`), both only when the footer read is confident.
+- `POST /v1/agents/permission-mode { target, mode }` changes that mode for the phone's mode picker by pressing Shift+Tab, re-reading the footer after each press, for at most one cycle plus one press. A working pane or an open dialog is 409, another harness or an unavailable mode is 422. Only the owner can make this change: a request naming a pane as `origin` (an agent's call) is refused with 403, whatever the mode, so no agent can lift itself or another pane past its `maxPermissionMode` ceiling or into `bypassPermissions`.
+
 ## [0.3.17] - 2026-09-30
 
 ### Added
