@@ -1,7 +1,7 @@
 // The tmux provider against a real tmux, on a private socket. Skipped when
 // this computer has no tmux.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,7 +13,7 @@ import { objects } from "./protocol.js";
 import type { ApprovalPushService } from "./push.js";
 import { launchSession, localConductor, stopConductor } from "./server-launch.js";
 import { conductorPane } from "./conductor-role.js";
-import { resetTmuxBinary, tmuxBinary, tmuxHealth, tmuxPaneFromEnv, tmuxServers, tmuxSnapshot, tmuxTerminal, toTmuxId } from "./terminal-tmux.js";
+import { resetTmuxBinary, tmuxBinary, tmuxHealth, tmuxPaneFromEnv, tmuxServers, tmuxSnapshot, tmuxSocketFolders, tmuxTerminal, toTmuxId } from "./terminal-tmux.js";
 
 const saved = process.env.PHREN_TMUX;
 delete process.env.PHREN_TMUX;
@@ -31,9 +31,19 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean, ms 
   }
 }
 
+/** A pane's dying login shell can still be writing as teardown runs; retry. */
+async function removeFolder(target: string): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try { await rm(target, { recursive: true, force: true }); return; }
+    catch { await new Promise(resolve => setTimeout(resolve, 100)); }
+  }
+  await rm(target, { recursive: true, force: true }).catch(() => undefined);
+}
+
 describe.skipIf(!binary || process.platform === "win32")("tmux provider on a real tmux", () => {
   let folder: string;
-  const env = { PHREN_TMUX: process.env.PHREN_TMUX, SHELL: process.env.SHELL, PATH: process.env.PATH,
+  const env = { PHREN_TMUX: process.env.PHREN_TMUX, SHELL: process.env.SHELL, PATH: process.env.PATH, HOME: process.env.HOME,
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, XDG_DATA_HOME: process.env.XDG_DATA_HOME, HISTFILE: process.env.HISTFILE,
     PHREN_BRIDGE_HOME: process.env.PHREN_BRIDGE_HOME, PHREN_HERDR_HOME: process.env.PHREN_HERDR_HOME, PHREN_PATH: process.env.PHREN_PATH };
   beforeAll(async () => {
     delete process.env.PHREN_TMUX;
@@ -44,6 +54,19 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
     process.env.PHREN_HERDR_HOME = path.join(folder, "herdr");
     process.env.PHREN_PATH = path.join(folder, "store");
     await mkdir(process.env.PHREN_BRIDGE_HOME, { recursive: true, mode: 0o700 });
+    // A throwaway home: the started agent's login shell (`sh -l`) must not read
+    // the owner's profile or mise config, which would put a real `claude` ahead
+    // of the stand-in below. With HOME and the XDG dirs inside the test folder,
+    // no user profile or mise activation is found.
+    const home = path.join(folder, "home");
+    await mkdir(path.join(home, ".config"), { recursive: true, mode: 0o700 });
+    await mkdir(path.join(home, ".local", "share"), { recursive: true, mode: 0o700 });
+    process.env.HOME = home;
+    process.env.XDG_CONFIG_HOME = path.join(home, ".config");
+    process.env.XDG_DATA_HOME = path.join(home, ".local", "share");
+    // The pane's fallback login shell writes history on exit; keep it out of
+    // the test home so cleanup is not racing a write.
+    process.env.HISTFILE = process.platform === "win32" ? path.join(home, ".history") : "/dev/null";
     // A stand-in for Claude Code: a Node script named claude that echoes what it is sent.
     // "DIALOG" draws Claude's permission dialog, as its auto-mode fallback
     // does with no hook behind it; "CLEAR" clears the screen.
@@ -63,10 +86,14 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
     process.env.PATH = `${folder}${path.delimiter}${process.env.PATH}`;
   });
   afterAll(async () => {
-    try { execFileSync(binary!, ["-L", server.slice("tmux-".length), "kill-server"], { stdio: "ignore" }); } catch { /* already gone */ }
+    const socket = server.slice("tmux-".length);
+    try { execFileSync(binary!, ["-L", socket, "kill-server"], { stdio: "ignore" }); } catch { /* already gone */ }
+    // tmux can leave the socket file behind when the server is killed; remove
+    // it so a killed run does not seed the next one's stale-socket pile.
+    for (const dir of tmuxSocketFolders()) await unlink(path.join(dir, socket)).catch(() => undefined);
     for (const [name, value] of Object.entries(env)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
     resetTmuxBinary();
-    await rm(folder, { recursive: true, force: true });
+    await removeFolder(folder);
   });
 
   it("opens a session, reads a shell back, types into it and starts an agent there", async () => {
