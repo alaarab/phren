@@ -726,15 +726,15 @@ never switches model.
 
 The audio format is the best the phone plays and the ElevenLabs plan allows,
 tried in this order: `pcm_44100` (16-bit little-endian mono PCM at 44.1 kHz,
-Pro plans and above), `mp3_44100_192` (Creator and above), `pcm_24000` (every
-plan). The phone lists what it plays in `formats` (names from the
-`speechFormats` capability); a phone that sends none gets `pcm_24000`, as every
-phone did before. A format the plan refuses (403 `output_format_not_allowed`)
-is skipped for 6 hours. The streamed reply names what it sends in
-`X-Phren-Audio` (`pcm_s16le;rate=24000;channels=1`,
-`pcm_s16le;rate=44100;channels=1` or `mp3;rate=44100;bitrate=192000;channels=1`)
-and `X-Phren-Audio-Rate` (`24000` or `44100`), and the model in
-`X-Phren-Speech-Model`.
+Pro plans and above), `mp3_44100_192` (Creator and above), `mp3_44100_128`,
+then `pcm_24000` (every plan, the base). The phone lists what it plays in
+`formats` (names from the `speechFormats` capability); a phone that sends none
+gets `pcm_24000`, as every phone did before. A format the plan refuses (403
+`output_format_not_allowed`) is skipped for 6 hours. The streamed reply names
+what it sends in `X-Phren-Audio` (`pcm_s16le;rate=24000;channels=1`,
+`pcm_s16le;rate=44100;channels=1`, `mp3;rate=44100;bitrate=192000;channels=1`
+or `mp3;rate=44100;bitrate=128000;channels=1`) and `X-Phren-Audio-Rate`
+(`24000` or `44100`), and the model in `X-Phren-Speech-Model`.
 
 With `"timestamps": true` (the `speechTimestamps` capability) the Hook calls
 ElevenLabs' `with-timestamps` endpoint instead and answers JSON: `{ "audio":
