@@ -564,6 +564,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           } : undefined);
         } else if (url.pathname === "/v1/sessions/rename") {
           result = await renameSession(selectedServer(url), data);
+        } else if (url.pathname === "/v1/jobs/cleanup") {
+          // Ends only registered worker process groups whose pane is gone.
+          result = { ok: true, ...await ctx.resources.cleanupJobs() };
         } else if (url.pathname === "/v1/schedules") {
           result = await scheduler!.statuses();
         } else if (url.pathname === "/v1/schedules/run") {

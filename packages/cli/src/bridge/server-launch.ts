@@ -23,6 +23,7 @@ import { optionalHookPeers } from "./peers.js";
 import { AppServerRpcError } from "./codex-app-server.js";
 import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { logger } from "../logger.js";
+import { JobRegistry } from "./job-registry.js";
 import { atomic, BridgeError, bridgeRoot, id, type Json, launchEfforts, objects, PERMISSION_MODES, provider } from "./protocol.js";
 import { CLAUDE_NAMES, CODEX_MODES, codexModeFlags } from "./settings-switch.js";
 
@@ -381,6 +382,13 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const chat = !sessionId && pane && pane.agent === kind ? await paneChatState(server, pane).catch((): Json => ({})) : {};
   const target = sessionId ? { ...binding, session: sessionId }
     : chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
+  // Register a dispatched or scheduled worker's job, so the resources report
+  // can name its agent and a sweep can end a leftover process group after its
+  // pane is gone. The process group is resolved on the next read.
+  if (brief && role === "agent") {
+    await new JobRegistry().register({ pane: { server, pane: created.paneId, ...(created.workspaceId ? { workspace: created.workspaceId } : {}), agent: kind, label },
+      ...(sessionId ? { session: sessionId } : {}), agent: kind, label, command: kind }).catch(() => undefined);
+  }
   return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(account ? { account } : {}), ...(permissionMode ? { permissionMode } : {}), ...(unchecked.length ? { unchecked } : {}),
     // The caller types the brief itself unless it went with the launch.
     ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief } : {}),
