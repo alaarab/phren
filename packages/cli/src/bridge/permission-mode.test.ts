@@ -64,9 +64,13 @@ describe("permission-mode route", () => {
     expect(keys).toEqual([]);
   });
 
-  it("names the local agent that chose the mode by its pane", async () => {
+  it("refuses any mode chosen by an agent, bypass included, before touching the pane", async () => {
     const origin = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1" };
-    expect(await switcher.set(target, "acceptEdits", origin)).toEqual({ ok: true, permissionMode: "acceptEdits", setBy: "agent", setByPane: "default:w1:p1" });
+    for (const mode of ["acceptEdits", "auto", "bypassPermissions"] as const) {
+      await expect(switcher.set(target, mode, origin)).rejects.toMatchObject({ status: 403 });
+    }
+    // Even a malformed origin is an agent's call, not the owner's.
+    await expect(switcher.set(target, "auto", {})).rejects.toMatchObject({ status: 403 });
   });
 
   it("refuses a working pane and never presses into it", async () => {
@@ -100,5 +104,13 @@ describe("permission-mode route", () => {
     const url = new URL("http://phren.local/v1/agents/permission-mode");
     expect(await paneRouteOnce(context, url, { target, mode: "plan" }, {} as never, () => {})).toEqual({ ok: true, permissionMode: "plan", setBy: "owner" });
     await expect(paneRouteOnce(context, url, { target, mode: "turbo" }, {} as never, () => {})).rejects.toBeInstanceOf(Error);
+    // An agent's call names its pane as origin: refused for every mode, bypass included, and no key is pressed.
+    const origin = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1" };
+    const before = keys.length;
+    for (const mode of ["auto", "bypassPermissions"]) {
+      await expect(paneRouteOnce(context, url, { target, mode, origin }, {} as never, () => {})).rejects.toMatchObject({ status: 403 });
+    }
+    await expect(paneRouteOnce(context, url, { target, mode: "auto", origin: null }, {} as never, () => {})).rejects.toMatchObject({ status: 403 });
+    expect(keys.length).toBe(before);
   });
 });

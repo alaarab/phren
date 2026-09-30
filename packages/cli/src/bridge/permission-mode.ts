@@ -1,8 +1,7 @@
-import { z } from "zod";
 import { stripTerminal } from "../terminal-text.js";
 import type { AgentHooks } from "./agent-hooks.js";
 import { validateTarget } from "./herdr.js";
-import { BridgeError, id, type Json, serverName, type Target } from "./protocol.js";
+import { BridgeError, type Json, type Target } from "./protocol.js";
 import { terminalProvider } from "./terminal.js";
 import { visibleTerminalChoice } from "./terminal-choice.js";
 
@@ -44,14 +43,18 @@ export function claudeFooterMode(screen: string): PermissionModeName | undefined
   return undefined;
 }
 
-/** A local agent's own pane, as the caller names it when it is not the owner. */
-const callerPane = z.object({ server: serverName, workspace: id, tab: id, pane: id }).passthrough();
+/** Only the owner changes a session's permission mode, from the phone. An
+ * agent's call names its own pane (`origin`), and none is accepted: an agent
+ * could otherwise lift itself or another pane past the per-grant
+ * `maxPermissionMode` ceiling, up to bypassPermissions. Same rule as
+ * `/v1/sudo/answer`. */
+export function refuseAgentOrigin(actor: unknown): void {
+  if (actor !== undefined) throw new BridgeError(403, "Only the owner changes a session's permission mode, from the phone.");
+}
 
-/** Who chose the mode, for the reply: the owner from the phone (no `origin`),
- * or the local agent that named its pane. */
-function attribution(actor: unknown): Json {
-  const pane = callerPane.safeParse(actor);
-  return pane.success ? { setBy: "agent", setByPane: `${pane.data.server}:${pane.data.pane}` } : { setBy: "owner" };
+/** Who chose the mode, for the reply: always the owner (see `refuseAgentOrigin`). */
+function attribution(): Json {
+  return { setBy: "owner" };
 }
 
 const STEP_WAIT_MS = 2_000, POLL_MS = 100;
@@ -71,6 +74,7 @@ export class PermissionModeSwitcher {
   /** Steps the pane to `mode`, or refuses. Only Claude offers the cycle; the
    * machine's authority policy never caps an owner's own choice. */
   async set(target: Target, mode: PermissionModeName, actor?: unknown): Promise<Json> {
+    refuseAgentOrigin(actor);
     this.assertAvailable(target);
     if (target.source !== "claude") throw new BridgeError(422, "Changing the permission mode is not supported for this harness. Open terminal to change it.");
     this.active.add(this.key(target));
@@ -91,7 +95,7 @@ export class PermissionModeSwitcher {
     }
     let current = claudeFooterMode(screen);
     if (!current) throw new BridgeError(409, "Could not read Claude's permission mode from its screen. Open terminal to check.");
-    if (current === mode) return { ok: true, permissionMode: current, ...attribution(actor) };
+    if (current === mode) return { ok: true, permissionMode: current, ...attribution() };
     // Shift+Tab steps through the modes this session offers. A full lap back to
     // the start (one more press than the cycle holds) means it does not offer
     // the one asked for. The bound grows if the cycle turns out to include one
@@ -103,7 +107,7 @@ export class PermissionModeSwitcher {
       await terminalProvider().sendKeys(target.server, target.pane, ["shift+tab"]);
       current = await this.changed(target, terminal, current);
       modes.add(current);
-      if (current === mode) return { ok: true, permissionMode: current, ...attribution(actor) };
+      if (current === mode) return { ok: true, permissionMode: current, ...attribution() };
     }
   }
 
