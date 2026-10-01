@@ -215,3 +215,36 @@ describe("turn stop reasons", () => {
     expect(result.stopReason).toBe("end_turn");
   });
 });
+
+describe("past 75% context", () => {
+  it("keeps working the task: no summarize prompt is injected into the tool loop", async () => {
+    const requests: LlmMessage[][] = [];
+    const replies: LlmResponse[] = [
+      { content: [{ type: "tool_use", id: "big", name: "big", input: {} }], stop_reason: "tool_use" },
+      { content: [{ type: "text", text: "fixed it" }], stop_reason: "end_turn" },
+    ];
+    const provider: LlmProvider = {
+      name: "mock",
+      contextWindow: 4_000,
+      async chat(_s, messages): Promise<LlmResponse> {
+        requests.push(structuredClone(messages));
+        return replies.shift()!;
+      },
+    };
+    const cfg = config(provider, { compaction: { enabled: false } });
+    cfg.registry.register({
+      name: "big",
+      description: "big output",
+      input_schema: { type: "object", properties: {} },
+      async execute() { return { output: "x".repeat(14_000) }; },
+    });
+    const result = await runTurn("fix the bug", createSession(4_000), cfg, quiet);
+    expect(result.stopReason).toBe("end_turn");
+    expect(result.text).toBe("fixed it");
+    expect(requests).toHaveLength(2);
+    const last = requests[1].at(-1)!;
+    expect(last.role).toBe("user");
+    expect((last.content as ContentBlock[])[0]).toMatchObject({ type: "tool_result", tool_use_id: "big" });
+    expect(JSON.stringify(requests[1])).not.toMatch(/Before continuing|summarize/i);
+  });
+});

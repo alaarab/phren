@@ -1,9 +1,12 @@
-export type ProviderId = "openrouter" | "anthropic" | "openai" | "openai-codex" | "deepseek" | "ollama";
-export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
+export type ProviderId = "openrouter" | "anthropic" | "openai" | "openai-codex" | "deepseek" | "openai-compat" | "ollama";
+/** "none" turns thinking off where the provider supports that; "max" on the CLI is "xhigh". */
+export type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh";
 
 export interface ModelPricing {
   inputPer1M: number;
   outputPer1M: number;
+  /** Cache-hit input tokens. Absent means cache hits bill as ordinary input. */
+  cacheReadPer1M?: number;
 }
 
 export interface ModelCatalogEntry {
@@ -20,7 +23,22 @@ export interface ModelCatalogEntry {
   vision?: boolean;
 }
 
+/** Levels the pickers step through ("none" is CLI/env only). */
 export const REASONING_LEVELS: ReasoningEffort[] = ["low", "medium", "high", "xhigh"];
+
+/**
+ * DeepSeek V4.1 Flash, direct or through an OpenAI-compatible relay: 1M
+ * context, 393,216 max output, effort low/high/max (picker "xhigh" = max).
+ * Off-peak rates; DeepSeek bills 2x at peak (weekdays 01-04 and 06-10 UTC).
+ */
+const DEEPSEEK_FLASH = {
+  vision: true,
+  contextWindow: 1_000_000,
+  maxOutputTokens: 393_216,
+  reasoningDefault: null,
+  reasoningRange: ["low", "high", "xhigh"],
+  pricing: { inputPer1M: 0.15, outputPer1M: 0.6, cacheReadPer1M: 0.003 },
+} satisfies Partial<ModelCatalogEntry>;
 
 const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
   anthropic: [
@@ -302,16 +320,8 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
     },
   ],
   deepseek: [
-    {
-      id: "deepseek-flash",
-      provider: "deepseek",
-      label: "DeepSeek V4.1 Flash (direct)",
-      contextWindow: 1_000_000,
-      maxOutputTokens: 65_536,
-      reasoningDefault: null,
-      reasoningRange: ["low", "medium", "high"],
-      pricing: { inputPer1M: 0.3, outputPer1M: 1.2 },
-    },
+    { ...DEEPSEEK_FLASH, id: "deepseek-flash", provider: "deepseek", label: "DeepSeek V4.1 Flash (direct)" },
+    { ...DEEPSEEK_FLASH, id: "deepseek-v4-flash", provider: "deepseek", label: "DeepSeek V4.1 Flash (legacy id)" },
     {
       id: "deepseek-v4-pro",
       provider: "deepseek",
@@ -319,9 +329,14 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
       contextWindow: 1_000_000,
       maxOutputTokens: 65_536,
       reasoningDefault: null,
-      reasoningRange: ["low", "medium", "high"],
-      pricing: { inputPer1M: 1.32, outputPer1M: 3.96 },
+      reasoningRange: ["low", "high", "xhigh"],
+      pricing: { inputPer1M: 0.66, outputPer1M: 1.98, cacheReadPer1M: 0.022 },
     },
+  ],
+  // Model ids for a generic OpenAI-compatible endpoint (OpenCode Go/Zen…).
+  // Pricing applies to metered relays; see isUnmeteredEndpoint for Go.
+  "openai-compat": [
+    { ...DEEPSEEK_FLASH, id: "deepseek-v4.1-flash", provider: "openai-compat", label: "DeepSeek V4.1 Flash" },
   ],
   ollama: [
     {
@@ -398,6 +413,7 @@ const LEGACY_CONTEXT_LIMITS: Array<[string, number]> = [
   ["o3", 200_000],
   ["o4-mini", 200_000],
   ["gemini", 1_000_000],
+  ["deepseek-v4", 1_000_000],
   ["deepseek", 128_000],
   ["llama", 128_000],
   ["qwen", 128_000],
@@ -452,12 +468,14 @@ LEGACY_PRICING.sort((a, b) => b[0].length - a[0].length);
 export function normalizeProviderId(provider: string | undefined): ProviderId | undefined {
   if (!provider) return undefined;
   if (provider === "codex") return "openai-codex";
+  if (provider === "compat") return "openai-compat";
   if (
     provider === "openrouter" ||
     provider === "anthropic" ||
     provider === "openai" ||
     provider === "openai-codex" ||
     provider === "deepseek" ||
+    provider === "openai-compat" ||
     provider === "ollama"
   ) {
     return provider;
@@ -469,8 +487,17 @@ export function normalizeReasoningEffort(raw: string | null | undefined): Reason
   if (!raw) return undefined;
   const value = raw.toLowerCase();
   if (value === "max") return "xhigh";
-  if (value === "low" || value === "medium" || value === "high" || value === "xhigh") return value;
+  if (value === "off") return "none";
+  if (value === "none" || value === "low" || value === "medium" || value === "high" || value === "xhigh") return value;
   return undefined;
+}
+
+/**
+ * OpenCode Go is a flat subscription: requests through it are not billed per
+ * token, so cost shows as included and --budget does not trip.
+ */
+export function isUnmeteredEndpoint(baseUrl: string | undefined): boolean {
+  return !!baseUrl && /^https?:\/\/opencode\.ai\/zen\/go(?:\/|$)/i.test(baseUrl);
 }
 
 export function getDefaultModel(provider: ProviderId): string {
@@ -536,9 +563,9 @@ export function lookupContextWindow(model: string, provider?: string): number {
   return 200_000;
 }
 
-export function lookupPricing(model: string, provider?: string): { pricing: ModelPricing; metered: boolean } {
+export function lookupPricing(model: string, provider?: string, baseUrl?: string): { pricing: ModelPricing; metered: boolean } {
   const normalizedProvider = normalizeProviderId(provider);
-  if (normalizedProvider === "openai-codex") {
+  if (normalizedProvider === "openai-codex" || isUnmeteredEndpoint(baseUrl)) {
     return { pricing: { inputPer1M: 0, outputPer1M: 0 }, metered: false };
   }
 
