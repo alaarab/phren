@@ -1,12 +1,12 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { createServer, request, type Server } from "node:http";
+import { createServer, type IncomingMessage, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeError, type Json } from "./protocol.js";
 import { alignmentOf, DEFAULT_SPEECH_MODEL, DEFAULT_SPEECH_VOICE, FALLBACK_HOLD_MS, FALLBACK_SPEECH_MODEL, SPEECH_AUDIO, SPEECH_SLOW_MS, SpeechState, speakableText, streamSpeech, type SpeechOptions } from "./speech.js";
-import { writeSpeechModel, writeSpeechVoice } from "./speech-voice.js";
+import { writeSpeechModel, writeSpeechRegion, writeSpeechVoice } from "./speech-voice.js";
 
 // The voice setting lives in the Hook's directory: never the developer's own.
 let bridge: string;
@@ -366,6 +366,135 @@ describe("speech model", () => {
     expect(state.benchedReason(DEFAULT_SPEECH_MODEL)).toBeUndefined();
     state.recordLatency(DEFAULT_SPEECH_MODEL, 9_000);
     expect(state.benchedReason(DEFAULT_SPEECH_MODEL)).toBe("slow");
+  });
+});
+
+describe("speech latency", () => {
+  async function until(done: () => boolean): Promise<void> {
+    for (let waited = 0; !done(); waited += 5) {
+      if (waited > 2_000) throw new Error("timed out");
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+  }
+
+  it("sends the headers at once and each chunk as ElevenLabs sends it, before ElevenLabs has finished", async () => {
+    let upstreamBody!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({ start(controller) { upstreamBody = controller; } });
+    const { server } = await hook({ key: async () => KEY, fetch: (async () => new Response(body, { status: 200 })) as unknown as typeof fetch });
+    servers.push(server);
+    const port = (server.address() as AddressInfo).port;
+    // The reply's headers arrive while ElevenLabs has sent no audio at all.
+    const reply = await new Promise<IncomingMessage>((resolve, reject) => {
+      const req = request({ host: "127.0.0.1", port, method: "POST", path: "/v1/speech", headers: { "Content-Type": "application/json" } }, resolve);
+      req.on("error", reject);
+      req.end(JSON.stringify({ text: "Hello." }));
+    });
+    expect(reply.headers["x-phren-speech-model"]).toBe(DEFAULT_SPEECH_MODEL);
+    const received: number[][] = [];
+    let ended = false;
+    reply.on("data", (chunk: Buffer) => received.push([...chunk]));
+    reply.on("end", () => { ended = true; });
+    upstreamBody.enqueue(new Uint8Array([1, 2, 3]));
+    await until(() => received.length === 1);
+    expect(received).toEqual([[1, 2, 3]]);
+    expect(ended).toBe(false);
+    upstreamBody.enqueue(new Uint8Array([4]));
+    upstreamBody.close();
+    await until(() => ended);
+    expect(received.flat()).toEqual([1, 2, 3, 4]);
+  });
+
+  it("streams timestamps as JSON lines while ElevenLabs is still voicing, alignment counted from the start of the reply", async () => {
+    let upstreamBody!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({ start(controller) { upstreamBody = controller; } });
+    const urls: string[] = [];
+    const { server } = await hook({ key: async () => KEY, fetch: (async (url: string) => { urls.push(url); return new Response(body, { status: 200 }); }) as unknown as typeof fetch });
+    servers.push(server);
+    const port = (server.address() as AddressInfo).port;
+    const reply = await new Promise<IncomingMessage>((resolve, reject) => {
+      const req = request({ host: "127.0.0.1", port, method: "POST", path: "/v1/speech", headers: { "Content-Type": "application/json" } }, resolve);
+      req.on("error", reject);
+      req.end(JSON.stringify({ text: "Two commits.", timestamps: true, stream: true, formats: ["mp3_44100_128"] }));
+    });
+    expect(new URL(urls[0]).pathname).toBe(`/v1/text-to-speech/${DEFAULT_SPEECH_VOICE}/stream/with-timestamps`);
+    expect(reply.headers).toMatchObject({ "content-type": "application/x-ndjson", "x-phren-audio": "mp3;rate=44100;bitrate=128000;channels=1", "x-phren-audio-rate": "44100", "x-phren-speech-model": DEFAULT_SPEECH_MODEL });
+    let text = "", ended = false;
+    reply.on("data", (chunk: Buffer) => { text += chunk; });
+    reply.on("end", () => { ended = true; });
+    const line = (audio: number[], characters: string[], starts: number[], ends: number[]) => JSON.stringify({ audio_base64: Buffer.from(audio).toString("base64"),
+      alignment: { characters, character_start_times_seconds: starts, character_end_times_seconds: ends }, normalized_alignment: null, quality_check: null });
+    // ElevenLabs separates its objects with a blank line, and a chunk can end mid-object.
+    const first = line([1], [], [], []) + "\n\n" + line([2, 3], ["T", "w", "o"], [0, 0.1, 0.2], [0.1, 0.2, 0.3]) + "\n\n";
+    upstreamBody.enqueue(new TextEncoder().encode(first.slice(0, 40)));
+    upstreamBody.enqueue(new TextEncoder().encode(first.slice(40)));
+    await until(() => text.split("\n").length === 3);
+    expect(ended).toBe(false);
+    upstreamBody.enqueue(new TextEncoder().encode(line([4], [" ", "c"], [0.3, 0.35], [0.35, 0.4]) + "\n\n" + JSON.stringify({ audio_base64: "", alignment: null })));
+    upstreamBody.close();
+    await until(() => ended);
+    expect(text.trim().split("\n").map(row => JSON.parse(row))).toEqual([
+      { audio: Buffer.from([1]).toString("base64"), alignment: null },
+      { audio: Buffer.from([2, 3]).toString("base64"), alignment: { characters: ["T", "w", "o"], starts: [0, 0.1, 0.2], ends: [0.1, 0.2, 0.3] } },
+      { audio: Buffer.from([4]).toString("base64"), alignment: { characters: [" ", "c"], starts: [0.3, 0.35], ends: [0.35, 0.4] } },
+    ]);
+  });
+
+  it("falls back from a refused format and a failing model on streamed timestamps too", async () => {
+    const eleven = upstream((format, model) => model === DEFAULT_SPEECH_MODEL ? refusal(500, "internal_error") : format === "pcm_44100" ? refusal(403, "output_format_not_allowed")
+      : new Response(JSON.stringify({ audio_base64: "AQI=", alignment: null }) + "\n", { status: 200 }));
+    const { server, post } = await hook({ key: async () => KEY, fetch: eleven.fetch });
+    servers.push(server);
+    const reply = await post({ text: "Hi.", timestamps: true, stream: true, formats: ["pcm_44100"] });
+    expect(reply.headers).toMatchObject({ "content-type": "application/x-ndjson", "x-phren-audio-rate": "24000", "x-phren-speech-model": FALLBACK_SPEECH_MODEL });
+    expect(JSON.parse(reply.bytes.toString())).toEqual({ audio: "AQI=", alignment: null });
+    expect(eleven.calls).toEqual([
+      { format: "pcm_44100", model: DEFAULT_SPEECH_MODEL, endpoint: "with-timestamps" },
+      { format: "pcm_44100", model: FALLBACK_SPEECH_MODEL, endpoint: "with-timestamps" },
+      { format: "pcm_24000", model: FALLBACK_SPEECH_MODEL, endpoint: "with-timestamps" },
+    ]);
+  });
+
+  it("reaches ElevenLabs over one kept-alive connection, sentence after sentence, through a model fallback", async () => {
+    const paths: string[] = [];
+    let connections = 0;
+    const eleven = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", chunk => chunks.push(chunk));
+      req.on("end", () => {
+        paths.push(req.url!);
+        if (JSON.parse(Buffer.concat(chunks).toString()).model_id === DEFAULT_SPEECH_MODEL) {
+          res.writeHead(500, { "Content-Type": "application/json" }).end(JSON.stringify({ detail: { status: "internal_error" } }));
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/octet-stream" });
+        res.write(Buffer.from([9]));
+        setTimeout(() => res.end(Buffer.from([8])), 10);
+      });
+    });
+    eleven.on("connection", () => { connections++; });
+    await new Promise<void>(resolve => eleven.listen(0, "127.0.0.1", resolve));
+    servers.push(eleven);
+    const { server, post } = await hook({ key: async () => KEY, origin: `http://127.0.0.1:${(eleven.address() as AddressInfo).port}` });
+    servers.push(server);
+    for (let i = 0; i < 3; i++) {
+      const reply = await post({ text: "Hello." });
+      expect(reply.status).toBe(200);
+      expect([...reply.bytes]).toEqual([9, 8]);
+    }
+    expect(paths[0]).toBe(`/v1/text-to-speech/${DEFAULT_SPEECH_VOICE}/stream?output_format=pcm_24000`);
+    expect(paths).toHaveLength(4);
+    expect(connections).toBe(1);
+  });
+
+  it("reaches the US-only endpoint once the region is set", async () => {
+    const urls: string[] = [];
+    const fetcher = (async (url: string) => { urls.push(url); return new Response(audioStream([new Uint8Array([1])]), { status: 200 }); }) as unknown as typeof fetch;
+    const { server, post } = await hook({ key: async () => KEY, fetch: fetcher });
+    servers.push(server);
+    await post({ text: "Hello." });
+    await writeSpeechRegion("us");
+    await post({ text: "Hello." });
+    expect(urls.map(url => new URL(url).origin)).toEqual(["https://api.elevenlabs.io", "https://api.us.elevenlabs.io"]);
   });
 });
 

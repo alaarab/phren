@@ -99,7 +99,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     capabilities: [
       "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "herdr",
       "webServers", "webPreview", "activity", "approvals", "questions", "accountUsage", "providers",
-      "files", "repositoryFiles", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "resources", "sessionRename", "sudo", "sudoOutcome", "previewDeltas", "quickChat",
+      "files", "repositoryFiles", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "resources", "sessionRename", "sudo", "sudoOutcome", "previewDeltas", "quickChat",
     ],
     storeFiles: [".runtime/sessions/opencode-*.events.jsonl", ".runtime/approvals/opencode-*.json"],
     localFiles: ["<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/askpass", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily"],

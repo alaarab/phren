@@ -1,9 +1,11 @@
 import { once } from "node:events";
-import type { ServerResponse } from "node:http";
+import { Agent as HttpAgent, request as httpRequest, type ServerResponse } from "node:http";
+import { Agent as HttpsAgent, request as httpsRequest } from "node:https";
+import { Readable } from "node:stream";
 import { z } from "zod";
 import { BridgeError, type Json } from "./protocol.js";
 import { readSpeechKey } from "./speech-key.js";
-import { FALLBACK_SPEECH_MODEL, resolveSpeechModel, resolveSpeechVoice, voiceId } from "./speech-voice.js";
+import { FALLBACK_SPEECH_MODEL, resolveSpeechModel, resolveSpeechRegion, resolveSpeechVoice, voiceId } from "./speech-voice.js";
 
 export { DEFAULT_SPEECH_MODEL, DEFAULT_SPEECH_VOICE, FALLBACK_SPEECH_MODEL } from "./speech-voice.js";
 
@@ -54,6 +56,10 @@ export const speechRequest = z.object({
   /** Answer JSON with the audio and when each character is spoken, so the
    * phone can highlight the word being read (talk mode's karaoke). */
   timestamps: z.boolean().optional(),
+  /** With `timestamps`, stream the audio and alignment as ElevenLabs makes
+   * them, one JSON line per chunk, instead of one JSON reply once the whole
+   * sentence is voiced (about 0.6 s later with v4 Turbo). */
+  stream: z.boolean().optional(),
   /** A voice the phone picked; otherwise this computer's setting. */
   voice: voiceId.optional(),
   /** The output formats the phone plays (`SPEECH_FORMATS` names). Without
@@ -111,6 +117,9 @@ export interface SpeechOptions {
   formats?: readonly string[];
   /** Defaults to this computer's setting (speech-voice.ts). */
   model?: string;
+  /** Where ElevenLabs is, e.g. https://api.elevenlabs.io. Defaults to this
+   * computer's region setting (speech-voice.ts). */
+  origin?: string;
   /** Defaults to the Hook's own. */
   state?: SpeechState;
   now?: () => number;
@@ -118,6 +127,38 @@ export interface SpeechOptions {
 
 /** What was voiced: the model and format actually used. */
 export interface SpeechResult { model: string; format: SpeechFormat }
+
+/** Idle connections to ElevenLabs are kept this long, so the next sentence's
+ * request skips the TCP and TLS handshake. fetch's own pool lets them go
+ * after four seconds, shorter than talk mode's pause between replies. */
+const KEEP_ALIVE_MS = 60_000;
+let pool: { http: HttpAgent; https: HttpsAgent } | undefined;
+
+/** POSTs to ElevenLabs over the Hook's kept-alive pool and answers a fetch
+ * Response whose body is the upstream socket, so audio is passed on chunk by
+ * chunk as it arrives. Honours HTTPS_PROXY as fetch does, when
+ * NODE_USE_ENV_PROXY is set. */
+export function elevenLabsFetch(url: string, init: RequestInit): Promise<Response> {
+  const proxyEnv = process.env.NODE_USE_ENV_PROXY === "1" ? process.env : undefined;
+  pool ??= {
+    http: new HttpAgent({ keepAlive: true, timeout: KEEP_ALIVE_MS, proxyEnv }),
+    https: new HttpsAgent({ keepAlive: true, timeout: KEEP_ALIVE_MS, proxyEnv }),
+  };
+  const target = new URL(url), secure = target.protocol === "https:";
+  const body = typeof init.body === "string" ? init.body : "";
+  return new Promise((resolve, reject) => {
+    const request = (secure ? httpsRequest : httpRequest)(target, {
+      method: init.method ?? "GET", signal: init.signal ?? undefined, agent: secure ? pool!.https : pool!.http,
+      headers: { ...init.headers as Record<string, string>, "Content-Length": String(Buffer.byteLength(body)) },
+    }, upstream => {
+      const status = upstream.statusCode ?? 0;
+      if (status < 200 || status > 599) { upstream.destroy(); reject(new Error(`HTTP ${status}`)); return; }
+      resolve(new Response(Readable.toWeb(upstream) as ReadableStream<Uint8Array>, { status }));
+    });
+    request.on("error", reject);
+    request.end(body);
+  });
+}
 
 /** ElevenLabs' machine-readable reason (`detail.status`), never its text. */
 async function upstreamCode(upstream: Response): Promise<string> {
@@ -173,9 +214,10 @@ export function speakableText(text: string): string {
     .trim();
 }
 
-/** Starts ElevenLabs' streaming synthesis and returns its audio body. */
-export async function synthesizeSpeech(text: string, signal: AbortSignal, options: SpeechOptions = {}): Promise<SpeechResult & { body: ReadableStream<Uint8Array> }> {
-  const { upstream, model, format, started } = await elevenLabs("stream", text, signal, options);
+/** Starts ElevenLabs' streaming synthesis and returns its body: the audio,
+ * or with `stream/with-timestamps` JSON lines of audio and alignment. */
+export async function synthesizeSpeech(text: string, signal: AbortSignal, options: SpeechOptions = {}, endpoint: "stream" | "stream/with-timestamps" = "stream"): Promise<SpeechResult & { body: ReadableStream<Uint8Array> }> {
+  const { upstream, model, format, started } = await elevenLabs(endpoint, text, signal, options);
   if (!upstream.body) throw await speechError(upstream);
   timed(text, model, started, options);
   return { body: upstream.body, model, format };
@@ -212,6 +254,31 @@ export function alignmentOf(raw: { characters?: unknown; character_start_times_s
   return { characters: characters as string[], starts: starts as number[], ends: ends as number[] };
 }
 
+/** ElevenLabs' streamed timestamps, one JSON object per line, as the phone's
+ * lines: `{audio, alignment}`, the alignment's times in seconds from the
+ * start of the whole reply (as ElevenLabs counts them) and null for a chunk
+ * with no characters. A chunk without audio is dropped. */
+async function* timedLines(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+  const decoder = new TextDecoder();
+  let pending = "";
+  for await (const bytes of body) {
+    pending += decoder.decode(bytes, { stream: true });
+    const lines = pending.split("\n");
+    pending = lines.pop()!;
+    for (const line of lines) { const out = timedLine(line); if (out) yield out; }
+  }
+  const out = timedLine(pending + decoder.decode());
+  if (out) yield out;
+}
+
+function timedLine(line: string): string | undefined {
+  if (!line.trim()) return undefined;
+  const raw = JSON.parse(line) as { audio_base64?: unknown; alignment?: Parameters<typeof alignmentOf>[0] };
+  if (typeof raw.audio_base64 !== "string" || !raw.audio_base64) return undefined;
+  const alignment = alignmentOf(raw.alignment);
+  return JSON.stringify({ audio: raw.audio_base64, alignment: alignment?.characters.length ? alignment : null }) + "\n";
+}
+
 /** The plan doesn't allow this output format (Creator: "Output format
  * 'pcm_44100' is only available on the Pro tier and above", 403
  * `output_format_not_allowed`). */
@@ -230,12 +297,13 @@ function modelFailed(status: number, code: string): boolean {
  * with the chosen model, then Flash v2.5 when that model fails or has been
  * slow. A refused format is skipped for FORMAT_HOLD_MS, a failed or slow
  * model for FALLBACK_HOLD_MS. */
-async function elevenLabs(endpoint: "stream" | "with-timestamps", text: string, signal: AbortSignal, options: SpeechOptions): Promise<SpeechResult & { upstream: Response; started: number }> {
+async function elevenLabs(endpoint: "stream" | "stream/with-timestamps" | "with-timestamps", text: string, signal: AbortSignal, options: SpeechOptions): Promise<SpeechResult & { upstream: Response; started: number }> {
   const key = await (options.key ?? readSpeechKey)();
   if (!key) throw new BridgeError(503, "Spoken replies aren't set up on this computer: it has no ElevenLabs key.", { code: "speech-unconfigured" });
   const { voice } = await resolveSpeechVoice(options.voice);
   const state = options.state ?? sharedState, now = options.now ?? Date.now;
   const chosen = options.model ?? (await resolveSpeechModel()).model;
+  const origin = options.origin ?? (await resolveSpeechRegion()).origin;
   const models = chosen === FALLBACK_SPEECH_MODEL ? [chosen] : state.benchedReason(chosen) ? [FALLBACK_SPEECH_MODEL] : [chosen, FALLBACK_SPEECH_MODEL];
   const accepted = new Set(options.formats ?? []);
   let failure: BridgeError | undefined;
@@ -243,11 +311,11 @@ async function elevenLabs(endpoint: "stream" | "with-timestamps", text: string, 
     // Per model, so a format refused under one isn't tried again under the next.
     const formats = SPEECH_FORMATS.filter(format => format === BASE_FORMAT || (accepted.has(format) && state.formatAllowed(format)));
     for (const format of formats) {
-      const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}/${endpoint}?output_format=${format}`;
+      const url = `${origin}/v1/text-to-speech/${encodeURIComponent(voice)}/${endpoint}?output_format=${format}`;
       const started = now();
       let upstream: Response;
       try {
-        upstream = await (options.fetch ?? fetch)(url, {
+        upstream = await (options.fetch ?? elevenLabsFetch)(url, {
           method: "POST", signal,
           headers: { "xi-api-key": key, "Content-Type": "application/json" },
           body: JSON.stringify({ text, model_id: model, voice_settings: { stability: 0.6, similarity_boost: 0.75 } }),
@@ -271,7 +339,9 @@ async function elevenLabs(endpoint: "stream" | "with-timestamps", text: string, 
  * format, model, alignment }`, the audio base64 in the format served and the
  * alignment null when ElevenLabs sent none. The streamed reply names its
  * format in `X-Phren-Audio` and `X-Phren-Audio-Rate`. A phone that sends no
- * `formats` always gets pcm_24000.
+ * `formats` always gets pcm_24000. With `timestamps` and `stream`, the
+ * streamed reply is `application/x-ndjson`, one `{audio, alignment}` line per
+ * chunk (see timedLines), with the same headers.
  * Failures before the first byte are thrown for the route's JSON error; a
  * failure mid-stream cuts the response off, which the phone treats as an
  * error. The phone hanging up cancels the ElevenLabs request. */
@@ -285,7 +355,7 @@ export async function streamSpeech(data: Json, response: ServerResponse, options
   options = { ...options, formats: request.formats ?? [] };
   const abort = new AbortController();
   response.once("close", () => { if (!response.writableEnded) abort.abort(); });
-  if (timestamps) {
+  if (timestamps && !request.stream) {
     const { audio, alignment, model, format } = await synthesizeTimedSpeech(text, abort.signal, options);
     const info = SPEECH_FORMAT_INFO[format];
     response.statusCode = 200;
@@ -293,15 +363,17 @@ export async function streamSpeech(data: Json, response: ServerResponse, options
     response.end(JSON.stringify({ audio, audioFormat: info.audio, sampleRate: info.sampleRate, format, model, alignment }));
     return;
   }
-  const { body: audio, model, format } = await synthesizeSpeech(text, abort.signal, options);
+  const { body: audio, model, format } = await synthesizeSpeech(text, abort.signal, options, timestamps ? "stream/with-timestamps" : "stream");
   const info = SPEECH_FORMAT_INFO[format];
   response.statusCode = 200;
-  response.setHeader("Content-Type", info.contentType);
+  response.setHeader("Content-Type", timestamps ? "application/x-ndjson" : info.contentType);
   response.setHeader("X-Phren-Audio", info.audio);
   response.setHeader("X-Phren-Audio-Rate", String(info.sampleRate));
   response.setHeader("X-Phren-Speech-Model", model);
+  // The phone sets up its player from these headers while the first audio is still on its way.
+  response.flushHeaders();
   try {
-    for await (const chunk of audio) {
+    for await (const chunk of timestamps ? timedLines(audio) : audio) {
       if (!response.write(chunk)) await once(response, "drain", { signal: abort.signal });
     }
     response.end();
