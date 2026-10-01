@@ -90,32 +90,47 @@ export function publicAssistant(raw: Json, source: Provider): string | undefined
       .filter(block => block.type === "text").map(block => String(block.text ?? "")).join("\n");
     return text.trim() || undefined;
   }
+  if (source === "copilot") {
+    // A sub-agent's messages carry its agentId; only the session's own reply counts.
+    const data = object(raw.data);
+    if (raw.type !== "assistant.message" || raw.agentId || typeof data.content !== "string") return;
+    return data.content.trim() || undefined;
+  }
   return;
 }
 
 const FINAL_TURN_TAIL_BYTES = 512 * 1024;
 
 /** A turn's end as the harness writes it: Claude's end_turn reply or its
- * turn_duration record, Codex's task_complete, opencode's end_turn step. */
-function turnEnded(raw: Json, source: ScheduleHarness): boolean {
+ * turn_duration record, Codex's task_complete, opencode's end_turn step.
+ * Copilot writes a turn_start/turn_end pair per model call, so its turn ends
+ * at the turn_end after the reply marked `final_answer` (`copilotFinal`). */
+function turnEnded(raw: Json, source: ScheduleHarness, copilotFinal = false): boolean {
   const payload = object(raw.payload), message = object(raw.message), data = object(raw.data);
   if (source === "claude") return (raw.type === "assistant" && message.stop_reason === "end_turn")
     || (raw.type === "system" && raw.subtype === "turn_duration");
   if (source === "codex") return raw.type === "event_msg" && ["task_complete", "task_completed"].includes(String(payload.type));
+  if (source === "copilot") return raw.type === "session.error" || (raw.type === "assistant.turn_end" && !raw.agentId && copilotFinal);
   return data.stop_reason === "end_turn";
 }
 
 /** The error a turn ended on, when the harness records one: Codex's
- * task_complete carries `error.message` (a usage limit, a failed compaction). */
+ * task_complete carries `error.message` (a usage limit, a failed compaction),
+ * Copilot's session.error its `message`. */
 function turnError(raw: Json, source: ScheduleHarness): string | undefined {
+  if (source === "copilot") {
+    const data = object(raw.data), message = raw.type === "session.error" && typeof data.message === "string" ? data.message.replace(/\s+/g, " ").trim() : "";
+    return message ? message.slice(0, 500) : raw.type === "session.error" ? "Copilot stopped on an error." : undefined;
+  }
   if (source !== "codex") return;
   const error = object(object(raw.payload).error), message = typeof error.message === "string" ? error.message.replace(/\s+/g, " ").trim() : "";
   return message ? message.slice(0, 500) : undefined;
 }
 
-/** The owner stopping a turn: Claude's interruption marker, Codex's aborted turn. */
+/** The owner stopping a turn: Claude's interruption marker, Codex's aborted turn, Copilot's abort. */
 function turnInterrupted(raw: Json, source: ScheduleHarness): boolean {
   if (source === "codex") return raw.type === "event_msg" && object(raw.payload).type === "turn_aborted";
+  if (source === "copilot") return raw.type === "abort";
   if (source !== "claude" || raw.type !== "user") return false;
   const content = object(raw.message).content;
   const text = typeof content === "string" ? content : objects(content).filter(block => block.type === "text").map(block => String(block.text ?? "")).join("");
@@ -169,7 +184,7 @@ function backgroundTasks(raw: Json, running: Set<string>, finished: Map<string, 
 /** The last assistant reply in a transcript and whether its turn finished.
  * A person's message after the reply opens a new turn, so it clears both. */
 export function finalTurnFromLines(lines: readonly string[], source: ScheduleHarness): FinalTurn {
-  let completed = false, lastAssistant: string | undefined, error: string | undefined, interrupted = false;
+  let completed = false, lastAssistant: string | undefined, error: string | undefined, interrupted = false, copilotFinal = false;
   const running = new Set<string>(), finished = new Map<string, string>(), tail: TaskTail = { commands: new Map(), awaited: new Set() };
   for (const line of lines) {
     if (!line.trim()) continue;
@@ -185,11 +200,13 @@ export function finalTurnFromLines(lines: readonly string[], source: ScheduleHar
     if (turnInterrupted(raw, source)) { interrupted = true; completed = false; continue; }
     const userTurn = source === "claude" ? raw.type === "user" && !raw.isMeta && typeof object(raw.message).content === "string"
       : source === "codex" ? raw.type === "response_item" && payload.type === "message" && payload.role === "user"
+      : source === "copilot" ? raw.type === "user.message"
       : raw.type === "user/message";
-    if (userTurn) { completed = false; lastAssistant = undefined; error = undefined; interrupted = false; continue; }
+    if (userTurn) { completed = false; lastAssistant = undefined; error = undefined; interrupted = false; copilotFinal = false; continue; }
     const text = publicAssistant(raw, source);
     if (text) { lastAssistant = text; completed = false; interrupted = false; }
-    if (turnEnded(raw, source)) { completed = true; interrupted = false; error = turnError(raw, source); }
+    if (source === "copilot" && raw.type === "assistant.message" && !raw.agentId) copilotFinal = object(raw.data).phase === "final_answer";
+    if (turnEnded(raw, source, copilotFinal)) { completed = true; interrupted = false; error = turnError(raw, source); copilotFinal = false; }
   }
   return { completed, ...(lastAssistant ? { lastAssistant } : {}), ...(completed && error ? { error } : {}),
     ...(interrupted ? { interrupted: true } : {}), ...(completed && running.size ? { background: running.size } : {}),

@@ -3,6 +3,12 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- GitHub Copilot is a dispatch, schedule and code-note harness (`harness: "copilot"`), alongside Codex, Claude and OpenCode. It starts with `--model` and `--reasoning-effort`, `permissionMode` maps to its tool approval flags (`--allow-tool=write`, `--allow-all-tools`, `--allow-all`), the Hook pre-trusts the project folder in `~/.copilot/settings.json`, and returns and scheduled runs read the end of its turn from its session log. The phone's launch route now takes `permissionMode` for Copilot instead of refusing it.
+
 ## [0.3.20] - 2026-10-01
 
 ### Added

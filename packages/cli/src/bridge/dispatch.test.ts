@@ -102,6 +102,16 @@ describe("dispatch receipts and selection", () => {
       expect((await dispatchStatus())[0]).toMatchObject({ id: result.id, permissionMode: "auto-edits" });
     });
 
+    it("starts a Copilot worker with the mode, as it does Claude and Codex", async () => {
+      const copilot = { ...target, source: "copilot" };
+      vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
+        ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 }
+        : route.startsWith("/v1/workspaces/launch") ? { ok: true, target: copilot, permissionMode: "auto" } : { ok: true });
+      const result = await new DispatchService().dispatch({ ...brief, harness: "copilot", model: "gpt-6-sol", effort: "high", permissionMode: "auto" });
+      expect(launchBody()).toMatchObject({ kind: "copilot", model: "gpt-6-sol", effort: "high", permissionMode: "auto" });
+      expect(result).toMatchObject({ state: "accepted", harness: "copilot", permissionMode: "auto" });
+    });
+
     it("sends nothing when no mode was asked for, and rejects an unknown one", async () => {
       await new DispatchService().dispatch(brief);
       expect(launchBody()).not.toHaveProperty("permissionMode");

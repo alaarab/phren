@@ -231,7 +231,7 @@ export const REGISTRY: Command[] = [
     },
   },
   {
-    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>] [--keep-open]",
+    name: "dispatch", topic: "core", usage: "phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode|copilot] [--model <model>] [--effort <effort>] [--account <id>] [--permission-mode <mode>] [--keep-open]",
     summary: "Dispatch a worker brief through Phren Hook",
     subcommands: [{ name: "status", usage: "phren dispatch status", summary: "List local dispatch receipts" },
       { name: "returns", usage: "phren dispatch returns", summary: "List unread worker returns (done, needs you, blocked, gone) and mark them read" },

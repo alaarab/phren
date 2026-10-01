@@ -33,6 +33,19 @@ export function codexModeFlags(mode: PermissionMode): string[] {
   return ["-a", String(approvalPolicy), "-s", String(sandbox), ...(approvalsReviewer === "auto_review" ? ["-c", 'approvals_reviewer="auto_review"'] : [])];
 }
 
+/**
+ * Copilot CLI's launch flags for a mode. Copilot asks before every tool by
+ * default and has no automatic reviewer, so `auto` approves every tool call
+ * while file access stays inside the working folder, and `full-access` also
+ * lifts the path and URL checks (`--allow-all`).
+ */
+export function copilotModeFlags(mode: PermissionMode): string[] {
+  if (mode === "auto-edits") return ["--allow-tool=write"];
+  if (mode === "auto") return ["--allow-all-tools"];
+  if (mode === "full-access") return ["--allow-all"];
+  return [];
+}
+
 const MAX_PRESSES = 6, STEP_WAIT_MS = 2_000;
 
 export interface SettingsCapabilities { permissionModes: string[]; plan: boolean; fast: boolean }
