@@ -90,6 +90,9 @@ describe("tmux names and ids", () => {
     expect(agentFromCommand("node /home/me/phren/packages/agent/dist/bin.js")).toBe("phren");
     expect(agentFromCommand("phren agent -i")).toBe("phren");
     expect(agentFromCommand("node /usr/local/lib/node_modules/@phren/cli/dist/index.js agent")).toBe("phren");
+    // A workspace checkout linked as `phren` runs the CLI's own dist entry.
+    expect(agentFromCommand("node /Users/me/phren/packages/cli/dist/index.js agent -i")).toBe("phren");
+    expect(agentFromCommand("node /Users/me/phren/packages/cli/dist/index.js shell")).toBeUndefined();
     expect(agentFromCommand("phren shell")).toBeUndefined();
     expect(agentFromCommand("-zsh")).toBeUndefined();
     expect(agentFromCommand("vim claude.md")).toBeUndefined();
@@ -208,6 +211,20 @@ describe("the tmux provider", () => {
     // The dispatch id reaches the agent's environment, not its command line.
     expect(respawn).toEqual(["respawn-pane", "-k", "-t", "%1", "-c", "/repo", "-e", "PHREN_DISPATCH_ID=dispatch-1", "--", "/bin/sh", "-l", "-c", 'shell="$1"; shift; "$@"; exec "$shell" -l',
       "phren", "/bin/sh", "claude", "--model", "opus; rm -rf ~"]);
+    expect(started).toBe(true);
+  });
+
+  it("starts phren's own agent as `phren agent -i` under the same login shell", async () => {
+    let started = false;
+    const calls: string[][] = [];
+    restore = setTmuxDeps({ binary: () => "/usr/bin/tmux", version: async () => "tmux 3.3a", sleep: async () => { started = true; },
+      processes: async () => started ? PS.replace("/Users/me/.local/share/claude/versions/2.1.3 --effort high", "phren-agent /usr/local/lib/node_modules/@phren/agent/dist/bin.js -i")
+        : PS.replace("/Users/me/.local/share/claude/versions/2.1.3 --effort high", "-zsh"),
+      run: async (_s, args) => { calls.push(args); return args[0] === "list-panes" ? PANES : ""; } });
+    vi.stubEnv("SHELL", "/bin/sh");
+    await tmuxTerminal.startAgent("tmux-phren", "p1", { name: "phren-worker", kind: "phren", args: ["agent", "-i", "--model", "gpt-6-sol", "--reasoning", "high"], timeoutMs: 5_000 });
+    expect(calls.find(c => c[0] === "respawn-pane")).toEqual(["respawn-pane", "-k", "-t", "%1", "-c", "/repo", "--", "/bin/sh", "-l", "-c", 'shell="$1"; shift; "$@"; exec "$shell" -l',
+      "phren", "/bin/sh", "phren", "agent", "-i", "--model", "gpt-6-sol", "--reasoning", "high"]);
     expect(started).toBe(true);
   });
 

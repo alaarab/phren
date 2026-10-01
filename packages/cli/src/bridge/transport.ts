@@ -94,7 +94,7 @@ export async function dispatch(command: string): Promise<void> {
   }
   // Without Herdr: a login shell, or one agent, in a validated project folder
   // on the SSH PTY itself. Nothing persists after the phone disconnects.
-  const shell = /^phren-hook v1 shell ([A-Za-z0-9_-]{1,8192})(?: (codex|claude|copilot|opencode))?$/.exec(command);
+  const shell = /^phren-hook v1 shell ([A-Za-z0-9_-]{1,8192})(?: (codex|claude|copilot|opencode|phren))?$/.exec(command);
   if (shell && shell[0] === command) {
     requireHook();
     const raw = decodeShellDirectory(shell[1]);
@@ -102,8 +102,9 @@ export async function dispatch(command: string): Promise<void> {
     const cwd = await launchDirectory(raw);
     if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Request an SSH terminal first.");
     const login = process.env.SHELL && path.isAbsolute(process.env.SHELL) ? process.env.SHELL : "/bin/sh";
-    const [file, args] = shell[2] ? [shell[2], []] : [login, ["-l"]];
-    await attach(file, args, { cwd, env: shellEnvironment() }, shell[2] ? `${shell[2]} exited.` : "The shell exited.");
+    // phren's own agent is the `phren agent` subcommand, in its interactive TUI.
+    const [file, args] = shell[2] === "phren" ? ["phren", ["agent", "-i"]] : shell[2] ? [shell[2], []] : [login, ["-l"]];
+    await attach(file, args, { cwd, env: shellEnvironment() }, shell[2] === "phren" ? "phren agent exited." : shell[2] ? `${shell[2]} exited.` : "The shell exited.");
     return;
   }
   const terminal = /^phren-hook v1 terminal ([A-Za-z0-9_.-]{1,100})$/.exec(command);

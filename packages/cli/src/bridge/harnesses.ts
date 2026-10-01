@@ -1,4 +1,5 @@
 // What this computer can launch: each harness's install state and, for Claude and Codex, its accounts.
+// `phren` is phren's own agent, run as `phren agent`; it needs no account here.
 // Served as GET /v1/harnesses and as `harnesses` on /v1/dispatch/capacity. See docs/accounts.md.
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -6,7 +7,7 @@ import { codexHome } from "../home-paths.js";
 import { claudeAccountRef, claudeAuthStatus, claudeHomes, CODEX_ACCOUNT, type AccountRef, type AuthRunner } from "./claude-accounts.js";
 import { toolVersion, type ToolVersion } from "./health.js";
 
-export type HarnessSource = "claude" | "codex" | "opencode" | "copilot";
+export type HarnessSource = "claude" | "codex" | "opencode" | "copilot" | "phren";
 export interface HarnessAccount extends AccountRef { signedIn: boolean; usable: boolean; plan?: string; reason?: string }
 export interface HarnessEntry {
   source: HarnessSource; installed: boolean; version?: string; usable: boolean; reason?: string; accounts?: HarnessAccount[];
@@ -18,15 +19,22 @@ export interface HarnessDeps {
   env?: NodeJS.ProcessEnv;
 }
 
-const SOURCES: HarnessSource[] = ["claude", "codex", "opencode", "copilot"];
+const SOURCES: HarnessSource[] = ["claude", "codex", "opencode", "copilot", "phren"];
+
+/** The binary is `phren`; the agent answers `phren agent --version` from the separate @phren/agent package. */
+const probeSource = (source: string) => source === "phren" ? toolVersion("phren agent", "phren", ["agent"]) : toolVersion(source);
 
 export async function harnessInventory(deps: HarnessDeps = {}): Promise<HarnessInventory> {
   const env = deps.env ?? process.env;
-  const probe = deps.toolVersion ?? ((tool: string) => toolVersion(tool));
+  const probe = deps.toolVersion ?? probeSource;
   const harnesses = await Promise.all(SOURCES.map(async (source): Promise<HarnessEntry> => {
     const found = await probe(source);
     // Only a missing binary is definite; a slow or failing --version (a loaded computer) stays usable.
     if (found.status === "missing") return { source, installed: false, usable: false, reason: "Not installed" };
+    // `phren agent` without @phren/agent prints an install hint and no version.
+    if (source === "phren" && found.status === "error" && found.detail?.startsWith("--version exited")) {
+      return { source, installed: false, usable: false, reason: "Not installed: npm install -g @phren/agent" };
+    }
     const base = { source, installed: true, ...(found.version ? { version: found.version } : {}) };
     if (source === "claude") {
       const accounts = await Promise.all(claudeHomes(env).map(async (home): Promise<HarnessAccount> => {

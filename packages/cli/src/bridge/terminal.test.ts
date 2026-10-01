@@ -4,7 +4,8 @@ import { rpc, validateTarget } from "./herdr.js";
 import { readPaneText } from "./pane-text.js";
 import type { Target } from "./protocol.js";
 import { routedTerminal, setTerminalProvider, terminalProvider, type ScreenRead, type TerminalProvider } from "./terminal.js";
-import { herdrPanes, herdrTerminal } from "./terminal-herdr.js";
+import { herdrPanes, herdrTerminal, phrenCommandLine } from "./terminal-herdr.js";
+import { BridgeError } from "./protocol.js";
 
 vi.mock("./herdr.js", async importOriginal => ({
   ...await importOriginal<typeof import("./herdr.js")>(), rpc: vi.fn(), validateTarget: vi.fn(),
@@ -93,6 +94,58 @@ describe("the Herdr provider", () => {
       ["s", "ping"],
       ["s", "session.snapshot"],
     ]);
+  });
+
+  it("types phren agent at the pane's shell, waits for it, then reports and names it", async () => {
+    let polls = 0;
+    vi.mocked(rpc).mockImplementation(async (_server, method) => {
+      if (method !== "pane.process_info") return {};
+      // The shell holds the foreground before the command and for one poll after it.
+      const agent = polls++ >= 2;
+      return { process_info: { shell_pid: 10, foreground_process_group_id: agent ? 20 : 10,
+        foreground_processes: [agent ? { pid: 20, cmdline: "node /opt/homebrew/bin/phren agent -i --model it's" } : { pid: 10, cmdline: "-zsh" }] } };
+    });
+    await herdrTerminal.startAgent("s", "w1:p1", { name: "worker", kind: "phren", args: ["agent", "-i", "--model", "it's"], timeoutMs: 5_000 });
+    const calls = vi.mocked(rpc).mock.calls.filter(call => call[1] !== "pane.process_info");
+    expect(calls).toStrictEqual([
+      ["s", "pane.send_text", { pane_id: "w1:p1", text: `phren agent -i --model 'it'\\''s'; herdr pane release-agent "$HERDR_PANE_ID" --source phren-hook --agent phren >/dev/null 2>&1` }],
+      ["s", "pane.send_keys", { pane_id: "w1:p1", keys: ["Enter"] }],
+      ["s", "pane.report_agent", { pane_id: "w1:p1", source: "phren-hook", agent: "phren", state: "idle" }],
+      ["s", "agent.rename", { target: "w1:p1", name: "worker" }],
+    ]);
+    expect(vi.mocked(rpc).mock.calls.some(call => call[1] === "agent.start")).toBe(false);
+  });
+
+  it("refuses a busy pane for phren agent the way Herdr does, so the launch waits for the shell", async () => {
+    vi.mocked(rpc).mockImplementation(async () => ({ process_info: { shell_pid: 10, foreground_process_group_id: 30, foreground_processes: [{ pid: 30, cmdline: "zsh -l" }] } }));
+    const refused = await herdrTerminal.startAgent("s", "p", { name: "n", kind: "phren", args: ["agent", "-i"], timeoutMs: 5_000 }).catch(error => error);
+    expect(refused).toBeInstanceOf(BridgeError);
+    expect(refused.details).toEqual({ herdrCode: "agent_pane_busy" });
+    expect(vi.mocked(rpc).mock.calls.map(call => call[1])).toEqual(["pane.process_info"]);
+  });
+
+  it("quotes only the words that need it", () => {
+    expect(phrenCommandLine(["agent", "-i", "--model", "openrouter/deepseek/v4:free"])).toMatch(/^phren agent -i --model openrouter\/deepseek\/v4:free; /);
+    expect(phrenCommandLine(["agent", "--model", "a b; rm -rf ~"])).toMatch(/^phren agent --model 'a b; rm -rf ~'; /);
+  });
+
+  it("prompts and sends keys to a reported phren pane through the pane, never another agent", async () => {
+    const unnamed = new BridgeError(409, "Herdr: agent p is not an active named agent", { herdrCode: "agent_not_ready" });
+    let agent = "phren";
+    vi.mocked(rpc).mockImplementation(async (_server, method) => {
+      if (method === "agent.prompt" || method === "agent.send_keys") throw unnamed;
+      return method === "pane.get" ? { pane: { pane_id: "p", agent } } : {};
+    });
+    await herdrTerminal.prompt("s", "p", "line one\nline two");
+    await herdrTerminal.sendKeys("s", "p", ["esc"]);
+    expect(vi.mocked(rpc).mock.calls.filter(call => call[1].startsWith("pane.send"))).toStrictEqual([
+      ["s", "pane.send_text", { pane_id: "p", text: "\x1b[200~line one\nline two\x1b[201~" }, undefined],
+      ["s", "pane.send_keys", { pane_id: "p", keys: ["Enter"] }, undefined],
+      ["s", "pane.send_keys", { pane_id: "p", keys: ["esc"] }],
+    ]);
+    // Any other pane keeps Herdr's refusal.
+    agent = "claude";
+    await expect(herdrTerminal.prompt("s", "p", "hi")).rejects.toBe(unnamed);
   });
 
   it("lists panes with Herdr's agent report as hints, and none for a plain shell", () => {

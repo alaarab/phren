@@ -1399,6 +1399,11 @@ export class AgentHooks {
         const autoReview = body.event === "PermissionRequest" && target.source === "codex" && body.autoReview === true;
         const status = autoReview ? undefined : eventStatus(body.event);
         if (status && typeof pane.terminal_id === "string") notePaneStatus(target.server, target.pane, pane.terminal_id, status);
+        // Herdr does not watch phren-agent: a pane the Hook reported as running
+        // it (a phone launch) takes its status from these events.
+        if (status && target.source === "phren" && pane.agent === "phren" && pane.agent_status !== status) {
+          await terminalProvider().reportAgent?.(target.server, target.pane, "phren", status as "idle" | "working" | "blocked").catch(() => undefined);
+        }
         // What a shell call changed on disk: snapshot before, diff after.
         const input = typeof body.input === "string" ? { patch: body.input } : object(body.input), command = [input.command, input.cmd].find(v => typeof v === "string") as string | undefined;
         // A shell call by name, or any tool whose input is a command line —

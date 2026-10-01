@@ -3,7 +3,14 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.3.19] - 2026-10-01
+
+### Added
+
+- The Hook launches phren's own coding agent from the phone: `POST /v1/workspaces/launch` takes `kind: "phren"` and runs `phren agent -i`, with `model` as `--model` and `effort` as `--reasoning` (`minimal` becomes `low`). Herdr's `agent.start` does not know phren-agent, so on Herdr the Hook types the command at the pane's login shell, waits for it to be the foreground program and reports it to Herdr as agent `phren` under the launch name; the typed line releases that report when the agent exits. tmux runs it like the other harnesses. Prompts and keys to such a pane go through Herdr's pane calls, since its agent calls take only agents Herdr started. A conductor role and `permissionMode` are refused with 400 for `phren`.
+- The phone's project shell without Herdr (`phren-hook v1 shell <folder> phren`) starts `phren agent -i` on the SSH PTY.
+- `GET /v1/harnesses` (and `harnesses` on `/v1/dispatch/capacity`) lists `phren`, installed when `phren agent --version` answers with a version and usable whenever installed.
+- A Herdr pane running phren-agent that the Hook reported takes its status (working, idle) from the agent's own lifecycle hooks. The tmux provider also recognises `phren agent` run from a workspace checkout's `packages/cli/dist/index.js`.
 
 ## [0.3.18] - 2026-09-30
 

@@ -30,7 +30,7 @@ import { CLAUDE_NAMES, CODEX_MODES, codexModeFlags } from "./settings-switch.js"
 /** Starting agents in Herdr from the phone: the launch route's harness
  * arguments, the conductor brief, and workspace, tab and pane actions. */
 
-const launchKinds = ["codex", "claude", "copilot", "opencode"] as const;
+const launchKinds = ["codex", "claude", "copilot", "opencode", "phren"] as const;
 const plainText = (max: number) => z.string().min(1).max(max).refine(t => !/[\x00-\x1f\x7f]/.test(t));
 declare const CONDUCTOR_SKILL_SOURCE: string | undefined;
 
@@ -61,8 +61,13 @@ function effortArgs(kind: (typeof launchKinds)[number], effort: LaunchEffort): s
   if (kind === "claude") return ["--effort", effort];
   if (kind === "codex") return ["-c", `model_reasoning_effort=${effort}`];
   if (kind === "opencode") return ["--variant", effort];
+  // phren-agent takes low to xhigh, and max as xhigh.
+  if (kind === "phren") return ["--reasoning", effort === "minimal" ? "low" : effort];
   return [];
 }
+
+/** phren's own agent runs as `phren agent`: the subcommand and its interactive TUI lead its arguments. */
+const PHREN_AGENT_ARGS = ["agent", "-i"];
 
 async function prepareConductor(kind: (typeof launchKinds)[number], effort: LaunchEffort, model?: string): Promise<string[]> {
   const brief = await conductorBrief();
@@ -133,6 +138,8 @@ async function requireNoConductor(server: string, before: Json, except?: string)
 /** The phone names the pane's workspace and tab too; the CLI may know only the pane. */
 const paneRequest = z.object({ workspaceId: id.optional(), tabId: id.optional(), paneId: id }).strict();
 
+const PHREN_NO_CONDUCTOR = "phren agent cannot run as a conductor: it takes no system brief at startup.";
+
 /** "Make conductor": the owner gives an agent already running in a pane on this computer the role. */
 export async function makeConductor(server: string, data: Json): Promise<Json> {
   const place = paneRequest.parse(data);
@@ -142,6 +149,7 @@ export async function makeConductor(server: string, data: Json): Promise<Json> {
   if (!pane) throw new BridgeError(409, "The pane changed.");
   if (!runsAgent(pane)) throw new BridgeError(409, "No agent is running in this pane.");
   if (pane.agent === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
+  if (pane.agent === "phren") throw new BridgeError(400, PHREN_NO_CONDUCTOR);
   const unchecked = await requireNoConductor(server, before, place.paneId);
   const target = await targetForPane(server, pane);
   await recordConductor(server, pane, "owner", typeof target?.session === "string" ? target.session : undefined);
@@ -234,7 +242,9 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   if (permissionMode && role === "conductor") throw new BridgeError(400, "A conductor starts with its own permissions; permissionMode is for workers.");
   if (permissionMode && kind === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude and Codex workers.");
   if (permissionMode && kind === "copilot") throw new BridgeError(400, "Copilot takes its permissions from its own settings; permissionMode is for Claude and Codex workers.");
+  if (permissionMode && kind === "phren") throw new BridgeError(400, "phren agent takes its permissions from its own settings; permissionMode is for Claude and Codex workers.");
   if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
+  if (role === "conductor" && kind === "phren") throw new BridgeError(400, PHREN_NO_CONDUCTOR);
   // A dispatched worker's or scheduled run's first prompt. It rides on the
   // launch where the harness takes one; elsewhere the caller types it.
   const brief = data.brief === undefined || data.brief === null ? undefined : launchBriefSchema.parse(data.brief);
@@ -250,7 +260,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const wanted = options.canary ? "phren-canary" : role === "conductor" ? (isConductorName(baseName) ? baseName : herdrAgentName(`conductor-${baseName}`))
     : isConductorName(baseName) ? herdrAgentName(`worker-${baseName}`) : baseName;
   const model = typeof data.model === "string" && data.model.trim() ? plainText(200).parse(data.model.trim()) : undefined;
-  const modelFlag: Partial<Record<(typeof launchKinds)[number], string>> = { codex: "--model", claude: "--model", opencode: "--model" };
+  const modelFlag: Partial<Record<(typeof launchKinds)[number], string>> = { codex: "--model", claude: "--model", opencode: "--model", phren: "--model" };
   let workspace = data.workspaceId === undefined ? undefined : id.parse(data.workspaceId);
   // Herdr 0.9.1 refuses a start timeout of 3000 ms or less (invalid_agent_timeout).
   const timeout = Math.min(120_000, Math.max(3_001, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
@@ -271,7 +281,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const conductorHere = role === "agent" && workspace ? await conductorPane(server, before) : undefined;
   if (conductorHere && conductorHere.workspace_id === workspace) workspace = undefined;
   const args = role === "conductor" ? await prepareConductor(kind, effort, model)
-    : [...(model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
+    : [...(kind === "phren" ? PHREN_AGENT_ARGS : []), ...(model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
       ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : [])];
   // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
   // pane joins the thread the Hook started, and the brief is that thread's
