@@ -32,6 +32,7 @@ import { getTheme, THEME_NAMES, type Theme } from "./themes.js";
 import { getAvailableModels, type PickerResult } from "../multi/model-picker.js";
 import { REASONING_LEVELS } from "../models.js";
 import type { ModelPickerState } from "./components/ModelPicker.js";
+import type { ListPickerState } from "./components/ListPicker.js";
 
 const _require = createRequire(import.meta.url);
 const AGENT_VERSION = (_require("../../package.json") as { version: string }).version;
@@ -177,6 +178,8 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   let activeTool: ActiveToolInfo | null = null;
   let modelPicker: ModelPickerState | null = null;
   let modelPickerResolve: ((result: PickerResult | null) => void) | null = null;
+  let listPicker: ListPickerState | null = null;
+  let listPickerResolve: ((index: number | null) => void) | null = null;
   const toolHistory: ToolCallProps[] = [];
   let toolDetailIndex: number | null = null;
   let planReview: string | null = null;
@@ -281,6 +284,15 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         onSelectAgent={(id) => handleSelectAgent(id === "__main__" ? null : id)}
         approval={approvalInfo}
         modelPicker={modelPicker}
+        listPicker={listPicker}
+        onListPickerMove={(delta) => {
+          if (!listPicker) return;
+          const count = listPicker.items.length;
+          listPicker = { ...listPicker, cursor: (listPicker.cursor + delta + count) % count };
+          update();
+        }}
+        onListPickerSelect={() => closeListPicker(listPicker?.cursor ?? null)}
+        onListPickerCancel={() => closeListPicker(null)}
         onModelPickerMove={moveModelPicker}
         onModelPickerReasoning={adjustModelReasoning}
         onModelPickerSelect={selectModelPicker}
@@ -292,6 +304,21 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         planReview={planReview}
       />
     );
+  }
+
+  function openListPicker(title: string, items: ListPickerState["items"]): Promise<number | null> {
+    if (items.length === 0) return Promise.resolve(null);
+    listPicker = { title, items, cursor: 0 };
+    update();
+    return new Promise((resolve) => { listPickerResolve = resolve; });
+  }
+
+  function closeListPicker(index: number | null) {
+    listPicker = null;
+    const resolve = listPickerResolve;
+    listPickerResolve = null;
+    update();
+    resolve?.(index);
   }
 
   function openModelPicker(): Promise<PickerResult | null> {
@@ -447,6 +474,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         } catch { /* keep current provider */ }
       },
       pickModel: openModelPicker,
+      pickFromList: openListPicker,
       promote: config.promote,
     },
     onOutput: (text) => {
