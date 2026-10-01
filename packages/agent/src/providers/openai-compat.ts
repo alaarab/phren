@@ -1,6 +1,6 @@
 /** Shared OpenAI-compatible message/tool conversion used by openrouter, codex, and openai providers. */
 import type { LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta, TokenUsage } from "./types.js";
-import { IncompleteStreamError, RetryableProviderError, type InvalidToolCall } from "./types.js";
+import { IncompleteStreamError, RetryableProviderError, withPartialUsage, type InvalidToolCall } from "./types.js";
 import type { ReasoningEffort } from "../models.js";
 import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
 
@@ -39,14 +39,30 @@ const DEEPSEEK_EFFORT: Record<ReasoningEffort, string> = {
   xhigh: "max",
 };
 
-/** The reasoning_effort value to send on this route. */
+/**
+ * OpenAI models that take reasoning effort "none": GPT-5.1 and later, except
+ * the -codex variants. Older reasoning models (gpt-5, o-series) and most
+ * other OpenAI-compatible servers reject it with a 400.
+ */
+export function acceptsNoReasoning(model: string | undefined): boolean {
+  const id = (model ?? "").replace(/^.*\//, "");
+  return /^gpt-5\.(?:[1-9]|\d{2,})/.test(id) && !/codex/i.test(id);
+}
+
+/**
+ * The reasoning_effort value to send on this route. "none" goes only where
+ * it is accepted (DeepSeek, newer OpenAI models); elsewhere the field is
+ * left out and the model's default applies.
+ */
 export function wireReasoningEffort(
   providerName: string | undefined,
   model: string | undefined,
   effort: ReasoningEffort | undefined,
 ): string | undefined {
   if (!effort) return undefined;
-  return isDeepSeekRoute(providerName, model) ? DEEPSEEK_EFFORT[effort] : effort;
+  if (isDeepSeekRoute(providerName, model)) return DEEPSEEK_EFFORT[effort];
+  if (effort === "none" && !acceptsNoReasoning(model)) return undefined;
+  return effort;
 }
 
 /**
@@ -260,7 +276,7 @@ export function parseOpenAiResponse(data: Record<string, unknown>, providerName?
  * A response is complete only when the provider says so: a finish_reason or
  * the `[DONE]` sentinel. A connection that closes before either is an error,
  * not a successful end_turn with partial output, and so is DeepSeek's
- * `aborted` finish reason.
+ * `aborted` finish reason. One that drops after a finish_reason is done.
  */
 export async function* parseOpenAiStream(res: Response): AsyncIterable<StreamDelta> {
   if (!res.body) throw new Error("Provider returned empty response body");
@@ -339,7 +355,17 @@ export async function* parseOpenAiStream(res: Response): AsyncIterable<StreamDel
   try {
     let sawDone = false;
     read: for (;;) {
-      const { done, value } = await reader.read();
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch (err: unknown) {
+        // The provider already said the response is complete (a usage-only
+        // chunk and [DONE] may still have been due): keep it rather than
+        // requesting the whole response again.
+        if (finished) break;
+        throw withPartialUsage(err, usage);
+      }
+      const { done, value } = chunk;
       if (done) {
         // A final event with no trailing newline is still an event.
         buf += decoder.decode();
@@ -357,7 +383,7 @@ export async function* parseOpenAiStream(res: Response): AsyncIterable<StreamDel
     }
 
     if (!finished && !sawDone) {
-      throw new IncompleteStreamError("Provider stream ended before the response was complete (no finish_reason or [DONE])");
+      throw withPartialUsage(new IncompleteStreamError("Provider stream ended before the response was complete (no finish_reason or [DONE])"), usage);
     }
 
     // Close out any active tool calls before signaling done

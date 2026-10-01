@@ -9,6 +9,7 @@ import { detectLintCommand, detectTestCommand } from "../tools/lint-test.js";
 import { createCheckpoint } from "../checkpoint.js";
 import { resetRepeatChain } from "../guards/repeat-tool-reminder.js";
 import { runLifecycleHooks } from "../user-hooks.js";
+import { recordTokenUsage } from "../cost.js";
 
 import type { AgentConfig, AgentSession, AgentResult, TurnResult, TurnHooks, TurnStopReason } from "./types.js";
 import { createSession } from "./types.js";
@@ -161,33 +162,43 @@ export async function runTurn(
         // a stream that drops, stalls into an incomplete end, or reports a
         // retryable failure mid-response is requested again. Nothing has run
         // yet (tools execute after the stream completes), so the only cost is
-        // the partial text already shown, which onStreamRetry lets UIs clear.
+        // the partial text already shown, dropped before the backoff wait.
         const onReasoningDelta =
           hooks?.onReasoningDelta ??
           (verbose ? (text: string) => process.stderr.write(`\x1b[2m${text}\x1b[0m`) : undefined);
         const onTextDelta = hooks?.onTextDelta ?? process.stdout.write.bind(process.stdout);
-        let attempt = 0;
+        // Text this attempt has shown, for UIs that cannot take it back.
+        let shown = "";
+        const onRetry = () => {
+          if (hooks?.onStreamRetry) {
+            hooks.onStreamRetry();
+          } else if (shown && !shown.endsWith("\n")) {
+            // Plain stdout (the REPL, one-shot) cannot erase the abandoned
+            // text; end its line so the restarted reply begins on its own.
+            onTextDelta("\n");
+          }
+          status(shown
+            ? "\x1b[33m[model request failed; retrying, the reply starts again]\x1b[0m\n"
+            : "\x1b[33m[model request failed; retrying]\x1b[0m\n");
+          shown = "";
+          // The phone's live preview drops the abandoned attempt's text too.
+          preview?.clear();
+        };
         const result = await withRetry(
           async () => {
-            if (attempt++ > 0) {
-              hooks?.onStreamRetry?.();
-              status("\x1b[33m[model request failed; retrying]\x1b[0m\n");
-              // The phone's live preview drops the abandoned attempt's text too.
-              preview?.clear();
-            }
             preview?.start(prompted.time);
             return consumeStream(
               provider.chatStream!(systemPrompt, session.messages, turnTools, signal),
               costTracker,
               {
-                onTextDelta: preview ? (text: string) => { onTextDelta(text); preview.append(text); } : hooks?.onTextDelta,
+                onTextDelta: (text: string) => { shown += text; onTextDelta(text); preview?.append(text); },
                 onReasoningDelta,
                 providerName: provider.name,
               },
               signal,
             );
           },
-          undefined,
+          { onRetry },
           verbose,
           signal,
         );
@@ -211,7 +222,7 @@ export async function runTurn(
 
         // Track cost from batch response
         if (costTracker && response.usage) {
-          costTracker.recordUsage(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_input_tokens);
+          recordTokenUsage(costTracker, response.usage);
         }
 
         // Print text blocks (streaming already prints inline)

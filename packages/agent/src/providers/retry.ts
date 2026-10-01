@@ -5,6 +5,11 @@ export interface RetryConfig {
   baseDelayMs: number;
   maxDelayMs: number;
   retryableStatuses: Set<number>;
+  /**
+   * Called once per retry, before the backoff sleep, so a UI can drop the
+   * failed attempt's partial output right away instead of after the wait.
+   */
+  onRetry?: (attempt: number, error: unknown, delayMs: number) => void;
 }
 
 const DEFAULT_CONFIG: RetryConfig = {
@@ -119,6 +124,7 @@ export async function withRetry<T>(
         );
       }
 
+      cfg.onRetry?.(attempt + 1, error, delayMs);
       await sleep(delayMs, signal);
     }
   }

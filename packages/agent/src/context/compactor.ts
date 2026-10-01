@@ -15,7 +15,7 @@
  * session log (the caller applies the resulting plan as a log/replace).
  */
 import type { LlmMessage, LlmProvider } from "../providers/types.js";
-import type { CostTracker } from "../cost.js";
+import { recordTokenUsage, type CostTracker } from "../cost.js";
 import type { PhrenContext } from "../memory/context.js";
 import { planPrune, type PrunePlan, type PruneConfig } from "./pruner.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
@@ -279,7 +279,7 @@ export async function compactWithLlm(
       opts.signal,
     ).finally(() => cancel.abort());
     if (response.usage && opts.costTracker) {
-      opts.costTracker.recordUsage(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_input_tokens);
+      recordTokenUsage(opts.costTracker, response.usage);
     }
     responseText = response.content
       .filter((block): block is { type: "text"; text: string } => block.type === "text")

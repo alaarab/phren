@@ -19,6 +19,7 @@ const resolved: unknown[][] = [];
 let previewFile: string | undefined;
 
 vi.mock("../providers/resolve.js", () => ({
+  keepSessionEndpoint: () => {},
   resolveProvider: (...args: unknown[]) => {
     resolved.push(args);
     return {
@@ -45,6 +46,12 @@ vi.mock("../repl.js", () => ({
     captured = config;
     return { messages: [], toolCalls: 0, antiPatterns: { flushAntiPatterns: async () => {} } };
   },
+}));
+
+// An MCP server that fails to start, for /promote's rollback.
+vi.mock("../mcp-client.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../mcp-client.js")>()),
+  connectMcpServers: async () => { throw new Error("MCP server failed to start"); },
 }));
 
 vi.mock("../herdr-hooks.js", () => ({ emitHerdrHook: () => {}, setHerdrHookSession: () => {} }));
@@ -152,6 +159,23 @@ describe("quick chat", () => {
     expect(calls[1].messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
     expect(JSON.stringify(calls[1].messages[1])).toContain("Forty-two.");
   });
+
+  it("/promote that fails leaves a working chat: no tools, chat prompt, and it can be tried again", async () => {
+    const { runAgentCli } = await import("../index.js");
+    await runAgentCli(["--mode", "chat", "-i", "--mcp", "broken-server --flag"]);
+    const config = captured!;
+    const prompt = config.systemPrompt;
+    const rebuild = config.rebuildSystemPrompt;
+
+    await expect(config.promote!()).rejects.toThrow(/MCP server failed to start/);
+    expect(config.mode).toBe("chat");
+    expect(config.registry.toolNames()).toEqual([]);
+    expect(config.systemPrompt).toBe(prompt);
+    expect(config.rebuildSystemPrompt).toBe(rebuild);
+    expect(config.lintTestConfig).toBeUndefined();
+    // Still a chat, so /promote is still offered rather than "Already an agent session."
+    await expect(config.promote!()).rejects.toThrow(/MCP server failed to start/);
+  });
 });
 
 describe("live preview sidecar", () => {
@@ -180,6 +204,34 @@ describe("live preview sidecar", () => {
     } finally {
       vi.useRealTimers();
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("stale preview sidecars", () => {
+  it("removes sidecars and staging files older than the limit, keeping fresh ones and the event logs", async () => {
+    const { removeStalePreviews, STALE_PREVIEW_MS } = await import("../session/preview.js");
+    const { sessionsDir } = await import("@phren/cli/session/utils");
+    const store = fs.mkdtempSync(path.join(os.tmpdir(), "phren-stale-preview-"));
+    try {
+      const dir = sessionsDir(store);
+      fs.mkdirSync(dir, { recursive: true });
+      const old = (Date.now() - STALE_PREVIEW_MS - 60_000) / 1000;
+      const files = {
+        oldPreview: "session-a.events.jsonl.preview.json",
+        oldTmp: "session-a.events.jsonl.preview.json.4242.tmp",
+        freshPreview: "session-b.events.jsonl.preview.json",
+        oldLog: "session-a.events.jsonl",
+      };
+      for (const name of Object.values(files)) fs.writeFileSync(path.join(dir, name), "{}");
+      for (const name of [files.oldPreview, files.oldTmp, files.oldLog]) fs.utimesSync(path.join(dir, name), old, old);
+
+      expect(removeStalePreviews(store)).toBe(2);
+      expect(fs.readdirSync(dir).sort()).toEqual([files.oldLog, files.freshPreview].sort());
+      // No sessions directory yet is fine.
+      expect(removeStalePreviews(path.join(store, "missing"))).toBe(0);
+    } finally {
+      fs.rmSync(store, { recursive: true, force: true });
     }
   });
 });

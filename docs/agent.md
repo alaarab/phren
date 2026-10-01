@@ -89,7 +89,9 @@ auto-detection. `openai-compat` is only used when named.
 
 Choose a model with `--model <id>` (or `PHREN_AGENT_MODEL`) and a reasoning
 effort with `--reasoning none|low|medium|high|xhigh` (or `PHREN_AGENT_REASONING`;
-`max` is accepted as `xhigh`, `off` as `none`).
+`max` is accepted as `xhigh`, `off` as `none`). `none` turns thinking off on
+Anthropic, DeepSeek and OpenAI's GPT-5.1 and later; other models reject it,
+so there no effort is sent and the model's default applies.
 In the terminal UI, `/model` switches both mid-session.
 
 ### ChatGPT or Codex subscription
@@ -168,14 +170,24 @@ For DeepSeek V4.1 Flash on OpenCode Go, use `--base-url https://opencode.ai/zen/
 replay and effort mapping. Go is a subscription, so its usage shows as
 included and `--budget` does not apply.
 
-`--base-url` is passed on to `/model` switches and subagents. Context window
+`--base-url` is passed on to `/model` switches and subagents: a session
+started on a DeepSeek proxy stays on it when `/model` picks another DeepSeek
+model. `PHREN_AGENT_BASE_URL` sets DeepSeek's endpoint only together with
+`PHREN_AGENT_PROVIDER=deepseek`, so an `openai-compat` relay never receives a
+DeepSeek key. A subagent
+that names no provider (or the parent's) runs on the parent's `openai-compat`
+or `deepseek` endpoint and model; `PHREN_AGENT_API_KEY` and
+`DEEPSEEK_API_KEY` reach it through its environment only. Context window
 and pricing come from the built-in catalogue when the model id is known,
 otherwise a 200k-token window and a conservative price estimate are assumed.
 Override them with `--context-window <tokens>` and `--price-in`, `--price-out`
-and `--price-cache` (USD per million tokens; or `PHREN_AGENT_CONTEXT_WINDOW`
-and `PHREN_AGENT_PRICE_IN|OUT|CACHE`). DeepSeek Flash is catalogued at the
-off-peak $0.15 in, $0.60 out and $0.003 per cache hit; DeepSeek bills twice
-that at peak, so pass the peak prices if you run then.
+and `--price-cache` (USD per million tokens). The flags belong to the model
+they were given with: a `/model` switch to another model, or a subagent on
+another model, uses that model's catalogue values. `PHREN_AGENT_CONTEXT_WINDOW`
+and `PHREN_AGENT_PRICE_IN|OUT|CACHE` apply to every model. DeepSeek Flash is
+catalogued at DeepSeek's off-peak rates, $0.15 in, $0.60 out and $0.003 per
+cache hit; DeepSeek bills twice that at peak (01:00-04:00 and 06:00-10:00
+UTC on weekdays), so pass the peak prices if you run then.
 
 DeepSeek is also on OpenRouter (`deepseek/deepseek-v4.1-flash`,
 `deepseek/deepseek-v4-pro`, `deepseek/deepseek-v4-flash`,
@@ -309,7 +321,7 @@ echo "add a --json flag" | phren agent --output-format stream-json --yolo   # ta
 | Format | stdout |
 |--------|--------|
 | `text` (default with `-p`) | the final assistant message |
-| `json` | one object: `type: "result"`, `subtype` (`success`, `error_max_turns`, `error_budget`, `error_plan_rejected`, `cancelled`, `error_during_execution`), `is_error`, `result`, `num_turns`, `tool_calls`, `duration_ms`, `session_id`, `provider`, `model`, `usage` (`input_tokens` excluding cache hits, `cache_read_input_tokens`, `output_tokens`), `total_cost_usd` (null on a subscription), `permission_denials`, `error` |
+| `json` | one object: `type: "result"`, `subtype` (`success`, `error_max_turns`, `error_budget`, `error_plan_rejected`, `cancelled`, `error_during_execution`), `is_error`, `result`, `num_turns`, `tool_calls`, `duration_ms`, `session_id`, `provider`, `model`, `usage` (`input_tokens` excluding cache hits and writes, `cache_read_input_tokens`, `cache_creation_input_tokens` (Anthropic; billed at 1.25x input), `output_tokens`), `total_cost_usd` (null on a subscription), `permission_denials`, `error` |
 | `stream-json` | one JSON object per line: `system`/`init`, then `assistant`, `tool_use` and `tool_result` events as they happen, then the same `result` object |
 
 `--output-format` implies `-p`. Everything else (warnings, compaction notices,
@@ -465,7 +477,10 @@ The agent has access to these built-in tools:
   (`PHREN_AGENT_SHELL_TIMEOUT_MS` and `PHREN_AGENT_SHELL_MAX_TIMEOUT_MS`
   change both). Long output is never fatal: the model sees the first 8,000
   and last 24,000 characters with the real exit code, and the full output is
-  saved to a temporary log file named in the result.
+  saved to a temporary log file named in the result (50 MB per file, 200 MB
+  per session, `PHREN_AGENT_SHELL_SPILL_TOTAL_BYTES`; removed when the agent
+  exits). A foreground command still running when the agent exits, or gets
+  Ctrl+C, SIGTERM or SIGHUP, is killed with everything it started.
 - **git_status** — Show working tree status
 - **git_diff** — Show staged/unstaged changes
 - **git_commit** — Create commits

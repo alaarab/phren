@@ -5,6 +5,7 @@
  * Each message has a `type` discriminant for exhaustive switching.
  */
 
+import type { ScopedModelOverrides } from "../model-overrides.js";
 import type { PermissionMode } from "../permissions/types.js";
 import type { SandboxMode } from "../permissions/kernel-sandbox.js";
 
@@ -25,6 +26,8 @@ export interface SpawnPayload {
   provider?: string;
   /** Model override. */
   model?: string;
+  /** The parent's openai-compat / deepseek endpoint (its key travels in the env). */
+  baseUrl?: string;
   /** Phren project name for memory context. */
   project?: string;
   /** Permission mode for tool execution. */
@@ -46,6 +49,8 @@ export interface SpawnPayload {
   depth?: number;
   sandboxMode?: SandboxMode;
   allowedPaths?: string[];
+  /** The parent's --context-window / --price-* and the model they apply to. */
+  modelOverrides?: ScopedModelOverrides;
 }
 
 /** Parent can send a cancellation signal. */
@@ -87,6 +92,16 @@ export interface TextDeltaEvent {
   type: "text_delta";
   agentId: string;
   text: string;
+}
+
+/**
+ * A model call failed and is being retried: the parent drops the last
+ * `discard` characters of text_delta, which belonged to the abandoned attempt.
+ */
+export interface StreamRetryEvent {
+  type: "stream_retry";
+  agentId: string;
+  discard: number;
 }
 
 /** A complete text block (non-streaming fallback). */
@@ -134,6 +149,8 @@ export interface DoneEvent {
     totalCost?: string;
     inputTokens?: number;
     outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
     costUsd?: number;
   };
 }
@@ -171,6 +188,7 @@ export interface IdleNotification {
 export type ChildMessage =
   | TextDeltaEvent
   | TextBlockEvent
+  | StreamRetryEvent
   | ToolStartEvent
   | ToolEndEvent
   | StatusEvent
