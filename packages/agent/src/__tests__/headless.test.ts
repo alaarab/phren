@@ -204,4 +204,39 @@ describe.skipIf(!fs.existsSync(AGENT_BIN))("headless binary (replay)", () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   }, 90_000);
+
+  it("--input-format stream-json runs one turn per user message on one session", async () => {
+    const fixture = path.join(workDir, "two-answers.events.jsonl");
+    const lines = [
+      { type: "header", version: 1, sessionId: "two-answers", cwd: "/tmp", createdAt: "2026-10-01T00:00:00.000Z" },
+      { seq: 0, time: "2026-10-01T00:00:01.000Z", type: "user/message", data: { message: { role: "user", content: "one" }, source: "user", turn: 0 } },
+      { seq: 1, time: "2026-10-01T00:00:02.000Z", type: "assistant/message", data: { message: { role: "assistant", content: [{ type: "text", text: "first answer" }] }, stop_reason: "end_turn", turn: 0 } },
+      { seq: 2, time: "2026-10-01T00:00:03.000Z", type: "user/message", data: { message: { role: "user", content: "two" }, source: "user", turn: 1 } },
+      { seq: 3, time: "2026-10-01T00:00:04.000Z", type: "assistant/message", data: { message: { role: "assistant", content: [{ type: "text", text: "second answer" }] }, stop_reason: "end_turn", turn: 1 } },
+    ];
+    fs.writeFileSync(fixture, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+    const input = [
+      JSON.stringify({ type: "user", message: { role: "user", content: "one" } }),
+      "not json",
+      JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "two" }] } }),
+    ].join("\n");
+    const { stdout, stderr, code } = await run(
+      ["--yolo", "--no-subagents", "--input-format", "stream-json", "--output-format", "stream-json"],
+      workDir,
+      { PHREN_PATH: storeDir, PHREN_AGENT_REPLAY: fixture },
+      input,
+    );
+    expect(code).toBe(0);
+    const events = stdout.trim().split("\n").map((l) => JSON.parse(l));
+    const results = events.filter((e) => e.type === "result");
+    expect(results.map((r) => [r.subtype, r.result])).toEqual([["success", "first answer"], ["success", "second answer"]]);
+    expect(new Set(results.map((r) => r.session_id)).size).toBe(1);
+    expect(stderr).toContain("skipped an input line: not JSON");
+  }, 90_000);
+
+  it("--input-format stream-json needs stream-json output", async () => {
+    const { stderr, code } = await run(["--input-format", "stream-json", "--output-format", "json"], workDir, { PHREN_PATH: storeDir }, "");
+    expect(code).toBe(1);
+    expect(stderr).toContain("needs --output-format stream-json");
+  }, 30_000);
 });

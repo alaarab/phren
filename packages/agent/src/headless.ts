@@ -166,6 +166,44 @@ export function parseOutputFormat(raw: string | undefined): OutputFormat | null 
 }
 
 /** Read the whole of stdin (for `echo task | phren-agent -p`). */
+/**
+ * One `--input-format stream-json` line: Claude Code's shape,
+ * {"type":"user","message":{"role":"user","content":"…" | [{"type":"text","text":"…"}]}}.
+ * Returns the prompt text, or an error naming what was wrong.
+ */
+export function parseStreamJsonInput(line: string): { prompt: string } | { error: string } {
+  let event: unknown;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return { error: "not JSON" };
+  }
+  const e = event as { type?: unknown; message?: { role?: unknown; content?: unknown } };
+  if (e?.type !== "user" || !e.message || e.message.role !== "user") return { error: "expected {\"type\":\"user\",\"message\":{\"role\":\"user\",…}}" };
+  const content = e.message.content;
+  const prompt = typeof content === "string"
+    ? content
+    : Array.isArray(content)
+      ? content.filter((b): b is { type: "text"; text: string } => b?.type === "text" && typeof b.text === "string").map((b) => b.text).join("\n")
+      : "";
+  return prompt.trim() ? { prompt } : { error: "the message has no text" };
+}
+
+/** Non-empty lines from a stream, as they arrive. */
+export async function* readLines(stream: NodeJS.ReadableStream = process.stdin): AsyncGenerator<string> {
+  let buffer = "";
+  for await (const chunk of stream) {
+    buffer += typeof chunk === "string" ? chunk : (chunk as Buffer).toString("utf-8");
+    let nl: number;
+    while ((nl = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (line) yield line;
+    }
+  }
+  if (buffer.trim()) yield buffer.trim();
+}
+
 export async function readStdin(stream: NodeJS.ReadableStream = process.stdin): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of stream) chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk as Buffer);
