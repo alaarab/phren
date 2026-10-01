@@ -26,6 +26,8 @@ rest.
 | MCP | `~/.phren-agent/mcp.json` by default, a trusted project's `.mcp.json`, output cap; prompts as `/mcp__server__prompt` | #303, #311 |
 | Hooks | Exit 2 blocks `UserPromptSubmit` and `Stop`, `PostToolUse` feedback, `SessionStart` and `PreCompact` | #304 |
 | Headless | `--input-format stream-json`; a JSON Schema for every stream-json line, tested against real output | #305, #309 |
+| UX | `/reasoning`, `/model <id>`, `/provider <name>` mid-session; images attached from paths in a prompt | #314, #315 |
+| Sandbox | `--no-network` for shell commands (bwrap, Seatbelt) | #316 |
 
 ## Still open
 
@@ -33,9 +35,8 @@ rest.
   right after each edit, from the project's language server, as OpenCode does.
   The parse check and the post-edit type-check run cover the cheap part.
 - An output JSON schema for headless results (`--json-schema`).
-- Smaller UX: image paste, `/reasoning`, `/model` across providers, steering
-  mid-stream, provider-native web search, network isolation in the sandbox,
-  OpenTelemetry.
+- Smaller: steering that lands mid-stream (today between tool batches),
+  provider-native web search (today a DuckDuckGo scrape), OpenTelemetry.
 
 ## DeepSeek V4.1 Flash readiness
 
