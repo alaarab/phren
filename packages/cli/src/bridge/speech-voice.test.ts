@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { clearSpeechModel, clearSpeechVoice, DEFAULT_SPEECH_MODEL, DEFAULT_SPEECH_VOICE, listSpeechVoices, readStoredModel, readStoredVoice, resolveSpeechModel, resolveSpeechVoice, writeSpeechModel, writeSpeechVoice } from "./speech-voice.js";
+import { clearSpeechModel, clearSpeechVoice, DEFAULT_SPEECH_MODEL, DEFAULT_SPEECH_VOICE, listSpeechVoices, readStoredModel, readStoredVoice, resolveSpeechModel, resolveSpeechRegion, resolveSpeechVoice, writeSpeechModel, writeSpeechRegion, writeSpeechVoice } from "./speech-voice.js";
 
 describe("the talk-mode voice setting", () => {
   let root: string, file: string;
@@ -48,12 +48,31 @@ describe("the talk-mode voice setting", () => {
     for (const bad of ["", "ab", "../v1/user", "Eleven V4", "eleven_v4?x=1"]) await expect(writeSpeechModel(bad, file)).rejects.toThrow();
   });
 
+  it("stores the US region next to the model, and global goes back to the default", async () => {
+    expect(await resolveSpeechRegion(file)).toEqual({ region: "global", origin: "https://api.elevenlabs.io", source: "default" });
+    await writeSpeechModel("eleven_v4", file);
+    expect(await writeSpeechRegion("us", file)).toBe("us");
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ model: "eleven_v4", region: "us" });
+    expect(await resolveSpeechRegion(file)).toEqual({ region: "us", origin: "https://api.us.elevenlabs.io", source: "setting" });
+    await writeSpeechRegion("global", file);
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ model: "eleven_v4" });
+    for (const bad of ["eu", "", "https://evil.example"]) await expect(writeSpeechRegion(bad, file)).rejects.toThrow();
+  });
+
   it("refuses anything that is not an ElevenLabs voice id", async () => {
     for (const bad of ["", "short", "../../v1/user", "S9EGwlCtMF7VXtENq79v?x=1"]) {
       await expect(writeSpeechVoice(bad, file)).rejects.toThrow();
       await expect(resolveSpeechVoice(bad || "x", { env: {}, file })).rejects.toThrow();
     }
     expect(await resolveSpeechVoice(undefined, { env: { PHREN_SPEECH_VOICE: "not a voice" }, file })).toMatchObject({ source: "default" });
+  });
+
+  it("lists voices from the stored region's endpoint", async () => {
+    const urls: string[] = [];
+    await writeSpeechRegion("us", file);
+    const fetcher = (async (url: string) => { urls.push(url); return Response.json({ voices: [] }); }) as typeof fetch;
+    await listSpeechVoices("sk_test", fetcher, undefined, (await resolveSpeechRegion(file)).origin);
+    expect(urls).toEqual(["https://api.us.elevenlabs.io/v1/voices"]);
   });
 
   it("lists the account's voices by name with only id, name, category and description", async () => {
@@ -66,10 +85,10 @@ describe("the talk-mode voice setting", () => {
         { voice_id: "../bad", name: "Nope" }, { voice_id: "SAz9YHcvj6GT2YYXdXww" },
       ] });
     }) as typeof fetch;
-    expect(await listSpeechVoices("sk_test", fetcher)).toEqual([
+    expect(await listSpeechVoices("sk_test", fetcher, undefined, "https://api.elevenlabs.io")).toEqual([
       { id: "S9EGwlCtMF7VXtENq79v", name: "Emma Taylor", category: "generated" },
       { id: "UgBBYS2sOqTuMpoF3BR0", name: "Mark", category: "professional", description: "Natural conversations" },
     ]);
-    await expect(listSpeechVoices("sk_test", (async () => new Response("", { status: 401 })) as typeof fetch)).rejects.toThrow("refused this computer's key");
+    await expect(listSpeechVoices("sk_test", (async () => new Response("", { status: 401 })) as typeof fetch, undefined, "https://api.elevenlabs.io")).rejects.toThrow("refused this computer's key");
   });
 });
