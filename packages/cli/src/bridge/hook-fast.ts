@@ -17,7 +17,19 @@ import path from "node:path";
 export const FAST_HOOK_FILE = "claude-hook.mjs";
 export const fastHookPath = (versionDir: string) => path.join(versionDir, FAST_HOOK_FILE);
 
-export const FAST_HOOK_SOURCE = `// Installed by Phren Hook: Claude Code's hook events, forwarded to the running Hook.
+/**
+ * How long a PreToolUse or PostToolUse callback may run, from its process's
+ * start. Install registers them for every tool call (Codex takes no matcher),
+ * and Codex kills a hook at 10 s: on the Mini under a load average near 130
+ * (2026-10-01) the old 8 s socket wait, after a slow start, ran past it and
+ * Codex showed "Hook failed: hook timed out after 10s" on every call. These
+ * callbacks only snapshot changed files for the phone and nothing waits on
+ * them, so once the budget is spent they give up and the tool runs.
+ */
+export const TOOL_HOOK_BUDGET_MS = 5_000;
+
+/** The forwarder's source, with the ToolUse budget written in. */
+export const fastHookSource = (toolBudgetMs = TOOL_HOOK_BUDGET_MS) => `// Installed by Phren Hook: Claude Code's hook events, forwarded to the running Hook.
 import { request } from "node:http";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -53,8 +65,11 @@ async function forward(place) {
     tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
     ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}), ...stop });
   const socketPath = path.join(env.PHREN_BRIDGE_HOME || path.join(homedir(), ".local/share/phren/bridge"), "agent.sock");
+  // A tool call's callback fits its budget from process start, or is skipped.
+  const left = Math.floor(${toolBudgetMs} - performance.now());
+  if (event.endsWith("ToolUse") && left <= 0) return;
   await new Promise(resolve => {
-    const req = request({ socketPath, path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? 8_000 : 12_000,
+    const req = request({ socketPath, path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? left : 12_000,
       headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, res => {
       let result = "";
       res.on("data", chunk => { result += chunk.toString(); if (result.length > 16_384) req.destroy(); });
@@ -68,3 +83,4 @@ async function forward(place) {
 if (source !== "claude" || (env.HERDR_ENV !== "1" && env.TMUX)) await full().catch(() => {});
 else if (env.HERDR_ENV === "1") { const place = herdrPane(); if (place) await forward(place).catch(() => {}); }
 `;
+export const FAST_HOOK_SOURCE = fastHookSource();

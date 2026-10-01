@@ -10,6 +10,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { findPane, knownPanes, paneForCodexSession, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
+import { TOOL_HOOK_BUDGET_MS } from "./hook-fast.js";
 import { underCodexDaemon } from "./codex-daemon.js";
 import { codexAutoReview } from "./codex-review-mode.js";
 import { terminalPaneFromEnv, terminalProvider } from "./terminal.js";
@@ -655,7 +656,8 @@ export class AgentHooks {
     await recordTurn(target.server, target.pane, { event: String(body.event), terminal: pane.terminal_id, source: target.source, session: target.session,
       ...(dispatch ? { dispatch } : {}),
       ...(typeof body.background === "number" ? { background: body.background } : {}),
-      ...(typeof body.reply === "string" ? { reply: body.reply } : {}) }).catch(() => undefined);
+      ...(typeof body.reply === "string" ? { reply: body.reply } : {}),
+      ...(body.event === "Stop" && typeof body.cwd === "string" ? { cwd: body.cwd } : {}) }).catch(() => undefined);
   }
   private rememberTerminalPrompt(target: Target, body: Json) {
     const tool = String(body.tool || "action").slice(0, 200);
@@ -1560,7 +1562,10 @@ export function stopFacts(value: Json): { background?: number; reply?: string } 
     ...(typeof value.last_assistant_message === "string" && value.last_assistant_message.trim() ? { reply: value.last_assistant_message.slice(0, 16_384) } : {}) };
 }
 
-export async function agentHook(source: Provider) {
+/** One agent callback, run as `hook <source>`. Resolves "abandoned" when a
+ * tool call's callback ran out of its budget: the caller then exits at once,
+ * since a socket or a process read still pending would hold the agent. */
+export async function agentHook(source: Provider, elapsed: () => number = () => performance.now()): Promise<void | "abandoned"> {
   provider.parse(source);
   // A missing helper must never prevent the coding agent from running.
   // Inside Herdr only Herdr's pane counts; elsewhere a tmux pane does.
@@ -1573,6 +1578,26 @@ export async function agentHook(source: Provider) {
   const target = targetSchema.parse({ server: place.server, workspace: place.workspace, tab: place.tab,
     pane: place.pane, source, session: value.session_id || value.sessionId });
   const event = String(value.hook_event_name || "SessionStart");
+  return withinToolBudget(event, left => forwardHook(source, target, event, value, left), elapsed);
+}
+
+/**
+ * Runs a callback's work. A PreToolUse or PostToolUse callback gets what is
+ * left of TOOL_HOOK_BUDGET_MS since its process started (hook-fast.ts says
+ * why): "abandoned" once that runs out, and the caller exits without an
+ * answer so the tool runs. Every other event runs to its own timeouts.
+ */
+export async function withinToolBudget<T>(event: string, work: (left: () => number) => Promise<T>,
+  elapsed: () => number = () => performance.now(), budgetMs = TOOL_HOOK_BUDGET_MS): Promise<T | "abandoned"> {
+  if (!event.endsWith("ToolUse")) return work(() => Infinity);
+  const left = () => Math.floor(budgetMs - elapsed());
+  if (left() <= 0) return "abandoned";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<"abandoned">(resolve => { timer = setTimeout(() => resolve("abandoned"), left()); });
+  try { return await Promise.race([work(left), expired]); } finally { clearTimeout(timer); }
+}
+
+async function forwardHook(source: Provider, target: Target, event: string, value: Json, left: () => number): Promise<void> {
   const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
   if (!modules.has("hook") || (event.endsWith("ToolUse") && !modules.has("git"))) return;
   // Codex 0.157 runs hooks inside its shared app-server daemon, whose pane
@@ -1594,7 +1619,7 @@ export async function agentHook(source: Provider) {
     ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}),
     ...(event === "Stop" ? stopFacts(value) : {}) });
   await new Promise<void>(resolve => {
-    const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? 8_000 : 12_000,
+    const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? Math.max(1, left()) : 12_000,
       headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, res => {
       let result = "";
       res.on("data", chunk => { result += chunk.toString(); if (result.length > 16_384) req.destroy(); });

@@ -24,14 +24,19 @@ async function transcriptStamp(target: Target): Promise<string> {
   } finally { await file.close(); }
 }
 /** Requires successful observations of both sources. Identity, terminal, work
- * status and either source changing all reset the clock. Missing data is unknown. */
+ * status and either source changing all reset the clock. Missing data is unknown.
+ * `live` reads the awaited work the pane's turn still waits on (`liveWork`:
+ * awaited background shells and monitors, running children). A worker that
+ * ended its turn on purpose while a build runs sits still on screen and in its
+ * transcript, so once the clock runs out `live` is asked, and any live work
+ * starts the clock over instead of reporting a stall. */
 export class StallDetector {
   private entries = new Map<string, { signature: string; since: number }>();
   constructor(private readers: StallReaders = {
     screen: target => terminalProvider().readScreen(target.server, target.pane, { scope: "pane", source: "visible", lines: 120, stripAnsi: true, timeoutMs: 1000 }),
     transcript: transcriptStamp, now: Date.now, threshold: stallThreshold,
   }) {}
-  async observe(target: Target, pane: Json): Promise<Stall | undefined> {
+  async observe(target: Target, pane: Json, live?: () => Promise<number | undefined>): Promise<Stall | undefined> {
     const key = JSON.stringify([target.server, target.pane]);
     if (pane.agent_status !== "working" || this.readers.threshold() === 0) { this.entries.delete(key); return undefined; }
     let screen: string, transcript: string;
@@ -42,7 +47,9 @@ export class StallDetector {
     if (!prior || prior.signature !== signature) { this.entries.delete(key); this.entries.set(key, { signature, since: now }); }
     while (this.entries.size > 1024) this.entries.delete(this.entries.keys().next().value!);
     const since = this.entries.get(key)!.since;
-    return now - since >= this.readers.threshold() ? { stalled: true, stalledSince: new Date(since).toISOString(), stallFor: Math.floor((now - since) / 1000) } : undefined;
+    if (now - since < this.readers.threshold()) return undefined;
+    if (live && await live().catch(() => undefined)) { this.entries.set(key, { signature, since: now }); return undefined; }
+    return { stalled: true, stalledSince: new Date(since).toISOString(), stallFor: Math.floor((now - since) / 1000) };
   }
 }
 export const sessionStalls = new StallDetector();

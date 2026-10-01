@@ -145,7 +145,7 @@ export async function runBridge(args: string[], version: string): Promise<number
     }
     case "usage-statusline": await captureClaudeUsage(args[1] || ""); break;
     case "usage": console.log(JSON.stringify(await new AccountUsageReader().read(), null, 2)); break;
-    case "hook": await agentHook(provider.parse(args[1])).catch(() => {}); break;
+    case "hook": if (await agentHook(provider.parse(args[1])).catch(() => undefined) === "abandoned") process.exit(0); break;
     // sudo -A runs <bridge>/askpass, which runs this: the password on stdout, or exit 1.
     case "askpass": return askpass(args[1]);
     case "serve": {

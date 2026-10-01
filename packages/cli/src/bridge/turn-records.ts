@@ -39,6 +39,8 @@ const turnRecordSchema = z.object({
     /** Background tasks (shells, subagents, monitors) the harness still ran when the turn stopped. */
     background: z.number().int().min(0).max(999).optional(),
     reply: z.string().max(TURN_REPLY_LIMIT).optional(), truncated: z.boolean().optional(),
+    /** The agent's working directory when the turn stopped: where its uncommitted work would be. */
+    cwd: z.string().max(4096).optional(),
   }).strict().optional(),
   at: z.string().datetime(),
 }).strict();
@@ -52,6 +54,8 @@ export interface TurnEvent {
   background?: number;
   /** Stop only: the harness's last assistant message, when it reports one. */
   reply?: string;
+  /** Stop only: the agent's working directory, as its hook payload names it. */
+  cwd?: string;
   at?: number;
 }
 
@@ -81,7 +85,8 @@ export function nextTurn(previous: TurnRecord | undefined, event: TurnEvent): Tu
   else {
     const reply = event.reply?.trim() ? truncateUtf8(event.reply.trim()) : undefined;
     record.stop = { seq: record.seq, at, ...(event.background !== undefined ? { background: Math.min(999, Math.max(0, Math.floor(event.background))) } : {}),
-      ...(reply ? { reply: reply.text, ...(reply.truncated ? { truncated: true } : {}) } : {}) };
+      ...(reply ? { reply: reply.text, ...(reply.truncated ? { truncated: true } : {}) } : {}),
+      ...(event.cwd && path.isAbsolute(event.cwd) && event.cwd.length <= 4096 ? { cwd: event.cwd } : {}) };
   }
   return record;
 }

@@ -47,7 +47,7 @@ describe("dispatch receipts and selection", () => {
     // The brief is offered with the launch; this Hook did not take it there, so it is typed, once per delivery id.
     expect(calls.find(call => call[1].startsWith("/v1/workspaces/launch"))?.[2]).toEqual({ project: "phren", kind: "codex", label: "Tests", model: undefined,
       brief: { id: result.id, text: brief.prompt } });
-    expect(calls.at(-1)?.[2]).toEqual({ target, text: brief.prompt, deliveryId: `dispatch-${result.id}` });
+    expect(calls.filter(call => call[1] === "/v1/prompt").map(call => call[2])).toEqual([{ target, text: brief.prompt, deliveryId: `dispatch-${result.id}` }]);
     expect(result.brief).toBe("typed");
     const stored = await readFile(path.join(root, `dispatches/${result.id}.json`), "utf8");
     expect(stored).not.toContain(brief.prompt);
@@ -305,7 +305,9 @@ describe("dispatch receipts and selection", () => {
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => {
       if (route === "/v1/dispatch/capacity") return { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 };
       if (route.startsWith("/v1/workspaces/launch")) return { ok: true, target };
-      if (route.startsWith("/v1/workspaces/panes")) return { panes: [{ id: target.pane, label: "1", agent: "codex", starting: true, startingToken: target.startingToken, agentStatus: statuses.shift() ?? "idle" }] };
+      // The brief, once typed, starts the conversation.
+      if (route.startsWith("/v1/workspaces/panes")) return { panes: [{ id: target.pane, label: "1", agent: "codex", agentStatus: statuses.shift() ?? "idle",
+        ...(prompts > 1 ? { sessionId: "00000001-1111-4111-8111-111111111111" } : { starting: true, startingToken: target.startingToken }) }] };
       if (route === "/v1/prompt" && prompts++ === 0) throw new BridgeError(409, "This agent needs input in the terminal first.");
       return { ok: true };
     });
@@ -327,24 +329,58 @@ describe("dispatch receipts and selection", () => {
     expect(result).toMatchObject({ ok: false, state: "failed", target,
       returned: { state: "needs-you", read: false, question: expect.stringContaining("startup screen (folder trust or sign-in)") } });
     expect(result.error).toContain("The brief was not sent.");
-    expect(prompts()).toBe(1);
+    // The pane is seen on its startup screen before anything is typed.
+    expect(prompts()).toBe(0);
   }, 15_000);
 
-  function launchingWithoutTarget(pane: Record<string, unknown> | undefined) {
+  function launchingWithoutTarget(pane: Record<string, unknown> | undefined, landed: (prompts: number) => Record<string, unknown> | undefined = () => undefined) {
+    let prompts = 0;
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => {
       if (route === "/v1/dispatch/capacity") return { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 };
       if (route.startsWith("/v1/workspaces/launch")) return { ok: true, workspaceId: "w1", tabId: "t1", paneId: "p1", agent: "codex", agentStatus: "idle" };
-      if (route.startsWith("/v1/workspaces/panes")) return { panes: pane ? [{ id: "p1", label: "1", agent: "codex", ...pane }] : [] };
+      if (route.startsWith("/v1/workspaces/panes")) return { panes: pane ? [{ id: "p1", label: "1", agent: "codex", ...(landed(prompts) ?? pane) }] : [] };
+      if (route === "/v1/prompt") prompts++;
       return { ok: true };
     });
+    return () => vi.mocked(peerRequest).mock.calls.filter(call => call[1] === "/v1/prompt").map(call => call[2]);
   }
+  const session = "00000001-1111-4111-8111-111111111111";
+  const startingPane = { agentStatus: "idle", starting: true, startingToken: target.startingToken };
 
   // Seen 2026-09-27: local Codex "send-confirm" sat idle and starting with no brief.
-  it("sends the brief to a new agent that has only a starting binding yet", async () => {
-    launchingWithoutTarget({ agentStatus: "idle", starting: true, startingToken: target.startingToken });
+  it("sends the brief to a new agent that has only a starting binding yet, and follows the conversation it starts", async () => {
+    const prompts = launchingWithoutTarget(startingPane, sent => sent ? { agentStatus: "working", sessionId: session } : undefined);
     const result = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" });
-    expect(result).toMatchObject({ ok: true, state: "accepted", target });
-    expect(vi.mocked(peerRequest).mock.calls.find(call => call[1] === "/v1/prompt")?.[2]).toEqual({ target, text: brief.prompt, deliveryId: `dispatch-${result.id}` });
+    const { starting: _starting, startingToken: _token, ...binding } = target;
+    expect(result).toMatchObject({ ok: true, state: "accepted", target: { ...binding, session } });
+    expect(prompts()).toEqual([{ target, text: brief.prompt, deliveryId: `dispatch-${result.id}` }]);
+  });
+
+  // Seen 2026-09-30 on the Mini (w4E, ios-chat-no-hscroll): the brief typed into a
+  // pane still starting vanished, dispatch said accepted, and the pane sat idle for 100 minutes.
+  it("waits for a starting pane to read ready before typing the brief", async () => {
+    let looks = 0;
+    const prompts = launchingWithoutTarget(startingPane, sent => sent ? { agentStatus: "working", sessionId: session }
+      : looks++ < 3 ? { ...startingPane, agentStatus: "unknown" } : undefined);
+    const result = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" });
+    expect(result).toMatchObject({ ok: true, state: "accepted" });
+    expect(prompts()).toHaveLength(1);
+    // Every look before the brief went in read the pane still unclassified, but the last.
+    expect(looks).toBeGreaterThanOrEqual(4);
+  });
+
+  it("types a swallowed brief again under its own delivery id, and fails the dispatch when it never arrives", async () => {
+    const twice = launchingWithoutTarget(startingPane, sent => sent >= 2 ? { agentStatus: "working", sessionId: session } : undefined);
+    const retried = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" });
+    expect(retried).toMatchObject({ ok: true, state: "accepted" });
+    expect(twice().map(call => (call as { deliveryId: string }).deliveryId)).toEqual([`dispatch-${retried.id}`, `dispatch-${retried.id}-2`]);
+    const never = launchingWithoutTarget(startingPane);
+    const lost = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" });
+    expect(never().filter(call => String((call as { deliveryId: string }).deliveryId).includes(lost.id as string))).toHaveLength(2);
+    expect(lost).toMatchObject({ ok: false, state: "failed", brief: "typed",
+      returned: { state: "failed", read: false, error: expect.stringContaining("never reached codex") } });
+    expect(lost.error).toContain("after 2 tries the pane still sits idle with no conversation");
+    expect((await dispatchStatus()).find(receipt => receipt.id === lost.id)).toMatchObject({ state: "failed", returned: { state: "failed" } });
   });
 
   it("says the brief was not sent when a new agent never shows a target", async () => {
