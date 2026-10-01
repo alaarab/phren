@@ -47,6 +47,31 @@ it("credits each agent only with its own file when both work in one repository",
   expect(await files("claude:b", "edit")).toEqual(["b.txt"]);
 });
 
+// Review of #283: a PreToolUse callback that gave up lets the tool run while
+// its snapshot is still read; that call shows no diff rather than a wrong one.
+it("shows no diff for a call whose before-snapshot was not taken before the tool ran", async () => {
+  const taking = changes.before("codex:a", "late", repo, "npm run format");
+  // PostToolUse arrives while the snapshot is still being read: the tool already ran.
+  await vi.waitFor(() => expect(changes.view("codex:a").pending("late")).toBe(true), { interval: 1 });
+  await writeFile(path.join(repo, "a.txt"), "a\n");
+  await changes.after("codex:a", "late");
+  expect(changes.view("codex:a").pending("late")).toBe(false);
+  await taking;
+  expect(await files("codex:a", "late")).toEqual([]);
+  expect(changes.view("codex:a").pending("late")).toBe(false);
+  // A snapshot finished after its callback was abandoned is dropped too.
+  await changes.before("codex:a", "abandoned", repo, "npm run format");
+  changes.drop("codex:a", "abandoned");
+  await writeFile(path.join(repo, "b.txt"), "b\n");
+  await changes.after("codex:a", "abandoned");
+  expect(await files("codex:a", "abandoned")).toEqual([]);
+  // An ordinary call still shows its diff.
+  await changes.before("codex:a", "kept", repo, "npm run format");
+  await writeFile(path.join(repo, "c.txt"), "c\n");
+  await changes.after("codex:a", "kept");
+  expect(await files("codex:a", "kept")).toEqual(["c.txt"]);
+});
+
 it("claims only structured paths, never words of a command line", () => {
   expect(claimedPaths({ command: "cat /etc/hosts > out.txt" }, "/work")).toEqual([]);
   expect(claimedPaths({ file_path: "src/a.ts" }, "/work")).toEqual([path.resolve("/work", "src/a.ts")]);

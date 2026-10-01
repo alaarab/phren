@@ -11,11 +11,13 @@ import { DispatchReturns, observe, workerStates } from "./dispatch-returns.js";
 import { dispatchStatus, type Receipt } from "./dispatch.js";
 import { noteTurn } from "./turn-records.js";
 import { handOff } from "./hand-off.js";
+import { recentUncommitted } from "./worker-unfinished.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
 
 vi.mock("./herdr.js", async original => ({ ...await original<object>(), snapshot: vi.fn(), sharedSnapshot: vi.fn(), paneIdentity: vi.fn(), validateTarget: vi.fn() }));
 vi.mock("./schedule-watch.js", async original => ({ ...await original<object>(), readFinalTurn: async () => ({ completed: true, lastAssistant: "Checks passed" }) }));
 vi.mock("./hand-off.js", async original => ({ ...await original<object>(), handOff: vi.fn() }));
+vi.mock("./worker-unfinished.js", async original => ({ ...await original<object>(), recentUncommitted: vi.fn() }));
 const target: Target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude", session: "11111111-1111-4111-8111-111111111111" };
 const dispatch = "22222222-2222-4222-8222-222222222222";
 const prs = [{ url: "https://github.com/alaarab/phren/pull/999", repo: "alaarab/phren", branch: "feat/checks", tests: "12 passed", notes: "Review the behavior" }];
@@ -31,6 +33,7 @@ beforeEach(async () => {
   vi.mocked(paneIdentity).mockResolvedValue(target.session); vi.mocked(validateTarget).mockImplementation(async () => ({ ...pane }));
   closePane.mockReset().mockImplementation(async () => { panes = []; }); restore = setTerminalProvider({ closePane } as unknown as TerminalProvider);
   vi.mocked(handOff).mockReset().mockResolvedValue({ ok: true, delivered: false, queued: true, target });
+  vi.mocked(recentUncommitted).mockReset().mockResolvedValue(0);
   await event("UserPromptSubmit"); await event("Stop");
 });
 afterEach(async () => { restore(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
@@ -115,6 +118,20 @@ describe("finished worker lifecycle", () => {
     await broken.take(); expect((await dispatchStatus())[0]).toHaveProperty("closePending");
     const restarted = new DispatchReturns({ peers: async () => [], close: async () => ({ closed: true }) });
     await restarted.cleanup(); expect((await dispatchStatus())[0]).toHaveProperty("closedAt");
+  });
+  // Review of #283: the close recheck must not close a turn that left work
+  // behind, nor one whose checkout git could not read in time.
+  it.each([["uncommitted work", 3], ["an unreadable checkout", "unknown"]] as const)("keeps a done worker's pane open over %s", async (_name, files) => {
+    pane.cwd = "/work/phren-wt";
+    const value = receipt(); observe(value, (await workerStates({ targets: [target] })).workers[0], Date.now()); await save(value);
+    expect(value.returned).toMatchObject({ state: "done" });
+    expect(recentUncommitted).toHaveBeenCalledWith("/work/phren-wt");
+    vi.mocked(recentUncommitted).mockResolvedValue(files);
+    expect(await closeFinishedWorker({ target, dispatch, turn: value.returned!.turn })).toEqual({ ok: true, closed: false });
+    expect(closePane).not.toHaveBeenCalled();
+    // Read clean, the same turn closes.
+    vi.mocked(recentUncommitted).mockResolvedValue(0);
+    expect(await closeFinishedWorker({ target, dispatch, turn: value.returned!.turn })).toEqual({ ok: true, closed: true });
   });
   it("refuses to close a different completed turn", async () => {
     const wrong = createHash("sha256").update("wrong turn").digest("hex").slice(0, 16);

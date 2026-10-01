@@ -88,18 +88,34 @@ describe.skipIf(process.platform === "win32")("claude-hook.mjs", () => {
   });
 
   const bundle = fileURLToPath(new URL("../../dist/bridge-hook.mjs", import.meta.url));
+  function runBundle(input: unknown): Promise<{ stdout: string; code: number | null }> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [bundle, "hook", "codex"], {
+        env: { PATH: process.env.PATH, HOME: root, PHREN_BRIDGE_HOME: root, PHREN_PATH: path.join(root, "store"), PHREN_HERDR_HOME: path.join(root, "herdr"), ...herdr() } });
+      let stdout = "";
+      child.stdout.on("data", chunk => { stdout += chunk; });
+      child.on("error", reject); child.on("close", code => resolve({ stdout, code }));
+      child.stdin.end(JSON.stringify(input));
+    });
+  }
+  const toolCall = { hook_event_name: "PreToolUse", session_id: session, tool_name: "exec_command", tool_input: { cmd: "ls" }, tool_use_id: "t1", cwd: root };
   it("exits the bundle's Codex callback for a tool call well inside Codex's 10 s hook timeout", async () => {
     hang = true;
     const started = Date.now();
-    const exited = await new Promise<number | null>((resolve, reject) => {
-      const child = spawn(process.execPath, [bundle, "hook", "codex"], {
-        env: { PATH: process.env.PATH, HOME: root, PHREN_BRIDGE_HOME: root, PHREN_PATH: path.join(root, "store"), PHREN_HERDR_HOME: path.join(root, "herdr"), ...herdr() } });
-      child.on("error", reject); child.on("close", resolve);
-      child.stdin.end(JSON.stringify({ hook_event_name: "PreToolUse", session_id: session, tool_name: "exec_command", tool_input: { cmd: "ls" }, tool_use_id: "t1", cwd: root }));
-    });
-    expect(exited).toBe(0);
+    // Failing open writes nothing: the agent's own permission rules decide the call.
+    expect(await runBundle(toolCall)).toEqual({ stdout: "", code: 0 });
     expect(bodies).toMatchObject([{ event: "PreToolUse", tool: "exec_command" }]);
     expect(Date.now() - started).toBeLessThan(TOOL_HOOK_BUDGET_MS + 2_000);
+  }, 20_000);
+
+  // A tool call's callback that gives up must never read as an approval. It
+  // never answers for the agent at all, in time or not: only PermissionRequest
+  // (and a refused prompt) prints a decision.
+  it("never prints a decision for a tool call, even one the Hook answers with allow", async () => {
+    reply = JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow" }, decision: "approve" });
+    expect(await run({ ...toolCall, tool_name: "Bash", tool_input: { command: "rm -rf build" } }, herdr())).toEqual({ stdout: "", code: 0 });
+    expect(await runBundle(toolCall)).toEqual({ stdout: "", code: 0 });
+    expect(bodies.map(body => body.event)).toEqual(["PreToolUse", "PreToolUse"]);
   }, 20_000);
 
   it("runs the bundle's full handler for a tmux pane and other agents", async () => {
@@ -122,6 +138,9 @@ describe("a tool call's callback budget", () => {
     expect(ran).toBe(false);
     expect(await withinToolBudget("PreToolUse", async left => left(), () => 1_000, 5_000)).toBe(4_000);
     expect(await withinToolBudget("Stop", async left => left(), () => 60_000, 5_000)).toBe(Infinity);
+    // An approval is never cut short by the tool budget: it waits for the owner's answer.
+    expect(await withinToolBudget("PermissionRequest", async () => "allow", () => 60_000, 5_000)).toBe("allow");
+    expect(await withinToolBudget("PostToolUseFailure", async left => left(), () => 60_000, 5_000)).toBe(Infinity);
     expect(TOOL_HOOK_BUDGET_MS).toBeLessThanOrEqual(5_000);
   });
 });

@@ -26,7 +26,9 @@ import { atomicInPrivateDir, bridgeRoot, provider, serverName, sessionId, type P
 export const TURN_REPLY_LIMIT = 4000;
 const MAX_RECORD_BYTES = 16_384;
 
-const stamp = z.object({ seq: z.number().int().min(0), at: z.string().datetime() }).strict();
+// Not strict: a field a newer Hook adds (as `stop.cwd` was) is dropped on
+// read here, never a reason to throw the pane's record away.
+const stamp = z.object({ seq: z.number().int().min(0), at: z.string().datetime() });
 const turnRecordSchema = z.object({
   terminal: z.string().min(1).max(200), source: provider, session: sessionId,
   /** Climbs with every recorded event, so prompt and stop are ordered without trusting the clock. */
@@ -41,9 +43,9 @@ const turnRecordSchema = z.object({
     reply: z.string().max(TURN_REPLY_LIMIT).optional(), truncated: z.boolean().optional(),
     /** The agent's working directory when the turn stopped: where its uncommitted work would be. */
     cwd: z.string().max(4096).optional(),
-  }).strict().optional(),
+  }).optional(),
   at: z.string().datetime(),
-}).strict();
+});
 export type TurnRecord = z.infer<typeof turnRecordSchema>;
 
 export interface TurnEvent {

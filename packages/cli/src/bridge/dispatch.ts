@@ -315,6 +315,29 @@ async function readyForBrief(peer: DispatchHost, target: StartingTarget, interva
 }
 
 /**
+ * Before a brief is typed again. The first try can reach the agent after its
+ * landed window (a loaded machine starts the turn late), and a second copy
+ * would hand the worker its task twice, so the pane is read first. It is typed
+ * again only into a pane that still sits idle on the same starting binding with
+ * no conversation. A conversation, or the agent working, blocked, waiting or
+ * done, means it took the first brief; a pane the Hook does not list, on
+ * another binding or never classified, cannot be told, and nothing is typed.
+ */
+async function readyForRetry(peer: DispatchHost, target: StartingTarget, intervalMs: number): Promise<{ state: "ready" | "unknown" } | { state: "arrived"; session?: string }> {
+  for (let look = 0; look < READY_LOOKS; look++) {
+    if (look) await new Promise(resolve => setTimeout(resolve, intervalMs));
+    const pane = await listedPane(peer, target);
+    if (!pane) return { state: "unknown" };
+    if (typeof pane.sessionId === "string" && pane.sessionId) return { state: "arrived", session: pane.sessionId };
+    if (pane.starting === true && pane.startingToken !== target.startingToken) return { state: "unknown" };
+    const status = String(pane.agentStatus);
+    if (status === "idle") return { state: "ready" };
+    if (["working", "blocked", "waiting", "done"].includes(status)) return { state: "arrived" };
+  }
+  return { state: "unknown" };
+}
+
+/**
  * Whether a brief typed into a starting pane reached its agent: a conversation
  * appeared, or the agent went to work. Lost when the pane still sits idle on
  * the same starting binding after LANDED_LOOKS; unknown when the Hook does not
@@ -372,7 +395,13 @@ export interface DispatchIdentity {
 }
 
 export class DispatchService {
+  /** One placement at a time: choosing a computer, saving the receipt and the
+   * launch request. Confirming the brief afterwards (up to a minute and a half
+   * for a slow starting pane) runs outside it, so other dispatches are not
+   * refused meanwhile; `placing` counts those launches toward their
+   * computer's load for the next `anywhere` choice. */
   private active = false;
+  private readonly placing = new Map<string, number>();
   /** `local` is this computer as a dispatch destination (its own Hook's
    * socket); tests replace it so they never reach a real Hook. */
   constructor(private readonly identity?: DispatchIdentity, private readonly local: () => DispatchHost = () => localHost(),
@@ -384,6 +413,8 @@ export class DispatchService {
     if (data.permissionMode && data.harness === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude and Codex workers.");
     if (this.active) throw new BridgeError(429, "A dispatch is already being placed. Try again after its receipt arrives.");
     this.active = true;
+    let holding = true, placed: string | undefined;
+    const release = () => { if (holding) { holding = false; this.active = false; } };
     try {
       if (data.parent !== undefined || data.parentTarget !== undefined) {
         if (!this.identity) throw new BridgeError(503, "This Hook cannot validate a dispatch parent.");
@@ -427,7 +458,7 @@ export class DispatchService {
         });
         skipped.sort((a, b) => a.computer.localeCompare(b.computer));
         const selected = capable
-          .sort((a, b) => a.working - b.working || a.peer.name.localeCompare(b.peer.name))[0];
+          .sort((a, b) => a.working + this.inFlight(a.peer.name) - b.working - this.inFlight(b.peer.name) || a.peer.name.localeCompare(b.peer.name))[0];
         peer = selected?.peer;
         remoteComputerID = selected?.computerId;
         if (!peer && spentSeen) throw new BridgeError(503, `No connected computer has ${data.harness}${data.harness === "claude" ? ` account ${data.account ?? "default"}` : ""} quota left right now.`, { code: "out_of_quota", skipped });
@@ -469,6 +500,9 @@ export class DispatchService {
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
           { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ? { account: data.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), label: data.label, brief: { id: receipt.id, text: prompt } });
+        // Placed: the brief is confirmed outside the lock.
+        placed = peer.name; this.placing.set(placed, this.inFlight(placed) + 1);
+        release();
         // An older Hook ignores the field and starts the worker in its own default mode.
         const ignored = data.permissionMode && launched.permissionMode !== data.permissionMode ? IGNORED_MODE : undefined;
         if (launched.briefLaunched === true) {
@@ -508,33 +542,52 @@ export class DispatchService {
       }
       receipt.updatedAt = new Date().toISOString(); await save(receipt);
       return { ok: receipt.state === "accepted", ...receipt };
-    } finally { this.active = false; }
+    } finally {
+      release();
+      if (placed) { const left = this.inFlight(placed) - 1; if (left > 0) this.placing.set(placed, left); else this.placing.delete(placed); }
+    }
   }
+
+  /** Launches placed on `computer` whose brief is still being confirmed. */
+  private inFlight(computer: string): number { return this.placing.get(computer) ?? 0; }
 
   /**
    * A brief typed into a pane that has no conversation yet: typed once the
    * pane reads ready, then confirmed by the conversation it starts. A brief
    * the pane swallowed (still idle on its starting binding) is typed again,
-   * under its own delivery id, and after BRIEF_TRIES the dispatch fails with
-   * a return, never an accepted receipt for a worker that has nothing to do.
+   * under its own delivery id, but only after `readyForRetry` finds the pane
+   * still idle there: a first brief that landed late is never typed twice.
+   * After BRIEF_TRIES the receipt carries a failed return yet stays watched
+   * (uncertain), so a brief that lands later still brings the worker's return.
    * A Claude prompt left typed but unsubmitted is not typed again.
    */
   private async typeIntoStarting(peer: DispatchHost, receipt: Receipt, target: StartingTarget, prompt: string): Promise<void> {
+    const arrived = (session?: string) => {
+      const full = session ? targetSchema.safeParse({ server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane, source: target.source, session }) : undefined;
+      if (full?.success) receipt.target = full.data;
+      receipt.state = "accepted";
+    };
     for (let attempt = 1; ; attempt++) {
-      await readyForBrief(peer, target, this.settleIntervalMs);
+      if (attempt === 1) await readyForBrief(peer, target, this.settleIntervalMs);
+      else {
+        const before = await readyForRetry(peer, target, this.settleIntervalMs);
+        if (before.state === "arrived") { arrived(before.session); return; }
+        if (before.state === "unknown") {
+          receipt.state = "uncertain";
+          receipt.error = `The brief typed into the new "${receipt.label}" pane on ${receipt.computer} did not show in time, and the pane can no longer be read as waiting for it, so it was not typed again. The Hook keeps watching the pane.`.slice(0, 500);
+          return;
+        }
+      }
       const result = await sendBrief(peer, target, prompt, attempt === 1 ? `dispatch-${receipt.id}` : `dispatch-${receipt.id}-${attempt}`);
       const sent = result.ok === true && result.deliveryUncertain !== true;
       const landed = await briefLanded(peer, target, this.settleIntervalMs);
-      if (landed.state === "arrived") {
-        const full = landed.session ? targetSchema.safeParse({ server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane, source: target.source, session: landed.session }) : undefined;
-        if (full?.success) receipt.target = full.data;
-        receipt.state = "accepted"; return;
-      }
+      if (landed.state === "arrived") { arrived(landed.session); return; }
       if (landed.state === "unknown" || result.unsubmitted === true) { receipt.state = sent ? "accepted" : "uncertain"; return; }
       logger.info("dispatch", `The brief for ${receipt.computer} ${receipt.label} did not reach the starting pane (try ${attempt} of ${BRIEF_TRIES}).`);
       if (attempt < BRIEF_TRIES) continue;
       const error = `The brief typed into the new "${receipt.label}" pane on ${receipt.computer} never reached ${receipt.harness}: after ${BRIEF_TRIES} tries the pane still sits idle with no conversation. The pane is still open; hand the brief off to it or close it.`.slice(0, 500);
-      receipt.state = "failed"; receipt.error = error;
+      // Watched still: a brief that lands after all brings the worker's own return.
+      receipt.state = "uncertain"; receipt.error = error;
       receipt.returned = { state: "failed", at: new Date().toISOString(), error, read: false };
       return;
     }
