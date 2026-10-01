@@ -284,7 +284,13 @@ sandbox settings, and OpenCode, Copilot, phren and conductors are refused with 4
 before any pane exists. `kind` is `codex`, `claude`, `copilot`, `opencode` or
 `phren` (phren's own agent, started as `phren agent -i`, with `model` as
 `--model` and `effort` as `--reasoning`, `minimal` as `low`; a dispatched brief
-is typed after it starts, since its TUI takes no first prompt). The reply repeats `permissionMode` when it was applied,
+is typed after it starts, since its TUI takes no first prompt). For `phren`
+only, `mode: "chat"` starts a quick chat (`--mode chat`: no tools, its memory
+read into the prompt up front) and `resumeSession: "<session id>"` continues
+that session's history (`--session <id>`); the id is the pane target's
+`session`. Resuming a chat with `mode: "agent"` (or no `mode`) promotes it:
+the same conversation with tools. Either field on another `kind` is 400.
+Health advertises `capabilities.quickChat`. The reply repeats `permissionMode` when it was applied,
 so a caller can tell an older Hook that ignored it. A
 conductor launch supports Claude, Codex and OpenCode (Copilot and phren are
 refused with 400: phren-agent takes no system brief at startup), attaches the shipped
@@ -1461,8 +1467,28 @@ not trigger terminal fallback merely because its file is absent.
 The transcript WebSocket includes `preview: {turnStartedAt, text}` or
 `preview: null` on backlog/append frames, or sends a standalone `type: "preview"`
 frame with the same conversation identity. Claude previews come from pane text anchored to the current
-prompt; Codex and OpenCode use their delta text. Updates arrive at most twice
-a second. Preview text stays out of history and never advances the transcript
+prompt; Codex, OpenCode and phren's agent use their delta text. Updates arrive at most twice
+a second.
+
+A preview built from a harness's own deltas also carries `streamed: true` and
+`delta`, the text appended since the previous preview frame on this socket:
+`{preview: {turnStartedAt, text, delta, streamed: true}}`. Either field marks
+`text` as the reply's own Markdown for the current assistant text block rather
+than text read off a terminal. `delta` is the whole `text` on the first preview
+frame of a block, after `preview: null`, and on the first frame of a new socket
+(a reconnect resends the text so far once, then continues with deltas). A
+block that does not extend the previous text (the next block in the same turn)
+also starts over with `delta` equal to `text`. Frames without either field
+(Claude's pane text) keep their old meaning. Health advertises
+`capabilities.previewDeltas`.
+
+| Harness | Preview source | Streaming |
+| --- | --- | --- |
+| phren agent | provider text deltas in `<event log>.preview.json`, written at most every 100 ms | token-level, `streamed: true` |
+| Codex | the thread's in-progress `agentMessage` (Hook app-server or `thread_history_1.sqlite`), else rollout `agent_message_delta` rows | as often as Codex records deltas, `streamed: true` |
+| OpenCode | the plugin's `.preview.json`, flushed with its event log | token-level, `streamed: true` |
+| Claude Code | the pane, read at most twice a second, anchored to the prompt, until the turn's first entry lands | screen text, no `delta`; later blocks arrive per block as entries |
+| Copilot | none (only its thinking state) | per block, as entries | Preview text stays out of history and never advances the transcript
 cursor. A completed entry clears the preview without the throttle delay. The
 phone replaces it in place and keeps the reveal progress, avoiding duplicate
 text. Reconnect history retains existing rows unless Hook explicitly resets

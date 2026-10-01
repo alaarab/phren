@@ -210,8 +210,10 @@ fallback. The result is cached in memory for ten minutes. No new environment
 variable is needed for this menu.
 
 OpenCode reply previews use a `.preview.json` sidecar beside the mirrored
-session event log under `<store>/.runtime/sessions`. Hook reads this temporary
-turn text for the live socket; it does not add it to transcript history.
+session event log under `<store>/.runtime/sessions`; phren's agent writes the
+same sidecar beside its own event log under `<store>/.sessions` while an
+interactive session streams a reply. Hook reads this temporary turn text for
+the live socket; it does not add it to transcript history.
 
 ### Code and worker files
 

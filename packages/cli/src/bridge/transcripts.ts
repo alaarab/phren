@@ -227,7 +227,10 @@ export async function transcriptPath(source: Provider, session: string, account?
   if (!sessionId.safeParse(session).success) throw new BridgeError(400, "Invalid conversation identity.");
   const bases: { id?: string; base: string }[] = source === "codex" ? [{ base: path.join(codexHome(), "sessions") }]
     : source === "claude" ? claudeHomes().map(home => ({ id: home.id, base: path.join(home.dir, "projects") }))
-    : source === "phren" || source === "opencode" ? [{ base: path.join(phrenStoreRoot(), ".runtime", "sessions") }]
+    // phren-agent keeps its event logs in the store's `.sessions` (the CLI's
+    // sessionsDir); OpenCode's plugin writes under `.runtime/sessions`.
+    : source === "phren" ? [{ base: path.join(phrenStoreRoot(), ".sessions") }, { base: path.join(phrenStoreRoot(), ".runtime", "sessions") }]
+    : source === "opencode" ? [{ base: path.join(phrenStoreRoot(), ".runtime", "sessions") }]
     : [{ base: path.join(process.env.COPILOT_HOME || path.join(homedir(), ".copilot"), "session-state") }];
   const pattern = source === "codex" ? `*/*/*/rollout-*-${session}.jsonl` : source === "claude" ? `*/${session}.jsonl`
     : source === "phren" ? `session-${session}.events.jsonl` : source === "opencode" ? `opencode-${session}.events.jsonl` : `${session}/events.jsonl`;

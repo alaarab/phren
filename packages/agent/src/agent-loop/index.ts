@@ -66,11 +66,14 @@ export async function runTurn(
   resetRepeatChain(session.repeatChain);
 
   // Append user message to the durable log
-  session.log.append("user/message", {
+  const prompted = session.log.append("user/message", {
     message: { role: "user", content: userInput },
     source: "user",
     turn: session.turns,
   });
+  // Phren Hook streams the text block being written from this sidecar; the
+  // turn is named by the time of the prompt that started it.
+  const preview = config.livePreview?.(session.log.header.sessionId);
 
   let turnToolCalls = 0;
   const turnStart = session.turns;
@@ -104,7 +107,8 @@ export async function runTurn(
 
     // Check if context flush is needed (one-time per session) — must run before pruning
     const contextLimit = provider.contextWindow ?? 200_000;
-    const flushPrompt = checkFlushNeeded(systemPrompt, session.messages, session.flushConfig);
+    // A chat has no tools to save findings with.
+    const flushPrompt = config.mode === "chat" ? null : checkFlushNeeded(systemPrompt, session.messages, session.flushConfig);
     if (flushPrompt) {
       session.log.append("user/message", {
         message: { role: "user", content: flushPrompt },
@@ -177,10 +181,16 @@ export async function runTurn(
         const onReasoningDelta =
           hooks?.onReasoningDelta ??
           (verbose ? (text: string) => process.stderr.write(`\x1b[2m${text}\x1b[0m`) : undefined);
+        const onTextDelta = hooks?.onTextDelta ?? process.stdout.write.bind(process.stdout);
+        preview?.start(prompted.time);
         const result = await consumeStream(
           prefetchFirst(opening.iterator, opening.first),
           costTracker,
-          { onTextDelta: hooks?.onTextDelta, onReasoningDelta, providerName: provider.name },
+          {
+            onTextDelta: preview ? (text: string) => { onTextDelta(text); preview.append(text); } : hooks?.onTextDelta,
+            onReasoningDelta,
+            providerName: provider.name,
+          },
           signal,
         );
         assistantContent = result.content;
@@ -218,6 +228,7 @@ export async function runTurn(
       }
     } catch (err: unknown) {
       spinner.stop();
+      preview?.clear();
       // The token estimate is approximate; when the provider itself says the
       // prompt is too long, compact harder (keep 2 turns) and retry once.
       if (!overflowRecovered && !signal?.aborted && isContextOverflowError(err)) {
@@ -248,6 +259,8 @@ export async function runTurn(
       stop_reason: stopReason,
       turn: session.turns,
     });
+    // Only after the message is in the log, so a reader never sees neither.
+    preview?.clear();
     session.turns++;
     hooks?.onAssistantMessage?.(assistantContent, stopReason);
 
