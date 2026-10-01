@@ -1,6 +1,8 @@
 import { toolResultText } from "../providers/types.js";
 import type { LlmMessage } from "../providers/types.js";
-import { seedFromMessages } from "../session/log.js";
+import { SessionLog, seedFromMessages } from "../session/log.js";
+import { listEventLogs, loadEventLog, type SessionListing } from "../session/persist.js";
+import { agentUserDir } from "../config.js";
 /**
  * Session commands: /session, /history, /compact, /diff, /git
  */
@@ -225,35 +227,85 @@ export function diffCommand(parts: string[], _ctx: CommandContext): boolean {
   return true;
 }
 
-export function resumeCommand(_parts: string[], ctx: CommandContext): boolean | Promise<boolean> {
-  if (!ctx.phrenPath) {
-    process.stderr.write(`${DIM}No phren context — cannot resume.${RESET}\n`);
-    return true;
-  }
+/** Sessions /resume can offer: this store's, or ~/.phren-agent's for this directory without one. */
+function resumableSessions(ctx: CommandContext): SessionListing[] {
+  const current = ctx.session.log.header.sessionId;
+  const listed = ctx.phrenPath
+    ? listEventLogs(ctx.phrenPath, { project: ctx.phrenCtx?.project ?? undefined, limit: 30 })
+    : listEventLogs(agentUserDir(), { cwd: process.cwd(), limit: 30 });
+  return listed.filter((s) => s.sessionId !== current);
+}
 
-  const project = ctx.phrenCtx?.project;
-  const snapshot = loadLastSessionSnapshot(ctx.phrenPath, project ?? undefined);
+function sessionLabel(s: SessionListing): { label: string; detail: string } {
+  const when = new Date(s.mtimeMs).toISOString().replace("T", " ").slice(0, 16);
+  return { label: s.title || "(no prompt)", detail: `${when} \u00b7 ${s.messages} msgs \u00b7 ${s.sessionId.slice(0, 8)}` };
+}
 
-  if (!snapshot) {
-    process.stderr.write(`${DIM}No previous session to resume.${RESET}\n`);
-    return true;
-  }
-
-  // Seed the current session's log from the serialized snapshot
-  const priorCount = snapshot.messages.length;
+/**
+ * /resume picks an earlier session and loads its conversation into this
+ * fresh one: from a picker in the terminal UI, by number or id prefix
+ * (`/resume 2`, `/resume 3fa9`), or from a printed list elsewhere.
+ */
+export async function resumeCommand(parts: string[], ctx: CommandContext): Promise<boolean> {
   if (ctx.session.messages.length > 0) {
     process.stderr.write(`${DIM}Session already has history; /resume only works on a fresh session.${RESET}\n`);
     return true;
   }
-  seedFromMessages(ctx.session.log, snapshot.messages as unknown as LlmMessage[]);
-
-  process.stderr.write(`${GREEN}-> Resumed ${priorCount} messages from session ${snapshot.sessionId}${RESET}\n`);
-  if (snapshot.project) {
-    process.stderr.write(`${DIM}   Project: ${snapshot.project}${RESET}\n`);
+  const sessions = resumableSessions(ctx);
+  const arg = parts[1];
+  let chosen: SessionListing | undefined;
+  if (arg) {
+    const index = Number(arg);
+    chosen = Number.isInteger(index) && index >= 1 && index <= sessions.length
+      ? sessions[index - 1]
+      : sessions.find((s) => s.sessionId.startsWith(arg));
+    if (!chosen) {
+      process.stderr.write(`${RED}No session "${arg}". /resume lists them.${RESET}\n`);
+      return true;
+    }
+  } else if (sessions.length === 0) {
+    return resumeLegacySnapshot(ctx);
+  } else if (ctx.pickFromList) {
+    const picked = await ctx.pickFromList("Resume a session", sessions.map(sessionLabel));
+    if (picked === null) return true;
+    chosen = sessions[picked];
+  } else {
+    const lines = sessions.slice(0, 15).map((s, i) => {
+      const { label, detail } = sessionLabel(s);
+      return `  ${String(i + 1).padStart(2)}. ${label.slice(0, 60)}  ${detail}`;
+    });
+    process.stderr.write(`${DIM}Recent sessions (newest first):\n${lines.join("\n")}\n  /resume <n> or /resume <id> to load one${RESET}\n`);
+    return true;
   }
-  process.stderr.write(`${DIM}   Saved: ${snapshot.savedAt}${RESET}\n`);
-  process.stderr.write(`${DIM}   Use /history to review. The LLM will see the full prior conversation on your next message.${RESET}\n`);
 
+  let messages: LlmMessage[];
+  try {
+    const { header, events } = loadEventLog(chosen.file);
+    messages = SessionLog.restore(header, events, () => {}).getMessages();
+  } catch (err: unknown) {
+    process.stderr.write(`${RED}Cannot read that session: ${err instanceof Error ? err.message : String(err)}${RESET}\n`);
+    return true;
+  }
+  seedFromMessages(ctx.session.log, messages);
+  process.stderr.write(`${GREEN}-> Resumed ${messages.length} messages from session ${chosen.sessionId.slice(0, 8)}: ${chosen.title}${RESET}\n`);
+  process.stderr.write(`${DIM}   Use /history to review. The model sees the whole conversation on your next message.${RESET}\n`);
+  return true;
+}
+
+/** Before event logs: the v1 snapshot saved at the end of the last session. */
+function resumeLegacySnapshot(ctx: CommandContext): boolean {
+  if (!ctx.phrenPath) {
+    process.stderr.write(`${DIM}No previous session to resume.${RESET}\n`);
+    return true;
+  }
+  const snapshot = loadLastSessionSnapshot(ctx.phrenPath, ctx.phrenCtx?.project ?? undefined);
+  if (!snapshot || snapshot.messages.length === 0) {
+    process.stderr.write(`${DIM}No previous session to resume.${RESET}\n`);
+    return true;
+  }
+  seedFromMessages(ctx.session.log, snapshot.messages as unknown as LlmMessage[]);
+  process.stderr.write(`${GREEN}-> Resumed ${snapshot.messages.length} messages from session ${snapshot.sessionId}${RESET}\n`);
+  process.stderr.write(`${DIM}   Saved: ${snapshot.savedAt}. Use /history to review.${RESET}\n`);
   return true;
 }
 

@@ -515,6 +515,7 @@ All 23 commands available in the interactive TUI:
 | `/review` | Triage the phren review queue (`go` = manual, `auto` = model-assisted) |
 | `/context` | Show context window usage |
 | `/history` | Show conversation history |
+| `/resume [n\|id]` | Load an earlier session into a fresh one: a picker in the terminal UI, or by number or id prefix (this project's sessions, or this directory's without a store) |
 | `/turns` | Show turn count and stats |
 | `/clear` | Clear conversation history |
 | `/files` | List files touched this session |

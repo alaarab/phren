@@ -41,6 +41,8 @@ export interface CommandContext {
   onModelChange?: (result: PickerResult) => void;
   /** Open the host UI's interactive model picker. */
   pickModel?: () => Promise<PickerResult | null>;
+  /** Open the host UI's pick-one list; resolves to the chosen index, or null. */
+  pickFromList?: (title: string, items: Array<{ label: string; detail?: string }>) => Promise<number | null>;
   /** LLM provider for /ask side-channel queries */
   provider?: LlmProvider;
   /** System prompt for /ask queries */

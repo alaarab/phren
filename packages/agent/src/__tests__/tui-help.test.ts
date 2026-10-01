@@ -43,3 +43,30 @@ it("opens help with ? and F1, preserves drafts and consumes help keys", async ()
     expect(configuration.onSubmit).toHaveBeenCalledTimes(1);
   } finally { instance.unmount(); await instance.waitUntilExit(); stdin.destroy(); stdout.destroy(); }
 });
+
+it("shows the /resume list picker and routes arrows, enter and esc to it", async () => {
+  const stdin = new PassThrough();
+  Object.assign(stdin, { isTTY: true, setRawMode() {}, ref() {}, unref() {} });
+  const stdout = new PassThrough();
+  Object.assign(stdout, { columns: 100, rows: 40, isTTY: true });
+  let output = ""; stdout.on("data", chunk => { output += chunk; });
+  const configuration = props();
+  const onMove = vi.fn(), onSelect = vi.fn(), onCancel = vi.fn();
+  Object.assign(configuration, {
+    listPicker: { title: "Resume a session", items: [{ label: "fix the login bug", detail: "2026-10-01 · 4 msgs" }, { label: "add a --json flag" }], cursor: 0 },
+    onListPickerMove: onMove, onListPickerSelect: onSelect, onListPickerCancel: onCancel,
+  });
+  const instance = render(createElement(App, configuration), { stdin: stdin as NodeJS.ReadStream, stdout: stdout as NodeJS.WriteStream,
+    stderr: stdout as NodeJS.WriteStream, exitOnCtrlC: false, patchConsole: false, debug: true });
+  const key = async (value: string) => { stdin.write(value); await new Promise(resolve => setTimeout(resolve, 35)); await instance.waitUntilRenderFlush(); };
+  try {
+    await instance.waitUntilRenderFlush();
+    expect(output).toContain("Resume a session");
+    expect(output).toContain("fix the login bug");
+    await key("\u001b[B"); expect(onMove).toHaveBeenCalledWith(1);
+    await key("\r"); expect(onSelect).toHaveBeenCalled();
+    await key("\u001b"); expect(onCancel).toHaveBeenCalled();
+  } finally {
+    instance.unmount();
+  }
+});
