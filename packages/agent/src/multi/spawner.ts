@@ -286,15 +286,20 @@ export class AgentSpawner extends EventEmitter {
     }
   }
 
+  /** Fold a child's usage into the parent's tracker (its cost already priced by the child). */
   private aggregateChildCost(result: DoneEvent["result"]): void {
     const tracker = this.costTracker;
     if (!tracker) return;
     const inputTokens = result.inputTokens ?? 0;
     const outputTokens = result.outputTokens ?? 0;
+    const cacheReadTokens = result.cacheReadTokens ?? 0;
+    const cacheWriteTokens = result.cacheWriteTokens ?? 0;
     const costUsd = result.costUsd ?? 0;
-    if (inputTokens === 0 && outputTokens === 0 && costUsd === 0) return;
+    if (inputTokens === 0 && outputTokens === 0 && cacheReadTokens === 0 && cacheWriteTokens === 0 && costUsd === 0) return;
     tracker.totalInputTokens += inputTokens;
     tracker.totalOutputTokens += outputTokens;
+    tracker.totalCacheReadTokens += cacheReadTokens;
+    tracker.totalCacheWriteTokens += cacheWriteTokens;
     tracker.totalCost += costUsd;
   }
 

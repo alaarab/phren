@@ -9,7 +9,7 @@
  * 6. Shuts down gracefully on ShutdownRequest
  */
 
-import type { SpawnPayload, ChildMessage, ParentMessage } from "./types.js";
+import type { SpawnPayload, ChildMessage, ParentMessage, DoneEvent } from "./types.js";
 import { MAX_SPAWN_DEPTH } from "./types.js";
 import type { TurnHooks, } from "../agent-loop.js";
 import { resolveProvider } from "../providers/resolve.js";
@@ -217,9 +217,11 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
 }
 
 /** Run a single task. Returns the result. */
-async function runTask(state: AgentState, task: string): Promise<{ finalText: string; turns: number; toolCalls: number; totalCost?: string; inputTokens: number; outputTokens: number; costUsd: number }> {
+async function runTask(state: AgentState, task: string): Promise<DoneEvent["result"]> {
   const beforeInput = state.costTracker.totalInputTokens;
   const beforeOutput = state.costTracker.totalOutputTokens;
+  const beforeCacheRead = state.costTracker.totalCacheReadTokens;
+  const beforeCacheWrite = state.costTracker.totalCacheWriteTokens;
   const beforeCost = state.costTracker.totalCost;
 
   const config = {
@@ -244,6 +246,8 @@ async function runTask(state: AgentState, task: string): Promise<{ finalText: st
     totalCost: result.totalCost,
     inputTokens: state.costTracker.totalInputTokens - beforeInput,
     outputTokens: state.costTracker.totalOutputTokens - beforeOutput,
+    cacheReadTokens: state.costTracker.totalCacheReadTokens - beforeCacheRead,
+    cacheWriteTokens: state.costTracker.totalCacheWriteTokens - beforeCacheWrite,
     costUsd: state.costTracker.totalCost - beforeCost,
   };
 }

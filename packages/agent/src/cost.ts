@@ -1,5 +1,6 @@
 /** Cost tracking for LLM API usage. */
 import { lookupPricing, type ModelPricing } from "./models.js";
+import type { TokenUsage } from "./providers/types.js";
 
 export interface CostTracker {
   /** Uncached input tokens. */
@@ -7,13 +8,15 @@ export interface CostTracker {
   totalOutputTokens: number;
   /** Input tokens served from the provider's prompt cache. */
   totalCacheReadTokens: number;
+  /** Input tokens written to the provider's prompt cache (Anthropic reports these). */
+  totalCacheWriteTokens: number;
   totalCost: number;
   budget: number | null;
   metered: boolean;
-  recordUsage(inputTokens: number, outputTokens: number, cacheReadTokens?: number): void;
+  recordUsage(inputTokens: number, outputTokens: number, cacheReadTokens?: number, cacheWriteTokens?: number): void;
   isOverBudget(): boolean;
   formatCost(): string;
-  formatTurnCost(inputTokens: number, outputTokens: number, cacheReadTokens?: number): string;
+  formatTurnCost(inputTokens: number, outputTokens: number, cacheReadTokens?: number, cacheWriteTokens?: number): string;
 }
 
 /** Price a model and endpoint, with PHREN_AGENT_PRICE_IN/OUT/CACHE (USD per 1M) taking precedence. */
@@ -42,28 +45,37 @@ export function resolvePricing(model: string, provider?: string, baseUrl?: strin
   };
 }
 
+/** Prompt-cache writes cost this much more than ordinary input. */
+export const CACHE_WRITE_MULTIPLIER = 1.25;
+
 export function createCostTracker(model: string, budget: number | null = null, provider?: string, baseUrl?: string): CostTracker {
   const { pricing, metered } = resolvePricing(model, provider, baseUrl);
   // Without a cache price, hits bill as ordinary input (no discount assumed).
   const cacheReadPer1M = pricing.cacheReadPer1M ?? pricing.inputPer1M;
-  const price = (input: number, output: number, cacheRead: number) =>
+  // Cache writes bill at 1.25x input (Anthropic's 5-minute cache, the one
+  // the agent asks for); providers that cache implicitly report none.
+  const cacheWritePer1M = pricing.inputPer1M * CACHE_WRITE_MULTIPLIER;
+  const price = (input: number, output: number, cacheRead: number, cacheWrite: number) =>
     (input / 1_000_000) * pricing.inputPer1M +
     (output / 1_000_000) * pricing.outputPer1M +
-    (cacheRead / 1_000_000) * cacheReadPer1M;
+    (cacheRead / 1_000_000) * cacheReadPer1M +
+    (cacheWrite / 1_000_000) * cacheWritePer1M;
 
   const tracker: CostTracker = {
     totalInputTokens: 0,
     totalOutputTokens: 0,
     totalCacheReadTokens: 0,
+    totalCacheWriteTokens: 0,
     totalCost: 0,
     budget,
     metered,
 
-    recordUsage(inputTokens: number, outputTokens: number, cacheReadTokens = 0) {
+    recordUsage(inputTokens: number, outputTokens: number, cacheReadTokens = 0, cacheWriteTokens = 0) {
       tracker.totalInputTokens += inputTokens;
       tracker.totalOutputTokens += outputTokens;
       tracker.totalCacheReadTokens += cacheReadTokens;
-      tracker.totalCost += price(inputTokens, outputTokens, cacheReadTokens);
+      tracker.totalCacheWriteTokens += cacheWriteTokens;
+      tracker.totalCost += price(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens);
     },
 
     isOverBudget() {
@@ -71,7 +83,7 @@ export function createCostTracker(model: string, budget: number | null = null, p
     },
 
     formatCost() {
-      const total = tracker.totalInputTokens + tracker.totalOutputTokens + tracker.totalCacheReadTokens;
+      const total = tracker.totalInputTokens + tracker.totalOutputTokens + tracker.totalCacheReadTokens + tracker.totalCacheWriteTokens;
       const cached = tracker.totalCacheReadTokens > 0 ? `, ${tracker.totalCacheReadTokens} cached` : "";
       const tokens = `${total} tokens${cached}`;
       if (!tracker.metered) {
@@ -84,9 +96,9 @@ export function createCostTracker(model: string, budget: number | null = null, p
       return `${cost} (${tokens}${budgetStr})`;
     },
 
-    formatTurnCost(inputTokens: number, outputTokens: number, cacheReadTokens = 0) {
+    formatTurnCost(inputTokens: number, outputTokens: number, cacheReadTokens = 0, cacheWriteTokens = 0) {
       if (!tracker.metered) return "included";
-      const turnCost = price(inputTokens, outputTokens, cacheReadTokens);
+      const turnCost = price(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens);
       return turnCost < 0.01
         ? `$${turnCost.toFixed(4)}`
         : `$${turnCost.toFixed(2)}`;
@@ -94,4 +106,9 @@ export function createCostTracker(model: string, budget: number | null = null, p
   };
 
   return tracker;
+}
+
+/** Record one response's usage, every bucket included. */
+export function recordTokenUsage(tracker: CostTracker, usage: TokenUsage): void {
+  tracker.recordUsage(usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens);
 }
