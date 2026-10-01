@@ -251,7 +251,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       if (background) awaited.set(tab, background);
       markBackground(tab, background);
       const target = targetSchema.safeParse(tab.target);
-      if (target.success && agents.length === 1) Object.assign(tab, await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }));
+      if (target.success && agents.length === 1) Object.assign(tab, await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }, async () => background));
       tab.title = title;
     }));
     let nextTab = 0;

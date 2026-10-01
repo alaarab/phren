@@ -114,7 +114,7 @@ const defaultReaders: WorkerReaders = {
   finalTurn: (source, session) => source === "codex" || source === "claude" || source === "opencode" ? readFinalTurn(source, session) : Promise.resolve(undefined),
   turn: paneTurn,
   children: (source, session) => childAgentTree(source, session).then(runningChildAgents).then(children => children.length),
-  stall: (target, pane) => sessionStalls.observe(target, pane),
+  stall: (target, pane, live) => sessionStalls.observe(target, pane, live),
   lost: (server, pane, session) => codexServers.lostTurn(server, pane, session),
 };
 
@@ -170,6 +170,19 @@ async function fromTurn(record: TurnRecord, session: string, status: string, sou
     ...(phase.reply ? replyFields(phase.reply, phase.truncated) : replyFields(final?.lastAssistant)) };
 }
 
+/** The live work a working pane's turn still waits on (`liveWork`), for the
+ * stall clock, which reads it only once it runs out: a worker whose only
+ * activity is an awaited background shell is waiting, not stalled. */
+function liveReader(record: TurnRecord | undefined, source: Provider, session: string, readers: WorkerReaders): () => Promise<number | undefined> {
+  return async () => {
+    const [final, children] = await Promise.all([
+      readers.finalTurn(source, session).catch(() => undefined),
+      readers.children ? readers.children(source, session).catch(() => 0) : Promise.resolve(0),
+    ]);
+    return liveWork(record, final, children, (readers.now ?? Date.now)());
+  };
+}
+
 /** Receiving side: the state of each dispatched pane, from its agent's turn
  * record when its hooks wrote one, else from the shared snapshot and, once
  * the agent has stopped, the final reply in its transcript. */
@@ -210,13 +223,13 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
       const seen = await fromTurn(own, own.session, status, target.source, readers);
       const full = targetSchema.safeParse({ ...target, session: seen.session });
       const prs = full.success && seen.state === "done" ? await workerPrs(full.data, own) : undefined;
-      return { ...seen, ...(prs ? { prs } : {}), ...(full.success && seen.state === "working" ? await readers.stall?.(full.data, { ...pane, agent_status: "working" }) : {}) };
+      return { ...seen, ...(prs ? { prs } : {}), ...(full.success && seen.state === "working" ? await readers.stall?.(full.data, { ...pane, agent_status: "working" }, liveReader(own, target.source, own.session, readers)) : {}) };
     }
     const session = expected ?? current;
     const state = (["working", "idle", "done", "blocked"] as const).find(value => value === status) ?? "unknown";
     if ((state !== "idle" && state !== "done") || !session) {
       const full = targetSchema.safeParse({ ...target, session });
-      return { state, ...(session ? { session } : {}), ...(full.success && state === "working" ? await readers.stall?.(full.data, pane) : {}) };
+      return { state, ...(session ? { session } : {}), ...(full.success && state === "working" ? await readers.stall?.(full.data, pane, liveReader(undefined, target.source, full.data.session, readers)) : {}) };
     }
     const turn = await readers.finalTurn(target.source, session).catch(() => undefined);
     const children = readers.children ? await readers.children(target.source, session).catch(() => 0) : 0;

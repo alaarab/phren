@@ -15,6 +15,7 @@ import { rpc, snapshot } from "./herdr.js";
 import { atomicInPrivateDir, type Json, type Target } from "./protocol.js";
 import { ENDLESS_COMMAND, finalTurnFromLines, type FinalTurn } from "./schedule-watch.js";
 import { nextTurn, noteTurn, readTurn, turnPhase, type TurnRecord } from "./turn-records.js";
+import { StallDetector } from "./stalls.js";
 
 vi.mock("./herdr.js", async importOriginal => ({
   ...await importOriginal<typeof import("./herdr.js")>(), rpc: vi.fn(), snapshot: vi.fn(),
@@ -235,6 +236,27 @@ describe("the worker's Hook answering from turn events", () => {
     // The same Stop with a sub-agent the child tree still reports running.
     const withChild = await workerStates({ targets: [target] }, { ...readers(), children: async () => 1 });
     expect(withChild.workers[0]).toEqual({ state: "working", session, hook: true, background: 1 });
+  });
+
+  it("never reports a worker stalled while its finished turn still awaits a background shell", async () => {
+    // ios-chat-code-links (Mini, 2026-10-01): the turn ended while an awaited
+    // xcodebuild queued on a lock; screen and transcript sat still for minutes.
+    const detector = new StallDetector({ now: () => now, threshold: () => 300_000, screen: async () => "1 shell still running", transcript: async () => "same" });
+    const watched = (): WorkerReaders => ({ ...readers(), stall: (seen, pane, live) => detector.observe(seen, pane, live) });
+    const poll = async () => (await workerStates({ targets: [target] }, watched())).workers[0];
+    record = turn(["UserPromptSubmit"], ["Stop", { background: 1, reply: "Waiting on the build." }]);
+    final = { completed: true, awaited: 1 };
+    for (let minute = 0; minute <= 15; minute += 1) {
+      const seen = await poll();
+      expect(seen).toEqual({ state: "working", session, hook: true, background: 1 });
+      now += 60_000;
+    }
+    // Herdr can show the pane working too; the transcript's awaited shell still holds it.
+    status = "working"; record = turn(["UserPromptSubmit"]);
+    now += 600_000; expect(await poll()).not.toHaveProperty("stalled");
+    // With nothing awaited, the same stillness is a stall.
+    final = { completed: false };
+    now += 300_000; expect(await poll()).toMatchObject({ state: "working", stalled: true });
   });
 
   it("reports an interrupted turn as failed, and a finished turn whose Stop never arrived as done", async () => {
