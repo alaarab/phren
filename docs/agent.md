@@ -175,8 +175,9 @@ started on a DeepSeek proxy stays on it when `/model` picks another DeepSeek
 model. `PHREN_AGENT_BASE_URL` sets DeepSeek's endpoint only together with
 `PHREN_AGENT_PROVIDER=deepseek`, so an `openai-compat` relay never receives a
 DeepSeek key. A subagent
-that names no provider (or the parent's) runs on the parent's `openai-compat`
-or `deepseek` endpoint and model; `PHREN_AGENT_API_KEY` and
+that names no provider (or the parent's) runs on the parent's provider and
+model, with the parent's reasoning effort when the model is the same, and on
+the parent's endpoint for `openai-compat` and `deepseek`; `PHREN_AGENT_API_KEY` and
 `DEEPSEEK_API_KEY` reach it through its environment only. Context window
 and pricing come from the built-in catalogue when the model id is known,
 otherwise a 200k-token window and a conservative price estimate are assumed.
