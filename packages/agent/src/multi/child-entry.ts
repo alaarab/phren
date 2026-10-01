@@ -116,6 +116,7 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
     allowedPaths: payload.allowedPaths ?? [],
     projectRoot: payload.worktreePath ?? cwd,
     sandboxMode: payload.sandboxMode,
+    rules: payload.rules,
   });
   // Headless child: an "ask" verdict has no human to answer it, and the
   // default readline prompt would hang forever on a closed stdin. Deny with

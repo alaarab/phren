@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- phren agent permission rules: `permissions.allow`, `ask` and `deny` lists in `~/.phren-agent/settings.json` or the project's `.phren-agent/settings.json`, and `--allowedTools` / `--disallowedTools` on the command line, in Claude Code's syntax (`read_file`, `shell(git log *)`, `edit_file(src/**)`, `mcp_github_*`). Deny wins in every mode, a shell line is allowed only when each command on it is, and subagents inherit the rules. A headless run can now allow exactly what a task needs instead of all or nothing.
+
 ### Changed
 
 - phren agent won't write over a picture of a file that is out of date: `write_file` refuses to overwrite an existing file it hasn't read in the session, and `write_file`, `edit_file`, `multi_edit` and `apply_patch` refuse a file that changed on disk since the agent last read or wrote it, asking the model to read it again. `PHREN_AGENT_FILE_GUARD=off` turns it off.

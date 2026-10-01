@@ -276,6 +276,39 @@ git, npm and other tools with subcommands, only that subcommand: approving
 approved. Approvals kept across sessions live in
 `~/.phren-agent/permissions.json`.
 
+### Permission rules
+
+Rules decide calls before the mode does. Put them in `~/.phren-agent/settings.json`
+or the project's `.phren-agent/settings.json`, or pass them with
+`--allowedTools` and `--disallowedTools` (comma-separated, the same syntax):
+
+```json
+{
+  "permissions": {
+    "allow": ["shell(npm test)", "shell(git log *)", "edit_file(src/**)", "mcp_github_*"],
+    "ask": ["shell(npm publish *)"],
+    "deny": ["shell(git push *)", "web_fetch"]
+  }
+}
+```
+
+A bare name covers every call of that tool (`*` globs work in names). In
+parentheses, a shell rule is a command pattern where `*` matches anything,
+and a trailing ` *` (or `:*`) also covers the bare command. A file rule is a
+path glob relative to the project, where `**` crosses directories. Deny rules
+win in every mode, ask rules ask even in full-auto, and allow rules run a
+call without asking, including command substitution and the other patterns
+that would otherwise ask. A shell line is allowed only when every command on
+it matches an allow rule, and denied when any command matches a deny rule.
+No rule overrides the blocked commands, secret files or paths outside the
+project. Subagents get their parent's rules.
+
+For a scripted run, allow exactly what the task needs:
+
+```bash
+phren agent -p --allowedTools "read_file,grep,glob,edit_file,shell(npm test)" "fix the failing test"
+```
+
 Whatever the mode, file tools stay inside the project directory, secret files
 such as `.env` are protected, shell commands have safety checks and timeouts,
 and on Linux shell commands run under a bubblewrap sandbox that makes
@@ -390,6 +423,7 @@ it on the computer and it appears in the app.
 | `--reasoning <level>` | `none`, `low`, `medium`, `high`, `xhigh` (`max`) |
 | `--project <name>` | phren project to load, instead of the one found from the directory |
 | `--permissions <mode>` | `suggest` (default), `auto-confirm`, `full-auto` |
+| `--allowedTools`, `--disallowedTools <rules>` | Allow or deny tool calls by rule, comma-separated (see [Permission rules](#permission-rules)) |
 | `--yolo` | Same as `--permissions full-auto` |
 | `--plan` | Show a plan and wait for approval before running tools |
 | `--resume`, `--continue`, `-c` | Continue the newest session; a task given with it becomes the next prompt |

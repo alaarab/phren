@@ -187,6 +187,7 @@ export class AgentSpawner extends EventEmitter {
       depth: this.depth + 1,
       sandboxMode: opts.sandboxMode ?? defaults?.sandboxMode,
       allowedPaths: opts.allowedPaths ?? defaults?.allowedPaths ?? [],
+      rules: defaults?.rules,
     };
 
     const entry: AgentEntry = {
