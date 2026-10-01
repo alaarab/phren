@@ -42,7 +42,7 @@ import { createCostTracker } from "./cost.js";
 import { scopeModelOverrides } from "./model-overrides.js";
 import { codexLogin, codexLogout } from "./providers/codex-auth.js";
 import { createCheckpoint } from "./checkpoint.js";
-import { detectLintCommand, detectTestCommand } from "./tools/lint-test.js";
+import { detectLintCommand, detectTypecheckCommand, detectTestCommand } from "./tools/lint-test.js";
 import { connectMcpServers, loadDefaultMcpConfig, loadMcpConfig, parseMcpInline, type McpConfigEntry } from "./mcp-client.js";
 import { isMcpProjectTrusted, trustMcpProject } from "./settings.js";
 import * as os from "os";
@@ -409,7 +409,10 @@ export async function runAgentCli(raw: string[]) {
   const detectLintTest = () => {
     const lintCmd = args.lintCmd ?? detectLintCommand(cwd);
     const testCmd = args.testCmd ?? detectTestCommand(cwd);
-    return (lintCmd || testCmd) ? { lintCmd: lintCmd ?? undefined, testCmd: testCmd ?? undefined } : undefined;
+    const typecheckCmd = args.typecheckCmd ?? detectTypecheckCommand(cwd);
+    return (lintCmd || testCmd || typecheckCmd)
+      ? { lintCmd: lintCmd ?? undefined, testCmd: testCmd ?? undefined, typecheckCmd: typecheckCmd ?? undefined }
+      : undefined;
   };
   // A chat edits nothing, so it has nothing to check.
   const lintTestConfig = chat ? undefined : detectLintTest();
