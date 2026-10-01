@@ -59,7 +59,7 @@ describe("Phren preview dispatcher", () => {
     "phren-hook v1 web 127.0.0.1 80; id", "phren-hook v1 web 127.0.0.1 80\n", "phren-hook v1 web 127.0.0.1 80 extra",
     "phren-hook v1 terminal default\n",
     "phren-hook v1 shell", "phren-hook v1 shell L3RtcA== claude", "phren-hook v1 shell L3RtcA claude; id",
-    "phren-hook v1 shell L3RtcA sh", "phren-hook v1 shell L3RtcA claude extra", "phren-hook v1 shell L3RtcA\n",
+    "phren-hook v1 shell L3RtcA sh", "phren-hook v1 shell L3RtcA claude extra", "phren-hook v1 shell L3RtcA phren agent", "phren-hook v1 shell L3RtcA phren-agent", "phren-hook v1 shell L3RtcA\n",
     "phren-hook v1 shell " + Buffer.from("relative/dir").toString("base64url"),
     "phren-hook v1 shell " + Buffer.from("/tmp/x\u0000y").toString("base64url"),
     // An existing folder outside every workspace; Windows has no /usr/bin, and
@@ -81,6 +81,7 @@ describe("Phren preview dispatcher", () => {
     const home = Buffer.from(homedir()).toString("base64url");
     await expect(dispatch(`phren-hook v1 shell ${home}`)).rejects.toThrow("Request an SSH terminal first.");
     await expect(dispatch(`phren-hook v1 shell ${home} codex`)).rejects.toThrow("Request an SSH terminal first.");
+    await expect(dispatch(`phren-hook v1 shell ${home} phren`)).rejects.toThrow("Request an SSH terminal first.");
     await expect(dispatch("phren-hook v1 shell " + Buffer.from("/nonexistent-phren-dir").toString("base64url"))).rejects.toMatchObject({ status: 400 });
   });
 
