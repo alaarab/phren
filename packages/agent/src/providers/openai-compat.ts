@@ -39,14 +39,30 @@ const DEEPSEEK_EFFORT: Record<ReasoningEffort, string> = {
   xhigh: "max",
 };
 
-/** The reasoning_effort value to send on this route. */
+/**
+ * OpenAI models that take reasoning effort "none": GPT-5.1 and later, except
+ * the -codex variants. Older reasoning models (gpt-5, o-series) and most
+ * other OpenAI-compatible servers reject it with a 400.
+ */
+export function acceptsNoReasoning(model: string | undefined): boolean {
+  const id = (model ?? "").replace(/^.*\//, "");
+  return /^gpt-5\.(?:[1-9]|\d{2,})/.test(id) && !/codex/i.test(id);
+}
+
+/**
+ * The reasoning_effort value to send on this route. "none" goes only where
+ * it is accepted (DeepSeek, newer OpenAI models); elsewhere the field is
+ * left out and the model's default applies.
+ */
 export function wireReasoningEffort(
   providerName: string | undefined,
   model: string | undefined,
   effort: ReasoningEffort | undefined,
 ): string | undefined {
   if (!effort) return undefined;
-  return isDeepSeekRoute(providerName, model) ? DEEPSEEK_EFFORT[effort] : effort;
+  if (isDeepSeekRoute(providerName, model)) return DEEPSEEK_EFFORT[effort];
+  if (effort === "none" && !acceptsNoReasoning(model)) return undefined;
+  return effort;
 }
 
 /**

@@ -89,7 +89,9 @@ auto-detection. `openai-compat` is only used when named.
 
 Choose a model with `--model <id>` (or `PHREN_AGENT_MODEL`) and a reasoning
 effort with `--reasoning none|low|medium|high|xhigh` (or `PHREN_AGENT_REASONING`;
-`max` is accepted as `xhigh`, `off` as `none`).
+`max` is accepted as `xhigh`, `off` as `none`). `none` turns thinking off on
+Anthropic, DeepSeek and OpenAI's GPT-5.1 and later; other models reject it,
+so there no effort is sent and the model's default applies.
 In the terminal UI, `/model` switches both mid-session.
 
 ### ChatGPT or Codex subscription
