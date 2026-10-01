@@ -65,11 +65,14 @@ export async function runTurn(
   resetRepeatChain(session.repeatChain);
 
   // Append user message to the durable log
-  session.log.append("user/message", {
+  const prompted = session.log.append("user/message", {
     message: { role: "user", content: userInput },
     source: "user",
     turn: session.turns,
   });
+  // Phren Hook streams the text block being written from this sidecar; the
+  // turn is named by the time of the prompt that started it.
+  const preview = config.livePreview?.(session.log.header.sessionId);
 
   let turnToolCalls = 0;
   const turnStart = session.turns;
@@ -162,17 +165,25 @@ export async function runTurn(
         const onReasoningDelta =
           hooks?.onReasoningDelta ??
           (verbose ? (text: string) => process.stderr.write(`\x1b[2m${text}\x1b[0m`) : undefined);
+        const onTextDelta = hooks?.onTextDelta ?? process.stdout.write.bind(process.stdout);
         let attempt = 0;
         const result = await withRetry(
           async () => {
             if (attempt++ > 0) {
               hooks?.onStreamRetry?.();
               status("\x1b[33m[model request failed; retrying]\x1b[0m\n");
+              // The phone's live preview drops the abandoned attempt's text too.
+              preview?.clear();
             }
+            preview?.start(prompted.time);
             return consumeStream(
               provider.chatStream!(systemPrompt, session.messages, turnTools, signal),
               costTracker,
-              { onTextDelta: hooks?.onTextDelta, onReasoningDelta, providerName: provider.name },
+              {
+                onTextDelta: preview ? (text: string) => { onTextDelta(text); preview.append(text); } : hooks?.onTextDelta,
+                onReasoningDelta,
+                providerName: provider.name,
+              },
               signal,
             );
           },
@@ -217,6 +228,7 @@ export async function runTurn(
       }
     } catch (err: unknown) {
       spinner.stop();
+      preview?.clear();
       // The token estimate is approximate; when the provider itself says the
       // prompt is too long, compact harder (keep 2 turns) and retry once.
       if (!overflowRecovered && !signal?.aborted && isContextOverflowError(err)) {
@@ -247,6 +259,8 @@ export async function runTurn(
       stop_reason: stopReason,
       turn: session.turns,
     });
+    // Only after the message is in the log, so a reader never sees neither.
+    preview?.clear();
     session.turns++;
     hooks?.onAssistantMessage?.(assistantContent, stopReason);
 

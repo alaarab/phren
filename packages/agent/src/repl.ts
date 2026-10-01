@@ -94,6 +94,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
     provider: config.provider,
     systemPrompt: config.systemPrompt,
     registry: config.registry,
+    promote: config.promote,
     onModelChange: (result: import("./multi/model-picker.js").PickerResult) => {
       config.provider = resolveProvider(config.provider.name, result.model, undefined, result.reasoning ?? undefined);
     },

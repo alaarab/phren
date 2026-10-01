@@ -25,6 +25,14 @@ export interface AgentConfig {
   sessionLog?: SessionLog;
   /** LLM compaction overrides (thresholds, disable flag). */
   compaction?: Partial<import("../context/compactor.js").CompactionConfig>;
+  /** "chat": quick chat with no tools and read-only memory (memory/chat.ts). */
+  mode?: "agent" | "chat";
+  /** Chat mode only: register the agent's tools and prompt in place, keeping the history. */
+  promote?: () => Promise<string>;
+  /** Rebuilds the system prompt after a model switch when it is not the agent's (a chat's). */
+  rebuildSystemPrompt?: (provider: { name: string; model?: string }) => string;
+  /** The streaming text block beside the session's event log, for Phren Hook (session/preview.ts). */
+  livePreview?: (sessionId: string) => import("../session/preview.js").LivePreview | undefined;
 }
 
 export interface AgentResult {

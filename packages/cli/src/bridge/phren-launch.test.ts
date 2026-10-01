@@ -67,6 +67,24 @@ describe("launching phren's own agent", () => {
     expect(starts).toEqual([]);
   });
 
+  it("starts a quick chat, resumes it, and promotes it to an agent with the same history", async () => {
+    const session = "0b6f3c2e-5d1a-4c7e-9f20-3a8b1c4d5e6f";
+    await launchSession("default", { cwd, label: "Quick chat", kind: "phren", mode: "chat", model: "openai-codex/gpt-6-sol" });
+    expect(starts[0].args).toEqual(["agent", "-i", "--mode", "chat", "--model", "openai-codex/gpt-6-sol"]);
+    await launchSession("default", { cwd, label: "Quick chat again", kind: "phren", mode: "chat", resumeSession: session });
+    expect(starts[1].args).toEqual(["agent", "-i", "--mode", "chat", "--session", session]);
+    await launchSession("default", { cwd, label: "Promoted", kind: "phren", mode: "agent", resumeSession: session });
+    expect(starts[2].args).toEqual(["agent", "-i", "--session", session]);
+  });
+
+  it("refuses chat mode and resume on another harness, and a session that is not an id, before any pane exists", async () => {
+    await expect(launchSession("default", { cwd, label: "Claude chat", kind: "claude", mode: "chat" })).rejects.toMatchObject({ status: 400 });
+    await expect(launchSession("default", { cwd, label: "Codex resume", kind: "codex", resumeSession: "0b6f3c2e-5d1a-4c7e-9f20-3a8b1c4d5e6f" })).rejects.toMatchObject({ status: 400 });
+    await expect(launchSession("default", { cwd, label: "Bad", kind: "phren", resumeSession: "--yolo" })).rejects.toThrow();
+    await expect(launchSession("default", { cwd, label: "Bad", kind: "phren", mode: "turbo" })).rejects.toThrow();
+    expect(placements).toEqual([]);
+  });
+
   it("will not make a running phren agent the conductor", async () => {
     state.panes.push({ pane_id: "w9:p1", tab_id: "w9:t1", workspace_id: "w9", agent: "phren", agent_status: "idle" });
     await expect(makeConductor("default", { paneId: "w9:p1" })).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/phren agent cannot run as a conductor/) });

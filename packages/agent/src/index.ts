@@ -23,13 +23,15 @@ import { gitStatusTool, gitDiffTool, gitCommitTool } from "./tools/git.js";
 import { updatePlanTool } from "./tools/update-plan.js";
 import { listMcpResourcesTool, readMcpResourceTool } from "./tools/mcp-resources.js";
 import { buildPhrenContext, buildContextSnippet, buildProjectInstructions } from "./memory/context.js";
+import { buildChatMemory, buildChatSystemPrompt } from "./memory/chat.js";
+import { livePreview, previewPath } from "./session/preview.js";
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot, writeSessionNote } from "./memory/session.js";
 import { emitHerdrHook, setHerdrHookSession } from "./herdr-hooks.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { loadHooksConfig } from "./user-hooks.js";
 import { loadAndRegisterCustomCommands, getCustomCommandInfos } from "./commands.js";
-import { createSession, runTurn } from "./agent-loop.js";
+import { createSession, runTurn, type AgentConfig } from "./agent-loop.js";
 import { SessionLog, seedFromMessages } from "./session/log.js";
 import { fileSink, findEventLogById, findLatestEventLog, listEventLogs, persistFork, restoreSessionLog } from "./session/persist.js";
 import { buildHeadlessResult, createHeadlessHooks, headlessExitCode, readStdin, type HeadlessResult } from "./headless.js";
@@ -175,6 +177,11 @@ export async function runAgentCli(raw: string[]) {
     args.interactive = false;
     args.multi = false;
   }
+  const chat = args.mode === "chat";
+  if (chat && (args.multi || args.team)) {
+    console.error("--mode chat is a single conversation; it cannot run with --multi or --team.");
+    process.exit(1);
+  }
 
   // `--resume` alone continues the prior session without a placeholder task
   const userTask = args.task;
@@ -212,7 +219,8 @@ export async function runAgentCli(raw: string[]) {
 
     // Review-queue surfacing. Interactive sessions get expiry + a triage
     // banner; one-shot runs get a count only and never mutate the queue.
-    if (phrenCtx.project) {
+    // A quick chat skips it: it cannot act on the queue.
+    if (phrenCtx.project && !chat) {
       try {
         const { getQueueStatus, formatQueueBanner, formatExpiryNotice, expireStaleItems, resolveExpireDays } =
           await import("./memory/review-triage.js");
@@ -233,29 +241,34 @@ export async function runAgentCli(raw: string[]) {
       } catch { /* best effort */ }
     }
 
-    contextSnippet = await buildContextSnippet(phrenCtx, args.task);
-    priorSummary = getPriorSummary(phrenCtx);
+    // A quick chat reads its memory from files below; the agent's snippet
+    // builds the search index, which is what makes a first answer slow.
+    if (!chat) {
+      contextSnippet = await buildContextSnippet(phrenCtx, args.task);
+      priorSummary = getPriorSummary(phrenCtx);
+    }
     sessionId = startSession(phrenCtx);
     // Inside a Herdr pane, tell Phren Hook which event log is this pane's.
     setHerdrHookSession(sessionId);
     emitHerdrHook("SessionStart");
 
     // Load evolved project context for warm start
-    const projectCtx = loadProjectContext(phrenCtx);
+    const projectCtx = chat ? null : loadProjectContext(phrenCtx);
     if (projectCtx) {
       contextSnippet += `\n\n## Agent context (${phrenCtx.project})\n\n${projectCtx}`;
     }
   }
 
   // Without a phren store, the repo's AGENTS.md / CLAUDE.md still apply.
-  if (!phrenCtx) contextSnippet = buildProjectInstructions();
+  if (!phrenCtx && !chat) contextSnippet = buildProjectInstructions();
 
   loadAndRegisterCustomCommands(process.cwd());
 
-  const systemPrompt = buildSystemPrompt(contextSnippet, priorSummary, {
-    name: provider.name,
-    model: (provider as { model?: string }).model,
-  }, getCustomCommandInfos());
+  const chatMemory = chat ? buildChatMemory(phrenCtx) : "";
+  const providerInfo = { name: provider.name, model: (provider as { model?: string }).model };
+  const systemPrompt = chat
+    ? buildChatSystemPrompt(chatMemory, providerInfo)
+    : buildSystemPrompt(contextSnippet, priorSummary, providerInfo, getCustomCommandInfos());
 
   // Dry run: print system prompt and exit
   if (args.dryRun) {
@@ -288,55 +301,59 @@ export async function runAgentCli(raw: string[]) {
       return false;
     };
   }
-  registry.register(readFileTool);
-  registry.register(writeFileTool);
-  registry.register(editFileTool);
-  registry.register(multiEditTool);
-  registry.register(applyPatchTool);
-  // Live-config factory: /permissions and sandbox mode changes apply per call
-  registry.register(createShellTool(() => registry.permissionConfig));
-  registry.register(taskOutputTool);
-  registry.register(taskStopTool);
-  registry.register(globTool);
-  registry.register(grepTool);
-  if (modelSupportsVision(provider.name, provider.model ?? "")) {
-    registry.register(createReadImageTool(provider));
-  }
-
-  if (phrenCtx) {
-    registry.register(createPhrenSearchTool(phrenCtx));
-    registry.register(createPhrenFindingTool(phrenCtx, sessionId));
-    registry.register(createPhrenGetTasksTool(phrenCtx));
-    registry.register(createPhrenCompleteTaskTool(phrenCtx, sessionId));
-    registry.register(createPhrenAddTaskTool(phrenCtx, sessionId));
-    registry.register(createSkillTool(phrenCtx));
-  }
-
-  // Web tools
-  registry.register(createWebFetchTool());
-  registry.register(createWebSearchTool());
-  registry.register(gitStatusTool);
-  registry.register(gitDiffTool);
-  registry.register(gitCommitTool);
-  registry.register(updatePlanTool);
-  registry.register(listMcpResourcesTool);
-  registry.register(readMcpResourceTool);
-
-  // MCP server connections
+  // The agent's tools. A quick chat starts with none and gets them on /promote.
   let mcpCleanup: (() => void) | undefined;
-  const mcpServers: Record<string, McpConfigEntry> = {};
-  if (args.mcpConfig) {
-    Object.assign(mcpServers, loadMcpConfig(args.mcpConfig));
-  }
-  for (let idx = 0; idx < args.mcp.length; idx++) {
-    const entry = parseMcpInline(args.mcp[idx]);
-    mcpServers[`mcp-${idx}`] = entry;
-  }
-  if (Object.keys(mcpServers).length > 0) {
-    const { tools: mcpTools, cleanup } = await connectMcpServers(mcpServers, args.verbose);
-    mcpCleanup = cleanup;
-    for (const tool of mcpTools) registry.register(tool);
-  }
+  const registerAgentTools = async () => {
+    registry.register(readFileTool);
+    registry.register(writeFileTool);
+    registry.register(editFileTool);
+    registry.register(multiEditTool);
+    registry.register(applyPatchTool);
+    // Live-config factory: /permissions and sandbox mode changes apply per call
+    registry.register(createShellTool(() => registry.permissionConfig));
+    registry.register(taskOutputTool);
+    registry.register(taskStopTool);
+    registry.register(globTool);
+    registry.register(grepTool);
+    if (modelSupportsVision(provider.name, provider.model ?? "")) {
+      registry.register(createReadImageTool(provider));
+    }
+
+    if (phrenCtx) {
+      registry.register(createPhrenSearchTool(phrenCtx));
+      registry.register(createPhrenFindingTool(phrenCtx, sessionId));
+      registry.register(createPhrenGetTasksTool(phrenCtx));
+      registry.register(createPhrenCompleteTaskTool(phrenCtx, sessionId));
+      registry.register(createPhrenAddTaskTool(phrenCtx, sessionId));
+      registry.register(createSkillTool(phrenCtx));
+    }
+
+    // Web tools
+    registry.register(createWebFetchTool());
+    registry.register(createWebSearchTool());
+    registry.register(gitStatusTool);
+    registry.register(gitDiffTool);
+    registry.register(gitCommitTool);
+    registry.register(updatePlanTool);
+    registry.register(listMcpResourcesTool);
+    registry.register(readMcpResourceTool);
+
+    // MCP server connections
+    const mcpServers: Record<string, McpConfigEntry> = {};
+    if (args.mcpConfig) {
+      Object.assign(mcpServers, loadMcpConfig(args.mcpConfig));
+    }
+    for (let idx = 0; idx < args.mcp.length; idx++) {
+      const entry = parseMcpInline(args.mcp[idx]);
+      mcpServers[`mcp-${idx}`] = entry;
+    }
+    if (Object.keys(mcpServers).length > 0) {
+      const { tools: mcpTools, cleanup } = await connectMcpServers(mcpServers, args.verbose);
+      mcpCleanup = cleanup;
+      for (const tool of mcpTools) registry.register(tool);
+    }
+  };
+  if (!chat) await registerAgentTools();
 
   // Build cost tracker from model info
   const modelName = (provider as { model?: string }).model ?? args.model ?? provider.name;
@@ -344,9 +361,13 @@ export async function runAgentCli(raw: string[]) {
 
   // Build lint/test config from CLI flags or auto-detect
   const cwd = process.cwd();
-  const lintCmd = args.lintCmd ?? detectLintCommand(cwd);
-  const testCmd = args.testCmd ?? detectTestCommand(cwd);
-  const lintTestConfig = (lintCmd || testCmd) ? { lintCmd: lintCmd ?? undefined, testCmd: testCmd ?? undefined } : undefined;
+  const detectLintTest = () => {
+    const lintCmd = args.lintCmd ?? detectLintCommand(cwd);
+    const testCmd = args.testCmd ?? detectTestCommand(cwd);
+    return (lintCmd || testCmd) ? { lintCmd: lintCmd ?? undefined, testCmd: testCmd ?? undefined } : undefined;
+  };
+  // A chat edits nothing, so it has nothing to check.
+  const lintTestConfig = chat ? undefined : detectLintTest();
 
   if (args.verbose && lintTestConfig) {
     if (lintTestConfig.lintCmd) process.stderr.write(`Lint: ${lintTestConfig.lintCmd}\n`);
@@ -423,7 +444,9 @@ export async function runAgentCli(raw: string[]) {
 
   const resumedLog = args.resume ? makeResumedLog() : undefined;
 
-  const agentConfig = {
+  /** Spawner tools, once an interactive session has a spawner. */
+  let registerSpawnerTools: (() => void) | undefined;
+  const agentConfig: AgentConfig = {
     provider,
     registry,
     systemPrompt,
@@ -437,7 +460,33 @@ export async function runAgentCli(raw: string[]) {
     hookConfig: registry.hookConfig,
     sessionLog: resumedLog ?? makePersistedLog(),
     ...(args.noLlmCompact ? { compaction: { enabled: false } } : {}),
+    mode: args.mode,
   };
+  // The phone reads the reply being written from a sidecar of the event log.
+  if (phrenCtx && agentConfig.sessionLog && (args.interactive || args.multi || args.team)) {
+    const phrenPath = phrenCtx.phrenPath;
+    agentConfig.livePreview = (id) => id.startsWith("mem-") ? undefined : livePreview(previewPath(phrenPath, id));
+  }
+  if (chat) {
+    agentConfig.rebuildSystemPrompt = (info) => buildChatSystemPrompt(chatMemory, info);
+    // Same conversation, same log: only the tools and the prompt change.
+    agentConfig.promote = async () => {
+      if (agentConfig.mode !== "chat") return "Already an agent session.";
+      agentConfig.mode = "agent";
+      agentConfig.rebuildSystemPrompt = undefined;
+      await registerAgentTools();
+      registerSpawnerTools?.();
+      let snippet = phrenCtx ? await buildContextSnippet(phrenCtx, "") : buildProjectInstructions();
+      const projectCtx = phrenCtx ? loadProjectContext(phrenCtx) : null;
+      if (phrenCtx && projectCtx) snippet += `\n\n## Agent context (${phrenCtx.project})\n\n${projectCtx}`;
+      agentConfig.systemPrompt = buildSystemPrompt(snippet, null, {
+        name: agentConfig.provider.name,
+        model: (agentConfig.provider as { model?: string }).model,
+      }, getCustomCommandInfos());
+      agentConfig.lintTestConfig = detectLintTest();
+      return `Promoted to a phren agent with ${registry.toolNames().length} tools; the conversation continues.`;
+    };
+  }
 
   // Interactive mode — Ink TUI with built-in spawner (--multi and --team also route here)
   if (args.interactive || args.multi || args.team) {
@@ -448,7 +497,7 @@ export async function runAgentCli(raw: string[]) {
     } else {
       // The phren splash (mascot + wordmark reveal) before the TUI mounts.
       // Cosmetic only: any failure is swallowed, and PHREN_INTRO=off skips it.
-      if (process.env.PHREN_INTRO !== "off") {
+      if (process.env.PHREN_INTRO !== "off" && !chat) {
         try {
           const { playSplash } = await import("@phren/cli/shell/intro");
           const model = (provider as { model?: string }).model;
@@ -466,9 +515,12 @@ export async function runAgentCli(raw: string[]) {
       const { AgentSpawner } = await import("./multi/spawner.js");
       const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
       const spawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig });
-      registry.register(createSpawnAgentTool(spawner, () => registry.permissionConfig));
-      registry.register(createSendMessageTool(spawner));
-      registry.register(createListAgentsTool(spawner));
+      registerSpawnerTools = () => {
+        registry.register(createSpawnAgentTool(spawner, () => registry.permissionConfig));
+        registry.register(createSendMessageTool(spawner));
+        registry.register(createListAgentsTool(spawner));
+      };
+      if (!chat) registerSpawnerTools();
       // Publish this process's agents so a phren graph in another terminal can
       // show them. Best-effort and silent: it is a courtesy to another tool.
       const { createAgentPublisher } = await import("./multi/publish.js");
@@ -485,8 +537,9 @@ export async function runAgentCli(raw: string[]) {
       await spawner.shutdown();
     }
 
-    // Flush anti-patterns at session end
-    if (phrenCtx) {
+    // Flush anti-patterns at session end. A chat that stayed one ran no
+    // tools and gets no reflection call.
+    if (phrenCtx && agentConfig.mode !== "chat") {
       try { await session.antiPatterns.flushAntiPatterns(phrenCtx, sessionId); } catch { /* best effort */ }
       try { await evolveProjectContext(phrenCtx, provider, session.messages, { sessionId }); } catch { /* best effort */ }
     }
@@ -508,7 +561,7 @@ export async function runAgentCli(raw: string[]) {
   }
 
   // Create initial checkpoint before agent starts
-  const initCheckpoint = createCheckpoint(cwd, "pre-agent");
+  const initCheckpoint = chat ? null : createCheckpoint(cwd, "pre-agent");
   if (args.verbose && initCheckpoint) {
     process.stderr.write(`Checkpoint: ${initCheckpoint.slice(0, 8)}\n`);
   }
@@ -531,7 +584,7 @@ export async function runAgentCli(raw: string[]) {
   // children run headless with auto-confirm permissions and exit when the
   // parent's IPC channel closes.
   let oneShotSpawner: import("./multi/spawner.js").AgentSpawner | undefined;
-  if (!args.noSubagents) {
+  if (!args.noSubagents && !chat) {
     const { AgentSpawner } = await import("./multi/spawner.js");
     const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
     oneShotSpawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig });
@@ -622,12 +675,14 @@ export async function runAgentCli(raw: string[]) {
       // Save messages for resume
       saveSessionMessages(phrenCtx.phrenPath, sessionId, result.messages, phrenCtx.project ?? undefined);
 
-      // Flush anti-patterns (interactive mode does this too; one-shot was missing it)
-      try { await result.session.antiPatterns.flushAntiPatterns(phrenCtx, sessionId); } catch { /* best effort */ }
+      if (!chat) {
+        // Flush anti-patterns (interactive mode does this too; one-shot was missing it)
+        try { await result.session.antiPatterns.flushAntiPatterns(phrenCtx, sessionId); } catch { /* best effort */ }
 
-      // Evolve project context via lightweight LLM reflection (also routes
-      // extracted knowledge through the graduated confidence pipeline)
-      try { await evolveProjectContext(phrenCtx, provider, result.messages, { sessionId }); } catch { /* best effort */ }
+        // Evolve project context via lightweight LLM reflection (also routes
+        // extracted knowledge through the graduated confidence pipeline)
+        try { await evolveProjectContext(phrenCtx, provider, result.messages, { sessionId }); } catch { /* best effort */ }
+      }
 
       // Mirror the session into a searchable (non-injectable) note
       writeSessionNote(phrenCtx, { sessionId, task: args.task, outcome: result.finalText });
