@@ -200,7 +200,7 @@ describe("shellTool", () => {
     expect(result.is_error).toBe(true);
   });
 
-  it("caps timeout at 120000ms", async () => {
+  it("caps an oversized timeout instead of failing", async () => {
     // Just verify it doesn't throw for a large timeout value
     const result = await shellTool.execute({ command: "echo test", timeout: 999999 });
     expect(result.output).toBe("test");

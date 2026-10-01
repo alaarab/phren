@@ -7,7 +7,7 @@
  * a `log/replace` event splices a surface range behind a summary message, so
  * the full record survives for replay, resume, and forking.
  */
-import type { LlmMessage } from "../providers/types.js";
+import type { LlmMessage, TokenUsage } from "../providers/types.js";
 
 /** Bump only when an older reader could misread a newer log. */
 export const SESSION_LOG_VERSION = 1;
@@ -32,7 +32,7 @@ export interface SessionEventMap {
   /** Direct input, steering, or a system-injected prompt (flush, plan gate, continuation). */
   "user/message": { message: LlmMessage; source: UserEventSource; turn: number };
   /** One model response (its content blocks include reasoning/tool_use). */
-  "assistant/message": { message: LlmMessage; stop_reason: string; usage?: { input_tokens: number; output_tokens: number }; turn: number };
+  "assistant/message": { message: LlmMessage; stop_reason: string; usage?: TokenUsage; turn: number };
   /** The user-role message carrying a batch of tool results. */
   "tool/results": { message: LlmMessage; turn: number };
   /**

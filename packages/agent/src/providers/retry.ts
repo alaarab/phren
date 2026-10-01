@@ -1,18 +1,25 @@
+import type { RetryableProviderError } from "./types.js";
+
 export interface RetryConfig {
   maxRetries: number;
   baseDelayMs: number;
   maxDelayMs: number;
   retryableStatuses: Set<number>;
+  /**
+   * Called once per retry, before the backoff sleep, so a UI can drop the
+   * failed attempt's partial output right away instead of after the wait.
+   */
+  onRetry?: (attempt: number, error: unknown, delayMs: number) => void;
 }
 
 const DEFAULT_CONFIG: RetryConfig = {
   maxRetries: 3,
   baseDelayMs: 1000,
   maxDelayMs: 60_000,
-  retryableStatuses: new Set([429, 500, 502, 503, 529]),
+  retryableStatuses: new Set([429, 500, 502, 503, 504, 529]),
 };
 
-const RETRYABLE_NETWORK_CODES = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE"]);
+const RETRYABLE_NETWORK_CODES = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "UND_ERR_SOCKET"]);
 
 /** Extract HTTP status from error message like "API error 429: ..." */
 function extractStatus(error: unknown): number | null {
@@ -21,14 +28,26 @@ function extractStatus(error: unknown): number | null {
   return match ? parseInt(match[1], 10) : null;
 }
 
-/** Check if the error is a retryable network error by code or message. */
+/**
+ * Check if the error is a retryable network error by code or message. A
+ * connection dropped mid-body surfaces from fetch (undici) as
+ * `TypeError: terminated` with the socket error as its cause.
+ */
 function isNetworkError(error: unknown): boolean {
-  if (error instanceof Error && "code" in error) {
-    const code = (error as Error & { code?: string }).code;
-    if (code && RETRYABLE_NETWORK_CODES.has(code)) return true;
+  if (error instanceof Error) {
+    for (const e of [error, error.cause]) {
+      const code = e && typeof e === "object" && "code" in e ? (e as { code?: unknown }).code : undefined;
+      if (typeof code === "string" && RETRYABLE_NETWORK_CODES.has(code)) return true;
+    }
+    if (error.message === "terminated") return true;
   }
   const msg = error instanceof Error ? error.message : String(error);
   return RETRYABLE_NETWORK_CODES.has(msg) || Array.from(RETRYABLE_NETWORK_CODES).some((c) => msg.includes(c));
+}
+
+/** Errors the provider layer marked as fixable by a fresh request. */
+function isMarkedRetryable(error: unknown): error is RetryableProviderError {
+  return error instanceof Error && (error as { retryable?: unknown }).retryable === true;
 }
 
 /** Extract Retry-After hint from error message. */
@@ -86,7 +105,7 @@ export async function withRetry<T>(
       if (signal?.aborted) throw error;
       const status = extractStatus(error);
       const isRetryable = !isQuotaExhausted(error)
-        && ((status !== null && cfg.retryableStatuses.has(status)) || isNetworkError(error));
+        && ((status !== null && cfg.retryableStatuses.has(status)) || isNetworkError(error) || isMarkedRetryable(error));
 
       if (!isRetryable || attempt >= cfg.maxRetries) {
         throw error;
@@ -105,6 +124,7 @@ export async function withRetry<T>(
         );
       }
 
+      cfg.onRetry?.(attempt + 1, error, delayMs);
       await sleep(delayMs, signal);
     }
   }

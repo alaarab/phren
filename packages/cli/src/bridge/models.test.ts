@@ -6,7 +6,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { BridgeError } from "./protocol.js";
-import { CLAUDE_MENU, claudeName, ModelCatalog, readClaudeModels, readOpenCodeModels } from "./models.js";
+import { CLAUDE_MENU, claudeName, ModelCatalog, readClaudeModels, readOpenCodeModels, readPhrenModels } from "./models.js";
 
 vi.mock("node:child_process", async importOriginal => {
   const original = await importOriginal<typeof import("node:child_process")>();
@@ -126,5 +126,30 @@ describe("model catalogue", () => {
     expect(models[2].description).toBe("OpenCode Zen, free.");
     expect(models[3]).toMatchObject({ isDefault: true, description: "Through openrouter." });
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it.skipIf(process.platform === "win32")("lists phren agent's catalog from `models --json`, dropping malformed rows, and caches it per source", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "phren-agent-models-"));
+    const bin = path.join(dir, "phren-agent");
+    const listing = { models: [
+      { id: "openai-codex/gpt-6-sol", name: "GPT-6 Sol", provider: "openai-codex", description: "ChatGPT subscription", isDefault: true, defaultReasoningEffort: "medium", supportedReasoningEfforts: ["low", "medium", "high", "xhigh"] },
+      { id: "anthropic/claude-sonnet-5", name: "Sonnet 5", description: "Anthropic API", supportedReasoningEfforts: ["low", "high"] },
+      { id: "no provider", name: "Bad" },
+      { id: "anthropic/claude-x", name: "line\nbreak" },
+    ] };
+    await writeFile(bin, `#!/bin/sh\n[ "$1 $2" = "models --json" ] || exit 1\ncat <<'JSON'\n${JSON.stringify(listing)}\nJSON\n`, { mode: 0o755 });
+    try {
+      const models = await readPhrenModels({ file: bin, args: ["models", "--json"] });
+      expect(models).toEqual([
+        { id: "openai-codex/gpt-6-sol", name: "GPT-6 Sol", description: "ChatGPT subscription", isDefault: true, defaultReasoningEffort: "medium", supportedReasoningEfforts: ["low", "medium", "high", "xhigh"] },
+        { id: "anthropic/claude-sonnet-5", name: "Sonnet 5", description: "Anthropic API", supportedReasoningEfforts: ["low", "high"] },
+      ]);
+      expect(await readPhrenModels({ file: path.join(dir, "missing"), args: [] })).toEqual([]);
+      let calls = 0;
+      const catalog = new ModelCatalog(async () => [], async () => [], async () => [], 600_000, async () => { calls++; return models; });
+      expect((await catalog.list("phren")).map(model => model.id)).toEqual(["openai-codex/gpt-6-sol", "anthropic/claude-sonnet-5"]);
+      await catalog.list("phren");
+      expect(calls).toBe(1);
+    } finally { await rm(dir, { recursive: true, force: true }); }
   });
 });

@@ -3,9 +3,10 @@
  * Calls chatgpt.com/backend-api/codex/responses (Responses API format).
  */
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
-import { toolResultText } from "./types.js";
+import { IncompleteStreamError, toolResultText } from "./types.js";
 import { getAccessToken } from "./codex-auth.js";
 import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
+import { wireReasoningEffort } from "./openai-compat.js";
 import type { ReasoningEffort } from "../models.js";
 import { lookupContextWindow, lookupMaxOutputTokens, modelSupportsVision } from "../models.js";
 
@@ -238,9 +239,8 @@ export class CodexProvider implements LlmProvider {
       // cannot round-trip (chatStream already requested it; chat() didn't).
       include: ["reasoning.encrypted_content"],
     };
-    if (this.reasoningEffort) {
-      body.reasoning = { effort: this.reasoningEffort };
-    }
+    const effort = wireReasoningEffort(this.name, this.model, this.reasoningEffort);
+    if (effort) body.reasoning = { effort };
     if (tools.length > 0) {
       body.tools = toResponsesTools(tools);
       body.tool_choice = "auto";
@@ -259,9 +259,8 @@ export class CodexProvider implements LlmProvider {
       stream: true,
       include: ["reasoning.encrypted_content"],
     };
-    if (this.reasoningEffort) {
-      body.reasoning = { effort: this.reasoningEffort };
-    }
+    const effort = wireReasoningEffort(this.name, this.model, this.reasoningEffort);
+    if (effort) body.reasoning = { effort };
     if (tools.length > 0) {
       body.tools = toResponsesTools(tools);
       body.tool_choice = "auto";
@@ -355,7 +354,7 @@ export class CodexProvider implements LlmProvider {
     }
 
     if (!finalResponse) {
-      throw new Error("Codex stream ended without response.completed event");
+      throw new IncompleteStreamError("Codex stream ended without response.completed event");
     }
 
     return finalResponse;
@@ -462,7 +461,7 @@ export class CodexProvider implements LlmProvider {
 
     ws.addEventListener("close", () => {
       if (!done) {
-        push(new Error("Codex WebSocket closed before response.completed"));
+        push(new IncompleteStreamError("Codex WebSocket closed before response.completed"));
         done = true;
       }
     });

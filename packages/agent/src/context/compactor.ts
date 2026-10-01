@@ -15,7 +15,7 @@
  * session log (the caller applies the resulting plan as a log/replace).
  */
 import type { LlmMessage, LlmProvider } from "../providers/types.js";
-import type { CostTracker } from "../cost.js";
+import { recordTokenUsage, type CostTracker } from "../cost.js";
 import type { PhrenContext } from "../memory/context.js";
 import { planPrune, type PrunePlan, type PruneConfig } from "./pruner.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
@@ -270,13 +270,16 @@ export async function compactWithLlm(
       ...messages.slice(0, plan.endIndex + 1),
       { role: "user", content: CHECKPOINT_INSTRUCTION },
     ];
+    // A timeout or turn abort settles the wait; finally() then cancels the
+    // request itself so it doesn't keep generating (and billing) detached.
+    const cancel = new AbortController();
     const response = await withTimeout(
-      provider.chat(systemPrompt, prefixMessages, []),
+      provider.chat(systemPrompt, prefixMessages, [], cancel.signal),
       config.timeoutMs,
       opts.signal,
-    );
+    ).finally(() => cancel.abort());
     if (response.usage && opts.costTracker) {
-      opts.costTracker.recordUsage(response.usage.input_tokens, response.usage.output_tokens);
+      recordTokenUsage(opts.costTracker, response.usage);
     }
     responseText = response.content
       .filter((block): block is { type: "text"; text: string } => block.type === "text")

@@ -1,6 +1,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import type { PermissionMode } from "./permissions/types.js";
+import { normalizeReasoningEffort, type ReasoningEffort } from "./models.js";
 import { loadPermissionMode } from "./settings.js";
 
 export const AGENT_CONFIG_DIR = ".phren-agent";
@@ -17,12 +18,18 @@ export interface CliArgs {
   task: string;
   provider?: string;
   model?: string;
-  reasoning?: "low" | "medium" | "high" | "xhigh";
+  reasoning?: ReasoningEffort;
   project?: string;
   permissions: PermissionMode;
   permissionsExplicit: boolean;
   maxTurns: number;
   maxOutput?: number;
+  /** Context window override in tokens (the catalog's otherwise). */
+  contextWindow?: number;
+  /** Per-1M-token price overrides in USD. */
+  priceIn?: number;
+  priceOut?: number;
+  priceCache?: number;
   budget: number | null;
   plan: boolean;
   dryRun: boolean;
@@ -50,6 +57,11 @@ export interface CliArgs {
   noLlmCompact: boolean;
   /** Kernel write-fence for shell commands: off | auto | require. */
   sandbox: "off" | "auto" | "require";
+  /**
+   * chat: quick chat, no tools, read-only phren memory in the system prompt
+   * (`/promote` turns it into a normal agent session with tools).
+   */
+  mode: "agent" | "chat";
   help: boolean;
   version: boolean;
 }
@@ -64,12 +76,18 @@ Options:
                        openai-compat, ollama
   --base-url <url>     Endpoint for openai-compat (or to override deepseek's)
   --model <model>      Override LLM model
-  --reasoning <level>  Reasoning effort: low, medium, high, xhigh
+  --reasoning <level>  Reasoning effort: none, low, medium, high, xhigh (max)
   --project <name>     Force phren project context
   --max-turns <n>      Max tool-use turns (default: 50)
   --max-output <n>     Max output tokens per response (default: auto per model)
+  --context-window <n> Context window in tokens, overriding the model catalog
+  --price-in <usd>     Input price per 1M tokens, overriding the catalog
+  --price-out <usd>    Output price per 1M tokens
+  --price-cache <usd>  Cache-hit input price per 1M tokens
   --budget <dollars>   Max spend in USD (aborts when exceeded)
   --plan               Plan mode: show plan before executing tools
+  --mode <mode>        agent (default) or chat: quick chat with no tools and read-only
+                       phren memory up front; /promote continues it as an agent
   --no-subagents       Disable spawn_agent/send_message/list_agents in one-shot mode
   --no-llm-compact     Use regex prune summaries instead of LLM compaction
   --sandbox <mode>     Kernel write-fence for shell (bwrap): off, auto (default), require
@@ -111,8 +129,14 @@ Environment:
   PHREN_AGENT_PROVIDER Force provider via env
   PHREN_AGENT_MODEL    Override model via env
   PHREN_AGENT_REASONING Override reasoning effort via env
-  PHREN_AGENT_BASE_URL  Endpoint for openai-compat
+  PHREN_AGENT_BASE_URL  Endpoint for openai-compat (and for deepseek with
+                        PHREN_AGENT_PROVIDER=deepseek)
   PHREN_AGENT_API_KEY   Key for openai-compat
+  PHREN_AGENT_CONTEXT_WINDOW, PHREN_AGENT_PRICE_IN, PHREN_AGENT_PRICE_OUT,
+  PHREN_AGENT_PRICE_CACHE  Same as the flags, for every model (the flags apply
+                           only to the model they were given with, and win)
+  OpenCode Go (base URL https://opencode.ai/zen/go/v1) is a subscription, so
+  its usage shows as included rather than priced.
 
 Examples:
   phren-agent "fix the login bug"
@@ -141,6 +165,7 @@ export function parseArgs(argv: string[]): CliArgs {
     sandbox: "auto",
     mcp: [],
     multi: false,
+    mode: "agent",
     help: false,
     version: false,
   };
@@ -161,6 +186,11 @@ export function parseArgs(argv: string[]): CliArgs {
       if (mode === "off" || mode === "auto" || mode === "require") { args.sandbox = mode; }
     }
     else if (arg === "--plan") { args.plan = true; }
+    else if (arg === "--mode" && argv[i + 1]) {
+      const mode = argv[++i];
+      if (mode !== "agent" && mode !== "chat") throw new Error(`Unknown --mode "${mode}". Use agent or chat.`);
+      args.mode = mode;
+    }
     else if (arg === "--resume" || arg === "--continue" || arg === "-c") { args.resume = true; }
     else if (arg === "--session" && argv[i + 1]) { args.resume = true; args.resumeId = argv[++i]; }
     else if (arg === "--list-sessions") { args.listSessions = true; }
@@ -184,14 +214,15 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--provider" && argv[i + 1]) { args.provider = argv[++i]; }
     else if (arg === "--model" && argv[i + 1]) { args.model = argv[++i]; }
     else if (arg === "--reasoning" && argv[i + 1]) {
-      const value = argv[++i]?.toLowerCase();
-      if (value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") {
-        args.reasoning = value === "max" ? "xhigh" : value;
-      }
+      args.reasoning = normalizeReasoningEffort(argv[++i]) ?? args.reasoning;
     }
     else if (arg === "--project" && argv[i + 1]) { args.project = argv[++i]; }
     else if (arg === "--max-turns" && argv[i + 1]) { args.maxTurns = parseInt(argv[++i], 10) || 50; }
     else if (arg === "--max-output" && argv[i + 1]) { args.maxOutput = parseInt(argv[++i], 10) || undefined; }
+    else if (arg === "--context-window" && argv[i + 1]) { args.contextWindow = parsePositive(argv[++i], arg, true); }
+    else if (arg === "--price-in" && argv[i + 1]) { args.priceIn = parsePositive(argv[++i], arg); }
+    else if (arg === "--price-out" && argv[i + 1]) { args.priceOut = parsePositive(argv[++i], arg); }
+    else if (arg === "--price-cache" && argv[i + 1]) { args.priceCache = parsePositive(argv[++i], arg); }
     else if (arg === "--budget" && argv[i + 1]) { args.budget = parseFloat(argv[++i]) || null; }
     else if (arg === "--yolo") { args.permissions = "full-auto"; args.permissionsExplicit = true; }
     else if (arg === "--permissions" && argv[i + 1]) {
@@ -211,13 +242,18 @@ export function parseArgs(argv: string[]): CliArgs {
     args.model = process.env.PHREN_AGENT_MODEL;
   }
   if (!args.reasoning && process.env.PHREN_AGENT_REASONING) {
-    const value = process.env.PHREN_AGENT_REASONING.toLowerCase();
-    if (value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") {
-      args.reasoning = value === "max" ? "xhigh" : value;
-    }
+    args.reasoning = normalizeReasoningEffort(process.env.PHREN_AGENT_REASONING);
   }
 
   return args;
+}
+
+/** A non-negative number (prices) or positive integer (token counts); throws on junk. */
+function parsePositive(raw: string, flag: string, integer = false): number {
+  const value = Number(raw.replace(/_/g, ""));
+  const ok = integer ? Number.isInteger(value) && value > 0 : Number.isFinite(value) && value >= 0;
+  if (!ok) throw new Error(`${flag} needs ${integer ? "a positive whole number" : "a number"}, got "${raw}".`);
+  return value;
 }
 
 export function resolveStartupPermissions(args: CliArgs): void {

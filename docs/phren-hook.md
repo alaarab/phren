@@ -12,8 +12,8 @@ Linux uses a systemd user service; macOS uses a LaunchAgent in your signed-in
 user session. Without Herdr the Hook uses tmux; see [Without Herdr: tmux](#without-herdr-tmux).
 
 ```sh
-npx --yes @phren/cli@0.3.19 bridge install
-npx --yes @phren/cli@0.3.19 bridge doctor
+npx --yes @phren/cli@0.3.20 bridge install
+npx --yes @phren/cli@0.3.20 bridge doctor
 ```
 
 Keep Tailscale connected on the iPhone and computer for remote access. Funnel and
@@ -191,7 +191,8 @@ From a project, the iPhone can open a new session on a computer:
 the project's directory and starts Codex, Claude Code, Copilot, OpenCode or
 phren's own agent (`kind: "phren"`) in its pane, returning once Herdr has
 detected it ready. Herdr cannot start or detect phren-agent itself, so for
-`phren` the Hook types `phren agent -i` (plus `--model` and `--reasoning`) at
+`phren` the Hook types `phren agent -i` (plus `--model`, `--reasoning`, and
+`--mode chat` / `--session <id>` for a quick chat or a resumed one) at
 the pane's login shell, waits for it to be the foreground program, and reports
 it to Herdr as agent `phren` under the launch name; its own lifecycle hooks then
 keep the pane's status, and the typed line releases that report when the agent
@@ -525,10 +526,10 @@ alone.
 ## Maintain and diagnose
 
 ```sh
-npx --yes @phren/cli@0.3.19 bridge status
-npx --yes @phren/cli@0.3.19 bridge update
-npx --yes @phren/cli@0.3.19 bridge rollback
-npx --yes @phren/cli@0.3.19 bridge uninstall
+npx --yes @phren/cli@0.3.20 bridge status
+npx --yes @phren/cli@0.3.20 bridge update
+npx --yes @phren/cli@0.3.20 bridge rollback
+npx --yes @phren/cli@0.3.20 bridge uninstall
 ```
 
 `update` installs the version of the CLI you invoke; choose an explicit newer
@@ -758,6 +759,48 @@ from the start of the audio whatever its sample rate, or `alignment: null` when
 ElevenLabs sent none. The alignment covers the words spoken, after the Hook
 strips the reply's markdown, so `characters` joined is the spoken text. The
 phone uses it to highlight the word being read in the chat.
+
+With `"timestamps": true, "stream": true` (the `speechTimestampStream`
+capability) the Hook calls ElevenLabs' `stream/with-timestamps` and streams
+`application/x-ndjson`: one `{ "audio": "<base64>", "alignment": {...} | null }`
+line per ElevenLabs chunk, with the same `X-Phren-*` headers as the audio
+stream, the alignment times in seconds from the start of the sentence. The
+first line arrives in about 0.3 s with v4 Turbo; the plain timestamped reply
+waits for the whole clip, about 0.9 s (measured 2026-10-01).
+
+How fast the first audio arrives. The Hook passes ElevenLabs' body through as
+it arrives, sending the headers before the first byte. It reaches ElevenLabs
+over its own keep-alive connection pool, so the next sentence skips the TCP and
+TLS handshake even after a pause of up to a minute. `phren bridge speech-region
+us` sends every ElevenLabs request this computer makes (spoken replies, the
+live socket, the voice list, Scribe dictation and the usage read) to
+ElevenLabs' US-only endpoint (`api.us.elevenlabs.io`), and `global` (the
+default) to `api.elevenlabs.io`. It is stored in `speech.json` like the model
+and read on every request. A request ElevenLabs goes quiet on for 30 s, before
+its headers or between two chunks of audio, is given up on, and a pooled
+connection ElevenLabs closed while idle is retried once on a fresh one.
+
+`WS /v1/speech/live` (the `speechLive` capability) voices a reply while it is
+still being written. Open it with optional `voice` and repeated `format`
+query parameters, send `{ "text": "<more of the reply>" }` as the reply grows
+and `{ "done": true }` when it is complete. The Hook speaks it a sentence or
+line at a time, as soon as each one is complete, and sends back `{ "type": "start", model,
+format, audioFormat, sampleRate }` with the first audio, then `{ "type":
+"audio", audio, alignment }` frames (alignment in seconds from the start of
+the socket's audio), then `{ "type": "done" }`, or `{ "type": "error", code,
+error }`. v4 Turbo works on ElevenLabs' text-to-dialogue WebSocket (its
+text-to-speech WebSocket refuses v4 models), where the first audio came about 140 ms
+after ElevenLabs had the first complete sentence (2026-10-01); Flash v2.5 is the fallback, on
+the text-to-speech WebSocket with `auto_mode`. One socket voices one reply.
+Before any audio, Flash takes the reply over (with everything said so far)
+when ElevenLabs refuses the model, sends an error frame other than the key,
+quota or rate limit, closes the socket, takes over 5 s to open it, or sends
+no audio within 5 s once it must be voicing: the reply is done, or 300
+characters of it are in (a shorter piece can sit in ElevenLabs' buffer while
+the agent thinks). Text the phone sends while the Hook reads its settings is
+kept. A reply with nothing to say (only code, say) ends with `done`; one past
+ten minutes ends with the error `speech-limit`; a phone that stops reading the
+audio (4 MB queued) is closed with `speech-failed`.
 
 The key is this computer's ElevenLabs key (see [the ElevenLabs key](#the-elevenlabs-key)),
 used only in the request to ElevenLabs and never returned, even in errors.

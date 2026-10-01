@@ -1,5 +1,6 @@
 import { markPaneClosed } from "./worker-close.js";
 import { mkdir, readFile } from "node:fs/promises";
+import { phrenStoreRoot } from "./transcripts.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -68,6 +69,59 @@ function effortArgs(kind: (typeof launchKinds)[number], effort: LaunchEffort): s
 
 /** phren's own agent runs as `phren agent`: the subcommand and its interactive TUI lead its arguments. */
 const PHREN_AGENT_ARGS = ["agent", "-i"];
+
+/**
+ * phren agent's quick chat and resume: `mode: "chat"` starts it with no tools
+ * and its memory read up front (`--mode chat`); `resumeSession` continues a
+ * session's history (`--session <id>`). Resuming a chat in `mode: "agent"`
+ * promotes it: the same conversation with tools. An agent session that used
+ * tools cannot go back to a chat: its history holds tool calls and results,
+ * which a request with no tools may not carry (Anthropic refuses it with a
+ * 400), so it is refused here before any pane exists.
+ */
+export async function phrenLaunchArgs(kind: string, data: Json, store = phrenStoreRoot()): Promise<string[]> {
+  const mode = z.enum(["agent", "chat"]).optional().parse(data.mode ?? undefined);
+  const resume = data.resumeSession === undefined || data.resumeSession === null ? undefined
+    : z.string().uuid("resumeSession must be a phren agent session id.").parse(data.resumeSession);
+  if ((mode || resume) && kind !== "phren") throw new BridgeError(400, "mode and resumeSession are for phren agent launches (kind phren).");
+  if (mode === "chat" && resume && await sessionUsedTools(resume, store)) {
+    throw new BridgeError(400, "This session used tools, so it can't continue as a quick chat. Resume it as an agent (mode agent).", { code: "chat-has-tools" });
+  }
+  return [...(mode === "chat" ? ["--mode", "chat"] : []), ...(resume ? ["--session", resume] : [])];
+}
+
+/** Whether a phren agent session's history, as its model sees it, holds a
+ * tool call or result: its event log (`<store>/.sessions`) folded as the
+ * agent folds it, so a span a compaction summary replaced counts as that
+ * summary. False when there is no readable log; phren agent says so itself. */
+export async function sessionUsedTools(session: string, store = phrenStoreRoot()): Promise<boolean> {
+  const raw = await readFile(path.join(store, ".sessions", `session-${session}.events.jsonl`), "utf8").catch(() => "");
+  const withTools = (message: unknown) => {
+    const content = (message as { content?: unknown } | undefined)?.content;
+    return Array.isArray(content) && content.some(block => ["tool_use", "tool_result"].includes(String((block as { type?: unknown } | null)?.type)));
+  };
+  const surface = new Map<number, boolean>();
+  for (const line of raw.split("\n")) {
+    let event: { seq?: unknown; type?: unknown; data?: { message?: unknown; start?: unknown; end?: unknown } };
+    try { event = JSON.parse(line) as typeof event; } catch { continue; }
+    if (typeof event.seq !== "number" || !event.data) continue;
+    if (["user/message", "assistant/message", "tool/results"].includes(String(event.type))) surface.set(event.seq, withTools(event.data.message));
+    else if (event.type === "log/replace" && typeof event.data.start === "number" && typeof event.data.end === "number") {
+      for (const seq of [...surface.keys()]) if (seq >= event.data.start && seq <= event.data.end) surface.delete(seq);
+      surface.set(event.data.start, withTools(event.data.message));
+    }
+  }
+  return [...surface.values()].some(Boolean);
+}
+
+/** A model from phren agent's catalog (`/v1/models?source=phren`) is
+ * `<provider>/<model>`. phren agent reads an openai or openai-codex prefix off
+ * `--model` itself; the rest name their provider with `--provider`. Any other
+ * model (an OpenRouter id typed by hand) passes through as it is. */
+export function phrenModelArgs(model: string): string[] {
+  const match = /^(anthropic|deepseek|ollama|openrouter)\/(.+)$/.exec(model);
+  return match ? ["--provider", match[1], "--model", match[2]] : ["--model", model];
+}
 
 async function prepareConductor(kind: (typeof launchKinds)[number], effort: LaunchEffort, model?: string): Promise<string[]> {
   const brief = await conductorBrief();
@@ -245,6 +299,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   if (permissionMode && kind === "phren") throw new BridgeError(400, "phren agent takes its permissions from its own settings; permissionMode is for Claude and Codex workers.");
   if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
   if (role === "conductor" && kind === "phren") throw new BridgeError(400, PHREN_NO_CONDUCTOR);
+  const phrenArgs = await phrenLaunchArgs(kind, data);
   // A dispatched worker's or scheduled run's first prompt. It rides on the
   // launch where the harness takes one; elsewhere the caller types it.
   const brief = data.brief === undefined || data.brief === null ? undefined : launchBriefSchema.parse(data.brief);
@@ -281,7 +336,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const conductorHere = role === "agent" && workspace ? await conductorPane(server, before) : undefined;
   if (conductorHere && conductorHere.workspace_id === workspace) workspace = undefined;
   const args = role === "conductor" ? await prepareConductor(kind, effort, model)
-    : [...(kind === "phren" ? PHREN_AGENT_ARGS : []), ...(model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
+    : [...(kind === "phren" ? [...PHREN_AGENT_ARGS, ...phrenArgs] : []), ...(model && kind === "phren" ? phrenModelArgs(model) : model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
       ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : [])];
   // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
   // pane joins the thread the Hook started, and the brief is that thread's

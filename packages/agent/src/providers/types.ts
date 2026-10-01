@@ -75,10 +75,25 @@ export interface AgentToolDef {
   input_schema: Record<string, unknown>;
 }
 
+/**
+ * Token usage for one response. `input_tokens` excludes cache hits and cache
+ * writes, which are counted separately in `cache_read_input_tokens` and
+ * `cache_creation_input_tokens` (the Anthropic and Claude Code shape), so
+ * each bucket can be priced at its own rate.
+ */
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
 export interface LlmResponse {
   content: ContentBlock[];
   stop_reason: "end_turn" | "tool_use" | "max_tokens";
-  usage?: { input_tokens: number; output_tokens: number };
+  usage?: TokenUsage;
+  /** tool_use blocks (input {}) whose arguments failed to parse. */
+  invalidToolCalls?: InvalidToolCall[];
 }
 
 // ── Streaming types ─────────────────────────────────────────────────────────
@@ -105,6 +120,8 @@ export interface LlmProvider {
   reasoningEffort?: ReasoningEffort;
   contextWindow?: number;
   maxOutputTokens?: number;
+  /** Endpoint, for OpenAI-compatible providers (decides metering, e.g. OpenCode Go). */
+  baseUrl?: string;
   chat(
     system: string,
     messages: LlmMessage[],
@@ -117,4 +134,48 @@ export interface LlmProvider {
     tools: AgentToolDef[],
     signal?: AbortSignal,
   ): AsyncIterable<StreamDelta>;
+}
+
+/** A provider failure that a fresh request can fix; withRetry retries it. */
+export class RetryableProviderError extends Error {
+  readonly retryable = true;
+  constructor(message: string) {
+    super(message);
+    this.name = "RetryableProviderError";
+  }
+}
+
+/**
+ * Mark a failed stream with the usage the provider reported before it
+ * failed. The attempt is retried, but its tokens were billed, so the loop
+ * records them for --budget.
+ */
+export function withPartialUsage<E>(error: E, usage: TokenUsage | undefined): E {
+  if (usage && error instanceof Error && !(error as { usage?: unknown }).usage) {
+    (error as { usage?: TokenUsage }).usage = usage;
+  }
+  return error;
+}
+
+/** The usage withPartialUsage attached to an error, if any. */
+export function partialUsage(error: unknown): TokenUsage | undefined {
+  const usage = error instanceof Error ? (error as { usage?: unknown }).usage : undefined;
+  return usage && typeof usage === "object" ? usage as TokenUsage : undefined;
+}
+
+/** Thrown when a stream ends without the provider saying the response is complete. */
+export class IncompleteStreamError extends RetryableProviderError {
+  constructor(message: string) {
+    super(message);
+    this.name = "IncompleteStreamError";
+  }
+}
+
+/** A tool call whose arguments were not a JSON object. It is answered with an error, never run. */
+export interface InvalidToolCall {
+  id: string;
+  name: string;
+  /** The arguments as the model sent them. */
+  raw: string;
+  error: string;
 }

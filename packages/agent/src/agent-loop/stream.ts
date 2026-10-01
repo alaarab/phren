@@ -1,7 +1,9 @@
-import type { ToolUseBlock, StreamDelta, ContentBlock } from "../providers/types.js";
+import type { ToolUseBlock, StreamDelta, ContentBlock, InvalidToolCall } from "../providers/types.js";
+import { partialUsage } from "../providers/types.js";
+import { parseToolArguments } from "../providers/openai-compat.js";
 import type { AgentToolImage } from "../tools/types.js";
 import { chainKey, recordCall, type RepeatChainState } from "../guards/repeat-tool-reminder.js";
-import type { CostTracker } from "../cost.js";
+import { recordTokenUsage, type CostTracker } from "../cost.js";
 import type { PhrenContext } from "../memory/context.js";
 import type { CaptureState } from "../memory/auto-capture.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -146,7 +148,7 @@ export async function consumeStream(
   costTracker?: CostTracker | null,
   hooks?: ConsumeStreamHooks | ((text: string) => void),
   signal?: AbortSignal,
-): Promise<{ content: ContentBlock[]; stop_reason: "end_turn" | "tool_use" | "max_tokens" }> {
+): Promise<{ content: ContentBlock[]; stop_reason: "end_turn" | "tool_use" | "max_tokens"; invalidToolCalls: InvalidToolCall[] }> {
   const onTextDelta = typeof hooks === "function" ? hooks : hooks?.onTextDelta;
   const onReasoningDelta = typeof hooks === "function" ? undefined : hooks?.onReasoningDelta;
   const providerName = typeof hooks === "function" ? undefined : hooks?.providerName;
@@ -159,7 +161,7 @@ export async function consumeStream(
   const toolsByIndex = new Map<string, { id: string; name: string; jsonParts: string[] }>();
   // Tool calls whose accumulated JSON failed to parse, held until the turn's
   // stop_reason is known (see tool_use_end).
-  const malformedTools: Array<{ id: string; name: string }> = [];
+  const malformedTools: InvalidToolCall[] = [];
 
   // Reasoning must land BEFORE the text/tool blocks it preceded: Anthropic
   // requires thinking blocks first in the assistant content array.
@@ -178,63 +180,66 @@ export async function consumeStream(
     currentReasoning = "";
   };
 
-  for await (const delta of stream) {
-    if (signal?.aborted) break;
-    if (delta.type === "text_delta") {
-      (onTextDelta ?? process.stdout.write.bind(process.stdout))(delta.text);
-      currentText += delta.text;
-    } else if (delta.type === "reasoning_delta") {
-      // Preserve stream order: a reasoning segment starting after visible
-      // text closes that text block first (providers normally emit
-      // reasoning before text, so this is the uncommon direction).
-      if (currentText && !currentReasoning) {
-        content.push({ type: "text", text: currentText });
-        currentText = "";
-      }
-      onReasoningDelta?.(delta.text);
-      currentReasoning += delta.text;
-    } else if (delta.type === "reasoning_end") {
-      flushReasoning(delta);
-    } else if (delta.type === "tool_use_start") {
-      // Flush accumulated reasoning (without a reasoning_end, e.g. compat
-      // providers that only emit deltas), then text.
-      flushReasoning();
-      if (currentText) {
-        content.push({ type: "text", text: currentText });
-        currentText = "";
-      }
-      toolsByIndex.set(delta.id, { id: delta.id, name: delta.name, jsonParts: [] });
-    } else if (delta.type === "tool_use_delta") {
-      const tool = toolsByIndex.get(delta.id);
-      if (tool) tool.jsonParts.push(delta.json);
-    } else if (delta.type === "tool_use_end") {
-      const tool = toolsByIndex.get(delta.id);
-      if (tool) {
-        const jsonStr = tool.jsonParts.join("");
-        let input: Record<string, unknown> | null = null;
-        try {
-          const parsed: unknown = JSON.parse(jsonStr);
-          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-            input = parsed as Record<string, unknown>;
+  try {
+    for await (const delta of stream) {
+      if (signal?.aborted) break;
+      if (delta.type === "text_delta") {
+        (onTextDelta ?? process.stdout.write.bind(process.stdout))(delta.text);
+        currentText += delta.text;
+      } else if (delta.type === "reasoning_delta") {
+        // Preserve stream order: a reasoning segment starting after visible
+        // text closes that text block first (providers normally emit
+        // reasoning before text, so this is the uncommon direction).
+        if (currentText && !currentReasoning) {
+          content.push({ type: "text", text: currentText });
+          currentText = "";
+        }
+        onReasoningDelta?.(delta.text);
+        currentReasoning += delta.text;
+      } else if (delta.type === "reasoning_end") {
+        flushReasoning(delta);
+      } else if (delta.type === "tool_use_start") {
+        // Flush accumulated reasoning (without a reasoning_end, e.g. compat
+        // providers that only emit deltas), then text.
+        flushReasoning();
+        if (currentText) {
+          content.push({ type: "text", text: currentText });
+          currentText = "";
+        }
+        toolsByIndex.set(delta.id, { id: delta.id, name: delta.name, jsonParts: [] });
+      } else if (delta.type === "tool_use_delta") {
+        const tool = toolsByIndex.get(delta.id);
+        if (tool) tool.jsonParts.push(delta.json);
+      } else if (delta.type === "tool_use_end") {
+        const tool = toolsByIndex.get(delta.id);
+        if (tool) {
+          const jsonStr = tool.jsonParts.join("");
+          const parsed = parseToolArguments(jsonStr);
+          if ("input" in parsed) {
+            content.push({ type: "tool_use", id: tool.id, name: tool.name, input: parsed.input });
+          } else {
+            // Defer: a malformed call must not become an orphan tool_use on a
+            // truncated (max_tokens) or text turn, where runTurn never answers
+            // it. If the turn does end as tool_use, emit it with empty input and
+            // report it, so runTurn answers it with an error instead of running
+            // the tool with arguments the model never gave.
+            malformedTools.push({ id: tool.id, name: tool.name, raw: jsonStr, error: parsed.error });
+            process.stderr.write(`\x1b[33m[warning] Malformed tool_use JSON for ${tool.name} (${tool.id}); returning an error to the model\x1b[0m\n`);
           }
-        } catch { /* fall through to malformed handling */ }
-        if (input) {
-          content.push({ type: "tool_use", id: tool.id, name: tool.name, input });
-        } else {
-          // Defer: a malformed call must not become an orphan tool_use on a
-          // truncated (max_tokens) or text turn, where runTurn never executes
-          // it. If the turn does end as tool_use, emit it with empty input so
-          // the tool runs and produces the matching tool_result.
-          malformedTools.push({ id: tool.id, name: tool.name });
-          process.stderr.write(`\x1b[33m[warning] Malformed tool_use JSON for ${tool.name} (${tool.id}); using empty input\x1b[0m\n`);
+        }
+      } else if (delta.type === "done") {
+        stop_reason = delta.stop_reason;
+        if (costTracker && delta.usage) {
+          recordTokenUsage(costTracker, delta.usage);
         }
       }
-    } else if (delta.type === "done") {
-      stop_reason = delta.stop_reason;
-      if (costTracker && delta.usage) {
-        costTracker.recordUsage(delta.usage.input_tokens, delta.usage.output_tokens);
-      }
     }
+  } catch (err: unknown) {
+    // A failed attempt is retried, but what the provider reported it billed
+    // still counts toward --budget.
+    const usage = partialUsage(err);
+    if (costTracker && usage) recordTokenUsage(costTracker, usage);
+    throw err;
   }
 
   // Flush remaining reasoning, then text
@@ -247,15 +252,14 @@ export async function consumeStream(
   }
 
   // Only a genuine tool_use turn can safely carry a synthesized tool block;
-  // runTurn executes it and pairs the result. On any other stop reason the
+  // runTurn pairs it with an error result. On any other stop reason the
   // block is dropped so the durable history never holds an orphan tool_use.
-  if (stop_reason === "tool_use") {
-    for (const tool of malformedTools) {
-      content.push({ type: "tool_use", id: tool.id, name: tool.name, input: {} });
-    }
+  const invalidToolCalls = stop_reason === "tool_use" ? malformedTools : [];
+  for (const tool of invalidToolCalls) {
+    content.push({ type: "tool_use", id: tool.id, name: tool.name, input: {} });
   }
 
-  return { content, stop_reason };
+  return { content, stop_reason, invalidToolCalls };
 }
 
 export interface ToolExecContext {

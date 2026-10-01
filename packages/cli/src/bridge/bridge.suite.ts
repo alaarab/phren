@@ -21,6 +21,7 @@ import { repositoryBranch, repositoryDiff } from "./projects.js";
 import { BridgeError, object } from "./protocol.js";
 import { herdrAgentName, streamCloseReason } from "./server.js";
 import { historicalImage, phrenStoreRoot, TranscriptReader, transcriptPath, visibleEvent } from "./transcripts.js";
+import { readDeltaPreview, TranscriptPreviewStream } from "./transcript-preview.js";
 import { dispatch } from "./transport.js";
 import { askpassScript } from "./sudo.js";
 import { enrollComputer, publicComputerKey } from "./computers.js";
@@ -297,6 +298,33 @@ describe("Phren Hook boundaries", () => {
       const page = await new TranscriptReader(await transcriptPath("phren", session), "phren").read();
       expect(page.entries.map(e => e.raw.type)).toEqual(["user/message"]);
       await expect(transcriptPath("phren", "bbbbbbbb-2222-4222-8222-222222222222")).rejects.toThrow("not available");
+    } finally {
+      if (previous === undefined) delete process.env.PHREN_PATH; else process.env.PHREN_PATH = previous;
+      await rm(store, { recursive: true, force: true });
+    }
+  });
+  it("reads a phren-agent session from the store's .sessions, with its reply streamed from the .preview.json beside it", async () => {
+    const store = await mkdtemp(path.join(tmpdir(), "phren-store-"));
+    const previous = process.env.PHREN_PATH;
+    process.env.PHREN_PATH = store;
+    try {
+      const start = "2026-10-01T12:00:00.000Z";
+      const header = JSON.stringify({ type: "header", version: 1, sessionId: session, cwd: store }) + "\n";
+      const prompt = JSON.stringify({ seq: 0, time: start, type: "user/message", data: { message: { role: "user", content: "What is 6 x 7?" }, source: "user", turn: 1 } }) + "\n";
+      await mkdir(path.join(store, ".sessions"));
+      const file = path.join(store, ".sessions", `session-${session}.events.jsonl`);
+      await writeFile(file, header + prompt);
+      expect(await transcriptPath("phren", session)).toBe(await realpathAsync(file));
+      const page = await new TranscriptReader(await transcriptPath("phren", session), "phren").read();
+      expect(page.entries.map(e => e.raw.type)).toEqual(["user/message"]);
+      const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "phren" as const, session };
+      const preview = new TranscriptPreviewStream(target, async () => { throw new Error("never the pane"); });
+      preview.observe(page.entries);
+      await writeFile(file + ".preview.json", JSON.stringify({ turnStartedAt: start, text: "It is" }));
+      expect(await readDeltaPreview(target, file)).toEqual({ turnStartedAt: start, text: "It is" });
+      expect((await preview.update("working", file, 0))?.preview).toEqual({ turnStartedAt: start, text: "It is", delta: "It is", streamed: true });
+      await writeFile(file + ".preview.json", JSON.stringify({ turnStartedAt: start, text: "It is 42." }));
+      expect((await preview.update("working", file, 500))?.preview).toMatchObject({ text: "It is 42.", delta: " 42." });
     } finally {
       if (previous === undefined) delete process.env.PHREN_PATH; else process.env.PHREN_PATH = previous;
       await rm(store, { recursive: true, force: true });
@@ -2906,11 +2934,17 @@ schedules:
       expect((await api("/v1/health/details")).data.peers.computers[0]).toMatchObject({ name: "Linuxbox", reachable: true, listsBack: true });
     });
 
-    it("advertises speech and transcribe, and voices /v1/speech with only bridge/elevenlabs.json as the key", async () => {
-      expect((await api("/v1/health")).data.capabilities).toMatchObject({ speech: true, transcribe: true });
+    it("advertises speech and transcribe, and voices /v1/speech with only bridge/elevenlabs.json as the key, in the stored region", async () => {
+      expect((await api("/v1/health")).data.capabilities).toMatchObject({ speech: true, transcribe: true, speechTimestampStream: true, speechLive: true, previewDeltas: true, quickChat: true });
       const reply = await api("/v1/speech", { text: "Hello from the conductor." });
       expect(reply.status).toBe(503);
       expect(reply.data).toMatchObject({ code: "speech-unconfigured" });
+      // The live socket answers the same way, before reaching for ElevenLabs.
+      const live = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/speech/live`);
+      const [first] = await once(live, "message") as [Buffer];
+      expect(JSON.parse(first.toString())).toMatchObject({ type: "error", code: "speech-unconfigured" });
+      const [closeCode] = await once(live, "close") as [number];
+      expect(closeCode).toBe(1008);
       expect((await api("/v1/speech", { text: "" })).status).toBe(400);
       // Node before 22.21 ignores NODE_USE_ENV_PROXY, and the request would leave the machine.
       const [major, minor] = process.versions.node.split(".").map(Number);
@@ -2922,8 +2956,13 @@ schedules:
         expect(keyed.data).toMatchObject({ code: "speech-unreachable" });
         expect(JSON.stringify(keyed.data)).not.toContain("sk_test");
         expect(egressTargets).toEqual(["api.elevenlabs.io:443"]);
+        // `phren bridge speech-region us` sends the next reply to the US-only endpoint, no restart.
+        await writeFile(path.join(root, "bridge/speech.json"), JSON.stringify({ region: "us" }));
+        expect((await api("/v1/speech", { text: "Hello again." })).data).toMatchObject({ code: "speech-unreachable" });
+        expect(egressTargets).toEqual(["api.elevenlabs.io:443", "api.us.elevenlabs.io:443"]);
       } finally {
         await rm(file, { force: true });
+        await rm(path.join(root, "bridge/speech.json"), { force: true });
       }
     });
 
