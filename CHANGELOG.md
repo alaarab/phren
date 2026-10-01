@@ -16,6 +16,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - phren agent's compaction request carries the session's tools. Without them, Anthropic rejects a history that holds tool calls, so compaction on Claude always fell back to the regex summary, and the cached prefix never matched.
 - A Claude Code teammate that has shut down is a finished child: its `shutdown_approved` reply no longer flips it back to running, and the system's `teammate_terminated` notice ends it too, so the phone's Background tray and the session's running count drop it.
+- A phone message to a Claude pane is followed by its `deliveryId` from the moment it is typed, not by its words. The Hook's typed record carries the id and holds only a SHA-256 of the words, and the conversation's own UserPromptSubmit settles that id. A message whose hook arrived while the Hook was still checking the pane's identity is now answered `delivered` (or 409 when another conversation took it) instead of `queued` with an untracked id that `/v1/prompt/status` called `unknown`, and a message answered `deliveryUncertain` turns `delivered` there once Claude submits it. A `/v1/transcripts` stream opened with `deliveries=1` (capability `deliveryFrames`) pushes `{ type: "delivery", source, session, deliveryId, state }` when a message's state changes, so the phone need not poll `/v1/prompt/status`.
 
 ## [0.3.20] - 2026-10-01
 
