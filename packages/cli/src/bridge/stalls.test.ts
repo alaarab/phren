@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { StallDetector } from "./stalls.js";
+import { BACKGROUND_STALE_MS } from "./session-activity.js";
 import type { Target } from "./protocol.js";
 const target: Target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude", session: "11111111-1111-4111-8111-111111111111" };
 describe("working session stall clock", () => {
@@ -37,6 +38,21 @@ describe("working session stall clock", () => {
     // An unreadable transcript counts no live work.
     live.mockRejectedValueOnce(new Error("gone"));
     expect(await detector.observe(target, pane, live)).toHaveProperty("stalled", true);
+  });
+  // Review of #283: an awaited build deadlocked on a lock, or a child that died
+  // without its completion record, restarted the clock forever.
+  it("stops letting live work that never ends hold the clock after BACKGROUND_STALE_MS", async () => {
+    let now = 0;
+    const live = vi.fn(async () => 1);
+    const detector = new StallDetector({ now: () => now, threshold: () => 300_000, screen: async () => "1 shell still running", transcript: async () => "same" });
+    const pane = { terminal_id: "t", agent_status: "working" };
+    expect(await detector.observe(target, pane, live)).toBeUndefined();
+    for (now = 300_000; now < BACKGROUND_STALE_MS; now += 300_000) expect(await detector.observe(target, pane, live), String(now)).toBeUndefined();
+    expect(now).toBe(BACKGROUND_STALE_MS);
+    expect(await detector.observe(target, pane, live)).toMatchObject({ stalled: true, stallFor: 300 });
+    // Anything moving starts over, live work included.
+    const moved = new StallDetector({ now: () => now, threshold: () => 300_000, screen: async () => String(now), transcript: async () => "same" });
+    expect(await moved.observe(target, pane, live)).toBeUndefined();
   });
   it("treats failed observations as unknown, and can be disabled", async () => {
     let now = 0, broken = false, threshold = 10;

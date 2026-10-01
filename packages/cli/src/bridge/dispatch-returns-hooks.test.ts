@@ -284,8 +284,55 @@ describe("the worker's Hook answering from turn events", () => {
     uncommitted.mockResolvedValue(0);
     const clean = (await workerStates({ targets: [target] }, { ...readers(), uncommitted })).workers[0];
     expect(clean).not.toHaveProperty("unfinished");
-    observe(left, clean, now + 1);
-    expect(left.returned).toMatchObject({ state: "done" });
+    const fresh = receipt();
+    observe(fresh, clean, now + 1);
+    expect(fresh.returned).toMatchObject({ state: "done" });
+  });
+
+  // Review of #283: a checkout read that timed out read as clean (done, pane
+  // closed), and the same turn read needs-you a minute later: two returns.
+  it("returns one finished turn once, however its checkout reads on later polls", async () => {
+    const uncommitted = vi.fn(async (_directory: string): Promise<number | "unknown" | undefined> => "unknown");
+    record = turn(["UserPromptSubmit"], ["Stop", { reply: "Updated the permission mode.", cwd: "/work/phren-wt" }]);
+    const unknown = (await workerStates({ targets: [target] }, { ...readers(), uncommitted })).workers[0];
+    expect(unknown).toMatchObject({ state: "done", unchecked: true });
+    expect(unknown).not.toHaveProperty("unfinished");
+    const value = receipt();
+    expect(observe(value, unknown, now)).toBe(true);
+    const first = value.returned!;
+    expect(first).toMatchObject({ state: "done" });
+    // Git answers on the next poll: nine files. The same turn is not returned again.
+    uncommitted.mockResolvedValue(9);
+    const dirty = (await workerStates({ targets: [target] }, { ...readers(), uncommitted })).workers[0];
+    expect(dirty).toMatchObject({ unfinished: "Stopped with 9 uncommitted files and no PR." });
+    expect(observe(value, dirty, now + 15_000)).toBe(false);
+    expect(value.returned).toBe(first);
+    // The reverse: needs-you, then the owner commits the edits. Still one return.
+    const other = receipt();
+    observe(other, dirty, now);
+    uncommitted.mockResolvedValue(0);
+    expect(observe(other, (await workerStates({ targets: [target] }, { ...readers(), uncommitted })).workers[0], now + 15_000)).toBe(false);
+    expect(other.returned).toMatchObject({ state: "needs-you" });
+    // A new turn is a new return.
+    now += 60_000;
+    record = nextTurn(record, event("UserPromptSubmit", { at: now }));
+    record = nextTurn(record, event("Stop", { at: now + 1, reply: "Committed and pushed." }));
+    expect(observe(other, (await workerStates({ targets: [target] }, { ...readers(), uncommitted })).workers[0], now + 2)).toBe(true);
+    expect(other.returned).toMatchObject({ state: "done", reply: "Committed and pushed." });
+  });
+
+  it("asks git only about a checkout that is the worker's own", async () => {
+    const uncommitted = vi.fn(async (_directory: string) => 4);
+    record = turn(["UserPromptSubmit"], ["Stop", { reply: "Updated the permission mode.", cwd: "/work/phren" }]);
+    const shared = vi.fn(async (_directory: string, folders: readonly unknown[]) => folders.includes("/work/phren"));
+    const owner = { pane_id: "owner", workspace_id: "w1", tab_id: "t2", terminal_id: "term-owner", agent: "claude", agent_status: "idle", cwd: "/work/phren" };
+    const both: WorkerReaders = { ...readers(), uncommitted, shared, snapshot: async () => ({ panes: [{ ...workerPane, agent_status: status }, owner] }) };
+    expect((await workerStates({ targets: [target] }, both)).workers[0]).not.toHaveProperty("unfinished");
+    expect(shared).toHaveBeenCalledWith("/work/phren", [undefined, "/work/phren"]);
+    expect(uncommitted).not.toHaveBeenCalled();
+    // Alone in its checkout, its changes are its own.
+    const alone: WorkerReaders = { ...readers(), uncommitted, shared };
+    expect((await workerStates({ targets: [target] }, alone)).workers[0]).toMatchObject({ unfinished: "Stopped with 4 uncommitted files and no PR." });
   });
 
   it("reports an interrupted turn as failed, and a finished turn whose Stop never arrived as done", async () => {
