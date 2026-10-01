@@ -32,7 +32,8 @@ import { emitHerdrHook, setHerdrHookSession } from "./herdr-hooks.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
 import { buildSystemPrompt, buildEnvironmentBlock } from "./system-prompt.js";
 import { loadHooksConfig, runLifecycleHooks } from "./user-hooks.js";
-import { loadAndRegisterCustomCommands, getCustomCommandInfos } from "./commands.js";
+import { addCommandNames, loadAndRegisterCustomCommands, getCustomCommandInfos } from "./commands.js";
+import { isMcpPromptCommand, loadMcpPrompts, mcpPromptCommandNames, resolveMcpPromptCommand } from "./mcp-prompts.js";
 import { createSession, runTurn, type AgentConfig } from "./agent-loop.js";
 import { SessionLog, seedFromMessages } from "./session/log.js";
 import { fileSink, findEventLogById, findLatestEventLog, listEventLogs, persistFork, restoreSessionLog } from "./session/persist.js";
@@ -382,6 +383,9 @@ export async function runAgentCli(raw: string[]) {
       const { tools: mcpTools, cleanup } = await connectMcpServers(mcpServers, args.verbose);
       mcpCleanup = cleanup;
       for (const tool of mcpTools) registry.register(tool);
+      // Their prompts become /mcp__server__prompt commands.
+      await loadMcpPrompts();
+      addCommandNames(mcpPromptCommandNames());
     }
   };
   if (!chat) await registerAgentTools();
@@ -696,9 +700,11 @@ export async function runAgentCli(raw: string[]) {
     }
     // A resumed session continues with the task given on the command line,
     // or with a generic "continue" when none was.
-    const prompt = resumedLog && !userTask
+    const given = resumedLog && !userTask
       ? "Continuing where we left off. Please review the conversation and continue with the task."
       : args.task;
+    // `phren agent "/mcp__server__prompt …"` sends what the MCP prompt says.
+    const prompt = isMcpPromptCommand(given) ? await resolveMcpPromptCommand(given) : given;
     const session = createSession(contextLimit, { log: resumedLog ?? agentConfig.sessionLog });
     // One turn for the task, or one per user message with --input-format
     // stream-json, all on the same session; each gets its own result line.
