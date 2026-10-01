@@ -506,6 +506,14 @@ again, so the other change is never overwritten. Edits to a file the agent
 hasn't read are allowed, because their old text must match it exactly.
 `PHREN_AGENT_FILE_GUARD=off` turns the check off.
 
+After each edit, write or patch, the agent parses the file it changed and adds
+any new syntax error to the tool result, so a dropped brace shows up at once
+instead of in a later test run. TypeScript and JavaScript use Node's built-in
+TypeScript parser (Node 22.13 or later; JSX files are skipped), Python uses
+`python3`'s `ast`, and JSON uses `JSON.parse` (files with comments are
+skipped). Errors the file had before the edit are not reported, and nothing
+type-checks. `PHREN_AGENT_SYNTAX_CHECK=off` turns it off.
+
 ### Shell and git
 - **shell** — Run shell commands (with timeout and safety checks). Foreground
   commands default to a 2 minute timeout, up to 10 minutes per call
