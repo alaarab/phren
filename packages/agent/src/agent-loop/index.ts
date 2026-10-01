@@ -6,6 +6,7 @@ import { compactWithLlm } from "../context/compactor.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
 import { isContextOverflowError, withRetry } from "../providers/retry.js";
 import { injectPlanPrompt, requestPlanApproval } from "../plan.js";
+import { READ_ONLY_TOOLS } from "../permissions/checker.js";
 import { detectLintCommand, detectTestCommand } from "../tools/lint-test.js";
 import { createCheckpoint } from "../checkpoint.js";
 import { resetRepeatChain } from "../guards/repeat-tool-reminder.js";
@@ -47,6 +48,8 @@ export async function runTurn(
   const { provider, registry, maxTurns, verbose, costTracker } = config;
   let systemPrompt = config.systemPrompt;
   const toolDefs = registry.getDefinitions();
+  // While a plan is pending the model may look but not touch.
+  const planToolDefs = toolDefs.filter((d) => READ_ONLY_TOOLS.has(d.name));
   const spinner = createSpinner();
   const useStream = typeof provider.chatStream === "function";
   const status = hooks?.onStatus ?? ((msg: string) => process.stderr.write(msg));
@@ -155,7 +158,7 @@ export async function runTurn(
     }
 
     // For plan mode first turn, pass empty tools so LLM can't call any
-    const turnTools = planPending ? [] : toolDefs;
+    const turnTools = planPending ? planToolDefs : toolDefs;
 
     // Model-visible means logged: everything the provider is about to see
     // must be reconstructable from the event log. Cheap relative to a model
@@ -305,8 +308,9 @@ export async function runTurn(
       status(`\x1b[2m  cost: ${costTracker.formatCost()}\x1b[0m\n`);
     }
 
-    // Plan mode gate: after first response, ask for approval
-    if (planPending) {
+    // Plan mode gate: once the model presents its plan (a reply without tool
+    // calls), ask for approval. Read-only calls before that just run.
+    if (planPending && stopReason === "end_turn") {
       const approve = hooks?.onPlanApproval ?? requestPlanApproval;
       const { approved, feedback } = await approve();
       if (signal?.aborted) { endReason = "aborted"; break; }
@@ -315,7 +319,7 @@ export async function runTurn(
           ? `The user rejected the plan with feedback: ${feedback}\nPlease revise your plan.`
           : "The user rejected the plan. Task aborted.";
         if (feedback) {
-          // Revisions remain in plan mode, with tools disabled, until approved.
+          // Revisions remain in plan mode, read-only, until approved.
           session.log.append("user/message", {
             message: { role: "user", content: msg },
             source: "user",
@@ -359,7 +363,9 @@ export async function runTurn(
     // valid JSON are answered with an error instead of being run.
     const toolUseBlocks = assistantContent.filter((b): b is ToolUseBlock => b.type === "tool_use");
     const invalidById = new Map(invalidToolCalls.map((call) => [call.id, call]));
-    const runnableBlocks = toolUseBlocks.filter((b) => !invalidById.has(b.id));
+    // Only offered the read-only tools, a model can still name another one.
+    const planRefused = new Set(planPending ? toolUseBlocks.filter((b) => !READ_ONLY_TOOLS.has(b.name)).map((b) => b.id) : []);
+    const runnableBlocks = toolUseBlocks.filter((b) => !invalidById.has(b.id) && !planRefused.has(b.id));
 
     // Checkpoint BEFORE the mutating batch: the tool names are known now, and
     // the snapshot must be the true pre-turn tree so /rewind can restore it.
@@ -392,6 +398,11 @@ export async function runTurn(
       executedResults.flatMap((r) => (r.type === "tool_result" ? [[r.tool_use_id, r] as const] : [])),
     );
     const toolResults: ContentBlock[] = toolUseBlocks.map((block) => {
+      if (planRefused.has(block.id)) {
+        const output = `Not run: plan mode allows only read-only tools until the user approves the plan. Finish the plan without calling ${block.name}.`;
+        hooks?.onToolEnd?.(block.name, block.input, output, true, 0);
+        return { type: "tool_result", tool_use_id: block.id, content: output, is_error: true };
+      }
       const invalid = invalidById.get(block.id);
       if (!invalid) return resultById.get(block.id)!;
       const sample = invalid.raw.length > 300 ? `${invalid.raw.slice(0, 300)}…` : invalid.raw;
@@ -401,8 +412,8 @@ export async function runTurn(
       return { type: "tool_result", tool_use_id: block.id, content: output, is_error: true };
     });
 
-    session.toolCalls += toolCallCount + invalidById.size;
-    turnToolCalls += toolCallCount + invalidById.size;
+    session.toolCalls += toolCallCount + invalidById.size + planRefused.size;
+    turnToolCalls += toolCallCount + invalidById.size + planRefused.size;
 
     // Only successful write/edit results justify checks; requested, denied,
     // failed, or cancelled mutations must never launch a follow-up command.
