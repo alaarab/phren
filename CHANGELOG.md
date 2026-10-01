@@ -23,6 +23,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - A shell approval covers only that subcommand for git, npm and the like, and every command on a line must be approved.
 - A dispatched worker that ends its turn waiting on its own job is no longer returned done with its pane closed. A background shell started before the dispatcher's message still counts once the agent reads its output again, a reply that says it waits on a task ("Now waiting on the MacBook rerun.", "I'll push once it passes.") keeps the worker working while one runs and returns needs-you when none does, a next step announced anywhere in the closing paragraph is needs-you, and a pane is never closed while a background task other than a log tail or dev server runs.
 - `watch` counts as an endless command only as a command, so `grep watch file` run in the background is waited on, and a running background skill is rechecked without rereading its parent's whole transcript every 5 seconds.
+- Test runs no longer leave a Codex managed daemon behind. The vitest config sets `PHREN_CODEX_BINARY=off`, which makes the Hook's own helper calls (model catalogue, usage limits, queue) resolve no `codex`, and the global teardown runs `codex app-server daemon stop` and kills any `app-server` or `pid-update-loop` process naming the throwaway HOME before deleting it.
 
 ## [0.3.20] - 2026-10-01
 
