@@ -377,7 +377,7 @@ it on the computer and it appears in the app.
 | `--project <name>` | phren project to load, instead of the one found from the directory |
 | `--permissions <mode>` | `suggest` (default), `auto-confirm`, `full-auto` |
 | `--yolo` | Same as `--permissions full-auto` |
-| `--plan` | Show a plan and wait for approval before running tools |
+| `--plan` | Explore with the read-only tools, show a plan and wait for approval before editing or running commands |
 | `--resume`, `--continue`, `-c` | Continue the newest session; a task given with it becomes the next prompt |
 | `--session <id>` | Continue a specific session by id or unique id prefix |
 | `--list-sessions` | List recent sessions (with `--output-format json` as JSON) and exit |

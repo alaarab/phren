@@ -472,7 +472,7 @@ describe("runTurn compaction", () => {
 });
 
 describe("plan approval gates", () => {
-  it("keeps tools disabled and requests approval again after revision feedback", async () => {
+  it("keeps writes disabled and requests approval again after revision feedback", async () => {
     const { runAgent } = await import("../agent-loop.js");
     const execute = vi.fn().mockResolvedValue({ output: "done" });
     const registry = new ToolRegistry();
@@ -493,6 +493,40 @@ describe("plan approval gates", () => {
     expect(chat.mock.calls[1][0]).toContain("## Plan mode");
     expect(chat.mock.calls[2][0]).not.toContain("## Plan mode");
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+  it("plans with the read-only tools: reads run, writes are refused, approval waits for the plan", async () => {
+    const { runAgent } = await import("../agent-loop.js");
+    const read = vi.fn().mockResolvedValue({ output: "export const x = 1;" });
+    const write = vi.fn().mockResolvedValue({ output: "written" });
+    const registry = new ToolRegistry();
+    registry.setPermissions({ mode: "full-auto", projectRoot: process.cwd(), allowedPaths: [] });
+    registry.register({ name: "read_file", description: "read", input_schema: {}, execute: read });
+    registry.register({ name: "write_file", description: "write", input_schema: {}, execute: write });
+    const provider = mockProvider([
+      toolCallResponse("read_file", { path: "a.ts" }, "r1"),
+      toolCallResponse("write_file", { path: "a.ts", content: "x" }, "w1"),
+      textResponse("Plan: change x in a.ts"),
+      toolCallResponse("write_file", { path: "a.ts", content: "y" }, "w2"),
+      textResponse("Done"),
+    ]);
+    const chat = vi.spyOn(provider, "chat");
+    const approval = vi.fn().mockResolvedValue({ approved: true });
+    const result = await runAgent("make a change", makeConfig({ provider, registry, plan: true, hooks: { onPlanApproval: approval } }));
+
+    // Planning requests offer only read_file; after approval, everything.
+    expect(chat.mock.calls.map((call) => call[2].map((tool) => tool.name))).toEqual([
+      ["read_file"], ["read_file"], ["read_file"], ["read_file", "write_file"], ["read_file", "write_file"],
+    ]);
+    expect(approval).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    // The write named during planning was answered, not run; the approved one ran.
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write.mock.calls[0][0]).toMatchObject({ content: "y" });
+    const refused = result.messages.flatMap((m) => Array.isArray(m.content) ? m.content : [])
+      .find((b) => b.type === "tool_result" && b.tool_use_id === "w1");
+    expect(refused).toMatchObject({ is_error: true });
+    expect(JSON.stringify(refused)).toContain("plan mode allows only read-only tools");
+    expect(result.messages.some((m) => m.content === "Plan approved. Proceed with execution.")).toBe(true);
   });
   it("stops when a revised plan is rejected without feedback", async () => {
     const { runAgent } = await import("../agent-loop.js");
