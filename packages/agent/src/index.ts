@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs, printHelp, resolveStartupPermissions } from "./config.js";
 import { loadPersistentAllowlist } from "./permissions/allowlist.js";
-import { resolveProvider } from "./providers/resolve.js";
+import { keepSessionEndpoint, resolveProvider } from "./providers/resolve.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { readFileTool } from "./tools/read-file.js";
 import { writeFileTool } from "./tools/write-file.js";
@@ -200,6 +200,7 @@ export async function runAgentCli(raw: string[]) {
     process.exit(1);
   }
 
+  keepSessionEndpoint(provider);
   scopeModelOverrides((provider as { model?: string }).model ?? args.model ?? provider.name, {
     contextWindow: args.contextWindow,
     priceIn: args.priceIn,

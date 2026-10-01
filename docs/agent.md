@@ -170,7 +170,11 @@ For DeepSeek V4.1 Flash on OpenCode Go, use `--base-url https://opencode.ai/zen/
 replay and effort mapping. Go is a subscription, so its usage shows as
 included and `--budget` does not apply.
 
-`--base-url` is passed on to `/model` switches and subagents. A subagent
+`--base-url` is passed on to `/model` switches and subagents: a session
+started on a DeepSeek proxy stays on it when `/model` picks another DeepSeek
+model. `PHREN_AGENT_BASE_URL` sets DeepSeek's endpoint only together with
+`PHREN_AGENT_PROVIDER=deepseek`, so an `openai-compat` relay never receives a
+DeepSeek key. A subagent
 that names no provider (or the parent's) runs on the parent's `openai-compat`
 or `deepseek` endpoint and model; `PHREN_AGENT_API_KEY` and
 `DEEPSEEK_API_KEY` reach it through its environment only. Context window

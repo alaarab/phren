@@ -129,7 +129,8 @@ Environment:
   PHREN_AGENT_PROVIDER Force provider via env
   PHREN_AGENT_MODEL    Override model via env
   PHREN_AGENT_REASONING Override reasoning effort via env
-  PHREN_AGENT_BASE_URL  Endpoint for openai-compat
+  PHREN_AGENT_BASE_URL  Endpoint for openai-compat (and for deepseek with
+                        PHREN_AGENT_PROVIDER=deepseek)
   PHREN_AGENT_API_KEY   Key for openai-compat
   PHREN_AGENT_CONTEXT_WINDOW, PHREN_AGENT_PRICE_IN, PHREN_AGENT_PRICE_OUT,
   PHREN_AGENT_PRICE_CACHE  Same as the flags, for every model (the flags apply

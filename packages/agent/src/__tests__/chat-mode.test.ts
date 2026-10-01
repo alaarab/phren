@@ -19,6 +19,7 @@ const resolved: unknown[][] = [];
 let previewFile: string | undefined;
 
 vi.mock("../providers/resolve.js", () => ({
+  keepSessionEndpoint: () => {},
   resolveProvider: (...args: unknown[]) => {
     resolved.push(args);
     return {
