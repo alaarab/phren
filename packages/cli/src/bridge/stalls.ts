@@ -3,6 +3,7 @@ import { open } from "node:fs/promises";
 import { targetTranscriptPath } from "./transcripts.js";
 import { terminalProvider } from "./terminal.js";
 import type { Json, Target } from "./protocol.js";
+import { BACKGROUND_STALE_MS } from "./session-activity.js";
 
 export interface Stall { stalled: true; stalledSince: string; stallFor: number }
 export interface StallReaders {
@@ -29,9 +30,11 @@ async function transcriptStamp(target: Target): Promise<string> {
  * awaited background shells and monitors, running children). A worker that
  * ended its turn on purpose while a build runs sits still on screen and in its
  * transcript, so once the clock runs out `live` is asked, and any live work
- * starts the clock over instead of reporting a stall. */
+ * starts the clock over instead of reporting a stall, for at most
+ * BACKGROUND_STALE_MS: work that never ends (a build deadlocked on a lock, a
+ * child that died without its completion record) does not hide a stall forever. */
 export class StallDetector {
-  private entries = new Map<string, { signature: string; since: number }>();
+  private entries = new Map<string, { signature: string; since: number; liveSince?: number }>();
   constructor(private readers: StallReaders = {
     screen: target => terminalProvider().readScreen(target.server, target.pane, { scope: "pane", source: "visible", lines: 120, stripAnsi: true, timeoutMs: 1000 }),
     transcript: transcriptStamp, now: Date.now, threshold: stallThreshold,
@@ -46,9 +49,10 @@ export class StallDetector {
     const now = this.readers.now(), prior = this.entries.get(key);
     if (!prior || prior.signature !== signature) { this.entries.delete(key); this.entries.set(key, { signature, since: now }); }
     while (this.entries.size > 1024) this.entries.delete(this.entries.keys().next().value!);
-    const since = this.entries.get(key)!.since;
+    const entry = this.entries.get(key)!, since = entry.since;
     if (now - since < this.readers.threshold()) return undefined;
-    if (live && await live().catch(() => undefined)) { this.entries.set(key, { signature, since: now }); return undefined; }
+    const held = entry.liveSince === undefined || now - entry.liveSince < BACKGROUND_STALE_MS;
+    if (live && held && await live().catch(() => undefined)) { entry.since = now; entry.liveSince ??= since; return undefined; }
     return { stalled: true, stalledSince: new Date(since).toISOString(), stallFor: Math.floor((now - since) / 1000) };
   }
 }

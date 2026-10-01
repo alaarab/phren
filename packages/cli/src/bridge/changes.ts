@@ -116,7 +116,10 @@ async function treeDiff(root: string, before: string, after: string, env: NodeJS
   return files;
 }
 
-interface Snapshot { at: number; conversation: string; own: Set<string>; trees: Map<string, Tree>; result?: Promise<ChangedFile[]>; expiry?: NodeJS.Timeout }
+/** `taking` until its trees are all read: a PostToolUse arriving before then
+ * (its PreToolUse callback gave up, so the tool ran meanwhile) has no true
+ * before-state to diff against. */
+interface Snapshot { at: number; conversation: string; own: Set<string>; trees: Map<string, Tree>; result?: Promise<ChangedFile[]>; expiry?: NodeJS.Timeout; taking?: boolean; dropped?: boolean }
 /** Files one tool call named in its own input (an Edit's file_path, a patch's
  * headers), from its start to its end. Another conversation's claim over a
  * file keeps that file out of a shell call's diff taken over the same time. */
@@ -213,7 +216,7 @@ export class ToolChanges {
     const claimed = await Promise.all(claimedPaths(input, cwd).map(realPathOf));
     this.claim(conversation, toolUseId, claimed);
     if (this.snapshots.size >= 64 || this.snapshots.has(key)) return;
-    const snapshot: Snapshot = { at: Date.now(), conversation, own: new Set(claimed), trees: new Map() };
+    const snapshot: Snapshot = { at: Date.now(), conversation, own: new Set(claimed), trees: new Map(), taking: true };
     this.snapshots.set(key, snapshot);
     try {
       await this.budget(async signal => {
@@ -229,13 +232,26 @@ export class ToolChanges {
         }
         signal.throwIfAborted();
       });
+      snapshot.taking = false;
+      if (snapshot.dropped) { await this.discard(snapshot); return; }
       if (!snapshot.trees.size) { this.snapshots.delete(key); return; }
       // A missing PostToolUse/reader cannot retain untracked contents forever.
       snapshot.expiry = setTimeout(() => {
         if (!snapshot.result) { this.snapshots.delete(key); void this.discard(snapshot).catch(() => {}); }
       }, 30 * 60_000);
       snapshot.expiry.unref();
-    } catch { this.snapshots.delete(key); await this.discard(snapshot); }
+    } catch { if (this.snapshots.get(key) === snapshot) this.snapshots.delete(key); await this.discard(snapshot); }
+  }
+
+  /** Forget the snapshot of a tool call whose PreToolUse callback gave up
+   * before the snapshot was taken: the tool may have run while it was read,
+   * so no diff is shown for that call rather than a wrong one. */
+  drop(conversation: string, toolUseId: string): void {
+    const key = `${conversation}\0${toolUseId}`, snapshot = this.snapshots.get(key);
+    if (!snapshot || snapshot.result) return;
+    this.snapshots.delete(key);
+    if (snapshot.taking) snapshot.dropped = true;
+    else void this.discard(snapshot).catch(() => {});
   }
 
   private claim(conversation: string, toolUseId: string, paths: string[]) {
@@ -253,6 +269,7 @@ export class ToolChanges {
     const key = `${conversation}\0${toolUseId}`, snapshot = this.snapshots.get(key);
     for (const claim of this.claims) if (claim.conversation === conversation && claim.toolUseId === toolUseId) claim.end ??= Date.now();
     if (!snapshot) return;
+    if (snapshot.taking) { this.drop(conversation, toolUseId); return; }
     snapshot.result ??= this.compute(snapshot);
     const files = await snapshot.result;
     if (this.snapshots.get(key) === snapshot) {

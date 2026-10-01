@@ -377,10 +377,78 @@ describe("dispatch receipts and selection", () => {
     const never = launchingWithoutTarget(startingPane);
     const lost = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" });
     expect(never().filter(call => String((call as { deliveryId: string }).deliveryId).includes(lost.id as string))).toHaveLength(2);
-    expect(lost).toMatchObject({ ok: false, state: "failed", brief: "typed",
+    expect(lost).toMatchObject({ ok: false, state: "uncertain", brief: "typed",
       returned: { state: "failed", read: false, error: expect.stringContaining("never reached codex") } });
     expect(lost.error).toContain("after 2 tries the pane still sits idle with no conversation");
-    expect((await dispatchStatus()).find(receipt => receipt.id === lost.id)).toMatchObject({ state: "failed", returned: { state: "failed" } });
+    expect((await dispatchStatus()).find(receipt => receipt.id === lost.id)).toMatchObject({ state: "uncertain", returned: { state: "failed" } });
+    // Still watched: a brief that lands after all brings the worker's own return.
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route, body) => route === "/v1/dispatch/workers"
+      ? { workers: (body as { targets: unknown[] }).targets.map(() => ({ state: "done", session, completed: true, reply: "Tests added.", endedAt: new Date().toISOString() })) } : { ok: true });
+    await new DispatchReturns({ peers: async () => [{ name: "Desk", address: "desk.example", username: "sam", port: 22, hostKey: "unused", server: "default" }] }).poll();
+    const { starting: _starting, startingToken: _token, ...binding } = target;
+    expect((await dispatchStatus()).find(receipt => receipt.id === lost.id)).toMatchObject({ target: { ...binding, session },
+      returned: { state: "done", read: false, reply: "Tests added." } });
+  });
+
+  // Review of #283: on a loaded machine a typed brief can start its turn after
+  // the landed window. Typing it again handed the worker its task twice.
+  describe("a first brief that lands after its window", () => {
+    const late = (after: Record<string, unknown>) => {
+      let looks = 0;
+      // Idle on the same binding for the whole landed window, then `after`.
+      return launchingWithoutTarget(startingPane, sent => sent && looks++ >= 20 ? after : undefined);
+    };
+    it.each([
+      ["working", { ...startingPane, agentStatus: "working" }],
+      ["blocked on an approval", { ...startingPane, agentStatus: "blocked" }],
+      ["waiting", { ...startingPane, agentStatus: "waiting" }],
+    ])("is not typed again into a pane %s", async (_name, after) => {
+      const prompts = late(after);
+      const result = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" });
+      expect(result).toMatchObject({ ok: true, state: "accepted", target });
+      expect(result).not.toHaveProperty("returned");
+      expect(result.error ?? "").not.toContain("startup screen");
+      expect(prompts()).toHaveLength(1);
+    });
+    it("follows the conversation it started instead of typing it again", async () => {
+      const prompts = late({ agentStatus: "idle", sessionId: session });
+      const result = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" });
+      const { starting: _starting, startingToken: _token, ...binding } = target;
+      expect(result).toMatchObject({ ok: true, state: "accepted", target: { ...binding, session } });
+      expect(prompts()).toHaveLength(1);
+    });
+    it("types nothing into a pane it can no longer read as waiting for the brief", async () => {
+      const prompts = late({ ...startingPane, agentStatus: "unknown" });
+      const unclassified = await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" });
+      expect(unclassified).toMatchObject({ ok: false, state: "uncertain" });
+      expect(unclassified.error).toContain("was not typed again");
+      expect(prompts()).toHaveLength(1);
+      const rebound = late({ ...startingPane, startingToken: "b".repeat(64) });
+      expect(await new DispatchService(undefined, undefined, 1).dispatch({ ...brief, computer: "Desk" })).toMatchObject({ ok: false, state: "uncertain" });
+      expect(rebound().filter(call => String((call as { deliveryId: string }).deliveryId).endsWith("-2"))).toHaveLength(0);
+    });
+  });
+
+  // Review of #283: the lock was held while a slow brief was confirmed, so a
+  // conductor fanning out got 429 on every dispatch for over a minute.
+  it("places another dispatch while one brief is still being confirmed, counting it toward its computer's load", async () => {
+    const full = { ...(({ starting: _s, startingToken: _t, ...binding }) => binding)(target), session };
+    let hold!: () => void, prompts = 0;
+    vi.mocked(peerRequest).mockImplementation(async (peer, route) => {
+      if (route === "/v1/dispatch/capacity") return { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 };
+      if (route.startsWith("/v1/workspaces/launch")) return { ok: true, target: full };
+      if (route === "/v1/prompt" && prompts++ === 0) await new Promise<void>(resolve => { hold = resolve; });
+      return { ok: true };
+    });
+    const service = new DispatchService(undefined, undefined, 1);
+    const first = service.dispatch(brief);
+    await vi.waitFor(() => expect(hold).toBeTypeOf("function"));
+    // Desk and Linuxbox are equally idle; Desk already has a launch in flight.
+    expect(await service.dispatch(brief)).toMatchObject({ ok: true, state: "accepted", computer: "Linuxbox" });
+    hold();
+    expect(await first).toMatchObject({ ok: true, state: "accepted", computer: "Desk" });
+    // Nothing in flight: the tie goes back to Desk by name.
+    expect(await service.dispatch(brief)).toMatchObject({ computer: "Desk" });
   });
 
   it("says the brief was not sent when a new agent never shows a target", async () => {
