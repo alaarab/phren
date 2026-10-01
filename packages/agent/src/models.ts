@@ -30,6 +30,9 @@ export const REASONING_LEVELS: ReasoningEffort[] = ["low", "medium", "high", "xh
  * DeepSeek V4.1 Flash, direct or through an OpenAI-compatible relay: 1M
  * context, 393,216 max output, effort low/high/max (picker "xhigh" = max).
  * Off-peak rates; DeepSeek bills 2x at peak (weekdays 01-04 and 06-10 UTC).
+ * Checked against https://api-docs.deepseek.com/quick_start/pricing on
+ * 2026-10-01: cache hit $0.003 / miss $0.15 / output $0.60 off-peak
+ * ($0.006 / $0.30 / $1.20 peak).
  */
 const DEEPSEEK_FLASH = {
   vision: true,
