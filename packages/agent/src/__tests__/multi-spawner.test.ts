@@ -96,13 +96,30 @@ describe("AgentSpawner", () => {
       }
     });
 
-    it("a DeepSeek parent's custom endpoint reaches children on DeepSeek; other parents add nothing", async () => {
-      const { childEndpoint } = await import("../multi/spawner.js");
-      expect(childEndpoint({ name: "deepseek", model: "deepseek-flash", baseUrl: "https://proxy.test" }, "deepseek", undefined))
+    it("a child of an Anthropic session spawns on Anthropic with the parent's model and effort", () => {
+      const parent = { name: "anthropic", model: "claude-sonnet-5", reasoningEffort: "high" as const };
+      const inheriting = new AgentSpawner({ getParentProvider: () => parent });
+      inheriting.spawn({ task: "t" });
+      expect(fakeChildren[0].send.mock.calls[0][0]).toMatchObject({ provider: "anthropic", model: "claude-sonnet-5", reasoning: "high" });
+    });
+
+    it("a child runs its parent's provider, model and effort unless it names another", async () => {
+      const { childProvider } = await import("../multi/spawner.js");
+      // Endpoint providers also pass their base URL.
+      expect(childProvider({ name: "deepseek", model: "deepseek-flash", baseUrl: "https://proxy.test" }, "deepseek", undefined))
         .toEqual({ provider: "deepseek", model: "deepseek-flash", baseUrl: "https://proxy.test" });
-      expect(childEndpoint({ name: "openai", model: "gpt-5.4", baseUrl: "https://api.openai.com/v1" }, undefined, undefined)).toBeUndefined();
-      expect(childEndpoint({ name: "anthropic", model: "claude-sonnet-5" }, undefined, undefined)).toBeUndefined();
-      expect(childEndpoint(undefined, undefined, undefined)).toBeUndefined();
+      // Other providers no longer fall back to auto-detection.
+      expect(childProvider({ name: "anthropic", model: "claude-sonnet-5", reasoningEffort: "high" }, undefined, undefined))
+        .toEqual({ provider: "anthropic", model: "claude-sonnet-5", reasoning: "high" });
+      expect(childProvider({ name: "openrouter", model: "deepseek/deepseek-v4.1-flash", baseUrl: "https://openrouter.ai/api/v1" }, undefined, undefined))
+        .toEqual({ provider: "openrouter", model: "deepseek/deepseek-v4.1-flash" });
+      // Another model on the same provider: no effort carried over.
+      expect(childProvider({ name: "openai", model: "gpt-6", reasoningEffort: "xhigh" }, undefined, "gpt-6-mini"))
+        .toEqual({ provider: "openai", model: "gpt-6-mini" });
+      // A named different provider is the child's own.
+      expect(childProvider({ name: "anthropic", model: "claude-sonnet-5" }, "openrouter", "x/y")).toEqual({ provider: "openrouter", model: "x/y" });
+      expect(childProvider({ name: "replay", model: "replay:x" }, undefined, undefined)).toEqual({ provider: undefined, model: undefined });
+      expect(childProvider(undefined, undefined, undefined)).toEqual({ provider: undefined, model: undefined });
     });
 
     it("returns a unique agent ID", () => {
