@@ -280,10 +280,14 @@ parallel round; unavailable directories retain the name-only view.
 `agent`) and `effort: "low" | "medium" | "high"` (default `medium`). Workers
 also take an optional `permissionMode` (`supervised`, `auto-edits`, `auto` or
 `full-access`): Claude gets `--permission-mode`, Codex gets its approval and
-sandbox settings, and OpenCode, Copilot and conductors are refused with 400
-before any pane exists. The reply repeats `permissionMode` when it was applied,
+sandbox settings, and OpenCode, Copilot, phren and conductors are refused with 400
+before any pane exists. `kind` is `codex`, `claude`, `copilot`, `opencode` or
+`phren` (phren's own agent, started as `phren agent -i`, with `model` as
+`--model` and `effort` as `--reasoning`, `minimal` as `low`; a dispatched brief
+is typed after it starts, since its TUI takes no first prompt). The reply repeats `permissionMode` when it was applied,
 so a caller can tell an older Hook that ignored it. A
-conductor launch supports Claude, Codex and OpenCode, attaches the shipped
+conductor launch supports Claude, Codex and OpenCode (Copilot and phren are
+refused with 400: phren-agent takes no system brief at startup), attaches the shipped
 conductor brief, prefixes the Herdr agent name with `conductor-`, records the
 pane as this computer's conductor and returns `role: "conductor"`. Workspace
 overview tabs report that role. A second running conductor in this computer's
@@ -315,7 +319,8 @@ history.
 ## Model catalogue
 
 `GET /v1/models?source=<codex|claude|opencode>[&account=<id>]` on Phren Hook returns the
-`/model` menu of the agent that source names, shaped as
+`/model` menu of the agent that source names (any other source, `phren` included,
+answers an empty list), shaped as
 `{ "models": [ { "id", "name", "description", "isDefault" } ] }`. `account` names a Claude home (default `default`) and reads that home's catalogue cache; an account that is not on this computer, or a non-default one for another source, answers 404 with `code: "account_unavailable"`:
 
 | Field | Type | Description |

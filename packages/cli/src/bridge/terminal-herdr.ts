@@ -3,10 +3,60 @@
 // fake, so a test that records Herdr requests sees exactly what it did before
 // the provider existed.
 import { herdrSocketPath, rpc, snapshot } from "./herdr.js";
-import { object, objects, type Json } from "./protocol.js";
-import type { PaneProcesses, TerminalPane, TerminalProvider } from "./terminal.js";
+import { BridgeError, object, objects, type Json } from "./protocol.js";
+import type { AgentStart, PaneProcesses, TerminalPane, TerminalProvider } from "./terminal.js";
+import { agentFromCommand } from "./terminal-tmux.js";
 
 const text = (value: unknown): string | undefined => typeof value === "string" && value ? value : undefined;
+
+/** Who reports phren-agent's lifecycle to Herdr, which does not detect it itself. */
+export const PHREN_REPORT_SOURCE = "phren-hook";
+
+/** A word for a POSIX shell, quoted only when it needs it. */
+export function shellWord(word: string): string {
+  return /^[A-Za-z0-9_./:=@%+,-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`;
+}
+
+/** What the Hook types into a Herdr pane's shell to start phren-agent:
+ * the agent, then Herdr's report of it released once it exits. */
+export function phrenCommandLine(args: string[]): string {
+  return [["phren", ...args].map(shellWord).join(" "),
+    `herdr pane release-agent "$HERDR_PANE_ID" --source ${PHREN_REPORT_SOURCE} --agent phren >/dev/null 2>&1`].join("; ");
+}
+
+/** Whether `pane` runs phren-agent as Herdr reports it, for the prompt and key fallbacks below. */
+async function reportedPhren(server: string, pane: string): Promise<boolean> {
+  const info = object((await rpc(server, "pane.get", { pane_id: pane }).catch((): Json => ({}))).pane);
+  return info.agent === "phren";
+}
+
+/** Herdr's `agent.prompt` and `agent.send_keys` take only agents it started;
+ * a phren-agent pane it knows by report gets the pane calls instead. */
+function unnamedAgent(error: unknown): boolean {
+  return error instanceof BridgeError && error.details?.herdrCode === "agent_not_ready" && /not an active named agent/.test(error.message);
+}
+
+/** Herdr's `agent.start` knows a fixed list of harnesses and phren-agent is
+ * not on it. The Hook types `phren agent ...` at the pane's login shell
+ * instead, waits for it to be the foreground program, then reports it to
+ * Herdr as agent "phren" under the launch name, so the pane reads as an agent
+ * like the others. Its own lifecycle hooks keep the status (agent-hooks.ts). */
+async function startPhren(server: string, pane: string, { name, args, timeoutMs }: AgentStart): Promise<void> {
+  const before = object((await rpc(server, "pane.process_info", { pane_id: pane })).process_info);
+  // Same refusal as Herdr's own start, so the caller waits for the shell.
+  if (!Number.isSafeInteger(before.shell_pid) || before.foreground_process_group_id !== before.shell_pid) throw new BridgeError(409, `Herdr: agent target pane ${pane} is not an available shell`, { herdrCode: "agent_pane_busy" });
+  await rpc(server, "pane.send_text", { pane_id: pane, text: phrenCommandLine(args) });
+  await rpc(server, "pane.send_keys", { pane_id: pane, keys: ["Enter"] });
+  const deadline = Date.now() + Math.min(timeoutMs, 30_000);
+  for (;;) {
+    const info = object((await rpc(server, "pane.process_info", { pane_id: pane })).process_info);
+    if (objects(info.foreground_processes).some(p => typeof p.cmdline === "string" && agentFromCommand(p.cmdline) === "phren")) break;
+    if (Date.now() >= deadline) throw new BridgeError(504, "phren agent did not start in the Herdr pane. Check that phren and @phren/agent are installed on the login shell's PATH.");
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  await rpc(server, "pane.report_agent", { pane_id: pane, source: PHREN_REPORT_SOURCE, agent: "phren", state: "idle" });
+  await rpc(server, "agent.rename", { target: pane, name }).catch(() => undefined);
+}
 
 /** A Herdr snapshot's panes in the provider's shape; Herdr's agent report becomes hints. */
 export function herdrPanes(server: string, s: Json): TerminalPane[] {
@@ -40,22 +90,40 @@ export const herdrTerminal: TerminalProvider = {
     const answer = object(result.read ?? result);
     return typeof answer.text === "string" ? answer.text : "";
   },
-  async sendKeys(server, pane, keys) { await rpc(server, "agent.send_keys", { target: pane, keys }); },
+  async sendKeys(server, pane, keys) {
+    try { await rpc(server, "agent.send_keys", { target: pane, keys }); } catch (error) {
+      if (!unnamedAgent(error) || !await reportedPhren(server, pane)) throw error;
+      await rpc(server, "pane.send_keys", { pane_id: pane, keys });
+    }
+  },
   async prompt(server, pane, text, signal) {
-    if (signal) await rpc(server, "agent.prompt", { target: pane, text }, signal);
-    else await rpc(server, "agent.prompt", { target: pane, text });
+    try {
+      if (signal) await rpc(server, "agent.prompt", { target: pane, text }, signal);
+      else await rpc(server, "agent.prompt", { target: pane, text });
+    } catch (error) {
+      if (!unnamedAgent(error) || !await reportedPhren(server, pane)) throw error;
+      // One bracketed paste keeps the newlines in phren-agent's composer; Enter submits it.
+      await rpc(server, "pane.send_text", { pane_id: pane, text: `\x1b[200~${text}\x1b[201~` }, signal);
+      await new Promise(resolve => setTimeout(resolve, 150));
+      await rpc(server, "pane.send_keys", { pane_id: pane, keys: ["Enter"] }, signal);
+    }
   },
   async create(server, { workspace, label, cwd, env }) {
     await rpc(server, workspace ? "tab.create" : "workspace.create", { workspace_id: workspace, label, cwd, focus: false, env: env ?? {} });
   },
   // `agent.start` takes no environment; the pane's shell got it at `create`.
-  async startAgent(server, pane, { name, kind, args, timeoutMs }) {
+  async startAgent(server, pane, agent) {
+    const { name, kind, args, timeoutMs } = agent;
+    if (kind === "phren") { await startPhren(server, pane, agent); return; }
     // Herdr waits up to `timeout_ms` for the agent to become ready; the socket waits a little longer.
     await rpc(server, "agent.start", { name, kind, pane_id: pane, timeout_ms: timeoutMs, ...(args.length ? { args } : {}) }, undefined, timeoutMs + 5_000);
   },
   // What Herdr sets in its own panes (herdrPaneFromEnv reads them back).
   paneEnv(server, { workspace, tab, pane }) {
     return { HERDR_ENV: "1", HERDR_SOCKET_PATH: herdrSocketPath(server), HERDR_WORKSPACE_ID: workspace, HERDR_TAB_ID: tab, HERDR_PANE_ID: pane };
+  },
+  async reportAgent(server, pane, agent, state) {
+    await rpc(server, "pane.report_agent", { pane_id: pane, source: PHREN_REPORT_SOURCE, agent, state });
   },
   async focusPane(server, pane) { await rpc(server, "pane.focus", { pane_id: pane }); },
   async closePane(server, pane) { await rpc(server, "pane.close", { pane_id: pane }); },
