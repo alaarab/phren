@@ -135,11 +135,18 @@ export interface SpeechResult { model: string; format: SpeechFormat }
 const KEEP_ALIVE_MS = 60_000;
 let pool: { http: HttpAgent; https: HttpsAgent } | undefined;
 
+/** How long ElevenLabs may send nothing, before its headers or between two
+ * chunks of audio, before the request is given up on: fetch's own limits were
+ * 300 s, and the pool's timeout only closes idle sockets. */
+export const SPEECH_STALL_MS = 30_000;
+
 /** POSTs to ElevenLabs over the Hook's kept-alive pool and answers a fetch
  * Response whose body is the upstream socket, so audio is passed on chunk by
  * chunk as it arrives. Honours HTTPS_PROXY as fetch does, when
- * NODE_USE_ENV_PROXY is set. */
-export function elevenLabsFetch(url: string, init: RequestInit): Promise<Response> {
+ * NODE_USE_ENV_PROXY is set. A pooled socket ElevenLabs closed while it sat
+ * idle fails on its first write; that request is sent once more on a fresh
+ * one. */
+export function elevenLabsFetch(url: string, init: RequestInit, stallMs = SPEECH_STALL_MS): Promise<Response> {
   const proxyEnv = process.env.NODE_USE_ENV_PROXY === "1" ? process.env : undefined;
   pool ??= {
     http: new HttpAgent({ keepAlive: true, timeout: KEEP_ALIVE_MS, proxyEnv }),
@@ -147,18 +154,28 @@ export function elevenLabsFetch(url: string, init: RequestInit): Promise<Respons
   };
   const target = new URL(url), secure = target.protocol === "https:";
   const body = typeof init.body === "string" ? init.body : "";
-  return new Promise((resolve, reject) => {
+  const attempt = (retried: boolean): Promise<Response> => new Promise((resolve, reject) => {
+    let answered = false;
     const request = (secure ? httpsRequest : httpRequest)(target, {
       method: init.method ?? "GET", signal: init.signal ?? undefined, agent: secure ? pool!.https : pool!.http,
       headers: { ...init.headers as Record<string, string>, "Content-Length": String(Buffer.byteLength(body)) },
     }, upstream => {
+      answered = true;
       const status = upstream.statusCode ?? 0;
       if (status < 200 || status > 599) { upstream.destroy(); reject(new Error(`HTTP ${status}`)); return; }
+      // A Response with one of these statuses may not have a body.
+      if (status === 204 || status === 205 || status === 304) { upstream.resume(); resolve(new Response(null, { status })); return; }
       resolve(new Response(Readable.toWeb(upstream) as ReadableStream<Uint8Array>, { status }));
     });
-    request.on("error", reject);
+    // Covers the wait for the headers and each gap in the body after them.
+    request.setTimeout(stallMs, () => request.destroy(new Error("ElevenLabs stalled")));
+    request.on("error", error => {
+      if (!retried && !answered && request.reusedSocket && (error as NodeJS.ErrnoException).code === "ECONNRESET") { resolve(attempt(true)); return; }
+      reject(error);
+    });
     request.end(body);
   });
+  return attempt(false);
 }
 
 /** ElevenLabs' machine-readable reason (`detail.status`), never its text. */

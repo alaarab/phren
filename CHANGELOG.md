@@ -13,6 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Talk mode's spoken replies start sooner. `POST /v1/speech` takes `stream: true` with `timestamps: true` (capability `speechTimestampStream`) and streams `application/x-ndjson` lines of `{audio, alignment}` as ElevenLabs makes them: about 0.3 s to the first line with v4 Turbo, where the whole-clip timestamped reply took about 0.9 s. The streamed audio reply flushes its headers before the first byte.
 - `WS /v1/speech/live` (capability `speechLive`) voices a reply while it is still being written: the phone sends text pieces and gets audio frames with alignment back. v4 Turbo runs on ElevenLabs' text-to-dialogue WebSocket, which started speaking about 140 ms after it had the first complete sentence; Flash v2.5 on the text-to-speech WebSocket is the fallback.
 - `phren bridge speech-region us|global` sends spoken replies to ElevenLabs' US-only endpoint (`api.us.elevenlabs.io`) or the global one (default), stored in `speech.json`.
+- `phren-agent models [--json]` lists the models of the providers with credentials on this computer, and `GET /v1/models?source=phren` serves them to the phone's Quick chat model picker (cached like the other sources). Launching `kind: "phren"` with an `anthropic/`, `deepseek/`, `ollama/` or `openrouter/` model passes `--provider` and `--model`.
 
 ### Changed
 
@@ -20,6 +21,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Live spoken replies (`WS /v1/speech/live`) keep the text the phone sends while the Hook reads its settings, and open nothing for a phone that hung up meanwhile. Before the first audio, a socket that won't open within 5 s, sends no audio 5 s after it must be voicing, closes, or answers a generic error frame now falls back to Flash instead of ending the reply. A reply with nothing to say ends with `done`, the ten-minute limit with a `speech-limit` error, and a phone that stops reading the audio is closed instead of buffered without bound. Unfinished text is cut at 2 KB.
+- `POST /v1/speech` gives up on ElevenLabs after 30 s of silence, before the headers or mid-reply, retries a pooled connection ElevenLabs reset once, and no longer throws on a bodiless status.
+- `phren bridge speech-region` now covers Scribe dictation and the ElevenLabs usage read, not only spoken replies.
+- A phren agent session that used tools can no longer be resumed as a quick chat (`mode: "chat"` with `resumeSession`), which providers such as Anthropic refuse: the launch answers 400 `chat-has-tools` before any pane exists.
 - A brief typed into a starting worker pane is never typed twice. Before typing it again, the dispatch reads the pane: a conversation, or the agent working, blocked or waiting, means the first copy landed after its window, and the receipt is accepted. Before, a slow Codex start got the brief a second time, and an agent blocked on an approval was reported as a startup screen. A brief still lost after two tries leaves an `uncertain` receipt with a `failed` return that stays watched, so a late arrival still brings the worker's return.
 - A brief being confirmed no longer holds the dispatch lock: other dispatches are placed meanwhile instead of getting 429 for up to a minute and a half, and `anywhere` counts the launch toward its computer's load.
 - Finished replies no longer read as stopped mid-task. "I'll wait for your review", "I'll stop here", "Let's merge once CI is green", "Now passing: 42 tests" and the like return `done`; "Let me run:" before a closing code block returns `needs-you`.

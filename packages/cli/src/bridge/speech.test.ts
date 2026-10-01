@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BridgeError, type Json } from "./protocol.js";
-import { alignmentOf, DEFAULT_SPEECH_MODEL, DEFAULT_SPEECH_VOICE, FALLBACK_HOLD_MS, FALLBACK_SPEECH_MODEL, SPEECH_AUDIO, SPEECH_SLOW_MS, SpeechState, speakableText, streamSpeech, type SpeechOptions } from "./speech.js";
+import { alignmentOf, DEFAULT_SPEECH_MODEL, elevenLabsFetch, DEFAULT_SPEECH_VOICE, FALLBACK_HOLD_MS, FALLBACK_SPEECH_MODEL, SPEECH_AUDIO, SPEECH_SLOW_MS, SpeechState, speakableText, streamSpeech, type SpeechOptions } from "./speech.js";
 import { writeSpeechModel, writeSpeechRegion, writeSpeechVoice } from "./speech-voice.js";
 
 // The voice setting lives in the Hook's directory: never the developer's own.
@@ -495,6 +495,56 @@ describe("speech latency", () => {
     await writeSpeechRegion("us");
     await post({ text: "Hello." });
     expect(urls.map(url => new URL(url).origin)).toEqual(["https://api.elevenlabs.io", "https://api.us.elevenlabs.io"]);
+  });
+});
+
+describe("ElevenLabs connection", () => {
+  async function listen(handler: Parameters<typeof createServer>[1]): Promise<{ url: string; server: Server }> {
+    const server = createServer(handler);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    servers.push(server);
+    return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/text-to-speech/x/stream`, server };
+  }
+  const post = { method: "POST", body: "{}", headers: { "xi-api-key": KEY } };
+
+  it("gives up on ElevenLabs going quiet mid-reply, so the phone's request ends", async () => {
+    const { url, server } = await listen((req, res) => {
+      req.resume();
+      res.writeHead(200, { "Content-Type": "application/octet-stream" });
+      res.write(Buffer.from([1]));
+    });
+    const reply = await elevenLabsFetch(url, post, 100);
+    expect(reply.status).toBe(200);
+    const read = (async () => { for await (const _ of reply.body!) { /* the one byte, then the stall */ } })();
+    await expect(read).rejects.toThrow();
+    server.closeAllConnections();
+  });
+
+  it("answers a status that has no body without throwing", async () => {
+    const { url } = await listen((req, res) => { req.resume(); res.writeHead(204).end(); });
+    const reply = await elevenLabsFetch(url, post);
+    expect(reply.status).toBe(204);
+    expect(reply.body).toBeNull();
+  });
+
+  it("sends a request once more when the kept-alive socket it reused was reset", async () => {
+    const seen = new Map<unknown, number>();
+    let served = 0;
+    const { url } = await listen((req, res) => {
+      const count = (seen.get(req.socket) ?? 0) + 1;
+      seen.set(req.socket, count);
+      // ElevenLabs closed the idle connection: the reused socket's next request dies.
+      if (count === 2) { req.socket.destroy(); return; }
+      req.resume();
+      served++;
+      res.writeHead(200).end(Buffer.from([7]));
+    });
+    for (let i = 0; i < 2; i++) {
+      const reply = await elevenLabsFetch(url, post);
+      expect([...new Uint8Array(await reply.arrayBuffer())]).toEqual([7]);
+    }
+    expect(served).toBe(2);
+    expect(seen.size).toBe(2);
   });
 });
 

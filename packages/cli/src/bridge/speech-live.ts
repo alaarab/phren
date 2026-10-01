@@ -28,15 +28,31 @@ const OPEN = 1;
 const MAX_SESSION_MS = 10 * 60_000;
 /** Text-to-dialogue closes a socket quiet for 20 s; an agent may think longer. */
 const KEEP_ALIVE_MS = 15_000;
+/** ElevenLabs' socket opens in well under a second; one still connecting
+ * after this is given up on, for Flash or an error. */
+const HANDSHAKE_MS = 5_000;
+/** The first audio came about 140 ms after ElevenLabs had a sentence
+ * (2026-10-01). It is awaited once ElevenLabs must be voicing: the reply is
+ * done, or FORCED_TEXT of it is in. A shorter piece may sit in ElevenLabs'
+ * buffer until more text comes, which can be minutes of the agent thinking. */
+const FIRST_AUDIO_MS = 5_000;
+const FORCED_TEXT = 300;
+/** Audio queued for a phone that isn't reading it: about 45 s of pcm_44100. */
+const MAX_BUFFERED = 4 * 1024 * 1024;
+/** The phone's frames held while this computer's settings are read. */
+const MAX_EARLY_BYTES = 1024 * 1024;
 const MAX_TEXT = 100_000;
 const VOICE_SETTINGS = { stability: 0.6, similarity_boost: 0.75 };
 
 export interface LiveSocket {
   readonly readyState: number;
+  /** Bytes queued to send; the phone's socket has it, ElevenLabs' need not. */
+  readonly bufferedAmount?: number;
   send(data: string): void;
   close(code?: number, reason?: string): void;
   on(event: "message", listener: (data: Buffer, isBinary: boolean) => void): unknown;
-  on(event: "open" | "close", listener: () => void): unknown;
+  on(event: "open", listener: () => void): unknown;
+  on(event: "close", listener: (code?: number, reason?: Buffer) => void): unknown;
   on(event: "error", listener: (error: Error) => void): unknown;
 }
 
@@ -44,7 +60,8 @@ export interface LiveSocket {
  * HTTP status and ElevenLabs' `detail.status`. */
 export interface LiveUpstream extends LiveSocket {
   on(event: "message", listener: (data: Buffer, isBinary: boolean) => void): unknown;
-  on(event: "open" | "close", listener: () => void): unknown;
+  on(event: "open", listener: () => void): unknown;
+  on(event: "close", listener: (code?: number, reason?: Buffer) => void): unknown;
   on(event: "error", listener: (error: Error) => void): unknown;
   on(event: "refused", listener: (status: number, code: string) => void): unknown;
 }
@@ -57,6 +74,8 @@ export interface LiveSpeechOptions {
   origin?: string;
   state?: SpeechState;
   maxSessionMs?: number;
+  handshakeMs?: number;
+  firstAudioMs?: number;
 }
 
 function connectElevenLabs(url: string, key: string): LiveUpstream {
@@ -79,6 +98,9 @@ export function liveEndpoint(model: string): "dialogue" | "speech" {
   return /^eleven_v[34]/.test(model) ? "dialogue" : "speech";
 }
 
+/** The longest unfinished sentence held for more text. */
+const MAX_PENDING = 2_048;
+
 /** Markdown arriving a piece at a time, released a sentence or line at a time
  * as the words speakableText leaves of it. A code block is skipped until it
  * closes; the unfinished sentence waits for more text or `end`. */
@@ -91,6 +113,9 @@ export class SpeakableStream {
     // The last line end, or sentence end followed by a space, so far.
     let cut = this.pending.lastIndexOf("\n") + 1;
     for (const match of this.pending.matchAll(/[.!?:;](?=\s)/g)) cut = Math.max(cut, match.index + 1);
+    // Text that never ends a sentence is cut at a space past MAX_PENDING, so
+    // the held text (and the rescan of it on each piece) stays small.
+    if (!cut && this.pending.length > MAX_PENDING) cut = this.pending.lastIndexOf(" ", MAX_PENDING) + 1 || MAX_PENDING;
     if (!cut) return "";
     const ready = this.pending.slice(0, cut);
     this.pending = this.pending.slice(cut);
@@ -127,9 +152,33 @@ function liveError(text: string): { code: string; error: string } {
   return { code: "speech-failed", error: "ElevenLabs couldn't voice this reply." };
 }
 
+/** A failure Flash would share: the key, the quota or the rate limit. */
+function accountFailure(status: number, code: string): boolean {
+  return status === 401 || status === 429 || /quota|auth|api_key|unauthori[sz]ed|rate_limit|too_many/i.test(code);
+}
+
+/** The HTTP status an error frame's code stands for, so a frame is judged as
+ * a refused handshake would be: a refused format or model, or the request,
+ * is a 400; anything else (internal_error, overloaded) ElevenLabs failing. */
+function frameStatus(code: string): number {
+  return /output_format|model|invalid|validation/.test(code) ? 400 : 500;
+}
+
 export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, options: LiveSpeechOptions = {}): Promise<void> {
   const connect = options.connect ?? connectElevenLabs;
   const state = options.state ?? sharedSpeechState;
+  // Attached before the first await: frames the phone sends while this
+  // computer's settings are read wait here, and a phone that hangs up by
+  // then never opens ElevenLabs' socket.
+  let early: Buffer[] = [], earlyBytes = 0, overflow = false, hungUp = false;
+  let receive = (data: Buffer) => {
+    earlyBytes += data.length;
+    if (earlyBytes > MAX_EARLY_BYTES) overflow = true; else early.push(data);
+  };
+  let gone = () => { hungUp = true; };
+  client.on("message", (data, isBinary) => { if (!isBinary) receive(data); });
+  client.on("close", () => gone());
+  client.on("error", () => gone());
   return (async () => {
     const tell = (frame: Record<string, unknown>) => { if (client.readyState === OPEN) client.send(JSON.stringify(frame)); };
     const key = await (options.key ?? readSpeechKey)();
@@ -142,6 +191,7 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
     const { voice } = await resolveSpeechVoice(requested.success ? requested.data : undefined);
     const chosen = options.model ?? (await resolveSpeechModel()).model;
     const origin = (options.origin ?? (await resolveSpeechRegion()).origin).replace(/^http/, "ws");
+    if (hungUp || client.readyState !== OPEN) return;
     const accepted = new Set(query.getAll("format"));
     const formats = SPEECH_FORMATS.filter(format => format === "pcm_24000" || (accepted.has(format) && state.formatAllowed(format)));
     let models = chosen === FALLBACK_SPEECH_MODEL || state.benchedReason(chosen) ? [FALLBACK_SPEECH_MODEL] : [chosen, FALLBACK_SPEECH_MODEL];
@@ -151,15 +201,18 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
     const said: string[] = [];
     let saidLength = 0, done = false, closed = false, started = false;
     let upstream: LiveUpstream | undefined, endpoint: "dialogue" | "speech" = "speech", format: SpeechFormat = "pcm_24000", elapsed = 0;
+    /** The current socket's handshake and first-audio timers. */
+    let watch: { voicing(): void; stop(): void } | undefined;
     const finish = (code = 1000, reason = "") => {
       if (closed) return;
       closed = true;
-      clearTimeout(limit); clearInterval(keepAlive);
+      clearTimeout(limit); clearInterval(keepAlive); watch?.stop();
       try { upstream?.close(); } catch { /* already closed */ }
       if (client.readyState === OPEN) client.close(code, reason);
     };
-    const fail = (frame: { code: string; error: string }) => { tell({ type: "error", ...frame }); finish(1011); };
-    const limit = setTimeout(() => finish(1000, "Session limit"), options.maxSessionMs ?? MAX_SESSION_MS);
+    const fail = (frame: { code: string; error: string }, code = 1011) => { tell({ type: "error", ...frame }); finish(code); };
+    const limit = setTimeout(() => fail({ code: "speech-limit", error: "This reply ran past the ten minutes one spoken reply can take." }, 1000),
+      options.maxSessionMs ?? MAX_SESSION_MS);
     limit.unref?.();
     const keepAlive = setInterval(() => { if (upstream?.readyState === OPEN && endpoint === "dialogue") upstream.send(JSON.stringify({ keep_alive: true })); }, KEEP_ALIVE_MS);
     keepAlive.unref?.();
@@ -171,7 +224,10 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
       saidLength += words.length;
       if (saidLength > MAX_TEXT) { fail({ code: "speech-invalid", error: "This reply is too long to voice." }); return; }
       said.push(words);
-      if (upstream?.readyState === OPEN) upstream.send(textFrame(words));
+      if (upstream?.readyState === OPEN) {
+        upstream.send(textFrame(words));
+        if (saidLength >= FORCED_TEXT) watch?.voicing();
+      }
     };
 
     const open = (): void => {
@@ -184,34 +240,61 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
       const socket = connect(`${origin}${path}?${params}`, key);
       upstream = socket;
       const current = () => upstream === socket && !closed;
-      let voiced = false;
-      // A refused format or model: ElevenLabs answers some in the handshake
-      // (v4 on stream-input) and the rest in an error frame once open.
-      const refused = (status: number, code: string) => {
+      let voiced = false, firstAudio: ReturnType<typeof setTimeout> | undefined;
+      const handshake = setTimeout(() => { if (current()) refused(504, "handshake_timeout"); }, options.handshakeMs ?? HANDSHAKE_MS);
+      handshake.unref?.();
+      watch = {
+        voicing: () => {
+          if (voiced || firstAudio || !current()) return;
+          firstAudio = setTimeout(() => { if (current() && !voiced) refused(504, "first_audio_timeout"); }, options.firstAudioMs ?? FIRST_AUDIO_MS);
+          firstAudio.unref?.();
+        },
+        stop: () => { clearTimeout(handshake); clearTimeout(firstAudio); },
+      };
+      const detach = () => {
+        clearTimeout(handshake); clearTimeout(firstAudio);
         // Detached first, so its closing is not taken for a failure.
         upstream = undefined;
         try { socket.close(); } catch { /* already closed */ }
+      };
+      // Before the first audio, the next model (Flash) takes the reply over;
+      // with none left, the phone gets `failure`.
+      const fallBack = (failure: { code: string; error: string }) => {
+        detach();
+        if (models.length > 1) { state.bench(model, "failed"); models = models.slice(1); open(); return; }
+        fail(failure);
+      };
+      // A refused format or model: ElevenLabs answers some in the handshake
+      // (v4 on stream-input) and the rest in an error frame once open. A
+      // stalled socket is refused here too, as a 504.
+      const refused = (status: number, code: string) => {
         if (format !== "pcm_24000" && (status === 400 || status === 403 || status === 422) && /output_format/.test(code)) {
-          state.refuseFormat(format); formats.shift(); open(); return;
+          detach(); state.refuseFormat(format); formats.shift(); open(); return;
         }
-        if (models.length > 1 && status !== 429 && code !== "quota_exceeded" && code !== "invalid_api_key" && (status >= 500 || /model/.test(code))) {
-          state.bench(model, "failed"); models = models.slice(1); open(); return;
+        if (!accountFailure(status, code) && (status >= 500 || /model/.test(code))) {
+          fallBack(status === 504 ? { code: "speech-failed", error: "ElevenLabs didn't answer." } : liveError(`${status} ${code}`));
+          return;
         }
+        detach();
         fail(liveError(`${status} ${code}`));
       };
       socket.on("refused", (status, code) => { if (current()) refused(status, code); });
       socket.on("open", () => {
         if (!current()) return;
+        clearTimeout(handshake);
         socket.send(JSON.stringify(endpoint === "dialogue" ? { voices: [voice], voice_settings: VOICE_SETTINGS } : { text: " ", voice_settings: VOICE_SETTINGS }));
         for (const words of said) socket.send(textFrame(words));
         if (done) socket.send(closeFrame());
+        if (said.length && (done || saidLength >= FORCED_TEXT)) watch?.voicing();
       });
       socket.on("message", data => {
         if (!current()) return;
         let message: Record<string, unknown>;
         try { message = JSON.parse(data.toString("utf8")) as Record<string, unknown>; } catch { return; }
-        if (message.error && !voiced) { refused(400, String(message.error)); return; }
+        if (message.error && !voiced) { refused(frameStatus(String(message.error)), String(message.error)); return; }
         if (typeof message.audio === "string" && message.audio) {
+          // A phone that stopped reading would hold the rest of the reply in this computer's memory.
+          if ((client.bufferedAmount ?? 0) > MAX_BUFFERED) { fail({ code: "speech-failed", error: "The phone stopped taking the audio." }); return; }
           // Announced with the first audio, so a fallback before it is never seen.
           if (!started) {
             const info = SPEECH_FORMAT_INFO[format];
@@ -219,6 +302,7 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
             started = true;
           }
           voiced = true;
+          clearTimeout(firstAudio);
           const audio = message.audio, length = Buffer.from(audio, "base64").length;
           tell({ type: "audio", audio, alignment: alignment(message.alignment) });
           elapsed += seconds(format, length);
@@ -226,8 +310,16 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
         if (message.isFinal === true || message.is_final === true) { tell({ type: "done" }); finish(); return; }
         if (message.error) fail(liveError(String(message.error)));
       });
-      socket.on("error", () => { if (current()) fail({ code: "speech-unreachable", error: "Couldn't reach ElevenLabs from this computer." }); });
-      socket.on("close", () => { if (current()) fail({ code: "speech-failed", error: started ? "ElevenLabs stopped before the reply was voiced." : "ElevenLabs didn't answer." }); });
+      socket.on("error", () => { if (current()) { detach(); fail({ code: "speech-unreachable", error: "Couldn't reach ElevenLabs from this computer." }); } });
+      socket.on("close", (_code, reason) => {
+        if (!current()) return;
+        if (voiced) { detach(); fail({ code: "speech-failed", error: "ElevenLabs stopped before the reply was voiced." }); return; }
+        // Closed before any audio: the reason is read only to tell the
+        // account's failures (which Flash shares) from the model's.
+        const why = reason?.toString("utf8") ?? "";
+        if (accountFailure(0, why)) { detach(); fail(liveError(why)); return; }
+        fallBack({ code: "speech-failed", error: "ElevenLabs didn't answer." });
+      });
     };
 
     /** In seconds from the start of this socket's audio. Stream-input counts
@@ -243,19 +335,25 @@ export function relayLiveSpeech(client: LiveSocket, query: URLSearchParams, opti
       return { characters, starts: starts.map(t => round(offset + t / 1_000)), ends: starts.map((t, i) => round(offset + (t + durations[i]) / 1_000)) };
     };
 
-    client.on("message", (data, isBinary) => {
-      if (closed || done || isBinary) return;
+    const handle = (data: Buffer) => {
+      if (closed || done) return;
       let frame: { text?: unknown; done?: unknown };
       try { frame = JSON.parse(data.toString("utf8")) as typeof frame; } catch { return; }
       if (typeof frame.text === "string") send(text.push(frame.text));
-      if (frame.done === true) {
+      if (frame.done === true && !closed) {
         done = true;
         send(text.end());
-        if (upstream?.readyState === OPEN) upstream.send(closeFrame());
+        if (closed) return;
+        // Nothing speakable (a reply of only code, say): no audio is coming.
+        if (!saidLength) { tell({ type: "done" }); finish(); return; }
+        if (upstream?.readyState === OPEN) { upstream.send(closeFrame()); watch?.voicing(); }
       }
-    });
-    client.on("close", () => finish());
-    client.on("error", () => finish());
-    open();
+    };
+    receive = handle;
+    gone = () => finish();
+    if (overflow) { fail({ code: "speech-invalid", error: "This reply is too long to voice." }); return; }
+    for (const data of early) handle(data);
+    early = [];
+    if (!closed) open();
   })();
 }

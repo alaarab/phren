@@ -1,6 +1,14 @@
 import { EventEmitter } from "node:events";
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { relayTranscription, transcribeURL, type RelaySocket } from "./speech-transcribe.js";
+import { writeSpeechRegion } from "./speech-voice.js";
+
+let bridge: string;
+beforeEach(async () => { bridge = await mkdtemp(path.join(tmpdir(), "phren-scribe-")); vi.stubEnv("PHREN_BRIDGE_HOME", bridge); });
+afterEach(async () => { vi.unstubAllEnvs(); await rm(bridge, { recursive: true, force: true }); });
 
 class FakeSocket extends EventEmitter implements RelaySocket {
   readyState = 1;
@@ -62,5 +70,15 @@ describe("Scribe transcription relay", () => {
     await relayTranscription(unkeyed, new URLSearchParams(), { key: async () => undefined, connect: () => { throw new Error("must not connect"); } });
     expect(frames(unkeyed)).toEqual([{ type: "error", code: "transcribe-unconfigured", error: "This computer has no ElevenLabs key." }]);
     expect(unkeyed.closed?.code).toBe(1008);
+  });
+
+  it("reaches Scribe in the stored region, as spoken replies do", async () => {
+    const urls: string[] = [];
+    const connect = (url: string) => { urls.push(url); return new FakeSocket(); };
+    await relayTranscription(new FakeSocket(), new URLSearchParams(), { key: async () => "sk-test", connect });
+    await writeSpeechRegion("us");
+    await relayTranscription(new FakeSocket(), new URLSearchParams(), { key: async () => "sk-test", connect });
+    expect(urls.map(url => new URL(url).origin + new URL(url).pathname)).toEqual([
+      "wss://api.elevenlabs.io/v1/speech-to-text/realtime", "wss://api.us.elevenlabs.io/v1/speech-to-text/realtime"]);
   });
 });
