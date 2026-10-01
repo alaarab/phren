@@ -284,7 +284,13 @@ sandbox settings, and OpenCode, Copilot, phren and conductors are refused with 4
 before any pane exists. `kind` is `codex`, `claude`, `copilot`, `opencode` or
 `phren` (phren's own agent, started as `phren agent -i`, with `model` as
 `--model` and `effort` as `--reasoning`, `minimal` as `low`; a dispatched brief
-is typed after it starts, since its TUI takes no first prompt). The reply repeats `permissionMode` when it was applied,
+is typed after it starts, since its TUI takes no first prompt). For `phren`
+only, `mode: "chat"` starts a quick chat (`--mode chat`: no tools, its memory
+read into the prompt up front) and `resumeSession: "<session id>"` continues
+that session's history (`--session <id>`); the id is the pane target's
+`session`. Resuming a chat with `mode: "agent"` (or no `mode`) promotes it:
+the same conversation with tools. Either field on another `kind` is 400.
+Health advertises `capabilities.quickChat`. The reply repeats `permissionMode` when it was applied,
 so a caller can tell an older Hook that ignored it. A
 conductor launch supports Claude, Codex and OpenCode (Copilot and phren are
 refused with 400: phren-agent takes no system brief at startup), attaches the shipped
@@ -1461,8 +1467,28 @@ not trigger terminal fallback merely because its file is absent.
 The transcript WebSocket includes `preview: {turnStartedAt, text}` or
 `preview: null` on backlog/append frames, or sends a standalone `type: "preview"`
 frame with the same conversation identity. Claude previews come from pane text anchored to the current
-prompt; Codex and OpenCode use their delta text. Updates arrive at most twice
-a second. Preview text stays out of history and never advances the transcript
+prompt; Codex, OpenCode and phren's agent use their delta text. Updates arrive at most twice
+a second.
+
+A preview built from a harness's own deltas also carries `streamed: true` and
+`delta`, the text appended since the previous preview frame on this socket:
+`{preview: {turnStartedAt, text, delta, streamed: true}}`. Either field marks
+`text` as the reply's own Markdown for the current assistant text block rather
+than text read off a terminal. `delta` is the whole `text` on the first preview
+frame of a block, after `preview: null`, and on the first frame of a new socket
+(a reconnect resends the text so far once, then continues with deltas). A
+block that does not extend the previous text (the next block in the same turn)
+also starts over with `delta` equal to `text`. Frames without either field
+(Claude's pane text) keep their old meaning. Health advertises
+`capabilities.previewDeltas`.
+
+| Harness | Preview source | Streaming |
+| --- | --- | --- |
+| phren agent | provider text deltas in `<event log>.preview.json`, written at most every 100 ms | token-level, `streamed: true` |
+| Codex | the thread's in-progress `agentMessage` (Hook app-server or `thread_history_1.sqlite`), else rollout `agent_message_delta` rows | as often as Codex records deltas, `streamed: true` |
+| OpenCode | the plugin's `.preview.json`, flushed with its event log | token-level, `streamed: true` |
+| Claude Code | the pane, read at most twice a second, anchored to the prompt, until the turn's first entry lands | screen text, no `delta`; later blocks arrive per block as entries |
+| Copilot | none (only its thinking state) | per block, as entries | Preview text stays out of history and never advances the transcript
 cursor. A completed entry clears the preview without the throttle delay. The
 phone replaces it in place and keeps the reveal progress, avoiding duplicate
 text. Reconnect history retains existing rows unless Hook explicitly resets
@@ -1484,7 +1510,11 @@ This computer's live resources, `{computer, resources}`, collected at most once 
 Pending `sudo -A` requests from this computer's askpass helper (`<bridge>/askpass`, see docs/phren-hook.md, *sudo from the phone*), and the phone's answer. `GET` returns `{requests: [{id, computer, command, account?, user?, cwd?, session?, askedAt, expiresAt}]}`, oldest first; `account` is whose password sudo asks for (the user running sudo), `user` who the command runs as; `command` is what sudo will run, read by the Hook from the sudo process itself, and `session` (`source`, `label`, `server`, `workspace`, `tab`, `pane`) names the pane that asked when the helper ran in one. `POST /v1/sudo/answer` takes `{id, password}` (1 to 1024 characters, no newline, carriage return or NUL) or `{id, deny: true}` and answers `{ok: true}`. With `outcome: true` next to a password it answers, within about `PHREN_SUDO_OUTCOME_MS` (6 s), `{ok: true, outcome}`: `rejected` when the same sudo process (pid and start time) asked again, `accepted` when it did not on an earlier try or is still running, `unknown` when it gave up after its last try or the password could not be handed over (capability `sudoOutcome`; the phone uses it to save a typed password or forget a saved one that failed). The request is then gone, and an unknown, answered or expired id is 404. A request lasts `PHREN_SUDO_TIMEOUT_MS` (120 s). The password is handed to the waiting askpass once and never logged, stored or sent anywhere else. A phone that opens `WS /v1/overview` with `sudo=1` gets `{type: "sudo", requests}` after the first overview and whenever the list changes, and phones registered for approval pushes get one push per request (category `PHREN_SUDO`, `phren.kind: "sudo"`, with `id`, `computer`, `command`, `expiresAt`, never a password). Advertised as `capabilities.sudo`.
 ### `POST /v1/speech`
 
-Voices `text` (1 to 2,000 characters) for talk mode with this computer's ElevenLabs key. Inputs: `text`, optional `timestamps` (answer JSON with the character alignment), `voice` (an ElevenLabs voice id) and `formats`, the output formats the phone plays, from `capabilities.speechFormats` (`pcm_44100`, `mp3_44100_192`, `mp3_44100_128`, `pcm_24000`). The Hook serves the first the phone plays and the ElevenLabs plan allows, learning refusals from ElevenLabs' `output_format_not_allowed` and skipping them for 6 hours; without `formats` it is always `pcm_24000`. The streamed reply carries `X-Phren-Audio` (e.g. `pcm_s16le;rate=44100;channels=1`), `X-Phren-Audio-Rate` and `X-Phren-Speech-Model`; the timestamped JSON is `{audio, audioFormat, sampleRate, format, model, alignment}` with alignment times in seconds. The model is `phren bridge speech-model` (default `eleven_v4_turbo`), replaced by `eleven_flash_v2_5` for 10 minutes when it errors or the median of its last three short replies took more than 1.5 s to start. See [spoken replies](phren-hook.md#spoken-replies-for-talk-mode).
+Voices `text` (1 to 2,000 characters) for talk mode with this computer's ElevenLabs key. Inputs: `text`, optional `timestamps` (answer JSON with the character alignment), `voice` (an ElevenLabs voice id) and `formats`, the output formats the phone plays, from `capabilities.speechFormats` (`pcm_44100`, `mp3_44100_192`, `mp3_44100_128`, `pcm_24000`). The Hook serves the first the phone plays and the ElevenLabs plan allows, learning refusals from ElevenLabs' `output_format_not_allowed` and skipping them for 6 hours; without `formats` it is always `pcm_24000`. The streamed reply carries `X-Phren-Audio` (e.g. `pcm_s16le;rate=44100;channels=1`), `X-Phren-Audio-Rate` and `X-Phren-Speech-Model`; the timestamped JSON is `{audio, audioFormat, sampleRate, format, model, alignment}` with alignment times in seconds. The model is `phren bridge speech-model` (default `eleven_v4_turbo`), replaced by `eleven_flash_v2_5` for 10 minutes when it errors or the median of its last three short replies took more than 1.5 s to start. With `timestamps` and `stream` (capability `speechTimestampStream`) the reply streams as `application/x-ndjson`, one `{audio, alignment}` line per ElevenLabs chunk. `phren bridge speech-region us|global` picks the ElevenLabs endpoint. See [spoken replies](phren-hook.md#spoken-replies-for-talk-mode).
+
+### `WS /v1/speech/live`
+
+Voices one reply while it is being written (capability `speechLive`). Query: optional `voice`, repeated `format` (as `formats` above). Send `{"text": "..."}` pieces and `{"done": true}`. Receive `{type: "start", model, format, audioFormat, sampleRate}` with the first audio, `{type: "audio", audio, alignment}` (base64 audio; alignment `{characters, starts, ends}` in seconds from the start of the socket's audio, or null), `{type: "done"}`, or `{type: "error", code, error}`. The model is `phren bridge speech-model` (v3/v4 models on ElevenLabs' text-to-dialogue WebSocket, others on text-to-speech stream-input with `auto_mode`), falling back to `eleven_flash_v2_5` when refused or failing before any audio.
 
 ## Computers and usage without memory
 

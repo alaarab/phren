@@ -46,8 +46,23 @@ phren agent -i                                     # interactive terminal UI
 phren agent "fix the failing date test"            # one task, then exit
 phren agent --plan "refactor the database layer"   # review the plan before it acts
 phren agent --resume                               # continue the last session
+phren agent -i --mode chat                         # quick chat: no tools, fast answers
 phren agent --help                                 # every option
 ```
+
+### Quick chat
+
+`--mode chat` is a plain chat with the configured provider, ChatGPT/Codex
+subscription included: no tools at all, and the project's pinned truths (global
+and project), `summary.md` and newest findings read straight from the store
+into the system prompt, without building the search index. With no tool calls
+and a short prompt, an answer starts in about a second. The chat cannot read
+files, run commands or change memory. `/promote` turns it into a normal agent
+session in place: the tools, the agent's prompt and memory snippet are loaded,
+and the same conversation (same event log) continues. From another process,
+`phren agent -i --session <id>` resumes a chat's history as a normal agent.
+The phone starts both through the Hook (`kind: "phren"` with `mode: "chat"` or
+`resumeSession`, see the [Hook routes](api-reference.md)).
 
 Run it from the project's directory. phren picks the project from the
 directory (or `--project <name>`) and loads that project's memory.

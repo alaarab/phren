@@ -9,7 +9,7 @@ import { askpass } from "./sudo.js";
 import { object, provider, type Json } from "./protocol.js";
 import { apnsSetupSteps } from "./push.js";
 import { speechKeyFile, speechKeyStatus, writeSpeechKey } from "./speech-key.js";
-import { clearSpeechModel, clearSpeechVoice, DEFAULT_SPEECH_MODEL, FALLBACK_SPEECH_MODEL, resolveSpeechModel, resolveSpeechVoice, speechModelId, speechVoiceFile, voiceId, writeSpeechModel, writeSpeechVoice } from "./speech-voice.js";
+import { clearSpeechModel, clearSpeechVoice, DEFAULT_SPEECH_MODEL, FALLBACK_SPEECH_MODEL, resolveSpeechModel, resolveSpeechRegion, resolveSpeechVoice, SPEECH_REGIONS, speechModelId, speechRegion, speechVoiceFile, voiceId, writeSpeechModel, writeSpeechRegion, writeSpeechVoice } from "./speech-voice.js";
 import { AccountUsageReader, captureClaudeUsage, type AccountUsage } from "./usage.js";
 import { acceptComputer, enrollComputer } from "./computers.js";
 import { addPeerFromLink, discoverComputers, linkComputer } from "./link.js";
@@ -131,6 +131,18 @@ export async function runBridge(args: string[], version: string): Promise<number
       } else throw new Error(SPEECH_MODEL_USAGE);
       break;
     }
+    case "speech-region": {
+      const [, region = "show"] = args;
+      if (args.length > 2) throw new Error(SPEECH_REGION_USAGE);
+      if (region === "show") {
+        const current = await resolveSpeechRegion();
+        console.log(`${current.region}: ${current.origin} (${current.source === "setting" ? `stored in ${speechVoiceFile()}` : current.source})`);
+      } else if (speechRegion.safeParse(region).success) {
+        const stored = await writeSpeechRegion(region);
+        console.log(`Talk mode now reaches ElevenLabs at ${SPEECH_REGIONS[stored]} (${stored}). Install and update keep it.`);
+      } else throw new Error(SPEECH_REGION_USAGE);
+      break;
+    }
     case "usage-statusline": await captureClaudeUsage(args[1] || ""); break;
     case "usage": console.log(JSON.stringify(await new AccountUsageReader().read(), null, 2)); break;
     case "hook": await agentHook(provider.parse(args[1])).catch(() => {}); break;
@@ -160,7 +172,7 @@ export async function runBridge(args: string[], version: string): Promise<number
     case "status": console.log(JSON.stringify(await health(), null, 2)); break;
     case "doctor": {
       const helper = await health(), muxes = await servers(), terminal = await terminalHealth();
-      const push = approvalPushCheck(helper), speech = await speechKeyStatus(), voice = await resolveSpeechVoice().catch(() => undefined), model = await resolveSpeechModel();
+      const push = approvalPushCheck(helper), speech = await speechKeyStatus(), voice = await resolveSpeechVoice().catch(() => undefined), model = await resolveSpeechModel(), region = await resolveSpeechRegion();
       // Chat needs Herdr or tmux; a plain project shell or agent over SSH does not.
       console.log(JSON.stringify({ ok: true, helper, herdr: muxes, terminal, checks: {
         privateSocket: true, protocol: true, independentHelper: true,
@@ -169,12 +181,12 @@ export async function runBridge(args: string[], version: string): Promise<number
         shell: muxes.length > 0 ? "available" : "Neither Herdr nor tmux is available: chat is unavailable, project shells and agents still open over SSH",
         approvalPush: push.configured ? "configured" : "not configured",
         speechKey: speech.configured ? "configured" : "not configured", speechKeyDetail: speech.detail,
-        ...(voice ? { speechVoice: `${voice.voice} (${voice.source})` } : {}), speechModel: `${model.model} (${model.source})`,
+        ...(voice ? { speechVoice: `${voice.voice} (${voice.source})` } : {}), speechModel: `${model.model} (${model.source})`, speechRegion: `${region.region} (${region.source})`,
       }, ...(push.warning ? { warnings: [push.warning] } : {}) }, null, 2));
       if (push.warning) console.error(`warning: ${push.warning}`);
       break;
     }
-    default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall|enroll-computer|accounts|discover|link|fanouts archive|speech-key set|speech-voice|speech-model>");
+    default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall|enroll-computer|accounts|discover|link|fanouts archive|speech-key set|speech-voice|speech-model|speech-region>");
   }
   return 0;
 }
@@ -190,6 +202,7 @@ export function approvalPushCheck(helper: Json): { configured: boolean; warning?
 
 const SPEECH_VOICE_USAGE = "Usage: phren bridge speech-voice [show | set <elevenlabs-voice-id> | clear]";
 const SPEECH_MODEL_USAGE = "Usage: phren bridge speech-model [show | set <elevenlabs-model-id> | clear]";
+const SPEECH_REGION_USAGE = "Usage: phren bridge speech-region [show | us | global]";
 const SPEECH_KEY_USAGE = "Usage: phren bridge speech-key set  (paste the key when asked, or pipe it on stdin)";
 
 /** One line from stdin: piped as is, or typed at a prompt without echo. */
