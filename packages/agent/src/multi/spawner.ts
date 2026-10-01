@@ -24,6 +24,7 @@ import { MAX_SPAWN_DEPTH } from "./types.js";
 import type { PermissionConfig, PermissionMode } from "../permissions/types.js";
 import type { SandboxMode } from "../permissions/kernel-sandbox.js";
 import type { CostTracker } from "../cost.js";
+import type { LlmProvider } from "../providers/types.js";
 import { scopedModelOverrides } from "../model-overrides.js";
 import { createWorktree, hasWorktreeChanges, removeWorktree, } from "./worktree.js";
 
@@ -58,6 +59,8 @@ export interface SpawnOptions {
 }
 
 export interface AgentSpawnerOptions {
+  /** The provider this process runs now, so a child can reach the same endpoint. */
+  getParentProvider?: () => Pick<LlmProvider, "name" | "model" | "baseUrl"> | undefined;
   costTracker?: CostTracker | null;
   depth?: number;
   maxDepth?: number;
@@ -79,11 +82,35 @@ export interface AgentSpawnerEvents {
   shutdown_approved: (agentId: string) => void;
 }
 
+/** Providers that reach a configurable endpoint (--base-url). */
+const ENDPOINT_PROVIDERS = new Set(["openai-compat", "deepseek"]);
+
+/**
+ * Where a child on the parent's endpoint provider should connect. A child
+ * that names no provider, or the parent's, gets the parent's endpoint, and
+ * its model unless it asked for another; openai-compat cannot be found by
+ * auto-detection and needs both. Any other provider is the child's own.
+ */
+export function childEndpoint(
+  parent: Pick<LlmProvider, "name" | "model" | "baseUrl"> | undefined,
+  provider: string | undefined,
+  model: string | undefined,
+): { provider: string; model?: string; baseUrl: string } | undefined {
+  if (!parent?.baseUrl || !ENDPOINT_PROVIDERS.has(parent.name)) return undefined;
+  if (provider !== undefined && provider !== parent.name) return undefined;
+  const childModel = model ?? parent.model;
+  return { provider: parent.name, ...(childModel !== undefined ? { model: childModel } : {}), baseUrl: parent.baseUrl };
+}
+
 /** Keys forwarded from the parent env into child processes. */
 const ENV_FORWARD_KEYS = [
   "OPENROUTER_API_KEY",
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
+  "DEEPSEEK_API_KEY",
+  // Key for an openai-compat endpoint; the endpoint itself goes in the
+  // spawn payload (childEndpoint). Env only: never argv or logs.
+  "PHREN_AGENT_API_KEY",
   "PHREN_AGENT_PROVIDER",
   "PHREN_AGENT_MODEL",
   "PHREN_OLLAMA_URL",
@@ -105,6 +132,7 @@ export class AgentSpawner extends EventEmitter {
   private depth: number;
   private maxDepth: number;
   private getPermissionDefaults?: () => PermissionConfig | undefined;
+  private getParentProvider?: AgentSpawnerOptions["getParentProvider"];
 
   constructor(opts: AgentSpawnerOptions = {}) {
     super();
@@ -112,6 +140,7 @@ export class AgentSpawner extends EventEmitter {
     this.depth = opts.depth ?? 0;
     this.maxDepth = opts.maxDepth ?? MAX_SPAWN_DEPTH;
     this.getPermissionDefaults = opts.getPermissionDefaults;
+    this.getParentProvider = opts.getParentProvider;
   }
 
   canSpawn(): boolean {
@@ -129,6 +158,7 @@ export class AgentSpawner extends EventEmitter {
     }
     const agentId = `agent-${this.nextId++}`;
     const defaults = this.getPermissionDefaults?.();
+    const endpoint = childEndpoint(this.getParentProvider?.(), opts.provider, opts.model);
 
     // Build forwarded env
     const childEnv: Record<string, string> = {};
@@ -142,8 +172,9 @@ export class AgentSpawner extends EventEmitter {
       agentId,
       task: opts.task,
       cwd: opts.cwd ?? defaults?.projectRoot ?? process.cwd(),
-      provider: opts.provider,
-      model: opts.model,
+      provider: endpoint?.provider ?? opts.provider,
+      model: endpoint?.model ?? opts.model,
+      ...(endpoint ? { baseUrl: endpoint.baseUrl } : {}),
       project: opts.project,
       modelOverrides: scopedModelOverrides(),
       permissions: opts.permissions ?? defaults?.mode ?? "auto-confirm",

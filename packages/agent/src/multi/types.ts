@@ -26,6 +26,8 @@ export interface SpawnPayload {
   provider?: string;
   /** Model override. */
   model?: string;
+  /** The parent's openai-compat / deepseek endpoint (its key travels in the env). */
+  baseUrl?: string;
   /** Phren project name for memory context. */
   project?: string;
   /** Permission mode for tool execution. */

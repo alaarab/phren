@@ -64,6 +64,47 @@ describe("AgentSpawner", () => {
       }
     });
 
+    it("a child reaches the parent's openai-compat endpoint, its key only in the child's env", async () => {
+      const { fork } = await import("node:child_process");
+      const saved = process.env.PHREN_AGENT_API_KEY;
+      process.env.PHREN_AGENT_API_KEY = "sk-secret-endpoint-key";
+      try {
+        const parent = { name: "openai-compat", model: "glm-5", baseUrl: "https://relay.test/v1" };
+        const withEndpoint = new AgentSpawner({ getParentProvider: () => parent });
+        withEndpoint.spawn({ task: "t" });
+        withEndpoint.spawn({ task: "t", model: "qwen3-coder" });
+        withEndpoint.spawn({ task: "t", provider: "anthropic" });
+
+        const payloads = fakeChildren.map((c) => c.send.mock.calls[0][0]);
+        expect(payloads[0]).toMatchObject({ provider: "openai-compat", model: "glm-5", baseUrl: "https://relay.test/v1" });
+        expect(payloads[1]).toMatchObject({ provider: "openai-compat", model: "qwen3-coder", baseUrl: "https://relay.test/v1" });
+        expect(payloads[2].provider).toBe("anthropic");
+        expect(payloads[2].baseUrl).toBeUndefined();
+
+        const forkCalls = vi.mocked(fork).mock.calls;
+        const [, argv, options] = forkCalls[forkCalls.length - 1] as unknown as [string, string[], { env: Record<string, string> }];
+        expect(options.env.PHREN_AGENT_API_KEY).toBe("sk-secret-endpoint-key");
+        expect(JSON.stringify(argv)).not.toContain("sk-secret");
+        // The payload names the endpoint, never the key outside the env map.
+        for (const p of payloads) {
+          const { env: _env, ...rest } = p as Record<string, unknown>;
+          expect(JSON.stringify(rest)).not.toContain("sk-secret");
+        }
+      } finally {
+        if (saved === undefined) delete process.env.PHREN_AGENT_API_KEY;
+        else process.env.PHREN_AGENT_API_KEY = saved;
+      }
+    });
+
+    it("a DeepSeek parent's custom endpoint reaches children on DeepSeek; other parents add nothing", async () => {
+      const { childEndpoint } = await import("../multi/spawner.js");
+      expect(childEndpoint({ name: "deepseek", model: "deepseek-flash", baseUrl: "https://proxy.test" }, "deepseek", undefined))
+        .toEqual({ provider: "deepseek", model: "deepseek-flash", baseUrl: "https://proxy.test" });
+      expect(childEndpoint({ name: "openai", model: "gpt-5.4", baseUrl: "https://api.openai.com/v1" }, undefined, undefined)).toBeUndefined();
+      expect(childEndpoint({ name: "anthropic", model: "claude-sonnet-5" }, undefined, undefined)).toBeUndefined();
+      expect(childEndpoint(undefined, undefined, undefined)).toBeUndefined();
+    });
+
     it("returns a unique agent ID", () => {
       const id1 = spawner.spawn({ task: "task one" });
       const id2 = spawner.spawn({ task: "task two" });
