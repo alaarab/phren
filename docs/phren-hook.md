@@ -772,9 +772,13 @@ How fast the first audio arrives. The Hook passes ElevenLabs' body through as
 it arrives, sending the headers before the first byte. It reaches ElevenLabs
 over its own keep-alive connection pool, so the next sentence skips the TCP and
 TLS handshake even after a pause of up to a minute. `phren bridge speech-region
-us` sends every request to ElevenLabs' US-only endpoint
-(`api.us.elevenlabs.io`), and `global` (the default) to `api.elevenlabs.io`.
-It is stored in `speech.json` like the model and read on every reply.
+us` sends every ElevenLabs request this computer makes (spoken replies, the
+live socket, the voice list, Scribe dictation and the usage read) to
+ElevenLabs' US-only endpoint (`api.us.elevenlabs.io`), and `global` (the
+default) to `api.elevenlabs.io`. It is stored in `speech.json` like the model
+and read on every request. A request ElevenLabs goes quiet on for 30 s, before
+its headers or between two chunks of audio, is given up on, and a pooled
+connection ElevenLabs closed while idle is retried once on a fresh one.
 
 `WS /v1/speech/live` (the `speechLive` capability) voices a reply while it is
 still being written. Open it with optional `voice` and repeated `format`
@@ -788,6 +792,15 @@ error }`. v4 Turbo works on ElevenLabs' text-to-dialogue WebSocket (its
 text-to-speech WebSocket refuses v4 models), where the first audio came about 140 ms
 after ElevenLabs had the first complete sentence (2026-10-01); Flash v2.5 is the fallback, on
 the text-to-speech WebSocket with `auto_mode`. One socket voices one reply.
+Before any audio, Flash takes the reply over (with everything said so far)
+when ElevenLabs refuses the model, sends an error frame other than the key,
+quota or rate limit, closes the socket, takes over 5 s to open it, or sends
+no audio within 5 s once it must be voicing: the reply is done, or 300
+characters of it are in (a shorter piece can sit in ElevenLabs' buffer while
+the agent thinks). Text the phone sends while the Hook reads its settings is
+kept. A reply with nothing to say (only code, say) ends with `done`; one past
+ten minutes ends with the error `speech-limit`; a phone that stops reading the
+audio (4 MB queued) is closed with `speech-failed`.
 
 The key is this computer's ElevenLabs key (see [the ElevenLabs key](#the-elevenlabs-key)),
 used only in the request to ElevenLabs and never returned, even in errors.

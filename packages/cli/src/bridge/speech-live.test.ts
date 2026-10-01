@@ -31,7 +31,7 @@ const frames = (socket: FakeSocket) => socket.sent.map(frame => JSON.parse(frame
 const say = (client: FakeSocket, frame: unknown) => client.emit("message", Buffer.from(JSON.stringify(frame)), false);
 
 /** The relay with ElevenLabs' sockets recorded, each still connecting. */
-async function live(query = "", options: { model?: string } = {}) {
+async function live(query = "", options: { model?: string; handshakeMs?: number; firstAudioMs?: number; maxSessionMs?: number } = {}) {
   const client = new FakeSocket(), upstreams: FakeSocket[] = [];
   await relayLiveSpeech(client, new URLSearchParams(query), { key: async () => KEY, state: new SpeechState(), ...options,
     connect: (url, key) => { expect(key).toBe(KEY); const socket = new FakeSocket(url); socket.readyState = 0; upstreams.push(socket); return socket; } });
@@ -162,11 +162,116 @@ describe("live spoken replies", () => {
     expect(frames(mid.client).at(-1)).toEqual({ type: "error", code: "speech-quota", error: "The ElevenLabs quota on this computer's account is used up." });
     expect(mid.client.closed?.code).toBe(1011);
 
+    // Closed before any audio: Flash takes the reply over; when it closes too, the phone hears why.
     const dropped = await live();
     dropped.upstreams[0].open();
     dropped.upstreams[0].close();
-    expect(frames(dropped.client).at(-1)).toMatchObject({ type: "error", code: "speech-failed" });
+    expect(new URL(dropped.upstreams[1].url).searchParams.get("model_id")).toBe(FALLBACK_SPEECH_MODEL);
+    dropped.upstreams[1].open();
+    dropped.upstreams[1].close();
+    expect(frames(dropped.client)).toEqual([{ type: "error", code: "speech-failed", error: "ElevenLabs didn't answer." }]);
     for (const socket of [refused.client, mid.client, dropped.client]) expect(socket.sent.join()).not.toContain(KEY);
+  });
+
+  it("keeps the phone's frames sent while settings are read, and opens nothing for a phone gone by then", async () => {
+    const client = new FakeSocket(), upstreams: FakeSocket[] = [];
+    const connect = (url: string) => { const socket = new FakeSocket(url); socket.readyState = 0; upstreams.push(socket); return socket; };
+    const relay = relayLiveSpeech(client, new URLSearchParams(), { key: async () => KEY, state: new SpeechState(), connect });
+    say(client, { text: "Said early. And" });
+    say(client, { text: " more." });
+    say(client, { done: true });
+    await relay;
+    upstreams[0].open();
+    expect(frames(upstreams[0]).slice(1)).toEqual([
+      { inputs: [{ text: "Said early. ", voice_id: DEFAULT_SPEECH_VOICE }] },
+      { inputs: [{ text: "And more. ", voice_id: DEFAULT_SPEECH_VOICE }] },
+      { close_socket: true },
+    ]);
+
+    const leaving = new FakeSocket(), opened: string[] = [];
+    const pending = relayLiveSpeech(leaving, new URLSearchParams(), { key: async () => KEY, state: new SpeechState(), connect: url => { opened.push(url); return new FakeSocket(url); } });
+    leaving.close();
+    await pending;
+    expect(opened).toEqual([]);
+  });
+
+  it("falls back to Flash when ElevenLabs never opens or never voices, and errors when Flash stalls too", async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, upstreams } = await live("", { handshakeMs: 1_000, firstAudioMs: 2_000 });
+      say(client, { text: "Hello there. " });
+      vi.advanceTimersByTime(1_000);
+      expect(upstreams[0].readyState).toBe(3);
+      expect(new URL(upstreams[1].url).searchParams.get("model_id")).toBe(FALLBACK_SPEECH_MODEL);
+      upstreams[1].open();
+      // A sentence with more to come may wait in ElevenLabs' buffer: not a stall yet.
+      vi.advanceTimersByTime(10_000);
+      expect(client.sent).toEqual([]);
+      say(client, { done: true });
+      vi.advanceTimersByTime(2_000);
+      expect(upstreams).toHaveLength(2);
+      expect(frames(client)).toEqual([{ type: "error", code: "speech-failed", error: "ElevenLabs didn't answer." }]);
+      expect(client.closed?.code).toBe(1011);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("falls back to Flash on a generic error frame or a bare close before any audio, not after", async () => {
+    const generic = await live();
+    generic.upstreams[0].open();
+    say(generic.client, { text: "One. " });
+    generic.upstreams[0].reply({ message: "Something went wrong", error: "internal_error" });
+    expect(new URL(generic.upstreams[1].url).searchParams.get("model_id")).toBe(FALLBACK_SPEECH_MODEL);
+    generic.upstreams[1].open();
+    expect(frames(generic.upstreams[1]).slice(1)).toEqual([{ text: "One. " }]);
+    expect(generic.client.sent).toEqual([]);
+
+    const closed = await live();
+    closed.upstreams[0].open();
+    closed.upstreams[0].emit("close", 1011, Buffer.from("upstream failure"));
+    expect(closed.upstreams).toHaveLength(2);
+
+    // An account failure in the close reason is Flash's too: no fallback.
+    const quota = await live();
+    quota.upstreams[0].open();
+    quota.upstreams[0].emit("close", 1008, Buffer.from("quota_exceeded"));
+    expect(quota.upstreams).toHaveLength(1);
+    expect(frames(quota.client)).toEqual([{ type: "error", code: "speech-quota", error: "The ElevenLabs quota on this computer's account is used up." }]);
+
+    const voiced = await live();
+    voiced.upstreams[0].open();
+    voiced.upstreams[0].reply({ audio: "AAAA", alignment: null });
+    voiced.upstreams[0].emit("close", 1011, Buffer.from(""));
+    expect(voiced.upstreams).toHaveLength(1);
+    expect(frames(voiced.client).at(-1)).toEqual({ type: "error", code: "speech-failed", error: "ElevenLabs stopped before the reply was voiced." });
+  });
+
+  it("ends a reply with nothing to say with done, and the session limit with an error frame", async () => {
+    const empty = await live();
+    say(empty.client, { text: "```sh\nls\n```\n" });
+    say(empty.client, { done: true });
+    expect(frames(empty.client)).toEqual([{ type: "done" }]);
+    expect(empty.client.closed?.code).toBe(1000);
+    expect(empty.upstreams[0].readyState).toBe(3);
+
+    vi.useFakeTimers();
+    try {
+      const long = await live("", { maxSessionMs: 1_000 });
+      long.upstreams[0].open();
+      vi.advanceTimersByTime(1_000);
+      expect(frames(long.client)).toEqual([{ type: "error", code: "speech-limit", error: "This reply ran past the ten minutes one spoken reply can take." }]);
+      expect(long.client.closed?.code).toBe(1000);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("stops voicing for a phone that stopped reading the audio", async () => {
+    const { client, upstreams } = await live();
+    upstreams[0].open();
+    upstreams[0].reply({ audio: "AAAA", alignment: null });
+    (client as unknown as { bufferedAmount: number }).bufferedAmount = 5 * 1024 * 1024;
+    upstreams[0].reply({ audio: "BBBB", alignment: null });
+    expect(frames(client).map(frame => frame.type)).toEqual(["start", "audio", "error"]);
+    expect(frames(client).at(-1)).toMatchObject({ code: "speech-failed" });
+    expect(upstreams[0].readyState).toBe(3);
   });
 
   it("closes ElevenLabs' socket when the phone hangs up", async () => {
@@ -186,5 +291,15 @@ describe("speakable stream", () => {
     expect(stream.push("\n```\n- one [link](https://x.y)\n- tw")).toBe("one link.");
     expect(stream.push("o")).toBe("");
     expect(stream.end()).toBe("two.");
+  });
+
+  it("cuts text that never ends a sentence at a space past 2 KB", () => {
+    const stream = new SpeakableStream();
+    const words = "word ".repeat(500);
+    const spoken = stream.push(words);
+    expect(spoken.length).toBeGreaterThan(1_900);
+    expect(spoken.length).toBeLessThanOrEqual(2_048);
+    expect(spoken.endsWith("word")).toBe(true);
+    expect(`${spoken} ${stream.end()}`).toBe(words.trim());
   });
 });
