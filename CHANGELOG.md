@@ -3,6 +3,12 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+
+- phren agent's `grep` and `glob` use ripgrep when it is installed: `.gitignore` is honoured (no more descending into `dist/` or `coverage/`), hidden directories such as `.github/` are searched, and lines are cut at 500 characters. `grep` is now case-sensitive unless `-i` is set. Without ripgrep the JS fallback skips the same directories and reports when it stopped at its file cap instead of answering "No matches." `PHREN_AGENT_RIPGREP=off` forces the fallback.
+
 ## [0.3.20] - 2026-10-01
 
 ### Added
