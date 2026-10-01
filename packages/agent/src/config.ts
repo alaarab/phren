@@ -1,6 +1,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import type { PermissionMode } from "./permissions/types.js";
+import { parseRuleList } from "./permissions/rules.js";
 import { normalizeReasoningEffort, type ReasoningEffort } from "./models.js";
 import { loadPermissionMode } from "./settings.js";
 
@@ -22,6 +23,9 @@ export interface CliArgs {
   project?: string;
   permissions: PermissionMode;
   permissionsExplicit: boolean;
+  /** --allowedTools / --disallowedTools rules (permissions/rules.ts). */
+  allowedTools: string[];
+  disallowedTools: string[];
   maxTurns: number;
   maxOutput?: number;
   /** Context window override in tokens (the catalog's otherwise). */
@@ -93,6 +97,8 @@ Options:
   --sandbox <mode>     Kernel write-fence for shell (bwrap): off, auto (default), require
   --permissions <mode> Permission mode: suggest (default), auto-confirm, full-auto
   --yolo               Full-auto permissions — no confirmations (alias for --permissions full-auto)
+  --allowedTools <rules>     Allow these without asking, comma-separated: read_file, shell(npm test), edit_file(src/**)
+  --disallowedTools <rules>  Deny these in every mode, same syntax
   --interactive, -i    Interactive REPL mode (multi-turn conversation)
   --resume, -c         Resume the newest session's conversation (task optional)
   --session <id>       Resume a specific session by id or unique id prefix
@@ -150,6 +156,8 @@ export function parseArgs(argv: string[]): CliArgs {
     task: "",
     permissions: "suggest",
     permissionsExplicit: false,
+    allowedTools: [],
+    disallowedTools: [],
     maxTurns: 50,
     budget: null,
     plan: false,
@@ -224,6 +232,8 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--price-out" && argv[i + 1]) { args.priceOut = parsePositive(argv[++i], arg); }
     else if (arg === "--price-cache" && argv[i + 1]) { args.priceCache = parsePositive(argv[++i], arg); }
     else if (arg === "--budget" && argv[i + 1]) { args.budget = parseFloat(argv[++i]) || null; }
+    else if ((arg === "--allowedTools" || arg === "--allowed-tools") && argv[i + 1]) { args.allowedTools.push(...parseRuleList(argv[++i])); }
+    else if ((arg === "--disallowedTools" || arg === "--disallowed-tools") && argv[i + 1]) { args.disallowedTools.push(...parseRuleList(argv[++i])); }
     else if (arg === "--yolo") { args.permissions = "full-auto"; args.permissionsExplicit = true; }
     else if (arg === "--permissions" && argv[i + 1]) {
       const mode = argv[++i];

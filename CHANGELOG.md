@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- phren agent permission rules: `permissions.allow`, `ask` and `deny` lists in `~/.phren-agent/settings.json` or the project's `.phren-agent/settings.json`, and `--allowedTools` / `--disallowedTools` on the command line, in Claude Code's syntax (`read_file`, `shell(git log *)`, `edit_file(src/**)`, `mcp_github_*`). Deny wins in every mode, a shell line is allowed only when each command on it is, and subagents inherit the rules. A headless run can now allow exactly what a task needs instead of all or nothing.
+
 ### Changed
 
 - phren agent plans with the read-only tools: under `--plan` or `/plan` it can read, search and check git before proposing the plan, and approval is asked once it presents one. Edits, writes and shell commands named before approval are answered with an error, not run. The planning turn used to get no tools at all, so it planned blind (and on Claude a mid-session `/plan` sent tool history without tools, which the API rejects).
