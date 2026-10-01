@@ -156,6 +156,32 @@ describe("DeepSeek reasoning effort mapping", () => {
     expect(bodies.map((b) => b.reasoning_effort)).toEqual(["max", "high", "none"]);
   });
 
+  it("none goes only to routes that accept it; elsewhere reasoning_effort is left out", async () => {
+    expect(wireReasoningEffort("openai", "gpt-5.4", "none")).toBe("none");
+    expect(wireReasoningEffort("openai", "gpt-5.1", "none")).toBe("none");
+    expect(wireReasoningEffort("openai-codex", "gpt-5.4", "none")).toBe("none");
+    for (const [name, model] of [
+      ["openai", "gpt-5"],
+      ["openai", "gpt-5-mini"],
+      ["openai", "o4-mini"],
+      ["openai-codex", "gpt-5.1-codex-max"],
+      ["openai-compat", "glm-5"],
+      ["openai-compat", "qwen3-coder"],
+    ] as const) {
+      expect(wireReasoningEffort(name, model, "none")).toBeUndefined();
+      expect(wireReasoningEffort(name, model, "low")).toBe("low");
+    }
+
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return new Response(JSON.stringify({ choices: [{ message: { content: "ok" }, finish_reason: "stop" }] }));
+    }));
+    await new OpenAiProvider("k", "o4-mini", undefined, undefined, "none").chat("s", [{ role: "user", content: "x" }], []);
+    await new OpenAiProvider("k", "gpt-5.4", undefined, undefined, "none").chat("s", [{ role: "user", content: "x" }], []);
+    expect(bodies.map((b) => "reasoning_effort" in b ? b.reasoning_effort : "(absent)")).toEqual(["(absent)", "none"]);
+  });
+
   it("none on Anthropic sends no thinking config", () => {
     const p = new AnthropicProvider("k", "claude-sonnet-5", 16384, true, "none");
     expect(p.reasoningEffort).toBeUndefined();
