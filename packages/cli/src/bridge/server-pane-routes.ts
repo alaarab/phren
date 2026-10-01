@@ -364,10 +364,11 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
         if (!(error instanceof CodexServerUnavailable)) return { ok: true, deliveryUncertain: true };
       }
     }
+    const deliveryId = deliveryIdSchema.parse(data.deliveryId);
     let busy = String(pane.agent_status) === "working";
     let outcome: DeliveryOutcome | "unsubmitted" = await promptWithStartupRetry(async () => {
       const refused = new AbortController();
-      const expected = agentHooks.expectDelivery(target, text, busy && target.source !== "claude" ? 300 : 1_500, refused.signal);
+      const expected = agentHooks.expectDelivery(target, text, busy && target.source !== "claude" ? 300 : 1_500, refused.signal, deliveryId);
       await typing();
       try { await terminalProvider().prompt(target.server, target.pane, text); } catch (error) {
         if (agentNotReady(error)) refused.abort();
@@ -389,13 +390,13 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
       if (!busy) outcome = await resubmitIfIdle(agentHooks, target, text);
       else followQueuedDelivery(agentHooks, target, pane.terminal_id, text);
     }
-    if (outcome === "blocked") throw new BridgeError(409, "The conversation in this pane changed; the message was not delivered. Reopen the chat and send it again.");
+    const refusedHere = () => new BridgeError(409, "The conversation in this pane changed; the message was not delivered. Reopen the chat and send it again.");
+    if (outcome === "blocked") throw refusedHere();
     // A bare slash command opens the agent's own menu; the phone may
     // walk it with keys for the next half minute. The command rides
     // along so a Codex /permissions walk can find its confirmation.
     if (/^\/[a-z][a-z0-9_-]*$/i.test(text.trim())) agentHooks.menuOpened(target, text.trim());
-    const deliveryId = deliveryIdSchema.parse(data.deliveryId);
-    if (outcome === "delivered") { result = { ok: true, delivered: true }; if (deliveryId) agentHooks.trackDelivery(deliveryId, target, text, "delivered"); }
+    if (outcome === "delivered") result = { ok: true, delivered: true };
     else if (outcome === "unsubmitted") { result = { ok: true, deliveryUncertain: true, unsubmitted: true }; }
     else {
       // The agent has not submitted it yet (a busy agent queues typed
@@ -408,11 +409,18 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
         const current = findPane(await snapshot(target.server), target);
         confirmed = !!current && current.terminal_id === pane.terminal_id && await paneIdentity(target.server, current, true) === target.session;
       } catch { /* No reliable post-delivery identity. */ }
-      // Still this conversation, in the same terminal: the agent holds the
-      // message (a busy turn queues it) and its hook has not submitted it
-      // yet. Queued, not delivered; `/v1/prompt/status` says when it lands.
-      if (confirmed && deliveryId) agentHooks.trackDelivery(deliveryId, target, text, "queued");
-      result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : { queued: true }) };
+      // The hook can take it while the identity probe runs; its answer,
+      // keyed by the delivery id, beats the probe.
+      const late = deliveryId ? agentHooks.deliveryState(deliveryId, target) : "unknown";
+      if (late === "blocked") throw refusedHere();
+      if (late === "delivered") result = { ok: true, delivered: true };
+      else {
+        // Still this conversation, in the same terminal: the agent holds the
+        // message (a busy turn queues it) and its hook has not submitted it
+        // yet. Queued, not delivered; `/v1/prompt/status` says when it lands.
+        if (confirmed && deliveryId) agentHooks.queueDelivery(deliveryId, target);
+        result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : { queued: true }) };
+      }
     }
   } else if (url.pathname === "/v1/prompt/status") {
     // Asked by the phone's own delivery id, so no text is matched again.
