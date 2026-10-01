@@ -241,6 +241,15 @@ phren agent --mcp-config ./mcp.json -i
 phren agent --mcp "npx -y @modelcontextprotocol/server-filesystem /tmp" -i   # one stdio server, repeatable
 ```
 
+Without flags the agent loads `~/.phren-agent/mcp.json`. A project's own
+`.mcp.json` (Claude Code's file) and `.phren-agent/mcp.json` start commands from
+whatever repository is checked out, so they load only once you trust the
+project: run with `--trust-project-mcp` once and it is remembered in
+`~/.phren-agent/settings.json`. Until then the agent names the servers it
+skipped. `--strict-mcp-config` uses only `--mcp-config` and `--mcp`. An MCP
+tool result longer than 100,000 characters (about 25k tokens) is cut with a
+note; `PHREN_AGENT_MCP_MAX_OUTPUT_CHARS` changes the limit.
+
 Transports are `stdio`, `http` (Streamable HTTP) and legacy `sse`. With
 `oauth: true` the agent prints an authorization URL on first connection and
 stores the tokens in private files under `~/.phren/agent/mcp-auth`
@@ -439,6 +448,8 @@ it on the computer and it appears in the app.
 | `--price-in`, `--price-out`, `--price-cache <usd>` | Prices per million tokens, overriding the catalogue |
 | `--mcp <command>` | Connect a stdio MCP server (repeatable) |
 | `--mcp-config <path>` | Load MCP servers from a JSON file |
+| `--trust-project-mcp` | Load this project's `.mcp.json` and `.phren-agent/mcp.json` (remembered) |
+| `--strict-mcp-config` | Use only `--mcp-config` and `--mcp` servers |
 | `--sandbox <mode>` | Linux shell sandbox: `auto` (default), `require`, `off` |
 | `--lint-cmd <cmd>`, `--test-cmd <cmd>` | Override the detected lint and test commands |
 | `--no-subagents` | No subagent tools in one-shot mode |

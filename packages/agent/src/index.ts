@@ -43,7 +43,10 @@ import { scopeModelOverrides } from "./model-overrides.js";
 import { codexLogin, codexLogout } from "./providers/codex-auth.js";
 import { createCheckpoint } from "./checkpoint.js";
 import { detectLintCommand, detectTestCommand } from "./tools/lint-test.js";
-import { connectMcpServers, loadMcpConfig, parseMcpInline, type McpConfigEntry } from "./mcp-client.js";
+import { connectMcpServers, loadDefaultMcpConfig, loadMcpConfig, parseMcpInline, type McpConfigEntry } from "./mcp-client.js";
+import { isMcpProjectTrusted, trustMcpProject } from "./settings.js";
+import * as os from "os";
+import * as path from "path";
 import { VERSION } from "./package-metadata.js";
 import {
   authProfilesPath,
@@ -349,6 +352,14 @@ export async function runAgentCli(raw: string[]) {
 
     // MCP server connections
     const mcpServers: Record<string, McpConfigEntry> = {};
+    if (!args.strictMcpConfig) {
+      if (args.trustProjectMcp) trustMcpProject(process.cwd());
+      const defaults = loadDefaultMcpConfig(process.cwd(), { home: os.homedir(), trusted: isMcpProjectTrusted(process.cwd()) });
+      Object.assign(mcpServers, defaults.servers);
+      for (const { file, names } of defaults.untrusted) {
+        process.stderr.write(`\x1b[2m[${path.relative(process.cwd(), file)} defines MCP servers (${names.join(", ")}) that were not started; run with --trust-project-mcp to load this project's servers]\x1b[0m\n`);
+      }
+    }
     if (args.mcpConfig) {
       Object.assign(mcpServers, loadMcpConfig(args.mcpConfig));
     }

@@ -53,6 +53,10 @@ export interface CliArgs {
   testCmd?: string;
   mcp: string[];
   mcpConfig?: string;
+  /** Load the project's .mcp.json / .phren-agent/mcp.json, and remember the choice. */
+  trustProjectMcp?: boolean;
+  /** Only the servers given with --mcp-config / --mcp; no default config files. */
+  strictMcpConfig?: boolean;
   team?: string;
   multi: boolean;
   /** Disable subagent tools in one-shot mode (they are on by default). */
@@ -110,6 +114,8 @@ Options:
   --test-cmd <cmd>     Override auto-detected test command
   --mcp <command>      Connect to an MCP server via stdio (repeatable)
   --mcp-config <path>  Load MCP server config from JSON file
+  --trust-project-mcp  Load this project's .mcp.json and .phren-agent/mcp.json (remembered)
+  --strict-mcp-config  Use only --mcp-config and --mcp servers, no default config files
   --team <name>        Start in team mode with named team coordination
   --multi              Start in multi-agent TUI mode
   --dry-run            Show system prompt and exit
@@ -217,6 +223,8 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--test-cmd" && argv[i + 1]) { args.testCmd = argv[++i]; }
     else if (arg === "--mcp" && argv[i + 1]) { args.mcp.push(argv[++i]); }
     else if (arg === "--mcp-config" && argv[i + 1]) { args.mcpConfig = argv[++i]; }
+    else if (arg === "--trust-project-mcp") { args.trustProjectMcp = true; }
+    else if (arg === "--strict-mcp-config") { args.strictMcpConfig = true; }
     else if (arg === "--team" && argv[i + 1]) { args.team = argv[++i]; }
     else if (arg === "--multi") { args.multi = true; }
     else if (arg === "--provider" && argv[i + 1]) { args.provider = argv[++i]; }
