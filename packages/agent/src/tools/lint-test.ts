@@ -4,6 +4,29 @@ import * as path from "path";
 export interface LintTestConfig {
   lintCmd?: string;
   testCmd?: string;
+  typecheckCmd?: string;
+}
+
+/**
+ * Detect a type-check command: a package script named for it, or tsc on a
+ * TypeScript project that has it installed. Typing catches what a parse
+ * check can't, in seconds, and runs before the (usually slower) tests.
+ */
+export function detectTypecheckCommand(cwd: string): string | null {
+  const pkgPath = path.join(cwd, "package.json");
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+      for (const name of ["typecheck", "type-check", "check-types", "tsc"]) {
+        if (pkg.scripts?.[name]) return `npm run ${name}`;
+      }
+    } catch { /* ignore */ }
+  }
+  if (fs.existsSync(path.join(cwd, "tsconfig.json")) && fs.existsSync(path.join(cwd, "node_modules", ".bin", "tsc"))) {
+    return "npx tsc --noEmit";
+  }
+  if (fs.existsSync(path.join(cwd, "mypy.ini"))) return "mypy .";
+  return null;
 }
 
 /** Detect test command from project config files. */

@@ -476,7 +476,7 @@ it on the computer and it appears in the app.
 | `--trust-project-mcp` | Load this project's `.mcp.json` and `.phren-agent/mcp.json` (remembered) |
 | `--strict-mcp-config` | Use only `--mcp-config` and `--mcp` servers |
 | `--sandbox <mode>` | Linux shell sandbox: `auto` (default), `require`, `off` |
-| `--lint-cmd <cmd>`, `--test-cmd <cmd>` | Override the detected lint and test commands |
+| `--lint-cmd <cmd>`, `--test-cmd <cmd>`, `--typecheck-cmd <cmd>` | Override the detected lint, test and type-check commands |
 | `--no-subagents` | No subagent tools in one-shot mode |
 | `--no-llm-compact` | Regex summaries instead of model checkpoints when compacting |
 | `--multi` | Multi-agent terminal UI |
@@ -583,6 +583,16 @@ TypeScript parser (Node 22.13 or later; JSX files are skipped), Python uses
 `python3`'s `ast`, and JSON uses `JSON.parse` (files with comments are
 skipped). Errors the file had before the edit are not reported, and nothing
 type-checks. `PHREN_AGENT_SYNTAX_CHECK=off` turns it off.
+
+After a batch of edits the agent also runs the project's own checks through
+the shell tool (same permissions and sandbox), and a failure goes back to the
+model with the start and end of its output: first a type check when an edited
+file is TypeScript, JavaScript or Python (a `typecheck`, `type-check`,
+`check-types` or `tsc` package script, else `npx tsc --noEmit` when the project
+has `tsc` installed, else `mypy .` with a `mypy.ini`), then the lint command,
+then the tests. While the types fail the tests are skipped, since they can't
+pass. `--typecheck-cmd`, `--lint-cmd` and `--test-cmd` override what is
+detected.
 
 ### Shell and git
 - **shell** — Run shell commands (with timeout and safety checks). Foreground
