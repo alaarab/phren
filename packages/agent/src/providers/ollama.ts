@@ -1,5 +1,5 @@
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
-import { toolResultText } from "./types.js";
+import { IncompleteStreamError, toolResultText } from "./types.js";
 import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
 import { lookupContextWindow } from "../models.js";
 
@@ -144,6 +144,7 @@ export class OllamaProvider implements LlmProvider {
     let buf = "";
     let stopReason: LlmResponse["stop_reason"] = "end_turn";
     let toolCallIndex = 0;
+    let finished = false;
 
     for (;;) {
       const { done, value } = await reader.read();
@@ -179,10 +180,11 @@ export class OllamaProvider implements LlmProvider {
           }
         }
 
-        if (chunk.done === true) break;
+        if (chunk.done === true) finished = true;
       }
     }
 
+    if (!finished) throw new IncompleteStreamError("Ollama stream ended before done");
     yield { type: "done", stop_reason: stopReason };
   }
 }

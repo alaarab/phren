@@ -297,9 +297,13 @@ export async function runTurn(
       continue;
     }
 
-    // If max_tokens, warn user and inject continuation prompt
+    // If max_tokens, warn user and inject continuation prompt. Complete tool
+    // calls in the truncated response are not run (the response may have been
+    // cut mid-batch), but each still needs a result or every later request
+    // carries an unpaired tool_use.
     if (stopReason === "max_tokens") {
       status("\x1b[33m[response truncated: max_tokens reached, requesting continuation]\x1b[0m\n");
+      closeDanglingToolUses(session, "Not executed: your response was truncated at max_tokens. Issue the call again if it is still needed.");
       session.log.append("user/message", {
         message: { role: "user", content: "Your response was truncated due to length. Please continue where you left off." },
         source: "system",

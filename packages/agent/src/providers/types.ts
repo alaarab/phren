@@ -118,3 +118,11 @@ export interface LlmProvider {
     signal?: AbortSignal,
   ): AsyncIterable<StreamDelta>;
 }
+
+/** Thrown when a stream ends without the provider saying the response is complete. */
+export class IncompleteStreamError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "IncompleteStreamError";
+  }
+}

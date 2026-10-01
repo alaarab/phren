@@ -1,5 +1,6 @@
 /** Shared OpenAI-compatible message/tool conversion used by openrouter, codex, and openai providers. */
 import type { LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
+import { IncompleteStreamError } from "./types.js";
 import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
 
 /** Convert Anthropic tool defs to OpenAI function format. */
@@ -179,7 +180,14 @@ export function parseOpenAiResponse(data: Record<string, unknown>, providerName?
   };
 }
 
-/** Parse OpenAI-compatible SSE stream into StreamDelta events. */
+/**
+ * Parse OpenAI-compatible SSE stream into StreamDelta events.
+ *
+ * A response is complete only when the provider says so: a finish_reason or
+ * the `[DONE]` sentinel. A connection that closes before either is an error,
+ * not a successful end_turn with partial output, and so is DeepSeek's
+ * `aborted` finish reason.
+ */
 export async function* parseOpenAiStream(res: Response): AsyncIterable<StreamDelta> {
   if (!res.body) throw new Error("Provider returned empty response body");
   const reader = res.body.getReader();
@@ -190,86 +198,99 @@ export async function* parseOpenAiStream(res: Response): AsyncIterable<StreamDel
   const activeTools = new Map<number, string>(); // index -> tool_call id
   let stopReason: LlmResponse["stop_reason"] = "end_turn";
   let usage: { input_tokens: number; output_tokens: number } | undefined;
+  let finished = false;
+
+  /** Handle one SSE line; returns true on the [DONE] sentinel. */
+  function* handleLine(line: string): Generator<StreamDelta, boolean> {
+    if (!line.startsWith("data:")) return false;
+    const raw = line.slice(5).trim();
+    if (raw === "[DONE]") return true;
+
+    let chunk: Record<string, unknown>;
+    try { chunk = JSON.parse(raw); } catch { return false; }
+    throwProviderError(chunk);
+
+    // Usage from final chunk (OpenAI includes it when stream_options.include_usage is set)
+    const u = chunk.usage as Record<string, number> | undefined;
+    if (u) {
+      usage = { input_tokens: u.prompt_tokens ?? 0, output_tokens: u.completion_tokens ?? 0 };
+    }
+
+    const choice = (chunk.choices as Record<string, unknown>[])?.[0];
+    if (!choice) return false;
+
+    const finishReason = choice.finish_reason as string | null;
+    if (finishReason === "aborted") {
+      throw new IncompleteStreamError("Provider aborted the response (finish_reason: aborted)");
+    }
+    if (finishReason) finished = true;
+    if (finishReason === "tool_calls") stopReason = "tool_use";
+    else if (finishReason === "length") stopReason = "max_tokens";
+
+    const delta = choice.delta as Record<string, unknown> | undefined;
+    if (!delta) return false;
+
+    // Reasoning content (DeepSeek/Qwen reasoning_content, OpenRouter reasoning)
+    const reasoningDelta = typeof delta.reasoning_content === "string"
+      ? delta.reasoning_content
+      : typeof delta.reasoning === "string" ? delta.reasoning : "";
+    if (reasoningDelta) {
+      yield { type: "reasoning_delta", text: reasoningDelta };
+    }
+
+    // Text content
+    if (delta.content && typeof delta.content === "string") {
+      yield { type: "text_delta", text: delta.content };
+    }
+
+    // Tool calls
+    const toolCalls = delta.tool_calls as Record<string, unknown>[] | undefined;
+    if (toolCalls) {
+      for (const tc of toolCalls) {
+        const idx = tc.index as number;
+        const fn = tc.function as Record<string, unknown> | undefined;
+
+        // New tool call starts when id is present
+        if (tc.id && typeof tc.id === "string") {
+          activeTools.set(idx, tc.id);
+          yield { type: "tool_use_start", id: tc.id, name: fn?.name as string ?? "" };
+        }
+
+        // Argument deltas
+        if (fn?.arguments && typeof fn.arguments === "string") {
+          const toolId = activeTools.get(idx) ?? String(idx);
+          yield { type: "tool_use_delta", id: toolId, json: fn.arguments };
+        }
+      }
+    }
+    return false;
+  }
 
   try {
-    for (;;) {
+    let sawDone = false;
+    read: for (;;) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        // A final event with no trailing newline is still an event.
+        buf += decoder.decode();
+        if (buf && (yield* handleLine(buf))) sawDone = true;
+        break;
+      }
       buf += decoder.decode(value, { stream: true });
 
       const lines = buf.split("\n");
       buf = lines.pop()!;
 
       for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const raw = line.slice(6).trim();
-        if (raw === "[DONE]") {
-          // Close out any active tool calls before signaling done
-          for (const [, toolId] of activeTools) {
-            yield { type: "tool_use_end", id: toolId };
-          }
-          activeTools.clear();
-          yield { type: "done", stop_reason: stopReason, usage };
-          return;
-        }
-
-        let chunk: Record<string, unknown>;
-        try { chunk = JSON.parse(raw); } catch { continue; }
-        throwProviderError(chunk);
-
-        // Usage from final chunk (OpenAI includes it when stream_options.include_usage is set)
-        const u = chunk.usage as Record<string, number> | undefined;
-        if (u) {
-          usage = { input_tokens: u.prompt_tokens ?? 0, output_tokens: u.completion_tokens ?? 0 };
-        }
-
-        const choice = (chunk.choices as Record<string, unknown>[])?.[0];
-        if (!choice) continue;
-
-        const finishReason = choice.finish_reason as string | null;
-        if (finishReason === "tool_calls") stopReason = "tool_use";
-        else if (finishReason === "length") stopReason = "max_tokens";
-
-        const delta = choice.delta as Record<string, unknown> | undefined;
-        if (!delta) continue;
-
-        // Reasoning content (DeepSeek/Qwen reasoning_content, OpenRouter reasoning)
-        const reasoningDelta = typeof delta.reasoning_content === "string"
-          ? delta.reasoning_content
-          : typeof delta.reasoning === "string" ? delta.reasoning : "";
-        if (reasoningDelta) {
-          yield { type: "reasoning_delta", text: reasoningDelta };
-        }
-
-        // Text content
-        if (delta.content && typeof delta.content === "string") {
-          yield { type: "text_delta", text: delta.content };
-        }
-
-        // Tool calls
-        const toolCalls = delta.tool_calls as Record<string, unknown>[] | undefined;
-        if (toolCalls) {
-          for (const tc of toolCalls) {
-            const idx = tc.index as number;
-            const fn = tc.function as Record<string, unknown> | undefined;
-
-            // New tool call starts when id is present
-            if (tc.id && typeof tc.id === "string") {
-              activeTools.set(idx, tc.id);
-              yield { type: "tool_use_start", id: tc.id, name: fn?.name as string ?? "" };
-            }
-
-            // Argument deltas
-            if (fn?.arguments && typeof fn.arguments === "string") {
-              const toolId = activeTools.get(idx) ?? String(idx);
-              yield { type: "tool_use_delta", id: toolId, json: fn.arguments };
-            }
-          }
-        }
+        if (yield* handleLine(line)) { sawDone = true; break read; }
       }
     }
 
-    // Emit tool_use_end for all active tools, then done
+    if (!finished && !sawDone) {
+      throw new IncompleteStreamError("Provider stream ended before the response was complete (no finish_reason or [DONE])");
+    }
+
+    // Close out any active tool calls before signaling done
     for (const [, toolId] of activeTools) {
       yield { type: "tool_use_end", id: toolId };
     }

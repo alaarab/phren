@@ -270,11 +270,14 @@ export async function compactWithLlm(
       ...messages.slice(0, plan.endIndex + 1),
       { role: "user", content: CHECKPOINT_INSTRUCTION },
     ];
+    // A timeout or turn abort settles the wait; finally() then cancels the
+    // request itself so it doesn't keep generating (and billing) detached.
+    const cancel = new AbortController();
     const response = await withTimeout(
-      provider.chat(systemPrompt, prefixMessages, []),
+      provider.chat(systemPrompt, prefixMessages, [], cancel.signal),
       config.timeoutMs,
       opts.signal,
-    );
+    ).finally(() => cancel.abort());
     if (response.usage && opts.costTracker) {
       opts.costTracker.recordUsage(response.usage.input_tokens, response.usage.output_tokens);
     }

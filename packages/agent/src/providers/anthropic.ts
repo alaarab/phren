@@ -1,4 +1,5 @@
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
+import { IncompleteStreamError } from "./types.js";
 import { stripForeignReasoning } from "./history.js";
 import { getModelMetadata, type ReasoningEffort } from "../models.js";
 
@@ -128,12 +129,20 @@ export class AnthropicProvider implements LlmProvider {
     // Thinking blocks are index-tracked too: the signature arrives as a
     // delta and must ride the reasoning_end at content_block_stop.
     const thinkingByIndex = new Map<number, { signature?: string }>();
+    let stopped = false;
 
     for await (const event of parseSSE(res)) {
       const type = event.event;
       const data = event.data;
 
-      if (type === "content_block_start") {
+      if (type === "error") {
+        // Mid-stream errors (overloaded_error, api_error) arrive as an event
+        // on an HTTP 200 response.
+        const error = data.error as Record<string, unknown> | undefined;
+        throw new Error(`Anthropic API error: ${error?.type ?? "error"}: ${error?.message ?? JSON.stringify(data)}`);
+      } else if (type === "message_stop") {
+        stopped = true;
+      } else if (type === "content_block_start") {
         const block = data.content_block as Record<string, unknown>;
         if (block.type === "tool_use") {
           const index = data.index as number;
@@ -202,6 +211,7 @@ export class AnthropicProvider implements LlmProvider {
       }
     }
 
+    if (!stopped) throw new IncompleteStreamError("Anthropic stream ended before message_stop");
     yield { type: "done", stop_reason: stopReason, usage };
   }
 
