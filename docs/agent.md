@@ -400,6 +400,18 @@ echo "add a --json flag" | phren agent --output-format stream-json --yolo   # ta
 | `json` | one object: `type: "result"`, `subtype` (`success`, `error_max_turns`, `error_budget`, `error_plan_rejected`, `cancelled`, `error_during_execution`, `error_hook_blocked`), `is_error`, `result`, `num_turns`, `tool_calls`, `duration_ms`, `session_id`, `provider`, `model`, `usage` (`input_tokens` excluding cache hits and writes, `cache_read_input_tokens`, `cache_creation_input_tokens` (Anthropic; billed at 1.25x input), `output_tokens`), `total_cost_usd` (null on a subscription), `permission_denials`, `error` |
 | `stream-json` | one JSON object per line: `system`/`init`, then `assistant`, `tool_use` and `tool_result` events as they happen, then the same `result` object |
 
+To drive one session over several turns, send user messages as JSON lines
+with `--input-format stream-json` (Claude Code's shape; needs
+`--output-format stream-json`). Each message runs as a turn on the same session
+and ends with its own `result` line; lines that aren't user messages are
+skipped with a note on stderr:
+
+```bash
+{ echo '{"type":"user","message":{"role":"user","content":"add a --json flag"}}'
+  echo '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"now add tests for it"}]}}'
+} | phren agent --yolo --input-format stream-json --output-format stream-json
+```
+
 `--output-format` implies `-p`. Everything else (warnings, compaction notices,
 tool lines with `--verbose`) goes to stderr. Exit code is 0 only for
 `success`, 130 when cancelled, 1 otherwise. With `-p`, approvals are always
@@ -452,6 +464,7 @@ it on the computer and it appears in the app.
 | `--list-sessions` | List recent sessions (with `--output-format json` as JSON) and exit |
 | `models [--json]` | List the models of the providers with credentials here, as `<provider>/<model>`, the default marked, and exit (Phren Hook's model picker reads the JSON) |
 | `-p`, `--print` | Headless run: clean stdout, approvals denied |
+| `--input-format text\|stream-json` | With `stream-json`, read user messages as JSON lines on stdin, one turn each |
 | `--output-format <f>` | `text`, `json` or `stream-json`; implies `-p` |
 | `--budget <dollars>` | Stop when estimated spend passes this |
 | `--max-turns <n>` | Maximum tool rounds (default 50) |
