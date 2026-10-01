@@ -166,7 +166,6 @@ export function parseOutputFormat(raw: string | undefined): OutputFormat | null 
   return null;
 }
 
-/** Read the whole of stdin (for `echo task | phren-agent -p`). */
 /**
  * One `--input-format stream-json` line: Claude Code's shape,
  * {"type":"user","message":{"role":"user","content":"…" | [{"type":"text","text":"…"}]}}.
@@ -205,6 +204,7 @@ export async function* readLines(stream: NodeJS.ReadableStream = process.stdin):
   if (buffer.trim()) yield buffer.trim();
 }
 
+/** Read the whole of stdin (for `echo task | phren-agent -p`). */
 export async function readStdin(stream: NodeJS.ReadableStream = process.stdin): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of stream) chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk as Buffer);
