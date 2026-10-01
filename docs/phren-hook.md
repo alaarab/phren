@@ -191,7 +191,8 @@ From a project, the iPhone can open a new session on a computer:
 the project's directory and starts Codex, Claude Code, Copilot, OpenCode or
 phren's own agent (`kind: "phren"`) in its pane, returning once Herdr has
 detected it ready. Herdr cannot start or detect phren-agent itself, so for
-`phren` the Hook types `phren agent -i` (plus `--model` and `--reasoning`) at
+`phren` the Hook types `phren agent -i` (plus `--model`, `--reasoning`, and
+`--mode chat` / `--session <id>` for a quick chat or a resumed one) at
 the pane's login shell, waits for it to be the foreground program, and reports
 it to Herdr as agent `phren` under the launch name; its own lifecycle hooks then
 keep the pane's status, and the typed line releases that report when the agent

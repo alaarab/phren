@@ -43,7 +43,7 @@ export async function buildPhrenContext(projectOverride?: string): Promise<Phren
 }
 
 /** Read truths.md pinned entries for a project. */
-function readTruths(phrenPath: string, project: string): string[] {
+export function readTruths(phrenPath: string, project: string): string[] {
   try {
     // Store-aware: upsertCanonical writes via storeAwareProjectPath, so team-store
     // truths live under the store root, not necessarily <phrenPath>/<project>/.

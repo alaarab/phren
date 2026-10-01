@@ -57,6 +57,8 @@ export interface CommandContext {
   registry?: { permissionConfig: PermissionConfig; setPermissions: (cfg: PermissionConfig) => void };
   /** Fork the session at the current point into a new durable log. */
   forkSession?: () => { ok: boolean; sessionId?: string; message: string };
+  /** Quick chat only: continue this conversation as an agent with tools. */
+  promote?: () => Promise<string>;
 }
 
 export function createCommandContext(session: AgentSession, contextLimit: number): CommandContext {
@@ -72,7 +74,7 @@ const BUILTIN_COMMAND_NAMES: readonly string[] = [
   "/context", "/model", "/provider", "/preset", "/session", "/history",
   "/compact", "/diff", "/git", "/mem", "/ask", "/resume", "/review", "/config", "/spawn", "/agents",
   "/allow",
-  "/mode", "/permissions", "/verbose", "/theme", "/agent", "/rewind", "/fork",
+  "/mode", "/permissions", "/verbose", "/theme", "/agent", "/rewind", "/fork", "/promote",
   "/exit", "/quit", "/q",
 ];
 
@@ -183,6 +185,21 @@ export function handleCommand(input: string, ctx: CommandContext): boolean | Pro
     case "/review":   return reviewCommand(parts, ctx);
     case "/config":   return configCommand(parts, ctx);
     case "/rewind":   return rewindCommand(parts, ctx);
+
+    case "/promote": {
+      const promote = ctx.promote;
+      if (!promote) {
+        process.stderr.write(`${DIM}Already an agent session: /promote turns a quick chat (--mode chat) into one.${RESET}\n`);
+        return true;
+      }
+      return promote().then((message) => {
+        process.stderr.write(`\x1b[32m${message}${RESET}\n`);
+        return true;
+      }, (err: unknown) => {
+        process.stderr.write(`\x1b[31mPromote failed: ${err instanceof Error ? err.message : String(err)}${RESET}\n`);
+        return true;
+      });
+    }
 
     case "/fork": {
       const result = ctx.forkSession?.();
