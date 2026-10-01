@@ -101,13 +101,14 @@ const VERSION_CACHE_MS = 5 * 60_000;
 const PEER_TIMEOUT_MS = 5_000;
 const versionCache = new Map<string, { at: number; value: Promise<ToolVersion> }>();
 
-/** `<tool> --version`, bounded to 3 seconds and remembered for 5 minutes. */
-export function toolVersion(tool: string, executable = tool): Promise<ToolVersion> {
+/** `<tool> --version`, bounded to 3 seconds and remembered for 5 minutes. `args` come
+ * before `--version` for a tool behind a subcommand (`phren agent --version`). */
+export function toolVersion(tool: string, executable = tool, args: string[] = []): Promise<ToolVersion> {
   const cached = versionCache.get(tool);
   if (cached && Date.now() - cached.at < VERSION_CACHE_MS) return cached.value;
   const value = new Promise<ToolVersion>(resolve => {
     let out = "", done = false;
-    const child = spawn(executable, ["--version"], { cwd: homedir(), stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_COLOR: "1" } });
+    const child = spawn(executable, [...args, "--version"], { cwd: homedir(), stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_COLOR: "1" } });
     const finish = (result: ToolVersion) => { if (!done) { done = true; clearTimeout(timer); resolve(result); } };
     const timer = setTimeout(() => { child.kill("SIGKILL"); finish({ tool, status: "error", detail: "--version did not answer within 3 seconds" }); }, VERSION_TIMEOUT_MS);
     const collect = (chunk: Buffer) => { if (out.length < 4_096) out += chunk.toString(); };

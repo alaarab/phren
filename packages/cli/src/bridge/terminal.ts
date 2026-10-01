@@ -111,6 +111,9 @@ export interface TerminalProvider {
    * recognized as running there (a Codex app-server whose hooks report the
    * pane). Absent where the multiplexer has none. */
   paneEnv?(server: string, place: { workspace: string; tab: string; pane: string }): Record<string, string> | undefined;
+  /** Tells a multiplexer that watches its agents what one it cannot detect
+   * (phren-agent in Herdr) is doing. Absent where the Hook keeps that itself (tmux). */
+  reportAgent?(server: string, pane: string, agent: string, state: "idle" | "working" | "blocked"): Promise<void>;
   focusPane(server: string, pane: string): Promise<void>;
   /** Sets the pane's own label (Herdr's pane label, a tmux pane option), shown by the Hook as the session's name. */
   closePane(server: string, pane: string): Promise<void>;
@@ -148,6 +151,7 @@ export const routedTerminal: TerminalProvider = {
   create: (server, placement) => route(server).create(server, placement),
   startAgent: (server, pane, agent) => route(server).startAgent(server, pane, agent),
   paneEnv: (server, place) => route(server).paneEnv?.(server, place),
+  reportAgent: async (server, pane, agent, state) => { await route(server).reportAgent?.(server, pane, agent, state); },
   focusPane: (server, pane) => route(server).focusPane(server, pane),
   closePane: (server, pane) => route(server).closePane(server, pane),
   renamePane: (server, pane, label) => route(server).renamePane(server, pane, label),
