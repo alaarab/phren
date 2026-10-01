@@ -206,3 +206,31 @@ describe("live preview sidecar", () => {
     }
   });
 });
+
+describe("stale preview sidecars", () => {
+  it("removes sidecars and staging files older than the limit, keeping fresh ones and the event logs", async () => {
+    const { removeStalePreviews, STALE_PREVIEW_MS } = await import("../session/preview.js");
+    const { sessionsDir } = await import("@phren/cli/session/utils");
+    const store = fs.mkdtempSync(path.join(os.tmpdir(), "phren-stale-preview-"));
+    try {
+      const dir = sessionsDir(store);
+      fs.mkdirSync(dir, { recursive: true });
+      const old = (Date.now() - STALE_PREVIEW_MS - 60_000) / 1000;
+      const files = {
+        oldPreview: "session-a.events.jsonl.preview.json",
+        oldTmp: "session-a.events.jsonl.preview.json.4242.tmp",
+        freshPreview: "session-b.events.jsonl.preview.json",
+        oldLog: "session-a.events.jsonl",
+      };
+      for (const name of Object.values(files)) fs.writeFileSync(path.join(dir, name), "{}");
+      for (const name of [files.oldPreview, files.oldTmp, files.oldLog]) fs.utimesSync(path.join(dir, name), old, old);
+
+      expect(removeStalePreviews(store)).toBe(2);
+      expect(fs.readdirSync(dir).sort()).toEqual([files.oldLog, files.freshPreview].sort());
+      // No sessions directory yet is fine.
+      expect(removeStalePreviews(path.join(store, "missing"))).toBe(0);
+    } finally {
+      fs.rmSync(store, { recursive: true, force: true });
+    }
+  });
+});
