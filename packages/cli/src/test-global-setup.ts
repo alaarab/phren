@@ -17,6 +17,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { removeSandboxHome } from "./test-sandbox.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,7 +62,7 @@ function sandboxHomeDir(): void {
 }
 
 export async function teardown(): Promise<void> {
-  if (sandboxHome) fs.rmSync(sandboxHome, { recursive: true, force: true });
+  if (sandboxHome) removeSandboxHome(sandboxHome);
 }
 
 export async function setup(): Promise<void> {

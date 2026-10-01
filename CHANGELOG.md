@@ -15,6 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - phren agent's compaction request carries the session's tools. Without them, Anthropic rejects a history that holds tool calls, so compaction on Claude always fell back to the regex summary, and the cached prefix never matched.
+- Test runs no longer leave a Codex managed daemon behind. The vitest config sets `PHREN_CODEX_BINARY=off`, which makes the Hook's own helper calls (model catalogue, usage limits, queue) resolve no `codex`, and the global teardown runs `codex app-server daemon stop` and kills any `app-server` or `pid-update-loop` process naming the throwaway HOME before deleting it.
 
 ## [0.3.20] - 2026-10-01
 
