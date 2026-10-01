@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { CLAUDE_SKILL_QUIET_MS, claudeChildAgents, visibleClaudeEvent, type ClaudeQueueState } from "./transcript-claude.js";
@@ -163,6 +163,19 @@ describe("Claude children the parent records without a task launch", () => {
     await appendFile(child, JSON.stringify({ type: "assistant", message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "No findings." }] } }) + "\n");
     vi.useFakeTimers({ now: Date.now() + 6_000, toFake: ["Date"] });
     try { expect(await f.states()).toEqual([{ id: "askill", label: "/code-review", state: "completed" }]); } finally { vi.useRealTimers(); }
+  });
+
+  it("rechecks a running skill without reading its unchanged parent again", async () => {
+    const f = await parent({ type: "system", subtype: "local_command", content: '<forked-skill-launch>{"agentId":"askill","skillName":"code-review"}</forked-skill-launch>' });
+    const child = path.join(f.directory, "agent-askill.jsonl");
+    await writeFile(child, sidechain("askill", { type: "assistant", message: { role: "assistant", stop_reason: "tool_use", content: [] } }));
+    const at = 1_790_000_000;
+    await utimes(f.file, at, at);
+    expect(await f.states()).toEqual([{ id: "askill", label: "/code-review", state: "running" }]);
+    // Same size, inode and time, other bytes: a reread of the parent would lose the launch.
+    await writeFile(f.file, " ".repeat((await stat(f.file)).size)); await utimes(f.file, at, at);
+    vi.useFakeTimers({ now: Date.now() + 6_000, toFake: ["Date"] });
+    try { expect(await f.states()).toEqual([{ id: "askill", label: "/code-review", state: "running" }]); } finally { vi.useRealTimers(); }
   });
 
   it("takes a background skill whose transcript went quiet as finished", async () => {

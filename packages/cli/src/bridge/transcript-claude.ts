@@ -9,7 +9,15 @@ import type { ChildAgentRelation } from "./transcripts.js";
 /** Claude Code's transcript reader: Task sidechains and named teammates as
  * child agents, and the public rows of a conversation. */
 
-const claudeRelationCache = new Map<string, { signature: string; relations: ChildAgentRelation[]; recheckAt?: number }>();
+type ClaudeLaunch = { path: string; callId: string; state: "running" | "completed" };
+type ClaudeWorkflow = { runId: string; name: string; callId: string; state: "running" | "completed" };
+/** What the parent transcript says of its children, kept so a timed recheck
+ * of an unchanged parent reads only the children, never the parent again. */
+interface ClaudeParentRows { launches: Map<string, ClaudeLaunch>; skills: Set<string>; workflows: Map<string, ClaudeWorkflow>; teammates: Map<string, ClaudeLaunch> }
+const claudeRelationCache = new Map<string, { signature: string; relations: ChildAgentRelation[]; recheckAt?: number; rows?: ClaudeParentRows }>();
+const copyRows = (rows: ClaudeParentRows): ClaudeParentRows => ({ launches: new Map([...rows.launches].map(([id, launch]) => [id, { ...launch }])),
+  skills: new Set(rows.skills), workflows: new Map([...rows.workflows].map(([id, workflow]) => [id, { ...workflow }])),
+  teammates: new Map([...rows.teammates].map(([name, launch]) => [name, { ...launch }])) });
 type ClaudeChildModelCache = { dev: number; ino: number; size: number; model?: string };
 const claudeChildModelCache = new Map<string, ClaudeChildModelCache>();
 
@@ -90,19 +98,26 @@ export async function claudeChildAgents(file: string, session: string): Promise<
     cached.relations = await withClaudeChildModels(cached.relations);
     return cached.relations;
   }
-  const launches = new Map<string, { path: string; callId: string; state: "running" | "completed" }>();
+  // A recheck of an unchanged parent (a launch whose transcript was not there
+  // yet, a background skill or workflow still running) reads only the children.
+  const rows = cached?.signature === signature && cached.rows ? cached.rows : await claudeParentRows(file);
+  return claudeChildRelations(file, session, signature, rows);
+}
+
+async function claudeParentRows(file: string): Promise<ClaudeParentRows> {
+  const launches = new Map<string, ClaudeLaunch>();
   const stops = new Map<string, string>();
   // A background skill (`/code-review` run as `@code-review`) is announced in
   // a local-command row, not a tool result, and its end is read from its own
   // transcript (claudeSkillFinished).
   const skills = new Set<string>();
   // A Workflow run, by its task id: its agents are in the run's journal.
-  const workflows = new Map<string, { runId: string; name: string; callId: string; state: "running" | "completed" }>();
+  const workflows = new Map<string, ClaudeWorkflow>();
   // Named teammates (the Agent tool with a `name`) run as their own session
   // and never post a task-notification: they announce themselves idle in a
   // teammate-message instead, and may be woken again later. Their file is
   // `agent-a<name>-<hex>.jsonl` beside the Task sidechains.
-  const teammates = new Map<string, { path: string; callId: string; state: "running" | "completed" }>();
+  const teammates = new Map<string, ClaudeLaunch>();
   const lines = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
   for await (const line of lines) {
     try {
@@ -179,6 +194,13 @@ export async function claudeChildAgents(file: string, session: string): Promise<
       }
     } catch { /* Ignore unrelated/malformed rows. */ }
   }
+  return { launches, skills, workflows, teammates };
+}
+
+async function claudeChildRelations(file: string, session: string, signature: string, rows: ClaudeParentRows): Promise<ChildAgentRelation[]> {
+  // Kept as the parent wrote them: what follows marks finished children.
+  const kept = copyRows(rows);
+  const { launches, skills, workflows, teammates } = copyRows(rows);
   const relations: ChildAgentRelation[] = [];
   // Claude Code records the launch in the parent before the child's own
   // file exists. A launch without a transcript yet is looked for again
@@ -242,7 +264,7 @@ export async function claudeChildAgents(file: string, session: string): Promise<
       }
     }
   }
-  claudeRelationCache.set(file, { signature, relations, ...(awaiting || live ? { recheckAt: Date.now() + (awaiting ? 2_000 : 5_000) } : {}) });
+  claudeRelationCache.set(file, { signature, relations, ...(awaiting || live ? { recheckAt: Date.now() + (awaiting ? 2_000 : 5_000), rows: kept } : {}) });
   while (claudeRelationCache.size > 64) claudeRelationCache.delete(claudeRelationCache.keys().next().value!);
   return relations;
 }

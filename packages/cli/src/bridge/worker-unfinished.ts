@@ -16,40 +16,70 @@ import { countGit } from "./metrics.js";
 
 const exec = promisify(execFile);
 
-/** A closing sentence that announces work the turn never did: "Let me…",
- * "I'll…", "I need to…", or "Now" with a working verb. Anything else, and
- * whatever follows the subject in HANDOVER or a sentence waiting on something
- * (CONDITIONAL), reads as finished: a done worker that says "I'll wait for
- * your review" must not read as needs-you. "Let me know…" is a sign-off. */
+/** A sentence that announces work the turn never did: "Let me…", "I'll…",
+ * "I need to…", or "Now" with a working verb. Whatever follows the subject in
+ * HANDOVER, or a sentence waiting on something (CONDITIONAL, read by
+ * `awaitedInReply` instead), is not one: a done worker that says "I'll wait
+ * for your review" must not read as needs-you. "Let me know…" is a sign-off. */
 const NEXT_STEP = /^(?:(?:ok(?:ay)?|alright|now|next|then|first|great|good)\b[,.!:]?\s+)*(?:let me(?! know)|let's|let us|i'll|i will|i'm going to|i am going to|i need to|i'm now|i am now|now i)\s+(.*)$/i;
 const NOW_DOING = /^now,?\s+(?:adding|applying|building|checking|cleaning|committing|compiling|creating|debugging|editing|fixing|generating|implementing|installing|investigating|launching|looking|moving|opening|patching|pushing|reading|rebuilding|refactoring|removing|rerunning|re-running|running|searching|setting|starting|testing|trying|updating|verifying|wiring|working|writing)\b/i;
 /** What a finished worker says it does next: wait, leave it to the owner, stop, be around. */
 const HANDOVER = /^(?:just\s+)?(?:wait|await|leave|stop|hold|pause|be|hand|defer|stand|end|wrap|let you|keep an eye|check back|merge|ship|land|release|discuss|review|done|finished|ready)\b/i;
 const CONDITIONAL = /\b(?:once|when|whenever|after|as soon as|if|until|unless)\b/i;
 
-/** The last prose line of a reply: blank lines and fenced code are skipped, so
- * "Let me run:" before a closing code block is still the closing sentence. */
-function lastProseLine(reply: string): string | undefined {
-  let fenced = false, last: string | undefined;
+/** A sentence that waits on something other than the owner: "Now waiting on
+ * the MacBook rerun.", "I'll push once it passes.", "Let's merge once CI is
+ * green." (ios-fast-voice2, 2026-10-01: returned done and closed with its test
+ * run going). Waiting for the owner's review or answer is a handover. */
+const WAITS = /(?<!\bwhile\s)\b(?:wait(?:ing|s)?|await(?:ing|s)?)\s+(?:on|for|until)\b/i;
+/** "Once it passes", "when the build finishes": waiting on a job, not an "if". */
+const ONCE_DONE = /\b(?:once|when|after|as soon as|until)\s+(?:it|its|the|that|this|they|both|all|my|ci)\b/i;
+const FUTURE = /\b(?:i'll|i will|we'll|we will|let's|let us|then i|will)\b/i;
+const OWNER = /\b(?:you|your|yours|owner|reviewers?|approv\w*|let me know)\b/i;
+const NEGATED = /\b(?:nothing|no longer|not|no need|without)\b|n't\b/i;
+
+/** The closing paragraph's prose lines: blank lines end a paragraph and fenced
+ * code is skipped, so "Let me run:" before a closing code block is still in it. */
+function closingLines(reply: string): string[] {
+  let fenced = false, lines: string[] = [];
   for (const raw of reply.replace(/\r/g, "").split("\n")) {
     const line = raw.trim();
     if (/^(?:```|~~~)/.test(line)) { fenced = !fenced; continue; }
-    if (!fenced && line) last = line;
+    if (fenced) continue;
+    if (!line) { if (lines.length) lines = [...lines, ""]; continue; }
+    if (lines.at(-1) === "") lines = [];
+    lines.push(line);
   }
-  return last;
+  return lines.filter(Boolean);
 }
 
-/** The reply's closing sentence when it announces a next step ("Let me…",
- * "I'll…", "Now running…"), else undefined. */
+const LIST_ITEM = /^(?:[-*+>]|\d+[.)])\s+/;
+const sentences = (line: string) => line.replace(LIST_ITEM, "").replace(/[*_`#]+/g, "").replace(/[\u2018\u2019]/g, "'").trim()
+  .split(/(?<=[.!?\u2026])\s+/).map(sentence => sentence.trim()).filter(Boolean);
+
+function nextStep(sentence: string): boolean {
+  if (CONDITIONAL.test(sentence)) return false;
+  const step = NEXT_STEP.exec(sentence);
+  return step ? !HANDOVER.test(step[1]) : NOW_DOING.test(sentence);
+}
+
+/** The first sentence of the reply's closing paragraph that announces a next
+ * step ("Let me…", "I'll…", "Now running…"), else undefined. The closing line
+ * counts even as a list item; earlier lines only as prose, so a summary list
+ * that quotes an old step is not one. */
 export function announcedNextStep(reply: string | undefined): string | undefined {
-  const line = reply ? lastProseLine(reply) : undefined;
-  if (!line) return undefined;
-  const plain = line.replace(/^(?:[-*+>]|\d+[.)])\s+/, "").replace(/[*_`#]+/g, "").replace(/[\u2018\u2019]/g, "'").trim();
-  const last = plain.split(/(?<=[.!?\u2026])\s+/).filter(Boolean).at(-1)?.trim();
-  if (!last || CONDITIONAL.test(last)) return undefined;
-  const step = NEXT_STEP.exec(last);
-  const announced = step ? !HANDOVER.test(step[1]) : NOW_DOING.test(last);
-  return announced ? last.slice(0, 160) : undefined;
+  const lines = reply ? closingLines(reply) : [];
+  const found = lines.flatMap((line, index) => index === lines.length - 1 || !LIST_ITEM.test(line) ? sentences(line) : []).find(nextStep);
+  return found?.slice(0, 160);
+}
+
+/** The first sentence of the reply's closing paragraph that waits on work
+ * still to finish ("Now waiting on the rerun.", "I'll push once it passes."),
+ * else undefined. */
+export function awaitedInReply(reply: string | undefined): string | undefined {
+  const found = (reply ? closingLines(reply) : []).flatMap(sentences).find(sentence => !OWNER.test(sentence) && !NEGATED.test(sentence)
+    && (WAITS.test(sentence) || (ONCE_DONE.test(sentence) && FUTURE.test(sentence))));
+  return found?.slice(0, 160);
 }
 
 /** A checkout git could not read in time (or at all): its work is unknown,
@@ -130,6 +160,8 @@ export async function unfinishedTurn(input: { reply?: string; prs?: readonly unk
   uncommitted?: (directory: string) => Promise<Uncommitted>): Promise<{ unfinished?: string; unchecked?: true }> {
   const step = announcedNextStep(input.reply);
   if (step) return { unfinished: `Stopped mid-task: ${step}` };
+  const waiting = awaitedInReply(input.reply);
+  if (waiting) return { unfinished: `Stopped waiting: ${waiting}` };
   if (input.prs?.length || PR_NAMED.test(input.reply ?? "") || !input.directory || !uncommitted) return {};
   const files = await uncommitted(input.directory).catch((): Uncommitted => UNKNOWN);
   if (files === UNKNOWN) return { unchecked: true };
