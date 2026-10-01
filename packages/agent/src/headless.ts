@@ -21,7 +21,7 @@ export type OutputFormat = "text" | "json" | "stream-json";
 
 export interface HeadlessResult {
   type: "result";
-  subtype: "success" | "error_max_turns" | "error_budget" | "error_plan_rejected" | "cancelled" | "error_during_execution";
+  subtype: "success" | "error_max_turns" | "error_budget" | "error_plan_rejected" | "cancelled" | "error_during_execution" | "error_hook_blocked";
   is_error: boolean;
   result: string;
   num_turns: number;
@@ -44,6 +44,7 @@ const SUBTYPE: Record<TurnStopReason, HeadlessResult["subtype"]> = {
   budget: "error_budget",
   plan_rejected: "error_plan_rejected",
   aborted: "cancelled",
+  hook_blocked: "error_hook_blocked",
 };
 
 export function buildHeadlessResult(opts: {

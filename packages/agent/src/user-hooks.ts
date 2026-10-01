@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { agentConfigDir, agentUserDir } from "./config.js";
 
-export type HookEventName = "PreToolUse" | "PostToolUse" | "UserPromptSubmit" | "Stop";
+export type HookEventName = "PreToolUse" | "PostToolUse" | "UserPromptSubmit" | "Stop" | "SessionStart" | "PreCompact";
 
 export interface HookCommand {
   matcher?: string;
@@ -42,7 +42,26 @@ export const HOOK_EVENT_NAMES: readonly HookEventName[] = [
   "PostToolUse",
   "UserPromptSubmit",
   "Stop",
+  "SessionStart",
+  "PreCompact",
 ];
+
+/**
+ * What lifecycle hooks said, in Claude Code's convention: exit code 2 blocks
+ * (the prompt for UserPromptSubmit, stopping for Stop) with stderr as the
+ * reason; exit 0 stdout is context for UserPromptSubmit and SessionStart.
+ * Any other result is ignored, so a broken hook never stops the agent.
+ */
+export interface LifecycleHookResult {
+  blocked: boolean;
+  /** stderr of the blocking hook. */
+  reason: string;
+  /** stdout of the hooks that exited 0, joined. */
+  context: string;
+}
+
+/** Exit code that blocks, as in Claude Code. */
+export const BLOCKING_EXIT_CODE = 2;
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_CHARS = 16_384;
@@ -187,6 +206,11 @@ export async function runPreToolUseHooks(
   return { denied: false, message: "" };
 }
 
+/**
+ * PostToolUse hooks run after the tool; one that exits 2 sends its stderr back
+ * to the model with the tool's result (a formatter or linter complaining).
+ * Returns that feedback, or "".
+ */
 export async function runPostToolUseHooks(
   config: HooksConfig | null,
   toolName: string,
@@ -194,9 +218,9 @@ export async function runPostToolUseHooks(
   output: string,
   isError: boolean,
   options: HookRunOptions = {},
-): Promise<void> {
+): Promise<string> {
   const hooks = (config?.PostToolUse ?? []).filter((hook) => matchesTool(hook.matcher, toolName));
-  if (hooks.length === 0) return;
+  if (hooks.length === 0) return "";
   const payload = {
     hook_event_name: "PostToolUse",
     tool_name: toolName,
@@ -205,21 +229,32 @@ export async function runPostToolUseHooks(
     is_error: isError,
     cwd: options.cwd ?? process.cwd(),
   };
+  const feedback: string[] = [];
   for (const hook of hooks) {
-    await runHook(hook, payload, options);
+    const result = await runHook(hook, payload, options);
+    if (result.exitCode === BLOCKING_EXIT_CODE && result.stderr.trim()) feedback.push(result.stderr.trim());
   }
+  return feedback.join("\n");
 }
 
 export async function runLifecycleHooks(
   config: HooksConfig | null,
-  event: "UserPromptSubmit" | "Stop",
+  event: "UserPromptSubmit" | "Stop" | "SessionStart" | "PreCompact",
   payload: Record<string, unknown> = {},
   options: HookRunOptions = {},
-): Promise<void> {
+): Promise<LifecycleHookResult> {
   const hooks = config?.[event] ?? [];
-  if (hooks.length === 0) return;
+  const outcome: LifecycleHookResult = { blocked: false, reason: "", context: "" };
+  if (hooks.length === 0) return outcome;
   const body = { hook_event_name: event, ...payload, cwd: options.cwd ?? process.cwd() };
+  const context: string[] = [];
   for (const hook of hooks) {
-    await runHook(hook, body, options);
+    const result = await runHook(hook, body, options);
+    if (result.exitCode === BLOCKING_EXIT_CODE) {
+      return { blocked: true, reason: result.stderr.trim() || `Blocked by ${event} hook: ${hook.command}`, context: context.join("\n") };
+    }
+    if (result.exitCode === 0 && result.stdout.trim()) context.push(result.stdout.trim());
   }
+  outcome.context = context.join("\n");
+  return outcome;
 }

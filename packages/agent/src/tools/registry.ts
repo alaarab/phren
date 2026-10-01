@@ -1,4 +1,5 @@
 import type { AgentTool, AgentToolResult } from "./types.js";
+import { DIFF_MARKER } from "../multi/diff-renderer.js";
 import type { AgentToolDef } from "../providers/types.js";
 import type { PermissionConfig } from "../permissions/types.js";
 import { checkPermission } from "../permissions/checker.js";
@@ -94,7 +95,13 @@ export class ToolRegistry {
       result = { output: `Tool error: ${msg}`, is_error: true };
     }
 
-    await runPostToolUseHooks(this.hookConfig, name, input, result.output, !!result.is_error, hookOptions);
+    const feedback = await runPostToolUseHooks(this.hookConfig, name, input, result.output, !!result.is_error, hookOptions);
+    if (feedback) {
+      // Before the TUI's diff payload, which the model never sees.
+      const note = `\n\nPostToolUse hook: ${feedback}`;
+      const at = result.output.indexOf(DIFF_MARKER);
+      result = { ...result, output: at === -1 ? result.output + note : result.output.slice(0, at) + note + result.output.slice(at) };
+    }
     return result;
   }
 }

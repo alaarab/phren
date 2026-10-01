@@ -23,6 +23,9 @@ export { createSession };
  * If the history ends with an assistant message whose tool calls have no
  * results, append a cancelled result for each. Returns how many were closed.
  */
+/** How many times one turn's Stop hooks may send the model back. */
+const MAX_STOP_BLOCKS = 5;
+
 export function closeDanglingToolUses(session: AgentSession, reason = "Cancelled by user."): number {
   const messages = session.messages;
   const last = messages[messages.length - 1];
@@ -69,9 +72,18 @@ export async function runTurn(
   // Direct user input resets the repeat-call chain (repetition across it is not a loop)
   resetRepeatChain(session.repeatChain);
 
+  // UserPromptSubmit hooks may block the prompt (exit 2) or add context to it.
+  const hookConfig = config.hookConfig ?? null;
+  const promptHooks = hookConfig ? await runLifecycleHooks(hookConfig, "UserPromptSubmit", { prompt: userInput }) : null;
+  if (promptHooks?.blocked) {
+    (hooks?.onStatus ?? ((msg: string) => process.stderr.write(msg)))(`\x1b[33m[prompt blocked by a UserPromptSubmit hook: ${promptHooks.reason}]\x1b[0m\n`);
+    return { text: "", turns: 0, toolCalls: 0, stopReason: "hook_blocked" };
+  }
+  const promptContent = promptHooks?.context ? `${userInput}\n\n<user-prompt-submit-hook>\n${promptHooks.context}\n</user-prompt-submit-hook>` : userInput;
+
   // Append user message to the durable log
   const prompted = session.log.append("user/message", {
-    message: { role: "user", content: userInput },
+    message: { role: "user", content: promptContent },
     source: "user",
     turn: session.turns,
   });
@@ -87,10 +99,9 @@ export async function runTurn(
   let overflowRecovered = false;
 
   const signal = hooks?.signal;
-  const hookConfig = config.hookConfig ?? null;
-  if (hookConfig) {
-    await runLifecycleHooks(hookConfig, "UserPromptSubmit", { prompt: userInput });
-  }
+  // Times a Stop hook sent the model back to work in this turn.
+  let stopBlocks = 0;
+  let stopHooksRan = false;
 
   // Why the loop ended; stays "max_turns" if the turn cap runs out.
   let endReason: TurnStopReason = "max_turns";
@@ -116,6 +127,7 @@ export async function runTurn(
     // knowledge to phren out of band.)
     const contextLimit = provider.contextWindow ?? 200_000;
     const compactHistory = async (keepRecentTurns: number, trigger: string): Promise<boolean> => {
+      if (hookConfig) await runLifecycleHooks(hookConfig, "PreCompact", { trigger: "auto" });
       const preCount = session.messages.length;
       const preTokens = estimateMessageTokens(session.messages);
       const result = await compactWithLlm(provider, systemPrompt, session.messages, {
@@ -357,7 +369,26 @@ export async function runTurn(
     }
 
     // If no tool use, we're done
-    if (stopReason !== "tool_use") { endReason = "end_turn"; break; }
+    if (stopReason !== "tool_use") {
+      // A Stop hook that exits 2 sends the model back with its reason (tests
+      // still failing, say); stop_hook_active tells it it already did once.
+      if (hookConfig && stopBlocks < MAX_STOP_BLOCKS && !signal?.aborted) {
+        const stop = await runLifecycleHooks(hookConfig, "Stop", { stop_hook_active: stopBlocks > 0 });
+        if (stop.blocked) {
+          stopBlocks++;
+          status(`\x1b[2m[Stop hook: ${stop.reason}]\x1b[0m\n`);
+          session.log.append("user/message", {
+            message: { role: "user", content: `A Stop hook asked you to keep going: ${stop.reason}` },
+            source: "system",
+            turn: session.turns,
+          });
+          continue;
+        }
+        stopHooksRan = true;
+      }
+      endReason = "end_turn";
+      break;
+    }
 
     // Execute tool calls with concurrency. Calls whose arguments were not
     // valid JSON are answered with an error instead of being run.
@@ -485,8 +516,8 @@ export async function runTurn(
     text = lastAssistant.content;
   }
 
-  if (hookConfig) {
-    await runLifecycleHooks(hookConfig, "Stop", {});
+  if (hookConfig && !stopHooksRan) {
+    await runLifecycleHooks(hookConfig, "Stop", { stop_hook_active: stopBlocks > 0 });
   }
 
   return { text, turns: session.turns - turnStart, toolCalls: turnToolCalls, stopReason: signal?.aborted ? "aborted" : endReason };
