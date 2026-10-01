@@ -3,6 +3,13 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+
+- A dispatched worker that ends its turn waiting on its own job is no longer returned done with its pane closed. A background shell started before the dispatcher's message still counts once the agent reads its output again, a reply that says it waits on a task ("Now waiting on the MacBook rerun.", "I'll push once it passes.") keeps the worker working while one runs and returns needs-you when none does, a next step announced anywhere in the closing paragraph is needs-you, and a pane is never closed while a background task other than a log tail or dev server runs.
+- `watch` counts as an endless command only as a command, so `grep watch file` run in the background is waited on, and a running background skill is rechecked without rereading its parent's whole transcript every 5 seconds.
+
 ## [0.3.20] - 2026-10-01
 
 ### Added
