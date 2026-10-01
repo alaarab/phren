@@ -102,8 +102,11 @@ describe("the receiving Hook's worker states", () => {
     // The Mini's tabs, 2026-09-29: a finished turn that left a log tail or a
     // dev server running. The raw count names it, but no one awaits it, so it
     // must not hold the return for BACKGROUND_WAIT_MS.
-    const answer = await workerStates({ targets: [workerTarget] }, readers(() => herdrSnapshot(), { completed: true, lastAssistant: "Left the server running.", background: 6 }));
+    const answer = await workerStates({ targets: [workerTarget] }, readers(() => herdrSnapshot(), { completed: true, lastAssistant: "Left the server running.", background: 6, endless: 6 }));
     expect(answer.workers[0]).toEqual({ state: "done", session: workerTarget.session, completed: true, reply: "Left the server running." });
+    // A leftover build is not awaited either, but its pane is not closed on it.
+    const build = await workerStates({ targets: [workerTarget] }, readers(() => herdrSnapshot(), { completed: true, lastAssistant: "Tests pass.", background: 1 }));
+    expect(build.workers[0]).toEqual({ state: "done", session: workerTarget.session, completed: true, background: 1, reply: "Tests pass." });
   });
 
   it("keeps a worker working while a sub-agent it started still runs", async () => {
