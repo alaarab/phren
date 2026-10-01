@@ -26,7 +26,7 @@ import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { logger } from "../logger.js";
 import { JobRegistry } from "./job-registry.js";
 import { atomic, BridgeError, bridgeRoot, id, type Json, launchEfforts, objects, PERMISSION_MODES, provider } from "./protocol.js";
-import { CLAUDE_NAMES, CODEX_MODES, codexModeFlags } from "./settings-switch.js";
+import { CLAUDE_NAMES, CODEX_MODES, codexModeFlags, copilotModeFlags } from "./settings-switch.js";
 
 /** Starting agents in Herdr from the phone: the launch route's harness
  * arguments, the conductor brief, and workspace, tab and pane actions. */
@@ -62,6 +62,7 @@ function effortArgs(kind: (typeof launchKinds)[number], effort: LaunchEffort): s
   if (kind === "claude") return ["--effort", effort];
   if (kind === "codex") return ["-c", `model_reasoning_effort=${effort}`];
   if (kind === "opencode") return ["--variant", effort];
+  if (kind === "copilot") return ["--reasoning-effort", effort];
   // phren-agent takes low to xhigh, and max as xhigh.
   if (kind === "phren") return ["--reasoning", effort === "minimal" ? "low" : effort];
   return [];
@@ -294,9 +295,8 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const account = data.account === undefined || data.account === null ? undefined : z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(data.account);
   const permissionMode = z.enum(PERMISSION_MODES).optional().parse(data.permissionMode ?? undefined);
   if (permissionMode && role === "conductor") throw new BridgeError(400, "A conductor starts with its own permissions; permissionMode is for workers.");
-  if (permissionMode && kind === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude and Codex workers.");
-  if (permissionMode && kind === "copilot") throw new BridgeError(400, "Copilot takes its permissions from its own settings; permissionMode is for Claude and Codex workers.");
-  if (permissionMode && kind === "phren") throw new BridgeError(400, "phren agent takes its permissions from its own settings; permissionMode is for Claude and Codex workers.");
+  if (permissionMode && kind === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
+  if (permissionMode && kind === "phren") throw new BridgeError(400, "phren agent takes its permissions from its own settings; permissionMode is for Claude, Codex and Copilot workers.");
   if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
   if (role === "conductor" && kind === "phren") throw new BridgeError(400, PHREN_NO_CONDUCTOR);
   const phrenArgs = await phrenLaunchArgs(kind, data);
@@ -315,7 +315,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const wanted = options.canary ? "phren-canary" : role === "conductor" ? (isConductorName(baseName) ? baseName : herdrAgentName(`conductor-${baseName}`))
     : isConductorName(baseName) ? herdrAgentName(`worker-${baseName}`) : baseName;
   const model = typeof data.model === "string" && data.model.trim() ? plainText(200).parse(data.model.trim()) : undefined;
-  const modelFlag: Partial<Record<(typeof launchKinds)[number], string>> = { codex: "--model", claude: "--model", opencode: "--model", phren: "--model" };
+  const modelFlag: Partial<Record<(typeof launchKinds)[number], string>> = { codex: "--model", claude: "--model", opencode: "--model", copilot: "--model", phren: "--model" };
   let workspace = data.workspaceId === undefined ? undefined : id.parse(data.workspaceId);
   // Herdr 0.9.1 refuses a start timeout of 3000 ms or less (invalid_agent_timeout).
   const timeout = Math.min(120_000, Math.max(3_001, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
@@ -337,7 +337,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   if (conductorHere && conductorHere.workspace_id === workspace) workspace = undefined;
   const args = role === "conductor" ? await prepareConductor(kind, effort, model)
     : [...(kind === "phren" ? [...PHREN_AGENT_ARGS, ...phrenArgs] : []), ...(model && kind === "phren" ? phrenModelArgs(model) : model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
-      ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : [])];
+      ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : []), ...(permissionMode && kind === "copilot" ? copilotModeFlags(permissionMode) : [])];
   // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
   // pane joins the thread the Hook started, and the brief is that thread's
   // first turn. The typed arguments below stay the fallback.

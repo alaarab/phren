@@ -23,3 +23,8 @@ export function claudeConfigDir(env: NodeJS.ProcessEnv = process.env): string {
 export function codexHome(env: NodeJS.ProcessEnv = process.env): string {
   return configuredDir(env.CODEX_HOME, env, ".codex");
 }
+
+/** Copilot CLI's home: `COPILOT_HOME`, else `~/.copilot`. */
+export function copilotHome(env: NodeJS.ProcessEnv = process.env): string {
+  return configuredDir(env.COPILOT_HOME, env, ".copilot");
+}
