@@ -175,4 +175,33 @@ describe.skipIf(!fs.existsSync(AGENT_BIN))("headless binary (replay)", () => {
     expect(stderr).toContain("No one is present to approve");
     expect(code).toBe(0); // the scripted model still finishes its answer
   }, 90_000);
+
+  it("keeps a resumable session in ~/.phren-agent without a phren store", async () => {
+    const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "phren-headless-home-")));
+    const noStore = path.join(home, "no-store");
+    const env = { HOME: home, USERPROFILE: home, PHREN_PATH: noStore };
+    try {
+      const task = "Run echo replay-fixture-7 and report the marker.";
+      const first = await run(["--yolo", "--no-subagents", "--output-format", "json", task], workDir, env);
+      expect(first.code).toBe(0);
+      const id = JSON.parse(first.stdout.trim()).session_id as string;
+      expect(id).toMatch(/^[0-9a-f-]{36}$/);
+      const sessions = path.join(home, ".phren-agent", ".sessions");
+      expect(fs.existsSync(path.join(sessions, `session-${id}.events.jsonl`))).toBe(true);
+
+      const listed = await run(["--list-sessions", "--output-format", "json"], workDir, env);
+      expect(JSON.parse(listed.stdout).map((s: { sessionId: string }) => s.sessionId)).toContain(id);
+
+      const second = await run(["--yolo", "--no-subagents", "--output-format", "json", "--session", id.slice(0, 8), task], workDir, env);
+      expect(second.code).toBe(0);
+      const secondId = JSON.parse(second.stdout.trim()).session_id as string;
+      expect(secondId).not.toBe(id);
+      // The resumed run's log is a fork that starts with the first run's history.
+      const forked = fs.readFileSync(path.join(sessions, `session-${secondId}.events.jsonl`), "utf-8");
+      expect(forked).toContain(id);
+      expect(forked.split(task).length - 1).toBeGreaterThanOrEqual(2);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  }, 90_000);
 });
