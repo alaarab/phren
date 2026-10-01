@@ -189,6 +189,20 @@ catalogued at DeepSeek's off-peak rates, $0.15 in, $0.60 out and $0.003 per
 cache hit; DeepSeek bills twice that at peak (01:00-04:00 and 06:00-10:00
 UTC on weekdays), so pass the peak prices if you run then.
 
+The keyless suite `packages/agent/src/__tests__/deepseek-e2e.test.ts` runs the
+real loop and provider, on both routes, against a fake endpoint that rejects
+what DeepSeek rejects (a missing `reasoning_content` with tools present, an
+unanswered or stray tool call, an effort level it doesn't take). It covers
+tool turns, plain answers, a resume from the persisted log, a compaction and a
+dropped stream, and checks the cost against the catalogue's cache-hit prices.
+For a live check on Go, the benchmark runs the built binary on its fixtures:
+
+```bash
+PHREN_AGENT_BASE_URL=https://opencode.ai/zen/go/v1 PHREN_AGENT_API_KEY=<go key> \
+  node packages/agent/scripts/bench/run.mjs --provider openai-compat \
+  --model deepseek-v4.1-flash --reasoning high --runs 1
+```
+
 DeepSeek is also on OpenRouter (`deepseek/deepseek-v4.1-flash`,
 `deepseek/deepseek-v4-pro`, `deepseek/deepseek-v4-flash`,
 `deepseek/deepseek-v3.2`), and locally through Ollama (below).

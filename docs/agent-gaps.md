@@ -131,11 +131,28 @@ stop that needs a human) times how bad that is.
 
 ## Fix order
 
-The first three are being fixed now, one PR each into the release train, in
-this order: editing (2), context and compaction (3), permissions (1). Search
-(4) and the system prompt (5) follow, then plan mode (6).
+Fixed in the 2026-10-02 train, one PR each: the stale-file guard (2, #290),
+search on ripgrep (4, #291), the environment block and registered tool list
+(5, #292), compaction from the provider's token count with old tool output
+cleared first (3, #293), and permission modes that mean what they say (1,
+#296). Still open: declarative allow / deny rules and `--allowedTools`,
+plan-mode reads (6), and gaps 7 to 11.
 
 ## DeepSeek V4.1 Flash readiness
+
+Ready for a live run. `src/__tests__/deepseek-e2e.test.ts` drives the real
+loop and provider, for `--provider deepseek` and for the OpenCode Go route
+(`openai-compat` with `deepseek-v4.1-flash`), against a fake endpoint as strict
+as DeepSeek's documented API: with tools present every earlier assistant
+message must carry `reasoning_content`, every tool call must be answered
+before the next message and no result may answer a call that wasn't made, and
+`reasoning_effort` must be a level DeepSeek takes. One session runs a tool
+turn, a plain answer, a resume from the persisted log, a stream that drops
+mid-answer, a compaction and a turn after it. Every request passes; the
+dropped stream is asked again and its half answer never reaches the history;
+`reasoning_effort` goes out as `high`; and with 90% cache hits the cost matches
+the catalogue's miss, hit and output prices. Removing the reasoning replay
+makes it fail with DeepSeek's 400.
 
 Run it single-agent first:
 
@@ -145,7 +162,10 @@ DEEPSEEK_API_KEY=… phren-agent --provider deepseek --model deepseek-flash --re
 # OpenCode Go
 PHREN_AGENT_BASE_URL=https://opencode.ai/zen/go/v1 PHREN_AGENT_API_KEY=… \
   phren-agent --provider openai-compat --model deepseek-v4.1-flash --reasoning high --no-subagents
+# the benchmark fixtures, one run each
+PHREN_AGENT_BASE_URL=https://opencode.ai/zen/go/v1 PHREN_AGENT_API_KEY=… \
+  node packages/agent/scripts/bench/run.mjs --provider openai-compat --model deepseek-v4.1-flash --reasoning high --runs 1
 ```
 
-The end-to-end checks (reasoning replay across turns and resume, tool history
-after compaction, cache-hit pricing) are in the next section once run.
+Not verified without a key: DeepSeek's live behaviour beyond its docs, and the
+peak-hour price (the catalogue uses off-peak rates; pass `--price-*` for peak).
