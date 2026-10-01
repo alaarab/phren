@@ -7,6 +7,9 @@ import { estimateMessageTokens } from "../context/token-counter.js";
 import { isContextOverflowError, withRetry } from "../providers/retry.js";
 import { injectPlanPrompt, requestPlanApproval } from "../plan.js";
 import { READ_ONLY_TOOLS } from "../permissions/checker.js";
+import { attachImages } from "../attach-images.js";
+import { modelSupportsVision } from "../models.js";
+import * as path from "path";
 import { detectLintCommand, detectTestCommand } from "../tools/lint-test.js";
 import { createCheckpoint } from "../checkpoint.js";
 import { resetRepeatChain } from "../guards/repeat-tool-reminder.js";
@@ -92,7 +95,15 @@ export async function runTurn(
     (hooks?.onStatus ?? ((msg: string) => process.stderr.write(msg)))(`\x1b[33m[prompt blocked by a UserPromptSubmit hook: ${promptHooks.reason}]\x1b[0m\n`);
     return { text: "", turns: 0, toolCalls: 0, stopReason: "hook_blocked" };
   }
-  const promptContent = promptHooks?.context ? `${userInput}\n\n<user-prompt-submit-hook>\n${promptHooks.context}\n</user-prompt-submit-hook>` : userInput;
+  const promptText = promptHooks?.context ? `${userInput}\n\n<user-prompt-submit-hook>\n${promptHooks.context}\n</user-prompt-submit-hook>` : userInput;
+  // Image paths in the prompt (typed or dropped onto the terminal) go along as images.
+  let promptContent: string | ContentBlock[] = promptText;
+  if (modelSupportsVision(provider.name, (provider as { model?: string }).model ?? "")) {
+    const withImages = attachImages(promptText, process.cwd());
+    promptContent = withImages.content;
+    if (withImages.attached.length > 0) status(`\x1b[2m[attached ${withImages.attached.map((f) => path.basename(f)).join(", ")}]\x1b[0m\n`);
+    if (withImages.skipped.length > 0) status(`\x1b[33m[not attached: ${withImages.skipped.join(", ")}]\x1b[0m\n`);
+  }
 
   // Append user message to the durable log
   const prompted = session.log.append("user/message", {
