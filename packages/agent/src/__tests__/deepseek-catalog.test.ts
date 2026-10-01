@@ -9,6 +9,7 @@ import { resolveProvider } from "../providers/resolve.js";
 import { OpenAiProvider } from "../providers/openrouter.js";
 import { AnthropicProvider } from "../providers/anthropic.js";
 import { wireReasoningEffort } from "../providers/openai-compat.js";
+import { overridesFor, scopeModelOverrides, scopedModelOverrides } from "../model-overrides.js";
 
 const GO = "https://opencode.ai/zen/go/v1";
 const ENV_KEYS = [
@@ -116,6 +117,48 @@ describe("--context-window and pricing overrides", () => {
 
     const onGo = createCostTracker("deepseek-v4.1-flash", null, "openai-compat", GO);
     expect(onGo.metered).toBe(true);
+  });
+});
+
+describe("--context-window and --price-* stay with their model", () => {
+  afterEach(() => { scopeModelOverrides(undefined, {}); });
+
+  it("apply to the model they were given for, not to a model switched to", () => {
+    scopeModelOverrides("glm-5", { contextWindow: 300_000, priceIn: 0.3, priceOut: 1.2 });
+    const same = resolveProvider("openai-compat", "glm-5", undefined, undefined, { baseUrl: "https://x.test/v1" });
+    expect(same.contextWindow).toBe(300_000);
+    const other = resolveProvider("openai-compat", "qwen3-coder", undefined, undefined, { baseUrl: "https://x.test/v1" });
+    expect(other.contextWindow).not.toBe(300_000);
+
+    const priced = createCostTracker("glm-5", null, "openai-compat", "https://x.test/v1");
+    priced.recordUsage(1_000_000, 1_000_000);
+    expect(priced.totalCost).toBeCloseTo(1.5, 6);
+    const catalog = createCostTracker("deepseek-flash", null, "deepseek");
+    catalog.recordUsage(1_000_000, 1_000_000);
+    expect(catalog.totalCost).toBeCloseTo(0.75, 6);
+    // Nothing leaks into the environment.
+    expect(process.env.PHREN_AGENT_CONTEXT_WINDOW).toBeUndefined();
+    expect(process.env.PHREN_AGENT_PRICE_IN).toBeUndefined();
+  });
+
+  it("the flag beats PHREN_AGENT_PRICE_IN for its model, and the env var still prices other models", () => {
+    process.env.PHREN_AGENT_PRICE_IN = "9";
+    scopeModelOverrides("glm-5", { priceIn: 0.3 });
+    const flagged = createCostTracker("glm-5", null, "openai-compat", "https://x.test/v1");
+    flagged.recordUsage(1_000_000, 0);
+    expect(flagged.totalCost).toBeCloseTo(0.3, 6);
+    const other = createCostTracker("deepseek-flash", null, "deepseek");
+    other.recordUsage(1_000_000, 0);
+    expect(other.totalCost).toBeCloseTo(9, 6);
+  });
+
+  it("reach a subagent in its spawn payload, applying only if it runs the same model", async () => {
+    scopeModelOverrides("glm-5", { contextWindow: 300_000 });
+    expect(scopedModelOverrides()).toEqual({ model: "glm-5", contextWindow: 300_000 });
+    expect(overridesFor("glm-5")).toEqual({ contextWindow: 300_000 });
+    expect(overridesFor("qwen3-coder")).toEqual({});
+    scopeModelOverrides("glm-5", {});
+    expect(scopedModelOverrides()).toBeUndefined();
   });
 });
 

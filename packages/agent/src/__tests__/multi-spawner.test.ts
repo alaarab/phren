@@ -50,6 +50,20 @@ describe("AgentSpawner", () => {
   });
 
   describe("spawn", () => {
+    it("hands the parent's model-scoped --context-window / --price-* to the child", async () => {
+      const { scopeModelOverrides } = await import("../model-overrides.js");
+      scopeModelOverrides("glm-5", { contextWindow: 300_000, priceIn: 0.3 });
+      try {
+        spawner.spawn({ task: "t", model: "qwen3-coder" });
+        expect(fakeChildren[0].send.mock.calls[0][0].modelOverrides).toEqual({ model: "glm-5", contextWindow: 300_000, priceIn: 0.3 });
+        // Never as env vars, which would apply to whatever model the child runs.
+        const env = fakeChildren[0].send.mock.calls[0][0].env as Record<string, string>;
+        expect(Object.keys(env).filter((k) => k.startsWith("PHREN_AGENT_CONTEXT") || k.startsWith("PHREN_AGENT_PRICE"))).toEqual([]);
+      } finally {
+        scopeModelOverrides(undefined, {});
+      }
+    });
+
     it("returns a unique agent ID", () => {
       const id1 = spawner.spawn({ task: "task one" });
       const id2 = spawner.spawn({ task: "task two" });

@@ -5,6 +5,7 @@
  * Each message has a `type` discriminant for exhaustive switching.
  */
 
+import type { ScopedModelOverrides } from "../model-overrides.js";
 import type { PermissionMode } from "../permissions/types.js";
 import type { SandboxMode } from "../permissions/kernel-sandbox.js";
 
@@ -46,6 +47,8 @@ export interface SpawnPayload {
   depth?: number;
   sandboxMode?: SandboxMode;
   allowedPaths?: string[];
+  /** The parent's --context-window / --price-* and the model they apply to. */
+  modelOverrides?: ScopedModelOverrides;
 }
 
 /** Parent can send a cancellation signal. */

@@ -38,6 +38,7 @@ import { buildPhrenContext, } from "../memory/context.js";
 import { startSession, endSession, } from "../memory/session.js";
 import { runAgent, } from "../agent-loop.js";
 import { createCostTracker } from "../cost.js";
+import { scopeModelOverrides } from "../model-overrides.js";
 import { getAgentType, applyAgentType } from "./agent-types.js";
 import { AgentSpawner } from "./spawner.js";
 import { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } from "../tools/spawn-agent.js";
@@ -92,7 +93,12 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
   // Set cwd (use worktree path if provided)
   process.chdir(payload.worktreePath ?? cwd);
 
-  // Resolve LLM provider
+  // Resolve LLM provider; the parent's --context-window / --price-* apply
+  // only if this child runs the model they were given for.
+  if (payload.modelOverrides) {
+    const { model: overridden, ...overrides } = payload.modelOverrides;
+    scopeModelOverrides(overridden, overrides);
+  }
   const provider = resolveProvider(providerName, model);
 
   // Child agents get a lightweight prompt — no "search memory first" forcing

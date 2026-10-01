@@ -132,7 +132,8 @@ Environment:
   PHREN_AGENT_BASE_URL  Endpoint for openai-compat
   PHREN_AGENT_API_KEY   Key for openai-compat
   PHREN_AGENT_CONTEXT_WINDOW, PHREN_AGENT_PRICE_IN, PHREN_AGENT_PRICE_OUT,
-  PHREN_AGENT_PRICE_CACHE  Same as the flags (flags win)
+  PHREN_AGENT_PRICE_CACHE  Same as the flags, for every model (the flags apply
+                           only to the model they were given with, and win)
   OpenCode Go (base URL https://opencode.ai/zen/go/v1) is a subscription, so
   its usage shows as included rather than priced.
 

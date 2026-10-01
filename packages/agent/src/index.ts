@@ -37,6 +37,7 @@ import { fileSink, findEventLogById, findLatestEventLog, listEventLogs, persistF
 import { buildHeadlessResult, createHeadlessHooks, headlessExitCode, readStdin, type HeadlessResult } from "./headless.js";
 import type { LlmMessage } from "./providers/types.js";
 import { createCostTracker } from "./cost.js";
+import { scopeModelOverrides } from "./model-overrides.js";
 import { codexLogin, codexLogout } from "./providers/codex-auth.js";
 import { createCheckpoint } from "./checkpoint.js";
 import { detectLintCommand, detectTestCommand } from "./tools/lint-test.js";
@@ -140,13 +141,10 @@ export async function runAgentCli(raw: string[]) {
 
   if (args.help) { printHelp(); process.exit(0); }
   if (args.version) { console.log(`phren-agent v${VERSION}`); process.exit(0); }
-  // Model switches and spawned children resolve the provider again; they
-  // read the endpoint from the environment.
+  // Model switches resolve the provider again; they read the endpoint from
+  // the environment. The window and prices stay with the model they were
+  // given for (scopeModelOverrides, below).
   if (args.baseUrl) process.env.PHREN_AGENT_BASE_URL = args.baseUrl;
-  if (args.contextWindow) process.env.PHREN_AGENT_CONTEXT_WINDOW = String(args.contextWindow);
-  if (args.priceIn !== undefined) process.env.PHREN_AGENT_PRICE_IN = String(args.priceIn);
-  if (args.priceOut !== undefined) process.env.PHREN_AGENT_PRICE_OUT = String(args.priceOut);
-  if (args.priceCache !== undefined) process.env.PHREN_AGENT_PRICE_CACHE = String(args.priceCache);
 
   if (args.listSessions) {
     const ctx = await buildPhrenContext(args.project);
@@ -196,11 +194,18 @@ export async function runAgentCli(raw: string[]) {
   // Resolve LLM provider
   let provider;
   try {
-    provider = resolveProvider(args.provider, args.model, args.maxOutput, args.reasoning, { baseUrl: args.baseUrl });
+    provider = resolveProvider(args.provider, args.model, args.maxOutput, args.reasoning, { baseUrl: args.baseUrl, contextWindow: args.contextWindow });
   } catch (err: unknown) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
+
+  scopeModelOverrides((provider as { model?: string }).model ?? args.model ?? provider.name, {
+    contextWindow: args.contextWindow,
+    priceIn: args.priceIn,
+    priceOut: args.priceOut,
+    priceCache: args.priceCache,
+  });
 
   if (args.verbose) {
     process.stderr.write(`Provider: ${provider.name}\n`);

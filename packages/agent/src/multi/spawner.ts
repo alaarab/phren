@@ -24,6 +24,7 @@ import { MAX_SPAWN_DEPTH } from "./types.js";
 import type { PermissionConfig, PermissionMode } from "../permissions/types.js";
 import type { SandboxMode } from "../permissions/kernel-sandbox.js";
 import type { CostTracker } from "../cost.js";
+import { scopedModelOverrides } from "../model-overrides.js";
 import { createWorktree, hasWorktreeChanges, removeWorktree, } from "./worktree.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -144,6 +145,7 @@ export class AgentSpawner extends EventEmitter {
       provider: opts.provider,
       model: opts.model,
       project: opts.project,
+      modelOverrides: scopedModelOverrides(),
       permissions: opts.permissions ?? defaults?.mode ?? "auto-confirm",
       maxTurns: opts.maxTurns ?? 50,
       budget: opts.budget ?? null,

@@ -174,10 +174,13 @@ included and `--budget` does not apply.
 and pricing come from the built-in catalogue when the model id is known,
 otherwise a 200k-token window and a conservative price estimate are assumed.
 Override them with `--context-window <tokens>` and `--price-in`, `--price-out`
-and `--price-cache` (USD per million tokens; or `PHREN_AGENT_CONTEXT_WINDOW`
-and `PHREN_AGENT_PRICE_IN|OUT|CACHE`). DeepSeek Flash is catalogued at the
-off-peak $0.15 in, $0.60 out and $0.003 per cache hit; DeepSeek bills twice
-that at peak, so pass the peak prices if you run then.
+and `--price-cache` (USD per million tokens). The flags belong to the model
+they were given with: a `/model` switch to another model, or a subagent on
+another model, uses that model's catalogue values. `PHREN_AGENT_CONTEXT_WINDOW`
+and `PHREN_AGENT_PRICE_IN|OUT|CACHE` apply to every model. DeepSeek Flash is
+catalogued at DeepSeek's off-peak rates, $0.15 in, $0.60 out and $0.003 per
+cache hit; DeepSeek bills twice that at peak (01:00-04:00 and 06:00-10:00
+UTC on weekdays), so pass the peak prices if you run then.
 
 DeepSeek is also on OpenRouter (`deepseek/deepseek-v4.1-flash`,
 `deepseek/deepseek-v4-pro`, `deepseek/deepseek-v4-flash`,
