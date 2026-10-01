@@ -5,6 +5,7 @@ import { encodeDiffPayload } from "../multi/diff-renderer.js";
 import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
 import { applyEdits, snippetAround, type EditSpec } from "./edit-engine.js";
 import { recordFileState, staleFileError } from "./file-state.js";
+import { syntaxCheckNote } from "./syntax-check.js";
 
 /** Shared path checks and read for the edit tools. */
 function openForEdit(filePath: unknown): { ok: true; filePath: string; content: string } | { ok: false; result: AgentToolResult } {
@@ -38,8 +39,9 @@ function runEdits(filePath: unknown, edits: EditSpec[]): AgentToolResult {
   // The model sees a short numbered excerpt of the result; the diff payload
   // after DIFF_MARKER is for the TUI and is stripped before the model sees it.
   const snippet = snippetAround(outcome.content.replace(/\r\n/g, "\n"), outcome.firstLine, outcome.lastLine);
+  const syntax = syntaxCheckNote(opened.filePath, opened.content, outcome.content);
   return {
-    output: `Edited ${opened.filePath}: ${count}${note}.\n${snippet}${encodeDiffPayload(opened.filePath, opened.content, outcome.content)}`,
+    output: `Edited ${opened.filePath}: ${count}${note}.\n${snippet}${syntax ? `\n\n${syntax}` : ""}${encodeDiffPayload(opened.filePath, opened.content, outcome.content)}`,
   };
 }
 
