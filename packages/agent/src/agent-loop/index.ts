@@ -23,6 +23,19 @@ export { createSession };
  * If the history ends with an assistant message whose tool calls have no
  * results, append a cancelled result for each. Returns how many were closed.
  */
+/**
+ * Up to `max` chars of a check's output: the start (where compilers put the
+ * first error) and the end (where test runners put the summary).
+ */
+/** Files a type checker looks at (matched anywhere in a path or patch text). */
+const TYPED_SOURCE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|py|pyi)\b/;
+
+function headAndTail(output: string, max: number): string {
+  if (output.length <= max) return output;
+  const head = Math.floor(max * 0.4);
+  return `${output.slice(0, head)}\n… [${output.length - max} chars cut] …\n${output.slice(output.length - (max - head))}`;
+}
+
 /** How many times one turn's Stop hooks may send the model back. */
 const MAX_STOP_BLOCKS = 5;
 
@@ -455,11 +468,22 @@ export async function runTurn(
       const cwd = registry.permissionConfig.projectRoot;
       const lintCmd = config.lintTestConfig.lintCmd ?? detectLintCommand(cwd);
       const testCmd = config.lintTestConfig.testCmd ?? detectTestCommand(cwd);
+      // The type check first: it is quick, and tests can't pass while it
+      // fails. Only after an edit to a typed source file (a README edit
+      // doesn't need it).
+      const touchedTyped = toolUseBlocks.some((block) => mutatingTools.has(block.name)
+        && TYPED_SOURCE.test(block.name === "apply_patch" ? String(block.input.patch ?? "") : String(block.input.path ?? "")));
+      const typecheckCmd = touchedTyped ? config.lintTestConfig.typecheckCmd : undefined;
 
       const lintFailures: string[] = [];
-      for (const cmd of new Set([lintCmd, testCmd].filter(Boolean) as string[])) {
+      let typesFailed = false;
+      for (const cmd of new Set([typecheckCmd, lintCmd, testCmd].filter(Boolean) as string[])) {
         if (signal?.aborted) break;
         if (deniedChecks.has(cmd)) continue;
+        if (typesFailed && cmd === testCmd && cmd !== lintCmd) {
+          lintFailures.push(`Tests (${cmd}) were not run: fix the type errors first.`);
+          continue;
+        }
         const input = { command: cmd, cwd, timeout: 60_000, description: "Verify the completed edit" };
         hooks?.onToolStart?.("shell", input, 1);
         // The same registry and scheduler preserve shell approval, hooks,
@@ -473,7 +497,8 @@ export async function runTurn(
         if (check.permissionDenied) deniedChecks.add(cmd);
         if (check.is_error) {
           if (verbose) status(`\x1b[33m[post-edit check failed: ${cmd}]\x1b[0m\n`);
-          lintFailures.push(`Post-edit check failed (${cmd}):\n${check.output.slice(0, 2000)}`);
+          if (cmd === typecheckCmd) typesFailed = true;
+          lintFailures.push(`Post-edit check failed (${cmd}):\n${headAndTail(check.output, 2000)}`);
         }
       }
       if (lintFailures.length > 0) {
