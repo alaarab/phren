@@ -404,7 +404,7 @@ echo "add a --json flag" | phren agent --output-format stream-json --yolo   # ta
 | Format | stdout |
 |--------|--------|
 | `text` (default with `-p`) | the final assistant message |
-| `json` | one object: `type: "result"`, `subtype` (`success`, `error_max_turns`, `error_budget`, `error_plan_rejected`, `cancelled`, `error_during_execution`, `error_hook_blocked`), `is_error`, `result`, `num_turns`, `tool_calls`, `duration_ms`, `session_id`, `provider`, `model`, `usage` (`input_tokens` excluding cache hits and writes, `cache_read_input_tokens`, `cache_creation_input_tokens` (Anthropic; billed at 1.25x input), `output_tokens`), `total_cost_usd` (null on a subscription), `permission_denials`, `error` |
+| `json` | one object: `type: "result"`, `subtype` (`success`, `error_max_turns`, `error_budget`, `error_plan_rejected`, `cancelled`, `error_during_execution`, `error_hook_blocked`, `error_structured_output`), `structured_output` (with `--json-schema`), `is_error`, `result`, `num_turns`, `tool_calls`, `duration_ms`, `session_id`, `provider`, `model`, `usage` (`input_tokens` excluding cache hits and writes, `cache_read_input_tokens`, `cache_creation_input_tokens` (Anthropic; billed at 1.25x input), `output_tokens`), `total_cost_usd` (null on a subscription), `permission_denials`, `error` |
 | `stream-json` | one JSON object per line: `system`/`init`, then `assistant`, `tool_use` and `tool_result` events as they happen, then the same `result` object |
 
 To drive one session over several turns, send user messages as JSON lines
@@ -426,6 +426,19 @@ Every line, in and out, is described by the JSON Schema in
 `is_error`, `output` cut at 4,000 characters) as they happen, and a `result`
 per turn; input lines are `InputMessage`. A test checks the agent's real output
 against it, so a field added without documenting it fails the build.
+
+For a typed answer, give `--json-schema` a JSON Schema (inline or a file
+path). When the task finishes, the agent asks the model for a JSON value
+matching it, validates it (two more tries with the validation errors if it
+doesn't match), and puts it in the result's `structured_output`; with text
+output it prints the JSON. A run that can't produce one ends with subtype
+`error_structured_output`. That last request counts in `usage` and the cost.
+
+```bash
+phren agent -p --output-format json \
+  --json-schema '{"type":"object","required":["files"],"properties":{"files":{"type":"array","items":{"type":"string"}}}}' \
+  "which files handle authentication?" | jq .structured_output
+```
 
 `--output-format` implies `-p`. Everything else (warnings, compaction notices,
 tool lines with `--verbose`) goes to stderr. Exit code is 0 only for
@@ -479,6 +492,7 @@ it on the computer and it appears in the app.
 | `--list-sessions` | List recent sessions (with `--output-format json` as JSON) and exit |
 | `models [--json]` | List the models of the providers with credentials here, as `<provider>/<model>`, the default marked, and exit (Phren Hook's model picker reads the JSON) |
 | `-p`, `--print` | Headless run: clean stdout, approvals denied |
+| `--json-schema <schema>` | End a headless run with `structured_output` matching this JSON Schema (inline or a file) |
 | `--input-format text\|stream-json` | With `stream-json`, read user messages as JSON lines on stdin, one turn each |
 | `--output-format <f>` | `text`, `json` or `stream-json`; implies `-p` |
 | `--budget <dollars>` | Stop when estimated spend passes this |

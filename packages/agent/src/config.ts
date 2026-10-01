@@ -49,6 +49,8 @@ export interface CliArgs {
   outputFormat: "text" | "json" | "stream-json";
   /** Headless input: the task as text, or user messages as JSON lines on stdin. */
   inputFormat: "text" | "stream-json";
+  /** --json-schema: inline JSON Schema or a path to one. */
+  jsonSchema?: string;
   /** OpenAI-compatible endpoint for --provider openai-compat (or deepseek override). */
   baseUrl?: string;
   lintCmd?: string;
@@ -116,6 +118,8 @@ Options:
   -p, --print          Headless: no prompts (tool approvals are denied), clean stdout
   --output-format <f>  With -p: text (final message), json (one result object),
                        stream-json (NDJSON events + result). Implies -p
+  --json-schema <s>    With -p: end with a JSON value matching this schema (inline JSON or a
+                       file), in the result's structured_output; implies -p
   --input-format <f>   With -p: text (the task, default) or stream-json (user
                        messages as JSON lines on stdin, one turn each, same session;
                        needs --output-format stream-json)
@@ -221,6 +225,7 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--session" && argv[i + 1]) { args.resume = true; args.resumeId = argv[++i]; }
     else if (arg === "--list-sessions") { args.listSessions = true; }
     else if (arg === "--print" || arg === "-p") { args.print = true; }
+    else if (arg === "--json-schema" && argv[i + 1]) { args.jsonSchema = argv[++i]; args.print = true; }
     else if (arg === "--input-format" && argv[i + 1]) {
       const format = argv[++i];
       if (format !== "text" && format !== "stream-json") throw new Error(`Unknown --input-format "${format}". Use text or stream-json.`);
