@@ -1,4 +1,4 @@
-import type { LlmMessage, ContentBlock, ToolUseBlock, ToolResultBlock } from "../providers/types.js";
+import type { LlmMessage, ToolUseBlock, ToolResultBlock } from "../providers/types.js";
 import { toolResultText } from "../providers/types.js";
 import { estimateTokens, estimateMessageTokens } from "./token-counter.js";
 
@@ -154,6 +154,26 @@ export interface PrunePlan {
   summaryMessage: LlmMessage;
 }
 
+/** A user message with text and no tool results: safe to start the kept tail on. */
+function isUserTextBoundary(msg: LlmMessage): boolean {
+  if (typeof msg.content === "string") return true;
+  return msg.content.some((b) => b.type === "text") && !msg.content.some((b) => b.type === "tool_result");
+}
+
+/** Every tool_result in messages[from..] answers a tool_use that is also kept. */
+function tailIsPaired(messages: LlmMessage[], from: number): boolean {
+  const calls = new Set<string>();
+  for (let i = from; i < messages.length; i++) {
+    const content = messages[i].content;
+    if (typeof content === "string") continue;
+    for (const block of content) {
+      if (block.type === "tool_use") calls.add(block.id);
+      else if (block.type === "tool_result" && !calls.has(block.tool_use_id)) return false;
+    }
+  }
+  return true;
+}
+
 /**
  * Plan a prune, keeping the first message (original task) and the last N turn
  * pairs. Returns null when there is nothing worth pruning. The caller applies
@@ -169,17 +189,14 @@ export function planPrune(messages: LlmMessage[], config?: Partial<PruneConfig>)
     return null;
   }
 
-  // Walk backwards from split point to ensure tail starts with a user text message,
-  // not a tool_result-only message (which would be orphaned without its tool_use).
+  // Walk backwards from split point to ensure tail starts with a user text
+  // message. A user message that also carries tool results (lint/test
+  // follow-ups ride along with them) is not a boundary: its results belong to
+  // the assistant call just before it, which would be pruned.
   let splitIdx = messages.length - keepRecentMessages;
   while (splitIdx > 1) {
     const msg = messages[splitIdx];
-    if (msg.role === "user") {
-      // Check if this is a text message (not just tool_results)
-      if (typeof msg.content === "string") break;
-      const hasText = msg.content.some((b: ContentBlock) => b.type === "text");
-      if (hasText) break;
-    }
+    if (msg.role === "user" && isUserTextBoundary(msg) && tailIsPaired(messages, splitIdx)) break;
     splitIdx--;
   }
   if (splitIdx <= 1) {
@@ -188,7 +205,7 @@ export function planPrune(messages: LlmMessage[], config?: Partial<PruneConfig>)
     // an assistant message instead; the tail then opens with a complete
     // tool_use/tool_result pair and never orphans a result.
     splitIdx = messages.length - keepRecentMessages;
-    while (splitIdx > 1 && messages[splitIdx].role !== "assistant") splitIdx--;
+    while (splitIdx > 1 && (messages[splitIdx].role !== "assistant" || !tailIsPaired(messages, splitIdx))) splitIdx--;
     if (splitIdx <= 1) return null;
   }
 
