@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { LlmMessage, StreamDelta } from "../providers/types.js";
 import { stripForeignReasoning } from "../providers/history.js";
 import { AnthropicProvider, toWireBlock, parseWireContent } from "../providers/anthropic.js";
-import { toOpenAiMessages, parseOpenAiResponse, parseOpenAiStream } from "../providers/openai-compat.js";
+import { toOpenAiMessages, parseOpenAiResponse, parseOpenAiStream, replaysAllReasoning } from "../providers/openai-compat.js";
 import { consumeStream } from "../agent-loop/stream.js";
 
 /** Wrap SSE lines in a fetch Response for parseOpenAiStream. */
@@ -151,29 +151,59 @@ describe("Anthropic adaptive thinking (4.6+/5-family)", () => {
 });
 
 describe("OpenAI-compat reasoning passback", () => {
-  it("sends reasoning_content only on tool-call turns", () => {
-    const withTool: LlmMessage[] = [
-      {
-        role: "assistant",
-        content: [
-          { type: "reasoning", text: "why", provider: "openai" },
-          { type: "tool_use", id: "c", name: "t", input: {} },
-        ],
-      },
-    ];
-    const out = toOpenAiMessages("sys", withTool, "openai");
-    expect(out[1]).toMatchObject({ role: "assistant", content: "", reasoning_content: "why" });
+  const withTool = (provider: string): LlmMessage[] => [
+    {
+      role: "assistant",
+      content: [
+        { type: "reasoning", text: "why", provider },
+        { type: "tool_use", id: "c", name: "t", input: {} },
+      ],
+    },
+  ];
+  const noTool = (provider: string): LlmMessage[] => [
+    {
+      role: "assistant",
+      content: [
+        { type: "reasoning", text: "why", provider },
+        { type: "text", text: "answer" },
+      ],
+    },
+  ];
 
-    const noTool: LlmMessage[] = [
-      {
-        role: "assistant",
-        content: [
-          { type: "reasoning", text: "why", provider: "openai" },
-          { type: "text", text: "answer" },
-        ],
-      },
-    ];
-    const plain = toOpenAiMessages("sys", noTool, "openai");
+  it("DeepSeek routes get reasoning_content on every assistant turn, not just tool-call turns", () => {
+    expect(replaysAllReasoning("deepseek", "deepseek-flash")).toBe(true);
+    const out = toOpenAiMessages("sys", withTool("deepseek"), "deepseek", false, true);
+    expect(out[1]).toMatchObject({ role: "assistant", content: "", reasoning_content: "why" });
+    const plain = toOpenAiMessages("sys", noTool("deepseek"), "deepseek", false, true);
+    expect(plain[1]).toEqual({ role: "assistant", content: "answer", reasoning_content: "why" });
+  });
+
+  it("DeepSeek routes send empty reasoning_content on turns that had none", () => {
+    const out = toOpenAiMessages(
+      "sys",
+      [
+        { role: "assistant", content: "legacy string turn" },
+        { role: "assistant", content: [{ type: "text", text: "no reasoning" }] },
+      ],
+      "deepseek",
+      false,
+      true,
+    );
+    expect(out[1]).toEqual({ role: "assistant", content: "legacy string turn", reasoning_content: "" });
+    expect(out[2]).toEqual({ role: "assistant", content: "no reasoning", reasoning_content: "" });
+  });
+
+  it("openai-compat replays all reasoning only for DeepSeek model ids", () => {
+    expect(replaysAllReasoning("openai-compat", "deepseek-v4.1-flash")).toBe(true);
+    expect(replaysAllReasoning("openai-compat", "glm-5")).toBe(false);
+    expect(replaysAllReasoning("openai", "gpt-5.4")).toBe(false);
+    expect(replaysAllReasoning("openrouter", "deepseek/deepseek-v4.1-flash")).toBe(false);
+  });
+
+  it("other routes keep reasoning_content to tool-call turns", () => {
+    const out = toOpenAiMessages("sys", withTool("openai"), "openai");
+    expect(out[1]).toMatchObject({ role: "assistant", content: "", reasoning_content: "why" });
+    const plain = toOpenAiMessages("sys", noTool("openai"), "openai");
     expect(plain[1]).toEqual({ role: "assistant", content: "answer" });
   });
 
