@@ -21,6 +21,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - The Hook found no transcript for a phren agent pane: it looked for the agent's event log in `<store>/.runtime/sessions`, but the agent writes to `<store>/.sessions`.
+- phren agent: a foreground shell command still running when the agent exits, gets Ctrl+C, SIGTERM or a closed terminal (SIGHUP) is killed with everything it started; it ran on in its own process group before. Full-output log files are removed at exit and capped at 200 MB per session (`PHREN_AGENT_SHELL_SPILL_TOTAL_BYTES`).
+- phren agent: an Anthropic `overloaded_error` or `api_error` event mid-stream is retried. Anthropic cache reads and writes are counted (writes priced at 1.25x input, `cache_creation_input_tokens` in the headless result), subagents' cache tokens reach the parent's total, and a failed attempt's reported usage counts toward `--budget`. An OpenAI-compatible stream that drops after its `finish_reason` is kept instead of being requested again.
+- phren agent: a retried model call drops the abandoned text before the backoff wait instead of after it, in the terminal UI, the phone's live preview and subagents' panes; the REPL ends the abandoned line and says the reply starts again.
+- phren agent: `/promote` that fails (an MCP server that won't start) leaves a working quick chat with no tools, instead of a session that claimed to be an agent and could not be promoted again.
+- phren agent: preview sidecars a killed agent left in `<store>/.sessions` are removed after 30 minutes, when the next interactive session starts.
+- phren agent: `--context-window` and `--price-*` apply only to the model they were given with, including in subagents on that model, instead of following a `/model` switch through the environment.
+- phren agent: `--reasoning none` is sent only to DeepSeek and OpenAI's GPT-5.1 and later; other models, which reject it, get no reasoning effort.
 
 ## [0.3.19] - 2026-10-01
 
