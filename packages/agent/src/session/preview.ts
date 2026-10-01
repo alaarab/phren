@@ -6,6 +6,8 @@
  * still being written. Removed once the message lands in the log.
  */
 import * as fs from "fs";
+import * as path from "path";
+import { sessionsDir } from "@phren/cli/session/utils";
 import { eventLogPath } from "./persist.js";
 
 /** At most this often on disk; the Hook reads it twice a second. */
@@ -18,6 +20,33 @@ export interface LivePreview {
   append(text: string): void;
   /** The text block ended (tool call) or the message landed in the log. */
   clear(): void;
+}
+
+/**
+ * A sidecar untouched this long belongs to a process that died mid-reply
+ * (a live one rewrites it while streaming and removes it when done).
+ */
+export const STALE_PREVIEW_MS = 30 * 60_000;
+
+/**
+ * Remove sidecars and their staging files that a killed agent left behind.
+ * Best effort; run when an agent session starts or resumes.
+ */
+export function removeStalePreviews(phrenPath: string, maxAgeMs = STALE_PREVIEW_MS, now = Date.now()): number {
+  const dir = sessionsDir(phrenPath);
+  let entries: string[];
+  try { entries = fs.readdirSync(dir); } catch { return 0; }
+  let removed = 0;
+  for (const name of entries) {
+    if (!/\.preview\.json(?:\.\d+\.tmp)?$/.test(name)) continue;
+    const file = path.join(dir, name);
+    try {
+      if (now - fs.statSync(file).mtimeMs < maxAgeMs) continue;
+      fs.rmSync(file, { force: true });
+      removed++;
+    } catch { /* gone already */ }
+  }
+  return removed;
 }
 
 export function previewPath(phrenPath: string, sessionId: string): string {

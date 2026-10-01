@@ -24,7 +24,7 @@ import { updatePlanTool } from "./tools/update-plan.js";
 import { listMcpResourcesTool, readMcpResourceTool } from "./tools/mcp-resources.js";
 import { buildPhrenContext, buildContextSnippet, buildProjectInstructions } from "./memory/context.js";
 import { buildChatMemory, buildChatSystemPrompt } from "./memory/chat.js";
-import { livePreview, previewPath } from "./session/preview.js";
+import { livePreview, previewPath, removeStalePreviews } from "./session/preview.js";
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot, writeSessionNote } from "./memory/session.js";
 import { emitHerdrHook, setHerdrHookSession } from "./herdr-hooks.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
@@ -465,6 +465,7 @@ export async function runAgentCli(raw: string[]) {
   // The phone reads the reply being written from a sidecar of the event log.
   if (phrenCtx && agentConfig.sessionLog && (args.interactive || args.multi || args.team)) {
     const phrenPath = phrenCtx.phrenPath;
+    removeStalePreviews(phrenPath);
     agentConfig.livePreview = (id) => id.startsWith("mem-") ? undefined : livePreview(previewPath(phrenPath, id));
   }
   if (chat) {
