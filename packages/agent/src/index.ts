@@ -31,7 +31,7 @@ import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLas
 import { emitHerdrHook, setHerdrHookSession } from "./herdr-hooks.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
 import { buildSystemPrompt, buildEnvironmentBlock } from "./system-prompt.js";
-import { loadHooksConfig } from "./user-hooks.js";
+import { loadHooksConfig, runLifecycleHooks } from "./user-hooks.js";
 import { loadAndRegisterCustomCommands, getCustomCommandInfos } from "./commands.js";
 import { createSession, runTurn, type AgentConfig } from "./agent-loop.js";
 import { SessionLog, seedFromMessages } from "./session/log.js";
@@ -293,6 +293,11 @@ export async function runAgentCli(raw: string[]) {
   // Register tools
   const registry = new ToolRegistry();
   registry.hookConfig = loadHooksConfig(process.cwd());
+  // SessionStart hooks: what they print joins the system prompt's context.
+  if (registry.hookConfig && !args.dryRun) {
+    const started = await runLifecycleHooks(registry.hookConfig, "SessionStart", { source: args.resume ? "resume" : "startup" });
+    if (started.context && !chat) promptContext += `\n\n## SessionStart hook\n${started.context}`;
+  }
   registry.setPermissions({
     mode: args.permissions,
     allowedPaths: [],
