@@ -179,7 +179,7 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
 
   // Cost tracker
   const modelName = (provider as { model?: string }).model ?? model ?? provider.name;
-  const costTracker = createCostTracker(modelName, budget, provider.name);
+  const costTracker = createCostTracker(modelName, budget, provider.name, provider.baseUrl);
 
   let spawner: AgentSpawner | null = null;
   const depth = payload.depth ?? 0;

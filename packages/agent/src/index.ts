@@ -143,6 +143,10 @@ export async function runAgentCli(raw: string[]) {
   // Model switches and spawned children resolve the provider again; they
   // read the endpoint from the environment.
   if (args.baseUrl) process.env.PHREN_AGENT_BASE_URL = args.baseUrl;
+  if (args.contextWindow) process.env.PHREN_AGENT_CONTEXT_WINDOW = String(args.contextWindow);
+  if (args.priceIn !== undefined) process.env.PHREN_AGENT_PRICE_IN = String(args.priceIn);
+  if (args.priceOut !== undefined) process.env.PHREN_AGENT_PRICE_OUT = String(args.priceOut);
+  if (args.priceCache !== undefined) process.env.PHREN_AGENT_PRICE_CACHE = String(args.priceCache);
 
   if (args.listSessions) {
     const ctx = await buildPhrenContext(args.project);
@@ -353,7 +357,7 @@ export async function runAgentCli(raw: string[]) {
 
   // Build cost tracker from model info
   const modelName = (provider as { model?: string }).model ?? args.model ?? provider.name;
-  const costTracker = createCostTracker(modelName, args.budget, provider.name);
+  const costTracker = createCostTracker(modelName, args.budget, provider.name, provider.baseUrl);
 
   // Build lint/test config from CLI flags or auto-detect
   const cwd = process.cwd();

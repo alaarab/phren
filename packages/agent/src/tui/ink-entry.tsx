@@ -167,6 +167,9 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   const completedMessages: CompletedMessage[] = [];
   let streamingText = "";
   let reasoningText = "";
+  // Length of streamingText when the current model call began, so a retried
+  // call can drop only its own partial text.
+  let streamMark = 0;
   let thinking = false;
   let thinkStartTime = 0;
   let thinkElapsed: string | null = null;
@@ -188,7 +191,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     const cost = tracker
       ? tracker.metered
         ? `$${tracker.totalCost < 0.01 ? tracker.totalCost.toFixed(4) : tracker.totalCost.toFixed(2)}`
-        : `${tracker.totalInputTokens + tracker.totalOutputTokens} tok`
+        : `${tracker.totalInputTokens + tracker.totalCacheReadTokens + tracker.totalOutputTokens} tok`
       : "";
     return {
       provider: config.provider.name,
@@ -674,6 +677,14 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     onTextDone: () => {
       // streaming complete — finalized in runAgentTurn
     },
+    onAssistantMessage: () => {
+      streamMark = streamingText.length;
+    },
+    onStreamRetry: () => {
+      streamingText = streamingText.slice(0, streamMark);
+      reasoningText = "";
+      scheduleUpdate();
+    },
     onTextBlock: (text) => {
       thinking = false;
       streamingText += text;
@@ -728,6 +739,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     thinkElapsed = null;
     streamingText = "";
     reasoningText = "";
+    streamMark = 0;
     currentToolCalls = [];
     activeTool = null;
     const pastVerb = PAST_VERBS[Math.floor(Math.random() * PAST_VERBS.length)];
@@ -760,6 +772,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     }
     streamingText = "";
     reasoningText = "";
+    streamMark = 0;
     currentToolCalls = [];
     activeTool = null;
     running = false;

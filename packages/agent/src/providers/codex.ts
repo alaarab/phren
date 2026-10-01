@@ -3,7 +3,7 @@
  * Calls chatgpt.com/backend-api/codex/responses (Responses API format).
  */
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
-import { toolResultText } from "./types.js";
+import { IncompleteStreamError, toolResultText } from "./types.js";
 import { getAccessToken } from "./codex-auth.js";
 import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
 import type { ReasoningEffort } from "../models.js";
@@ -355,7 +355,7 @@ export class CodexProvider implements LlmProvider {
     }
 
     if (!finalResponse) {
-      throw new Error("Codex stream ended without response.completed event");
+      throw new IncompleteStreamError("Codex stream ended without response.completed event");
     }
 
     return finalResponse;
@@ -462,7 +462,7 @@ export class CodexProvider implements LlmProvider {
 
     ws.addEventListener("close", () => {
       if (!done) {
-        push(new Error("Codex WebSocket closed before response.completed"));
+        push(new IncompleteStreamError("Codex WebSocket closed before response.completed"));
         done = true;
       }
     });
