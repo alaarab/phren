@@ -1,6 +1,6 @@
 # phren agent: gaps against Claude Code, Codex CLI, OpenCode and DeepSeek Harness
 
-Status as of 2026-10-01, `@phren/agent` 0.3.20. This compares `packages/agent`
+Written 2026-10-01 against `@phren/agent` 0.3.20; the Status section tracks the fixes since. This compares `packages/agent`
 with the four harnesses people use for the same work, lists what phren agent is
 missing, and ranks the gaps by how much they hurt real coding sessions. It
 replaces the open items in `packages/agent/PARITY.md` (2026-09-25) and folds in
@@ -129,14 +129,30 @@ stop that needs a human) times how bad that is.
     change provider, steering lands only between tool batches, web search is
     an HTML scrape, no network isolation in the sandbox, no OpenTelemetry.
 
-## Fix order
+## Status
 
-Fixed in the 2026-10-02 train, one PR each: the stale-file guard (2, #290),
-search on ripgrep (4, #291), the environment block and registered tool list
-(5, #292), compaction from the provider's token count with old tool output
-cleared first (3, #293), and permission modes that mean what they say (1,
-#296). Still open: declarative allow / deny rules and `--allowedTools`,
-plan-mode reads (6), and gaps 7 to 11.
+Fixed in the 2026-10-02 train, one PR each:
+
+| Gap | Fix | PR |
+| --- | --- | --- |
+| 1 Permissions | `auto-confirm` runs only read, build and test commands; `--yolo` allows warn patterns; a subagent never exceeds its parent's mode; approvals scoped to the subcommand | #296 |
+| 1 Permissions | `permissions.allow / ask / deny` rules in settings files, `--allowedTools`, `--disallowedTools` | #300 |
+| 2 Stale writes | Read-before-write and stale-file guard on every write tool | #290 |
+| 3 Compaction | Context measured from the provider's token count; old tool output cleared before compacting; compaction request carries the tools; `/compact <focus>` | #293 |
+| 4 Search | `grep` / `glob` on ripgrep with `.gitignore`, hidden directories searched, truncation reported, case-sensitive | #291 |
+| 5 System prompt | Environment block and the registered tool list | #292 |
+| 6 Plan mode | Plans with the read-only tools; approval once the plan is presented | #299 |
+| 7 Diagnostics | Syntax check after each edit (TypeScript / JavaScript, Python, JSON) | #301 |
+| 8 Sessions | Resumable sessions without a phren store | #302 |
+| 9 MCP | `~/.phren-agent/mcp.json` by default, a trusted project's `.mcp.json`, output cap | #303 |
+| 9 Hooks | Exit 2 blocks `UserPromptSubmit` and `Stop`, `PostToolUse` feedback, `SessionStart` and `PreCompact` | #304 |
+| 10 Headless | `--input-format stream-json` for multi-turn runs | #305 |
+
+Still open, in order: type errors after edits (an LSP client; the syntax check
+covers parse errors only), MCP prompts, an output JSON schema for headless
+runs, a `/resume` picker in the terminal UI, and the smaller UX gaps in 11
+(image paste, `/reasoning`, `/model` across providers, mid-stream steering,
+provider-native web search, network isolation, OpenTelemetry).
 
 ## DeepSeek V4.1 Flash readiness
 
