@@ -1,6 +1,7 @@
 /** Cost tracking for LLM API usage. */
 import { lookupPricing, type ModelPricing } from "./models.js";
 import type { TokenUsage } from "./providers/types.js";
+import { overridesFor } from "./model-overrides.js";
 
 export interface CostTracker {
   /** Uncached input tokens. */
@@ -19,7 +20,11 @@ export interface CostTracker {
   formatTurnCost(inputTokens: number, outputTokens: number, cacheReadTokens?: number, cacheWriteTokens?: number): string;
 }
 
-/** Price a model and endpoint, with PHREN_AGENT_PRICE_IN/OUT/CACHE (USD per 1M) taking precedence. */
+/**
+ * Price a model and endpoint. The --price-* flags (when this is the model
+ * they were given for), then PHREN_AGENT_PRICE_IN/OUT/CACHE (USD per 1M),
+ * take precedence over the catalog.
+ */
 export function resolvePricing(model: string, provider?: string, baseUrl?: string): { pricing: ModelPricing; metered: boolean } {
   const looked = lookupPricing(model, provider, baseUrl);
   const env = (key: string): number | undefined => {
@@ -28,9 +33,10 @@ export function resolvePricing(model: string, provider?: string, baseUrl?: strin
     const value = Number(raw);
     return Number.isFinite(value) && value >= 0 ? value : undefined;
   };
-  const input = env("PHREN_AGENT_PRICE_IN");
-  const output = env("PHREN_AGENT_PRICE_OUT");
-  const cacheRead = env("PHREN_AGENT_PRICE_CACHE");
+  const flags = overridesFor(model);
+  const input = flags.priceIn ?? env("PHREN_AGENT_PRICE_IN");
+  const output = flags.priceOut ?? env("PHREN_AGENT_PRICE_OUT");
+  const cacheRead = flags.priceCache ?? env("PHREN_AGENT_PRICE_CACHE");
   if (input === undefined && output === undefined && cacheRead === undefined) return looked;
   // An explicit price means the user is paying per token, even on a route
   // the catalog calls included.

@@ -1,4 +1,5 @@
 import type { LlmProvider } from "./types.js";
+import { overridesFor } from "../model-overrides.js";
 import { OpenRouterProvider, OpenAiProvider } from "./openrouter.js";
 import { AnthropicProvider } from "./anthropic.js";
 import { OllamaProvider } from "./ollama.js";
@@ -39,7 +40,7 @@ export const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 export interface ResolveOptions {
   /** Endpoint for openai-compat (required there) or an override for deepseek. */
   baseUrl?: string;
-  /** Context window in tokens, overriding the catalog (else PHREN_AGENT_CONTEXT_WINDOW). */
+  /** Context window in tokens, overriding the catalog (else the model's --context-window, else PHREN_AGENT_CONTEXT_WINDOW). */
   contextWindow?: number;
 }
 
@@ -59,8 +60,11 @@ export function resolveProvider(
 ): LlmProvider {
   const provider = resolveCatalogProvider(overrideProvider, overrideModel, overrideMaxOutput, overrideReasoning, options);
   // The catalog can't know every relay's window (and compaction keys off
-  // it), so an explicit override wins for whichever model is resolved.
-  const contextWindow = options.contextWindow ?? parseTokenCount(process.env.PHREN_AGENT_CONTEXT_WINDOW);
+  // it): an explicit option wins, then --context-window when this is the
+  // model it was given for, then PHREN_AGENT_CONTEXT_WINDOW for any model.
+  const contextWindow = options.contextWindow
+    ?? overridesFor(provider.model).contextWindow
+    ?? parseTokenCount(process.env.PHREN_AGENT_CONTEXT_WINDOW);
   if (contextWindow) provider.contextWindow = contextWindow;
   return provider;
 }
