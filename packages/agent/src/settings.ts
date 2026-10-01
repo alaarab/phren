@@ -50,6 +50,21 @@ export function loadPermissionMode(): PermissionMode | undefined {
   return undefined;
 }
 
+/** Projects whose own MCP config (`.mcp.json`) the user chose to load. */
+export function isMcpProjectTrusted(projectRoot: string): boolean {
+  const list = readSettings().trustedMcpProjects;
+  return Array.isArray(list) && list.includes(path.resolve(projectRoot));
+}
+
+export function trustMcpProject(projectRoot: string): void {
+  const data = readSettings();
+  const list = Array.isArray(data.trustedMcpProjects) ? data.trustedMcpProjects.filter((p): p is string => typeof p === "string") : [];
+  const root = path.resolve(projectRoot);
+  if (!list.includes(root)) list.push(root);
+  data.trustedMcpProjects = list;
+  writeSettings(data);
+}
+
 export function loadTheme(): string | undefined {
   const name = readSettings().theme;
   return typeof name === "string" && name ? name : undefined;

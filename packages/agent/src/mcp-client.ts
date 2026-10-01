@@ -9,6 +9,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { type ChildProcess, spawn } from "child_process";
 import * as fs from "fs";
+import * as path from "path";
 import * as readline from "readline";
 import { type McpOAuthOptions, McpOAuthProvider } from "./mcp-oauth.js";
 import { VERSION } from "./package-metadata.js";
@@ -462,6 +463,21 @@ function formatToolResult(result: McpToolResult): string {
     .join("\n");
 }
 
+/**
+ * Longest MCP tool result the model gets, in chars (about 25k tokens, Claude
+ * Code's default). One server answering with a whole database dump must not
+ * fill the context. PHREN_AGENT_MCP_MAX_OUTPUT_CHARS changes it.
+ */
+function maxMcpOutputChars(): number {
+  const raw = Number(process.env.PHREN_AGENT_MCP_MAX_OUTPUT_CHARS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 100_000;
+}
+
+export function capMcpOutput(text: string, max = maxMcpOutputChars()): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n\n[MCP output truncated: ${text.length} chars, showing the first ${max}. Ask the tool for less, with a filter or a page, if it takes one.]`;
+}
+
 /** Wrap an MCP tool as an AgentTool. */
 function wrapMcpTool(conn: McpConnection, def: McpToolDef): AgentTool {
   return {
@@ -471,7 +487,7 @@ function wrapMcpTool(conn: McpConnection, def: McpToolDef): AgentTool {
     async execute(input: Record<string, unknown>, signal?: AbortSignal): Promise<AgentToolResult> {
       try {
         const result = await conn.callTool(def.name, input, signal);
-        const text = formatToolResult(result);
+        const text = capMcpOutput(formatToolResult(result));
         return result?.isError ? { output: text, is_error: true } : { output: text };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -571,6 +587,32 @@ export async function connectMcpServers(
       }
     },
   };
+}
+
+export interface DefaultMcpConfig {
+  servers: Record<string, McpConfigEntry>;
+  /** Project config files found but not loaded because the project isn't trusted. */
+  untrusted: Array<{ file: string; names: string[] }>;
+}
+
+/**
+ * The MCP servers a session gets without flags: the user's
+ * `~/.phren-agent/mcp.json`, then the project's `.mcp.json` (Claude Code's
+ * file) and `.phren-agent/mcp.json`. A project file starts commands from
+ * whatever repository is checked out, so it loads only for a project the
+ * user trusted (`--trust-project-mcp`, remembered); otherwise it is reported
+ * in `untrusted`.
+ */
+export function loadDefaultMcpConfig(cwd: string, opts: { home: string; trusted: boolean }): DefaultMcpConfig {
+  const servers: Record<string, McpConfigEntry> = { ...loadMcpConfig(path.join(opts.home, ".phren-agent", "mcp.json")) };
+  const untrusted: DefaultMcpConfig["untrusted"] = [];
+  for (const file of [path.join(cwd, ".mcp.json"), path.join(cwd, ".phren-agent", "mcp.json")]) {
+    const found = loadMcpConfig(file);
+    if (Object.keys(found).length === 0) continue;
+    if (opts.trusted) Object.assign(servers, found);
+    else untrusted.push({ file, names: Object.keys(found) });
+  }
+  return { servers, untrusted };
 }
 
 /** Load MCP server config from a JSON file (same format as Claude Code's mcpServers). */
