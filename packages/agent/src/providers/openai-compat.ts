@@ -1,6 +1,6 @@
 /** Shared OpenAI-compatible message/tool conversion used by openrouter, codex, and openai providers. */
 import type { LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta, TokenUsage } from "./types.js";
-import { IncompleteStreamError } from "./types.js";
+import { IncompleteStreamError, RetryableProviderError, type InvalidToolCall } from "./types.js";
 import type { ReasoningEffort } from "../models.js";
 import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
 
@@ -158,6 +158,35 @@ export function parseOpenAiUsage(u: Record<string, unknown>): TokenUsage {
   };
 }
 
+/**
+ * Parse a tool call's JSON arguments. Empty arguments are a no-argument call;
+ * anything else that isn't a JSON object is an error for the model to fix.
+ */
+export function parseToolArguments(raw: string): { input: Record<string, unknown> } | { error: string } {
+  if (raw.trim() === "") return { input: {} };
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return { input: parsed as Record<string, unknown> };
+    return { error: "arguments must be a JSON object" };
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * DeepSeek ends a response with finish_reason insufficient_system_resource
+ * when it runs out of capacity mid-generation: the output is incomplete, and
+ * a fresh request usually succeeds.
+ */
+function throwOnAbnormalFinish(finishReason: unknown): void {
+  if (finishReason === "insufficient_system_resource") {
+    throw new RetryableProviderError("Provider ran out of capacity mid-response (finish_reason: insufficient_system_resource)");
+  }
+  if (finishReason === "aborted") {
+    throw new IncompleteStreamError("Provider aborted the response (finish_reason: aborted)");
+  }
+}
+
 /** HTTP 200 can still carry an upstream error, including inside SSE data events. */
 function throwProviderError(data: Record<string, unknown>): void {
   const choice = (data.choices as Record<string, unknown>[])?.[0];
@@ -176,6 +205,7 @@ function throwProviderError(data: Record<string, unknown>): void {
 export function parseOpenAiResponse(data: Record<string, unknown>, providerName?: string): LlmResponse {
   throwProviderError(data);
   const choice = (data.choices as Record<string, unknown>[])?.[0] ?? {};
+  throwOnAbnormalFinish(choice.finish_reason);
   const message = choice.message as Record<string, unknown> | undefined;
   const content: ContentBlock[] = [];
 
@@ -197,17 +227,16 @@ export function parseOpenAiResponse(data: Record<string, unknown>, providerName?
   }
 
   const toolCalls = message?.tool_calls as Record<string, unknown>[] | undefined;
+  const invalidToolCalls: InvalidToolCall[] = [];
   if (toolCalls) {
     for (const tc of toolCalls) {
       const fn = tc.function as Record<string, unknown>;
-      let input: Record<string, unknown> = {};
-      try { input = JSON.parse(fn.arguments as string); } catch { /* malformed arguments */ }
-      content.push({
-        type: "tool_use",
-        id: tc.id as string,
-        name: fn.name as string,
-        input,
-      });
+      const raw = typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments ?? {});
+      const parsed = parseToolArguments(raw);
+      const id = tc.id as string;
+      const name = fn.name as string;
+      if ("error" in parsed) invalidToolCalls.push({ id, name, raw, error: parsed.error });
+      content.push({ type: "tool_use", id, name, input: "input" in parsed ? parsed.input : {} });
     }
   }
 
@@ -221,6 +250,7 @@ export function parseOpenAiResponse(data: Record<string, unknown>, providerName?
     content,
     stop_reason,
     usage: usage ? parseOpenAiUsage(usage) : undefined,
+    ...(invalidToolCalls.length > 0 ? { invalidToolCalls } : {}),
   };
 }
 
@@ -262,9 +292,7 @@ export async function* parseOpenAiStream(res: Response): AsyncIterable<StreamDel
     if (!choice) return false;
 
     const finishReason = choice.finish_reason as string | null;
-    if (finishReason === "aborted") {
-      throw new IncompleteStreamError("Provider aborted the response (finish_reason: aborted)");
-    }
+    throwOnAbnormalFinish(finishReason);
     if (finishReason) finished = true;
     if (finishReason === "tool_calls") stopReason = "tool_use";
     else if (finishReason === "length") stopReason = "max_tokens";

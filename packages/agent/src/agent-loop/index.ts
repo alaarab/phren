@@ -1,4 +1,4 @@
-import type { ContentBlock, ToolUseBlock } from "../providers/types.js";
+import type { ContentBlock, InvalidToolCall, ToolUseBlock } from "../providers/types.js";
 import { createSpinner, formatTurnHeader, formatToolCall } from "../spinner.js";
 import { shouldPrune } from "../context/pruner.js";
 import { compactWithLlm } from "../context/compactor.js";
@@ -12,7 +12,7 @@ import { runLifecycleHooks } from "../user-hooks.js";
 
 import type { AgentConfig, AgentSession, AgentResult, TurnResult, TurnHooks, TurnStopReason } from "./types.js";
 import { createSession } from "./types.js";
-import { consumeStream, executeToolBlocks, prefetchFirst, runToolsConcurrently } from "./stream.js";
+import { consumeStream, executeToolBlocks, runToolsConcurrently } from "./stream.js";
 export type { AgentConfig, AgentResult, AgentSession, TurnResult, TurnHooks, TurnStopReason };
 export { createSession };
 
@@ -150,32 +150,39 @@ export async function runTurn(
 
     let assistantContent: ContentBlock[];
     let stopReason: "end_turn" | "tool_use" | "max_tokens";
+    let invalidToolCalls: InvalidToolCall[] = [];
 
     try {
       if (useStream) {
-        // Streaming path — retry the initial connection. The async generator does
-        // no work until first read, so the first next() runs inside withRetry.
-        const opening = await withRetry(
+        // Streaming path — the whole request is retried, not just opening it:
+        // a stream that drops, stalls into an incomplete end, or reports a
+        // retryable failure mid-response is requested again. Nothing has run
+        // yet (tools execute after the stream completes), so the only cost is
+        // the partial text already shown, which onStreamRetry lets UIs clear.
+        const onReasoningDelta =
+          hooks?.onReasoningDelta ??
+          (verbose ? (text: string) => process.stderr.write(`\x1b[2m${text}\x1b[0m`) : undefined);
+        let attempt = 0;
+        const result = await withRetry(
           async () => {
-            const iterator = provider.chatStream!(systemPrompt, session.messages, turnTools, signal)[Symbol.asyncIterator]();
-            const first = await iterator.next();
-            return { iterator, first };
+            if (attempt++ > 0) {
+              hooks?.onStreamRetry?.();
+              status("\x1b[33m[model request failed; retrying]\x1b[0m\n");
+            }
+            return consumeStream(
+              provider.chatStream!(systemPrompt, session.messages, turnTools, signal),
+              costTracker,
+              { onTextDelta: hooks?.onTextDelta, onReasoningDelta, providerName: provider.name },
+              signal,
+            );
           },
           undefined,
           verbose,
           signal,
         );
-        const onReasoningDelta =
-          hooks?.onReasoningDelta ??
-          (verbose ? (text: string) => process.stderr.write(`\x1b[2m${text}\x1b[0m`) : undefined);
-        const result = await consumeStream(
-          prefetchFirst(opening.iterator, opening.first),
-          costTracker,
-          { onTextDelta: hooks?.onTextDelta, onReasoningDelta, providerName: provider.name },
-          signal,
-        );
         assistantContent = result.content;
         stopReason = result.stop_reason;
+        invalidToolCalls = result.invalidToolCalls;
       } else {
         // Batch path
         spinner.start("Thinking...");
@@ -189,6 +196,7 @@ export async function runTurn(
 
         assistantContent = response.content;
         stopReason = response.stop_reason;
+        invalidToolCalls = response.invalidToolCalls ?? [];
 
         // Track cost from batch response
         if (costTracker && response.usage) {
@@ -306,13 +314,16 @@ export async function runTurn(
     // If no tool use, we're done
     if (stopReason !== "tool_use") { endReason = "end_turn"; break; }
 
-    // Execute tool calls with concurrency
+    // Execute tool calls with concurrency. Calls whose arguments were not
+    // valid JSON are answered with an error instead of being run.
     const toolUseBlocks = assistantContent.filter((b): b is ToolUseBlock => b.type === "tool_use");
+    const invalidById = new Map(invalidToolCalls.map((call) => [call.id, call]));
+    const runnableBlocks = toolUseBlocks.filter((b) => !invalidById.has(b.id));
 
     // Checkpoint BEFORE the mutating batch: the tool names are known now, and
     // the snapshot must be the true pre-turn tree so /rewind can restore it.
     const mutatingTools = new Set(["edit_file", "multi_edit", "apply_patch", "write_file"]);
-    const hasMutation = toolUseBlocks.some(b => mutatingTools.has(b.name));
+    const hasMutation = runnableBlocks.some(b => mutatingTools.has(b.name));
     if (hasMutation) {
       createCheckpoint(process.cwd(), `turn-${session.turns}`);
     }
@@ -325,7 +336,7 @@ export async function runTurn(
     }
 
     if (!hooks?.onToolStart) spinner.start(`Running ${toolUseBlocks.length} tool${toolUseBlocks.length > 1 ? "s" : ""}...`);
-    const { results: toolResults, toolCallCount } = await executeToolBlocks(toolUseBlocks, {
+    const { results: executedResults, toolCallCount } = await executeToolBlocks(runnableBlocks, {
       registry, verbose, status, hooks, signal,
       antiPatterns: session.antiPatterns,
       captureState: session.captureState,
@@ -335,8 +346,22 @@ export async function runTurn(
     });
     if (!hooks?.onToolStart) spinner.stop();
 
-    session.toolCalls += toolCallCount;
-    turnToolCalls += toolCallCount;
+    // Results in the model's call order, invalid calls answered in place.
+    const resultById = new Map(
+      executedResults.flatMap((r) => (r.type === "tool_result" ? [[r.tool_use_id, r] as const] : [])),
+    );
+    const toolResults: ContentBlock[] = toolUseBlocks.map((block) => {
+      const invalid = invalidById.get(block.id);
+      if (!invalid) return resultById.get(block.id)!;
+      const sample = invalid.raw.length > 300 ? `${invalid.raw.slice(0, 300)}…` : invalid.raw;
+      const output = `Not run: the arguments for ${block.name} were not valid JSON (${invalid.error}). ` +
+        `Call the tool again with a JSON object of arguments. You sent: ${sample}`;
+      hooks?.onToolEnd?.(block.name, block.input, output, true, 0);
+      return { type: "tool_result", tool_use_id: block.id, content: output, is_error: true };
+    });
+
+    session.toolCalls += toolCallCount + invalidById.size;
+    turnToolCalls += toolCallCount + invalidById.size;
 
     // Only successful write/edit results justify checks; requested, denied,
     // failed, or cancelled mutations must never launch a follow-up command.

@@ -649,7 +649,13 @@ an unsendable request.
 Consecutive identical tool calls (same tool, same canonicalized arguments)
 get escalating reminders at runs of 3/5/8 appended to the tool result;
 identical calls within one assistant message execute once and share the
-result. Every tool runs under a declarative per-tool timeout (default 120s)
+result. A tool call whose arguments are not valid JSON is not run: the model
+gets an error result quoting what it sent. Model requests are retried on
+rate limits, 5xx (including 504), dropped connections, streams that end
+before the provider says they are complete, and DeepSeek's
+`insufficient_system_resource`; a stream that fails partway is requested
+again from the start, since no tool has run yet. Every tool runs under a
+declarative per-tool timeout (default 120s)
 with a real AbortSignal — shell commands are cancellable, run in their own
 process group so a timeout also stops what they started, and no longer block
 the event loop.

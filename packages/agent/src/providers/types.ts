@@ -90,6 +90,8 @@ export interface LlmResponse {
   content: ContentBlock[];
   stop_reason: "end_turn" | "tool_use" | "max_tokens";
   usage?: TokenUsage;
+  /** tool_use blocks (input {}) whose arguments failed to parse. */
+  invalidToolCalls?: InvalidToolCall[];
 }
 
 // ── Streaming types ─────────────────────────────────────────────────────────
@@ -132,10 +134,28 @@ export interface LlmProvider {
   ): AsyncIterable<StreamDelta>;
 }
 
+/** A provider failure that a fresh request can fix; withRetry retries it. */
+export class RetryableProviderError extends Error {
+  readonly retryable = true;
+  constructor(message: string) {
+    super(message);
+    this.name = "RetryableProviderError";
+  }
+}
+
 /** Thrown when a stream ends without the provider saying the response is complete. */
-export class IncompleteStreamError extends Error {
+export class IncompleteStreamError extends RetryableProviderError {
   constructor(message: string) {
     super(message);
     this.name = "IncompleteStreamError";
   }
+}
+
+/** A tool call whose arguments were not a JSON object. It is answered with an error, never run. */
+export interface InvalidToolCall {
+  id: string;
+  name: string;
+  /** The arguments as the model sent them. */
+  raw: string;
+  error: string;
 }
