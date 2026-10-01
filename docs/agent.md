@@ -445,7 +445,12 @@ The agent has access to these built-in tools:
 - **grep** — Search file contents with regex
 
 ### Shell and git
-- **shell** — Run shell commands (with timeout and safety checks)
+- **shell** — Run shell commands (with timeout and safety checks). Foreground
+  commands default to a 2 minute timeout, up to 10 minutes per call
+  (`PHREN_AGENT_SHELL_TIMEOUT_MS` and `PHREN_AGENT_SHELL_MAX_TIMEOUT_MS`
+  change both). Long output is never fatal: the model sees the first 8,000
+  and last 24,000 characters with the real exit code, and the full output is
+  saved to a temporary log file named in the result.
 - **git_status** — Show working tree status
 - **git_diff** — Show staged/unstaged changes
 - **git_commit** — Create commits
@@ -645,7 +650,8 @@ Consecutive identical tool calls (same tool, same canonicalized arguments)
 get escalating reminders at runs of 3/5/8 appended to the tool result;
 identical calls within one assistant message execute once and share the
 result. Every tool runs under a declarative per-tool timeout (default 120s)
-with a real AbortSignal — shell commands are cancellable and no longer block
+with a real AbortSignal — shell commands are cancellable, run in their own
+process group so a timeout also stops what they started, and no longer block
 the event loop.
 
 ## Subagents in one-shot mode
