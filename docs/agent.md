@@ -315,10 +315,22 @@ and on Linux shell commands run under a bubblewrap sandbox that makes
 everything outside the workspace read-only (`--sandbox auto|require|off`,
 see [Security](#security)).
 
-Hooks can allow or deny tool calls with your own scripts: put
-`PreToolUse`, `PostToolUse`, `UserPromptSubmit` or `Stop` entries (each a
-`command`, optional `matcher` and `timeoutMs`) in `~/.phren-agent/hooks.json`
-or the project's `.phren-agent/hooks.json`. Markdown files in
+Hooks run your own scripts at points in a session: put entries (each a
+`command`, optional `matcher` and `timeoutMs`) under `hooks` in
+`~/.phren-agent/hooks.json` or the project's `.phren-agent/hooks.json`. Each
+hook gets the event as JSON on stdin. As in Claude Code, exit code 2 blocks
+and its stderr is the reason:
+
+| Event | When | Exit 2 | Exit 0 stdout |
+|---|---|---|---|
+| `PreToolUse` | before a tool call (`matcher` is a tool-name regex) | denies the call (any nonzero exit does) | ignored |
+| `PostToolUse` | after a tool call | stderr is added to the tool result for the model | ignored |
+| `UserPromptSubmit` | before a prompt is sent | blocks the prompt | added to the prompt as context |
+| `Stop` | when the model is done | sends it back to work with the reason, at most 5 times a turn (`stop_hook_active` is true after the first) | ignored |
+| `SessionStart` | at start (`source`: `startup` or `resume`) | ignored | added to the system prompt |
+| `PreCompact` | before automatic compaction (`trigger`: `auto`) | ignored | ignored |
+
+A blocked headless prompt ends with subtype `error_hook_blocked`. Markdown files in
 `~/.phren-agent/commands/` or `.phren-agent/commands/` become slash commands.
 
 ---
@@ -376,7 +388,7 @@ echo "add a --json flag" | phren agent --output-format stream-json --yolo   # ta
 | Format | stdout |
 |--------|--------|
 | `text` (default with `-p`) | the final assistant message |
-| `json` | one object: `type: "result"`, `subtype` (`success`, `error_max_turns`, `error_budget`, `error_plan_rejected`, `cancelled`, `error_during_execution`), `is_error`, `result`, `num_turns`, `tool_calls`, `duration_ms`, `session_id`, `provider`, `model`, `usage` (`input_tokens` excluding cache hits and writes, `cache_read_input_tokens`, `cache_creation_input_tokens` (Anthropic; billed at 1.25x input), `output_tokens`), `total_cost_usd` (null on a subscription), `permission_denials`, `error` |
+| `json` | one object: `type: "result"`, `subtype` (`success`, `error_max_turns`, `error_budget`, `error_plan_rejected`, `cancelled`, `error_during_execution`, `error_hook_blocked`), `is_error`, `result`, `num_turns`, `tool_calls`, `duration_ms`, `session_id`, `provider`, `model`, `usage` (`input_tokens` excluding cache hits and writes, `cache_read_input_tokens`, `cache_creation_input_tokens` (Anthropic; billed at 1.25x input), `output_tokens`), `total_cost_usd` (null on a subscription), `permission_denials`, `error` |
 | `stream-json` | one JSON object per line: `system`/`init`, then `assistant`, `tool_use` and `tool_result` events as they happen, then the same `result` object |
 
 `--output-format` implies `-p`. Everything else (warnings, compaction notices,

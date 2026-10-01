@@ -61,7 +61,7 @@ export interface AgentSession {
 }
 
 /** Why runTurn returned. */
-export type TurnStopReason = "end_turn" | "max_turns" | "budget" | "aborted" | "plan_rejected";
+export type TurnStopReason = "end_turn" | "max_turns" | "budget" | "aborted" | "plan_rejected" | "hook_blocked";
 
 export interface TurnResult {
   text: string;
