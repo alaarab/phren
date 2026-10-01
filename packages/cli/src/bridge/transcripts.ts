@@ -125,7 +125,8 @@ function toolOutputReferences(output: unknown): unknown {
 }
 
 /**
- * The phren store whose `.runtime/sessions` holds phren-agent event logs.
+ * The phren store whose `.sessions` holds phren-agent event logs (and
+ * `.runtime/sessions` OpenCode's plugin logs).
  * `PHREN_PATH` or the shared `~/.phren` root — the two resolutions the CLI's
  * `findPhrenPath` makes without a working directory, which a service has none
  * of. Kept inline rather than importing phren-paths: that module drags in

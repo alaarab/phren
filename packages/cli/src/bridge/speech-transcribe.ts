@@ -1,5 +1,6 @@
 import { WebSocket } from "ws";
 import { readSpeechKey } from "./speech-key.js";
+import { resolveSpeechRegion, SPEECH_REGIONS } from "./speech-voice.js";
 
 /** Dictation through ElevenLabs Scribe v2 Realtime, for the phone's opt-in
  * Scribe input. The phone streams 16 kHz mono PCM as binary frames; this
@@ -9,7 +10,7 @@ import { readSpeechKey } from "./speech-key.js";
 
 export const TRANSCRIBE_MODEL = "scribe_v2_realtime";
 export const TRANSCRIBE_RATE = 16_000;
-const ENDPOINT = "wss://api.elevenlabs.io/v1/speech-to-text/realtime";
+const ENDPOINT = "/v1/speech-to-text/realtime";
 /** Ten minutes of dictation per socket; the phone opens a fresh one after. */
 const MAX_SESSION_MS = 10 * 60_000;
 /** Audio held while the upstream socket opens: about eight seconds. */
@@ -29,14 +30,17 @@ export interface RelaySocket {
 export interface TranscribeOptions {
   key?: () => Promise<string | undefined>;
   connect?: (url: string, key: string) => RelaySocket;
+  /** Defaults to this computer's region setting (speech-voice.ts). */
+  origin?: string;
   maxSessionMs?: number;
 }
 
 const OPEN = 1;
 
-/** The upstream URL: VAD commits, the phone's language and its vocabulary as keyterms. */
-export function transcribeURL(query: URLSearchParams): string {
-  const url = new URL(ENDPOINT);
+/** The upstream URL in the given region: VAD commits, the phone's language
+ * and its vocabulary as keyterms. */
+export function transcribeURL(query: URLSearchParams, origin: string = SPEECH_REGIONS.global): string {
+  const url = new URL(ENDPOINT, origin.replace(/^http/, "ws"));
   url.searchParams.set("model_id", TRANSCRIBE_MODEL);
   url.searchParams.set("audio_format", "pcm_16000");
   url.searchParams.set("commit_strategy", "vad");
@@ -66,7 +70,8 @@ export function relayTranscription(client: RelaySocket, query: URLSearchParams, 
       client.close(1008, "No ElevenLabs key");
       return;
     }
-    const upstream = connect(transcribeURL(query), key);
+    const origin = options.origin ?? (await resolveSpeechRegion()).origin;
+    const upstream = connect(transcribeURL(query, origin), key);
     let pending: Buffer[] = [], pendingBytes = 0, closed = false;
     const finish = (code = 1000, reason = "") => {
       if (closed) return;

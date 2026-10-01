@@ -199,6 +199,38 @@ export async function readOpenCodeModels(executable = "opencode", configDir = pa
   });
 }
 
+/** phren agent's catalog (`phren-agent models --json`): only providers with
+ * credentials on this computer, ids as `<provider>/<model>`, the
+ * auto-detected default marked. The agent package next to this CLI (or this
+ * checkout's) runs under this Node; otherwise `phren-agent` on PATH. Never the
+ * npm global lookup, which blocks. */
+export async function readPhrenModels(command?: { file: string; args: string[] }): Promise<AgentModel[]> {
+  const found = command ? undefined : (await import("../modules/agent-package.js")).findAgentPackage({ global: false });
+  const run = command ?? (found ? { file: process.execPath, args: [found.bin, "models", "--json"] } : { file: "phren-agent", args: ["models", "--json"] });
+  const listed = await new Promise<string>(resolve => {
+    const child = spawn(run.file, run.args, { cwd: homedir(), stdio: ["ignore", "pipe", "ignore"] });
+    let out = "", done = false;
+    const finish = () => { if (!done) { done = true; clearTimeout(timer); resolve(out); } };
+    const timer = setTimeout(() => { child.kill("SIGTERM"); finish(); }, 12_000);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { if (out.length < 262_144) out += chunk; });
+    child.on("error", finish); child.on("close", finish);
+  });
+  let rows: Json[];
+  try { rows = objects(object(JSON.parse(listed)).models); } catch { return []; }
+  const text = (value: unknown, max: number) => typeof value === "string" && value.trim() && !/[\x00-\x1f\x7f]/.test(value) ? value.trim().slice(0, max) : undefined;
+  const models: AgentModel[] = [];
+  for (const row of rows.slice(0, 200)) {
+    const id = text(row.id, 200), name = text(row.name, 120);
+    if (!id || !name || !/^[a-z0-9-]+\/\S+$/.test(id)) continue;
+    const description = text(row.description, 120), effort = text(row.defaultReasoningEffort, 20);
+    const efforts = Array.isArray(row.supportedReasoningEfforts) ? row.supportedReasoningEfforts.map(value => text(value, 20)).filter((value): value is string => !!value) : [];
+    models.push({ id, name, ...(description ? { description } : {}), ...(row.isDefault === true ? { isDefault: true } : {}),
+      ...(effort ? { defaultReasoningEffort: effort } : {}), ...(efforts.length ? { supportedReasoningEfforts: efforts } : {}) });
+  }
+  return models;
+}
+
 /** "claude-fable-5-1" reads as "Fable 5.1"; a date suffix is dropped. */
 export function claudeName(id: string): string {
   const parts = id.replace(/^claude-/, "").replace(/-\d{8}$/, "").replace(/\[1m\]$/, "").split("-");
@@ -217,7 +249,8 @@ export const accountUnavailable = (account: string) =>
 export class ModelCatalog {
   private cache = new Map<string, { at: number; value: Promise<AgentModel[]> }>();
   constructor(private readonly codex = () => readCodexModels(), private readonly claude: (configDir?: string) => Promise<AgentModel[]> = dir => readClaudeModels(dir),
-              private readonly opencode = () => readOpenCodeModels(), private readonly cacheMs = 600_000) {}
+              private readonly opencode = () => readOpenCodeModels(), private readonly cacheMs = 600_000,
+              private readonly phren = () => readPhrenModels()) {}
   list(source: string, account?: string): Promise<AgentModel[]> {
     const id = account?.trim() || DEFAULT_ACCOUNT;
     let dir: string | undefined;
@@ -228,7 +261,7 @@ export class ModelCatalog {
     } else if (id !== DEFAULT_ACCOUNT) return Promise.reject(accountUnavailable(id));
     const key = `${source}:${id}`, cached = this.cache.get(key);
     if (cached && Date.now() - cached.at < this.cacheMs) return cached.value;
-    const value = (source === "codex" ? this.codex() : source === "claude" ? this.claude(dir) : source === "opencode" ? this.opencode() : Promise.resolve([])).catch(() => [] as AgentModel[]);
+    const value = (source === "codex" ? this.codex() : source === "claude" ? this.claude(dir) : source === "opencode" ? this.opencode() : source === "phren" ? this.phren() : Promise.resolve([])).catch(() => [] as AgentModel[]);
     this.cache.set(key, { at: Date.now(), value });
     return value;
   }

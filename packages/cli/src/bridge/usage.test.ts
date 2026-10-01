@@ -521,6 +521,9 @@ describe("ElevenLabs usage", () => {
     expect(JSON.stringify(usage)).not.toContain("xi-secret");
     const failing = (async () => ({ ok: false, status: 401 }) as unknown as Response) as unknown as typeof fetch;
     await expect(fetchElevenLabsUsage("xi-secret", failing, now)).rejects.toThrow("401");
+    // The region setting's endpoint, as spoken replies use.
+    await fetchElevenLabsUsage("xi-secret", fetchImpl, now, "https://api.us.elevenlabs.io");
+    expect(seen).toEqual({ url: "https://api.us.elevenlabs.io/v1/user/subscription", key: "xi-secret" });
   });
   it("caps overage at 100% and explains a missing limit", () => {
     expect(elevenLabsUsage({ character_count: 120, character_limit: 100 }, now).windows[0]).toMatchObject({ usedPercent: 100, usedCharacters: 120 });
