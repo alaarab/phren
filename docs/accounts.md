@@ -62,15 +62,16 @@ The computer's inventory. The same object also rides on `GET /v1/dispatch/capaci
     { "source": "codex", "installed": true, "version": "0.155.0", "usable": true,
       "accounts": [{ "id": "default", "label": "Codex", "key": "codex", "signedIn": true, "usable": true }] },
     { "source": "opencode", "installed": false, "usable": false, "reason": "Not installed" },
-    { "source": "copilot", "installed": true, "version": "1.0.3", "usable": true }
+    { "source": "copilot", "installed": true, "version": "1.0.3", "usable": true },
+    { "source": "phren", "installed": true, "version": "0.3.18", "usable": true }
   ]
 }
 ```
 
-- `installed` comes from `<tool> --version`, the probe `/v1/health/details` already runs.
+- `installed` comes from `<tool> --version`, the probe `/v1/health/details` already runs. `phren` (phren's own agent) is probed as `phren agent --version`; a `phren` that answers without a version (no `@phren/agent` installed) counts as not installed.
 - For Claude, `signedIn` comes from `claude auth status --json` run in each home, cached for 5 minutes. The Hook never reads a token for this. `plan` is the subscription type when Claude reports it.
 - `key` is `claude:` followed by the first 12 hex characters of SHA-256 of the account's `oauthAccount.accountUuid` in that home's `.claude.json`. It is the same on every computer. When it is unknown, `key` is `claude:home:<id>` and the account is not deduplicated.
-- Codex has exactly one account on every computer, keyed `codex` (owner decision). OpenCode and Copilot report no `accounts`.
+- Codex has exactly one account on every computer, keyed `codex` (owner decision). OpenCode, Copilot and phren report no `accounts`; phren's provider credentials are not checked.
 - `usable` means that a launch should work now. A harness is usable when it is installed and at least one account is usable. `reason` explains a `false`, and also says why a usable account is not confirmed signed in. An account whose sign-in check did not answer stays usable, with `signedIn: false` and a `reason`. Only a missing binary or Claude reporting logged out makes something unusable.
 
 ### Session rows

@@ -20,6 +20,7 @@ const versions: Record<string, ToolVersion> = {
   codex: { tool: "codex", status: "ok", version: "0.155.0" },
   opencode: { tool: "opencode", status: "missing" },
   copilot: { tool: "copilot", status: "error", detail: "--version did not answer within 3 seconds" },
+  phren: { tool: "phren agent", status: "ok", version: "0.3.18" },
 };
 const probe = async (tool: string) => versions[tool];
 const auth = async (h: { id: string }) => JSON.stringify({ loggedIn: h.id === "default", subscriptionType: "max" });
@@ -76,4 +77,26 @@ it("answers within its bound while a cold sign-in check is still running", async
   // The probe kept running and cached its answer for the next request.
   const inv = await harnessInventoryWithin(1_000, { toolVersion: async t => versions[t], authRunner: () => slow });
   expect(inv?.harnesses.find(h => h.source === "claude")?.accounts?.[0]).toMatchObject({ signedIn: true, usable: true });
+});
+
+it("offers phren's own agent when `phren agent --version` answers, with no accounts and no sign-in check", async () => {
+  const asked: string[] = [];
+  const { harnesses } = await harnessInventory({ toolVersion: async t => { asked.push(t); return versions[t]; }, authRunner: auth });
+  expect(asked).toContain("phren");
+  const phren = harnesses.find(h => h.source === "phren");
+  expect(phren).toEqual({ source: "phren", installed: true, version: "0.3.18", usable: true });
+  expect(hasUsable({ harnesses }, "phren")).toEqual({ ok: true });
+  expect(hasUsable({ harnesses }, "phren", "work")).toMatchObject({ ok: false, code: "account_unavailable" });
+});
+
+it("marks phren's agent missing without phren, or when phren answers without @phren/agent", async () => {
+  for (const found of [{ tool: "phren agent", status: "missing" }, { tool: "phren agent", status: "error", detail: "--version exited 1 without a version" }] as ToolVersion[]) {
+    const { harnesses } = await harnessInventory({ toolVersion: async t => t === "phren" ? found : versions[t], authRunner: auth });
+    const phren = harnesses.find(h => h.source === "phren")!;
+    expect(phren).toMatchObject({ installed: false, usable: false });
+    expect(hasUsable({ harnesses }, "phren")).toMatchObject({ ok: false, code: "harness_unavailable" });
+  }
+  // A --version too slow to answer is not a missing agent.
+  const slow = await harnessInventory({ toolVersion: async t => t === "phren" ? { tool: t, status: "error", detail: "--version did not answer within 3 seconds" } : versions[t], authRunner: auth });
+  expect(slow.harnesses.find(h => h.source === "phren")).toMatchObject({ installed: true, usable: true });
 });
