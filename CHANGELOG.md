@@ -15,6 +15,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - phren agent's compaction request carries the session's tools. Without them, Anthropic rejects a history that holds tool calls, so compaction on Claude always fell back to the regex summary, and the cached prefix never matched.
+### Fixed
+
+- A Claude Code teammate that has shut down is a finished child: its `shutdown_approved` reply no longer flips it back to running, and the system's `teammate_terminated` notice ends it too, so the phone's Background tray and the session's running count drop it.
 
 ## [0.3.20] - 2026-10-01
 

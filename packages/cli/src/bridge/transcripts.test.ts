@@ -189,6 +189,18 @@ describe("child agent relationships", () => {
       const woken = { type: "user", message: { role: "user", content: `<teammate-message teammate_id="${name}">\nStarting on the second batch.\n</teammate-message>` } };
       await appendFile(parentFile, JSON.stringify(woken) + "\n");
       expect((await childAgentTree("claude", parent))[0]).toMatchObject({ state: "running" });
+      // A shut-down teammate is finished, by its approval or the system's
+      // notice, alone or together in one row, never back to running.
+      const approved = `<teammate-message teammate_id="${name}" color="blue">\n{"type":"shutdown_approved","requestId":"shutdown-1@${name}","from":"${name}"}\n</teammate-message>`;
+      const terminated = `<teammate-message teammate_id="system">\n{"type":"teammate_terminated","message":"${name} has shut down."}\n</teammate-message>`;
+      await appendFile(parentFile, JSON.stringify({ type: "user", message: { role: "user", content: approved } }) + "\n");
+      expect((await childAgentTree("claude", parent))[0]).toMatchObject({ state: "completed" });
+      await appendFile(parentFile, JSON.stringify(woken) + "\n");
+      await appendFile(parentFile, JSON.stringify({ type: "user", message: { role: "user", content: terminated } }) + "\n");
+      expect((await childAgentTree("claude", parent))[0]).toMatchObject({ state: "completed" });
+      await appendFile(parentFile, JSON.stringify(woken) + "\n");
+      await appendFile(parentFile, JSON.stringify({ type: "user", message: { role: "user", content: `${terminated}\n\n${approved}` } }) + "\n");
+      expect((await childAgentTree("claude", parent))[0]).toMatchObject({ state: "completed" });
     } finally { process.env.CLAUDE_CONFIG_DIR = old; await rm(root, { recursive: true, force: true }); }
   }, 10_000);
 
