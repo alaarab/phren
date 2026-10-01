@@ -167,10 +167,15 @@ export async function claudeChildAgents(file: string, session: string): Promise<
           if (previous && ["completed", "failed", "cancelled", "canceled", "killed", "stopped"].includes(taskStatus ?? "")) previous.state = "completed";
         }
       }
-      if (content.includes("<teammate-message")) {
-        const from = /<teammate-message teammate_id="([A-Za-z0-9][A-Za-z0-9_-]{0,63})"/.exec(content)?.[1];
-        const teammate = from && teammates.get(from);
-        if (teammate) teammate.state = content.includes("\"type\":\"idle_notification\"") ? "completed" : "running";
+      // One row can carry several messages (a shutdown approval and the
+      // system's termination notice together). Idle, an approved shutdown
+      // and termination end a teammate; anything else it says wakes it.
+      for (const match of content.includes("<teammate-message") ? content.matchAll(/<teammate-message teammate_id="([A-Za-z0-9][A-Za-z0-9_-]{0,63})"[^>]*>([\s\S]*?)<\/teammate-message>/g) : []) {
+        const [, from, body] = match;
+        const type = /"type":"([a-z_]+)"/.exec(body)?.[1];
+        const ended = from === "system" && type === "teammate_terminated" ? /"message":"([A-Za-z0-9][A-Za-z0-9_-]{0,63}) has shut down/.exec(body)?.[1] : undefined;
+        const teammate = teammates.get(ended ?? from);
+        if (teammate) teammate.state = ended || type === "idle_notification" || type === "shutdown_approved" ? "completed" : "running";
       }
     } catch { /* Ignore unrelated/malformed rows. */ }
   }
