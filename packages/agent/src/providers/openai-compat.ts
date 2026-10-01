@@ -1,5 +1,5 @@
 /** Shared OpenAI-compatible message/tool conversion used by openrouter, codex, and openai providers. */
-import type { LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
+import type { LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta, TokenUsage } from "./types.js";
 import { IncompleteStreamError } from "./types.js";
 import type { ReasoningEffort } from "../models.js";
 import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
@@ -141,6 +141,23 @@ export function toOpenAiMessages(
   return out;
 }
 
+/**
+ * Chat Completions usage → TokenUsage. prompt_tokens includes cache hits:
+ * DeepSeek reports them as prompt_cache_hit_tokens, OpenAI (and most relays)
+ * as prompt_tokens_details.cached_tokens.
+ */
+export function parseOpenAiUsage(u: Record<string, unknown>): TokenUsage {
+  const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const prompt = num(u.prompt_tokens);
+  const details = u.prompt_tokens_details as Record<string, unknown> | undefined;
+  const cached = Math.min(prompt, num(u.prompt_cache_hit_tokens) || num(details?.cached_tokens));
+  return {
+    input_tokens: prompt - cached,
+    output_tokens: num(u.completion_tokens),
+    ...(cached > 0 ? { cache_read_input_tokens: cached } : {}),
+  };
+}
+
 /** HTTP 200 can still carry an upstream error, including inside SSE data events. */
 function throwProviderError(data: Record<string, unknown>): void {
   const choice = (data.choices as Record<string, unknown>[])?.[0];
@@ -199,11 +216,11 @@ export function parseOpenAiResponse(data: Record<string, unknown>, providerName?
     : finishReason === "length" ? "max_tokens"
     : "end_turn";
 
-  const usage = data.usage as Record<string, number> | undefined;
+  const usage = data.usage as Record<string, unknown> | undefined;
   return {
     content,
     stop_reason,
-    usage: usage ? { input_tokens: usage.prompt_tokens ?? 0, output_tokens: usage.completion_tokens ?? 0 } : undefined,
+    usage: usage ? parseOpenAiUsage(usage) : undefined,
   };
 }
 
@@ -224,7 +241,7 @@ export async function* parseOpenAiStream(res: Response): AsyncIterable<StreamDel
   // Track active tool calls by index
   const activeTools = new Map<number, string>(); // index -> tool_call id
   let stopReason: LlmResponse["stop_reason"] = "end_turn";
-  let usage: { input_tokens: number; output_tokens: number } | undefined;
+  let usage: TokenUsage | undefined;
   let finished = false;
 
   /** Handle one SSE line; returns true on the [DONE] sentinel. */
@@ -238,10 +255,8 @@ export async function* parseOpenAiStream(res: Response): AsyncIterable<StreamDel
     throwProviderError(chunk);
 
     // Usage from final chunk (OpenAI includes it when stream_options.include_usage is set)
-    const u = chunk.usage as Record<string, number> | undefined;
-    if (u) {
-      usage = { input_tokens: u.prompt_tokens ?? 0, output_tokens: u.completion_tokens ?? 0 };
-    }
+    const u = chunk.usage as Record<string, unknown> | undefined;
+    if (u) usage = parseOpenAiUsage(u);
 
     const choice = (chunk.choices as Record<string, unknown>[])?.[0];
     if (!choice) return false;

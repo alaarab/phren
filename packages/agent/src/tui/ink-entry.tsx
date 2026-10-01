@@ -188,7 +188,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     const cost = tracker
       ? tracker.metered
         ? `$${tracker.totalCost < 0.01 ? tracker.totalCost.toFixed(4) : tracker.totalCost.toFixed(2)}`
-        : `${tracker.totalInputTokens + tracker.totalOutputTokens} tok`
+        : `${tracker.totalInputTokens + tracker.totalCacheReadTokens + tracker.totalOutputTokens} tok`
       : "";
     return {
       provider: config.provider.name,

@@ -216,7 +216,7 @@ describe("compactWithLlm", () => {
         recordUsage, isOverBudget: () => false, formatCost: () => "", formatTurnCost: () => "",
       } as never,
     });
-    expect(recordUsage).toHaveBeenCalledWith(100, 50);
+    expect(recordUsage).toHaveBeenCalledWith(100, 50, undefined);
   });
 });
 

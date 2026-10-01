@@ -201,7 +201,7 @@ export async function runTurn(
 
         // Track cost from batch response
         if (costTracker && response.usage) {
-          costTracker.recordUsage(response.usage.input_tokens, response.usage.output_tokens);
+          costTracker.recordUsage(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_input_tokens);
         }
 
         // Print text blocks (streaming already prints inline)
