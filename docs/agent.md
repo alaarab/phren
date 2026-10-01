@@ -465,7 +465,10 @@ The agent has access to these built-in tools:
   (`PHREN_AGENT_SHELL_TIMEOUT_MS` and `PHREN_AGENT_SHELL_MAX_TIMEOUT_MS`
   change both). Long output is never fatal: the model sees the first 8,000
   and last 24,000 characters with the real exit code, and the full output is
-  saved to a temporary log file named in the result.
+  saved to a temporary log file named in the result (50 MB per file, 200 MB
+  per session, `PHREN_AGENT_SHELL_SPILL_TOTAL_BYTES`; removed when the agent
+  exits). A foreground command still running when the agent exits, or gets
+  Ctrl+C, SIGTERM or SIGHUP, is killed with everything it started.
 - **git_status** — Show working tree status
 - **git_diff** — Show staged/unstaged changes
 - **git_commit** — Create commits
