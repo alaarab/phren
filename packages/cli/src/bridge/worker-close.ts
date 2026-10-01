@@ -39,7 +39,7 @@ export async function closeFinishedWorker(input: unknown, queue?: HandOffQueue):
   if (!["idle", "done"].includes(String(pane.agent_status))) return { ok: true, closed: false };
   const seen = (await workerStates({ targets: [{ ...data.target, dispatch: data.dispatch }] })).workers[0];
   const turn = workerTurnKey(seen);
-  if (!seen.completed || seen.background || seen.error || turn !== data.turn) return { ok: true, closed: false };
+  if (!seen.completed || seen.background || seen.error || seen.unfinished || turn !== data.turn) return { ok: true, closed: false };
   // One final fresh binding before the terminal mutation.
   const current = await validateTarget(data.target, false, true);
   if (current.terminal_id !== pane.terminal_id || !["idle", "done"].includes(String(current.agent_status))) throw new BridgeError(409, "The worker resumed before it could close.");

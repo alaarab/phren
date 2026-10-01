@@ -259,6 +259,35 @@ describe("the worker's Hook answering from turn events", () => {
     now += 300_000; expect(await poll()).toMatchObject({ state: "working", stalled: true });
   });
 
+  it("returns a turn that ended announcing a next step, or with uncommitted work and no PR, as needs-you", async () => {
+    // hook-permission-mode (OpenCode, Linuxbox, 2026-09-30) returned done on
+    // this reply with nothing run after it, and its pane was closed.
+    record = turn(["UserPromptSubmit"], ["Stop", { reply: "The worktree lacks node_modules. Let me install dependencies." }]);
+    const announced = await ask();
+    expect(announced).toMatchObject({ state: "done", completed: true, unfinished: "Stopped mid-task: Let me install dependencies." });
+    const value = receipt();
+    observe(value, announced, now);
+    expect(value.returned).toMatchObject({ state: "needs-you", question: "Stopped mid-task: Let me install dependencies.",
+      reply: "The worktree lacks node_modules. Let me install dependencies." });
+    expect(noticeLine([value])).toContain("parser checks needs you, Stopped mid-task: Let me install dependencies.");
+    // Nine edited files left where the agent stopped, and no PR reported.
+    const uncommitted = vi.fn(async (_directory: string) => 9);
+    record = turn(["UserPromptSubmit"], ["Stop", { reply: "Updated the permission mode.", cwd: "/work/phren-wt" }]);
+    expect(record!.stop!.cwd).toBe("/work/phren-wt");
+    const dirty = (await workerStates({ targets: [target] }, { ...readers(), uncommitted })).workers[0];
+    expect(dirty).toMatchObject({ state: "done", unfinished: "Stopped with 9 uncommitted files and no PR." });
+    expect(uncommitted).toHaveBeenCalledWith("/work/phren-wt");
+    const left = receipt();
+    observe(left, dirty, now);
+    expect(left.returned).toMatchObject({ state: "needs-you", question: "Stopped with 9 uncommitted files and no PR." });
+    // A clean checkout with an ordinary closing line is done.
+    uncommitted.mockResolvedValue(0);
+    const clean = (await workerStates({ targets: [target] }, { ...readers(), uncommitted })).workers[0];
+    expect(clean).not.toHaveProperty("unfinished");
+    observe(left, clean, now + 1);
+    expect(left.returned).toMatchObject({ state: "done" });
+  });
+
   it("reports an interrupted turn as failed, and a finished turn whose Stop never arrived as done", async () => {
     record = turn(["UserPromptSubmit"]);
     final = { completed: false, interrupted: true };
