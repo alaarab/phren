@@ -73,7 +73,8 @@ An unknown `--provider` name is an error rather than a silent fallback to
 auto-detection. `openai-compat` is only used when named.
 
 Choose a model with `--model <id>` (or `PHREN_AGENT_MODEL`) and a reasoning
-effort with `--reasoning low|medium|high|xhigh` (or `PHREN_AGENT_REASONING`).
+effort with `--reasoning none|low|medium|high|xhigh` (or `PHREN_AGENT_REASONING`;
+`max` is accepted as `xhigh`, `off` as `none`).
 In the terminal UI, `/model` switches both mid-session.
 
 ### ChatGPT or Codex subscription
@@ -115,8 +116,13 @@ phren agent --provider openrouter --model google/gemini-2.5-pro -i
 ### DeepSeek and other OpenAI-compatible models
 
 With a DeepSeek API key, use DeepSeek's own endpoint (`https://api.deepseek.com`).
-Models are `deepseek-flash` (default) and `deepseek-v4-pro`; `--reasoning`
-sets DeepSeek's `reasoning_effort`:
+Models are `deepseek-flash` (default, V4.1 Flash; `deepseek-v4-flash` is its
+legacy id) and `deepseek-v4-pro`. `--reasoning` sets DeepSeek's
+`reasoning_effort`, mapped onto the levels DeepSeek documents: `none` turns
+thinking off, `low` stays low, `medium` and `high` send `high`, and
+`xhigh`/`max` send `max`. Unset leaves DeepSeek's default (thinking on, high).
+DeepSeek requires each earlier assistant turn's reasoning back when tools are
+present, so on DeepSeek routes it is replayed on every assistant turn:
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...
@@ -141,9 +147,20 @@ PHREN_AGENT_PROVIDER=openai-compat PHREN_AGENT_BASE_URL=http://127.0.0.1:8000/v1
   PHREN_AGENT_MODEL=qwen3-coder phren agent "run the tests"
 ```
 
+For DeepSeek V4.1 Flash on OpenCode Go, use `--base-url https://opencode.ai/zen/go/v1
+--model deepseek-v4.1-flash` with the Go key in `PHREN_AGENT_API_KEY`. Any
+`openai-compat` model id containing `deepseek` gets DeepSeek's reasoning
+replay and effort mapping. Go is a subscription, so its usage shows as
+included and `--budget` does not apply.
+
 `--base-url` is passed on to `/model` switches and subagents. Context window
 and pricing come from the built-in catalogue when the model id is known,
 otherwise a 200k-token window and a conservative price estimate are assumed.
+Override them with `--context-window <tokens>` and `--price-in`, `--price-out`
+and `--price-cache` (USD per million tokens; or `PHREN_AGENT_CONTEXT_WINDOW`
+and `PHREN_AGENT_PRICE_IN|OUT|CACHE`). DeepSeek Flash is catalogued at the
+off-peak $0.15 in, $0.60 out and $0.003 per cache hit; DeepSeek bills twice
+that at peak, so pass the peak prices if you run then.
 
 DeepSeek is also on OpenRouter (`deepseek/deepseek-v4.1-flash`,
 `deepseek/deepseek-v4-pro`, `deepseek/deepseek-v4-flash`,
@@ -321,7 +338,7 @@ it on the computer and it appears in the app.
 | `--provider <name>` | `openai-codex`, `openai`, `openrouter`, `anthropic`, `deepseek`, `openai-compat`, `ollama` |
 | `--base-url <url>` | Endpoint for `openai-compat`, or to override `deepseek`'s |
 | `--model <id>` | Model for the chosen provider |
-| `--reasoning <level>` | `low`, `medium`, `high`, `xhigh` |
+| `--reasoning <level>` | `none`, `low`, `medium`, `high`, `xhigh` (`max`) |
 | `--project <name>` | phren project to load, instead of the one found from the directory |
 | `--permissions <mode>` | `suggest` (default), `auto-confirm`, `full-auto` |
 | `--yolo` | Same as `--permissions full-auto` |
@@ -334,6 +351,8 @@ it on the computer and it appears in the app.
 | `--budget <dollars>` | Stop when estimated spend passes this |
 | `--max-turns <n>` | Maximum tool rounds (default 50) |
 | `--max-output <n>` | Maximum output tokens per response |
+| `--context-window <n>` | Context window in tokens, overriding the catalogue |
+| `--price-in`, `--price-out`, `--price-cache <usd>` | Prices per million tokens, overriding the catalogue |
 | `--mcp <command>` | Connect a stdio MCP server (repeatable) |
 | `--mcp-config <path>` | Load MCP servers from a JSON file |
 | `--sandbox <mode>` | Linux shell sandbox: `auto` (default), `require`, `off` |

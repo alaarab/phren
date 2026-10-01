@@ -7,6 +7,7 @@ const PROVIDER_NAME = "anthropic";
 
 /** Thinking budget per effort level; always clamped below max_tokens. */
 const THINKING_BUDGETS: Record<ReasoningEffort, number> = {
+  none: 0,
   low: 2048,
   medium: 8192,
   high: 16384,
@@ -46,7 +47,8 @@ export class AnthropicProvider implements LlmProvider {
     this.model = model ?? "claude-sonnet-5";
     this.maxOutputTokens = maxOutputTokens ?? 8192;
     this.cacheEnabled = cacheEnabled;
-    this.reasoningEffort = reasoningEffort;
+    // "none" is thinking off, which on Anthropic means sending no thinking config.
+    this.reasoningEffort = reasoningEffort === "none" ? undefined : reasoningEffort;
     const metadata = getModelMetadata(PROVIDER_NAME, this.model);
     if (metadata) this.contextWindow = metadata.contextWindow;
   }

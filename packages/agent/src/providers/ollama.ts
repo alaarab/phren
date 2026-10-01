@@ -50,7 +50,7 @@ export class OllamaProvider implements LlmProvider {
   name = PROVIDER_NAME;
   contextWindow: number;
   maxOutputTokens: number;
-  private baseUrl: string;
+  readonly baseUrl: string;
   model: string;
 
   constructor(model?: string, baseUrl?: string, maxOutputTokens?: number) {

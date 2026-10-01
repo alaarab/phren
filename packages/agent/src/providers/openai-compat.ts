@@ -1,6 +1,7 @@
 /** Shared OpenAI-compatible message/tool conversion used by openrouter, codex, and openai providers. */
 import type { LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
 import { IncompleteStreamError } from "./types.js";
+import type { ReasoningEffort } from "../models.js";
 import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
 
 /** Convert Anthropic tool defs to OpenAI function format. */
@@ -11,15 +12,41 @@ export function toOpenAiTools(tools: AgentToolDef[]) {
   }));
 }
 
-/**
- * Routes that require every earlier assistant turn's `reasoning_content` back
- * when tools are present: DeepSeek directly, or any OpenAI-compatible endpoint
- * (OpenCode Go, a proxy) serving a DeepSeek model. DeepSeek returns HTTP 400
- * when a plain-answer turn arrives without it.
- */
-export function replaysAllReasoning(providerName: string | undefined, model: string | undefined): boolean {
+/** DeepSeek directly, or any OpenAI-compatible endpoint (OpenCode Go, a proxy) serving a DeepSeek model. */
+export function isDeepSeekRoute(providerName: string | undefined, model: string | undefined): boolean {
   if (providerName === "deepseek") return true;
   return providerName === "openai-compat" && /deepseek/i.test(model ?? "");
+}
+
+/**
+ * Routes that require every earlier assistant turn's `reasoning_content` back
+ * when tools are present. DeepSeek returns HTTP 400 when a plain-answer turn
+ * arrives without it.
+ */
+export function replaysAllReasoning(providerName: string | undefined, model: string | undefined): boolean {
+  return isDeepSeekRoute(providerName, model);
+}
+
+/**
+ * DeepSeek's reasoning_effort takes none, low, high and max; it has no medium
+ * and treats xhigh as high, so map Phren's levels onto what it documents.
+ */
+const DEEPSEEK_EFFORT: Record<ReasoningEffort, string> = {
+  none: "none",
+  low: "low",
+  medium: "high",
+  high: "high",
+  xhigh: "max",
+};
+
+/** The reasoning_effort value to send on this route. */
+export function wireReasoningEffort(
+  providerName: string | undefined,
+  model: string | undefined,
+  effort: ReasoningEffort | undefined,
+): string | undefined {
+  if (!effort) return undefined;
+  return isDeepSeekRoute(providerName, model) ? DEEPSEEK_EFFORT[effort] : effort;
 }
 
 /**
