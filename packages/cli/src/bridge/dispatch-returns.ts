@@ -123,7 +123,7 @@ const defaultReaders: WorkerReaders = {
   snapshot: server => sharedSnapshot(server, SNAPSHOT_AGE_MS),
   freshSnapshot: snapshot,
   identity: (server, pane) => paneIdentity(server, pane),
-  finalTurn: (source, session) => source === "codex" || source === "claude" || source === "opencode" ? readFinalTurn(source, session) : Promise.resolve(undefined),
+  finalTurn: (source, session) => source === "codex" || source === "claude" || source === "opencode" || source === "copilot" ? readFinalTurn(source, session) : Promise.resolve(undefined),
   turn: paneTurn,
   children: (source, session) => childAgentTree(source, session).then(runningChildAgents).then(children => children.length),
   stall: (target, pane, live) => sessionStalls.observe(target, pane, live),

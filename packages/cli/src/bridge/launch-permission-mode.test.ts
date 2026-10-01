@@ -64,6 +64,20 @@ describe("launching in a permission mode", () => {
     }
   });
 
+  it("starts Copilot with its model, reasoning effort and the tool approvals of the mode", async () => {
+    const wanted: Record<string, string[]> = {
+      supervised: [],
+      "auto-edits": ["--allow-tool=write"],
+      auto: ["--allow-all-tools"],
+      "full-access": ["--allow-all"],
+    };
+    for (const [mode, flags] of Object.entries(wanted)) {
+      const launched = await launchSession("default", { cwd, label: `Copilot ${mode}`, kind: "copilot", model: "gpt-6-sol", effort: "high", permissionMode: mode });
+      expect(launched).toMatchObject({ ok: true, permissionMode: mode });
+      expect(starts.at(-1)!.args).toEqual(["--model", "gpt-6-sol", "--reasoning-effort", "high", ...flags]);
+    }
+  });
+
   it("launches unchanged without a mode and says nothing about one", async () => {
     mocks.structured = false;
     const launched = await launchSession("default", { cwd, label: "Plain", kind: "claude" });
@@ -94,11 +108,10 @@ describe("launching in a permission mode", () => {
     expect(mocks.holdSettings).not.toHaveBeenCalled();
   });
 
-  it("refuses a conductor, OpenCode, Copilot and an unknown mode with 400 before any pane exists", async () => {
+  it("refuses a conductor, OpenCode and an unknown mode with 400 before any pane exists", async () => {
     const refused = [
       { kind: "claude", role: "conductor", permissionMode: "auto" },
       { kind: "opencode", permissionMode: "auto" },
-      { kind: "copilot", permissionMode: "auto" },
       { kind: "claude", permissionMode: "yolo" },
     ];
     for (const request of refused) await expect(launchSession("default", { cwd, label: "X", ...request })).rejects.toThrow();

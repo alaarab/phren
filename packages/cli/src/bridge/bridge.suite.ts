@@ -1094,10 +1094,10 @@ schedules:
       expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ kind: "opencode", args: ["--model", "openrouter/deepseek/deepseek-v4.1-flash", "--port", expect.stringMatching(/^\d+$/)] });
     });
 
-    it("omits the model argument for a harness without one", async () => {
-      const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "nomodel", kind: "copilot", model: "anything" });
+    it("gives Copilot its model as --model", async () => {
+      const launched = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "copilot model", kind: "copilot", model: "gpt-6-sol" });
       expect(launched.status, JSON.stringify(launched.data)).toBe(200);
-      expect(commands.filter(c => c.method === "agent.start").at(-1)?.params).not.toHaveProperty("args");
+      expect(commands.filter(c => c.method === "agent.start").at(-1)?.params).toMatchObject({ args: ["--model", "gpt-6-sol"] });
     });
 
     it("launches a tab inside an existing workspace when asked", async () => {

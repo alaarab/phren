@@ -40,11 +40,11 @@ See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
 |-----------|------|----------|-------------|
 | `computer` | string | yes | Enrolled name, or `anywhere` for the connected peer with the fewest working agents, skipping one whose account for this harness has no quota left (see below). |
 | `project` | string | yes | Project slug whose `phren.project.yaml` sourcePath exists on the receiver. No local checkout paths. |
-| `harness` | enum | yes | `codex`, `claude`, or `opencode`. |
+| `harness` | enum | yes | `codex`, `claude`, `opencode` or `copilot`. |
 | `model` | string | no | Explicit remote model, up to 200 characters; otherwise its configured default. |
-| `effort` | enum | no | Reasoning effort: `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; otherwise the harness default. Codex takes it as `model_reasoning_effort`, Claude as `--effort`, OpenCode as `--variant`. |
+| `effort` | enum | no | Reasoning effort: `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; otherwise the harness default. Codex takes it as `model_reasoning_effort`, Claude as `--effort`, OpenCode as `--variant`, Copilot as `--reasoning-effort`. |
 | `account` | string | no | Claude account id (`default` or a slug from `phren bridge accounts`). `anywhere` skips computers whose `harnesses` do not report that account usable (an older Hook that reports none is skipped too) and lists each in `skipped`; a named computer that lacks it fails before launching. Recorded on the receipt. |
-| `permissionMode` | enum | no | Permission mode the worker starts in: `supervised`, `auto-edits`, `auto` or `full-access`; otherwise the receiving computer's own default. Claude and Codex only; `opencode` is refused with 400 before a receipt is saved. |
+| `permissionMode` | enum | no | Permission mode the worker starts in: `supervised`, `auto-edits`, `auto` or `full-access`; otherwise the receiving computer's own default. Claude, Codex and Copilot (see [Conductor](conductor.md#copilot-workers) for Copilot's flags); `opencode` is refused with 400 before a receipt is saved. |
 | `releaseActions` | string[] | no | Release actions the brief asks for: `merge`, `publish`, `deploy`, `app-store`, `github-admin`. From an agent, an action the project's release authority policy marks ask-first is refused with 403 until the owner confirms it. An ask-first project also lowers the agent's permission ceiling there and starts a worker with no mode at it. See docs/authority.md. |
 | `prompt` | string | yes | Worker brief, up to 32768 characters. |
 | `label` | string | yes | Task label, up to 200 characters. |
@@ -55,7 +55,7 @@ Returns the receipt in `data`: dispatch ID, computer, project, harness/model/eff
 label, timestamps, state, remote target when known, grant match (`granted`), and an optional error.
 `accepted` means first-prompt acceptance, not task completion: for Claude and
 Codex the brief goes with the launch and the worker's own hook confirms it by
-dispatch ID (`brief: "launch"`); OpenCode gets it typed (`brief: "typed"`).
+dispatch ID (`brief: "launch"`); OpenCode and Copilot get it typed (`brief: "typed"`).
 `uncertain` means delivery might have occurred; never retry it automatically.
 A launched brief that was not confirmed yet (a startup screen holds it) turns
 `accepted` when the worker confirms it. Receipts are available

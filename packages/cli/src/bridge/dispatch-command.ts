@@ -36,7 +36,7 @@ export async function runDispatch(args: string[]): Promise<number> {
     "parent-provider": { type: "string" }, "parent-session": { type: "string" }, "parent-computer": { type: "string" },
     "parent-server": { type: "string" }, "parent-workspace": { type: "string" }, "parent-tab": { type: "string" }, "parent-pane": { type: "string" },
   } });
-  if (positionals.length !== 2) throw new Error("Usage: phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode] [--model <model>] [--effort minimal|low|medium|high|xhigh|max] [--account <id>] [--permission-mode supervised|auto-edits|auto|full-access] [explicit parent flags]");
+  if (positionals.length !== 2) throw new Error("Usage: phren dispatch <computer|anywhere> <project> --label <label> --prompt <brief> [--harness codex|claude|opencode|copilot] [--model <model>] [--effort minimal|low|medium|high|xhigh|max] [--account <id>] [--permission-mode supervised|auto-edits|auto|full-access] [explicit parent flags]");
   const parentValues = ["parent-provider", "parent-session", "parent-computer", "parent-server", "parent-workspace", "parent-tab", "parent-pane"] as const;
   const hasParent = parentValues.some(key => values[key] !== undefined);
   const parent = hasParent ? {
