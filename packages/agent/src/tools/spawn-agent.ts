@@ -93,6 +93,20 @@ export function createListAgentsTool(spawner: AgentSpawner): AgentTool {
 
 const VALID_PERMISSION_MODES: PermissionMode[] = ["suggest", "auto-confirm", "plan", "full-auto"];
 
+/** How much a mode lets run without asking. */
+const MODE_RANK: Record<PermissionMode, number> = { plan: 0, suggest: 0, "auto-confirm": 1, "full-auto": 2 };
+
+/**
+ * A child runs with the mode the model asked for, but never more than the
+ * parent's: a suggest or auto-confirm session must not start a full-auto
+ * child that runs what the parent would have asked about.
+ */
+export function clampChildMode(requested: PermissionMode | undefined, parent: PermissionMode | undefined): PermissionMode | undefined {
+  if (!requested) return parent;
+  if (!parent) return MODE_RANK[requested] > MODE_RANK.suggest ? "suggest" : requested;
+  return MODE_RANK[requested] > MODE_RANK[parent] ? parent : requested;
+}
+
 export function createSpawnAgentTool(
   spawner: AgentSpawner,
   getPermissions?: () => PermissionConfig | undefined,
@@ -171,9 +185,10 @@ export function createSpawnAgentTool(
 
       const perms = getPermissions?.();
       const requestedPermissions = input.permissions as PermissionMode | undefined;
-      const permissions = requestedPermissions && VALID_PERMISSION_MODES.includes(requestedPermissions)
-        ? requestedPermissions
-        : perms?.mode;
+      const permissions = clampChildMode(
+        requestedPermissions && VALID_PERMISSION_MODES.includes(requestedPermissions) ? requestedPermissions : undefined,
+        perms?.mode,
+      );
       const isolation = input.isolation === "worktree" ? "worktree" as const : undefined;
 
       const agentId = spawner.spawn({
