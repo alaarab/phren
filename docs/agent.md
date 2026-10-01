@@ -827,6 +827,14 @@ gif up to 5MB into the conversation. On a text-only model, image content in
 resumed history degrades to an explicit `[image omitted]` marker rather than
 an unsendable request.
 
+To show the agent an image yourself, put its path in the prompt: type it, or
+drop the file onto the terminal, which pastes the path (quoted or with
+escaped spaces both work). On a vision-capable model each png, jpeg, webp or
+gif path that exists, up to 5 images of 5MB each, is attached to the message
+as the image; the path stays in the text. Terminals don't hand clipboard
+image data to programs, so pasting a screenshot itself doesn't work; save it
+and drop the file.
+
 ## Loop hygiene
 
 Consecutive identical tool calls (same tool, same canonicalized arguments)
