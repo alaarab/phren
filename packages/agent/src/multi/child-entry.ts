@@ -99,7 +99,7 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
     const { model: overridden, ...overrides } = payload.modelOverrides;
     scopeModelOverrides(overridden, overrides);
   }
-  const provider = resolveProvider(providerName, model, undefined, undefined, { baseUrl: payload.baseUrl });
+  const provider = resolveProvider(providerName, model, undefined, payload.reasoning, { baseUrl: payload.baseUrl });
 
   // Child agents get a lightweight prompt — no "search memory first" forcing
   const systemPrompt = buildChildPrompt(_task);

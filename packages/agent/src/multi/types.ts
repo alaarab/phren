@@ -49,6 +49,8 @@ export interface SpawnPayload {
   depth?: number;
   sandboxMode?: SandboxMode;
   allowedPaths?: string[];
+  /** The parent's reasoning effort, when the child runs the parent's model. */
+  reasoning?: string;
   /** The parent's permission rules; a child never loosens them. */
   rules?: import("../permissions/rules.js").PermissionRules;
   /** The parent's --context-window / --price-* and the model they apply to. */
