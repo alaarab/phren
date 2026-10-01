@@ -3,6 +3,12 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+
+- phren agent's system prompt now has an environment block (working directory, platform, shell, today's date, git branch, permission mode) and lists the tools actually registered in the session, MCP tools as a count per server, instead of a fixed list.
+
 ## [0.3.20] - 2026-10-01
 
 ### Added

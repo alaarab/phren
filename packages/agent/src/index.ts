@@ -28,7 +28,7 @@ import { livePreview, previewPath, removeStalePreviews } from "./session/preview
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot, writeSessionNote } from "./memory/session.js";
 import { emitHerdrHook, setHerdrHookSession } from "./herdr-hooks.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
-import { buildSystemPrompt } from "./system-prompt.js";
+import { buildSystemPrompt, buildEnvironmentBlock } from "./system-prompt.js";
 import { loadHooksConfig } from "./user-hooks.js";
 import { loadAndRegisterCustomCommands, getCustomCommandInfos } from "./commands.js";
 import { createSession, runTurn, type AgentConfig } from "./agent-loop.js";
@@ -272,18 +272,20 @@ export async function runAgentCli(raw: string[]) {
 
   const chatMemory = chat ? buildChatMemory(phrenCtx) : "";
   const providerInfo = { name: provider.name, model: (provider as { model?: string }).model };
-  const systemPrompt = chat
-    ? buildChatSystemPrompt(chatMemory, providerInfo)
-    : buildSystemPrompt(contextSnippet, priorSummary, providerInfo, getCustomCommandInfos());
-
-  // Dry run: print system prompt and exit
-  if (args.dryRun) {
-    console.log("=== System Prompt ===");
-    console.log(systemPrompt);
-    console.log("\n=== Task ===");
-    console.log(args.task);
-    process.exit(0);
-  }
+  // The environment block is built once so the prompt stays byte-stable
+  // across rebuilds (provider prompt caching).
+  const environment = buildEnvironmentBlock(process.cwd(), args.permissions);
+  let promptContext = contextSnippet;
+  let promptSummary = priorSummary;
+  const mcpServerNames: string[] = [];
+  // Built from the tools registered right now: call again after registering more.
+  const agentPrompt = (info: { name: string; model?: string }) =>
+    buildSystemPrompt(promptContext, promptSummary, info, getCustomCommandInfos(), {
+      toolNames: registry.toolNames(),
+      mcpServers: mcpServerNames,
+      permissionMode: args.permissions,
+      environment,
+    });
 
   // Register tools
   const registry = new ToolRegistry();
@@ -353,13 +355,28 @@ export async function runAgentCli(raw: string[]) {
       const entry = parseMcpInline(args.mcp[idx]);
       mcpServers[`mcp-${idx}`] = entry;
     }
-    if (Object.keys(mcpServers).length > 0) {
+    if (Object.keys(mcpServers).length > 0 && !args.dryRun) {
+      mcpServerNames.push(...Object.keys(mcpServers));
       const { tools: mcpTools, cleanup } = await connectMcpServers(mcpServers, args.verbose);
       mcpCleanup = cleanup;
       for (const tool of mcpTools) registry.register(tool);
     }
   };
   if (!chat) await registerAgentTools();
+
+  // The prompt lists the registered tools, so it is built after they are.
+  const systemPrompt = chat
+    ? buildChatSystemPrompt(chatMemory, providerInfo)
+    : agentPrompt(providerInfo);
+
+  // Dry run: print system prompt and exit
+  if (args.dryRun) {
+    console.log("=== System Prompt ===");
+    console.log(systemPrompt);
+    console.log("\n=== Task ===");
+    console.log(args.task);
+    process.exit(0);
+  }
 
   // Build cost tracker from model info
   const modelName = (provider as { model?: string }).model ?? args.model ?? provider.name;
@@ -474,6 +491,7 @@ export async function runAgentCli(raw: string[]) {
     removeStalePreviews(phrenPath);
     agentConfig.livePreview = (id) => id.startsWith("mem-") ? undefined : livePreview(previewPath(phrenPath, id));
   }
+  if (!chat) agentConfig.rebuildSystemPrompt = agentPrompt;
   if (chat) {
     agentConfig.rebuildSystemPrompt = (info) => buildChatSystemPrompt(chatMemory, info);
     // Same conversation, same log: only the tools and the prompt change.
@@ -488,13 +506,13 @@ export async function runAgentCli(raw: string[]) {
         let snippet = phrenCtx ? await buildContextSnippet(phrenCtx, "") : buildProjectInstructions();
         const projectCtx = phrenCtx ? loadProjectContext(phrenCtx) : null;
         if (phrenCtx && projectCtx) snippet += `\n\n## Agent context (${phrenCtx.project})\n\n${projectCtx}`;
-        const systemPrompt = buildSystemPrompt(snippet, null, {
-          name: agentConfig.provider.name,
-          model: (agentConfig.provider as { model?: string }).model,
-        }, getCustomCommandInfos());
+        promptContext = snippet;
+        promptSummary = null;
+        const info = { name: agentConfig.provider.name, model: (agentConfig.provider as { model?: string }).model };
+        const systemPrompt = agentPrompt(info);
         const lintTestConfig = detectLintTest();
         agentConfig.mode = "agent";
-        agentConfig.rebuildSystemPrompt = undefined;
+        agentConfig.rebuildSystemPrompt = agentPrompt;
         agentConfig.systemPrompt = systemPrompt;
         agentConfig.lintTestConfig = lintTestConfig;
       } catch (err: unknown) {
@@ -539,7 +557,10 @@ export async function runAgentCli(raw: string[]) {
         registry.register(createSendMessageTool(spawner));
         registry.register(createListAgentsTool(spawner));
       };
-      if (!chat) registerSpawnerTools();
+      if (!chat) {
+        registerSpawnerTools();
+        agentConfig.systemPrompt = agentPrompt(providerInfo);
+      }
       // Publish this process's agents so a phren graph in another terminal can
       // show them. Best-effort and silent: it is a courtesy to another tool.
       const { createAgentPublisher } = await import("./multi/publish.js");
@@ -610,6 +631,7 @@ export async function runAgentCli(raw: string[]) {
     registry.register(createSpawnAgentTool(oneShotSpawner, () => registry.permissionConfig));
     registry.register(createSendMessageTool(oneShotSpawner));
     registry.register(createListAgentsTool(oneShotSpawner));
+    agentConfig.systemPrompt = agentPrompt(providerInfo);
   }
 
   const startedAt = Date.now();
