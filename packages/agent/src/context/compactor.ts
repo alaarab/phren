@@ -279,7 +279,7 @@ export async function compactWithLlm(
       opts.signal,
     ).finally(() => cancel.abort());
     if (response.usage && opts.costTracker) {
-      opts.costTracker.recordUsage(response.usage.input_tokens, response.usage.output_tokens);
+      opts.costTracker.recordUsage(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_input_tokens);
     }
     responseText = response.content
       .filter((block): block is { type: "text"; text: string } => block.type === "text")

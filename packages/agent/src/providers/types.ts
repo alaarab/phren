@@ -75,10 +75,21 @@ export interface AgentToolDef {
   input_schema: Record<string, unknown>;
 }
 
+/**
+ * Token usage for one response. `input_tokens` excludes cache hits, which are
+ * counted separately in `cache_read_input_tokens` (the Anthropic and Claude
+ * Code shape), so each bucket can be priced at its own rate.
+ */
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens?: number;
+}
+
 export interface LlmResponse {
   content: ContentBlock[];
   stop_reason: "end_turn" | "tool_use" | "max_tokens";
-  usage?: { input_tokens: number; output_tokens: number };
+  usage?: TokenUsage;
 }
 
 // ── Streaming types ─────────────────────────────────────────────────────────

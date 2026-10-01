@@ -232,7 +232,7 @@ export async function consumeStream(
     } else if (delta.type === "done") {
       stop_reason = delta.stop_reason;
       if (costTracker && delta.usage) {
-        costTracker.recordUsage(delta.usage.input_tokens, delta.usage.output_tokens);
+        costTracker.recordUsage(delta.usage.input_tokens, delta.usage.output_tokens, delta.usage.cache_read_input_tokens);
       }
     }
   }

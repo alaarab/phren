@@ -294,7 +294,7 @@ echo "add a --json flag" | phren agent --output-format stream-json --yolo   # ta
 | Format | stdout |
 |--------|--------|
 | `text` (default with `-p`) | the final assistant message |
-| `json` | one object: `type: "result"`, `subtype` (`success`, `error_max_turns`, `error_budget`, `error_plan_rejected`, `cancelled`, `error_during_execution`), `is_error`, `result`, `num_turns`, `tool_calls`, `duration_ms`, `session_id`, `provider`, `model`, `usage`, `total_cost_usd` (null on a subscription), `permission_denials`, `error` |
+| `json` | one object: `type: "result"`, `subtype` (`success`, `error_max_turns`, `error_budget`, `error_plan_rejected`, `cancelled`, `error_during_execution`), `is_error`, `result`, `num_turns`, `tool_calls`, `duration_ms`, `session_id`, `provider`, `model`, `usage` (`input_tokens` excluding cache hits, `cache_read_input_tokens`, `output_tokens`), `total_cost_usd` (null on a subscription), `permission_denials`, `error` |
 | `stream-json` | one JSON object per line: `system`/`init`, then `assistant`, `tool_use` and `tool_result` events as they happen, then the same `result` object |
 
 `--output-format` implies `-p`. Everything else (warnings, compaction notices,
