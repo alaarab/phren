@@ -512,8 +512,9 @@ All 23 commands available in the interactive TUI:
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/model` | Interactive model picker with reasoning slider |
-| `/provider` | Show current provider info |
+| `/model [id]` | Interactive model picker with reasoning slider; with an id, switch to that model on the current provider |
+| `/provider [name [model]]` | Show the providers; with a name, switch to that provider (and model) mid-session |
+| `/reasoning [level]` | Show or set the reasoning effort (`none`, `low`, `medium`, `high`, `xhigh`) on the current model |
 | `/cost` | Show session cost breakdown |
 | `/plan` | Show/toggle plan mode |
 | `/undo` | Undo last file change |

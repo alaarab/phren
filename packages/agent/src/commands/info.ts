@@ -20,7 +20,10 @@ export function helpCommand(_parts: string[], _ctx: CommandContext): boolean {
   /model      Interactive model + reasoning picker
   /model add <id>  Add a custom model
   /model remove <id>  Remove a custom model
+  /model <id>  Switch to that model on the current provider
   /provider   Show configured providers + auth status
+  /provider <name> [model]  Switch provider (and model) mid-session
+  /reasoning [level]  Show or set the reasoning effort (none, low, medium, high, xhigh)
   /turns      Show turn and tool call counts
   /clear      Clear conversation history and terminal screen
   /cwd        Show current working directory
