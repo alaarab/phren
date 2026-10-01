@@ -414,13 +414,16 @@ unread returns, oldest first, and mark them read. A return is one of:
 
 - `done`: the worker finished its turn. `reply` is its final reply, from the
   harness's Stop hook or its transcript, capped at 4000 bytes (`truncated`
-  when cut). `background` counts background tasks it left running (see below).
+  when cut). `background` counts background tasks it left running (see below);
+  a pane with one still running is not closed.
 - `needs-you`: the worker finished by asking the owner something, or stopped
   mid-task. `question` is the question line, or why the turn is not done: its
-  closing sentence announced a step it never ran ("Let me install
-  dependencies."), or it left tracked uncommitted files and reported or named
-  no PR. A reply that hands over ("I'll wait for your review", "Let's merge
-  once CI is green") is done. Uncommitted files are counted only in a
+  closing paragraph announced a step it never ran ("Let me install
+  dependencies.", "I'll resolve it on the follow-up branch."), it waits on
+  something with nothing left running ("Now waiting on CI.", "I'll push once
+  it passes."), or it left tracked uncommitted files and reported or named no
+  PR. A reply that hands over to the owner ("I'll wait for your review",
+  "I'll leave the merge to you") is done. Uncommitted files are counted only in a
   checkout no other pane works in. A turn whose checkout git could not read
   in time is returned `done` but its pane is not closed, and one turn is
   returned once even when a later poll reads it differently.
@@ -466,7 +469,12 @@ into its per-process status file. From that record:
   even when no new turn follows (a notification can wait in an idle session's
   queue), and the worker is `done` once none is left. A worker still
   waiting on background work two hours after its Stop (a dev server it left
-  running) counts as `done`, with `background` set. The wait is measured from
+  running) counts as `done`, with `background` set. The tasks waited on are
+  shells and monitors the turn started, and any started earlier that the
+  agent looked at again since the last prompt (read its output, named its
+  id): a dispatcher's message arriving mid-run does not turn the run into a
+  leftover. A worker whose reply says it waits on a task ("Now waiting on the
+  MacBook rerun.") stays `working` while any non-stream task still runs. The wait is measured from
   the latest Stop and every task that finishes wakes the worker with a new
   Stop, so it only runs out when no task has finished for two hours. The
   dispatching Hook remembers the most background tasks it saw the worker
