@@ -413,6 +413,14 @@ skipped with a note on stderr:
 } | phren agent --yolo --input-format stream-json --output-format stream-json
 ```
 
+Every line, in and out, is described by the JSON Schema in
+[`agent-stream-json.schema.json`](agent-stream-json.schema.json): `system`
+`init` first, then `assistant` (a message's text and `stop_reason`),
+`tool_use` (`id`, `name`, `input`) and `tool_result` (`tool_use_id`, `name`,
+`is_error`, `output` cut at 4,000 characters) as they happen, and a `result`
+per turn; input lines are `InputMessage`. A test checks the agent's real output
+against it, so a field added without documenting it fails the build.
+
 `--output-format` implies `-p`. Everything else (warnings, compaction notices,
 tool lines with `--verbose`) goes to stderr. Exit code is 0 only for
 `success`, 130 when cancelled, 1 otherwise. With `-p`, approvals are always
