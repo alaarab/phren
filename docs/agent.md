@@ -410,7 +410,7 @@ All 23 commands available in the interactive TUI:
 | `/cost` | Show session cost breakdown |
 | `/plan` | Show/toggle plan mode |
 | `/undo` | Undo last file change |
-| `/compact` | Compact context: LLM checkpoint + knowledge promotion (regex fallback) |
+| `/compact [focus]` | Compact context: LLM checkpoint + knowledge promotion (regex fallback); the focus says what the summary must keep |
 | `/review` | Triage the phren review queue (`go` = manual, `auto` = model-assisted) |
 | `/context` | Show context window usage |
 | `/history` | Show conversation history |
@@ -524,11 +524,21 @@ Agents run as child processes with IPC messaging and shared task coordination.
 
 ## Compaction with knowledge promotion
 
-When the conversation approaches 75% of the context window (or on `/compact`),
-the agent asks the *same provider* for a structured checkpoint via prefix
-replay: the summarization request reuses the conversation's own system prompt
-and message prefix byte-identical, so the provider's KV cache covers
-everything except the final instruction. The response carries the summary plus
+The context size is the provider's own count: the prompt tokens (cache hits
+and writes included) its last response reported, plus an estimate for what was
+added since. The chars/4 estimate is only used before the first response and
+right after the history is rewritten. The status bar and `/context` show the
+same number.
+
+Past 75% of the window the agent first clears old tool output: results outside
+the newest 8 that are longer than 2,000 characters (or hold an image) become a
+one-line note naming the tool and how to get the output back. The full output
+stays in the event log. If the context is still over 60% after that, or on
+`/compact`, the agent asks the *same provider* for a structured checkpoint via
+prefix replay: the summarization request reuses the conversation's own system
+prompt, tools and message prefix byte-identical, so the provider's KV cache
+covers everything except the final instruction. `/compact <focus>` tells the
+summary what to keep. The response carries the summary plus
 candidate knowledge items, routed by the model's own confidence:
 
 | Confidence | Destination |

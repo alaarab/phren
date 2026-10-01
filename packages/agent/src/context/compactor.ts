@@ -14,7 +14,7 @@
  * indices. This module never throws into the turn and never touches the
  * session log (the caller applies the resulting plan as a log/replace).
  */
-import type { LlmMessage, LlmProvider } from "../providers/types.js";
+import type { AgentToolDef, LlmMessage, LlmProvider } from "../providers/types.js";
 import { recordTokenUsage, type CostTracker } from "../cost.js";
 import type { PhrenContext } from "../memory/context.js";
 import { planPrune, type PrunePlan, type PruneConfig } from "./pruner.js";
@@ -81,6 +81,12 @@ The original task; work completed so far; files created or modified; the current
 ## Knowledge
 A fenced json block: {"items":[{"text":"...","confidence":0.9,"kind":"finding|gotcha|decision"}]}
 Only durable, non-obvious, project-level knowledge worth remembering across sessions (root causes, architecture decisions with rationale, gotchas, workarounds). Confidence is YOUR certainty the item is true and durable, 0 to 1. Use {"items":[]} if nothing qualifies. Never include secrets or credentials.`;
+
+function checkpointInstruction(focus?: string): string {
+  const trimmed = focus?.trim();
+  if (!trimmed) return CHECKPOINT_INSTRUCTION;
+  return `${CHECKPOINT_INSTRUCTION}\n\nThe user asked the summary to focus on: ${trimmed}. Keep everything about it; shorten the rest.`;
+}
 
 // ── Response parsing ─────────────────────────────────────────────────────────
 
@@ -234,6 +240,14 @@ export interface CompactOpts {
   pruneConfig?: Partial<PruneConfig>;
   signal?: AbortSignal;
   verbose?: boolean;
+  /**
+   * The session's tool definitions, sent with the summary request: Anthropic
+   * rejects a history holding tool calls when the request defines no tools,
+   * and the same tools keep the cached prefix identical.
+   */
+  tools?: AgentToolDef[];
+  /** What the summary should keep above all (`/compact <focus>`). */
+  focus?: string;
 }
 
 /**
@@ -268,13 +282,13 @@ export async function compactWithLlm(
     // covers the prefix, so this costs roughly one summary generation.
     const prefixMessages: LlmMessage[] = [
       ...messages.slice(0, plan.endIndex + 1),
-      { role: "user", content: CHECKPOINT_INSTRUCTION },
+      { role: "user", content: checkpointInstruction(opts.focus) },
     ];
     // A timeout or turn abort settles the wait; finally() then cancels the
     // request itself so it doesn't keep generating (and billing) detached.
     const cancel = new AbortController();
     const response = await withTimeout(
-      provider.chat(systemPrompt, prefixMessages, [], cancel.signal),
+      provider.chat(systemPrompt, prefixMessages, opts.tools ?? [], cancel.signal),
       config.timeoutMs,
       opts.signal,
     ).finally(() => cancel.abort());

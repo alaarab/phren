@@ -2,7 +2,7 @@
  * Slash command dispatch for the REPL.
  */
 import type { AgentSession } from "./agent-loop.js";
-import type { LlmMessage, LlmProvider } from "./providers/types.js";
+import type { AgentToolDef, LlmMessage, LlmProvider } from "./providers/types.js";
 import type { AgentSpawner } from "./multi/spawner.js";
 import type { PickerResult } from "./multi/model-picker.js";
 import type { PhrenContext } from "./memory/context.js";
@@ -54,7 +54,12 @@ export interface CommandContext {
   /** Full phren context for /mem commands */
   phrenCtx?: PhrenContext | null;
   /** Tool registry for /permissions command */
-  registry?: { permissionConfig: PermissionConfig; setPermissions: (cfg: PermissionConfig) => void };
+  registry?: {
+    permissionConfig: PermissionConfig;
+    setPermissions: (cfg: PermissionConfig) => void;
+    /** For /compact: the summary request carries the session's tools. */
+    getDefinitions?: () => AgentToolDef[];
+  };
   /** Fork the session at the current point into a new durable log. */
   forkSession?: () => { ok: boolean; sessionId?: string; message: string };
   /** Quick chat only: continue this conversation as an agent with tools. */

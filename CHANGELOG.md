@@ -3,6 +3,16 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+
+- phren agent measures its context with the provider's own token count (the prompt size the last response reported, cache included, plus an estimate for what came after) instead of a chars/4 guess that ran sessions into the window. Past 75% it first clears old bulky tool output, outside the newest 8 results, and compacts only if that frees too little. `/compact <focus>` says what the summary must keep.
+
+### Fixed
+
+- phren agent's compaction request carries the session's tools. Without them, Anthropic rejects a history that holds tool calls, so compaction on Claude always fell back to the regex summary, and the cached prefix never matched.
+
 ## [0.3.20] - 2026-10-01
 
 ### Added
