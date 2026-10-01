@@ -89,6 +89,16 @@ export interface TextDeltaEvent {
   text: string;
 }
 
+/**
+ * A model call failed and is being retried: the parent drops the last
+ * `discard` characters of text_delta, which belonged to the abandoned attempt.
+ */
+export interface StreamRetryEvent {
+  type: "stream_retry";
+  agentId: string;
+  discard: number;
+}
+
 /** A complete text block (non-streaming fallback). */
 export interface TextBlockEvent {
   type: "text_block";
@@ -173,6 +183,7 @@ export interface IdleNotification {
 export type ChildMessage =
   | TextDeltaEvent
   | TextBlockEvent
+  | StreamRetryEvent
   | ToolStartEvent
   | ToolEndEvent
   | StatusEvent

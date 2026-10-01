@@ -12,6 +12,7 @@
 import type { SpawnPayload, ChildMessage, ParentMessage, DoneEvent } from "./types.js";
 import { MAX_SPAWN_DEPTH } from "./types.js";
 import type { TurnHooks, } from "../agent-loop.js";
+import { createIpcHooks } from "./ipc-hooks.js";
 import { resolveProvider } from "../providers/resolve.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { readFileTool } from "../tools/read-file.js";
@@ -49,30 +50,6 @@ function send(msg: ChildMessage): void {
   if (process.send) {
     process.send(msg);
   }
-}
-
-/** Build TurnHooks that relay all events to the parent via IPC. */
-function createIpcHooks(agentId: string): TurnHooks {
-  return {
-    onTextDelta(text: string) {
-      send({ type: "text_delta", agentId, text });
-    },
-    onTextDone() {
-      // No-op — parent reconstructs from deltas
-    },
-    onTextBlock(text: string) {
-      send({ type: "text_block", agentId, text });
-    },
-    onToolStart(name: string, input: Record<string, unknown>, count: number) {
-      send({ type: "tool_start", agentId, toolName: name, input, count });
-    },
-    onToolEnd(name: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number) {
-      send({ type: "tool_end", agentId, toolName: name, input, output, isError, durationMs });
-    },
-    onStatus(msg: string) {
-      send({ type: "status", agentId, message: msg });
-    },
-  };
 }
 
 // ── Persistent agent state (survives across idle/wake cycles) ──────────────
@@ -209,7 +186,7 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
     maxTurns,
     verbose,
     plan,
-    hooks: createIpcHooks(agentId),
+    hooks: createIpcHooks(agentId, send),
     spawner,
     pendingDms: [],
     taskCount: 0,

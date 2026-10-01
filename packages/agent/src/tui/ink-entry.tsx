@@ -870,6 +870,13 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       if (selectedAgentId === agentId) update();
     });
 
+    spawner.on("stream_retry", (agentId: string, discard: number) => {
+      // The agent's model call is being retried: drop the abandoned attempt's text.
+      const convo = getOrCreateConvo(agentId);
+      convo.streamingText = convo.streamingText.slice(0, Math.max(0, convo.streamingText.length - discard));
+      if (selectedAgentId === agentId) update();
+    });
+
     spawner.on("text_block", (agentId: string, text: string) => {
       const convo = getOrCreateConvo(agentId);
       convo.streamingText += text;
