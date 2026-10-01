@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs, printHelp, resolveStartupPermissions } from "./config.js";
 import { loadPersistentAllowlist } from "./permissions/allowlist.js";
-import { resolveProvider } from "./providers/resolve.js";
+import { keepSessionEndpoint, resolveProvider } from "./providers/resolve.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { readFileTool } from "./tools/read-file.js";
 import { writeFileTool } from "./tools/write-file.js";
@@ -24,7 +24,7 @@ import { updatePlanTool } from "./tools/update-plan.js";
 import { listMcpResourcesTool, readMcpResourceTool } from "./tools/mcp-resources.js";
 import { buildPhrenContext, buildContextSnippet, buildProjectInstructions } from "./memory/context.js";
 import { buildChatMemory, buildChatSystemPrompt } from "./memory/chat.js";
-import { livePreview, previewPath } from "./session/preview.js";
+import { livePreview, previewPath, removeStalePreviews } from "./session/preview.js";
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot, writeSessionNote } from "./memory/session.js";
 import { emitHerdrHook, setHerdrHookSession } from "./herdr-hooks.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
@@ -37,6 +37,7 @@ import { fileSink, findEventLogById, findLatestEventLog, listEventLogs, persistF
 import { buildHeadlessResult, createHeadlessHooks, headlessExitCode, readStdin, type HeadlessResult } from "./headless.js";
 import type { LlmMessage } from "./providers/types.js";
 import { createCostTracker } from "./cost.js";
+import { scopeModelOverrides } from "./model-overrides.js";
 import { codexLogin, codexLogout } from "./providers/codex-auth.js";
 import { createCheckpoint } from "./checkpoint.js";
 import { detectLintCommand, detectTestCommand } from "./tools/lint-test.js";
@@ -140,13 +141,10 @@ export async function runAgentCli(raw: string[]) {
 
   if (args.help) { printHelp(); process.exit(0); }
   if (args.version) { console.log(`phren-agent v${VERSION}`); process.exit(0); }
-  // Model switches and spawned children resolve the provider again; they
-  // read the endpoint from the environment.
+  // Model switches resolve the provider again; they read the endpoint from
+  // the environment. The window and prices stay with the model they were
+  // given for (scopeModelOverrides, below).
   if (args.baseUrl) process.env.PHREN_AGENT_BASE_URL = args.baseUrl;
-  if (args.contextWindow) process.env.PHREN_AGENT_CONTEXT_WINDOW = String(args.contextWindow);
-  if (args.priceIn !== undefined) process.env.PHREN_AGENT_PRICE_IN = String(args.priceIn);
-  if (args.priceOut !== undefined) process.env.PHREN_AGENT_PRICE_OUT = String(args.priceOut);
-  if (args.priceCache !== undefined) process.env.PHREN_AGENT_PRICE_CACHE = String(args.priceCache);
 
   if (args.listSessions) {
     const ctx = await buildPhrenContext(args.project);
@@ -196,11 +194,19 @@ export async function runAgentCli(raw: string[]) {
   // Resolve LLM provider
   let provider;
   try {
-    provider = resolveProvider(args.provider, args.model, args.maxOutput, args.reasoning, { baseUrl: args.baseUrl });
+    provider = resolveProvider(args.provider, args.model, args.maxOutput, args.reasoning, { baseUrl: args.baseUrl, contextWindow: args.contextWindow });
   } catch (err: unknown) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
+
+  keepSessionEndpoint(provider);
+  scopeModelOverrides((provider as { model?: string }).model ?? args.model ?? provider.name, {
+    contextWindow: args.contextWindow,
+    priceIn: args.priceIn,
+    priceOut: args.priceOut,
+    priceCache: args.priceCache,
+  });
 
   if (args.verbose) {
     process.stderr.write(`Provider: ${provider.name}\n`);
@@ -465,25 +471,38 @@ export async function runAgentCli(raw: string[]) {
   // The phone reads the reply being written from a sidecar of the event log.
   if (phrenCtx && agentConfig.sessionLog && (args.interactive || args.multi || args.team)) {
     const phrenPath = phrenCtx.phrenPath;
+    removeStalePreviews(phrenPath);
     agentConfig.livePreview = (id) => id.startsWith("mem-") ? undefined : livePreview(previewPath(phrenPath, id));
   }
   if (chat) {
     agentConfig.rebuildSystemPrompt = (info) => buildChatSystemPrompt(chatMemory, info);
     // Same conversation, same log: only the tools and the prompt change.
+    // Nothing about the session changes until every step has succeeded; a
+    // failure (an MCP server that won't start) leaves it a working chat.
     agentConfig.promote = async () => {
       if (agentConfig.mode !== "chat") return "Already an agent session.";
-      agentConfig.mode = "agent";
-      agentConfig.rebuildSystemPrompt = undefined;
-      await registerAgentTools();
-      registerSpawnerTools?.();
-      let snippet = phrenCtx ? await buildContextSnippet(phrenCtx, "") : buildProjectInstructions();
-      const projectCtx = phrenCtx ? loadProjectContext(phrenCtx) : null;
-      if (phrenCtx && projectCtx) snippet += `\n\n## Agent context (${phrenCtx.project})\n\n${projectCtx}`;
-      agentConfig.systemPrompt = buildSystemPrompt(snippet, null, {
-        name: agentConfig.provider.name,
-        model: (agentConfig.provider as { model?: string }).model,
-      }, getCustomCommandInfos());
-      agentConfig.lintTestConfig = detectLintTest();
+      const before = new Set(registry.toolNames());
+      try {
+        await registerAgentTools();
+        registerSpawnerTools?.();
+        let snippet = phrenCtx ? await buildContextSnippet(phrenCtx, "") : buildProjectInstructions();
+        const projectCtx = phrenCtx ? loadProjectContext(phrenCtx) : null;
+        if (phrenCtx && projectCtx) snippet += `\n\n## Agent context (${phrenCtx.project})\n\n${projectCtx}`;
+        const systemPrompt = buildSystemPrompt(snippet, null, {
+          name: agentConfig.provider.name,
+          model: (agentConfig.provider as { model?: string }).model,
+        }, getCustomCommandInfos());
+        const lintTestConfig = detectLintTest();
+        agentConfig.mode = "agent";
+        agentConfig.rebuildSystemPrompt = undefined;
+        agentConfig.systemPrompt = systemPrompt;
+        agentConfig.lintTestConfig = lintTestConfig;
+      } catch (err: unknown) {
+        for (const name of registry.toolNames()) if (!before.has(name)) registry.remove(name);
+        mcpCleanup?.();
+        mcpCleanup = undefined;
+        throw err;
+      }
       return `Promoted to a phren agent with ${registry.toolNames().length} tools; the conversation continues.`;
     };
   }
@@ -514,7 +533,7 @@ export async function runAgentCli(raw: string[]) {
       // Ink TUI with spawner — LLM can spawn agents via spawn_agent tool
       const { AgentSpawner } = await import("./multi/spawner.js");
       const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
-      const spawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig });
+      const spawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig, getParentProvider: () => agentConfig.provider });
       registerSpawnerTools = () => {
         registry.register(createSpawnAgentTool(spawner, () => registry.permissionConfig));
         registry.register(createSendMessageTool(spawner));
@@ -587,7 +606,7 @@ export async function runAgentCli(raw: string[]) {
   if (!args.noSubagents && !chat) {
     const { AgentSpawner } = await import("./multi/spawner.js");
     const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
-    oneShotSpawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig });
+    oneShotSpawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig, getParentProvider: () => agentConfig.provider });
     registry.register(createSpawnAgentTool(oneShotSpawner, () => registry.permissionConfig));
     registry.register(createSendMessageTool(oneShotSpawner));
     registry.register(createListAgentsTool(oneShotSpawner));

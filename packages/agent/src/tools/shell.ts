@@ -7,8 +7,8 @@ import type { PermissionConfig } from "../permissions/types.js";
 import { checkShellSafety, scrubEnv } from "../permissions/shell-safety.js";
 import { wrapWithSandbox, classifySandboxDenial, SandboxRequiredError } from "../permissions/kernel-sandbox.js";
 
-/** A positive whole number of ms from the environment, else the fallback. */
-function envMs(key: string, fallback: number): number {
+/** A positive whole number from the environment, else the fallback. */
+function envPositiveInt(key: string, fallback: number): number {
   const value = Number(process.env[key]);
   return Number.isInteger(value) && value > 0 ? value : fallback;
 }
@@ -20,8 +20,8 @@ function envMs(key: string, fallback: number): number {
  * and PHREN_AGENT_SHELL_MAX_TIMEOUT_MS (cap).
  */
 function shellTimeouts(): { defaultMs: number; maxMs: number } {
-  const maxMs = envMs("PHREN_AGENT_SHELL_MAX_TIMEOUT_MS", 600_000);
-  return { defaultMs: Math.min(maxMs, envMs("PHREN_AGENT_SHELL_TIMEOUT_MS", 120_000)), maxMs };
+  const maxMs = envPositiveInt("PHREN_AGENT_SHELL_MAX_TIMEOUT_MS", 600_000);
+  return { defaultMs: Math.min(maxMs, envPositiveInt("PHREN_AGENT_SHELL_TIMEOUT_MS", 120_000)), maxMs };
 }
 
 /** Background task_output reads are capped at this many trailing characters. */
@@ -36,6 +36,8 @@ export const OUTPUT_HEAD_CHARS = 8_000;
 export const OUTPUT_TAIL_CHARS = 24_000;
 /** Stop writing the full-output file past this, so a runaway command can't fill the disk. */
 const MAX_SPILL_BYTES = 50_000_000;
+/** All full-output files of one agent process together stop growing past this (PHREN_AGENT_SHELL_SPILL_TOTAL_BYTES). */
+const sessionSpillLimit = () => envPositiveInt("PHREN_AGENT_SHELL_SPILL_TOTAL_BYTES", 200_000_000);
 
 // Background task tracking
 const backgroundTasks = new Map<string, { pid: number; outputFile: string; done: boolean; exitCode: number | null }>();
@@ -60,6 +62,66 @@ function backgroundLogDir(): string {
 }
 let nextBgId = 1;
 let nextSpillId = 1;
+/** Full-output files written by this process; removed when it exits. */
+const spillFiles = new Set<string>();
+let sessionSpilled = 0;
+
+/**
+ * Process groups of foreground commands still running. Each one is detached
+ * into its own group (so a timeout kills what it spawned), which also means
+ * Ctrl+C, a closed terminal or the agent exiting no longer reach it; the
+ * exit and signal handlers below kill them instead.
+ */
+const foregroundGroups = new Set<number>();
+let exitHandlersInstalled = false;
+
+/** Kill every running foreground command's process group. Synchronous, so it can run in an exit handler. */
+export function killForegroundCommands(): void {
+  for (const pgid of foregroundGroups) {
+    try { process.kill(-pgid, "SIGKILL"); } catch { /* already gone */ }
+  }
+  foregroundGroups.clear();
+}
+
+/** Remove this process's full-output files. */
+export function removeSpillFiles(): void {
+  for (const file of spillFiles) {
+    try { fs.rmSync(file, { force: true }); } catch { /* best effort */ }
+  }
+  spillFiles.clear();
+  // Background logs may still be in use; the directory goes only when empty.
+  if (backgroundLogRoot) {
+    try { fs.rmdirSync(backgroundLogRoot); backgroundLogRoot = undefined; } catch { /* not empty */ }
+  }
+}
+
+function onProcessExit(): void {
+  killForegroundCommands();
+  removeSpillFiles();
+}
+
+/**
+ * Covers every way the agent ends: process.exit from the one-shot, REPL,
+ * TUI and subagent paths (a subagent exits when its parent's IPC channel
+ * closes) runs the exit handler; SIGINT, SIGTERM and SIGHUP kill the groups
+ * first and, when nothing else handles the signal, re-raise it so the
+ * default exit still happens.
+ */
+function installExitHandlers(): void {
+  if (exitHandlersInstalled) return;
+  exitHandlersInstalled = true;
+  process.on("exit", onProcessExit);
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    const onSignal = () => {
+      killForegroundCommands();
+      if (process.listenerCount(sig) === 1) {
+        process.removeListener(sig, onSignal);
+        process.kill(process.pid, sig);
+      }
+    };
+    process.on(sig, onSignal);
+  }
+}
 
 /** Interleaved stdout/stderr, keeping only the head and tail in memory. */
 class OutputCapture {
@@ -91,9 +153,12 @@ class OutputCapture {
   }
 
   private openSpill(initial: string): void {
+    if (sessionSpilled >= sessionSpillLimit()) return;
     try {
       this.spillPath = path.join(backgroundLogDir(), `shell-${nextSpillId++}.log`);
       this.spillFd = fs.openSync(this.spillPath, "wx");
+      spillFiles.add(this.spillPath);
+      installExitHandlers();
       this.writeSpill(initial);
     } catch {
       this.spillFd = null;
@@ -101,10 +166,16 @@ class OutputCapture {
     }
   }
 
+  private get capped(): boolean {
+    return this.spilled >= MAX_SPILL_BYTES || sessionSpilled >= sessionSpillLimit();
+  }
+
   private writeSpill(text: string): void {
-    if (this.spillFd === null || this.spilled >= MAX_SPILL_BYTES) return;
+    if (this.spillFd === null || this.capped) return;
     try {
-      this.spilled += fs.writeSync(this.spillFd, text);
+      const written = fs.writeSync(this.spillFd, text);
+      this.spilled += written;
+      sessionSpilled += written;
     } catch { /* best effort */ }
   }
 
@@ -117,8 +188,10 @@ class OutputCapture {
     if (this.total <= OUTPUT_HEAD_CHARS + OUTPUT_TAIL_CHARS) return this.head.trim();
     const omitted = this.total - this.head.length - this.tail.length;
     const where = this.spillPath
-      ? ` Full output (${this.total} chars${this.spilled >= MAX_SPILL_BYTES ? `, file capped at ${MAX_SPILL_BYTES} bytes` : ""}) is in ${this.spillPath}; read or grep it for the middle.`
-      : "";
+      ? ` Full output (${this.total} chars${this.capped ? `, file capped at ${this.spilled} bytes` : ""}) is in ${this.spillPath}; read or grep it for the middle.`
+      : sessionSpilled >= sessionSpillLimit()
+        ? " Full output was not saved: this session's output files reached their size cap; rerun with less output (e.g. pipe through grep or tail)."
+        : "";
     return `${this.head}\n\n... [${omitted} chars of output omitted.${where}] ...\n\n${this.tail}`.trim();
   }
 }
@@ -163,9 +236,14 @@ function runForeground(
       return;
     }
 
+    const pgid = posix ? child.pid : undefined;
+    if (pgid) {
+      foregroundGroups.add(pgid);
+      installExitHandlers();
+    }
     const kill = () => {
       try {
-        if (posix && child.pid) process.kill(-child.pid, "SIGKILL");
+        if (pgid) process.kill(-pgid, "SIGKILL");
         else child.kill("SIGKILL");
       } catch { /* already gone */ }
     };
@@ -182,6 +260,7 @@ function runForeground(
     const done = (result: Omit<ForegroundResult, "output" | "timedOut" | "aborted">) => {
       if (settled) return;
       settled = true;
+      if (pgid) foregroundGroups.delete(pgid);
       clearTimeout(timer);
       opts.signal?.removeEventListener("abort", onAbort);
       resolve({ ...result, output: capture.finish(), timedOut, aborted });

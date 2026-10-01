@@ -1,4 +1,5 @@
 import type { LlmProvider } from "./types.js";
+import { overridesFor } from "../model-overrides.js";
 import { OpenRouterProvider, OpenAiProvider } from "./openrouter.js";
 import { AnthropicProvider } from "./anthropic.js";
 import { OllamaProvider } from "./ollama.js";
@@ -36,10 +37,39 @@ function normalizeProviderSelection(
 
 export const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 
+/**
+ * The DeepSeek endpoint this session started on, when it was not the default
+ * (a proxy via --base-url). /model switches resolve the provider again with
+ * no options, so a switch back to a DeepSeek model would otherwise go to
+ * api.deepseek.com. Kept per provider rather than read from
+ * PHREN_AGENT_BASE_URL, which a session started on openai-compat sets to its
+ * relay: a DeepSeek key must never be sent there.
+ */
+let sessionDeepSeekUrl: string | undefined;
+
+/** Remember the session's provider endpoint for later /model switches. */
+export function keepSessionEndpoint(provider: Pick<LlmProvider, "name" | "baseUrl">): void {
+  sessionDeepSeekUrl = provider.name === "deepseek" && provider.baseUrl && provider.baseUrl !== DEEPSEEK_BASE_URL
+    ? provider.baseUrl
+    : undefined;
+}
+
+/**
+ * DeepSeek's endpoint: an explicit option, else the session's own DeepSeek
+ * endpoint, else PHREN_AGENT_BASE_URL when the environment also names
+ * DeepSeek as the provider, else DeepSeek's API.
+ */
+function deepSeekBaseUrl(options: ResolveOptions): string {
+  const fromEnv = normalizeProviderId(process.env.PHREN_AGENT_PROVIDER) === "deepseek"
+    ? process.env.PHREN_AGENT_BASE_URL
+    : undefined;
+  return (options.baseUrl ?? sessionDeepSeekUrl ?? fromEnv ?? DEEPSEEK_BASE_URL).replace(/\/+$/, "");
+}
+
 export interface ResolveOptions {
   /** Endpoint for openai-compat (required there) or an override for deepseek. */
   baseUrl?: string;
-  /** Context window in tokens, overriding the catalog (else PHREN_AGENT_CONTEXT_WINDOW). */
+  /** Context window in tokens, overriding the catalog (else the model's --context-window, else PHREN_AGENT_CONTEXT_WINDOW). */
   contextWindow?: number;
 }
 
@@ -59,8 +89,11 @@ export function resolveProvider(
 ): LlmProvider {
   const provider = resolveCatalogProvider(overrideProvider, overrideModel, overrideMaxOutput, overrideReasoning, options);
   // The catalog can't know every relay's window (and compaction keys off
-  // it), so an explicit override wins for whichever model is resolved.
-  const contextWindow = options.contextWindow ?? parseTokenCount(process.env.PHREN_AGENT_CONTEXT_WINDOW);
+  // it): an explicit option wins, then --context-window when this is the
+  // model it was given for, then PHREN_AGENT_CONTEXT_WINDOW for any model.
+  const contextWindow = options.contextWindow
+    ?? overridesFor(provider.model).contextWindow
+    ?? parseTokenCount(process.env.PHREN_AGENT_CONTEXT_WINDOW);
   if (contextWindow) provider.contextWindow = contextWindow;
   return provider;
 }
@@ -142,7 +175,7 @@ function resolveCatalogProvider(
   if (explicit === "deepseek" || (!explicit && deepseekKey)) {
     if (!deepseekKey) throw new Error("DeepSeek credentials are required. Set DEEPSEEK_API_KEY.");
     const model = normalizedModel ?? getDefaultModel("deepseek");
-    const baseUrl = (options.baseUrl ?? DEEPSEEK_BASE_URL).replace(/\/+$/, "");
+    const baseUrl = deepSeekBaseUrl(options);
     return new OpenAiProvider(deepseekKey, model, baseUrl, resolveLimit("deepseek", model), resolveReasoning("deepseek", model))
       .withName("deepseek", overrideMaxOutput ?? lookupMaxOutputTokens(model, "deepseek"));
   }
