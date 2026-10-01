@@ -309,6 +309,7 @@ export async function runAgentCli(raw: string[]) {
     allowedPaths: [],
     projectRoot: process.cwd(),
     sandboxMode: args.sandbox,
+    ...(args.noNetwork ? { network: "off" as const } : {}),
     rules: loadPermissionRules(process.cwd(), { allow: args.allowedTools, deny: args.disallowedTools }),
   });
   // Nobody can answer a prompt in a headless run or with stdin not a

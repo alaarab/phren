@@ -68,6 +68,8 @@ export interface CliArgs {
   noLlmCompact: boolean;
   /** Kernel write-fence for shell commands: off | auto | require. */
   sandbox: "off" | "auto" | "require";
+  /** --no-network: shell commands run without network access. */
+  noNetwork?: boolean;
   /**
    * chat: quick chat, no tools, read-only phren memory in the system prompt
    * (`/promote` turns it into a normal agent session with tools).
@@ -102,6 +104,7 @@ Options:
   --no-subagents       Disable spawn_agent/send_message/list_agents in one-shot mode
   --no-llm-compact     Use regex prune summaries instead of LLM compaction
   --sandbox <mode>     Kernel write-fence for shell (bwrap): off, auto (default), require
+  --no-network         Run shell commands without network (bwrap or Seatbelt; fails closed)
   --permissions <mode> Permission mode: suggest (default), auto-confirm, full-auto
   --yolo               Full-auto permissions — no confirmations (alias for --permissions full-auto)
   --allowedTools <rules>     Allow these without asking, comma-separated: read_file, shell(npm test), edit_file(src/**)
@@ -203,6 +206,7 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--interactive" || arg === "-i") { args.interactive = true; }
     else if (arg === "--no-subagents") { args.noSubagents = true; }
     else if (arg === "--no-llm-compact") { args.noLlmCompact = true; }
+    else if (arg === "--no-network") { args.noNetwork = true; }
     else if (arg === "--sandbox" && argv[i + 1]) {
       const mode = argv[++i];
       if (mode === "off" || mode === "auto" || mode === "require") { args.sandbox = mode; }
