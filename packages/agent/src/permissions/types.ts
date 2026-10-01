@@ -10,6 +10,8 @@ export interface PermissionConfig {
   projectRoot: string;
   /** Declarative allow / ask / deny rules (permissions/rules.ts). */
   rules?: import("./rules.js").PermissionRules;
+  /** "off" runs shell commands without network (--no-network). */
+  network?: "on" | "off";
   /** Kernel write-fence for shell commands (bwrap). Default: "auto". */
   sandboxMode?: import("./kernel-sandbox.js").SandboxMode;
 }

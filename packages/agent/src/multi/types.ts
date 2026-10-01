@@ -48,6 +48,8 @@ export interface SpawnPayload {
   worktreePath?: string;
   depth?: number;
   sandboxMode?: SandboxMode;
+  /** The parent's --no-network. */
+  network?: "on" | "off";
   allowedPaths?: string[];
   /** The parent's reasoning effort, when the child runs the parent's model. */
   reasoning?: string;

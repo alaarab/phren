@@ -197,6 +197,7 @@ export class AgentSpawner extends EventEmitter {
       agentType: opts.agentType,
       depth: this.depth + 1,
       sandboxMode: opts.sandboxMode ?? defaults?.sandboxMode,
+      network: defaults?.network,
       allowedPaths: opts.allowedPaths ?? defaults?.allowedPaths ?? [],
       rules: defaults?.rules,
     };

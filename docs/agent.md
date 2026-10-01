@@ -490,6 +490,7 @@ it on the computer and it appears in the app.
 | `--mcp-config <path>` | Load MCP servers from a JSON file |
 | `--trust-project-mcp` | Load this project's `.mcp.json` and `.phren-agent/mcp.json` (remembered) |
 | `--strict-mcp-config` | Use only `--mcp-config` and `--mcp` servers |
+| `--no-network` | Run shell commands without network access (see [Kernel sandbox](#kernel-sandbox-linux-bubblewrap)) |
 | `--sandbox <mode>` | Linux shell sandbox: `auto` (default), `require`, `off` |
 | `--lint-cmd <cmd>`, `--test-cmd <cmd>`, `--typecheck-cmd <cmd>` | Override the detected lint, test and type-check commands |
 | `--no-subagents` | No subagent tools in one-shot mode |
@@ -743,6 +744,16 @@ drift apart. When a sandboxed write is blocked, the tool result gets a
 | `auto` (default) | Confine when a functional `bwrap` probe passes; otherwise run unconfined with a one-time notice (non-Linux included) |
 | `require` | Fail closed: no working bwrap ⇒ every shell call errors |
 | `off` | Never wrap |
+
+`--no-network` also takes shell commands off the network: bwrap gives them an
+empty network namespace, and on macOS a Seatbelt profile denies outbound IP
+(local sockets still work; this turns the Seatbelt backend on without
+`PHREN_AGENT_MACOS_SANDBOX=1`). It applies whatever `--sandbox` says, and fails
+closed: with no backend that can isolate, every shell call errors instead of
+running with network. A connection that fails for it gets a `[sandbox]`
+annotation, and subagents inherit it. The agent's own `web_fetch` and
+`web_search` tools are separate; deny them with
+`--disallowedTools web_fetch,web_search` for a fully offline run.
 
 ### web_fetch SSRF guard
 
