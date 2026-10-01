@@ -53,6 +53,7 @@ export interface CliArgs {
   baseUrl?: string;
   lintCmd?: string;
   testCmd?: string;
+  typecheckCmd?: string;
   mcp: string[];
   mcpConfig?: string;
   /** Load the project's .mcp.json / .phren-agent/mcp.json, and remember the choice. */
@@ -117,6 +118,7 @@ Options:
                        needs --output-format stream-json)
   --lint-cmd <cmd>     Override auto-detected lint command
   --test-cmd <cmd>     Override auto-detected test command
+  --typecheck-cmd <cmd> Override the auto-detected type check run after edits
   --mcp <command>      Connect to an MCP server via stdio (repeatable)
   --mcp-config <path>  Load MCP server config from JSON file
   --trust-project-mcp  Load this project's .mcp.json and .phren-agent/mcp.json (remembered)
@@ -233,6 +235,7 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--base-url" && argv[i + 1]) { args.baseUrl = argv[++i]; }
     else if (arg === "--lint-cmd" && argv[i + 1]) { args.lintCmd = argv[++i]; }
     else if (arg === "--test-cmd" && argv[i + 1]) { args.testCmd = argv[++i]; }
+    else if (arg === "--typecheck-cmd" && argv[i + 1]) { args.typecheckCmd = argv[++i]; }
     else if (arg === "--mcp" && argv[i + 1]) { args.mcp.push(argv[++i]); }
     else if (arg === "--mcp-config" && argv[i + 1]) { args.mcpConfig = argv[++i]; }
     else if (arg === "--trust-project-mcp") { args.trustProjectMcp = true; }
