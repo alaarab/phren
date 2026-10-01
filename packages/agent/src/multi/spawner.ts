@@ -66,6 +66,7 @@ export interface AgentSpawnerOptions {
 export interface AgentSpawnerEvents {
   text_delta: (agentId: string, text: string) => void;
   text_block: (agentId: string, text: string) => void;
+  stream_retry: (agentId: string, discard: number) => void;
   tool_start: (agentId: string, toolName: string, input: Record<string, unknown>, count: number) => void;
   tool_end: (agentId: string, toolName: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number) => void;
   status: (agentId: string, message: string) => void;
@@ -246,6 +247,9 @@ export class AgentSpawner extends EventEmitter {
         break;
       case "text_block":
         this.emit("text_block", msg.agentId, msg.text);
+        break;
+      case "stream_retry":
+        this.emit("stream_retry", msg.agentId, msg.discard);
         break;
       case "tool_start":
         this.emit("tool_start", msg.agentId, msg.toolName, msg.input, msg.count);

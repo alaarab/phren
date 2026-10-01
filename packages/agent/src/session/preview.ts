@@ -41,7 +41,8 @@ export function livePreview(file: string, now: () => number = Date.now): LivePre
     } catch { try { fs.rmSync(staging, { force: true }); } catch { /* best effort */ } }
   };
   return {
-    start(at) { cancel(); turnStartedAt = at; text = ""; },
+    // A new response (or a retried one) shows its first words at once.
+    start(at) { cancel(); turnStartedAt = at; text = ""; writtenAt = -Infinity; },
     append(delta) {
       if (!turnStartedAt || text.length >= MAX_TEXT) return;
       text = (text + delta).slice(0, MAX_TEXT);
