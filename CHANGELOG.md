@@ -13,6 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Talk mode's spoken replies start sooner. `POST /v1/speech` takes `stream: true` with `timestamps: true` (capability `speechTimestampStream`) and streams `application/x-ndjson` lines of `{audio, alignment}` as ElevenLabs makes them: about 0.3 s to the first line with v4 Turbo, where the whole-clip timestamped reply took about 0.9 s. The streamed audio reply flushes its headers before the first byte.
 - `WS /v1/speech/live` (capability `speechLive`) voices a reply while it is still being written: the phone sends text pieces and gets audio frames with alignment back. v4 Turbo runs on ElevenLabs' text-to-dialogue WebSocket, which started speaking about 140 ms after it had the first complete sentence; Flash v2.5 on the text-to-speech WebSocket is the fallback.
 - `phren bridge speech-region us|global` sends spoken replies to ElevenLabs' US-only endpoint (`api.us.elevenlabs.io`) or the global one (default), stored in `speech.json`.
+- `phren-agent models [--json]` lists the models of the providers with credentials on this computer, and `GET /v1/models?source=phren` serves them to the phone's Quick chat model picker (cached like the other sources). Launching `kind: "phren"` with an `anthropic/`, `deepseek/`, `ollama/` or `openrouter/` model passes `--provider` and `--model`.
 
 ### Changed
 

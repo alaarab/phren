@@ -158,7 +158,7 @@ export async function runBridge(args: string[], version: string): Promise<number
         return Array.isArray(rows[source]) ? rows[source] : [];
       };
       const emptyUsage = (source: AccountUsage["source"]): AccountUsage => ({ source, windows: [] });
-      const modelCatalog = new ModelCatalog(() => readModels("codex"), () => readModels("claude"), () => readModels("opencode"), 0);
+      const modelCatalog = new ModelCatalog(() => readModels("codex"), () => readModels("claude"), () => readModels("opencode"), 0, () => readModels("phren"));
       const accountUsage = new AccountUsageReader(async () => emptyUsage("codex"), Date.now,
         async () => ({ source: "claude", windows: [{ id: "fixture", name: "Fixture", usedPercent: 0 }] }),
         async () => emptyUsage("opencode"), async () => undefined, async () => emptyUsage("opencode-go"), async () => emptyUsage("copilot"));

@@ -114,6 +114,15 @@ export async function sessionUsedTools(session: string, store = phrenStoreRoot()
   return [...surface.values()].some(Boolean);
 }
 
+/** A model from phren agent's catalog (`/v1/models?source=phren`) is
+ * `<provider>/<model>`. phren agent reads an openai or openai-codex prefix off
+ * `--model` itself; the rest name their provider with `--provider`. Any other
+ * model (an OpenRouter id typed by hand) passes through as it is. */
+export function phrenModelArgs(model: string): string[] {
+  const match = /^(anthropic|deepseek|ollama|openrouter)\/(.+)$/.exec(model);
+  return match ? ["--provider", match[1], "--model", match[2]] : ["--model", model];
+}
+
 async function prepareConductor(kind: (typeof launchKinds)[number], effort: LaunchEffort, model?: string): Promise<string[]> {
   const brief = await conductorBrief();
   const briefDirectory = path.join(bridgeRoot(), "conductor");
@@ -327,7 +336,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const conductorHere = role === "agent" && workspace ? await conductorPane(server, before) : undefined;
   if (conductorHere && conductorHere.workspace_id === workspace) workspace = undefined;
   const args = role === "conductor" ? await prepareConductor(kind, effort, model)
-    : [...(kind === "phren" ? [...PHREN_AGENT_ARGS, ...phrenArgs] : []), ...(model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
+    : [...(kind === "phren" ? [...PHREN_AGENT_ARGS, ...phrenArgs] : []), ...(model && kind === "phren" ? phrenModelArgs(model) : model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
       ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : [])];
   // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
   // pane joins the thread the Hook started, and the brief is that thread's

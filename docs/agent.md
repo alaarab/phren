@@ -361,6 +361,7 @@ it on the computer and it appears in the app.
 | `--resume`, `--continue`, `-c` | Continue the newest session; a task given with it becomes the next prompt |
 | `--session <id>` | Continue a specific session by id or unique id prefix |
 | `--list-sessions` | List recent sessions (with `--output-format json` as JSON) and exit |
+| `models [--json]` | List the models of the providers with credentials here, as `<provider>/<model>`, the default marked, and exit (Phren Hook's model picker reads the JSON) |
 | `-p`, `--print` | Headless run: clean stdout, approvals denied |
 | `--output-format <f>` | `text`, `json` or `stream-json`; implies `-p` |
 | `--budget <dollars>` | Stop when estimated spend passes this |

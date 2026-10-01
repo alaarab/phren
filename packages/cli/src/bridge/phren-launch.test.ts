@@ -111,6 +111,15 @@ describe("launching phren's own agent", () => {
     expect(starts[1].args).toEqual(["agent", "-i", "--mode", "chat", "--session", session]);
   });
 
+  it("starts a catalog model on its provider: --provider for those phren agent can't read off --model", async () => {
+    await launchSession("default", { cwd, label: "Sonnet", kind: "phren", model: "anthropic/claude-sonnet-5" });
+    expect(starts[0].args).toEqual(["agent", "-i", "--provider", "anthropic", "--model", "claude-sonnet-5"]);
+    await launchSession("default", { cwd, label: "Router", kind: "phren", model: "openrouter/anthropic/claude-sonnet-5" });
+    expect(starts[1].args).toEqual(["agent", "-i", "--provider", "openrouter", "--model", "anthropic/claude-sonnet-5"]);
+    await launchSession("default", { cwd, label: "Sol", kind: "phren", model: "openai-codex/gpt-6-sol" });
+    expect(starts[2].args).toEqual(["agent", "-i", "--model", "openai-codex/gpt-6-sol"]);
+  });
+
   it("will not make a running phren agent the conductor", async () => {
     state.panes.push({ pane_id: "w9:p1", tab_id: "w9:t1", workspace_id: "w9", agent: "phren", agent_status: "idle" });
     await expect(makeConductor("default", { paneId: "w9:p1" })).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/phren agent cannot run as a conductor/) });
