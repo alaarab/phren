@@ -1433,8 +1433,11 @@ export class AgentHooks {
         if (body.event === "SessionStart" || body.event === "Stop") await this.recordTurn(target, pane, body, dispatch);
         if ((this.modules?.has("git") ?? true) && ["PreToolUse", "PostToolUse"].includes(String(body.event)) && capturesChanges(String(body.tool), input)) {
           const conversation = `${target.source}:${target.session}`, id = String(body.toolUseId || "").slice(0, 200);
-          if (body.event === "PreToolUse") await this.changes.before(conversation, id, typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane), command ?? "", input);
-          else await this.changes.after(conversation, id);
+          if (body.event === "PreToolUse") {
+            await this.changes.before(conversation, id, typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane), command ?? "", input);
+            // The callback gave up (TOOL_HOOK_BUDGET_MS) and the tool ran while this was read.
+            if (req.destroyed || res.destroyed) this.changes.drop(conversation, id);
+          } else await this.changes.after(conversation, id);
           res.end("{}"); return;
         }
         if (body.event === "PermissionRequest") this.terminalPrompts.delete(JSON.stringify(target));
