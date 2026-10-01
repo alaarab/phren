@@ -102,13 +102,17 @@ describe("a turn that ended mid-task", () => {
       expect(await uncommittedFiles("relative")).toBeUndefined();
       // Git that does not answer in time is unknown, not clean. A shim that
       // sleeps stands in for slow git: a 1 ms timeout lost the race on Linux.
-      const shim = await mkdtemp(path.join(tmpdir(), "phren-slow-git-"));
-      const pathBefore = process.env.PATH;
-      try {
-        await writeFile(path.join(shim, "git"), "#!/bin/sh\nexec sleep 5\n", { mode: 0o755 });
-        process.env.PATH = `${shim}${path.delimiter}${pathBefore ?? ""}`;
-        expect(await uncommittedFiles(repo, 200)).toBe(UNKNOWN);
-      } finally { process.env.PATH = pathBefore; await rm(shim, { recursive: true, force: true }); }
+      // Not on Windows: execFile runs only a real git.exe there, so a script
+      // can't stand in, and the timeout path is the same on every platform.
+      if (process.platform !== "win32") {
+        const shim = await mkdtemp(path.join(tmpdir(), "phren-slow-git-"));
+        const pathBefore = process.env.PATH;
+        try {
+          await writeFile(path.join(shim, "git"), "#!/bin/sh\nexec sleep 5\n", { mode: 0o755 });
+          process.env.PATH = `${shim}${path.delimiter}${pathBefore ?? ""}`;
+          expect(await uncommittedFiles(repo, 200)).toBe(UNKNOWN);
+        } finally { process.env.PATH = pathBefore; await rm(shim, { recursive: true, force: true }); }
+      }
       const outside = await mkdtemp(path.join(tmpdir(), "phren-not-repo-"));
       try { expect(await uncommittedFiles(outside)).toBeUndefined(); } finally { await rm(outside, { recursive: true, force: true }); }
     });
