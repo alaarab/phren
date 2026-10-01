@@ -410,7 +410,7 @@ All 23 commands available in the interactive TUI:
 | `/cost` | Show session cost breakdown |
 | `/plan` | Show/toggle plan mode |
 | `/undo` | Undo last file change |
-| `/compact` | Compact context: LLM checkpoint + knowledge promotion (regex fallback) |
+| `/compact [focus]` | Compact context: LLM checkpoint + knowledge promotion (regex fallback); the focus says what the summary must keep |
 | `/review` | Triage the phren review queue (`go` = manual, `auto` = model-assisted) |
 | `/context` | Show context window usage |
 | `/history` | Show conversation history |
@@ -461,7 +461,11 @@ Full readline-style editing in the interactive TUI:
 
 ## Tools
 
-The agent has access to these built-in tools:
+The agent has access to these built-in tools. The system prompt tells the model
+which of them are registered in the session (MCP tools as a count per server)
+and carries a short environment block: working directory, platform, shell,
+today's date and the git branch if the directory is a repository. The block is built once per session, with no clock time, so
+the prompt stays cacheable. `--dry-run` prints it.
 
 ### File operations
 - **read_file** — Read file contents (with line range support)
@@ -469,8 +473,16 @@ The agent has access to these built-in tools:
 - **edit_file** — Exact string replacement (`replace_all` for every occurrence). Tolerates CRLF files, trailing-whitespace and indentation drift and pasted `read_file` line numbers; a miss shows the closest lines and the first difference
 - **multi_edit** — Several edits to one file, applied in order, all or nothing
 - **apply_patch** — Codex-format patches (`*** Begin Patch` … add, delete, update, move) across files, atomic
-- **glob** — Find files by pattern
-- **grep** — Search file contents with regex
+- **glob** — Find files by pattern. Uses `rg --files` when ripgrep is on PATH, so `.gitignore` applies; hidden files such as `.github/` are listed, `.git` and `node_modules` are not. Says when it shows only part of the matches
+- **grep** — Search file contents with regex, case-sensitive unless `-i` is set. Uses ripgrep when it is on PATH (`.gitignore` honoured, hidden directories searched, lines cut at 500 characters); otherwise a JS walker that skips `.git`, `node_modules` and the directories in the root `.gitignore`, and says when it stopped at its 5,000-file cap. `PHREN_AGENT_RIPGREP=off` forces the walker
+
+The write tools check the file against what the agent last saw. An existing
+file has to be read before `write_file` (or an `apply_patch` Add File) may
+replace it, and a file that changed on disk since the agent last read or
+wrote it (the user, a formatter, a shell command) is refused until it is read
+again, so the other change is never overwritten. Edits to a file the agent
+hasn't read are allowed, because their old text must match it exactly.
+`PHREN_AGENT_FILE_GUARD=off` turns the check off.
 
 ### Shell and git
 - **shell** — Run shell commands (with timeout and safety checks). Foreground
@@ -524,11 +536,21 @@ Agents run as child processes with IPC messaging and shared task coordination.
 
 ## Compaction with knowledge promotion
 
-When the conversation approaches 75% of the context window (or on `/compact`),
-the agent asks the *same provider* for a structured checkpoint via prefix
-replay: the summarization request reuses the conversation's own system prompt
-and message prefix byte-identical, so the provider's KV cache covers
-everything except the final instruction. The response carries the summary plus
+The context size is the provider's own count: the prompt tokens (cache hits
+and writes included) its last response reported, plus an estimate for what was
+added since. The chars/4 estimate is only used before the first response and
+right after the history is rewritten. The status bar and `/context` show the
+same number.
+
+Past 75% of the window the agent first clears old tool output: results outside
+the newest 8 that are longer than 2,000 characters (or hold an image) become a
+one-line note naming the tool and how to get the output back. The full output
+stays in the event log. If the context is still over 60% after that, or on
+`/compact`, the agent asks the *same provider* for a structured checkpoint via
+prefix replay: the summarization request reuses the conversation's own system
+prompt, tools and message prefix byte-identical, so the provider's KV cache
+covers everything except the final instruction. `/compact <focus>` tells the
+summary what to keep. The response carries the summary plus
 candidate knowledge items, routed by the model's own confidence:
 
 | Confidence | Destination |

@@ -152,6 +152,8 @@ describe("quick chat", () => {
     expect(config.mode).toBe("agent");
     expect(config.registry.toolNames()).toContain("read_file");
     expect(config.systemPrompt).not.toContain("You have no tools");
+    expect(config.systemPrompt).toContain("## Environment");
+    expect(config.systemPrompt).toMatch(/Tools You Have[\s\S]*`read_file`/);
     expect(await config.promote!()).toBe("Already an agent session.");
 
     await runTurn("Now check the invoices file.", session, config, hooks);

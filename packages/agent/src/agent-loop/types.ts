@@ -56,6 +56,8 @@ export interface AgentSession {
   antiPatterns: AntiPatternTracker;
   /** Repeat-call guard chain (reset on direct user input). */
   repeatChain: RepeatChainState;
+  /** The context size the provider last reported (context/usage.ts). */
+  reportedContext?: import("../context/usage.js").ReportedContext;
 }
 
 /** Why runTurn returned. */
