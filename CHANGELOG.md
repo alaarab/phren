@@ -3,6 +3,16 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+
+- phren agent's permission modes mean what they say:
+  - `auto-confirm` runs only shell commands that read, build or test (`git status`, `npm test`, `cargo test`…) and asks about anything else (`rm -rf src`, `git push`, `npm publish`, `npm run deploy`, a redirect into a file). It used to run every command its blocklist missed.
+  - `--yolo` allows command substitution, `env` and `sudo` instead of asking, which a headless run turned into a denial. The blocked commands stay blocked.
+  - A subagent never gets more than its parent's mode.
+  - A shell approval covers only that subcommand for git, npm and the like, and every command on a line must be approved.
+
 ## [0.3.20] - 2026-10-01
 
 ### Added

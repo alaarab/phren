@@ -1,5 +1,6 @@
 import type { PermissionConfig, PermissionRule } from "./types.js";
 import { checkShellSafety } from "./shell-safety.js";
+import { isAutoApprovableCommand } from "./shell-classify.js";
 import { validatePath, checkSensitivePath } from "./sandbox.js";
 import { isAllowed } from "./allowlist.js";
 import { parsePatch, patchPaths } from "../tools/apply-patch.js";
@@ -68,11 +69,11 @@ export function checkPermission(
     if (!safety.safe && safety.severity === "block") {
       return { verdict: "deny", reason: safety.reason };
     }
-    if (!safety.safe && safety.severity === "warn") {
-      // In full-auto, warn becomes ask. In other modes, it's already going to ask.
-      if (config.mode === "full-auto") {
-        return { verdict: "ask", reason: safety.reason };
-      }
+    // A warn pattern (command substitution, env, sudo, a force push) asks in
+    // every mode but full-auto, which means allow: --yolo in a headless run,
+    // where every ask is a denial, must not refuse `echo $(git rev-parse HEAD)`.
+    if (!safety.safe && safety.severity === "warn" && config.mode !== "full-auto") {
+      return { verdict: "ask", reason: safety.reason };
     }
 
     // Check cwd for shell
@@ -149,12 +150,10 @@ export function checkPermission(
       if (toolName === "shell") {
         const cwd = (input.cwd as string) || config.projectRoot;
         const cwdResult = validatePath(cwd, config.projectRoot, config.allowedPaths);
-        if (cwdResult.ok) {
-          const cmd = (input.command as string) || "";
-          const safety = checkShellSafety(cmd);
-          if (safety.safe) {
-            return { verdict: "allow", reason: "Safe shell command within sandbox." };
-          }
+        // Only commands that read, build or test; anything else (rm, git
+        // push, npm publish, a redirect into a file) asks.
+        if (cwdResult.ok && isAutoApprovableCommand((input.command as string) || "")) {
+          return { verdict: "allow", reason: "Read, build or test command within sandbox." };
         }
       }
       return { verdict: "ask", reason: `Auto-confirm mode requires confirmation for "${toolName}".` };

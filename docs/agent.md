@@ -243,15 +243,23 @@ Every tool call passes a permission check first.
 
 | Mode | What runs without asking | How to choose it |
 |------|--------------------------|------------------|
-| `suggest` (default) | Nothing; you approve each call | default |
-| `auto-confirm` | Reads and searches (read, glob, grep); edits and shell commands still ask | `--permissions auto-confirm` |
-| `full-auto` | Everything | `--yolo` or `--permissions full-auto` |
+| `suggest` (default) | Reads and searches; you approve everything else | default |
+| `auto-confirm` | Reads, edits inside the project, and shell commands that only read, build or test (`ls`, `git status`/`diff`/`log`, `npm test`, `pnpm run build`, `cargo test`, `npx tsc`…). Anything else asks: `rm`, `git push`, `npm publish`, `npm run deploy`, a redirect into a file | `--permissions auto-confirm` |
+| `full-auto` | Everything except the blocked commands (deleting `/`, piping a download into a shell, disk formats) | `--yolo` or `--permissions full-auto` |
+
+In `suggest` and `auto-confirm`, command substitution (`$(…)`), `env`, `sudo`,
+force pushes and hard resets always ask, even for a command you approved
+before. A subagent never runs with more than its parent's mode, whatever mode
+the model asks for.
 
 Shift+Tab cycles the mode in the terminal UI, and the choice is remembered in
 `~/.phren-agent/settings.json`. At a prompt, `y` allows the call once, `s` allows
 calls like it (the same file, or the same command) for the rest of the
 session, `a` allows the tool for the rest of the session (for the shell, only
-that command) and `n` denies. Approvals kept across sessions live in
+that command) and `n` denies. A shell approval covers the command and, for
+git, npm and other tools with subcommands, only that subcommand: approving
+`git status` doesn't approve `git push`. Every command on a line must be
+approved. Approvals kept across sessions live in
 `~/.phren-agent/permissions.json`.
 
 Whatever the mode, file tools stay inside the project directory, secret files
