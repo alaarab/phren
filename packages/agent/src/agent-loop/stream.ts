@@ -1,8 +1,9 @@
 import type { ToolUseBlock, StreamDelta, ContentBlock, InvalidToolCall } from "../providers/types.js";
+import { partialUsage } from "../providers/types.js";
 import { parseToolArguments } from "../providers/openai-compat.js";
 import type { AgentToolImage } from "../tools/types.js";
 import { chainKey, recordCall, type RepeatChainState } from "../guards/repeat-tool-reminder.js";
-import type { CostTracker } from "../cost.js";
+import { recordTokenUsage, type CostTracker } from "../cost.js";
 import type { PhrenContext } from "../memory/context.js";
 import type { CaptureState } from "../memory/auto-capture.js";
 import { ToolRegistry } from "../tools/registry.js";
@@ -179,58 +180,66 @@ export async function consumeStream(
     currentReasoning = "";
   };
 
-  for await (const delta of stream) {
-    if (signal?.aborted) break;
-    if (delta.type === "text_delta") {
-      (onTextDelta ?? process.stdout.write.bind(process.stdout))(delta.text);
-      currentText += delta.text;
-    } else if (delta.type === "reasoning_delta") {
-      // Preserve stream order: a reasoning segment starting after visible
-      // text closes that text block first (providers normally emit
-      // reasoning before text, so this is the uncommon direction).
-      if (currentText && !currentReasoning) {
-        content.push({ type: "text", text: currentText });
-        currentText = "";
-      }
-      onReasoningDelta?.(delta.text);
-      currentReasoning += delta.text;
-    } else if (delta.type === "reasoning_end") {
-      flushReasoning(delta);
-    } else if (delta.type === "tool_use_start") {
-      // Flush accumulated reasoning (without a reasoning_end, e.g. compat
-      // providers that only emit deltas), then text.
-      flushReasoning();
-      if (currentText) {
-        content.push({ type: "text", text: currentText });
-        currentText = "";
-      }
-      toolsByIndex.set(delta.id, { id: delta.id, name: delta.name, jsonParts: [] });
-    } else if (delta.type === "tool_use_delta") {
-      const tool = toolsByIndex.get(delta.id);
-      if (tool) tool.jsonParts.push(delta.json);
-    } else if (delta.type === "tool_use_end") {
-      const tool = toolsByIndex.get(delta.id);
-      if (tool) {
-        const jsonStr = tool.jsonParts.join("");
-        const parsed = parseToolArguments(jsonStr);
-        if ("input" in parsed) {
-          content.push({ type: "tool_use", id: tool.id, name: tool.name, input: parsed.input });
-        } else {
-          // Defer: a malformed call must not become an orphan tool_use on a
-          // truncated (max_tokens) or text turn, where runTurn never answers
-          // it. If the turn does end as tool_use, emit it with empty input and
-          // report it, so runTurn answers it with an error instead of running
-          // the tool with arguments the model never gave.
-          malformedTools.push({ id: tool.id, name: tool.name, raw: jsonStr, error: parsed.error });
-          process.stderr.write(`\x1b[33m[warning] Malformed tool_use JSON for ${tool.name} (${tool.id}); returning an error to the model\x1b[0m\n`);
+  try {
+    for await (const delta of stream) {
+      if (signal?.aborted) break;
+      if (delta.type === "text_delta") {
+        (onTextDelta ?? process.stdout.write.bind(process.stdout))(delta.text);
+        currentText += delta.text;
+      } else if (delta.type === "reasoning_delta") {
+        // Preserve stream order: a reasoning segment starting after visible
+        // text closes that text block first (providers normally emit
+        // reasoning before text, so this is the uncommon direction).
+        if (currentText && !currentReasoning) {
+          content.push({ type: "text", text: currentText });
+          currentText = "";
+        }
+        onReasoningDelta?.(delta.text);
+        currentReasoning += delta.text;
+      } else if (delta.type === "reasoning_end") {
+        flushReasoning(delta);
+      } else if (delta.type === "tool_use_start") {
+        // Flush accumulated reasoning (without a reasoning_end, e.g. compat
+        // providers that only emit deltas), then text.
+        flushReasoning();
+        if (currentText) {
+          content.push({ type: "text", text: currentText });
+          currentText = "";
+        }
+        toolsByIndex.set(delta.id, { id: delta.id, name: delta.name, jsonParts: [] });
+      } else if (delta.type === "tool_use_delta") {
+        const tool = toolsByIndex.get(delta.id);
+        if (tool) tool.jsonParts.push(delta.json);
+      } else if (delta.type === "tool_use_end") {
+        const tool = toolsByIndex.get(delta.id);
+        if (tool) {
+          const jsonStr = tool.jsonParts.join("");
+          const parsed = parseToolArguments(jsonStr);
+          if ("input" in parsed) {
+            content.push({ type: "tool_use", id: tool.id, name: tool.name, input: parsed.input });
+          } else {
+            // Defer: a malformed call must not become an orphan tool_use on a
+            // truncated (max_tokens) or text turn, where runTurn never answers
+            // it. If the turn does end as tool_use, emit it with empty input and
+            // report it, so runTurn answers it with an error instead of running
+            // the tool with arguments the model never gave.
+            malformedTools.push({ id: tool.id, name: tool.name, raw: jsonStr, error: parsed.error });
+            process.stderr.write(`\x1b[33m[warning] Malformed tool_use JSON for ${tool.name} (${tool.id}); returning an error to the model\x1b[0m\n`);
+          }
+        }
+      } else if (delta.type === "done") {
+        stop_reason = delta.stop_reason;
+        if (costTracker && delta.usage) {
+          recordTokenUsage(costTracker, delta.usage);
         }
       }
-    } else if (delta.type === "done") {
-      stop_reason = delta.stop_reason;
-      if (costTracker && delta.usage) {
-        costTracker.recordUsage(delta.usage.input_tokens, delta.usage.output_tokens, delta.usage.cache_read_input_tokens);
-      }
     }
+  } catch (err: unknown) {
+    // A failed attempt is retried, but what the provider reported it billed
+    // still counts toward --budget.
+    const usage = partialUsage(err);
+    if (costTracker && usage) recordTokenUsage(costTracker, usage);
+    throw err;
   }
 
   // Flush remaining reasoning, then text

@@ -58,7 +58,38 @@ describe("cached prompt tokens", () => {
       text: "", stopReason: "end_turn", turns: 1, toolCalls: 0, startedAt: Date.now(), sessionId: null,
       provider: "deepseek", model: "deepseek-flash", costTracker: tracker, permissionDenials: 0,
     });
-    expect(r.usage).toEqual({ input_tokens: 100_000, output_tokens: 50_000, cache_read_input_tokens: 900_000 });
+    expect(r.usage).toEqual({ input_tokens: 100_000, output_tokens: 50_000, cache_read_input_tokens: 900_000, cache_creation_input_tokens: 0 });
     expect(r.total_cost_usd).toBeCloseTo(0.015 + 0.03 + 0.0027, 6);
+  });
+});
+
+describe("child agent cache tokens", () => {
+  it("aggregateChildCost carries a child's cache reads and writes into the parent", async () => {
+    const { AgentSpawner } = await import("../multi/spawner.js");
+    const parent = createCostTracker("claude-sonnet-5", null, "anthropic");
+    const spawner = new AgentSpawner({ costTracker: parent });
+    (spawner as unknown as { handleChildMessage(msg: unknown): void }).handleChildMessage({
+      type: "done",
+      agentId: "agent-1",
+      result: { finalText: "", turns: 1, toolCalls: 0, inputTokens: 10, outputTokens: 5, cacheReadTokens: 900, cacheWriteTokens: 80, costUsd: 0.5 },
+    });
+    expect(parent.totalInputTokens).toBe(10);
+    expect(parent.totalOutputTokens).toBe(5);
+    expect(parent.totalCacheReadTokens).toBe(900);
+    expect(parent.totalCacheWriteTokens).toBe(80);
+    expect(parent.totalCost).toBeCloseTo(0.5, 6);
+    expect(parent.formatCost()).toMatch(/995 tokens, 900 cached/);
+  });
+
+  it("a child that only read from the cache still counts", async () => {
+    const { AgentSpawner } = await import("../multi/spawner.js");
+    const parent = createCostTracker("claude-sonnet-5", null, "anthropic");
+    const spawner = new AgentSpawner({ costTracker: parent });
+    (spawner as unknown as { handleChildMessage(msg: unknown): void }).handleChildMessage({
+      type: "done",
+      agentId: "agent-1",
+      result: { finalText: "", turns: 1, toolCalls: 0, cacheReadTokens: 400 },
+    });
+    expect(parent.totalCacheReadTokens).toBe(400);
   });
 });

@@ -9,6 +9,7 @@ import { detectLintCommand, detectTestCommand } from "../tools/lint-test.js";
 import { createCheckpoint } from "../checkpoint.js";
 import { resetRepeatChain } from "../guards/repeat-tool-reminder.js";
 import { runLifecycleHooks } from "../user-hooks.js";
+import { recordTokenUsage } from "../cost.js";
 
 import type { AgentConfig, AgentSession, AgentResult, TurnResult, TurnHooks, TurnStopReason } from "./types.js";
 import { createSession } from "./types.js";
@@ -211,7 +212,7 @@ export async function runTurn(
 
         // Track cost from batch response
         if (costTracker && response.usage) {
-          costTracker.recordUsage(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_input_tokens);
+          recordTokenUsage(costTracker, response.usage);
         }
 
         // Print text blocks (streaming already prints inline)
