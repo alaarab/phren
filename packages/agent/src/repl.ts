@@ -10,6 +10,7 @@ import { persistFork } from "./session/persist.js";
 import type { AgentConfig } from "./agent-loop.js";
 import { createSession, runTurn, type AgentSession } from "./agent-loop.js";
 import { handleCommand, resolveSkillGesture, resolveCustomCommand } from "./commands.js";
+import { isMcpPromptCommand, resolveMcpPromptCommand } from "./mcp-prompts.js";
 import { resolveProvider } from "./providers/resolve.js";
 import { loadInputMode } from "./settings.js";
 
@@ -108,6 +109,18 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
     }
 
     allHistory.push(trimmed);
+
+    // An MCP prompt: fetch it from its server and send what it says.
+    if (isMcpPromptCommand(trimmed)) {
+      try {
+        process.stderr.write(`${DIM}↳ fetching MCP prompt ${trimmed.split(/\s+/)[0]}${RESET}\n`);
+        trimmed = await resolveMcpPromptCommand(trimmed);
+      } catch (err: unknown) {
+        process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+        rl.prompt();
+        continue;
+      }
+    }
 
     // /skill-name gesture: rewrite into a run_skill task before command dispatch
     const customTask = resolveCustomCommand(trimmed);
