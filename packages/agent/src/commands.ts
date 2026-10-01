@@ -99,6 +99,11 @@ export function setCustomCommands(commands: CustomCommand[]): void {
   COMMAND_NAMES.push(...BUILTIN_COMMAND_NAMES, ...customCommands.map((command) => `/${command.name}`));
 }
 
+/** Extra command names for completion (MCP prompts, found after servers connect). */
+export function addCommandNames(names: string[]): void {
+  for (const name of names) if (!COMMAND_NAMES.includes(name)) COMMAND_NAMES.push(name);
+}
+
 export function loadAndRegisterCustomCommands(cwd = process.cwd()): CustomCommand[] {
   const commands = loadCustomCommands(cwd);
   setCustomCommands(commands);

@@ -250,6 +250,12 @@ skipped. `--strict-mcp-config` uses only `--mcp-config` and `--mcp`. An MCP
 tool result longer than 100,000 characters (about 25k tokens) is cut with a
 note; `PHREN_AGENT_MCP_MAX_OUTPUT_CHARS` changes the limit.
 
+A server's prompts become slash commands named `/mcp__<server>__<prompt>`, as in
+Claude Code. Type one with its arguments in the order the prompt declares
+them (the last takes the rest of the line), and the agent fetches the prompt
+and sends what it says as your message. It works the same in a one-shot task:
+`phren agent "/mcp__github__review_pr 123"`.
+
 Transports are `stdio`, `http` (Streamable HTTP) and legacy `sse`. With
 `oauth: true` the agent prints an authorization URL on first connection and
 stores the tokens in private files under `~/.phren/agent/mcp-auth`

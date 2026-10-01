@@ -10,6 +10,7 @@ import { emitHerdrHook, setHerdrHookSession } from "../herdr-hooks.js";
 import type { InputMode } from "../repl.js";
 import { useSlashCommands } from "./hooks/useSlashCommands.js";
 import { resolveSkillGesture, resolveCustomCommand } from "../commands.js";
+import { isMcpPromptCommand, resolveMcpPromptCommand } from "../mcp-prompts.js";
 import type { AgentSpawner } from "../multi/spawner.js";
 import { decodeDiffPayload, DIFF_MARKER, renderInlineDiff } from "../multi/diff-renderer.js";
 import { formatToolInput } from "./tool-render.js";
@@ -612,6 +613,21 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       else process.stdout.write("\x1b[2J\x1b[H");
       slashCommands.tryHandleCommand(line);
       update();
+      return;
+    }
+
+    // An MCP prompt: fetch it from its server, then send what it says.
+    if (isMcpPromptCommand(line)) {
+      const command = line.split(/\s+/)[0];
+      completedMessages.push({ id: nextId(), kind: "status", text: `↳ fetching MCP prompt ${command}` });
+      update();
+      resolveMcpPromptCommand(line).then(
+        (task) => handleSubmit(task.startsWith("/") ? ` ${task}` : task),
+        (err: unknown) => {
+          completedMessages.push({ id: nextId(), kind: "status", text: err instanceof Error ? err.message : String(err) });
+          update();
+        },
+      );
       return;
     }
 

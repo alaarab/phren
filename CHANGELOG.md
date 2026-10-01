@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- MCP prompts are phren agent slash commands, `/mcp__<server>__<prompt> [args]` as in Claude Code, in the terminal UI, the REPL and one-shot tasks: the agent fetches the prompt and sends what it says.
 - `phren agent --input-format stream-json` (with `--output-format stream-json`) reads user messages as JSON lines on stdin, in Claude Code's shape, and runs each as a turn on the same session with its own `result` line, so a script can drive a multi-turn session.
 - phren agent loads MCP servers without flags: `~/.phren-agent/mcp.json` always, and a project's `.mcp.json` or `.phren-agent/mcp.json` once the project is trusted with `--trust-project-mcp` (remembered); `--strict-mcp-config` uses only the flags. MCP tool results over 100,000 characters are cut with a note (`PHREN_AGENT_MCP_MAX_OUTPUT_CHARS`).
 - phren agent hooks follow Claude Code's convention: exit code 2 blocks a `UserPromptSubmit` prompt (headless subtype `error_hook_blocked`), sends the model back to work from `Stop` (at most 5 times a turn, `stop_hook_active` after the first) and returns a `PostToolUse` hook's stderr to the model; exit 0 stdout from `UserPromptSubmit` and the new `SessionStart` event is added as context. New `PreCompact` event before automatic compaction.
