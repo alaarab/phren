@@ -3,6 +3,7 @@
  */
 import type { CommandContext } from "../commands.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
+import { contextTokens } from "../context/usage.js";
 import { execSync } from "node:child_process";
 
 const DIM = "\x1b[2m";
@@ -28,7 +29,7 @@ export function helpCommand(_parts: string[], _ctx: CommandContext): boolean {
   /plan       Show conversation plan (tool calls so far)
   /undo       Undo last user message and response
   /history [n|full]  Show last N messages (default 10) with rich formatting
-  /compact    Compact conversation (LLM checkpoint + knowledge promotion)
+  /compact [focus]  Compact conversation (LLM checkpoint + knowledge promotion), keeping the focus
   /review     Triage the phren review queue (go = manual, auto = model-assisted)
   /context    Show context window usage and provider info
   /mode       Toggle input mode (steering ↔ queue)
@@ -158,7 +159,7 @@ export function undoCommand(_parts: string[], ctx: CommandContext): boolean {
 }
 
 export function contextCommand(_parts: string[], ctx: CommandContext): boolean {
-  const ctxTokens = estimateMessageTokens(ctx.session.messages);
+  const ctxTokens = contextTokens(ctx.systemPrompt ?? "", ctx.session.messages, ctx.session.log, ctx.session.reportedContext);
   const ctxPct = ctx.contextLimit > 0 ? (ctxTokens / ctx.contextLimit) * 100 : 0;
   const ctxPctStr = ctxPct.toFixed(1);
   const ctxWindowK = ctx.contextLimit >= 1000 ? `${(ctx.contextLimit / 1000).toFixed(0)}k` : String(ctx.contextLimit);
