@@ -470,20 +470,32 @@ export async function runAgentCli(raw: string[]) {
   if (chat) {
     agentConfig.rebuildSystemPrompt = (info) => buildChatSystemPrompt(chatMemory, info);
     // Same conversation, same log: only the tools and the prompt change.
+    // Nothing about the session changes until every step has succeeded; a
+    // failure (an MCP server that won't start) leaves it a working chat.
     agentConfig.promote = async () => {
       if (agentConfig.mode !== "chat") return "Already an agent session.";
-      agentConfig.mode = "agent";
-      agentConfig.rebuildSystemPrompt = undefined;
-      await registerAgentTools();
-      registerSpawnerTools?.();
-      let snippet = phrenCtx ? await buildContextSnippet(phrenCtx, "") : buildProjectInstructions();
-      const projectCtx = phrenCtx ? loadProjectContext(phrenCtx) : null;
-      if (phrenCtx && projectCtx) snippet += `\n\n## Agent context (${phrenCtx.project})\n\n${projectCtx}`;
-      agentConfig.systemPrompt = buildSystemPrompt(snippet, null, {
-        name: agentConfig.provider.name,
-        model: (agentConfig.provider as { model?: string }).model,
-      }, getCustomCommandInfos());
-      agentConfig.lintTestConfig = detectLintTest();
+      const before = new Set(registry.toolNames());
+      try {
+        await registerAgentTools();
+        registerSpawnerTools?.();
+        let snippet = phrenCtx ? await buildContextSnippet(phrenCtx, "") : buildProjectInstructions();
+        const projectCtx = phrenCtx ? loadProjectContext(phrenCtx) : null;
+        if (phrenCtx && projectCtx) snippet += `\n\n## Agent context (${phrenCtx.project})\n\n${projectCtx}`;
+        const systemPrompt = buildSystemPrompt(snippet, null, {
+          name: agentConfig.provider.name,
+          model: (agentConfig.provider as { model?: string }).model,
+        }, getCustomCommandInfos());
+        const lintTestConfig = detectLintTest();
+        agentConfig.mode = "agent";
+        agentConfig.rebuildSystemPrompt = undefined;
+        agentConfig.systemPrompt = systemPrompt;
+        agentConfig.lintTestConfig = lintTestConfig;
+      } catch (err: unknown) {
+        for (const name of registry.toolNames()) if (!before.has(name)) registry.remove(name);
+        mcpCleanup?.();
+        mcpCleanup = undefined;
+        throw err;
+      }
       return `Promoted to a phren agent with ${registry.toolNames().length} tools; the conversation continues.`;
     };
   }
