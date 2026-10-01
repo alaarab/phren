@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- phren agent checks the syntax of each file it edits, writes or patches and adds any new parse error to the tool result: TypeScript and JavaScript through Node's built-in parser, Python through `ast`, JSON through `JSON.parse`. Errors the file already had are not reported. `PHREN_AGENT_SYNTAX_CHECK=off` turns it off.
+
 ### Changed
 
 - phren agent won't write over a picture of a file that is out of date: `write_file` refuses to overwrite an existing file it hasn't read in the session, and `write_file`, `edit_file`, `multi_edit` and `apply_patch` refuse a file that changed on disk since the agent last read or wrote it, asking the model to read it again. `PHREN_AGENT_FILE_GUARD=off` turns it off.

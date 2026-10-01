@@ -26,6 +26,7 @@ import type { AgentTool } from "./types.js";
 import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
 import { describeNotFound } from "./edit-engine.js";
 import { forgetFileState, recordFileState, staleFileError } from "./file-state.js";
+import { syntaxCheckNote } from "./syntax-check.js";
 
 export interface PatchChunk {
   /** Text after `@@ `, used to seek before matching the chunk. */
@@ -358,6 +359,10 @@ export const applyPatchTool: AgentTool = {
       }
     }
     const summary = writes.map((w) => `${w.status} ${w.path}`).join("\n");
-    return { output: `Success. Updated the following files:\n${summary}` };
+    const notes = writes.flatMap((w) => {
+      const note = w.content === null ? null : syntaxCheckNote(w.path, w.before, w.content);
+      return note ? [note] : [];
+    });
+    return { output: `Success. Updated the following files:\n${summary}${notes.length > 0 ? `\n\n${notes.join("\n\n")}` : ""}` };
   },
 };

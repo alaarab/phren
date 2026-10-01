@@ -4,6 +4,7 @@ import type { AgentTool } from "./types.js";
 import { encodeDiffPayload } from "../multi/diff-renderer.js";
 import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
 import { recordFileState, staleFileError } from "./file-state.js";
+import { syntaxCheckNote } from "./syntax-check.js";
 
 export const writeFileTool: AgentTool = {
   name: "write_file",
@@ -36,12 +37,14 @@ export const writeFileTool: AgentTool = {
     const stale = staleFileError(filePath, { requireRead: true });
     if (stale) return { output: stale, is_error: true };
 
-    const oldContent = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : "";
+    const existed = fs.existsSync(filePath);
+    const oldContent = existed ? fs.readFileSync(filePath, "utf-8") : "";
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, content);
     recordFileState(filePath);
 
-    const msg = `Wrote ${content.length} bytes to ${filePath}`;
+    const syntax = syntaxCheckNote(filePath, existed ? oldContent : null, content);
+    const msg = `Wrote ${content.length} bytes to ${filePath}${syntax ? `\n\n${syntax}` : ""}`;
     if (oldContent) {
       return { output: msg + encodeDiffPayload(filePath, oldContent, content) };
     }
