@@ -5,7 +5,7 @@ import * as os from "os";
 import type { AgentTool } from "./types.js";
 import type { PermissionConfig } from "../permissions/types.js";
 import { checkShellSafety, scrubEnv } from "../permissions/shell-safety.js";
-import { wrapWithSandbox, classifySandboxDenial, SandboxRequiredError } from "../permissions/kernel-sandbox.js";
+import { wrapWithSandbox, classifySandboxDenial, classifyNetworkDenial, SandboxRequiredError } from "../permissions/kernel-sandbox.js";
 
 /** A positive whole number from the environment, else the fallback. */
 function envPositiveInt(key: string, fallback: number): number {
@@ -319,6 +319,7 @@ export function createShellTool(getPermissions?: () => PermissionConfig): AgentT
           mode: perms?.sandboxMode ?? "off",
           workspaceRoot: perms?.projectRoot ?? process.cwd(),
           extraWritable: perms?.allowedPaths ?? [],
+          network: perms?.network !== "off",
         });
       } catch (err: unknown) {
         if (err instanceof SandboxRequiredError) {
@@ -377,6 +378,7 @@ export function createShellTool(getPermissions?: () => PermissionConfig): AgentT
       // of retrying (classify combined output — commands often 2>&1)
       const denial = decision.sandboxed
         ? classifySandboxDenial(combined, perms?.projectRoot ?? process.cwd())
+          ?? (perms?.network === "off" ? classifyNetworkDenial(combined) : null)
         : null;
       const status = result.code !== null ? `Exit code ${result.code}` : `Killed by ${result.signal ?? "signal"}`;
       return { output: `${noticePrefix}${status}\n${combined}${denial ?? ""}`, is_error: true };

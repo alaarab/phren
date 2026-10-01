@@ -87,7 +87,7 @@ describe("automatic post-edit checks", () => {
     const result = await f.run(2);
     expect(wrap).toHaveBeenCalledTimes(1);
     expect(wrap).toHaveBeenCalledWith(["bash", "-c", f.command], {
-      mode: "require", workspaceRoot: f.cwd, extraWritable: [],
+      mode: "require", workspaceRoot: f.cwd, extraWritable: [], network: true,
     });
     expect(fs.existsSync(f.marker)).toBe(false);
     expect(JSON.stringify(result.messages)).toContain("fixture backend unavailable");

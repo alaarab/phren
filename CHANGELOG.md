@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- `phren agent --no-network` runs shell commands without network access, through bubblewrap's network namespace on Linux and a Seatbelt outbound-IP deny on macOS, failing closed where neither works; subagents inherit it.
 - `docs/agent-stream-json.schema.json`: a JSON Schema for every phren agent stream-json line, output events and input messages, checked against the agent's real output in the test suite.
 - phren agent's `/resume` picks from recent sessions: an arrow-key picker in the terminal UI, or `/resume <n>` / `/resume <id>`, over this project's event logs (or this directory's without a store). It used to load only the last session's legacy snapshot.
 - MCP prompts are phren agent slash commands, `/mcp__<server>__<prompt> [args]` as in Claude Code, in the terminal UI, the REPL and one-shot tasks: the agent fetches the prompt and sends what it says.
