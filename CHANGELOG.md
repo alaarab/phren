@@ -7,19 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 - `docs/agent-stream-json.schema.json`: a JSON Schema for every phren agent stream-json line, output events and input messages, checked against the agent's real output in the test suite.
-=======
 - phren agent's `/resume` picks from recent sessions: an arrow-key picker in the terminal UI, or `/resume <n>` / `/resume <id>`, over this project's event logs (or this directory's without a store). It used to load only the last session's legacy snapshot.
->>>>>>> b46097de852146e1e800245ddabec240a4b0887e
-=======
 - MCP prompts are phren agent slash commands, `/mcp__<server>__<prompt> [args]` as in Claude Code, in the terminal UI, the REPL and one-shot tasks: the agent fetches the prompt and sends what it says.
->>>>>>> 3051b95c5405ff6c705cc3bd90671ce62079aa61
-=======
 - phren agent type-checks after editing TypeScript, JavaScript or Python (a `typecheck`-style package script, `npx tsc --noEmit`, or `mypy .`, `--typecheck-cmd` to override) before its lint and test checks, and skips the tests while the types fail. A failed check now shows the model the start and the end of its output, where test runners put their summary.
->>>>>>> 2a8ec586081686ae1d167742efcfd605126d3fa4
 - `phren agent --input-format stream-json` (with `--output-format stream-json`) reads user messages as JSON lines on stdin, in Claude Code's shape, and runs each as a turn on the same session with its own `result` line, so a script can drive a multi-turn session.
 - phren agent loads MCP servers without flags: `~/.phren-agent/mcp.json` always, and a project's `.mcp.json` or `.phren-agent/mcp.json` once the project is trusted with `--trust-project-mcp` (remembered); `--strict-mcp-config` uses only the flags. MCP tool results over 100,000 characters are cut with a note (`PHREN_AGENT_MCP_MAX_OUTPUT_CHARS`).
 - phren agent hooks follow Claude Code's convention: exit code 2 blocks a `UserPromptSubmit` prompt (headless subtype `error_hook_blocked`), sends the model back to work from `Stop` (at most 5 times a turn, `stop_hook_active` after the first) and returns a `PostToolUse` hook's stderr to the model; exit 0 stdout from `UserPromptSubmit` and the new `SessionStart` event is added as context. New `PreCompact` event before automatic compaction.
