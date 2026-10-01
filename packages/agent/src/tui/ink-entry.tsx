@@ -18,7 +18,7 @@ import * as fs from "node:fs";
 import { execSync } from "node:child_process";
 import * as path from "node:path";
 import { loadInputMode, saveInputMode, savePermissionMode, loadTheme, saveTheme, loadInputHistory, saveInputHistory } from "../settings.js";
-import { estimateMessageTokens } from "../context/token-counter.js";
+import { contextTokens } from "../context/usage.js";
 import { READ_ONLY_TOOLS } from "../permissions/checker.js";
 import type { ApprovalInfo } from "./components/ApprovalPanel.js";
 import { nextPermissionMode } from "./ansi.js";
@@ -208,11 +208,15 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     };
   }
 
-  let contextMemo = { count: -1, tokens: 0 };
+  let contextMemo = { count: -1, logLength: -1, tokens: 0 };
   function currentContextTokens(): number {
     const count = session.messages.length;
-    if (contextMemo.count !== count) {
-      contextMemo = { count, tokens: estimateMessageTokens(session.messages) };
+    if (contextMemo.count !== count || contextMemo.logLength !== session.log.length) {
+      contextMemo = {
+        count,
+        logLength: session.log.length,
+        tokens: contextTokens(config.systemPrompt, session.messages, session.log, session.reportedContext),
+      };
     }
     return contextMemo.tokens;
   }

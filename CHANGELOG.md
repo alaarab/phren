@@ -10,6 +10,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - phren agent won't write over a picture of a file that is out of date: `write_file` refuses to overwrite an existing file it hasn't read in the session, and `write_file`, `edit_file`, `multi_edit` and `apply_patch` refuse a file that changed on disk since the agent last read or wrote it, asking the model to read it again. `PHREN_AGENT_FILE_GUARD=off` turns it off.
 - phren agent's `grep` and `glob` use ripgrep when it is installed: `.gitignore` is honoured (no more descending into `dist/` or `coverage/`), hidden directories such as `.github/` are searched, and lines are cut at 500 characters. `grep` is now case-sensitive unless `-i` is set. Without ripgrep the JS fallback skips the same directories and reports when it stopped at its file cap instead of answering "No matches." `PHREN_AGENT_RIPGREP=off` forces the fallback.
 - phren agent's system prompt now has an environment block (working directory, platform, shell, today's date, git branch) and lists the tools actually registered in the session, MCP tools as a count per server, instead of a fixed list.
+- phren agent measures its context with the provider's own token count (the prompt size the last response reported, cache included, plus an estimate for what came after) instead of a chars/4 guess that ran sessions into the window. Past 75% it first clears old bulky tool output, outside the newest 8 results, and compacts only if that frees too little. `/compact <focus>` says what the summary must keep.
+
+### Fixed
+
+- phren agent's compaction request carries the session's tools. Without them, Anthropic rejects a history that holds tool calls, so compaction on Claude always fell back to the regex summary, and the cached prefix never matched.
 
 ## [0.3.20] - 2026-10-01
 

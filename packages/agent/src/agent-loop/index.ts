@@ -1,6 +1,7 @@
-import type { ContentBlock, InvalidToolCall, ToolUseBlock } from "../providers/types.js";
+import type { ContentBlock, InvalidToolCall, TokenUsage, ToolUseBlock } from "../providers/types.js";
 import { createSpinner, formatTurnHeader, formatToolCall } from "../spinner.js";
-import { shouldPrune } from "../context/pruner.js";
+import { planToolResultClearing } from "../context/clear-tool-results.js";
+import { contextTokens, reportedContext } from "../context/usage.js";
 import { compactWithLlm } from "../context/compactor.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
 import { isContextOverflowError, withRetry } from "../providers/retry.js";
@@ -122,6 +123,7 @@ export async function runTurn(
         pruneConfig: { contextLimit, keepRecentTurns },
         signal,
         verbose,
+        tools: toolDefs,
       });
       if (!result) return false;
       session.log.replaceMessageRange(result.plan.startIndex, result.plan.endIndex, result.plan.summaryMessage);
@@ -138,8 +140,18 @@ export async function runTurn(
       return true;
     };
 
-    if (shouldPrune(systemPrompt, session.messages, { contextLimit })) {
-      await compactHistory(6, "");
+    // Past 75% of the window (by the provider's own count when there is
+    // one), first clear old tool output; compact only if that frees too little.
+    const usedTokens = () => contextTokens(systemPrompt, session.messages, session.log, session.reportedContext);
+    if (usedTokens() > contextLimit * 0.75) {
+      const before = usedTokens();
+      const cleared = planToolResultClearing(session.messages);
+      for (const { index, message } of cleared) session.log.replaceMessageRange(index, index, message);
+      const after = usedTokens();
+      if (cleared.length > 0) {
+        status(`\x1b[2m[cleared ${cleared.length === 1 ? "old tool output in 1 message" : `old tool output in ${cleared.length} messages`}: ~${Math.round(before / 1000)}k → ~${Math.round(after / 1000)}k tokens]\x1b[0m\n`);
+      }
+      if (after > contextLimit * 0.6) await compactHistory(6, "");
     }
 
     // For plan mode first turn, pass empty tools so LLM can't call any
@@ -155,6 +167,7 @@ export async function runTurn(
     let assistantContent: ContentBlock[];
     let stopReason: "end_turn" | "tool_use" | "max_tokens";
     let invalidToolCalls: InvalidToolCall[] = [];
+    let usage: TokenUsage | undefined;
 
     try {
       if (useStream) {
@@ -205,6 +218,7 @@ export async function runTurn(
         assistantContent = result.content;
         stopReason = result.stop_reason;
         invalidToolCalls = result.invalidToolCalls;
+        usage = result.usage;
       } else {
         // Batch path
         spinner.start("Thinking...");
@@ -219,6 +233,7 @@ export async function runTurn(
         assistantContent = response.content;
         stopReason = response.stop_reason;
         invalidToolCalls = response.invalidToolCalls ?? [];
+        usage = response.usage;
 
         // Track cost from batch response
         if (costTracker && response.usage) {
@@ -270,6 +285,7 @@ export async function runTurn(
       stop_reason: stopReason,
       turn: session.turns,
     });
+    session.reportedContext = reportedContext(usage, session.log) ?? session.reportedContext;
     // Only after the message is in the log, so a reader never sees neither.
     preview?.clear();
     session.turns++;
