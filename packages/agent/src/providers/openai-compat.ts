@@ -11,22 +11,39 @@ export function toOpenAiTools(tools: AgentToolDef[]) {
 }
 
 /**
+ * Routes that require every earlier assistant turn's `reasoning_content` back
+ * when tools are present: DeepSeek directly, or any OpenAI-compatible endpoint
+ * (OpenCode Go, a proxy) serving a DeepSeek model. DeepSeek returns HTTP 400
+ * when a plain-answer turn arrives without it.
+ */
+export function replaysAllReasoning(providerName: string | undefined, model: string | undefined): boolean {
+  if (providerName === "deepseek") return true;
+  return providerName === "openai-compat" && /deepseek/i.test(model ?? "");
+}
+
+/**
  * Convert Anthropic messages to OpenAI messages.
  *
  * `providerName` scopes which reasoning blocks belong to this provider; when
  * omitted, all reasoning is stripped (conservative). Own reasoning is passed
- * back as `reasoning_content` only on tool-call turns — the field is ignored
- * on plain turns by providers that support it (DeepSeek's documented rule),
- * so sending it there just wastes tokens. Assistant `content` is always a
- * string, never null/absent: some gateways 400 on a null-content assistant
- * message, and history is durable, so one would poison every later turn.
+ * back as `reasoning_content` on tool-call turns; with `replayAllReasoning`
+ * (DeepSeek routes, see replaysAllReasoning) it goes on every assistant turn,
+ * empty when the turn had none. Assistant `content` is always a string, never
+ * null/absent: some gateways 400 on a null-content assistant message, and
+ * history is durable, so one would poison every later turn.
  */
-export function toOpenAiMessages(system: string, messages: LlmMessage[], providerName?: string, vision = false) {
+export function toOpenAiMessages(
+  system: string,
+  messages: LlmMessage[],
+  providerName?: string,
+  vision = false,
+  replayAllReasoning = false,
+) {
   const out: Record<string, unknown>[] = [{ role: "system", content: system }];
   for (const msg of stripForeignReasoning(messages, providerName)) {
     if (msg.role === "assistant") {
       if (typeof msg.content === "string") {
-        out.push({ role: "assistant", content: msg.content });
+        out.push({ role: "assistant", content: msg.content, ...(replayAllReasoning ? { reasoning_content: "" } : {}) });
       } else {
         const textParts = msg.content.filter((b) => b.type === "text").map((b) => b.type === "text" ? b.text : "");
         const reasoningParts = msg.content
@@ -38,10 +55,9 @@ export function toOpenAiMessages(system: string, messages: LlmMessage[], provide
           return { id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input) } };
         });
         const entry: Record<string, unknown> = { role: "assistant", content: textParts.join("\n") };
-        if (toolCalls.length > 0) {
-          entry.tool_calls = toolCalls;
-          if (reasoningParts.length > 0) entry.reasoning_content = reasoningParts.join("\n");
-        }
+        if (toolCalls.length > 0) entry.tool_calls = toolCalls;
+        if (replayAllReasoning) entry.reasoning_content = reasoningParts.join("\n");
+        else if (toolCalls.length > 0 && reasoningParts.length > 0) entry.reasoning_content = reasoningParts.join("\n");
         out.push(entry);
       }
     } else if (msg.role === "user") {
