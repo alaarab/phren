@@ -46,7 +46,7 @@ already in the group, so each one reaches the whole group in one hop.
 
 The phone launch sheet offers an Agent or Conductor role, a harness, model and
 effort. `POST /v1/workspaces/launch` accepts `role: "conductor"` with Claude,
-Codex or OpenCode, loads the shipped brief and gives Herdr an agent name
+Codex or OpenCode (not Copilot or phren's own agent, which are refused with 400), loads the shipped brief and gives Herdr an agent name
 starting with `conductor-`. Effort is `low`, `medium` or `high`.
 
 An agent (not a conductor) can start in a new worktree. The sheet's Work in a

@@ -188,8 +188,14 @@ No extra request per iPhone row is needed.
 
 From a project, the iPhone can open a new session on a computer:
 `POST /v1/workspaces/launch` creates a Herdr workspace (or a tab in one) in
-the project's directory and starts Codex, Claude Code, Copilot or OpenCode
-in its pane, returning once Herdr has detected it ready. `account` (`default`
+the project's directory and starts Codex, Claude Code, Copilot, OpenCode or
+phren's own agent (`kind: "phren"`) in its pane, returning once Herdr has
+detected it ready. Herdr cannot start or detect phren-agent itself, so for
+`phren` the Hook types `phren agent -i` (plus `--model` and `--reasoning`) at
+the pane's login shell, waits for it to be the foreground program, and reports
+it to Herdr as agent `phren` under the launch name; its own lifecycle hooks then
+keep the pane's status, and the typed line releases that report when the agent
+exits. Under tmux it runs like the others, `respawn-pane` under a login shell. `account` (`default`
 or a slug) runs Claude under that account's config home: the pane and agent get
 `CLAUDE_CONFIG_DIR` (Herdr at pane creation, tmux on the agent's `respawn-pane -e`),
 folder trust is written to that home's `.claude.json`, and the reply echoes
@@ -236,7 +242,7 @@ snapshot version. Its bounded cache expires after two seconds; status refresh
 and mutations invalidate it. Indexed projects add per-file change chips
 without making an index a requirement for file browsing.
 
-`GET /v1/harnesses` reports which harnesses (Claude, Codex, OpenCode, Copilot) are
+`GET /v1/harnesses` reports which harnesses (Claude, Codex, OpenCode, Copilot, phren) are
 installed and usable on this computer, and each Claude account's sign-in state; the
 same list rides on `GET /v1/dispatch/capacity` as `harnesses`, next to `usage` (the
 room left on Codex and each Claude account, and whether it is exhausted, which `anywhere` uses to skip an account with no quota left). `phren bridge accounts`
@@ -490,7 +496,7 @@ What works:
   terminal.
 - Chat, sends (pasted as one bracketed paste, then Enter), keys, approvals, the
   terminal (`phren-hook v1 terminal tmux` attaches the phone's SSH terminal to
-  the server), and launching Claude Code, Codex, Copilot or OpenCode into
+  the server), and launching Claude Code, Codex, Copilot, OpenCode or phren-agent into
   `tmux-phren`.
 - Scrolling the phone's terminal: tmux draws on the alternate screen, so the
   phone keeps no history of its own. With `set -g mouse on` tmux turns on the

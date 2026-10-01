@@ -197,7 +197,7 @@ export function agentFromCommand(command: string): string | undefined {
   if (name === "phren-agent" || program.includes("@phren/agent/") || /\/packages\/agent\/dist\/bin\.js$/.test(program)) return "phren";
   // `phren agent` runs the same agent through the CLI.
   const next = words[words.indexOf(program) + 1];
-  if ((name === "phren" || program.includes("@phren/cli/")) && next === "agent") return "phren";
+  if ((name === "phren" || program.includes("@phren/cli/") || /\/packages\/cli\/dist\/index\.js$/.test(program)) && next === "agent") return "phren";
   return undefined;
 }
 
@@ -399,7 +399,7 @@ export const tmuxTerminal: TerminalProvider = {
     await tmux(server, ["new-session", "-d", "-s", sessionName(label, taken), "-x", "200", "-y", "50", ...directory, ...name]);
   },
   async startAgent(server, pane, { name, kind, args, timeoutMs, env }) {
-    if (!["claude", "codex", "copilot", "opencode"].includes(kind)) throw new BridgeError(400, "This agent cannot be started in tmux.");
+    if (!["claude", "codex", "copilot", "opencode", "phren"].includes(kind)) throw new BridgeError(400, "This agent cannot be started in tmux.");
     await requireDirectExec();
     const target = toTmuxId(pane, "p"), row = await paneRow(server, target);
     if (!row) throw new BridgeError(409, "This tmux pane changed. Refresh the computer.");
