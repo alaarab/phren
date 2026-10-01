@@ -58,7 +58,7 @@
       "required": ["type", "subtype", "is_error", "result", "num_turns", "tool_calls", "duration_ms", "session_id", "provider", "model", "usage", "total_cost_usd", "permission_denials"],
       "properties": {
         "type": { "const": "result" },
-        "subtype": { "enum": ["success", "error_max_turns", "error_budget", "error_plan_rejected", "cancelled", "error_during_execution", "error_hook_blocked"] },
+        "subtype": { "enum": ["success", "error_max_turns", "error_budget", "error_plan_rejected", "cancelled", "error_during_execution", "error_hook_blocked", "error_structured_output"] },
         "is_error": { "type": "boolean" },
         "result": { "type": "string" },
         "num_turns": { "type": "integer" },
@@ -79,6 +79,7 @@
         },
         "total_cost_usd": { "type": ["number", "null"], "description": "Null on a flat-rate subscription." },
         "permission_denials": { "type": "integer" },
+        "structured_output": { "description": "With --json-schema: the value matching that schema." },
         "error": { "type": "string" }
       }
     },
