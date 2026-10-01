@@ -1,5 +1,5 @@
 /** Cost tracking for LLM API usage. */
-import { lookupPricing } from "./models.js";
+import { lookupPricing, type ModelPricing } from "./models.js";
 
 export interface CostTracker {
   totalInputTokens: number;
@@ -13,8 +13,34 @@ export interface CostTracker {
   formatTurnCost(inputTokens: number, outputTokens: number): string;
 }
 
-export function createCostTracker(model: string, budget: number | null = null, provider?: string): CostTracker {
-  const { pricing, metered } = lookupPricing(model, provider);
+/** Price a model and endpoint, with PHREN_AGENT_PRICE_IN/OUT/CACHE (USD per 1M) taking precedence. */
+export function resolvePricing(model: string, provider?: string, baseUrl?: string): { pricing: ModelPricing; metered: boolean } {
+  const looked = lookupPricing(model, provider, baseUrl);
+  const env = (key: string): number | undefined => {
+    const raw = process.env[key];
+    if (raw === undefined || raw === "") return undefined;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  };
+  const input = env("PHREN_AGENT_PRICE_IN");
+  const output = env("PHREN_AGENT_PRICE_OUT");
+  const cacheRead = env("PHREN_AGENT_PRICE_CACHE");
+  if (input === undefined && output === undefined && cacheRead === undefined) return looked;
+  // An explicit price means the user is paying per token, even on a route
+  // the catalog calls included.
+  const cache = cacheRead ?? looked.pricing.cacheReadPer1M;
+  return {
+    pricing: {
+      inputPer1M: input ?? looked.pricing.inputPer1M,
+      outputPer1M: output ?? looked.pricing.outputPer1M,
+      ...(cache !== undefined ? { cacheReadPer1M: cache } : {}),
+    },
+    metered: true,
+  };
+}
+
+export function createCostTracker(model: string, budget: number | null = null, provider?: string, baseUrl?: string): CostTracker {
+  const { pricing, metered } = resolvePricing(model, provider, baseUrl);
 
   const tracker: CostTracker = {
     totalInputTokens: 0,

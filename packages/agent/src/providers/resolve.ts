@@ -39,9 +39,33 @@ export const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 export interface ResolveOptions {
   /** Endpoint for openai-compat (required there) or an override for deepseek. */
   baseUrl?: string;
+  /** Context window in tokens, overriding the catalog (else PHREN_AGENT_CONTEXT_WINDOW). */
+  contextWindow?: number;
+}
+
+/** A positive integer token count from a flag or env value, else undefined. */
+export function parseTokenCount(raw: string | number | undefined): number | undefined {
+  if (raw === undefined || raw === "") return undefined;
+  const value = typeof raw === "number" ? raw : Number(String(raw).replace(/_/g, ""));
+  return Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 export function resolveProvider(
+  overrideProvider?: string,
+  overrideModel?: string,
+  overrideMaxOutput?: number,
+  overrideReasoning?: string,
+  options: ResolveOptions = {},
+): LlmProvider {
+  const provider = resolveCatalogProvider(overrideProvider, overrideModel, overrideMaxOutput, overrideReasoning, options);
+  // The catalog can't know every relay's window (and compaction keys off
+  // it), so an explicit override wins for whichever model is resolved.
+  const contextWindow = options.contextWindow ?? parseTokenCount(process.env.PHREN_AGENT_CONTEXT_WINDOW);
+  if (contextWindow) provider.contextWindow = contextWindow;
+  return provider;
+}
+
+function resolveCatalogProvider(
   overrideProvider?: string,
   overrideModel?: string,
   overrideMaxOutput?: number,

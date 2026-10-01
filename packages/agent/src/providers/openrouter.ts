@@ -1,5 +1,12 @@
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, StreamDelta } from "./types.js";
-import { toOpenAiTools, toOpenAiMessages, parseOpenAiResponse, parseOpenAiStream, replaysAllReasoning } from "./openai-compat.js";
+import {
+  toOpenAiTools,
+  toOpenAiMessages,
+  parseOpenAiResponse,
+  parseOpenAiStream,
+  replaysAllReasoning,
+  wireReasoningEffort,
+} from "./openai-compat.js";
 import type { ReasoningEffort } from "../models.js";
 import { lookupContextWindow, lookupMaxOutputTokens, modelSupportsVision } from "../models.js";
 
@@ -10,7 +17,7 @@ export class OpenRouterProvider implements LlmProvider {
   private apiKey: string;
   model: string;
   reasoningEffort?: ReasoningEffort;
-  private baseUrl: string;
+  readonly baseUrl: string;
 
   constructor(apiKey: string, model?: string, baseUrl?: string, maxOutputTokens?: number, reasoningEffort?: ReasoningEffort) {
     this.apiKey = apiKey;
@@ -99,7 +106,7 @@ export class OpenAiProvider implements LlmProvider {
   private apiKey: string;
   model: string;
   reasoningEffort?: ReasoningEffort;
-  private baseUrl: string;
+  readonly baseUrl: string;
 
   constructor(apiKey: string, model?: string, baseUrl?: string, maxOutputTokens?: number, reasoningEffort?: ReasoningEffort) {
     this.apiKey = apiKey;
@@ -139,7 +146,8 @@ export class OpenAiProvider implements LlmProvider {
       messages: this.toMessages(system, messages),
       max_tokens: this.maxOutputTokens,
     };
-    if (this.reasoningEffort) body.reasoning_effort = this.reasoningEffort;
+    const effort = wireReasoningEffort(this.name, this.model, this.reasoningEffort);
+    if (effort) body.reasoning_effort = effort;
     if (tools.length > 0) body.tools = toOpenAiTools(tools);
 
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -165,7 +173,8 @@ export class OpenAiProvider implements LlmProvider {
       stream: true,
       stream_options: { include_usage: true },
     };
-    if (this.reasoningEffort) body.reasoning_effort = this.reasoningEffort;
+    const effort = wireReasoningEffort(this.name, this.model, this.reasoningEffort);
+    if (effort) body.reasoning_effort = effort;
     if (tools.length > 0) body.tools = toOpenAiTools(tools);
 
     const res = await fetch(`${this.baseUrl}/chat/completions`, {

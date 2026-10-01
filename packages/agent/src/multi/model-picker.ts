@@ -11,7 +11,7 @@
  * Up/Down to navigate, Left/Right to adjust reasoning, Enter to select, Esc to cancel.
  */
 import * as readline from "node:readline";
-import { getBuiltinModels, normalizeProviderId, REASONING_LEVELS, type ReasoningEffort } from "../models.js";
+import { getBuiltinModels, normalizeProviderId, REASONING_LEVELS, type ProviderId, type ReasoningEffort } from "../models.js";
 
 const ESC = "\x1b[";
 const s = {
@@ -30,7 +30,7 @@ export type ReasoningLevel = ReasoningEffort | null;
 
 export interface ModelEntry {
   id: string;
-  provider: "openrouter" | "anthropic" | "openai" | "openai-codex" | "deepseek" | "ollama";
+  provider: ProviderId;
   label: string;
   reasoning: ReasoningLevel;       // current reasoning level
   reasoningRange: ReasoningLevel[]; // available levels (empty = no reasoning control)

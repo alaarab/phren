@@ -105,6 +105,8 @@ export interface LlmProvider {
   reasoningEffort?: ReasoningEffort;
   contextWindow?: number;
   maxOutputTokens?: number;
+  /** Endpoint, for OpenAI-compatible providers (decides metering, e.g. OpenCode Go). */
+  baseUrl?: string;
   chat(
     system: string,
     messages: LlmMessage[],
