@@ -319,7 +319,8 @@ history.
 ## Model catalogue
 
 `GET /v1/models?source=<codex|claude|opencode>[&account=<id>]` on Phren Hook returns the
-`/model` menu of the agent that source names, shaped as
+`/model` menu of the agent that source names (any other source, `phren` included,
+answers an empty list), shaped as
 `{ "models": [ { "id", "name", "description", "isDefault" } ] }`. `account` names a Claude home (default `default`) and reads that home's catalogue cache; an account that is not on this computer, or a non-default one for another source, answers 404 with `code: "account_unavailable"`:
 
 | Field | Type | Description |
