@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   Scheduler,
@@ -182,10 +183,15 @@ describe("scheduled startup prompts", () => {
     expect(opencode.cwd).toBe(cwd);
     expect(opencode.args).toEqual(["run", "--format", "json", "--dir", cwd]);
     expect(opencode.args.some(arg => arg.includes("skip-git-repo-check") || arg === "--settings")).toBe(false);
+
+    const copilot = headlessCommand(schedule({ harness: "copilot", prompt: "-v is not a flag here" }), cwd);
+    expect(copilot.file).toBe("copilot");
+    expect(copilot.cwd).toBe(cwd);
+    expect(copilot.args).toEqual(["--prompt=-v is not a flag here", "--allow-all-tools", "--output-format", "json"]);
   });
 
   it("keeps the model flag in every harness's headless argv", () => {
-    for (const harness of ["claude", "codex", "opencode"] as const) {
+    for (const harness of ["claude", "codex", "opencode", "copilot"] as const) {
       const command = headlessCommand(schedule({ harness, model: "test-model" }), cwd);
       expect(command.args.indexOf("--model")).toBeGreaterThanOrEqual(0);
       expect(command.args[command.args.indexOf("--model") + 1]).toBe("test-model");
@@ -535,6 +541,30 @@ describe("a scheduled turn that finished", () => {
       JSON.stringify({ type: "assistant/message", data: { message: { role: "assistant", content: [{ type: "text", text: "All green." }] }, stop_reason: "end_turn" } }),
     ];
     expect(finalTurnFromLines(opencode, "opencode")).toEqual({ completed: true, lastAssistant: "All green." });
+    // Copilot ends a model call with turn_end; only the one after the final answer ends the turn.
+    const copilot = [
+      JSON.stringify({ type: "user.message", data: { content: "Fix it." } }),
+      JSON.stringify({ type: "assistant.turn_start", data: {} }),
+      JSON.stringify({ type: "assistant.message", data: { content: "Looking at the parser." } }),
+      JSON.stringify({ type: "assistant.turn_end", data: {} }),
+      JSON.stringify({ type: "assistant.turn_start", data: {} }),
+      JSON.stringify({ type: "assistant.message", agentId: "sub-1", data: { content: "Sub-agent notes.", phase: "final_answer" } }),
+      JSON.stringify({ type: "assistant.turn_end", agentId: "sub-1", data: {} }),
+    ];
+    expect(finalTurnFromLines(copilot, "copilot")).toEqual({ completed: false, lastAssistant: "Looking at the parser." });
+    const answered = [...copilot,
+      JSON.stringify({ type: "assistant.message", data: { content: "Fixed. Open a PR?", phase: "final_answer" } }),
+      JSON.stringify({ type: "assistant.turn_end", data: {} })];
+    expect(finalTurnFromLines(answered, "copilot")).toEqual({ completed: true, lastAssistant: "Fixed. Open a PR?" });
+    expect(finalTurnFromLines([...copilot, JSON.stringify({ type: "abort", data: {} })], "copilot")).toMatchObject({ completed: false, interrupted: true });
+    expect(finalTurnFromLines([...copilot, JSON.stringify({ type: "session.error", data: { message: "Quota exceeded" } })], "copilot"))
+      .toMatchObject({ completed: true, error: "Quota exceeded" });
+  });
+
+  it("reads the recorded Copilot session's final answer", async () => {
+    const lines = (await readFile(path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures/copilot/1.0.87/events.jsonl"), "utf8")).split("\n");
+    // The log ends with a shutdown after the last answered turn.
+    expect(finalTurnFromLines(lines, "copilot")).toMatchObject({ completed: true });
   });
 
   it("tells a question for the owner from a report that lists what it did", () => {

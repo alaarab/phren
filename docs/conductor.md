@@ -214,7 +214,7 @@ without retaining the prompt. States are `launching`, `sending`, `accepted`,
 `uncertain` and `failed`. `accepted` confirms first-prompt delivery, not worker
 completion; completion arrives as a return (see [Returns](#returns)).
 
-Before a Claude or Codex worker starts, the receiving Hook marks the project's
+Before a Claude, Codex or Copilot worker starts, the receiving Hook marks the project's
 resolved folder trusted for that harness (`PHREN_PRETRUST=off` turns this off;
 see [footprint](footprint.md#folder-trust-for-launches-the-hook-places)), so the
 folder-trust screen does not appear.
@@ -235,6 +235,29 @@ return naming the pane, the Hook never answers that screen, and once the owner
 does the harness submits the brief itself. An unconfirmed brief is asked about
 again on each returns poll, so the receipt turns `accepted` when the worker
 confirms it. Briefs are kept for seven days (at most 256).
+
+### Copilot workers
+
+`harness: "copilot"` starts GitHub Copilot CLI in the new pane, the same way the
+phone's launch does. `model` goes to `--model` and `effort` to
+`--reasoning-effort`. Copilot asks before every tool by default and has no
+automatic reviewer, so `permissionMode` maps to its launch flags:
+
+| Mode | Copilot flags |
+|------|---------------|
+| `supervised` | none (Copilot asks for each tool) |
+| `auto-edits` | `--allow-tool=write` |
+| `auto` | `--allow-all-tools` (file access stays inside the project folder; URLs still ask) |
+| `full-access` | `--allow-all` (tools, paths and URLs) |
+
+The grant and release-authority ceilings apply as they do to Claude and Codex.
+Copilot takes no first prompt the Hook can confirm, so its brief is typed into
+the pane once it reads ready (`brief: "typed"`), and the folder is pre-trusted
+through `trustedFolders` in `~/.copilot/settings.json`. Its returns come from
+its session log (`~/.copilot/session-state/<id>/events.jsonl`): the turn is done
+at the `assistant.turn_end` that follows the reply marked `final_answer`, failed
+on `session.error`, and interrupted on `abort`. Copilot has no accounts in the
+Hook, and it cannot be a conductor.
 
 A Codex worker runs on its own Phren-owned `codex app-server` instead (see
 [Phren Hook](phren-hook.md#codex-panes-on-a-phren-owned-app-server)). The

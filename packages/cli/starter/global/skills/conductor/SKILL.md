@@ -144,7 +144,8 @@ Write one short line either way. Call `dispatch` in full or
 in core. The CLI equivalent is `phren dispatch <computer|anywhere> <project>
 --harness <harness> --label <label> --prompt <brief> [--model <model>] [--effort <effort>]
 [--permission-mode supervised|auto-edits|auto|full-access]`. `permissionMode` sets how the
-worker starts (Claude and Codex only).
+worker starts (Claude, Codex and Copilot; not OpenCode). `harness` is codex,
+claude, opencode or copilot.
 For release work (merge, publish, deploy, app-store, github-admin), read the
 owner's release authority policy first with `authority` in full or
 `phren_admin(action: "authority", project)` in core (CLI: `phren authority show
