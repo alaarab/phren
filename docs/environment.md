@@ -186,6 +186,9 @@ project's folder, or a worktree it created, trusted in Claude's and Codex's
 config before launching there, and from carrying the owner's Codex trust
 forward to Phren's own Codex hooks when an install rewrites them (see
 [footprint](footprint.md)).
+`PHREN_CODEX_BINARY=off` makes the Hook's own Codex helper calls (model
+catalogue, usage limits, queue, app-server) find no `codex`; the test suite
+sets it so a run never leaves a Codex managed daemon behind.
 `PHREN_CODEX_APP_SERVER=off` keeps Codex workers the Hook launches on the typed
 path instead of a Phren-owned `codex app-server` per pane; those servers run
 their hooks with `PHREN_CODEX_SERVER` set to the server's registry ID, and
