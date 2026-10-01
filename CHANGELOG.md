@@ -3,6 +3,12 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+
+- phren agent won't write over a picture of a file that is out of date: `write_file` refuses to overwrite an existing file it hasn't read in the session, and `write_file`, `edit_file`, `multi_edit` and `apply_patch` refuse a file that changed on disk since the agent last read or wrote it, asking the model to read it again. `PHREN_AGENT_FILE_GUARD=off` turns it off.
+
 ## [0.3.20] - 2026-10-01
 
 ### Added

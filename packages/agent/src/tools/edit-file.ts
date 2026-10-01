@@ -4,6 +4,7 @@ import type { AgentTool, AgentToolResult } from "./types.js";
 import { encodeDiffPayload } from "../multi/diff-renderer.js";
 import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
 import { applyEdits, snippetAround, type EditSpec } from "./edit-engine.js";
+import { recordFileState, staleFileError } from "./file-state.js";
 
 /** Shared path checks and read for the edit tools. */
 function openForEdit(filePath: unknown): { ok: true; filePath: string; content: string } | { ok: false; result: AgentToolResult } {
@@ -20,6 +21,8 @@ function openForEdit(filePath: unknown): { ok: true; filePath: string; content: 
   if (fs.statSync(filePath).isDirectory()) {
     return { ok: false, result: { output: `${filePath} is a directory, not a file.`, is_error: true } };
   }
+  const stale = staleFileError(filePath);
+  if (stale) return { ok: false, result: { output: stale, is_error: true } };
   return { ok: true, filePath, content: fs.readFileSync(filePath, "utf-8") };
 }
 
@@ -29,6 +32,7 @@ function runEdits(filePath: unknown, edits: EditSpec[]): AgentToolResult {
   const outcome = applyEdits(opened.content, edits);
   if (!outcome.ok) return { output: `${opened.filePath}: ${outcome.error}`, is_error: true };
   fs.writeFileSync(opened.filePath, outcome.content);
+  recordFileState(opened.filePath);
   const count = outcome.replacements === 1 ? "1 replacement" : `${outcome.replacements} replacements`;
   const note = outcome.note ? ` (${outcome.note})` : "";
   // The model sees a short numbered excerpt of the result; the diff payload
