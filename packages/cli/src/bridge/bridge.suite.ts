@@ -2907,10 +2907,16 @@ schedules:
     });
 
     it("advertises speech and transcribe, and voices /v1/speech with only bridge/elevenlabs.json as the key, in the stored region", async () => {
-      expect((await api("/v1/health")).data.capabilities).toMatchObject({ speech: true, transcribe: true });
+      expect((await api("/v1/health")).data.capabilities).toMatchObject({ speech: true, transcribe: true, speechTimestampStream: true, speechLive: true });
       const reply = await api("/v1/speech", { text: "Hello from the conductor." });
       expect(reply.status).toBe(503);
       expect(reply.data).toMatchObject({ code: "speech-unconfigured" });
+      // The live socket answers the same way, before reaching for ElevenLabs.
+      const live = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/speech/live`);
+      const [first] = await once(live, "message") as [Buffer];
+      expect(JSON.parse(first.toString())).toMatchObject({ type: "error", code: "speech-unconfigured" });
+      const [closeCode] = await once(live, "close") as [number];
+      expect(closeCode).toBe(1008);
       expect((await api("/v1/speech", { text: "" })).status).toBe(400);
       // Node before 22.21 ignores NODE_USE_ENV_PROXY, and the request would leave the machine.
       const [major, minor] = process.versions.node.split(".").map(Number);
