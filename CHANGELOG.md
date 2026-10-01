@@ -20,6 +20,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A brief typed into a starting worker pane is never typed twice. Before typing it again, the dispatch reads the pane: a conversation, or the agent working, blocked or waiting, means the first copy landed after its window, and the receipt is accepted. Before, a slow Codex start got the brief a second time, and an agent blocked on an approval was reported as a startup screen. A brief still lost after two tries leaves an `uncertain` receipt with a `failed` return that stays watched, so a late arrival still brings the worker's return.
+- A brief being confirmed no longer holds the dispatch lock: other dispatches are placed meanwhile instead of getting 429 for up to a minute and a half, and `anywhere` counts the launch toward its computer's load.
+- Finished replies no longer read as stopped mid-task. "I'll wait for your review", "I'll stop here", "Let's merge once CI is green", "Now passing: 42 tests" and the like return `done`; "Let me run:" before a closing code block returns `needs-you`.
+- A worker's uncommitted files are read only in a checkout no other pane works in, a reply naming a PR counts as one, and a `git status` that times out is no longer read as clean: that turn returns `done` but its pane is not closed, and the read is not cached. A finished turn is returned once, even when a later poll reads its checkout differently.
+- Awaited background work that never ends (a build deadlocked on a lock, a child agent that died without its completion record) holds a worker's stall clock for at most two hours.
+- A PreToolUse callback that gave up leaves no file-change diff for its tool call, instead of one taken after the tool ran.
+- A turn record with a field a newer Hook added is read with that field dropped, instead of being thrown away.
 - The Hook found no transcript for a phren agent pane: it looked for the agent's event log in `<store>/.runtime/sessions`, but the agent writes to `<store>/.sessions`.
 
 ## [0.3.19] - 2026-10-01
