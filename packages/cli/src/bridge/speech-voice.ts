@@ -86,6 +86,28 @@ export async function resolveSpeechModel(file = speechVoiceFile()): Promise<{ mo
   return stored ? { model: stored, source: "setting" } : { model: DEFAULT_SPEECH_MODEL, source: "default" };
 }
 
+/** Where this computer reaches ElevenLabs. `global` is api.elevenlabs.io,
+ * which routes to the nearest region; `us` is ElevenLabs' US-only endpoint.
+ * `phren bridge speech-region us|global` stores it in the same `speech.json`
+ * as the voice and model; unset is global. Read on every reply. */
+export const SPEECH_REGIONS = { global: "https://api.elevenlabs.io", us: "https://api.us.elevenlabs.io" } as const;
+export type SpeechRegion = keyof typeof SPEECH_REGIONS;
+export const DEFAULT_SPEECH_REGION: SpeechRegion = "global";
+export const speechRegion = z.enum(Object.keys(SPEECH_REGIONS) as [SpeechRegion, ...SpeechRegion[]]);
+
+export async function resolveSpeechRegion(file = speechVoiceFile()): Promise<{ region: SpeechRegion; origin: string; source: "setting" | "default" }> {
+  const parsed = speechRegion.safeParse((await readSettings(file)).region);
+  const region = parsed.success ? parsed.data : DEFAULT_SPEECH_REGION;
+  return { region, origin: SPEECH_REGIONS[region], source: parsed.success ? "setting" : "default" };
+}
+
+/** Global is the default, so choosing it removes the key. */
+export async function writeSpeechRegion(region: string, file = speechVoiceFile()): Promise<SpeechRegion> {
+  const value = speechRegion.parse(region);
+  await updateSettings(file, "region", value === DEFAULT_SPEECH_REGION ? undefined : value);
+  return value;
+}
+
 export type SpeechVoiceSource = "request" | "setting" | "environment" | "default";
 
 /** The voice to speak with: the request's own, the stored setting, the old
@@ -109,10 +131,10 @@ export interface SpeechVoiceChoice { id: string; name: string; category?: string
 /** The voices this computer's ElevenLabs account can speak with, for the
  * phone's picker: id, name and a short description, never the account's
  * other details. */
-export async function listSpeechVoices(key: string, fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<SpeechVoiceChoice[]> {
+export async function listSpeechVoices(key: string, fetcher: typeof fetch = fetch, signal?: AbortSignal, origin?: string): Promise<SpeechVoiceChoice[]> {
   let upstream: Response;
   try {
-    upstream = await fetcher("https://api.elevenlabs.io/v1/voices", { headers: { "xi-api-key": key }, signal });
+    upstream = await fetcher(`${origin ?? (await resolveSpeechRegion()).origin}/v1/voices`, { headers: { "xi-api-key": key }, signal });
   } catch {
     throw new BridgeError(502, "Couldn't reach ElevenLabs from this computer.", { code: "speech-unreachable" });
   }
