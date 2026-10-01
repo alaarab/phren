@@ -4,18 +4,20 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+// The multiline counts are the JS walker's (ripgrep counts differently), so that case forces it.
 // Isolate cwd and put a real process timeout around regex execution: an
 // accidental synchronous infinite loop cannot be stopped by a test timer.
 const grepModule = new URL("../tools/grep.ts", import.meta.url).href;
 const writeModule = new URL("../tools/write-file.ts", import.meta.url).href;
 const loader = import.meta.resolve("tsx");
 let directory: string, project: string;
-function run(script: string): any {
+function run(script: string, fallback = false): any {
   const source = `const { grepTool } = await import(${JSON.stringify(grepModule)});
     const { writeFileTool } = await import(${JSON.stringify(writeModule)});
     ${script}`;
   return JSON.parse(execFileSync(process.execPath, ["--import", loader, "--input-type=module", "-e", source], {
     cwd: project, timeout: 5_000, encoding: "utf8",
+    env: fallback ? { ...process.env, PHREN_AGENT_RIPGREP: "off" } : process.env,
   }));
 }
 beforeEach(() => {
@@ -34,7 +36,7 @@ describe("filesystem tool boundaries", () => {
         output.push(await grepTool.execute({ path: "one.txt", pattern, multiline: true, output_mode: "count" }));
       }
       output.push(await grepTool.execute({ path: ".", pattern: "(?:)", multiline: true, output_mode: "count" }));
-      console.log(JSON.stringify(output));`);
+      console.log(JSON.stringify(output));`, true);
     expect(result.slice(0, 5).map((item: { output: string }) => item.output)).toEqual(["1", "1", "3", "4", "1"]);
     expect(result[5].output).toContain("one.txt: 4");
     expect(result[5].output).toContain("two.txt: 4");

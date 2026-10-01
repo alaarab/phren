@@ -469,6 +469,8 @@ The agent has access to these built-in tools:
 - **edit_file** — Exact string replacement (`replace_all` for every occurrence). Tolerates CRLF files, trailing-whitespace and indentation drift and pasted `read_file` line numbers; a miss shows the closest lines and the first difference
 - **multi_edit** — Several edits to one file, applied in order, all or nothing
 - **apply_patch** — Codex-format patches (`*** Begin Patch` … add, delete, update, move) across files, atomic
+- **glob** — Find files by pattern. Uses `rg --files` when ripgrep is on PATH, so `.gitignore` applies; hidden files such as `.github/` are listed, `.git` and `node_modules` are not. Says when it shows only part of the matches
+- **grep** — Search file contents with regex, case-sensitive unless `-i` is set. Uses ripgrep when it is on PATH (`.gitignore` honoured, hidden directories searched, lines cut at 500 characters); otherwise a JS walker that skips `.git`, `node_modules` and the directories in the root `.gitignore`, and says when it stopped at its 5,000-file cap. `PHREN_AGENT_RIPGREP=off` forces the walker
 
 The write tools check the file against what the agent last saw. An existing
 file has to be read before `write_file` (or an `apply_patch` Add File) may
@@ -477,8 +479,6 @@ wrote it (the user, a formatter, a shell command) is refused until it is read
 again, so the other change is never overwritten. Edits to a file the agent
 hasn't read are allowed, because their old text must match it exactly.
 `PHREN_AGENT_FILE_GUARD=off` turns the check off.
-- **glob** — Find files by pattern
-- **grep** — Search file contents with regex
 
 ### Shell and git
 - **shell** — Run shell commands (with timeout and safety checks). Foreground
