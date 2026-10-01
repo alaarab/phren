@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AgentHooks } from "./agent-hooks.js";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { AgentHooks, watchHangUp } from "./agent-hooks.js";
 import { rpc, validateTarget } from "./herdr.js";
 import type { Target } from "./protocol.js";
 
@@ -205,5 +207,29 @@ describe("a permission left in the terminal after its hook let go", () => {
     expect(await hooks.dialogAnswerKeys(claude, ["1"])).toEqual(["1"]);
     expect(hooks.pendingPanes("default", { panes: [pane] }).has("w1:p1")).toBe(true);
     expect(hooks.pendingPanes("default", { panes: [{ ...pane, agent_status: "working" }] }).size).toBe(0);
+  });
+});
+
+// A PreToolUse snapshot is dropped when the callback gave up while it was
+// taken. `req.destroyed` read every normal callback (body read to its end) as
+// a hang-up, so on Linux no Write was ever captured.
+describe("a tool callback that hung up", () => {
+  it("is told apart from one still waiting for its answer", async () => {
+    const seen: Record<string, boolean> = {};
+    const server = createServer(async (req, res) => {
+      for await (const _ of req) { /* read the body to its end, as /hook does */ }
+      const hungUp = watchHangUp(res);
+      await new Promise(resolve => setTimeout(resolve, 300));
+      seen[req.url!] = hungUp();
+      res.end("{}");
+    });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      expect(await (await fetch(`${url}/answered`, { method: "POST", body: "{}" })).text()).toBe("{}");
+      await expect(fetch(`${url}/gave-up`, { method: "POST", body: "{}", signal: AbortSignal.timeout(100) })).rejects.toThrow();
+      await vi.waitFor(() => expect(seen["/gave-up"]).toBeDefined(), { timeout: 2000 });
+      expect(seen).toEqual({ "/answered": false, "/gave-up": true });
+    } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
   });
 });

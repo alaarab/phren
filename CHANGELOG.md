@@ -21,6 +21,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- File changes from a tool call are captured again. The Hook dropped every PreToolUse snapshot as if the callback had hung up, because it read `req.destroyed`, which Node sets once a request body has been read. It now drops one only when the caller closed the connection before its answer.
 - Live spoken replies (`WS /v1/speech/live`) keep the text the phone sends while the Hook reads its settings, and open nothing for a phone that hung up meanwhile. Before the first audio, a socket that won't open within 5 s, sends no audio 5 s after it must be voicing, closes, or answers a generic error frame now falls back to Flash instead of ending the reply. A reply with nothing to say ends with `done`, the ten-minute limit with a `speech-limit` error, and a phone that stops reading the audio is closed instead of buffered without bound. Unfinished text is cut at 2 KB.
 - `POST /v1/speech` gives up on ElevenLabs after 30 s of silence, before the headers or mid-reply, retries a pooled connection ElevenLabs reset once, and no longer throws on a bodiless status.
 - `phren bridge speech-region` now covers Scribe dictation and the ElevenLabs usage read, not only spoken replies.
