@@ -114,11 +114,10 @@ describe("checkPermission", () => {
       expect(checkPermission(makeConfig("full-auto"), "shell", { command: "npm test" }).verdict).toBe("allow");
     });
 
-    it("asks for shell with warn-severity pattern in full-auto", () => {
-      const result = checkPermission(makeConfig("full-auto"), "shell", {
-        command: "sudo rm something",
-      });
-      expect(result.verdict).toBe("ask");
+    it("allows warn-severity shell in full-auto: --yolo means allow", () => {
+      for (const command of ["sudo rm something", "echo $(git rev-parse HEAD)", "env | sort"]) {
+        expect(checkPermission(makeConfig("full-auto"), "shell", { command }).verdict).toBe("allow");
+      }
     });
 
     it("denies blocked shell commands even in full-auto", () => {

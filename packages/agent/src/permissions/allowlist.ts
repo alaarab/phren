@@ -9,6 +9,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { commandPattern, splitCommandLine } from "./shell-classify.js";
 
 /** An entry in the session allowlist. */
 interface AllowEntry {
@@ -40,9 +41,11 @@ let persistentProjectRoot: string | null = null;
  */
 export function extractPattern(toolName: string, input: Record<string, unknown>): string {
   if (toolName === "shell") {
+    // The binary, with the subcommand for git, npm and the like: approving
+    // `git status` must not approve `git push --force`.
     const cmd = ((input.command as string) || "").trim();
-    // Use the first token (the binary) as the pattern
-    return cmd.split(/\s+/)[0] || "*";
+    const first = splitCommandLine(cmd)?.[0] ?? cmd.split(/\s+/);
+    return commandPattern(first);
   }
 
   const filePath = (input.path as string) || (input.file_path as string) || "";
@@ -56,13 +59,24 @@ function matches(entry: AllowEntry, toolName: string, pattern: string): boolean 
   if (entry.pattern === "*") return true;
   // For file paths: exact match or child path (boundary-aware to prevent prefix collisions)
   if (pattern === entry.pattern || pattern.startsWith(entry.pattern.endsWith("/") ? entry.pattern : entry.pattern + "/")) return true;
-  // For shell commands: match the binary name
-  return entry.pattern === pattern;
+  // For shell commands: the entry's words start the command's pattern, so an
+  // older binary-only entry ("git") still covers every subcommand.
+  return toolName === "shell" && pattern.startsWith(`${entry.pattern} `);
 }
 
 /** Check if a tool call is in the session allowlist. */
 export function isAllowed(toolName: string, input: Record<string, unknown>): boolean {
   if (sessionAllowlist.length === 0 && persistentAllowlist.length === 0) return false;
+  if (toolName === "shell") {
+    // Every command on the line must be approved: an approved `git status`
+    // must not carry `git status && rm -rf src` through.
+    const segments = splitCommandLine(((input.command as string) || "").trim());
+    if (!segments || segments.length === 0) return false;
+    return segments.every((tokens) => {
+      const pattern = commandPattern(tokens);
+      return [...sessionAllowlist, ...persistentAllowlist].some((entry) => matches(entry, toolName, pattern));
+    });
+  }
   const pattern = extractPattern(toolName, input);
 
   return (
