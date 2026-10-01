@@ -47,6 +47,12 @@ vi.mock("../repl.js", () => ({
   },
 }));
 
+// An MCP server that fails to start, for /promote's rollback.
+vi.mock("../mcp-client.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../mcp-client.js")>()),
+  connectMcpServers: async () => { throw new Error("MCP server failed to start"); },
+}));
+
 vi.mock("../herdr-hooks.js", () => ({ emitHerdrHook: () => {}, setHerdrHookSession: () => {} }));
 vi.mock("../checkpoint.js", () => ({ createCheckpoint: () => null }));
 
@@ -151,6 +157,23 @@ describe("quick chat", () => {
     expect(calls[1].tools.length).toBeGreaterThan(0);
     expect(calls[1].messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
     expect(JSON.stringify(calls[1].messages[1])).toContain("Forty-two.");
+  });
+
+  it("/promote that fails leaves a working chat: no tools, chat prompt, and it can be tried again", async () => {
+    const { runAgentCli } = await import("../index.js");
+    await runAgentCli(["--mode", "chat", "-i", "--mcp", "broken-server --flag"]);
+    const config = captured!;
+    const prompt = config.systemPrompt;
+    const rebuild = config.rebuildSystemPrompt;
+
+    await expect(config.promote!()).rejects.toThrow(/MCP server failed to start/);
+    expect(config.mode).toBe("chat");
+    expect(config.registry.toolNames()).toEqual([]);
+    expect(config.systemPrompt).toBe(prompt);
+    expect(config.rebuildSystemPrompt).toBe(rebuild);
+    expect(config.lintTestConfig).toBeUndefined();
+    // Still a chat, so /promote is still offered rather than "Already an agent session."
+    await expect(config.promote!()).rejects.toThrow(/MCP server failed to start/);
   });
 });
 
