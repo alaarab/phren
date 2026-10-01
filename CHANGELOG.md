@@ -20,6 +20,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Live spoken replies (`WS /v1/speech/live`) keep the text the phone sends while the Hook reads its settings, and open nothing for a phone that hung up meanwhile. Before the first audio, a socket that won't open within 5 s, sends no audio 5 s after it must be voicing, closes, or answers a generic error frame now falls back to Flash instead of ending the reply. A reply with nothing to say ends with `done`, the ten-minute limit with a `speech-limit` error, and a phone that stops reading the audio is closed instead of buffered without bound. Unfinished text is cut at 2 KB.
+- `POST /v1/speech` gives up on ElevenLabs after 30 s of silence, before the headers or mid-reply, retries a pooled connection ElevenLabs reset once, and no longer throws on a bodiless status.
+- `phren bridge speech-region` now covers Scribe dictation and the ElevenLabs usage read, not only spoken replies.
+- A phren agent session that used tools can no longer be resumed as a quick chat (`mode: "chat"` with `resumeSession`), which providers such as Anthropic refuse: the launch answers 400 `chat-has-tools` before any pane exists.
 - The Hook found no transcript for a phren agent pane: it looked for the agent's event log in `<store>/.runtime/sessions`, but the agent writes to `<store>/.sessions`.
 
 ## [0.3.19] - 2026-10-01

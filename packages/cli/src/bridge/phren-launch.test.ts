@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -83,6 +83,32 @@ describe("launching phren's own agent", () => {
     await expect(launchSession("default", { cwd, label: "Bad", kind: "phren", resumeSession: "--yolo" })).rejects.toThrow();
     await expect(launchSession("default", { cwd, label: "Bad", kind: "phren", mode: "turbo" })).rejects.toThrow();
     expect(placements).toEqual([]);
+  });
+
+  it("refuses to resume a session that used tools as a quick chat, unless a compaction summary replaced them", async () => {
+    const store = path.join(home, "store"), session = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
+    vi.stubEnv("PHREN_PATH", store);
+    mkdirSync(path.join(store, ".sessions"), { recursive: true });
+    const event = (seq: number, type: string, data: Json) => JSON.stringify({ seq, time: "2026-10-01T00:00:00Z", type, data });
+    const log = [
+      JSON.stringify({ type: "header", version: 1, sessionId: session, cwd }),
+      event(0, "user/message", { message: { role: "user", content: "List the files" }, source: "user", turn: 1 }),
+      event(1, "assistant/message", { message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "shell", input: { command: "ls" } }] }, stop_reason: "tool_use", turn: 1 }),
+      event(2, "tool/results", { message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "a b" }] }, turn: 1 }),
+      event(3, "assistant/message", { message: { role: "assistant", content: [{ type: "text", text: "Two files." }] }, stop_reason: "end_turn", turn: 1 }),
+    ];
+    const file = path.join(store, ".sessions", `session-${session}.events.jsonl`);
+    writeFileSync(file, log.join("\n") + "\n");
+    await expect(launchSession("default", { cwd, label: "Back to chat", kind: "phren", mode: "chat", resumeSession: session }))
+      .rejects.toMatchObject({ status: 400, details: { code: "chat-has-tools" } });
+    expect(placements).toEqual([]);
+    // As an agent it resumes, tools and all.
+    await launchSession("default", { cwd, label: "As agent", kind: "phren", mode: "agent", resumeSession: session });
+    expect(starts[0].args).toEqual(["agent", "-i", "--session", session]);
+    // Compacted behind a summary, the model no longer sees the tool calls.
+    writeFileSync(file, [...log, event(4, "log/replace", { start: 1, end: 3, message: { role: "user", content: "Summary: listed two files." } })].join("\n") + "\n");
+    await launchSession("default", { cwd, label: "Chat again", kind: "phren", mode: "chat", resumeSession: session });
+    expect(starts[1].args).toEqual(["agent", "-i", "--mode", "chat", "--session", session]);
   });
 
   it("will not make a running phren agent the conductor", async () => {

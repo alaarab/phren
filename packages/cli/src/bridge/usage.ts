@@ -10,6 +10,7 @@ import { atomicInPrivateDir, bridgeRoot, type Json, object } from "./protocol.js
 import { stripTerminal } from "../terminal-text.js";
 import { codexExecutable } from "./codex-binary.js";
 import { readSpeechKey } from "./speech-key.js";
+import { resolveSpeechRegion, SPEECH_REGIONS } from "./speech-voice.js";
 import { CODEX_ACCOUNT, claudeAccountSubscription, claudeAccountEmail, claudeAccountRef, claudeHomeOfEnv, claudeHomes, type AccountRef, type ClaudeHome } from "./claude-accounts.js";
 
 import { planName, subscriptionDate, type Subscription } from "./subscription.js";
@@ -363,11 +364,11 @@ export function elevenLabsUsage(value: unknown, now = new Date()): AccountUsage 
 }
 
 /** The key the Hook already uses for /v1/speech, sent only to ElevenLabs; the answer carries counts, never the key. */
-export async function fetchElevenLabsUsage(key: string, fetchImpl: typeof fetch = fetch, now = new Date()): Promise<AccountUsage> {
+export async function fetchElevenLabsUsage(key: string, fetchImpl: typeof fetch = fetch, now = new Date(), origin: string = SPEECH_REGIONS.global): Promise<AccountUsage> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8_000);
   try {
-    const response = await fetchImpl("https://api.elevenlabs.io/v1/user/subscription", {
+    const response = await fetchImpl(`${origin}/v1/user/subscription`, {
       headers: { "xi-api-key": key, accept: "application/json" },
       redirect: "error",
       signal: controller.signal,
@@ -382,7 +383,7 @@ async function liveElevenLabsUsage(now: Date): Promise<AccountUsage | undefined>
   if (typeof fetch !== "function" || process.env.PHREN_ELEVENLABS_USAGE === "off") return undefined;
   const key = await readSpeechKey().catch(() => undefined);
   if (!key) return undefined;
-  try { return await fetchElevenLabsUsage(key, fetch, now); } catch {
+  try { return await fetchElevenLabsUsage(key, fetch, now, (await resolveSpeechRegion()).origin); } catch {
     return { source: "elevenlabs", windows: [], updatedAt: now.toISOString(), message: "Could not read ElevenLabs usage. Check this computer's ElevenLabs key." };
   }
 }
