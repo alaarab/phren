@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { logger } from "../logger.js";
 import { claudeBoldMarkdown, claudeChrome, claudePanePreview, CodexRolloutPreview, readDeltaPreview, readPreviewPane, TranscriptPreviewStream, unwrapTerminalLines } from "./transcript-preview.js";
-import { TranscriptReader } from "./transcripts.js";
+import { TranscriptReader, transcriptPath } from "./transcripts.js";
 import type { Target } from "./protocol.js";
 
 const target: Target = { source: "claude", session: "preview-session", server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1" };
@@ -121,7 +121,7 @@ describe("live reply previews", () => {
     const delta = vi.fn(async () => ({ turnStartedAt: start, text: "Streaming" }));
     const stream = new TranscriptPreviewStream(codex, async () => "", delta);
     stream.observe([{ line: 0, raw: { type: "event_msg", timestamp: start, payload: { type: "task_started" } } }]);
-    expect(await stream.update("working", undefined, 0)).toEqual({ preview: { turnStartedAt: start, text: "Streaming" } });
+    expect(await stream.update("working", undefined, 0)).toEqual({ preview: { turnStartedAt: start, text: "Streaming", delta: "Streaming", streamed: true } });
     stream.observe([{ line: 1, raw: { type: "event_msg", timestamp: start, payload: { type: "task_complete" } } }]);
     expect(await stream.update("working", undefined, 600)).toEqual({ preview: null });
     expect(delta).toHaveBeenCalledTimes(1);
@@ -140,7 +140,7 @@ describe("live reply previews", () => {
     const delta = vi.fn(async () => live);
     const stream = new TranscriptPreviewStream({ ...target, source: "codex" }, async () => "", delta);
     stream.observe((await history.read()).entries);
-    expect(await stream.update("working", file, 0)).toEqual({ preview: live });
+    expect(await stream.update("working", file, 0)).toEqual({ preview: { ...live, delta: live.text, streamed: true } });
 
     await appendFile(file, row({ type: "event_msg", payload: { type: "item_completed",
       item: { type: "AgentMessage", id: "msg-1", phase: "commentary", content: [{ type: "Text", text: "Checking files and running tests." }] } } })
@@ -156,7 +156,7 @@ describe("live reply previews", () => {
     expect(await stream.update("working", file, 600)).toEqual({ preview: null });
     expect(await stream.update("working", file, 1200)).toBeUndefined();
     live = { turnStartedAt: start, text: "The shell output is ready" };
-    expect(await stream.update("working", file, 1800)).toEqual({ preview: live });
+    expect(await stream.update("working", file, 1800)).toEqual({ preview: { ...live, delta: live.text, streamed: true } });
   });
 
   it("clears at stop and does not resurrect a preview from unchanged terminal content", async () => {
@@ -330,6 +330,78 @@ describe("live reply previews", () => {
     await expect(readFile(file + ".preview.json")).rejects.toThrow();
     expect((await new TranscriptReader(file, "opencode").read()).entries).toHaveLength(2);
     expect(await readFile(file, "utf8")).toContain("Hello world");
+  });
+});
+
+describe("streamed preview deltas", () => {
+  const phren: Target = { ...target, source: "phren", session: "0b6f3c2e-5d1a-4c7e-9f20-3a8b1c4d5e6f" };
+  const growing = (texts: (string | null)[]) => {
+    let index = 0;
+    return vi.fn(async () => { const text = texts[Math.min(index++, texts.length - 1)]; return text === null ? null : { turnStartedAt: start, text }; });
+  };
+
+  it("sends deltas in order that add up to the text, each relative to the last frame this socket sent", async () => {
+    const stream = new TranscriptPreviewStream({ ...target, source: "codex" }, async () => "", growing(["Hel", "Hello", "Hello, wor", "Hello, world."]));
+    const frames = [];
+    for (const at of [0, 100, 500, 1000]) {
+      const frame = await stream.update("working", undefined, at);
+      if (frame?.preview) frames.push(frame.preview);
+    }
+    // The 100 ms read was throttled, so the next frame carries both reads' text.
+    expect(frames.map(frame => frame.delta)).toEqual(["Hel", "lo, wor", "ld."]);
+    expect(frames.every(frame => frame.streamed === true)).toBe(true);
+    expect(frames.map(frame => frame.delta).join("")).toBe(frames.at(-1)!.text);
+  });
+
+  it("ends a block with preview null, and a new block in the same turn starts its deltas over", async () => {
+    const stream = new TranscriptPreviewStream({ ...target, source: "opencode" }, async () => "", growing(["Checking", null, "Done: two files"]));
+    expect((await stream.update("working", "f", 0))?.preview).toMatchObject({ text: "Checking", delta: "Checking" });
+    expect(await stream.update("working", "f", 500)).toEqual({ preview: null });
+    expect((await stream.update("working", "f", 1000))?.preview).toEqual({ turnStartedAt: start, text: "Done: two files", delta: "Done: two files", streamed: true });
+  });
+
+  it("starts a reconnected socket with the whole text so far, then continues with deltas", async () => {
+    const source = growing(["The answer", "The answer is 42", "The answer is 42, because"]);
+    const first = new TranscriptPreviewStream(phren, async () => "", source);
+    expect((await first.update("working", "f", 0))?.preview?.delta).toBe("The answer");
+    // The phone's socket drops and it opens a new one mid-reply.
+    const second = new TranscriptPreviewStream(phren, async () => "", source);
+    expect((await second.update("working", "f", 0))?.preview).toEqual({ turnStartedAt: start, text: "The answer is 42", delta: "The answer is 42", streamed: true });
+    expect((await second.update("working", "f", 500))?.preview?.delta).toBe(", because");
+  });
+
+  it("never marks Claude's terminal text as streamed", async () => {
+    const stream = new TranscriptPreviewStream(target, async () => "❯ Explain this\n⏺ Partial reply\n❯");
+    stream.observe([user]);
+    const frame = await stream.update("working", undefined, 0);
+    expect(frame?.preview).toEqual({ turnStartedAt: start, text: "Partial reply" });
+  });
+
+  it("streams phren agent's sidecar and drops it once the message lands in the event log", async () => {
+    const root = await scratch(); vi.stubEnv("PHREN_PATH", root);
+    // Where phren-agent keeps its event logs (the CLI's sessionsDir).
+    await mkdir(path.join(root, ".sessions"));
+    const file = path.join(root, ".sessions", `session-${phren.session}.events.jsonl`);
+    const row = (raw: object) => JSON.stringify(raw) + "\n";
+    await writeFile(file, row({ type: "header", version: 1, sessionId: phren.session, cwd: root, createdAt: start })
+      + row({ seq: 0, time: start, type: "user/message", data: { message: { role: "user", content: "What is 6 x 7?" }, source: "user", turn: 0 } }));
+    expect(await transcriptPath("phren", phren.session)).toBe(await realpath(file));
+    const history = new TranscriptReader(file, "phren");
+    const stream = new TranscriptPreviewStream(phren, async () => { throw new Error("never the pane"); });
+    stream.observe((await history.read()).entries);
+    expect(await stream.update("working", file, 0)).toBeUndefined();
+    await writeFile(file + ".preview.json", JSON.stringify({ turnStartedAt: start, text: "It is" }));
+    expect(await readDeltaPreview(phren, file)).toEqual({ turnStartedAt: start, text: "It is" });
+    expect((await stream.update("working", file, 500))?.preview).toEqual({ turnStartedAt: start, text: "It is", delta: "It is", streamed: true });
+    await writeFile(file + ".preview.json", JSON.stringify({ turnStartedAt: start, text: "It is 42." }));
+    expect((await stream.update("working", file, 1000))?.preview?.delta).toBe(" 42.");
+    // The message is logged before the sidecar goes: a tick between the two
+    // must not show the finished text as a preview again.
+    await appendFile(file, row({ seq: 1, time: start, type: "assistant/message", data: { message: { role: "assistant", content: [{ type: "text", text: "It is 42." }] }, stop_reason: "end_turn", turn: 0 } }));
+    stream.observe((await history.read()).entries);
+    expect(await stream.update("working", file, 1500)).toEqual({ preview: null });
+    await rm(file + ".preview.json");
+    expect(await stream.update("working", file, 2000)).toBeUndefined();
   });
 });
 

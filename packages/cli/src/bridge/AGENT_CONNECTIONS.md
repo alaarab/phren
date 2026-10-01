@@ -184,7 +184,7 @@ WebSockets on the same socket.
 | `GET /v1/metrics` | In-memory counters since the Hook started: Herdr RPCs by method, identity probes (`lsof`/`proc` spawns, cache hits, agent-reported ids), git child processes by caller and timer ticks by name, each with `total`, `lastMinute`, `currentMinute` and `perMinute`, plus the Hook's `pid`. At most 65 names per kind; no paths, targets or text. Read by `scripts/bench-hook.mjs`. |
 | `GET /v1/projects/files?project=…&directory=…&path=…` | Read-only checkout browser. The directory must match a fresh project-location result; path is relative. Returns `kind: directory` with at most 500 entries or `kind: file` with base64 `data`, at most 2 MB. Symlinks, traversal, `.git`, and non-regular files are refused. `repositoryFiles` advertises support. |
 | `WS /v1/overview?watchApprovals=1` | The `/v1/workspaces` overview for one Herdr server (`server` or `mux`), pushed instead of polled. The first frame is `{type: "overview", ...}` from a fresh snapshot; after that the Hook reads the shared snapshot at most one tick old every `PHREN_OVERVIEW_TICK_MS` (default 5 s, reusing the activity timer's snapshot), rebuilds the overview when that snapshot changed or `PHREN_OVERVIEW_REFRESH_MS` (10 s) passed, and sends it only when its rows differ from the last frame. With nothing to send, `{type: "heartbeat", phren}` every `PHREN_OVERVIEW_HEARTBEAT_MS` (20 s) keeps the phone's copy current. `watchApprovals=1` renews the approval lease each tick; `resources=1` adds `{type: "resources", resources}` frames (see `/v1/resources`); `sudo=1` adds `{type: "sudo", requests}` after the first overview and whenever the pending sudo requests change (see `/v1/sudo`). Advertised as `capabilities.overviewStream`; see `server-overview.ts`. |
-| `WS /v1/transcripts`, `/v1/status` | Bounded transcript backlog/tail/history and live status. With `child=<id>` from `/v1/subagents`, the same socket follows that child agent's transcript instead: the parent target is what stays validated each tick, and the frames carry the child's parent-scoped id as `session`. The transcript socket also sends ephemeral `{preview: {turnStartedAt, text}}` or `{preview: null}` frames, at most twice a second, without changing history cursors. Completed entries clear the preview immediately. |
+| `WS /v1/transcripts`, `/v1/status` | Bounded transcript backlog/tail/history and live status. With `child=<id>` from `/v1/subagents`, the same socket follows that child agent's transcript instead: the parent target is what stays validated each tick, and the frames carry the child's parent-scoped id as `session`. The transcript socket also sends ephemeral `{preview: {turnStartedAt, text}}` or `{preview: null}` frames, at most twice a second, without changing history cursors. Completed entries clear the preview immediately. A preview built from the harness's own deltas adds `delta` and `streamed: true` (see *Streaming reply text*). |
 | `GET /v1/transcripts/history`, `/v1/transcripts/blob` | Target-bound older rows and separately requested original embedded images. `history` also takes `child=<id>`. |
 | `GET /v1/subagents`, `/v1/subagents/transcript` | The agents a conversation spawned (Codex `SubAgentActivity`, Claude Code `agent-<id>.jsonl` sidechains, phren fan-outs) as a tree of parent-scoped ids, and a one-shot recent page of one child's transcript. Child rows are served as that conversation's own turns (Claude's `isSidechain` flag is dropped). A Claude launch whose file has not appeared yet is looked for again within two seconds rather than missed until the parent next changes. Codex CLI fan-outs launched with `codex exec --json` appear as child agents through `provider: "codex"` manifests, beside OpenCode ones. Fan-out exports carry the shell command, a bounded output tail, and the changed paths; each child also reports the manifest's `model` when it names one. Fan-out children report the worktree folder name and attached branch when available, without exposing the filesystem path. A worker whose plugin refused a permission carries `reason: "blocked: <type> <pattern>"` even when the launcher recorded exit 0. A running OpenCode worker waiting on the owner's answer to a permission ask carries `reason: "needs-you: <type>: <pattern>"`. Rows include `finishedAt` and `failed` so phone lists can show failure ages and expire visible failures after one hour, independently of archive retention. |
 | `POST /v1/prompt`, `/v1/keys` | Send text or Escape after validating the live destination. A Claude `/btw <question>` is allowed while the pane works: the Hook reads its terminal panel, closes it, and streams `{type: "side-answer", id, question, state, answer?}` to transcript sockets opened with `sideAnswers=1` (see `side-questions.ts`). |
@@ -210,6 +210,49 @@ WebSockets on the same socket.
 | `POST /v1/sudo/answer` | `{ id, password }` hands the password to the waiting askpass once, which prints it for sudo; `{ id, deny: true }` makes askpass exit 1. `outcome: true` beside a password holds the reply until the Hook knows whether sudo took it: `{ ok: true, outcome: "accepted" | "rejected" | "unknown" }` (capability `sudoOutcome`). The password is 1 to 1024 characters with no newline, carriage return or NUL, and is never logged or stored. An unknown, answered or expired id is 404. |
 | `POST /v1/push/target` | Where a live push binding's request is (server, workspace, tab, pane, source), without spending it, so a tapped notification opens that session's details. |
 | `POST /v1/questions/answer` | For a Codex question, `attachments` (at most eight paths `/v1/upload` returned for this conversation) ride along: an async answer on the Hook's app-server gets them as an `Attached files on this computer:` text item plus a `localImage` per picture, a blocking `request_user_input` answer and a `codex queue` reply get the same list appended to the text; a form elicitation and other providers refuse them (400). The status frame advertises this as `capabilities.questionAttachments`. Answer an exact pending Codex `request_user_input_async` call: on a pane the Hook runs on its own app-server, by `turn/steer` into the running turn with Codex's `<send_user_message_question_reply>` message (`turn/start` when none runs); elsewhere through `codex queue --thread <UUID> --message <quoted answer>`, which Codex holds until the turn ends. A `toolUseId` of `request:<id>` answers a question parked on that app-server (`item/tool/requestUserInput`, or a single-value form MCP elicitation) as the reply to that request. Choices and typed answers are checked against the original acknowledged transcript call, the pane identity is rechecked, and a durable receipt prevents resending an uncertain result. Synchronous `request_user_input` remains unsupported on terminal-only connections. For a served OpenCode pane it takes Claude's question body (`questions`, `answers` with `optionIndexes` and `text`) and replies to OpenCode's pending question with the chosen labels. |
+
+### Streaming reply text
+
+Talk mode reads a reply aloud while it is still being written, from the
+transcript socket's preview frames:
+
+```json
+{ "type": "preview", "source": "phren", "session": "<id>",
+  "preview": { "turnStartedAt": "2026-10-01T12:00:00.000Z", "text": "It is 42", "delta": " 42", "streamed": true } }
+```
+
+The same `preview` object rides backlog and append frames. `text` is the
+current assistant text block so far (at most 32,768 characters). `delta` and
+`streamed: true` appear only when that text is the reply's own Markdown built
+from harness deltas; terminal text never has them. `delta` is what was
+appended since the previous preview frame on this socket, so a phone appends
+it in order; it equals `text` when the block is new to the socket: the first
+frame of a block, the first after `preview: null`, the first on a reconnected
+socket (which resends the text so far once), and a following block in the same
+turn. `preview: null` or the block's completed entry ends it. Frames are
+throttled to two a second, so one `delta` can carry several harness deltas.
+
+| Harness | Source | Granularity |
+| --- | --- | --- |
+| phren agent | `<store>/.sessions/session-<id>.events.jsonl.preview.json`, `{turnStartedAt, text}` written by the agent at most every 100 ms and removed after the message is logged (`packages/agent/src/session/preview.ts`) | token deltas, `streamed` |
+| Codex | the in-progress `agentMessage` item of the thread, or rollout `agent_message_delta` rows | deltas as often as Codex records them, `streamed` |
+| OpenCode | the plugin's `.preview.json` beside its mirrored event log | token deltas, `streamed` |
+| Claude Code | the pane, read twice a second and anchored to the prompt, until the turn's first entry lands | screen text, no `delta`; later blocks only as entries |
+| Copilot | none | per block, as entries |
+
+### Quick chat
+
+`POST /v1/workspaces/launch` with `kind: "phren"` takes `mode: "chat"`, which
+starts `phren agent -i --mode chat`: no tools, and the project's truths,
+summary and newest findings read from the store into the system prompt, so
+the first answer comes in about a second on the owner's own provider setup
+(ChatGPT/Codex subscription included). `resumeSession: "<uuid>"` adds
+`--session <uuid>`, continuing that session's history; resuming a chat with
+`mode: "agent"` (or none) promotes it to a normal agent with tools. Typing
+`/promote` into a running chat does the same in place. The pane is an ordinary
+phren pane: prompts go through `/v1/prompt`, replies stream as above. Other
+harnesses refuse `mode` and `resumeSession` with 400. Capabilities
+`previewDeltas` and `quickChat` advertise both.
 
 Claude Code names its current permission mode in the footer under its composer
 (`⏸ manual mode on`, `⏵⏵ accept edits on`, `⏸ plan mode on`, `⏵⏵ auto mode on`,

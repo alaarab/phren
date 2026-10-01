@@ -429,15 +429,18 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
           const newProvider = resolveProvider(config.provider.name, result.model, undefined, result.reasoning ?? undefined);
           config.provider = newProvider;
           const { buildSystemPrompt } = await import("../system-prompt.js") as typeof import("../system-prompt.js");
-          config.systemPrompt = buildSystemPrompt(
-            config.systemPrompt.split("\n## Last session")[0],
-            null,
-            { name: newProvider.name, model: result.model },
-          );
+          config.systemPrompt = config.rebuildSystemPrompt
+            ? config.rebuildSystemPrompt({ name: newProvider.name, model: result.model })
+            : buildSystemPrompt(
+              config.systemPrompt.split("\n## Last session")[0],
+              null,
+              { name: newProvider.name, model: result.model },
+            );
           update();
         } catch { /* keep current provider */ }
       },
       pickModel: openModelPicker,
+      promote: config.promote,
     },
     onOutput: (text) => {
       completedMessages.push({ id: nextId(), kind: "status", text });

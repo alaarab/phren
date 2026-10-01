@@ -196,6 +196,9 @@ nothing to that checkout.
   capped at 500 folders. These directories are local runtime state.
 - OpenCode's mirrored session event logs can have a `.preview.json` sidecar in
   `<store>/.runtime/sessions/`, holding temporary live reply text for Hook.
+  An interactive phren agent writes the same sidecar beside its event log in
+  `<store>/.sessions/` while a reply streams, and removes it once the reply is
+  logged.
 - `<bridge>/dispatches/` holds dispatch receipts without prompt text;
   on the computer that runs a dispatched Claude or Codex worker (or a
   scheduled run), `<bridge>/briefs/<id>/` holds its brief (`brief.md`, 0600)

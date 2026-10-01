@@ -69,6 +69,20 @@ function effortArgs(kind: (typeof launchKinds)[number], effort: LaunchEffort): s
 /** phren's own agent runs as `phren agent`: the subcommand and its interactive TUI lead its arguments. */
 const PHREN_AGENT_ARGS = ["agent", "-i"];
 
+/**
+ * phren agent's quick chat and resume: `mode: "chat"` starts it with no tools
+ * and its memory read up front (`--mode chat`); `resumeSession` continues a
+ * session's history (`--session <id>`). Resuming a chat in `mode: "agent"`
+ * promotes it: the same conversation with tools.
+ */
+export function phrenLaunchArgs(kind: string, data: Json): string[] {
+  const mode = z.enum(["agent", "chat"]).optional().parse(data.mode ?? undefined);
+  const resume = data.resumeSession === undefined || data.resumeSession === null ? undefined
+    : z.string().uuid("resumeSession must be a phren agent session id.").parse(data.resumeSession);
+  if ((mode || resume) && kind !== "phren") throw new BridgeError(400, "mode and resumeSession are for phren agent launches (kind phren).");
+  return [...(mode === "chat" ? ["--mode", "chat"] : []), ...(resume ? ["--session", resume] : [])];
+}
+
 async function prepareConductor(kind: (typeof launchKinds)[number], effort: LaunchEffort, model?: string): Promise<string[]> {
   const brief = await conductorBrief();
   const briefDirectory = path.join(bridgeRoot(), "conductor");
@@ -245,6 +259,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   if (permissionMode && kind === "phren") throw new BridgeError(400, "phren agent takes its permissions from its own settings; permissionMode is for Claude and Codex workers.");
   if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
   if (role === "conductor" && kind === "phren") throw new BridgeError(400, PHREN_NO_CONDUCTOR);
+  const phrenArgs = phrenLaunchArgs(kind, data);
   // A dispatched worker's or scheduled run's first prompt. It rides on the
   // launch where the harness takes one; elsewhere the caller types it.
   const brief = data.brief === undefined || data.brief === null ? undefined : launchBriefSchema.parse(data.brief);
@@ -281,7 +296,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const conductorHere = role === "agent" && workspace ? await conductorPane(server, before) : undefined;
   if (conductorHere && conductorHere.workspace_id === workspace) workspace = undefined;
   const args = role === "conductor" ? await prepareConductor(kind, effort, model)
-    : [...(kind === "phren" ? PHREN_AGENT_ARGS : []), ...(model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
+    : [...(kind === "phren" ? [...PHREN_AGENT_ARGS, ...phrenArgs] : []), ...(model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
       ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : [])];
   // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
   // pane joins the thread the Hook started, and the brief is that thread's
