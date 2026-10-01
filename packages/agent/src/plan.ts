@@ -5,13 +5,17 @@ const PLAN_SUFFIX = `
 
 ## Plan mode
 
-Before executing any tools, first describe your plan:
+Before changing anything, propose a plan for the user to approve. You can
+use the read-only tools (read_file, glob, grep, git_status, git_diff and the
+like) to explore the code first; edits, writes and shell commands are refused
+until the plan is approved. Then describe:
 1. What you understand about the task
 2. What files you'll need to read or modify
 3. What approach you'll take
 4. Any risks or uncertainties
 
-Do NOT call any tools yet. Just describe your plan.`;
+End your reply with the plan, without a tool call; the user approves it or
+asks for changes.`;
 
 /** Append plan instruction to the system prompt. */
 export function injectPlanPrompt(systemPrompt: string): string {
