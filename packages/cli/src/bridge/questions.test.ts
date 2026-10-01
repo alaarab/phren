@@ -150,6 +150,7 @@ sleep 30
 "$REAL_BIN" "$@"
 `, { mode: 0o755 });
     vi.stubEnv("PATH", `${bin}${path.delimiter}${process.env.PATH ?? ""}`);
+    vi.stubEnv("PHREN_CODEX_BINARY", "on");
     try {
       const started = Date.now(), bridge = new CodexQuestions();
       expect(await bridge.supported()).toBe(true);
