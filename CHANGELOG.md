@@ -3,7 +3,7 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.3.20] - 2026-10-01
 
 ### Added
 
