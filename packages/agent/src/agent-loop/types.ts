@@ -4,7 +4,6 @@ import type { CostTracker } from "../cost.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { createCaptureState, type CaptureState } from "../memory/auto-capture.js";
 import { AntiPatternTracker } from "../memory/anti-patterns.js";
-import { createFlushConfig, type FlushConfig } from "../memory/context-flush.js";
 import type { LintTestConfig } from "../tools/lint-test.js";
 import type { HooksConfig } from "../user-hooks.js";
 
@@ -47,7 +46,6 @@ export interface AgentSession {
   toolCalls: number;
   captureState: CaptureState;
   antiPatterns: AntiPatternTracker;
-  flushConfig: FlushConfig;
   /** Repeat-call guard chain (reset on direct user input). */
   repeatChain: RepeatChainState;
 }
@@ -78,7 +76,7 @@ export interface TurnHooks {
   onToolStart?: (name: string, input: Record<string, unknown>, count: number) => void;
   /** After tool execution. Default: verbose log */
   onToolEnd?: (name: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number) => void;
-  /** Status messages (prune, flush, budget, cost). Default: stderr */
+  /** Status messages (prune, budget, cost). Default: stderr */
   onStatus?: (msg: string) => void;
   /** Mid-turn steering input injection. Return null for none. */
   getSteeringInput?: () => string | null;
@@ -99,7 +97,8 @@ import { SessionLog } from "../session/log.js";
 import { createRepeatChain, type RepeatChainState } from "../guards/repeat-tool-reminder.js";
 import { randomUUID } from "crypto";
 
-export function createSession(contextLimit?: number, options?: { log?: SessionLog }): AgentSession {
+/** The context limit argument is unused (compaction reads the provider's window); kept for callers. */
+export function createSession(_contextLimit?: number, options?: { log?: SessionLog }): AgentSession {
   const log =
     options?.log ??
     new SessionLog({
@@ -116,7 +115,6 @@ export function createSession(contextLimit?: number, options?: { log?: SessionLo
     toolCalls: 0,
     captureState: createCaptureState(),
     antiPatterns: new AntiPatternTracker(),
-    flushConfig: createFlushConfig(contextLimit ?? 200_000),
     repeatChain: createRepeatChain(),
   };
 }

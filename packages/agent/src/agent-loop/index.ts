@@ -4,7 +4,6 @@ import { shouldPrune } from "../context/pruner.js";
 import { compactWithLlm } from "../context/compactor.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
 import { isContextOverflowError, withRetry } from "../providers/retry.js";
-import { checkFlushNeeded } from "../memory/context-flush.js";
 import { injectPlanPrompt, requestPlanApproval } from "../plan.js";
 import { detectLintCommand, detectTestCommand } from "../tools/lint-test.js";
 import { createCheckpoint } from "../checkpoint.js";
@@ -102,20 +101,12 @@ export async function runTurn(
       status(`\n${formatTurnHeader(session.turns + 1, turnToolCalls)}\n`);
     }
 
-    // Check if context flush is needed (one-time per session) — must run before pruning
-    const contextLimit = provider.contextWindow ?? 200_000;
-    const flushPrompt = checkFlushNeeded(systemPrompt, session.messages, session.flushConfig);
-    if (flushPrompt) {
-      session.log.append("user/message", {
-        message: { role: "user", content: flushPrompt },
-        source: "system",
-        turn: session.turns,
-      });
-      if (verbose) status("[context flush injected]\n");
-    }
-
     // Prune context if approaching limit — LLM checkpoint with knowledge
-    // promotion, degrading to the regex summary on any failure.
+    // promotion, degrading to the regex summary on any failure. (There is no
+    // separate "summarize what you learned" prompt: injected mid-task, the
+    // model answered it and ended the turn, and compaction already promotes
+    // knowledge to phren out of band.)
+    const contextLimit = provider.contextWindow ?? 200_000;
     const compactHistory = async (keepRecentTurns: number, trigger: string): Promise<boolean> => {
       const preCount = session.messages.length;
       const preTokens = estimateMessageTokens(session.messages);
