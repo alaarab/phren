@@ -3,6 +3,18 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- Live reply text for talk mode: transcript socket preview frames built from a harness's own deltas (phren agent, Codex, OpenCode) carry `delta` (the text appended since the socket's previous preview frame, the whole text when the block is new to the socket) and `streamed: true`. Claude's pane text keeps the old frame. Capability `previewDeltas`.
+- phren agent streams the reply it is writing to a `.preview.json` sidecar beside its event log, at most every 100 ms, removed once the message is logged; the Hook reads it like OpenCode's.
+- Quick chat: `phren agent --mode chat` has no tools and reads the project's truths, summary and newest findings into its system prompt up front (no search index), on the configured provider including the ChatGPT/Codex subscription. `/promote` continues the same conversation as an agent with tools. The Hook launches it with `kind: "phren", mode: "chat"`, and `resumeSession` resumes a chat or, with `mode: "agent"`, promotes it. Capability `quickChat`.
+
+### Fixed
+
+- The Hook found no transcript for a phren agent pane: it looked for the agent's event log in `<store>/.runtime/sessions`, but the agent writes to `<store>/.sessions`.
+
 ## [0.3.19] - 2026-10-01
 
 ### Added

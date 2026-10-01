@@ -50,6 +50,11 @@ export interface CliArgs {
   noLlmCompact: boolean;
   /** Kernel write-fence for shell commands: off | auto | require. */
   sandbox: "off" | "auto" | "require";
+  /**
+   * chat: quick chat, no tools, read-only phren memory in the system prompt
+   * (`/promote` turns it into a normal agent session with tools).
+   */
+  mode: "agent" | "chat";
   help: boolean;
   version: boolean;
 }
@@ -70,6 +75,8 @@ Options:
   --max-output <n>     Max output tokens per response (default: auto per model)
   --budget <dollars>   Max spend in USD (aborts when exceeded)
   --plan               Plan mode: show plan before executing tools
+  --mode <mode>        agent (default) or chat: quick chat with no tools and read-only
+                       phren memory up front; /promote continues it as an agent
   --no-subagents       Disable spawn_agent/send_message/list_agents in one-shot mode
   --no-llm-compact     Use regex prune summaries instead of LLM compaction
   --sandbox <mode>     Kernel write-fence for shell (bwrap): off, auto (default), require
@@ -141,6 +148,7 @@ export function parseArgs(argv: string[]): CliArgs {
     sandbox: "auto",
     mcp: [],
     multi: false,
+    mode: "agent",
     help: false,
     version: false,
   };
@@ -161,6 +169,11 @@ export function parseArgs(argv: string[]): CliArgs {
       if (mode === "off" || mode === "auto" || mode === "require") { args.sandbox = mode; }
     }
     else if (arg === "--plan") { args.plan = true; }
+    else if (arg === "--mode" && argv[i + 1]) {
+      const mode = argv[++i];
+      if (mode !== "agent" && mode !== "chat") throw new Error(`Unknown --mode "${mode}". Use agent or chat.`);
+      args.mode = mode;
+    }
     else if (arg === "--resume" || arg === "--continue" || arg === "-c") { args.resume = true; }
     else if (arg === "--session" && argv[i + 1]) { args.resume = true; args.resumeId = argv[++i]; }
     else if (arg === "--list-sessions") { args.listSessions = true; }
