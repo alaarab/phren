@@ -459,20 +459,22 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         }
       },
       onModelChange: async (result) => {
-        try {
-          const { resolveProvider } = await import("../providers/resolve.js") as typeof import("../providers/resolve.js");
-          const newProvider = resolveProvider(config.provider.name, result.model, undefined, result.reasoning ?? undefined);
-          config.provider = newProvider;
-          const { buildSystemPrompt } = await import("../system-prompt.js") as typeof import("../system-prompt.js");
-          config.systemPrompt = config.rebuildSystemPrompt
-            ? config.rebuildSystemPrompt({ name: newProvider.name, model: result.model })
-            : buildSystemPrompt(
-              config.systemPrompt.split("\n## Last session")[0],
-              null,
-              { name: newProvider.name, model: result.model },
-            );
-          update();
-        } catch { /* keep current provider */ }
+        // A failure (no key for that provider, an unknown name) is reported
+        // by the command; the current provider stays.
+        const { resolveProvider } = await import("../providers/resolve.js") as typeof import("../providers/resolve.js");
+        const newProvider = resolveProvider(result.provider ?? config.provider.name, result.model || undefined, undefined, result.reasoning ?? undefined);
+        config.provider = newProvider;
+        config.costTracker?.reprice((newProvider as { model?: string }).model ?? newProvider.name, newProvider.name, newProvider.baseUrl);
+        const { buildSystemPrompt } = await import("../system-prompt.js") as typeof import("../system-prompt.js");
+        config.systemPrompt = config.rebuildSystemPrompt
+          ? config.rebuildSystemPrompt({ name: newProvider.name, model: (newProvider as { model?: string }).model })
+          : buildSystemPrompt(
+            config.systemPrompt.split("\n## Last session")[0],
+            null,
+            { name: newProvider.name, model: (newProvider as { model?: string }).model },
+          );
+        update();
+        return newProvider;
       },
       pickModel: openModelPicker,
       pickFromList: openListPicker,

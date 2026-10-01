@@ -86,8 +86,11 @@ function renderReasoningMeter(level: ReasoningLevel, range: ReasoningLevel[]): s
 // ── Interactive picker ──────────────────────────────────────────────────────
 
 export interface PickerResult {
+  /** "" keeps the provider's default model. */
   model: string;
   reasoning: ReasoningLevel;
+  /** Switch to this provider too; the current one when absent. */
+  provider?: string;
 }
 
 /**
