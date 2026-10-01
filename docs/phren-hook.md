@@ -760,6 +760,35 @@ ElevenLabs sent none. The alignment covers the words spoken, after the Hook
 strips the reply's markdown, so `characters` joined is the spoken text. The
 phone uses it to highlight the word being read in the chat.
 
+With `"timestamps": true, "stream": true` (the `speechTimestampStream`
+capability) the Hook calls ElevenLabs' `stream/with-timestamps` and streams
+`application/x-ndjson`: one `{ "audio": "<base64>", "alignment": {...} | null }`
+line per ElevenLabs chunk, with the same `X-Phren-*` headers as the audio
+stream, the alignment times in seconds from the start of the sentence. The
+first line arrives in about 0.3 s with v4 Turbo; the plain timestamped reply
+waits for the whole clip, about 0.9 s (measured 2026-10-01).
+
+How fast the first audio arrives. The Hook passes ElevenLabs' body through as
+it arrives, sending the headers before the first byte. It reaches ElevenLabs
+over its own keep-alive connection pool, so the next sentence skips the TCP and
+TLS handshake even after a pause of up to a minute. `phren bridge speech-region
+us` sends every request to ElevenLabs' US-only endpoint
+(`api.us.elevenlabs.io`), and `global` (the default) to `api.elevenlabs.io`.
+It is stored in `speech.json` like the model and read on every reply.
+
+`WS /v1/speech/live` (the `speechLive` capability) voices a reply while it is
+still being written. Open it with optional `voice` and repeated `format`
+query parameters, send `{ "text": "<more of the reply>" }` as the reply grows
+and `{ "done": true }` when it is complete. The Hook speaks it a sentence or
+line at a time, as soon as each one is complete, and sends back `{ "type": "start", model,
+format, audioFormat, sampleRate }` with the first audio, then `{ "type":
+"audio", audio, alignment }` frames (alignment in seconds from the start of
+the socket's audio), then `{ "type": "done" }`, or `{ "type": "error", code,
+error }`. v4 Turbo works on ElevenLabs' text-to-dialogue WebSocket (its
+text-to-speech WebSocket refuses v4 models), where the first audio came about 140 ms
+after ElevenLabs had the first complete sentence (2026-10-01); Flash v2.5 is the fallback, on
+the text-to-speech WebSocket with `auto_mode`. One socket voices one reply.
+
 The key is this computer's ElevenLabs key (see [the ElevenLabs key](#the-elevenlabs-key)),
 used only in the request to ElevenLabs and never returned, even in errors.
 
