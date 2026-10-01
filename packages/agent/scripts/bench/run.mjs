@@ -136,6 +136,7 @@ for (const task of tasks) {
       tool_calls: out.result?.tool_calls ?? null,
       input_tokens: out.result?.usage?.input_tokens ?? null,
       output_tokens: out.result?.usage?.output_tokens ?? null,
+      cache_read_tokens: out.result?.usage?.cache_read_input_tokens ?? null,
       cost_usd: out.result?.total_cost_usd ?? null,
       seconds: Math.round(out.seconds * 10) / 10,
     };
@@ -149,10 +150,11 @@ for (const task of tasks) {
 }
 
 const passed = rows.filter((r) => r.pass).length;
-console.log(`\n| Task | Provider / model | Result | Turns | Tool calls | Tokens in/out | Seconds |`);
-console.log(`| --- | --- | --- | ---: | ---: | ---: | ---: |`);
+console.log(`\n| Task | Provider / model | Result | Turns | Tool calls | Tokens in/cached/out | Cost | Seconds |`);
+console.log(`| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |`);
 for (const r of rows) {
-  console.log(`| ${r.task} | ${r.provider} / ${r.model ?? "default"} | ${r.pass ? "pass" : `fail: ${r.reasons.join("; ")}`} | ${r.turns ?? "-"} | ${r.tool_calls ?? "-"} | ${r.input_tokens ?? "-"} / ${r.output_tokens ?? "-"} | ${r.seconds} |`);
+  const cost = r.cost_usd === null ? "included" : `$${r.cost_usd}`;
+  console.log(`| ${r.task} | ${r.provider} / ${r.model ?? "default"} | ${r.pass ? "pass" : `fail: ${r.reasons.join("; ")}`} | ${r.turns ?? "-"} | ${r.tool_calls ?? "-"} | ${r.input_tokens ?? "-"} / ${r.cache_read_tokens ?? "-"} / ${r.output_tokens ?? "-"} | ${cost} | ${r.seconds} |`);
 }
 console.log(`\n${passed}/${rows.length} passed`);
 const output = opt("--output");
