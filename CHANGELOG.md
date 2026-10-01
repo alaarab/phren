@@ -28,6 +28,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - phren agent: preview sidecars a killed agent left in `<store>/.sessions` are removed after 30 minutes, when the next interactive session starts.
 - phren agent: `--context-window` and `--price-*` apply only to the model they were given with, including in subagents on that model, instead of following a `/model` switch through the environment.
 - phren agent: subagents of an `openai-compat` or `deepseek` session run on the parent's endpoint and model with its key (`PHREN_AGENT_API_KEY`, `DEEPSEEK_API_KEY`, passed in the child's environment only); before, they got neither and fell back to auto-detecting another provider.
+- phren agent: a `/model` switch in a session started on a DeepSeek proxy (`--provider deepseek --base-url …`) stays on that proxy instead of going to api.deepseek.com. `PHREN_AGENT_BASE_URL` sets DeepSeek's endpoint when `PHREN_AGENT_PROVIDER=deepseek`; an `openai-compat` session's relay URL is never used for DeepSeek.
 - phren agent: `--reasoning none` is sent only to DeepSeek and OpenAI's GPT-5.1 and later; other models, which reject it, get no reasoning effort.
 
 ## [0.3.19] - 2026-10-01

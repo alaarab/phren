@@ -240,3 +240,48 @@ describe("a subagent's endpoint", () => {
     expect(p.baseUrl).toBe("https://relay.test/v1");
   });
 });
+
+describe("a /model switch keeps the session's DeepSeek endpoint", () => {
+  afterEach(async () => {
+    const { keepSessionEndpoint } = await import("../providers/resolve.js");
+    keepSessionEndpoint({ name: "none" });
+  });
+
+  it("a session started on a DeepSeek proxy switches to another DeepSeek model on the same proxy", async () => {
+    const { keepSessionEndpoint } = await import("../providers/resolve.js");
+    process.env.DEEPSEEK_API_KEY = "ds";
+    const start = resolveProvider("deepseek", "deepseek-flash", undefined, undefined, { baseUrl: "https://ds-proxy.test/" });
+    expect(start.baseUrl).toBe("https://ds-proxy.test");
+    keepSessionEndpoint(start);
+    // What the /model picker does: same provider name, new model, no options.
+    const switched = resolveProvider(start.name, "deepseek-v4-pro");
+    expect(switched.baseUrl).toBe("https://ds-proxy.test");
+    // An explicit option still wins.
+    expect(resolveProvider("deepseek", "deepseek-flash", undefined, undefined, { baseUrl: "https://other.test" }).baseUrl).toBe("https://other.test");
+  });
+
+  it("an openai-compat session's relay never becomes DeepSeek's endpoint", async () => {
+    const { keepSessionEndpoint } = await import("../providers/resolve.js");
+    process.env.DEEPSEEK_API_KEY = "ds";
+    process.env.PHREN_AGENT_API_KEY = "relay";
+    process.env.PHREN_AGENT_BASE_URL = "https://relay.test/v1";
+    const start = resolveProvider("openai-compat", "glm-5");
+    keepSessionEndpoint(start);
+    expect(resolveProvider("deepseek", "deepseek-flash").baseUrl).toBe("https://api.deepseek.com");
+  });
+
+  it("PHREN_AGENT_BASE_URL applies to DeepSeek when the environment names DeepSeek as the provider", () => {
+    process.env.DEEPSEEK_API_KEY = "ds";
+    process.env.PHREN_AGENT_PROVIDER = "deepseek";
+    process.env.PHREN_AGENT_BASE_URL = "https://ds-env.test/";
+    expect(resolveProvider(undefined, "deepseek-flash").baseUrl).toBe("https://ds-env.test");
+  });
+
+  it("a session on DeepSeek's own API keeps no override", async () => {
+    const { keepSessionEndpoint } = await import("../providers/resolve.js");
+    process.env.DEEPSEEK_API_KEY = "ds";
+    const start = resolveProvider("deepseek", "deepseek-flash");
+    keepSessionEndpoint(start);
+    expect(resolveProvider("deepseek", "deepseek-v4-pro").baseUrl).toBe("https://api.deepseek.com");
+  });
+});
