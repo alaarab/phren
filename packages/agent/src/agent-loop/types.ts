@@ -83,6 +83,8 @@ export interface TurnHooks {
   /** Plan approval override. Return { approved: true } to skip the readline
    *  prompt (e.g. in a TUI where per-tool approval handles gating instead). */
   onPlanApproval?: () => Promise<{ approved: boolean; feedback?: string }>;
+  /** A model call failed and is being retried: drop any partial text or reasoning shown for it. */
+  onStreamRetry?: () => void;
   /** A complete assistant message was recorded (after streaming finished). */
   onAssistantMessage?: (content: ContentBlock[], stopReason: "end_turn" | "tool_use" | "max_tokens") => void;
   /** Tool results were recorded (one entry per tool_use, in model order). */
