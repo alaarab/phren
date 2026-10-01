@@ -1233,7 +1233,12 @@ schedules:
       expect(await submit(other, "typed at the keyboard")).toEqual({ status: 200 });
       // A busy agent submits queued text long after the phone stopped waiting;
       // the record outlives that wait, so a wrong conversation is still refused.
-      // Still the same conversation: queued, and its delivery id says when it lands.
+      // Still the same conversation: queued, and its delivery id says when it
+      // lands, on request and on a transcript stream that asked for it.
+      const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/transcripts?${new URLSearchParams({ ...target, deliveries: "1" })}`);
+      const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
+      await once(socket, "open");
+      const states = (id: string) => frames.filter(f => f.type === "delivery" && f.deliveryId === id).map(f => f.state);
       expect((await api("/v1/prompt", { target, text: "queued while busy", deliveryId: "queued-000001" })).data).toEqual({ ok: true, queued: true });
       expect((await api("/v1/prompt/status", { target, deliveryId: "queued-000001" })).data).toEqual({ ok: true, state: "queued" });
       expect(await submit(other, "queued while busy")).toMatchObject({ decision: "block" });
@@ -1244,6 +1249,13 @@ schedules:
       expect((await api("/v1/prompt/status", { target, deliveryId: "queued-000002" })).data).toEqual({ ok: true, state: "delivered" });
       expect((await api("/v1/prompt/status", { target: { ...target, session: other }, deliveryId: "queued-000002" })).status).toBe(409);
       expect((await api("/v1/prompt/status", { target, deliveryId: "never-sent-01" })).data).toEqual({ ok: true, state: "unknown" });
+      try {
+        await waitFor(() => states("queued-000002").at(-1) === "delivered" && states("queued-000001").at(-1) === "blocked", 4_000);
+        expect(frames.find(f => f.deliveryId === "queued-000002" && f.state === "delivered")).toEqual({ type: "delivery", source: target.source, session, deliveryId: "queued-000002", state: "delivered" });
+        // Changes only, each state once, and never a message it was not asked about.
+        for (const id of ["queued-000001", "queued-000002"]) expect(new Set(states(id)).size).toBe(states(id).length);
+        expect(states("never-sent-01")).toEqual([]);
+      } finally { socket.terminate(); }
     }, 15_000);
 
     // Seen on the phone: an idle Claude Code redrawing (an update notice)
