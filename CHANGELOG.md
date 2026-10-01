@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- phren agent hooks follow Claude Code's convention: exit code 2 blocks a `UserPromptSubmit` prompt (headless subtype `error_hook_blocked`), sends the model back to work from `Stop` (at most 5 times a turn, `stop_hook_active` after the first) and returns a `PostToolUse` hook's stderr to the model; exit 0 stdout from `UserPromptSubmit` and the new `SessionStart` event is added as context. New `PreCompact` event before automatic compaction.
 - phren agent permission rules: `permissions.allow`, `ask` and `deny` lists in `~/.phren-agent/settings.json` or the project's `.phren-agent/settings.json`, and `--allowedTools` / `--disallowedTools` on the command line, in Claude Code's syntax (`read_file`, `shell(git log *)`, `edit_file(src/**)`, `mcp_github_*`). Deny wins in every mode, a shell line is allowed only when each command on it is, and subagents inherit the rules. A headless run can now allow exactly what a task needs instead of all or nothing.
 
 ### Changed
