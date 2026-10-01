@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs, printHelp, resolveStartupPermissions } from "./config.js";
 import { loadPersistentAllowlist } from "./permissions/allowlist.js";
+import { loadPermissionRules } from "./permissions/rules.js";
 import { keepSessionEndpoint, resolveProvider } from "./providers/resolve.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { readFileTool } from "./tools/read-file.js";
@@ -294,6 +295,7 @@ export async function runAgentCli(raw: string[]) {
     allowedPaths: [],
     projectRoot: process.cwd(),
     sandboxMode: args.sandbox,
+    rules: loadPermissionRules(process.cwd(), { allow: args.allowedTools, deny: args.disallowedTools }),
   });
   // Nobody can answer a prompt in a headless run or with stdin not a
   // terminal (a readline question on a closed stdin would hang): deny, and
@@ -303,7 +305,7 @@ export async function runAgentCli(raw: string[]) {
     registry.askUser = async (toolName, _input, reason) => {
       permissionDenials++;
       process.stderr.write(
-        `[denied ${toolName}: ${reason} No one is present to approve; rerun with --permissions auto-confirm or --yolo to allow.]\n`,
+        `[denied ${toolName}: ${reason} No one is present to approve; allow it with --allowedTools "${toolName}", --permissions auto-confirm or --yolo.]\n`,
       );
       return false;
     };
