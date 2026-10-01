@@ -16,7 +16,7 @@ import { callerQuery, localCaller, oneWayHint } from "./conductor-group.js";
 import { recordedConductor } from "./conductor-role.js";
 import { linkedComputer } from "./computer-identity.js";
 import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
-import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
+import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
 import { phrenStoreRoot } from "./transcripts.js";
 import { isAccountSlug } from "./claude-accounts.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
@@ -285,6 +285,53 @@ async function sendBrief(peer: DispatchHost, target: Json, text: string, deliver
   }
 }
 
+/** The pane as the remote Hook lists it now, or undefined when it does not list it. */
+async function listedPane(peer: DispatchHost, place: { workspace: unknown; tab: unknown; pane: unknown }): Promise<Json | undefined> {
+  const panes = await peer.request(`/v1/workspaces/panes?server=${encodeURIComponent(peer.server)}&groupId=${encodeURIComponent(String(place.workspace))}&childId=${encodeURIComponent(String(place.tab))}`).catch(() => undefined);
+  return (Array.isArray(panes?.panes) ? panes.panes : []).find((p: Json) => p && typeof p === "object" && (p as Json).id === place.pane) as Json | undefined;
+}
+
+/** Tries of a brief typed into a starting pane before the dispatch fails. */
+const BRIEF_TRIES = 2;
+/** Looks, one settle interval apart, for a starting pane to read ready, and for a typed brief to show. */
+const READY_LOOKS = 15;
+const LANDED_LOOKS = 20;
+
+/**
+ * A starting agent's terminal takes typed text only once its prompt is drawn,
+ * which Herdr reads as idle: text typed while it is still `unknown` can be
+ * swallowed with nothing to show for it (Mini w4E, 2026-09-30). Waits for that,
+ * at most READY_LOOKS. A startup screen is the owner's to answer; a pane the
+ * Hook does not list is not waited on.
+ */
+async function readyForBrief(peer: DispatchHost, target: StartingTarget, intervalMs: number): Promise<void> {
+  for (let look = 0; look < READY_LOOKS; look++) {
+    const pane = await listedPane(peer, target);
+    const status = pane?.agentStatus;
+    if (!pane || ["idle", "done", "working"].includes(String(status))) return;
+    if (status === "blocked" || status === "waiting") throw new StartupScreen(String(status));
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+}
+
+/**
+ * Whether a brief typed into a starting pane reached its agent: a conversation
+ * appeared, or the agent went to work. Lost when the pane still sits idle on
+ * the same starting binding after LANDED_LOOKS; unknown when the Hook does not
+ * list the pane, or it no longer holds that binding.
+ */
+async function briefLanded(peer: DispatchHost, target: StartingTarget, intervalMs: number): Promise<{ state: "arrived"; session?: string } | { state: "lost" | "unknown" }> {
+  for (let look = 0; look < LANDED_LOOKS; look++) {
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+    const pane = await listedPane(peer, target);
+    if (!pane) return { state: "unknown" };
+    if (typeof pane.sessionId === "string" && pane.sessionId) return { state: "arrived", session: pane.sessionId };
+    if (pane.starting === true && pane.startingToken !== target.startingToken) return { state: "unknown" };
+    if (["working", "blocked", "waiting"].includes(String(pane.agentStatus))) return { state: "arrived" };
+  }
+  return { state: "lost" };
+}
+
 /** What the worker's own hooks reported for a brief that went with its
  * launch, or undefined when the receiving Hook has no such brief. */
 export async function arrivalOf(peer: Pick<DispatchHost, "request">, id: string): Promise<BriefArrival | undefined> {
@@ -441,9 +488,11 @@ export class DispatchService {
         if (target.source !== data.harness || target.server !== peer.server) throw new BridgeError(502, "The remote Hook returned a different launch target.");
         receipt.target = target;
         receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt);
-        const result = await sendBrief(peer, receipt.target, prompt, `dispatch-${receipt.id}`);
-        receipt.state = result.ok === true && result.deliveryUncertain !== true ? "accepted" : "uncertain";
-        if (ignored) receipt.error = ignored;
+        if (!("starting" in target)) {
+          const result = await sendBrief(peer, target, prompt, `dispatch-${receipt.id}`);
+          receipt.state = result.ok === true && result.deliveryUncertain !== true ? "accepted" : "uncertain";
+        } else await this.typeIntoStarting(peer, receipt, target, prompt);
+        if (ignored) receipt.error = [receipt.error, ignored].filter(Boolean).join(" ").slice(0, 500);
       } catch (error) {
         if (error instanceof StartupScreen) {
           // Known, not uncertain: the brief never reached the pane. Say where
@@ -460,6 +509,35 @@ export class DispatchService {
       receipt.updatedAt = new Date().toISOString(); await save(receipt);
       return { ok: receipt.state === "accepted", ...receipt };
     } finally { this.active = false; }
+  }
+
+  /**
+   * A brief typed into a pane that has no conversation yet: typed once the
+   * pane reads ready, then confirmed by the conversation it starts. A brief
+   * the pane swallowed (still idle on its starting binding) is typed again,
+   * under its own delivery id, and after BRIEF_TRIES the dispatch fails with
+   * a return, never an accepted receipt for a worker that has nothing to do.
+   * A Claude prompt left typed but unsubmitted is not typed again.
+   */
+  private async typeIntoStarting(peer: DispatchHost, receipt: Receipt, target: StartingTarget, prompt: string): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+      await readyForBrief(peer, target, this.settleIntervalMs);
+      const result = await sendBrief(peer, target, prompt, attempt === 1 ? `dispatch-${receipt.id}` : `dispatch-${receipt.id}-${attempt}`);
+      const sent = result.ok === true && result.deliveryUncertain !== true;
+      const landed = await briefLanded(peer, target, this.settleIntervalMs);
+      if (landed.state === "arrived") {
+        const full = landed.session ? targetSchema.safeParse({ server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane, source: target.source, session: landed.session }) : undefined;
+        if (full?.success) receipt.target = full.data;
+        receipt.state = "accepted"; return;
+      }
+      if (landed.state === "unknown" || result.unsubmitted === true) { receipt.state = sent ? "accepted" : "uncertain"; return; }
+      logger.info("dispatch", `The brief for ${receipt.computer} ${receipt.label} did not reach the starting pane (try ${attempt} of ${BRIEF_TRIES}).`);
+      if (attempt < BRIEF_TRIES) continue;
+      const error = `The brief typed into the new "${receipt.label}" pane on ${receipt.computer} never reached ${receipt.harness}: after ${BRIEF_TRIES} tries the pane still sits idle with no conversation. The pane is still open; hand the brief off to it or close it.`.slice(0, 500);
+      receipt.state = "failed"; receipt.error = error;
+      receipt.returned = { state: "failed", at: new Date().toISOString(), error, read: false };
+      return;
+    }
   }
 
   /**
