@@ -29,7 +29,9 @@ rest.
 
 ## Still open
 
-- LSP diagnostics (the parse and type checks cover the cheap part).
+- **Next big item: LSP diagnostics.** Type errors scoped to the edited file
+  right after each edit, from the project's language server, as OpenCode does.
+  The parse check and the post-edit type-check run cover the cheap part.
 - An output JSON schema for headless results (`--json-schema`).
 - Smaller UX: image paste, `/reasoning`, `/model` across providers, steering
   mid-stream, provider-native web search, network isolation in the sandbox,
