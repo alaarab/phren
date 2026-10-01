@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- `phren agent --input-format stream-json` (with `--output-format stream-json`) reads user messages as JSON lines on stdin, in Claude Code's shape, and runs each as a turn on the same session with its own `result` line, so a script can drive a multi-turn session.
 - phren agent loads MCP servers without flags: `~/.phren-agent/mcp.json` always, and a project's `.mcp.json` or `.phren-agent/mcp.json` once the project is trusted with `--trust-project-mcp` (remembered); `--strict-mcp-config` uses only the flags. MCP tool results over 100,000 characters are cut with a note (`PHREN_AGENT_MCP_MAX_OUTPUT_CHARS`).
 - phren agent permission rules: `permissions.allow`, `ask` and `deny` lists in `~/.phren-agent/settings.json` or the project's `.phren-agent/settings.json`, and `--allowedTools` / `--disallowedTools` on the command line, in Claude Code's syntax (`read_file`, `shell(git log *)`, `edit_file(src/**)`, `mcp_github_*`). Deny wins in every mode, a shell line is allowed only when each command on it is, and subagents inherit the rules. A headless run can now allow exactly what a task needs instead of all or nothing.
 - phren agent checks the syntax of each file it edits, writes or patches and adds any new parse error to the tool result: TypeScript and JavaScript through Node's built-in parser, Python through `ast`, JSON through `JSON.parse`. Errors the file already had are not reported. `PHREN_AGENT_SYNTAX_CHECK=off` turns it off.

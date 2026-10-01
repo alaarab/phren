@@ -36,7 +36,7 @@ import { loadAndRegisterCustomCommands, getCustomCommandInfos } from "./commands
 import { createSession, runTurn, type AgentConfig } from "./agent-loop.js";
 import { SessionLog, seedFromMessages } from "./session/log.js";
 import { fileSink, findEventLogById, findLatestEventLog, listEventLogs, persistFork, restoreSessionLog } from "./session/persist.js";
-import { buildHeadlessResult, createHeadlessHooks, headlessExitCode, readStdin, type HeadlessResult } from "./headless.js";
+import { buildHeadlessResult, createHeadlessHooks, headlessExitCode, parseStreamJsonInput, readLines, readStdin, type HeadlessResult } from "./headless.js";
 import type { LlmMessage } from "./providers/types.js";
 import { createCostTracker } from "./cost.js";
 import { scopeModelOverrides } from "./model-overrides.js";
@@ -171,8 +171,13 @@ export async function runAgentCli(raw: string[]) {
     process.exit(0);
   }
 
+  const streamInput = args.inputFormat === "stream-json";
+  if (streamInput && args.outputFormat !== "stream-json") {
+    console.error("--input-format stream-json needs --output-format stream-json.");
+    process.exit(1);
+  }
   // Headless with no task argument: read the task from piped stdin.
-  if (args.print && !args.task && !process.stdin.isTTY) {
+  if (args.print && !streamInput && !args.task && !process.stdin.isTTY) {
     args.task = (await readStdin()).trim();
   }
   if (args.print) {
@@ -190,7 +195,7 @@ export async function runAgentCli(raw: string[]) {
   if (!args.task && args.resume) {
     args.task = "Continue where the previous session left off.";
   }
-  if (!args.task && !args.interactive && !args.multi && !args.team) {
+  if (!args.task && !streamInput && !args.interactive && !args.multi && !args.team) {
     console.error("Usage: phren-agent <task>\nRun phren-agent --help for more info.");
     process.exit(1);
   }
@@ -690,8 +695,47 @@ export async function runAgentCli(raw: string[]) {
       ? "Continuing where we left off. Please review the conversation and continue with the task."
       : args.task;
     const session = createSession(contextLimit, { log: resumedLog ?? agentConfig.sessionLog });
-    emitHerdrHook("UserPromptSubmit");
-    const turnResult = await runTurn(prompt, session, agentConfig, headlessHooks).finally(() => emitHerdrHook("Stop"));
+    // One turn for the task, or one per user message with --input-format
+    // stream-json, all on the same session; each gets its own result line.
+    const taskGiven = !!args.task;
+    async function* prompts(): AsyncGenerator<string> {
+      if (!streamInput) {
+        yield prompt;
+        return;
+      }
+      if (taskGiven) yield prompt;
+      for await (const line of readLines(process.stdin)) {
+        const parsed = parseStreamJsonInput(line);
+        if ("error" in parsed) {
+          process.stderr.write(`[skipped an input line: ${parsed.error}]\n`);
+          continue;
+        }
+        yield parsed.prompt;
+      }
+    }
+    let turnResult: Awaited<ReturnType<typeof runTurn>> = { text: "", turns: 0, toolCalls: 0, stopReason: "end_turn" };
+    let turnStartedAt = startedAt;
+    for await (const next of prompts()) {
+      emitHerdrHook("UserPromptSubmit");
+      turnResult = await runTurn(next, session, agentConfig, headlessHooks).finally(() => emitHerdrHook("Stop"));
+      if (args.print && streamInput) {
+        const headless = buildHeadlessResult({
+          text: turnResult.text,
+          stopReason: turnResult.stopReason,
+          turns: turnResult.turns,
+          toolCalls: turnResult.toolCalls,
+          startedAt: turnStartedAt,
+          sessionId: logSessionId,
+          provider: provider.name,
+          model: modelId,
+          costTracker,
+          permissionDenials,
+        });
+        emitHeadless(headless);
+        exitCode = headlessExitCode(headless);
+        turnStartedAt = Date.now();
+      }
+    }
     const result = {
       finalText: turnResult.text,
       turns: turnResult.turns,
@@ -706,7 +750,7 @@ export async function runAgentCli(raw: string[]) {
       process.stderr.write(`\nDone: ${result.turns} turns, ${result.toolCalls} tool calls${costStr}\n`);
     }
 
-    if (args.print) {
+    if (args.print && !streamInput) {
       const headless = buildHeadlessResult({
         text: turnResult.text,
         stopReason: turnResult.stopReason,
