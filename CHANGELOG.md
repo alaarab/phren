@@ -10,6 +10,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Live reply text for talk mode: transcript socket preview frames built from a harness's own deltas (phren agent, Codex, OpenCode) carry `delta` (the text appended since the socket's previous preview frame, the whole text when the block is new to the socket) and `streamed: true`. Claude's pane text keeps the old frame. Capability `previewDeltas`.
 - phren agent streams the reply it is writing to a `.preview.json` sidecar beside its event log, at most every 100 ms, removed once the message is logged; the Hook reads it like OpenCode's.
 - Quick chat: `phren agent --mode chat` has no tools and reads the project's truths, summary and newest findings into its system prompt up front (no search index), on the configured provider including the ChatGPT/Codex subscription. `/promote` continues the same conversation as an agent with tools. The Hook launches it with `kind: "phren", mode: "chat"`, and `resumeSession` resumes a chat or, with `mode: "agent"`, promotes it. Capability `quickChat`.
+- Talk mode's spoken replies start sooner. `POST /v1/speech` takes `stream: true` with `timestamps: true` (capability `speechTimestampStream`) and streams `application/x-ndjson` lines of `{audio, alignment}` as ElevenLabs makes them: about 0.3 s to the first line with v4 Turbo, where the whole-clip timestamped reply took about 0.9 s. The streamed audio reply flushes its headers before the first byte.
+- `WS /v1/speech/live` (capability `speechLive`) voices a reply while it is still being written: the phone sends text pieces and gets audio frames with alignment back. v4 Turbo runs on ElevenLabs' text-to-dialogue WebSocket, which started speaking about 140 ms after it had the first complete sentence; Flash v2.5 on the text-to-speech WebSocket is the fallback.
+- `phren bridge speech-region us|global` sends spoken replies to ElevenLabs' US-only endpoint (`api.us.elevenlabs.io`) or the global one (default), stored in `speech.json`.
+
+### Changed
+
+- The Hook reaches ElevenLabs for `/v1/speech` over its own keep-alive pool, keeping idle connections for 60 s instead of fetch's 4 s, so the next sentence skips the TLS handshake.
 
 ### Fixed
 

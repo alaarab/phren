@@ -102,7 +102,8 @@ export class SpeechState {
   }
 }
 
-const sharedState = new SpeechState();
+/** The Hook's own: /v1/speech and /v1/speech/live learn together. */
+export const sharedSpeechState = new SpeechState();
 
 /** When each character of the voiced text starts and ends, in seconds from
  * the start of the audio. */
@@ -242,7 +243,7 @@ export async function synthesizeTimedSpeech(text: string, signal: AbortSignal, o
  * nothing to fall back to). */
 function timed(text: string, model: string, started: number, options: SpeechOptions): void {
   if (model === FALLBACK_SPEECH_MODEL || text.length > TIMED_TEXT) return;
-  (options.state ?? sharedState).recordLatency(model, (options.now ?? Date.now)() - started);
+  (options.state ?? sharedSpeechState).recordLatency(model, (options.now ?? Date.now)() - started);
 }
 
 /** ElevenLabs' alignment, kept only when its three lists line up. */
@@ -301,7 +302,7 @@ async function elevenLabs(endpoint: "stream" | "stream/with-timestamps" | "with-
   const key = await (options.key ?? readSpeechKey)();
   if (!key) throw new BridgeError(503, "Spoken replies aren't set up on this computer: it has no ElevenLabs key.", { code: "speech-unconfigured" });
   const { voice } = await resolveSpeechVoice(options.voice);
-  const state = options.state ?? sharedState, now = options.now ?? Date.now;
+  const state = options.state ?? sharedSpeechState, now = options.now ?? Date.now;
   const chosen = options.model ?? (await resolveSpeechModel()).model;
   const origin = options.origin ?? (await resolveSpeechRegion()).origin;
   const models = chosen === FALLBACK_SPEECH_MODEL ? [chosen] : state.benchedReason(chosen) ? [FALLBACK_SPEECH_MODEL] : [chosen, FALLBACK_SPEECH_MODEL];
