@@ -167,6 +167,9 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   const completedMessages: CompletedMessage[] = [];
   let streamingText = "";
   let reasoningText = "";
+  // Length of streamingText when the current model call began, so a retried
+  // call can drop only its own partial text.
+  let streamMark = 0;
   let thinking = false;
   let thinkStartTime = 0;
   let thinkElapsed: string | null = null;
@@ -188,7 +191,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     const cost = tracker
       ? tracker.metered
         ? `$${tracker.totalCost < 0.01 ? tracker.totalCost.toFixed(4) : tracker.totalCost.toFixed(2)}`
-        : `${tracker.totalInputTokens + tracker.totalOutputTokens} tok`
+        : `${tracker.totalInputTokens + tracker.totalCacheReadTokens + tracker.totalOutputTokens} tok`
       : "";
     return {
       provider: config.provider.name,
@@ -429,15 +432,18 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
           const newProvider = resolveProvider(config.provider.name, result.model, undefined, result.reasoning ?? undefined);
           config.provider = newProvider;
           const { buildSystemPrompt } = await import("../system-prompt.js") as typeof import("../system-prompt.js");
-          config.systemPrompt = buildSystemPrompt(
-            config.systemPrompt.split("\n## Last session")[0],
-            null,
-            { name: newProvider.name, model: result.model },
-          );
+          config.systemPrompt = config.rebuildSystemPrompt
+            ? config.rebuildSystemPrompt({ name: newProvider.name, model: result.model })
+            : buildSystemPrompt(
+              config.systemPrompt.split("\n## Last session")[0],
+              null,
+              { name: newProvider.name, model: result.model },
+            );
           update();
         } catch { /* keep current provider */ }
       },
       pickModel: openModelPicker,
+      promote: config.promote,
     },
     onOutput: (text) => {
       completedMessages.push({ id: nextId(), kind: "status", text });
@@ -671,6 +677,14 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     onTextDone: () => {
       // streaming complete — finalized in runAgentTurn
     },
+    onAssistantMessage: () => {
+      streamMark = streamingText.length;
+    },
+    onStreamRetry: () => {
+      streamingText = streamingText.slice(0, streamMark);
+      reasoningText = "";
+      scheduleUpdate();
+    },
     onTextBlock: (text) => {
       thinking = false;
       streamingText += text;
@@ -725,6 +739,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     thinkElapsed = null;
     streamingText = "";
     reasoningText = "";
+    streamMark = 0;
     currentToolCalls = [];
     activeTool = null;
     const pastVerb = PAST_VERBS[Math.floor(Math.random() * PAST_VERBS.length)];
@@ -757,6 +772,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     }
     streamingText = "";
     reasoningText = "";
+    streamMark = 0;
     currentToolCalls = [];
     activeTool = null;
     running = false;
@@ -851,6 +867,13 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       const convo = getOrCreateConvo(agentId);
       convo.streamingText += text;
       // Only update if this agent is currently selected
+      if (selectedAgentId === agentId) update();
+    });
+
+    spawner.on("stream_retry", (agentId: string, discard: number) => {
+      // The agent's model call is being retried: drop the abandoned attempt's text.
+      const convo = getOrCreateConvo(agentId);
+      convo.streamingText = convo.streamingText.slice(0, Math.max(0, convo.streamingText.length - discard));
       if (selectedAgentId === agentId) update();
     });
 

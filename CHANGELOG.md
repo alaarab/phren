@@ -3,6 +3,47 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.20] - 2026-10-01
+
+### Added
+
+- Live reply text for talk mode: transcript socket preview frames built from a harness's own deltas (phren agent, Codex, OpenCode) carry `delta` (the text appended since the socket's previous preview frame, the whole text when the block is new to the socket) and `streamed: true`. Claude's pane text keeps the old frame. Capability `previewDeltas`.
+- phren agent streams the reply it is writing to a `.preview.json` sidecar beside its event log, at most every 100 ms, removed once the message is logged; the Hook reads it like OpenCode's.
+- Quick chat: `phren agent --mode chat` has no tools and reads the project's truths, summary and newest findings into its system prompt up front (no search index), on the configured provider including the ChatGPT/Codex subscription. `/promote` continues the same conversation as an agent with tools. The Hook launches it with `kind: "phren", mode: "chat"`, and `resumeSession` resumes a chat or, with `mode: "agent"`, promotes it. Capability `quickChat`.
+- Talk mode's spoken replies start sooner. `POST /v1/speech` takes `stream: true` with `timestamps: true` (capability `speechTimestampStream`) and streams `application/x-ndjson` lines of `{audio, alignment}` as ElevenLabs makes them: about 0.3 s to the first line with v4 Turbo, where the whole-clip timestamped reply took about 0.9 s. The streamed audio reply flushes its headers before the first byte.
+- `WS /v1/speech/live` (capability `speechLive`) voices a reply while it is still being written: the phone sends text pieces and gets audio frames with alignment back. v4 Turbo runs on ElevenLabs' text-to-dialogue WebSocket, which started speaking about 140 ms after it had the first complete sentence; Flash v2.5 on the text-to-speech WebSocket is the fallback.
+- `phren bridge speech-region us|global` sends spoken replies to ElevenLabs' US-only endpoint (`api.us.elevenlabs.io`) or the global one (default), stored in `speech.json`.
+- `phren-agent models [--json]` lists the models of the providers with credentials on this computer, and `GET /v1/models?source=phren` serves them to the phone's Quick chat model picker (cached like the other sources). Launching `kind: "phren"` with an `anthropic/`, `deepseek/`, `ollama/` or `openrouter/` model passes `--provider` and `--model`.
+
+### Changed
+
+- The Hook reaches ElevenLabs for `/v1/speech` over its own keep-alive pool, keeping idle connections for 60 s instead of fetch's 4 s, so the next sentence skips the TLS handshake.
+
+### Fixed
+
+- File changes from a tool call are captured again. The Hook dropped every PreToolUse snapshot as if the callback had hung up, because it read `req.destroyed`, which Node sets once a request body has been read. It now drops one only when the caller closed the connection before its answer.
+- Live spoken replies (`WS /v1/speech/live`) keep the text the phone sends while the Hook reads its settings, and open nothing for a phone that hung up meanwhile. Before the first audio, a socket that won't open within 5 s, sends no audio 5 s after it must be voicing, closes, or answers a generic error frame now falls back to Flash instead of ending the reply. A reply with nothing to say ends with `done`, the ten-minute limit with a `speech-limit` error, and a phone that stops reading the audio is closed instead of buffered without bound. Unfinished text is cut at 2 KB.
+- `POST /v1/speech` gives up on ElevenLabs after 30 s of silence, before the headers or mid-reply, retries a pooled connection ElevenLabs reset once, and no longer throws on a bodiless status.
+- `phren bridge speech-region` now covers Scribe dictation and the ElevenLabs usage read, not only spoken replies.
+- A phren agent session that used tools can no longer be resumed as a quick chat (`mode: "chat"` with `resumeSession`), which providers such as Anthropic refuse: the launch answers 400 `chat-has-tools` before any pane exists.
+- A brief typed into a starting worker pane is never typed twice. Before typing it again, the dispatch reads the pane: a conversation, or the agent working, blocked or waiting, means the first copy landed after its window, and the receipt is accepted. Before, a slow Codex start got the brief a second time, and an agent blocked on an approval was reported as a startup screen. A brief still lost after two tries leaves an `uncertain` receipt with a `failed` return that stays watched, so a late arrival still brings the worker's return.
+- A brief being confirmed no longer holds the dispatch lock: other dispatches are placed meanwhile instead of getting 429 for up to a minute and a half, and `anywhere` counts the launch toward its computer's load.
+- Finished replies no longer read as stopped mid-task. "I'll wait for your review", "I'll stop here", "Let's merge once CI is green", "Now passing: 42 tests" and the like return `done`; "Let me run:" before a closing code block returns `needs-you`.
+- A worker's uncommitted files are read only in a checkout no other pane works in, a reply naming a PR counts as one, and a `git status` that times out is no longer read as clean: that turn returns `done` but its pane is not closed, and the read is not cached. A finished turn is returned once, even when a later poll reads its checkout differently.
+- Awaited background work that never ends (a build deadlocked on a lock, a child agent that died without its completion record) holds a worker's stall clock for at most two hours.
+- A PreToolUse callback that gave up leaves no file-change diff for its tool call, instead of one taken after the tool ran.
+- A turn record with a field a newer Hook added is read with that field dropped, instead of being thrown away.
+- The Hook found no transcript for a phren agent pane: it looked for the agent's event log in `<store>/.runtime/sessions`, but the agent writes to `<store>/.sessions`.
+- phren agent: a foreground shell command still running when the agent exits, gets Ctrl+C, SIGTERM or a closed terminal (SIGHUP) is killed with everything it started; it ran on in its own process group before. Full-output log files are removed at exit and capped at 200 MB per session (`PHREN_AGENT_SHELL_SPILL_TOTAL_BYTES`).
+- phren agent: an Anthropic `overloaded_error` or `api_error` event mid-stream is retried. Anthropic cache reads and writes are counted (writes priced at 1.25x input, `cache_creation_input_tokens` in the headless result), subagents' cache tokens reach the parent's total, and a failed attempt's reported usage counts toward `--budget`. An OpenAI-compatible stream that drops after its `finish_reason` is kept instead of being requested again.
+- phren agent: a retried model call drops the abandoned text before the backoff wait instead of after it, in the terminal UI, the phone's live preview and subagents' panes; the REPL ends the abandoned line and says the reply starts again.
+- phren agent: `/promote` that fails (an MCP server that won't start) leaves a working quick chat with no tools, instead of a session that claimed to be an agent and could not be promoted again.
+- phren agent: preview sidecars a killed agent left in `<store>/.sessions` are removed after 30 minutes, when the next interactive session starts.
+- phren agent: `--context-window` and `--price-*` apply only to the model they were given with, including in subagents on that model, instead of following a `/model` switch through the environment.
+- phren agent: subagents of an `openai-compat` or `deepseek` session run on the parent's endpoint and model with its key (`PHREN_AGENT_API_KEY`, `DEEPSEEK_API_KEY`, passed in the child's environment only); before, they got neither and fell back to auto-detecting another provider.
+- phren agent: a `/model` switch in a session started on a DeepSeek proxy (`--provider deepseek --base-url …`) stays on that proxy instead of going to api.deepseek.com. `PHREN_AGENT_BASE_URL` sets DeepSeek's endpoint when `PHREN_AGENT_PROVIDER=deepseek`; an `openai-compat` session's relay URL is never used for DeepSeek.
+- phren agent: `--reasoning none` is sent only to DeepSeek and OpenAI's GPT-5.1 and later; other models, which reject it, get no reasoning effort.
+
 ## [0.3.19] - 2026-10-01
 
 ### Added

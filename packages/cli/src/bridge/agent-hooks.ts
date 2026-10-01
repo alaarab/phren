@@ -2,7 +2,7 @@ import { defaultPhrenPath } from "../shared.js";
 import { disabledHint } from "../modules/registry.js";
 import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
 import { logger } from "../logger.js";
-import { request, createServer, type Server } from "node:http";
+import { request, createServer, type Server, type ServerResponse } from "node:http";
 import { mkdir, readFile, chmod, unlink, lstat } from "node:fs/promises";
 import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
@@ -10,6 +10,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { findPane, knownPanes, paneForCodexSession, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
+import { TOOL_HOOK_BUDGET_MS } from "./hook-fast.js";
 import { underCodexDaemon } from "./codex-daemon.js";
 import { codexAutoReview } from "./codex-review-mode.js";
 import { terminalPaneFromEnv, terminalProvider } from "./terminal.js";
@@ -67,6 +68,16 @@ const FANOUT_ARCHIVE_MS = 60 * 60 * 1000;
 /** Where a held request's answer goes: the callback's HTTP response, or the
  * reply to a Codex app-server request (codex-servers.ts). Either takes the
  * PermissionRequest-shaped JSON; "{}" gives the request back to the terminal. */
+/** Whether the caller hung up on `res` before it was answered. Not
+ * `req.destroyed`: a request body read to its end is destroyed on every
+ * Node this supports, so that read as a hang-up on each normal callback. */
+export function watchHangUp(res: ServerResponse): () => boolean {
+  let closed = res.destroyed || res.socket?.destroyed === true;
+  const onClose = () => { if (!res.writableEnded) closed = true; };
+  res.once("close", onClose);
+  return () => { res.off("close", onClose); return closed || res.destroyed; };
+}
+
 interface HeldReply { end(body: string): unknown; readonly destroyed: boolean }
 interface Pending { target: Target; response: HeldReply; tool: string; input: unknown; message: string; request: string; requestKind: RequestKind; title?: string; choice?: TerminalChoice; expiresAt: string; timer?: NodeJS.Timeout; conductor?: { action: "dispatch" | "hand_off"; project?: string; computer?: string };
   /** A server request of the Hook's own Codex app-server: answered over RPC, never held on a timer. */
@@ -655,7 +666,8 @@ export class AgentHooks {
     await recordTurn(target.server, target.pane, { event: String(body.event), terminal: pane.terminal_id, source: target.source, session: target.session,
       ...(dispatch ? { dispatch } : {}),
       ...(typeof body.background === "number" ? { background: body.background } : {}),
-      ...(typeof body.reply === "string" ? { reply: body.reply } : {}) }).catch(() => undefined);
+      ...(typeof body.reply === "string" ? { reply: body.reply } : {}),
+      ...(body.event === "Stop" && typeof body.cwd === "string" ? { cwd: body.cwd } : {}) }).catch(() => undefined);
   }
   private rememberTerminalPrompt(target: Target, body: Json) {
     const tool = String(body.tool || "action").slice(0, 200);
@@ -1431,8 +1443,12 @@ export class AgentHooks {
         if (body.event === "SessionStart" || body.event === "Stop") await this.recordTurn(target, pane, body, dispatch);
         if ((this.modules?.has("git") ?? true) && ["PreToolUse", "PostToolUse"].includes(String(body.event)) && capturesChanges(String(body.tool), input)) {
           const conversation = `${target.source}:${target.session}`, id = String(body.toolUseId || "").slice(0, 200);
-          if (body.event === "PreToolUse") await this.changes.before(conversation, id, typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane), command ?? "", input);
-          else await this.changes.after(conversation, id);
+          if (body.event === "PreToolUse") {
+            const hungUp = watchHangUp(res);
+            await this.changes.before(conversation, id, typeof body.cwd === "string" && path.isAbsolute(body.cwd) ? body.cwd : await trustedDirectory(pane), command ?? "", input);
+            // The callback gave up (TOOL_HOOK_BUDGET_MS) and the tool ran while this was read.
+            if (hungUp()) this.changes.drop(conversation, id);
+          } else await this.changes.after(conversation, id);
           res.end("{}"); return;
         }
         if (body.event === "PermissionRequest") this.terminalPrompts.delete(JSON.stringify(target));
@@ -1560,7 +1576,10 @@ export function stopFacts(value: Json): { background?: number; reply?: string } 
     ...(typeof value.last_assistant_message === "string" && value.last_assistant_message.trim() ? { reply: value.last_assistant_message.slice(0, 16_384) } : {}) };
 }
 
-export async function agentHook(source: Provider) {
+/** One agent callback, run as `hook <source>`. Resolves "abandoned" when a
+ * tool call's callback ran out of its budget: the caller then exits at once,
+ * since a socket or a process read still pending would hold the agent. */
+export async function agentHook(source: Provider, elapsed: () => number = () => performance.now()): Promise<void | "abandoned"> {
   provider.parse(source);
   // A missing helper must never prevent the coding agent from running.
   // Inside Herdr only Herdr's pane counts; elsewhere a tmux pane does.
@@ -1573,6 +1592,26 @@ export async function agentHook(source: Provider) {
   const target = targetSchema.parse({ server: place.server, workspace: place.workspace, tab: place.tab,
     pane: place.pane, source, session: value.session_id || value.sessionId });
   const event = String(value.hook_event_name || "SessionStart");
+  return withinToolBudget(event, left => forwardHook(source, target, event, value, left), elapsed);
+}
+
+/**
+ * Runs a callback's work. A PreToolUse or PostToolUse callback gets what is
+ * left of TOOL_HOOK_BUDGET_MS since its process started (hook-fast.ts says
+ * why): "abandoned" once that runs out, and the caller exits without an
+ * answer so the tool runs. Every other event runs to its own timeouts.
+ */
+export async function withinToolBudget<T>(event: string, work: (left: () => number) => Promise<T>,
+  elapsed: () => number = () => performance.now(), budgetMs = TOOL_HOOK_BUDGET_MS): Promise<T | "abandoned"> {
+  if (!event.endsWith("ToolUse")) return work(() => Infinity);
+  const left = () => Math.floor(budgetMs - elapsed());
+  if (left() <= 0) return "abandoned";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<"abandoned">(resolve => { timer = setTimeout(() => resolve("abandoned"), left()); });
+  try { return await Promise.race([work(left), expired]); } finally { clearTimeout(timer); }
+}
+
+async function forwardHook(source: Provider, target: Target, event: string, value: Json, left: () => number): Promise<void> {
   const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
   if (!modules.has("hook") || (event.endsWith("ToolUse") && !modules.has("git"))) return;
   // Codex 0.157 runs hooks inside its shared app-server daemon, whose pane
@@ -1594,7 +1633,7 @@ export async function agentHook(source: Provider) {
     ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}),
     ...(event === "Stop" ? stopFacts(value) : {}) });
   await new Promise<void>(resolve => {
-    const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? 8_000 : 12_000,
+    const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? Math.max(1, left()) : 12_000,
       headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, res => {
       let result = "";
       res.on("data", chunk => { result += chunk.toString(); if (result.length > 16_384) req.destroy(); });

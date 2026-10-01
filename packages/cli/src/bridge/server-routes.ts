@@ -137,7 +137,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, resources: true, sudo: true, sudoOutcome: true };
+  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -251,7 +251,7 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       if (background) awaited.set(tab, background);
       markBackground(tab, background);
       const target = targetSchema.safeParse(tab.target);
-      if (target.success && agents.length === 1) Object.assign(tab, await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }));
+      if (target.success && agents.length === 1) Object.assign(tab, await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }, async () => background));
       tab.title = title;
     }));
     let nextTab = 0;

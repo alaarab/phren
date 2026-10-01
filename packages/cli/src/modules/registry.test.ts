@@ -155,7 +155,7 @@ describe("built-in registration declarations", () => {
     for (const operation of ["create", "focus", "rename", "close"]) currentPosts.add(`/v1/workspaces/${operation}`);
     for (const route of storeRoutes("POST")) currentPosts.add(route);
     expect(declared.filter(route => route.method === "POST").map(route => route.path).sort()).toEqual([...currentPosts].sort());
-    expect(declared.filter(route => route.method === "WS").map(route => route.path)).toEqual(["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe"]);
+    expect(declared.filter(route => route.method === "WS").map(route => route.path)).toEqual(["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe", "/v1/speech/live"]);
   });
 
   it("can feed only memory into the existing gate without exposing task or dispatch actions", async () => {

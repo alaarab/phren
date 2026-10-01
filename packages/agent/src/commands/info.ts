@@ -111,7 +111,7 @@ export function costCommand(_parts: string[], ctx: CommandContext): boolean {
   const ct = ctx.costTracker;
   if (ct) {
     const cost = ct.metered ? `$${ct.totalCost.toFixed(4)}` : "included";
-    process.stderr.write(`${DIM}Tokens — input: ${ct.totalInputTokens}  output: ${ct.totalOutputTokens}  est. cost: ${cost}${RESET}\n`);
+    process.stderr.write(`${DIM}Tokens — input: ${ct.totalInputTokens}  cached: ${ct.totalCacheReadTokens}  output: ${ct.totalOutputTokens}  est. cost: ${cost}${RESET}\n`);
   } else {
     process.stderr.write(`${DIM}Cost tracking not available.${RESET}\n`);
   }

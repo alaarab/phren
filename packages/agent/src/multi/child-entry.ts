@@ -9,9 +9,10 @@
  * 6. Shuts down gracefully on ShutdownRequest
  */
 
-import type { SpawnPayload, ChildMessage, ParentMessage } from "./types.js";
+import type { SpawnPayload, ChildMessage, ParentMessage, DoneEvent } from "./types.js";
 import { MAX_SPAWN_DEPTH } from "./types.js";
 import type { TurnHooks, } from "../agent-loop.js";
+import { createIpcHooks } from "./ipc-hooks.js";
 import { resolveProvider } from "../providers/resolve.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { readFileTool } from "../tools/read-file.js";
@@ -37,6 +38,7 @@ import { buildPhrenContext, } from "../memory/context.js";
 import { startSession, endSession, } from "../memory/session.js";
 import { runAgent, } from "../agent-loop.js";
 import { createCostTracker } from "../cost.js";
+import { scopeModelOverrides } from "../model-overrides.js";
 import { getAgentType, applyAgentType } from "./agent-types.js";
 import { AgentSpawner } from "./spawner.js";
 import { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } from "../tools/spawn-agent.js";
@@ -49,30 +51,6 @@ function send(msg: ChildMessage): void {
   if (process.send) {
     process.send(msg);
   }
-}
-
-/** Build TurnHooks that relay all events to the parent via IPC. */
-function createIpcHooks(agentId: string): TurnHooks {
-  return {
-    onTextDelta(text: string) {
-      send({ type: "text_delta", agentId, text });
-    },
-    onTextDone() {
-      // No-op — parent reconstructs from deltas
-    },
-    onTextBlock(text: string) {
-      send({ type: "text_block", agentId, text });
-    },
-    onToolStart(name: string, input: Record<string, unknown>, count: number) {
-      send({ type: "tool_start", agentId, toolName: name, input, count });
-    },
-    onToolEnd(name: string, input: Record<string, unknown>, output: string, isError: boolean, durationMs: number) {
-      send({ type: "tool_end", agentId, toolName: name, input, output, isError, durationMs });
-    },
-    onStatus(msg: string) {
-      send({ type: "status", agentId, message: msg });
-    },
-  };
 }
 
 // ── Persistent agent state (survives across idle/wake cycles) ──────────────
@@ -115,8 +93,13 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
   // Set cwd (use worktree path if provided)
   process.chdir(payload.worktreePath ?? cwd);
 
-  // Resolve LLM provider
-  const provider = resolveProvider(providerName, model);
+  // Resolve LLM provider; the parent's --context-window / --price-* apply
+  // only if this child runs the model they were given for.
+  if (payload.modelOverrides) {
+    const { model: overridden, ...overrides } = payload.modelOverrides;
+    scopeModelOverrides(overridden, overrides);
+  }
+  const provider = resolveProvider(providerName, model, undefined, undefined, { baseUrl: payload.baseUrl });
 
   // Child agents get a lightweight prompt — no "search memory first" forcing
   const systemPrompt = buildChildPrompt(_task);
@@ -179,12 +162,12 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
 
   // Cost tracker
   const modelName = (provider as { model?: string }).model ?? model ?? provider.name;
-  const costTracker = createCostTracker(modelName, budget, provider.name);
+  const costTracker = createCostTracker(modelName, budget, provider.name, provider.baseUrl);
 
   let spawner: AgentSpawner | null = null;
   const depth = payload.depth ?? 0;
   if (depth < MAX_SPAWN_DEPTH) {
-    spawner = new AgentSpawner({ costTracker, depth, getPermissionDefaults: () => registry.permissionConfig });
+    spawner = new AgentSpawner({ costTracker, depth, getPermissionDefaults: () => registry.permissionConfig, getParentProvider: () => provider });
     registry.register(createSpawnAgentTool(spawner, () => registry.permissionConfig));
     registry.register(createSendMessageTool(spawner));
     registry.register(createListAgentsTool(spawner));
@@ -209,7 +192,7 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
     maxTurns,
     verbose,
     plan,
-    hooks: createIpcHooks(agentId),
+    hooks: createIpcHooks(agentId, send),
     spawner,
     pendingDms: [],
     taskCount: 0,
@@ -217,9 +200,11 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
 }
 
 /** Run a single task. Returns the result. */
-async function runTask(state: AgentState, task: string): Promise<{ finalText: string; turns: number; toolCalls: number; totalCost?: string; inputTokens: number; outputTokens: number; costUsd: number }> {
+async function runTask(state: AgentState, task: string): Promise<DoneEvent["result"]> {
   const beforeInput = state.costTracker.totalInputTokens;
   const beforeOutput = state.costTracker.totalOutputTokens;
+  const beforeCacheRead = state.costTracker.totalCacheReadTokens;
+  const beforeCacheWrite = state.costTracker.totalCacheWriteTokens;
   const beforeCost = state.costTracker.totalCost;
 
   const config = {
@@ -244,6 +229,8 @@ async function runTask(state: AgentState, task: string): Promise<{ finalText: st
     totalCost: result.totalCost,
     inputTokens: state.costTracker.totalInputTokens - beforeInput,
     outputTokens: state.costTracker.totalOutputTokens - beforeOutput,
+    cacheReadTokens: state.costTracker.totalCacheReadTokens - beforeCacheRead,
+    cacheWriteTokens: state.costTracker.totalCacheWriteTokens - beforeCacheWrite,
     costUsd: state.costTracker.totalCost - beforeCost,
   };
 }

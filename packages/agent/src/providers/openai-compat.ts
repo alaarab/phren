@@ -1,5 +1,7 @@
 /** Shared OpenAI-compatible message/tool conversion used by openrouter, codex, and openai providers. */
-import type { LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
+import type { LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta, TokenUsage } from "./types.js";
+import { IncompleteStreamError, RetryableProviderError, withPartialUsage, type InvalidToolCall } from "./types.js";
+import type { ReasoningEffort } from "../models.js";
 import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
 
 /** Convert Anthropic tool defs to OpenAI function format. */
@@ -10,23 +12,82 @@ export function toOpenAiTools(tools: AgentToolDef[]) {
   }));
 }
 
+/** DeepSeek directly, or any OpenAI-compatible endpoint (OpenCode Go, a proxy) serving a DeepSeek model. */
+export function isDeepSeekRoute(providerName: string | undefined, model: string | undefined): boolean {
+  if (providerName === "deepseek") return true;
+  return providerName === "openai-compat" && /deepseek/i.test(model ?? "");
+}
+
+/**
+ * Routes that require every earlier assistant turn's `reasoning_content` back
+ * when tools are present. DeepSeek returns HTTP 400 when a plain-answer turn
+ * arrives without it.
+ */
+export function replaysAllReasoning(providerName: string | undefined, model: string | undefined): boolean {
+  return isDeepSeekRoute(providerName, model);
+}
+
+/**
+ * DeepSeek's reasoning_effort takes none, low, high and max; it has no medium
+ * and treats xhigh as high, so map Phren's levels onto what it documents.
+ */
+const DEEPSEEK_EFFORT: Record<ReasoningEffort, string> = {
+  none: "none",
+  low: "low",
+  medium: "high",
+  high: "high",
+  xhigh: "max",
+};
+
+/**
+ * OpenAI models that take reasoning effort "none": GPT-5.1 and later, except
+ * the -codex variants. Older reasoning models (gpt-5, o-series) and most
+ * other OpenAI-compatible servers reject it with a 400.
+ */
+export function acceptsNoReasoning(model: string | undefined): boolean {
+  const id = (model ?? "").replace(/^.*\//, "");
+  return /^gpt-5\.(?:[1-9]|\d{2,})/.test(id) && !/codex/i.test(id);
+}
+
+/**
+ * The reasoning_effort value to send on this route. "none" goes only where
+ * it is accepted (DeepSeek, newer OpenAI models); elsewhere the field is
+ * left out and the model's default applies.
+ */
+export function wireReasoningEffort(
+  providerName: string | undefined,
+  model: string | undefined,
+  effort: ReasoningEffort | undefined,
+): string | undefined {
+  if (!effort) return undefined;
+  if (isDeepSeekRoute(providerName, model)) return DEEPSEEK_EFFORT[effort];
+  if (effort === "none" && !acceptsNoReasoning(model)) return undefined;
+  return effort;
+}
+
 /**
  * Convert Anthropic messages to OpenAI messages.
  *
  * `providerName` scopes which reasoning blocks belong to this provider; when
  * omitted, all reasoning is stripped (conservative). Own reasoning is passed
- * back as `reasoning_content` only on tool-call turns — the field is ignored
- * on plain turns by providers that support it (DeepSeek's documented rule),
- * so sending it there just wastes tokens. Assistant `content` is always a
- * string, never null/absent: some gateways 400 on a null-content assistant
- * message, and history is durable, so one would poison every later turn.
+ * back as `reasoning_content` on tool-call turns; with `replayAllReasoning`
+ * (DeepSeek routes, see replaysAllReasoning) it goes on every assistant turn,
+ * empty when the turn had none. Assistant `content` is always a string, never
+ * null/absent: some gateways 400 on a null-content assistant message, and
+ * history is durable, so one would poison every later turn.
  */
-export function toOpenAiMessages(system: string, messages: LlmMessage[], providerName?: string, vision = false) {
+export function toOpenAiMessages(
+  system: string,
+  messages: LlmMessage[],
+  providerName?: string,
+  vision = false,
+  replayAllReasoning = false,
+) {
   const out: Record<string, unknown>[] = [{ role: "system", content: system }];
   for (const msg of stripForeignReasoning(messages, providerName)) {
     if (msg.role === "assistant") {
       if (typeof msg.content === "string") {
-        out.push({ role: "assistant", content: msg.content });
+        out.push({ role: "assistant", content: msg.content, ...(replayAllReasoning ? { reasoning_content: "" } : {}) });
       } else {
         const textParts = msg.content.filter((b) => b.type === "text").map((b) => b.type === "text" ? b.text : "");
         const reasoningParts = msg.content
@@ -38,10 +99,9 @@ export function toOpenAiMessages(system: string, messages: LlmMessage[], provide
           return { id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input) } };
         });
         const entry: Record<string, unknown> = { role: "assistant", content: textParts.join("\n") };
-        if (toolCalls.length > 0) {
-          entry.tool_calls = toolCalls;
-          if (reasoningParts.length > 0) entry.reasoning_content = reasoningParts.join("\n");
-        }
+        if (toolCalls.length > 0) entry.tool_calls = toolCalls;
+        if (replayAllReasoning) entry.reasoning_content = reasoningParts.join("\n");
+        else if (toolCalls.length > 0 && reasoningParts.length > 0) entry.reasoning_content = reasoningParts.join("\n");
         out.push(entry);
       }
     } else if (msg.role === "user") {
@@ -97,6 +157,52 @@ export function toOpenAiMessages(system: string, messages: LlmMessage[], provide
   return out;
 }
 
+/**
+ * Chat Completions usage → TokenUsage. prompt_tokens includes cache hits:
+ * DeepSeek reports them as prompt_cache_hit_tokens, OpenAI (and most relays)
+ * as prompt_tokens_details.cached_tokens.
+ */
+export function parseOpenAiUsage(u: Record<string, unknown>): TokenUsage {
+  const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const prompt = num(u.prompt_tokens);
+  const details = u.prompt_tokens_details as Record<string, unknown> | undefined;
+  const cached = Math.min(prompt, num(u.prompt_cache_hit_tokens) || num(details?.cached_tokens));
+  return {
+    input_tokens: prompt - cached,
+    output_tokens: num(u.completion_tokens),
+    ...(cached > 0 ? { cache_read_input_tokens: cached } : {}),
+  };
+}
+
+/**
+ * Parse a tool call's JSON arguments. Empty arguments are a no-argument call;
+ * anything else that isn't a JSON object is an error for the model to fix.
+ */
+export function parseToolArguments(raw: string): { input: Record<string, unknown> } | { error: string } {
+  if (raw.trim() === "") return { input: {} };
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return { input: parsed as Record<string, unknown> };
+    return { error: "arguments must be a JSON object" };
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * DeepSeek ends a response with finish_reason insufficient_system_resource
+ * when it runs out of capacity mid-generation: the output is incomplete, and
+ * a fresh request usually succeeds.
+ */
+function throwOnAbnormalFinish(finishReason: unknown): void {
+  if (finishReason === "insufficient_system_resource") {
+    throw new RetryableProviderError("Provider ran out of capacity mid-response (finish_reason: insufficient_system_resource)");
+  }
+  if (finishReason === "aborted") {
+    throw new IncompleteStreamError("Provider aborted the response (finish_reason: aborted)");
+  }
+}
+
 /** HTTP 200 can still carry an upstream error, including inside SSE data events. */
 function throwProviderError(data: Record<string, unknown>): void {
   const choice = (data.choices as Record<string, unknown>[])?.[0];
@@ -115,6 +221,7 @@ function throwProviderError(data: Record<string, unknown>): void {
 export function parseOpenAiResponse(data: Record<string, unknown>, providerName?: string): LlmResponse {
   throwProviderError(data);
   const choice = (data.choices as Record<string, unknown>[])?.[0] ?? {};
+  throwOnAbnormalFinish(choice.finish_reason);
   const message = choice.message as Record<string, unknown> | undefined;
   const content: ContentBlock[] = [];
 
@@ -136,17 +243,16 @@ export function parseOpenAiResponse(data: Record<string, unknown>, providerName?
   }
 
   const toolCalls = message?.tool_calls as Record<string, unknown>[] | undefined;
+  const invalidToolCalls: InvalidToolCall[] = [];
   if (toolCalls) {
     for (const tc of toolCalls) {
       const fn = tc.function as Record<string, unknown>;
-      let input: Record<string, unknown> = {};
-      try { input = JSON.parse(fn.arguments as string); } catch { /* malformed arguments */ }
-      content.push({
-        type: "tool_use",
-        id: tc.id as string,
-        name: fn.name as string,
-        input,
-      });
+      const raw = typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments ?? {});
+      const parsed = parseToolArguments(raw);
+      const id = tc.id as string;
+      const name = fn.name as string;
+      if ("error" in parsed) invalidToolCalls.push({ id, name, raw, error: parsed.error });
+      content.push({ type: "tool_use", id, name, input: "input" in parsed ? parsed.input : {} });
     }
   }
 
@@ -155,15 +261,23 @@ export function parseOpenAiResponse(data: Record<string, unknown>, providerName?
     : finishReason === "length" ? "max_tokens"
     : "end_turn";
 
-  const usage = data.usage as Record<string, number> | undefined;
+  const usage = data.usage as Record<string, unknown> | undefined;
   return {
     content,
     stop_reason,
-    usage: usage ? { input_tokens: usage.prompt_tokens ?? 0, output_tokens: usage.completion_tokens ?? 0 } : undefined,
+    usage: usage ? parseOpenAiUsage(usage) : undefined,
+    ...(invalidToolCalls.length > 0 ? { invalidToolCalls } : {}),
   };
 }
 
-/** Parse OpenAI-compatible SSE stream into StreamDelta events. */
+/**
+ * Parse OpenAI-compatible SSE stream into StreamDelta events.
+ *
+ * A response is complete only when the provider says so: a finish_reason or
+ * the `[DONE]` sentinel. A connection that closes before either is an error,
+ * not a successful end_turn with partial output, and so is DeepSeek's
+ * `aborted` finish reason. One that drops after a finish_reason is done.
+ */
 export async function* parseOpenAiStream(res: Response): AsyncIterable<StreamDelta> {
   if (!res.body) throw new Error("Provider returned empty response body");
   const reader = res.body.getReader();
@@ -173,87 +287,106 @@ export async function* parseOpenAiStream(res: Response): AsyncIterable<StreamDel
   // Track active tool calls by index
   const activeTools = new Map<number, string>(); // index -> tool_call id
   let stopReason: LlmResponse["stop_reason"] = "end_turn";
-  let usage: { input_tokens: number; output_tokens: number } | undefined;
+  let usage: TokenUsage | undefined;
+  let finished = false;
+
+  /** Handle one SSE line; returns true on the [DONE] sentinel. */
+  function* handleLine(line: string): Generator<StreamDelta, boolean> {
+    if (!line.startsWith("data:")) return false;
+    const raw = line.slice(5).trim();
+    if (raw === "[DONE]") return true;
+
+    let chunk: Record<string, unknown>;
+    try { chunk = JSON.parse(raw); } catch { return false; }
+    throwProviderError(chunk);
+
+    // Usage from final chunk (OpenAI includes it when stream_options.include_usage is set)
+    const u = chunk.usage as Record<string, unknown> | undefined;
+    if (u) usage = parseOpenAiUsage(u);
+
+    const choice = (chunk.choices as Record<string, unknown>[])?.[0];
+    if (!choice) return false;
+
+    const finishReason = choice.finish_reason as string | null;
+    throwOnAbnormalFinish(finishReason);
+    if (finishReason) finished = true;
+    if (finishReason === "tool_calls") stopReason = "tool_use";
+    else if (finishReason === "length") stopReason = "max_tokens";
+
+    const delta = choice.delta as Record<string, unknown> | undefined;
+    if (!delta) return false;
+
+    // Reasoning content (DeepSeek/Qwen reasoning_content, OpenRouter reasoning)
+    const reasoningDelta = typeof delta.reasoning_content === "string"
+      ? delta.reasoning_content
+      : typeof delta.reasoning === "string" ? delta.reasoning : "";
+    if (reasoningDelta) {
+      yield { type: "reasoning_delta", text: reasoningDelta };
+    }
+
+    // Text content
+    if (delta.content && typeof delta.content === "string") {
+      yield { type: "text_delta", text: delta.content };
+    }
+
+    // Tool calls
+    const toolCalls = delta.tool_calls as Record<string, unknown>[] | undefined;
+    if (toolCalls) {
+      for (const tc of toolCalls) {
+        const idx = tc.index as number;
+        const fn = tc.function as Record<string, unknown> | undefined;
+
+        // New tool call starts when id is present
+        if (tc.id && typeof tc.id === "string") {
+          activeTools.set(idx, tc.id);
+          yield { type: "tool_use_start", id: tc.id, name: fn?.name as string ?? "" };
+        }
+
+        // Argument deltas
+        if (fn?.arguments && typeof fn.arguments === "string") {
+          const toolId = activeTools.get(idx) ?? String(idx);
+          yield { type: "tool_use_delta", id: toolId, json: fn.arguments };
+        }
+      }
+    }
+    return false;
+  }
 
   try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    let sawDone = false;
+    read: for (;;) {
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch (err: unknown) {
+        // The provider already said the response is complete (a usage-only
+        // chunk and [DONE] may still have been due): keep it rather than
+        // requesting the whole response again.
+        if (finished) break;
+        throw withPartialUsage(err, usage);
+      }
+      const { done, value } = chunk;
+      if (done) {
+        // A final event with no trailing newline is still an event.
+        buf += decoder.decode();
+        if (buf && (yield* handleLine(buf))) sawDone = true;
+        break;
+      }
       buf += decoder.decode(value, { stream: true });
 
       const lines = buf.split("\n");
       buf = lines.pop()!;
 
       for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const raw = line.slice(6).trim();
-        if (raw === "[DONE]") {
-          // Close out any active tool calls before signaling done
-          for (const [, toolId] of activeTools) {
-            yield { type: "tool_use_end", id: toolId };
-          }
-          activeTools.clear();
-          yield { type: "done", stop_reason: stopReason, usage };
-          return;
-        }
-
-        let chunk: Record<string, unknown>;
-        try { chunk = JSON.parse(raw); } catch { continue; }
-        throwProviderError(chunk);
-
-        // Usage from final chunk (OpenAI includes it when stream_options.include_usage is set)
-        const u = chunk.usage as Record<string, number> | undefined;
-        if (u) {
-          usage = { input_tokens: u.prompt_tokens ?? 0, output_tokens: u.completion_tokens ?? 0 };
-        }
-
-        const choice = (chunk.choices as Record<string, unknown>[])?.[0];
-        if (!choice) continue;
-
-        const finishReason = choice.finish_reason as string | null;
-        if (finishReason === "tool_calls") stopReason = "tool_use";
-        else if (finishReason === "length") stopReason = "max_tokens";
-
-        const delta = choice.delta as Record<string, unknown> | undefined;
-        if (!delta) continue;
-
-        // Reasoning content (DeepSeek/Qwen reasoning_content, OpenRouter reasoning)
-        const reasoningDelta = typeof delta.reasoning_content === "string"
-          ? delta.reasoning_content
-          : typeof delta.reasoning === "string" ? delta.reasoning : "";
-        if (reasoningDelta) {
-          yield { type: "reasoning_delta", text: reasoningDelta };
-        }
-
-        // Text content
-        if (delta.content && typeof delta.content === "string") {
-          yield { type: "text_delta", text: delta.content };
-        }
-
-        // Tool calls
-        const toolCalls = delta.tool_calls as Record<string, unknown>[] | undefined;
-        if (toolCalls) {
-          for (const tc of toolCalls) {
-            const idx = tc.index as number;
-            const fn = tc.function as Record<string, unknown> | undefined;
-
-            // New tool call starts when id is present
-            if (tc.id && typeof tc.id === "string") {
-              activeTools.set(idx, tc.id);
-              yield { type: "tool_use_start", id: tc.id, name: fn?.name as string ?? "" };
-            }
-
-            // Argument deltas
-            if (fn?.arguments && typeof fn.arguments === "string") {
-              const toolId = activeTools.get(idx) ?? String(idx);
-              yield { type: "tool_use_delta", id: toolId, json: fn.arguments };
-            }
-          }
-        }
+        if (yield* handleLine(line)) { sawDone = true; break read; }
       }
     }
 
-    // Emit tool_use_end for all active tools, then done
+    if (!finished && !sawDone) {
+      throw withPartialUsage(new IncompleteStreamError("Provider stream ended before the response was complete (no finish_reason or [DONE])"), usage);
+    }
+
+    // Close out any active tool calls before signaling done
     for (const [, toolId] of activeTools) {
       yield { type: "tool_use_end", id: toolId };
     }

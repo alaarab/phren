@@ -1,19 +1,19 @@
-import type { ContentBlock, ToolUseBlock } from "../providers/types.js";
+import type { ContentBlock, InvalidToolCall, ToolUseBlock } from "../providers/types.js";
 import { createSpinner, formatTurnHeader, formatToolCall } from "../spinner.js";
 import { shouldPrune } from "../context/pruner.js";
 import { compactWithLlm } from "../context/compactor.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
 import { isContextOverflowError, withRetry } from "../providers/retry.js";
-import { checkFlushNeeded } from "../memory/context-flush.js";
 import { injectPlanPrompt, requestPlanApproval } from "../plan.js";
 import { detectLintCommand, detectTestCommand } from "../tools/lint-test.js";
 import { createCheckpoint } from "../checkpoint.js";
 import { resetRepeatChain } from "../guards/repeat-tool-reminder.js";
 import { runLifecycleHooks } from "../user-hooks.js";
+import { recordTokenUsage } from "../cost.js";
 
 import type { AgentConfig, AgentSession, AgentResult, TurnResult, TurnHooks, TurnStopReason } from "./types.js";
 import { createSession } from "./types.js";
-import { consumeStream, executeToolBlocks, prefetchFirst, runToolsConcurrently } from "./stream.js";
+import { consumeStream, executeToolBlocks, runToolsConcurrently } from "./stream.js";
 export type { AgentConfig, AgentResult, AgentSession, TurnResult, TurnHooks, TurnStopReason };
 export { createSession };
 
@@ -66,11 +66,14 @@ export async function runTurn(
   resetRepeatChain(session.repeatChain);
 
   // Append user message to the durable log
-  session.log.append("user/message", {
+  const prompted = session.log.append("user/message", {
     message: { role: "user", content: userInput },
     source: "user",
     turn: session.turns,
   });
+  // Phren Hook streams the text block being written from this sidecar; the
+  // turn is named by the time of the prompt that started it.
+  const preview = config.livePreview?.(session.log.header.sessionId);
 
   let turnToolCalls = 0;
   const turnStart = session.turns;
@@ -102,20 +105,12 @@ export async function runTurn(
       status(`\n${formatTurnHeader(session.turns + 1, turnToolCalls)}\n`);
     }
 
-    // Check if context flush is needed (one-time per session) — must run before pruning
-    const contextLimit = provider.contextWindow ?? 200_000;
-    const flushPrompt = checkFlushNeeded(systemPrompt, session.messages, session.flushConfig);
-    if (flushPrompt) {
-      session.log.append("user/message", {
-        message: { role: "user", content: flushPrompt },
-        source: "system",
-        turn: session.turns,
-      });
-      if (verbose) status("[context flush injected]\n");
-    }
-
     // Prune context if approaching limit — LLM checkpoint with knowledge
-    // promotion, degrading to the regex summary on any failure.
+    // promotion, degrading to the regex summary on any failure. (There is no
+    // separate "summarize what you learned" prompt: injected mid-task, the
+    // model answered it and ended the turn, and compaction already promotes
+    // knowledge to phren out of band.)
+    const contextLimit = provider.contextWindow ?? 200_000;
     const compactHistory = async (keepRecentTurns: number, trigger: string): Promise<boolean> => {
       const preCount = session.messages.length;
       const preTokens = estimateMessageTokens(session.messages);
@@ -159,32 +154,57 @@ export async function runTurn(
 
     let assistantContent: ContentBlock[];
     let stopReason: "end_turn" | "tool_use" | "max_tokens";
+    let invalidToolCalls: InvalidToolCall[] = [];
 
     try {
       if (useStream) {
-        // Streaming path — retry the initial connection. The async generator does
-        // no work until first read, so the first next() runs inside withRetry.
-        const opening = await withRetry(
-          async () => {
-            const iterator = provider.chatStream!(systemPrompt, session.messages, turnTools, signal)[Symbol.asyncIterator]();
-            const first = await iterator.next();
-            return { iterator, first };
-          },
-          undefined,
-          verbose,
-          signal,
-        );
+        // Streaming path — the whole request is retried, not just opening it:
+        // a stream that drops, stalls into an incomplete end, or reports a
+        // retryable failure mid-response is requested again. Nothing has run
+        // yet (tools execute after the stream completes), so the only cost is
+        // the partial text already shown, dropped before the backoff wait.
         const onReasoningDelta =
           hooks?.onReasoningDelta ??
           (verbose ? (text: string) => process.stderr.write(`\x1b[2m${text}\x1b[0m`) : undefined);
-        const result = await consumeStream(
-          prefetchFirst(opening.iterator, opening.first),
-          costTracker,
-          { onTextDelta: hooks?.onTextDelta, onReasoningDelta, providerName: provider.name },
+        const onTextDelta = hooks?.onTextDelta ?? process.stdout.write.bind(process.stdout);
+        // Text this attempt has shown, for UIs that cannot take it back.
+        let shown = "";
+        const onRetry = () => {
+          if (hooks?.onStreamRetry) {
+            hooks.onStreamRetry();
+          } else if (shown && !shown.endsWith("\n")) {
+            // Plain stdout (the REPL, one-shot) cannot erase the abandoned
+            // text; end its line so the restarted reply begins on its own.
+            onTextDelta("\n");
+          }
+          status(shown
+            ? "\x1b[33m[model request failed; retrying, the reply starts again]\x1b[0m\n"
+            : "\x1b[33m[model request failed; retrying]\x1b[0m\n");
+          shown = "";
+          // The phone's live preview drops the abandoned attempt's text too.
+          preview?.clear();
+        };
+        const result = await withRetry(
+          async () => {
+            preview?.start(prompted.time);
+            return consumeStream(
+              provider.chatStream!(systemPrompt, session.messages, turnTools, signal),
+              costTracker,
+              {
+                onTextDelta: (text: string) => { shown += text; onTextDelta(text); preview?.append(text); },
+                onReasoningDelta,
+                providerName: provider.name,
+              },
+              signal,
+            );
+          },
+          { onRetry },
+          verbose,
           signal,
         );
         assistantContent = result.content;
         stopReason = result.stop_reason;
+        invalidToolCalls = result.invalidToolCalls;
       } else {
         // Batch path
         spinner.start("Thinking...");
@@ -198,10 +218,11 @@ export async function runTurn(
 
         assistantContent = response.content;
         stopReason = response.stop_reason;
+        invalidToolCalls = response.invalidToolCalls ?? [];
 
         // Track cost from batch response
         if (costTracker && response.usage) {
-          costTracker.recordUsage(response.usage.input_tokens, response.usage.output_tokens);
+          recordTokenUsage(costTracker, response.usage);
         }
 
         // Print text blocks (streaming already prints inline)
@@ -218,6 +239,7 @@ export async function runTurn(
       }
     } catch (err: unknown) {
       spinner.stop();
+      preview?.clear();
       // The token estimate is approximate; when the provider itself says the
       // prompt is too long, compact harder (keep 2 turns) and retry once.
       if (!overflowRecovered && !signal?.aborted && isContextOverflowError(err)) {
@@ -248,6 +270,8 @@ export async function runTurn(
       stop_reason: stopReason,
       turn: session.turns,
     });
+    // Only after the message is in the log, so a reader never sees neither.
+    preview?.clear();
     session.turns++;
     hooks?.onAssistantMessage?.(assistantContent, stopReason);
 
@@ -297,9 +321,13 @@ export async function runTurn(
       continue;
     }
 
-    // If max_tokens, warn user and inject continuation prompt
+    // If max_tokens, warn user and inject continuation prompt. Complete tool
+    // calls in the truncated response are not run (the response may have been
+    // cut mid-batch), but each still needs a result or every later request
+    // carries an unpaired tool_use.
     if (stopReason === "max_tokens") {
       status("\x1b[33m[response truncated: max_tokens reached, requesting continuation]\x1b[0m\n");
+      closeDanglingToolUses(session, "Not executed: your response was truncated at max_tokens. Issue the call again if it is still needed.");
       session.log.append("user/message", {
         message: { role: "user", content: "Your response was truncated due to length. Please continue where you left off." },
         source: "system",
@@ -311,13 +339,16 @@ export async function runTurn(
     // If no tool use, we're done
     if (stopReason !== "tool_use") { endReason = "end_turn"; break; }
 
-    // Execute tool calls with concurrency
+    // Execute tool calls with concurrency. Calls whose arguments were not
+    // valid JSON are answered with an error instead of being run.
     const toolUseBlocks = assistantContent.filter((b): b is ToolUseBlock => b.type === "tool_use");
+    const invalidById = new Map(invalidToolCalls.map((call) => [call.id, call]));
+    const runnableBlocks = toolUseBlocks.filter((b) => !invalidById.has(b.id));
 
     // Checkpoint BEFORE the mutating batch: the tool names are known now, and
     // the snapshot must be the true pre-turn tree so /rewind can restore it.
     const mutatingTools = new Set(["edit_file", "multi_edit", "apply_patch", "write_file"]);
-    const hasMutation = toolUseBlocks.some(b => mutatingTools.has(b.name));
+    const hasMutation = runnableBlocks.some(b => mutatingTools.has(b.name));
     if (hasMutation) {
       createCheckpoint(process.cwd(), `turn-${session.turns}`);
     }
@@ -330,7 +361,7 @@ export async function runTurn(
     }
 
     if (!hooks?.onToolStart) spinner.start(`Running ${toolUseBlocks.length} tool${toolUseBlocks.length > 1 ? "s" : ""}...`);
-    const { results: toolResults, toolCallCount } = await executeToolBlocks(toolUseBlocks, {
+    const { results: executedResults, toolCallCount } = await executeToolBlocks(runnableBlocks, {
       registry, verbose, status, hooks, signal,
       antiPatterns: session.antiPatterns,
       captureState: session.captureState,
@@ -340,8 +371,22 @@ export async function runTurn(
     });
     if (!hooks?.onToolStart) spinner.stop();
 
-    session.toolCalls += toolCallCount;
-    turnToolCalls += toolCallCount;
+    // Results in the model's call order, invalid calls answered in place.
+    const resultById = new Map(
+      executedResults.flatMap((r) => (r.type === "tool_result" ? [[r.tool_use_id, r] as const] : [])),
+    );
+    const toolResults: ContentBlock[] = toolUseBlocks.map((block) => {
+      const invalid = invalidById.get(block.id);
+      if (!invalid) return resultById.get(block.id)!;
+      const sample = invalid.raw.length > 300 ? `${invalid.raw.slice(0, 300)}…` : invalid.raw;
+      const output = `Not run: the arguments for ${block.name} were not valid JSON (${invalid.error}). ` +
+        `Call the tool again with a JSON object of arguments. You sent: ${sample}`;
+      hooks?.onToolEnd?.(block.name, block.input, output, true, 0);
+      return { type: "tool_result", tool_use_id: block.id, content: output, is_error: true };
+    });
+
+    session.toolCalls += toolCallCount + invalidById.size;
+    turnToolCalls += toolCallCount + invalidById.size;
 
     // Only successful write/edit results justify checks; requested, denied,
     // failed, or cancelled mutations must never launch a follow-up command.

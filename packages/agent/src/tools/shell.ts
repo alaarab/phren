@@ -1,5 +1,4 @@
-import { execFile, spawn } from "child_process";
-import { promisify } from "util";
+import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -8,11 +7,37 @@ import type { PermissionConfig } from "../permissions/types.js";
 import { checkShellSafety, scrubEnv } from "../permissions/shell-safety.js";
 import { wrapWithSandbox, classifySandboxDenial, SandboxRequiredError } from "../permissions/kernel-sandbox.js";
 
-const execFileAsync = promisify(execFile);
+/** A positive whole number from the environment, else the fallback. */
+function envPositiveInt(key: string, fallback: number): number {
+  const value = Number(process.env[key]);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
 
-const DEFAULT_TIMEOUT_MS = 30_000;
-const MAX_TIMEOUT_MS = 120_000;
+/**
+ * Foreground limits. A real test suite or build often needs minutes, and
+ * weaker models handle background polling badly, so the cap is 10 minutes
+ * (as in Claude Code). Override with PHREN_AGENT_SHELL_TIMEOUT_MS (default)
+ * and PHREN_AGENT_SHELL_MAX_TIMEOUT_MS (cap).
+ */
+function shellTimeouts(): { defaultMs: number; maxMs: number } {
+  const maxMs = envPositiveInt("PHREN_AGENT_SHELL_MAX_TIMEOUT_MS", 600_000);
+  return { defaultMs: Math.min(maxMs, envPositiveInt("PHREN_AGENT_SHELL_TIMEOUT_MS", 120_000)), maxMs };
+}
+
+/** Background task_output reads are capped at this many trailing characters. */
 const MAX_OUTPUT_BYTES = 100_000;
+
+/**
+ * Foreground output kept for the model: the head (what ran) and the tail
+ * (test summaries, stack traces). Anything between is dropped with a marker
+ * and the full output is kept in a log file the model can read.
+ */
+export const OUTPUT_HEAD_CHARS = 8_000;
+export const OUTPUT_TAIL_CHARS = 24_000;
+/** Stop writing the full-output file past this, so a runaway command can't fill the disk. */
+const MAX_SPILL_BYTES = 50_000_000;
+/** All full-output files of one agent process together stop growing past this (PHREN_AGENT_SHELL_SPILL_TOTAL_BYTES). */
+const sessionSpillLimit = () => envPositiveInt("PHREN_AGENT_SHELL_SPILL_TOTAL_BYTES", 200_000_000);
 
 // Background task tracking
 const backgroundTasks = new Map<string, { pid: number; outputFile: string; done: boolean; exitCode: number | null }>();
@@ -36,6 +61,215 @@ function backgroundLogDir(): string {
   return backgroundLogRoot;
 }
 let nextBgId = 1;
+let nextSpillId = 1;
+/** Full-output files written by this process; removed when it exits. */
+const spillFiles = new Set<string>();
+let sessionSpilled = 0;
+
+/**
+ * Process groups of foreground commands still running. Each one is detached
+ * into its own group (so a timeout kills what it spawned), which also means
+ * Ctrl+C, a closed terminal or the agent exiting no longer reach it; the
+ * exit and signal handlers below kill them instead.
+ */
+const foregroundGroups = new Set<number>();
+let exitHandlersInstalled = false;
+
+/** Kill every running foreground command's process group. Synchronous, so it can run in an exit handler. */
+export function killForegroundCommands(): void {
+  for (const pgid of foregroundGroups) {
+    try { process.kill(-pgid, "SIGKILL"); } catch { /* already gone */ }
+  }
+  foregroundGroups.clear();
+}
+
+/** Remove this process's full-output files. */
+export function removeSpillFiles(): void {
+  for (const file of spillFiles) {
+    try { fs.rmSync(file, { force: true }); } catch { /* best effort */ }
+  }
+  spillFiles.clear();
+  // Background logs may still be in use; the directory goes only when empty.
+  if (backgroundLogRoot) {
+    try { fs.rmdirSync(backgroundLogRoot); backgroundLogRoot = undefined; } catch { /* not empty */ }
+  }
+}
+
+function onProcessExit(): void {
+  killForegroundCommands();
+  removeSpillFiles();
+}
+
+/**
+ * Covers every way the agent ends: process.exit from the one-shot, REPL,
+ * TUI and subagent paths (a subagent exits when its parent's IPC channel
+ * closes) runs the exit handler; SIGINT, SIGTERM and SIGHUP kill the groups
+ * first and, when nothing else handles the signal, re-raise it so the
+ * default exit still happens.
+ */
+function installExitHandlers(): void {
+  if (exitHandlersInstalled) return;
+  exitHandlersInstalled = true;
+  process.on("exit", onProcessExit);
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    const onSignal = () => {
+      killForegroundCommands();
+      if (process.listenerCount(sig) === 1) {
+        process.removeListener(sig, onSignal);
+        process.kill(process.pid, sig);
+      }
+    };
+    process.on(sig, onSignal);
+  }
+}
+
+/** Interleaved stdout/stderr, keeping only the head and tail in memory. */
+class OutputCapture {
+  private head = "";
+  private tail = "";
+  private total = 0;
+  private spillFd: number | null = null;
+  private spillPath: string | null = null;
+  private spilled = 0;
+
+  push(chunk: string): void {
+    const full = this.total <= OUTPUT_HEAD_CHARS + OUTPUT_TAIL_CHARS;
+    this.total += chunk.length;
+    if (full && this.total <= OUTPUT_HEAD_CHARS + OUTPUT_TAIL_CHARS) {
+      // Still small enough to hold whole: everything lives in head.
+      this.head += chunk;
+      return;
+    }
+    if (full) {
+      // Crossing the limit: start the full-output file with what we have.
+      const all = this.head + chunk;
+      this.openSpill(all.slice(0, all.length - chunk.length));
+      this.head = all.slice(0, OUTPUT_HEAD_CHARS);
+      this.tail = all.slice(OUTPUT_HEAD_CHARS).slice(-OUTPUT_TAIL_CHARS);
+    } else {
+      this.tail = (this.tail + chunk).slice(-OUTPUT_TAIL_CHARS);
+    }
+    this.writeSpill(chunk);
+  }
+
+  private openSpill(initial: string): void {
+    if (sessionSpilled >= sessionSpillLimit()) return;
+    try {
+      this.spillPath = path.join(backgroundLogDir(), `shell-${nextSpillId++}.log`);
+      this.spillFd = fs.openSync(this.spillPath, "wx");
+      spillFiles.add(this.spillPath);
+      installExitHandlers();
+      this.writeSpill(initial);
+    } catch {
+      this.spillFd = null;
+      this.spillPath = null;
+    }
+  }
+
+  private get capped(): boolean {
+    return this.spilled >= MAX_SPILL_BYTES || sessionSpilled >= sessionSpillLimit();
+  }
+
+  private writeSpill(text: string): void {
+    if (this.spillFd === null || this.capped) return;
+    try {
+      const written = fs.writeSync(this.spillFd, text);
+      this.spilled += written;
+      sessionSpilled += written;
+    } catch { /* best effort */ }
+  }
+
+  /** The model-visible text: whole when small, else head + marker + tail. */
+  finish(): string {
+    if (this.spillFd !== null) {
+      try { fs.closeSync(this.spillFd); } catch { /* already closed */ }
+      this.spillFd = null;
+    }
+    if (this.total <= OUTPUT_HEAD_CHARS + OUTPUT_TAIL_CHARS) return this.head.trim();
+    const omitted = this.total - this.head.length - this.tail.length;
+    const where = this.spillPath
+      ? ` Full output (${this.total} chars${this.capped ? `, file capped at ${this.spilled} bytes` : ""}) is in ${this.spillPath}; read or grep it for the middle.`
+      : sessionSpilled >= sessionSpillLimit()
+        ? " Full output was not saved: this session's output files reached their size cap; rerun with less output (e.g. pipe through grep or tail)."
+        : "";
+    return `${this.head}\n\n... [${omitted} chars of output omitted.${where}] ...\n\n${this.tail}`.trim();
+  }
+}
+
+interface ForegroundResult {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  output: string;
+  timedOut: boolean;
+  aborted: boolean;
+  error?: Error;
+}
+
+/**
+ * Run a command to completion without a size limit: output streams into an
+ * OutputCapture, so a verbose command is never killed for printing too much
+ * and its real exit code is reported. On POSIX the command gets its own
+ * process group so a timeout or cancel also kills what it spawned.
+ */
+function runForeground(
+  exe: string,
+  args: string[],
+  opts: { cwd: string; timeout: number; signal?: AbortSignal },
+): Promise<ForegroundResult> {
+  return new Promise((resolve) => {
+    const capture = new OutputCapture();
+    const posix = process.platform !== "win32";
+    let timedOut = false;
+    let aborted = false;
+    let settled = false;
+
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(exe, args, {
+        cwd: opts.cwd,
+        env: scrubEnv(),
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: posix,
+      });
+    } catch (err: unknown) {
+      resolve({ code: null, signal: null, output: "", timedOut, aborted, error: err instanceof Error ? err : new Error(String(err)) });
+      return;
+    }
+
+    const pgid = posix ? child.pid : undefined;
+    if (pgid) {
+      foregroundGroups.add(pgid);
+      installExitHandlers();
+    }
+    const kill = () => {
+      try {
+        if (pgid) process.kill(-pgid, "SIGKILL");
+        else child.kill("SIGKILL");
+      } catch { /* already gone */ }
+    };
+    const timer = setTimeout(() => { timedOut = true; kill(); }, opts.timeout);
+    const onAbort = () => { aborted = true; kill(); };
+    if (opts.signal?.aborted) onAbort();
+    else opts.signal?.addEventListener("abort", onAbort, { once: true });
+
+    child.stdout?.setEncoding("utf-8");
+    child.stderr?.setEncoding("utf-8");
+    child.stdout?.on("data", (chunk: string) => capture.push(chunk));
+    child.stderr?.on("data", (chunk: string) => capture.push(chunk));
+
+    const done = (result: Omit<ForegroundResult, "output" | "timedOut" | "aborted">) => {
+      if (settled) return;
+      settled = true;
+      if (pgid) foregroundGroups.delete(pgid);
+      clearTimeout(timer);
+      opts.signal?.removeEventListener("abort", onAbort);
+      resolve({ ...result, output: capture.finish(), timedOut, aborted });
+    };
+    child.on("error", (err) => done({ code: null, signal: null, error: err }));
+    // "close" fires after stdio drains, so the tail is complete.
+    child.on("close", (code, signal) => done({ code, signal }));
+  });
+}
 
 /**
  * Shell tool factory. `getPermissions` is read per call so /permissions and
@@ -45,9 +279,9 @@ let nextBgId = 1;
 export function createShellTool(getPermissions?: () => PermissionConfig): AgentTool {
   return {
     name: "shell",
-    // Internal budget maxes at 120s; give the scheduler a little headroom so
-    // the tool's own richer timeout message wins the race.
-    timeoutMs: MAX_TIMEOUT_MS + 5_000,
+    // Give the scheduler a little headroom over the internal cap so the
+    // tool's own richer timeout message wins the race.
+    timeoutMs: shellTimeouts().maxMs + 5_000,
     description: "Run a shell command and return stdout + stderr. Use run_in_background for long-running commands (builds, test suites, dev servers). Use description to explain what the command does.",
     input_schema: {
       type: "object",
@@ -55,7 +289,7 @@ export function createShellTool(getPermissions?: () => PermissionConfig): AgentT
         command: { type: "string", description: "Shell command to execute." },
         description: { type: "string", description: "Human-readable description of what this command does (shown to user)." },
         cwd: { type: "string", description: "Working directory. Defaults to process cwd." },
-        timeout: { type: "number", description: "Timeout in ms. Default: 30000, max: 120000." },
+        timeout: { type: "number", description: `Timeout in ms. Default: ${shellTimeouts().defaultMs}, max: ${shellTimeouts().maxMs}.` },
         run_in_background: { type: "boolean", description: "If true, run in background and return a task_id. Use task_output to get results later." },
       },
       required: ["command"],
@@ -63,7 +297,8 @@ export function createShellTool(getPermissions?: () => PermissionConfig): AgentT
     async execute(input, signal) {
       const command = input.command as string;
       const cwd = (input.cwd as string) || process.cwd();
-      const timeout = Math.min(MAX_TIMEOUT_MS, (input.timeout as number) || DEFAULT_TIMEOUT_MS);
+      const limits = shellTimeouts();
+      const timeout = Math.min(limits.maxMs, (input.timeout as number) || limits.defaultMs);
       const description = input.description as string | undefined;
       const runInBackground = input.run_in_background as boolean;
 
@@ -124,37 +359,27 @@ export function createShellTool(getPermissions?: () => PermissionConfig): AgentT
       }
 
       // Foreground execution — async so concurrent tool batches actually run
-      // concurrently (execFileSync blocked the event loop, making batch
-      // concurrency fictional and timeouts unenforceable mid-call) and so the
-      // scheduler's abort signal can kill a hung command.
-      try {
-        const { stdout, stderr } = await execFileAsync(exe, exeArgs, {
-          cwd,
-          encoding: "utf-8",
-          timeout,
-          maxBuffer: MAX_OUTPUT_BYTES,
-          env: scrubEnv(),
-          ...(signal ? { signal } : {}),
-        });
-        const combined = [stdout, stderr].filter(Boolean).join("\n").trim();
-        return { output: noticePrefix + (combined || "(no output)") };
-      } catch (err: unknown) {
-        if (err && typeof err === "object" && ("stdout" in err || "stderr" in err)) {
-          const e = err as { stdout?: string; stderr?: string; code?: number | string; killed?: boolean; signal?: string };
-          const combined = [e.stdout, e.stderr].filter(Boolean).join("\n").trim();
-          if (e.killed || e.signal === "SIGTERM") {
-            return { output: `${noticePrefix}Command timed out or was cancelled after ${timeout}ms\n${combined}`, is_error: true };
-          }
-          // Explain kernel write-fence denials so the model redirects instead
-          // of retrying (classify combined output — commands often 2>&1)
-          const denial = decision.sandboxed
-            ? classifySandboxDenial(combined, perms?.projectRoot ?? process.cwd())
-            : null;
-          return { output: `${noticePrefix}Exit code ${typeof e.code === "number" ? e.code : 1}\n${combined}${denial ?? ""}`, is_error: true };
-        }
-        const msg = err instanceof Error ? err.message : String(err);
-        return { output: msg, is_error: true };
+      // concurrently and the scheduler's abort signal can kill a hung command.
+      const result = await runForeground(exe, exeArgs, { cwd, timeout, signal });
+      if (result.error) return { output: noticePrefix + result.error.message, is_error: true };
+      const combined = result.output;
+      if (result.aborted) {
+        return { output: `${noticePrefix}Command was cancelled\n${combined}`.trim(), is_error: true };
       }
+      if (result.timedOut) {
+        return {
+          output: `${noticePrefix}Command timed out after ${timeout}ms (pass a larger timeout, up to ${limits.maxMs}ms, or use run_in_background)\n${combined}`.trim(),
+          is_error: true,
+        };
+      }
+      if (result.code === 0) return { output: noticePrefix + (combined || "(no output)") };
+      // Explain kernel write-fence denials so the model redirects instead
+      // of retrying (classify combined output — commands often 2>&1)
+      const denial = decision.sandboxed
+        ? classifySandboxDenial(combined, perms?.projectRoot ?? process.cwd())
+        : null;
+      const status = result.code !== null ? `Exit code ${result.code}` : `Killed by ${result.signal ?? "signal"}`;
+      return { output: `${noticePrefix}${status}\n${combined}${denial ?? ""}`, is_error: true };
     },
   };
 }

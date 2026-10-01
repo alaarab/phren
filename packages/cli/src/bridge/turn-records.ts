@@ -26,7 +26,9 @@ import { atomicInPrivateDir, bridgeRoot, provider, serverName, sessionId, type P
 export const TURN_REPLY_LIMIT = 4000;
 const MAX_RECORD_BYTES = 16_384;
 
-const stamp = z.object({ seq: z.number().int().min(0), at: z.string().datetime() }).strict();
+// Not strict: a field a newer Hook adds (as `stop.cwd` was) is dropped on
+// read here, never a reason to throw the pane's record away.
+const stamp = z.object({ seq: z.number().int().min(0), at: z.string().datetime() });
 const turnRecordSchema = z.object({
   terminal: z.string().min(1).max(200), source: provider, session: sessionId,
   /** Climbs with every recorded event, so prompt and stop are ordered without trusting the clock. */
@@ -39,9 +41,11 @@ const turnRecordSchema = z.object({
     /** Background tasks (shells, subagents, monitors) the harness still ran when the turn stopped. */
     background: z.number().int().min(0).max(999).optional(),
     reply: z.string().max(TURN_REPLY_LIMIT).optional(), truncated: z.boolean().optional(),
-  }).strict().optional(),
+    /** The agent's working directory when the turn stopped: where its uncommitted work would be. */
+    cwd: z.string().max(4096).optional(),
+  }).optional(),
   at: z.string().datetime(),
-}).strict();
+});
 export type TurnRecord = z.infer<typeof turnRecordSchema>;
 
 export interface TurnEvent {
@@ -52,6 +56,8 @@ export interface TurnEvent {
   background?: number;
   /** Stop only: the harness's last assistant message, when it reports one. */
   reply?: string;
+  /** Stop only: the agent's working directory, as its hook payload names it. */
+  cwd?: string;
   at?: number;
 }
 
@@ -81,7 +87,8 @@ export function nextTurn(previous: TurnRecord | undefined, event: TurnEvent): Tu
   else {
     const reply = event.reply?.trim() ? truncateUtf8(event.reply.trim()) : undefined;
     record.stop = { seq: record.seq, at, ...(event.background !== undefined ? { background: Math.min(999, Math.max(0, Math.floor(event.background))) } : {}),
-      ...(reply ? { reply: reply.text, ...(reply.truncated ? { truncated: true } : {}) } : {}) };
+      ...(reply ? { reply: reply.text, ...(reply.truncated ? { truncated: true } : {}) } : {}),
+      ...(event.cwd && path.isAbsolute(event.cwd) && event.cwd.length <= 4096 ? { cwd: event.cwd } : {}) };
   }
   return record;
 }
