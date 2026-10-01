@@ -274,7 +274,7 @@ export async function runAgentCli(raw: string[]) {
   const providerInfo = { name: provider.name, model: (provider as { model?: string }).model };
   // The environment block is built once so the prompt stays byte-stable
   // across rebuilds (provider prompt caching).
-  const environment = buildEnvironmentBlock(process.cwd(), args.permissions);
+  const environment = buildEnvironmentBlock(process.cwd());
   let promptContext = contextSnippet;
   let promptSummary = priorSummary;
   const mcpServerNames: string[] = [];
@@ -283,7 +283,6 @@ export async function runAgentCli(raw: string[]) {
     buildSystemPrompt(promptContext, promptSummary, info, getCustomCommandInfos(), {
       toolNames: registry.toolNames(),
       mcpServers: mcpServerNames,
-      permissionMode: args.permissions,
       environment,
     });
 

@@ -464,8 +464,7 @@ Full readline-style editing in the interactive TUI:
 The agent has access to these built-in tools. The system prompt tells the model
 which of them are registered in the session (MCP tools as a count per server)
 and carries a short environment block: working directory, platform, shell,
-today's date, the git branch if the directory is a repository, and the
-permission mode. The block is built once per session, with no clock time, so
+today's date and the git branch if the directory is a repository. The block is built once per session, with no clock time, so
 the prompt stays cacheable. `--dry-run` prints it.
 
 ### File operations
