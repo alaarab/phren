@@ -41,8 +41,6 @@ for (const mode of ["ripgrep", "fallback"] as const) {
   describe.runIf(mode === "fallback" || hasRg)(`search tools (${mode})`, () => {
     beforeEach(() => {
       if (mode === "fallback") process.env.PHREN_AGENT_RIPGREP = "off";
-      // Ripgrep only reads .gitignore inside a git work tree, or with this file name.
-      write(".ignore", "");
       expect(ripgrepPath() === null).toBe(mode === "fallback");
     });
 
@@ -50,6 +48,19 @@ for (const mode of ["ripgrep", "fallback"] as const) {
       const result = await grepTool.execute({ pattern: "Needle", path: dir, output_mode: "files_with_matches" });
       const files = result.output.split("\n").sort();
       expect(files).toEqual([path.join(".github", "workflows", "ci.yml"), path.join("src", "app.ts")]);
+    });
+
+    it("honours .gitignore outside a git repository", async () => {
+      fs.rmSync(path.join(dir, ".git"), { recursive: true });
+      const grep = await grepTool.execute({ pattern: "Needle", path: dir, output_mode: "files_with_matches" });
+      expect(grep.output).not.toContain("dist");
+      const glob = await globTool.execute({ pattern: "**/*.js", path: dir });
+      expect(glob.output).not.toContain("bundle.js");
+    });
+
+    it("grep takes JavaScript regex syntax such as lookahead", async () => {
+      const result = await grepTool.execute({ pattern: "Needle(?= = 1)", path: dir, output_mode: "files_with_matches" });
+      expect(result.output).toBe(path.join("src", "app.ts"));
     });
 
     it("grep is case-sensitive unless -i is set", async () => {

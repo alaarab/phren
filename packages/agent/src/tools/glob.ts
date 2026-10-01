@@ -15,7 +15,7 @@ async function listWithRipgrep(root: string, pattern: string, signal?: AbortSign
   let total = 0;
   let capped = false;
   try {
-    await runRipgrep(rg, ["--files", "--hidden", "--glob", "!.git", "--glob", "!node_modules", "--sort", "path"], root, (line) => {
+    await runRipgrep(rg, ["--files", "--hidden", "--no-require-git", "--glob", "!.git", "--glob", "!node_modules", "--sort", "path"], root, (line) => {
       const rel = line.replace(/^\.[\\/]/, "");
       if (!matchGlob(pattern, rel)) return false;
       total++;

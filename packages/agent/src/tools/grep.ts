@@ -97,7 +97,7 @@ function formatRgLines(lines: RgFile["lines"]): string {
  * cannot start, so the caller falls back to the JS walker.
  */
 async function ripgrepSearch(rg: string, o: RipgrepSearch, signal?: AbortSignal): Promise<AgentToolResult | null> {
-  const args = ["--json", "--hidden", "--glob", "!.git", "--glob", "!node_modules", "--max-columns", String(MAX_LINE_CHARS), "--max-columns-preview",
+  const args = ["--json", "--hidden", "--no-require-git", "--glob", "!.git", "--glob", "!node_modules", "--max-columns", String(MAX_LINE_CHARS), "--max-columns-preview",
     o.caseInsensitive ? "-i" : "-s"];
   if (o.multiline) args.push("-U", "--multiline-dotall");
   if (o.outputMode === "content") args.push("-A", String(o.contextA), "-B", String(o.contextB));
@@ -145,9 +145,8 @@ async function ripgrepSearch(rg: string, o: RipgrepSearch, signal?: AbortSignal)
     if (signal?.aborted) return { output: "Search aborted.", is_error: true };
     return null;
   }
-  if (run.code === 2 && files.length === 0 && /regex parse error|error parsing|unclosed|repetition/i.test(run.stderr)) {
-    return { output: `Invalid regex: ${o.pattern}`, is_error: true };
-  }
+  // A pattern ripgrep can't parse (lookaround, backreferences) may still be a
+  // valid JavaScript regex: the JS walker gets it and reports it if not.
   if (run.code === 2 && files.length === 0 && run.stderr.trim()) return null;
 
   const page = files.slice(o.offset, o.offset + o.headLimit);
