@@ -231,3 +231,12 @@ describe("DeepSeek reasoning effort mapping", () => {
     expect(p.thinkingBudget()).toBeNull();
   });
 });
+
+describe("a subagent's endpoint", () => {
+  it("resolves openai-compat from the payload's base URL and the forwarded key", () => {
+    process.env.PHREN_AGENT_API_KEY = "k";
+    const p = resolveProvider("openai-compat", "glm-5", undefined, undefined, { baseUrl: "https://relay.test/v1/" });
+    expect(p.name).toBe("openai-compat");
+    expect(p.baseUrl).toBe("https://relay.test/v1");
+  });
+});

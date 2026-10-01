@@ -170,7 +170,10 @@ For DeepSeek V4.1 Flash on OpenCode Go, use `--base-url https://opencode.ai/zen/
 replay and effort mapping. Go is a subscription, so its usage shows as
 included and `--budget` does not apply.
 
-`--base-url` is passed on to `/model` switches and subagents. Context window
+`--base-url` is passed on to `/model` switches and subagents. A subagent
+that names no provider (or the parent's) runs on the parent's `openai-compat`
+or `deepseek` endpoint and model; `PHREN_AGENT_API_KEY` and
+`DEEPSEEK_API_KEY` reach it through its environment only. Context window
 and pricing come from the built-in catalogue when the model id is known,
 otherwise a 200k-token window and a conservative price estimate are assumed.
 Override them with `--context-window <tokens>` and `--price-in`, `--price-out`

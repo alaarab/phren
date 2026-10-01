@@ -99,7 +99,7 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
     const { model: overridden, ...overrides } = payload.modelOverrides;
     scopeModelOverrides(overridden, overrides);
   }
-  const provider = resolveProvider(providerName, model);
+  const provider = resolveProvider(providerName, model, undefined, undefined, { baseUrl: payload.baseUrl });
 
   // Child agents get a lightweight prompt — no "search memory first" forcing
   const systemPrompt = buildChildPrompt(_task);
@@ -167,7 +167,7 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
   let spawner: AgentSpawner | null = null;
   const depth = payload.depth ?? 0;
   if (depth < MAX_SPAWN_DEPTH) {
-    spawner = new AgentSpawner({ costTracker, depth, getPermissionDefaults: () => registry.permissionConfig });
+    spawner = new AgentSpawner({ costTracker, depth, getPermissionDefaults: () => registry.permissionConfig, getParentProvider: () => provider });
     registry.register(createSpawnAgentTool(spawner, () => registry.permissionConfig));
     registry.register(createSendMessageTool(spawner));
     registry.register(createListAgentsTool(spawner));
