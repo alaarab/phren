@@ -655,7 +655,8 @@ export class AgentHooks {
     await recordTurn(target.server, target.pane, { event: String(body.event), terminal: pane.terminal_id, source: target.source, session: target.session,
       ...(dispatch ? { dispatch } : {}),
       ...(typeof body.background === "number" ? { background: body.background } : {}),
-      ...(typeof body.reply === "string" ? { reply: body.reply } : {}) }).catch(() => undefined);
+      ...(typeof body.reply === "string" ? { reply: body.reply } : {}),
+      ...(body.event === "Stop" && typeof body.cwd === "string" ? { cwd: body.cwd } : {}) }).catch(() => undefined);
   }
   private rememberTerminalPrompt(target: Target, body: Json) {
     const tool = String(body.tool || "action").slice(0, 200);
