@@ -5,8 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- phren agent won't write over a picture of a file that is out of date: `write_file` refuses to overwrite an existing file it hasn't read in the session, and `write_file`, `edit_file`, `multi_edit` and `apply_patch` refuse a file that changed on disk since the agent last read or wrote it, asking the model to read it again. `PHREN_AGENT_FILE_GUARD=off` turns it off.
+- phren agent's `grep` and `glob` use ripgrep when it is installed: `.gitignore` is honoured (no more descending into `dist/` or `coverage/`), hidden directories such as `.github/` are searched, and lines are cut at 500 characters. `grep` is now case-sensitive unless `-i` is set. Without ripgrep the JS fallback skips the same directories and reports when it stopped at its file cap instead of answering "No matches." `PHREN_AGENT_RIPGREP=off` forces the fallback.
+- phren agent's system prompt now has an environment block (working directory, platform, shell, today's date, git branch) and lists the tools actually registered in the session, MCP tools as a count per server, instead of a fixed list.
+- phren agent measures its context with the provider's own token count (the prompt size the last response reported, cache included, plus an estimate for what came after) instead of a chars/4 guess that ran sessions into the window. Past 75% it first clears old bulky tool output, outside the newest 8 results, and compacts only if that frees too little. `/compact <focus>` says what the summary must keep.
+
 ### Fixed
 
+- phren agent's compaction request carries the session's tools. Without them, Anthropic rejects a history that holds tool calls, so compaction on Claude always fell back to the regex summary, and the cached prefix never matched.
+- A Claude Code teammate that has shut down is a finished child: its `shutdown_approved` reply no longer flips it back to running, and the system's `teammate_terminated` notice ends it too, so the phone's Background tray and the session's running count drop it.
 - A dispatched worker that ends its turn waiting on its own job is no longer returned done with its pane closed. A background shell started before the dispatcher's message still counts once the agent reads its output again, a reply that says it waits on a task ("Now waiting on the MacBook rerun.", "I'll push once it passes.") keeps the worker working while one runs and returns needs-you when none does, a next step announced anywhere in the closing paragraph is needs-you, and a pane is never closed while a background task other than a log tail or dev server runs.
 - `watch` counts as an endless command only as a command, so `grep watch file` run in the background is waited on, and a running background skill is rechecked without rereading its parent's whole transcript every 5 seconds.
 

@@ -153,7 +153,8 @@ export function historyCommand(parts: string[], ctx: CommandContext): boolean {
   return true;
 }
 
-export async function compactCommand(_parts: string[], ctx: CommandContext): Promise<boolean> {
+export async function compactCommand(parts: string[], ctx: CommandContext): Promise<boolean> {
+  const focus = parts.slice(1).join(" ");
   const beforeCount = ctx.session.messages.length;
   const beforeTokens = estimateMessageTokens(ctx.session.messages);
 
@@ -168,6 +169,8 @@ export async function compactCommand(_parts: string[], ctx: CommandContext): Pro
       pruneConfig: { contextLimit: ctx.contextLimit, keepRecentTurns: 4 },
       // Manual /compact should always try the LLM, even for small ranges.
       config: { minPrunedTokens: 0 },
+      tools: ctx.registry?.getDefinitions?.(),
+      focus,
     });
     if (result) {
       ctx.session.log.replaceMessageRange(result.plan.startIndex, result.plan.endIndex, result.plan.summaryMessage);

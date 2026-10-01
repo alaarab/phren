@@ -1,4 +1,4 @@
-import type { ToolUseBlock, StreamDelta, ContentBlock, InvalidToolCall } from "../providers/types.js";
+import type { ToolUseBlock, StreamDelta, ContentBlock, InvalidToolCall, TokenUsage } from "../providers/types.js";
 import { partialUsage } from "../providers/types.js";
 import { parseToolArguments } from "../providers/openai-compat.js";
 import type { AgentToolImage } from "../tools/types.js";
@@ -148,12 +148,13 @@ export async function consumeStream(
   costTracker?: CostTracker | null,
   hooks?: ConsumeStreamHooks | ((text: string) => void),
   signal?: AbortSignal,
-): Promise<{ content: ContentBlock[]; stop_reason: "end_turn" | "tool_use" | "max_tokens"; invalidToolCalls: InvalidToolCall[] }> {
+): Promise<{ content: ContentBlock[]; stop_reason: "end_turn" | "tool_use" | "max_tokens"; invalidToolCalls: InvalidToolCall[]; usage?: TokenUsage }> {
   const onTextDelta = typeof hooks === "function" ? hooks : hooks?.onTextDelta;
   const onReasoningDelta = typeof hooks === "function" ? undefined : hooks?.onReasoningDelta;
   const providerName = typeof hooks === "function" ? undefined : hooks?.providerName;
   const content: ContentBlock[] = [];
   let stop_reason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
+  let usage: TokenUsage | undefined;
   let currentText = "";
   let currentReasoning = "";
 
@@ -229,6 +230,7 @@ export async function consumeStream(
         }
       } else if (delta.type === "done") {
         stop_reason = delta.stop_reason;
+        usage = delta.usage;
         if (costTracker && delta.usage) {
           recordTokenUsage(costTracker, delta.usage);
         }
@@ -259,7 +261,7 @@ export async function consumeStream(
     content.push({ type: "tool_use", id: tool.id, name: tool.name, input: {} });
   }
 
-  return { content, stop_reason, invalidToolCalls };
+  return { content, stop_reason, invalidToolCalls, usage };
 }
 
 export interface ToolExecContext {
