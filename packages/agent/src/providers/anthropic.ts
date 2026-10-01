@@ -1,5 +1,5 @@
-import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
-import { IncompleteStreamError } from "./types.js";
+import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta, TokenUsage } from "./types.js";
+import { IncompleteStreamError, RetryableProviderError, withPartialUsage } from "./types.js";
 import { stripForeignReasoning } from "./history.js";
 import { getModelMetadata, type ReasoningEffort } from "../models.js";
 
@@ -100,7 +100,7 @@ export class AnthropicProvider implements LlmProvider {
     return {
       content,
       stop_reason: stop_reason as LlmResponse["stop_reason"],
-      usage: usage ? { input_tokens: usage.input_tokens ?? 0, output_tokens: usage.output_tokens ?? 0 } : undefined,
+      usage: usage ? anthropicUsage(usage) : undefined,
     };
   }
 
@@ -125,7 +125,7 @@ export class AnthropicProvider implements LlmProvider {
     }
 
     let stopReason: LlmResponse["stop_reason"] = "end_turn";
-    let usage: { input_tokens: number; output_tokens: number } | undefined;
+    let usage: TokenUsage | undefined;
     // Map block index to tool ID for consistent ID across start/delta/end
     const indexToToolId = new Map<number, string>();
     // Thinking blocks are index-tracked too: the signature arrives as a
@@ -133,87 +133,82 @@ export class AnthropicProvider implements LlmProvider {
     const thinkingByIndex = new Map<number, { signature?: string }>();
     let stopped = false;
 
-    for await (const event of parseSSE(res)) {
-      const type = event.event;
-      const data = event.data;
+    try {
+      for await (const event of parseSSE(res)) {
+        const type = event.event;
+        const data = event.data;
 
-      if (type === "error") {
-        // Mid-stream errors (overloaded_error, api_error) arrive as an event
-        // on an HTTP 200 response.
-        const error = data.error as Record<string, unknown> | undefined;
-        throw new Error(`Anthropic API error: ${error?.type ?? "error"}: ${error?.message ?? JSON.stringify(data)}`);
-      } else if (type === "message_stop") {
-        stopped = true;
-      } else if (type === "content_block_start") {
-        const block = data.content_block as Record<string, unknown>;
-        if (block.type === "tool_use") {
+        if (type === "error") {
+          throw streamErrorEvent(data);
+        } else if (type === "message_stop") {
+          stopped = true;
+        } else if (type === "content_block_start") {
+          const block = data.content_block as Record<string, unknown>;
+          if (block.type === "tool_use") {
+            const index = data.index as number;
+            const id = block.id as string;
+            indexToToolId.set(index, id);
+            yield { type: "tool_use_start", id, name: block.name as string };
+          } else if (block.type === "thinking") {
+            thinkingByIndex.set(data.index as number, {});
+          } else if (block.type === "redacted_thinking") {
+            // Arrives complete: opaque payload, no deltas, no signature.
+            yield {
+              type: "reasoning_end",
+              redacted: true,
+              ...(typeof block.data === "string" ? { data: block.data } : {}),
+            };
+          }
+        } else if (type === "content_block_delta") {
+          const delta = data.delta as Record<string, unknown>;
+          if (delta.type === "text_delta") {
+            yield { type: "text_delta", text: delta.text as string };
+          } else if (delta.type === "thinking_delta") {
+            yield { type: "reasoning_delta", text: delta.thinking as string };
+          } else if (delta.type === "signature_delta") {
+            const state = thinkingByIndex.get(data.index as number);
+            if (state) state.signature = (state.signature ?? "") + (delta.signature as string);
+          } else if (delta.type === "input_json_delta") {
+            const index = data.index as number;
+            const id = indexToToolId.get(index) ?? String(index);
+            yield { type: "tool_use_delta", id, json: delta.partial_json as string };
+          }
+        } else if (type === "content_block_stop") {
           const index = data.index as number;
-          const id = block.id as string;
-          indexToToolId.set(index, id);
-          yield { type: "tool_use_start", id, name: block.name as string };
-        } else if (block.type === "thinking") {
-          thinkingByIndex.set(data.index as number, {});
-        } else if (block.type === "redacted_thinking") {
-          // Arrives complete: opaque payload, no deltas, no signature.
-          yield {
-            type: "reasoning_end",
-            redacted: true,
-            ...(typeof block.data === "string" ? { data: block.data } : {}),
-          };
-        }
-      } else if (type === "content_block_delta") {
-        const delta = data.delta as Record<string, unknown>;
-        if (delta.type === "text_delta") {
-          yield { type: "text_delta", text: delta.text as string };
-        } else if (delta.type === "thinking_delta") {
-          yield { type: "reasoning_delta", text: delta.thinking as string };
-        } else if (delta.type === "signature_delta") {
-          const state = thinkingByIndex.get(data.index as number);
-          if (state) state.signature = (state.signature ?? "") + (delta.signature as string);
-        } else if (delta.type === "input_json_delta") {
-          const index = data.index as number;
-          const id = indexToToolId.get(index) ?? String(index);
-          yield { type: "tool_use_delta", id, json: delta.partial_json as string };
-        }
-      } else if (type === "content_block_stop") {
-        const index = data.index as number;
-        if (thinkingByIndex.has(index)) {
-          const state = thinkingByIndex.get(index)!;
-          thinkingByIndex.delete(index);
-          yield {
-            type: "reasoning_end",
-            ...(state.signature !== undefined ? { signature: state.signature } : {}),
-          };
-        }
-        if (indexToToolId.has(index)) {
-          yield { type: "tool_use_end", id: indexToToolId.get(index)! };
-        }
-      } else if (type === "message_delta") {
-        const delta = data.delta as Record<string, unknown>;
-        if (delta.stop_reason === "tool_use") stopReason = "tool_use";
-        else if (delta.stop_reason === "max_tokens") stopReason = "max_tokens";
-        // message_delta carries output_tokens — merge with existing input_tokens from message_start
-        const u = data.usage as Record<string, number> | undefined;
-        if (u) {
-          usage = {
-            input_tokens: usage?.input_tokens ?? 0,
-            output_tokens: u.output_tokens ?? 0,
-          };
-        }
-      } else if (type === "message_start") {
-        // message_start carries input_tokens — initialize usage
-        const u = (data.message as Record<string, unknown>)?.usage as Record<string, number> | undefined;
-        if (u) {
-          logCacheUsage(u);
-          usage = {
-            input_tokens: u.input_tokens ?? 0,
-            output_tokens: usage?.output_tokens ?? 0,
-          };
+          if (thinkingByIndex.has(index)) {
+            const state = thinkingByIndex.get(index)!;
+            thinkingByIndex.delete(index);
+            yield {
+              type: "reasoning_end",
+              ...(state.signature !== undefined ? { signature: state.signature } : {}),
+            };
+          }
+          if (indexToToolId.has(index)) {
+            yield { type: "tool_use_end", id: indexToToolId.get(index)! };
+          }
+        } else if (type === "message_delta") {
+          const delta = data.delta as Record<string, unknown>;
+          if (delta.stop_reason === "tool_use") stopReason = "tool_use";
+          else if (delta.stop_reason === "max_tokens") stopReason = "max_tokens";
+          // message_delta carries output_tokens (and, on newer API versions,
+          // cumulative input and cache counts) — merge with message_start's.
+          const u = data.usage as Record<string, number> | undefined;
+          if (u) usage = mergeUsage(usage, u);
+        } else if (type === "message_start") {
+          // message_start carries input and cache tokens — initialize usage
+          const u = (data.message as Record<string, unknown>)?.usage as Record<string, number> | undefined;
+          if (u) {
+            logCacheUsage(u);
+            usage = mergeUsage(usage, u);
+          }
         }
       }
-    }
 
-    if (!stopped) throw new IncompleteStreamError("Anthropic stream ended before message_stop");
+      if (!stopped) throw new IncompleteStreamError("Anthropic stream ended before message_stop");
+    } catch (err: unknown) {
+      // The input was billed even though this attempt failed.
+      throw withPartialUsage(err, usage);
+    }
     yield { type: "done", stop_reason: stopReason, usage };
   }
 
@@ -344,6 +339,41 @@ export function parseWireContent(raw: unknown): ContentBlock[] {
     }
   }
   return content;
+}
+
+/**
+ * A mid-stream `error` event (it arrives on an HTTP 200 response).
+ * overloaded_error and api_error are transient on Anthropic's side, so a
+ * fresh request is worth making; anything else is not.
+ */
+function streamErrorEvent(data: Record<string, unknown>): Error {
+  const error = data.error as Record<string, unknown> | undefined;
+  const type = typeof error?.type === "string" ? error.type : "error";
+  const message = `Anthropic API error: ${type}: ${error?.message ?? JSON.stringify(data)}`;
+  return type === "overloaded_error" || type === "api_error" ? new RetryableProviderError(message) : new Error(message);
+}
+
+/** Anthropic usage → TokenUsage; input_tokens already excludes cache reads and writes. */
+function anthropicUsage(u: Record<string, number>): TokenUsage {
+  return {
+    input_tokens: u.input_tokens ?? 0,
+    output_tokens: u.output_tokens ?? 0,
+    ...(u.cache_read_input_tokens ? { cache_read_input_tokens: u.cache_read_input_tokens } : {}),
+    ...(u.cache_creation_input_tokens ? { cache_creation_input_tokens: u.cache_creation_input_tokens } : {}),
+  };
+}
+
+/** Fold a stream event's usage into what earlier events reported; absent fields keep their value. */
+function mergeUsage(prev: TokenUsage | undefined, u: Record<string, number>): TokenUsage {
+  const next = anthropicUsage(u);
+  return {
+    input_tokens: u.input_tokens !== undefined ? next.input_tokens : prev?.input_tokens ?? 0,
+    output_tokens: u.output_tokens !== undefined ? next.output_tokens : prev?.output_tokens ?? 0,
+    ...(next.cache_read_input_tokens ?? prev?.cache_read_input_tokens
+      ? { cache_read_input_tokens: next.cache_read_input_tokens ?? prev?.cache_read_input_tokens } : {}),
+    ...(next.cache_creation_input_tokens ?? prev?.cache_creation_input_tokens
+      ? { cache_creation_input_tokens: next.cache_creation_input_tokens ?? prev?.cache_creation_input_tokens } : {}),
+  };
 }
 
 /** Log cache hit/creation stats to stderr (visible in verbose mode). */

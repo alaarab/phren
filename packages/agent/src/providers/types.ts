@@ -76,14 +76,16 @@ export interface AgentToolDef {
 }
 
 /**
- * Token usage for one response. `input_tokens` excludes cache hits, which are
- * counted separately in `cache_read_input_tokens` (the Anthropic and Claude
- * Code shape), so each bucket can be priced at its own rate.
+ * Token usage for one response. `input_tokens` excludes cache hits and cache
+ * writes, which are counted separately in `cache_read_input_tokens` and
+ * `cache_creation_input_tokens` (the Anthropic and Claude Code shape), so
+ * each bucket can be priced at its own rate.
  */
 export interface TokenUsage {
   input_tokens: number;
   output_tokens: number;
   cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
 }
 
 export interface LlmResponse {
@@ -141,6 +143,24 @@ export class RetryableProviderError extends Error {
     super(message);
     this.name = "RetryableProviderError";
   }
+}
+
+/**
+ * Mark a failed stream with the usage the provider reported before it
+ * failed. The attempt is retried, but its tokens were billed, so the loop
+ * records them for --budget.
+ */
+export function withPartialUsage<E>(error: E, usage: TokenUsage | undefined): E {
+  if (usage && error instanceof Error && !(error as { usage?: unknown }).usage) {
+    (error as { usage?: TokenUsage }).usage = usage;
+  }
+  return error;
+}
+
+/** The usage withPartialUsage attached to an error, if any. */
+export function partialUsage(error: unknown): TokenUsage | undefined {
+  const usage = error instanceof Error ? (error as { usage?: unknown }).usage : undefined;
+  return usage && typeof usage === "object" ? usage as TokenUsage : undefined;
 }
 
 /** Thrown when a stream ends without the provider saying the response is complete. */

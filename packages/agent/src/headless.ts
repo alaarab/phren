@@ -31,7 +31,7 @@ export interface HeadlessResult {
   provider: string;
   model: string | null;
   /** input_tokens excludes cache hits, which are cache_read_input_tokens. */
-  usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number };
+  usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number };
   /** Estimated USD; null when the provider is a flat-rate subscription. */
   total_cost_usd: number | null;
   permission_denials: number;
@@ -76,6 +76,7 @@ export function buildHeadlessResult(opts: {
       input_tokens: tracker?.totalInputTokens ?? 0,
       output_tokens: tracker?.totalOutputTokens ?? 0,
       cache_read_input_tokens: tracker?.totalCacheReadTokens ?? 0,
+      cache_creation_input_tokens: tracker?.totalCacheWriteTokens ?? 0,
     },
     total_cost_usd: tracker?.metered ? Number(tracker.totalCost.toFixed(6)) : null,
     permission_denials: opts.permissionDenials,
