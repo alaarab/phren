@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { parseArgs, printHelp, resolveStartupPermissions } from "./config.js";
+import { agentUserDir, parseArgs, printHelp, resolveStartupPermissions } from "./config.js";
+import { randomUUID } from "crypto";
 import { loadPersistentAllowlist } from "./permissions/allowlist.js";
 import { loadPermissionRules } from "./permissions/rules.js";
 import { keepSessionEndpoint, resolveProvider } from "./providers/resolve.js";
@@ -148,12 +149,11 @@ export async function runAgentCli(raw: string[]) {
   if (args.baseUrl) process.env.PHREN_AGENT_BASE_URL = args.baseUrl;
 
   if (args.listSessions) {
+    // Without a phren store, sessions live in ~/.phren-agent, listed for this directory.
     const ctx = await buildPhrenContext(args.project);
-    if (!ctx) {
-      console.error("Sessions are stored in the phren store; none was found.");
-      process.exit(1);
-    }
-    const sessions = listEventLogs(ctx.phrenPath, { project: args.project ?? undefined, limit: 20 });
+    const sessions = ctx
+      ? listEventLogs(ctx.phrenPath, { project: args.project ?? undefined, limit: 20 })
+      : listEventLogs(agentUserDir(), { cwd: process.cwd(), limit: 20 });
     if (args.outputFormat === "json") {
       console.log(JSON.stringify(sessions.map(({ file: _file, ...rest }) => ({ ...rest, updatedAt: new Date(rest.mtimeMs).toISOString() })), null, 2));
     } else if (sessions.length === 0) {
@@ -398,17 +398,22 @@ export async function runAgentCli(raw: string[]) {
     if (lintTestConfig.testCmd) process.stderr.write(`Test: ${lintTestConfig.testCmd}\n`);
   }
 
-  /** Durable event log for this run when a phren store is available. */
-  const makePersistedLog = (): SessionLog | undefined => {
-    if (!phrenCtx || !sessionId) return undefined;
+  // The durable event log lives in the phren store, or in ~/.phren-agent
+  // without one, so a session can be resumed either way. Without a store the
+  // session has no phren session id, only this log's.
+  const sessionRoot = phrenCtx?.phrenPath ?? agentUserDir();
+  const logSessionId = sessionId ?? randomUUID();
+
+  /** Durable event log for this run. */
+  const makePersistedLog = (): SessionLog => {
     return new SessionLog(
       {
-        sessionId,
-        project: phrenCtx.project ?? undefined,
+        sessionId: logSessionId,
+        project: phrenCtx?.project ?? undefined,
         cwd: process.cwd(),
         createdAt: new Date().toISOString(),
       },
-      fileSink(phrenCtx.phrenPath, sessionId),
+      fileSink(sessionRoot, logSessionId),
     );
   };
 
@@ -419,21 +424,22 @@ export async function runAgentCli(raw: string[]) {
    * previous session.
    */
   const makeResumedLog = (): SessionLog | undefined => {
-    if (!phrenCtx || !sessionId) return undefined;
     let latest: string | null;
     if (args.resumeId) {
       try {
-        latest = findEventLogById(phrenCtx.phrenPath, args.resumeId);
+        latest = findEventLogById(sessionRoot, args.resumeId);
       } catch (err: unknown) {
         process.stderr.write(`Cannot resume: ${err instanceof Error ? err.message : String(err)}\n`);
         process.exit(1);
       }
     } else {
-      latest = findLatestEventLog(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
+      latest = phrenCtx
+        ? findLatestEventLog(sessionRoot, phrenCtx.project ?? undefined)
+        : findLatestEventLog(sessionRoot, undefined, process.cwd());
     }
     if (latest) {
       try {
-        const parent = restoreSessionLog(phrenCtx.phrenPath, latest);
+        const parent = restoreSessionLog(sessionRoot, latest);
         if (parent.length > 0) {
           if (args.verbose) {
             process.stderr.write(
@@ -442,7 +448,7 @@ export async function runAgentCli(raw: string[]) {
           }
           // This run gets its own forked log file, seeded with the parent's
           // full history and linked via parentSession.
-          return persistFork(phrenCtx.phrenPath, parent, sessionId);
+          return persistFork(sessionRoot, parent, logSessionId);
         }
       } catch (err: unknown) {
         process.stderr.write(
@@ -450,7 +456,7 @@ export async function runAgentCli(raw: string[]) {
         );
       }
     }
-    if (args.resumeId) return undefined; // a named session never falls back to another one
+    if (args.resumeId || !phrenCtx) return undefined; // a named session never falls back to another one
     const priorSnapshot = loadLastSessionSnapshot(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
     if (priorSnapshot && priorSnapshot.messages.length > 0) {
       if (args.verbose) {
@@ -459,7 +465,6 @@ export async function runAgentCli(raw: string[]) {
         );
       }
       const log = makePersistedLog();
-      if (!log) return undefined;
       seedFromMessages(log, priorSnapshot.messages as LlmMessage[]);
       return log;
     }
@@ -652,7 +657,7 @@ export async function runAgentCli(raw: string[]) {
     process.stdout.write(`${JSON.stringify({
       type: "system",
       subtype: "init",
-      session_id: sessionId,
+      session_id: logSessionId,
       provider: provider.name,
       model: modelId,
       cwd,
@@ -697,7 +702,7 @@ export async function runAgentCli(raw: string[]) {
         turns: turnResult.turns,
         toolCalls: turnResult.toolCalls,
         startedAt,
-        sessionId,
+        sessionId: logSessionId,
         provider: provider.name,
         model: modelId,
         costTracker,
@@ -738,7 +743,7 @@ export async function runAgentCli(raw: string[]) {
         turns: 0,
         toolCalls: 0,
         startedAt,
-        sessionId,
+        sessionId: logSessionId,
         provider: provider.name,
         model: modelId,
         costTracker,
