@@ -328,10 +328,15 @@ history.
 
 ## Model catalogue
 
-`GET /v1/models?source=<codex|claude|opencode>[&account=<id>]` on Phren Hook returns the
-`/model` menu of the agent that source names (any other source, `phren` included,
-answers an empty list), shaped as
-`{ "models": [ { "id", "name", "description", "isDefault" } ] }`. `account` names a Claude home (default `default`) and reads that home's catalogue cache; an account that is not on this computer, or a non-default one for another source, answers 404 with `code: "account_unavailable"`:
+`GET /v1/models?source=<codex|claude|opencode|phren>[&account=<id>]` on Phren Hook returns the
+`/model` menu of the agent that source names (any other source answers an empty
+list), shaped as
+`{ "models": [ { "id", "name", "description", "isDefault" } ] }`. For `phren`
+the list is phren agent's own catalog (`phren-agent models --json`), only the
+providers with credentials on this computer, each id `<provider>/<model>` with
+the provider in `description`; a launch with `kind: "phren"` passes the
+`anthropic`, `deepseek`, `ollama` and `openrouter` ones as `--provider` and
+`--model`. `account` names a Claude home (default `default`) and reads that home's catalogue cache; an account that is not on this computer, or a non-default one for another source, answers 404 with `code: "account_unavailable"`:
 
 | Field | Type | Description |
 |-------|------|-------------|
