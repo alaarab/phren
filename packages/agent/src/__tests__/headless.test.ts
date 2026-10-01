@@ -239,4 +239,60 @@ describe.skipIf(!fs.existsSync(AGENT_BIN))("headless binary (replay)", () => {
     expect(code).toBe(1);
     expect(stderr).toContain("needs --output-format stream-json");
   }, 30_000);
+
+  it("every stream-json line matches docs/agent-stream-json.schema.json", async () => {
+    const schema = JSON.parse(fs.readFileSync(path.join(here, "..", "..", "..", "..", "docs", "agent-stream-json.schema.json"), "utf-8"));
+    const { stdout, code } = await run(
+      ["--yolo", "--no-subagents", "--output-format", "stream-json", "Run echo replay-fixture-7 and report the marker."],
+      workDir,
+      { PHREN_PATH: storeDir },
+    );
+    expect(code).toBe(0);
+    const events = stdout.trim().split("\n").map((l) => JSON.parse(l));
+    expect(new Set(events.map((e) => e.type))).toEqual(new Set(["system", "assistant", "tool_use", "tool_result", "result"]));
+    for (const event of events) expect(schemaErrors(schema, event), JSON.stringify(event)).toEqual([]);
+    // The documented input shape, both content forms.
+    const input = { $ref: "#/$defs/InputMessage" };
+    expect(schemaErrors(schema, { type: "user", message: { role: "user", content: "hi" } }, input)).toEqual([]);
+    expect(schemaErrors(schema, { type: "user", message: { role: "user", content: [{ type: "text", text: "hi" }] } }, input)).toEqual([]);
+  }, 90_000);
 });
+
+type Schema = Record<string, unknown>;
+
+/**
+ * The JSON Schema subset the stream-json schema uses ($ref, oneOf, const,
+ * enum, type, required, properties, items), strict about undocumented keys so
+ * the schema can't fall behind what the agent prints.
+ */
+function schemaErrors(root: Schema, value: unknown, node: Schema = root, at = "$"): string[] {
+  if (typeof node.$ref === "string") {
+    const target = (node.$ref as string).replace("#/", "").split("/").reduce<unknown>((o, k) => (o as Schema)[k], root) as Schema;
+    return schemaErrors(root, value, target, at);
+  }
+  if (Array.isArray(node.oneOf)) {
+    const matches = (node.oneOf as Schema[]).filter((s) => schemaErrors(root, value, s, at).length === 0);
+    return matches.length === 1 ? [] : [`${at}: matches ${matches.length} of oneOf`];
+  }
+  const errors: string[] = [];
+  if ("const" in node && value !== node.const) errors.push(`${at}: expected ${JSON.stringify(node.const)}`);
+  if (Array.isArray(node.enum) && !node.enum.includes(value)) errors.push(`${at}: ${JSON.stringify(value)} not in enum`);
+  if (node.type !== undefined) {
+    const types = Array.isArray(node.type) ? node.type as string[] : [node.type as string];
+    const actual = value === null ? "null" : Array.isArray(value) ? "array" : Number.isInteger(value) ? "integer" : typeof value;
+    if (!types.some((t) => t === actual || (t === "number" && actual === "integer"))) errors.push(`${at}: ${actual} is not ${types.join("|")}`);
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const obj = value as Record<string, unknown>;
+    for (const key of (node.required as string[] | undefined) ?? []) if (!(key in obj)) errors.push(`${at}.${key}: missing`);
+    const props = node.properties as Record<string, Schema> | undefined;
+    if (props) {
+      for (const [key, v] of Object.entries(obj)) {
+        if (!props[key]) errors.push(`${at}.${key}: not in the schema`);
+        else errors.push(...schemaErrors(root, v, props[key], `${at}.${key}`));
+      }
+    }
+  }
+  if (Array.isArray(value) && node.items) value.forEach((v, i) => errors.push(...schemaErrors(root, v, node.items as Schema, `${at}[${i}]`)));
+  return errors;
+}
