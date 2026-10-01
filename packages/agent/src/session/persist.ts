@@ -117,7 +117,7 @@ export interface SessionListing {
 }
 
 /** Recent sessions, newest first; unreadable logs are skipped. */
-export function listEventLogs(phrenPath: string, opts: { project?: string; limit?: number } = {}): SessionListing[] {
+export function listEventLogs(phrenPath: string, opts: { project?: string; cwd?: string; limit?: number } = {}): SessionListing[] {
   const dir = sessionsDir(phrenPath);
   let entries: string[];
   try {
@@ -142,6 +142,7 @@ export function listEventLogs(phrenPath: string, opts: { project?: string; limit
     try {
       const { header, events } = loadEventLog(file);
       if (opts.project && header.project !== opts.project) continue;
+      if (opts.cwd && header.cwd !== opts.cwd) continue;
       const log = SessionLog.restore(header, events, () => {});
       const msgs = log.getMessages();
       if (msgs.length === 0) continue;
@@ -185,10 +186,11 @@ export function findEventLogById(phrenPath: string, idPrefix: string): string {
 }
 
 /**
- * Newest event log for resume, optionally filtered by project.
+ * Newest event log for resume, optionally filtered by project or by the
+ * directory it ran in (sessions kept without a store have no project).
  * @returns the file path, or null when none exist.
  */
-export function findLatestEventLog(phrenPath: string, project?: string): string | null {
+export function findLatestEventLog(phrenPath: string, project?: string, cwd?: string): string | null {
   const dir = sessionsDir(phrenPath);
   let entries: string[];
   try {
@@ -200,9 +202,10 @@ export function findLatestEventLog(phrenPath: string, project?: string): string 
   for (const entry of entries) {
     const file = path.join(dir, entry);
     try {
-      if (project) {
+      if (project || cwd) {
         const { header } = loadEventLog(file);
-        if (header.project !== project) continue;
+        if (project && header.project !== project) continue;
+        if (cwd && header.cwd !== cwd) continue;
       }
       candidates.push({ file, mtimeMs: fs.statSync(file).mtimeMs });
     } catch {

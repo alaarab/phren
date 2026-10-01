@@ -731,7 +731,8 @@ skill with those args. Built-in commands always win.
 ## Session event log
 
 Session history is an append-only event log at
-`<phrenPath>/.runtime/sessions/session-<id>.events.jsonl` — one JSON line per
+`<phrenPath>/.sessions/session-<id>.events.jsonl`, or without a phren store at
+`~/.phren-agent/.sessions/session-<id>.events.jsonl` — one JSON line per
 event (`user/message`, `assistant/message`, `tool/results`, `log/replace`).
 The message array the model sees is derived from the log, and an invariant
 asserts before every request that the projection still reconstructs from it
@@ -741,7 +742,9 @@ keeps everything for replay and resume. `--list-sessions` shows recent logs
 and `--session <id>` resumes a specific one. `--resume` prefers the newest event
 log (forking it into the new run's own file, with `parentSession` lineage)
 and falls back to legacy v1 message snapshots, which are still written once
-at session end.
+at session end. Without a store, `--list-sessions` and `--resume` cover the
+sessions run in the current directory, and headless output's `session_id` is
+the log's id, so `--session` takes it.
 
 ## Reasoning models
 
