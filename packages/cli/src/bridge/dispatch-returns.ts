@@ -19,7 +19,7 @@ import { liveWork } from "./session-activity.js";
 import { terminalProvider } from "./terminal.js";
 import { childAgentTree, runningChildAgents } from "./transcripts.js";
 import { opencodeTurn, readTurn, TURN_REPLY_LIMIT, truncateUtf8, turnPhase, type TurnRecord } from "./turn-records.js";
-import { recentUncommitted, unfinishedTurn } from "./worker-unfinished.js";
+import { recentUncommitted, sharedCheckout, unfinishedTurn, type Uncommitted } from "./worker-unfinished.js";
 
 export { truncateUtf8 } from "./turn-records.js";
 
@@ -85,6 +85,9 @@ export interface WorkerObservation {
   /** Why a turn that ended is not done (worker-unfinished.ts): it announced a
    * next step, or left uncommitted work and no PR. Returned as needs-you. */
   unfinished?: string;
+  /** The worker's checkout could not be read in time: the turn may be done,
+   * but it is not closed on that (worker-close.ts). */
+  unchecked?: true;
 }
 
 export interface WorkerReaders {
@@ -104,7 +107,9 @@ export interface WorkerReaders {
   /** The turn a Codex pane lost with its app-server, which no Stop will end. */
   lost?: (server: string, pane: string, session?: string) => LostTurn | undefined;
   /** Tracked files with uncommitted changes in the worker's checkout. */
-  uncommitted?: (directory: string) => Promise<number | undefined>;
+  uncommitted?: (directory: string) => Promise<Uncommitted>;
+  /** Whether other panes' folders share the worker's checkout, whose changes then are not only its own. */
+  shared?: (directory: string, folders: readonly unknown[]) => Promise<boolean>;
 }
 
 export async function paneTurn(server: string, pane: Json, source: Provider): Promise<TurnRecord | undefined> {
@@ -123,6 +128,7 @@ const defaultReaders: WorkerReaders = {
   stall: (target, pane, live) => sessionStalls.observe(target, pane, live),
   lost: (server, pane, session) => codexServers.lostTurn(server, pane, session),
   uncommitted: directory => recentUncommitted(directory),
+  shared: sharedCheckout,
 };
 
 /** The default readers with the approval reader of the Hook that runs the workers. */
@@ -192,13 +198,18 @@ function liveReader(record: TurnRecord | undefined, source: Provider, session: s
 
 /** A finished turn that announced a next step, or left uncommitted work in
  * its checkout and no PR, is not done (worker-unfinished.ts). The checkout is
- * where the agent was when it stopped, else the pane's folder. A truncated
- * reply has lost its closing sentence, so only the checkout is asked then. */
-async function unfinished(seen: WorkerObservation, directory: unknown, readers: WorkerReaders, prs?: readonly PullRequest[]): Promise<Pick<WorkerObservation, "unfinished">> {
+ * where the agent was when it stopped, else the pane's folder, and it is asked
+ * only when it is the worker's own: a checkout another pane works in (the
+ * owner's, a sibling worker's) holds changes that are not the worker's. A
+ * truncated reply has lost its closing sentence, so only the checkout is asked
+ * then. */
+async function unfinished(seen: WorkerObservation, directory: unknown, readers: WorkerReaders, s: Json, pane: Json,
+  prs?: readonly PullRequest[]): Promise<Pick<WorkerObservation, "unfinished" | "unchecked">> {
   if ((seen.state !== "done" && seen.state !== "idle") || !seen.completed || seen.error || seen.interrupted) return {};
-  const reason = await unfinishedTurn({ reply: seen.truncated ? undefined : seen.reply, prs,
-    directory: typeof directory === "string" && directory ? directory : undefined }, readers.uncommitted);
-  return reason ? { unfinished: reason } : {};
+  let folder = typeof directory === "string" && directory ? directory : undefined;
+  const others = objects(s.panes).filter(other => other.pane_id !== pane.pane_id).flatMap(other => [other.foreground_cwd, other.cwd]);
+  if (folder && readers.shared && await readers.shared(folder, others).catch(() => true)) folder = undefined;
+  return unfinishedTurn({ reply: seen.truncated ? undefined : seen.reply, prs, directory: folder }, readers.uncommitted);
 }
 const paneDirectory = (pane: Json): unknown => pane.foreground_cwd || pane.cwd;
 
@@ -242,7 +253,7 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
       const seen = await fromTurn(own, own.session, status, target.source, readers);
       const full = targetSchema.safeParse({ ...target, session: seen.session });
       const prs = full.success && seen.state === "done" ? await workerPrs(full.data, own) : undefined;
-      return { ...seen, ...(prs ? { prs } : {}), ...await unfinished(seen, own.stop?.cwd ?? paneDirectory(pane), readers, prs), ...(full.success && seen.state === "working" ? await readers.stall?.(full.data, { ...pane, agent_status: "working" }, liveReader(own, target.source, own.session, readers)) : {}) };
+      return { ...seen, ...(prs ? { prs } : {}), ...await unfinished(seen, own.stop?.cwd ?? paneDirectory(pane), readers, s, pane, prs), ...(full.success && seen.state === "working" ? await readers.stall?.(full.data, { ...pane, agent_status: "working" }, liveReader(own, target.source, own.session, readers)) : {}) };
     }
     const session = expected ?? current;
     const state = (["working", "idle", "done", "blocked"] as const).find(value => value === status) ?? "unknown";
@@ -261,7 +272,7 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     }
     const seen: WorkerObservation = { state, session, completed: turn?.completed === true, ...(turn?.error ? { error: turn.error } : {}),
       ...(turn?.interrupted ? { interrupted: true as const } : {}), ...replyFields(turn?.lastAssistant) };
-    return { ...seen, ...await unfinished(seen, paneDirectory(pane), readers) };
+    return { ...seen, ...await unfinished(seen, paneDirectory(pane), readers, s, pane) };
   }));
   // Only a conversation this dispatch named can be answered; a starting target has no session yet.
   return { workers: workers.map((seen, index) => {
@@ -280,7 +291,7 @@ const observationSchema = z.object({
   hook: z.boolean().optional(), endedAt: z.string().max(40).optional(), background: z.number().int().min(0).max(999).optional(),
   prs: prsSchema.optional(),
   stalled: z.boolean().optional(), stalledSince: z.string().datetime().optional(), stallFor: z.number().nonnegative().optional(),
-  interrupted: z.boolean().optional(), approval: z.unknown().optional(), unfinished: z.string().max(200).optional(),
+  interrupted: z.boolean().optional(), approval: z.unknown().optional(), unfinished: z.string().max(200).optional(), unchecked: z.boolean().optional(),
 }).passthrough();
 
 /** A worker's forwarded permission request as its Hook sent it; an invalid one is ignored, not a reason to drop the state. */
@@ -381,7 +392,12 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
   const previous = receipt.worker?.state;
   // The same finished state with a different final reply is a new turn: the
   // worker took more work (a hand_off) and finished again between two polls.
-  const repeated = previous === next && !(turn && receipt.returned?.turn && turn !== receipt.returned.turn);
+  // A finished turn is returned once: the same turn reading done on one poll
+  // and needs-you on the next (its checkout read late, or the owner committed
+  // its edits) is not a second return.
+  const finished = (state: WorkerState | undefined) => state === "done" || state === "needs-you";
+  const reread = finished(previous) && finished(next) && !!turn && receipt.returned?.turn === turn;
+  const repeated = reread || (previous === next && !(turn && receipt.returned?.turn && turn !== receipt.returned.turn));
   if (repeated) {
     if (receipt.worker && receipt.worker.sawWorking !== sawWorking) { receipt.worker.sawWorking = sawWorking; changed = true; }
     if (receipt.worker && background > (receipt.worker.background ?? 0)) { receipt.worker.background = background; changed = true; }

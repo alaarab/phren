@@ -260,10 +260,18 @@ types it at most once. A new agent that has not written a conversation yet
 takes it on its starting binding, as the phone's first message does. One held
 on a startup screen gets no brief: its receipt is `failed` with a `needs-you`
 return naming the pane. An agent that never shows a target is `failed` with the
-brief unsent and its pane left open. A lost acknowledgement leaves an uncertain
-receipt and is never automatically retried. Receipts survive restart;
-interrupted placement states are reported as uncertain. Only one placement runs
-at a time per service.
+brief unsent and its pane left open. A typed brief that never shows (the pane
+still idle on its starting binding) is typed once more under its own delivery
+id, but only after the pane is read again: a conversation, or the agent
+working, blocked or waiting, means the first copy landed late, and nothing is
+typed twice. After two tries the receipt stays `uncertain` with a `failed`
+return, and stays watched, so a brief that lands later still brings the
+worker's own return. A lost acknowledgement leaves an uncertain receipt and is
+never automatically retried. Receipts survive restart; interrupted placement
+states are reported as uncertain. Only one placement (choosing a computer and
+launching) runs at a time per service; confirming the brief runs outside it,
+and a launch still being confirmed counts toward its computer's load for
+`anywhere`.
 
 An optional `parent` and `parentTarget` must be supplied together. The Hook
 checks the parent against its own computer and live pane. Receipts retain the
@@ -407,8 +415,15 @@ unread returns, oldest first, and mark them read. A return is one of:
 - `done`: the worker finished its turn. `reply` is its final reply, from the
   harness's Stop hook or its transcript, capped at 4000 bytes (`truncated`
   when cut). `background` counts background tasks it left running (see below).
-- `needs-you`: the worker finished by asking the owner something. `question`
-  is the question line.
+- `needs-you`: the worker finished by asking the owner something, or stopped
+  mid-task. `question` is the question line, or why the turn is not done: its
+  closing sentence announced a step it never ran ("Let me install
+  dependencies."), or it left tracked uncommitted files and reported or named
+  no PR. A reply that hands over ("I'll wait for your review", "Let's merge
+  once CI is green") is done. Uncommitted files are counted only in a
+  checkout no other pane works in. A turn whose checkout git could not read
+  in time is returned `done` but its pane is not closed, and one turn is
+  returned once even when a later poll reads it differently.
 - `failed`: the harness ended the turn on an error instead of a reply, such
   as Codex's usage limit, or the owner interrupted the turn in the worker's
   terminal. `error` is the message.
@@ -566,7 +581,9 @@ Working sessions whose visible screen and transcript both stay unchanged for
 `PHREN_STALL_MS` (default 300000, zero disables) carry `stalled:true`,
 `stalledSince` and `stallFor` in seconds in the overview and `live_sessions`.
 Their dispatch produces a `stalled` return with the same fields. Progress resets
-the flag. Failed reads do not count as inactivity. A stall is a supervision
+the flag. Failed reads do not count as inactivity. Awaited background work
+(a build, a running child agent) restarts the clock for at most two hours, so
+work that never ends does not hide a stall. A stall is a supervision
 signal; it does not interrupt the worker or authorize a replacement.
 
 ## Finish cleanup and PR-ready reports
