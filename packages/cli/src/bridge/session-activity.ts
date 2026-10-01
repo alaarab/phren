@@ -80,6 +80,21 @@ export function liveWork(record: TurnRecord | undefined, final: FinalTurn | unde
   return total || undefined;
 }
 
+/** Every background task the finished turn left running, awaited or not, less
+ * the endless streams (a log tail, a dev server): the Stop's count less the
+ * tasks finished since, else the transcript's own count, and nothing once the
+ * Stop is BACKGROUND_STALE_MS old. A turn whose reply says it waits on such a
+ * task is still working, and a pane running one is not closed. */
+export function runningTasks(record: TurnRecord | undefined, final: FinalTurn | undefined, now = Date.now()): number {
+  const phase = record ? turnPhase(record) : undefined, endless = final?.endless ?? 0;
+  if (phase?.phase === "ended" && phase.background !== undefined) {
+    if (!(now - Date.parse(phase.at) < BACKGROUND_STALE_MS)) return 0;
+    return Math.max(0, backgroundLeft(phase.background, phase.at, final?.finishedTasks) - endless);
+  }
+  if (phase?.phase === "ended" && !(now - Date.parse(phase.at) < BACKGROUND_STALE_MS)) return 0;
+  return final?.completed ? Math.max(0, (final.background ?? 0) - endless) : 0;
+}
+
 /** The background shells and monitors a pane's ended Claude turn is waiting
  * on (`FinalTurn.awaited`), at most `recordedBackground`. Reads the transcript
  * (`readFinalTurn`, passed in: schedule-watch imports herdr, which imports

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { announcedNextStep, checkoutRoot, recentUncommitted, sharedCheckout, uncommittedFiles, unfinishedTurn, UNKNOWN } from "./worker-unfinished.js";
+import { announcedNextStep, awaitedInReply, checkoutRoot, recentUncommitted, sharedCheckout, uncommittedFiles, unfinishedTurn, UNKNOWN } from "./worker-unfinished.js";
 
 describe("a turn that ended mid-task", () => {
   it("reads a closing sentence that announces a next step", () => {
@@ -23,19 +23,44 @@ describe("a turn that ended mid-task", () => {
   it.each([
     "All done. PR #12 is open.\n\nI'll leave the merge to you.",
     "Done. I'll wait for your review.",
-    "Tests pass. Let's merge once CI is green.",
-    "Done. Let's merge once CI is green",
     "I'll stop here.",
     "I'll be around if anything else comes up.",
     "Now passing: 42 tests.",
-    "Now I wait for CI.",
     "Now everything passes.",
     "Now nothing is left.",
     "I\u2019ll hand it back to you.",
-    "Pushed the branch. I will check back once the build finishes.",
     "Here is the change:\n```\nlet me = 1;\n```",
   ])("reads a finished reply as finished: %s", reply => {
     expect(announcedNextStep(reply)).toBeUndefined();
+  });
+
+  // ios-fast-voice2 (2026-10-01): a reply waiting on its own job read as done.
+  it.each([
+    ["There's one conflict. I'll push once it passes. Thanks.", "I'll push once it passes."],
+    ["Two commits are ready. Now waiting on the MacBook rerun.", "Now waiting on the MacBook rerun."],
+    ["Now I wait for CI.", "Now I wait for CI."],
+    ["Pushed the branch. I will check back once the build finishes.", "I will check back once the build finishes."],
+    ["Tests pass. Let's merge once CI is green.", "Let's merge once CI is green."],
+    ["- Waiting for the simulator run", "Waiting for the simulator run"],
+  ])("reads a reply that waits on work still to finish: %s", (reply, sentence) => {
+    expect(awaitedInReply(reply)).toBe(sentence);
+  });
+
+  it.each([
+    "Done. I'll wait for your review.",
+    "I'll be around if anything else comes up.",
+    "Nothing left to wait for.",
+    "While waiting for the build I fixed the lint errors.",
+    "After the rebase, all tests pass.",
+    "Let me know once you've tried it.",
+    "Waiting on CI earlier.\n\nAll green now. PR #4 is open.",
+  ])("reads a finished reply as no wait: %s", reply => {
+    expect(awaitedInReply(reply)).toBeUndefined();
+  });
+
+  it("reads a next step anywhere in the closing paragraph's prose", () => {
+    expect(announcedNextStep("There's one conflict. I'll resolve it on the follow-up branch. Now waiting on the rerun.")).toBe("I'll resolve it on the follow-up branch.");
+    expect(announcedNextStep("I'll fix the parser next.\n\nPR #3 is open.")).toBeUndefined();
   });
 
   it.each([
@@ -48,6 +73,10 @@ describe("a turn that ended mid-task", () => {
     ["I need to rebuild first.", "I need to rebuild first."],
   ])("reads a reply that announces a next step: %s", (reply, step) => {
     expect(announcedNextStep(reply)).toBe(step);
+  });
+
+  it("names a waiting reply as stopped waiting", async () => {
+    expect(await unfinishedTurn({ reply: "PR #9 is up. Waiting on CI." })).toEqual({ unfinished: "Stopped waiting: Waiting on CI." });
   });
 
   it("counts uncommitted work only when no PR was reported or named", async () => {
