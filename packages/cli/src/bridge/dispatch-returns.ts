@@ -19,6 +19,7 @@ import { liveWork } from "./session-activity.js";
 import { terminalProvider } from "./terminal.js";
 import { childAgentTree, runningChildAgents } from "./transcripts.js";
 import { opencodeTurn, readTurn, TURN_REPLY_LIMIT, truncateUtf8, turnPhase, type TurnRecord } from "./turn-records.js";
+import { recentUncommitted, unfinishedTurn } from "./worker-unfinished.js";
 
 export { truncateUtf8 } from "./turn-records.js";
 
@@ -81,6 +82,9 @@ export interface WorkerObservation {
   approval?: Json;
   prs?: PullRequest[];
   stalled?: boolean; stalledSince?: string; stallFor?: number;
+  /** Why a turn that ended is not done (worker-unfinished.ts): it announced a
+   * next step, or left uncommitted work and no PR. Returned as needs-you. */
+  unfinished?: string;
 }
 
 export interface WorkerReaders {
@@ -99,6 +103,8 @@ export interface WorkerReaders {
   stall?: typeof sessionStalls.observe;
   /** The turn a Codex pane lost with its app-server, which no Stop will end. */
   lost?: (server: string, pane: string, session?: string) => LostTurn | undefined;
+  /** Tracked files with uncommitted changes in the worker's checkout. */
+  uncommitted?: (directory: string) => Promise<number | undefined>;
 }
 
 export async function paneTurn(server: string, pane: Json, source: Provider): Promise<TurnRecord | undefined> {
@@ -114,8 +120,9 @@ const defaultReaders: WorkerReaders = {
   finalTurn: (source, session) => source === "codex" || source === "claude" || source === "opencode" ? readFinalTurn(source, session) : Promise.resolve(undefined),
   turn: paneTurn,
   children: (source, session) => childAgentTree(source, session).then(runningChildAgents).then(children => children.length),
-  stall: (target, pane) => sessionStalls.observe(target, pane),
+  stall: (target, pane, live) => sessionStalls.observe(target, pane, live),
   lost: (server, pane, session) => codexServers.lostTurn(server, pane, session),
+  uncommitted: directory => recentUncommitted(directory),
 };
 
 /** The default readers with the approval reader of the Hook that runs the workers. */
@@ -170,6 +177,31 @@ async function fromTurn(record: TurnRecord, session: string, status: string, sou
     ...(phase.reply ? replyFields(phase.reply, phase.truncated) : replyFields(final?.lastAssistant)) };
 }
 
+/** The live work a working pane's turn still waits on (`liveWork`), for the
+ * stall clock, which reads it only once it runs out: a worker whose only
+ * activity is an awaited background shell is waiting, not stalled. */
+function liveReader(record: TurnRecord | undefined, source: Provider, session: string, readers: WorkerReaders): () => Promise<number | undefined> {
+  return async () => {
+    const [final, children] = await Promise.all([
+      readers.finalTurn(source, session).catch(() => undefined),
+      readers.children ? readers.children(source, session).catch(() => 0) : Promise.resolve(0),
+    ]);
+    return liveWork(record, final, children, (readers.now ?? Date.now)());
+  };
+}
+
+/** A finished turn that announced a next step, or left uncommitted work in
+ * its checkout and no PR, is not done (worker-unfinished.ts). The checkout is
+ * where the agent was when it stopped, else the pane's folder. A truncated
+ * reply has lost its closing sentence, so only the checkout is asked then. */
+async function unfinished(seen: WorkerObservation, directory: unknown, readers: WorkerReaders, prs?: readonly PullRequest[]): Promise<Pick<WorkerObservation, "unfinished">> {
+  if ((seen.state !== "done" && seen.state !== "idle") || !seen.completed || seen.error || seen.interrupted) return {};
+  const reason = await unfinishedTurn({ reply: seen.truncated ? undefined : seen.reply, prs,
+    directory: typeof directory === "string" && directory ? directory : undefined }, readers.uncommitted);
+  return reason ? { unfinished: reason } : {};
+}
+const paneDirectory = (pane: Json): unknown => pane.foreground_cwd || pane.cwd;
+
 /** Receiving side: the state of each dispatched pane, from its agent's turn
  * record when its hooks wrote one, else from the shared snapshot and, once
  * the agent has stopped, the final reply in its transcript. */
@@ -210,13 +242,13 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
       const seen = await fromTurn(own, own.session, status, target.source, readers);
       const full = targetSchema.safeParse({ ...target, session: seen.session });
       const prs = full.success && seen.state === "done" ? await workerPrs(full.data, own) : undefined;
-      return { ...seen, ...(prs ? { prs } : {}), ...(full.success && seen.state === "working" ? await readers.stall?.(full.data, { ...pane, agent_status: "working" }) : {}) };
+      return { ...seen, ...(prs ? { prs } : {}), ...await unfinished(seen, own.stop?.cwd ?? paneDirectory(pane), readers, prs), ...(full.success && seen.state === "working" ? await readers.stall?.(full.data, { ...pane, agent_status: "working" }, liveReader(own, target.source, own.session, readers)) : {}) };
     }
     const session = expected ?? current;
     const state = (["working", "idle", "done", "blocked"] as const).find(value => value === status) ?? "unknown";
     if ((state !== "idle" && state !== "done") || !session) {
       const full = targetSchema.safeParse({ ...target, session });
-      return { state, ...(session ? { session } : {}), ...(full.success && state === "working" ? await readers.stall?.(full.data, pane) : {}) };
+      return { state, ...(session ? { session } : {}), ...(full.success && state === "working" ? await readers.stall?.(full.data, pane, liveReader(undefined, target.source, full.data.session, readers)) : {}) };
     }
     const turn = await readers.finalTurn(target.source, session).catch(() => undefined);
     const children = readers.children ? await readers.children(target.source, session).catch(() => 0) : 0;
@@ -227,8 +259,9 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     if (live) {
       return { state: "working", session, completed: true, background: live, ...(turn?.error ? { error: turn.error } : {}), ...replyFields(turn?.lastAssistant) };
     }
-    return { state, session, completed: turn?.completed === true, ...(turn?.error ? { error: turn.error } : {}),
+    const seen: WorkerObservation = { state, session, completed: turn?.completed === true, ...(turn?.error ? { error: turn.error } : {}),
       ...(turn?.interrupted ? { interrupted: true as const } : {}), ...replyFields(turn?.lastAssistant) };
+    return { ...seen, ...await unfinished(seen, paneDirectory(pane), readers) };
   }));
   // Only a conversation this dispatch named can be answered; a starting target has no session yet.
   return { workers: workers.map((seen, index) => {
@@ -247,7 +280,7 @@ const observationSchema = z.object({
   hook: z.boolean().optional(), endedAt: z.string().max(40).optional(), background: z.number().int().min(0).max(999).optional(),
   prs: prsSchema.optional(),
   stalled: z.boolean().optional(), stalledSince: z.string().datetime().optional(), stallFor: z.number().nonnegative().optional(),
-  interrupted: z.boolean().optional(), approval: z.unknown().optional(),
+  interrupted: z.boolean().optional(), approval: z.unknown().optional(), unfinished: z.string().max(200).optional(),
 }).passthrough();
 
 /** A worker's forwarded permission request as its Hook sent it; an invalid one is ignored, not a reason to drop the state. */
@@ -330,7 +363,9 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
   // A turn the harness ended on an error (a usage limit) failed, reply or not,
   // and so did one the owner interrupted in the worker's terminal.
   const failed = stopped && seen.completed && seen.error ? seen.error : stopped && seen.interrupted ? INTERRUPTED : undefined;
-  const question = seen.completed && seen.reply && !failed ? ownerQuestion(seen.reply) : undefined;
+  // A turn that stopped mid-task needs a nudge, not a close: it returns as
+  // needs-you with the reason, never as done.
+  const question = failed || !seen.completed ? undefined : (seen.reply ? ownerQuestion(seen.reply) : undefined) ?? seen.unfinished;
   let next: WorkerState;
   if (seen.state === "gone") next = "gone";
   else if (seen.state === "working") next = seen.stalled ? "stalled" : "working";

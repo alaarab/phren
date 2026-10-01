@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { StallDetector } from "./stalls.js";
 import type { Target } from "./protocol.js";
 const target: Target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude", session: "11111111-1111-4111-8111-111111111111" };
@@ -17,6 +17,26 @@ describe("working session stall clock", () => {
     now += 300_000; expect(await detector.observe({ ...target, session: "22222222-2222-4222-8222-222222222222" }, pane)).toBeUndefined();
     now += 300_000; expect(await detector.observe(target, { ...pane, agent_status: "idle" })).toBeUndefined();
     expect(await detector.observe(target, pane)).toBeUndefined();
+  });
+  it("starts the clock over while the turn's awaited work still runs, and asks only once it runs out", async () => {
+    // ios-chat-code-links, 2026-10-01: a Claude worker ended its turn on purpose
+    // while an awaited xcodebuild waited on a lock ("1 shell still running").
+    let now = 0, running: number | undefined = 1;
+    const live = vi.fn(async () => running);
+    const detector = new StallDetector({ now: () => now, threshold: () => 300_000, screen: async () => "1 shell still running", transcript: async () => "same" });
+    const pane = { terminal_id: "t", agent_status: "working" };
+    expect(await detector.observe(target, pane, live)).toBeUndefined();
+    now = 299_999; expect(await detector.observe(target, pane, live)).toBeUndefined();
+    expect(live).not.toHaveBeenCalled();
+    now = 300_000; expect(await detector.observe(target, pane, live)).toBeUndefined();
+    now = 600_000; expect(await detector.observe(target, pane, live)).toBeUndefined();
+    expect(live).toHaveBeenCalledTimes(2);
+    // The build ended and nothing moved since: a stall, timed from the last check.
+    running = undefined;
+    now = 900_000; expect(await detector.observe(target, pane, live)).toMatchObject({ stalled: true, stalledSince: new Date(600_000).toISOString(), stallFor: 300 });
+    // An unreadable transcript counts no live work.
+    live.mockRejectedValueOnce(new Error("gone"));
+    expect(await detector.observe(target, pane, live)).toHaveProperty("stalled", true);
   });
   it("treats failed observations as unknown, and can be disabled", async () => {
     let now = 0, broken = false, threshold = 10;
