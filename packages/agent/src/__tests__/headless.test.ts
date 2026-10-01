@@ -240,6 +240,32 @@ describe.skipIf(!fs.existsSync(AGENT_BIN))("headless binary (replay)", () => {
     expect(stderr).toContain("needs --output-format stream-json");
   }, 30_000);
 
+  it("--json-schema ends a run with structured_output matching it, in the documented result shape", async () => {
+    const fixture = path.join(workDir, "structured.events.jsonl");
+    const lines = [
+      { type: "header", version: 1, sessionId: "structured", cwd: "/tmp", createdAt: "2026-10-01T00:00:00.000Z" },
+      { seq: 0, time: "2026-10-01T00:00:01.000Z", type: "user/message", data: { message: { role: "user", content: "count" }, source: "user", turn: 0 } },
+      { seq: 1, time: "2026-10-01T00:00:02.000Z", type: "assistant/message", data: { message: { role: "assistant", content: [{ type: "text", text: "There are 3." }] }, stop_reason: "end_turn", turn: 0 } },
+      { seq: 2, time: "2026-10-01T00:00:03.000Z", type: "assistant/message", data: { message: { role: "assistant", content: [{ type: "text", text: "{\"count\": 3}" }] }, stop_reason: "end_turn", turn: 0 } },
+    ];
+    fs.writeFileSync(fixture, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+    const schema = JSON.stringify({ type: "object", required: ["count"], properties: { count: { type: "integer" } } });
+    const { stdout, code } = await run(
+      ["--yolo", "--no-subagents", "--output-format", "json", "--json-schema", schema, "count the files"],
+      workDir,
+      { PHREN_PATH: storeDir, PHREN_AGENT_REPLAY: fixture },
+    );
+    expect(code).toBe(0);
+    const result = JSON.parse(stdout.trim());
+    expect(result).toMatchObject({ subtype: "success", result: "There are 3.", structured_output: { count: 3 } });
+    const docs = JSON.parse(fs.readFileSync(path.join(here, "..", "..", "..", "..", "docs", "agent-stream-json.schema.json"), "utf-8"));
+    expect(schemaErrors(docs, result, { $ref: "#/$defs/Result" })).toEqual([]);
+
+    const bad = await run(["--json-schema", "{nope", "x"], workDir, { PHREN_PATH: storeDir });
+    expect(bad.code).toBe(1);
+    expect(bad.stderr).toContain("--json-schema is not valid JSON");
+  }, 90_000);
+
   it("every stream-json line matches docs/agent-stream-json.schema.json", async () => {
     const schema = JSON.parse(fs.readFileSync(path.join(here, "..", "..", "..", "..", "docs", "agent-stream-json.schema.json"), "utf-8"));
     const { stdout, code } = await run(

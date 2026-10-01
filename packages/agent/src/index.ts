@@ -33,6 +33,7 @@ import { loadProjectContext, evolveProjectContext } from "./memory/project-conte
 import { buildSystemPrompt, buildEnvironmentBlock } from "./system-prompt.js";
 import { loadHooksConfig, runLifecycleHooks } from "./user-hooks.js";
 import { addCommandNames, loadAndRegisterCustomCommands, getCustomCommandInfos } from "./commands.js";
+import { loadJsonSchema, produceStructuredOutput } from "./structured-output.js";
 import { isMcpPromptCommand, loadMcpPrompts, mcpPromptCommandNames, resolveMcpPromptCommand } from "./mcp-prompts.js";
 import { createSession, runTurn, type AgentConfig } from "./agent-loop.js";
 import { SessionLog, seedFromMessages } from "./session/log.js";
@@ -173,6 +174,20 @@ export async function runAgentCli(raw: string[]) {
   }
 
   const streamInput = args.inputFormat === "stream-json";
+  // --json-schema: compiled up front, so a bad schema fails before any work.
+  let jsonSchema: ReturnType<typeof loadJsonSchema> | undefined;
+  if (args.jsonSchema) {
+    if (streamInput) {
+      console.error("--json-schema answers one task; it cannot run with --input-format stream-json.");
+      process.exit(1);
+    }
+    try {
+      jsonSchema = loadJsonSchema(args.jsonSchema);
+    } catch (err: unknown) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  }
   if (streamInput && args.outputFormat !== "stream-json") {
     console.error("--input-format stream-json needs --output-format stream-json.");
     process.exit(1);
@@ -765,6 +780,11 @@ export async function runAgentCli(raw: string[]) {
     }
 
     if (args.print && !streamInput) {
+      // --json-schema: a finished task ends with a value matching it (its
+      // request counts in the result's usage and cost).
+      const structured = jsonSchema && turnResult.stopReason === "end_turn"
+        ? await produceStructuredOutput(agentConfig.provider, agentConfig.systemPrompt, session.messages, registry.getDefinitions(), jsonSchema, { costTracker })
+        : undefined;
       const headless = buildHeadlessResult({
         text: turnResult.text,
         stopReason: turnResult.stopReason,
@@ -777,6 +797,12 @@ export async function runAgentCli(raw: string[]) {
         costTracker,
         permissionDenials,
       });
+      if (structured && "value" in structured) {
+        headless.structured_output = structured.value;
+        if (args.outputFormat === "text") headless.result = JSON.stringify(structured.value, null, 2);
+      } else if (structured) {
+        Object.assign(headless, { subtype: "error_structured_output", is_error: true, error: structured.error });
+      }
       emitHeadless(headless);
       exitCode = headlessExitCode(headless);
     } else if (process.stdout.isTTY) {

@@ -21,7 +21,7 @@ export type OutputFormat = "text" | "json" | "stream-json";
 
 export interface HeadlessResult {
   type: "result";
-  subtype: "success" | "error_max_turns" | "error_budget" | "error_plan_rejected" | "cancelled" | "error_during_execution" | "error_hook_blocked";
+  subtype: "success" | "error_max_turns" | "error_budget" | "error_plan_rejected" | "cancelled" | "error_during_execution" | "error_hook_blocked" | "error_structured_output";
   is_error: boolean;
   result: string;
   num_turns: number;
@@ -35,6 +35,8 @@ export interface HeadlessResult {
   /** Estimated USD; null when the provider is a flat-rate subscription. */
   total_cost_usd: number | null;
   permission_denials: number;
+  /** With --json-schema: the value matching it. */
+  structured_output?: unknown;
   error?: string;
 }
 
