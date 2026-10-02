@@ -842,7 +842,11 @@ phone's one text frame, `{"type":"commit"}`, commits what's left when the
 person stops. Errors arrive as `{"type":"error","code":…,"error":…}` with fixed
 messages (`transcribe-unconfigured`, `transcribe-rejected`, `transcribe-quota`,
 `transcribe-busy`, `transcribe-limit`, `transcribe-failed`), never ElevenLabs'
-own text. A socket lasts at most ten minutes. The Hook advertises it as the
+own text. `{"type":"ready"}` says ElevenLabs answered and audio is flowing.
+A socket lasts at most ten minutes. The Hook never closes it without saying
+why: an `error` frame, or `{"type":"end","reason":…}` with `session-limit`
+(the ten minutes ran out; open a fresh socket) or `upstream-closed`
+(ElevenLabs hung up). The phone ignores frame types it does not know. The Hook advertises it as the
 `transcribe` capability; each use is billed to that ElevenLabs account.
 
 ### The ElevenLabs key
