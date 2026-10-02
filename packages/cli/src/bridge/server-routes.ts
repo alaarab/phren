@@ -120,16 +120,20 @@ const CHILD_ACTIVITY_CACHE_MS = 5_000;
 /** How long the overview waits for per-tab git and transcript reads; the phone gives up at 20 s. */
 export const OVERVIEW_ENRICH_BUDGET_MS = 5_000;
 interface ChildActivity { runningChildren: number; childProviders: Provider[] }
-const childActivityCache = new Map<string, { at: number; result: Promise<ChildActivity> }>();
+const childActivityCache = new Map<string, { at: number; pending: boolean; result: Promise<ChildActivity> }>();
 
 async function childActivity(source: Provider, session: string): Promise<ChildActivity> {
   const key = `${source}\0${session}`, now = Date.now(), cached = childActivityCache.get(key);
-  if (cached && now - cached.at < CHILD_ACTIVITY_CACHE_MS) return cached.result;
+  // A slow tree still belongs to the next overview. Expiring an in-flight
+  // read every five seconds starts it over before any answer can be reused.
+  if (cached && (cached.pending || now - cached.at < CHILD_ACTIVITY_CACHE_MS)) return cached.result;
   const result = childAgentTree(source, session).then(tree => {
     const running = runningChildAgents(tree);
     return { runningChildren: running.length, childProviders: [...new Set(running.map(child => child.provider))].sort() };
   }).catch(() => ({ runningChildren: 0, childProviders: [] as Provider[] }));
-  childActivityCache.set(key, { at: now, result });
+  const entry = { at: now, pending: true, result };
+  void result.then(() => { entry.at = Date.now(); entry.pending = false; });
+  childActivityCache.set(key, entry);
   while (childActivityCache.size > 128) childActivityCache.delete(childActivityCache.keys().next().value!);
   return result;
 }
@@ -234,9 +238,9 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     let expired = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const budget = new Promise<void>(resolve => { timer = setTimeout(resolve, OVERVIEW_ENRICH_BUDGET_MS); });
-    // First, each pane's own turn record (one small file): whether its ended
-    // turn still has background work, and which dispatch it is. It runs ahead
-    // of the slower reads so the status does not flicker between answers, but
+    // Each pane's own turn record (one small file): whether its ended
+    // turn still has background work, and which dispatch it is. It runs
+    // alongside the slower reads so a stuck transcript cannot hide children, but
     // inside the budget, so a stuck disk cannot hold the overview either.
     const awaited = new Map<Json, number>();
     const records = Promise.all(tabs.map(async ({ group, tab }) => {
@@ -249,43 +253,56 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
       ]);
       if (expired) return;
       if (background) awaited.set(tab, background);
-      markBackground(tab, background);
+      markBackground(tab, (background ?? 0) + (typeof tab.runningChildren === "number" ? tab.runningChildren : 0));
       const target = targetSchema.safeParse(tab.target);
-      if (target.success && agents.length === 1) Object.assign(tab, await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }, async () => background));
+      const stall = target.success && agents.length === 1
+        ? await sessionStalls.observe(target.data, { ...agents[0], agent_status: tab.agentStatus }, async () => background) : {};
+      if (expired) return;
+      Object.assign(tab, stall);
       tab.title = title;
     }));
-    let nextTab = 0;
-    const enrich = records.then(() => Promise.all(Array.from({ length: Math.min(4, tabs.length) }, async () => {
-      while (!expired && nextTab < tabs.length) {
-        const { group, tab } = tabs[nextTab++];
-        const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
-        const found: Json = {};
-        if (modules.has("git") && typeof tab.cwd === "string" && tab.agent) found.branch = await repositoryBranch(tab.cwd);
-        if (agents.length === 1 && provider.safeParse(agents[0].agent).success) {
-          const session = chatStates.get(agents[0])?.sessionId;
-          found.runningChildren = 0; found.childProviders = [];
-          if (typeof session === "string") {
-            const source = agents[0].agent as Provider;
-            const [model, children] = await Promise.all([
-              currentModel(source, session).catch(() => undefined), childActivity(source, session),
-            ]);
-            if (model) found.model = model;
-            found.runningChildren = children.runningChildren; found.childProviders = children.childProviders;
-            if (agents[0].agent_status === "working") {
-              const step = await currentStep(source, session).catch(() => undefined);
-              if (step) found.currentStep = step;
-            }
-          }
-        }
-        // A row finished after the answer left belongs to the next read.
-        if (!expired) {
-          Object.assign(tab, Object.fromEntries(Object.entries(found).filter(([, value]) => value !== undefined)));
-          // Running sub-agents and fan-out jobs keep an idle-looking session
-          // working too, on top of the shells its last turn is waiting on.
-          markBackground(tab, (awaited.get(tab) ?? 0) + (typeof found.runningChildren === "number" ? found.runningChildren : 0));
-        }
-      }
-    })));
+    // Separate bounded queues: a stalled git/model/step read cannot prevent
+    // the child tree from reaching the phone. Apply each answer as it arrives.
+    const eachTab = (read: (row: typeof tabs[number]) => Promise<void>) => {
+      let next = 0;
+      return Promise.all(Array.from({ length: Math.min(4, tabs.length) }, async () => {
+        while (!expired && next < tabs.length) await read(tabs[next++]);
+      }));
+    };
+    const identified = (group: Json, tab: Json) => {
+      const agents = agentsByTab.get(JSON.stringify([group.id, tab.id])) ?? [];
+      if (agents.length !== 1 || !provider.safeParse(agents[0].agent).success) return undefined;
+      const session = chatStates.get(agents[0])?.sessionId;
+      return typeof session === "string" ? { source: agents[0].agent as Provider, session, pane: agents[0] } : undefined;
+    };
+    const enrich = Promise.all([
+      records,
+      eachTab(async ({ tab }) => {
+        if (!modules.has("git") || typeof tab.cwd !== "string" || !tab.agent) return;
+        const branch = await repositoryBranch(tab.cwd);
+        if (!expired && branch !== undefined) tab.branch = branch;
+      }),
+      eachTab(async ({ group, tab }) => {
+        const identity = identified(group, tab);
+        if (!identity) return;
+        const children = await childActivity(identity.source, identity.session);
+        if (expired) return;
+        Object.assign(tab, children);
+        markBackground(tab, (awaited.get(tab) ?? 0) + children.runningChildren);
+      }),
+      eachTab(async ({ group, tab }) => {
+        const identity = identified(group, tab);
+        if (!identity) return;
+        const model = await currentModel(identity.source, identity.session).catch(() => undefined);
+        if (!expired && model) tab.model = model;
+      }),
+      eachTab(async ({ group, tab }) => {
+        const identity = identified(group, tab);
+        if (!identity || identity.pane.agent_status !== "working") return;
+        const step = await currentStep(identity.source, identity.session).catch(() => undefined);
+        if (!expired && step) tab.currentStep = step;
+      }),
+    ]);
     await Promise.race([enrich, budget]);
     expired = true; clearTimeout(timer);
     const mux = terminalMux(server);

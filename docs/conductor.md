@@ -468,6 +468,10 @@ keeps it in `<bridge>/briefs/<id>/label` and shows it as the session's title
 in place of the harness's own, which for a brief launch is only "Read and
 follow the brief...". A session with background work still running is listed
 as `working` with `backgroundTasks`, in `live_sessions` and on the phone.
+The phone overview reads branch, model, current step and child activity in
+separate bounded queues. A slow Git or model read cannot hide running agents.
+The overview still answers within its five-second enrichment budget; a child
+tree that finishes later is reused by the next read.
 
 How it works: the receiving computer's Hook answers
 `POST /v1/dispatch/workers` from what the worker's harness reported about its
