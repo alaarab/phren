@@ -116,7 +116,8 @@ describe("folder trust", () => {
     // No settings yet: the file is created with just the list.
     expect(await pretrustFolder("copilot", project, "test", copilotEnv)).toBe("trusted");
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ trustedFolders: [project] });
-    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    // Windows does not implement POSIX file permission bits.
+    if (process.platform !== "win32") expect((await stat(file)).mode & 0o777).toBe(0o600);
     expect(await ensureCopilotFolderTrusted(project, copilotEnv)).toBe("already");
     // The owner's own settings and folders stay as they were.
     await writeFile(file, JSON.stringify({ hooks: { SessionStart: [] }, trustedFolders: ["/elsewhere"] }));
