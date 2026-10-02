@@ -13,7 +13,11 @@ function beneath(root: string, file: string): boolean {
  * into an unrelated in-repository suffix match. Metadata is checked by the
  * same no-symlink reader that will subsequently serve the file's bytes. */
 export async function resolveFilePath(root: string, cwd: string, requested: string) {
+  // Native Windows references use backslashes; walk the same components as
+  // slash-form chat links. On POSIX a backslash remains an invalid reference.
+  if (process.platform === "win32") requested = requested.replaceAll("\\", "/");
   if (!requested || requested.length > 4096 || /[\x00-\x1f\x7f\\]/.test(requested)
+      || /^[A-Za-z]:[^/]/.test(requested)
       || requested.split("/").includes(".git") || path.win32.isAbsolute(requested) && !path.isAbsolute(requested)) {
     throw new BridgeError(400, "Invalid file path.");
   }
@@ -21,9 +25,10 @@ export async function resolveFilePath(root: string, cwd: string, requested: stri
   if (!beneath(base, folder)) throw new BridgeError(403, "This folder is outside the repository.");
   // macOS /tmp is an alias of /private/tmp. Preserve a trusted cwd's root
   // spelling without resolving any client-supplied symlink beneath it.
-  const roots = [base, path.resolve(root), path.resolve(cwd, path.relative(folder, base))];
+  const roots = [base, path.resolve(root), path.resolve(cwd, path.relative(folder, base))]
+    .map(value => value.split(path.sep).join("/"));
   const absolute = path.isAbsolute(requested);
-  const alias = roots.find(candidate => requested === candidate || requested.startsWith(candidate + path.sep));
+  const alias = roots.find(candidate => requested === candidate || requested.startsWith(candidate + "/"));
   if (absolute && !alias) throw new BridgeError(403, "This file is outside the repository.");
   const candidates = absolute ? [{ start: base, name: requested.slice(alias!.length) }]
     : [...new Set([folder, base])].map(start => ({ start, name: requested }));
