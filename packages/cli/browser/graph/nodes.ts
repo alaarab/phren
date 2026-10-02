@@ -145,6 +145,9 @@ export function buildNodeObject(fgNode: FGNode): THREE.Group {
   const node = fgNode.raw;
   const group = new THREE.Group();
   group.userData.phrenNodeId = node.id;
+  // The layout is already pinned. A remount can build this object between
+  // force-graph ticks, so it must start where the camera and labels place it.
+  group.position.set(fgNode.x ?? 0, fgNode.y ?? 0, fgNode.z ?? 0);
 
   // Every node is a small glowing point (dot sprite). Communities/structure
   // come from the cages, not from big per-node geometry.
