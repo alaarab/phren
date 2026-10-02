@@ -7,7 +7,7 @@ vi.mock("node:child_process", async importOriginal => ({ ...await importOriginal
   execFile: Object.assign(() => {}, { [Symbol.for("nodejs.util.promisify.custom")]: state.exec }),
 }));
 import { paneIdentity } from "./herdr.js";
-import { assignDaemonConversation, parseElapsed, resetCodexDaemonCache, rolloutMeta, underCodexDaemon } from "./codex-daemon.js";
+import { assignDaemonConversation, parseElapsed, resetCodexDaemonCache, resumedConversation, rolloutMeta, underCodexDaemon } from "./codex-daemon.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
 import { bindingPath } from "./agent-hook-stores.js";
 
@@ -59,7 +59,13 @@ beforeEach(async () => {
   resetCodexDaemonCache();
   state.exec.mockReset().mockImplementation(async (file: string, args: string[]) => {
     if (file === "ps") return { stdout: rows.join("\n") + "\n" };
-    if (file === "/usr/sbin/lsof") return { stdout: (held[Number(args[2])] ?? []).map(name => `n${name}`).join("\n") + "\n" };
+    if (file === "/usr/sbin/lsof") return { stdout: (held[Number(args[2])] ?? []).map(name => {
+      // lsof reports POSIX absolute paths. On a Windows test host the
+      // extended path spelling both starts with / and opens the real file;
+      // a bare C:\\ path was discarded, silently exercising disk fallback.
+      const slash = name.replace(/\\/g, "/");
+      return `n${/^[a-z]:\//i.test(slash) ? `//?/${slash}` : slash}`;
+    }).join("\n") + "\n" };
     throw new Error(`unexpected ${file}`);
   });
   restore = setTerminalProvider({
@@ -129,6 +135,20 @@ describe("Codex 0.157 daemon conversations", () => {
     expect(await paneIdentity("default", pane("p"), true)).toBe(id(1));
   });
 
+  it("recovers an explicitly resumed older conversation held by the daemon, then follows /new", async () => {
+    proc(500, 1, 60 * MIN, DAEMON);
+    tui("p", "/work/a", 1000, 5 * MIN);
+    rows = rows.map(row => row.includes("codex -m gpt") ? row.replace("codex -m gpt", `codex resume ${id(1)}`) : row);
+    const old = await rollout(1, "/work/a", 30 * MIN);
+    const recent = new Date(Date.now() - MIN);
+    await utimes(old, recent, recent);
+    held[500] = [old];
+    expect(await paneIdentity("default", pane("p"), true)).toBe(id(1));
+    held[500].push(await rollout(2, "/work/a", 30_000));
+    resetCodexDaemonCache();
+    expect(await paneIdentity("default", pane("p"), true)).toBe(id(2));
+  });
+
   it("leaves a Codex pane starting when no daemon runs", async () => {
     tui("p", "/work/a", 1000, 20 * MIN);
     await rollout(1, "/work/a", 19 * MIN);
@@ -138,6 +158,33 @@ describe("Codex 0.157 daemon conversations", () => {
 });
 
 describe("codex-daemon helpers", () => {
+  it("uses only an explicit foreground resume launch, not a command embedded in a prompt", () => {
+    const row = (pid: number, command: string) => ({ pid, ppid: 1, startedAt: 0, command });
+    for (const prefix of ["codex", "/bin/codex", "node /bin/codex", "/bin/sh /home/me/.local/bin/codex"]) {
+      expect(resumedConversation([row(1, `${prefix} resume ${id(1)}`)], [1])).toBe(id(1));
+    }
+    for (const command of [`codex exec echo codex resume ${id(1)}`, `echo codex resume ${id(1)}`, "codex resume --last", "codex resume malformed"]) {
+      expect(resumedConversation([row(1, command)], [1])).toBeUndefined();
+    }
+    expect(resumedConversation([row(2, `codex resume ${id(1)}`)], [1])).toBeUndefined();
+    expect(resumedConversation([row(1, `codex resume ${id(1)}`), row(2, `codex resume ${id(2)}`)], [1, 2])).toBeUndefined();
+  });
+
+  it("refuses stale, unheld, claimed, ambiguous or competing older resume matches", () => {
+    const old = { id: id(1), cwd: "/a", startedAt: 1000, activeAt: 25_000, held: true };
+    const self = { key: "a", start: 20_000, resumed: id(1) };
+    const match = (here = [old], claimed = new Set<string>(), rivals: { key: string; start: number }[] = []) => assignDaemonConversation(here, self, claimed, rivals, 30_000);
+    expect(match()).toBe(id(1));
+    expect(match([{ ...old, activeAt: 19_000 }])).toBeUndefined();
+    expect(match([{ ...old, activeAt: 100_000 }])).toBeUndefined();
+    expect(match([{ ...old, held: false }])).toBeUndefined();
+    expect(match([old], new Set([id(1)]))).toBeUndefined();
+    expect(match([old, { ...old, id: id(2) }])).toBeUndefined();
+    expect(match([old], new Set(), [{ key: "b", start: 10_000 }])).toBeUndefined();
+    expect(assignDaemonConversation([old], { ...self, resumed: undefined }, new Set(), [], 30_000)).toBeUndefined();
+    expect(assignDaemonConversation([old], { ...self, resumed: id(2) }, new Set(), [], 30_000)).toBeUndefined();
+  });
+
   it("parses ps elapsed times", () => {
     expect(parseElapsed("07:36")).toBe(456_000);
     expect(parseElapsed("10:27:13")).toBe(37_633_000);

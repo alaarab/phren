@@ -191,6 +191,12 @@ flag a link that runs only one way (see [Phren Hook](phren-hook.md#health-and-th
 A conductor starts in the phren store and has no
 project; its Herdr name is `conductor` (or `conductor-<label>`).
 
+For Codex's shared daemon, a lone pane launched with `codex resume <id>` can
+recover a conversation created before the terminal started. Its matching
+conversation must still be open in the daemon and have advanced since launch;
+competing panes or multiple active older conversations leave it unresolved.
+A newer conversation takes precedence over the original launch arguments.
+
 ```sh
 phren dispatch usage
 phren dispatch usage --json
