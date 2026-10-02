@@ -60,7 +60,7 @@ export interface SpawnOptions {
 
 export interface AgentSpawnerOptions {
   /** The provider this process runs now, so a child can reach the same endpoint. */
-  getParentProvider?: () => Pick<LlmProvider, "name" | "model" | "baseUrl"> | undefined;
+  getParentProvider?: () => Pick<LlmProvider, "name" | "model" | "baseUrl" | "reasoningEffort"> | undefined;
   costTracker?: CostTracker | null;
   depth?: number;
   maxDepth?: number;
@@ -86,20 +86,30 @@ export interface AgentSpawnerEvents {
 const ENDPOINT_PROVIDERS = new Set(["openai-compat", "deepseek"]);
 
 /**
- * Where a child on the parent's endpoint provider should connect. A child
- * that names no provider, or the parent's, gets the parent's endpoint, and
- * its model unless it asked for another; openai-compat cannot be found by
- * auto-detection and needs both. Any other provider is the child's own.
+ * Which provider a child runs on. A child that names no provider, or the
+ * parent's, runs the parent's: same provider, the parent's model unless it
+ * asked for another, the parent's reasoning effort, and for an endpoint
+ * provider the parent's base URL (openai-compat can't be found by
+ * auto-detection at all). Left to auto-detect, a child of an Anthropic or
+ * OpenRouter session could land on whatever key the environment had first.
+ * A child that names another provider gets exactly what it asked for.
  */
-export function childEndpoint(
-  parent: Pick<LlmProvider, "name" | "model" | "baseUrl"> | undefined,
+export function childProvider(
+  parent: Pick<LlmProvider, "name" | "model" | "baseUrl" | "reasoningEffort"> | undefined,
   provider: string | undefined,
   model: string | undefined,
-): { provider: string; model?: string; baseUrl: string } | undefined {
-  if (!parent?.baseUrl || !ENDPOINT_PROVIDERS.has(parent.name)) return undefined;
-  if (provider !== undefined && provider !== parent.name) return undefined;
+): { provider?: string; model?: string; baseUrl?: string; reasoning?: string } {
+  // A replayed recording is scripted for one process; its children resolve their own.
+  if (!parent || parent.name === "replay" || (provider !== undefined && provider !== parent.name)) return { provider, model };
   const childModel = model ?? parent.model;
-  return { provider: parent.name, ...(childModel !== undefined ? { model: childModel } : {}), baseUrl: parent.baseUrl };
+  const sameModel = childModel === parent.model;
+  return {
+    provider: parent.name,
+    ...(childModel !== undefined ? { model: childModel } : {}),
+    ...(parent.baseUrl && ENDPOINT_PROVIDERS.has(parent.name) ? { baseUrl: parent.baseUrl } : {}),
+    // Effort levels differ between models; carry it only with the same model.
+    ...(sameModel && parent.reasoningEffort ? { reasoning: parent.reasoningEffort } : {}),
+  };
 }
 
 /** Keys forwarded from the parent env into child processes. */
@@ -109,7 +119,7 @@ const ENV_FORWARD_KEYS = [
   "OPENAI_API_KEY",
   "DEEPSEEK_API_KEY",
   // Key for an openai-compat endpoint; the endpoint itself goes in the
-  // spawn payload (childEndpoint). Env only: never argv or logs.
+  // spawn payload (childProvider). Env only: never argv or logs.
   "PHREN_AGENT_API_KEY",
   "PHREN_AGENT_PROVIDER",
   "PHREN_AGENT_MODEL",
@@ -158,7 +168,7 @@ export class AgentSpawner extends EventEmitter {
     }
     const agentId = `agent-${this.nextId++}`;
     const defaults = this.getPermissionDefaults?.();
-    const endpoint = childEndpoint(this.getParentProvider?.(), opts.provider, opts.model);
+    const chosen = childProvider(this.getParentProvider?.(), opts.provider, opts.model);
 
     // Build forwarded env
     const childEnv: Record<string, string> = {};
@@ -172,9 +182,10 @@ export class AgentSpawner extends EventEmitter {
       agentId,
       task: opts.task,
       cwd: opts.cwd ?? defaults?.projectRoot ?? process.cwd(),
-      provider: endpoint?.provider ?? opts.provider,
-      model: endpoint?.model ?? opts.model,
-      ...(endpoint ? { baseUrl: endpoint.baseUrl } : {}),
+      provider: chosen.provider,
+      model: chosen.model,
+      ...(chosen.baseUrl ? { baseUrl: chosen.baseUrl } : {}),
+      ...(chosen.reasoning ? { reasoning: chosen.reasoning } : {}),
       project: opts.project,
       modelOverrides: scopedModelOverrides(),
       permissions: opts.permissions ?? defaults?.mode ?? "auto-confirm",
@@ -186,7 +197,9 @@ export class AgentSpawner extends EventEmitter {
       agentType: opts.agentType,
       depth: this.depth + 1,
       sandboxMode: opts.sandboxMode ?? defaults?.sandboxMode,
+      network: defaults?.network,
       allowedPaths: opts.allowedPaths ?? defaults?.allowedPaths ?? [],
+      rules: defaults?.rules,
     };
 
     const entry: AgentEntry = {

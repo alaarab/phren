@@ -99,7 +99,7 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
     const { model: overridden, ...overrides } = payload.modelOverrides;
     scopeModelOverrides(overridden, overrides);
   }
-  const provider = resolveProvider(providerName, model, undefined, undefined, { baseUrl: payload.baseUrl });
+  const provider = resolveProvider(providerName, model, undefined, payload.reasoning, { baseUrl: payload.baseUrl });
 
   // Child agents get a lightweight prompt — no "search memory first" forcing
   const systemPrompt = buildChildPrompt(_task);
@@ -116,6 +116,8 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
     allowedPaths: payload.allowedPaths ?? [],
     projectRoot: payload.worktreePath ?? cwd,
     sandboxMode: payload.sandboxMode,
+    network: payload.network,
+    rules: payload.rules,
   });
   // Headless child: an "ask" verdict has no human to answer it, and the
   // default readline prompt would hang forever on a closed stdin. Deny with

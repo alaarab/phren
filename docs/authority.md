@@ -50,7 +50,8 @@ permission ceiling for workers an agent dispatches there: its own
 `maxPermissionMode`, or `auto-edits` when it names none. The effective ceiling
 is the lower of that and the conductor grant's. An agent's dispatch that names
 a higher mode is refused with 403. One that names none starts the worker at the
-ceiling, not at the receiving computer's default. OpenCode takes its
+ceiling, not at the receiving computer's default (Copilot included, through its
+launch flags). OpenCode takes its
 permissions from its own config and cannot be started lower, so an agent's
 OpenCode dispatch to an ask-first project is refused.
 

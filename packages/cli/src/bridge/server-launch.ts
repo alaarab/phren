@@ -26,7 +26,7 @@ import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { logger } from "../logger.js";
 import { JobRegistry } from "./job-registry.js";
 import { atomic, BridgeError, bridgeRoot, id, type Json, launchEfforts, objects, PERMISSION_MODES, provider } from "./protocol.js";
-import { CLAUDE_NAMES, CODEX_MODES, codexModeFlags } from "./settings-switch.js";
+import { CLAUDE_NAMES, CODEX_MODES, codexModeFlags, copilotModeFlags } from "./settings-switch.js";
 
 /** Starting agents in Herdr from the phone: the launch route's harness
  * arguments, the conductor brief, and workspace, tab and pane actions. */
@@ -62,6 +62,7 @@ function effortArgs(kind: (typeof launchKinds)[number], effort: LaunchEffort): s
   if (kind === "claude") return ["--effort", effort];
   if (kind === "codex") return ["-c", `model_reasoning_effort=${effort}`];
   if (kind === "opencode") return ["--variant", effort];
+  if (kind === "copilot") return ["--reasoning-effort", effort];
   // phren-agent takes low to xhigh, and max as xhigh.
   if (kind === "phren") return ["--reasoning", effort === "minimal" ? "low" : effort];
   return [];
@@ -147,9 +148,8 @@ async function prepareConductor(kind: (typeof launchKinds)[number], effort: Laun
 async function targetForPane(server: string, pane: Json): Promise<Json | undefined> {
   if (!provider.safeParse(pane.agent).success || !id.safeParse(pane.workspace_id).success || !id.safeParse(pane.tab_id).success || !id.safeParse(pane.pane_id).success) return undefined;
   const binding = { server, workspace: pane.workspace_id, tab: pane.tab_id, pane: pane.pane_id, source: pane.agent };
-  const session = await paneIdentity(server, pane);
-  if (session) return { ...binding, session };
-  const chat = await paneChatState(server, pane).catch((): Json => ({}));
+  const chat = await paneChatState(server, pane, { tokenWhenIdentified: false }).catch((): Json => ({}));
+  if (typeof chat.sessionId === "string") return { ...binding, session: chat.sessionId };
   return chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
 }
 
@@ -282,8 +282,53 @@ export interface LaunchOptions {
  * Herdr's create calls do not return identifiers, so the new tab is found
  * by diffing snapshots; `agent.start` returns once Herdr has detected the
  * agent and it is ready for input, which can take most of `timeoutMs`.
+ * A `launchId` (a UUID the caller keeps for one intended launch) makes it
+ * idempotent: the same id again returns the first launch's pane while it is
+ * listed, with `reused: true`, instead of starting a second agent.
  */
 export async function launchSession(server: string, data: Json, options: LaunchOptions = {}): Promise<Json> {
+  const launchId = data.launchId === undefined || data.launchId === null ? undefined
+    : z.string().uuid("launchId must be a UUID.").parse(data.launchId);
+  if (!launchId) return startSession(server, data, options);
+  const now = Date.now();
+  for (const [key, entry] of launchesById) if (now - entry.at > LAUNCH_ID_TTL_MS) launchesById.delete(key);
+  const key = `${server}\u0000${launchId}`;
+  const earlier = launchesById.get(key);
+  // Reserve the id before checking the old pane. Two retries after a closed
+  // chat must share its replacement, just as they share the initial launch.
+  const result = Promise.resolve().then(async () => {
+    if (earlier) {
+      const previous = await earlier.result;
+      if (await stillListed(server, previous)) return { ...previous, reused: true };
+    }
+    return startSession(server, data, options);
+  });
+  // An in-flight launch must not expire while another caller is waiting.
+  const entry = { at: Infinity, result };
+  launchesById.set(key, entry);
+  void result.then(() => { entry.at = Date.now(); }, () => {
+    if (launchesById.get(key) !== entry) return;
+    // A temporary snapshot failure is not evidence that the old pane died.
+    if (earlier && Number.isFinite(earlier.at)) launchesById.set(key, earlier);
+    else launchesById.delete(key);
+  });
+  return result;
+}
+
+/** Launches by the caller's `launchId`, for `LAUNCH_ID_TTL_MS`: a repeat
+ * joins the launch in flight or gets its pane back. In memory only. */
+const launchesById = new Map<string, { at: number; result: Promise<Json> }>();
+export const LAUNCH_ID_TTL_MS = 10 * 60_000;
+/** For tests: forget every remembered launch. */
+export function resetLaunchIds(): void { launchesById.clear(); }
+
+async function stillListed(server: string, result: Json): Promise<boolean> {
+  const s = await snapshot(server);
+  return objects(s.tabs).some(t => t.tab_id === result.tabId && t.workspace_id === result.workspaceId)
+    && objects(s.panes).some(p => p.pane_id === result.paneId && p.tab_id === result.tabId && p.workspace_id === result.workspaceId);
+}
+
+async function startSession(server: string, data: Json, options: LaunchOptions): Promise<Json> {
   const role = z.enum(["agent", "conductor"]).default("agent").parse(data.role);
   const projectDirectory = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
   const worktreeRequest = data.worktree === undefined || data.worktree === null ? undefined : launchWorktreeSchema.parse(data.worktree);
@@ -294,9 +339,8 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const account = data.account === undefined || data.account === null ? undefined : z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(data.account);
   const permissionMode = z.enum(PERMISSION_MODES).optional().parse(data.permissionMode ?? undefined);
   if (permissionMode && role === "conductor") throw new BridgeError(400, "A conductor starts with its own permissions; permissionMode is for workers.");
-  if (permissionMode && kind === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude and Codex workers.");
-  if (permissionMode && kind === "copilot") throw new BridgeError(400, "Copilot takes its permissions from its own settings; permissionMode is for Claude and Codex workers.");
-  if (permissionMode && kind === "phren") throw new BridgeError(400, "phren agent takes its permissions from its own settings; permissionMode is for Claude and Codex workers.");
+  if (permissionMode && kind === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
+  if (permissionMode && kind === "phren") throw new BridgeError(400, "phren agent takes its permissions from its own settings; permissionMode is for Claude, Codex and Copilot workers.");
   if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
   if (role === "conductor" && kind === "phren") throw new BridgeError(400, PHREN_NO_CONDUCTOR);
   const phrenArgs = await phrenLaunchArgs(kind, data);
@@ -315,7 +359,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   const wanted = options.canary ? "phren-canary" : role === "conductor" ? (isConductorName(baseName) ? baseName : herdrAgentName(`conductor-${baseName}`))
     : isConductorName(baseName) ? herdrAgentName(`worker-${baseName}`) : baseName;
   const model = typeof data.model === "string" && data.model.trim() ? plainText(200).parse(data.model.trim()) : undefined;
-  const modelFlag: Partial<Record<(typeof launchKinds)[number], string>> = { codex: "--model", claude: "--model", opencode: "--model", phren: "--model" };
+  const modelFlag: Partial<Record<(typeof launchKinds)[number], string>> = { codex: "--model", claude: "--model", opencode: "--model", copilot: "--model", phren: "--model" };
   let workspace = data.workspaceId === undefined ? undefined : id.parse(data.workspaceId);
   // Herdr 0.9.1 refuses a start timeout of 3000 ms or less (invalid_agent_timeout).
   const timeout = Math.min(120_000, Math.max(3_001, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
@@ -337,7 +381,7 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   if (conductorHere && conductorHere.workspace_id === workspace) workspace = undefined;
   const args = role === "conductor" ? await prepareConductor(kind, effort, model)
     : [...(kind === "phren" ? [...PHREN_AGENT_ARGS, ...phrenArgs] : []), ...(model && kind === "phren" ? phrenModelArgs(model) : model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
-      ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : [])];
+      ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : []), ...(permissionMode && kind === "copilot" ? copilotModeFlags(permissionMode) : [])];
   // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
   // pane joins the thread the Hook started, and the brief is that thread's
   // first turn. The typed arguments below stay the fallback.

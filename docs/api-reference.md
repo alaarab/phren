@@ -40,11 +40,11 @@ See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
 |-----------|------|----------|-------------|
 | `computer` | string | yes | Enrolled name, or `anywhere` for the connected peer with the fewest working agents, skipping one whose account for this harness has no quota left (see below). |
 | `project` | string | yes | Project slug whose `phren.project.yaml` sourcePath exists on the receiver. No local checkout paths. |
-| `harness` | enum | yes | `codex`, `claude`, or `opencode`. |
+| `harness` | enum | yes | `codex`, `claude`, `opencode` or `copilot`. |
 | `model` | string | no | Explicit remote model, up to 200 characters; otherwise its configured default. |
-| `effort` | enum | no | Reasoning effort: `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; otherwise the harness default. Codex takes it as `model_reasoning_effort`, Claude as `--effort`, OpenCode as `--variant`. |
+| `effort` | enum | no | Reasoning effort: `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; otherwise the harness default. Codex takes it as `model_reasoning_effort`, Claude as `--effort`, OpenCode as `--variant`, Copilot as `--reasoning-effort`. |
 | `account` | string | no | Claude account id (`default` or a slug from `phren bridge accounts`). `anywhere` skips computers whose `harnesses` do not report that account usable (an older Hook that reports none is skipped too) and lists each in `skipped`; a named computer that lacks it fails before launching. Recorded on the receipt. |
-| `permissionMode` | enum | no | Permission mode the worker starts in: `supervised`, `auto-edits`, `auto` or `full-access`; otherwise the receiving computer's own default. Claude and Codex only; `opencode` is refused with 400 before a receipt is saved. |
+| `permissionMode` | enum | no | Permission mode the worker starts in: `supervised`, `auto-edits`, `auto` or `full-access`; otherwise the receiving computer's own default. Claude, Codex and Copilot (see [Conductor](conductor.md#copilot-workers) for Copilot's flags); `opencode` is refused with 400 before a receipt is saved. |
 | `releaseActions` | string[] | no | Release actions the brief asks for: `merge`, `publish`, `deploy`, `app-store`, `github-admin`. From an agent, an action the project's release authority policy marks ask-first is refused with 403 until the owner confirms it. An ask-first project also lowers the agent's permission ceiling there and starts a worker with no mode at it. See docs/authority.md. |
 | `prompt` | string | yes | Worker brief, up to 32768 characters. |
 | `label` | string | yes | Task label, up to 200 characters. |
@@ -55,7 +55,7 @@ Returns the receipt in `data`: dispatch ID, computer, project, harness/model/eff
 label, timestamps, state, remote target when known, grant match (`granted`), and an optional error.
 `accepted` means first-prompt acceptance, not task completion: for Claude and
 Codex the brief goes with the launch and the worker's own hook confirms it by
-dispatch ID (`brief: "launch"`); OpenCode gets it typed (`brief: "typed"`).
+dispatch ID (`brief: "launch"`); OpenCode and Copilot get it typed (`brief: "typed"`).
 `uncertain` means delivery might have occurred; never retry it automatically.
 A launched brief that was not confirmed yet (a startup screen holds it) turns
 `accepted` when the worker confirms it. Receipts are available
@@ -294,7 +294,11 @@ the same conversation with tools. Either field on another `kind` is 400.
 results (an agent session that used tools, unless a compaction summary
 replaced them) is 400 with `code: "chat-has-tools"`: a request with no tools
 may not carry them. Resume such a session with `mode: "agent"`.
-Health advertises `capabilities.quickChat`. The reply repeats `permissionMode` when it was applied,
+Health advertises `capabilities.quickChat`. Any launch may carry a
+`launchId` (a UUID the caller keeps for one intended launch): the same
+`launchId` again within 10 minutes joins the launch in flight, or returns its
+pane with `reused: true` while that tab is listed, instead of starting a second
+agent. A double tap or a retry after a lost reply opens one pane. The reply repeats `permissionMode` when it was applied,
 so a caller can tell an older Hook that ignored it. A
 conductor launch supports Claude, Codex and OpenCode (Copilot and phren are
 refused with 400: phren-agent takes no system brief at startup), attaches the shipped
@@ -455,7 +459,12 @@ the first reply with `replayed: true`. `POST /v1/prompt/status { target,
 deliveryId }` (capability `promptStatus`) returns `{ ok, state }`, where
 `state` is `queued`, `delivered`, `blocked` (another conversation in the pane
 took it) or `unknown` (not tracked, another conversation, or older than ten
-minutes), for a message the Hook answered as queued or delivered.
+minutes), for a message sent with a `deliveryId`. The id follows the typed text
+until the conversation's hook submits it, so a message answered
+`deliveryUncertain` still turns `delivered` once the agent takes it. A
+`/v1/transcripts` stream opened with `deliveries=1` (capability
+`deliveryFrames`) pushes `{ type: "delivery", source, session, deliveryId,
+state }` for that conversation's messages whenever one's state changes.
 
 A working pane returns 409 before any model command is typed. `/v1/prompt`
 also refuses every slash command while working, except Claude Code's
@@ -1507,6 +1516,17 @@ cursor. A completed entry clears the preview without the throttle delay. The
 phone replaces it in place and keeps the reveal progress, avoiding duplicate
 text. Reconnect history retains existing rows unless Hook explicitly resets
 the conversation.
+
+### Computer memory
+
+`GET /v1/store/head` returns the working-tree `sha`. When the store has a
+GitHub origin and an attached branch, it also returns
+`repositoryIdentity: { repository: "owner/repo", branch: "main" }`.
+The repository name is lowercase; branch names retain their case. The remote
+URL, embedded credentials and local paths are never included. The field is
+absent for older Hooks, detached heads and other remotes. Phones use the
+repository and branch together to recognize the same store through a computer
+and GitHub; independent stores and branches remain separate.
 
 ### `GET /v1/usage`
 

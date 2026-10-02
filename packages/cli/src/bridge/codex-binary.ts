@@ -1,6 +1,12 @@
 import { accessSync, closeSync, constants, openSync, readSync, statSync } from "node:fs";
 import path from "node:path";
 
+/** What `PHREN_CODEX_BINARY=off` resolves to: a path no spawn can run, so every
+ * helper call fails as if codex were not installed. The vitest config sets it:
+ * Codex 0.158 leaves a detached `app-server --managed-daemon` behind for the
+ * HOME it ran under, and a test run's throwaway HOME is deleted under it. */
+export const CODEX_OFF = "/nonexistent/phren-codex-off";
+
 /** The `codex` the Hook runs for its own helper calls (`codex queue`, `codex
  * app-server`). `phren init` can put a session wrapper at ~/.local/bin/codex
  * that runs phren's session-start hook before the real binary for every
@@ -9,6 +15,7 @@ import path from "node:path";
  * questions were reported as terminal-only, and each call opened a phren
  * session. The Hook skips its own wrapper and runs the binary it names. */
 export function codexExecutable(env: NodeJS.ProcessEnv = process.env): string {
+  if (/^(?:0|off|false|no)$/i.test(env.PHREN_CODEX_BINARY ?? "")) return CODEX_OFF;
   if (process.platform === "win32") return "codex";
   for (const directory of (env.PATH ?? "").split(path.delimiter)) {
     if (!path.isAbsolute(directory)) continue;

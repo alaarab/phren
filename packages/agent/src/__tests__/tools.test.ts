@@ -273,9 +273,9 @@ describe("grepTool", () => {
     expect(result.output).toBe("No matches.");
   });
 
-  it("is case-insensitive by default", async () => {
-    const result = await grepTool.execute({ pattern: "HELLO", path: tmpDir });
-    expect(result.output).toContain("hello");
+  it("is case-sensitive by default and honours -i", async () => {
+    expect((await grepTool.execute({ pattern: "HELLO", path: tmpDir })).output).toBe("No matches.");
+    expect((await grepTool.execute({ pattern: "HELLO", path: tmpDir, "-i": true })).output).toContain("hello");
   });
 
   it("returns error for invalid regex", async () => {

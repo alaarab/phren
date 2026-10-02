@@ -21,7 +21,7 @@ export type OutputFormat = "text" | "json" | "stream-json";
 
 export interface HeadlessResult {
   type: "result";
-  subtype: "success" | "error_max_turns" | "error_budget" | "error_plan_rejected" | "cancelled" | "error_during_execution";
+  subtype: "success" | "error_max_turns" | "error_budget" | "error_plan_rejected" | "cancelled" | "error_during_execution" | "error_hook_blocked" | "error_structured_output";
   is_error: boolean;
   result: string;
   num_turns: number;
@@ -35,6 +35,8 @@ export interface HeadlessResult {
   /** Estimated USD; null when the provider is a flat-rate subscription. */
   total_cost_usd: number | null;
   permission_denials: number;
+  /** With --json-schema: the value matching it. */
+  structured_output?: unknown;
   error?: string;
 }
 
@@ -44,6 +46,7 @@ const SUBTYPE: Record<TurnStopReason, HeadlessResult["subtype"]> = {
   budget: "error_budget",
   plan_rejected: "error_plan_rejected",
   aborted: "cancelled",
+  hook_blocked: "error_hook_blocked",
 };
 
 export function buildHeadlessResult(opts: {
@@ -163,6 +166,44 @@ export function createHeadlessHooks(opts: {
 export function parseOutputFormat(raw: string | undefined): OutputFormat | null {
   if (raw === "text" || raw === "json" || raw === "stream-json") return raw;
   return null;
+}
+
+/**
+ * One `--input-format stream-json` line: Claude Code's shape,
+ * {"type":"user","message":{"role":"user","content":"…" | [{"type":"text","text":"…"}]}}.
+ * Returns the prompt text, or an error naming what was wrong.
+ */
+export function parseStreamJsonInput(line: string): { prompt: string } | { error: string } {
+  let event: unknown;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return { error: "not JSON" };
+  }
+  const e = event as { type?: unknown; message?: { role?: unknown; content?: unknown } };
+  if (e?.type !== "user" || !e.message || e.message.role !== "user") return { error: "expected {\"type\":\"user\",\"message\":{\"role\":\"user\",…}}" };
+  const content = e.message.content;
+  const prompt = typeof content === "string"
+    ? content
+    : Array.isArray(content)
+      ? content.filter((b): b is { type: "text"; text: string } => b?.type === "text" && typeof b.text === "string").map((b) => b.text).join("\n")
+      : "";
+  return prompt.trim() ? { prompt } : { error: "the message has no text" };
+}
+
+/** Non-empty lines from a stream, as they arrive. */
+export async function* readLines(stream: NodeJS.ReadableStream = process.stdin): AsyncGenerator<string> {
+  let buffer = "";
+  for await (const chunk of stream) {
+    buffer += typeof chunk === "string" ? chunk : (chunk as Buffer).toString("utf-8");
+    let nl: number;
+    while ((nl = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (line) yield line;
+    }
+  }
+  if (buffer.trim()) yield buffer.trim();
 }
 
 /** Read the whole of stdin (for `echo task | phren-agent -p`). */

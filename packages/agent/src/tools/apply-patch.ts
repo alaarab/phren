@@ -25,6 +25,8 @@ import * as path from "path";
 import type { AgentTool } from "./types.js";
 import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
 import { describeNotFound } from "./edit-engine.js";
+import { forgetFileState, recordFileState, staleFileError } from "./file-state.js";
+import { syntaxCheckNote } from "./syntax-check.js";
 
 export interface PatchChunk {
   /** Text after `@@ `, used to seek before matching the chunk. */
@@ -335,6 +337,11 @@ export const applyPatchTool: AgentTool = {
         const sandbox = validatePath(p, cwd, []);
         if (!sandbox.ok) return { output: `Path outside sandbox: ${sandbox.error}`, is_error: true };
       }
+      for (const op of ops) {
+        // Add File over an existing file is a whole-file overwrite.
+        const stale = staleFileError(path.resolve(cwd, op.path), { requireRead: op.kind === "add" });
+        if (stale) throw new PatchError(stale);
+      }
       writes = planPatch(ops, cwd);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -344,12 +351,18 @@ export const applyPatchTool: AgentTool = {
       const abs = path.resolve(cwd, w.path);
       if (w.content === null) {
         if (fs.existsSync(abs)) fs.rmSync(abs);
+        forgetFileState(abs);
       } else {
         fs.mkdirSync(path.dirname(abs), { recursive: true });
         fs.writeFileSync(abs, w.content);
+        recordFileState(abs);
       }
     }
     const summary = writes.map((w) => `${w.status} ${w.path}`).join("\n");
-    return { output: `Success. Updated the following files:\n${summary}` };
+    const notes = writes.flatMap((w) => {
+      const note = w.content === null ? null : syntaxCheckNote(w.path, w.before, w.content);
+      return note ? [note] : [];
+    });
+    return { output: `Success. Updated the following files:\n${summary}${notes.length > 0 ? `\n\n${notes.join("\n\n")}` : ""}` };
   },
 };

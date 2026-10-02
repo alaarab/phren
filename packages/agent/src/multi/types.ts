@@ -48,7 +48,13 @@ export interface SpawnPayload {
   worktreePath?: string;
   depth?: number;
   sandboxMode?: SandboxMode;
+  /** The parent's --no-network. */
+  network?: "on" | "off";
   allowedPaths?: string[];
+  /** The parent's reasoning effort, when the child runs the parent's model. */
+  reasoning?: string;
+  /** The parent's permission rules; a child never loosens them. */
+  rules?: import("../permissions/rules.js").PermissionRules;
   /** The parent's --context-window / --price-* and the model they apply to. */
   modelOverrides?: ScopedModelOverrides;
 }

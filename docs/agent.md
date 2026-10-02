@@ -175,8 +175,9 @@ started on a DeepSeek proxy stays on it when `/model` picks another DeepSeek
 model. `PHREN_AGENT_BASE_URL` sets DeepSeek's endpoint only together with
 `PHREN_AGENT_PROVIDER=deepseek`, so an `openai-compat` relay never receives a
 DeepSeek key. A subagent
-that names no provider (or the parent's) runs on the parent's `openai-compat`
-or `deepseek` endpoint and model; `PHREN_AGENT_API_KEY` and
+that names no provider (or the parent's) runs on the parent's provider and
+model, with the parent's reasoning effort when the model is the same, and on
+the parent's endpoint for `openai-compat` and `deepseek`; `PHREN_AGENT_API_KEY` and
 `DEEPSEEK_API_KEY` reach it through its environment only. Context window
 and pricing come from the built-in catalogue when the model id is known,
 otherwise a 200k-token window and a conservative price estimate are assumed.
@@ -188,6 +189,20 @@ and `PHREN_AGENT_PRICE_IN|OUT|CACHE` apply to every model. DeepSeek Flash is
 catalogued at DeepSeek's off-peak rates, $0.15 in, $0.60 out and $0.003 per
 cache hit; DeepSeek bills twice that at peak (01:00-04:00 and 06:00-10:00
 UTC on weekdays), so pass the peak prices if you run then.
+
+The keyless suite `packages/agent/src/__tests__/deepseek-e2e.test.ts` runs the
+real loop and provider, on both routes, against a fake endpoint that rejects
+what DeepSeek rejects (a missing `reasoning_content` with tools present, an
+unanswered or stray tool call, an effort level it doesn't take). It covers
+tool turns, plain answers, a resume from the persisted log, a compaction and a
+dropped stream, and checks the cost against the catalogue's cache-hit prices.
+For a live check on Go, the benchmark runs the built binary on its fixtures:
+
+```bash
+PHREN_AGENT_BASE_URL=https://opencode.ai/zen/go/v1 PHREN_AGENT_API_KEY=<go key> \
+  node packages/agent/scripts/bench/run.mjs --provider openai-compat \
+  --model deepseek-v4.1-flash --reasoning high --runs 1
+```
 
 DeepSeek is also on OpenRouter (`deepseek/deepseek-v4.1-flash`,
 `deepseek/deepseek-v4-pro`, `deepseek/deepseek-v4-flash`,
@@ -227,6 +242,21 @@ phren agent --mcp-config ./mcp.json -i
 phren agent --mcp "npx -y @modelcontextprotocol/server-filesystem /tmp" -i   # one stdio server, repeatable
 ```
 
+Without flags the agent loads `~/.phren-agent/mcp.json`. A project's own
+`.mcp.json` (Claude Code's file) and `.phren-agent/mcp.json` start commands from
+whatever repository is checked out, so they load only once you trust the
+project: run with `--trust-project-mcp` once and it is remembered in
+`~/.phren-agent/settings.json`. Until then the agent names the servers it
+skipped. `--strict-mcp-config` uses only `--mcp-config` and `--mcp`. An MCP
+tool result longer than 100,000 characters (about 25k tokens) is cut with a
+note; `PHREN_AGENT_MCP_MAX_OUTPUT_CHARS` changes the limit.
+
+A server's prompts become slash commands named `/mcp__<server>__<prompt>`, as in
+Claude Code. Type one with its arguments in the order the prompt declares
+them (the last takes the rest of the line), and the agent fetches the prompt
+and sends what it says as your message. It works the same in a one-shot task:
+`phren agent "/mcp__github__review_pr 123"`.
+
 Transports are `stdio`, `http` (Streamable HTTP) and legacy `sse`. With
 `oauth: true` the agent prints an authorization URL on first connection and
 stores the tokens in private files under `~/.phren/agent/mcp-auth`
@@ -243,16 +273,57 @@ Every tool call passes a permission check first.
 
 | Mode | What runs without asking | How to choose it |
 |------|--------------------------|------------------|
-| `suggest` (default) | Nothing; you approve each call | default |
-| `auto-confirm` | Reads and searches (read, glob, grep); edits and shell commands still ask | `--permissions auto-confirm` |
-| `full-auto` | Everything | `--yolo` or `--permissions full-auto` |
+| `suggest` (default) | Reads and searches; you approve everything else | default |
+| `auto-confirm` | Reads, edits inside the project, and shell commands that only read, build or test (`ls`, `git status`/`diff`/`log`, `npm test`, `pnpm run build`, `cargo test`, `npx tsc`…). Anything else asks: `rm`, `git push`, `npm publish`, `npm run deploy`, a redirect into a file | `--permissions auto-confirm` |
+| `full-auto` | Everything except the blocked commands (deleting `/`, piping a download into a shell, disk formats) | `--yolo` or `--permissions full-auto` |
+
+In `suggest` and `auto-confirm`, command substitution (`$(…)`), `env`, `sudo`,
+force pushes and hard resets always ask, even for a command you approved
+before. A subagent never runs with more than its parent's mode, whatever mode
+the model asks for.
 
 Shift+Tab cycles the mode in the terminal UI, and the choice is remembered in
 `~/.phren-agent/settings.json`. At a prompt, `y` allows the call once, `s` allows
 calls like it (the same file, or the same command) for the rest of the
 session, `a` allows the tool for the rest of the session (for the shell, only
-that command) and `n` denies. Approvals kept across sessions live in
+that command) and `n` denies. A shell approval covers the command and, for
+git, npm and other tools with subcommands, only that subcommand: approving
+`git status` doesn't approve `git push`. Every command on a line must be
+approved. Approvals kept across sessions live in
 `~/.phren-agent/permissions.json`.
+
+### Permission rules
+
+Rules decide calls before the mode does. Put them in `~/.phren-agent/settings.json`
+or the project's `.phren-agent/settings.json`, or pass them with
+`--allowedTools` and `--disallowedTools` (comma-separated, the same syntax):
+
+```json
+{
+  "permissions": {
+    "allow": ["shell(npm test)", "shell(git log *)", "edit_file(src/**)", "mcp_github_*"],
+    "ask": ["shell(npm publish *)"],
+    "deny": ["shell(git push *)", "web_fetch"]
+  }
+}
+```
+
+A bare name covers every call of that tool (`*` globs work in names). In
+parentheses, a shell rule is a command pattern where `*` matches anything,
+and a trailing ` *` (or `:*`) also covers the bare command. A file rule is a
+path glob relative to the project, where `**` crosses directories. Deny rules
+win in every mode, ask rules ask even in full-auto, and allow rules run a
+call without asking, including command substitution and the other patterns
+that would otherwise ask. A shell line is allowed only when every command on
+it matches an allow rule, and denied when any command matches a deny rule.
+No rule overrides the blocked commands, secret files or paths outside the
+project. Subagents get their parent's rules.
+
+For a scripted run, allow exactly what the task needs:
+
+```bash
+phren agent -p --allowedTools "read_file,grep,glob,edit_file,shell(npm test)" "fix the failing test"
+```
 
 Whatever the mode, file tools stay inside the project directory, secret files
 such as `.env` are protected, shell commands have safety checks and timeouts,
@@ -260,10 +331,22 @@ and on Linux shell commands run under a bubblewrap sandbox that makes
 everything outside the workspace read-only (`--sandbox auto|require|off`,
 see [Security](#security)).
 
-Hooks can allow or deny tool calls with your own scripts: put
-`PreToolUse`, `PostToolUse`, `UserPromptSubmit` or `Stop` entries (each a
-`command`, optional `matcher` and `timeoutMs`) in `~/.phren-agent/hooks.json`
-or the project's `.phren-agent/hooks.json`. Markdown files in
+Hooks run your own scripts at points in a session: put entries (each a
+`command`, optional `matcher` and `timeoutMs`) under `hooks` in
+`~/.phren-agent/hooks.json` or the project's `.phren-agent/hooks.json`. Each
+hook gets the event as JSON on stdin. As in Claude Code, exit code 2 blocks
+and its stderr is the reason:
+
+| Event | When | Exit 2 | Exit 0 stdout |
+|---|---|---|---|
+| `PreToolUse` | before a tool call (`matcher` is a tool-name regex) | denies the call (any nonzero exit does) | ignored |
+| `PostToolUse` | after a tool call | stderr is added to the tool result for the model | ignored |
+| `UserPromptSubmit` | before a prompt is sent | blocks the prompt | added to the prompt as context |
+| `Stop` | when the model is done | sends it back to work with the reason, at most 5 times a turn (`stop_hook_active` is true after the first) | ignored |
+| `SessionStart` | at start (`source`: `startup` or `resume`) | ignored | added to the system prompt |
+| `PreCompact` | before automatic compaction (`trigger`: `auto`) | ignored | ignored |
+
+A blocked headless prompt ends with subtype `error_hook_blocked`. Markdown files in
 `~/.phren-agent/commands/` or `.phren-agent/commands/` become slash commands.
 
 ---
@@ -321,8 +404,41 @@ echo "add a --json flag" | phren agent --output-format stream-json --yolo   # ta
 | Format | stdout |
 |--------|--------|
 | `text` (default with `-p`) | the final assistant message |
-| `json` | one object: `type: "result"`, `subtype` (`success`, `error_max_turns`, `error_budget`, `error_plan_rejected`, `cancelled`, `error_during_execution`), `is_error`, `result`, `num_turns`, `tool_calls`, `duration_ms`, `session_id`, `provider`, `model`, `usage` (`input_tokens` excluding cache hits and writes, `cache_read_input_tokens`, `cache_creation_input_tokens` (Anthropic; billed at 1.25x input), `output_tokens`), `total_cost_usd` (null on a subscription), `permission_denials`, `error` |
+| `json` | one object: `type: "result"`, `subtype` (`success`, `error_max_turns`, `error_budget`, `error_plan_rejected`, `cancelled`, `error_during_execution`, `error_hook_blocked`, `error_structured_output`), `structured_output` (with `--json-schema`), `is_error`, `result`, `num_turns`, `tool_calls`, `duration_ms`, `session_id`, `provider`, `model`, `usage` (`input_tokens` excluding cache hits and writes, `cache_read_input_tokens`, `cache_creation_input_tokens` (Anthropic; billed at 1.25x input), `output_tokens`), `total_cost_usd` (null on a subscription), `permission_denials`, `error` |
 | `stream-json` | one JSON object per line: `system`/`init`, then `assistant`, `tool_use` and `tool_result` events as they happen, then the same `result` object |
+
+To drive one session over several turns, send user messages as JSON lines
+with `--input-format stream-json` (Claude Code's shape; needs
+`--output-format stream-json`). Each message runs as a turn on the same session
+and ends with its own `result` line; lines that aren't user messages are
+skipped with a note on stderr:
+
+```bash
+{ echo '{"type":"user","message":{"role":"user","content":"add a --json flag"}}'
+  echo '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"now add tests for it"}]}}'
+} | phren agent --yolo --input-format stream-json --output-format stream-json
+```
+
+Every line, in and out, is described by the JSON Schema in
+[`agent-stream-json.schema.json`](agent-stream-json.schema.json): `system`
+`init` first, then `assistant` (a message's text and `stop_reason`),
+`tool_use` (`id`, `name`, `input`) and `tool_result` (`tool_use_id`, `name`,
+`is_error`, `output` cut at 4,000 characters) as they happen, and a `result`
+per turn; input lines are `InputMessage`. A test checks the agent's real output
+against it, so a field added without documenting it fails the build.
+
+For a typed answer, give `--json-schema` a JSON Schema (inline or a file
+path). When the task finishes, the agent asks the model for a JSON value
+matching it, validates it (two more tries with the validation errors if it
+doesn't match), and puts it in the result's `structured_output`; with text
+output it prints the JSON. A run that can't produce one ends with subtype
+`error_structured_output`. That last request counts in `usage` and the cost.
+
+```bash
+phren agent -p --output-format json \
+  --json-schema '{"type":"object","required":["files"],"properties":{"files":{"type":"array","items":{"type":"string"}}}}' \
+  "which files handle authentication?" | jq .structured_output
+```
 
 `--output-format` implies `-p`. Everything else (warnings, compaction notices,
 tool lines with `--verbose`) goes to stderr. Exit code is 0 only for
@@ -368,13 +484,16 @@ it on the computer and it appears in the app.
 | `--reasoning <level>` | `none`, `low`, `medium`, `high`, `xhigh` (`max`) |
 | `--project <name>` | phren project to load, instead of the one found from the directory |
 | `--permissions <mode>` | `suggest` (default), `auto-confirm`, `full-auto` |
+| `--allowedTools`, `--disallowedTools <rules>` | Allow or deny tool calls by rule, comma-separated (see [Permission rules](#permission-rules)) |
 | `--yolo` | Same as `--permissions full-auto` |
-| `--plan` | Show a plan and wait for approval before running tools |
+| `--plan` | Explore with the read-only tools, show a plan and wait for approval before editing or running commands |
 | `--resume`, `--continue`, `-c` | Continue the newest session; a task given with it becomes the next prompt |
 | `--session <id>` | Continue a specific session by id or unique id prefix |
 | `--list-sessions` | List recent sessions (with `--output-format json` as JSON) and exit |
 | `models [--json]` | List the models of the providers with credentials here, as `<provider>/<model>`, the default marked, and exit (Phren Hook's model picker reads the JSON) |
 | `-p`, `--print` | Headless run: clean stdout, approvals denied |
+| `--json-schema <schema>` | End a headless run with `structured_output` matching this JSON Schema (inline or a file) |
+| `--input-format text\|stream-json` | With `stream-json`, read user messages as JSON lines on stdin, one turn each |
 | `--output-format <f>` | `text`, `json` or `stream-json`; implies `-p` |
 | `--budget <dollars>` | Stop when estimated spend passes this |
 | `--max-turns <n>` | Maximum tool rounds (default 50) |
@@ -383,8 +502,11 @@ it on the computer and it appears in the app.
 | `--price-in`, `--price-out`, `--price-cache <usd>` | Prices per million tokens, overriding the catalogue |
 | `--mcp <command>` | Connect a stdio MCP server (repeatable) |
 | `--mcp-config <path>` | Load MCP servers from a JSON file |
+| `--trust-project-mcp` | Load this project's `.mcp.json` and `.phren-agent/mcp.json` (remembered) |
+| `--strict-mcp-config` | Use only `--mcp-config` and `--mcp` servers |
+| `--no-network` | Run shell commands without network access (see [Kernel sandbox](#kernel-sandbox-linux-bubblewrap)) |
 | `--sandbox <mode>` | Linux shell sandbox: `auto` (default), `require`, `off` |
-| `--lint-cmd <cmd>`, `--test-cmd <cmd>` | Override the detected lint and test commands |
+| `--lint-cmd <cmd>`, `--test-cmd <cmd>`, `--typecheck-cmd <cmd>` | Override the detected lint, test and type-check commands |
 | `--no-subagents` | No subagent tools in one-shot mode |
 | `--no-llm-compact` | Regex summaries instead of model checkpoints when compacting |
 | `--multi` | Multi-agent terminal UI |
@@ -405,15 +527,17 @@ All 23 commands available in the interactive TUI:
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/model` | Interactive model picker with reasoning slider |
-| `/provider` | Show current provider info |
+| `/model [id]` | Interactive model picker with reasoning slider; with an id, switch to that model on the current provider |
+| `/provider [name [model]]` | Show the providers; with a name, switch to that provider (and model) mid-session |
+| `/reasoning [level]` | Show or set the reasoning effort (`none`, `low`, `medium`, `high`, `xhigh`) on the current model |
 | `/cost` | Show session cost breakdown |
 | `/plan` | Show/toggle plan mode |
 | `/undo` | Undo last file change |
-| `/compact` | Compact context: LLM checkpoint + knowledge promotion (regex fallback) |
+| `/compact [focus]` | Compact context: LLM checkpoint + knowledge promotion (regex fallback); the focus says what the summary must keep |
 | `/review` | Triage the phren review queue (`go` = manual, `auto` = model-assisted) |
 | `/context` | Show context window usage |
 | `/history` | Show conversation history |
+| `/resume [n\|id]` | Load an earlier session into a fresh one: a picker in the terminal UI, or by number or id prefix (this project's sessions, or this directory's without a store) |
 | `/turns` | Show turn count and stats |
 | `/clear` | Clear conversation history |
 | `/files` | List files touched this session |
@@ -461,7 +585,11 @@ Full readline-style editing in the interactive TUI:
 
 ## Tools
 
-The agent has access to these built-in tools:
+The agent has access to these built-in tools. The system prompt tells the model
+which of them are registered in the session (MCP tools as a count per server)
+and carries a short environment block: working directory, platform, shell,
+today's date and the git branch if the directory is a repository. The block is built once per session, with no clock time, so
+the prompt stays cacheable. `--dry-run` prints it.
 
 ### File operations
 - **read_file** — Read file contents (with line range support)
@@ -469,8 +597,34 @@ The agent has access to these built-in tools:
 - **edit_file** — Exact string replacement (`replace_all` for every occurrence). Tolerates CRLF files, trailing-whitespace and indentation drift and pasted `read_file` line numbers; a miss shows the closest lines and the first difference
 - **multi_edit** — Several edits to one file, applied in order, all or nothing
 - **apply_patch** — Codex-format patches (`*** Begin Patch` … add, delete, update, move) across files, atomic
-- **glob** — Find files by pattern
-- **grep** — Search file contents with regex
+- **glob** — Find files by pattern. Uses `rg --files` when ripgrep is on PATH, so `.gitignore` applies; hidden files such as `.github/` are listed, `.git` and `node_modules` are not. Says when it shows only part of the matches
+- **grep** — Search file contents with regex, case-sensitive unless `-i` is set. Uses ripgrep when it is on PATH (`.gitignore` honoured, hidden directories searched, lines cut at 500 characters); otherwise a JS walker that skips `.git`, `node_modules` and the directories in the root `.gitignore`, and says when it stopped at its 5,000-file cap. `PHREN_AGENT_RIPGREP=off` forces the walker
+
+The write tools check the file against what the agent last saw. An existing
+file has to be read before `write_file` (or an `apply_patch` Add File) may
+replace it, and a file that changed on disk since the agent last read or
+wrote it (the user, a formatter, a shell command) is refused until it is read
+again, so the other change is never overwritten. Edits to a file the agent
+hasn't read are allowed, because their old text must match it exactly.
+`PHREN_AGENT_FILE_GUARD=off` turns the check off.
+
+After each edit, write or patch, the agent parses the file it changed and adds
+any new syntax error to the tool result, so a dropped brace shows up at once
+instead of in a later test run. TypeScript and JavaScript use Node's built-in
+TypeScript parser (Node 22.13 or later; JSX files are skipped), Python uses
+`python3`'s `ast`, and JSON uses `JSON.parse` (files with comments are
+skipped). Errors the file had before the edit are not reported, and nothing
+type-checks. `PHREN_AGENT_SYNTAX_CHECK=off` turns it off.
+
+After a batch of edits the agent also runs the project's own checks through
+the shell tool (same permissions and sandbox), and a failure goes back to the
+model with the start and end of its output: first a type check when an edited
+file is TypeScript, JavaScript or Python (a `typecheck`, `type-check`,
+`check-types` or `tsc` package script, else `npx tsc --noEmit` when the project
+has `tsc` installed, else `mypy .` with a `mypy.ini`), then the lint command,
+then the tests. While the types fail the tests are skipped, since they can't
+pass. `--typecheck-cmd`, `--lint-cmd` and `--test-cmd` override what is
+detected.
 
 ### Shell and git
 - **shell** — Run shell commands (with timeout and safety checks). Foreground
@@ -524,11 +678,21 @@ Agents run as child processes with IPC messaging and shared task coordination.
 
 ## Compaction with knowledge promotion
 
-When the conversation approaches 75% of the context window (or on `/compact`),
-the agent asks the *same provider* for a structured checkpoint via prefix
-replay: the summarization request reuses the conversation's own system prompt
-and message prefix byte-identical, so the provider's KV cache covers
-everything except the final instruction. The response carries the summary plus
+The context size is the provider's own count: the prompt tokens (cache hits
+and writes included) its last response reported, plus an estimate for what was
+added since. The chars/4 estimate is only used before the first response and
+right after the history is rewritten. The status bar and `/context` show the
+same number.
+
+Past 75% of the window the agent first clears old tool output: results outside
+the newest 8 that are longer than 2,000 characters (or hold an image) become a
+one-line note naming the tool and how to get the output back. The full output
+stays in the event log. If the context is still over 60% after that, or on
+`/compact`, the agent asks the *same provider* for a structured checkpoint via
+prefix replay: the summarization request reuses the conversation's own system
+prompt, tools and message prefix byte-identical, so the provider's KV cache
+covers everything except the final instruction. `/compact <focus>` tells the
+summary what to keep. The response carries the summary plus
 candidate knowledge items, routed by the model's own confidence:
 
 | Confidence | Destination |
@@ -596,6 +760,16 @@ drift apart. When a sandboxed write is blocked, the tool result gets a
 | `require` | Fail closed: no working bwrap ⇒ every shell call errors |
 | `off` | Never wrap |
 
+`--no-network` also takes shell commands off the network: bwrap gives them an
+empty network namespace, and on macOS a Seatbelt profile denies outbound IP
+(local sockets still work; this turns the Seatbelt backend on without
+`PHREN_AGENT_MACOS_SANDBOX=1`). It applies whatever `--sandbox` says, and fails
+closed: with no backend that can isolate, every shell call errors instead of
+running with network. A connection that fails for it gets a `[sandbox]`
+annotation, and subagents inherit it. The agent's own `web_fetch` and
+`web_search` tools are separate; deny them with
+`--disallowedTools web_fetch,web_search` for a fully offline run.
+
 ### web_fetch SSRF guard
 
 `web_fetch` rejects URLs that are — or resolve via DNS to — private,
@@ -645,7 +819,8 @@ skill with those args. Built-in commands always win.
 ## Session event log
 
 Session history is an append-only event log at
-`<phrenPath>/.runtime/sessions/session-<id>.events.jsonl` — one JSON line per
+`<phrenPath>/.sessions/session-<id>.events.jsonl`, or without a phren store at
+`~/.phren-agent/.sessions/session-<id>.events.jsonl` — one JSON line per
 event (`user/message`, `assistant/message`, `tool/results`, `log/replace`).
 The message array the model sees is derived from the log, and an invariant
 asserts before every request that the projection still reconstructs from it
@@ -655,7 +830,9 @@ keeps everything for replay and resume. `--list-sessions` shows recent logs
 and `--session <id>` resumes a specific one. `--resume` prefers the newest event
 log (forking it into the new run's own file, with `parentSession` lineage)
 and falls back to legacy v1 message snapshots, which are still written once
-at session end.
+at session end. Without a store, `--list-sessions` and `--resume` cover the
+sessions run in the current directory, and headless output's `session_id` is
+the log's id, so `--session` takes it.
 
 ## Reasoning models
 
@@ -674,6 +851,14 @@ one-shot `--verbose` streams it to stderr.
 gif up to 5MB into the conversation. On a text-only model, image content in
 resumed history degrades to an explicit `[image omitted]` marker rather than
 an unsendable request.
+
+To show the agent an image yourself, put its path in the prompt: type it, or
+drop the file onto the terminal, which pastes the path (quoted or with
+escaped spaces both work). On a vision-capable model each png, jpeg, webp or
+gif path that exists, up to 5 images of 5MB each, is attached to the message
+as the image; the path stays in the text. Terminals don't hand clipboard
+image data to programs, so pasting a screenshot itself doesn't work; save it
+and drop the file.
 
 ## Loop hygiene
 

@@ -18,6 +18,8 @@ export interface CostTracker {
   isOverBudget(): boolean;
   formatCost(): string;
   formatTurnCost(inputTokens: number, outputTokens: number, cacheReadTokens?: number, cacheWriteTokens?: number): string;
+  /** Price usage from now on as this model (a /model or /provider switch); totals so far stay. */
+  reprice(model: string, provider?: string, baseUrl?: string): void;
 }
 
 /**
@@ -55,12 +57,12 @@ export function resolvePricing(model: string, provider?: string, baseUrl?: strin
 export const CACHE_WRITE_MULTIPLIER = 1.25;
 
 export function createCostTracker(model: string, budget: number | null = null, provider?: string, baseUrl?: string): CostTracker {
-  const { pricing, metered } = resolvePricing(model, provider, baseUrl);
+  let { pricing, metered } = resolvePricing(model, provider, baseUrl);
   // Without a cache price, hits bill as ordinary input (no discount assumed).
-  const cacheReadPer1M = pricing.cacheReadPer1M ?? pricing.inputPer1M;
+  let cacheReadPer1M = pricing.cacheReadPer1M ?? pricing.inputPer1M;
   // Cache writes bill at 1.25x input (Anthropic's 5-minute cache, the one
   // the agent asks for); providers that cache implicitly report none.
-  const cacheWritePer1M = pricing.inputPer1M * CACHE_WRITE_MULTIPLIER;
+  let cacheWritePer1M = pricing.inputPer1M * CACHE_WRITE_MULTIPLIER;
   const price = (input: number, output: number, cacheRead: number, cacheWrite: number) =>
     (input / 1_000_000) * pricing.inputPer1M +
     (output / 1_000_000) * pricing.outputPer1M +
@@ -82,6 +84,14 @@ export function createCostTracker(model: string, budget: number | null = null, p
       tracker.totalCacheReadTokens += cacheReadTokens;
       tracker.totalCacheWriteTokens += cacheWriteTokens;
       tracker.totalCost += price(inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens);
+    },
+
+    reprice(nextModel: string, nextProvider?: string, nextBaseUrl?: string) {
+      ({ pricing, metered } = resolvePricing(nextModel, nextProvider, nextBaseUrl));
+      cacheReadPer1M = pricing.cacheReadPer1M ?? pricing.inputPer1M;
+      cacheWritePer1M = pricing.inputPer1M * CACHE_WRITE_MULTIPLIER;
+      // Money already spent on a metered model still counts against --budget.
+      tracker.metered = metered || tracker.totalCost > 0;
     },
 
     isOverBudget() {

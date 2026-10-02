@@ -2,7 +2,7 @@
  * Slash command dispatch for the REPL.
  */
 import type { AgentSession } from "./agent-loop.js";
-import type { LlmMessage, LlmProvider } from "./providers/types.js";
+import type { AgentToolDef, LlmMessage, LlmProvider } from "./providers/types.js";
 import type { AgentSpawner } from "./multi/spawner.js";
 import type { PickerResult } from "./multi/model-picker.js";
 import type { PhrenContext } from "./memory/context.js";
@@ -15,7 +15,7 @@ import { sessionCommand, historyCommand, compactCommand, diffCommand, gitCommand
 import { memCommand, askCommand } from "./commands/memory.js";
 import { reviewCommand } from "./commands/review.js";
 import { findSkill, getScopedSkills } from "@phren/cli/skill/registry";
-import { modelCommand, providerCommand, presetCommand } from "./commands/model.js";
+import { modelCommand, providerCommand, presetCommand, reasoningCommand } from "./commands/model.js";
 import { configCommand } from "./commands/config.js";
 import type { PermissionMode, PermissionConfig } from "./permissions/types.js";
 import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
@@ -37,10 +37,12 @@ export interface CommandContext {
   currentModel?: string;
   /** Current reasoning effort for /model command */
   currentReasoning?: ReasoningEffort | null;
-  /** Callback when model/reasoning changes */
-  onModelChange?: (result: PickerResult) => void;
+  /** Callback when model/reasoning changes; returns the provider now in use. */
+  onModelChange?: (result: PickerResult) => void | LlmProvider | Promise<void | LlmProvider>;
   /** Open the host UI's interactive model picker. */
   pickModel?: () => Promise<PickerResult | null>;
+  /** Open the host UI's pick-one list; resolves to the chosen index, or null. */
+  pickFromList?: (title: string, items: Array<{ label: string; detail?: string }>) => Promise<number | null>;
   /** LLM provider for /ask side-channel queries */
   provider?: LlmProvider;
   /** System prompt for /ask queries */
@@ -54,7 +56,12 @@ export interface CommandContext {
   /** Full phren context for /mem commands */
   phrenCtx?: PhrenContext | null;
   /** Tool registry for /permissions command */
-  registry?: { permissionConfig: PermissionConfig; setPermissions: (cfg: PermissionConfig) => void };
+  registry?: {
+    permissionConfig: PermissionConfig;
+    setPermissions: (cfg: PermissionConfig) => void;
+    /** For /compact: the summary request carries the session's tools. */
+    getDefinitions?: () => AgentToolDef[];
+  };
   /** Fork the session at the current point into a new durable log. */
   forkSession?: () => { ok: boolean; sessionId?: string; message: string };
   /** Quick chat only: continue this conversation as an agent with tools. */
@@ -71,7 +78,7 @@ export function createCommandContext(session: AgentSession, contextLimit: number
 
 const BUILTIN_COMMAND_NAMES: readonly string[] = [
   "/help", "/turns", "/clear", "/cwd", "/files", "/cost", "/plan", "/undo",
-  "/context", "/model", "/provider", "/preset", "/session", "/history",
+  "/context", "/model", "/provider", "/reasoning", "/preset", "/session", "/history",
   "/compact", "/diff", "/git", "/mem", "/ask", "/resume", "/review", "/config", "/spawn", "/agents",
   "/allow",
   "/mode", "/permissions", "/verbose", "/theme", "/agent", "/rewind", "/fork", "/promote",
@@ -92,6 +99,11 @@ export function setCustomCommands(commands: CustomCommand[]): void {
   customCommands = commands.filter((command) => !BUILTIN_BARE_NAMES.has(command.name));
   COMMAND_NAMES.length = 0;
   COMMAND_NAMES.push(...BUILTIN_COMMAND_NAMES, ...customCommands.map((command) => `/${command.name}`));
+}
+
+/** Extra command names for completion (MCP prompts, found after servers connect). */
+export function addCommandNames(names: string[]): void {
+  for (const name of names) if (!COMMAND_NAMES.includes(name)) COMMAND_NAMES.push(name);
 }
 
 export function loadAndRegisterCustomCommands(cwd = process.cwd()): CustomCommand[] {
@@ -173,6 +185,7 @@ export function handleCommand(input: string, ctx: CommandContext): boolean | Pro
     case "/context":  return contextCommand(parts, ctx);
     case "/model":    return modelCommand(parts, ctx);
     case "/provider": return providerCommand(parts, ctx);
+    case "/reasoning": return reasoningCommand(parts, ctx);
     case "/preset":   return presetCommand(parts, ctx);
     case "/session":  return sessionCommand(parts, ctx);
     case "/history":  return historyCommand(parts, ctx);

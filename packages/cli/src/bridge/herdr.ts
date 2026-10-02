@@ -286,18 +286,18 @@ const identities = new Map<string, { at: number; result: Promise<PaneIdentity> }
 const identityKey = (server: string, pane: Json, pids: number[]) => JSON.stringify([server, pane.pane_id, pane.terminal_id, pids, pane.agent]);
 /** The pane's identity and, when it had to look, the foreground PIDs it read,
  * so a caller that also needs them does not ask Herdr a second time. */
-async function resolveIdentity(server: string, pane: Json, fresh: boolean): Promise<{ sessionId?: string; pids?: number[] }> {
+async function resolveIdentity(server: string, pane: Json, fresh: boolean): Promise<PaneIdentity & { pids?: number[] }> {
   const reported = object(pane.agent_session);
   // Copilot's report lags a conversation switch (see copilotForegroundSession);
   // its own process log is read first and the report is the fallback.
   // A Codex pane on the Hook's own app-server: the registry follows `/new`
   // and `/resume` as they happen, while Herdr's report waits for a hook.
   const owned = pane.agent === "codex" && !!codexServers.forPane(server, String(pane.pane_id))?.threadId;
-  if (pane.agent !== "copilot" && !owned && reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) { countIdentity("reported"); return { sessionId: reported.value }; }
+  if (pane.agent !== "copilot" && !owned && reported.kind === "id" && reported.agent === pane.agent && typeof reported.value === "string" && sessionId.safeParse(reported.value).success) { countIdentity("reported"); return { sessionId: reported.value, noTranscriptLogs: false }; }
   const pids = await foregroundPids(server, pane);
   const key = identityKey(server, pane, pids);
   const cached = identities.get(key);
-  if (!fresh && cached && Date.now() - cached.at < IDENTITY_CACHE_MS) { countIdentity("cached"); return { sessionId: (await cached.result).sessionId, pids }; }
+  if (!fresh && cached && Date.now() - cached.at < IDENTITY_CACHE_MS) { countIdentity("cached"); return { ...await cached.result, pids }; }
   countIdentity(fresh ? "probe-fresh" : "probe");
   const result = identityFromProcesses(server, pane, pids);
   if (identities.size >= 128) identities.delete(identities.keys().next().value!);
@@ -308,7 +308,7 @@ async function resolveIdentity(server: string, pane: Json, fresh: boolean): Prom
   // brand-new conversation it just proved as starting.
   void result.then(() => { entry.at = Date.now(); }, () => {});
   identities.set(key, entry);
-  return { sessionId: (await result).sessionId, pids };
+  return { ...await result, pids };
 }
 export async function paneIdentity(server: string, pane: Json, fresh = false): Promise<string | undefined> {
   return (await resolveIdentity(server, pane, fresh)).sessionId;
@@ -503,8 +503,9 @@ export async function paneChatState(server: string, pane: Json, options: { token
   // An ambiguous set of open logs is not a brand-new conversation.
   // Reuse the same two-second identity probe as context/overview polling;
   // discovering a new chat must not run lsof again for every list refresh.
-  const evidence = identities.get(identityKey(server, pane, pids));
-  const starting = !sessionId && !!process && !!evidence && Date.now() - evidence.at < IDENTITY_CACHE_MS && (await evidence.result).noTranscriptLogs;
+  // Carry the evidence returned by this probe. A concurrent lookup may replace
+  // its cache entry, or a busy event loop may advance past the reuse window.
+  const starting = !sessionId && !!process && identity.noTranscriptLogs;
   let binding = startingBindings.get(key);
   if (process) {
     // Lost identity, changed process, or newly ambiguous evidence requires a

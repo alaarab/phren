@@ -1,6 +1,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import type { PermissionMode } from "./permissions/types.js";
+import { parseRuleList } from "./permissions/rules.js";
 import { normalizeReasoningEffort, type ReasoningEffort } from "./models.js";
 import { loadPermissionMode } from "./settings.js";
 
@@ -22,6 +23,9 @@ export interface CliArgs {
   project?: string;
   permissions: PermissionMode;
   permissionsExplicit: boolean;
+  /** --allowedTools / --disallowedTools rules (permissions/rules.ts). */
+  allowedTools: string[];
+  disallowedTools: string[];
   maxTurns: number;
   maxOutput?: number;
   /** Context window override in tokens (the catalog's otherwise). */
@@ -43,12 +47,21 @@ export interface CliArgs {
   /** Headless: no prompts, stdout carries only `outputFormat`. */
   print: boolean;
   outputFormat: "text" | "json" | "stream-json";
+  /** Headless input: the task as text, or user messages as JSON lines on stdin. */
+  inputFormat: "text" | "stream-json";
+  /** --json-schema: inline JSON Schema or a path to one. */
+  jsonSchema?: string;
   /** OpenAI-compatible endpoint for --provider openai-compat (or deepseek override). */
   baseUrl?: string;
   lintCmd?: string;
   testCmd?: string;
+  typecheckCmd?: string;
   mcp: string[];
   mcpConfig?: string;
+  /** Load the project's .mcp.json / .phren-agent/mcp.json, and remember the choice. */
+  trustProjectMcp?: boolean;
+  /** Only the servers given with --mcp-config / --mcp; no default config files. */
+  strictMcpConfig?: boolean;
   team?: string;
   multi: boolean;
   /** Disable subagent tools in one-shot mode (they are on by default). */
@@ -57,6 +70,8 @@ export interface CliArgs {
   noLlmCompact: boolean;
   /** Kernel write-fence for shell commands: off | auto | require. */
   sandbox: "off" | "auto" | "require";
+  /** --no-network: shell commands run without network access. */
+  noNetwork?: boolean;
   /**
    * chat: quick chat, no tools, read-only phren memory in the system prompt
    * (`/promote` turns it into a normal agent session with tools).
@@ -91,8 +106,11 @@ Options:
   --no-subagents       Disable spawn_agent/send_message/list_agents in one-shot mode
   --no-llm-compact     Use regex prune summaries instead of LLM compaction
   --sandbox <mode>     Kernel write-fence for shell (bwrap): off, auto (default), require
+  --no-network         Run shell commands without network (bwrap or Seatbelt; fails closed)
   --permissions <mode> Permission mode: suggest (default), auto-confirm, full-auto
   --yolo               Full-auto permissions — no confirmations (alias for --permissions full-auto)
+  --allowedTools <rules>     Allow these without asking, comma-separated: read_file, shell(npm test), edit_file(src/**)
+  --disallowedTools <rules>  Deny these in every mode, same syntax
   --interactive, -i    Interactive REPL mode (multi-turn conversation)
   --resume, -c         Resume the newest session's conversation (task optional)
   --session <id>       Resume a specific session by id or unique id prefix
@@ -100,10 +118,18 @@ Options:
   -p, --print          Headless: no prompts (tool approvals are denied), clean stdout
   --output-format <f>  With -p: text (final message), json (one result object),
                        stream-json (NDJSON events + result). Implies -p
+  --json-schema <s>    With -p: end with a JSON value matching this schema (inline JSON or a
+                       file), in the result's structured_output; implies -p
+  --input-format <f>   With -p: text (the task, default) or stream-json (user
+                       messages as JSON lines on stdin, one turn each, same session;
+                       needs --output-format stream-json)
   --lint-cmd <cmd>     Override auto-detected lint command
   --test-cmd <cmd>     Override auto-detected test command
+  --typecheck-cmd <cmd> Override the auto-detected type check run after edits
   --mcp <command>      Connect to an MCP server via stdio (repeatable)
   --mcp-config <path>  Load MCP server config from JSON file
+  --trust-project-mcp  Load this project's .mcp.json and .phren-agent/mcp.json (remembered)
+  --strict-mcp-config  Use only --mcp-config and --mcp servers, no default config files
   --team <name>        Start in team mode with named team coordination
   --multi              Start in multi-agent TUI mode
   --dry-run            Show system prompt and exit
@@ -150,6 +176,8 @@ export function parseArgs(argv: string[]): CliArgs {
     task: "",
     permissions: "suggest",
     permissionsExplicit: false,
+    allowedTools: [],
+    disallowedTools: [],
     maxTurns: 50,
     budget: null,
     plan: false,
@@ -160,6 +188,7 @@ export function parseArgs(argv: string[]): CliArgs {
     listSessions: false,
     print: false,
     outputFormat: "text",
+    inputFormat: "text",
     noSubagents: false,
     noLlmCompact: false,
     sandbox: "auto",
@@ -181,6 +210,7 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--interactive" || arg === "-i") { args.interactive = true; }
     else if (arg === "--no-subagents") { args.noSubagents = true; }
     else if (arg === "--no-llm-compact") { args.noLlmCompact = true; }
+    else if (arg === "--no-network") { args.noNetwork = true; }
     else if (arg === "--sandbox" && argv[i + 1]) {
       const mode = argv[++i];
       if (mode === "off" || mode === "auto" || mode === "require") { args.sandbox = mode; }
@@ -195,6 +225,13 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--session" && argv[i + 1]) { args.resume = true; args.resumeId = argv[++i]; }
     else if (arg === "--list-sessions") { args.listSessions = true; }
     else if (arg === "--print" || arg === "-p") { args.print = true; }
+    else if (arg === "--json-schema" && argv[i + 1]) { args.jsonSchema = argv[++i]; args.print = true; }
+    else if (arg === "--input-format" && argv[i + 1]) {
+      const format = argv[++i];
+      if (format !== "text" && format !== "stream-json") throw new Error(`Unknown --input-format "${format}". Use text or stream-json.`);
+      args.inputFormat = format;
+      if (format === "stream-json") args.print = true;
+    }
     else if (arg === "--output-format" && argv[i + 1]) {
       const format = argv[++i];
       if (format === "text" || format === "json" || format === "stream-json") {
@@ -207,8 +244,11 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--base-url" && argv[i + 1]) { args.baseUrl = argv[++i]; }
     else if (arg === "--lint-cmd" && argv[i + 1]) { args.lintCmd = argv[++i]; }
     else if (arg === "--test-cmd" && argv[i + 1]) { args.testCmd = argv[++i]; }
+    else if (arg === "--typecheck-cmd" && argv[i + 1]) { args.typecheckCmd = argv[++i]; }
     else if (arg === "--mcp" && argv[i + 1]) { args.mcp.push(argv[++i]); }
     else if (arg === "--mcp-config" && argv[i + 1]) { args.mcpConfig = argv[++i]; }
+    else if (arg === "--trust-project-mcp") { args.trustProjectMcp = true; }
+    else if (arg === "--strict-mcp-config") { args.strictMcpConfig = true; }
     else if (arg === "--team" && argv[i + 1]) { args.team = argv[++i]; }
     else if (arg === "--multi") { args.multi = true; }
     else if (arg === "--provider" && argv[i + 1]) { args.provider = argv[++i]; }
@@ -224,6 +264,8 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--price-out" && argv[i + 1]) { args.priceOut = parsePositive(argv[++i], arg); }
     else if (arg === "--price-cache" && argv[i + 1]) { args.priceCache = parsePositive(argv[++i], arg); }
     else if (arg === "--budget" && argv[i + 1]) { args.budget = parseFloat(argv[++i]) || null; }
+    else if ((arg === "--allowedTools" || arg === "--allowed-tools") && argv[i + 1]) { args.allowedTools.push(...parseRuleList(argv[++i])); }
+    else if ((arg === "--disallowedTools" || arg === "--disallowed-tools") && argv[i + 1]) { args.disallowedTools.push(...parseRuleList(argv[++i])); }
     else if (arg === "--yolo") { args.permissions = "full-auto"; args.permissionsExplicit = true; }
     else if (arg === "--permissions" && argv[i + 1]) {
       const mode = argv[++i];

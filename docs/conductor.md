@@ -214,7 +214,7 @@ without retaining the prompt. States are `launching`, `sending`, `accepted`,
 `uncertain` and `failed`. `accepted` confirms first-prompt delivery, not worker
 completion; completion arrives as a return (see [Returns](#returns)).
 
-Before a Claude or Codex worker starts, the receiving Hook marks the project's
+Before a Claude, Codex or Copilot worker starts, the receiving Hook marks the project's
 resolved folder trusted for that harness (`PHREN_PRETRUST=off` turns this off;
 see [footprint](footprint.md#folder-trust-for-launches-the-hook-places)), so the
 folder-trust screen does not appear.
@@ -235,6 +235,29 @@ return naming the pane, the Hook never answers that screen, and once the owner
 does the harness submits the brief itself. An unconfirmed brief is asked about
 again on each returns poll, so the receipt turns `accepted` when the worker
 confirms it. Briefs are kept for seven days (at most 256).
+
+### Copilot workers
+
+`harness: "copilot"` starts GitHub Copilot CLI in the new pane, the same way the
+phone's launch does. `model` goes to `--model` and `effort` to
+`--reasoning-effort`. Copilot asks before every tool by default and has no
+automatic reviewer, so `permissionMode` maps to its launch flags:
+
+| Mode | Copilot flags |
+|------|---------------|
+| `supervised` | none (Copilot asks for each tool) |
+| `auto-edits` | `--allow-tool=write` |
+| `auto` | `--allow-all-tools` (file access stays inside the project folder; URLs still ask) |
+| `full-access` | `--allow-all` (tools, paths and URLs) |
+
+The grant and release-authority ceilings apply as they do to Claude and Codex.
+Copilot takes no first prompt the Hook can confirm, so its brief is typed into
+the pane once it reads ready (`brief: "typed"`), and the folder is pre-trusted
+through `trustedFolders` in `~/.copilot/settings.json`. Its returns come from
+its session log (`~/.copilot/session-state/<id>/events.jsonl`): the turn is done
+at the `assistant.turn_end` that follows the reply marked `final_answer`, failed
+on `session.error`, and interrupted on `abort`. Copilot has no accounts in the
+Hook, and it cannot be a conductor.
 
 A Codex worker runs on its own Phren-owned `codex app-server` instead (see
 [Phren Hook](phren-hook.md#codex-panes-on-a-phren-owned-app-server)). The
@@ -414,13 +437,16 @@ unread returns, oldest first, and mark them read. A return is one of:
 
 - `done`: the worker finished its turn. `reply` is its final reply, from the
   harness's Stop hook or its transcript, capped at 4000 bytes (`truncated`
-  when cut). `background` counts background tasks it left running (see below).
+  when cut). `background` counts background tasks it left running (see below);
+  a pane with one still running is not closed.
 - `needs-you`: the worker finished by asking the owner something, or stopped
   mid-task. `question` is the question line, or why the turn is not done: its
-  closing sentence announced a step it never ran ("Let me install
-  dependencies."), or it left tracked uncommitted files and reported or named
-  no PR. A reply that hands over ("I'll wait for your review", "Let's merge
-  once CI is green") is done. Uncommitted files are counted only in a
+  closing paragraph announced a step it never ran ("Let me install
+  dependencies.", "I'll resolve it on the follow-up branch."), it waits on
+  something with nothing left running ("Now waiting on CI.", "I'll push once
+  it passes."), or it left tracked uncommitted files and reported or named no
+  PR. A reply that hands over to the owner ("I'll wait for your review",
+  "I'll leave the merge to you") is done. Uncommitted files are counted only in a
   checkout no other pane works in. A turn whose checkout git could not read
   in time is returned `done` but its pane is not closed, and one turn is
   returned once even when a later poll reads it differently.
@@ -466,7 +492,12 @@ into its per-process status file. From that record:
   even when no new turn follows (a notification can wait in an idle session's
   queue), and the worker is `done` once none is left. A worker still
   waiting on background work two hours after its Stop (a dev server it left
-  running) counts as `done`, with `background` set. The wait is measured from
+  running) counts as `done`, with `background` set. The tasks waited on are
+  shells and monitors the turn started, and any started earlier that the
+  agent looked at again since the last prompt (read its output, named its
+  id): a dispatcher's message arriving mid-run does not turn the run into a
+  leftover. A worker whose reply says it waits on a task ("Now waiting on the
+  MacBook rerun.") stays `working` while any non-stream task still runs. The wait is measured from
   the latest Stop and every task that finishes wakes the worker with a new
   Stop, so it only runs out when no task has finished for two hours. The
   dispatching Hook remembers the most background tasks it saw the worker

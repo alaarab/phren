@@ -1,11 +1,11 @@
 import { lstat, mkdir, readFile, realpath, rmdir, stat, utimes } from "node:fs/promises";
 import path from "node:path";
-import { claudeConfigDir, codexHome, homeDir } from "../home-paths.js";
+import { claudeConfigDir, codexHome, copilotHome, homeDir } from "../home-paths.js";
 import { logger } from "../logger.js";
 import { atomic } from "./protocol.js";
 
 /**
- * Marking a folder the Hook chose as trusted, so a Claude or Codex launched
+ * Marking a folder the Hook chose as trusted, so a Claude, Codex or Copilot launched
  * there starts without its folder-trust screen. Claude's default on that
  * screen is "No, exit", so a dispatched worker would otherwise sit there
  * until the owner answers it (the brief is never sent; see dispatch.ts).
@@ -21,12 +21,16 @@ import { atomic } from "./protocol.js";
  *   that key for the working folder and each parent up to its git root.
  * - Codex: `[projects."<dir>"]` `trust_level = "trusted"` in
  *   `$CODEX_HOME/config.toml`, the table Codex itself writes on "Yes".
+ * - Copilot: the folder added to `trustedFolders` in
+ *   `$COPILOT_HOME/settings.json` (else `~/.copilot/settings.json`), the list
+ *   its "Yes, and remember this folder" answer keeps.
  *
- * Both were checked against Claude Code 2.1.280 and codex-cli 0.155.1.
+ * Claude and Codex were checked against Claude Code 2.1.280 and codex-cli
+ * 0.155.1, Copilot against Copilot CLI 1.0.89.
  * `PHREN_PRETRUST=off` turns all of it off.
  */
 
-export type TrustHarness = "claude" | "codex";
+export type TrustHarness = "claude" | "codex" | "copilot";
 export type TrustResult = "trusted" | "already" | "skipped";
 
 export function pretrustEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -166,15 +170,44 @@ export async function ensureCodexDirTrusted(dir: string, env: NodeJS.ProcessEnv 
 }
 
 /**
+ * Adds `dir` to `trustedFolders` in Copilot's `settings.json`, creating the
+ * file when Copilot has none yet. Other settings are kept; a file that is not
+ * a JSON object is left alone (the launch then meets the trust screen).
+ */
+export async function ensureCopilotFolderTrusted(dir: string, env: NodeJS.ProcessEnv = process.env): Promise<TrustResult> {
+  const directory = copilotHome(env);
+  const configured = path.join(directory, "settings.json");
+  const file = await realpath(configured).catch(() => configured);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let text = "";
+    try { text = await readFile(file, "utf8"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    const settings: unknown = text.trim() ? JSON.parse(text) : {};
+    if (!settings || typeof settings !== "object" || Array.isArray(settings)) throw new Error("settings.json is not a JSON object");
+    const record = settings as Record<string, unknown>;
+    if (record.trustedFolders !== undefined && !Array.isArray(record.trustedFolders)) throw new Error("trustedFolders in settings.json is not a list");
+    const trusted = (record.trustedFolders ?? []) as unknown[];
+    if (trusted.includes(dir)) return "already";
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const metadata = await lstat(file).catch(() => undefined);
+    // Copilot may have rewritten the file meanwhile; start over from its text.
+    if (await readFile(file, "utf8").catch(() => "") !== text) continue;
+    await atomic(file, JSON.stringify({ ...record, trustedFolders: [...trusted, dir] }, null, 2) + "\n", metadata ? metadata.mode & 0o777 : 0o600);
+    return "trusted";
+  }
+  throw new Error("settings.json kept changing while it was being updated");
+}
+
+/**
  * Trusts `dir` for `harness` before a launch, when the harness has a trust
  * screen and pre-trust is on. Never throws: a failure is logged and the
  * launch goes on to meet the screen, which dispatch then reports.
  */
 export async function pretrustFolder(harness: string, dir: string, why: string, env: NodeJS.ProcessEnv = process.env): Promise<TrustResult> {
-  if (harness !== "claude" && harness !== "codex") return "skipped";
+  if (harness !== "claude" && harness !== "codex" && harness !== "copilot") return "skipped";
   if (!pretrustEnabled(env)) return "skipped";
   if (!path.isAbsolute(dir)) return "skipped";
-  const name = harness === "claude" ? "Claude" : "Codex";
+  const name = harness === "claude" ? "Claude" : harness === "codex" ? "Codex" : "Copilot";
   // The same folder by the path the Hook was given and by its real path: the
   // harness keys trust by whichever one its working directory reports.
   const real = await realpath(dir).catch(() => undefined);
@@ -182,7 +215,8 @@ export async function pretrustFolder(harness: string, dir: string, why: string, 
   let outcome: TrustResult = "already";
   for (const folder of [...new Set([dir, real])]) {
     try {
-      const result = harness === "claude" ? await ensureClaudeFolderTrusted(folder, env) : await ensureCodexDirTrusted(folder, env);
+      const result = harness === "claude" ? await ensureClaudeFolderTrusted(folder, env)
+        : harness === "codex" ? await ensureCodexDirTrusted(folder, env) : await ensureCopilotFolderTrusted(folder, env);
       if (result === "trusted") logger.info("launch", `Marked ${folder} trusted for ${name} (${why}).`);
       else if (result === "skipped") logger.warn("launch", `Did not mark ${folder} trusted for ${name}: its config file does not exist yet.`);
       if (result === "trusted" || (result === "skipped" && outcome === "already")) outcome = result;

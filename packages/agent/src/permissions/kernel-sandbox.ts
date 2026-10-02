@@ -17,6 +17,12 @@
  *             profiles are easy to get subtly wrong); without it auto degrades
  *             visibly with the same notice as before.
  *   require — fail closed: no working backend ⇒ the command errors.
+ *
+ * Network: with `network: false` (--no-network) the same backends also cut
+ * the command off from the network, bwrap with its own empty network
+ * namespace and Seatbelt by denying outbound IP; local sockets still work.
+ * Asking for that turns the Seatbelt backend on without the opt-in, since
+ * the user chose isolation explicitly.
  */
 import { execFileSync } from "child_process";
 import * as fs from "fs";
@@ -67,8 +73,8 @@ export function isBwrapAvailable(): boolean {
   return probeResult;
 }
 
-export function isSeatbeltAvailable(): boolean {
-  if (!seatbeltEnabled()) return false;
+export function isSeatbeltAvailable(force = false): boolean {
+  if (process.platform !== "darwin" || (!force && !seatbeltEnabled())) return false;
   if (seatbeltProbeResult !== null) return seatbeltProbeResult;
   try {
     execFileSync("sandbox-exec", ["-p", "(version 1)(allow default)", "true"], {
@@ -108,13 +114,14 @@ function realpathOrNull(p: string): string | null {
 }
 
 /** Build the bwrap argv prefix for the given writable roots. */
-export function buildBwrapArgv(argv: string[], writableRoots: string[]): string[] {
+export function buildBwrapArgv(argv: string[], writableRoots: string[], opts: { network?: boolean } = {}): string[] {
   const wrapped = [
     "bwrap",
     "--ro-bind", "/", "/",
     "--dev", "/dev",
     "--proc", "/proc",
     "--tmpfs", "/tmp",
+    ...(opts.network === false ? ["--unshare-net"] : []),
   ];
 
   const seen = new Set<string>();
@@ -136,13 +143,15 @@ export interface WrapOptions {
   mode: SandboxMode;
   workspaceRoot: string;
   extraWritable?: string[];
+  /** false cuts the command off from the network (--no-network). */
+  network?: boolean;
 }
 
 function sbplQuote(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-export function buildSeatbeltProfile(writableRoots: string[]): string {
+export function buildSeatbeltProfile(writableRoots: string[], opts: { network?: boolean } = {}): string {
   const rules: string[] = [];
   const seen = new Set<string>();
   for (const root of writableRoots) {
@@ -165,11 +174,12 @@ export function buildSeatbeltProfile(writableRoots: string[]): string {
     "(allow default)",
     "(deny file-write*)",
     `(allow file-write* ${rules.join(" ")})`,
+    ...(opts.network === false ? ["(deny network-outbound (remote ip))"] : []),
   ].join("\n");
 }
 
-export function buildSeatbeltArgv(argv: string[], writableRoots: string[]): string[] {
-  return ["sandbox-exec", "-p", buildSeatbeltProfile(writableRoots), ...argv];
+export function buildSeatbeltArgv(argv: string[], writableRoots: string[], opts: { network?: boolean } = {}): string[] {
+  return ["sandbox-exec", "-p", buildSeatbeltProfile(writableRoots, opts), ...argv];
 }
 
 /**
@@ -177,18 +187,26 @@ export function buildSeatbeltArgv(argv: string[], writableRoots: string[]): stri
  * Throws SandboxRequiredError only in `require` mode with no working backend.
  */
 export function wrapWithSandbox(argv: string[], opts: WrapOptions): SandboxDecision {
-  if (opts.mode === "off") {
+  const isolateNetwork = opts.network === false;
+  // Network isolation needs a backend, so it overrides --sandbox off.
+  if (opts.mode === "off" && !isolateNetwork) {
     return { argv, sandboxed: false };
   }
 
   const writable = [opts.workspaceRoot, os.tmpdir(), ...(opts.extraWritable ?? [])];
+  const net = { network: opts.network };
 
   if (isBwrapAvailable()) {
-    return { argv: buildBwrapArgv(argv, writable), sandboxed: true };
+    return { argv: buildBwrapArgv(argv, writable, net), sandboxed: true };
   }
 
-  if (isSeatbeltAvailable()) {
-    return { argv: buildSeatbeltArgv(argv, writable), sandboxed: true };
+  if (isSeatbeltAvailable(isolateNetwork)) {
+    return { argv: buildSeatbeltArgv(argv, writable, net), sandboxed: true };
+  }
+
+  if (isolateNetwork) {
+    // Asked for no network and can't give it: fail closed, whatever the mode.
+    throw new SandboxRequiredError(`--no-network needs a kernel sandbox, and none works on this ${process.platform} system.`);
   }
 
   if (opts.mode === "require") {
@@ -218,6 +236,13 @@ export function wrapWithSandbox(argv: string[], opts: WrapOptions): SandboxDecis
 // ── Denial classification ────────────────────────────────────────────────────
 
 const DENIAL_RE = /read-only file system|operation not permitted/i;
+const NETWORK_DENIAL_RE = /network is unreachable|could not resolve host|name or service not known|temporary failure in name resolution|getaddrinfo|ENETUNREACH|EAI_AGAIN|connect EPERM|failed to connect|could(?:n't| not) connect to server/i;
+
+/** When a command without network fails for want of it, say so. */
+export function classifyNetworkDenial(output: string): string | null {
+  if (!NETWORK_DENIAL_RE.test(output)) return null;
+  return "\n[sandbox] Network blocked: this session runs shell commands with --no-network. Work offline, or the user can rerun without it.";
+}
 
 /**
  * When a sandboxed command fails with a write-fence error, return an

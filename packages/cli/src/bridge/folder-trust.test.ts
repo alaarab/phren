@@ -2,7 +2,7 @@ import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, sy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { claudeGlobalConfigFile, claudeProjectKey, codexTrustedText, ensureClaudeFolderTrusted, ensureCodexDirTrusted, pretrustEnabled, pretrustFolder } from "./folder-trust.js";
+import { claudeGlobalConfigFile, claudeProjectKey, codexTrustedText, ensureClaudeFolderTrusted, ensureCodexDirTrusted, ensureCopilotFolderTrusted, pretrustEnabled, pretrustFolder } from "./folder-trust.js";
 
 describe("folder trust", () => {
   const temporary: string[] = [];
@@ -107,6 +107,27 @@ describe("folder trust", () => {
     expect(codexTrustedText(`[projects."/c"]\nfoo = 1\n`, "/c")).toBe(`[projects."/c"]\ntrust_level = "trusted"\nfoo = 1\n`);
     expect(codexTrustedText(`[projects."/a"]\ntrust_level = "trusted"\n`, "/a")).toBeUndefined();
     expect(codexTrustedText("", 'C:\\a "b"')).toBe(`[projects."C:\\\\a \\"b\\""]\ntrust_level = "trusted"\n`);
+  });
+
+  it("adds the folder to Copilot's trustedFolders once, keeping its other settings", async () => {
+    const { home, env, project } = await sandbox();
+    const copilotEnv = { ...env, COPILOT_HOME: path.join(home, "copilot") };
+    const file = path.join(home, "copilot", "settings.json");
+    // No settings yet: the file is created with just the list.
+    expect(await pretrustFolder("copilot", project, "test", copilotEnv)).toBe("trusted");
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ trustedFolders: [project] });
+    // Windows does not implement POSIX file permission bits.
+    if (process.platform !== "win32") expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(await ensureCopilotFolderTrusted(project, copilotEnv)).toBe("already");
+    // The owner's own settings and folders stay as they were.
+    await writeFile(file, JSON.stringify({ hooks: { SessionStart: [] }, trustedFolders: ["/elsewhere"] }));
+    expect(await ensureCopilotFolderTrusted(project, copilotEnv)).toBe("trusted");
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ hooks: { SessionStart: [] }, trustedFolders: ["/elsewhere", project] });
+    // A file that is not a settings object is left alone, and the launch goes on.
+    await writeFile(file, "// comments\n{}");
+    await expect(ensureCopilotFolderTrusted(path.join(home, "Projects"), copilotEnv)).rejects.toThrow();
+    expect(await pretrustFolder("copilot", path.join(home, "Projects"), "test", copilotEnv)).toBe("skipped");
+    expect(await readFile(file, "utf8")).toBe("// comments\n{}");
   });
 
   it("refuses to touch an unreadable Codex config and says why", async () => {

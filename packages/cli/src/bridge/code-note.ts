@@ -3,7 +3,7 @@ import { z } from "zod";
 import { addFindingToFile } from "../shared/content.js";
 import { requireCodePackage } from "./code-routes.js";
 import { BridgeError, sessionId, type Json } from "./protocol.js";
-import { projectName } from "./dispatch.js";
+import { DISPATCH_HARNESSES, projectName } from "./dispatch.js";
 
 export const codeNoteSchema = z.object({
   store: z.string().min(1).max(200).optional(),
@@ -13,7 +13,7 @@ export const codeNoteSchema = z.object({
   name: z.string().min(1).max(4600).optional(), symbol: z.string().min(1).max(4600).optional(),
   file: z.string().min(1).max(4096).refine(file => !path.isAbsolute(file) && !file.includes("\0") && !file.split(/[\\/]/).includes("..")),
   line: z.number().int().positive(), text: z.string().trim().min(1).max(4500).refine(text => !/[\x00-\x08\x0b-\x1f\x7f]/.test(text)),
-  target: z.union([z.object({ session: sessionId }).strict(), z.object({ harness: z.enum(["codex", "claude", "opencode"]) }).strict()]).optional(),
+  target: z.union([z.object({ session: sessionId }).strict(), z.object({ harness: z.enum(DISPATCH_HARNESSES) }).strict()]).optional(),
 }).strict();
 export type CodeNote = z.infer<typeof codeNoteSchema>;
 const noteName = (note: CodeNote): string => {

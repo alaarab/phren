@@ -12,8 +12,8 @@ Linux uses a systemd user service; macOS uses a LaunchAgent in your signed-in
 user session. Without Herdr the Hook uses tmux; see [Without Herdr: tmux](#without-herdr-tmux).
 
 ```sh
-npx --yes @phren/cli@0.3.20 bridge install
-npx --yes @phren/cli@0.3.20 bridge doctor
+npx --yes @phren/cli@0.3.21 bridge install
+npx --yes @phren/cli@0.3.21 bridge doctor
 ```
 
 Keep Tailscale connected on the iPhone and computer for remote access. Funnel and
@@ -526,10 +526,10 @@ alone.
 ## Maintain and diagnose
 
 ```sh
-npx --yes @phren/cli@0.3.20 bridge status
-npx --yes @phren/cli@0.3.20 bridge update
-npx --yes @phren/cli@0.3.20 bridge rollback
-npx --yes @phren/cli@0.3.20 bridge uninstall
+npx --yes @phren/cli@0.3.21 bridge status
+npx --yes @phren/cli@0.3.21 bridge update
+npx --yes @phren/cli@0.3.21 bridge rollback
+npx --yes @phren/cli@0.3.21 bridge uninstall
 ```
 
 `update` installs the version of the CLI you invoke; choose an explicit newer
@@ -842,7 +842,11 @@ phone's one text frame, `{"type":"commit"}`, commits what's left when the
 person stops. Errors arrive as `{"type":"error","code":…,"error":…}` with fixed
 messages (`transcribe-unconfigured`, `transcribe-rejected`, `transcribe-quota`,
 `transcribe-busy`, `transcribe-limit`, `transcribe-failed`), never ElevenLabs'
-own text. A socket lasts at most ten minutes. The Hook advertises it as the
+own text. `{"type":"ready"}` says ElevenLabs answered and audio is flowing.
+A socket lasts at most ten minutes. The Hook never closes it without saying
+why: an `error` frame, or `{"type":"end","reason":…}` with `session-limit`
+(the ten minutes ran out; open a fresh socket) or `upstream-closed`
+(ElevenLabs hung up). The phone ignores frame types it does not know. The Hook advertises it as the
 `transcribe` capability; each use is billed to that ElevenLabs account.
 
 ### The ElevenLabs key

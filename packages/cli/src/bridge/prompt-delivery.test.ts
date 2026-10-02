@@ -18,7 +18,7 @@ const target: Target = { server: "default", workspace: "w1", tab: "w1:t1", pane:
 const text = "Review the parser";
 let pane: Json, restore: () => void, sequence = 0, deliveryId: string;
 const prompt = vi.fn(), sendKeys = vi.fn(), expectDelivery = vi.fn();
-const context = { agentHooks: { expectDelivery, trackDelivery: vi.fn() }, modelSwitcher: { assertAvailable() {} },
+const context = { agentHooks: { expectDelivery, queueDelivery: vi.fn(), deliveryState: vi.fn(() => "unknown") }, modelSwitcher: { assertAvailable() {} },
   settingsSwitcher: { assertAvailable() {} }, permissionModeSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as unknown as PaneRouteContext;
 const hand = (where = target) => handOff({ target: where, text }, { deliveryId });
 
@@ -32,6 +32,7 @@ beforeEach(() => {
   vi.spyOn(codexServers, "forTarget").mockReturnValue(undefined);
   prompt.mockResolvedValue(undefined);
   expectDelivery.mockResolvedValue("pending");
+  vi.mocked(context.agentHooks.deliveryState).mockReturnValue("unknown");
   restore = setTerminalProvider({ prompt, sendKeys } as unknown as TerminalProvider);
   vi.mocked(hookRequest).mockImplementation(async (route, body) => {
     if (route !== "/v1/hand-off") return {};
@@ -51,7 +52,7 @@ describe("hand-off submission confirmation", () => {
     expectDelivery.mockResolvedValue("delivered");
     expect(await hand()).toMatchObject({ delivered: false, deliveryUncertain: true });
     expect(prompt).toHaveBeenCalledExactlyOnceWith(target.server, target.pane, text);
-    expect(expectDelivery).toHaveBeenCalledExactlyOnceWith(target, text, status === "working" ? 300 : 1_500, expect.any(AbortSignal));
+    expect(expectDelivery).toHaveBeenCalledExactlyOnceWith(target, text, status === "working" ? 300 : 1_500, expect.any(AbortSignal), deliveryId);
     expect(sendKeys).not.toHaveBeenCalled();
   });
 
@@ -101,6 +102,27 @@ describe("hand-off submission confirmation", () => {
     await expect(hand()).rejects.toThrow("reply lost");
     expect(prompt).toHaveBeenCalledTimes(1);
     expect(sendKeys).not.toHaveBeenCalled();
+  });
+});
+
+describe("a queued message its own hook takes during the identity probe", () => {
+  const send = () => paneRoute(context, new URL("http://phren.local/v1/prompt"), { target, text, deliveryId }, {} as never);
+
+  it("is answered delivered, by its delivery id", async () => {
+    vi.mocked(context.agentHooks.deliveryState).mockReturnValue("delivered");
+    expect(await send()).toEqual({ ok: true, delivered: true });
+    expect(context.agentHooks.deliveryState).toHaveBeenCalledWith(deliveryId, target);
+    expect(context.agentHooks.queueDelivery).not.toHaveBeenCalled();
+  });
+
+  it("is refused when another conversation in the pane took it", async () => {
+    vi.mocked(context.agentHooks.deliveryState).mockReturnValue("blocked");
+    await expect(send()).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("is otherwise queued under its id", async () => {
+    expect(await send()).toEqual({ ok: true, queued: true });
+    expect(context.agentHooks.queueDelivery).toHaveBeenCalledExactlyOnceWith(deliveryId, target);
   });
 });
 

@@ -14,14 +14,16 @@ beforeEach(() => {
 describe("extractPattern", () => {
   // ── Shell tool ──────────────────────────────────────────────────────
 
-  it("extracts binary name from shell command", () => {
-    expect(extractPattern("shell", { command: "git status" })).toBe("git");
+  it("extracts binary and subcommand for multi-command tools", () => {
+    expect(extractPattern("shell", { command: "git status" })).toBe("git status");
+    expect(extractPattern("shell", { command: "git -c x=y push --force" })).toBe("git x=y");
   });
 
   it("extracts binary from multi-arg command", () => {
     expect(extractPattern("shell", { command: "npm install --save foo" })).toBe(
-      "npm",
+      "npm install",
     );
+    expect(extractPattern("shell", { command: "cat a.txt b.txt" })).toBe("cat");
   });
 
   it("handles leading whitespace in command", () => {
@@ -77,7 +79,22 @@ describe("isAllowed", () => {
 
   it("returns true for exact tool+pattern match", () => {
     addAllow("shell", { command: "git status" }, "session");
-    expect(isAllowed("shell", { command: "git diff" })).toBe(true); // same binary "git"
+    expect(isAllowed("shell", { command: "git status --short" })).toBe(true);
+    // Approving one git subcommand does not approve another.
+    expect(isAllowed("shell", { command: "git push --force" })).toBe(false);
+  });
+
+  it("needs every command on the line approved", () => {
+    addAllow("shell", { command: "git status" }, "session");
+    expect(isAllowed("shell", { command: "git status && rm -rf src" })).toBe(false);
+    addAllow("shell", { command: "rm x" }, "session");
+    expect(isAllowed("shell", { command: "git status && rm -rf src" })).toBe(true);
+    expect(isAllowed("shell", { command: "git status > out.txt" })).toBe(false);
+  });
+
+  it("an older binary-only entry still covers its subcommands", () => {
+    addAllow("shell", { command: "ls" }, "session");
+    expect(isAllowed("shell", { command: "ls -la" })).toBe(true);
   });
 
   it("returns false for different tool name", () => {
@@ -133,7 +150,7 @@ describe("addAllow", () => {
 
   it("persists 'session' scope with extracted pattern", () => {
     addAllow("shell", { command: "git status" }, "session");
-    expect(isAllowed("shell", { command: "git diff" })).toBe(true);
+    expect(isAllowed("shell", { command: "git status -sb" })).toBe(true);
   });
 
   // ── Scope: tool ─────────────────────────────────────────────────────
@@ -143,14 +160,14 @@ describe("addAllow", () => {
     expect(isAllowed("read_file", { path: "/completely/different.ts" })).toBe(true);
   });
 
-  it("shell tool scope still scopes to binary, not wildcard", () => {
+  it("shell tool scope still scopes to the command, not wildcard", () => {
     addAllow("shell", { command: "git status" }, "tool");
-    expect(isAllowed("shell", { command: "git diff" })).toBe(true);
+    expect(isAllowed("shell", { command: "git status -s" })).toBe(true);
+    expect(isAllowed("shell", { command: "git diff" })).toBe(false);
   });
 
   it("shell tool scope does not allow different binaries", () => {
     addAllow("shell", { command: "git status" }, "tool");
-    expect(isAllowed("shell", { command: "git diff" })).toBe(true);
     expect(isAllowed("shell", { command: "npm install" })).toBe(false);
   });
 
@@ -158,9 +175,9 @@ describe("addAllow", () => {
 
   it("does not add duplicate entries", () => {
     addAllow("shell", { command: "git status" }, "session");
-    addAllow("shell", { command: "git diff" }, "session"); // same binary "git"
+    addAllow("shell", { command: "git status -s" }, "session"); // same pattern "git status"
     // Still just one pattern match — adding twice doesn't break anything
-    expect(isAllowed("shell", { command: "git log" })).toBe(true);
+    expect(isAllowed("shell", { command: "git status" })).toBe(true);
   });
 });
 
