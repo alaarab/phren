@@ -88,7 +88,12 @@ export function syncScopeSkillsToDir(phrenPath: string, scope: string, destDir: 
 
 export function syncSkillLinksForScope(phrenPath: string, scope: string): SkillManifest | null {
   if (scope.toLowerCase() === "global") {
-    return syncScopeSkillsToDir(phrenPath, "global", homePath(".claude", "skills"));
+    const manifest = syncScopeSkillsToDir(phrenPath, "global", homePath(".claude", "skills"));
+    for (const tool of [".agents", ".copilot"]) {
+      const dir = homePath(tool, "skills");
+      if (fs.existsSync(path.join(path.dirname(dir), "skill-manifest.json"))) syncScopeSkillsToDir(phrenPath, "global", dir);
+    }
+    return manifest;
   }
 
   const projectDir = findProjectDir(scope);

@@ -49,6 +49,8 @@ Set the preset at install (`phren init --preset <name>`), switch it anytime
 - `~/.claude/CLAUDE.md`, symlink to `~/.phren/global/AGENTS.md`.
 - `~/.claude/skills/*`, symlinks to phren slash-commands, plus
   `~/.claude/skill-manifest.json` and `~/.claude/skill-commands.json`.
+- `~/.agents/skills/*`, enabled global folder skill symlinks for Codex, plus
+  `~/.agents/skill-manifest.json` and `~/.agents/skill-commands.json`.
 - `~/.github/copilot-instructions.md`, `~/.copilot/skills/`, when Copilot is detected.
 - `~/.local/bin/{phren,copilot,cursor,codex}`, CLI and session wrappers.
 - `~/.phren-context.md`, the machine-alias file.
@@ -101,6 +103,12 @@ dispatch returns), bounded `activity.jsonl` and
 Uploads are limited to 8 MiB each and 256 MiB total; uploads older than 14 days
 are removed on the next upload. Activity stores status and project metadata,
 not conversation text. See [Phren Hook](phren-hook.md).
+
+The Hook keeps the shipped conductor instructions at
+`<bridge>/conductor/brief.md` (0600). Its agent-only socket returns a bounded
+role reminder for the recorded conductor's turn; OpenCode asks through
+`POST /conductor-context` on that same private socket, with its PID and root
+conversation checked against the live pane. This path starts no turns.
 
 The installer adds `~/Library/LaunchAgents/com.phren.hook.plist` on macOS, or
 `~/.config/systemd/user/phren-hook.service` on Linux. Agent callbacks are merged

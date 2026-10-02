@@ -2,7 +2,6 @@ import { markPaneClosed } from "./worker-close.js";
 import { mkdir, readFile } from "node:fs/promises";
 import { phrenStoreRoot } from "./transcripts.js";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { homeDir } from "../home-paths.js";
 import { agentNames, findPane, isConductorName, paneChatState, paneIdentity, servers, snapshot } from "./herdr.js";
@@ -13,6 +12,7 @@ import { createLaunchWorktree, launchWorktreeSchema, type LaunchWorktree } from 
 import { askpassEnv } from "./sudo.js";
 import { briefArgs, DISPATCH_ID_ENV, launchBriefSchema, launchesWithBrief, recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
 import { prepareServedLaunch, registerServedPane, sendServedBrief } from "./opencode-panes.js";
+import { conductorBrief, ensureConductorBrief } from "./conductor-context.js";
 import { groupConductor, type GroupConductor } from "./conductor-group.js";
 import { clearConductor, conductorPane, noteConductorSession, readRoleState, recordConductor, runsAgent } from "./conductor-role.js";
 import { localNames } from "./computer-names.js";
@@ -25,7 +25,7 @@ import { AppServerRpcError } from "./codex-app-server.js";
 import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { logger } from "../logger.js";
 import { JobRegistry } from "./job-registry.js";
-import { atomic, BridgeError, bridgeRoot, id, type Json, launchEfforts, objects, PERMISSION_MODES, provider } from "./protocol.js";
+import { atomic, BridgeError, id, type Json, launchEfforts, objects, PERMISSION_MODES, provider } from "./protocol.js";
 import { CLAUDE_NAMES, CODEX_MODES, codexModeFlags, copilotModeFlags } from "./settings-switch.js";
 
 /** Starting agents in Herdr from the phone: the launch route's harness
@@ -33,27 +33,6 @@ import { CLAUDE_NAMES, CODEX_MODES, codexModeFlags, copilotModeFlags } from "./s
 
 const launchKinds = ["codex", "claude", "copilot", "opencode", "phren"] as const;
 const plainText = (max: number) => z.string().min(1).max(max).refine(t => !/[\x00-\x1f\x7f]/.test(t));
-declare const CONDUCTOR_SKILL_SOURCE: string | undefined;
-
-async function conductorBrief(): Promise<string> {
-  let source: string | undefined;
-  if (typeof CONDUCTOR_SKILL_SOURCE === "string") source = CONDUCTOR_SKILL_SOURCE;
-  else {
-    const here = path.dirname(fileURLToPath(import.meta.url));
-    for (const candidate of [
-      path.join(here, "..", "starter", "global", "skills", "conductor", "SKILL.md"),
-      path.join(here, "..", "..", "starter", "global", "skills", "conductor", "SKILL.md"),
-    ]) {
-      source = await readFile(candidate, "utf8").catch(() => undefined);
-      if (source !== undefined) break;
-    }
-  }
-  if (source === undefined) throw new BridgeError(503, "The shipped conductor brief is unavailable. Reinstall Phren Hook.");
-  const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n([\s\S]*)$/.exec(source);
-  const brief = (match?.[1] ?? source).trim();
-  if (!brief) throw new BridgeError(503, "The shipped conductor brief is empty. Reinstall Phren Hook.");
-  return brief;
-}
 
 type LaunchEffort = (typeof launchEfforts)[number];
 
@@ -126,10 +105,7 @@ export function phrenModelArgs(model: string): string[] {
 
 async function prepareConductor(kind: (typeof launchKinds)[number], effort: LaunchEffort, model?: string): Promise<string[]> {
   const brief = await conductorBrief();
-  const briefDirectory = path.join(bridgeRoot(), "conductor");
-  await mkdir(briefDirectory, { recursive: true, mode: 0o700 });
-  const briefFile = path.join(briefDirectory, "brief.md");
-  if (await readFile(briefFile, "utf8").catch(() => undefined) !== brief + "\n") await atomic(briefFile, brief + "\n");
+  const briefFile = await ensureConductorBrief(brief);
   // A multi-line argument cannot be typed safely into every shell (Herdr
   // refuses it for zsh); Claude reads the brief from its file instead.
   if (kind === "claude") return [...(model ? ["--model", model] : []), "--append-system-prompt-file", briefFile, "--effort", effort];

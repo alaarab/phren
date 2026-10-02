@@ -1,4 +1,5 @@
 // Installed by Phren Hook and replaced on every update. Copy it under another name to customize.
+import { request } from "node:http";
 import { execFileSync } from "node:child_process";
 import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -253,6 +254,27 @@ function writePidBinding(sessionID) {
  * whose terminal does not watch its agents (tmux); Herdr has its own. */
 const statusFile = () => path.join(storeRoot(), ".runtime", "sessions", `opencode-status-${process.pid}.json`);
 
+/** Context reads never hold up a model request when the Hook is unavailable. */
+function conductorContext(session) {
+  return new Promise(resolve => {
+    const socketPath = path.join(process.env.PHREN_BRIDGE_HOME || path.join(homedir(), ".local/share/phren/bridge"), "agent.sock");
+    const data = JSON.stringify({ pid: process.pid, session });
+    const req = request({ socketPath, path: "/conductor-context", method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, res => {
+      let body = "";
+      res.on("data", chunk => { body += chunk; if (body.length > 16_384) req.destroy(); });
+      res.on("end", () => {
+        try { const value = JSON.parse(body); finish(res.statusCode === 200 && typeof value.context === "string" ? value.context : undefined); }
+        catch { finish(); }
+      });
+      res.on("error", () => finish());
+    });
+    const timer = setTimeout(() => { req.destroy(); finish(); }, 1_000);
+    function finish(value) { clearTimeout(timer); resolve(value); }
+    req.on("error", () => finish()); req.end(data);
+  });
+}
+
 export const PhrenTranscriptPlugin = async input => {
   // The process's own API, bound to its in-process server (no port needed).
   const client = input?.client;
@@ -396,6 +418,12 @@ export const PhrenTranscriptPlugin = async input => {
   };
 
   return {
+    "experimental.chat.system.transform": async (input, output) => {
+      const sessionID = text(input?.sessionID);
+      if (process.env.PHREN_FANOUT_JOB || !OPENCODE_SESSION.test(sessionID) || sessionID !== boundSession || children.has(sessionID) || !Array.isArray(output?.system)) return;
+      const context = await conductorContext(sessionID);
+      if (context) output.system.push(context);
+    },
     "chat.message": async (input, output) => {
       if (!OPENCODE_SESSION.test(text(input?.sessionID)) || !output?.message) return;
       if (!process.env.PHREN_FANOUT_JOB && !children.has(input.sessionID) && boundSession !== input.sessionID) {
