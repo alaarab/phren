@@ -3,6 +3,14 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.23] - 2026-10-02
+
+### Fixed
+
+- Conductors recover their role instructions when a Claude or Codex session starts, resumes or compacts, and on the next prompt after Make conductor. OpenCode restores the role for its verified root conversation. Worker sessions do not inherit it.
+- Managed installs expose enabled global skills in Codex's standard discovery directory, including skill switches, store refreshes and cleanup of managed links.
+- Session overviews keep reporting background workers when a branch or model lookup stalls. Slow worker reads are shared between refreshes, and late answers leave expired responses unchanged.
+
 ## [0.3.22] - 2026-10-02
 
 ### Fixed
