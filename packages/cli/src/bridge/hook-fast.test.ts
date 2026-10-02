@@ -63,6 +63,23 @@ describe.skipIf(process.platform === "win32")("claude-hook.mjs", () => {
     expect(bodies[1]).toMatchObject({ event: "PermissionRequest", tool: "Bash", input: { command: "ls" } });
   });
 
+  it("forwards matching turn context through both handlers without adding approval fields", async () => {
+    for (const event of ["SessionStart", "UserPromptSubmit"]) {
+      const context = { hookSpecificOutput: { hookEventName: event, additionalContext: "Current role: conductor." } };
+      reply = JSON.stringify({ ...context, decision: "approve" });
+      const input = { hook_event_name: event, session_id: session, prompt: "status" };
+      expect(JSON.parse((await run(input, herdr())).stdout)).toEqual(context);
+      expect(JSON.parse((await runBundle(input)).stdout)).toEqual(context);
+    }
+    for (const bad of ["not json", JSON.stringify({ hookSpecificOutput: { hookEventName: "Stop", additionalContext: "wrong event" } }),
+      JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: {} } })]) {
+      reply = bad;
+      const input = { hook_event_name: "SessionStart", session_id: session };
+      expect((await run(input, herdr())).stdout).toBe("");
+      expect((await runBundle(input)).stdout).toBe("");
+    }
+  });
+
   it("stays silent for subagents, other Herdr sockets, no pane and an unreachable Hook", async () => {
     await run({ hook_event_name: "Stop", session_id: session, agent_id: "a1" }, herdr());
     await run({ hook_event_name: "Stop", session_id: session }, { ...herdr(), HERDR_SOCKET_PATH: "/elsewhere/herdr.sock" });

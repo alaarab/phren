@@ -49,6 +49,38 @@ effort. `POST /v1/workspaces/launch` accepts `role: "conductor"` with Claude,
 Codex or OpenCode (not Copilot or phren's own agent, which are refused with 400), loads the shipped brief and gives Herdr an agent name
 starting with `conductor-`. Effort is `low`, `medium` or `high`.
 
+The Hook also restores a concise role reminder and the local brief path on
+Claude and Codex `SessionStart` and `UserPromptSubmit`. This covers fresh and
+resumed sessions, compaction, and the next prompt after **Make conductor**;
+changing a model keeps the conversation's context. OpenCode's transcript plugin
+adds the reminder when building the current root conversation's system prompt.
+The Hook checks its current foreground process and conversation before replying.
+Worker callbacks, child sessions and reused terminal IDs receive no conductor
+instructions. A role change does not send a message or start work by itself.
+
+### Skill discovery and worker setup
+
+Under the managed preset, `phren init` and `phren link` mirror enabled global
+skills into `~/.agents/skills/` for Codex as well as `~/.claude/skills/` for
+Claude. The source stays in the store's `global/skills/`; disabling a skill
+removes its managed mirrors while preserving user-owned files. Existing mirrors
+refresh on store pulls and skill switches. Assisted and manual installs use
+`phren snippet` or MCP `read_skill` instead of creating home mirrors.
+
+The conductor and fanout modules are opt-in. Enable `conductor` on each
+participating computer and `fanout` on a lead's computer when local parallel
+workers are wanted. The Claude marketplace plugin intentionally excludes these
+two orchestration skills; the Hook's conductor brief works independently of the
+marketplace skill list. An owner-disabled fanout skill stays disabled.
+
+For a conductor → remote lead → local workers → integrator workflow, link the
+computers in both directions, dispatch a bounded lead brief naming its project,
+branch, tests and delegation limit, and have the lead report verified PRs with
+`dispatch_report`. Configure the integrator with `phren conductor integrator`;
+read `dispatch_returns` before recording work as complete. A phone-started agent
+is a worker unless its role was explicitly set to Conductor. The owner's current
+delegation and release restrictions apply at every level.
+
 An agent (not a conductor) can start in a new worktree. The sheet's Work in a
 new worktree switch is off by default; turned on, it takes a branch name,
 suggested from the task's first line or `phren/<short-id>`. The Hook sends

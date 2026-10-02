@@ -340,6 +340,16 @@ function ensureGeneratedSkillArtifacts(phrenPath: string, preferredHome: string)
     debugLog(`ensureGeneratedSkillArtifacts: global skill mirror sync failed: ${errorMessage(err)}`);
   }
 
+  // The standard user skill directory is how Codex discovers folder skills.
+  const nativeSkillsDir = path.join(preferredHome, ".agents", "skills");
+  const hadNativeSkillsDir = fs.existsSync(nativeSkillsDir);
+  try {
+    syncScopeSkillsToDir(phrenPath, "global", nativeSkillsDir);
+    if (!hadNativeSkillsDir) created.push("~/.agents/skills/");
+  } catch (err: unknown) {
+    debugLog(`ensureGeneratedSkillArtifacts: native skill mirror sync failed: ${errorMessage(err)}`);
+  }
+
   const copilotSkillsDir = path.join(preferredHome, ".copilot", "skills");
   const hadCopilotSkillsDir = fs.existsSync(copilotSkillsDir);
   if (isCopilotInstalled()) {

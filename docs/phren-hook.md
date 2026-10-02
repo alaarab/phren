@@ -464,6 +464,10 @@ What works:
   from the rollout a Codex app-server daemon holds for the pane's folder,
   from the conversation phren's OpenCode plugin records per process, and from
   Copilot's process log.
+- Conductor context: Claude and Codex turn-start hooks restore the role and
+  shipped brief path after startup, resume or compaction. OpenCode's system
+  prompt plugin checks the current process and root conversation. See
+  [conductor setup](conductor.md#skill-discovery-and-worker-setup).
 - Status, per harness:
   - Claude Code, Codex and phren-agent: the last callback event. A submitted
     prompt or a tool call is working, a finished turn or a new session idle, a

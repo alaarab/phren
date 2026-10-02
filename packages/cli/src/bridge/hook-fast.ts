@@ -28,6 +28,21 @@ export const fastHookPath = (versionDir: string) => path.join(versionDir, FAST_H
  */
 export const TOOL_HOOK_BUDGET_MS = 5_000;
 
+/** Keep permission replies and turn context, without turning tool callbacks into approvals. */
+export function hookOutput(event: string, result: string): string {
+  if (event === "PermissionRequest") return result;
+  if (event !== "SessionStart" && event !== "UserPromptSubmit") return "";
+  try {
+    const reply = JSON.parse(result);
+    if (event === "UserPromptSubmit" && reply?.decision === "block") return result;
+    const output = reply?.hookSpecificOutput;
+    if (output?.hookEventName === event && typeof output.additionalContext === "string" && output.additionalContext.trim()) {
+      return JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: output.additionalContext } });
+    }
+  } catch { /* A malformed reply adds no context. */ }
+  return "";
+}
+
 /** The forwarder's source, with the ToolUse budget written in. */
 export const fastHookSource = (toolBudgetMs = TOOL_HOOK_BUDGET_MS) => `// Installed by Phren Hook: Claude Code's hook events, forwarded to the running Hook.
 import { request } from "node:http";
@@ -35,6 +50,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 const env = process.env, source = process.argv[2];
+const hookOutput = ${hookOutput.toString()};
 async function full() {
   const bundle = path.join(path.dirname(fileURLToPath(import.meta.url)), "bridge-hook.mjs");
   process.argv = [process.argv[0], bundle, "hook", source];
@@ -73,7 +89,7 @@ async function forward(place) {
       headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, res => {
       let result = "";
       res.on("data", chunk => { result += chunk.toString(); if (result.length > 16_384) req.destroy(); });
-      res.on("end", () => { if (res.statusCode === 200 && (event === "PermissionRequest" || (event === "UserPromptSubmit" && result.includes("\\"decision\\"")))) process.stdout.write(result); resolve(); });
+      res.on("end", () => { if (res.statusCode === 200) process.stdout.write(hookOutput(event, result)); resolve(); });
       res.on("error", () => resolve());
     });
     req.on("error", () => resolve()); req.on("timeout", () => { req.destroy(); resolve(); }); req.end(data);
