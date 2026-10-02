@@ -106,7 +106,7 @@ pnpm lint          # lint all packages
 
 ## Current Version
 
-`@phren/cli` 0.3.22 (see `packages/cli/package.json`).
+`@phren/cli` 0.3.23 (see `packages/cli/package.json`).
 
 ## Reference Documentation
 
