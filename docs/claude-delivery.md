@@ -39,50 +39,55 @@ where both sides are in hand. Everything after that is keyed by id:
 
 - the phone names each message with its `deliveryId` (already sent on every
   attempt for `PromptOnce`);
-- the Hook keeps, per `deliveryId`, the conversation and a SHA-256 of the
-  prompt's words, never the text, for ten minutes (as long as the typed record
-  guards the paste);
-- the hook's later answer updates that entry, and the phone asks by id.
+- the typed record carries that id and is keyed by a SHA-256 of the prompt's
+  words, so the Hook holds no prompt text while it waits (ten minutes);
+- the Hook keeps, per `deliveryId`, the conversation and its state; the
+  hook's answer settles the record, and the record settles its id;
+- the phone asks by id, or hears it on the conversation's stream.
 
 The phone then never matches its own text against transcript rows to decide
 whether a message arrived.
 
 ## Slices
 
-### Slice 1 (this change, Hook only)
+### Slice 1 (Hook only, done)
 
 1. `POST /v1/prompt` answers `{ ok: true, queued: true }` for "pending,
    identity unchanged": same terminal, and a fresh identity probe still names
    the target conversation. A failed probe stays `deliveryUncertain`.
 2. `POST /v1/prompt/status { target, deliveryId }` returns `queued`,
    `delivered`, `blocked` or `unknown`. Advertised as
-   `capabilities.promptStatus`. A queued message is tracked only while its
-   typed record still waits, so the hook's answer always reaches the entry.
+   `capabilities.promptStatus`. The id is registered when the text is typed
+   and reported once the Hook answered, so a hook that lands while the Hook
+   still probes the pane's identity turns the reply into `delivered` (or
+   409), and a message answered `deliveryUncertain` still turns `delivered`
+   when the agent takes it.
 3. `submitted()` settles the record for the submitting conversation first and
    blocks only when no record for that conversation has those words.
 
 Nothing a phone does today changes: `queued` is an extra field on an `ok`
 reply, and a phone that ignores it behaves as before.
 
-### Slice 2 (phones, phren-apps)
+### Slice 2 (phones, phren-apps; not started)
 
 - Show `queued` as a neutral pending state ("Queued, sends when Claude
   finishes"), never as a warning. Keep the outbox echo until the queued row or
   the user row lands.
-- While a message is `queued`, poll `/v1/prompt/status` on the chat stream's
-  existing cadence (or on each stream frame), and clear the pending echo on
-  `delivered`. On `blocked`, show "Not delivered, send again". On `unknown`
+- Open the transcript stream with `deliveries=1` and follow a `queued`
+  message by its `delivery` frames (`/v1/prompt/status` after a reconnect),
+  and clear the pending echo on `delivered`. On `blocked`, show "Not delivered, send again". On `unknown`
   fall back to today's transcript match.
 - Stop raising "Not seen in the chat yet" / "Not confirmed" for a message the
   Hook called queued until the pane has been idle for a full status tick with
   the message still unsubmitted.
 
-### Slice 3 (Hook, push instead of poll)
+### Slice 3 (Hook, push instead of poll; done)
 
-Emit a `delivery` frame on the conversation's `/v1/transcripts` stream when a
-tracked message settles (`{ type: "delivery", deliveryId, state }`), so the
-phone does not poll. Same entries as slice 1; the stream already carries
-side-answer frames the same way.
+A `/v1/transcripts` stream opened with `deliveries=1` (capability
+`deliveryFrames`) sends `{ type: "delivery", source, session, deliveryId,
+state }` for the conversation's messages whenever one's state changes, so the
+phone does not poll. Same entries as slice 1, read on the stream's tick like
+side-answer frames.
 
 ### Slice 4 (Herdr upstream)
 
