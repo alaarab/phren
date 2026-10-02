@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.27] - 2026-10-02
+
 ### Fixed
 
 - Long-lived MCP connections refresh summaries and project discovery after local file, store attachment or profile changes, including uncommitted changes with remote polling disabled. Unchanged reads use a bounded metadata check; concurrent refreshes preserve active tool calls and respect existing index writers.
