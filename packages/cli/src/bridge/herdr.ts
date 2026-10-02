@@ -15,7 +15,7 @@ import { tabActivityKey } from "./tab-activity.js";
 import { intervalFromEnv } from "./limits.js";
 import { countHerdr, countIdentity } from "./metrics.js";
 import { phrenStoreRoot } from "./transcripts.js";
-import { assignDaemonConversation, daemonRollouts, processTable, sameDirectory, startedAt, type CodexPaneStart } from "./codex-daemon.js";
+import { assignDaemonConversation, daemonRollouts, processTable, resumedConversation, sameDirectory, startedAt, type CodexPaneStart } from "./codex-daemon.js";
 import { codexServers } from "./codex-servers.js";
 
 // terminal.ts and terminal-tmux.ts import this module, so it reaches them at
@@ -453,7 +453,7 @@ async function codexDaemonIdentity(server: string, pane: Json, pids: number[]): 
     const peerStart = startedAt(rows, peerPids);
     if (peerStart !== undefined) rivals.push({ key: String(peer.pane_id), start: peerStart });
   }
-  return { sessionId: assignDaemonConversation(here, { key: String(pane.pane_id), start }, claimed, rivals), known };
+  return { sessionId: assignDaemonConversation(here, { key: String(pane.pane_id), start, resumed: resumedConversation(rows, pids) }, claimed, rivals), known };
 }
 
 /** The Codex pane that shows `session`, for a lifecycle callback that ran
