@@ -32,6 +32,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The memory head reports its GitHub repository and branch so phones can recognize duplicate stores, without exposing the remote URL or credentials. Quick-chat retries also share one replacement after a pane closes and preserve the original launch when the terminal is temporarily unavailable.
+
 - A quick chat started twice from the phone (a double tap, or a retry after a slow launch) opens one pane: `POST /v1/workspaces/launch` takes a `launchId`, and the same id again returns the first launch's pane with `reused: true`.
 - phren agent's quick chat banner no longer prints the phren store's path (`~/.phren`) under the version.
 - Approval notifications from a pane in the phren store (a quick chat, the conductor) no longer name ".phren" as the project, and a phren agent's approvals say "Phren" instead of "Your agent".
