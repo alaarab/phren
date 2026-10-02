@@ -3,6 +3,13 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.24] - 2026-10-02
+
+### Fixed
+
+- Graph taps use current object and camera transforms after Focus, filtering or a refresh, including taps that land over a link.
+- New and reused graph objects take their positions directly from the deterministic layout, keeping the visible dots, labels and selection aligned between render ticks.
+
 ## [0.3.23] - 2026-10-02
 
 ### Fixed
