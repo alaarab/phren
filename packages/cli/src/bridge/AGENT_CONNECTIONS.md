@@ -254,7 +254,10 @@ the first answer comes in about a second on the owner's own provider setup
 `/promote` into a running chat does the same in place. The pane is an ordinary
 phren pane: prompts go through `/v1/prompt`, replies stream as above. Other
 harnesses refuse `mode` and `resumeSession` with 400. Capabilities
-`previewDeltas` and `quickChat` advertise both.
+`previewDeltas` and `quickChat` advertise both. The phone sends a `launchId`
+with each quick chat it starts, so a repeat of the same request returns the
+first pane (`reused: true`) rather than a second chat. A chat's banner leaves
+out its folder: the phren store's path means nothing to the person chatting.
 
 Claude Code names its current permission mode in the footer under its composer
 (`⏸ manual mode on`, `⏵⏵ accept edits on`, `⏸ plan mode on`, `⏵⏵ auto mode on`,
