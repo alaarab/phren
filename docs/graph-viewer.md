@@ -92,7 +92,9 @@ Zoom preserves this placement. The layout depends on the nodes shown, so
 Focus, a refresh, a filter or a delete moves nodes; the camera follows the
 selected or revealed node to its new place until you move the camera. Taps
 pick the node at the tap's own position, including between a layout update and
-the next rendered frame. Closing the dossier restores the view saved
+the next rendered frame. New and reused node objects take their positions
+directly from that layout, including while the force simulation is stopped.
+Closing the dossier restores the view saved
 before the first selection; stepping between nodes keeps that saved view.
 
 Camera movement takes 0.18 seconds or happens immediately with Reduce Motion.
