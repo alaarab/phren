@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.26] - 2026-10-02
+
 ### Fixed
 
 - A lone Codex pane launched with `codex resume <id>` can recover its older conversation from the shared daemon, so the phone and conductor can address it. The Hook requires the matching open conversation to have advanced since launch and leaves ambiguous matches unresolved.
