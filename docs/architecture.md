@@ -101,6 +101,14 @@ This gives Claude full native lifecycle parity while keeping other tools synchro
 
 Running MCP servers can poll shared Git stores on a configurable interval (off by default; enable with `phren config pull-interval 60` for one minute). A per-store process lock and shared timestamp coordinate checks across clients. `git ls-remote` compares the upstream commit before fetching; a shared Git-operation lock protects clean fast-forward updates against session hooks and pushes. Polling defers dirty or diverged stores and backs off network failures. Each server watches local HEAD changes to refresh its index and existing managed skill/instruction mirrors, including updates pulled by a sibling client. This runs only during the MCP server's lifetime, respects lifecycle-automation presets, and excludes project-local/workspace-Git installs.
 
+Local index freshness is independent of that remote polling. Before tool calls,
+the MCP server checks a process-owned snapshot of file and directory metadata
+at most once per second. External summary, document, store attachment and
+profile-membership changes refresh the live index even with pull interval zero
+and without a commit. Concurrent requests share one refresh through the write
+queue. A busy index writer causes a retryable error; active tool calls retain
+their old database handles until they finish. No Hook restart is involved.
+
 ## MCP Server Modules
 
 Phren MCP is split into 15 modules:

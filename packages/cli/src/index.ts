@@ -91,7 +91,7 @@ async function main() {
   const [
     { McpServer },
     { StdioServerTransport },
-    { buildIndex, flushEmbeddingQueue, updateFileInIndex: updateFileInIndexFn },
+    { buildIndex, captureIndexInputs, flushEmbeddingQueue, updateFileInIndex: updateFileInIndexFn },
     { runCustomHooks },
     { mcpResponse },
     { startEmbeddingWarmup },
@@ -108,7 +108,7 @@ async function main() {
     import("./package-metadata.js"),
   ]);
 
-  const profile = resolveRuntimeProfile(phrenPath);
+  let profile = resolveRuntimeProfile(phrenPath);
   const { activateModules: moduleSnapshot } = await import("./modules/runtime.js");
   const { BUILTIN_MODULES, toolOwner, disabledHint } = await import("./modules/registry.js");
   const { resolveAllStores } = await import("./store-registry.js");
@@ -123,6 +123,15 @@ async function main() {
   // /tmp. A 0700 root makes it unreachable to other local accounts.
   ensureFtsCacheRootPrivate();
   let db: Awaited<ReturnType<typeof buildIndex>> | null = null;
+  // The first call also verifies startup's possibly stale lock-contention fallback.
+  let localInputs: (() => boolean) | undefined;
+  const { localIndexRefresh, indexReaders } = await import("./mcp/local-index.js");
+  const readers = indexReaders(() => {
+    if (!db) throw new Error("Index unavailable - check phren setup");
+    return db;
+  }, (retired) => {
+    try { retired.close(); } catch (error: unknown) { logger.warn("rebuildIndex", errorMessage(error)); }
+  });
   let indexReady = false;
   let shuttingDown = false;
   try {
@@ -147,14 +156,17 @@ async function main() {
     runCustomHooks(phrenPath, "pre-index");
     const oldDb = db;
     try {
-      indexReady = false;
-      db = await buildIndex(phrenPath, profile, { force });
+      const nextProfile = resolveRuntimeProfile(phrenPath);
+      const inputs = await captureIndexInputs(phrenPath, nextProfile);
+      db = await buildIndex(phrenPath, nextProfile, { force, requireFresh: true });
+      profile = nextProfile;
+      localInputs = inputs;
       indexReady = true;
       // buildIndex() hands back its cached handle inside the debounce
       // window, so oldDb can be the very database we just installed.
-      try { if (oldDb && oldDb !== db) oldDb.close(); } catch (err: unknown) {
-        logger.warn("rebuildIndex", `dbClose: ${errorMessage(err)}`);
-      }
+      // An already-running search may retain its handle across an await.
+      // Close it once its own readers finish, even while newer calls stay busy.
+      if (oldDb && oldDb !== db) readers.retire(oldDb);
     } catch (err) {
       // Restore old state on failure
       db = oldDb;
@@ -199,6 +211,17 @@ async function main() {
     return run;
   }
 
+  const runIndexExclusive = (fn: () => Promise<void>): Promise<unknown> => {
+    const run = writeQueue.then(fn);
+    writeQueue = run.catch((error: unknown) => { logger.warn("index-refresh", errorMessage(error)); });
+    return run;
+  };
+  const localIndex = localIndexRefresh({
+    isFresh: () => localInputs?.() ?? false,
+    refresh: () => rebuildIndex(true),
+    runExclusive: runIndexExclusive,
+  });
+
   const server = new McpServer({
     name: "phren-mcp",
     version: PACKAGE_VERSION,
@@ -236,6 +259,11 @@ async function main() {
           }],
         };
       }
+      try { await localIndex.ensureFresh(); }
+      catch (error: unknown) {
+        logger.warn("local-index", errorMessage(error));
+        return mcpResponse({ ok: false, error: "Could not refresh the local index; retry shortly." });
+      }
       if (!indexReady || !db) {
         return {
           content: [{
@@ -256,7 +284,7 @@ async function main() {
       try { trackToolCall(phrenPath, registeredName); } catch (err: unknown) {
         logger.warn("trackToolCall", errorMessage(err));
       }
-      return (handler as (...a: unknown[]) => unknown)(...args);
+      return readers.run(() => (handler as (...a: unknown[]) => unknown)(...args));
     },
   });
   server.registerTool = gate.registerTool as unknown as typeof server.registerTool;
@@ -264,11 +292,8 @@ async function main() {
   // Register all tool handlers from domain modules
   const ctx: McpContext = {
     phrenPath,
-    profile,
-    db: () => {
-      if (!db) throw new Error("Index unavailable - check phren setup");
-      return db;
-    },
+    get profile() { return profile; },
+    db: () => readers.get(),
     rebuildIndex,
     withWriteQueue,
     updateFileInIndex: (filePath: string) => {
@@ -314,13 +339,8 @@ async function main() {
       catch (err: unknown) { logger.warn("periodic-pull", `context refresh: ${errorMessage(err)}`); }
       await rebuildIndex(true);
     },
-    runExclusive: (fn) => {
-      // Network calls have their own timeouts. Do not release the queue while
-      // an underlying Git operation is still running, as Promise.race would.
-      const run = writeQueue.then(fn);
-      writeQueue = run.catch((err: unknown) => { logger.warn("periodic-pull", errorMessage(err)); });
-      return run;
-    },
+    // No timeout races: the queue stays owned until the actual work ends.
+    runExclusive: runIndexExclusive,
   });
   server.server.onclose = () => { void shutdown("transport closed"); };
 

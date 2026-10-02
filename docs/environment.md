@@ -21,6 +21,11 @@ and precedence rules. `phren status` shows the active preset and what it touches
 
 Periodic checks are off by default. Use `phren config pull-interval 600` for ten minutes, `phren config pull-interval 60` for one minute, or `phren config pull-interval off`. With no value, the command shows the effective setting and its source. The preference lives in this machine's `.runtime/install-preferences.json`; running servers reload it automatically. An environment override takes precedence and requires restarting the server when changed.
 
+Local MCP discovery updates independently of this setting. During tool calls,
+a metadata check runs at most once per second; changed local files or profile
+membership refresh the process's index without a remote pull or Git commit.
+Unchanged checks do not glob, read document contents, or reload the database.
+
 The first remote check runs after the configured interval. MCP clients sharing a store coordinate one check per interval using local locks and `.runtime/pull-poll.json`. A check reads the upstream's advertised commit with `git ls-remote`; only changed refs trigger a fetch. Updates require a clean worktree and fast-forward history. Dirty stores, diverged histories, and in-progress Git operations are left for the existing sync/recovery flows, with the reason recorded in runtime sync status. Failed network checks back off exponentially, capped at 30 minutes or the configured interval if longer.
 
 Polling covers the primary and registered secondary Git stores while an MCP server is running. It refreshes each client's index and existing managed skill/instruction mirrors when local commits change. Agents consume updated instructions at their normal reload boundaries. The manual preset and project-local/workspace-Git installs do not poll by default. Disabling periodic checks does not disable SessionStart/Stop hooks. This setting installs no background service.
