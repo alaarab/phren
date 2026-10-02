@@ -58,6 +58,16 @@ export function startedAt(rows: ProcessRow[], pids: number[]): number | undefine
   return times.length ? Math.min(...times) : undefined;
 }
 
+/** A direct `codex resume <id>` launch, including its shell/npm wrapper.
+ * This is only a hint: the command line survives later /new and /resume. */
+export function resumedConversation(rows: ProcessRow[], pids: number[]): string | undefined {
+  const ids = new Set(rows.filter(row => pids.includes(row.pid)).flatMap(row => {
+    const match = /^(?:(?:\S*\/)?(?:sh|bash|zsh|node)\s+)?(?:\S*\/)?codex\s+resume\s+([a-f0-9-]{36})(?:\s|$)/i.exec(row.command);
+    return match && sessionId.safeParse(match[1]).success ? [match[1]] : [];
+  }));
+  return ids.size === 1 ? [...ids][0] : undefined;
+}
+
 /** True when this process runs under a Codex app-server daemon: a hook the
  * daemon ran carries the environment of the pane that started the daemon,
  * which is not the pane of the conversation it reports. */
@@ -172,14 +182,21 @@ export async function sameDirectory(a: unknown, b: unknown): Promise<boolean> {
  * /resume follows. With several, the latest-started pane chooses first (ties
  * by pane key), each taking the earliest conversation begun after it started.
  */
-export interface CodexPaneStart { key: string; start: number }
+export interface CodexPaneStart { key: string; start: number; resumed?: string }
 export function assignDaemonConversation(here: DaemonRollout[], self: CodexPaneStart, claimed: Set<string>, rivals: CodexPaneStart[], now = Date.now()): string | undefined {
   const open = here.filter(r => !claimed.has(r.id) && r.startedAt <= now + 60_000);
   const after = (from: number) => open.filter(r => r.startedAt >= from - START_SLACK_MS);
   if (!rivals.length) {
     const pool = after(self.start);
     const held = pool.filter(r => r.held);
-    return (held.length ? held : pool).sort((a, b) => b.activeAt - a.activeAt)[0]?.id;
+    const current = (held.length ? held : pool).sort((a, b) => b.activeAt - a.activeAt)[0]?.id;
+    if (current) return current;
+    // An explicit resume may name a conversation older than this TUI. Only
+    // use it when the daemon holds exactly one unclaimed conversation that
+    // has advanced since launch, and no other pane in this folder competes.
+    // A later /new above takes precedence over the stale launch arguments.
+    const resumed = open.filter(r => r.held && r.activeAt >= self.start && r.activeAt <= now + 60_000);
+    return resumed.length === 1 && resumed[0].id === self.resumed ? self.resumed : undefined;
   }
   const order = [...rivals, self].sort((a, b) => b.start - a.start || (a.key < b.key ? 1 : a.key > b.key ? -1 : 0));
   const taken = new Set<string>();
