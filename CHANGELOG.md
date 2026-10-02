@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.28] - 2026-10-02
+
 ### Fixed
 
 - Existing Codex conversations stay discoverable when new per-pane servers start. The bounded daemon probe counts launcher wrappers and native servers once and keeps the shared managed daemon in view, so opening new agents does not hide the conductor's history.
