@@ -729,7 +729,12 @@ export function updateTask(
 
     if (updates.context) {
       if (updates.replace_context || !item.context) item.context = updates.context;
-      else item.context = `${item.context}; ${updates.context}`;
+      // Agents sometimes send the existing context with their new note. Do
+      // not append the complete history to itself on every such update.
+      else if (updates.context.startsWith(`${item.context}; `)) item.context = updates.context;
+      else if (updates.context !== item.context && !item.context.endsWith(`; ${updates.context}`)) {
+        item.context = `${item.context}; ${updates.context}`;
+      }
       changes.push("context updated");
     }
 

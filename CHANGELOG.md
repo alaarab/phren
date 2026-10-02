@@ -3,6 +3,13 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.22] - 2026-10-02
+
+### Fixed
+
+- Oversized memory files return a named size error with a 4 MiB limit instead of exhausting the Hook's blob buffer and returning an unexplained 503.
+- Updating a task with its existing context plus a new note no longer duplicates the whole history. Retrying the same latest note is idempotent.
+
 ## [0.3.21] - 2026-10-02
 
 - Keep a newly started conductor reachable when an identity lookup on a busy computer outlasts its cache window.
