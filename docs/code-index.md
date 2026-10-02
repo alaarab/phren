@@ -84,6 +84,16 @@ tools and Hook routes take `name`; the older `symbol` spelling is accepted until
 0.3.1. See the complete
 [route table](api-reference.md#hook-routes).
 
+Chat references can resolve their paths through `GET /v1/files/resolve`,
+using the pane's trusted working directory and repository rather than guessed
+folder prefixes. `GET /v1/code/files?project=<project>&name=<filename-or-suffix>`
+searches indexed file paths directly, including files with no declarations.
+It accepts an optional registered `store` and `limit` (1-100, default 20),
+returns `{project, name, files: [{path, language}], truncated}`, and matches
+literal, case-sensitive path components. Phones can use the `fileResolution`
+and `codeFiles` capabilities to detect these routes and retain compatibility
+with older Hooks. File lookup uses the existing `@phren/code` database API.
+
 ## Refresh and phone
 
 Hook observes recorded tool/git changes and debounces affected projects for
