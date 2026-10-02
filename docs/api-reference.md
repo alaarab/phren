@@ -1332,6 +1332,7 @@ writes. A missing index returns 404 with the `phren code index` command.
 | `GET /v1/code/status` | None | File, declaration and use counts, languages, counts per kind, last index time and the most used functions and types. |
 | `GET /v1/code/tree` | `directory`, optional relative directory | `{project, directory, entries}`; immediate indexed children with `path`, `directory`, descendant `files`, declaration count (`symbols`) and `languages`. |
 | `GET /v1/code/search` | `q`, optional `kind`, `directory`, `limit` (1-500, default 20) | `{project, query, symbols}`: matching functions, types and variables, ranked by exact name, prefix, full-text relevance and usage. |
+| `GET /v1/code/files` | `name` (filename or relative path suffix), optional `limit` (1-100, default 20) | `{project, name, files: [{path, language}], truncated}`: exact, case-sensitive filename/suffix matches in the index, including files without declarations. Exact paths come first, then shorter paths. `%` and `_` are literal characters. Advertised as `codeFiles`. |
 | `GET /v1/code/outline` | `path`, relative file path | `{project, path, entries}` in source order with nested members. |
 | `GET /v1/code/outline-summary` | `paths`, a JSON array of 1-200 relative paths | `{project, entries}` with declaration totals and up to three leading kinds per file or directory, including descendants. Kept for phones older than 1.0.3; newer phones use `change-counts`. |
 | `GET /v1/code/change-counts` | `paths`, a JSON array of 1-200 relative paths | `{project, entries}`, one per path: `functions` and `types`, each `{changed, added}`, from the working-tree diff (an untracked file is new throughout), and `first`, the first function or type to open. The Changes tree's chips read like "2 functions changed · 1 new type". |
@@ -1393,6 +1394,16 @@ Directories return `{path, kind: "directory", truncated, entries}` with at most
 with up to 2 MiB of file content encoded as base64. Symlinks, `.git`, traversal and paths
 outside the selected checkout are refused. This route is read-only.
 
+`GET /v1/files/resolve` takes the full session target in the query, `path`,
+and optional `child` or `worktree`, validated like the session's Git routes.
+It resolves relative paths against the selected pane/worker folder first, then
+the repository root. Absolute paths must be in that repository. `..` may move
+within the repository; escapes, `.git`, symlinks and non-files are refused.
+Only a missing cwd-relative file permits a root-relative fallback. The reply
+is `{path, size, contentType, version}`, with a repository-relative path that
+can be passed to `/v1/files/range` with the same target/worktree. No file bytes
+or absolute server paths are returned. Hook advertises `fileResolution`.
+
 `POST /v1/git/tree` takes the session's full target, optional `child` or
 `worktree`, relative `path` and optional `ignored: true`. It returns one directory
 with descendant file counts and a snapshot version; with `ignored`, the level's
@@ -1404,7 +1415,7 @@ main?, locked?, worker?: {label, provider, child?, state?}}]}`. `ahead`/`behind`
 are against the pane's HEAD, `changed` counts uncommitted files, and `worker`
 names a fan-out job, this conversation's sub-agent or a Herdr agent (by its
 agent name) editing there. Every other
-`/v1/git/*` route, `/v1/diff` and `/v1/files/range` accept `worktree=<id>`,
+`/v1/git/*` route, `/v1/diff`, `/v1/files/range` and `/v1/files/resolve` accept `worktree=<id>`,
 resolved only against that listing. The bounded repository cache is keyed by HEAD and a file/status hash;
 it expires after two seconds and is invalidated by status refresh and mutations.
 Opening a directory does not collect diff statistics or upstream history.

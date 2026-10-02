@@ -30,6 +30,7 @@ import { optionalHookPeers, peerRequest } from "./peers.js";
 import { candidateRepos, enrollProject } from "./enroll.js";
 import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
+import { resolveFilePath } from "./file-resolve.js";
 import { storeRoute } from "./memory-store.js";
 import { liveBackground, markBackground, paneRecord, recordTitle } from "./session-activity.js";
 import { paneAccountField, paneChatState, panes, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
@@ -141,7 +142,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -416,6 +417,14 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             response.setHeader("Content-Type", "image/png"); response.end(bytes); return;
           }
           case "/v1/files": result = { files: await listUploads("files") }; break;
+          case "/v1/files/resolve": {
+            const target = targetFromURL(url), pane = await validateTarget(target);
+            const cwd = await gitRepository(pane, target, url.searchParams.get("child") ?? undefined, url.searchParams.get("worktree") ?? undefined);
+            const repository = await gitRoot(cwd);
+            if (!repository) throw new BridgeError(409, "This pane is not in a project repository.");
+            result = await resolveFilePath(repository, cwd, url.searchParams.get("path") ?? "");
+            break;
+          }
           case "/v1/files/range": {
             let root: string;
             if (url.searchParams.get("scope") === "uploads") {
@@ -553,6 +562,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           }); break;
           case "/v1/code/status": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).status(url.searchParams.get("project")); break;
           case "/v1/code/search": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).search(url.searchParams.get("project"), url.searchParams.get("q"), url.searchParams.get("kind"), url.searchParams.get("limit"), url.searchParams.get("directory")); break;
+          case "/v1/code/files": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).files(url.searchParams.get("project"), url.searchParams.get("name"), url.searchParams.get("limit")); break;
           case "/v1/code/outline-summary": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).outlineSummary(url.searchParams.get("project"), url.searchParams.get("paths")); break;
           case "/v1/code/file-references": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).fileReferences(url.searchParams.get("project"), url.searchParams.get("path")); break;
           case "/v1/code/outline": result = await (new CodeRoutes(await resolveCodeStore(scheduleStore, url.searchParams.get("store")))).outline(url.searchParams.get("project"), url.searchParams.get("path")); break;

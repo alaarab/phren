@@ -83,7 +83,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ...routes("GET", [
         "/v1/health", "/v1/health/details", "/v1/health/peers", "/v1/muxes", "/v1/activity", "/v1/metrics", "/v1/web-servers", "/v1/simulators",
         "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/files", "/v1/models", "/v1/harnesses", "/v1/projects/files",
-        "/v1/uploads/image", "/v1/files/range", "/v1/usage", "/v1/resources", "/v1/speech/voices", "/v1/push/status", "/v1/projects/locate", "/v1/projects/repos",
+        "/v1/uploads/image", "/v1/files/range", "/v1/files/resolve", "/v1/usage", "/v1/resources", "/v1/speech/voices", "/v1/push/status", "/v1/projects/locate", "/v1/projects/repos",
         "/v1/workspaces", "/v1/workspaces/panes", "/v1/transcripts/blob", "/v1/transcripts/history", "/v1/sudo",
         "/v1/subagents", "/v1/subagents/transcript", "/v1/subagents/messages",
       ]),
@@ -99,7 +99,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     capabilities: [
       "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "herdr",
       "webServers", "webPreview", "activity", "approvals", "questions", "accountUsage", "providers",
-      "files", "repositoryFiles", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "deliveryFrames", "resources", "sessionRename", "sudo", "sudoOutcome", "previewDeltas", "quickChat",
+      "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "deliveryFrames", "resources", "sessionRename", "sudo", "sudoOutcome", "previewDeltas", "quickChat",
     ],
     storeFiles: [".runtime/sessions/opencode-*.events.jsonl", ".runtime/approvals/opencode-*.json"],
     localFiles: ["<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/askpass", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily"],
@@ -148,8 +148,8 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     tools: full(["code_search", "code_definition", "code_references", "code_outline", "code_usage"]),
     cliCommands: ["code index", "code status", "code search", "code outline", "code refs", "code def", "code usage"],
     agentHooks: [],
-    hookRoutes: [...routes("GET", ["/v1/code/tree", "/v1/code/usage-page", "/v1/code/changed", "/v1/code/change-counts", "/v1/code/status", "/v1/code/search", "/v1/code/outline", "/v1/code/outline-summary", "/v1/code/file-references", "/v1/code/definition", "/v1/code/references", "/v1/code/usage"]), ...routes("POST", ["/v1/code/note", "/v1/code/reindex", "/v1/code/disable"])],
-    capabilities: ["code"],
+    hookRoutes: [...routes("GET", ["/v1/code/tree", "/v1/code/usage-page", "/v1/code/changed", "/v1/code/change-counts", "/v1/code/status", "/v1/code/search", "/v1/code/files", "/v1/code/outline", "/v1/code/outline-summary", "/v1/code/file-references", "/v1/code/definition", "/v1/code/references", "/v1/code/usage"]), ...routes("POST", ["/v1/code/note", "/v1/code/reindex", "/v1/code/disable"])],
+    capabilities: ["code", "codeFiles"],
     storeFiles: [], localFiles: ["<store>/.runtime/code/*.sqlite"],
     phoneScreens: [{ screen: "CodeView", capability: "code" }], skills: ["code"],
   },
