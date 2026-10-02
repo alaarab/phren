@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.25] - 2026-10-02
+
 ### Added
 
 - Hook resolves chat file references against the session's folder and repository through `/v1/files/resolve`, including selected child-agent and worktree scopes.
