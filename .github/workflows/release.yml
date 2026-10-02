@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
       id-token: write
     env:
       # The dispatch input is interpolated only here, into an env var, so it
@@ -52,6 +53,21 @@ jobs:
             exit 1
           }
 
+      - name: Require successful full release candidate validation of this exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=workflow_dispatch&per_page=100" > "$RUNNER_TEMP/phren-rc-runs.json"
+          # shellcheck disable=SC2016
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const runs = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).workflow_runs;
+            const run = runs.find(r => r.head_sha === process.env.GITHUB_SHA && r.event === "workflow_dispatch" && r.display_title === "RC validation" && r.status === "completed" && r.conclusion === "success");
+            if (!run) { console.error("No successful full RC validation for this exact commit. Dispatch CI with release_candidate=true first."); process.exit(1); }
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Full RC tests already passed for ${run.head_sha}: ${run.html_url}. Publication reuses that evidence without rerunning tests.\n`);
+          ' "$RUNNER_TEMP/phren-rc-runs.json"
+
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -60,13 +76,6 @@ jobs:
 
       - name: Lint
         run: pnpm lint
-
-      - name: Test
-        run: pnpm test -- --coverage
-
-      - name: Test agent
-        # The agent's suite runs under its own vitest config, outside the root run.
-        run: pnpm --filter @phren/agent test
 
       - name: Validate docs
         run: pnpm run validate-docs
