@@ -20,7 +20,7 @@ import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
 import { archiveFinishedFanouts, blockedFanouts, fanoutAsking } from "./fanouts.js";
 import { ensureGrant, findGrant } from "./grants.js";
 import { ApprovalPushService } from "./push.js";
-import { approvalSummary, type RequestKind } from "./approval-summary.js";
+import { approvalSummary, paneProject, type RequestKind } from "./approval-summary.js";
 import { computerDisplayName } from "./pair.js";
 import { intervalFromEnv } from "./limits.js";
 import { answerClaudeQuestionDialog, claudeQuestionDialog, type DialogAnswer, type DialogQuestion } from "./claude-question-dialog.js";
@@ -197,6 +197,13 @@ const promptHash = (text: string) => createHash("sha256").update(promptKey(text)
 
 /** This socket is deliberately separate from the phone's HTTP pipe. Only local
  * agent callbacks can register identities or create an approval request. */
+/** The project a notification names for a pane's folder: none for the
+ * phren store, whose path is never shown on the phone. */
+function projectField(cwd: string | undefined): { project?: string } {
+  const project = paneProject(cwd, phrenStoreRoot());
+  return project ? { project } : {};
+}
+
 export class AgentHooks {
   readonly changes = new ToolChanges();
   private pending = new Map<string, Pending>();
@@ -337,7 +344,7 @@ export class AgentHooks {
       // The held request is what stops a later sweep from pushing again; a
       // failed delivery only drops the binding and leaves the card in place.
       void this.push.notify({ binding, provider: "opencode", question: false, expiresAt: String(request.expiresAt),
-        ...(cwd ? { project: path.basename(cwd) } : {}), computer: this.computerName, ...summary })
+        ...projectField(cwd), computer: this.computerName, ...summary })
         .then(delivered => { if (!delivered) this.pushBindings.dropAction(id); })
         .catch(() => {});
     }
@@ -1183,7 +1190,7 @@ export class AgentHooks {
       const summary = entry.request ? { request: entry.request, requestKind: entry.requestKind ?? "other" }
         : approvalSummary({ tool: entry.tool, message: title });
       void this.push.notify({ binding, provider: target.source, question: entry.tool === "AskUserQuestion", expiresAt: new Date(expiresAt).toISOString(),
-        ...(cwd ? { project: path.basename(cwd) } : {}), computer: this.computerName, ...summary })
+        ...projectField(cwd), computer: this.computerName, ...summary })
         .then(delivered => { if (!delivered) this.dropDialogPush(key); }).catch(() => this.dropDialogPush(key));
     }
     for (const [key, hold] of this.releasedHolds) {
@@ -1357,7 +1364,7 @@ export class AgentHooks {
     const binding = randomUUID();
     this.pushBindings.add(binding, { action, expiresAt });
     void this.push.notify({ binding, provider: "codex", question: false, expiresAt: new Date(expiresAt).toISOString(),
-      ...(cwd ? { project: path.basename(cwd) } : {}), computer: this.computerName, ...summary })
+      ...projectField(cwd), computer: this.computerName, ...summary })
       .then(delivered => { if (!delivered) this.pushBindings.consume(binding); }).catch(() => {});
   }
   /** Another client (the pane's TUI) answered the request, or this one declined it. */
@@ -1511,7 +1518,7 @@ export class AgentHooks {
           this.pushBindings.add(binding, { action, expiresAt: pushExpiresAt });
           this.pushedHolds.set(action, pushExpiresAt);
           void this.push.notify({ binding, provider: target.source, question: body.tool === "AskUserQuestion",
-            expiresAt: new Date(pushExpiresAt).toISOString(), ...(cwd ? { project: path.basename(cwd) } : {}), computer: this.computerName, ...summary }).catch(() => false).then(delivered => {
+            expiresAt: new Date(pushExpiresAt).toISOString(), ...projectField(cwd), computer: this.computerName, ...summary }).catch(() => false).then(delivered => {
             if (!delivered) {
               this.pushBindings.consume(binding); this.pushedHolds.delete(action);
               const pending = this.pending.get(action);

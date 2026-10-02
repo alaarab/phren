@@ -9,8 +9,18 @@ const string = (value: unknown): string | undefined => typeof value === "string"
 const oneLine = (value: string): string => value.replace(/\s+/g, " ").trim();
 
 export function approvalTitle(agent: string, project?: string, computer?: string): string {
-  const label = ({ claude: "Claude", codex: "Codex", opencode: "opencode", copilot: "Copilot" } as Record<string, string>)[agent.toLowerCase()] ?? "Your agent";
+  const label = ({ claude: "Claude", codex: "Codex", opencode: "opencode", copilot: "Copilot", phren: "Phren" } as Record<string, string>)[agent.toLowerCase()] ?? "Your agent";
   return `${label}${project ? ` · ${project}` : ""}${computer ? ` on ${computer}` : ""}`;
+}
+
+/** A pane's folder as the project a notification names: its last part, or
+ * none for the phren store (`~/.phren`, or `store`), whose path names no
+ * project and is never shown on the phone. */
+export function paneProject(cwd: string | undefined, store?: string): string | undefined {
+  if (!cwd) return undefined;
+  const resolved = path.resolve(cwd);
+  if (path.basename(resolved) === ".phren" || (store && resolved === path.resolve(store))) return undefined;
+  return path.basename(resolved) || undefined;
 }
 
 /** Sanitize the whole line before shortening it for the notification. */
