@@ -70,7 +70,7 @@ describe("index invalidation: file changes trigger rebuild", () => {
     expect(data.hashes[findingsPath]).toBeTruthy();
     expect(data.meta).toBeTruthy();
     const stat = fs.statSync(findingsPath);
-    expect(data.meta[findingsPath]).toEqual({ mtimeMs: stat.mtimeMs, size: stat.size });
+    expect(data.meta[findingsPath]).toEqual({ mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino, size: stat.size });
   });
 
   it("forces a refresh of pulled content while a recently built index is still open", async () => {
