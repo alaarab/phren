@@ -56,6 +56,27 @@ describe("launching phren's own agent", () => {
     await expect(launchSession("default", { ...quick, launchId: "not-a-uuid" })).rejects.toThrow();
   });
 
+  it("concurrent retries share one replacement when the old pane is gone", async () => {
+    const quick = { cwd, label: "Quick chat", kind: "phren", mode: "chat", launchId: "3e9a5e3c-7f4b-4a0c-9e63-4b8d0f2a9c35" };
+    const first = await launchSession("default", quick);
+    // The tab can remain after its agent pane closes.
+    state.panes = state.panes.filter((pane: Json) => pane.pane_id !== first.paneId);
+    const [second, third] = await Promise.all([launchSession("default", quick), launchSession("default", quick)]);
+    expect(starts).toHaveLength(2);
+    expect(second.paneId).not.toBe(first.paneId);
+    expect(third).toMatchObject({ paneId: second.paneId, reused: true });
+  });
+
+  it("keeps the original launch after a failed snapshot instead of duplicating it", async () => {
+    const quick = { cwd, label: "Quick chat", kind: "phren", mode: "chat", launchId: "4f9a5e3c-7f4b-4a0c-9e63-4b8d0f2a9c35" };
+    const first = await launchSession("default", quick);
+    const restoreUnavailable = setTerminalProvider({ snapshot: async () => { throw new Error("Terminal unavailable"); } } as unknown as TerminalProvider);
+    try { await expect(launchSession("default", quick)).rejects.toThrow("Terminal unavailable"); }
+    finally { restoreUnavailable(); }
+    expect(await launchSession("default", quick)).toMatchObject({ paneId: first.paneId, reused: true });
+    expect(starts).toHaveLength(1);
+  });
+
   it("runs `phren agent -i`, with --model and --reasoning when asked", async () => {
     expect(await launchSession("default", { cwd, label: "Phren plain", kind: "phren" })).toMatchObject({ ok: true, agent: "phren" });
     expect(starts[0]).toMatchObject({ name: "phren-plain", kind: "phren", args: ["agent", "-i"] });

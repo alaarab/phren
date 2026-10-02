@@ -45,8 +45,35 @@ async function isRepository(store: string): Promise<boolean> {
   return (await lstat(path.join(store, ".git")).catch(() => undefined)) !== undefined;
 }
 
+/** Only the public repository identity reaches the phone, never credentials
+ * embedded in a remote URL or a local filesystem path. */
+export function githubStoreRepository(remote: string): string | undefined {
+  let host: string, pathname: string;
+  const scp = /^(?:[^@/\s]+@)?github\.com:([^\s]+)$/i.exec(remote.trim());
+  if (scp) { host = "github.com"; pathname = scp[1]; }
+  else {
+    try {
+      const url = new URL(remote.trim());
+      if (!["https:", "ssh:"].includes(url.protocol) || url.search || url.hash) return undefined;
+      host = url.hostname; pathname = url.pathname.replace(/^\//, "");
+    } catch { return undefined; }
+  }
+  if (host.toLowerCase() !== "github.com") return undefined;
+  const repository = pathname.replace(/\/$/, "").replace(/\.git$/i, "");
+  return /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+$/.test(repository) ? repository.toLowerCase() : undefined;
+}
+
+async function storeRepositoryIdentity(store: string): Promise<{ repository: string; branch: string } | undefined> {
+  const [remote, branch] = await Promise.all([
+    git(store, ["config", "--get", "remote.origin.url"]).catch(() => ""),
+    git(store, ["symbolic-ref", "--quiet", "--short", "HEAD"]).catch(() => ""),
+  ]);
+  const repository = githubStoreRepository(remote);
+  return repository && branch.trim() ? { repository, branch: branch.trim() } : undefined;
+}
+
 /** A tree sha for the store's current working tree, written through a private index. */
-export function storeHead(store: string, indexFile = path.join(bridgeRoot(), "store-snapshot.index")): Promise<{ sha: string }> {
+export function storeHead(store: string, indexFile = path.join(bridgeRoot(), "store-snapshot.index")): Promise<{ sha: string; repositoryIdentity?: { repository: string; branch: string } }> {
   return serialized(async () => {
     if (!await isRepository(store)) throw new BridgeError(409, "This computer's phren store is not a git repository. Run phren init.");
     await mkdir(path.dirname(indexFile), { recursive: true, mode: 0o700 });
@@ -56,7 +83,9 @@ export function storeHead(store: string, indexFile = path.join(bridgeRoot(), "st
       await git(store, head.trim() ? ["read-tree", "HEAD"] : ["read-tree", "--empty"], env);
     }
     await git(store, ["add", "--all", "--", "."], env);
-    return { sha: (await git(store, ["write-tree"], env)).trim() };
+    const sha = (await git(store, ["write-tree"], env)).trim();
+    const repositoryIdentity = await storeRepositoryIdentity(store);
+    return { sha, ...(repositoryIdentity ? { repositoryIdentity } : {}) };
   });
 }
 

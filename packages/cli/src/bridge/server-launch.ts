@@ -295,17 +295,24 @@ export async function launchSession(server: string, data: Json, options: LaunchO
   for (const [key, entry] of launchesById) if (now - entry.at > LAUNCH_ID_TTL_MS) launchesById.delete(key);
   const key = `${server}\u0000${launchId}`;
   const earlier = launchesById.get(key);
-  if (earlier) {
-    // The same request again: a double tap, or a retry after a reply that
-    // never arrived. Its pane, while it lives, rather than a second one.
-    const result = await earlier.result.catch(() => undefined);
-    if (result && await stillListed(server, result)) return { ...result, reused: true };
-    if (launchesById.get(key) === earlier) launchesById.delete(key);
-  }
-  const result = startSession(server, data, options);
-  const entry = { at: now, result };
+  // Reserve the id before checking the old pane. Two retries after a closed
+  // chat must share its replacement, just as they share the initial launch.
+  const result = Promise.resolve().then(async () => {
+    if (earlier) {
+      const previous = await earlier.result;
+      if (await stillListed(server, previous)) return { ...previous, reused: true };
+    }
+    return startSession(server, data, options);
+  });
+  // An in-flight launch must not expire while another caller is waiting.
+  const entry = { at: Infinity, result };
   launchesById.set(key, entry);
-  result.catch(() => { if (launchesById.get(key) === entry) launchesById.delete(key); });
+  void result.then(() => { entry.at = Date.now(); }, () => {
+    if (launchesById.get(key) !== entry) return;
+    // A temporary snapshot failure is not evidence that the old pane died.
+    if (earlier && Number.isFinite(earlier.at)) launchesById.set(key, earlier);
+    else launchesById.delete(key);
+  });
   return result;
 }
 
@@ -317,8 +324,9 @@ export const LAUNCH_ID_TTL_MS = 10 * 60_000;
 export function resetLaunchIds(): void { launchesById.clear(); }
 
 async function stillListed(server: string, result: Json): Promise<boolean> {
-  const s = await snapshot(server).catch(() => undefined);
-  return !!s && objects(s.tabs).some(t => t.tab_id === result.tabId && t.workspace_id === result.workspaceId);
+  const s = await snapshot(server);
+  return objects(s.tabs).some(t => t.tab_id === result.tabId && t.workspace_id === result.workspaceId)
+    && objects(s.panes).some(p => p.pane_id === result.paneId && p.tab_id === result.tabId && p.workspace_id === result.workspaceId);
 }
 
 async function startSession(server: string, data: Json, options: LaunchOptions): Promise<Json> {

@@ -1517,6 +1517,17 @@ phone replaces it in place and keeps the reveal progress, avoiding duplicate
 text. Reconnect history retains existing rows unless Hook explicitly resets
 the conversation.
 
+### Computer memory
+
+`GET /v1/store/head` returns the working-tree `sha`. When the store has a
+GitHub origin and an attached branch, it also returns
+`repositoryIdentity: { repository: "owner/repo", branch: "main" }`.
+The repository name is lowercase; branch names retain their case. The remote
+URL, embedded credentials and local paths are never included. The field is
+absent for older Hooks, detached heads and other remotes. Phones use the
+repository and branch together to recognize the same store through a computer
+and GitHub; independent stores and branches remain separate.
+
 ### `GET /v1/usage`
 
 Account limits and spend for the phone's Account usage screen: `{accounts: [...]}`, each account carrying `source` (`codex`, `claude`, `opencode`, `opencode-go`, `openrouter`, `copilot`, `elevenlabs`), `windows`, optional `updatedAt`, `message`, `spend`, `accountName`, `accountId`, for Claude `origin`, and `account: {id, label, key}` on Claude and Codex rows (Claude rows add `email` when the login names one). A Claude window whose reset passed after its report is sent as `reset: true` without `usedPercent`, and Claude windows reported over three days ago are dropped. By default there is one `claude` row, the default home; `?accounts=all` adds one row per extra Claude home (`~/.claude-<id>`), default first, since a phone built before accounts refuses two rows of one source. Extra homes have no live read on macOS and use the status-line snapshot (`usage/claude-<id>.json`) plus their own `.claude.json`. The optional `?sources=` comma list names the sources the phone understands; an older phone that sends none gets the original four so it never meets a source it cannot read. `elevenlabs` appears only on a computer with the ElevenLabs key spoken replies use (`phren bridge speech-key set`): the Hook reads `GET /v1/user/subscription` on the `speech-region` endpoint (`api.elevenlabs.io` by default) with that key, sent only there, and reports one `elevenlabs:characters` window with `usedPercent`, `usedCharacters`, `limitCharacters` and `resetsAt`; the key never reaches the phone. `copilot` is GitHub Copilot's own quota report read through the GitHub CLI's sign-in (`gh api /copilot_internal/user`): one window per limited quota (premium requests) with its monthly reset, unlimited quotas named in `message`; the token never reaches Phren. OpenCode Go's windows come from Go's own account report (`GET https://opencode.ai/zen/go/v1/usage`, with the local Go key sent only there): `opencode-go:plan:5h|7d|30d` with `usedPercent`, `resetsAt` and `limited: true` while Go refuses requests on that window. They are account-wide, so they already count every computer. They carry no dollar amounts, and are sent only with `?goPlan=1`, since older phones reject a Go window with a percentage and no dollar limit. The Go account's `message` says which limit is reached and how many requests OpenCode's own log shows refused with "usage limit exceeded" in the last day. The log is read incrementally; the first read covers at most its last 64 MB. With `?peers=1` the answer adds `computer` and `peers: [{name, computer, accounts} | {name, error, code?}]`, each linked computer's own answer over its pinned SSH pipe.
