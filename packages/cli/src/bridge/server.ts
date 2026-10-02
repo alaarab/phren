@@ -17,7 +17,7 @@ import { cpus, hostname, loadavg } from "node:os";
 import path from "node:path";
 import { WebSocketServer } from "ws";
 import { relayLiveSpeech } from "./speech-live.js";
-import { relayTranscription } from "./speech-transcribe.js";
+import { failRelay, relayTranscription } from "./speech-transcribe.js";
 import { ActivityJournal } from "./activity.js";
 import { countTick } from "./metrics.js";
 import { AgentHooks } from "./agent-hooks.js";
@@ -215,7 +215,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
           ws.clients.delete(oldest);
         }
         if (overviewServer !== undefined) { overview(client, overviewServer, url.searchParams.get("watchApprovals") === "1", url.searchParams.get("resources") === "1", typedMuxRequest(url), url.searchParams.get("sudo") === "1"); return; }
-        if (url.pathname === "/v1/speech/transcribe") { void relayTranscription(client, url.searchParams).catch(() => client.close(1011, "Transcription unavailable")); return; }
+        if (url.pathname === "/v1/speech/transcribe") { void relayTranscription(client, url.searchParams).catch(() => failRelay(client)); return; }
         if (url.pathname === "/v1/speech/live") { void relayLiveSpeech(client, url.searchParams).catch(() => client.close(1011, "Spoken replies unavailable")); return; }
         void stream(client, url).catch(() => client.close(1011, "Conversation unavailable; refresh"));
       });

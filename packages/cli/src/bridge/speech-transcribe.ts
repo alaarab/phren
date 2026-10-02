@@ -6,7 +6,11 @@ import { resolveSpeechRegion, SPEECH_REGIONS } from "./speech-voice.js";
  * Scribe input. The phone streams 16 kHz mono PCM as binary frames; this
  * computer forwards it to ElevenLabs with its own key, which never leaves
  * here, and sends back `{type: "partial"|"committed", text}` frames. Errors
- * are fixed messages by code: ElevenLabs' own text is never passed on. */
+ * are fixed messages by code: ElevenLabs' own text is never passed on. No
+ * close is silent: `{type: "ready"}` says ElevenLabs answered, and every close
+ * the phone did not ask for follows an `error` frame or `{type: "end", reason}`
+ * (`session-limit` after ten minutes, `upstream-closed` when ElevenLabs hung
+ * up), so the phone reopens or reports without guessing from run length. */
 
 export const TRANSCRIBE_MODEL = "scribe_v2_realtime";
 export const TRANSCRIBE_RATE = 16_000;
@@ -60,6 +64,13 @@ const ERRORS: Record<string, { code: string; message: string }> = {
   session_time_limit_exceeded: { code: "transcribe-limit", message: "This dictation reached ElevenLabs' time limit." },
 };
 
+/** Ends a socket whose relay threw before it could start (no key read, no
+ * region, no upstream socket), with the reason first. */
+export function failRelay(client: RelaySocket): void {
+  if (client.readyState === OPEN) client.send(JSON.stringify({ type: "error", code: "transcribe-failed", error: "Couldn't reach ElevenLabs." }));
+  client.close(1011, "Transcription unavailable");
+}
+
 export function relayTranscription(client: RelaySocket, query: URLSearchParams, options: TranscribeOptions = {}): Promise<void> {
   const connect = options.connect ?? ((url, key) => new WebSocket(url, { headers: { "xi-api-key": key } }) as unknown as RelaySocket);
   return (async () => {
@@ -80,7 +91,8 @@ export function relayTranscription(client: RelaySocket, query: URLSearchParams, 
       try { upstream.close(); } catch { /* already closed */ }
       if (client.readyState === OPEN) client.close(code, reason);
     };
-    const limit = setTimeout(() => finish(1000, "Session limit"), options.maxSessionMs ?? MAX_SESSION_MS);
+    const end = (reason: string) => { if (!closed) tell({ type: "end", reason }); };
+    const limit = setTimeout(() => { end("session-limit"); finish(1000, "Session limit"); }, options.maxSessionMs ?? MAX_SESSION_MS);
     limit.unref?.();
     const chunk = (audio: Buffer, commit = false) => JSON.stringify({
       message_type: "input_audio_chunk", audio_base_64: audio.toString("base64"), commit, sample_rate: TRANSCRIBE_RATE });
@@ -103,6 +115,7 @@ export function relayTranscription(client: RelaySocket, query: URLSearchParams, 
     upstream.on("open", () => {
       for (const audio of pending) upstream.send(chunk(audio));
       pending = []; pendingBytes = 0;
+      if (!closed) tell({ type: "ready" });
     });
     upstream.on("message", data => {
       let message: { message_type?: unknown; text?: unknown };
@@ -120,6 +133,6 @@ export function relayTranscription(client: RelaySocket, query: URLSearchParams, 
       }
     });
     upstream.on("error", () => { tell({ type: "error", code: "transcribe-failed", error: "Couldn't reach ElevenLabs." }); finish(1011); });
-    upstream.on("close", () => finish());
+    upstream.on("close", () => { end("upstream-closed"); finish(1000, "ElevenLabs closed"); });
   })();
 }
