@@ -24,15 +24,17 @@ import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
 export const projectName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/);
+/** The harnesses a dispatch, a code note's hand-off or a schedule can start. */
+export const DISPATCH_HARNESSES = ["codex", "claude", "opencode", "copilot"] as const;
 export const dispatchSchema = z.object({
   computer: z.union([z.literal("anywhere"), computerName]).describe("Enrolled computer name, or anywhere for the least busy connected computer."),
   project: projectName.describe("Project slug registered on the receiving computer."),
-  harness: z.enum(["codex", "claude", "opencode"]).describe("Agent harness on the receiving computer."),
+  harness: z.enum(DISPATCH_HARNESSES).describe("Agent harness on the receiving computer."),
   model: text(200).optional().describe("Explicit model, otherwise the remote harness default."),
   effort: z.enum(launchEfforts).optional().describe("Reasoning effort for the worker (minimal, low, medium, high, xhigh, max), otherwise the harness default."),
   account: z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").optional()
     .describe("Claude account id to run the worker under (default, or a slug from `phren bridge accounts`). anywhere only picks computers where that account is signed in; a named computer without it fails."),
-  permissionMode: z.enum(PERMISSION_MODES).optional().describe("Permission mode the worker starts in: supervised, auto-edits, auto or full-access (Claude and Codex only); otherwise the receiving computer's own default."),
+  permissionMode: z.enum(PERMISSION_MODES).optional().describe("Permission mode the worker starts in: supervised, auto-edits, auto or full-access (Claude, Codex and Copilot; not OpenCode); otherwise the receiving computer's own default."),
   releaseActions: z.array(releaseAction).min(1).max(RELEASE_ACTIONS.length).optional()
     .describe("Release-type actions the brief asks the worker to do (merge, publish, deploy, app-store, github-admin). Ask-first projects refuse them from an agent unless the owner confirmed."),
   prompt: z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value)).describe("Worker brief, at most 32768 characters."),
@@ -410,7 +412,7 @@ export class DispatchService {
    * Herdr variables name it; a pane without a running agent is left out. */
   async dispatch(input: unknown, originValue?: unknown): Promise<Json> {
     const data = dispatchSchema.parse(input);
-    if (data.permissionMode && data.harness === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude and Codex workers.");
+    if (data.permissionMode && data.harness === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
     if (this.active) throw new BridgeError(429, "A dispatch is already being placed. Try again after its receipt arrives.");
     this.active = true;
     let holding = true, placed: string | undefined;

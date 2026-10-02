@@ -5,6 +5,7 @@ import { z } from "zod";
 import { computerName } from "./computers.js";
 import { hookRequest } from "./client.js";
 import { projectName } from "./dispatch.js";
+import { paneProject } from "./approval-summary.js";
 import { isAccountSlug } from "./claude-accounts.js";
 import { grantLabel, findGrant } from "./grants.js";
 import { hookPeers, optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
@@ -142,7 +143,7 @@ function sessionsFrom(overview: Json, computer: string, local: boolean, now = Da
     const text = (value: unknown) => typeof value === "string" && value ? value : undefined;
     const changedAt = typeof tab.lastChangedAt === "string" ? Date.parse(tab.lastChangedAt) : NaN;
     // A conductor sits in the store, not a project.
-    sessions.push({ computer, local, project: tab.role === "conductor" ? undefined : text(cwd.split("/").filter(Boolean).at(-1)), label: text(label),
+    sessions.push({ computer, local, project: tab.role === "conductor" ? undefined : text(paneProject(cwd)), label: text(label),
       title: text(tab.title), agent: tab.agent, status: text(tab.agentStatus), role: text(tab.role),
       branch: text(tab.branch), model: text(tab.model), ...(typeof object(tab.account).id === "string" ? { account: String(object(tab.account).id) } : {}), ...(target.success ? { target: target.data } : {}),
       ...(typeof tab.backgroundTasks === "number" && tab.backgroundTasks > 0 ? { backgroundTasks: tab.backgroundTasks } : {}),

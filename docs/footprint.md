@@ -138,7 +138,7 @@ file and rename. `PHREN_PRETRUST=off` turns this off too.
 
 ### Folder trust for launches the Hook places
 
-Before the Hook starts Claude or Codex in a folder it chose itself, it marks
+Before the Hook starts Claude, Codex or Copilot in a folder it chose itself, it marks
 that exact folder trusted so the agent does not stop on its folder-trust screen
 (Claude's defaults to "No, exit"). Those folders are a dispatched or scheduled
 project's resolved source folder, and a worktree the Hook just created under
@@ -155,12 +155,17 @@ reached through a symlink, both its given path and its real path get the entry.
 - Codex: a `[projects."<folder>"]` table with `trust_level = "trusted"` in
   `$CODEX_HOME/config.toml` (default `~/.codex`), appended when absent or with
   its one `trust_level` line changed. The rest of the file is kept as it was.
+- Copilot: the folder appended to `trustedFolders` in
+  `$COPILOT_HOME/settings.json` (default `~/.copilot`), the list Copilot's own
+  "Yes, and remember this folder" answer keeps. The file is created when
+  missing; other settings are kept, and a file that is not a JSON object is
+  left alone.
 
 Each write is logged in the store's `.runtime/debug.log`. `PHREN_PRETRUST=off`
 in the Hook service's environment turns this off; the launch then reports the
 trust screen as before (see [conductor](conductor.md)). Entries stay after
 `phren bridge uninstall`; remove them in Claude's `/config` or by editing
-`config.toml`.
+`config.toml` or Copilot's `settings.json`.
 
 `phren bridge uninstall` removes its service and callbacks. It retains helper
 data, versions, and backups. Remove Phren device keys to revoke SSH access.

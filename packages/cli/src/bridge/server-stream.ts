@@ -104,6 +104,10 @@ export function transcriptStreams(ctx: StreamContext) {
     // for a phone that asked for them; an older phone rejects unknown frames.
     const sideAnswers = url.pathname === "/v1/transcripts" && child === null && url.searchParams.get("sideAnswers") === "1";
     const sentSide = new Map<string, number>();
+    // A phone message's outcome by its delivery id (`/v1/prompt/status`),
+    // pushed as it changes to a stream opened with `deliveries=1`.
+    const deliveryFrames = url.pathname === "/v1/transcripts" && child === null && url.searchParams.get("deliveries") === "1";
+    const sentDelivery = new Map<string, string>();
     // The first frame stays a backlog for protocol compatibility, but a
     // reconnect only reads rows beyond the phone's retained raw-line cursor.
     let resumeAfterLine = cursor === null ? undefined : z.coerce.number().int().nonnegative().max(4_294_967_295).parse(cursor);
@@ -209,6 +213,13 @@ export function transcriptStreams(ctx: StreamContext) {
               if (sentSide.get(side.id) === revision) continue;
               sentSide.set(side.id, revision);
               send(client, { type: "side-answer", ...conversation, ...side });
+            }
+          }
+          if (deliveryFrames) {
+            for (const { deliveryId, state } of agentHooks.deliveriesFor(target)) {
+              if (sentDelivery.get(deliveryId) === state) continue;
+              sentDelivery.set(deliveryId, state);
+              send(client, { type: "delivery", ...conversation, deliveryId, state });
             }
           }
           first = false;

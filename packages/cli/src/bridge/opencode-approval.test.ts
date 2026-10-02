@@ -149,7 +149,8 @@ describe("opencode file approvals", () => {
     await writeFile(bindingFile(bridge), JSON.stringify({ terminal: "term-1", source: "opencode", session, pids: [process.pid], workspace: "w1", tab: "w1:t1" }));
     await hooks.sweepOpencodeApprovals();
     expect(push.sent).toHaveLength(1);
-    expect(push.sent[0]).toMatchObject({ project: path.basename(store), request: "external_directory: m" });
+    expect(push.sent[0]).toMatchObject({ request: "external_directory: m" });
+    expect(push.sent[0]).not.toHaveProperty("project"); // The store itself is never shown as a project.
     const approval = hooks.approval(target);
     expect(String(approval?.actionId)).toMatch(/^[0-9a-f]{32}$/);
     await hooks.answer(target, String(approval!.actionId), "deny");

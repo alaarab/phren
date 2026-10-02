@@ -56,10 +56,12 @@ export interface AgentSession {
   antiPatterns: AntiPatternTracker;
   /** Repeat-call guard chain (reset on direct user input). */
   repeatChain: RepeatChainState;
+  /** The context size the provider last reported (context/usage.ts). */
+  reportedContext?: import("../context/usage.js").ReportedContext;
 }
 
 /** Why runTurn returned. */
-export type TurnStopReason = "end_turn" | "max_turns" | "budget" | "aborted" | "plan_rejected";
+export type TurnStopReason = "end_turn" | "max_turns" | "budget" | "aborted" | "plan_rejected" | "hook_blocked";
 
 export interface TurnResult {
   text: string;

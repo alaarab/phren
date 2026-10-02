@@ -151,6 +151,10 @@ export function headlessCommand(schedule: Schedule, cwd: string): { file: string
   if (schedule.harness === "codex") return { file: "codex", cwd, args: ["exec", ...model, "--sandbox", "workspace-write", "-C", cwd,
     "--skip-git-repo-check", "--json", "-"] };
   if (schedule.harness === "opencode") return { file: "opencode", cwd, args: ["run", "--format", "json", "--dir", cwd, ...model] };
+  // Copilot's non-interactive mode needs every tool allowed up front; file
+  // access stays inside the working folder. `=` keeps a prompt that starts
+  // with "-" from reading as a flag.
+  if (schedule.harness === "copilot") return { file: "copilot", cwd, args: [`--prompt=${schedule.prompt}`, "--allow-all-tools", "--output-format", "json", ...model] };
   return { file: "claude", cwd, args: ["-p", "--output-format", "stream-json", "--settings", CLAUDE_SCHEDULE_SETTINGS, ...model] };
 }
 

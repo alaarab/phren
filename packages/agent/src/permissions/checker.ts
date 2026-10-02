@@ -1,5 +1,7 @@
 import type { PermissionConfig, PermissionRule } from "./types.js";
 import { checkShellSafety } from "./shell-safety.js";
+import { isAutoApprovableCommand } from "./shell-classify.js";
+import { evaluateRules } from "./rules.js";
 import { validatePath, checkSensitivePath } from "./sandbox.js";
 import { isAllowed } from "./allowlist.js";
 import { parsePatch, patchPaths } from "../tools/apply-patch.js";
@@ -61,6 +63,25 @@ export function checkPermission(
     return { verdict: "deny", reason: `Tool "${toolName}" is on the deny list.` };
   }
 
+  // apply_patch names its paths inside the patch text.
+  let patchFiles: string[] = [];
+  if (toolName === "apply_patch") {
+    try {
+      patchFiles = patchPaths(parsePatch(String(input.patch ?? "")));
+    } catch {
+      // Unparseable: the tool itself reports the error without writing.
+    }
+  }
+
+  // Declarative rules (settings files, --allowedTools / --disallowedTools).
+  // A deny rule wins at once; ask and allow apply below, after the checks no
+  // rule may override (blocked commands, secret files, paths outside the
+  // project).
+  const rule = evaluateRules(config.rules, toolName, input, config.projectRoot, patchFiles);
+  if (rule?.verdict === "deny") {
+    return { verdict: "deny", reason: `Denied by the permission rule "${rule.rule}".` };
+  }
+
   // Shell commands get extra scrutiny
   if (toolName === "shell") {
     const cmd = (input.command as string) || "";
@@ -68,11 +89,11 @@ export function checkPermission(
     if (!safety.safe && safety.severity === "block") {
       return { verdict: "deny", reason: safety.reason };
     }
-    if (!safety.safe && safety.severity === "warn") {
-      // In full-auto, warn becomes ask. In other modes, it's already going to ask.
-      if (config.mode === "full-auto") {
-        return { verdict: "ask", reason: safety.reason };
-      }
+    // A warn pattern (command substitution, env, sudo, a force push) asks in
+    // every mode but full-auto, which means allow: --yolo in a headless run,
+    // where every ask is a denial, must not refuse `echo $(git rev-parse HEAD)`.
+    if (!safety.safe && safety.severity === "warn" && config.mode !== "full-auto" && rule?.verdict !== "allow") {
+      return { verdict: "ask", reason: safety.reason };
     }
 
     // Check cwd for shell
@@ -104,15 +125,9 @@ export function checkPermission(
     }
   }
 
-  // apply_patch names its paths inside the patch text: check every one.
+  // apply_patch: check every path the patch names.
   if (toolName === "apply_patch") {
-    let paths: string[] = [];
-    try {
-      paths = patchPaths(parsePatch(String(input.patch ?? "")));
-    } catch {
-      // Unparseable: the tool itself reports the error without writing.
-    }
-    for (const p of paths) {
+    for (const p of patchFiles) {
       const sensitive = checkSensitivePath(p);
       if (sensitive.sensitive) {
         return { verdict: "deny", reason: `Sensitive path: ${sensitive.reason}` };
@@ -124,9 +139,17 @@ export function checkPermission(
     }
   }
 
+  if (rule?.verdict === "ask") {
+    return { verdict: "ask", reason: `The permission rule "${rule.rule}" asks first.` };
+  }
+
   // Always-safe tools pass in all modes
   if (READ_ONLY_TOOLS.has(toolName)) {
     return { verdict: "allow", reason: "Read-only tool, always allowed." };
+  }
+
+  if (rule?.verdict === "allow") {
+    return { verdict: "allow", reason: `Allowed by the permission rule "${rule.rule}".` };
   }
 
   // Session allowlist — user previously approved this tool+pattern via (a)llow-tool or (s)ession-allow.
@@ -149,12 +172,10 @@ export function checkPermission(
       if (toolName === "shell") {
         const cwd = (input.cwd as string) || config.projectRoot;
         const cwdResult = validatePath(cwd, config.projectRoot, config.allowedPaths);
-        if (cwdResult.ok) {
-          const cmd = (input.command as string) || "";
-          const safety = checkShellSafety(cmd);
-          if (safety.safe) {
-            return { verdict: "allow", reason: "Safe shell command within sandbox." };
-          }
+        // Only commands that read, build or test; anything else (rm, git
+        // push, npm publish, a redirect into a file) asks.
+        if (cwdResult.ok && isAutoApprovableCommand((input.command as string) || "")) {
+          return { verdict: "allow", reason: "Read, build or test command within sandbox." };
         }
       }
       return { verdict: "ask", reason: `Auto-confirm mode requires confirmation for "${toolName}".` };

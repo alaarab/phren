@@ -175,4 +175,150 @@ describe.skipIf(!fs.existsSync(AGENT_BIN))("headless binary (replay)", () => {
     expect(stderr).toContain("No one is present to approve");
     expect(code).toBe(0); // the scripted model still finishes its answer
   }, 90_000);
+
+  it("keeps a resumable session in ~/.phren-agent without a phren store", async () => {
+    const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "phren-headless-home-")));
+    const noStore = path.join(home, "no-store");
+    const env = { HOME: home, USERPROFILE: home, PHREN_PATH: noStore };
+    try {
+      const task = "Run echo replay-fixture-7 and report the marker.";
+      const first = await run(["--yolo", "--no-subagents", "--output-format", "json", task], workDir, env);
+      expect(first.code).toBe(0);
+      const id = JSON.parse(first.stdout.trim()).session_id as string;
+      expect(id).toMatch(/^[0-9a-f-]{36}$/);
+      const sessions = path.join(home, ".phren-agent", ".sessions");
+      expect(fs.existsSync(path.join(sessions, `session-${id}.events.jsonl`))).toBe(true);
+
+      const listed = await run(["--list-sessions", "--output-format", "json"], workDir, env);
+      expect(JSON.parse(listed.stdout).map((s: { sessionId: string }) => s.sessionId)).toContain(id);
+
+      const second = await run(["--yolo", "--no-subagents", "--output-format", "json", "--session", id.slice(0, 8), task], workDir, env);
+      expect(second.code).toBe(0);
+      const secondId = JSON.parse(second.stdout.trim()).session_id as string;
+      expect(secondId).not.toBe(id);
+      // The resumed run's log is a fork that starts with the first run's history.
+      const forked = fs.readFileSync(path.join(sessions, `session-${secondId}.events.jsonl`), "utf-8");
+      expect(forked).toContain(id);
+      expect(forked.split(task).length - 1).toBeGreaterThanOrEqual(2);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  }, 90_000);
+
+  it("--input-format stream-json runs one turn per user message on one session", async () => {
+    const fixture = path.join(workDir, "two-answers.events.jsonl");
+    const lines = [
+      { type: "header", version: 1, sessionId: "two-answers", cwd: "/tmp", createdAt: "2026-10-01T00:00:00.000Z" },
+      { seq: 0, time: "2026-10-01T00:00:01.000Z", type: "user/message", data: { message: { role: "user", content: "one" }, source: "user", turn: 0 } },
+      { seq: 1, time: "2026-10-01T00:00:02.000Z", type: "assistant/message", data: { message: { role: "assistant", content: [{ type: "text", text: "first answer" }] }, stop_reason: "end_turn", turn: 0 } },
+      { seq: 2, time: "2026-10-01T00:00:03.000Z", type: "user/message", data: { message: { role: "user", content: "two" }, source: "user", turn: 1 } },
+      { seq: 3, time: "2026-10-01T00:00:04.000Z", type: "assistant/message", data: { message: { role: "assistant", content: [{ type: "text", text: "second answer" }] }, stop_reason: "end_turn", turn: 1 } },
+    ];
+    fs.writeFileSync(fixture, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+    const input = [
+      JSON.stringify({ type: "user", message: { role: "user", content: "one" } }),
+      "not json",
+      JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text: "two" }] } }),
+    ].join("\n");
+    const { stdout, stderr, code } = await run(
+      ["--yolo", "--no-subagents", "--input-format", "stream-json", "--output-format", "stream-json"],
+      workDir,
+      { PHREN_PATH: storeDir, PHREN_AGENT_REPLAY: fixture },
+      input,
+    );
+    expect(code).toBe(0);
+    const events = stdout.trim().split("\n").map((l) => JSON.parse(l));
+    const results = events.filter((e) => e.type === "result");
+    expect(results.map((r) => [r.subtype, r.result])).toEqual([["success", "first answer"], ["success", "second answer"]]);
+    expect(new Set(results.map((r) => r.session_id)).size).toBe(1);
+    expect(stderr).toContain("skipped an input line: not JSON");
+  }, 90_000);
+
+  it("--input-format stream-json needs stream-json output", async () => {
+    const { stderr, code } = await run(["--input-format", "stream-json", "--output-format", "json"], workDir, { PHREN_PATH: storeDir }, "");
+    expect(code).toBe(1);
+    expect(stderr).toContain("needs --output-format stream-json");
+  }, 30_000);
+
+  it("--json-schema ends a run with structured_output matching it, in the documented result shape", async () => {
+    const fixture = path.join(workDir, "structured.events.jsonl");
+    const lines = [
+      { type: "header", version: 1, sessionId: "structured", cwd: "/tmp", createdAt: "2026-10-01T00:00:00.000Z" },
+      { seq: 0, time: "2026-10-01T00:00:01.000Z", type: "user/message", data: { message: { role: "user", content: "count" }, source: "user", turn: 0 } },
+      { seq: 1, time: "2026-10-01T00:00:02.000Z", type: "assistant/message", data: { message: { role: "assistant", content: [{ type: "text", text: "There are 3." }] }, stop_reason: "end_turn", turn: 0 } },
+      { seq: 2, time: "2026-10-01T00:00:03.000Z", type: "assistant/message", data: { message: { role: "assistant", content: [{ type: "text", text: "{\"count\": 3}" }] }, stop_reason: "end_turn", turn: 0 } },
+    ];
+    fs.writeFileSync(fixture, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+    const schema = JSON.stringify({ type: "object", required: ["count"], properties: { count: { type: "integer" } } });
+    const { stdout, code } = await run(
+      ["--yolo", "--no-subagents", "--output-format", "json", "--json-schema", schema, "count the files"],
+      workDir,
+      { PHREN_PATH: storeDir, PHREN_AGENT_REPLAY: fixture },
+    );
+    expect(code).toBe(0);
+    const result = JSON.parse(stdout.trim());
+    expect(result).toMatchObject({ subtype: "success", result: "There are 3.", structured_output: { count: 3 } });
+    const docs = JSON.parse(fs.readFileSync(path.join(here, "..", "..", "..", "..", "docs", "agent-stream-json.schema.json"), "utf-8"));
+    expect(schemaErrors(docs, result, { $ref: "#/$defs/Result" })).toEqual([]);
+
+    const bad = await run(["--json-schema", "{nope", "x"], workDir, { PHREN_PATH: storeDir });
+    expect(bad.code).toBe(1);
+    expect(bad.stderr).toContain("--json-schema is not valid JSON");
+  }, 90_000);
+
+  it("every stream-json line matches docs/agent-stream-json.schema.json", async () => {
+    const schema = JSON.parse(fs.readFileSync(path.join(here, "..", "..", "..", "..", "docs", "agent-stream-json.schema.json"), "utf-8"));
+    const { stdout, code } = await run(
+      ["--yolo", "--no-subagents", "--output-format", "stream-json", "Run echo replay-fixture-7 and report the marker."],
+      workDir,
+      { PHREN_PATH: storeDir },
+    );
+    expect(code).toBe(0);
+    const events = stdout.trim().split("\n").map((l) => JSON.parse(l));
+    expect(new Set(events.map((e) => e.type))).toEqual(new Set(["system", "assistant", "tool_use", "tool_result", "result"]));
+    for (const event of events) expect(schemaErrors(schema, event), JSON.stringify(event)).toEqual([]);
+    // The documented input shape, both content forms.
+    const input = { $ref: "#/$defs/InputMessage" };
+    expect(schemaErrors(schema, { type: "user", message: { role: "user", content: "hi" } }, input)).toEqual([]);
+    expect(schemaErrors(schema, { type: "user", message: { role: "user", content: [{ type: "text", text: "hi" }] } }, input)).toEqual([]);
+  }, 90_000);
 });
+
+type Schema = Record<string, unknown>;
+
+/**
+ * The JSON Schema subset the stream-json schema uses ($ref, oneOf, const,
+ * enum, type, required, properties, items), strict about undocumented keys so
+ * the schema can't fall behind what the agent prints.
+ */
+function schemaErrors(root: Schema, value: unknown, node: Schema = root, at = "$"): string[] {
+  if (typeof node.$ref === "string") {
+    const target = (node.$ref as string).replace("#/", "").split("/").reduce<unknown>((o, k) => (o as Schema)[k], root) as Schema;
+    return schemaErrors(root, value, target, at);
+  }
+  if (Array.isArray(node.oneOf)) {
+    const matches = (node.oneOf as Schema[]).filter((s) => schemaErrors(root, value, s, at).length === 0);
+    return matches.length === 1 ? [] : [`${at}: matches ${matches.length} of oneOf`];
+  }
+  const errors: string[] = [];
+  if ("const" in node && value !== node.const) errors.push(`${at}: expected ${JSON.stringify(node.const)}`);
+  if (Array.isArray(node.enum) && !node.enum.includes(value)) errors.push(`${at}: ${JSON.stringify(value)} not in enum`);
+  if (node.type !== undefined) {
+    const types = Array.isArray(node.type) ? node.type as string[] : [node.type as string];
+    const actual = value === null ? "null" : Array.isArray(value) ? "array" : Number.isInteger(value) ? "integer" : typeof value;
+    if (!types.some((t) => t === actual || (t === "number" && actual === "integer"))) errors.push(`${at}: ${actual} is not ${types.join("|")}`);
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const obj = value as Record<string, unknown>;
+    for (const key of (node.required as string[] | undefined) ?? []) if (!(key in obj)) errors.push(`${at}.${key}: missing`);
+    const props = node.properties as Record<string, Schema> | undefined;
+    if (props) {
+      for (const [key, v] of Object.entries(obj)) {
+        if (!props[key]) errors.push(`${at}.${key}: not in the schema`);
+        else errors.push(...schemaErrors(root, v, props[key], `${at}.${key}`));
+      }
+    }
+  }
+  if (Array.isArray(value) && node.items) value.forEach((v, i) => errors.push(...schemaErrors(root, v, node.items as Schema, `${at}[${i}]`)));
+  return errors;
+}

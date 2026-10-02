@@ -136,12 +136,37 @@ describe("the transcript's own record of a turn", () => {
     expect(finalTurnFromLines([...again, user(notice("bbuild1", "failed")), assistant("Tests failed.")], "claude").awaited).toBeUndefined();
   });
 
+  it("awaits a shell started before the dispatcher's prompt once the agent reads it again", () => {
+    // ios-fast-voice2 (Mini, 2026-10-01): its MacBook test run outran the Bash
+    // timeout into the background, the conductor's hand_off arrived, the agent
+    // read the run's output and ended on "Now waiting on the MacBook rerun."
+    const owner = (content: string) => line({ type: "user", message: { role: "user", content } });
+    const call = (id: string, command: string) => line({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id, name: "Bash", input: { command } }] } });
+    const run = [owner("Fix the voice tests"), call("toolu_mbp", "ssh mbp 'xcodebuild test -only-testing:TalkVoiceTests'"),
+      line({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_mbp", content: "moved to the background" }] }, toolUseResult: { backgroundTaskId: "boj3ma6t7" } }),
+      assistant("I'll push and open the PR when it reports back."), owner("Conductor: the sibling's PR is open now.")];
+    expect(finalTurnFromLines([...run, call("toolu_git", "git merge-tree HEAD origin/x"), assistant("Done.")], "claude")).toMatchObject({ background: 1 });
+    expect(finalTurnFromLines([...run, call("toolu_git", "git merge-tree HEAD origin/x"), assistant("Done.")], "claude").awaited).toBeUndefined();
+    const read = [...run, call("toolu_cat", "cat /private/tmp/claude-501/x/tasks/boj3ma6t7.output | tail -8"), assistant("Now waiting on the MacBook rerun.")];
+    expect(finalTurnFromLines(read, "claude")).toMatchObject({ completed: true, background: 1, awaited: 1 });
+    expect(finalTurnFromLines([...read, user(notice("boj3ma6t7", "completed")), assistant("Pushed.")], "claude")).toEqual({ completed: true, lastAssistant: "Pushed." });
+  });
+
+  it("counts the endless streams among the running shells", () => {
+    const launch = (id: string, command: string) => [
+      line({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: `toolu_${id}`, name: "Bash", input: { command, run_in_background: true } }] } }),
+      line({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: `toolu_${id}`, content: "ok" }] }, toolUseResult: { backgroundTaskId: id } })];
+    const lines = [line({ type: "user", message: { role: "user", content: "Go" } }), ...launch("btail00", "tail -f /tmp/x"), ...launch("bbuild0", "pnpm build"), assistant("Building.")];
+    expect(finalTurnFromLines(lines, "claude")).toMatchObject({ background: 2, awaited: 1, endless: 1 });
+  });
+
   it("recognizes commands that run until killed", () => {
     for (const command of ["tail -f log", "tail -F /tmp/x", "tail --follow=name x", "journalctl --user -fu phren-hook", "log stream --predicate x",
-      "adb logcat", "watch -n1 ls", "tsc --watch", "inotifywait -m .", "fswatch src", "npm run dev", "pnpm dev", "bun preview", "python3 -m http.server 8000", "sleep infinity"]) {
+      "adb logcat", "watch -n1 ls", "cd app && watch -n5 make", "sudo watch df", "tsc --watch", "inotifywait -m .", "fswatch src", "npm run dev", "pnpm dev", "bun preview", "python3 -m http.server 8000", "sleep infinity"]) {
       expect(ENDLESS_COMMAND.test(command), command).toBe(true);
     }
-    for (const command of ["pnpm build", "tail -n 50 log", "xcodebuild test", "npm test", "sleep 60 && curl x", "journalctl -n 20", "git log --stat", "npm run devtools-build"]) {
+    for (const command of ["pnpm build", "tail -n 50 log", "xcodebuild test", "npm test", "sleep 60 && curl x", "journalctl -n 20", "git log --stat", "npm run devtools-build",
+      "grep watch file", "rg -n 'watch ' src"]) {
       expect(ENDLESS_COMMAND.test(command), command).toBe(false);
     }
   });
@@ -231,11 +256,39 @@ describe("the worker's Hook answering from turn events", () => {
   it("returns a worker whose Stop named only a leftover shell done, and one whose sub-agent still runs working", async () => {
     // A Stop whose count is a log tail or a dev server no one awaits.
     record = turn(["UserPromptSubmit"], ["Stop", { background: 6, reply: "Left it running." }]);
-    final = { completed: true };
+    final = { completed: true, endless: 6 };
     expect(await ask()).toEqual({ state: "done", session, hook: true, completed: true, endedAt: record!.stop!.at, stopSeq: record!.stop!.seq, reply: "Left it running." });
+    // A leftover that is no stream (a build from an earlier exchange) does not
+    // hold the return, but rides along so the pane is not closed on it.
+    final = { completed: true, endless: 4 };
+    expect(await ask()).toMatchObject({ state: "done", completed: true, background: 2 });
     // The same Stop with a sub-agent the child tree still reports running.
     const withChild = await workerStates({ targets: [target] }, { ...readers(), children: async () => 1 });
     expect(withChild.workers[0]).toEqual({ state: "working", session, hook: true, background: 1 });
+  });
+
+  it("keeps a worker whose reply waits on a task it left running working, and never done", async () => {
+    // ios-fast-voice2 (Mini, 2026-10-01): returned done, its pane closed, its
+    // MacBook test run going and its PR unopened.
+    const reply = "There's one conflict in TalkVoice.swift. I'll resolve it on the follow-up branch, where both sets of changes meet. Now waiting on the MacBook rerun.";
+    record = turn(["UserPromptSubmit"], ["Stop", { background: 1, reply }]);
+    final = { completed: true, background: 1, lastAssistant: reply };
+    expect(await ask()).toEqual({ state: "working", session, hook: true, background: 1 });
+    const value = receipt();
+    observe(value, await ask(), now);
+    expect(value.worker!.state).toBe("working");
+    // Once the run reports back, the next Stop is the turn's end.
+    final = { completed: true, lastAssistant: reply, finishedTasks: [new Date(now + 1_000).toISOString()] };
+    now += 2_000;
+    const ended = await ask();
+    expect(ended).toMatchObject({ state: "done", unfinished: "Stopped mid-task: I'll resolve it on the follow-up branch, where both sets of changes meet." });
+    expect(ended).not.toHaveProperty("background");
+    observe(value, ended, now);
+    expect(value.returned).toMatchObject({ state: "needs-you" });
+    // The same wait with nothing running is no done either.
+    record = turn(["UserPromptSubmit"], ["Stop", { reply: "PR #12 is open. Now waiting on CI." }]);
+    final = { completed: true };
+    expect(await ask()).toMatchObject({ state: "done", unfinished: "Stopped waiting: Now waiting on CI." });
   });
 
   it("never reports a worker stalled while its finished turn still awaits a background shell", async () => {
@@ -437,9 +490,8 @@ describe.skipIf(process.platform === "win32")("the Hook recording a worker's tur
   it("settles the same words sent to two conversations by conversation, not by which was typed first", async () => {
     await post({ target, event: "SessionStart" });
     const first = { ...target, session: "00000009-1111-4111-8111-111111111111" };
-    const toFirst = hooks.expectDelivery(first, "Same words"), toThis = hooks.expectDelivery(target, "Same words");
-    hooks.trackDelivery("same-words-1", first, "Same words", "queued");
-    hooks.trackDelivery("same-words-2", target, "Same words", "queued");
+    const toFirst = hooks.expectDelivery(first, "Same words", 1_500, undefined, "same-words-1"), toThis = hooks.expectDelivery(target, "Same words", 1_500, undefined, "same-words-2");
+    hooks.queueDelivery("same-words-1", first); hooks.queueDelivery("same-words-2", target);
     expect(await post({ target, event: "UserPromptSubmit", prompt: "Same words" })).toBe("{}");
     expect(await toThis).toBe("delivered");
     expect(hooks.deliveryState("same-words-2", target)).toBe("delivered");
@@ -447,6 +499,27 @@ describe.skipIf(process.platform === "win32")("the Hook recording a worker's tur
     expect(hooks.deliveryState("same-words-2", first)).toBe("unknown");
     expect(hooks.deliveryPending(first, "Same words")).toBe(true);
     void toFirst;
+  });
+
+  it("settles a phone message by its delivery id, and keeps only a hash of the typed words", async () => {
+    await post({ target, event: "SessionStart" });
+    const queued = hooks.expectDelivery(target, "Run the suite again", 1, undefined, "by-id-0001");
+    expect(await queued).toBe("pending");
+    // Not answered yet: the phone has no reply to ask about.
+    expect(hooks.deliveryState("by-id-0001", target)).toBe("unknown");
+    hooks.queueDelivery("by-id-0001", target);
+    expect(hooks.deliveriesFor(target)).toEqual([{ deliveryId: "by-id-0001", state: "queued" }]);
+    expect([...(hooks as unknown as { deliveries: Map<string, unknown> }).deliveries.keys()]).toEqual([expect.stringMatching(/^[0-9a-f]{64}$/)]);
+    expect(await post({ target, event: "UserPromptSubmit", prompt: "<pasted_content id=\"3\">\nRun the suite   again\n</pasted_content id=\"3\">" })).toBe("{}");
+    expect(hooks.deliveryState("by-id-0001", target)).toBe("delivered");
+    // One the Hook answered uncertain still turns delivered when its hook takes it.
+    const uncertain = hooks.expectDelivery(target, "Check the logs", 1, undefined, "by-id-0002");
+    expect(await uncertain).toBe("pending");
+    expect(await post({ target, event: "UserPromptSubmit", prompt: "Check the logs" })).toBe("{}");
+    expect(hooks.deliveryState("by-id-0002", target)).toBe("delivered");
+    // A late queue call never moves a settled message back.
+    hooks.queueDelivery("by-id-0002", target);
+    expect(hooks.deliveryState("by-id-0002", target)).toBe("delivered");
   });
 
   it("records no turn for a prompt it refused because it was meant for another conversation", async () => {

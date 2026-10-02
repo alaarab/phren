@@ -13,6 +13,7 @@ import { type ApprovalInfo, ApprovalPanel } from "./ApprovalPanel.js";
 import { Banner } from "./Banner.js";
 import { type AgentTab, InputArea, PermissionsLine } from "./InputArea.js";
 import { ModelPicker, type ModelPickerState } from "./ModelPicker.js";
+import { ListPicker, type ListPickerState } from "./ListPicker.js";
 import { PlanReview } from "./PlanReview.js";
 import { ShortcutHelp } from "./ShortcutHelp.js";
 import { StatusBar } from "./StatusBar.js";
@@ -64,6 +65,8 @@ export interface AppState {
   contextWindow?: number;
   contextTokens?: number;
   reasoningEffort?: string;
+  /** A quick chat (`--mode chat`): the banner leaves out the folder, the phren store. */
+  chat?: boolean;
 }
 
 export interface ActiveToolInfo {
@@ -109,6 +112,10 @@ export interface AppProps {
   onModelPickerReasoning?: (delta: number) => void;
   onModelPickerSelect?: () => void;
   onModelPickerCancel?: () => void;
+  listPicker?: ListPickerState | null;
+  onListPickerMove?: (delta: number) => void;
+  onListPickerSelect?: () => void;
+  onListPickerCancel?: () => void;
   /** Ctrl+O with no current-turn tool opens the tool detail overlay. */
   onInspectTool?: () => void;
   toolDetail?: ToolDetailState | null;
@@ -149,6 +156,10 @@ export function App({
   onModelPickerReasoning,
   onModelPickerSelect,
   onModelPickerCancel,
+  listPicker,
+  onListPickerMove,
+  onListPickerSelect,
+  onListPickerCancel,
   onInspectTool,
   toolDetail,
   onToolDetailMove,
@@ -323,7 +334,7 @@ export function App({
   }, [bashMode, onSubmit]);
 
   const isAnyModeActive = search.state.active || historySearchMode;
-  const helpEnabled = !isAnyModeActive && !modelPicker && !toolDetail && !approval;
+  const helpEnabled = !isAnyModeActive && !modelPicker && !listPicker && !toolDetail && !approval;
 
   useEffect(() => {
     if (!helpEnabled) return;
@@ -418,7 +429,7 @@ export function App({
       onSelectAgent?.(nextId === "__main__" ? null : nextId);
     } : undefined,
     onToggleTaskList: () => setShowTaskList(v => !v),
-    enabled: !isAnyModeActive && !showHelp && !modelPicker && !toolDetail,
+    enabled: !isAnyModeActive && !showHelp && !modelPicker && !listPicker && !toolDetail,
     completionOpen: completions.length > 0,
     completionCount: completions.length,
     onCompletionMove: (delta) => setCompletionIndex((i) => (i + delta + completions.length) % completions.length),
@@ -599,6 +610,15 @@ export function App({
             onCancel={onModelPickerCancel ?? (() => {})}
           />
         ) : null}
+        {listPicker ? (
+          <ListPicker
+            state={listPicker}
+            theme={theme}
+            onMove={onListPickerMove ?? (() => {})}
+            onSelect={onListPickerSelect ?? (() => {})}
+            onCancel={onListPickerCancel ?? (() => {})}
+          />
+        ) : null}
         {completions.length > 0 && (
           <Box flexDirection="column" paddingLeft={2}>
             {completions.map((candidate, i) => (
@@ -625,7 +645,7 @@ export function App({
           onChange={setInputValue}
           onSubmit={handleSubmit}
           bashMode={bashMode}
-          focus={!isAnyModeActive && !showHelp && !modelPicker && !toolDetail}
+          focus={!isAnyModeActive && !showHelp && !modelPicker && !listPicker && !toolDetail}
           completionOpen={completions.length > 0}
           separatorColor={theme.separator}
           theme={theme}

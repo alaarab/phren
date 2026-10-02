@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { relayTranscription, transcribeURL, type RelaySocket } from "./speech-transcribe.js";
+import { failRelay, relayTranscription, transcribeURL, type RelaySocket } from "./speech-transcribe.js";
 import { writeSpeechRegion } from "./speech-voice.js";
 
 let bridge: string;
@@ -48,12 +48,50 @@ describe("Scribe transcription relay", () => {
     ]);
     upstream.emit("message", Buffer.from(JSON.stringify({ message_type: "partial_transcript", text: "rebase onto" })), false);
     upstream.emit("message", Buffer.from(JSON.stringify({ message_type: "committed_transcript", text: "Rebase onto main." })), false);
-    expect(frames(client)).toEqual([{ type: "partial", text: "rebase onto" }, { type: "committed", text: "Rebase onto main." }]);
+    expect(frames(client)).toEqual([{ type: "ready" }, { type: "partial", text: "rebase onto" }, { type: "committed", text: "Rebase onto main." }]);
     client.emit("message", Buffer.from("{\"type\":\"commit\"}"), false);
     expect(frames(upstream).at(-1)).toMatchObject({ commit: true, audio_base_64: "" });
     client.close();
     await settle();
     expect(upstream.readyState).toBe(3);
+    // The phone hung up itself: nothing more is said.
+    expect(frames(client).at(-1)).toEqual({ type: "committed", text: "Rebase onto main." });
+  });
+
+  // phren-apps #237: dictation stopped on quiet closes the phone had to guess about.
+  it("says why before every close the phone did not ask for", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new FakeSocket(), upstream = new FakeSocket();
+      await relayTranscription(client, new URLSearchParams(), { key: async () => "sk-test", connect: () => upstream, maxSessionMs: 60_000 });
+      vi.advanceTimersByTime(60_000);
+      expect(frames(client)).toEqual([{ type: "end", reason: "session-limit" }]);
+      expect(client.closed).toEqual({ code: 1000, reason: "Session limit" });
+      expect(upstream.readyState).toBe(3);
+    } finally { vi.useRealTimers(); }
+
+    const client = new FakeSocket(), upstream = new FakeSocket();
+    await relayTranscription(client, new URLSearchParams(), { key: async () => "sk-test", connect: () => upstream });
+    upstream.close();
+    expect(frames(client)).toEqual([{ type: "end", reason: "upstream-closed" }]);
+    expect(client.closed?.code).toBe(1000);
+
+    // An error frame is the reason; the close that follows adds no end.
+    const failing = new FakeSocket(), broken = new FakeSocket();
+    await relayTranscription(failing, new URLSearchParams(), { key: async () => "sk-test", connect: () => broken });
+    broken.emit("error", new Error("self-signed certificate"));
+    expect(frames(failing)).toEqual([{ type: "error", code: "transcribe-failed", error: "Couldn't reach ElevenLabs." }]);
+    expect(failing.closed?.code).toBe(1011);
+  });
+
+  it("tells the phone before closing a relay that could not start", async () => {
+    const client = new FakeSocket();
+    await relayTranscription(client, new URLSearchParams(), { key: async () => "sk-test", connect: () => { throw new Error("bad URL"); } }).catch(() => failRelay(client));
+    expect(frames(client)).toEqual([{ type: "error", code: "transcribe-failed", error: "Couldn't reach ElevenLabs." }]);
+    expect(client.closed).toEqual({ code: 1011, reason: "Transcription unavailable" });
+    const gone = new FakeSocket(); gone.readyState = 3;
+    failRelay(gone);
+    expect(gone.sent).toEqual([]);
   });
 
   it("never sends ElevenLabs' own error text, and says so when there is no key", async () => {

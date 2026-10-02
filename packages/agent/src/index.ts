@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-import { parseArgs, printHelp, resolveStartupPermissions } from "./config.js";
+import { agentUserDir, parseArgs, printHelp, resolveStartupPermissions } from "./config.js";
+import { randomUUID } from "crypto";
 import { loadPersistentAllowlist } from "./permissions/allowlist.js";
+import { loadPermissionRules } from "./permissions/rules.js";
 import { keepSessionEndpoint, resolveProvider } from "./providers/resolve.js";
 import { ToolRegistry } from "./tools/registry.js";
 import { readFileTool } from "./tools/read-file.js";
@@ -28,20 +30,25 @@ import { livePreview, previewPath, removeStalePreviews } from "./session/preview
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot, writeSessionNote } from "./memory/session.js";
 import { emitHerdrHook, setHerdrHookSession } from "./herdr-hooks.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
-import { buildSystemPrompt } from "./system-prompt.js";
-import { loadHooksConfig } from "./user-hooks.js";
-import { loadAndRegisterCustomCommands, getCustomCommandInfos } from "./commands.js";
+import { buildSystemPrompt, buildEnvironmentBlock } from "./system-prompt.js";
+import { loadHooksConfig, runLifecycleHooks } from "./user-hooks.js";
+import { addCommandNames, loadAndRegisterCustomCommands, getCustomCommandInfos } from "./commands.js";
+import { loadJsonSchema, produceStructuredOutput } from "./structured-output.js";
+import { isMcpPromptCommand, loadMcpPrompts, mcpPromptCommandNames, resolveMcpPromptCommand } from "./mcp-prompts.js";
 import { createSession, runTurn, type AgentConfig } from "./agent-loop.js";
 import { SessionLog, seedFromMessages } from "./session/log.js";
 import { fileSink, findEventLogById, findLatestEventLog, listEventLogs, persistFork, restoreSessionLog } from "./session/persist.js";
-import { buildHeadlessResult, createHeadlessHooks, headlessExitCode, readStdin, type HeadlessResult } from "./headless.js";
+import { buildHeadlessResult, createHeadlessHooks, headlessExitCode, parseStreamJsonInput, readLines, readStdin, type HeadlessResult } from "./headless.js";
 import type { LlmMessage } from "./providers/types.js";
 import { createCostTracker } from "./cost.js";
 import { scopeModelOverrides } from "./model-overrides.js";
 import { codexLogin, codexLogout } from "./providers/codex-auth.js";
 import { createCheckpoint } from "./checkpoint.js";
-import { detectLintCommand, detectTestCommand } from "./tools/lint-test.js";
-import { connectMcpServers, loadMcpConfig, parseMcpInline, type McpConfigEntry } from "./mcp-client.js";
+import { detectLintCommand, detectTypecheckCommand, detectTestCommand } from "./tools/lint-test.js";
+import { connectMcpServers, loadDefaultMcpConfig, loadMcpConfig, parseMcpInline, type McpConfigEntry } from "./mcp-client.js";
+import { isMcpProjectTrusted, trustMcpProject } from "./settings.js";
+import * as os from "os";
+import * as path from "path";
 import { VERSION } from "./package-metadata.js";
 import {
   authProfilesPath,
@@ -147,12 +154,11 @@ export async function runAgentCli(raw: string[]) {
   if (args.baseUrl) process.env.PHREN_AGENT_BASE_URL = args.baseUrl;
 
   if (args.listSessions) {
+    // Without a phren store, sessions live in ~/.phren-agent, listed for this directory.
     const ctx = await buildPhrenContext(args.project);
-    if (!ctx) {
-      console.error("Sessions are stored in the phren store; none was found.");
-      process.exit(1);
-    }
-    const sessions = listEventLogs(ctx.phrenPath, { project: args.project ?? undefined, limit: 20 });
+    const sessions = ctx
+      ? listEventLogs(ctx.phrenPath, { project: args.project ?? undefined, limit: 20 })
+      : listEventLogs(agentUserDir(), { cwd: process.cwd(), limit: 20 });
     if (args.outputFormat === "json") {
       console.log(JSON.stringify(sessions.map(({ file: _file, ...rest }) => ({ ...rest, updatedAt: new Date(rest.mtimeMs).toISOString() })), null, 2));
     } else if (sessions.length === 0) {
@@ -167,8 +173,27 @@ export async function runAgentCli(raw: string[]) {
     process.exit(0);
   }
 
+  const streamInput = args.inputFormat === "stream-json";
+  // --json-schema: compiled up front, so a bad schema fails before any work.
+  let jsonSchema: ReturnType<typeof loadJsonSchema> | undefined;
+  if (args.jsonSchema) {
+    if (streamInput) {
+      console.error("--json-schema answers one task; it cannot run with --input-format stream-json.");
+      process.exit(1);
+    }
+    try {
+      jsonSchema = loadJsonSchema(args.jsonSchema);
+    } catch (err: unknown) {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
+  }
+  if (streamInput && args.outputFormat !== "stream-json") {
+    console.error("--input-format stream-json needs --output-format stream-json.");
+    process.exit(1);
+  }
   // Headless with no task argument: read the task from piped stdin.
-  if (args.print && !args.task && !process.stdin.isTTY) {
+  if (args.print && !streamInput && !args.task && !process.stdin.isTTY) {
     args.task = (await readStdin()).trim();
   }
   if (args.print) {
@@ -186,7 +211,7 @@ export async function runAgentCli(raw: string[]) {
   if (!args.task && args.resume) {
     args.task = "Continue where the previous session left off.";
   }
-  if (!args.task && !args.interactive && !args.multi && !args.team) {
+  if (!args.task && !streamInput && !args.interactive && !args.multi && !args.team) {
     console.error("Usage: phren-agent <task>\nRun phren-agent --help for more info.");
     process.exit(1);
   }
@@ -272,27 +297,35 @@ export async function runAgentCli(raw: string[]) {
 
   const chatMemory = chat ? buildChatMemory(phrenCtx) : "";
   const providerInfo = { name: provider.name, model: (provider as { model?: string }).model };
-  const systemPrompt = chat
-    ? buildChatSystemPrompt(chatMemory, providerInfo)
-    : buildSystemPrompt(contextSnippet, priorSummary, providerInfo, getCustomCommandInfos());
-
-  // Dry run: print system prompt and exit
-  if (args.dryRun) {
-    console.log("=== System Prompt ===");
-    console.log(systemPrompt);
-    console.log("\n=== Task ===");
-    console.log(args.task);
-    process.exit(0);
-  }
+  // The environment block is built once so the prompt stays byte-stable
+  // across rebuilds (provider prompt caching).
+  const environment = buildEnvironmentBlock(process.cwd());
+  let promptContext = contextSnippet;
+  let promptSummary = priorSummary;
+  const mcpServerNames: string[] = [];
+  // Built from the tools registered right now: call again after registering more.
+  const agentPrompt = (info: { name: string; model?: string }) =>
+    buildSystemPrompt(promptContext, promptSummary, info, getCustomCommandInfos(), {
+      toolNames: registry.toolNames(),
+      mcpServers: mcpServerNames,
+      environment,
+    });
 
   // Register tools
   const registry = new ToolRegistry();
   registry.hookConfig = loadHooksConfig(process.cwd());
+  // SessionStart hooks: what they print joins the system prompt's context.
+  if (registry.hookConfig && !args.dryRun) {
+    const started = await runLifecycleHooks(registry.hookConfig, "SessionStart", { source: args.resume ? "resume" : "startup" });
+    if (started.context && !chat) promptContext += `\n\n## SessionStart hook\n${started.context}`;
+  }
   registry.setPermissions({
     mode: args.permissions,
     allowedPaths: [],
     projectRoot: process.cwd(),
     sandboxMode: args.sandbox,
+    ...(args.noNetwork ? { network: "off" as const } : {}),
+    rules: loadPermissionRules(process.cwd(), { allow: args.allowedTools, deny: args.disallowedTools }),
   });
   // Nobody can answer a prompt in a headless run or with stdin not a
   // terminal (a readline question on a closed stdin would hang): deny, and
@@ -302,7 +335,7 @@ export async function runAgentCli(raw: string[]) {
     registry.askUser = async (toolName, _input, reason) => {
       permissionDenials++;
       process.stderr.write(
-        `[denied ${toolName}: ${reason} No one is present to approve; rerun with --permissions auto-confirm or --yolo to allow.]\n`,
+        `[denied ${toolName}: ${reason} No one is present to approve; allow it with --allowedTools "${toolName}", --permissions auto-confirm or --yolo.]\n`,
       );
       return false;
     };
@@ -346,6 +379,14 @@ export async function runAgentCli(raw: string[]) {
 
     // MCP server connections
     const mcpServers: Record<string, McpConfigEntry> = {};
+    if (!args.strictMcpConfig) {
+      if (args.trustProjectMcp) trustMcpProject(process.cwd());
+      const defaults = loadDefaultMcpConfig(process.cwd(), { home: os.homedir(), trusted: isMcpProjectTrusted(process.cwd()) });
+      Object.assign(mcpServers, defaults.servers);
+      for (const { file, names } of defaults.untrusted) {
+        process.stderr.write(`\x1b[2m[${path.relative(process.cwd(), file)} defines MCP servers (${names.join(", ")}) that were not started; run with --trust-project-mcp to load this project's servers]\x1b[0m\n`);
+      }
+    }
     if (args.mcpConfig) {
       Object.assign(mcpServers, loadMcpConfig(args.mcpConfig));
     }
@@ -353,13 +394,31 @@ export async function runAgentCli(raw: string[]) {
       const entry = parseMcpInline(args.mcp[idx]);
       mcpServers[`mcp-${idx}`] = entry;
     }
-    if (Object.keys(mcpServers).length > 0) {
+    if (Object.keys(mcpServers).length > 0 && !args.dryRun) {
+      mcpServerNames.push(...Object.keys(mcpServers));
       const { tools: mcpTools, cleanup } = await connectMcpServers(mcpServers, args.verbose);
       mcpCleanup = cleanup;
       for (const tool of mcpTools) registry.register(tool);
+      // Their prompts become /mcp__server__prompt commands.
+      await loadMcpPrompts();
+      addCommandNames(mcpPromptCommandNames());
     }
   };
   if (!chat) await registerAgentTools();
+
+  // The prompt lists the registered tools, so it is built after they are.
+  const systemPrompt = chat
+    ? buildChatSystemPrompt(chatMemory, providerInfo)
+    : agentPrompt(providerInfo);
+
+  // Dry run: print system prompt and exit
+  if (args.dryRun) {
+    console.log("=== System Prompt ===");
+    console.log(systemPrompt);
+    console.log("\n=== Task ===");
+    console.log(args.task);
+    process.exit(0);
+  }
 
   // Build cost tracker from model info
   const modelName = (provider as { model?: string }).model ?? args.model ?? provider.name;
@@ -370,7 +429,10 @@ export async function runAgentCli(raw: string[]) {
   const detectLintTest = () => {
     const lintCmd = args.lintCmd ?? detectLintCommand(cwd);
     const testCmd = args.testCmd ?? detectTestCommand(cwd);
-    return (lintCmd || testCmd) ? { lintCmd: lintCmd ?? undefined, testCmd: testCmd ?? undefined } : undefined;
+    const typecheckCmd = args.typecheckCmd ?? detectTypecheckCommand(cwd);
+    return (lintCmd || testCmd || typecheckCmd)
+      ? { lintCmd: lintCmd ?? undefined, testCmd: testCmd ?? undefined, typecheckCmd: typecheckCmd ?? undefined }
+      : undefined;
   };
   // A chat edits nothing, so it has nothing to check.
   const lintTestConfig = chat ? undefined : detectLintTest();
@@ -380,17 +442,22 @@ export async function runAgentCli(raw: string[]) {
     if (lintTestConfig.testCmd) process.stderr.write(`Test: ${lintTestConfig.testCmd}\n`);
   }
 
-  /** Durable event log for this run when a phren store is available. */
-  const makePersistedLog = (): SessionLog | undefined => {
-    if (!phrenCtx || !sessionId) return undefined;
+  // The durable event log lives in the phren store, or in ~/.phren-agent
+  // without one, so a session can be resumed either way. Without a store the
+  // session has no phren session id, only this log's.
+  const sessionRoot = phrenCtx?.phrenPath ?? agentUserDir();
+  const logSessionId = sessionId ?? randomUUID();
+
+  /** Durable event log for this run. */
+  const makePersistedLog = (): SessionLog => {
     return new SessionLog(
       {
-        sessionId,
-        project: phrenCtx.project ?? undefined,
+        sessionId: logSessionId,
+        project: phrenCtx?.project ?? undefined,
         cwd: process.cwd(),
         createdAt: new Date().toISOString(),
       },
-      fileSink(phrenCtx.phrenPath, sessionId),
+      fileSink(sessionRoot, logSessionId),
     );
   };
 
@@ -401,21 +468,22 @@ export async function runAgentCli(raw: string[]) {
    * previous session.
    */
   const makeResumedLog = (): SessionLog | undefined => {
-    if (!phrenCtx || !sessionId) return undefined;
     let latest: string | null;
     if (args.resumeId) {
       try {
-        latest = findEventLogById(phrenCtx.phrenPath, args.resumeId);
+        latest = findEventLogById(sessionRoot, args.resumeId);
       } catch (err: unknown) {
         process.stderr.write(`Cannot resume: ${err instanceof Error ? err.message : String(err)}\n`);
         process.exit(1);
       }
     } else {
-      latest = findLatestEventLog(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
+      latest = phrenCtx
+        ? findLatestEventLog(sessionRoot, phrenCtx.project ?? undefined)
+        : findLatestEventLog(sessionRoot, undefined, process.cwd());
     }
     if (latest) {
       try {
-        const parent = restoreSessionLog(phrenCtx.phrenPath, latest);
+        const parent = restoreSessionLog(sessionRoot, latest);
         if (parent.length > 0) {
           if (args.verbose) {
             process.stderr.write(
@@ -424,7 +492,7 @@ export async function runAgentCli(raw: string[]) {
           }
           // This run gets its own forked log file, seeded with the parent's
           // full history and linked via parentSession.
-          return persistFork(phrenCtx.phrenPath, parent, sessionId);
+          return persistFork(sessionRoot, parent, logSessionId);
         }
       } catch (err: unknown) {
         process.stderr.write(
@@ -432,7 +500,7 @@ export async function runAgentCli(raw: string[]) {
         );
       }
     }
-    if (args.resumeId) return undefined; // a named session never falls back to another one
+    if (args.resumeId || !phrenCtx) return undefined; // a named session never falls back to another one
     const priorSnapshot = loadLastSessionSnapshot(phrenCtx.phrenPath, phrenCtx.project ?? undefined);
     if (priorSnapshot && priorSnapshot.messages.length > 0) {
       if (args.verbose) {
@@ -441,7 +509,6 @@ export async function runAgentCli(raw: string[]) {
         );
       }
       const log = makePersistedLog();
-      if (!log) return undefined;
       seedFromMessages(log, priorSnapshot.messages as LlmMessage[]);
       return log;
     }
@@ -474,6 +541,7 @@ export async function runAgentCli(raw: string[]) {
     removeStalePreviews(phrenPath);
     agentConfig.livePreview = (id) => id.startsWith("mem-") ? undefined : livePreview(previewPath(phrenPath, id));
   }
+  if (!chat) agentConfig.rebuildSystemPrompt = agentPrompt;
   if (chat) {
     agentConfig.rebuildSystemPrompt = (info) => buildChatSystemPrompt(chatMemory, info);
     // Same conversation, same log: only the tools and the prompt change.
@@ -488,13 +556,13 @@ export async function runAgentCli(raw: string[]) {
         let snippet = phrenCtx ? await buildContextSnippet(phrenCtx, "") : buildProjectInstructions();
         const projectCtx = phrenCtx ? loadProjectContext(phrenCtx) : null;
         if (phrenCtx && projectCtx) snippet += `\n\n## Agent context (${phrenCtx.project})\n\n${projectCtx}`;
-        const systemPrompt = buildSystemPrompt(snippet, null, {
-          name: agentConfig.provider.name,
-          model: (agentConfig.provider as { model?: string }).model,
-        }, getCustomCommandInfos());
+        promptContext = snippet;
+        promptSummary = null;
+        const info = { name: agentConfig.provider.name, model: (agentConfig.provider as { model?: string }).model };
+        const systemPrompt = agentPrompt(info);
         const lintTestConfig = detectLintTest();
         agentConfig.mode = "agent";
-        agentConfig.rebuildSystemPrompt = undefined;
+        agentConfig.rebuildSystemPrompt = agentPrompt;
         agentConfig.systemPrompt = systemPrompt;
         agentConfig.lintTestConfig = lintTestConfig;
       } catch (err: unknown) {
@@ -539,7 +607,10 @@ export async function runAgentCli(raw: string[]) {
         registry.register(createSendMessageTool(spawner));
         registry.register(createListAgentsTool(spawner));
       };
-      if (!chat) registerSpawnerTools();
+      if (!chat) {
+        registerSpawnerTools();
+        agentConfig.systemPrompt = agentPrompt(providerInfo);
+      }
       // Publish this process's agents so a phren graph in another terminal can
       // show them. Best-effort and silent: it is a courtesy to another tool.
       const { createAgentPublisher } = await import("./multi/publish.js");
@@ -610,6 +681,7 @@ export async function runAgentCli(raw: string[]) {
     registry.register(createSpawnAgentTool(oneShotSpawner, () => registry.permissionConfig));
     registry.register(createSendMessageTool(oneShotSpawner));
     registry.register(createListAgentsTool(oneShotSpawner));
+    agentConfig.systemPrompt = agentPrompt(providerInfo);
   }
 
   const startedAt = Date.now();
@@ -629,7 +701,7 @@ export async function runAgentCli(raw: string[]) {
     process.stdout.write(`${JSON.stringify({
       type: "system",
       subtype: "init",
-      session_id: sessionId,
+      session_id: logSessionId,
       provider: provider.name,
       model: modelId,
       cwd,
@@ -647,12 +719,53 @@ export async function runAgentCli(raw: string[]) {
     }
     // A resumed session continues with the task given on the command line,
     // or with a generic "continue" when none was.
-    const prompt = resumedLog && !userTask
+    const given = resumedLog && !userTask
       ? "Continuing where we left off. Please review the conversation and continue with the task."
       : args.task;
+    // `phren agent "/mcp__server__prompt …"` sends what the MCP prompt says.
+    const prompt = isMcpPromptCommand(given) ? await resolveMcpPromptCommand(given) : given;
     const session = createSession(contextLimit, { log: resumedLog ?? agentConfig.sessionLog });
-    emitHerdrHook("UserPromptSubmit");
-    const turnResult = await runTurn(prompt, session, agentConfig, headlessHooks).finally(() => emitHerdrHook("Stop"));
+    // One turn for the task, or one per user message with --input-format
+    // stream-json, all on the same session; each gets its own result line.
+    const taskGiven = !!args.task;
+    async function* prompts(): AsyncGenerator<string> {
+      if (!streamInput) {
+        yield prompt;
+        return;
+      }
+      if (taskGiven) yield prompt;
+      for await (const line of readLines(process.stdin)) {
+        const parsed = parseStreamJsonInput(line);
+        if ("error" in parsed) {
+          process.stderr.write(`[skipped an input line: ${parsed.error}]\n`);
+          continue;
+        }
+        yield parsed.prompt;
+      }
+    }
+    let turnResult: Awaited<ReturnType<typeof runTurn>> = { text: "", turns: 0, toolCalls: 0, stopReason: "end_turn" };
+    let turnStartedAt = startedAt;
+    for await (const next of prompts()) {
+      emitHerdrHook("UserPromptSubmit");
+      turnResult = await runTurn(next, session, agentConfig, headlessHooks).finally(() => emitHerdrHook("Stop"));
+      if (args.print && streamInput) {
+        const headless = buildHeadlessResult({
+          text: turnResult.text,
+          stopReason: turnResult.stopReason,
+          turns: turnResult.turns,
+          toolCalls: turnResult.toolCalls,
+          startedAt: turnStartedAt,
+          sessionId: logSessionId,
+          provider: provider.name,
+          model: modelId,
+          costTracker,
+          permissionDenials,
+        });
+        emitHeadless(headless);
+        exitCode = headlessExitCode(headless);
+        turnStartedAt = Date.now();
+      }
+    }
     const result = {
       finalText: turnResult.text,
       turns: turnResult.turns,
@@ -667,19 +780,30 @@ export async function runAgentCli(raw: string[]) {
       process.stderr.write(`\nDone: ${result.turns} turns, ${result.toolCalls} tool calls${costStr}\n`);
     }
 
-    if (args.print) {
+    if (args.print && !streamInput) {
+      // --json-schema: a finished task ends with a value matching it (its
+      // request counts in the result's usage and cost).
+      const structured = jsonSchema && turnResult.stopReason === "end_turn"
+        ? await produceStructuredOutput(agentConfig.provider, agentConfig.systemPrompt, session.messages, registry.getDefinitions(), jsonSchema, { costTracker })
+        : undefined;
       const headless = buildHeadlessResult({
         text: turnResult.text,
         stopReason: turnResult.stopReason,
         turns: turnResult.turns,
         toolCalls: turnResult.toolCalls,
         startedAt,
-        sessionId,
+        sessionId: logSessionId,
         provider: provider.name,
         model: modelId,
         costTracker,
         permissionDenials,
       });
+      if (structured && "value" in structured) {
+        headless.structured_output = structured.value;
+        if (args.outputFormat === "text") headless.result = JSON.stringify(structured.value, null, 2);
+      } else if (structured) {
+        Object.assign(headless, { subtype: "error_structured_output", is_error: true, error: structured.error });
+      }
       emitHeadless(headless);
       exitCode = headlessExitCode(headless);
     } else if (process.stdout.isTTY) {
@@ -715,7 +839,7 @@ export async function runAgentCli(raw: string[]) {
         turns: 0,
         toolCalls: 0,
         startedAt,
-        sessionId,
+        sessionId: logSessionId,
         provider: provider.name,
         model: modelId,
         costTracker,

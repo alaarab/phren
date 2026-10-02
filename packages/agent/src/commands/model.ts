@@ -10,6 +10,7 @@ import { normalizeReasoningEffort } from "../models.js";
 
 const DIM = "\x1b[2m";
 const GREEN = "\x1b[32m";
+const RED = "\x1b[31m";
 const RESET = "\x1b[0m";
 
 export function modelCommand(parts: string[], ctx: CommandContext): boolean | Promise<boolean> {
@@ -53,30 +54,74 @@ export function modelCommand(parts: string[], ctx: CommandContext): boolean | Pr
     return true;
   }
 
+  // /model <id>: that model on the current provider, keeping the effort.
+  if (parts[1] && sub !== "add" && sub !== "remove" && sub !== "rm") {
+    return switchModel(ctx, { model: parts[1], reasoning: ctx.currentReasoning ?? null });
+  }
+
   // /model (no sub) -- interactive picker
   if (!ctx.providerName) {
     process.stderr.write(`${DIM}Provider not configured. Start with --provider to set one.${RESET}\n`);
     return true;
   }
-  const applyResult = (result: PickerResult | null) => {
-    if (result && ctx.onModelChange) {
-      ctx.onModelChange(result);
-      const reasoningLabel = result.reasoning ? ` (reasoning: ${result.reasoning})` : "";
-      process.stderr.write(`${GREEN}-> ${result.model}${reasoningLabel}${RESET}\n`);
-    } else if (result) {
-      process.stderr.write(`${DIM}Model selected: ${result.model} -- restart to apply.${RESET}\n`);
-    }
-  };
+  const applyResult = (result: PickerResult | null) => (result ? switchModel(ctx, result) : true);
   if (ctx.pickModel) {
-    return ctx.pickModel().then((result) => { applyResult(result); return true; });
+    return ctx.pickModel().then(applyResult);
   }
   showModelPicker(ctx.providerName, ctx.currentModel, ctx.currentReasoning, process.stdout).then(applyResult);
   return true;
 }
 
-export function providerCommand(_parts: string[], _ctx: CommandContext): boolean {
-  process.stderr.write(formatProviderList());
+/**
+ * Apply a model, provider or effort change through the host and keep the
+ * command context in step with it, so the next /model or /reasoning starts
+ * from what is running now.
+ */
+export async function switchModel(ctx: CommandContext, result: PickerResult): Promise<boolean> {
+  if (!ctx.onModelChange) {
+    process.stderr.write(`${DIM}Model selected: ${result.model || "(default)"} -- restart to apply.${RESET}\n`);
+    return true;
+  }
+  try {
+    const provider = await ctx.onModelChange(result);
+    if (provider) {
+      ctx.provider = provider;
+      ctx.providerName = provider.name;
+      ctx.currentModel = (provider as { model?: string }).model;
+      ctx.currentReasoning = provider.reasoningEffort ?? null;
+    }
+    const name = provider ? `${provider.name}/${(provider as { model?: string }).model ?? "default"}` : result.model;
+    const effort = provider?.reasoningEffort ?? result.reasoning;
+    process.stderr.write(`${GREEN}-> ${name}${effort ? ` (reasoning: ${effort})` : ""}${RESET}\n`);
+  } catch (err: unknown) {
+    process.stderr.write(`${RED}Could not switch: ${err instanceof Error ? err.message : String(err)}${RESET}\n`);
+  }
   return true;
+}
+
+/** /reasoning [level]: show the effort, or set it on the current model. */
+export function reasoningCommand(parts: string[], ctx: CommandContext): boolean | Promise<boolean> {
+  const arg = parts[1];
+  if (!arg) {
+    process.stderr.write(`${DIM}Reasoning: ${ctx.currentReasoning ?? "model default"}. Set it with /reasoning none|low|medium|high|xhigh.${RESET}\n`);
+    return true;
+  }
+  const level = normalizeReasoningEffort(arg);
+  if (!level) {
+    process.stderr.write(`${RED}Unknown reasoning level "${arg}". Use none, low, medium, high or xhigh.${RESET}\n`);
+    return true;
+  }
+  return switchModel(ctx, { model: ctx.currentModel ?? "", reasoning: level });
+}
+
+/** /provider lists providers; /provider <name> [model] switches to one mid-session. */
+export function providerCommand(parts: string[], ctx: CommandContext): boolean | Promise<boolean> {
+  if (!parts[1]) {
+    process.stderr.write(formatProviderList());
+    return true;
+  }
+  // Another provider's effort scale may differ: start from its default.
+  return switchModel(ctx, { provider: parts[1], model: parts[2] ?? "", reasoning: null });
 }
 
 export function presetCommand(parts: string[], _ctx: CommandContext): boolean {

@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { AgentTool } from "./types.js";
 import { checkSensitivePath, validatePath } from "../permissions/sandbox.js";
+import { recordFileState } from "./file-state.js";
 
 /** Minified bundles and data files can have megabyte lines; cap each one. */
 const MAX_LINE_CHARS = 2000;
@@ -48,6 +49,7 @@ export const readFileTool: AgentTool = {
         is_error: true,
       };
     }
+    recordFileState(filePath);
     const lines = buf.toString("utf-8").split("\n");
     if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
     if (offset > lines.length) {

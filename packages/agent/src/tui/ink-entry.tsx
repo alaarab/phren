@@ -10,6 +10,7 @@ import { emitHerdrHook, setHerdrHookSession } from "../herdr-hooks.js";
 import type { InputMode } from "../repl.js";
 import { useSlashCommands } from "./hooks/useSlashCommands.js";
 import { resolveSkillGesture, resolveCustomCommand } from "../commands.js";
+import { isMcpPromptCommand, resolveMcpPromptCommand } from "../mcp-prompts.js";
 import type { AgentSpawner } from "../multi/spawner.js";
 import { decodeDiffPayload, DIFF_MARKER, renderInlineDiff } from "../multi/diff-renderer.js";
 import { formatToolInput } from "./tool-render.js";
@@ -18,7 +19,7 @@ import * as fs from "node:fs";
 import { execSync } from "node:child_process";
 import * as path from "node:path";
 import { loadInputMode, saveInputMode, savePermissionMode, loadTheme, saveTheme, loadInputHistory, saveInputHistory } from "../settings.js";
-import { estimateMessageTokens } from "../context/token-counter.js";
+import { contextTokens } from "../context/usage.js";
 import { READ_ONLY_TOOLS } from "../permissions/checker.js";
 import type { ApprovalInfo } from "./components/ApprovalPanel.js";
 import { nextPermissionMode } from "./ansi.js";
@@ -32,6 +33,7 @@ import { getTheme, THEME_NAMES, type Theme } from "./themes.js";
 import { getAvailableModels, type PickerResult } from "../multi/model-picker.js";
 import { REASONING_LEVELS } from "../models.js";
 import type { ModelPickerState } from "./components/ModelPicker.js";
+import type { ListPickerState } from "./components/ListPicker.js";
 
 const _require = createRequire(import.meta.url);
 const AGENT_VERSION = (_require("../../package.json") as { version: string }).version;
@@ -177,6 +179,8 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   let activeTool: ActiveToolInfo | null = null;
   let modelPicker: ModelPickerState | null = null;
   let modelPickerResolve: ((result: PickerResult | null) => void) | null = null;
+  let listPicker: ListPickerState | null = null;
+  let listPickerResolve: ((index: number | null) => void) | null = null;
   const toolHistory: ToolCallProps[] = [];
   let toolDetailIndex: number | null = null;
   let planReview: string | null = null;
@@ -205,14 +209,19 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       contextWindow: contextLimit,
       contextTokens: currentContextTokens(),
       reasoningEffort: config.provider.reasoningEffort as string | undefined,
+      chat: config.mode === "chat",
     };
   }
 
-  let contextMemo = { count: -1, tokens: 0 };
+  let contextMemo = { count: -1, logLength: -1, tokens: 0 };
   function currentContextTokens(): number {
     const count = session.messages.length;
-    if (contextMemo.count !== count) {
-      contextMemo = { count, tokens: estimateMessageTokens(session.messages) };
+    if (contextMemo.count !== count || contextMemo.logLength !== session.log.length) {
+      contextMemo = {
+        count,
+        logLength: session.log.length,
+        tokens: contextTokens(config.systemPrompt, session.messages, session.log, session.reportedContext),
+      };
     }
     return contextMemo.tokens;
   }
@@ -277,6 +286,15 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         onSelectAgent={(id) => handleSelectAgent(id === "__main__" ? null : id)}
         approval={approvalInfo}
         modelPicker={modelPicker}
+        listPicker={listPicker}
+        onListPickerMove={(delta) => {
+          if (!listPicker) return;
+          const count = listPicker.items.length;
+          listPicker = { ...listPicker, cursor: (listPicker.cursor + delta + count) % count };
+          update();
+        }}
+        onListPickerSelect={() => closeListPicker(listPicker?.cursor ?? null)}
+        onListPickerCancel={() => closeListPicker(null)}
         onModelPickerMove={moveModelPicker}
         onModelPickerReasoning={adjustModelReasoning}
         onModelPickerSelect={selectModelPicker}
@@ -288,6 +306,21 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         planReview={planReview}
       />
     );
+  }
+
+  function openListPicker(title: string, items: ListPickerState["items"]): Promise<number | null> {
+    if (items.length === 0) return Promise.resolve(null);
+    listPicker = { title, items, cursor: 0 };
+    update();
+    return new Promise((resolve) => { listPickerResolve = resolve; });
+  }
+
+  function closeListPicker(index: number | null) {
+    listPicker = null;
+    const resolve = listPickerResolve;
+    listPickerResolve = null;
+    update();
+    resolve?.(index);
   }
 
   function openModelPicker(): Promise<PickerResult | null> {
@@ -427,22 +460,25 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         }
       },
       onModelChange: async (result) => {
-        try {
-          const { resolveProvider } = await import("../providers/resolve.js") as typeof import("../providers/resolve.js");
-          const newProvider = resolveProvider(config.provider.name, result.model, undefined, result.reasoning ?? undefined);
-          config.provider = newProvider;
-          const { buildSystemPrompt } = await import("../system-prompt.js") as typeof import("../system-prompt.js");
-          config.systemPrompt = config.rebuildSystemPrompt
-            ? config.rebuildSystemPrompt({ name: newProvider.name, model: result.model })
-            : buildSystemPrompt(
-              config.systemPrompt.split("\n## Last session")[0],
-              null,
-              { name: newProvider.name, model: result.model },
-            );
-          update();
-        } catch { /* keep current provider */ }
+        // A failure (no key for that provider, an unknown name) is reported
+        // by the command; the current provider stays.
+        const { resolveProvider } = await import("../providers/resolve.js") as typeof import("../providers/resolve.js");
+        const newProvider = resolveProvider(result.provider ?? config.provider.name, result.model || undefined, undefined, result.reasoning ?? undefined);
+        config.provider = newProvider;
+        config.costTracker?.reprice((newProvider as { model?: string }).model ?? newProvider.name, newProvider.name, newProvider.baseUrl);
+        const { buildSystemPrompt } = await import("../system-prompt.js") as typeof import("../system-prompt.js");
+        config.systemPrompt = config.rebuildSystemPrompt
+          ? config.rebuildSystemPrompt({ name: newProvider.name, model: (newProvider as { model?: string }).model })
+          : buildSystemPrompt(
+            config.systemPrompt.split("\n## Last session")[0],
+            null,
+            { name: newProvider.name, model: (newProvider as { model?: string }).model },
+          );
+        update();
+        return newProvider;
       },
       pickModel: openModelPicker,
+      pickFromList: openListPicker,
       promote: config.promote,
     },
     onOutput: (text) => {
@@ -608,6 +644,21 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       else process.stdout.write("\x1b[2J\x1b[H");
       slashCommands.tryHandleCommand(line);
       update();
+      return;
+    }
+
+    // An MCP prompt: fetch it from its server, then send what it says.
+    if (isMcpPromptCommand(line)) {
+      const command = line.split(/\s+/)[0];
+      completedMessages.push({ id: nextId(), kind: "status", text: `↳ fetching MCP prompt ${command}` });
+      update();
+      resolveMcpPromptCommand(line).then(
+        (task) => handleSubmit(task.startsWith("/") ? ` ${task}` : task),
+        (err: unknown) => {
+          completedMessages.push({ id: nextId(), kind: "status", text: err instanceof Error ? err.message : String(err) });
+          update();
+        },
+      );
       return;
     }
 

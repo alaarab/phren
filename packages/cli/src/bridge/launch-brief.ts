@@ -16,7 +16,9 @@ import { atomic, bridgeRoot, targetSchema, type Target } from "./protocol.js";
  *
  * OpenCode takes its brief over the HTTP API its launched TUI serves
  * (opencode-panes.ts); the file is still written so the arrival is recorded
- * here. Copilot, with no such argument or API, keeps the typed path.
+ * here. Copilot keeps the typed path: its `-i <prompt>` would submit a first
+ * prompt, but its hooks fire SessionStart lazily and their payload was not
+ * confirmed to carry the event name, so no arrival could be recorded.
  */
 
 /** A dispatch receipt id or a scheduled run id: what `PHREN_DISPATCH_ID` carries. */

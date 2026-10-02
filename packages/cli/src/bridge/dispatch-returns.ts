@@ -15,11 +15,11 @@ import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { BridgeError, objects, startingTargetSchema, targetSchema, type ApprovalDecision, type Json, type Provider, type Target } from "./protocol.js";
 import { ownerQuestion, readFinalTurn, type FinalTurn } from "./schedule-watch.js";
-import { liveWork } from "./session-activity.js";
+import { liveWork, runningTasks } from "./session-activity.js";
 import { terminalProvider } from "./terminal.js";
 import { childAgentTree, runningChildAgents } from "./transcripts.js";
 import { opencodeTurn, readTurn, TURN_REPLY_LIMIT, truncateUtf8, turnPhase, type TurnRecord } from "./turn-records.js";
-import { recentUncommitted, sharedCheckout, unfinishedTurn, type Uncommitted } from "./worker-unfinished.js";
+import { awaitedInReply, recentUncommitted, sharedCheckout, unfinishedTurn, type Uncommitted } from "./worker-unfinished.js";
 
 export { truncateUtf8 } from "./turn-records.js";
 
@@ -73,8 +73,9 @@ export interface WorkerObservation {
   hook?: true;
   /** When the turn's Stop arrived, on the worker's clock; names the turn. */
   endedAt?: string; stopSeq?: number;
-  /** Background tasks the harness still runs: waited on while `working`,
-   * left running when `done` after BACKGROUND_WAIT_MS. */
+  /** Background tasks the harness still runs: waited on while `working`;
+   * when `done`, left running (after BACKGROUND_WAIT_MS, or not awaited), so
+   * the pane is not closed on them. */
   background?: number;
   /** The owner stopped the turn in the worker's terminal. */
   interrupted?: true;
@@ -122,7 +123,7 @@ const defaultReaders: WorkerReaders = {
   snapshot: server => sharedSnapshot(server, SNAPSHOT_AGE_MS),
   freshSnapshot: snapshot,
   identity: (server, pane) => paneIdentity(server, pane),
-  finalTurn: (source, session) => source === "codex" || source === "claude" || source === "opencode" ? readFinalTurn(source, session) : Promise.resolve(undefined),
+  finalTurn: (source, session) => source === "codex" || source === "claude" || source === "opencode" || source === "copilot" ? readFinalTurn(source, session) : Promise.resolve(undefined),
   turn: paneTurn,
   children: (source, session) => childAgentTree(source, session).then(runningChildAgents).then(children => children.length),
   stall: (target, pane, live) => sessionStalls.observe(target, pane, live),
@@ -151,12 +152,20 @@ function replyFields(text: string | undefined, truncated?: boolean): Pick<Worker
   return { reply: reply.text, ...(reply.truncated || truncated ? { truncated: true } : {}) };
 }
 
+/** A finished turn's state with nothing awaited left (`liveWork`): working
+ * when its reply says it waits on a task that still runs (`awaitedInReply`),
+ * else done, carrying what still runs so its pane is not closed on it. */
+function settled(reply: string | undefined, running: number): Pick<WorkerObservation, "state" | "background"> {
+  if (running && awaitedInReply(reply)) return { state: "working", background: running };
+  return { state: "done", ...(running ? { background: running } : {}) };
+}
+
 /** A worker's state from its own turn events. Done means a Stop arrived after
  * the last submitted prompt with no live work left (see `liveWork`: awaited
- * shells plus running children, never a leftover idle shell); a prompt with no
- * Stop is still working, unless the pane is idle and the transcript shows the
- * owner interrupted it (no Stop comes then) or a finished turn whose Stop the
- * Hook never received. */
+ * shells plus running children, never a leftover idle shell, and `settled`); a
+ * prompt with no Stop is still working, unless the pane is idle and the
+ * transcript shows the owner interrupted it (no Stop comes then) or a
+ * finished turn whose Stop the Hook never received. */
 async function fromTurn(record: TurnRecord, session: string, status: string, source: Provider, readers: WorkerReaders): Promise<WorkerObservation> {
   const base = { session, hook: true as const };
   if (status === "blocked") return { state: "blocked", ...base };
@@ -174,11 +183,15 @@ async function fromTurn(record: TurnRecord, session: string, status: string, sou
     if (!final?.completed) return { state: "working", ...base };
     const live = liveWork(record, final, children, now);
     if (live) return { state: "working", ...base, background: live };
-    return { state: "done", ...base, completed: true, ...(final.error ? { error: final.error } : {}), ...replyFields(final.lastAssistant) };
+    const end = settled(final.lastAssistant, runningTasks(record, final, now));
+    if (end.state === "working") return { ...end, ...base };
+    return { ...end, ...base, completed: true, ...(final.error ? { error: final.error } : {}), ...replyFields(final.lastAssistant) };
   }
   const live = liveWork(record, final, children, now);
   if (live) return { state: "working", ...base, background: live };
-  return { state: "done", ...base, completed: true, endedAt: phase.at, stopSeq: record.stop?.seq,
+  const end = settled(phase.reply ?? final?.lastAssistant, runningTasks(record, final, now));
+  if (end.state === "working") return { ...end, ...base };
+  return { ...end, ...base, completed: true, endedAt: phase.at, stopSeq: record.stop?.seq,
     ...(final?.completed && final.error ? { error: final.error } : {}),
     ...(phase.reply ? replyFields(phase.reply, phase.truncated) : replyFields(final?.lastAssistant)) };
 }
@@ -266,11 +279,13 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     // A finished turn that left live work is still the worker's turn. With no
     // Stop record, the transcript's awaited shells and the running children are
     // all there is: a leftover shell alone does not hold it.
-    const live = turn?.completed ? liveWork(undefined, turn, children, (readers.now ?? Date.now)()) : undefined;
+    const now = (readers.now ?? Date.now)();
+    const end = turn?.completed ? settled(turn.lastAssistant, runningTasks(undefined, turn, now)) : undefined;
+    const live = turn?.completed ? liveWork(undefined, turn, children, now) ?? (end?.state === "working" ? end.background : undefined) : undefined;
     if (live) {
       return { state: "working", session, completed: true, background: live, ...(turn?.error ? { error: turn.error } : {}), ...replyFields(turn?.lastAssistant) };
     }
-    const seen: WorkerObservation = { state, session, completed: turn?.completed === true, ...(turn?.error ? { error: turn.error } : {}),
+    const seen: WorkerObservation = { state, session, completed: turn?.completed === true, ...(end?.background ? { background: end.background } : {}), ...(turn?.error ? { error: turn.error } : {}),
       ...(turn?.interrupted ? { interrupted: true as const } : {}), ...replyFields(turn?.lastAssistant) };
     return { ...seen, ...await unfinished(seen, paneDirectory(pane), readers, s, pane) };
   }));

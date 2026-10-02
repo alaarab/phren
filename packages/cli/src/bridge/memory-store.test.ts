@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { blobSha, deleteStoreFile, putStoreFile, storeBlob, storeHead, storeTree } from "./memory-store.js";
+import { blobSha, deleteStoreFile, githubStoreRepository, putStoreFile, storeBlob, storeHead, storeTree } from "./memory-store.js";
 
 let root: string, store: string, index: string;
 beforeEach(async () => {
@@ -19,6 +19,25 @@ beforeEach(async () => {
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 const paths = async (sha: string) => ((await storeTree(store, sha)).tree as { path: string }[]).map(entry => entry.path).sort();
+
+it("reports a store's GitHub repository and branch without exposing its remote credentials", async () => {
+  execFileSync("git", ["-C", store, "remote", "add", "origin", "https://user:private-password@github.com/Owner/Memory.git"]);
+  const branch = execFileSync("git", ["-C", store, "symbolic-ref", "--short", "HEAD"], { encoding: "utf8" }).trim();
+  const head = await storeHead(store, index);
+  expect(head.repositoryIdentity).toEqual({ repository: "owner/memory", branch });
+  expect(JSON.stringify(head)).not.toContain("private-password");
+  execFileSync("git", ["-C", store, "remote", "remove", "origin"]);
+  expect(await storeHead(store, index)).not.toHaveProperty("repositoryIdentity");
+});
+
+it("only identifies GitHub remotes, preserving distinct hosts and local stores", () => {
+  for (const remote of ["git@github.com:Owner/Memory.git", "ssh://git@github.com/Owner/Memory.git", "https://github.com/Owner/Memory.git/"]) {
+    expect(githubStoreRepository(remote)).toBe("owner/memory");
+  }
+  for (const remote of ["/some/local/repo", "https://github.com.evil.test/owner/memory", "https://gitlab.com/owner/memory", "https://github.com/owner/memory?token=secret", "https://github.com/owner/memory/extra"]) {
+    expect(githubStoreRepository(remote)).toBeUndefined();
+  }
+});
 
 it("serves the working tree, uncommitted edits included, without ignored files", async () => {
   await writeFile(path.join(store, "demo", "tasks.md"), "# tasks\n");

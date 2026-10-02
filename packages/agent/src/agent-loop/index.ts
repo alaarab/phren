@@ -1,10 +1,15 @@
-import type { ContentBlock, InvalidToolCall, ToolUseBlock } from "../providers/types.js";
+import type { ContentBlock, InvalidToolCall, TokenUsage, ToolUseBlock } from "../providers/types.js";
 import { createSpinner, formatTurnHeader, formatToolCall } from "../spinner.js";
-import { shouldPrune } from "../context/pruner.js";
+import { planToolResultClearing } from "../context/clear-tool-results.js";
+import { contextTokens, reportedContext } from "../context/usage.js";
 import { compactWithLlm } from "../context/compactor.js";
 import { estimateMessageTokens } from "../context/token-counter.js";
 import { isContextOverflowError, withRetry } from "../providers/retry.js";
 import { injectPlanPrompt, requestPlanApproval } from "../plan.js";
+import { READ_ONLY_TOOLS } from "../permissions/checker.js";
+import { attachImages } from "../attach-images.js";
+import { modelSupportsVision } from "../models.js";
+import * as path from "path";
 import { detectLintCommand, detectTestCommand } from "../tools/lint-test.js";
 import { createCheckpoint } from "../checkpoint.js";
 import { resetRepeatChain } from "../guards/repeat-tool-reminder.js";
@@ -21,6 +26,22 @@ export { createSession };
  * If the history ends with an assistant message whose tool calls have no
  * results, append a cancelled result for each. Returns how many were closed.
  */
+/**
+ * Up to `max` chars of a check's output: the start (where compilers put the
+ * first error) and the end (where test runners put the summary).
+ */
+/** Files a type checker looks at (matched anywhere in a path or patch text). */
+const TYPED_SOURCE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|py|pyi)\b/;
+
+function headAndTail(output: string, max: number): string {
+  if (output.length <= max) return output;
+  const head = Math.floor(max * 0.4);
+  return `${output.slice(0, head)}\n… [${output.length - max} chars cut] …\n${output.slice(output.length - (max - head))}`;
+}
+
+/** How many times one turn's Stop hooks may send the model back. */
+const MAX_STOP_BLOCKS = 5;
+
 export function closeDanglingToolUses(session: AgentSession, reason = "Cancelled by user."): number {
   const messages = session.messages;
   const last = messages[messages.length - 1];
@@ -46,6 +67,8 @@ export async function runTurn(
   const { provider, registry, maxTurns, verbose, costTracker } = config;
   let systemPrompt = config.systemPrompt;
   const toolDefs = registry.getDefinitions();
+  // While a plan is pending the model may look but not touch.
+  const planToolDefs = toolDefs.filter((d) => READ_ONLY_TOOLS.has(d.name));
   const spinner = createSpinner();
   const useStream = typeof provider.chatStream === "function";
   const status = hooks?.onStatus ?? ((msg: string) => process.stderr.write(msg));
@@ -65,9 +88,26 @@ export async function runTurn(
   // Direct user input resets the repeat-call chain (repetition across it is not a loop)
   resetRepeatChain(session.repeatChain);
 
+  // UserPromptSubmit hooks may block the prompt (exit 2) or add context to it.
+  const hookConfig = config.hookConfig ?? null;
+  const promptHooks = hookConfig ? await runLifecycleHooks(hookConfig, "UserPromptSubmit", { prompt: userInput }) : null;
+  if (promptHooks?.blocked) {
+    (hooks?.onStatus ?? ((msg: string) => process.stderr.write(msg)))(`\x1b[33m[prompt blocked by a UserPromptSubmit hook: ${promptHooks.reason}]\x1b[0m\n`);
+    return { text: "", turns: 0, toolCalls: 0, stopReason: "hook_blocked" };
+  }
+  const promptText = promptHooks?.context ? `${userInput}\n\n<user-prompt-submit-hook>\n${promptHooks.context}\n</user-prompt-submit-hook>` : userInput;
+  // Image paths in the prompt (typed or dropped onto the terminal) go along as images.
+  let promptContent: string | ContentBlock[] = promptText;
+  if (modelSupportsVision(provider.name, (provider as { model?: string }).model ?? "")) {
+    const withImages = attachImages(promptText, process.cwd());
+    promptContent = withImages.content;
+    if (withImages.attached.length > 0) status(`\x1b[2m[attached ${withImages.attached.map((f) => path.basename(f)).join(", ")}]\x1b[0m\n`);
+    if (withImages.skipped.length > 0) status(`\x1b[33m[not attached: ${withImages.skipped.join(", ")}]\x1b[0m\n`);
+  }
+
   // Append user message to the durable log
   const prompted = session.log.append("user/message", {
-    message: { role: "user", content: userInput },
+    message: { role: "user", content: promptContent },
     source: "user",
     turn: session.turns,
   });
@@ -83,10 +123,9 @@ export async function runTurn(
   let overflowRecovered = false;
 
   const signal = hooks?.signal;
-  const hookConfig = config.hookConfig ?? null;
-  if (hookConfig) {
-    await runLifecycleHooks(hookConfig, "UserPromptSubmit", { prompt: userInput });
-  }
+  // Times a Stop hook sent the model back to work in this turn.
+  let stopBlocks = 0;
+  let stopHooksRan = false;
 
   // Why the loop ended; stays "max_turns" if the turn cap runs out.
   let endReason: TurnStopReason = "max_turns";
@@ -112,6 +151,7 @@ export async function runTurn(
     // knowledge to phren out of band.)
     const contextLimit = provider.contextWindow ?? 200_000;
     const compactHistory = async (keepRecentTurns: number, trigger: string): Promise<boolean> => {
+      if (hookConfig) await runLifecycleHooks(hookConfig, "PreCompact", { trigger: "auto" });
       const preCount = session.messages.length;
       const preTokens = estimateMessageTokens(session.messages);
       const result = await compactWithLlm(provider, systemPrompt, session.messages, {
@@ -122,6 +162,7 @@ export async function runTurn(
         pruneConfig: { contextLimit, keepRecentTurns },
         signal,
         verbose,
+        tools: toolDefs,
       });
       if (!result) return false;
       session.log.replaceMessageRange(result.plan.startIndex, result.plan.endIndex, result.plan.summaryMessage);
@@ -138,12 +179,22 @@ export async function runTurn(
       return true;
     };
 
-    if (shouldPrune(systemPrompt, session.messages, { contextLimit })) {
-      await compactHistory(6, "");
+    // Past 75% of the window (by the provider's own count when there is
+    // one), first clear old tool output; compact only if that frees too little.
+    const usedTokens = () => contextTokens(systemPrompt, session.messages, session.log, session.reportedContext);
+    if (usedTokens() > contextLimit * 0.75) {
+      const before = usedTokens();
+      const cleared = planToolResultClearing(session.messages);
+      for (const { index, message } of cleared) session.log.replaceMessageRange(index, index, message);
+      const after = usedTokens();
+      if (cleared.length > 0) {
+        status(`\x1b[2m[cleared ${cleared.length === 1 ? "old tool output in 1 message" : `old tool output in ${cleared.length} messages`}: ~${Math.round(before / 1000)}k → ~${Math.round(after / 1000)}k tokens]\x1b[0m\n`);
+      }
+      if (after > contextLimit * 0.6) await compactHistory(6, "");
     }
 
     // For plan mode first turn, pass empty tools so LLM can't call any
-    const turnTools = planPending ? [] : toolDefs;
+    const turnTools = planPending ? planToolDefs : toolDefs;
 
     // Model-visible means logged: everything the provider is about to see
     // must be reconstructable from the event log. Cheap relative to a model
@@ -155,6 +206,7 @@ export async function runTurn(
     let assistantContent: ContentBlock[];
     let stopReason: "end_turn" | "tool_use" | "max_tokens";
     let invalidToolCalls: InvalidToolCall[] = [];
+    let usage: TokenUsage | undefined;
 
     try {
       if (useStream) {
@@ -205,6 +257,7 @@ export async function runTurn(
         assistantContent = result.content;
         stopReason = result.stop_reason;
         invalidToolCalls = result.invalidToolCalls;
+        usage = result.usage;
       } else {
         // Batch path
         spinner.start("Thinking...");
@@ -219,6 +272,7 @@ export async function runTurn(
         assistantContent = response.content;
         stopReason = response.stop_reason;
         invalidToolCalls = response.invalidToolCalls ?? [];
+        usage = response.usage;
 
         // Track cost from batch response
         if (costTracker && response.usage) {
@@ -270,6 +324,7 @@ export async function runTurn(
       stop_reason: stopReason,
       turn: session.turns,
     });
+    session.reportedContext = reportedContext(usage, session.log) ?? session.reportedContext;
     // Only after the message is in the log, so a reader never sees neither.
     preview?.clear();
     session.turns++;
@@ -289,8 +344,9 @@ export async function runTurn(
       status(`\x1b[2m  cost: ${costTracker.formatCost()}\x1b[0m\n`);
     }
 
-    // Plan mode gate: after first response, ask for approval
-    if (planPending) {
+    // Plan mode gate: once the model presents its plan (a reply without tool
+    // calls), ask for approval. Read-only calls before that just run.
+    if (planPending && stopReason === "end_turn") {
       const approve = hooks?.onPlanApproval ?? requestPlanApproval;
       const { approved, feedback } = await approve();
       if (signal?.aborted) { endReason = "aborted"; break; }
@@ -299,7 +355,7 @@ export async function runTurn(
           ? `The user rejected the plan with feedback: ${feedback}\nPlease revise your plan.`
           : "The user rejected the plan. Task aborted.";
         if (feedback) {
-          // Revisions remain in plan mode, with tools disabled, until approved.
+          // Revisions remain in plan mode, read-only, until approved.
           session.log.append("user/message", {
             message: { role: "user", content: msg },
             source: "user",
@@ -337,13 +393,34 @@ export async function runTurn(
     }
 
     // If no tool use, we're done
-    if (stopReason !== "tool_use") { endReason = "end_turn"; break; }
+    if (stopReason !== "tool_use") {
+      // A Stop hook that exits 2 sends the model back with its reason (tests
+      // still failing, say); stop_hook_active tells it it already did once.
+      if (hookConfig && stopBlocks < MAX_STOP_BLOCKS && !signal?.aborted) {
+        const stop = await runLifecycleHooks(hookConfig, "Stop", { stop_hook_active: stopBlocks > 0 });
+        if (stop.blocked) {
+          stopBlocks++;
+          status(`\x1b[2m[Stop hook: ${stop.reason}]\x1b[0m\n`);
+          session.log.append("user/message", {
+            message: { role: "user", content: `A Stop hook asked you to keep going: ${stop.reason}` },
+            source: "system",
+            turn: session.turns,
+          });
+          continue;
+        }
+        stopHooksRan = true;
+      }
+      endReason = "end_turn";
+      break;
+    }
 
     // Execute tool calls with concurrency. Calls whose arguments were not
     // valid JSON are answered with an error instead of being run.
     const toolUseBlocks = assistantContent.filter((b): b is ToolUseBlock => b.type === "tool_use");
     const invalidById = new Map(invalidToolCalls.map((call) => [call.id, call]));
-    const runnableBlocks = toolUseBlocks.filter((b) => !invalidById.has(b.id));
+    // Only offered the read-only tools, a model can still name another one.
+    const planRefused = new Set(planPending ? toolUseBlocks.filter((b) => !READ_ONLY_TOOLS.has(b.name)).map((b) => b.id) : []);
+    const runnableBlocks = toolUseBlocks.filter((b) => !invalidById.has(b.id) && !planRefused.has(b.id));
 
     // Checkpoint BEFORE the mutating batch: the tool names are known now, and
     // the snapshot must be the true pre-turn tree so /rewind can restore it.
@@ -376,6 +453,11 @@ export async function runTurn(
       executedResults.flatMap((r) => (r.type === "tool_result" ? [[r.tool_use_id, r] as const] : [])),
     );
     const toolResults: ContentBlock[] = toolUseBlocks.map((block) => {
+      if (planRefused.has(block.id)) {
+        const output = `Not run: plan mode allows only read-only tools until the user approves the plan. Finish the plan without calling ${block.name}.`;
+        hooks?.onToolEnd?.(block.name, block.input, output, true, 0);
+        return { type: "tool_result", tool_use_id: block.id, content: output, is_error: true };
+      }
       const invalid = invalidById.get(block.id);
       if (!invalid) return resultById.get(block.id)!;
       const sample = invalid.raw.length > 300 ? `${invalid.raw.slice(0, 300)}…` : invalid.raw;
@@ -385,8 +467,8 @@ export async function runTurn(
       return { type: "tool_result", tool_use_id: block.id, content: output, is_error: true };
     });
 
-    session.toolCalls += toolCallCount + invalidById.size;
-    turnToolCalls += toolCallCount + invalidById.size;
+    session.toolCalls += toolCallCount + invalidById.size + planRefused.size;
+    turnToolCalls += toolCallCount + invalidById.size + planRefused.size;
 
     // Only successful write/edit results justify checks; requested, denied,
     // failed, or cancelled mutations must never launch a follow-up command.
@@ -397,11 +479,22 @@ export async function runTurn(
       const cwd = registry.permissionConfig.projectRoot;
       const lintCmd = config.lintTestConfig.lintCmd ?? detectLintCommand(cwd);
       const testCmd = config.lintTestConfig.testCmd ?? detectTestCommand(cwd);
+      // The type check first: it is quick, and tests can't pass while it
+      // fails. Only after an edit to a typed source file (a README edit
+      // doesn't need it).
+      const touchedTyped = toolUseBlocks.some((block) => mutatingTools.has(block.name)
+        && TYPED_SOURCE.test(block.name === "apply_patch" ? String(block.input.patch ?? "") : String(block.input.path ?? "")));
+      const typecheckCmd = touchedTyped ? config.lintTestConfig.typecheckCmd : undefined;
 
       const lintFailures: string[] = [];
-      for (const cmd of new Set([lintCmd, testCmd].filter(Boolean) as string[])) {
+      let typesFailed = false;
+      for (const cmd of new Set([typecheckCmd, lintCmd, testCmd].filter(Boolean) as string[])) {
         if (signal?.aborted) break;
         if (deniedChecks.has(cmd)) continue;
+        if (typesFailed && cmd === testCmd && cmd !== lintCmd) {
+          lintFailures.push(`Tests (${cmd}) were not run: fix the type errors first.`);
+          continue;
+        }
         const input = { command: cmd, cwd, timeout: 60_000, description: "Verify the completed edit" };
         hooks?.onToolStart?.("shell", input, 1);
         // The same registry and scheduler preserve shell approval, hooks,
@@ -415,7 +508,8 @@ export async function runTurn(
         if (check.permissionDenied) deniedChecks.add(cmd);
         if (check.is_error) {
           if (verbose) status(`\x1b[33m[post-edit check failed: ${cmd}]\x1b[0m\n`);
-          lintFailures.push(`Post-edit check failed (${cmd}):\n${check.output.slice(0, 2000)}`);
+          if (cmd === typecheckCmd) typesFailed = true;
+          lintFailures.push(`Post-edit check failed (${cmd}):\n${headAndTail(check.output, 2000)}`);
         }
       }
       if (lintFailures.length > 0) {
@@ -458,8 +552,8 @@ export async function runTurn(
     text = lastAssistant.content;
   }
 
-  if (hookConfig) {
-    await runLifecycleHooks(hookConfig, "Stop", {});
+  if (hookConfig && !stopHooksRan) {
+    await runLifecycleHooks(hookConfig, "Stop", { stop_hook_active: stopBlocks > 0 });
   }
 
   return { text, turns: session.turns - turnStart, toolCalls: turnToolCalls, stopReason: signal?.aborted ? "aborted" : endReason };

@@ -11,7 +11,7 @@ import { isAccountSlug } from "./claude-accounts.js";
  * the five timing forms evaluated in local time, and the run history file. */
 
 export const SCHEDULE_EVERY = ["interval", "daily", "weekly", "once", "cron"] as const;
-export const SCHEDULE_HARNESSES = ["claude", "codex", "opencode"] as const;
+export const SCHEDULE_HARNESSES = ["claude", "codex", "opencode", "copilot"] as const;
 export const SCHEDULE_NOTIFY = ["start", "finish", "failure"] as const;
 export const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
