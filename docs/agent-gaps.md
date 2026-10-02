@@ -27,6 +27,7 @@ rest.
 | Hooks | Exit 2 blocks `UserPromptSubmit` and `Stop`, `PostToolUse` feedback, `SessionStart` and `PreCompact` | #304 |
 | Headless | `--input-format stream-json`; a JSON Schema for every stream-json line, tested against real output | #305, #309 |
 | UX | `/reasoning`, `/model <id>`, `/provider <name>` mid-session; images attached from paths in a prompt | #314, #315 |
+| Headless | `--json-schema` validates the final result against a supplied schema | #317 |
 | Sandbox | `--no-network` for shell commands (bwrap, Seatbelt) | #316 |
 
 ## Still open
@@ -34,7 +35,6 @@ rest.
 - **Next big item: LSP diagnostics.** Type errors scoped to the edited file
   right after each edit, from the project's language server, as OpenCode does.
   The parse check and the post-edit type-check run cover the cheap part.
-- An output JSON schema for headless results (`--json-schema`).
 - Smaller: steering that lands mid-stream (today between tool batches),
   provider-native web search (today a DuckDuckGo scrape), OpenTelemetry.
 

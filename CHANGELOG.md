@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.3.21] - 2026-10-02
 
+- Keep a newly started conductor reachable when an identity lookup on a busy computer outlasts its cache window.
+
 ### Added
 
 - phren agent attaches images named in a prompt: a png, jpeg, webp or gif path, typed or dropped onto the terminal, goes to a vision-capable model as the image itself (up to 5, 5MB each).
