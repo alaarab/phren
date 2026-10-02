@@ -309,6 +309,8 @@ function linkGlobal(phrenPath: string, tools: Set<string>, caps: ManagementCapab
     log("  global skills -> ~/.claude/skills/");
     const skillsDir = homePath(".claude", "skills");
     syncScopeSkillsToDir(phrenPath, "global", skillsDir);
+    log("  global skills -> ~/.agents/skills/");
+    syncScopeSkillsToDir(phrenPath, "global", homePath(".agents", "skills"));
 
     if (tools.has("copilot")) {
       const copilotSkillsDir = homePath(".copilot", "skills");

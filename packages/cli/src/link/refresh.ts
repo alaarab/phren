@@ -11,7 +11,7 @@ import { syncScopeSkillsToDir } from "../skill/files.js";
 export function refreshLinkedContext(phrenPath: string, profile: string): void {
   const caps = resolveManagementCapabilities(phrenPath);
   if (caps.installSkillLinks) {
-    for (const tool of [".claude", ".copilot"]) {
+    for (const tool of [".claude", ".agents", ".copilot"]) {
       const dir = homePath(tool, "skills");
       if (fs.existsSync(path.join(path.dirname(dir), "skill-manifest.json"))) syncScopeSkillsToDir(phrenPath, "global", dir);
     }

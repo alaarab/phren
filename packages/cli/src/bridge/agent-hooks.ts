@@ -1,3 +1,5 @@
+import { recordedConductor } from "./conductor-role.js";
+import { conductorContext } from "./conductor-context.js";
 import { defaultPhrenPath } from "../shared.js";
 import { disabledHint } from "../modules/registry.js";
 import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
@@ -9,8 +11,8 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
-import { findPane, knownPanes, paneForCodexSession, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
-import { TOOL_HOOK_BUDGET_MS } from "./hook-fast.js";
+import { findPane, knownPanes, paneIdentity, paneForCodexSession, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
+import { hookOutput, TOOL_HOOK_BUDGET_MS } from "./hook-fast.js";
 import { underCodexDaemon } from "./codex-daemon.js";
 import { codexAutoReview } from "./codex-review-mode.js";
 import { terminalPaneFromEnv, terminalProvider } from "./terminal.js";
@@ -1388,10 +1390,28 @@ export class AgentHooks {
       res.setHeader("Content-Type", "application/json");
       try {
         if (req.method === "POST" && req.url === "/sudo") { await this.sudo.handle(req, res); return; }
-        if (req.method !== "POST" || req.url !== "/hook") throw new Error("Invalid callback");
+        if (req.method !== "POST" || !["/hook", "/conductor-context"].includes(req.url ?? "")) throw new Error("Invalid callback");
         let size = 0; const chunks: Buffer[] = [];
         for await (const bytes of req) { size += bytes.length; if (size > 1_048_576) throw new Error("Oversized hook"); chunks.push(bytes); }
         const body = object(JSON.parse(Buffer.concat(chunks).toString()));
+        // OpenCode asks when building the root session's system prompt. Resolve
+        // its process against the current conductor; no inherited pane env or
+        // plugin callback may create a session binding or a turn record here.
+        if (req.url === "/conductor-context") {
+          if (this.modules?.has("conductor") === false) { res.end("{}"); return; }
+          if (!Number.isSafeInteger(body.pid) || Number(body.pid) <= 0 || typeof body.session !== "string") throw new Error("Invalid context callback");
+          const role = await recordedConductor();
+          if (!role) { res.end("{}"); return; }
+          const s = await snapshot(role.server);
+          const pane = objects(s.panes).find(p => p.pane_id === role.pane);
+          if (!pane || pane.agent !== "opencode" || (role.terminal && pane.terminal_id !== role.terminal)) { res.end("{}"); return; }
+          const pids = (await terminalProvider().processes(role.server, role.pane)).foregroundPids;
+          if (!pids.includes(Number(body.pid)) || await paneIdentity(role.server, pane, true) !== body.session) { res.end("{}"); return; }
+          const target = targetSchema.parse({ server: role.server, workspace: pane.workspace_id, tab: pane.tab_id,
+            pane: role.pane, source: "opencode", session: body.session });
+          const context = await conductorContext(target, s);
+          res.end(JSON.stringify(context ? { context } : {})); return;
+        }
         let target = targetSchema.parse(body.target);
         if (this.modules?.has("git") === false && ["PreToolUse", "PostToolUse"].includes(String(body.event))) {
           res.statusCode = 404; res.end(JSON.stringify({ error: disabledHint("git") })); return;
@@ -1451,9 +1471,14 @@ export class AgentHooks {
           const answer = typeof body.prompt === "string" ? this.submitted(target, body.prompt.slice(0, 65_536)) : {};
           // A prompt refused here never starts a turn in this conversation.
           if (answer.decision !== "block") await this.recordTurn(target, pane, body, dispatch);
-          res.end(JSON.stringify(answer)); return;
+          const context = answer.decision === "block" || this.modules?.has("conductor") === false ? undefined : await conductorContext(target, s).catch(() => undefined);
+          res.end(JSON.stringify({ ...answer, ...(context ? { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } } : {}) })); return;
         }
         if (body.event === "SessionStart" || body.event === "Stop") await this.recordTurn(target, pane, body, dispatch);
+        if (body.event === "SessionStart") {
+          const context = this.modules?.has("conductor") === false ? undefined : await conductorContext(target, s).catch(() => undefined);
+          res.end(JSON.stringify(context ? { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } } : {})); return;
+        }
         if ((this.modules?.has("git") ?? true) && ["PreToolUse", "PostToolUse"].includes(String(body.event)) && capturesChanges(String(body.tool), input)) {
           const conversation = `${target.source}:${target.session}`, id = String(body.toolUseId || "").slice(0, 200);
           if (body.event === "PreToolUse") {
@@ -1650,9 +1675,9 @@ async function forwardHook(source: Provider, target: Target, event: string, valu
       headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, res => {
       let result = "";
       res.on("data", chunk => { result += chunk.toString(); if (result.length > 16_384) req.destroy(); });
-      // Only a decision reaches the agent: an approval answer, or a refusal of
-      // a prompt Phren meant for another conversation. An empty reply says nothing.
-      res.on("end", () => { if (res.statusCode === 200 && (event === "PermissionRequest" || (event === "UserPromptSubmit" && result.includes("\"decision\"")))) process.stdout.write(result); resolve(); });
+      // Forward approval/refusal decisions and validated turn context.
+      // Tool callbacks stay silent, and an empty reply says nothing.
+      res.on("end", () => { if (res.statusCode === 200) process.stdout.write(hookOutput(event, result)); resolve(); });
       res.on("error", () => resolve());
     });
     req.on("error", () => resolve()); req.on("timeout", () => { req.destroy(); resolve(); }); req.end(data);

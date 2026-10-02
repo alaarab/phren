@@ -12,6 +12,7 @@ import {
 import { getProjectOwnershipDefault } from "../project-config.js";
 import { getMachineName } from "../machine-identity.js";
 import { setMachineProfile } from "../profile-store.js";
+import { setSkillEnabledAndSync } from "../skill/files.js";
 
 describe("management preset init integration", () => {
   let tmpRoot: string;
@@ -46,6 +47,17 @@ describe("management preset init integration", () => {
     const homeClaude = path.join(homeDir, ".claude", "CLAUDE.md");
     expect(fs.existsSync(homeClaude)).toBe(true);
     expect(fs.lstatSync(homeClaude).isSymbolicLink()).toBe(true);
+    const nativeSkill = path.join(homeDir, ".agents", "skills", "phren-discover");
+    expect(fs.lstatSync(nativeSkill).isSymbolicLink()).toBe(true);
+    expect(fs.existsSync(path.join(nativeSkill, "SKILL.md"))).toBe(true);
+    const ownerSkill = path.join(homeDir, ".agents", "skills", "owner", "SKILL.md");
+    fs.mkdirSync(path.dirname(ownerSkill), { recursive: true });
+    fs.writeFileSync(ownerSkill, "# Owner skill\n");
+    setSkillEnabledAndSync(phrenPath, "global", "phren-discover", false);
+    expect(fs.existsSync(nativeSkill)).toBe(false);
+    expect(fs.readFileSync(ownerSkill, "utf8")).toBe("# Owner skill\n");
+    setSkillEnabledAndSync(phrenPath, "global", "phren-discover", true);
+    expect(fs.existsSync(path.join(nativeSkill, "SKILL.md"))).toBe(true);
   });
 
   it("assisted init does not write into ~/.claude but keeps hooks", async () => {
@@ -60,6 +72,7 @@ describe("management preset init integration", () => {
     // ...but nothing is written into ~/.claude.
     expect(fs.existsSync(path.join(homeDir, ".claude", "CLAUDE.md"))).toBe(false);
     expect(fs.existsSync(path.join(homeDir, ".claude", "skill-manifest.json"))).toBe(false);
+    expect(fs.existsSync(path.join(homeDir, ".agents", "skills"))).toBe(false);
     // No CLI wrapper under the assisted preset.
     expect(fs.existsSync(path.join(homeDir, ".local", "bin", "phren"))).toBe(false);
     // Hooks remain enabled.
@@ -74,6 +87,7 @@ describe("management preset init integration", () => {
     expect(readInstallPreferences(phrenPath).managementPreset).toBe("manual");
     expect(getHooksEnabledPreference(phrenPath)).toBe(false);
     expect(fs.existsSync(path.join(homeDir, ".claude", "CLAUDE.md"))).toBe(false);
+    expect(fs.existsSync(path.join(homeDir, ".agents", "skills"))).toBe(false);
 
     const env = fs.readFileSync(path.join(phrenPath, ".env"), "utf8");
     expect(env).toMatch(/PHREN_FEATURE_AUTO_CAPTURE=0/);
