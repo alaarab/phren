@@ -196,6 +196,10 @@ export function peekNode(nodeId: string): void {
 
 export function getNodeAt(x: number, y: number): NodeDetail | null {
   if (!state.fg) return null;
+  // Touch events can arrive between a relayout/camera flight and the next GL
+  // frame. Raycaster reads world matrices but never refreshes them itself.
+  state.fg.scene().updateMatrixWorld(true);
+  state.fg.camera().updateMatrixWorld(true);
   const size = containerSize();
   const ndc = new THREE.Vector2((x / size.w) * 2 - 1, -(y / size.h) * 2 + 1);
   const raycaster = new THREE.Raycaster();

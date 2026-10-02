@@ -241,6 +241,9 @@ export function setupForceGraph(): void {
     .d3AlphaDecay(1)
     .onNodeHover((node: FGNode | null) => onHover(node))
     .onNodeClick((node: FGNode, event: MouseEvent) => onCanvasClick(event, node))
+    // A link's wider hit geometry can sit over a dot; use the same point-based
+    // picker when force-graph reports that link instead of dropping the tap.
+    .onLinkClick((_link: FGLink, event: MouseEvent) => onCanvasClick(event, null))
     .onNodeRightClick((node: FGNode, event: MouseEvent) => onNodeRightClick(node, event))
     .onNodeDragEnd((node: FGNode) => {
       node.fx = node.x;
