@@ -455,7 +455,12 @@ the first reply with `replayed: true`. `POST /v1/prompt/status { target,
 deliveryId }` (capability `promptStatus`) returns `{ ok, state }`, where
 `state` is `queued`, `delivered`, `blocked` (another conversation in the pane
 took it) or `unknown` (not tracked, another conversation, or older than ten
-minutes), for a message the Hook answered as queued or delivered.
+minutes), for a message sent with a `deliveryId`. The id follows the typed text
+until the conversation's hook submits it, so a message answered
+`deliveryUncertain` still turns `delivered` once the agent takes it. A
+`/v1/transcripts` stream opened with `deliveries=1` (capability
+`deliveryFrames`) pushes `{ type: "delivery", source, session, deliveryId,
+state }` for that conversation's messages whenever one's state changes.
 
 A working pane returns 409 before any model command is typed. `/v1/prompt`
 also refuses every slash command while working, except Claude Code's

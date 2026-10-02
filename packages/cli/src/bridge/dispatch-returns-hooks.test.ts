@@ -490,9 +490,8 @@ describe.skipIf(process.platform === "win32")("the Hook recording a worker's tur
   it("settles the same words sent to two conversations by conversation, not by which was typed first", async () => {
     await post({ target, event: "SessionStart" });
     const first = { ...target, session: "00000009-1111-4111-8111-111111111111" };
-    const toFirst = hooks.expectDelivery(first, "Same words"), toThis = hooks.expectDelivery(target, "Same words");
-    hooks.trackDelivery("same-words-1", first, "Same words", "queued");
-    hooks.trackDelivery("same-words-2", target, "Same words", "queued");
+    const toFirst = hooks.expectDelivery(first, "Same words", 1_500, undefined, "same-words-1"), toThis = hooks.expectDelivery(target, "Same words", 1_500, undefined, "same-words-2");
+    hooks.queueDelivery("same-words-1", first); hooks.queueDelivery("same-words-2", target);
     expect(await post({ target, event: "UserPromptSubmit", prompt: "Same words" })).toBe("{}");
     expect(await toThis).toBe("delivered");
     expect(hooks.deliveryState("same-words-2", target)).toBe("delivered");
@@ -500,6 +499,27 @@ describe.skipIf(process.platform === "win32")("the Hook recording a worker's tur
     expect(hooks.deliveryState("same-words-2", first)).toBe("unknown");
     expect(hooks.deliveryPending(first, "Same words")).toBe(true);
     void toFirst;
+  });
+
+  it("settles a phone message by its delivery id, and keeps only a hash of the typed words", async () => {
+    await post({ target, event: "SessionStart" });
+    const queued = hooks.expectDelivery(target, "Run the suite again", 1, undefined, "by-id-0001");
+    expect(await queued).toBe("pending");
+    // Not answered yet: the phone has no reply to ask about.
+    expect(hooks.deliveryState("by-id-0001", target)).toBe("unknown");
+    hooks.queueDelivery("by-id-0001", target);
+    expect(hooks.deliveriesFor(target)).toEqual([{ deliveryId: "by-id-0001", state: "queued" }]);
+    expect([...(hooks as unknown as { deliveries: Map<string, unknown> }).deliveries.keys()]).toEqual([expect.stringMatching(/^[0-9a-f]{64}$/)]);
+    expect(await post({ target, event: "UserPromptSubmit", prompt: "<pasted_content id=\"3\">\nRun the suite   again\n</pasted_content id=\"3\">" })).toBe("{}");
+    expect(hooks.deliveryState("by-id-0001", target)).toBe("delivered");
+    // One the Hook answered uncertain still turns delivered when its hook takes it.
+    const uncertain = hooks.expectDelivery(target, "Check the logs", 1, undefined, "by-id-0002");
+    expect(await uncertain).toBe("pending");
+    expect(await post({ target, event: "UserPromptSubmit", prompt: "Check the logs" })).toBe("{}");
+    expect(hooks.deliveryState("by-id-0002", target)).toBe("delivered");
+    // A late queue call never moves a settled message back.
+    hooks.queueDelivery("by-id-0002", target);
+    expect(hooks.deliveryState("by-id-0002", target)).toBe("delivered");
   });
 
   it("records no turn for a prompt it refused because it was meant for another conversation", async () => {
