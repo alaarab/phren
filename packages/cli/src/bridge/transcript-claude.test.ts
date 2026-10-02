@@ -204,6 +204,25 @@ describe("Claude children the parent records without a task launch", () => {
     expect((await f.states()).map(child => child.state)).toEqual(["completed", "completed"]);
   });
 
+  it("ends a teammate and a background agent whose session lost their final notice", async () => {
+    // The session restarted: the teammate's last word was a report, not idle or a shutdown,
+    // and the background agent's completion notification never reached the parent.
+    const f = await parent({ type: "assistant", message: { role: "assistant", content: [
+      { type: "tool_use", id: "call-mate", name: "Agent", input: { name: "composer", description: "Talk settings sheet", prompt: "Build" } }] } },
+    result({ status: "async_launched", isAsync: true, agentId: "areview1", description: "Review hook-2" }, "call-bg"),
+    { type: "user", message: { role: "user", content: '<teammate-message teammate_id="composer" summary="done">The sheet is written.</teammate-message>' } });
+    const mate = path.join(f.directory, "agent-acomposer-0123abcd.jsonl"), review = path.join(f.directory, "agent-areview1.jsonl");
+    await writeFile(mate, sidechain("acomposer-0123abcd", { type: "assistant", message: { role: "assistant", stop_reason: "tool_use", content: [] } }));
+    await writeFile(review, sidechain("areview1", { type: "assistant", message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "Findings written." }] } }));
+    // The background agent ended on a finished reply; the teammate is mid-tool, so it runs on.
+    expect(await f.states()).toEqual([{ id: "areview1", label: "Review hook-2", state: "completed" }, { id: "acomposer-0123abcd", label: "Talk settings sheet", state: "running" }]);
+    // Quiet past the limit: the teammate's session is gone, so it is no longer running.
+    const old = new Date(Date.now() - CLAUDE_SKILL_QUIET_MS - 1_000);
+    await utimes(mate, old, old);
+    vi.useFakeTimers({ now: Date.now() + 6_000, toFake: ["Date"] });
+    try { expect((await f.states()).map(child => child.state)).toEqual(["completed", "completed"]); } finally { vi.useRealTimers(); }
+  });
+
   it("finds a named teammate by the name in its meta file, and lists a named background agent once", async () => {
     const f = await parent({ type: "assistant", message: { role: "assistant", content: [
       { type: "tool_use", id: "call-mate", name: "Agent", input: { name: "reviewer", description: "Review the diff", prompt: "Review" } },
