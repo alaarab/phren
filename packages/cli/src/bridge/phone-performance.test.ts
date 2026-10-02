@@ -104,7 +104,8 @@ afterAll(async () => {
 
 it("measures phone route handlers with 24 panes and 5000 transcript lines", async () => {
   for (const route of ["/v1/health", "/v1/workspaces", "/v1/transcripts/history?" + new URLSearchParams({ ...target, beforeLine: "4500" }),
-    "/v1/subagents?" + new URLSearchParams(target), "/v1/usage", "/v1/code/search?project=speed&q=sample&limit=20"]) {
+    "/v1/subagents?" + new URLSearchParams(target), "/v1/usage", "/v1/code/search?project=speed&q=sample&limit=20",
+    "/v1/code/files?project=speed&name=sample.ts", "/v1/files/resolve?" + new URLSearchParams({ ...target, path: "sample.ts" })]) {
     const samples = [];
     for (let i = 0; i < 11; i++) {
       const response = Object.assign(new EventEmitter(), { statusCode: 200, writableEnded: false,
@@ -116,6 +117,8 @@ it("measures phone route handlers with 24 panes and 5000 transcript lines", asyn
       expect(response.statusCode, JSON.stringify(data)).toBe(200);
       if (route.includes("history")) expect(data.totalLines).toBe(5_000);
       if (route.includes("code/search")) expect(data.symbols).toHaveLength(20);
+      if (route.includes("code/files")) expect(data.files).toEqual([{ path: "sample.ts", language: "typescript" }]);
+      if (route.includes("files/resolve")) expect(data).toMatchObject({ path: "sample.ts", contentType: "text/plain" });
     }
     const cold = samples.shift()!; samples.sort((a, b) => a - b);
     process.stdout.write(`PHONE_SPEED ${route.split("?")[0]} cold=${cold.toFixed(2)} median=${samples[5].toFixed(2)} max=${samples[9].toFixed(2)} ms\n`);

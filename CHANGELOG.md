@@ -3,6 +3,13 @@
 All notable changes to phren are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- Hook resolves chat file references against the session's folder and repository through `/v1/files/resolve`, including selected child-agent and worktree scopes.
+- `/v1/code/files` finds indexed files by their literal filename or path suffix, including files without declarations, with bounded choices and capability discovery.
+
 ## [0.3.24] - 2026-10-02
 
 ### Fixed

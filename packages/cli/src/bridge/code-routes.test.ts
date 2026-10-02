@@ -76,6 +76,26 @@ describe("code Hook routes", () => {
     expect(typeof hit!.uses).toBe("number");
   });
 
+  it("finds filenames independent of declarations, with literal suffixes and bounded choices", async () => {
+    for (const file of ["Session.ts", "Auth/Session.ts", "Tests/Session.ts", "NotSession.ts", "literal_%/Session.ts", "日本語/Session.ts"]) {
+      fs.mkdirSync(path.dirname(path.join(repo, file)), { recursive: true });
+      fs.writeFileSync(path.join(repo, file), "// no declaration resembling the filename\n");
+    }
+    await indexProject(store, "fixture", { repoRoot: repo });
+    const result = await routes.files("fixture", "Session.ts", "2");
+    expect(result).toMatchObject({ project: "fixture", name: "Session.ts", truncated: true });
+    expect(result.files.map(file => file.path)).toEqual(["Session.ts", "日本語/Session.ts"]);
+    expect((await routes.files("fixture", "literal_%/Session.ts")).files.map(file => file.path)).toEqual(["literal_%/Session.ts"]);
+    expect((await routes.files("fixture", "日本語/Session.ts")).files.map(file => file.path)).toEqual(["日本語/Session.ts"]);
+    expect((await routes.files("fixture", "Session.ts")).files).toHaveLength(5);
+    expect(await routes.files("fixture", "missing.ts")).toMatchObject({ files: [], truncated: false });
+    await expect(routes.files("missing", "Session.ts")).rejects.toMatchObject({ status: 404 });
+    for (const name of ["", "../Session.ts", "/Session.ts", ".git/config", "Auth//Session.ts", "a\nb"]) {
+      await expect(routes.files("fixture", name)).rejects.toThrow();
+    }
+    await expect(routes.files("fixture", "Session.ts", "101")).rejects.toThrow();
+  });
+
   it("returns a file outline in source order", async () => {
     const result = await routes.outline("fixture", "typescript/app.ts");
     expect(result.entries.length).toBeGreaterThan(0);
@@ -116,10 +136,14 @@ describe("code module gate", () => {
   it("advertises the code capability and serves the routes only when the module is on", () => {
     const on = snapshot(["memory", "code"]);
     expect(capabilitiesForModules(on).code).toBe(true);
+    expect(capabilitiesForModules(on).codeFiles).toBe(true);
+    expect(() => requireRoute(on, "GET", "/v1/code/files")).not.toThrow();
     expect(() => requireRoute(on, "GET", "/v1/code/status")).not.toThrow();
 
     const off = snapshot(["memory"]);
     expect(capabilitiesForModules(off).code).toBeUndefined();
+    expect(capabilitiesForModules(off).codeFiles).toBeUndefined();
+    expect(() => requireRoute(off, "GET", "/v1/code/files")).toThrow();
     expect(() => requireRoute(off, "GET", "/v1/code/status")).toThrow("phren code needs @phren/code: run phren modules enable code");
   });
 });
