@@ -105,7 +105,11 @@ export async function storeTree(store: string, sha: string): Promise<Json> {
 export async function storeBlob(store: string, sha: string): Promise<Json> {
   if (!SHA.test(sha)) throw new BridgeError(400, "Invalid blob sha.");
   if ((await git(store, ["cat-file", "-t", sha]).catch(() => "")).trim() !== "blob") throw new BridgeError(404, "Unknown blob.");
-  const { stdout } = await exec("git", ["-C", store, "cat-file", "blob", sha], { encoding: "buffer", maxBuffer: MAX_FILE * 4 });
+  const size = Number((await git(store, ["cat-file", "-s", sha])).trim());
+  if (size > MAX_FILE) throw new BridgeError(413,
+    "This store file exceeds the phone's 4 MiB limit. Archive or shorten it on the computer, then sync again.",
+    { code: "store-file-too-large", size, limit: MAX_FILE });
+  const { stdout } = await exec("git", ["-C", store, "cat-file", "blob", sha], { encoding: "buffer", maxBuffer: MAX_FILE, timeout: 60_000 });
   return { sha, encoding: "base64", content: stdout.toString("base64") };
 }
 

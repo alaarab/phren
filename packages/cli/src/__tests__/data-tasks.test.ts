@@ -416,6 +416,16 @@ describe("updateTask", () => {
     const item = after.data.items.Queue.find((i) => i.line.includes("rate limiting"));
     expect(item?.context).toBe("new");
   });
+
+  it("does not duplicate an echoed context history or a retried latest note", () => {
+    writeTaskFile(SAMPLE_TASKS);
+    for (const context of ["first", "first", "first; second", "second", "third", "first; second; third; fourth"]) {
+      expect(updateTask(tmpDir, PROJECT, "Add rate limiting", { context }).ok).toBe(true);
+    }
+    const after = readTasks(tmpDir, PROJECT);
+    expect(after.ok && after.data.items.Queue.find(i => i.line.includes("rate limiting"))?.context)
+      .toBe("first; second; third; fourth");
+  });
 });
 
 // ── applyGravity ───────────────────────────────────────────────────────────

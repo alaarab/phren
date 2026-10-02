@@ -66,6 +66,18 @@ it("writes only over the sha the phone last saw", async () => {
   await deleteStoreFile(store, { path: "demo/notes/new.md", sha: blobSha(Buffer.from("x")) });
 });
 
+it("rejects oversized blobs with an actionable size error before reading their contents", async () => {
+  const content = Buffer.alloc(4 * 1024 * 1024 + 1, 120);
+  await writeFile(path.join(store, "demo", "tasks.md"), content);
+  await storeHead(store, index);
+  await expect(storeBlob(store, blobSha(content))).rejects.toMatchObject({
+    status: 413, details: { code: "store-file-too-large", size: content.length, limit: 4 * 1024 * 1024 },
+  });
+  // A large task history cannot stop independent small files being read.
+  const small = await readFile(path.join(store, "demo", "FINDINGS.md"));
+  expect((await storeBlob(store, blobSha(small))).content).toBe(small.toString("base64"));
+});
+
 it("refuses paths outside the store, into .git, or through symlinks", async () => {
   await symlink(root, path.join(store, "escape"));
   for (const bad of ["../x.md", "/etc/passwd", ".git/config", "demo/../../x", "escape/x.md", "demo//x.md", "./demo/x.md"]) {
