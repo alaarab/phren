@@ -32,6 +32,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- A quick chat started twice from the phone (a double tap, or a retry after a slow launch) opens one pane: `POST /v1/workspaces/launch` takes a `launchId`, and the same id again returns the first launch's pane with `reused: true`.
+- phren agent's quick chat banner no longer prints the phren store's path (`~/.phren`) under the version.
+- Approval notifications from a pane in the phren store (a quick chat, the conductor) no longer name ".phren" as the project, and a phren agent's approvals say "Phren" instead of "Your agent".
 - A phren agent subagent that names no provider runs on its parent's provider and model, with the parent's reasoning effort for the same model. Only DeepSeek and OpenAI-compatible parents passed theirs on; a child of an Anthropic, OpenRouter, OpenAI or Codex session auto-detected a provider from whatever keys the environment had.
 - phren agent's compaction request carries the session's tools. Without them, Anthropic rejects a history that holds tool calls, so compaction on Claude always fell back to the regex summary, and the cached prefix never matched.
 - A Claude Code teammate that has shut down is a finished child: its `shutdown_approved` reply no longer flips it back to running, and the system's `teammate_terminated` notice ends it too, so the phone's Background tray and the session's running count drop it.
