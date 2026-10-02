@@ -77,6 +77,34 @@ beforeEach(async () => {
 afterEach(async () => { restore(); vi.restoreAllMocks(); vi.unstubAllEnvs(); resetCodexDaemonCache(); await rm(root, { recursive: true, force: true }); });
 
 describe("Codex 0.157 daemon conversations", () => {
+  it("does not spend the daemon limit on launcher wrappers and lose a running root conversation", async () => {
+    for (const base of [100, 200, 500]) {
+      proc(base, 1, 60 * MIN, `node /opt/homebrew/bin/codex app-server --listen unix://daemon-${base}`);
+      proc(base + 1, base, 60 * MIN, DAEMON);
+    }
+    tui("root", "/work/root", 1000, 20 * MIN);
+    held[101] = [await rollout(1, "/work/new-a", 5 * MIN)];
+    held[201] = [await rollout(2, "/work/new-b", 4 * MIN)];
+    held[501] = [await rollout(3, "/work/root", 19 * MIN)];
+    expect(await paneIdentity("default", pane("root"), true)).toBe(id(3));
+    const probes = state.exec.mock.calls.filter(call => call[0] === "/usr/sbin/lsof").map(call => call[1][2]);
+    expect(probes).toContain("501");
+    for (const wrapper of ["100", "200", "500"]) expect(probes).not.toContain(wrapper);
+  });
+
+  it("keeps the shared managed daemon in the bounded probe when private pane servers fill it", async () => {
+    for (const pid of [100, 200, 300, 400, 600]) {
+      proc(pid, 1, 5 * MIN, DAEMON.replace("--managed-daemon", ""));
+    }
+    proc(500, 1, 60 * MIN, DAEMON);
+    tui("root", "/work/root", 1000, 20 * MIN);
+    held[500] = [await rollout(1, "/work/root", 19 * MIN)];
+    expect(await paneIdentity("default", pane("root"), true)).toBe(id(1));
+    const probes = state.exec.mock.calls.filter(call => call[0] === "/usr/sbin/lsof").map(call => call[1][2]);
+    expect(probes).toContain("500");
+    expect(probes.filter(pid => ["100", "200", "300", "400", "500", "600"].includes(pid))).toHaveLength(4);
+  });
+
   it("names the pane by the rollout the daemon holds for its folder since its TUI started, and refuses the origin pane's binding", async () => {
     proc(50728, 1, 10 * 60 * MIN, DAEMON);
     proc(50746, 1, 10 * 60 * MIN, DAEMON.replace("--listen unix:// --managed-daemon", "daemon pid-update-loop"));
