@@ -283,8 +283,45 @@ export interface LaunchOptions {
  * Herdr's create calls do not return identifiers, so the new tab is found
  * by diffing snapshots; `agent.start` returns once Herdr has detected the
  * agent and it is ready for input, which can take most of `timeoutMs`.
+ * A `launchId` (a UUID the caller keeps for one intended launch) makes it
+ * idempotent: the same id again returns the first launch's pane while it is
+ * listed, with `reused: true`, instead of starting a second agent.
  */
 export async function launchSession(server: string, data: Json, options: LaunchOptions = {}): Promise<Json> {
+  const launchId = data.launchId === undefined || data.launchId === null ? undefined
+    : z.string().uuid("launchId must be a UUID.").parse(data.launchId);
+  if (!launchId) return startSession(server, data, options);
+  const now = Date.now();
+  for (const [key, entry] of launchesById) if (now - entry.at > LAUNCH_ID_TTL_MS) launchesById.delete(key);
+  const key = `${server}\u0000${launchId}`;
+  const earlier = launchesById.get(key);
+  if (earlier) {
+    // The same request again: a double tap, or a retry after a reply that
+    // never arrived. Its pane, while it lives, rather than a second one.
+    const result = await earlier.result.catch(() => undefined);
+    if (result && await stillListed(server, result)) return { ...result, reused: true };
+    if (launchesById.get(key) === earlier) launchesById.delete(key);
+  }
+  const result = startSession(server, data, options);
+  const entry = { at: now, result };
+  launchesById.set(key, entry);
+  result.catch(() => { if (launchesById.get(key) === entry) launchesById.delete(key); });
+  return result;
+}
+
+/** Launches by the caller's `launchId`, for `LAUNCH_ID_TTL_MS`: a repeat
+ * joins the launch in flight or gets its pane back. In memory only. */
+const launchesById = new Map<string, { at: number; result: Promise<Json> }>();
+export const LAUNCH_ID_TTL_MS = 10 * 60_000;
+/** For tests: forget every remembered launch. */
+export function resetLaunchIds(): void { launchesById.clear(); }
+
+async function stillListed(server: string, result: Json): Promise<boolean> {
+  const s = await snapshot(server).catch(() => undefined);
+  return !!s && objects(s.tabs).some(t => t.tab_id === result.tabId && t.workspace_id === result.workspaceId);
+}
+
+async function startSession(server: string, data: Json, options: LaunchOptions): Promise<Json> {
   const role = z.enum(["agent", "conductor"]).default("agent").parse(data.role);
   const projectDirectory = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
   const worktreeRequest = data.worktree === undefined || data.worktree === null ? undefined : launchWorktreeSchema.parse(data.worktree);

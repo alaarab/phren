@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approvalSummary, approvalTitle, shortApproval } from "./approval-summary.js";
+import { approvalSummary, approvalTitle, paneProject, shortApproval } from "./approval-summary.js";
 
 describe("approval summaries", () => {
   it.each([
@@ -68,7 +68,17 @@ describe("approval summaries", () => {
     ["opencode", undefined, "Desk", "opencode on Desk"],
     ["copilot", undefined, undefined, "Copilot"],
     ["unknown", undefined, undefined, "Your agent"],
+    ["phren", undefined, "Mini", "Phren on Mini"],
   ])("titles %#", (agent, project, computer, expected) => {
     expect(approvalTitle(agent, project, computer)).toBe(expected);
+  });
+
+  it("names a pane's project by its folder, and none in the phren store", () => {
+    expect(paneProject("/Users/sam/Projects/app")).toBe("app");
+    expect(paneProject("/Users/sam/.phren")).toBeUndefined();
+    expect(paneProject("/home/sam/.phren/")).toBeUndefined();
+    expect(paneProject("/srv/memory", "/srv/memory")).toBeUndefined();
+    expect(paneProject("/Users/sam/.phren/app")).toBe("app");
+    expect(paneProject(undefined)).toBeUndefined();
   });
 });

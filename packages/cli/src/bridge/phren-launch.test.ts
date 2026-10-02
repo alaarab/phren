@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HarnessInventory } from "./harnesses.js";
 import { BridgeError, type Json } from "./protocol.js";
-import { launchSession, makeConductor, setLaunchInventory } from "./server-launch.js";
+import { launchSession, makeConductor, resetLaunchIds, setLaunchInventory } from "./server-launch.js";
 import { type AgentStart, type PanePlacement, setTerminalProvider, type TerminalProvider } from "./terminal.js";
 
 const inventory = (sources = ["claude", "codex", "opencode", "copilot", "phren"]): HarnessInventory =>
@@ -31,7 +31,30 @@ describe("launching phren's own agent", () => {
       startAgent: async (_server: string, _pane: string, agent: AgentStart) => { starts.push(agent); },
     } as unknown as TerminalProvider);
   });
-  afterEach(() => { restore(); setLaunchInventory(undefined); vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });
+  afterEach(() => { restore(); setLaunchInventory(undefined); resetLaunchIds(); vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });
+
+  it("starts one quick chat for one launchId: a double tap or a retry gets the same pane", async () => {
+    const launchId = "0b7e3c1a-5d2f-4e8a-9c41-2f6b8d0e7a13";
+    const quick = { cwd, label: "Quick chat", kind: "phren", mode: "chat", launchId };
+    const [first, second] = await Promise.all([launchSession("default", quick), launchSession("default", quick)]);
+    expect(starts).toHaveLength(1);
+    expect(second).toMatchObject({ workspaceId: first.workspaceId, tabId: first.tabId, reused: true });
+    expect(await launchSession("default", quick)).toMatchObject({ tabId: first.tabId, reused: true });
+    expect(starts).toHaveLength(1);
+    // Another launchId is another chat; without one nothing is remembered.
+    await launchSession("default", { ...quick, launchId: "1c8f4d2b-6e3a-4f9b-8d52-3a7c9e1f8b24" });
+    await launchSession("default", { cwd, label: "Quick chat", kind: "phren", mode: "chat" });
+    expect(starts).toHaveLength(3);
+  });
+
+  it("starts again when the launchId's pane is gone", async () => {
+    const quick = { cwd, label: "Quick chat", kind: "phren", mode: "chat", launchId: "2d9a5e3c-7f4b-4a0c-9e63-4b8d0f2a9c35" };
+    const first = await launchSession("default", quick);
+    state.tabs = state.tabs.filter((tab: Json) => tab.tab_id !== first.tabId);
+    expect(await launchSession("default", quick)).not.toHaveProperty("reused");
+    expect(starts).toHaveLength(2);
+    await expect(launchSession("default", { ...quick, launchId: "not-a-uuid" })).rejects.toThrow();
+  });
 
   it("runs `phren agent -i`, with --model and --reasoning when asked", async () => {
     expect(await launchSession("default", { cwd, label: "Phren plain", kind: "phren" })).toMatchObject({ ok: true, agent: "phren" });
