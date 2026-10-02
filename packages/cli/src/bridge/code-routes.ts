@@ -71,6 +71,28 @@ function noIndex(project: string): BridgeError {
 export class CodeRoutes {
   constructor(private readonly store: string) {}
 
+  /** A filename need not resemble a symbol declared inside it. Query the
+   * index's files table through @phren/code's existing public read API so
+   * installed optional packages need no new export to serve this route. */
+  async files(projectValue: string | null, nameValue: string | null, limitValue?: string | null) {
+    const project = projectSchema.parse(projectValue ?? "");
+    const name = relativePathSchema.refine(value => !/[\x00-\x1f\x7f]/.test(value)
+      && !value.split("/").includes(".git")).parse(nameValue ?? "");
+    const limit = limitValue ? topSchema.parse(limitValue) : 20;
+    const code = await requireCodePackage(this.store);
+    const database = await code.openCodeDatabase(this.store, project, false);
+    if (!database) throw noIndex(project);
+    try {
+      const suffix = "/" + name;
+      const rows = code.rowsOf(database.db,
+        `SELECT path, language FROM files WHERE path = ? OR substr(path, -?) = ?
+         ORDER BY CASE WHEN path = ? THEN 0 ELSE 1 END, length(path), path LIMIT ?`,
+        [name, [...suffix].length, suffix, name, limit + 1]);
+      return { project, name, files: rows.slice(0, limit).map(row => ({ path: code.stringAt(row, 0), language: code.stringAt(row, 1) })),
+        truncated: rows.length > limit };
+    } finally { database.close(); }
+  }
+
   async status(projectValue: string | null): Promise<CodeStatus> {
     const project = projectSchema.parse(projectValue ?? "");
     const result = await (await requireCodePackage(this.store)).codeIndexStatus(this.store, project);
