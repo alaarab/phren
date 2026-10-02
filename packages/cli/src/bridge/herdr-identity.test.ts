@@ -6,7 +6,7 @@ const state = vi.hoisted(() => ({ exec: vi.fn() }));
 vi.mock("node:child_process", async importOriginal => ({ ...await importOriginal<typeof import("node:child_process")>(),
   execFile: Object.assign(() => {}, { [Symbol.for("nodejs.util.promisify.custom")]: state.exec }),
 }));
-import { opencodePidSession, paneIdentity } from "./herdr.js";
+import { opencodePidSession, paneChatState, paneIdentity } from "./herdr.js";
 import { recordedSession } from "./agent-hooks.js";
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 it("accepts an opencode ses_ session reported by Herdr", async () => {
@@ -106,4 +106,24 @@ it.skipIf(process.platform === "win32")("names a Copilot pane by the conversatio
     await new Promise<void>(resolve => server.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
   }
+});
+
+it("keeps the completed starting evidence when scheduling outlasts the cache window", async () => {
+  const root = await mkdtemp(path.join((await import("node:os")).tmpdir(), "phren-starting-evidence-"));
+  vi.stubEnv("PHREN_BRIDGE_HOME", root);
+  vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+  let now = 0;
+  vi.spyOn(Date, "now").mockImplementation(() => (now += 3_000));
+  state.exec.mockResolvedValue({ stdout: "" });
+  const { setTerminalProvider } = await import("./terminal.js");
+  const restore = setTerminalProvider({
+    processes: async () => ({ foregroundPids: [999_999_997] }),
+  } as unknown as import("./terminal.js").TerminalProvider);
+  try {
+    const pane = { pane_id: "starting-evidence", terminal_id: root, agent: "codex" };
+    expect(await paneChatState("default", pane)).toMatchObject({ starting: true, startingToken: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    // A changed process with ambiguous logs must never receive first-send permission.
+    state.exec.mockResolvedValue({ stdout: "n/tmp/rollout-a-aaaaaaaa-1111-4111-8111-111111111111.jsonl\nn/tmp/rollout-b-bbbbbbbb-1111-4111-8111-111111111111.jsonl\n" });
+    expect(await paneChatState("default", { ...pane, terminal_id: root + "-changed" })).not.toHaveProperty("starting");
+  } finally { restore(); await rm(root, { recursive: true, force: true }); }
 });

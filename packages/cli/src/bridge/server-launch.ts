@@ -148,9 +148,8 @@ async function prepareConductor(kind: (typeof launchKinds)[number], effort: Laun
 async function targetForPane(server: string, pane: Json): Promise<Json | undefined> {
   if (!provider.safeParse(pane.agent).success || !id.safeParse(pane.workspace_id).success || !id.safeParse(pane.tab_id).success || !id.safeParse(pane.pane_id).success) return undefined;
   const binding = { server, workspace: pane.workspace_id, tab: pane.tab_id, pane: pane.pane_id, source: pane.agent };
-  const session = await paneIdentity(server, pane);
-  if (session) return { ...binding, session };
-  const chat = await paneChatState(server, pane).catch((): Json => ({}));
+  const chat = await paneChatState(server, pane, { tokenWhenIdentified: false }).catch((): Json => ({}));
+  if (typeof chat.sessionId === "string") return { ...binding, session: chat.sessionId };
   return chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
 }
 
