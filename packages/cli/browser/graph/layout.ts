@@ -163,5 +163,10 @@ export function computeHierarchicalLayout(fgNodes: FGNode[]): CageSpec[] {
     }
   });
 
+  // Existing objects move with the data immediately; the disabled force
+  // simulation is not responsible for applying our deterministic layout.
+  for (const node of fgNodes) {
+    node.__group?.position.set(node.x ?? 0, node.y ?? 0, node.z ?? 0);
+  }
   return cages;
 }
