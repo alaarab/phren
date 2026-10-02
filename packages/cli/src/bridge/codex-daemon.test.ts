@@ -59,7 +59,13 @@ beforeEach(async () => {
   resetCodexDaemonCache();
   state.exec.mockReset().mockImplementation(async (file: string, args: string[]) => {
     if (file === "ps") return { stdout: rows.join("\n") + "\n" };
-    if (file === "/usr/sbin/lsof") return { stdout: (held[Number(args[2])] ?? []).map(name => `n${name}`).join("\n") + "\n" };
+    if (file === "/usr/sbin/lsof") return { stdout: (held[Number(args[2])] ?? []).map(name => {
+      // lsof reports POSIX absolute paths. On a Windows test host the
+      // extended path spelling both starts with / and opens the real file;
+      // a bare C:\\ path was discarded, silently exercising disk fallback.
+      const slash = name.replace(/\\/g, "/");
+      return `n${/^[a-z]:\//i.test(slash) ? `//?/${slash}` : slash}`;
+    }).join("\n") + "\n" };
     throw new Error(`unexpected ${file}`);
   });
   restore = setTerminalProvider({
