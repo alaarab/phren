@@ -200,7 +200,7 @@ async function claudeParentRows(file: string): Promise<ClaudeParentRows> {
 async function claudeChildRelations(file: string, session: string, signature: string, rows: ClaudeParentRows): Promise<ChildAgentRelation[]> {
   // Kept as the parent wrote them: what follows marks finished children.
   const kept = copyRows(rows);
-  const { launches, skills, workflows, teammates } = copyRows(rows);
+  const { launches, workflows, teammates } = copyRows(rows);
   const relations: ChildAgentRelation[] = [];
   // Claude Code records the launch in the parent before the child's own
   // file exists. A launch without a transcript yet is looked for again
@@ -215,7 +215,9 @@ async function claudeChildRelations(file: string, session: string, signature: st
       if (launch.state === "running") awaiting = true;
       continue;
     }
-    if (skills.has(agentId) && launch.state === "running") {
+    // A skill never gets a notification, and any child loses its own when the
+    // session that ran it was restarted or continued: its transcript decides.
+    if (launch.state === "running") {
       if (await claudeSkillFinished(childFile).catch(() => false)) launch.state = "completed"; else live = true;
     }
     const model = await claudeChildModel(childFile).catch(() => undefined);
@@ -246,6 +248,11 @@ async function claudeChildRelations(file: string, session: string, signature: st
       }
       // The meta file names the model as the launcher chose it ("sonnet");
       // the transcript's first assistant turn carries the full id and wins.
+      // A teammate that never said it was idle or shut down (its session was
+      // restarted or continued) ends the same way: a finished reply, or quiet.
+      if (launch.state === "running") {
+        if (await claudeSkillFinished(childFile).catch(() => false)) launch.state = "completed"; else live = true;
+      }
       const meta = await readFile(childFile.slice(0, -".jsonl".length) + ".meta.json", "utf8").then(v => object(JSON.parse(v))).catch(() => ({} as Json));
       const model = await claudeChildModel(childFile).catch(() => undefined) ?? (typeof meta.model === "string" && meta.model ? meta.model.slice(0, 200) : undefined);
       const checkout = await claudeChildCheckout(childFile).catch(() => ({}));
@@ -274,8 +281,9 @@ async function claudeChildRelations(file: string, session: string, signature: st
  * exited mid-skill leaves it without a final reply. */
 export const CLAUDE_SKILL_QUIET_MS = 30 * 60 * 1000;
 
-/** A background skill is done once its transcript ends on a finished reply,
- * or has not changed for CLAUDE_SKILL_QUIET_MS. */
+/** A background child (a skill, or a sub-agent or teammate whose end the
+ * parent never recorded) is done once its transcript ends on a finished
+ * reply, or has not changed for CLAUDE_SKILL_QUIET_MS. */
 async function claudeSkillFinished(file: string, now = Date.now()): Promise<boolean> {
   const metadata = await stat(file);
   if (now - metadata.mtimeMs >= CLAUDE_SKILL_QUIET_MS) return true;
