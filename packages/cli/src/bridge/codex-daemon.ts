@@ -137,6 +137,28 @@ async function recentRollouts(now: number): Promise<string[]> {
 }
 
 let rollouts: { at: number; value: Promise<DaemonRollout[]> } | undefined;
+/** Launcher wrappers may have the same command as their native server child.
+ * Count the server once, and keep the shared managed daemon ahead of private
+ * per-pane servers when the bounded probe is full. */
+function daemonPids(rows: ProcessRow[]): number[] {
+  const byPid = new Map(rows.map(row => [row.pid, row]));
+  const servers = rows.filter(row => isCodexDaemon(row.command));
+  const serverIds = new Set(servers.map(row => row.pid));
+  const wrappers = new Set<number>();
+  for (const server of servers) {
+    let parent = server.ppid;
+    for (let depth = 0; depth < 8 && parent > 1; depth++) {
+      if (serverIds.has(parent)) wrappers.add(parent);
+      const ancestor = byPid.get(parent);
+      if (!ancestor || ancestor.ppid === parent) break;
+      parent = ancestor.ppid;
+    }
+  }
+  const managed = (row: ProcessRow) => /(?:^|\s)--managed-daemon(?:\s|$)/.test(row.command) ? 1 : 0;
+  return servers.filter(row => !wrappers.has(row.pid))
+    .sort((a, b) => managed(b) - managed(a) || a.startedAt - b.startedAt || a.pid - b.pid)
+    .slice(0, MAX_DAEMONS).map(row => row.pid);
+}
 /**
  * The conversations a running Codex daemon holds open (by `openFiles`, the
  * caller's lsof or /proc read), else, when it holds none, the recent rollouts
@@ -146,7 +168,7 @@ let rollouts: { at: number; value: Promise<DaemonRollout[]> } | undefined;
 export function daemonRollouts(openFiles: (pids: number[]) => Promise<string[]>, now = Date.now()): Promise<DaemonRollout[]> {
   if (rollouts && now - rollouts.at < CACHE_MS) return rollouts.value;
   const value = (async () => {
-    const daemons = (await processTable(now)).filter(row => isCodexDaemon(row.command)).map(row => row.pid).slice(0, MAX_DAEMONS);
+    const daemons = daemonPids(await processTable(now));
     if (!daemons.length) return [];
     countIdentity("codex-daemon");
     const held = (await openFiles(daemons).catch(() => [] as string[])).filter(file => ROLLOUT.test(file)).slice(0, MAX_ROLLOUTS);
