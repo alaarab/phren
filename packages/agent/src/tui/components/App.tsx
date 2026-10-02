@@ -65,6 +65,8 @@ export interface AppState {
   contextWindow?: number;
   contextTokens?: number;
   reasoningEffort?: string;
+  /** A quick chat (`--mode chat`): the banner leaves out the folder, the phren store. */
+  chat?: boolean;
 }
 
 export interface ActiveToolInfo {

@@ -209,6 +209,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       contextWindow: contextLimit,
       contextTokens: currentContextTokens(),
       reasoningEffort: config.provider.reasoningEffort as string | undefined,
+      chat: config.mode === "chat",
     };
   }
 

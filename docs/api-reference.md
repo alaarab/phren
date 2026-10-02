@@ -294,7 +294,11 @@ the same conversation with tools. Either field on another `kind` is 400.
 results (an agent session that used tools, unless a compaction summary
 replaced them) is 400 with `code: "chat-has-tools"`: a request with no tools
 may not carry them. Resume such a session with `mode: "agent"`.
-Health advertises `capabilities.quickChat`. The reply repeats `permissionMode` when it was applied,
+Health advertises `capabilities.quickChat`. Any launch may carry a
+`launchId` (a UUID the caller keeps for one intended launch): the same
+`launchId` again within 10 minutes joins the launch in flight, or returns its
+pane with `reused: true` while that tab is listed, instead of starting a second
+agent. A double tap or a retry after a lost reply opens one pane. The reply repeats `permissionMode` when it was applied,
 so a caller can tell an older Hook that ignored it. A
 conductor launch supports Claude, Codex and OpenCode (Copilot and phren are
 refused with 400: phren-agent takes no system brief at startup), attaches the shipped

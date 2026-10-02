@@ -39,8 +39,9 @@ export function Banner({ state, theme }: BannerProps) {
       {modelLine ? (
         <Text color={versionColor} dimColor>{modelLine}</Text>
       ) : null}
-      {/* Line 3: cwd */}
-      <Text color={cwdColor} dimColor>{cwd}</Text>
+      {/* Line 3: cwd. A quick chat runs in the phren store, a path that
+          means nothing to the person chatting, so it shows none. */}
+      {state.chat ? null : <Text color={cwdColor} dimColor>{cwd}</Text>}
       <Text>{""}</Text>
     </Box>
   );
