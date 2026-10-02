@@ -109,6 +109,7 @@ function agentSkillDirs(): string[] {
     path.join(home, ".cursor", "skills"),
     path.join(home, ".copilot", "skills"),
     path.join(home, ".codex", "skills"),
+    path.join(home, ".agents", "skills"),
   ];
 }
 
