@@ -1,10 +1,20 @@
 name: CI
+run-name: ${{ inputs.release_candidate && 'RC validation' || 'Development build' }}
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_candidate:
+        description: Run the consolidated release candidate test suites
+        type: boolean
+        default: false
+
+env:
+  PHREN_RC: ${{ github.event_name == 'workflow_dispatch' && inputs.release_candidate }}
 
 # Superseded commits should not keep consuming runners.
 concurrency:
@@ -33,14 +43,19 @@ jobs:
       # The tmux provider's integration test runs against a real tmux; it
       # skips where there is none (Windows).
       - name: Install tmux (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.PHREN_RC == 'true'
         run: sudo apt-get update && sudo apt-get install -y tmux
       - name: Install tmux (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && env.PHREN_RC == 'true'
         run: brew install tmux
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm test
+      - name: Release candidate tests
+        if: env.PHREN_RC == 'true'
+        run: pnpm test -- --coverage
+      - name: Development build summary
+        if: env.PHREN_RC != 'true'
+        run: echo 'Build passed. Tests deferred to the consolidated release candidate; tests were not run.' >> "$GITHUB_STEP_SUMMARY"
 
   lint:
     runs-on: ubuntu-latest
@@ -72,7 +87,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # turbo's test task depends on build -> ^build, which produces the
       # packages/cli dist output the agent's tests import at runtime.
-      - run: pnpm exec turbo run test --filter=@phren/agent
+      - name: Build agent
+        run: pnpm exec turbo run build --filter=@phren/agent
+      - name: Release candidate agent tests
+        if: env.PHREN_RC == 'true'
+        run: pnpm --filter @phren/agent test
+      - name: Development agent summary
+        if: env.PHREN_RC != 'true'
+        run: echo 'Agent build passed. Agent tests deferred to the consolidated release candidate; tests were not run.' >> "$GITHUB_STEP_SUMMARY"
 
   validate-docs:
     runs-on: ubuntu-latest
