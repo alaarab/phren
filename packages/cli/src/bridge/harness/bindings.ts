@@ -6,7 +6,7 @@ import type { Target } from "../protocol.js";
 import { CodexAppServerAdapter, OpenCodeServeAdapter, PaneTypingAdapter } from "./direct.js";
 import type { HarnessAdapter, PaneBinding } from "./contract.js";
 import type { AgentHooks } from "../agent-hooks.js";
-import { objects, targetSchema } from "../protocol.js";
+import { objects, targetSchema, BridgeError } from "../protocol.js";
 let requestSink: Pick<AgentHooks, "harnessRequest" | "harnessResolved"> | undefined;
 const knownRequests = new Map<string, Set<string>>();
 export function setHarnessRequestSink(sink?: typeof requestSink) { requestSink = sink; if (!sink) knownRequests.clear(); }
@@ -48,10 +48,11 @@ export function bindHarness(target: Target, adapter: HarnessAdapter, terminal?: 
   adapters.set(key(target), { adapter, session: target.session, terminal, lastUsed: Date.now() });
 }
 export async function unbindHarness(target: Target) { const bound = adapters.get(key(target)); if (!bound || bound.session !== target.session) return; adapters.delete(key(target)); await bound.adapter.close(); }
-export async function boundHarness(target: Target): Promise<HarnessAdapter> {
+export async function boundHarness(target: Target, expectedOwner?: unknown): Promise<HarnessAdapter> {
   const pane = await validateTarget(target, false, true), terminal = typeof pane.terminal_id === "string" ? pane.terminal_id : undefined;
   const previous = adapters.get(key(target));
   const runner = await runnerForPane(target.server, pane);
+  if (expectedOwner !== undefined && (!runner || runner.ownerId !== expectedOwner || runner.session !== target.session)) throw new BridgeError(409, "The structured worker owner changed. Refresh this exact session before continuing.");
   const sameRunner = !previous || !(previous.adapter instanceof RunnerAdapter) || runner?.ownerId === previous.adapter.entry.ownerId;
   if (previous && sameRunner && previous.session === target.session && previous.terminal === terminal) { previous.lastUsed = Date.now(); return previous.adapter; }
   if (previous) { adapters.delete(key(target)); await previous.adapter.close(); }
@@ -73,5 +74,5 @@ export async function boundHarness(target: Target): Promise<HarnessAdapter> {
 }
 export async function harnessInfo(target: Target) {
   const adapter = await boundHarness(target);
-  return { version: 1, ...(adapter instanceof RunnerAdapter ? { nativeSession: adapter.entry.nativeSession } : {}), provider: adapter.provider, session: target.session, pane: { server: target.server, pane: target.pane }, capabilities: { ...adapter.capabilities } };
+  return { version: 1, ...(adapter instanceof RunnerAdapter ? { nativeSession: adapter.entry.nativeSession, ownerId: adapter.entry.ownerId } : {}), provider: adapter.provider, session: target.session, pane: { server: target.server, pane: target.pane }, capabilities: { ...adapter.capabilities } };
 }

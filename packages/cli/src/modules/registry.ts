@@ -82,7 +82,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     hookRoutes: [
       ...routes("GET", [
         "/v1/health", "/v1/health/details", "/v1/health/peers", "/v1/muxes", "/v1/activity", "/v1/metrics", "/v1/web-servers", "/v1/simulators",
-        "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/files", "/v1/models", "/v1/harnesses", "/v1/harness/session", "/v1/harness/thread", "/v1/harness/events", "/v1/projects/files",
+        "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/files", "/v1/models", "/v1/harnesses", "/v1/harness/session", "/v1/harness/thread", "/v1/harness/requests", "/v1/harness/events", "/v1/projects/files",
         "/v1/uploads/image", "/v1/files/range", "/v1/files/resolve", "/v1/usage", "/v1/resources", "/v1/speech/voices", "/v1/push/status", "/v1/projects/locate", "/v1/projects/repos",
         "/v1/workspaces", "/v1/workspaces/panes", "/v1/transcripts/blob", "/v1/transcripts/history", "/v1/sudo",
         "/v1/subagents", "/v1/subagents/transcript", "/v1/subagents/messages",

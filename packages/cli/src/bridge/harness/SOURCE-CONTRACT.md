@@ -200,3 +200,6 @@ Hook before activation. A killed installer cannot execute catch-based rollback;
 activation leaves an existing service running until its restart transaction.
 Agent-account/plugin/trust/key edits are not claimed to be an all-files atomic
 transaction. Fault-injection and actual service readiness remain unrun.
+
+
+Native structured sessions now discover `GET /v1/harness/session` with the real pane target and receive the runner's `ownerId` and `nativeSession`. Phone reads/controls retain that owner independently of the pane/session; a replaced runner refuses stale controls. `GET /v1/harness/requests` returns the current pending snapshot, including after Hook restart. Native SDK/ACP chat uses actual thread/event responses, displays SDK text deltas separately until history catches up, persists uncertain delivery receipts without resending, and gates interrupt, question, approval, model and explicit SDK-to-terminal takeover on capabilities. QL retains its distinct opaque proxy target. Native, SDK login/resume and provider runtime acceptance remain UNRUN.

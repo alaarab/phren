@@ -371,14 +371,15 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/harness/proxies": result = await proxyView(info.computer.name); break;
           case "/v1/harness/proxy/session": case "/v1/harness/proxy/thread": case "/v1/harness/proxy/events": case "/v1/harness/proxy/requests": case "/v1/harness/proxy/delivery":
             result = await proxyOperation(url.pathname.split("/").at(-1)!, Object.fromEntries(url.searchParams)); break;
-          case "/v1/harness/delivery": {
+          case "/v1/harness/requests": case "/v1/harness/delivery": {
             const target = targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}")), runner = await runnerForPane(target.server, await validateTarget(target, false, true));
-            if (!runner) throw new BridgeError(409, "This session has no worker-owned delivery journal.");
+            if (!runner || runner.session !== target.session || runner.ownerId !== url.searchParams.get("ownerId")) throw new BridgeError(409, "The exact worker owner is unavailable.");
+            if (url.pathname.endsWith("/requests")) { result = await runnerRequest(runner, "requests"); break; }
             result = await runnerRequest(runner, "delivery", { deliveryId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/).parse(url.searchParams.get("deliveryId")) }); break;
           }
-          case "/v1/harness/thread": { const target = targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}")); const adapter = await boundHarness(target); if (!adapter.capabilities.readThread) throw new BridgeError(409, "This harness does not support thread reads."); result = { thread: await adapter.readThread(target.session) }; break; }
+          case "/v1/harness/thread": { const target = targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}")); const adapter = await boundHarness(target, url.searchParams.get("ownerId") ?? undefined); if (!adapter.capabilities.readThread) throw new BridgeError(409, "This harness does not support thread reads."); result = { thread: await adapter.readThread(target.session) }; break; }
           case "/v1/harness/events": {
-            const target = targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}")), adapter = await boundHarness(target);
+            const target = targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}")), adapter = await boundHarness(target, url.searchParams.get("ownerId") ?? undefined);
             if (!adapter.capabilities.events) throw new BridgeError(409, "This harness has no structured event stream.");
             const after = z.coerce.number().int().nonnegative().parse(url.searchParams.get("after") ?? 0), controller = new AbortController(), events: unknown[] = [];
             const stop = () => controller.abort(), timer = setTimeout(stop, 1000); response.once("close", stop);
@@ -623,7 +624,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         else if (url.pathname.startsWith("/v1/harness/proxy/")) result = await proxyOperation(url.pathname.split("/").at(-1)!, data);
         else if (["/v1/harness/lease/acquire", "/v1/harness/lease/revoke", "/v1/harness/lease/takeover"].includes(url.pathname)) result = await changeStoreLease(modules.store, url.pathname.split("/").at(-1) as "acquire" | "revoke" | "takeover", data);
         else if (["/v1/harness/model", "/v1/harness/takeover", "/v1/harness/approval", "/v1/harness/input"].includes(url.pathname)) {
-          const target = targetSchema.parse(data.target), adapter = await boundHarness(target);
+          const target = targetSchema.parse(data.target), adapter = await boundHarness(target, data.ownerId);
           if (url.pathname === "/v1/harness/model") {
             if (!adapter.capabilities.setModel || !adapter.setModel) throw new BridgeError(409, "Model selection is unavailable.");
             if (adapter.provider === "codex-app-server" || adapter.provider === "opencode-serve") { const mapped = new URL(url); mapped.pathname = "/v1/model"; result = await paneRoute(ctx, mapped, data, response); }
@@ -642,7 +643,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           // Preserve existing identity, idempotency, busy-dialog and approval checks.
           const mapped = new URL(url); mapped.pathname = url.pathname === "/v1/harness/turn" ? "/v1/prompt" : "/v1/keys";
           if (url.pathname === "/v1/harness/interrupt") {
-            const target = targetSchema.parse(data.target), adapter = await boundHarness(target);
+            const target = targetSchema.parse(data.target), adapter = await boundHarness(target, data.ownerId);
             if (!adapter.capabilities.interrupt) throw new BridgeError(409, "This fallback cannot safely interrupt a specific turn.");
             const turnId = z.string().min(1).max(200).parse(data.turnId);
             result = { ok: await adapter.interruptTurn(target.session, turnId) };

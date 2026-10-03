@@ -355,6 +355,7 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     // have reached it is reported uncertain and never retried.
     const { runnerForPane, RunnerAdapter } = await import("./harness/runner-client.js");
     const runner = await runnerForPane(target.server, pane);
+    if (data.ownerId !== undefined && (!runner || runner.ownerId !== data.ownerId || runner.session !== target.session)) throw new BridgeError(409, "The structured worker owner changed; no text was sent.");
     if (runner) {
       if (text.trim().startsWith("/")) throw new BridgeError(422, "Use the structured harness controls for this worker.");
       const deliveryId = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/).parse(data.deliveryId);
