@@ -56,11 +56,74 @@ export interface ComputerResources {
   memory: { totalBytes: number; availablePercent?: number; pressure?: "normal" | "warn" | "critical"; swapUsedBytes?: number };
   disk?: { path: string; totalBytes: number; freeBytes: number };
   battery?: { percent: number; charging: boolean; onAC: boolean };
+  hardware?: ComputerHardware;
   heavy: HeavyProcess[];
   /** 0 idle to 1 saturated, per resource and overall (the highest), so every client fills its gauge the same way. */
   pressure: { cpu: number; memory: number; disk: number; overall: number };
   level: "ok" | "busy" | "stressed";
   warnings: Array<"load-high" | "memory-low" | "disk-low" | "battery-low">;
+}
+
+/** What the computer is, read once per Hook run: "MacBook Pro", "Apple M1 Max",
+ * 32 GB; on Linux the DMI vendor and product ("Dell XPS 13 9310") and the CPU's
+ * model name. Never a serial number or any other identifier. */
+export interface ComputerHardware { model?: string; chip?: string; memoryBytes: number; cores: number }
+
+/** `system_profiler SPHardwareDataType -json` → model and chip. Intel Macs name
+ * the processor in `cpu_type` instead of `chip_type`. */
+export function parseMacHardware(json: string): Pick<ComputerHardware, "model" | "chip"> {
+  const item = (JSON.parse(json) as { SPHardwareDataType?: Array<Record<string, unknown>> }).SPHardwareDataType?.[0] ?? {};
+  const text = (value: unknown) => typeof value === "string" && value.trim() ? value.trim().slice(0, 80) : undefined;
+  const model = text(item.machine_name), chip = text(item.chip_type) ?? text(item.cpu_type);
+  return { ...(model ? { model } : {}), ...(chip ? { chip } : {}) };
+}
+
+/** DMI vendor and product → "Dell XPS 13 9310", "Lenovo ThinkPad X1 Carbon";
+ * placeholder strings firmware leaves in are dropped. */
+export function linuxModel(vendor: string | undefined, product: string | undefined, version?: string): string | undefined {
+  const clean = (value?: string) => {
+    const text = value?.replace(/\s+/g, " ").trim();
+    return text && !/^(to be filled|default string|system (product name|manufacturer)|not specified|none|o\.e\.m\.?|unknown)/i.test(text) ? text : undefined;
+  };
+  const brand = clean(vendor)?.replace(/,?\s+(Inc\.?|Corporation|Corp\.?|Co\.,? Ltd\.?|Ltd\.?|GmbH|Technology)$/i, "");
+  // Lenovo puts the marketing name in product_version and a part number in product_name.
+  const name = brand === "LENOVO" || brand === "Lenovo" ? clean(version) ?? clean(product) : clean(product);
+  if (!name) return brand;
+  const label = brand && !name.toLowerCase().startsWith(brand.toLowerCase()) ? `${brand === "LENOVO" ? "Lenovo" : brand} ${name}` : name;
+  return label.slice(0, 80);
+}
+
+/** /proc/cpuinfo's first `model name`, without the (R)/(TM) marks, "CPU" and clock. */
+export function linuxChip(cpuinfo: string): string | undefined {
+  const raw = /^model name\s*:\s*(.+)$/m.exec(cpuinfo)?.[1];
+  const chip = raw?.replace(/\((R|TM|tm|r)\)/g, "").replace(/\s+@\s+.*$/, "").replace(/\bCPU\b/g, "")
+    .replace(/\b\d+-Core Processor\b/i, "").replace(/\s+/g, " ").trim();
+  return chip ? chip.slice(0, 80) : undefined;
+}
+
+let hardwareRead: Promise<ComputerHardware> | undefined;
+/** Read once; the answer can't change while the Hook runs. */
+export function computerHardware(platform: NodeJS.Platform = process.platform): Promise<ComputerHardware> {
+  hardwareRead ??= (async () => {
+    const base = { memoryBytes: totalmem(), cores: cpus().length || 1 };
+    if (platform === "darwin") {
+      // system_profiler takes about half a second, more under load.
+      const found = await exec("/usr/sbin/system_profiler", ["SPHardwareDataType", "-json"], { timeout: 20_000, maxBuffer: 1024 * 1024 })
+        .then(result => parseMacHardware(result.stdout)).catch(() => undefined);
+      // A failed read is tried again on the next collection rather than kept.
+      if (!found) hardwareRead = undefined;
+      return { ...found, ...base };
+    }
+    if (platform === "linux") {
+      const dmi = (name: string) => readFile(`/sys/devices/virtual/dmi/id/${name}`, "utf8").catch(() => undefined);
+      const [vendor, product, version, cpuinfo] = await Promise.all([dmi("sys_vendor"), dmi("product_name"), dmi("product_version"),
+        readFile("/proc/cpuinfo", "utf8").catch(() => "")]);
+      const model = linuxModel(vendor, product, version), chip = linuxChip(cpuinfo);
+      return { ...(model ? { model } : {}), ...(chip ? { chip } : {}), ...base };
+    }
+    return base;
+  })();
+  return hardwareRead;
 }
 
 /** A `ps` row; `pgid` is the process group the job registry attributes work by. */
@@ -356,6 +419,7 @@ export interface ResourceDeps {
   owners: () => Promise<Map<number, PaneRef>>;
   /** Every live pane and the servers listed, or undefined when the listing is incomplete (see `livePanes`). */
   panes: () => Promise<{ panes: Set<string>; servers: Set<string> } | undefined>;
+  hardware?: () => Promise<ComputerHardware | undefined>;
   jobs?: JobSource;
 }
 
@@ -364,7 +428,7 @@ export async function collectResources(deps: ResourceDeps): Promise<ComputerReso
   const cores = cpus().length || 1;
   const platform = deps.platform;
   const registry = deps.jobs ?? new JobRegistry();
-  const [memory, disk, battery, rows, registered] = await Promise.all([
+  const [memory, disk, battery, rows, registered, hardware] = await Promise.all([
     platform === "darwin" ? darwinMemory()
       : platform === "linux" ? readFile("/proc/meminfo", "utf8").then(parseMeminfo).catch(() => ({ totalBytes: totalmem() }))
       : Promise.resolve({ totalBytes: totalmem() }),
@@ -373,6 +437,7 @@ export async function collectResources(deps: ResourceDeps): Promise<ComputerReso
       : platform === "linux" ? linuxBattery() : Promise.resolve(undefined),
     deps.processes().catch(() => [] as ProcessRow[]),
     registry.list().catch(() => [] as TrackedJob[]),
+    (deps.hardware ?? (() => computerHardware(platform)))().catch(() => undefined),
   ]);
   // Pane pids cost one terminal call per pane: only when there is a job to name.
   const preliminary = heavyProcesses(rows, new Map(), registered);
@@ -384,7 +449,7 @@ export async function collectResources(deps: ResourceDeps): Promise<ComputerReso
   const value = {
     collectedAt: new Date(deps.now()).toISOString(), platform, uptimeSeconds: Math.round(uptime()),
     cpu: { cores, load1: round(one), load5: round(five), load15: round(fifteen), loadPerCore: round(one / cores) },
-    memory, ...(disk ? { disk } : {}), ...(battery ? { battery } : {}),
+    memory, ...(disk ? { disk } : {}), ...(battery ? { battery } : {}), ...(hardware ? { hardware } : {}),
     heavy: owners.size || jobs.length ? heavyProcesses(rows, owners, jobs) : preliminary,
   };
   return { ...value, ...assess(value) };

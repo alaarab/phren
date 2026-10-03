@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assess, collectResources, heavyKind, heavyProcesses, parseEtime, parseMeminfo, parsePmset, parsePs, parseSwap, type ProcessRow, ResourceMonitor, withStartTimes } from "./resources.js";
+import { assess, collectResources, heavyKind, linuxChip, linuxModel, parseMacHardware, heavyProcesses, parseEtime, parseMeminfo, parsePmset, parsePs, parseSwap, type ProcessRow, ResourceMonitor, withStartTimes } from "./resources.js";
 
 const GB = 1024 ** 3;
 const row = (pid: number, ppid: number, cpu: number, rssMB: number, command: string, args = command, pgid = pid): ProcessRow =>
@@ -161,5 +161,29 @@ describe("resources", () => {
     const busy = await collectResources({ now: () => 0, home: () => process.cwd(), platform: "freebsd",
       processes: async () => [row(10, 1, 80, 1, "/usr/bin/xcodebuild")], owners: async () => { owners++; return new Map(); } });
     expect(owners).toBe(1); expect(busy.heavy[0].kind).toBe("xcodebuild");
+  });
+});
+
+describe("computer hardware", () => {
+  it("names a Mac by model and chip from system_profiler, without its serial", () => {
+    const json = JSON.stringify({ SPHardwareDataType: [{ machine_name: "MacBook Pro", chip_type: "Apple M1 Max", physical_memory: "32 GB", serial_number: "XYZ" }] });
+    expect(parseMacHardware(json)).toEqual({ model: "MacBook Pro", chip: "Apple M1 Max" });
+    expect(parseMacHardware(JSON.stringify({ SPHardwareDataType: [{ machine_name: "iMac", cpu_type: "Quad-Core Intel Core i5" }] })))
+      .toEqual({ model: "iMac", chip: "Quad-Core Intel Core i5" });
+    expect(parseMacHardware("{}")).toEqual({});
+  });
+  it("names a Linux machine by DMI vendor and product, and its CPU without marks", () => {
+    expect(linuxModel("Dell Inc.\n", "XPS 13 9310\n")).toBe("Dell XPS 13 9310");
+    expect(linuxModel("LENOVO", "20XWCTO1WW", "ThinkPad X1 Carbon Gen 9")).toBe("Lenovo ThinkPad X1 Carbon Gen 9");
+    expect(linuxModel("To Be Filled By O.E.M.", "To Be Filled By O.E.M.")).toBeUndefined();
+    expect(linuxModel("Framework", "Framework Laptop 13")).toBe("Framework Laptop 13");
+    expect(linuxChip("processor\t: 0\nmodel name\t: 11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz\n")).toBe("11th Gen Intel Core i7-1185G7");
+    expect(linuxChip("model name\t: AMD Ryzen 7 7840U w/ Radeon  780M Graphics\n")).toBe("AMD Ryzen 7 7840U w/ Radeon 780M Graphics");
+    expect(linuxChip("")).toBeUndefined();
+  });
+  it("adds the hardware to the resources report", async () => {
+    const report = await collectResources({ now: () => 0, home: () => process.cwd(), platform: "freebsd", processes: async () => [],
+      owners: async () => new Map(), panes: async () => undefined, hardware: async () => ({ model: "Dell XPS 13 9310", memoryBytes: 32 * 1024 ** 3, cores: 8 }) });
+    expect(report.hardware).toEqual({ model: "Dell XPS 13 9310", memoryBytes: 32 * 1024 ** 3, cores: 8 });
   });
 });

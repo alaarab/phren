@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Resources report each computer's `hardware`: model ("MacBook Pro", "Dell XPS 13 9310"), chip or CPU, memory and cores, read once per Hook run, so the phone can say which machine each computer is.
+
 ## [0.3.29] - 2026-10-03
 
 ### Added
