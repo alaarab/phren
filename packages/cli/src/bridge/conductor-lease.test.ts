@@ -9,16 +9,19 @@ import { configureConductorLease, conductorLeaseAuthority, requireAvailableCondu
 import { paneIdentity, snapshot } from "./herdr.js";
 import { recordConductor, readRoleState, resetRoleState } from "./conductor-role.js";
 import { stopConductor } from "./server-launch.js";
-import type { Json } from "./protocol.js";
+import { optionalHookPeers, peerRequest } from "./peers.js";
+import { BridgeError, type Json } from "./protocol.js";
 
 vi.mock("./herdr.js", async original => ({ ...await original<object>(), snapshot: vi.fn(), paneIdentity: vi.fn() }));
-vi.mock("./peers.js", async original => ({ ...await original<object>(), optionalHookPeers: async () => ({ peers: [] }) }));
+vi.mock("./peers.js", async original => ({ ...await original<object>(), optionalHookPeers: vi.fn(), peerRequest: vi.fn() }));
 
 const authority = "40000000-0000-4000-8000-000000000001";
 let store: string, cleanup: () => void;
 let ownerKey: { publicKey: KeyObject; privateKey: KeyObject }, ownerWire: string;
 const place = { server: "default", pane: "p1", terminal: "terminal-1", source: "codex" as const, session: "40000000-0000-4000-8000-000000000005" };
-const livePane = { pane_id: place.pane, terminal_id: place.terminal, agent: place.source, agent_status: "idle" };
+const target = { server: place.server, workspace: "w1", tab: "w1:t1", pane: place.pane, source: place.source, session: place.session };
+const newHolder = { computerId: authority, target, terminal: place.terminal };
+const livePane = { workspace_id: target.workspace, tab_id: target.tab, pane_id: place.pane, terminal_id: place.terminal, agent: place.source, agent_status: "idle" };
 function signed(route: string, body: Json) {
   // Independent wire encoding via JSON's sorted property whitelist, not the production signing helper.
   const keys = new Set<string>();
@@ -38,7 +41,8 @@ beforeEach(async () => {
   ownerKey = generateKeyPairSync("ed25519");
   ownerWire = Buffer.concat([Buffer.from("0000000b7373682d6564323535313900000020", "hex"), ownerKey.publicKey.export({ type: "spki", format: "der" }).subarray(-32)]).toString("base64");
   fs.writeFileSync(path.join(store, ".ssh/authorized_keys"), `restrict,pty,command="sh ~/.local/share/phren/bridge/dispatch" ssh-ed25519 ${ownerWire} phren-iphone\n`, { mode: 0o600 });
-  vi.mocked(snapshot).mockResolvedValue({ panes: [livePane] }); vi.mocked(paneIdentity).mockResolvedValue(place.session); resetRoleState();
+  vi.mocked(snapshot).mockReset().mockResolvedValue({ panes: [livePane] }); vi.mocked(paneIdentity).mockReset().mockResolvedValue(place.session);
+  vi.mocked(optionalHookPeers).mockReset().mockResolvedValue({ peers: [] }); vi.mocked(peerRequest).mockReset(); resetRoleState();
   writeStoreRegistry(store, { version: 1, stores: [{ id: "11111111", name: "Personal", path: store, role: "primary", sync: "managed-git" }] });
   await configureConductorLease(store, { authorityComputerId: authority, confirm: true });
 });
@@ -68,7 +72,7 @@ describe("store conductor ownership", () => {
   });
   it("atomically replaces the complete reviewed holder once, without freeing a launch slot", async () => {
     const held = (await conductorLeaseAuthority(store, { storeId: "11111111", operation: "claim", claim: claim("40000000-0000-4000-8000-000000000003") })).state;
-    const body = { confirm: true, expectedGeneration: held.generation, holder: held.holder, computerId: authority, place };
+    const body = { confirm: true, expectedGeneration: held.generation, holder: held.holder, newHolder };
     const results = await Promise.allSettled([1, 2].map(() => takeoverConductorLease(store, body, signed("/v1/conductor/lease/takeover", body))));
     expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
     const replaced = (await read()).state;
@@ -80,7 +84,7 @@ describe("store conductor ownership", () => {
   });
   it("rejects a changed full holder with the same claim ID and generation", async () => {
     const held = (await conductorLeaseAuthority(store, { storeId: "11111111", operation: "claim", claim: claim(randomUUID()) })).state;
-    const body = { confirm: true, expectedGeneration: held.generation, holder: { ...held.holder!, since: "2001-01-01T00:00:00.000Z" }, computerId: authority, place };
+    const body = { confirm: true, expectedGeneration: held.generation, holder: { ...held.holder!, since: "2001-01-01T00:00:00.000Z" }, newHolder };
     await expect(takeoverConductorLease(store, body, signed("/v1/conductor/lease/takeover", body))).rejects.toThrow("exact conductor identity changed");
     expect((await read()).state).toEqual(held);
   });
@@ -90,10 +94,18 @@ describe("store conductor ownership", () => {
     await expect(conductorLeaseAuthority(store, { storeId: "11111111", operation: "takeover", claim: { computerId: authority, claimId: randomUUID(), since: "2026-10-03T00:00:00.000Z", place }, holder: held.holder, expectedGeneration: held.generation })).rejects.toMatchObject({ status: 403 });
     expect((await read()).state).toEqual(held);
   });
-  it("rejects a stale session before replacing the holder", async () => {
+  it("rejects unsigned public takeover before creating review evidence", async () => {
     const held = (await conductorLeaseAuthority(store, { storeId: "11111111", operation: "claim", claim: claim(randomUUID()) })).state;
-    const body = { confirm: true, expectedGeneration: held.generation, holder: held.holder, computerId: authority, place };
-    vi.mocked(paneIdentity).mockResolvedValue(randomUUID());
+    const body = { confirm: true, expectedGeneration: held.generation, holder: held.holder, newHolder };
+    await expect(takeoverConductorLease(store, body, {})).rejects.toMatchObject({ status: 403 });
+    expect(fs.existsSync(path.join(store, ".runtime/conductor-takeovers"))).toBe(false);
+    expect((await read()).state).toEqual(held);
+  });
+  it.each(["workspace", "tab", "terminal", "session"])("rejects a stale %s before replacing the holder", async field => {
+    const held = (await conductorLeaseAuthority(store, { storeId: "11111111", operation: "claim", claim: claim(randomUUID()) })).state;
+    const body = { confirm: true, expectedGeneration: held.generation, holder: held.holder, newHolder };
+    if (field === "session") vi.mocked(paneIdentity).mockResolvedValue(randomUUID());
+    else vi.mocked(snapshot).mockResolvedValue({ panes: [{ ...livePane, [field === "workspace" ? "workspace_id" : field === "tab" ? "tab_id" : "terminal_id"]: "changed" }] });
     await expect(takeoverConductorLease(store, body, signed("/v1/conductor/lease/takeover", body))).rejects.toMatchObject({ status: 409, details: { code: "lease-target-changed" } });
     expect((await read()).state).toEqual(held);
   });
@@ -112,16 +124,44 @@ describe("store conductor ownership", () => {
     const leaseBytes = fs.readFileSync(path.join(store, ".runtime/conductor-lease.json"), "utf8");
     fs.writeFileSync(path.join(store, ".config/conductor-authority.json"), JSON.stringify({ version: 1, storeId: "11111111", authorityComputerId: "40000000-0000-4000-8000-000000000099" }));
     await expect(requireAvailableConductorAuthority(store)).rejects.toThrow("offline, unlinked or ambiguous");
-    expect(await stopConductor({ paneId: place.pane })).toMatchObject({ ok: true, stopped: true, leasePreserved: true });
+    expect(await stopConductor({ paneId: place.pane })).toMatchObject({ ok: true, stopped: true, leaseUnchanged: true });
     expect((await readRoleState())?.conductor).toBeNull();
     expect(fs.readFileSync(path.join(store, ".runtime/conductor-lease.json"), "utf8")).toBe(leaseBytes);
+    fs.unlinkSync(path.join(store, ".config/conductor-authority.json"));
+    expect(await stopConductor({})).not.toHaveProperty("leaseUnchanged");
   });
   it("retains the new reservation and reports partial adoption when the local claim cannot be saved", async () => {
     const held = (await conductorLeaseAuthority(store, { storeId: "11111111", operation: "claim", claim: claim(randomUUID()) })).state;
     fs.mkdirSync(path.join(store, ".runtime/conductor-claim.json"));
-    const body = { confirm: true, expectedGeneration: held.generation, holder: held.holder, computerId: authority, place };
-    await expect(takeoverConductorLease(store, body, signed("/v1/conductor/lease/takeover", body))).rejects.toMatchObject({ status: 409, details: { code: "lease-adoption-incomplete", existingWorkPreserved: true } });
+    const body = { confirm: true, expectedGeneration: held.generation, holder: held.holder, newHolder };
+    await expect(takeoverConductorLease(store, body, signed("/v1/conductor/lease/takeover", body))).rejects.toMatchObject({ status: 409, details: { code: "lease-adoption-incomplete", transferred: true, launched: false, existingWorkPreserved: true } });
     expect((await read()).state).toMatchObject({ generation: held.generation + 1, holder: { computerId: authority, place } });
+    const reviews = fs.readdirSync(path.join(store, ".runtime/conductor-takeovers"));
+    expect(reviews).toHaveLength(1);
+    expect(JSON.parse(fs.readFileSync(path.join(store, ".runtime/conductor-takeovers", reviews[0]), "utf8"))).toMatchObject(body);
+    expect((await readRoleState())?.conductor).toBeUndefined();
+  });
+  it("retains public review evidence and the previous local claim after an unanswered authority request", async () => {
+    const held = (await conductorLeaseAuthority(store, { storeId: "11111111", operation: "claim", claim: claim(randomUUID()) })).state;
+    const previousBytes = JSON.stringify(held.holder);
+    fs.writeFileSync(path.join(store, ".runtime/conductor-claim.json"), previousBytes);
+    const remoteAuthority = "40000000-0000-4000-8000-000000000099";
+    fs.writeFileSync(path.join(store, ".config/conductor-authority.json"), JSON.stringify({ version: 1, storeId: "11111111", authorityComputerId: remoteAuthority }));
+    vi.mocked(optionalHookPeers).mockResolvedValue({ peers: [{ name: "authority", address: "127.0.0.1", username: "owner", port: 22, server: "default", hostKey: "ssh-ed25519 " + ownerWire }] });
+    vi.mocked(peerRequest).mockImplementation(async (_peer, route) => {
+      if (route === "/v1/health") return { computer: { id: remoteAuthority } };
+      // Only the missing reply is simulated; whether the remote transfer happened is deliberately unknown.
+      throw new BridgeError(504, "Hook did not confirm the request.", { code: "peer-timeout" });
+    });
+    const body = { confirm: true, expectedGeneration: held.generation, holder: held.holder, newHolder };
+    await expect(takeoverConductorLease(store, body, signed("/v1/conductor/lease/takeover", body))).rejects.toMatchObject({ status: 504, details: { code: "lease-transfer-unconfirmed", transferUnconfirmed: true, existingWorkPreserved: true, launched: false } });
+    expect(fs.readFileSync(path.join(store, ".runtime/conductor-claim.json"), "utf8")).toBe(previousBytes);
+    const reviews = fs.readdirSync(path.join(store, ".runtime/conductor-takeovers"));
+    expect(reviews).toHaveLength(1);
+    const review = JSON.parse(fs.readFileSync(path.join(store, ".runtime/conductor-takeovers", reviews[0]), "utf8"));
+    expect(review).toMatchObject({ ...body, claim: { computerId: authority, place } });
+    expect(Object.keys(review).sort()).toEqual(["claim", "confirm", "expectedGeneration", "holder", "newHolder"]);
+    expect(vi.mocked(peerRequest).mock.calls.filter(([, route]) => route === "/v1/conductor/lease/authority")).toHaveLength(1);
     expect((await readRoleState())?.conductor).toBeUndefined();
   });
   it("refuses damaged durable lease state instead of silently freeing the store", async () => {

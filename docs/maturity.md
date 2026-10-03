@@ -6,7 +6,12 @@ conductor design judgments, not owner quotations. Frozen donor `1f8dfdf5` is a
 source donor rather than accepted RC evidence. Q's isolated canonical correction
 retains the lease on Stop, adds signed atomic exact-holder takeover, guards new
 launches against an offline authority, and requires paired-owner proof on the
-existing enrollment controls. Native screens/transport belong to Astra; their
+existing enrollment controls. The pinned `1f8dfdf5..42688bbd` supplemental delta
+has been reconciled into this single Q contract: exact `newHolder.target`,
+conditional `leaseUnchanged`, public-only pending review evidence and explicit
+partial/uncertain transfer results. Q's signed owner proof, nonce protection and
+offline launch guards remain; internal confirmation booleans are not authority.
+Inherited core commits were not replayed. Native screens/transport belong to Astra; their
 source does not establish live linking. The exact API and prepared UNRUN
 regressions are in
 [CANONICAL-LEASE-CONTRACT.md](../packages/cli/src/bridge/harness/CANONICAL-LEASE-CONTRACT.md).

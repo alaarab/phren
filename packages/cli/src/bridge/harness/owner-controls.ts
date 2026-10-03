@@ -19,8 +19,9 @@ export function ownerSigningMessage(time: string, nonce: string, method: string,
   return ["phren-owner-v1", time, nonce, method, route, createHash("sha256").update(canonicalOwnerBody(data)).digest("hex")].join("\n");
 }
 
-/** Only a paired phone key proves the owner. A computer's forced SSH command proves no such authority. */
-export async function requireOwnerControl(headers: IncomingHttpHeaders, method: string, route: string, data: Json, root = bridgeRoot(), sshDirectory = path.join(homedir(), ".ssh")): Promise<void> {
+/** Read-only signature preflight. The fixed authority still consumes the nonce
+ * exactly once before mutation; preflight alone never authorizes a lease write. */
+export async function verifyOwnerControlSignature(headers: IncomingHttpHeaders, method: string, route: string, data: Json, sshDirectory = path.join(homedir(), ".ssh")): Promise<string> {
   if (data.origin !== undefined) throw new BridgeError(403, "Only the authenticated owner may perform this control.");
   const scalar = (name: string) => typeof headers[name] === "string" ? headers[name] as string : "";
   const time = scalar("x-phren-owner-time"), nonce = scalar("x-phren-owner-nonce"), encoded = scalar("x-phren-owner-key"), signature = scalar("x-phren-owner-signature");
@@ -37,6 +38,12 @@ export async function requireOwnerControl(headers: IncomingHttpHeaders, method: 
   });
   const blob = Buffer.from(encoded, "base64"), publicKey = createPublicKey({ key: Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), blob.subarray(19)]), type: "spki", format: "der" });
   if (!paired || !verify(null, Buffer.from(ownerSigningMessage(time, nonce, method, route, data)), publicKey, Buffer.from(signature, "base64"))) throw new BridgeError(403, "The owner signature is invalid or the paired key was revoked.");
+  return nonce;
+}
+
+/** Only a paired phone key proves the owner. A computer's forced SSH command proves no such authority. */
+export async function requireOwnerControl(headers: IncomingHttpHeaders, method: string, route: string, data: Json, root = bridgeRoot(), sshDirectory = path.join(homedir(), ".ssh")): Promise<void> {
+  const nonce = await verifyOwnerControlSignature(headers, method, route, data, sshDirectory);
   const ledger = path.join(root, "harness", "owner-nonces.json");
   await lockedState(ledger, async () => {
     const before = await readPrivateState(ledger), now = Date.now();

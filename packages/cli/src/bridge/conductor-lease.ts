@@ -6,12 +6,12 @@ import { z } from "zod";
 import { tryFileLock } from "../governance/locks.js";
 import { permissionDeniedError } from "../governance/rbac.js";
 import { registeredStoreIdentity } from "../store-registry.js";
-import { atomicInPrivateDir, bridgeRoot, BridgeError, id, object, provider, serverName, type Json } from "./protocol.js";
+import { atomicInPrivateDir, bridgeRoot, BridgeError, id, object, objects, provider, serverName, targetSchema, type Json } from "./protocol.js";
 import { optionalHookPeers, peerRequest } from "./peers.js";
 import { phrenStoreRoot } from "./transcripts.js";
 import { findPane, paneIdentity, snapshot } from "./herdr.js";
 import { recordConductor, runsAgent } from "./conductor-role.js";
-import { requireOwnerControl } from "./harness/owner-controls.js";
+import { requireOwnerControl, verifyOwnerControlSignature } from "./harness/owner-controls.js";
 
 const configSchema = z.object({ version: z.literal(1), storeId: z.string().regex(/^[a-f0-9]{8}$/), authorityComputerId: z.string().uuid() }).strict();
 const placeSchema = z.object({ server: serverName, pane: id, terminal: z.string().min(1).max(200), source: provider,
@@ -23,8 +23,12 @@ type State = z.infer<typeof stateSchema>;
 type Config = z.infer<typeof configSchema>;
 export type LeaseClaim = z.infer<typeof holderSchema>;
 const takeoverPlaceSchema = placeSchema.extend({ source: z.enum(["claude", "codex", "opencode"]), session: z.string().min(1).max(200) });
+const newHolderSchema = z.object({ computerId: z.string().uuid(),
+  target: targetSchema.extend({ source: z.enum(["claude", "codex", "opencode"]) }).strict(),
+  terminal: z.string().min(1).max(200) }).strict();
+type NewHolder = z.infer<typeof newHolderSchema>;
 const revokeSchema = z.object({ expectedGeneration: z.number().int().nonnegative(), holder: holderSchema, confirm: z.literal(true) }).strict();
-const takeoverSchema = revokeSchema.extend({ computerId: z.string().uuid(), place: takeoverPlaceSchema }).strict();
+const takeoverSchema = revokeSchema.extend({ newHolder: newHolderSchema }).strict();
 const ownerRequestSchema = z.object({ route: z.enum(["/v1/conductor/lease/revoke", "/v1/conductor/lease/takeover"]), body: z.record(z.string(), z.unknown()),
   headers: z.object({ "x-phren-owner-time": z.string(), "x-phren-owner-nonce": z.string(), "x-phren-owner-key": z.string(), "x-phren-owner-signature": z.string() }).strict() }).strict();
 type OwnerRequest = z.infer<typeof ownerRequestSchema>;
@@ -41,8 +45,18 @@ function samePlace(a: LeaseClaim["place"], b: LeaseClaim["place"]): boolean {
   return (!a && !b) || (!!a && !!b && a.server === b.server && a.pane === b.pane
     && a.terminal === b.terminal && a.source === b.source && a.session === b.session);
 }
-async function liveTakeoverPane(place: z.infer<typeof takeoverPlaceSchema>) {
-  const pane = findPane(await snapshot(place.server), { pane: place.pane });
+function takeoverPlace(replacement: NewHolder): z.infer<typeof takeoverPlaceSchema> {
+  const { target, terminal } = replacement;
+  return { server: target.server, pane: target.pane, terminal, source: target.source, session: target.session };
+}
+function sameReplacement(a: NewHolder, b: NewHolder): boolean {
+  return a.computerId === b.computerId && a.target.workspace === b.target.workspace && a.target.tab === b.target.tab
+    && samePlace(takeoverPlace(a), takeoverPlace(b));
+}
+async function liveConductorPane(place: z.infer<typeof takeoverPlaceSchema>, location?: { workspace: string; tab: string }) {
+  const before = await snapshot(place.server);
+  const pane = location ? findPane(before, { ...location, pane: place.pane, source: place.source })
+    : objects(before.panes).find(row => row.pane_id === place.pane);
   if (!runsAgent(pane) || pane.terminal_id !== place.terminal || pane.agent !== place.source || await paneIdentity(place.server, pane, true) !== place.session) {
     throw new BridgeError(409, "The replacement conductor's exact local pane, terminal or session changed.", { code: "lease-target-changed" });
   }
@@ -113,15 +127,15 @@ async function readState(store: string, config: Config): Promise<State> {
 export async function conductorLeaseAuthority(store: string, raw: unknown) {
   const input = z.object({ storeId: z.string().regex(/^[a-f0-9]{8}$/), operation: z.enum(["read", "claim", "bind", "release", "takeover", "validate-place"]),
     claim: holderSchema.optional(), expectedGeneration: z.number().int().nonnegative().optional(), holder: holderSchema.optional(),
-    ownerRequest: ownerRequestSchema.optional(), place: takeoverPlaceSchema.optional(), computerId: z.string().uuid().optional() }).strict().parse(raw);
+    ownerRequest: ownerRequestSchema.optional(), newHolder: newHolderSchema.optional() }).strict().parse(raw);
   const config = await conductorLeaseConfig(store);
   const computerId = await localId();
   if (!config || input.storeId !== config.storeId) throw new BridgeError(409, "This Hook has no matching configured store authority.");
   // Read-only pinned-Hook evidence for the authority; never grants a role or changes a lease.
   if (input.operation === "validate-place") {
-    if (input.computerId !== computerId || !input.place) throw new BridgeError(409, "The replacement computer identity changed.");
-    await liveTakeoverPane(input.place);
-    return { ok: true, computerId, place: input.place };
+    if (!input.newHolder || input.newHolder.computerId !== computerId) throw new BridgeError(409, "The replacement computer identity changed.");
+    await liveConductorPane(takeoverPlace(input.newHolder), input.newHolder.target);
+    return { ok: true, newHolder: input.newHolder };
   }
   if (config.authorityComputerId !== computerId) throw new BridgeError(409, "This Hook is not the configured authority for this store.");
   if (input.operation === "release" || input.operation === "takeover") {
@@ -134,18 +148,18 @@ export async function conductorLeaseAuthority(store: string, raw: unknown) {
     if (!previous || !sameHolder(previous, reviewed.holder) || input.expectedGeneration !== reviewed.expectedGeneration) throw new BridgeError(403, "The lease operation differs from the signed owner review.");
     if (input.operation === "takeover") {
       const replacement = takeoverSchema.parse(proof.body), claim = input.claim;
-      if (!claim || !sameHolder(claim, { ...claim, computerId: replacement.computerId, place: replacement.place })) throw new BridgeError(403, "The replacement differs from the signed owner target.");
+      if (!claim || !sameHolder(claim, { ...claim, computerId: replacement.newHolder.computerId, place: takeoverPlace(replacement.newHolder) })) throw new BridgeError(403, "The replacement differs from the signed owner target.");
     }
     // The original native body/path is verified at the fixed authority, even when relayed by a computer.
     await requireOwnerControl(proof.headers, "POST", proof.route, proof.body);
     if (input.operation === "takeover") {
-      const replacement = takeoverSchema.parse(proof.body);
-      if (replacement.computerId === computerId) await liveTakeoverPane(replacement.place);
+      const replacement = takeoverSchema.parse(proof.body).newHolder;
+      if (replacement.computerId === computerId) await liveConductorPane(takeoverPlace(replacement), replacement.target);
       else {
         const reply = await peerRequest(await authorityPeer(replacement.computerId), "/v1/conductor/lease/authority",
-          { storeId: config.storeId, operation: "validate-place", computerId: replacement.computerId, place: replacement.place }, 15000);
-        const verifiedPlace = takeoverPlaceSchema.safeParse(reply.place);
-        if (reply.computerId !== replacement.computerId || !verifiedPlace.success || !samePlace(verifiedPlace.data, replacement.place)) throw new BridgeError(409, "The replacement Hook did not verify the exact owner target.");
+          { storeId: config.storeId, operation: "validate-place", newHolder: replacement }, 15000);
+        const verified = newHolderSchema.safeParse(reply.newHolder);
+        if (!verified.success || !sameReplacement(verified.data, replacement)) throw new BridgeError(409, "The replacement Hook did not verify the exact owner target.");
       }
     }
   }
@@ -163,7 +177,7 @@ export async function conductorLeaseAuthority(store: string, raw: unknown) {
     } else {
       if ((input.operation !== "takeover" && !same) || input.expectedGeneration !== state.generation) throw new BridgeError(409, "Conductor lease changed since it was reviewed.", { lease: state });
       if (input.operation === "takeover") {
-        if (!input.holder || !sameHolder(state.holder, input.holder) || !claim.place) throw new BridgeError(409, "The exact conductor identity changed since review.", { lease: state });
+        if (!input.holder || !sameHolder(state.holder, input.holder) || !claim.place || claim.claimId === state.holder!.claimId) throw new BridgeError(409, "The exact conductor identity changed since review.", { lease: state });
         state.holder = claim;
       } else if (input.operation === "bind") {
         if (!claim.place) throw new BridgeError(400, "Binding requires the exact conductor pane identity.");
@@ -226,21 +240,38 @@ export async function revokeConductorLease(store: string, raw: unknown, headers:
 export async function takeoverConductorLease(store: string, raw: unknown, headers: IncomingHttpHeaders) {
   requireOwner(store, raw);
   const input = takeoverSchema.parse(raw);
-  if (input.computerId !== await localId()) throw new BridgeError(409, "Send takeover to the reviewed replacement computer's paired Hook.");
-  await liveTakeoverPane(input.place);
-  const claim: LeaseClaim = { computerId: input.computerId, claimId: randomUUID(), since: new Date().toISOString(), place: input.place };
-  const state = await requestAuthority(store, "takeover", claim, input.expectedGeneration,
-    ownerRequest("/v1/conductor/lease/takeover", object(raw), headers), input.holder);
+  // No unsigned computer caller may create review records. Nonce consumption
+  // stays at the authority, so local and remote transfers have the same policy.
+  await verifyOwnerControlSignature(headers, "POST", "/v1/conductor/lease/takeover", object(raw));
+  const replacement = input.newHolder;
+  if (replacement.computerId !== await localId()) throw new BridgeError(409, "Send takeover to the reviewed replacement computer's paired Hook.");
+  const place = takeoverPlace(replacement);
+  await liveConductorPane(place, replacement.target);
+  const claim: LeaseClaim = { computerId: replacement.computerId, claimId: randomUUID(), since: new Date().toISOString(), place };
+  // Public reviewed identities only: no signature, credentials or automatic replay.
+  // The existing local claim stays intact until the authority confirms transfer.
+  await atomicInPrivateDir(path.join(store, ".runtime", "conductor-takeovers", `${claim.claimId}.json`), { ...input, claim });
+  let state: State;
+  try {
+    state = await requestAuthority(store, "takeover", claim, input.expectedGeneration,
+      ownerRequest("/v1/conductor/lease/takeover", object(raw), headers), input.holder);
+  } catch (error) {
+    if (error instanceof BridgeError && error.status < 500) throw error;
+    throw new BridgeError(error instanceof BridgeError ? error.status : 503,
+      "Conductor transfer was not confirmed. Read the fixed authority and review the retained claim before any explicit owner retry.",
+      { ...(error instanceof BridgeError ? error.details : {}), code: "lease-transfer-unconfirmed", reviewId: claim.claimId,
+        transferUnconfirmed: true, existingWorkPreserved: true, launched: false });
+  }
   // An uncertain reply or local persistence failure leaves the authority's reservation intact.
   try {
     await atomicInPrivateDir(claimFile(store), claim);
-    const pane = await liveTakeoverPane(input.place);
-    await recordConductor(input.place.server, pane, "owner", input.place.session);
+    const pane = await liveConductorPane(place, replacement.target);
+    await recordConductor(place.server, pane, "owner", place.session);
   } catch {
     throw new BridgeError(409, "The lease was replaced, but local conductor adoption is incomplete. Review the authority before another explicit owner decision.",
-      { code: "lease-adoption-incomplete", state, existingWorkPreserved: true });
+      { code: "lease-adoption-incomplete", lease: state, transferred: true, reviewId: claim.claimId, existingWorkPreserved: true, launched: false });
   }
-  return { ok: true, state, existingWorkPreserved: true };
+  return { ok: true, state, previousHolder: input.holder, existingWorkPreserved: true, launched: false };
 }
 export async function requireConductorLease(place: { server: string; pane: string; terminal?: string; source?: string }, store = phrenStoreRoot()) {
   // Existing conductors keep their work during deliberate configuration migration.
@@ -250,5 +281,5 @@ export async function requireConductorLease(place: { server: string; pane: strin
   if (!sameHolder(state.holder, claim) || state.holder?.computerId !== await localId()
     || state.holder.place?.server !== place.server || state.holder.place?.pane !== place.pane
     || state.holder.place.terminal !== place.terminal || state.holder.place.source !== place.source) throw new BridgeError(409, "This conductor no longer holds the store lease. Existing work is preserved; new dispatches are blocked.");
-  if (state.holder.place.session) await liveTakeoverPane(takeoverPlaceSchema.parse(state.holder.place));
+  if (state.holder.place.session) await liveConductorPane(takeoverPlaceSchema.parse(state.holder.place));
 }

@@ -101,6 +101,7 @@ export async function runConductor(args: string[]): Promise<number> {
   const [namespace = "status", action = "list", ...rest] = args;
   if (namespace === "lease") {
     if (action === "list" || action === "status") { console.log(JSON.stringify(await hookRequest("/v1/conductor/lease"), null, 2)); return 0; }
+    if (action === "takeover") throw new Error("Conductor takeover requires the paired phone's signed owner review. Authenticated local terminal transport is not available.");
     const { agentShell } = await import("./authority-command.js");
     if (agentShell() || !process.stdin.isTTY) throw new Error("Conductor lease configuration and revocation require the owner's interactive terminal or authenticated phone.");
     const { values } = parseArgs({ args: rest, options: { computer: { type: "string" }, confirm: { type: "string" }, "review-file": { type: "string" } } });
@@ -130,6 +131,7 @@ export async function runConductor(args: string[]): Promise<number> {
     }
     const result = await hookRequest("/v1/conductor/stop", values.pane ? { paneId: values.pane } : {});
     console.log(result.stopped ? "This computer has no conductor now." : "This computer had no conductor.");
+    if (result.leaseUnchanged) console.log("The store lease was not changed. Read phren conductor lease status before explicit owner revocation or takeover.");
     return 0;
   }
   if (namespace === "integrator") {

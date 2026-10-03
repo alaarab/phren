@@ -204,8 +204,10 @@ export async function stopConductor(data: Json): Promise<Json> {
   }
   const held = (await readRoleState())?.conductor;
   if (pane !== undefined && held && held.pane !== pane) throw new BridgeError(409, "That pane is not this computer's conductor.");
+  // Role Stop never revokes a reservation or contacts an offline authority.
+  const leaseUnchanged = !!await conductorLeaseConfig();
   const stopped = await clearConductor(pane);
-  return { ok: true, stopped: !!stopped, leasePreserved: true };
+  return { ok: true, stopped: !!stopped, ...(leaseUnchanged ? { leaseUnchanged: true } : {}) };
 }
 
 /** How long a pane the Hook just created may take to reach its shell prompt. */
