@@ -186,6 +186,7 @@ const MAINTAIN_SUBCOMMANDS: Subcommand[] = [
 
 const STORE_SUBCOMMANDS: Subcommand[] = [
   { name: "list", usage: "phren store list", summary: "List registered stores" },
+  { name: "identity", usage: "phren store identity [--create]", summary: "Read or explicitly register this store's portable identity" },
   { name: "add", usage: "phren store add <name> --remote <url>", summary: "Add a team store" },
   { name: "remove", usage: "phren store remove <name>", summary: "Remove a store (local only)" },
   { name: "sync", usage: "phren store sync", summary: "Pull and push all stores" },
@@ -400,12 +401,12 @@ export const REGISTRY: Command[] = [
   {
     name: "tasks",
     topic: "core",
-    usage: "phren tasks",
+    usage: "phren tasks [profile] [--responsibility=human|agent] [--readiness=ready|waiting-on-human|waiting-on-task]",
     summary: "Cross-project task view",
     featured: true,
-    run: async (_args, ctx) => {
-      const { handleTaskView } = await import("./cli/ops.js");
-      await handleTaskView(ctx.profile());
+    run: async (args, ctx) => {
+      const { handleTaskListArgs } = await import("./cli/namespaces-tasks.js");
+      await handleTaskListArgs(args, ctx.profile());
     },
   },
   {

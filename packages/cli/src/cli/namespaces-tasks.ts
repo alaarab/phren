@@ -1,9 +1,12 @@
 import { getPhrenPath } from "../shared.js";
+import { enableTaskFormat, taskFormatStatus, taskFormatMigrationHint } from "../data/task-format.js";
 import { addTask, completeTask, updateTask, reorderTask, pinTask, removeTask, workNextTask, tidyDoneTasks, linkTaskIssue, promoteTask, resolveTaskItem } from "../data/tasks.js";
 import { buildTaskIssueBody, createGithubIssueForTask, parseGithubIssueUrl, resolveProjectGithubRepo } from "../task/github.js";
 
 function printTaskUsage() {
   console.log("Usage:");
+  console.log('  phren task list [profile] [--responsibility=human|agent] [--readiness=ready|waiting-on-human|waiting-on-task]');
+  console.log('  phren task format [enable --all-writers-compatible]');
   console.log('  phren task add <project> "<text>"');
   console.log('  phren task complete <project> "<text>"');
   console.log('  phren task remove <project> "<text>"');
@@ -13,7 +16,7 @@ function printTaskUsage() {
   console.log('  phren task link <project> "<text>" --issue <number> [--url <url>]');
   console.log('  phren task link <project> "<text>" --unlink');
   console.log('  phren task create-issue <project> "<text>" [--repo <owner/name>] [--title "<title>"] [--done]');
-  console.log('  phren task update <project> "<text>" [--priority=high|medium|low] [--section=Active|Queue|Done] [--context="..."]');
+  console.log('  phren task update <project> "<text>" [--priority=high|medium|low] [--section=Active|Queue|Done] [--context="..."] [--responsibility=human|agent] [--dependencies=JSON]');
   console.log('  phren task pin <project> "<text>"');
   console.log('  phren task reorder <project> "<text>" --rank=<n>');
 }
@@ -27,8 +30,20 @@ export async function handleTaskNamespace(args: string[]) {
 
   if (subcommand === "list") {
     // Delegate to the cross-project task view (same as `phren tasks`)
-    const { handleTaskView } = await import("./ops.js");
-    return handleTaskView(args[1] || "default");
+    return handleTaskListArgs(args.slice(1), "default");
+  }
+
+  if (subcommand === "format") {
+    const base = getPhrenPath();
+    if (args.length === 1) { console.log(JSON.stringify(taskFormatStatus(base))); return; }
+    if (args.length !== 3 || args[1] !== "enable" || args[2] !== "--all-writers-compatible") {
+      console.error(taskFormatMigrationHint); process.exitCode = 1; return;
+    }
+    try {
+      enableTaskFormat(base, true);
+      console.log("Task metadata enabled for this store. Your acknowledgement covers every CLI, MCP, Hook, sync and app writer; old binaries must no longer write this store.");
+    } catch (error) { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; }
+    return;
   }
 
   if (subcommand === "add") {
@@ -71,9 +86,15 @@ export async function handleTaskNamespace(args: string[]) {
     }
     // Collect non-flag args as the match text, flags as updates
     const positional: string[] = [];
-    const updates: { priority?: string; context?: string; section?: string } = {};
+    const updates: Parameters<typeof updateTask>[3] = {};
     for (const arg of args.slice(2)) {
-      if (arg.startsWith("--priority=")) {
+      if (arg.startsWith("--responsibility=")) {
+        const value = arg.slice(17);
+        if (value !== "human" && value !== "agent") { console.error("Responsibility must be human or agent."); process.exit(1); }
+        updates.responsibility = value;
+      } else if (arg.startsWith("--dependencies=")) {
+        try { updates.dependencies = JSON.parse(arg.slice(15)); } catch { console.error("Dependencies must be a JSON array of storeId/project/stableId objects."); process.exit(1); }
+      } else if (arg.startsWith("--priority=")) {
         updates.priority = arg.slice("--priority=".length);
       } else if (arg.startsWith("--section=")) {
         updates.section = arg.slice("--section=".length);
@@ -363,4 +384,13 @@ export async function handleTaskNamespace(args: string[]) {
   console.error(`Unknown task subcommand: ${subcommand}`);
   printTaskUsage();
   process.exit(1);
+}
+
+export async function handleTaskListArgs(args: string[], defaultProfile: string) {
+  const { handleTaskView } = await import("./ops.js");
+  const { z } = await import("zod");
+  const filter = z.object({ responsibility: z.enum(["human", "agent"]).optional(), readiness: z.enum(["ready", "waiting-on-human", "waiting-on-task"]).optional() }).strict().safeParse(Object.fromEntries(args.filter(a => a.startsWith("--")).map(a => a.slice(2).split("="))));
+  if (!filter.success) throw new Error("Invalid task responsibility/readiness filter; use --responsibility=human|agent or --readiness=ready|waiting-on-human|waiting-on-task.");
+  const profiles = args.filter(a => !a.startsWith("--")); if (profiles.length > 1) throw new Error("Pass at most one task profile.");
+  return handleTaskView(profiles[0] || defaultProfile, filter.data);
 }

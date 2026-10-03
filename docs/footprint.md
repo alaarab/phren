@@ -265,3 +265,7 @@ the process table shows it, the worker's process group). The resources report
 uses it to name the agent a heavy process belongs to, and `POST
 /v1/jobs/cleanup` ends only a registered process group whose pane is gone and
 whose lease has passed. The file is private and does not sync either.
+
+## Task responsibility metadata
+
+Task writers preserve versioned `Task:` continuations in each project's `tasks.md` and archived task records in `.config/task-archive/<project>.md`. Explicit owner activation writes `.config/task-format.json`; it stays disabled until compatible writers are adopted. Canonical identity registration writes the primary entry in synced `stores.yaml`. Task graph mutations lock `.runtime/task-dependencies` in the writable participating stores before locking the task document. Task-bound launch writes a durable Active claim and history to `tasks.md` before invoking the ordinary launcher; its brief uses the existing Hook brief directory. Failed or uncertain launch keeps the claim for explicit review. Revision tokens are derived on read, with no extra state file. Directory discovery does not create identities or migrate attachments. See [Task responsibility](task-responsibility.md).
