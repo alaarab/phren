@@ -1,7 +1,6 @@
 import { configuredHarness, prepareHarnessCommand } from "./harness/launch.js";
-import { conductorLeaseConfig, reserveConductorLease, bindConductorLease, releaseLocalConductorLease } from "./conductor-lease.js";
+import { conductorLeaseConfig, reserveConductorLease, bindConductorLease } from "./conductor-lease.js";
 import { requireLaunchLease } from "./harness/store-lease.js";
-import { defaultPhrenPath } from "../shared.js";
 import { markPaneClosed } from "./worker-close.js";
 import { mkdir, readFile } from "node:fs/promises";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -180,7 +179,7 @@ const PHREN_NO_CONDUCTOR = "phren agent cannot run as a conductor: it takes no s
 /** "Make conductor": the owner gives an agent already running in a pane on this computer the role. */
 export async function makeConductor(server: string, data: Json): Promise<Json> {
   const place = paneRequest.parse(data);
-  await requireLaunchLease(defaultPhrenPath(), true, place.launchId);
+  await requireLaunchLease(phrenStoreRoot());
   const before = await snapshot(server);
   const pane = objects(before.panes).find(p => p.pane_id === place.paneId && (place.workspaceId === undefined || p.workspace_id === place.workspaceId)
     && (place.tabId === undefined || p.tab_id === place.tabId));
@@ -190,7 +189,7 @@ export async function makeConductor(server: string, data: Json): Promise<Json> {
   if (pane.agent === "phren") throw new BridgeError(400, PHREN_NO_CONDUCTOR);
   const unchecked = await requireNoConductor(server, before, place.paneId);
   const target = await targetForPane(server, pane);
-  const lease = await reserveConductorLease();
+  const lease = await reserveConductorLease(phrenStoreRoot(), place.launchId);
   await bindConductorLease(lease, { server, pane: place.paneId, terminal: z.string().min(1).parse(pane.terminal_id), source: provider.parse(pane.agent), ...(typeof target?.session === "string" ? { session: target.session } : {}) });
   await recordConductor(server, pane, "owner", typeof target?.session === "string" ? target.session : undefined);
   return { ok: true, conductor: { server, ...(target ? { target } : {}) }, ...(unchecked.length ? { unchecked } : {}) };
@@ -207,7 +206,6 @@ export async function stopConductor(data: Json): Promise<Json> {
   }
   const held = (await readRoleState())?.conductor;
   if (pane !== undefined && held && held.pane !== pane) throw new BridgeError(409, "That pane is not this computer's conductor.");
-  await releaseLocalConductorLease();
   const stopped = await clearConductor(pane);
   return { ok: true, stopped: !!stopped };
 }
@@ -317,7 +315,7 @@ async function stillListed(server: string, result: Json): Promise<boolean> {
 
 async function startSession(server: string, data: Json, options: LaunchOptions): Promise<Json> {
   const role = z.enum(["agent", "conductor"]).default("agent").parse(data.role);
-  await requireLaunchLease(defaultPhrenPath(), role === "conductor" && !options.canary, typeof data.launchId === "string" ? data.launchId : undefined);
+  await requireLaunchLease(phrenStoreRoot());
   const projectDirectory = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
   const worktreeRequest = data.worktree === undefined || data.worktree === null ? undefined : launchWorktreeSchema.parse(data.worktree);
   if (worktreeRequest && role === "conductor") throw new BridgeError(400, "A conductor works across projects, so it cannot start in a worktree.");
@@ -366,7 +364,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   for (let n = 2; taken.has(name) && n < 100; n++) name = `${wanted.slice(0, 32 - String(n).length - 1)}-${n}`;
   // One conductor per set of linked computers.
   const unchecked: GroupConductor["unchecked"] = role === "conductor" && !options.canary ? await requireNoConductor(server, before) : [];
-  const conductorLease = role === "conductor" && !options.canary ? await reserveConductorLease() : undefined;
+  const conductorLease = role === "conductor" && !options.canary ? await reserveConductorLease(phrenStoreRoot(), typeof data.launchId === "string" ? data.launchId : undefined) : undefined;
   // A worker opened in the conductor's workspace would be listed under the
   // conductor's name; it gets its own workspace instead.
   const conductorHere = role === "agent" && workspace ? await conductorPane(server, before) : undefined;

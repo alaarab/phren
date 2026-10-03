@@ -710,3 +710,25 @@ question creates a new item. The phone UI is a follow-up using the contract in
 [Phren Hook](phren-hook.md#owner-inbox-phone-contract).
 
 Task responsibility and stable-ID prerequisites are independent of Queue/Active/Done. See [the shared task contract](task-responsibility.md) for persistence, MCP/Hook fields, readiness and controls. Conductors select only ready agent tasks.
+
+## Fixed store ownership
+
+A configured store has one fixed conductor authority. Its registered store ID,
+authority computer ID, holder and generation are shared by the conductor and
+harness APIs. Peer computers may read, consume or bind an existing grant; acquisition,
+revocation and takeover require the owner. New conductors consume a single
+owner-granted launch ID. Failed launches retain their reservation, stopping a
+role does not release it, and an offline authority blocks new launches without
+ending existing sessions.
+
+The phone signs each owner control with its existing paired device key. Nonces,
+request body, route and time are verified by the Hook; computer dispatch keys
+cannot authorize these controls. Phone configuration must be distributed to
+all participating copies of the registered store before adoption. The native
+ownership view reviews the exact holder and generation before revocation.
+
+See the [harness source contract](../packages/cli/src/bridge/harness/SOURCE-CONTRACT.md)
+for wire schemas, structured-worker ownership, delivery receipts and the
+separate one-agent QL proxy. These new paths are source-integrated; provider,
+service, native and RC verification remain outstanding until recorded against
+the complete candidate.

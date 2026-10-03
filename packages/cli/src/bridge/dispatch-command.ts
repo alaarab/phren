@@ -103,16 +103,18 @@ export async function runConductor(args: string[]): Promise<number> {
     if (action === "list" || action === "status") { console.log(JSON.stringify(await hookRequest("/v1/conductor/lease"), null, 2)); return 0; }
     const { agentShell } = await import("./authority-command.js");
     if (agentShell() || !process.stdin.isTTY) throw new Error("Conductor lease configuration and revocation require the owner's interactive terminal or authenticated phone.");
+    const { configureConductorLease, revokeConductorLease } = await import("./conductor-lease.js");
+    const { phrenStoreRoot } = await import("./transcripts.js");
     const { values } = parseArgs({ args: rest, options: { computer: { type: "string" }, confirm: { type: "string" }, "review-file": { type: "string" } } });
     if (action === "configure" && values.computer && values.confirm === values.computer) {
-      console.log(JSON.stringify(await hookRequest("/v1/conductor/lease/configure", { authorityComputerId: values.computer, confirm: true }), null, 2)); return 0;
+      console.log(JSON.stringify(await configureConductorLease(phrenStoreRoot(), { authorityComputerId: values.computer, confirm: true }), null, 2)); return 0;
     }
     if (action === "revoke" && values["review-file"]) {
       const { readFile } = await import("node:fs/promises");
       const review = JSON.parse(await readFile(values["review-file"], "utf8"));
       const state = review.state ?? review;
       if (!state.holder || values.confirm !== state.holder.claimId) throw new Error("Confirm the exact reviewed holder claimId; nothing changed.");
-      console.log(JSON.stringify(await hookRequest("/v1/conductor/lease/revoke", { expectedGeneration: state.generation, holder: state.holder, confirm: true }), null, 2)); return 0;
+      console.log(JSON.stringify(await revokeConductorLease(phrenStoreRoot(), { expectedGeneration: state.generation, holder: state.holder, confirm: true }), null, 2)); return 0;
     }
     throw new Error("Usage: phren conductor lease [status | configure --computer <UUID> --confirm <same-UUID> | revoke --review-file <lease.json> --confirm <claimId>]");
   }

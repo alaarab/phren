@@ -45,7 +45,9 @@ Closed journals drain their final events before ending the consumer.
 ## Paired owner proof
 
 Every POST below `/v1/harness/` requires these headers, in addition to the
-existing paired-device transport. A computer's dispatch SSH key is insufficient.
+existing paired-device transport. The same proof is required for conductor
+configure/grant/revoke and computer-enrollment prepare/review/confirm. A
+computer's dispatch SSH key is insufficient.
 
 | Header | Wire value |
 | --- | --- |
@@ -82,34 +84,44 @@ owner decision with a new proof after refreshing its current state.
 
 ## Fixed store conductor lease
 
-These routes use the Hook's configured store, not a client-supplied filesystem
-path. A fixed authority must be configured consistently on every participating
-store checkout. This patch does not migrate or elect authorities.
+All lease routes use the one registered store identity, canonical
+`.config/conductor-authority.json` and `.runtime/conductor-lease.json` ledger.
+The `/v1/harness/lease` routes are compatibility views over that ledger; they
+never create a second authority. Distribute the fixed configuration to every
+participating checkout. Public identity configuration may be Git mode 0644;
+private runtime state and admissions remain mode 0600.
 
 | API | Body or result |
 | --- | --- |
-| GET `/v1/harness/lease` | `{configured, authoritative?, computerId?, storeId?, holder?, noAutomaticFailover:true}` |
-| GET `/v1/harness/lease?authority=1&storeId=<8hex>` | Must be the named authority and store; refuses redirects |
-| POST `/v1/harness/lease/authority` | `{storeId:<8hex>, computerId:<UUID>, peerName?, expectedHostKey?}`; remote authority must already be a verified pinned peer |
-| POST `/v1/harness/lease/acquire` | `{computerId:<intended launch computer UUID>, launchId:<UUID>, target?}`; requires no holder |
-| POST `/v1/harness/lease/revoke` | `{expectedLeaseId:<current UUID>}` |
-| POST `/v1/harness/lease/takeover` | `{expectedLeaseId, computerId, launchId, target?}` |
+| GET `/v1/conductor/lease` | `{ok, config, state}`; canonical version, store, authority, generation and holder |
+| POST `/v1/conductor/lease/configure` | `{authorityComputerId, confirm:true}`; fixed registered authority, distribution required |
+| POST `/v1/conductor/lease/grant` | `{expectedGeneration, computerId, launchId, confirm:true}`; signed owner, empty holder only |
+| POST `/v1/conductor/lease/revoke` | `{expectedGeneration, holder, confirm:true}`; exact reviewed holder, signed owner |
+| POST `/v1/conductor/lease/authority` | Peer read/admit/bind only; peers cannot acquire, revoke or replace a grant |
+| GET `/v1/harness/lease` | Compatibility holder with `leaseId` mapped to canonical `claimId`, plus generation |
+| GET `/v1/harness/lease?authority=1&storeId=<8hex>` | Must be the named authority and registered store; refuses redirects |
+| POST `/v1/harness/lease/authority` | `{storeId:<8hex>, computerId:<UUID>}`; same canonical configuration |
+| POST `/v1/harness/lease/acquire` | `{expectedGeneration, computerId, launchId}`; signed owner, empty holder only |
+| POST `/v1/harness/lease/revoke` | `{expectedGeneration, expectedLeaseId}` |
+| POST `/v1/harness/lease/takeover` | `{expectedGeneration, expectedLeaseId, computerId, launchId}`; atomic explicit owner replacement |
 
-Lease mutations must be sent to the authority computer with its paired owner's
-proof. The holder includes `leaseId`, `computerId`, `launchId`, `createdAt` and
-optional pane Target. It has no expiration. An unreachable configured authority
-blocks **every new launch**, including schedules and workers. A new conductor
-also requires a matching owner-granted lease and consumes one durable admission
-reservation before launch. A failed launch retains the reservation for an
-explicit owner decision. Concurrent launches cannot reuse that lease. Existing
-sessions, thread reads and owner repair do not become new launches.
+Grant/revoke/takeover go directly to the paired authority computer. The holder
+has no expiration. An unreachable authority blocks every new launch, including
+schedules and workers. A conductor consumes one durable admission at the fixed authority for the
+owner-granted launch ID; failed or uncertain launches retain that reservation.
+Existing sessions and thread reads remain available. Stopping a role does not
+release its grant, and no timeout or silence authorizes replacement.
 
-The existing session launch API carries `launchId`. CLI promotion uses
-`phren conductor make --launch-id <owner-granted UUID>`. Stopping a conductor
-does not release its lease; only signed owner revoke/takeover does. Unconfigured
-stores keep ordinary worker launches but refuse new conductors. Configuration
-changes and abandoned lock directories require explicit owner reconciliation;
-there is no silence-, age- or timeout-based takeover.
+`phren conductor make --launch-id <owner-granted UUID>` consumes that grant.
+Interactive owner-terminal configure/revoke operate on the local canonical
+store; HTTP controls require the paired signature. Unconfigured stores allow
+ordinary workers but refuse new conductors. Interrupted lock directories
+require owner reconciliation.
+
+Native source signs controls with the existing device key and routes owner
+changes to the exact paired authority. Its explicit conductor move reviews the
+holder/generation before revocation; uncertain launches never automatically
+start a replacement on the old machine. All native/runtime checks remain UNRUN.
 
 ## Existing-peer repair and optional new enrollment
 

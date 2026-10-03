@@ -265,3 +265,18 @@ the process table shows it, the worker's process group). The resources report
 uses it to name the agent a heavy process belongs to, and `POST
 /v1/jobs/cleanup` ends only a registered process group whose pane is gone and
 whose lease has passed. The file is private and does not sync either.
+
+### Structured harness and conductor state
+
+The Hook's private `harness/` directory holds runner registries and sockets,
+`owner-nonces.json` replay protection, and the optional single-agent
+`proxies.json` plus `proxies/<id>.sock` forwarding endpoint. Proxy bearer tokens
+stay in private state and never appear in listings. A worker owns its runner;
+restarting its observing Hook does not terminate the worker.
+
+A registered store may hold `.config/conductor-authority.json` (public fixed
+identity configuration), `.runtime/conductor-lease.json`,
+`.runtime/conductor-claim.json`, and `.runtime/conductor-admissions/<claimId>.json`.
+The runtime files are private. A failed launch keeps its admission; no age-based
+cleanup releases a conductor. These owner-state writers use exclusive `.lock`
+directories whose interrupted writes require explicit owner reconciliation.
