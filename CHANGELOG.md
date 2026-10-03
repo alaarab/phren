@@ -9,6 +9,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - Hand-offs and dispatch returns no longer stop on two Hooks that owe each other hand-off notices. Each Hook sent its notices while holding its own hand-off queue, so each waited on the other, and its 5-second ticks queued up behind that wait. After that, every `hand_off`, hand-off status and `dispatch_returns` call ended with "Hook did not confirm the request" until the Hook restarted. A Hook now runs one tick at a time and sends notices to other computers after releasing its queue.
 
+## [0.3.29] - 2026-10-03
+
+### Added
+
+- Tasks can carry Human or Agent responsibility and stable prerequisites across registered stores, with readiness derived from current dependencies and coordinated writer adoption required before metadata edits.
+- Hook task APIs support revision-checked text, context and metadata saves, plus task-bound launch reservations that preserve uncertain outcomes without automatic retries.
+
+## [0.3.28] - 2026-10-02
+
+### Fixed
+
+- Existing Codex conversations stay discoverable when new per-pane servers start. The bounded daemon probe counts launcher wrappers and native servers once and keeps the shared managed daemon in view, so opening new agents does not hide the conductor's history.
+
+## [0.3.27] - 2026-10-02
+
+### Fixed
+
+- Long-lived MCP connections refresh summaries and project discovery after local file, store attachment or profile changes, including uncommitted changes with remote polling disabled. Unchanged reads use a bounded metadata check; concurrent refreshes preserve active tool calls and respect existing index writers.
+
 ## [0.3.26] - 2026-10-02
 
 ### Fixed

@@ -81,11 +81,12 @@ describe("task write receipts", () => {
     expect(res.data).toEqual({ project: PROJECT, added: ["first task", "second task"], errors: [""], write: receipt() });
   });
 
-  it("reports an actual formatting write even when every batch item fails", async () => {
+  it("leaves the file unchanged without a write receipt when every batch item fails", async () => {
     const res = parse(await add({ project: PROJECT, item: ["", " "] }));
     expect(res.ok).toBe(false);
     expect(res.error).toContain("No tasks added");
-    expect(res.data).toEqual({ project: PROJECT, added: [], errors: ["", " "], write: receipt() });
+    expect(res.data).toEqual({ project: PROJECT, added: [], errors: ["", " "] });
+    expect(fs.readFileSync(path.join(tmp.path, PROJECT, TASKS_FILENAME), "utf8")).toBe(SAMPLE);
   });
 
   it("does not mistake an existing store HEAD for a commit of the new task", async () => {

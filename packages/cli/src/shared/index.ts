@@ -330,7 +330,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
     for (const f of preGlobbed) {
       try {
         const stat = fs.statSync(f);
-        hash.update(`${f}:${stat.mtimeMs}:${stat.size}`);
+        hash.update(`${f}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.ino}`);
       } catch (err: unknown) {
         logger.debug("computePhrenHash skip", errorMessage(err));
       }
@@ -338,7 +338,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
     for (const configPath of topicConfigEntries) {
       try {
         const stat = fs.statSync(configPath);
-        hash.update(`topic-config:${configPath}:${stat.mtimeMs}:${stat.size}`);
+        hash.update(`topic-config:${configPath}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.ino}`);
       } catch (err: unknown) {
         logger.debug("computePhrenHash topicConfig", errorMessage(err));
       }
@@ -374,7 +374,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
     for (const f of files) {
       try {
         const stat = fs.statSync(f);
-        hash.update(`${f}:${stat.mtimeMs}:${stat.size}`);
+        hash.update(`${f}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.ino}`);
       } catch (err: unknown) {
         logger.debug("computePhrenHash skip", errorMessage(err));
       }
@@ -382,7 +382,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
     for (const configPath of topicConfigEntries) {
       try {
         const stat = fs.statSync(configPath);
-        hash.update(`topic-config:${configPath}:${stat.mtimeMs}:${stat.size}`);
+        hash.update(`topic-config:${configPath}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.ino}`);
       } catch (err: unknown) {
         logger.debug("computePhrenHash topicConfig", errorMessage(err));
       }
@@ -392,7 +392,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
   for (const mem of nativeMemoryEnabled() ? collectNativeMemoryFiles() : []) {
     try {
       const stat = fs.statSync(mem.fullPath);
-      hash.update(`native:${mem.fullPath}:${stat.mtimeMs}:${stat.size}`);
+      hash.update(`native:${mem.fullPath}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.ino}`);
     } catch (err: unknown) {
         logger.debug("computePhrenHash skip", errorMessage(err));
       }
@@ -405,7 +405,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
       try {
         const fp = path.join(globalDir, f);
         const stat = fs.statSync(fp);
-        hash.update(`global:${f}:${stat.mtimeMs}:${stat.size}`);
+        hash.update(`global:${f}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.ino}`);
       } catch (err: unknown) {
         logger.debug("computePhrenHash skip", errorMessage(err));
       }
@@ -416,7 +416,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
   if (fs.existsSync(manualLinksPath)) {
     try {
       const stat = fs.statSync(manualLinksPath);
-      hash.update(`manual-links:${stat.mtimeMs}:${stat.size}`);
+      hash.update(`manual-links:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.ino}`);
     } catch (err: unknown) {
         logger.debug("computePhrenHash skip", errorMessage(err));
       }
@@ -425,7 +425,7 @@ function computePhrenHash(phrenPath: string, profile?: string, preGlobbed?: stri
   if (fs.existsSync(indexPolicyPath)) {
     try {
       const stat = fs.statSync(indexPolicyPath);
-      hash.update(`index-policy-file:${stat.mtimeMs}:${stat.size}`);
+      hash.update(`index-policy-file:${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.ino}`);
     } catch (err: unknown) {
         logger.debug("computePhrenHash skip", errorMessage(err));
       }
@@ -506,6 +506,8 @@ function isExpectedMigrationError(err: unknown): boolean {
 /** Stat snapshot stored alongside each file hash so unchanged files can skip re-hashing. */
 interface FileStatMeta {
   mtimeMs: number;
+  ctimeMs?: number;
+  ino?: number;
   size: number;
 }
 
@@ -884,7 +886,7 @@ export function updateFileInIndex(db: SqlJsDatabase, filePath: string, phrenPath
       const hashData = loadHashMap(phrenPath);
       hashData.hashes[resolvedPath] = raw !== null ? hashContent(raw) : hashFileContent(resolvedPath);
       const stat = fs.statSync(resolvedPath);
-      saveHashMap(phrenPath, hashData.hashes, undefined, { [resolvedPath]: { mtimeMs: stat.mtimeMs, size: stat.size } });
+      saveHashMap(phrenPath, hashData.hashes, undefined, { [resolvedPath]: { mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino, size: stat.size } });
     } catch (err: unknown) {
       logger.debug("updateFileInIndex hashMap", errorMessage(err));
     }
@@ -1032,6 +1034,53 @@ function snapshotContentDirs(phrenPath: string, projectDirs: string[]): Record<s
     }
   }
   return snapshot;
+}
+
+/**
+ * A process-owned metadata snapshot taken BEFORE an MCP index build. Unlike
+ * the shared on-disk sentinel, another process cannot advance this baseline
+ * while this process still holds an older database. Warm checks only stat
+ * known paths: no glob, content reads, Git operations, or database rebuild.
+ */
+export async function captureIndexInputs(phrenPath: string, profile?: string): Promise<() => boolean> {
+  const stamp = (file: string): string => {
+    try {
+      const stat = fs.statSync(file);
+      return `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}:${stat.ino}`;
+    } catch (error) {
+      if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return "absent";
+      throw error;
+    }
+  };
+  await refreshStoreProjectDirs(phrenPath, profile);
+  const { resolveAllStores } = await import("../store-registry.js");
+  const projectDirs = getAllStoreProjectDirs(phrenPath, profile);
+  const globalDir = path.join(phrenPath, "global");
+  // runtimeFile may create .runtime on a new store; do that before the baseline.
+  const runtimeInputs = [runtimeFile(phrenPath, "attached-stores.yaml"), runtimeFile(phrenPath, "manual-links.json")];
+  // Directory stamps precede the glob: additions during it must stay dirty.
+  const inputs = new Map(collectContentDirs(phrenPath, [...projectDirs, globalDir]).map(dir => [dir, stamp(dir)]));
+  const paths = new Set([
+    ...globAllFiles(phrenPath, profile).filePaths,
+    // Imported global documents also contribute to indexed content.
+    ...globSync("**/*.md", { cwd: globalDir, nodir: true }).map(file => path.join(globalDir, file)),
+    ...runtimeInputs,
+  ]);
+  for (const store of resolveAllStores(phrenPath)) {
+    for (const file of ["", "phren.root.yaml", "stores.yaml", "machines.yaml", ".config/index-policy.json", ".config/modules.yaml"]) {
+      paths.add(path.join(store.path, file));
+    }
+    if (profile) paths.add(path.join(store.path, "profiles", `${profile}.yaml`));
+  }
+  for (const dir of projectDirs) {
+    paths.add(path.join(dir, "topic-config.json"));
+    paths.add(path.join(dir, "phren.project.yaml"));
+  }
+  for (const file of paths) if (!inputs.has(file)) inputs.set(file, stamp(file));
+  return () => {
+    for (const [file, previous] of inputs) if (stamp(file) !== previous) return false;
+    return true;
+  };
 }
 
 function readIndexSentinel(phrenPath: string): IndexSentinel | null {
@@ -1426,7 +1475,8 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
             const prevHash = savedHashes[entry.fullPath];
             const prevMeta = savedMeta[entry.fullPath];
             const statUnchanged = prevHash !== undefined && prevMeta !== undefined
-              && prevMeta.mtimeMs === stat.mtimeMs && prevMeta.size === stat.size;
+              && prevMeta.mtimeMs === stat.mtimeMs && prevMeta.size === stat.size
+              && prevMeta.ctimeMs === stat.ctimeMs && prevMeta.ino === stat.ino;
             let fileHash: string;
             if (statUnchanged) {
               fileHash = prevHash;
@@ -1438,7 +1488,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
               contentCache.put(entry.fullPath, raw);
             }
             currentHashes[entry.fullPath] = fileHash;
-            currentMeta[entry.fullPath] = { mtimeMs: stat.mtimeMs, size: stat.size };
+            currentMeta[entry.fullPath] = { mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino, size: stat.size };
             if (!(entry.fullPath in savedHashes)) {
               newFiles.push(entry);
             } else if (savedHashes[entry.fullPath] !== fileHash) {
@@ -1609,7 +1659,7 @@ async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJ
       try {
         newHashes[entry.fullPath] = hashContent(raw);
         const stat = fs.statSync(entry.fullPath);
-        newMeta[entry.fullPath] = { mtimeMs: stat.mtimeMs, size: stat.size };
+        newMeta[entry.fullPath] = { mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino, size: stat.size };
       } catch (err: unknown) {
         logger.debug("buildIndex statFile", errorMessage(err));
       }
@@ -1790,11 +1840,11 @@ function isDbOpen(db: SqlJsDatabase): boolean {
   }
 }
 
-export async function buildIndex(phrenPath: string, profile?: string, options: { force?: boolean } = {}): Promise<SqlJsDatabase> {
+export async function buildIndex(phrenPath: string, profile?: string, options: { force?: boolean; requireFresh?: boolean } = {}): Promise<SqlJsDatabase> {
   const debounceMs = getIndexDebounceMs();
   const buildKey = storeCacheKey(phrenPath, profile);
   if (
-    !options.force &&
+    !options.force && !options.requireFresh &&
     debounceMs > 0 &&
     _lastBuiltDb !== null &&
     _lastBuildKey === buildKey &&
@@ -1805,7 +1855,7 @@ export async function buildIndex(phrenPath: string, profile?: string, options: {
     return _lastBuiltDb;
   }
 
-  const result = buildLock.then(() => _buildIndexGuarded(phrenPath, profile));
+  const result = buildLock.then(() => _buildIndexGuarded(phrenPath, profile, options.requireFresh));
   // Update the lock chain; swallow rejections so the chain doesn't stall
   buildLock = result.catch(() => null);
   const db = await result;
@@ -2008,9 +2058,10 @@ export async function loadIndexForHook(phrenPath: string, profile?: string): Pro
   return loadIndexSnapshotOrEmpty(phrenPath, profile, hash);
 }
 
-async function _buildIndexGuarded(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
+async function _buildIndexGuarded(phrenPath: string, profile?: string, requireFresh = false): Promise<SqlJsDatabase> {
   const lockTarget = runtimeFile(phrenPath, "index-rebuild");
   if (isRebuildLockHeld(phrenPath)) {
+    if (requireFresh) throw new Error("Index rebuild is busy; retry shortly.");
     return loadIndexSnapshotOrEmpty(phrenPath, profile);
   }
 
@@ -2029,6 +2080,7 @@ async function _buildIndexGuarded(phrenPath: string, profile?: string): Promise<
   } catch (err: unknown) {
     const message = errorMessage(err);
     if (message.includes("could not acquire lock")) {
+      if (requireFresh) throw err;
       debugLog(`FTS rebuild skipped because another process holds the rebuild lock: ${message}`);
       return loadIndexSnapshotOrEmpty(phrenPath, profile);
     }

@@ -6,7 +6,8 @@ import * as path from "path";
 
 // ── parseGitLogRecords ───────────────────────────────────────────────────────
 
-vi.mock("child_process", () => ({
+vi.mock("child_process", async (importOriginal) => ({
+  ...await importOriginal<typeof import("child_process")>(),
   execFileSync: vi.fn(),
 }));
 
