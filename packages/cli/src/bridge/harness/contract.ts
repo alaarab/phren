@@ -11,7 +11,7 @@ export interface HarnessStart { cwd: string; resume?: string; model?: string }
 export interface HarnessAdapter {
   readonly provider: string; readonly capabilities: HarnessCapabilities;
   startSession(input: HarnessStart): Promise<HarnessSession>;
-  sendTurn(session: string, text: string): Promise<{ turnId: string; acknowledged: boolean }>;
+  sendTurn(session: string, text: string, deliveryId?: string): Promise<{ turnId: string; acknowledged: boolean }>;
   interruptTurn(session: string, turnId: string): Promise<boolean>;
   respondToRequest(session: string, requestId: string, response: unknown): Promise<boolean>;
   respondToUserInput(session: string, requestId: string, response: unknown): Promise<boolean>;
@@ -30,8 +30,9 @@ export class HarnessEvents {
   private bytes = 0;
   private wake = new Set<() => void>();
   private closed = false;
+  private ended = new Set<string>();
   publish(session: string, type: string, data?: unknown, turnId?: string) {
-    if (this.closed) return;
+    if (this.closed || this.ended.has(session)) return;
     const row = { seq: ++this.sequence, session, type, ...(data === undefined ? {} : { data }), ...(turnId ? { turnId } : {}) };
     let size: number; try { size = Buffer.byteLength(JSON.stringify(row)); } catch { return; }
     if (size > 1024 * 1024) { row.type = "event-too-large"; delete row.data; size = 256; }
@@ -40,18 +41,20 @@ export class HarnessEvents {
     for (const notify of this.wake) notify();
   }
   read(session: string) { return this.rows.filter(row => row.session === session); }
+  end(session: string) { this.ended.add(session); for (const notify of this.wake) notify(); }
   async *stream(session: string, after = 0, signal?: AbortSignal): AsyncGenerator<HarnessEvent> {
     let cursor = after;
-    while (!this.closed && !signal?.aborted) {
+    while (!signal?.aborted) {
       const first = this.rows[0]?.seq;
       if (first && cursor < first - 1) { yield { seq: first - 1, session, type: "event-gap", data: { after: cursor } }; cursor = first - 1; }
       const rows = this.rows.filter(row => row.seq > cursor);
       for (const row of rows) { cursor = row.seq; if (row.session === session) yield row; }
       if (rows.length) continue;
+      if (this.closed || this.ended.has(session)) return;
       await new Promise<void>(resolve => {
         const done = () => { this.wake.delete(done); signal?.removeEventListener("abort", done); resolve(); };
         this.wake.add(done); signal?.addEventListener("abort", done, { once: true });
-        if (this.closed || signal?.aborted || this.sequence > cursor) done();
+        if (this.closed || this.ended.has(session) || signal?.aborted || this.sequence > cursor) done();
       });
     }
   }

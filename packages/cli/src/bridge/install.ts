@@ -3,7 +3,7 @@ import { defaultPhrenPath } from "../shared.js";
 import { disabledHint } from "../modules/registry.js";
 import { execFile } from "node:child_process";
 import { usageStatusLine } from "./usage.js";
-import { access, chmod, copyFile, mkdir, open, readFile, rename, symlink, unlink, lstat, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, mkdir, open, readFile, readlink, rename, symlink, unlink, lstat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { codexHome, claudeConfigDir } from "../home-paths.js";
 import { claudeHomes } from "./claude-accounts.js";
@@ -15,10 +15,12 @@ import { bridgeRoot, object, objects, atomic, socketPath } from "./protocol.js";
 import { herdrRoot } from "./herdr.js";
 import { health } from "./transport.js";
 import { FAST_HOOK_SOURCE, fastHookPath } from "./hook-fast.js";
-import { installAskpass, removeAskpass } from "./sudo.js";
+import { installAskpass, removeAskpass, askpassPath } from "./sudo.js";
 import { readStoredVoice, SPEECH_VOICE_ENV, writeSpeechVoice } from "./speech-voice.js";
 import { carryCodexHookTrust } from "./codex-hook-trust.js";
 import { type CodexServerEntry, serversInService } from "./codex-servers.js";
+import { randomUUID } from "node:crypto";
+import { lockedState } from "./harness/private-state.js";
 
 const exec = promisify(execFile);
 const label = "com.phren.hook";
@@ -139,7 +141,7 @@ ${pipe}exec ${quote(node)} ${quote(bundle)} ssh
 
 async function activate(version: string) {
   const root = bridgeRoot();
-  const next = path.join(root, `current-${process.pid}`);
+  const next = path.join(root, `current-${randomUUID()}`);
   await symlink(path.join("versions", version), next);
   await rename(next, path.join(root, "current"));
 }
@@ -228,6 +230,11 @@ async function serviceReady(version: string): Promise<boolean> {
 export async function install(version: string, noService = false, force = false): Promise<void> {
   if (!["darwin", "linux"].includes(process.platform)) throw new Error("Phren Hook supports macOS and Linux.");
   if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) throw new Error("Invalid helper version.");
+  return lockedState(path.join(bridgeRoot(), "install"), () => installLocked(version, noService, force));
+}
+async function installLocked(version: string, noService: boolean, force: boolean): Promise<void> {
+  if (!["darwin", "linux"].includes(process.platform)) throw new Error("Phren Hook supports macOS and Linux.");
+  if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) throw new Error("Invalid helper version.");
   const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
   if (!modules.has("hook")) throw new Error(disabledHint("hook"));
   const root = bridgeRoot(), herdr = herdrRoot(), versions = path.join(root, "versions");
@@ -242,12 +249,21 @@ export async function install(version: string, noService = false, force = false)
   await mkdir(destination, { recursive: true, mode: 0o700 });
   const installedBundle = path.join(destination, "bridge-hook.mjs");
   const previousBundle = await missingFile(readFile(installedBundle));
-  const stagedBundle = installedBundle + `.phren-${process.pid}`;
+  const stagedBundle = installedBundle + `.phren-${randomUUID()}`;
+  const previousFastHook = await missingFile(readFile(fastHookPath(destination)));
+  const previousCurrent = await missingFile(readlink(path.join(root, "current")));
+  const dispatchFile = path.join(root, "dispatch"), previousDispatch = await missingFile(readFile(dispatchFile));
+  const previousAskpass = await missingFile(readFile(askpassPath()));
+  const installedMetadata = path.join(root, "installed.json"), previousMetadata = await missingFile(readFile(installedMetadata));
+  const previous = previousMetadata ? JSON.parse(previousMetadata.toString("utf8")) as { version: string; previous?: string } : null;
+  const unitFile = path.join(homedir(), ".config/systemd/user", unit);
+  const previousUnit = process.platform === "linux" ? await missingFile(readFile(unitFile)) : undefined;
+  let activated = false;
+  try {
   await copyFile(bundle, stagedBundle); await rename(stagedBundle, installedBundle);
   await atomic(fastHookPath(destination), FAST_HOOK_SOURCE);
-  const previous = await readFile(path.join(root, "installed.json"), "utf8").then(v => JSON.parse(v) as { version: string; previous?: string }).catch(() => null);
   const gateway = await detectGateway();
-  await atomic(path.join(root, "dispatch"), gatewayScript(gateway, {
+  await atomic(dispatchFile, gatewayScript(gateway, {
     root, herdr, store: modules.store, profile: modules.profile, node: process.execPath,
     bundle: path.join(root, "current/bridge-hook.mjs"), socket: socketPath(), timing: path.join(root, "gateway.json"),
   }), 0o700);
@@ -271,8 +287,8 @@ export async function install(version: string, noService = false, force = false)
     // Activation first also survives an installer interruption without a stopped job.
     if (process.platform === "darwin") await stopService();
   }
-  await activate(version);
-  try {
+    await activate(version);
+    activated = true;
     if (!noService) {
       let kickstartError = await startService(process.platform !== "darwin");
       let ready = await serviceReady(version);
@@ -319,14 +335,28 @@ export async function install(version: string, noService = false, force = false)
     console.log(`Phren Hook ${version} installed${noService ? " (service not started)" : " and running"}. Run phren bridge doctor.`);
   } catch (error) {
     await restoreAgentHooks(hookEdits);
-    if (!noService) await stopService();
-    if (previous?.version) {
-      if (previous.version === version && previousBundle) {
-        await writeFile(stagedBundle, previousBundle); await rename(stagedBundle, installedBundle);
-      }
-      await activate(previous.version);
-      if (!noService) await startService();
+    if (!noService && activated) await stopService();
+    if (process.platform === "linux" && !noService) {
+      if (previousUnit) await atomic(unitFile, previousUnit.toString("utf8"));
+      else await unlink(unitFile).catch(() => {});
     }
+    if (previousBundle) { await writeFile(stagedBundle, previousBundle); await rename(stagedBundle, installedBundle); }
+    else await unlink(installedBundle).catch(() => {});
+    if (previousFastHook) await atomic(fastHookPath(destination), previousFastHook.toString("utf8"));
+    else await unlink(fastHookPath(destination)).catch(() => {});
+    if (previousDispatch) await atomic(dispatchFile, previousDispatch.toString("utf8"), 0o700);
+    else await unlink(dispatchFile).catch(() => {});
+    if (previousAskpass) await atomic(askpassPath(), previousAskpass.toString("utf8"), 0o700);
+    else await unlink(askpassPath()).catch(() => {});
+    if (activated) {
+      if (previousCurrent) {
+        const rollbackLink = path.join(root, `current-${randomUUID()}`);
+        await symlink(previousCurrent, rollbackLink); await rename(rollbackLink, path.join(root, "current"));
+        if (!noService) await startService();
+      } else await unlink(path.join(root, "current")).catch(() => {});
+    }
+    if (previousMetadata) await atomic(installedMetadata, previousMetadata.toString("utf8"));
+    else await unlink(installedMetadata).catch(() => {});
     throw error;
   }
 }

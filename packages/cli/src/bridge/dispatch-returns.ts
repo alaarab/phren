@@ -47,7 +47,8 @@ export const WATCH_MS = 24 * 60 * 60 * 1000;
 /** Observation expiry is neither completion nor permission to close a worker. */
 export function expireObservation(receipt: Receipt, now: number): boolean {
   const created = Date.parse(receipt.createdAt);
-  if (!Number.isFinite(created) || !["accepted", "uncertain"].includes(receipt.state) || receipt.closedAt || receipt.returned || now - created < WATCH_MS) return false;
+  const terminal = receipt.returned && ["done", "needs-you", "failed", "gone", "expired"].includes(receipt.returned.state);
+  if (!Number.isFinite(created) || !["accepted", "uncertain"].includes(receipt.state) || receipt.closedAt || terminal || now - created < WATCH_MS) return false;
   const at = new Date(now).toISOString();
   receipt.worker = { state: "expired", since: at, checkedAt: at, sawWorking: receipt.worker?.sawWorking ?? false };
   receipt.returned = { state: "expired", at, read: false, error: "The 24-hour observation window ended. The worker may still be running; completion was not verified." };

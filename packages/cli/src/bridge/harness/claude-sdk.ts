@@ -39,7 +39,8 @@ export class ClaudeSdkAdapter implements HarnessAdapter {
         const requestId = randomUUID();
         if (options.signal.aborted) return { behavior: "deny", message: "The tool request was cancelled." };
         return new Promise(resolve => {
-          const answer = (response: unknown) => { pending.delete(requestId); options.signal.removeEventListener("abort", cancel); this.events.publish(id, "request-resolved", { requestId }); resolve(response); };
+          let settled = false;
+          const answer = (response: unknown) => { if (settled) return; settled = true; pending.delete(requestId); options.signal.removeEventListener("abort", cancel); this.events.publish(id, "request-resolved", { requestId }); resolve(response); };
           const cancel = () => answer({ behavior: "deny", message: "The tool request was cancelled." });
           pending.set(requestId, { answer, input: params, tool }); options.signal.addEventListener("abort", cancel, { once: true });
           this.events.publish(id, tool === "AskUserQuestion" ? "user-input" : "approval", { requestId, tool, input: params });
@@ -54,11 +55,13 @@ export class ClaudeSdkAdapter implements HarnessAdapter {
       try {
         for await (const event of query) {
           if (event.session_id && event.session_id !== id) { this.events.publish(id, "session-identity-mismatch"); await this.stop(id); break; }
+          // Initialization and replay are observations, never completion of a newly queued turn.
+          if (event.type === "result" && !session.active) continue;
           this.events.publish(id, event.type ?? "message", event, session.active);
           if (event.type === "result") session.active = undefined;
         }
       } catch { this.events.publish(id, "failed", { reason: "Claude SDK stream stopped." }, session.active); }
-      finally { session.stopped = true; messages.close(); for (const request of [...pending.values()]) request.answer({ behavior: "deny", message: "Claude SDK session ended." }); pending.clear(); }
+      finally { session.stopped = true; messages.close(); try { query.close(); } finally { for (const request of [...pending.values()]) request.answer({ behavior: "deny", message: "Claude SDK session ended." }); pending.clear(); this.events.end(id); } }
     })();
     return sessionResult(this, id, this.settings.pane);
   }
@@ -89,6 +92,6 @@ export class ClaudeSdkAdapter implements HarnessAdapter {
   streamEvents(id: string, after?: number, signal?: AbortSignal) { if (!this.sessions.has(id)) throw new Error("Unknown SDK session."); return this.events.stream(id, after, signal); }
   async setModel(id: string, model: string) { await this.session(id).query.setModel(model); }
   private async stop(id: string) { const session = this.sessions.get(id); if (!session || session.stopped) return; session.stopped = true; session.input.close(); for (const request of [...session.pending.values()]) request.answer({ behavior: "deny", message: "SDK ownership ended." }); session.query.close(); }
-  async takeover(id: string, _pane: PaneBinding) { if (!this.sessions.has(id)) throw new Error("Unknown SDK session."); await this.stop(id); this.events.publish(id, "takeover", { command: "claude", session: id }); return { command: this.executable, args: ["--resume", id] }; }
+  async takeover(id: string, _pane: PaneBinding) { if (!this.sessions.has(id)) throw new Error("Unknown SDK session."); await this.stop(id); this.events.publish(id, "takeover", { command: "claude", session: id }); return { command: this.executable, args: ["--resume", id, "--permission-mode", this.settings.permissionMode] }; }
   async close() { for (const id of this.sessions.keys()) await this.stop(id); this.events.close(); }
 }

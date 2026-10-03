@@ -1,5 +1,7 @@
 import { configuredHarness, prepareHarnessCommand } from "./harness/launch.js";
 import { conductorLeaseConfig, reserveConductorLease, bindConductorLease, releaseLocalConductorLease } from "./conductor-lease.js";
+import { requireLaunchLease } from "./harness/store-lease.js";
+import { defaultPhrenPath } from "../shared.js";
 import { markPaneClosed } from "./worker-close.js";
 import { mkdir, readFile } from "node:fs/promises";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -171,13 +173,14 @@ async function requireNoConductor(server: string, before: Json, except?: string)
 }
 
 /** The phone names the pane's workspace and tab too; the CLI may know only the pane. */
-const paneRequest = z.object({ workspaceId: id.optional(), tabId: id.optional(), paneId: id }).strict();
+const paneRequest = z.object({ workspaceId: id.optional(), tabId: id.optional(), paneId: id, launchId: z.string().uuid().optional() }).strict();
 
 const PHREN_NO_CONDUCTOR = "phren agent cannot run as a conductor: it takes no system brief at startup.";
 
 /** "Make conductor": the owner gives an agent already running in a pane on this computer the role. */
 export async function makeConductor(server: string, data: Json): Promise<Json> {
   const place = paneRequest.parse(data);
+  await requireLaunchLease(defaultPhrenPath(), true, place.launchId);
   const before = await snapshot(server);
   const pane = objects(before.panes).find(p => p.pane_id === place.paneId && (place.workspaceId === undefined || p.workspace_id === place.workspaceId)
     && (place.tabId === undefined || p.tab_id === place.tabId));
@@ -314,6 +317,7 @@ async function stillListed(server: string, result: Json): Promise<boolean> {
 
 async function startSession(server: string, data: Json, options: LaunchOptions): Promise<Json> {
   const role = z.enum(["agent", "conductor"]).default("agent").parse(data.role);
+  await requireLaunchLease(defaultPhrenPath(), role === "conductor" && !options.canary, typeof data.launchId === "string" ? data.launchId : undefined);
   const projectDirectory = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
   const worktreeRequest = data.worktree === undefined || data.worktree === null ? undefined : launchWorktreeSchema.parse(data.worktree);
   if (worktreeRequest && role === "conductor") throw new BridgeError(400, "A conductor works across projects, so it cannot start in a worktree.");

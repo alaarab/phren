@@ -51,13 +51,14 @@ export async function unbindHarness(target: Target) { const bound = adapters.get
 export async function boundHarness(target: Target): Promise<HarnessAdapter> {
   const pane = await validateTarget(target, false, true), terminal = typeof pane.terminal_id === "string" ? pane.terminal_id : undefined;
   const previous = adapters.get(key(target));
-  if (previous && previous.session === target.session && previous.terminal === terminal) { previous.lastUsed = Date.now(); return previous.adapter; }
+  const runner = await runnerForPane(target.server, pane);
+  const sameRunner = !previous || !(previous.adapter instanceof RunnerAdapter) || runner?.ownerId === previous.adapter.entry.ownerId;
+  if (previous && sameRunner && previous.session === target.session && previous.terminal === terminal) { previous.lastUsed = Date.now(); return previous.adapter; }
   if (previous) { adapters.delete(key(target)); await previous.adapter.close(); }
   // Direct backends retain their existing launch, permissions and approval owners.
   const binding: PaneBinding = { server: target.server, pane: target.pane, ...(terminal ? { terminal } : {}) };
   const codex = codexServers.forTarget(target);
   const served = target.source === "opencode" ? servedPane(target.server, target.pane) : undefined;
-  const runner = await runnerForPane(target.server, pane);
   const adapter: HarnessAdapter = runner ? new RunnerAdapter(runner) : codex ? new CodexAppServerAdapter(await codexServers.adapterClient(codex), {}, binding, target.session)
     : served ? new OpenCodeServeAdapter(paneClient(served), binding, target.session) : new PaneTypingAdapter(binding, target.session);
   // A second thread/session would leave the observed TUI; launches own creation.

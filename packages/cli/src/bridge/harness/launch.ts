@@ -13,8 +13,8 @@ export async function configuredHarness(kind: string, requested?: unknown): Prom
   if (!backend) return undefined;
   if (backend === "claude-sdk") {
     if (kind !== "claude") throw new BridgeError(400, "Claude SDK requires the Claude harness.");
-    const executable = process.env.PHREN_CLAUDE_EXECUTABLE ?? (process.env.PATH ?? "").split(path.delimiter).map(dir => path.join(dir, "claude")).find(file => { try { return requireAccess(file); } catch { return false; } });
-    if (!executable) throw new BridgeError(409, "The installed Claude binary was not found; no SDK launch was attempted.");
+    const executable = process.env.PHREN_CLAUDE_EXECUTABLE ?? (process.env.PATH ?? "").split(path.delimiter).filter(dir => path.isAbsolute(dir)).map(dir => path.join(dir, "claude")).find(file => { try { return requireAccess(file); } catch { return false; } });
+    if (!executable || !path.isAbsolute(executable)) throw new BridgeError(409, "The installed Claude binary was not found by absolute path; no SDK launch was attempted.");
     await access(executable, constants.X_OK); return { backend, executable, args: [] };
   }
   if (kind !== "phren") throw new BridgeError(400, "Configured ACP workers use the Phren runner; their actual provider is reported separately.");
@@ -29,11 +29,13 @@ export function runnerCommand(configFile: string): { file: string; args: string[
   const entry = process.argv[1];
   if (!entry || !path.isAbsolute(entry)) throw new Error("Structured launches require the absolute running Hook/CLI entry.");
   const standalone = /(?:bridge-hook\.mjs|hook-main\.js)$/.test(entry);
-  return { file: process.execPath, args: [entry, ...(standalone ? [] : ["bridge"]), "harness-runner", "--source=" + (configFile.endsWith(".claude.json") ? "claude" : "phren"), configFile] };
+  const source = configFile.endsWith(".claude.json") ? "claude" : configFile.endsWith(".codex.json") ? "codex" : "phren";
+  return { file: process.execPath, args: [entry, ...(standalone ? [] : ["bridge"]), "harness-runner", "--source=" + source, configFile] };
 }
 export async function prepareHarnessCommand(config: RunnerConfig) {
   const value = runnerConfigSchema.parse(config);
-  const file = value.pane ? runnerPaths(value.pane.server, value.pane.pane).entry + (value.backend === "claude-sdk" ? ".claude.json" : ".phren.json")
-    : path.join(bridgeRoot(), "harness", `${process.pid}-${Date.now()}${value.backend === "claude-sdk" ? ".claude.json" : ".phren.json"}`);
+  const suffix = value.backend === "claude-sdk" ? ".claude.json" : value.backend === "codex-stdio" ? ".codex.json" : ".phren.json";
+  const file = value.pane ? runnerPaths(value.pane.server, value.pane.pane).entry + suffix
+    : path.join(bridgeRoot(), "harness", `${process.pid}-${Date.now()}${suffix}`);
   await atomicInPrivateDir(file, value); return runnerCommand(file);
 }

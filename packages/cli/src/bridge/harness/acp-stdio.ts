@@ -8,8 +8,9 @@ export function openAcpStdio(command: string, args: string[], cwd: string, env: 
   const decoder = new StringDecoder("utf8");
   const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer?: NodeJS.Timeout }>();
   const listeners = new Set<Parameters<AcpPeer["on"]>[0]>();
+  const closeListeners = new Set<() => void>();
   const send = (message: unknown) => { if (closed) throw new Error("ACP transport is closed."); child.stdin.write(JSON.stringify(message) + "\n"); };
-  const end = () => { closed = true; for (const request of pending.values()) { if (request.timer) clearTimeout(request.timer); request.reject(new Error("ACP transport closed.")); } pending.clear(); };
+  const end = () => { if (closed) return; closed = true; for (const request of pending.values()) { if (request.timer) clearTimeout(request.timer); request.reject(new Error("Agent transport closed.")); } pending.clear(); for (const listener of closeListeners) listener(); closeListeners.clear(); };
   child.stdin.on("error", end);
   child.stderr.resume(); child.on("error", end); child.on("exit", end);
   child.stdout.on("data", chunk => {
@@ -29,6 +30,7 @@ export function openAcpStdio(command: string, args: string[], cwd: string, env: 
     respond(id, result) { send({ jsonrpc: "2.0", id, result }); },
     respondError(id, code, message) { send({ jsonrpc: "2.0", id, error: { code, message } }); },
     on(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    onClose(listener) { if (closed) { listener(); return () => {}; } closeListeners.add(listener); return () => { closeListeners.delete(listener); }; },
     close() { if (stopped) return; stopped = true; end(); child.stdin.end(); child.kill(); },
   };
   return peer;

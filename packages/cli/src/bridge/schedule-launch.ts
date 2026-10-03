@@ -1,4 +1,5 @@
 import { configuredHarness } from "./harness/launch.js";
+import { requireLaunchLease } from "./harness/store-lease.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
@@ -25,6 +26,7 @@ type HerdrLauncher = (server: string, data: Json) => Promise<Json>;
 export function createScheduleLauncher(launchHerdr: HerdrLauncher, store = defaultPhrenPath()): ScheduleLauncher {
   const abort = new AbortController(), children = new Set<ChildProcess>();
   const launcher: ScheduleLauncher = async context => {
+    await requireLaunchLease(store);
     const live = await servers();
     if (live.length) return launchInHerdr(String(live[0].session), context, launchHerdr, abort.signal);
     if (await configuredHarness(context.schedule.harness, context.schedule.backend)) {

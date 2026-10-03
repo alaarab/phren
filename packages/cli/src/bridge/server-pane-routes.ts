@@ -357,7 +357,8 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     const runner = await runnerForPane(target.server, pane);
     if (runner) {
       if (text.trim().startsWith("/")) throw new BridgeError(422, "Use the structured harness controls for this worker.");
-      await typing(); const result = await new RunnerAdapter(runner).sendTurn(target.session, text);
+      const deliveryId = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/).parse(data.deliveryId);
+      await typing(); const result = await new RunnerAdapter(runner).sendTurn(target.session, text, deliveryId);
       return { ok: true, delivered: result.acknowledged, queued: !result.acknowledged, turnId: result.turnId, harnessProvider: runner.provider };
     }
     const owned = text.trim().startsWith("/") ? undefined : codexServers.forTarget(target);
@@ -433,7 +434,9 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     // Asked by the phone's own delivery id, so no text is matched again.
     const id = deliveryIdSchema.parse(data.deliveryId);
     if (!id) throw new BridgeError(400, "Name the message by its deliveryId.");
-    result = { ok: true, state: agentHooks.deliveryState(id, target) };
+    const { runnerForPane, runnerRequest } = await import("./harness/runner-client.js");
+    const runner = await runnerForPane(target.server, await validateTarget(target, false, true));
+    result = runner ? { ok: true, ...await runnerRequest(runner, "delivery", { deliveryId: id }) } : { ok: true, state: agentHooks.deliveryState(id, target) };
   } else if (url.pathname === "/v1/side-question/dismiss") {
     result = sideQuestions.dismiss(target, z.string().uuid().parse(data.id));
   } else if (url.pathname === "/v1/model") {
