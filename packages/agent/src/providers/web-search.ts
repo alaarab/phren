@@ -1,6 +1,6 @@
 import type { TokenUsage } from "./types.js";
 export interface WebSearchSource { title: string; url: string; snippet: string }
-export interface WebSearchResponse { answer?: string; sources: WebSearchSource[]; usage?: TokenUsage; billedCost?: number }
+export interface WebSearchResponse { answer?: string; sources: WebSearchSource[]; usage?: TokenUsage; billedCost?: number; searchFee?: number }
 /** Only public HTTP(S) citations, deduplicated. Never return encrypted provider payloads. */
 export function searchSources(raw: unknown[], limit: number): WebSearchSource[] {
   if (!Array.isArray(raw) || !Number.isFinite(limit) || limit < 1) return [];
@@ -42,11 +42,20 @@ export async function searchJson(response: Response): Promise<Record<string, any
 
 /** Billed usage must survive an HTTP-200 tool failure without echoing its body. */
 export class SearchResponseError extends Error {
-  constructor(message: string, readonly usage?: TokenUsage, readonly billedCost?: number) { super(message); }
+  constructor(message: string, readonly usage?: TokenUsage, readonly billedCost?: number, readonly searchFee?: number) { super(message); }
 }
 export function searchTokenUsage(raw: unknown, inputKey = "input_tokens", outputKey = "output_tokens"): TokenUsage | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const value = raw as Record<string, unknown>;
   const count = (key: string) => typeof value[key] === "number" && Number.isFinite(value[key]) && (value[key] as number) >= 0 ? value[key] as number : 0;
   return { input_tokens: count(inputKey), output_tokens: count(outputKey) };
+}
+
+/** Native API search is $10/1,000 calls, in addition to model tokens.
+ * Verified 2026-10-03: https://developers.openai.com/api/docs/pricing
+ * https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
+ * Only provider-reported requests are counted; OpenRouter reports total cost.
+ */
+export function nativeSearchFee(requests: unknown): number {
+  return typeof requests === "number" && Number.isSafeInteger(requests) && requests >= 0 ? requests * 0.01 : 0;
 }
