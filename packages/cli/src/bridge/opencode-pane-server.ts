@@ -187,6 +187,7 @@ export interface PaneClient {
   /** True once the server answers an authenticated request within `timeoutMs`. */
   ready(timeoutMs?: number): Promise<boolean>;
   sessions(): Promise<OpenCodeSession[]>;
+  messages?(sessionId: string): Promise<OpenCodeMessage[]>;
   session(id: string): Promise<OpenCodeSession | undefined>;
   currentSession(): Promise<OpenCodeSession | undefined>;
   /** A new root session in the pane's directory. The TUI does not show it
@@ -244,6 +245,7 @@ export function openPaneClient(entry: PaneServerEntry, fetchImpl: typeof fetch =
     (message.parts ?? []).filter(part => part.type === "text").map(part => part.text ?? "").join("").trim();
 
   return {
+    messages,
     async ready(timeoutMs = 1_500) {
       try { return (await send("GET", "/session?limit=1", undefined, undefined, timeoutMs)).ok; } catch { return false; }
     },

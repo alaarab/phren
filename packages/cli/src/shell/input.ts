@@ -1,3 +1,4 @@
+import { filterTaskDoc } from "../data/task-contract.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 /**
  * Command palette and input handling for the phren interactive shell.
@@ -195,6 +196,16 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     return;
   }
 
+  if (command === "lane") {
+    const value = (parts[1] ?? "").toLowerCase();
+    if (!["human", "agent", "all"].includes(value)) { host.setMessage("  Usage: :lane human|agent|all"); return; }
+    host.state.taskResponsibility = value === "all" ? undefined : value as "human" | "agent";
+    saveShellState(host.phrenPath, host.state);
+    host.setView("Tasks");
+    host.setMessage(`  Task responsibility: ${value}`);
+    return;
+  }
+
   if (command === "responsibility" || command === "depends") {
     const project = host.ensureProjectSelected();
     if (!project) return;
@@ -202,7 +213,7 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     if (!match) { host.setMessage("  Usage: :responsibility <id> human|agent or :depends <id> <JSON array>"); return; }
     const value = parts.slice(2).join(" ");
     let updates: Parameters<typeof updateTask>[3];
-    if (command === "responsibility") {
+  if (command === "responsibility") {
       if (value !== "human" && value !== "agent") { host.setMessage("  Responsibility must be human or agent."); return; }
       updates = { responsibility: value };
     } else {
@@ -540,7 +551,7 @@ function suggestCommand(input: string): string | undefined {
 
 export function completeInput(line: string, phrenPath: string, profile: string, state: ShellState): string[] {
   const commands = [
-    ":projects", ":tasks", ":task", ":findings", ":review queue", ":machines", ":health", ":graph",
+    ":projects", ":tasks", ":task", ":lane", ":responsibility", ":depends", ":findings", ":review queue", ":machines", ":health", ":graph",
     ":open", ":search", ":add", ":complete", ":move", ":reprioritize", ":pin",
     ":unpin", ":context", ":work next", ":tidy", ":find add", ":find remove",
     ":machine map",
@@ -566,7 +577,7 @@ export function completeInput(line: string, phrenPath: string, profile: string, 
     return listProjectCards(phrenPath, profile).map((c) => `:open ${c.name}`);
   }
 
-  if (["complete", "move", "reprioritize", "context", "pin", "unpin"].includes(cmd)) {
+  if (["complete", "move", "reprioritize", "context", "pin", "unpin", "responsibility", "depends"].includes(cmd)) {
     const project = state.project;
     if (!project) return [];
     const result = readTasks(phrenPath, project);
@@ -605,8 +616,9 @@ export function getListItems(
       if (!state.project) return [];
       const result = readTasks(phrenPath, state.project);
       if (!result.ok) return [];
-      const active = state.filter ? tasksByFilter(result.data.items.Active, state.filter) : result.data.items.Active;
-      const queue = state.filter ? tasksByFilter(result.data.items.Queue, state.filter) : result.data.items.Queue;
+      const filtered = filterTaskDoc(phrenPath, result.data, { responsibility: state.taskResponsibility });
+      const active = state.filter ? tasksByFilter(filtered.items.Active, state.filter) : filtered.items.Active;
+      const queue = state.filter ? tasksByFilter(filtered.items.Queue, state.filter) : filtered.items.Queue;
       return [...active, ...queue];
     }
     case "Findings": {

@@ -684,7 +684,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
       if (inputMode === "steering") {
         steerQueueBuf.push(line);
       } else {
-        pendingInput = line;
+        pendingInput = pendingInput ? `${pendingInput}\n${line}` : line;
       }
       update();
       return;

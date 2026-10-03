@@ -186,6 +186,7 @@ const MAINTAIN_SUBCOMMANDS: Subcommand[] = [
 
 const STORE_SUBCOMMANDS: Subcommand[] = [
   { name: "list", usage: "phren store list", summary: "List registered stores" },
+  { name: "identity", usage: "phren store identity [--create]", summary: "Read or explicitly register this store's portable identity" },
   { name: "add", usage: "phren store add <name> --remote <url>", summary: "Add a team store" },
   { name: "remove", usage: "phren store remove <name>", summary: "Remove a store (local only)" },
   { name: "sync", usage: "phren store sync", summary: "Pull and push all stores" },
@@ -279,6 +280,7 @@ export const REGISTRY: Command[] = [
     subcommands: [
       { name: "integrator", usage: "phren conductor integrator [--session <id> [--computer <name>] | --clear]", summary: "Configure the session that receives structured PR-ready reports" },
       { name: "status", usage: "phren conductor status", summary: "This computer's conductor and the set name it holds" },
+      { name: "lease", usage: "phren conductor lease [status|configure|revoke]", summary: "Read the store lease or explicitly configure/revoke its holder" },
       { name: "make", usage: "phren conductor make [--pane <id>] [--mux herdr:<name>|tmux:<name>]", summary: "Make the agent in this pane (or --pane) this computer's conductor" },
       { name: "stop", usage: "phren conductor stop [--pane <id>]", summary: "End this computer's conductor role; the agent keeps running" },
       { name: "sets", usage: "phren conductor sets [--json] | phren conductor sets name <name>|--clear", summary: "List linked computer sets with reachability and conductors, or name this computer's set" },
@@ -400,12 +402,12 @@ export const REGISTRY: Command[] = [
   {
     name: "tasks",
     topic: "core",
-    usage: "phren tasks",
+    usage: "phren tasks [profile] [--responsibility=human|agent] [--readiness=ready|waiting-on-human|waiting-on-task]",
     summary: "Cross-project task view",
     featured: true,
-    run: async (_args, ctx) => {
-      const { handleTaskView } = await import("./cli/ops.js");
-      await handleTaskView(ctx.profile());
+    run: async (args, ctx) => {
+      const { handleTaskListArgs } = await import("./cli/namespaces-tasks.js");
+      await handleTaskListArgs(args, ctx.profile());
     },
   },
   {

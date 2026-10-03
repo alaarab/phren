@@ -1,3 +1,4 @@
+import { searchSources, type WebSearchResponse } from "./web-search.js";
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, StreamDelta } from "./types.js";
 import {
   toOpenAiTools,
@@ -32,6 +33,17 @@ export class OpenRouterProvider implements LlmProvider {
     if (!this.reasoningEffort) return;
     const effort = this.reasoningEffort === "xhigh" ? "high" : this.reasoningEffort;
     body.reasoning = { effort };
+  }
+
+  supportsWebSearch() { return true; }
+  async searchWeb(query: string, limit: number, signal?: AbortSignal): Promise<WebSearchResponse> {
+    const res = await fetch(`${this.baseUrl}/chat/completions`, { method: "POST", signal,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.apiKey}`, "HTTP-Referer": "https://github.com/alaarab/phren", "X-Title": "phren-agent" },
+      body: JSON.stringify({ model: this.model, max_tokens: Math.min(this.maxOutputTokens, 2048), messages: [{ role: "user", content: `Search the web for: ${query}. Return concise findings with citations.` }], tools: [{ type: "openrouter:web_search", parameters: { engine: "native", max_results: limit, max_total_results: limit, max_uses: 1 } }] }),
+    });
+    if (!res.ok) throw new Error(`OpenRouter search returned HTTP ${res.status}`);
+    const data = await res.json() as Record<string, any>, message = data.choices?.[0]?.message;
+    return { answer: typeof message?.content === "string" ? message.content.slice(0, 8000) : "", sources: searchSources((message?.annotations ?? []).map((a: any) => a.url_citation ?? a), limit), usage: data.usage ? { input_tokens: data.usage.prompt_tokens ?? data.usage.input_tokens ?? 0, output_tokens: data.usage.completion_tokens ?? data.usage.output_tokens ?? 0 } : undefined, billedCost: typeof data.usage?.cost === "number" ? data.usage.cost : undefined };
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {
@@ -138,6 +150,23 @@ export class OpenAiProvider implements LlmProvider {
   private apiError(status: number, text: string): Error {
     const label = this.name === "openai" ? "OpenAI" : this.name;
     return new Error(`${label} API error ${status}: ${text}`);
+  }
+
+  supportsWebSearch() { return this.name === "openai"; }
+  async searchWeb(query: string, limit: number, signal?: AbortSignal): Promise<WebSearchResponse> {
+    if (!this.supportsWebSearch()) throw new Error("This compatible endpoint has no declared native search support.");
+    const res = await fetch(`${this.baseUrl}/responses`, { method: "POST", signal,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.apiKey}` },
+      body: JSON.stringify({ model: this.model, store: false, input: `Search the web for: ${query}. Return concise findings with citations.`, max_output_tokens: Math.min(this.maxOutputTokens, 2048), tools: [{ type: "web_search", search_context_size: "low" }], tool_choice: { type: "web_search" }, include: ["web_search_call.action.sources"] }),
+    });
+    if (!res.ok) throw new Error(`OpenAI search returned HTTP ${res.status}`);
+    const data = await res.json() as Record<string, any>, sources: unknown[] = [], text: string[] = [];
+    if (data.error || data.status === "failed") throw new Error("OpenAI search failed.");
+    for (const output of data.output ?? []) {
+      if (output.type === "web_search_call") sources.push(...(output.action?.sources ?? []));
+      for (const block of output.content ?? []) { if (block.type === "output_text") { text.push(block.text ?? ""); sources.push(...(block.annotations ?? [])); } }
+    }
+    return { answer: text.join("\n").slice(0, 8000), sources: searchSources(sources, limit), usage: data.usage ? { input_tokens: data.usage.input_tokens ?? 0, output_tokens: data.usage.output_tokens ?? 0 } : undefined };
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {

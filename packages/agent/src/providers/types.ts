@@ -128,6 +128,9 @@ export interface LlmProvider {
     tools: AgentToolDef[],
     signal?: AbortSignal,
   ): Promise<LlmResponse>;
+  /** Provider-native search when supported; never an implicit account/provider switch. */
+  supportsWebSearch?: () => boolean;
+  searchWeb?: (query: string, limit: number, signal?: AbortSignal) => Promise<import("./web-search.js").WebSearchResponse>;
   chatStream?(
     system: string,
     messages: LlmMessage[],

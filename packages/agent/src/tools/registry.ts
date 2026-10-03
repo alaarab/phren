@@ -1,3 +1,5 @@
+import { traceOperation } from "../telemetry.js";
+import { LspDiagnostics } from "../lsp/diagnostics.js";
 import type { AgentTool, AgentToolResult } from "./types.js";
 import { DIFF_MARKER } from "../multi/diff-renderer.js";
 import type { AgentToolDef } from "../providers/types.js";
@@ -15,6 +17,14 @@ import {
 export type AskUserFn = (toolName: string, input: Record<string, unknown>, reason: string) => Promise<boolean>;
 
 export class ToolRegistry {
+  private diagnostics = new LspDiagnostics(() => this.permissionConfig, async (argv, signal) => {
+    const input = { command: argv.map(arg => "'" + arg.replace(/'/g, "'\\''") + "'").join(" "), cwd: this.permissionConfig.projectRoot };
+    const pre = await runPreToolUseHooks(this.hookConfig, "shell", input, { cwd: this.permissionConfig.projectRoot, executor: this.hookExecutor });
+    if (pre.denied || signal?.aborted) return false;
+    const rule = checkPermission(this.permissionConfig, "shell", input);
+    return rule.verdict === "allow" || (rule.verdict === "ask" && await this.askUser("shell", input, rule.reason));
+  });
+  close(): void { this.diagnostics.close(); }
   private tools = new Map<string, AgentTool>();
   /** Override the default permission prompt (e.g. for Ink TUI). */
   askUser: AskUserFn = defaultAskUser;
@@ -47,6 +57,7 @@ export class ToolRegistry {
   }
 
   setPermissions(config: PermissionConfig): void {
+    this.diagnostics.close();
     this.permissionConfig = config;
   }
 
@@ -89,12 +100,19 @@ export class ToolRegistry {
 
     let result: AgentToolResult;
     try {
-      result = await tool.execute(input, signal);
+      result = await traceOperation("agent.tool", { "tool.name": name }, () => tool.execute(input, signal), this.permissionConfig.network !== "off");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       result = { output: `Tool error: ${msg}`, is_error: true };
     }
 
+    if (!result.is_error && result.changedFiles?.length) {
+      const diagnostics = await this.diagnostics.afterEdit(result.changedFiles, signal);
+      if (diagnostics) {
+        const at = result.output.indexOf(DIFF_MARKER), note = `\n\n${diagnostics}`;
+        result = { ...result, output: at === -1 ? result.output + note : result.output.slice(0, at) + note + result.output.slice(at) };
+      }
+    }
     const feedback = await runPostToolUseHooks(this.hookConfig, name, input, result.output, !!result.is_error, hookOptions);
     if (feedback) {
       // Before the TUI's diff payload, which the model never sees.

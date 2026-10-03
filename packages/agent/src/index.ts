@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { flushTelemetry } from "./telemetry.js";
 import { agentUserDir, parseArgs, printHelp, resolveStartupPermissions } from "./config.js";
 import { randomUUID } from "crypto";
 import { loadPersistentAllowlist } from "./permissions/allowlist.js";
@@ -369,7 +370,7 @@ export async function runAgentCli(raw: string[]) {
 
     // Web tools
     registry.register(createWebFetchTool());
-    registry.register(createWebSearchTool());
+    registry.register(createWebSearchTool({ provider: () => agentConfig.provider, costTracker: () => agentConfig.costTracker, network: () => registry.permissionConfig.network !== "off" }));
     registry.register(gitStatusTool);
     registry.register(gitDiffTool);
     registry.register(gitCommitTool);
@@ -567,6 +568,8 @@ export async function runAgentCli(raw: string[]) {
         agentConfig.lintTestConfig = lintTestConfig;
       } catch (err: unknown) {
         for (const name of registry.toolNames()) if (!before.has(name)) registry.remove(name);
+        registry.close();
+        await flushTelemetry();
         mcpCleanup?.();
         mcpCleanup = undefined;
         throw err;
@@ -646,6 +649,8 @@ export async function runAgentCli(raw: string[]) {
         });
       }
     }
+    registry.close();
+    await flushTelemetry();
     mcpCleanup?.();
     return;
   }
@@ -662,6 +667,8 @@ export async function runAgentCli(raw: string[]) {
     if (process.stdin.isTTY) {
       try { process.stdin.setRawMode(false); } catch {}
     }
+    registry.close();
+    void flushTelemetry();
     mcpCleanup?.();
     if (phrenCtx && sessionId) {
       endSession(phrenCtx, sessionId, "Interrupted by user");
@@ -857,11 +864,15 @@ export async function runAgentCli(raw: string[]) {
       endSession(phrenCtx, sessionId, `Error: ${err instanceof Error ? err.message : String(err)}`);
     }
     try { await oneShotSpawner?.shutdown(); } catch { /* children exit with the IPC channel */ }
+    registry.close();
+    await flushTelemetry();
     mcpCleanup?.();
     process.exit(1);
   }
 
   try { await oneShotSpawner?.shutdown(); } catch { /* children exit with the IPC channel */ }
+  registry.close();
+  await flushTelemetry();
   mcpCleanup?.();
   if (exitCode !== 0) process.exit(exitCode);
 }

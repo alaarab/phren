@@ -1,3 +1,5 @@
+import { configuredHarness, prepareHarnessCommand } from "./harness/launch.js";
+import { conductorLeaseConfig, reserveConductorLease, bindConductorLease, releaseLocalConductorLease } from "./conductor-lease.js";
 import { markPaneClosed } from "./worker-close.js";
 import { mkdir, readFile } from "node:fs/promises";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -155,6 +157,9 @@ export async function localConductor(known?: { server: string; snapshot: Json })
 /** Refuses a second conductor in this computer's set: a live one here on
  * another pane, or on any member. Members that could not say come back as `unchecked`. */
 async function requireNoConductor(server: string, before: Json, except?: string): Promise<GroupConductor["unchecked"]> {
+  // Configured stores serialize every claim at one fixed authority. A revoked
+  // old role may still have a running pane: its existing work is preserved.
+  if (await conductorLeaseConfig()) return [];
   const existing = await localConductor({ server, snapshot: before });
   if (existing && !(except && existing.server === server && existing.target?.pane === except)) {
     throw new BridgeError(409, "A conductor is already running on this computer. Stop it first.", { target: existing.target });
@@ -182,6 +187,8 @@ export async function makeConductor(server: string, data: Json): Promise<Json> {
   if (pane.agent === "phren") throw new BridgeError(400, PHREN_NO_CONDUCTOR);
   const unchecked = await requireNoConductor(server, before, place.paneId);
   const target = await targetForPane(server, pane);
+  const lease = await reserveConductorLease();
+  await bindConductorLease(lease, { server, pane: place.paneId, terminal: z.string().min(1).parse(pane.terminal_id), source: provider.parse(pane.agent), ...(typeof target?.session === "string" ? { session: target.session } : {}) });
   await recordConductor(server, pane, "owner", typeof target?.session === "string" ? target.session : undefined);
   return { ok: true, conductor: { server, ...(target ? { target } : {}) }, ...(unchecked.length ? { unchecked } : {}) };
 }
@@ -197,6 +204,7 @@ export async function stopConductor(data: Json): Promise<Json> {
   }
   const held = (await readRoleState())?.conductor;
   if (pane !== undefined && held && held.pane !== pane) throw new BridgeError(409, "That pane is not this computer's conductor.");
+  await releaseLocalConductorLease();
   const stopped = await clearConductor(pane);
   return { ok: true, stopped: !!stopped };
 }
@@ -311,6 +319,9 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   if (worktreeRequest && role === "conductor") throw new BridgeError(400, "A conductor works across projects, so it cannot start in a worktree.");
   const label = plainText(200).parse(data.label);
   const kind = z.enum(launchKinds).parse(data.kind);
+  const backend = await configuredHarness(kind, data.backend);
+  if (backend && role !== "agent") throw new BridgeError(400, "Structured SDK/ACP backends are worker launches.");
+  if (backend && data.permissionMode && data.permissionMode !== "supervised") throw new BridgeError(400, "Structured workers retain supervised permissions; broader permissions are not inferred.");
   const effort = z.enum(launchEfforts).default("medium").parse(data.effort);
   const account = data.account === undefined || data.account === null ? undefined : z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(data.account);
   const permissionMode = z.enum(PERMISSION_MODES).optional().parse(data.permissionMode ?? undefined);
@@ -351,6 +362,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   for (let n = 2; taken.has(name) && n < 100; n++) name = `${wanted.slice(0, 32 - String(n).length - 1)}-${n}`;
   // One conductor per set of linked computers.
   const unchecked: GroupConductor["unchecked"] = role === "conductor" && !options.canary ? await requireNoConductor(server, before) : [];
+  const conductorLease = role === "conductor" && !options.canary ? await reserveConductorLease() : undefined;
   // A worker opened in the conductor's workspace would be listed under the
   // conductor's name; it gets its own workspace instead.
   const conductorHere = role === "agent" && workspace ? await conductorPane(server, before) : undefined;
@@ -368,7 +380,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // answers; its file still marks the dispatch so the arrival is recorded here.
   const served = kind === "opencode" ? await prepareServedLaunch() : undefined;
   if (served) args.push(...served.args);
-  const briefFile = brief && (launchesWithBrief(kind) || structured || served) ? await writeLaunchBrief(brief, Date.now(), label) : undefined;
+  const briefFile = brief && (launchesWithBrief(kind) || structured || served || backend) ? await writeLaunchBrief(brief, Date.now(), label) : undefined;
   const briefLaunch = brief && briefFile && launchesWithBrief(kind) ? briefArgs(kind, briefFile) : undefined;
   // sudo -A in the new agent asks the phone for the password (sudo.ts).
   const variables = { ...askpassEnv(), ...(brief ? { [DISPATCH_ID_ENV]: brief.id } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
@@ -423,9 +435,11 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
       await recordBriefArrival(brief.id, "UserPromptSubmit", { ...binding, session: appServer.threadId }).catch(() => undefined);
     } catch (error) { briefTurn = error instanceof AppServerRpcError ? undefined : "uncertain"; }
   }
+  const runner = backend ? await prepareHarnessCommand({ ...backend, cwd, args: backend.args, permissionMode: "default", once: false,
+    ...(model ? { model } : {}), pane: { server, ...place }, ...(briefFile ? { briefFile } : {}), ...(brief ? { briefId: brief.id } : {}) }) : undefined;
   const agentArgs = structuredLaunch ? structuredLaunch.args : [...args, ...(briefLaunch ?? [])];
   try {
-    await startWhenShellReady(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(env ? { env } : {}) });
+    await startWhenShellReady(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(runner ? { command: runner } : {}), ...(env ? { env } : {}) });
   } catch (error) {
     if (appServer && !agentNotReady(error)) await codexServers.stop(appServer).catch(() => undefined);
     // A first-run screen (Claude's folder trust, a login notice) holds the
@@ -461,6 +475,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const agentStatus = typeof pane?.agent_status === "string" ? pane.agent_status : undefined;
   if (kind === "claude" && account) recordPaneAccount(paneAccountKey(server, created.paneId), account, typeof pane?.terminal_id === "string" ? pane.terminal_id : undefined);
   const sessionId = appServer?.threadId ?? (pane && pane.agent === kind ? await paneIdentity(server, pane) : undefined) ?? servedBrief?.session;
+  if (conductorLease) await bindConductorLease(conductorLease, { server, pane: created.paneId, terminal: z.string().min(1).parse(pane?.terminal_id), source: kind, ...(sessionId ? { session: sessionId } : {}) });
   // The Hook, not the agent name, holds the role from here on.
   if (role === "conductor" && !options.canary) await recordConductor(server, pane ?? { pane_id: created.paneId, workspace_id: created.workspaceId, tab_id: created.tabId, agent: kind },
     "launch", sessionId);
@@ -474,9 +489,9 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     await new JobRegistry().register({ pane: { server, pane: created.paneId, ...(created.workspaceId ? { workspace: created.workspaceId } : {}), agent: kind, label },
       ...(sessionId ? { session: sessionId } : {}), agent: kind, label, command: kind }).catch(() => undefined);
   }
-  return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(account ? { account } : {}), ...(permissionMode ? { permissionMode } : {}), ...(unchecked.length ? { unchecked } : {}),
+  return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(backend ? { harnessProvider: backend.backend } : {}), ...(account ? { account } : {}), ...(permissionMode ? { permissionMode } : {}), ...(unchecked.length ? { unchecked } : {}),
     // The caller types the brief itself unless it went with the launch.
-    ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief } : {}),
+    ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!runner || !!briefLaunch || !!servedBrief } : {}),
     ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}) };
 }
 export async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {

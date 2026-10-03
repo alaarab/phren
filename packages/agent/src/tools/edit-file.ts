@@ -41,6 +41,7 @@ function runEdits(filePath: unknown, edits: EditSpec[]): AgentToolResult {
   const snippet = snippetAround(outcome.content.replace(/\r\n/g, "\n"), outcome.firstLine, outcome.lastLine);
   const syntax = syntaxCheckNote(opened.filePath, opened.content, outcome.content);
   return {
+    changedFiles: [path.resolve(opened.filePath)],
     output: `Edited ${opened.filePath}: ${count}${note}.\n${snippet}${syntax ? `\n\n${syntax}` : ""}${encodeDiffPayload(opened.filePath, opened.content, outcome.content)}`,
   };
 }

@@ -1,4 +1,7 @@
-import { getTaskRoute, updateTaskRoute } from "./task-routes.js";
+import { harnessInfo, boundHarness } from "./harness/bindings.js";
+import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute } from "./task-routes.js";
+import { prepareComputerEnrollment, reviewComputerEnrollment, confirmComputerEnrollment, verifyComputerEnrollment } from "./computer-enrollment.js";
+import { readConductorLease, configureConductorLease, conductorLeaseAuthority, revokeConductorLease } from "./conductor-lease.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import type { OwnerInbox } from "./owner-inbox.js";
 import { closeFinishedWorker } from "./worker-close.js";
@@ -143,7 +146,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, conductorLease: true, computerEnrollment: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, harnessAdapters: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -351,7 +354,20 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         result = await storeRoute(modules.store, request.method ?? "", url, request.method === "POST" ? await body(request) : undefined);
       } else if (request.method === "GET") {
         switch (url.pathname) {
+          case "/v1/harness/session": result = await harnessInfo(targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}"))); break;
+          case "/v1/harness/thread": { const target = targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}")); const adapter = await boundHarness(target); if (!adapter.capabilities.readThread) throw new BridgeError(409, "This harness does not support thread reads."); result = { thread: await adapter.readThread(target.session) }; break; }
+          case "/v1/harness/events": {
+            const target = targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}")), adapter = await boundHarness(target);
+            if (!adapter.capabilities.events) throw new BridgeError(409, "This harness has no structured event stream.");
+            const after = z.coerce.number().int().nonnegative().parse(url.searchParams.get("after") ?? 0), controller = new AbortController(), events: unknown[] = [];
+            const stop = () => controller.abort(), timer = setTimeout(stop, 1000); response.once("close", stop);
+            try { for await (const event of adapter.streamEvents(target.session, after, controller.signal)) { events.push(event); if (events.length === 100) { controller.abort(); break; } } }
+            finally { clearTimeout(timer); response.off("close", stop); controller.abort(); }
+            result = { events }; break;
+          }
           case "/v1/tasks": result = getTaskRoute(modules.store, url); break;
+          case "/v1/tasks/stores": result = await getTaskDirectoryRoute(modules.store); break;
+          case "/v1/conductor/lease": result = await readConductorLease(modules.store); break;
           case "/v1/health": result = { ...info, codePackage: await codePackageStatus(scheduleStore, modules.has("code")) }; break;
           case "/v1/metrics": result = hookMetrics.snapshot(); break;
           case "/v1/health/details": result = await healthDetails({ hookVersion: version, computerId: computerID, store: scheduleStore,
@@ -576,7 +592,32 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         }
       } else if (request.method === "POST") {
         const data = await body(request);
-        if (url.pathname === "/v1/tasks/update") {
+        if (["/v1/harness/model", "/v1/harness/takeover", "/v1/harness/approval", "/v1/harness/input"].includes(url.pathname)) {
+          const target = targetSchema.parse(data.target), adapter = await boundHarness(target);
+          if (url.pathname === "/v1/harness/model") {
+            if (!adapter.capabilities.setModel || !adapter.setModel) throw new BridgeError(409, "Model selection is unavailable.");
+            if (adapter.provider === "codex-app-server" || adapter.provider === "opencode-serve") { const mapped = new URL(url); mapped.pathname = "/v1/model"; result = await paneRoute(ctx, mapped, data, response); }
+            else { await adapter.setModel(target.session, z.string().min(1).max(200).parse(data.model)); result = { ok: true }; }
+          } else if (url.pathname === "/v1/harness/takeover") {
+            if (!adapter.capabilities.takeover || !adapter.takeover) throw new BridgeError(409, "Takeover is unavailable.");
+            const pane = await validateTarget(target, false, true);
+            result = await adapter.takeover(target.session, { server: target.server, pane: target.pane, terminal: String(pane.terminal_id) });
+          } else {
+            const requestId = z.string().min(1).max(200).parse(data.requestId);
+            const capability = url.pathname.endsWith("/input") ? "userInput" : "approvals";
+            if (!adapter.capabilities[capability]) throw new BridgeError(409, "This structured request is unavailable.");
+            result = { ok: capability === "userInput" ? await adapter.respondToUserInput(target.session, requestId, data.response) : await adapter.respondToRequest(target.session, requestId, data.response) };
+          }
+        } else if (url.pathname === "/v1/harness/turn" || url.pathname === "/v1/harness/interrupt") {
+          // Preserve existing identity, idempotency, busy-dialog and approval checks.
+          const mapped = new URL(url); mapped.pathname = url.pathname === "/v1/harness/turn" ? "/v1/prompt" : "/v1/keys";
+          if (url.pathname === "/v1/harness/interrupt") {
+            const target = targetSchema.parse(data.target), adapter = await boundHarness(target);
+            if (!adapter.capabilities.interrupt) throw new BridgeError(409, "This fallback cannot safely interrupt a specific turn.");
+            const turnId = z.string().min(1).max(200).parse(data.turnId);
+            result = { ok: await adapter.interruptTurn(target.session, turnId) };
+          } else result = await paneRoute(ctx, mapped, data, response);
+        } else if (url.pathname === "/v1/tasks/update") {
           result = updateTaskRoute(modules.store, data);
         } else if (url.pathname === "/v1/subagents/resume") {
           result = await fanoutMessages.send(data);
@@ -645,6 +686,20 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           if (data.origin !== undefined) throw new BridgeError(403, "Only the owner changes the release authority policy, from the phone or `phren authority` in their own terminal.");
           result = url.pathname === "/v1/authority" ? { ok: true, authority: await setProjectAuthority(data, "phone") }
             : { ok: true, confirmation: await confirmAuthority(data, "phone") };
+        } else if (url.pathname === "/v1/conductor/lease/configure") {
+          result = await configureConductorLease(modules.store, data);
+        } else if (url.pathname === "/v1/conductor/lease/revoke") {
+          result = await revokeConductorLease(modules.store, data);
+        } else if (url.pathname === "/v1/conductor/lease/authority") {
+          result = await conductorLeaseAuthority(modules.store, data);
+        } else if (url.pathname === "/v1/computers/enrollment/prepare") {
+          result = await prepareComputerEnrollment(modules.store, computerID, data);
+        } else if (url.pathname === "/v1/computers/enrollment/review") {
+          result = await reviewComputerEnrollment(modules.store, computerID, data);
+        } else if (url.pathname === "/v1/computers/enrollment/confirm") {
+          result = await confirmComputerEnrollment(modules.store, computerID, data);
+        } else if (url.pathname === "/v1/computers/enrollment/verify") {
+          result = await verifyComputerEnrollment(modules.store, data);
         } else if (url.pathname === "/v1/conductor/make") {
           // Serialized with launches, so a conductor launch and a make cannot both pass the set check.
           result = await launches.run(async () => makeConductor(selectedServer(url), data));

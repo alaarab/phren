@@ -1,3 +1,5 @@
+import { parseTaskMetadata } from "./task-metadata.js";
+import { taskFormatStatus, taskFormatMigrationHint } from "./task-format.js";
 import { moduleEnabled } from "../modules/runtime.js";
 import { disabledHint } from "../modules/registry.js";
 import * as fs from "fs";
@@ -56,6 +58,7 @@ export interface TaskItem {
   history?: TaskChange[];
   /** Unknown/invalid contract content is retained and fails closed for selection. */
   taskContractRaw?: string;
+  taskContractRecords?: string[];
 }
 
 /**
@@ -156,10 +159,12 @@ function parseContinuation(lines: string[], idx: number): {
   claim?: TaskClaim;
   contract?: { responsibility?: TaskResponsibility; dependencies?: TaskDependency[]; history?: TaskChange[] };
   taskContractRaw?: string;
+  taskContractRecords?: string[];
   linesToSkip: number;
 } {
   let contract: ReturnType<typeof parseContinuation>["contract"];
   let taskContractRaw: string | undefined;
+  const taskContractRecords: string[] = [];
   let context: string | undefined;
   let claim: TaskClaim | undefined;
   let githubIssue: number | undefined;
@@ -175,16 +180,7 @@ function parseContinuation(lines: string[], idx: number): {
       continue;
     }
     if (trimmed.startsWith("Task:")) {
-      taskContractRaw = trimmed.slice(5).trim();
-      try {
-        const value = JSON.parse(taskContractRaw);
-        if (value.version === 1 && Object.keys(value).every(key => ["version", "responsibility", "dependencies", "history"].includes(key)) && (value.responsibility === "human" || value.responsibility === "agent")
-          && Array.isArray(value.dependencies) && value.dependencies.every((d: TaskDependency) =>
-            typeof d.storeId === "string" && /^[a-f0-9]{8}$/.test(d.storeId) && typeof d.project === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(d.project) && typeof d.stableId === "string" && /^[a-f0-9]{8}$/.test(d.stableId))
-          && Array.isArray(value.history) && value.history.every((h: TaskChange) => typeof h.at === "string" && typeof h.change === "string")) {
-          contract = value; taskContractRaw = undefined;
-        }
-      } catch { /* Preserve unknown versions and malformed metadata on ordinary writes. */ }
+      taskContractRecords.push(trimmed.slice(5).trim());
       linesToSkip++; continue;
     }
     if (trimmed.startsWith("Context:")) {
@@ -208,7 +204,11 @@ function parseContinuation(lines: string[], idx: number): {
     break;
   }
 
-  return { context, githubIssue, githubUrl, claim, contract, taskContractRaw, linesToSkip };
+  if (taskContractRecords.length === 1) {
+    contract = parseTaskMetadata(taskContractRecords[0]);
+    if (!contract) taskContractRaw = taskContractRecords[0];
+  } else if (taskContractRecords.length > 1) taskContractRaw = taskContractRecords[0];
+  return { context, githubIssue, githubUrl, claim, contract, taskContractRaw, ...(taskContractRecords.length > 1 ? { taskContractRecords } : {}), linesToSkip };
 }
 
 /** Pattern that matches the task metadata comment embedded in task item lines.
@@ -304,7 +304,7 @@ function normalizeTaskItemLine(item: TaskItem): string {
   return `${prefix}${text} <!-- bid:${bid}${rankPart}${activityPart}${createdPart}${sessionPart}${scopePart}${findingsPart}${parentFindingPart}${speculativePart} -->`;
 }
 
-function parseTaskContent(project: string, taskPath: string, content: string): TaskDoc {
+export function parseTaskContent(project: string, taskPath: string, content: string): TaskDoc {
   const lines = content.split("\n");
   const title = lines[0]?.trim() || `# ${project} tasks`;
   const items: Record<TaskSection, TaskItem[]> = {
@@ -363,6 +363,7 @@ function parseTaskContent(project: string, taskPath: string, content: string): T
       dependencies: continuation.contract?.dependencies,
       history: continuation.contract?.history,
       taskContractRaw: continuation.taskContractRaw,
+      taskContractRecords: continuation.taskContractRecords,
     });
     i += continuation.linesToSkip;
   }
@@ -387,7 +388,8 @@ function renderTask(doc: TaskDoc): string {
     out.push(`## ${section}`, "");
     for (const item of doc.items[section]) {
       out.push(normalizeTaskItemLine(item));
-      if (item.taskContractRaw !== undefined) out.push(`  Task: ${item.taskContractRaw}`);
+      if (item.taskContractRecords?.length) out.push(...item.taskContractRecords.map(raw => `  Task: ${raw}`));
+      else if (item.taskContractRaw !== undefined) out.push(`  Task: ${item.taskContractRaw}`);
       else if (item.responsibility !== undefined || item.dependencies?.length || item.history?.length) out.push(`  Task: ${JSON.stringify({ version: 1, responsibility: item.responsibility ?? "agent", dependencies: item.dependencies ?? [], history: item.history ?? [] })}`);
       if (item.context) out.push(`  Context: ${item.context}`);
       const githubRef = formatGitHubIssueReference(item);
@@ -745,7 +747,9 @@ export function updateTask(
     const item = parsed.data.items[found.match.section][found.match.index];
     const changes: string[] = [];
     if (updates.responsibility !== undefined || updates.dependencies !== undefined) {
-      if (item.taskContractRaw) return phrenErr("Task metadata is invalid or from a newer version; preserve it and repair before editing responsibility/dependencies.", PhrenError.VALIDATION_ERROR);
+      const storeRoot = path.dirname(path.dirname(parsed.data.path));
+      if (!taskFormatStatus(storeRoot).enabled) return phrenErr(taskFormatMigrationHint, PhrenError.VALIDATION_ERROR);
+      if (item.taskContractRaw !== undefined) return phrenErr("Task metadata is invalid or from a newer version; preserve it and repair before editing responsibility/dependencies.", PhrenError.VALIDATION_ERROR);
       if (updates.responsibility !== undefined && !["human", "agent"].includes(updates.responsibility)) return phrenErr("Responsibility must be human or agent.", PhrenError.VALIDATION_ERROR);
       item.stableId ??= newBid();
       if (updates.dependencies !== undefined) {
@@ -984,7 +988,7 @@ export const STALE_CLAIM_MS = 24 * 60 * 60 * 1000;
  * `release`, clears this computer's claim and returns the task to the Queue.
  */
 export function claimTask(phrenPath: string, project: string, match: string, claim: TaskClaim,
-  opts: { release?: boolean; force?: boolean; now?: number } = {}): PhrenResult<TaskItem> {
+  opts: { release?: boolean; force?: boolean; now?: number; graphRoot?: string } = {}): PhrenResult<TaskItem> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
   const preCheck = ensureProject(phrenPath, project);
@@ -997,7 +1001,7 @@ export function claimTask(phrenPath: string, project: string, match: string, cla
     if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
     if (!found.match) return taskItemNotFound(project, match);
     const item = parsed.data.items[found.match.section][found.match.index];
-    if (!opts.release && taskReadiness(phrenPath, parsed.data, item).readiness !== "ready") return phrenErr("This task awaits a human or prerequisite task.", PhrenError.VALIDATION_ERROR);
+    if (!opts.release && taskReadiness(opts.graphRoot ?? phrenPath, parsed.data, item).readiness !== "ready") return phrenErr("This task awaits a human or prerequisite task.", PhrenError.VALIDATION_ERROR);
     if (item.section === "Done") return phrenErr(`This task is already done: ${item.line}`, PhrenError.VALIDATION_ERROR);
     const held = item.claim && item.claim.computer !== claim.computer ? item.claim : undefined;
     if (held) {
@@ -1027,7 +1031,7 @@ export function claimTask(phrenPath: string, project: string, match: string, cla
   });
 }
 
-export function workNextTask(phrenPath: string, project: string): PhrenResult<string> {
+export function workNextTask(phrenPath: string, project: string, graphRoot = phrenPath): PhrenResult<string> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
   const preCheck = ensureProject(phrenPath, project);
@@ -1047,7 +1051,7 @@ export function workNextTask(phrenPath: string, project: string): PhrenResult<st
       return pa - pb;
     });
 
-    const nextIndex = parsed.data.items.Queue.findIndex(item => taskReadiness(phrenPath, parsed.data, item).readiness === "ready");
+    const nextIndex = parsed.data.items.Queue.findIndex(item => taskReadiness(graphRoot, parsed.data, item).readiness === "ready");
     if (nextIndex < 0) return phrenErr("No ready agent tasks; queued tasks await a human or prerequisite task.", PhrenError.NOT_FOUND);
     const [item] = parsed.data.items.Queue.splice(nextIndex, 1);
     if (item.history !== undefined) item.history.push({ at: new Date().toISOString(), change: "moved Queue -> Active by next" });

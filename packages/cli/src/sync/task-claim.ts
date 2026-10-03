@@ -29,7 +29,7 @@ export interface ClaimOutcome {
  * keeps theirs, so the task is read again after the push to see who won.
  */
 export async function claimTaskSynced(phrenPath: string, project: string, match: string, claim: TaskClaim,
-  opts: { release?: boolean; force?: boolean } = {}): Promise<ClaimOutcome> {
+  opts: { release?: boolean; force?: boolean; graphRoot?: string } = {}): Promise<ClaimOutcome> {
   return withFileLock(runtimeFile(phrenPath, "git-op"), async () => {
     const pulled = await mergeStoreUpstream(phrenPath, { git, commitMessage: "auto-save phren (task claim)" });
     const offline = pulled.status === "error" || pulled.status === "busy" ? pulled.detail : undefined;

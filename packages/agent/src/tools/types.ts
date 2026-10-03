@@ -8,6 +8,8 @@ export interface AgentToolImage {
 
 export interface AgentToolResult {
   output: string;
+  /** Successful write paths for permission-preserving post-edit diagnostics. */
+  changedFiles?: string[];
   is_error?: boolean;
   /** The command was refused before execution; automatic checks must not retry it. */
   permissionDenied?: boolean;

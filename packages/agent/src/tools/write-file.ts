@@ -46,8 +46,8 @@ export const writeFileTool: AgentTool = {
     const syntax = syntaxCheckNote(filePath, existed ? oldContent : null, content);
     const msg = `Wrote ${content.length} bytes to ${filePath}${syntax ? `\n\n${syntax}` : ""}`;
     if (oldContent) {
-      return { output: msg + encodeDiffPayload(filePath, oldContent, content) };
+      return { changedFiles: [resolved], output: msg + encodeDiffPayload(filePath, oldContent, content) };
     }
-    return { output: msg };
+    return { changedFiles: [resolved], output: msg };
   },
 };

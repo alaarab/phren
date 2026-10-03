@@ -168,7 +168,7 @@ async function stopService() {
   }
   else await exec("systemctl", ["--user", "stop", unit]).catch(() => {});
 }
-async function startService(): Promise<string | undefined> {
+async function startService(restart = false): Promise<string | undefined> {
   if (process.platform === "darwin") {
     const uid = process.getuid!(), gui = await guiSession(uid), domain = launchDomain(uid, gui);
     // bootout returns before launchd finishes releasing the old job. A valid
@@ -190,7 +190,7 @@ async function startService(): Promise<string | undefined> {
     if (!gui) console.log(`No one is logged in at this Mac's screen, so the Phren Hook runs in ${domain}. After a screen login, run phren bridge install again to move it into gui/${uid}.`);
     return kickstartError;
   }
-  else { await exec("systemctl", ["--user", "daemon-reload"]); await exec("systemctl", ["--user", "enable", "--now", unit]); }
+  else { await exec("systemctl", ["--user", "daemon-reload"]); await exec("systemctl", ["--user", "enable", unit]); await exec("systemctl", ["--user", restart ? "restart" : "start", unit]); }
 }
 
 /** How long install waits for Codex turns that would stop with the Hook. */
@@ -264,15 +264,17 @@ export async function install(version: string, noService = false, force = false)
       await atomic(plist, launchAgentXml({ label, node: process.execPath, program, path: environmentPath, root, herdr, store: modules.store, profile: modules.profile }, extra));
     } else {
       const folder = path.join(homedir(), ".config/systemd/user"); await mkdir(folder, { recursive: true });
-      await atomic(path.join(folder, unit), `[Unit]\nDescription=Phren Hook\n[Service]\nExecStart=${systemdQuote(process.execPath)} ${systemdQuote(program)} serve\nNice=-5\nEnvironment=${systemdQuote("PATH=" + environmentPath)} ${systemdQuote("PHREN_BRIDGE_HOME=" + root)} ${systemdQuote("PHREN_HERDR_HOME=" + herdr)} ${systemdQuote("PHREN_PATH=" + modules.store)} ${systemdQuote("PHREN_PROFILE=" + modules.profile)}\nRestart=always\nRestartSec=3\nUMask=0077\n[Install]\nWantedBy=default.target\n`);
+      await atomic(path.join(folder, unit), `[Unit]\nDescription=Phren Hook\nStartLimitIntervalSec=60\nStartLimitBurst=30\n[Service]\nExecStart=${systemdQuote(process.execPath)} ${systemdQuote(program)} serve\nNice=-5\nEnvironment=${systemdQuote("PATH=" + environmentPath)} ${systemdQuote("PHREN_BRIDGE_HOME=" + root)} ${systemdQuote("PHREN_HERDR_HOME=" + herdr)} ${systemdQuote("PHREN_PATH=" + modules.store)} ${systemdQuote("PHREN_PROFILE=" + modules.profile)}\nRestart=always\nRestartSec=3\nUMask=0077\n[Install]\nWantedBy=default.target\n`);
     }
     if (!force) await waitForCodexWorkers();
-    await stopService();
+    // Linux keeps the old Hook available until one systemd restart transaction.
+    // Activation first also survives an installer interruption without a stopped job.
+    if (process.platform === "darwin") await stopService();
   }
   await activate(version);
   try {
     if (!noService) {
-      let kickstartError = await startService();
+      let kickstartError = await startService(process.platform !== "darwin");
       let ready = await serviceReady(version);
       if (!ready && process.platform === "darwin") {
         // launchd may accept bootstrap but leave a throttled or old job behind.

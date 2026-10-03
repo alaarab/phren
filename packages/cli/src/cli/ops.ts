@@ -1,4 +1,4 @@
-import { taskReadiness } from "../data/task-contract.js";
+import { taskReadiness, filterTaskDoc, taskCounts, type TaskFilter } from "../data/task-contract.js";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
@@ -15,7 +15,7 @@ import { buildIndex, queryRows } from "../shared/index.js";
 import { resolveSubprocessArgs } from "./hooks.js";
 import { listAllSessions, getSessionArtifacts } from "../tools/session.js";
 
-export function handleTaskView(profile: string) {
+export function handleTaskView(profile: string, filter: TaskFilter = {}) {
   const docs = readTasksAcrossProjects(getPhrenPath(), profile);
   if (!docs.length) {
     console.log("No tasks found.");
@@ -25,7 +25,8 @@ export function handleTaskView(profile: string) {
   let totalActive = 0;
   let totalQueue = 0;
 
-  for (const doc of docs) {
+  for (const original of docs) {
+    const doc = filterTaskDoc(getPhrenPath(), original, filter);
     const activeCount = doc.items.Active.length;
     const queueCount = doc.items.Queue.length;
     if (activeCount === 0 && queueCount === 0) continue;
@@ -34,13 +35,15 @@ export function handleTaskView(profile: string) {
     totalQueue += queueCount;
 
     console.log(`\n## ${doc.project}`);
+    const counts = taskCounts(getPhrenPath(), original);
+    console.log(`  Human: ${counts.human}; Agent ready: ${counts.agentReady}; waiting on human: ${counts.agentWaitingOnHuman}; waiting on task: ${counts.agentWaitingOnTask}.`);
     if (activeCount > 0) {
       console.log("  Active:");
       const activeWithGravity = applyGravity(doc.items.Active).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
       for (const item of activeWithGravity) {
         const rankTag = item.rank !== undefined ? ` [#${item.rank}]` : "";
         const github = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
-        const ready = taskReadiness(getPhrenPath(), doc, item);
+        const ready = taskReadiness(getPhrenPath(), original, item);
         console.log(`    - ${item.line}${rankTag}${github} [${ready.responsibility} · ${ready.readiness}]`);
         for (const prerequisite of ready.prerequisites) console.log(`      ${prerequisite.completed ? "✓" : "Waiting on"} ${prerequisite.title}`);
       }
@@ -51,7 +54,7 @@ export function handleTaskView(profile: string) {
       for (const item of queueWithGravity) {
         const rankTag = item.rank !== undefined ? ` [#${item.rank}]` : "";
         const github = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
-        const ready = taskReadiness(getPhrenPath(), doc, item);
+        const ready = taskReadiness(getPhrenPath(), original, item);
         console.log(`    - ${item.line}${rankTag}${github} [${ready.responsibility} · ${ready.readiness}]`);
         for (const prerequisite of ready.prerequisites) console.log(`      ${prerequisite.completed ? "✓" : "Waiting on"} ${prerequisite.title}`);
       }

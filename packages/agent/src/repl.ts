@@ -141,7 +141,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
 
     // If agent is already running, buffer the input
     if (agentRunning) {
-      pendingInput = trimmed;
+      pendingInput = pendingInput ? `${pendingInput}\n\n${trimmed}` : trimmed;
       if (inputMode === "steering") {
         process.stderr.write(`${DIM}↳ steering: "${trimmed.slice(0, 60)}${trimmed.length > 60 ? "..." : ""}" will be injected${RESET}\n`);
       } else {
@@ -154,7 +154,12 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
 
     emitHerdrHook("UserPromptSubmit");
     try {
-      await runTurn(trimmed, session, config);
+      await runTurn(trimmed, session, config, {
+        getSteeringInput: () => {
+          if (inputMode !== "steering") return null;
+          const value = pendingInput; pendingInput = null; return value;
+        },
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       process.stderr.write(`${RED}Error: ${msg}${RESET}\n`);
@@ -182,7 +187,12 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
           // Steering: inject as a correction/redirect
           process.stderr.write(`${YELLOW}↳ steering with: ${queued.slice(0, 80)}${RESET}\n`);
         }
-        await runTurn(queued, session, config);
+        await runTurn(queued, session, config, {
+          getSteeringInput: () => {
+            if (inputMode !== "steering") return null;
+            const value = pendingInput; pendingInput = null; return value;
+          },
+        });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         process.stderr.write(`${RED}Error: ${msg}${RESET}\n`);

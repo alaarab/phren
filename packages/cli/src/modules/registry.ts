@@ -62,7 +62,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ...core(["get_tasks", "add_task", "manage_task"]),
       ...full(["complete_task", "remove_task", "update_task", "tidy_done_tasks", "pin_task", "claim_task"]),
     ],
-    cliCommands: ["task", "tasks", "config task-mode", "config proactivity.tasks"], agentHooks: [], hookRoutes: [{ method: "GET", path: "/v1/tasks" }, { method: "POST", path: "/v1/tasks/update" }], capabilities: ["tasks", "taskDependencies"],
+    cliCommands: ["task", "tasks", "config task-mode", "config proactivity.tasks"], agentHooks: [], hookRoutes: [{ method: "GET", path: "/v1/tasks" }, { method: "GET", path: "/v1/tasks/stores" }, { method: "POST", path: "/v1/tasks/update" }], capabilities: ["tasks", "taskDependencies"],
     storeFiles: ["<project>/tasks.md", ".sessions/checkpoint-*.json"], localFiles: [],
     phoneScreens: [{ screen: "TasksView", capability: "tasks" }], skills: [],
   },
@@ -82,7 +82,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     hookRoutes: [
       ...routes("GET", [
         "/v1/health", "/v1/health/details", "/v1/health/peers", "/v1/muxes", "/v1/activity", "/v1/metrics", "/v1/web-servers", "/v1/simulators",
-        "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/files", "/v1/models", "/v1/harnesses", "/v1/projects/files",
+        "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/files", "/v1/models", "/v1/harnesses", "/v1/harness/session", "/v1/harness/thread", "/v1/harness/events", "/v1/projects/files",
         "/v1/uploads/image", "/v1/files/range", "/v1/files/resolve", "/v1/usage", "/v1/resources", "/v1/speech/voices", "/v1/push/status", "/v1/projects/locate", "/v1/projects/repos",
         "/v1/workspaces", "/v1/workspaces/panes", "/v1/transcripts/blob", "/v1/transcripts/history", "/v1/sudo",
         "/v1/subagents", "/v1/subagents/transcript", "/v1/subagents/messages",
@@ -90,7 +90,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ...routes("POST", [
         "/v1/push/register", "/v1/push/answer", "/v1/push/target", "/v1/files", "/v1/projects/add", "/v1/simulators/action",
         "/v1/workspaces/launch", "/v1/workspaces/create", "/v1/workspaces/focus", "/v1/workspaces/rename",
-        "/v1/workspaces/close", "/v1/sessions/rename", "/v1/prompt", "/v1/prompt/status", "/v1/model", "/v1/settings", "/v1/agents/permission-mode", "/v1/side-question/dismiss", "/v1/keys", "/v1/secret", "/v1/upload",
+        "/v1/workspaces/close", "/v1/sessions/rename", "/v1/prompt", "/v1/prompt/status", "/v1/harness/turn", "/v1/harness/interrupt", "/v1/harness/model", "/v1/harness/takeover", "/v1/harness/approval", "/v1/harness/input", "/v1/model", "/v1/settings", "/v1/agents/permission-mode", "/v1/side-question/dismiss", "/v1/keys", "/v1/secret", "/v1/upload",
         "/v1/approvals/answer", "/v1/questions/answer", "/v1/subagents/resume", "/v1/subagents/archive-finished", "/v1/canary",
         "/v1/speech", "/v1/sudo/answer", "/v1/jobs/cleanup",
       ]),
@@ -99,7 +99,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     capabilities: [
       "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "herdr",
       "webServers", "webPreview", "activity", "approvals", "questions", "accountUsage", "providers",
-      "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "deliveryFrames", "resources", "sessionRename", "sudo", "sudoOutcome", "previewDeltas", "quickChat",
+      "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "deliveryFrames", "resources", "sessionRename", "sudo", "sudoOutcome", "previewDeltas", "quickChat", "harnessAdapters",
     ],
     storeFiles: [".runtime/sessions/opencode-*.events.jsonl", ".runtime/approvals/opencode-*.json"],
     localFiles: ["<bridge>/installed.json", "<bridge>/versions/**", "<bridge>/current", "<bridge>/dispatch", "<bridge>/askpass", "<bridge>/computer-id", "<bridge>/canary.json", "<bridge>/canary-daily"],
@@ -132,10 +132,10 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
   {
     schemaVersion: 1, name: "conductor", version: VERSION, defaultEnabled: false, requires: ["memory", "hook"],
     tools: full(["dispatch", "dispatch_returns", "dispatch_approve", "hand_off", "live_sessions", "account_usage", "authority", "dispatch_report", "owner_inbox"]), cliCommands: ["dispatch", "dispatch status", "dispatch returns", "dispatch sessions", "dispatch usage", "dispatch report", "hand-off", "conductor", "conductor grants", "conductor status", "conductor make", "conductor stop", "conductor sets", "conductor integrator", "owner-inbox", "authority", "bridge enroll-computer"], agentHooks: [],
-    hookRoutes: [...routes("GET", ["/v1/dispatch", "/v1/dispatch/capacity", "/v1/dispatch/arrival", "/v1/conductor", "/v1/conductor/grants", "/v1/computers", "/v1/sets", "/v1/authority", "/v1/owner-inbox", "/v1/conductor/integrator"]),
-      ...routes("POST", ["/v1/dispatch", "/v1/dispatch/workers", "/v1/dispatch/returns", "/v1/dispatch/approve", "/v1/dispatch/report", "/v1/dispatch/close", "/v1/owner-inbox", "/v1/conductor/integrator", "/v1/hand-off", "/v1/hand-off/status", "/v1/conductor/grants", "/v1/conductor/make", "/v1/conductor/stop", "/v1/sets/name", "/v1/authority", "/v1/authority/confirm"]), ...routes("DELETE", ["/v1/conductor/grants", "/v1/authority"])],
-    capabilities: ["dispatch", "conductorSets", "ownerInbox", "workerReports", "queuedHandOff"], storeFiles: ["global/skills/conductor/**"],
-    localFiles: ["<bridge>/hooks.yaml", "<bridge>/conductor.yaml", "<bridge>/conductor-role.json", "<bridge>/conductor/brief.md", "<bridge>/authority.yaml", "<bridge>/authority-confirmations.json", "<bridge>/dispatches/*.json", "<bridge>/hand-offs/*.json", "<bridge>/worker-reports/*.json", "<bridge>/closed-workers/*.json", "<bridge>/owner-inbox.json", "<bridge>/integrator.json"], phoneScreens: [], skills: ["conductor"],
+    hookRoutes: [...routes("GET", ["/v1/dispatch", "/v1/dispatch/capacity", "/v1/dispatch/arrival", "/v1/conductor", "/v1/conductor/lease", "/v1/conductor/grants", "/v1/computers", "/v1/sets", "/v1/authority", "/v1/owner-inbox", "/v1/conductor/integrator"]),
+      ...routes("POST", ["/v1/dispatch", "/v1/dispatch/workers", "/v1/dispatch/returns", "/v1/dispatch/approve", "/v1/dispatch/report", "/v1/dispatch/close", "/v1/owner-inbox", "/v1/conductor/integrator", "/v1/hand-off", "/v1/hand-off/status", "/v1/conductor/grants", "/v1/conductor/make", "/v1/conductor/stop", "/v1/conductor/lease/configure", "/v1/conductor/lease/revoke", "/v1/conductor/lease/authority", "/v1/sets/name", "/v1/authority", "/v1/authority/confirm", "/v1/computers/enrollment/prepare", "/v1/computers/enrollment/review", "/v1/computers/enrollment/confirm", "/v1/computers/enrollment/verify"]), ...routes("DELETE", ["/v1/conductor/grants", "/v1/authority"])],
+    capabilities: ["dispatch", "conductorSets", "conductorLease", "computerEnrollment", "ownerInbox", "workerReports", "queuedHandOff"], storeFiles: ["global/skills/conductor/**"],
+    localFiles: ["<bridge>/hooks.yaml", "<bridge>/computer-enrollment/*.json", "<bridge>/conductor.yaml", "<bridge>/conductor-role.json", "<bridge>/conductor/brief.md", "<bridge>/authority.yaml", "<bridge>/authority-confirmations.json", "<bridge>/dispatches/*.json", "<bridge>/hand-offs/*.json", "<bridge>/worker-reports/*.json", "<bridge>/closed-workers/*.json", "<bridge>/owner-inbox.json", "<bridge>/integrator.json"], phoneScreens: [], skills: ["conductor"],
   },
   {
     schemaVersion: 1, name: "fanout", version: VERSION, defaultEnabled: false, requires: ["memory", "hook"],

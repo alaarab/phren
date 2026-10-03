@@ -5,6 +5,7 @@ import { Duplex } from "node:stream";
 import { dump, load } from "js-yaml";
 import { z } from "zod";
 import { logger } from "../logger.js";
+import { tryFileLock } from "../governance/locks.js";
 import { hookRequest } from "./client.js";
 import { computerName, dispatchKeyPath, publicComputerKey } from "./computers.js";
 import { atomic, BridgeError, bridgeRoot, serverName, withErrorCode, type Json } from "./protocol.js";
@@ -39,6 +40,9 @@ export async function hookPeers(root = bridgeRoot()): Promise<HookPeer[]> {
  */
 export async function addHookPeer(input: unknown, root = bridgeRoot()): Promise<{ added: boolean; peer: HookPeer }> {
   const peer = peerSchema.parse(input);
+  const release = tryFileLock(path.join(root, "hooks.yaml"));
+  if (!release) throw new BridgeError(409, "Computer links are being updated. Review the current links and retry.");
+  try {
   const existing = await hookPeers(root).catch(error => {
     if (error instanceof BridgeError && error.details?.hooksYaml === "missing") return [];
     throw error;
@@ -50,6 +54,7 @@ export async function addHookPeer(input: unknown, root = bridgeRoot()): Promise<
   if (existing.length >= 32) throw new BridgeError(409, "hooks.yaml already has 32 computers.");
   await atomic(path.join(root, "hooks.yaml"), dump({ version: 1, computers: [...existing, peer] }, { lineWidth: -1 }));
   return { added: true, peer };
+  } finally { release(); }
 }
 
 /**

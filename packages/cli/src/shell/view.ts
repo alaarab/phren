@@ -1,4 +1,4 @@
-import { taskReadiness } from "../data/task-contract.js";
+import { taskReadiness, filterTaskDoc, taskCounts } from "../data/task-contract.js";
 import { moduleEnabled } from "../modules/runtime.js";
 /**
  * View rendering functions for the phren interactive shell.
@@ -379,7 +379,9 @@ function renderTaskView(ctx: ViewContext, cursor: number, height: number, subsec
   const result = readTasks(storePath, project);
   if (!result.ok) return { lines: [result.error], subsectionsCache };
 
-  const parsed = result.data;
+  const parsed = filterTaskDoc(ctx.phrenPath, result.data, { responsibility: ctx.state.taskResponsibility });
+  const counts = taskCounts(ctx.phrenPath, result.data);
+  const laneHeader = `  ${ctx.state.taskResponsibility ?? "Human + Agent"} · Human ${counts.human} · Agent ready ${counts.agentReady} · Waiting ${counts.agentWaitingOnHuman + counts.agentWaitingOnTask} (:lane human|agent|all)`;
   const warnings = parsed.issues.length
     ? [`  ${style.yellow("⚠")}  ${style.yellow(parsed.issues.join("; "))}`, ""]
     : [];
@@ -404,7 +406,7 @@ function renderTaskView(ctx: ViewContext, cursor: number, height: number, subsec
   const queueStart = active.length;
   const doneStart = active.length + queue.length;
 
-  const allLines: string[] = [];
+  const allLines: string[] = [style.dim(laneHeader)];
   let cursorFirstLine = 0;
   let cursorLastLine = 0;
   let lastSection = "";
@@ -441,7 +443,7 @@ function renderTaskView(ctx: ViewContext, cursor: number, height: number, subsec
     const lineText = isDone ? style.dim(item.line) : item.line;
     const idStr = style.dim(item.id.padEnd(3));
 
-    const ready = taskReadiness(ctx.phrenPath, parsed, item);
+    const ready = taskReadiness(ctx.phrenPath, result.data, item);
     const laneTag = ` [${ready.responsibility} · ${ready.readiness}]`;
     let row = `    ${prioIcon} ${statusIcon} ${idStr} ${lineText}${pinTag}${ghTag}${laneTag}`;
     row = isSelected && !isDone

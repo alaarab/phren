@@ -44,6 +44,16 @@ export const LAUNCH_GRACE_MS = 60_000;
 export const NOTICE_MS = 120_000;
 /** Receipts older than this are no longer watched. */
 export const WATCH_MS = 24 * 60 * 60 * 1000;
+/** Observation expiry is neither completion nor permission to close a worker. */
+export function expireObservation(receipt: Receipt, now: number): boolean {
+  const created = Date.parse(receipt.createdAt);
+  if (!Number.isFinite(created) || !["accepted", "uncertain"].includes(receipt.state) || receipt.closedAt || receipt.returned || now - created < WATCH_MS) return false;
+  const at = new Date(now).toISOString();
+  receipt.worker = { state: "expired", since: at, checkedAt: at, sawWorking: receipt.worker?.sawWorking ?? false };
+  receipt.returned = { state: "expired", at, read: false, error: "The 24-hour observation window ended. The worker may still be running; completion was not verified." };
+  return true;
+}
+
 /** How long a stopped worker whose harness still runs background tasks is
  * waited on before it counts as done anyway. Measured from the latest Stop,
  * and every task that finishes wakes the worker (a new prompt, a new Stop), so
@@ -440,11 +450,11 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
 /** One line for the dispatching agent: who returned, how, and where to read it. */
 export function noticeLine(receipts: readonly Receipt[]): string {
   const clean = (value: string, max: number) => value.replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
-  const word = { "done": "done", "needs-you": "needs you", "failed": "failed", "blocked": "blocked", "gone": "gone", "stalled": "stalled" } as const;
+  const word = { "done": "done", "needs-you": "needs you", "failed": "failed", "blocked": "blocked", "gone": "gone", "stalled": "stalled", "expired": "observation expired" } as const;
   const describe = (receipt: Receipt, room: number) => {
     const returned = receipt.returned!;
     const asking = returned.state === "blocked" ? receipt.approval : undefined;
-    const detail = asking ? asking.request ?? asking.title ?? asking.tool : returned.state === "needs-you" ? returned.question : returned.state === "failed" ? returned.error
+    const detail = asking ? asking.request ?? asking.title ?? asking.tool : returned.state === "needs-you" ? returned.question : returned.state === "failed" || returned.state === "expired" ? returned.error
       : returned.state === "done" ? returned.reply?.split("\n").find(line => line.trim()) : undefined;
     const excerpt = detail ? clean(detail.replace(/[*_`#>]+/g, ""), room) : "";
     const tasks = (count: number) => `${count} background task${count === 1 ? "" : "s"}`;
@@ -620,8 +630,13 @@ export class DispatchReturns {
   async poll(): Promise<void> {
     await this.confirmArrivals(await this.peers().catch(() => [] as HookPeer[]));
     const now = this.now();
-    const open = (await dispatchStatus()).filter(receipt => (receipt.state === "accepted" || receipt.state === "uncertain")
-      && receipt.target && !receipt.closedAt && receipt.worker?.state !== "gone" && now - Date.parse(receipt.createdAt) < WATCH_MS);
+    const receipts = await dispatchStatus();
+    for (const receipt of receipts) {
+      if (!["accepted", "uncertain"].includes(receipt.state) || receipt.closedAt || receipt.returned || now - Date.parse(receipt.createdAt) < WATCH_MS) continue;
+      await updateReceipt(receipt.id, current => expireObservation(current, now));
+    }
+    const open = receipts.filter(receipt => (receipt.state === "accepted" || receipt.state === "uncertain")
+      && receipt.target && !receipt.closedAt && receipt.worker?.state !== "gone" && receipt.worker?.state !== "expired" && now - Date.parse(receipt.createdAt) < WATCH_MS);
     if (!open.length) return;
     const peers = await this.peers().catch(() => [] as HookPeer[]);
     const byComputer = new Map<string, Receipt[]>();

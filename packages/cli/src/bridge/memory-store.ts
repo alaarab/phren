@@ -63,7 +63,7 @@ export function githubStoreRepository(remote: string): string | undefined {
   return /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+$/.test(repository) ? repository.toLowerCase() : undefined;
 }
 
-async function storeRepositoryIdentity(store: string): Promise<{ repository: string; branch: string } | undefined> {
+export async function storeRepositoryIdentity(store: string): Promise<{ repository: string; branch: string } | undefined> {
   const [remote, branch] = await Promise.all([
     git(store, ["config", "--get", "remote.origin.url"]).catch(() => ""),
     git(store, ["symbolic-ref", "--quiet", "--short", "HEAD"]).catch(() => ""),
