@@ -201,6 +201,23 @@ that cannot fall back to opening a connection. If the actual client cannot add
 such a channel, report that a controlled reconnect is needed and leave it blocked
 until separately authorized. A reconnect is not authorized by this source plan.
 
+Herdr's [machine guide](https://herdr.dev/docs/connecting-machines/) and
+[CLI reference](https://herdr.dev/docs/cli-reference/) distinguish saved-profile
+API routing from a TUI's live connections. `--machine` selects that profile's
+remote session; sidebar selection does not retarget commands in existing panes.
+The CLI does not route through another TUI's connections. Managed shared SSH
+recovery is documented for Linux/macOS clients, not local Windows clients;
+neither a working overview row nor a machine profile proves a usable return
+channel. Do not assume Windows mux support or adopt current documentation's
+features without checking the installed client's capabilities.
+
+The owner's read-only Mini report identifies Herdr 0.9.1 with `--machine` but
+without `machine status`/`machine reconnect`, and an empty local saved catalog.
+Those observations do not describe Omarchy's or QL's catalog or capabilities.
+Await w7Z's existing read-only assessment of connection direction, client OS,
+installed protocol and available control channel. No update, restart, link,
+catalog edit or fresh connection is a substitute for that evidence.
+
 The receiver must bind each RPC to the current proxy owner/native session/process
 and a revocable owner-approved list of exact destination Targets (computer,
 server, workspace, tab, pane, source, session). No wildcard, session-name search,
