@@ -1,3 +1,4 @@
+import { configuredHarness } from "./harness/launch.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
@@ -26,6 +27,9 @@ export function createScheduleLauncher(launchHerdr: HerdrLauncher, store = defau
   const launcher: ScheduleLauncher = async context => {
     const live = await servers();
     if (live.length) return launchInHerdr(String(live[0].session), context, launchHerdr, abort.signal);
+    if (await configuredHarness(context.schedule.harness, context.schedule.backend)) {
+      throw new BridgeError(409, "A structured scheduled worker requires an available terminal so its approvals and questions remain reachable. Enable the existing Herdr or tmux integration before scheduling this backend.");
+    }
     return launchHeadless(context, store, child => { children.add(child); child.once("exit", () => children.delete(child)); });
   };
   launcher.close = () => { abort.abort(); for (const child of children) child.kill("SIGTERM"); children.clear(); };
@@ -62,7 +66,7 @@ async function launchInHerdr(server: string, context: ScheduleLaunchContext, lau
   // The prompt goes with the launch where the harness takes one (Claude,
   // Codex); otherwise it is typed once the agent is ready.
   const brief = context.schedule.prompt.trim() ? { brief: { id: context.runId, text: context.schedule.prompt } } : {};
-  const launched = await launchHerdr(server, { cwd: context.cwd, label: context.schedule.name, kind: context.schedule.harness, model: context.schedule.model, ...(context.schedule.account ? { account: context.schedule.account } : {}), ...brief });
+  const launched = await launchHerdr(server, { cwd: context.cwd, label: context.schedule.name, kind: context.schedule.harness, ...(context.schedule.backend ? { backend: context.schedule.backend } : {}), model: context.schedule.model, ...(context.schedule.account ? { account: context.schedule.account } : {}), ...brief });
   const workspaceId = String(launched.workspaceId), tabId = String(launched.tabId), paneId = String(launched.paneId);
   if (launched.briefLaunched !== true) await promptWhenReady(server, paneId, context.schedule.prompt, signal);
   let sessionId = typeof launched.sessionId === "string" ? launched.sessionId : undefined;

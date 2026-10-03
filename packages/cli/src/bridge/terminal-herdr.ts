@@ -41,20 +41,20 @@ function unnamedAgent(error: unknown): boolean {
  * instead, waits for it to be the foreground program, then reports it to
  * Herdr as agent "phren" under the launch name, so the pane reads as an agent
  * like the others. Its own lifecycle hooks keep the status (agent-hooks.ts). */
-async function startPhren(server: string, pane: string, { name, args, timeoutMs }: AgentStart): Promise<void> {
+async function startPhren(server: string, pane: string, { name, kind, args, timeoutMs, command }: AgentStart): Promise<void> {
   const before = object((await rpc(server, "pane.process_info", { pane_id: pane })).process_info);
   // Same refusal as Herdr's own start, so the caller waits for the shell.
   if (!Number.isSafeInteger(before.shell_pid) || before.foreground_process_group_id !== before.shell_pid) throw new BridgeError(409, `Herdr: agent target pane ${pane} is not an available shell`, { herdrCode: "agent_pane_busy" });
-  await rpc(server, "pane.send_text", { pane_id: pane, text: phrenCommandLine(args) });
+  await rpc(server, "pane.send_text", { pane_id: pane, text: command ? `${[command.file, ...command.args].map(shellWord).join(" ")}; herdr pane release-agent "$HERDR_PANE_ID" --source ${PHREN_REPORT_SOURCE} --agent ${shellWord(kind)} >/dev/null 2>&1` : phrenCommandLine(args) });
   await rpc(server, "pane.send_keys", { pane_id: pane, keys: ["Enter"] });
   const deadline = Date.now() + Math.min(timeoutMs, 30_000);
   for (;;) {
     const info = object((await rpc(server, "pane.process_info", { pane_id: pane })).process_info);
-    if (objects(info.foreground_processes).some(p => typeof p.cmdline === "string" && agentFromCommand(p.cmdline) === "phren")) break;
+    if (objects(info.foreground_processes).some(p => typeof p.cmdline === "string" && agentFromCommand(p.cmdline) === kind)) break;
     if (Date.now() >= deadline) throw new BridgeError(504, "phren agent did not start in the Herdr pane. Check that phren and @phren/agent are installed on the login shell's PATH.");
     await new Promise(resolve => setTimeout(resolve, 250));
   }
-  await rpc(server, "pane.report_agent", { pane_id: pane, source: PHREN_REPORT_SOURCE, agent: "phren", state: "idle" });
+  await rpc(server, "pane.report_agent", { pane_id: pane, source: PHREN_REPORT_SOURCE, agent: kind, state: "idle" });
   await rpc(server, "agent.rename", { target: pane, name }).catch(() => undefined);
 }
 
@@ -114,7 +114,7 @@ export const herdrTerminal: TerminalProvider = {
   // `agent.start` takes no environment; the pane's shell got it at `create`.
   async startAgent(server, pane, agent) {
     const { name, kind, args, timeoutMs } = agent;
-    if (kind === "phren") { await startPhren(server, pane, agent); return; }
+    if (kind === "phren" || agent.command) { await startPhren(server, pane, agent); return; }
     // Herdr waits up to `timeout_ms` for the agent to become ready; the socket waits a little longer.
     await rpc(server, "agent.start", { name, kind, pane_id: pane, timeout_ms: timeoutMs, ...(args.length ? { args } : {}) }, undefined, timeoutMs + 5_000);
   },

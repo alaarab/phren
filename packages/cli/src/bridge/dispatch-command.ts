@@ -32,7 +32,7 @@ export async function runDispatch(args: string[]): Promise<number> {
   }
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     "keep-open": { type: "boolean" },
-    harness: { type: "string", default: "codex" }, model: { type: "string" }, effort: { type: "string" }, account: { type: "string" }, "permission-mode": { type: "string" }, prompt: { type: "string" }, label: { type: "string" },
+    harness: { type: "string", default: "codex" }, backend: { type: "string" }, model: { type: "string" }, effort: { type: "string" }, account: { type: "string" }, "permission-mode": { type: "string" }, prompt: { type: "string" }, label: { type: "string" },
     "parent-provider": { type: "string" }, "parent-session": { type: "string" }, "parent-computer": { type: "string" },
     "parent-server": { type: "string" }, "parent-workspace": { type: "string" }, "parent-tab": { type: "string" }, "parent-pane": { type: "string" },
   } });

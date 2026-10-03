@@ -1,3 +1,4 @@
+import { observeHarnessRequests, setHarnessRequestSink } from "./harness/bindings.js";
 import { OwnerInbox, inboxTargetSchema } from "./owner-inbox.js";
 import { closeFinishedWorker } from "./worker-close.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
@@ -80,6 +81,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const locatedDirectories = new Set<string>();
   const journal = new ActivityJournal();
   const agentHooks = new AgentHooks(undefined, modules);
+  setHarnessRequestSink(agentHooks);
   // Follows what dispatched workers do and tells the dispatching agent.
   const returns: DispatchReturns | undefined = dispatches ? new DispatchReturns({
     localWorkers: hookWorkers(agentHooks),
@@ -258,6 +260,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
           await journal.record(name, objects(current.panes));
           // A Codex app-server whose pane closed is stopped; a dead one forgotten.
           await codexServers.reap(name, current).catch(() => {});
+          await observeHarnessRequests(name, objects(current.panes)).catch(() => {});
           // Approvals drawn in a terminal reach a phone with phren closed.
           await agentHooks.observeWaitingPanes(name, objects(current.panes), async pane => {
             const state = await paneChatState(name, pane, { tokenWhenIdentified: false });
@@ -278,7 +281,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     })().finally(() => { recording = false; }).catch(() => {});
   }, 5000);
   await new Promise<void>(resolve => {
-    const stop = () => { fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
+    const stop = () => { setHarnessRequestSink(); fanoutMessages.close(); stopRetention(); clearInterval(scheduleTimer); clearInterval(canaryTimer); clearInterval(codexAuthTimer); clearInterval(activityTimer); scheduler?.close(); codeReindexer?.close(); codexServers.close(); agentHooks.close(); ws.clients.forEach(c => c.terminate()); ws.close(); http.close(() => resolve()); http.closeAllConnections(); };
     process.once("SIGTERM", stop); process.once("SIGINT", stop);
   });
   await unlink(socketPath()).catch(() => {});

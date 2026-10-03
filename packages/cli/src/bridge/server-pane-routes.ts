@@ -353,6 +353,13 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     // command is the TUI's own and is still typed. An unreachable server
     // sent nothing, so the pane is typed into instead; a request that may
     // have reached it is reported uncertain and never retried.
+    const { runnerForPane, RunnerAdapter } = await import("./harness/runner-client.js");
+    const runner = await runnerForPane(target.server, pane);
+    if (runner) {
+      if (text.trim().startsWith("/")) throw new BridgeError(422, "Use the structured harness controls for this worker.");
+      await typing(); const result = await new RunnerAdapter(runner).sendTurn(target.session, text);
+      return { ok: true, delivered: result.acknowledged, queued: !result.acknowledged, turnId: result.turnId, harnessProvider: runner.provider };
+    }
     const owned = text.trim().startsWith("/") ? undefined : codexServers.forTarget(target);
     if (owned) {
       await typing();

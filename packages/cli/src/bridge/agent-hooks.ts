@@ -83,7 +83,8 @@ export function watchHangUp(res: ServerResponse): () => boolean {
 interface HeldReply { end(body: string): unknown; readonly destroyed: boolean }
 interface Pending { target: Target; response: HeldReply; tool: string; input: unknown; message: string; request: string; requestKind: RequestKind; title?: string; choice?: TerminalChoice; expiresAt: string; timer?: NodeJS.Timeout; conductor?: { action: "dispatch" | "hand_off"; project?: string; computer?: string };
   /** A server request of the Hook's own Codex app-server: answered over RPC, never held on a timer. */
-  appServer?: { requestId: AppServerRequestId; answer: (result: Json) => void } }
+  appServer?: { requestId: AppServerRequestId; answer: (result: Json) => void };
+  harness?: { requestId: string; answer: (response: Json) => Promise<boolean> } }
 
 /** The approval card's tool and input for an app-server request, in the
  * shapes `approvalSummary` and the phone already read for Codex's hook.
@@ -722,7 +723,7 @@ export class AgentHooks {
     // A held Codex permission can already have real choices in its pane.
     // Refresh those before publishing the approval, even while it is held.
     // One the Hook's own app-server asked is answered over RPC, not in the pane.
-    if (held?.appServer) return;
+    if (held?.appServer || held?.harness) return;
     if (held && target.source === "codex") {
       const now = Date.now();
       if (now - (this.dialogReads.get(key) ?? 0) < DIALOG_READ_MS) return;
@@ -957,7 +958,7 @@ export class AgentHooks {
       details: pending[1].message, terminalOnly: target.source === "codex" && !pending[1].choice && !pending[1].appServer,
       ...(pending[1].choice ? { choice: pending[1].choice } : {}),
       // An app-server request waits for as long as it takes: its card never runs out.
-      expiresAt: pending[1].appServer ? new Date(Math.max(Date.parse(pending[1].expiresAt), Date.now() + DIALOG_PUSH_MS)).toISOString() : pending[1].expiresAt,
+      expiresAt: pending[1].appServer || pending[1].harness ? new Date(Math.max(Date.parse(pending[1].expiresAt), Date.now() + DIALOG_PUSH_MS)).toISOString() : pending[1].expiresAt,
       ...(pending[1].conductor ? { conductor: pending[1].conductor } : {}) };
     const own = target.source === "opencode" ? this.opencodeApproval(target) : undefined;
     if (own) return own;
@@ -1077,6 +1078,12 @@ export class AgentHooks {
     const answered = updatedInput === undefined ? undefined : answeredQuestionInput(entry.tool, entry.input, updatedInput);
     await validateTarget(target);
     if (this.pending.get(id) !== entry || entry.response.destroyed) throw new BridgeError(409, "This approval is no longer pending.");
+    if (entry.harness) {
+      if (grantAnswer) throw new BridgeError(400, "Structured worker requests use one-time decisions.");
+      const ok = await entry.harness.answer({ decision: effective, ...(answered ? { updatedInput: answered } : {}) });
+      if (!ok) throw new BridgeError(409, "The structured request is no longer pending.");
+      this.pending.delete(id); this.dropPushBindings(id); return;
+    }
     if (grantAnswer) {
       const conductor = entry.conductor!;
       if (grantAnswer === "allow-project" && !conductor.project) throw new BridgeError(400, "This call has no project to scope a grant to.");
@@ -1336,6 +1343,21 @@ export class AgentHooks {
   }
   private dropPushBindings(action: string) {
     this.pushBindings.dropAction(action);
+  }
+  /** SDK/ACP requests remain parked in their worker without a Hook hold timeout. */
+  harnessRequest(target: Target, requestId: string, tool: string, input: Json, answer: (response: Json) => Promise<boolean>): void {
+    if (this.closed) return;
+    const known = [...this.pending.values()].find(entry => entry.harness?.requestId === requestId && JSON.stringify(entry.target) === JSON.stringify(target));
+    if (known?.harness) { known.harness.answer = answer; return; }
+    const action = randomUUID(), summary = approvalSummary({ tool, input }), expiresAt = Date.now() + DIALOG_PUSH_MS;
+    this.pending.set(action, { target, response: { destroyed: false, end() {} }, tool, input, message: JSON.stringify(input).slice(0, 32768), ...summary,
+      expiresAt: new Date(expiresAt).toISOString(), harness: { requestId, answer } });
+    if (!this.push.available) return;
+    const binding = randomUUID(); this.pushBindings.add(binding, { action, expiresAt });
+    void this.push.notify({ binding, provider: target.source, question: tool === "AskUserQuestion", expiresAt: new Date(expiresAt).toISOString(), computer: this.computerName, ...summary }).catch(() => {});
+  }
+  harnessResolved(target: Target, requestId: string): void {
+    for (const [action, entry] of this.pending) if (entry.harness?.requestId === requestId && JSON.stringify(entry.target) === JSON.stringify(target)) { this.pending.delete(action); this.dropPushBindings(action); }
   }
   /** A server request from one of the Hook's own Codex app-servers: an
    * approval card like a held PermissionRequest, pushed the same way, but

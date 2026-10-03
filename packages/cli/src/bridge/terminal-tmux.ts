@@ -184,6 +184,8 @@ export function toTmuxId(value: string, kind: keyof typeof SIGILS): string {
 
 /** The agent a command line runs, by the harness's executable or package. */
 export function agentFromCommand(command: string): string | undefined {
+  const structured = /(?:bridge-hook\.mjs|hook-main\.js|index\.js)\s+(?:bridge\s+)?harness-runner\s+--source=(claude|phren)(?:\s|$)/.exec(command);
+  if (structured) return structured[1];
   const words = command.trim().split(/\s+/).filter(Boolean).slice(0, 4);
   const [first, second] = words, base = (word?: string) => word ? path.basename(word) : "";
   // A Node, Bun or Deno launcher runs the harness as its script.
@@ -398,7 +400,7 @@ export const tmuxTerminal: TerminalProvider = {
     const taken = new Set((await tmux(server, ["list-sessions", "-F", "#{session_name}"]).catch(() => "")).split("\n").filter(Boolean));
     await tmux(server, ["new-session", "-d", "-s", sessionName(label, taken), "-x", "200", "-y", "50", ...directory, ...name]);
   },
-  async startAgent(server, pane, { name, kind, args, timeoutMs, env }) {
+  async startAgent(server, pane, { name, kind, args, timeoutMs, env, command }) {
     if (!["claude", "codex", "copilot", "opencode", "phren"].includes(kind)) throw new BridgeError(400, "This agent cannot be started in tmux.");
     await requireDirectExec();
     const target = toTmuxId(pane, "p"), row = await paneRow(server, target);
@@ -412,7 +414,7 @@ export const tmuxTerminal: TerminalProvider = {
     // Variables for the agent alone (a dispatch id) ride on the respawn.
     const variables = Object.entries(env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]);
     await tmux(server, ["respawn-pane", "-k", "-t", target, ...(row.pane_current_path ? ["-c", row.pane_current_path] : []), ...variables,
-      "--", shell, "-l", "-c", 'shell="$1"; shift; "$@"; exec "$shell" -l', "phren", shell, kind, ...args]);
+      "--", shell, "-l", "-c", 'shell="$1"; shift; "$@"; exec "$shell" -l', "phren", shell, command?.file ?? kind, ...(command?.args ?? args)]);
     // Started once the harness is the pane's foreground program.
     const deadline = Date.now() + Math.min(timeoutMs, 30_000);
     for (;;) {

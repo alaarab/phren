@@ -23,6 +23,11 @@ const LINK_USAGE = "Usage: phren bridge link <ssh-host> [--name <its name here>]
 
 export async function runBridge(args: string[], version: string): Promise<number> {
   switch (args[0]) {
+    case "harness-runner": {
+      if (args.length !== 3 || !/^--source=(claude|phren)$/.test(args[1])) throw new Error("Invalid private harness runner invocation.");
+      const { runHarnessWorker } = await import("./harness/runner.js");
+      return runHarnessWorker(JSON.parse(await readFile(args[2], "utf8")));
+    }
     case "enroll-computer": {
       if (args.length === 2) console.log(await enrollComputer(args[1]));
       else if (args.length === 4 && args[2] === "--accept") {

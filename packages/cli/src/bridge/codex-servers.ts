@@ -538,6 +538,9 @@ export class CodexServers {
     if (object(object(resumed.thread).status).type === "idle") delete live.entry.activeTurn;
   }
 
+  /** Shares the already authenticated client with the common adapter; no new server. */
+  adapterClient(entry: CodexServerEntry): Promise<AppServerClient> { return this.client(entry); }
+
   private async client(entry: CodexServerEntry): Promise<AppServerClient> {
     const live = this.live.get(entry.id);
     if (!live) throw new CodexServerUnavailable("This Codex server is no longer registered.");

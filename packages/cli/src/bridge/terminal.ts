@@ -73,7 +73,7 @@ export interface PanePlacement { workspace?: string; label?: string; cwd?: strin
 /** Starts an agent in an existing, empty pane. `env` is the same variables as
  * the pane's placement, for a provider that starts the agent in a fresh
  * process of its own (tmux respawns the pane). */
-export interface AgentStart { name: string; kind: string; args: string[]; timeoutMs: number; env?: Record<string, string> }
+export interface AgentStart { name: string; kind: string; args: string[]; timeoutMs: number; env?: Record<string, string>; command?: { file: string; args: string[] } }
 
 /**
  * Key names are the Hook's vocabulary: "enter", "esc", "up", "down", "tab",

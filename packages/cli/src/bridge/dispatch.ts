@@ -30,6 +30,7 @@ export const dispatchSchema = z.object({
   computer: z.union([z.literal("anywhere"), computerName]).describe("Enrolled computer name, or anywhere for the least busy connected computer."),
   project: projectName.describe("Project slug registered on the receiving computer."),
   harness: z.enum(DISPATCH_HARNESSES).describe("Agent harness on the receiving computer."),
+  backend: z.string().regex(/^(claude-sdk|acp:[a-z][a-z0-9-]{0,31})$/).optional().describe("Explicit configured structured backend; otherwise the receiving Hook default."),
   model: text(200).optional().describe("Explicit model, otherwise the remote harness default."),
   effort: z.enum(launchEfforts).optional().describe("Reasoning effort for the worker (minimal, low, medium, high, xhigh, max), otherwise the harness default."),
   account: z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").optional()
@@ -49,7 +50,7 @@ const remoteTarget = z.union([targetSchema, startingTargetSchema]);
 /** The local pane that asked for the dispatch, where return notices go. */
 export const originPaneSchema = z.object({ server: serverName, workspace: id, tab: id, pane: id }).strict();
 export type OriginPane = z.infer<typeof originPaneSchema>;
-export const workerStates = ["working", "done", "needs-you", "failed", "blocked", "stalled", "gone"] as const;
+export const workerStates = ["working", "done", "needs-you", "failed", "blocked", "stalled", "gone", "expired"] as const;
 export type WorkerState = typeof workerStates[number];
 const timestamp = z.string().datetime();
 const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
@@ -73,7 +74,7 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
     waitingSince: timestamp.optional().describe("When the dispatching Hook first saw the worker's finished turn waiting on background tasks; bounds that wait.") }).strict().optional()
     .describe("The worker pane's last observed state."),
   returned: z.object({
-    state: z.enum(["done", "needs-you", "failed", "blocked", "stalled", "gone"]), at: timestamp,
+    state: z.enum(["done", "needs-you", "failed", "blocked", "stalled", "gone", "expired"]), at: timestamp,
     reply: z.string().max(4000).optional(), error: z.string().max(500).optional(), truncated: z.boolean().optional(), question: z.string().max(200).optional(),
     prs: prsSchema.optional(),
     integratorDelivery: z.object({ deliveryId: z.string(), state: z.enum(["pending", "queued", "delivered", "uncertain", "failed"]), at: timestamp, integrator: integratorSchema.optional() }).strict().optional(),
@@ -501,7 +502,7 @@ export class DispatchService {
         // The brief goes with the launch: a Hook that can start the harness
         // with it says so, and any other types it below.
         const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
-          { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ? { account: data.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), label: data.label, brief: { id: receipt.id, text: prompt } });
+          { project: data.project, kind: data.harness, ...(data.backend ? { backend: data.backend } : {}), model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ? { account: data.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), label: data.label, brief: { id: receipt.id, text: prompt } });
         // Placed: the brief is confirmed outside the lock.
         placed = peer.name; this.placing.set(placed, this.inFlight(placed) + 1);
         release();

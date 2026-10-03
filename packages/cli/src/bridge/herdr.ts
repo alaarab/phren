@@ -367,6 +367,9 @@ export async function opencodePidSession(pids: number[], root = phrenStoreRoot()
   return current;
 }
 async function identityFromProcesses(server: string, pane: Json, pids: number[]): Promise<PaneIdentity> {
+  const { runnerForPane } = await import("./harness/runner-client.js");
+  const runner = await runnerForPane(server, pane, pids);
+  if (runner) return { sessionId: runner.session, noTranscriptLogs: false };
   if (pane.agent === "opencode") {
     const bound = await opencodePidSession(pids).catch(() => undefined);
     if (bound) return { sessionId: bound, noTranscriptLogs: false };

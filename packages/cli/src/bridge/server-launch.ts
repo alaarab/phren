@@ -1,3 +1,4 @@
+import { configuredHarness, prepareHarnessCommand } from "./harness/launch.js";
 import { markPaneClosed } from "./worker-close.js";
 import { mkdir, readFile } from "node:fs/promises";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -311,6 +312,9 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   if (worktreeRequest && role === "conductor") throw new BridgeError(400, "A conductor works across projects, so it cannot start in a worktree.");
   const label = plainText(200).parse(data.label);
   const kind = z.enum(launchKinds).parse(data.kind);
+  const backend = await configuredHarness(kind, data.backend);
+  if (backend && role !== "agent") throw new BridgeError(400, "Structured SDK/ACP backends are worker launches.");
+  if (backend && data.permissionMode && data.permissionMode !== "supervised") throw new BridgeError(400, "Structured workers retain supervised permissions; broader permissions are not inferred.");
   const effort = z.enum(launchEfforts).default("medium").parse(data.effort);
   const account = data.account === undefined || data.account === null ? undefined : z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(data.account);
   const permissionMode = z.enum(PERMISSION_MODES).optional().parse(data.permissionMode ?? undefined);
@@ -368,7 +372,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // answers; its file still marks the dispatch so the arrival is recorded here.
   const served = kind === "opencode" ? await prepareServedLaunch() : undefined;
   if (served) args.push(...served.args);
-  const briefFile = brief && (launchesWithBrief(kind) || structured || served) ? await writeLaunchBrief(brief, Date.now(), label) : undefined;
+  const briefFile = brief && (launchesWithBrief(kind) || structured || served || backend) ? await writeLaunchBrief(brief, Date.now(), label) : undefined;
   const briefLaunch = brief && briefFile && launchesWithBrief(kind) ? briefArgs(kind, briefFile) : undefined;
   // sudo -A in the new agent asks the phone for the password (sudo.ts).
   const variables = { ...askpassEnv(), ...(brief ? { [DISPATCH_ID_ENV]: brief.id } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
@@ -423,9 +427,11 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
       await recordBriefArrival(brief.id, "UserPromptSubmit", { ...binding, session: appServer.threadId }).catch(() => undefined);
     } catch (error) { briefTurn = error instanceof AppServerRpcError ? undefined : "uncertain"; }
   }
+  const runner = backend ? await prepareHarnessCommand({ ...backend, cwd, args: backend.args, permissionMode: "default", once: false,
+    ...(model ? { model } : {}), pane: { server, ...place }, ...(briefFile ? { briefFile } : {}), ...(brief ? { briefId: brief.id } : {}) }) : undefined;
   const agentArgs = structuredLaunch ? structuredLaunch.args : [...args, ...(briefLaunch ?? [])];
   try {
-    await startWhenShellReady(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(env ? { env } : {}) });
+    await startWhenShellReady(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(runner ? { command: runner } : {}), ...(env ? { env } : {}) });
   } catch (error) {
     if (appServer && !agentNotReady(error)) await codexServers.stop(appServer).catch(() => undefined);
     // A first-run screen (Claude's folder trust, a login notice) holds the
@@ -474,9 +480,9 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     await new JobRegistry().register({ pane: { server, pane: created.paneId, ...(created.workspaceId ? { workspace: created.workspaceId } : {}), agent: kind, label },
       ...(sessionId ? { session: sessionId } : {}), agent: kind, label, command: kind }).catch(() => undefined);
   }
-  return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(account ? { account } : {}), ...(permissionMode ? { permissionMode } : {}), ...(unchecked.length ? { unchecked } : {}),
+  return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(backend ? { harnessProvider: backend.backend } : {}), ...(account ? { account } : {}), ...(permissionMode ? { permissionMode } : {}), ...(unchecked.length ? { unchecked } : {}),
     // The caller types the brief itself unless it went with the launch.
-    ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief } : {}),
+    ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!runner || !!briefLaunch || !!servedBrief } : {}),
     ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}) };
 }
 export async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {

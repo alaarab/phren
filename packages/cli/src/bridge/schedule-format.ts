@@ -30,6 +30,7 @@ export interface Schedule {
   enabled: boolean;
   computer: string;
   harness: ScheduleHarness;
+  backend?: string;
   model?: string;
   /** Claude account id (a slug) the run uses; absent means the default account. */
   account?: string;
@@ -153,6 +154,10 @@ export function parseSchedule(value: unknown): Schedule {
     createdAt: timestamp.parse(raw.createdAt),
     updatedAt: timestamp.parse(raw.updatedAt),
   };
+  if (raw.backend !== undefined) {
+    schedule.backend = z.string().regex(/^(claude-sdk|acp:[a-z][a-z0-9-]{0,31})$/).parse(raw.backend);
+    if (schedule.backend !== "claude-sdk" || schedule.harness !== "claude") throw new Error("Scheduled structured backends currently require Claude SDK with the Claude harness.");
+  }
   if (raw.model !== undefined) schedule.model = singleLine(200).parse(raw.model);
   if (raw.account !== undefined) schedule.account = z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(raw.account);
   if (raw.notify !== undefined) schedule.notify = z.array(z.enum(SCHEDULE_NOTIFY)).max(3).parse(raw.notify)
