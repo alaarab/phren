@@ -1,11 +1,10 @@
 import { z } from "zod";
 import * as path from "node:path";
-import { getStoreProjectDirs } from "../store-registry.js";
 import { readTasks, updateTask } from "../data/tasks.js";
 import { taskView, taskCounts, filterTaskDoc, taskStores, taskStoreHasProject } from "../data/task-contract.js";
 import { permissionDeniedError } from "../governance/rbac.js";
 import { BridgeError } from "./protocol.js";
-import { storeRepositoryIdentity } from "./memory-store.js";
+import { taskStoreProjects, taskStoreRepositoryIdentity } from "../data/task-store-directory.js";
 import { taskFormatStatus } from "../data/task-format.js";
 
 export const taskUpdatesSchema = z.object({
@@ -16,10 +15,20 @@ export const taskUpdatesSchema = z.object({
 const identitySchema = z.object({ storeId: z.string().regex(/^[a-f0-9]{8}$/), project: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/), stableId: z.string().regex(/^[a-f0-9]{8}$/) });
 
 function owner(base: string, id: string, write: boolean) {
-  const matches = taskStores(base).filter(s => s.taskStoreId === id && s.available !== false);
+  const matches = taskStores(base).filter(s => s.taskStoreId === id);
   if (matches.length !== 1) throw new BridgeError(404, "Task store is unavailable or ambiguous.");
+  if (matches[0].available === false) throw new BridgeError(404, "Task store is unavailable or ambiguous.");
   if (write && matches[0].role === "readonly") throw new BridgeError(403, "Task store is read-only.");
   return matches[0];
+}
+
+/** Explicit blocking capability for a client: Hook support is read support,
+ * never evidence that an older MCP/CLI/sync/app writer has been replaced. */
+function metadataAccess(store: ReturnType<typeof owner>, identityReady: boolean, projects: string[]) {
+  const block = !identityReady ? "identity-unavailable" : store.role === "readonly" ? "readonly-store"
+    : !taskFormatStatus(store.path).enabled ? "compatible-writer-adoption-required"
+    : !projects.some(project => !permissionDeniedError(store.path, "update_task", project)) ? "permission-denied" : null;
+  return { metadataWritable: block === null, metadataWriteBlock: block };
 }
 
 /** Native clients discover portable identities without knowing filesystem paths
@@ -29,13 +38,13 @@ export async function getTaskDirectoryRoute(base: string) {
   return { ok: true, version: 1, stores: await Promise.all(stores.map(async store => {
     const ambiguous = !!store.taskStoreId && stores.filter(s => s.taskStoreId === store.taskStoreId).length !== 1;
     const identityReady = !!store.taskStoreId && !ambiguous;
-    const repositoryIdentity = store.available === false ? undefined : await storeRepositoryIdentity(store.path);
+    const repositoryIdentity = store.available === false ? undefined : await taskStoreRepositoryIdentity(store.path);
+    const projects = taskStoreProjects(store);
     return {
       id: store.taskStoreId ?? null, name: store.name, role: store.role, primary: store.role === "primary", available: store.available !== false,
       identityReady, ambiguous, ...(repositoryIdentity ? { repositoryIdentity } : {}),
-      metadataWritable: identityReady && store.role !== "readonly" && !permissionDeniedError(store.path, "update_task") && taskFormatStatus(store.path).enabled,
-      projects: store.available === false ? [] : getStoreProjectDirs(store).map(dir => path.basename(dir))
-        .filter(project => /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(project)).sort(),
+      ...metadataAccess(store, identityReady, projects),
+      projects,
     };
   })) };
 }
@@ -49,7 +58,7 @@ export function getTaskRoute(base: string, url: URL) {
   if (path.resolve(result.data.path) !== path.join(path.resolve(store.path), project, "tasks.md")) throw new BridgeError(404, "Project is not in that task store.");
   const filter = z.object({ responsibility: z.enum(["human", "agent"]).optional(), readiness: z.enum(["ready", "waiting-on-human", "waiting-on-task"]).optional() }).parse(Object.fromEntries(url.searchParams));
   const filtered = filterTaskDoc(base, result.data, filter);
-  return { ok: true, version: 1, storeId, project, metadataWritable: store.role !== "readonly" && !permissionDeniedError(store.path, "update_task", project) && taskFormatStatus(store.path).enabled, counts: taskCounts(base, result.data), items: Object.fromEntries(Object.entries(filtered.items).map(([section, items]) => [section, items.map(i => taskView(base, result.data, i))])) };
+  return { ok: true, version: 1, storeId, project, ...metadataAccess(store, true, [project]), counts: taskCounts(base, result.data), items: Object.fromEntries(Object.entries(filtered.items).map(([section, items]) => [section, items.map(i => taskView(base, result.data, i))])) };
 }
 
 export function updateTaskRoute(base: string, input: unknown) {
