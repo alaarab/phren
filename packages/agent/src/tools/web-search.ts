@@ -4,6 +4,8 @@
  * Uses DuckDuckGo HTML search (no API key required) as the default backend.
  * Falls back gracefully if the search fails.
  */
+import { partialUsage } from "../providers/types.js";
+import { SearchResponseError, searchSources } from "../providers/web-search.js";
 import { recordTokenUsage, type CostTracker } from "../cost.js";
 import type { LlmProvider } from "../providers/types.js";
 import type { AgentTool } from "./types.js";
@@ -35,18 +37,23 @@ export function createWebSearchTool(options: { provider?: () => LlmProvider; cos
       const query = input.query.trim();
       const limit = typeof input.limit === "number" && Number.isFinite(input.limit) ? Math.max(1, Math.min(Math.floor(input.limit), 10)) : 5;
 
+      const tracker = options.costTracker?.();
       try {
-        const provider = options.provider?.(), tracker = options.costTracker?.();
+        if (signal?.aborted) return { output: "Search cancelled.", is_error: true };
+        const provider = options.provider?.();
         if (tracker?.isOverBudget()) return { output: "Search stopped: the session budget has been reached.", is_error: true };
         const native = provider?.searchWeb && provider.supportsWebSearch?.();
         const timeout = signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000);
         const response = native ? await provider!.searchWeb!(query, limit, timeout) : undefined;
-        if (response?.usage && tracker) {
+        if (response && tracker) {
           const priorCost = tracker.totalCost;
-          recordTokenUsage(tracker, response.usage);
+          if (response.usage) recordTokenUsage(tracker, response.usage);
           if (typeof response.billedCost === "number" && Number.isFinite(response.billedCost) && response.billedCost >= 0) { tracker.totalCost = priorCost + response.billedCost; tracker.metered = true; }
         }
-        const results = response?.sources ?? await searchDuckDuckGo(query, limit, timeout);
+        // A selected native backend owns this request, even if its response
+        // is empty or malformed. Never spend again through a fallback.
+        if (native && (!response || !Array.isArray(response.sources))) throw new Error("Native search returned an invalid response.");
+        const results = native ? searchSources(response!.sources, limit) : searchSources(await searchDuckDuckGo(query, limit, timeout), limit);
         const answer = response?.answer ? `Provider search (${provider!.name}):\n${response.answer}\n\n` : "";
         if (results.length === 0) {
           return { output: answer + "No source URLs returned; this answer has no verified citations." };
@@ -58,8 +65,14 @@ export function createWebSearchTool(options: { provider?: () => LlmProvider; cos
 
         return { output: answer + formatted };
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return { output: `Search failed: ${msg}`, is_error: true };
+        const usage = partialUsage(err);
+        if (tracker) {
+          const priorCost = tracker.totalCost;
+          if (usage) recordTokenUsage(tracker, usage);
+          if (err instanceof SearchResponseError && typeof err.billedCost === "number" && Number.isFinite(err.billedCost) && err.billedCost >= 0) { tracker.totalCost = priorCost + err.billedCost; tracker.metered = true; }
+        }
+        // Provider bodies may contain credentials or echoed prompt text.
+        return { output: signal?.aborted ? "Search cancelled." : "Web search failed or returned an incomplete response; no fallback was attempted.", is_error: true };
       }
     },
   };
@@ -84,6 +97,7 @@ async function searchDuckDuckGo(query: string, limit: number, signal?: AbortSign
   });
 
   if (!res.ok) {
+    await res.body?.cancel();
     throw new Error(`Search returned HTTP ${res.status}`);
   }
 

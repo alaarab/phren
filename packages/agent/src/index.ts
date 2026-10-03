@@ -344,6 +344,7 @@ export async function runAgentCli(raw: string[]) {
   // The agent's tools. A quick chat starts with none and gets them on /promote.
   let mcpCleanup: (() => void) | undefined;
   const registerAgentTools = async () => {
+    registry.registerDiagnosticsTool();
     registry.register(readFileTool);
     registry.register(writeFileTool);
     registry.register(editFileTool);
@@ -568,8 +569,8 @@ export async function runAgentCli(raw: string[]) {
         agentConfig.lintTestConfig = lintTestConfig;
       } catch (err: unknown) {
         for (const name of registry.toolNames()) if (!before.has(name)) registry.remove(name);
-        registry.close();
-        await flushTelemetry();
+        registry.setPermissions(registry.permissionConfig);
+        await flushTelemetry(registry.permissionConfig.network !== "off");
         mcpCleanup?.();
         mcpCleanup = undefined;
         throw err;
@@ -580,79 +581,82 @@ export async function runAgentCli(raw: string[]) {
 
   // Interactive mode — Ink TUI with built-in spawner (--multi and --team also route here)
   if (args.interactive || args.multi || args.team) {
-    const isTTY = process.stdout.isTTY && process.stdin.isTTY;
-    let session;
-    if (!isTTY) {
-      session = await (await import("./repl.js")).startRepl(agentConfig);
-    } else {
-      // The phren splash (mascot + wordmark reveal) before the TUI mounts.
-      // Cosmetic only: any failure is swallowed, and PHREN_INTRO=off skips it.
-      if (process.env.PHREN_INTRO !== "off" && !chat) {
+    try {
+      const isTTY = process.stdout.isTTY && process.stdin.isTTY;
+      let session;
+      if (!isTTY) {
+        session = await (await import("./repl.js")).startRepl(agentConfig);
+      } else {
+        // The phren splash (mascot + wordmark reveal) before the TUI mounts.
+        // Cosmetic only: any failure is swallowed, and PHREN_INTRO=off skips it.
+        if (process.env.PHREN_INTRO !== "off" && !chat) {
+          try {
+            const { playSplash } = await import("@phren/cli/shell/intro");
+            const model = (provider as { model?: string }).model;
+            await playSplash({
+              version: VERSION,
+              tagline: `agent · ${provider.name}${model ? ` · ${model}` : ""}`,
+              hint: "starting agent…",
+              reveal: true,
+              dwellMs: 600,
+              fullscreen: true,
+            });
+          } catch { /* best effort */ }
+        }
+        // Ink TUI with spawner — LLM can spawn agents via spawn_agent tool
+        const { AgentSpawner } = await import("./multi/spawner.js");
+        const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
+        const spawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig, getParentProvider: () => agentConfig.provider });
+        registerSpawnerTools = () => {
+          registry.register(createSpawnAgentTool(spawner, () => registry.permissionConfig));
+          registry.register(createSendMessageTool(spawner));
+          registry.register(createListAgentsTool(spawner));
+        };
+        if (!chat) {
+          registerSpawnerTools();
+          agentConfig.systemPrompt = agentPrompt(providerInfo);
+        }
+        // Publish this process's agents so a phren graph in another terminal can
+        // show them. Best-effort and silent: it is a courtesy to another tool.
+        const { createAgentPublisher } = await import("./multi/publish.js");
+        const publisher = createAgentPublisher(phrenCtx?.phrenPath);
+        const republish = () => publisher.publish(spawner.listAgents());
+        spawner.on("status", republish);
+        spawner.on("done", republish);
+        republish();
         try {
-          const { playSplash } = await import("@phren/cli/shell/intro");
-          const model = (provider as { model?: string }).model;
-          await playSplash({
-            version: VERSION,
-            tagline: `agent · ${provider.name}${model ? ` · ${model}` : ""}`,
-            hint: "starting agent…",
-            reveal: true,
-            dwellMs: 600,
-            fullscreen: true,
+          session = await (await import("./tui/ink-entry.js")).startInkTui(agentConfig, spawner);
+        } finally {
+          publisher.stop();
+          await spawner.shutdown();
+        }
+      }
+
+      // Flush anti-patterns at session end. A chat that stayed one ran no
+      // tools and gets no reflection call.
+      if (phrenCtx && agentConfig.mode !== "chat") {
+        try { await session.antiPatterns.flushAntiPatterns(phrenCtx, sessionId); } catch { /* best effort */ }
+        try { await evolveProjectContext(phrenCtx, provider, session.messages, { sessionId }); } catch { /* best effort */ }
+      }
+
+      if (phrenCtx && sessionId) {
+        const lastText = session.messages.length > 0 ? "Interactive session ended" : "Empty session";
+        endSession(phrenCtx, sessionId, lastText);
+        saveSessionMessages(phrenCtx.phrenPath, sessionId, session.messages, phrenCtx.project ?? undefined);
+        if (session.messages.length > 0) {
+          writeSessionNote(phrenCtx, {
+            sessionId,
+            task: "interactive session",
+            outcome: `${session.messages.length} messages, ${session.toolCalls} tool calls`,
           });
-        } catch { /* best effort */ }
+        }
       }
-      // Ink TUI with spawner — LLM can spawn agents via spawn_agent tool
-      const { AgentSpawner } = await import("./multi/spawner.js");
-      const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
-      const spawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig, getParentProvider: () => agentConfig.provider });
-      registerSpawnerTools = () => {
-        registry.register(createSpawnAgentTool(spawner, () => registry.permissionConfig));
-        registry.register(createSendMessageTool(spawner));
-        registry.register(createListAgentsTool(spawner));
-      };
-      if (!chat) {
-        registerSpawnerTools();
-        agentConfig.systemPrompt = agentPrompt(providerInfo);
-      }
-      // Publish this process's agents so a phren graph in another terminal can
-      // show them. Best-effort and silent: it is a courtesy to another tool.
-      const { createAgentPublisher } = await import("./multi/publish.js");
-      const publisher = createAgentPublisher(phrenCtx?.phrenPath);
-      const republish = () => publisher.publish(spawner.listAgents());
-      spawner.on("status", republish);
-      spawner.on("done", republish);
-      republish();
-      try {
-        session = await (await import("./tui/ink-entry.js")).startInkTui(agentConfig, spawner);
-      } finally {
-        publisher.stop();
-      }
-      await spawner.shutdown();
+      return;
+    } finally {
+      registry.close();
+      await flushTelemetry(registry.permissionConfig.network !== "off");
+      mcpCleanup?.();
     }
-
-    // Flush anti-patterns at session end. A chat that stayed one ran no
-    // tools and gets no reflection call.
-    if (phrenCtx && agentConfig.mode !== "chat") {
-      try { await session.antiPatterns.flushAntiPatterns(phrenCtx, sessionId); } catch { /* best effort */ }
-      try { await evolveProjectContext(phrenCtx, provider, session.messages, { sessionId }); } catch { /* best effort */ }
-    }
-
-    if (phrenCtx && sessionId) {
-      const lastText = session.messages.length > 0 ? "Interactive session ended" : "Empty session";
-      endSession(phrenCtx, sessionId, lastText);
-      saveSessionMessages(phrenCtx.phrenPath, sessionId, session.messages, phrenCtx.project ?? undefined);
-      if (session.messages.length > 0) {
-        writeSessionNote(phrenCtx, {
-          sessionId,
-          task: "interactive session",
-          outcome: `${session.messages.length} messages, ${session.toolCalls} tool calls`,
-        });
-      }
-    }
-    registry.close();
-    await flushTelemetry();
-    mcpCleanup?.();
-    return;
   }
 
   // Create initial checkpoint before agent starts
@@ -668,7 +672,7 @@ export async function runAgentCli(raw: string[]) {
       try { process.stdin.setRawMode(false); } catch {}
     }
     registry.close();
-    void flushTelemetry();
+    void flushTelemetry(registry.permissionConfig.network !== "off");
     mcpCleanup?.();
     if (phrenCtx && sessionId) {
       endSession(phrenCtx, sessionId, "Interrupted by user");
@@ -865,14 +869,14 @@ export async function runAgentCli(raw: string[]) {
     }
     try { await oneShotSpawner?.shutdown(); } catch { /* children exit with the IPC channel */ }
     registry.close();
-    await flushTelemetry();
+    await flushTelemetry(registry.permissionConfig.network !== "off");
     mcpCleanup?.();
     process.exit(1);
   }
 
   try { await oneShotSpawner?.shutdown(); } catch { /* children exit with the IPC channel */ }
   registry.close();
-  await flushTelemetry();
+  await flushTelemetry(registry.permissionConfig.network !== "off");
   mcpCleanup?.();
   if (exitCode !== 0) process.exit(exitCode);
 }

@@ -16,6 +16,12 @@ describe("owner native search contract", () => {
     const result = await createWebSearchTool({ provider: () => provider(search) }).execute({ query: "installed SDK" });
     expect(result.is_error).toBe(true); expect(search).toHaveBeenCalledTimes(1); expect(fetch).not.toHaveBeenCalled();
   });
+  it("does not turn a malformed native response into a second search", async () => {
+    const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+    const search = vi.fn().mockResolvedValue(undefined);
+    const result = await createWebSearchTool({ provider: () => provider(search) }).execute({ query: "q" });
+    expect(result.is_error).toBe(true); expect(search).toHaveBeenCalledTimes(1); expect(fetch).not.toHaveBeenCalled();
+  });
   it("blocks network and exhausted budget before calling a provider", async () => {
     const search = vi.fn(); const tracker = createCostTracker("mock", 0); tracker.metered = true;
     await createWebSearchTool({ provider: () => provider(search), network: () => false }).execute({ query: "q" });
@@ -40,6 +46,29 @@ describe("owner opt-in telemetry contract", () => {
     vi.stubEnv("PHREN_AGENT_OTEL", "1"); vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://collector.invalid");
     await traceOperation("agent.turn", {}, async () => "ok", false); expect(fetch).not.toHaveBeenCalled();
   });
+  it("drops arbitrary metadata, model aliases and collector service names", async () => {
+    const bodies: string[] = []; vi.stubGlobal("fetch", vi.fn(async (_url, request) => { bodies.push(request.body); return { ok: true }; }));
+    vi.stubEnv("PHREN_AGENT_OTEL", "1"); vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://collector.invalid"); vi.stubEnv("OTEL_SERVICE_NAME", "/private/owner-project");
+    await traceOperation("agent.turn", { "prompt": "secret prompt", "gen_ai.request.model": "private-customer-model", "gen_ai.provider.name": "private-provider", "tool.name": "mcp_private_customer" }, async () => "private result");
+    await flushTelemetry();
+    const payload = bodies.join("");
+    for (const secret of ["secret prompt", "private-customer-model", "private-provider", "mcp_private_customer", "/private/owner-project", "private result"]) expect(payload).not.toContain(secret);
+    expect(payload).toContain("phren-agent");
+  });
+  it("cancels export and discards queued spans when network access is revoked", async () => {
+    let requestSignal: AbortSignal | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (_url, request) => {
+      requestSignal = request.signal;
+      await new Promise<void>((_resolve, reject) => requestSignal!.addEventListener("abort", () => reject(new Error("cancelled")), { once: true }));
+    }));
+    vi.stubEnv("PHREN_AGENT_OTEL", "1"); vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://collector.invalid");
+    await traceOperation("agent.tool", { "tool.name": "read_file" }, async () => "ok");
+    let finish!: () => void;
+    const inFlight = traceOperation("agent.turn", {}, () => new Promise<void>(resolve => { finish = resolve; }));
+    await flushTelemetry(false); expect(requestSignal?.aborted).toBe(true);
+    finish(); await inFlight; await flushTelemetry();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
   it("links turn/tool spans and omits operation results and thrown details", async () => {
     const bodies: any[] = []; vi.stubGlobal("fetch", vi.fn(async (_url, request) => { bodies.push(JSON.parse(request.body)); return { ok: true }; }));
     vi.stubEnv("PHREN_AGENT_OTEL", "1"); vi.stubEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://collector.invalid");
@@ -48,5 +77,54 @@ describe("owner opt-in telemetry contract", () => {
     const tool = spans.find(span => span.name === "agent.tool"), turn = spans.find(span => span.name === "agent.turn");
     expect(tool.traceId).toBe(turn.traceId); expect(tool.parentSpanId).toBe(turn.spanId); expect(tool.status.code).toBe(2);
     expect(JSON.stringify(bodies)).not.toContain("private prompt"); expect(JSON.stringify(bodies)).not.toContain("/secret/path");
+  });
+});
+
+describe("native search response contracts", () => {
+  it("preserves citations from all three native response formats without a second request", async () => {
+    const { AnthropicProvider } = await import("../providers/anthropic.js");
+    const { OpenAiProvider, OpenRouterProvider } = await import("../providers/openrouter.js");
+    const cases = [
+      { provider: new AnthropicProvider("fixture", "claude-sonnet-5"), body: { stop_reason: "end_turn", content: [{ type: "web_search_tool_result", content: [{ url: "https://example.org/primary", title: "Primary", encrypted_content: "private encrypted payload" }] }], usage: { input_tokens: 7, output_tokens: 3 } } },
+      { provider: new OpenAiProvider("fixture", "gpt-6"), body: { status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "Grounded answer", annotations: [{ type: "url_citation", url: "https://example.org/primary", title: "Primary" }] }] }], usage: { input_tokens: 7, output_tokens: 3 } } },
+      { provider: new OpenRouterProvider("fixture", "anthropic/claude-sonnet-5"), body: { choices: [{ finish_reason: "stop", message: { content: "Grounded answer", annotations: [{ type: "url_citation", url_citation: { url: "https://example.org/primary", title: "Primary" } }] } }], usage: { prompt_tokens: 7, completion_tokens: 3, cost: 0.02 } } },
+    ];
+    for (const value of cases) {
+      const fetch = vi.fn(async () => new Response(JSON.stringify(value.body))); vi.stubGlobal("fetch", fetch);
+      const result = await createWebSearchTool({ provider: () => value.provider }).execute({ query: "q" });
+      expect(fetch).toHaveBeenCalledTimes(1); expect(result.is_error).not.toBe(true);
+      expect(result.output).toContain("https://example.org/primary"); expect(result.output).not.toContain("private encrypted payload");
+    }
+  });
+  it("rejects unsupported OpenRouter models locally, rather than authorizing paid Exa fallback", async () => {
+    const { OpenRouterProvider } = await import("../providers/openrouter.js");
+    const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+    const result = await createWebSearchTool({ provider: () => new OpenRouterProvider("fixture", "openai/gpt-4o") }).execute({ query: "q" });
+    expect(result.is_error).toBe(true); expect(fetch).not.toHaveBeenCalled();
+  });
+  it("never treats a compatible or subscription endpoint as API-key native search", async () => {
+    const { OpenAiProvider } = await import("../providers/openrouter.js");
+    const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+    for (const provider of [new OpenAiProvider("fixture", "gpt-6", "https://relay.invalid/v1"), new OpenAiProvider("fixture", "gpt-6").withName("openai-codex")]) {
+      await expect(provider.searchWeb("q", 3)).rejects.toThrow("no declared native search");
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("retains the reported charge on a failed OpenRouter search", async () => {
+    const { OpenRouterProvider } = await import("../providers/openrouter.js");
+    const tracker = createCostTracker("mock", 1); tracker.totalCost = 0.2;
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ error: { message: "private upstream detail" }, usage: { prompt_tokens: 8, completion_tokens: 2, cost: 0.04 } })));
+    vi.stubGlobal("fetch", fetch);
+    const result = await createWebSearchTool({ provider: () => new OpenRouterProvider("fixture", "anthropic/claude-sonnet-5"), costTracker: () => tracker }).execute({ query: "q" });
+    expect(result.is_error).toBe(true); expect(fetch).toHaveBeenCalledTimes(1);
+    expect(tracker.totalInputTokens).toBe(8); expect(tracker.totalCost).toBeCloseTo(0.24);
+    expect(result.output).not.toContain("private upstream detail");
+  });
+  it("turns HTTP-200 native tool errors into failure without leaking their detail or falling back", async () => {
+    const { AnthropicProvider } = await import("../providers/anthropic.js");
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ stop_reason: "end_turn", content: [{ type: "web_search_tool_result", content: { type: "web_search_tool_result_error", error_code: "private account detail" } }] })));
+    vi.stubGlobal("fetch", fetch);
+    const result = await createWebSearchTool({ provider: () => new AnthropicProvider("fixture") }).execute({ query: "q" });
+    expect(result.is_error).toBe(true); expect(fetch).toHaveBeenCalledTimes(1); expect(result.output).not.toContain("private account detail");
   });
 });
