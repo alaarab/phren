@@ -1,4 +1,4 @@
-import { SearchResponseError, searchJson, searchSources, searchTokenUsage, type WebSearchResponse } from "./web-search.js";
+import { SearchResponseError, nativeSearchFee, searchJson, searchSources, searchTokenUsage, type WebSearchResponse } from "./web-search.js";
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, StreamDelta } from "./types.js";
 import {
   toOpenAiTools,
@@ -40,7 +40,7 @@ export class OpenRouterProvider implements LlmProvider {
     // OpenRouter documents paid Exa fallback even for engine:native on older
     // models. Refuse unverified models locally instead of authorizing it.
     const nativeModel = /^(?:anthropic\/claude-(?:3-5-haiku|3\.5-haiku|3-7-sonnet|3\.7-sonnet|(?:opus|sonnet|haiku|fable|mythos)-[4-9]|[4-9])|openai\/(?:gpt-(?:4\.1(?:-|$)|[5-9](?:[.-]|$))|o3(?:-|$)|o4-mini(?:-|$))|google\/gemini-3(?:[.-]|$)|x-ai\/grok-[4-9](?:[.-]|$)|perplexity\/)/.test(this.model);
-    if (!nativeModel) throw new Error("Native search is not verified for the selected OpenRouter model.");
+    if (!nativeModel || /:online(?:$|:)/.test(this.model)) throw new Error("Native search is not verified for the selected OpenRouter model.");
     const res = await fetch(`${this.baseUrl}/chat/completions`, { method: "POST", redirect: "error", signal,
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.apiKey}`, "HTTP-Referer": "https://github.com/alaarab/phren", "X-Title": "phren-agent" },
       body: JSON.stringify({ model: this.model, max_tool_calls: 1, max_tokens: Math.min(this.maxOutputTokens, 2048), plugins: [{ id: "web", enabled: false }], messages: [{ role: "user", content: `Search the web for: ${query}. Return concise findings with citations.` }], tools: [{ type: "openrouter:web_search", parameters: { engine: "native", max_results: limit, max_total_results: limit, max_uses: 1 } }] }),
@@ -49,7 +49,7 @@ export class OpenRouterProvider implements LlmProvider {
     const data = await searchJson(res), message = data.choices?.[0]?.message;
     const usage = searchTokenUsage(data.usage, "prompt_tokens", "completion_tokens"), billedCost = typeof data.usage?.cost === "number" && Number.isFinite(data.usage.cost) && data.usage.cost >= 0 ? data.usage.cost : undefined;
     if (data.error || !message || data.choices?.[0]?.finish_reason !== "stop") throw new SearchResponseError("OpenRouter search did not complete.", usage, billedCost);
-    return { answer: typeof message?.content === "string" ? message.content.slice(0, 8000) : "", sources: searchSources((Array.isArray(message?.annotations) ? message.annotations : []).map((a: any) => a.url_citation ?? a), limit), usage, billedCost };
+    return { answer: typeof message?.content === "string" ? message.content.slice(0, 8000) : "", sources: searchSources((Array.isArray(message?.annotations) ? message.annotations : []).map((a: any) => a?.url_citation ?? a), limit), usage, billedCost };
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {
@@ -171,13 +171,14 @@ export class OpenAiProvider implements LlmProvider {
     });
     if (!res.ok) { await res.body?.cancel(); throw new Error(`OpenAI search returned HTTP ${res.status}`); }
     const data = await searchJson(res), sources: unknown[] = [], text: string[] = [];
-    const usage = searchTokenUsage(data.usage);
-    if (data.error || data.status !== "completed" || !Array.isArray(data.output)) throw new SearchResponseError("OpenAI search did not complete.", usage);
+    const usage = searchTokenUsage(data.usage), searchFee = nativeSearchFee(Array.isArray(data.output) ? data.output.filter((item: any) => item?.type === "web_search_call").length : 0);
+    if (data.error || data.status !== "completed" || !Array.isArray(data.output)) throw new SearchResponseError("OpenAI search did not complete.", usage, undefined, searchFee);
     for (const output of data.output) {
+      if (!output || typeof output !== "object") continue;
       if (output.type === "web_search_call") sources.push(...(Array.isArray(output.action?.sources) ? output.action.sources : []));
-      for (const block of Array.isArray(output.content) ? output.content : []) { if (block.type === "output_text") { if (typeof block.text === "string") text.push(block.text); sources.push(...(Array.isArray(block.annotations) ? block.annotations : [])); } }
+      for (const block of Array.isArray(output.content) ? output.content : []) { if (block?.type === "output_text") { if (typeof block.text === "string") text.push(block.text); sources.push(...(Array.isArray(block.annotations) ? block.annotations : [])); } }
     }
-    return { answer: text.join("\n").slice(0, 8000), sources: searchSources(sources, limit), usage };
+    return { answer: text.join("\n").slice(0, 8000), sources: searchSources(sources, limit), usage, searchFee };
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {

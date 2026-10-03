@@ -99,8 +99,11 @@ describe("native search response contracts", () => {
   it("rejects unsupported OpenRouter models locally, rather than authorizing paid Exa fallback", async () => {
     const { OpenRouterProvider } = await import("../providers/openrouter.js");
     const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
-    const result = await createWebSearchTool({ provider: () => new OpenRouterProvider("fixture", "openai/gpt-4o") }).execute({ query: "q" });
-    expect(result.is_error).toBe(true); expect(fetch).not.toHaveBeenCalled();
+    for (const model of ["openai/gpt-4o", "anthropic/claude-sonnet-5:online"]) {
+      const result = await createWebSearchTool({ provider: () => new OpenRouterProvider("fixture", model) }).execute({ query: "q" });
+      expect(result.is_error).toBe(true);
+    }
+    expect(fetch).not.toHaveBeenCalled();
   });
   it("never treats a compatible or subscription endpoint as API-key native search", async () => {
     const { OpenAiProvider } = await import("../providers/openrouter.js");
@@ -109,6 +112,13 @@ describe("native search response contracts", () => {
       await expect(provider.searchWeb("q", 3)).rejects.toThrow("no declared native search");
     }
     expect(fetch).not.toHaveBeenCalled();
+  });
+  it("adds native search fees to token cost while treating an authoritative total as inclusive", async () => {
+    const tracker = createCostTracker("mock", 1); tracker.totalCost = 0.2;
+    const search = vi.fn().mockResolvedValueOnce({ sources: [], searchFee: 0.01 }).mockResolvedValueOnce({ sources: [], searchFee: 0.01, billedCost: 0.03 });
+    const tool = createWebSearchTool({ provider: () => provider(search), costTracker: () => tracker });
+    await tool.execute({ query: "first" }); expect(tracker.totalCost).toBeCloseTo(0.21);
+    await tool.execute({ query: "second" }); expect(tracker.totalCost).toBeCloseTo(0.24);
   });
   it("retains the reported charge on a failed OpenRouter search", async () => {
     const { OpenRouterProvider } = await import("../providers/openrouter.js");
