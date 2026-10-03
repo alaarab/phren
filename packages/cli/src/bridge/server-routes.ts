@@ -1,3 +1,4 @@
+import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import type { OwnerInbox } from "./owner-inbox.js";
 import { closeFinishedWorker } from "./worker-close.js";
@@ -148,6 +149,7 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
+  if (snapshot.has("tasks")) { result.taskDependencies = true; result.taskWriterSafety = true; result.taskAtomicCreate = true; result.taskAtomicSave = true; result.taskBoundLaunch = true; }
   return result;
 }
 
@@ -349,6 +351,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         result = await storeRoute(modules.store, request.method ?? "", url, request.method === "POST" ? await body(request) : undefined);
       } else if (request.method === "GET") {
         switch (url.pathname) {
+          case "/v1/tasks": result = getTaskRoute(modules.store, url); break;
+          case "/v1/tasks/stores": result = await getTaskDirectoryRoute(modules.store); break;
           case "/v1/health": result = { ...info, codePackage: await codePackageStatus(scheduleStore, modules.has("code")) }; break;
           case "/v1/metrics": result = hookMetrics.snapshot(); break;
           case "/v1/health/details": result = await healthDetails({ hookVersion: version, computerId: computerID, store: scheduleStore,
@@ -573,7 +577,15 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         }
       } else if (request.method === "POST") {
         const data = await body(request);
-        if (url.pathname === "/v1/subagents/resume") {
+        if (url.pathname === "/v1/tasks/launch") {
+          result = await launches.run(async () => launchTaskRoute(modules.store, selectedServer(url), data));
+        } else if (url.pathname === "/v1/tasks/save") {
+          result = saveTaskRoute(modules.store, data);
+        } else if (url.pathname === "/v1/tasks/create") {
+          result = createTaskRoute(modules.store, data);
+        } else if (url.pathname === "/v1/tasks/update") {
+          result = updateTaskRoute(modules.store, data);
+        } else if (url.pathname === "/v1/subagents/resume") {
           result = await fanoutMessages.send(data);
         } else if (url.pathname === "/v1/subagents/archive-finished") {
           result = await fanoutMessages.archiveFinished(data);

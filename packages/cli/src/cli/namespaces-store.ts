@@ -11,15 +11,19 @@ import {
   generateStoreId,
   getStoreProjectDirs,
   readTeamBootstrap,
+  registeredStoreIdentity,
+  registerStoreIdentity,
   type StoreEntry,
 } from "../store-registry.js";
 import { mergeStoreUpstream, type RunStoreGit } from "../sync/store-merge.js";
 import { aheadBehind, logSyncOutcome } from "../sync/outcome.js";
 import { getRuntimeHealth, updateRuntimeHealth } from "../shared/governance.js";
+import { permissionDeniedError } from "../governance/rbac.js";
 
 function printStoreUsage() {
   console.log("Usage:");
   console.log("  phren store list                        List registered stores");
+  console.log("  phren store identity [--create]         Read or explicitly register this store's portable identity");
   console.log("  phren store add <name> --remote <url>   Add a team store");
   console.log("  phren store remove <name>               Remove a store (local only)");
   console.log("  phren store sync                        Pull and push all stores");
@@ -110,6 +114,24 @@ export async function handleStoreNamespace(args: string[]) {
   }
 
   const phrenPath = getPhrenPath();
+
+  if (subcommand === "identity") {
+    if (args.length > 2 || (args[1] !== undefined && args[1] !== "--create")) {
+      console.error("Usage: phren store identity [--create]"); process.exitCode = 1; return;
+    }
+    try {
+      if (args[1] === "--create") {
+        const denied = permissionDeniedError(phrenPath, "manage_config");
+        if (denied) throw new Error(denied);
+        console.log(registerStoreIdentity(phrenPath));
+      } else {
+        const id = registeredStoreIdentity(phrenPath);
+        if (id) console.log(id);
+        else { console.error("No portable store identity. An owner can register one with phren store identity --create, then distribute stores.yaml through the existing store sync workflow."); process.exitCode = 1; }
+      }
+    } catch (error) { console.error(errorMessage(error)); process.exitCode = 1; }
+    return;
+  }
 
   if (subcommand === "list") {
     const stores = resolveAllStores(phrenPath);
