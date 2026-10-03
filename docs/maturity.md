@@ -1,3 +1,15 @@
+> October 3 integration source checkpoint: the table below is the historical
+> September 26 audit, not current acceptance evidence. The prepared source now
+> uses one canonical fixed authority per registered store, signed owner grants,
+> retained offline reservations, two-way phone enrollment, owner-bound SDK/ACP
+> sessions and a narrow one-agent reverse proxy. The native integration supplies
+> their screens and capability-gated controls. Task identity, readiness and atomic
+> Human creation are implemented behind coordinated compatible-writer adoption.
+> Combined-source builds, real-tool/provider/device evidence and full RC are still
+> required. No new runtime setup or activation is claimed. See
+> [conductor](conductor.md), [task contract](task-responsibility.md), and
+> [harness source contract](../packages/cli/src/bridge/harness/SOURCE-CONTRACT.md).
+
 # Feature maturity, September 26
 
 Level 5 means a feature **works**, is **reliable** (errors, restarts and

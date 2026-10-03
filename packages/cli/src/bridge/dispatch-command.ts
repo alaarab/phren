@@ -133,6 +133,7 @@ export async function runConductor(args: string[]): Promise<number> {
     }
     const result = await hookRequest("/v1/conductor/stop", values.pane ? { paneId: values.pane } : {});
     console.log(result.stopped ? "This computer has no conductor now." : "This computer had no conductor.");
+    if (result.leaseUnchanged) console.log("The store lease is unchanged. Review its holder before an explicit owner revocation or takeover.");
     return 0;
   }
   if (namespace === "integrator") {

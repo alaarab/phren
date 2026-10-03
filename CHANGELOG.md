@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.29] - 2026-10-03
+
+### Added
+
+- Human and Agent task responsibility, portable cross-store prerequisites, readiness and history across CLI, MCP, TUI, web and Hook APIs. Metadata writes require explicit compatible-writer adoption; the acknowledgement cannot fence an older binary. Human task creation is atomic and retryable by stable identity.
+- A fixed conductor authority per registered store, signed owner launch grants and exact reviewed revocation. Offline or failed launches retain their reservations. Phone-driven two-way enrollment keeps verified host identities.
+- A shared harness interface for existing Codex/OpenCode sessions, subscription-backed Claude SDK workers and installed ACP adapters. Structured controls use paired-owner proofs, exact process ownership and worker delivery journals. A separately registered one-agent reverse proxy supports the narrow QL path through Omarchy.
+- Installed language-server diagnostics, cancellation-aware mid-turn steering, provider-native paid search with explicit endpoint admission, and opt-in bounded tracing for the agent package.
+
+### Fixed
+
+- Preserve unsupported, blank and duplicate task metadata through ordinary edits and sync; reject ambiguous task IDs and honor exact archived prerequisite identities.
+- Report expired dispatch observation honestly and keep independent installer rollback failures from skipping executable or service restoration.
+
+
 ## [0.3.28] - 2026-10-02
 
 ### Fixed
