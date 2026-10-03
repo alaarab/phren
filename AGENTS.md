@@ -107,7 +107,7 @@ pnpm lint          # lint all packages
 
 ## Current Version
 
-`@phren/cli` 0.3.26 (see `packages/cli/package.json`).
+`@phren/cli` 0.3.29 (see `packages/cli/package.json`).
 
 ## Reference Documentation
 
@@ -129,3 +129,7 @@ Developer docs live in `docs/` (also published to the GitHub Pages site):
 
 Note: `reference/topics/` is a *runtime* location inside a user's `.phren/<project>/`
 (archived per-topic docs), not a directory in this repo.
+
+## Owner development and release workflow
+
+Feature PRs run builds, lint and docs only. Tests are deferred, never reported as passed. Consolidate the requested features, then dispatch CI on the exact release commit with `release_candidate=true` once. Publication requires that successful full RC run on the same commit and reuses its evidence. No per-feature tests or redundant manual native jobs. Preserve running workers and source pins.

@@ -14,6 +14,17 @@ The FTS5 index uses three layers of caching to avoid unnecessary rebuilds:
 | **File hashes** | Per-file content hashes persisted across runs. On cache hit, only files whose hash changed are re-indexed (incremental update). If >20% of tracked files are missing, a full rebuild is forced instead. | Parsing unchanged files |
 | **DB cache** | The SQLite FTS5 database is cached to `$TMPDIR/phren-fts-<uid>/<hash>.db`. A sentinel-hit with a valid DB file returns immediately without touching any project files. | Everything |
 
+### Live MCP freshness
+
+Each MCP process keeps its own metadata baseline, so another process rebuilding
+the shared cache cannot hide changes from an older live database. Tool calls
+check known file and directory stats at most once per second. Unchanged checks
+perform no glob, document read or database reload. Changes coalesce into one
+refresh through the existing write queue; no extra polling timer or remote
+Git check is introduced. A busy rebuild lock leaves the baseline dirty and
+returns a retryable error. File fingerprints include change time and inode as
+well as mtime and size, so atomic replacements that preserve mtime still update.
+
 ### When Full Rebuilds Happen
 
 - First run after install (no cache exists)
