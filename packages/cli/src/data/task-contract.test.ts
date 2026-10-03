@@ -121,12 +121,14 @@ describe("task responsibility and prerequisites (RC source, unrun)", () => {
   });
   it("reassigns and moves the same stable task without losing context, creation or history", () => {
     const a = add("core", "Keep identity");
-    expect(updateTask(base, "core", a.stableId!, { responsibility: "human", context: "Owner account action", section: "Active" }).ok).toBe(true);
+    expect(claimTask(base, "core", a.stableId!, { computer: "Desk", at: "2026-10-03T00:00:00Z" }).ok).toBe(true);
+    expect(updateTask(base, "core", a.stableId!, { responsibility: "human", context: "Owner account action", github_issue: 47, section: "Active" }).ok).toBe(true);
     expect(updateTask(base, "core", a.stableId!, { responsibility: "agent", section: "Queue" }).ok).toBe(true);
     const restored = item("core", a.stableId!);
-    expect(restored).toMatchObject({ stableId: a.stableId, createdAt: a.createdAt, context: "Owner account action", responsibility: "agent", section: "Queue" });
+    expect(restored).toMatchObject({ stableId: a.stableId, createdAt: a.createdAt, context: "Owner account action", githubIssue: 47, responsibility: "agent", section: "Queue", claim: undefined });
     expect(restored.history).toHaveLength(2);
     expect(restored.history![0].change).toContain("agent -> human");
+    expect(restored.history![0].change).toContain("released claim by Desk");
     expect(restored.history![1].change).toContain("human -> agent");
   });
   it("shows cross-project prerequisite titles and resumes after completion and archival", () => {
