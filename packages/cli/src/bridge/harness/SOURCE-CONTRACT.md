@@ -115,6 +115,15 @@ owner-granted launch ID; failed or uncertain launches retain that reservation.
 Existing sessions and thread reads remain available. Stopping a role does not
 release its grant, and no timeout or silence authorizes replacement.
 
+The reservation protects conductor ownership, not every ordinary worker slot.
+An ordinary worker or schedule checks configured authority reachability but does
+not require an empty holder, contact the holder's process, or consume its grant.
+An existing conductor must still match its current grant before dispatching.
+Holder-process liveness is not authority reachability and cannot authorize
+replacement. This describes current source behavior, not runtime acceptance.
+Both configuration and subsequent reads compare the configured store ID with
+the checkout's registered canonical identity; a signed arbitrary ID is refused.
+
 `phren conductor make --launch-id <owner-granted UUID>` consumes that grant.
 Interactive owner-terminal configure/revoke operate on the local canonical
 store; HTTP controls require the paired signature. Unconfigured stores allow
