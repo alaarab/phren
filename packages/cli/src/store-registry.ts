@@ -161,7 +161,10 @@ export function registerStoreIdentity(phrenPath: string): string {
     const result = readSyncedRegistry(phrenPath);
     if (result.lossy) throw new Error(`Cannot register store identity: ${result.problems.join(" | ")}`);
     const existing = result.registry?.stores.find(s => s.role === "primary");
-    if (existing) return existing.id;
+    if (existing) {
+      if (!/^[a-f0-9]{8}$/.test(existing.id)) throw new Error("Existing store identity is not a canonical eight-hex ID. Review the registry; identity registration cannot replace an immutable ID.");
+      return existing.id;
+    }
     const primary = { ...implicitPrimaryStore(phrenPath), id: generateStoreId() };
     writeSyncedPrimary(phrenPath, primary);
     return primary.id;

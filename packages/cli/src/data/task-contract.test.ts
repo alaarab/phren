@@ -220,6 +220,7 @@ describe("task responsibility and prerequisites (RC source, unrun)", () => {
     expect(() => getTaskRoute(base, new URL("http://phren.local/v1/tasks?storeId=11111111&project=core"))).toThrow(/ambiguous/);
     writeStoreRegistry(other, { version: 1, stores: [{ id: "not-hex-id", name: "Team", path: other, role: "primary", sync: "managed-git" }] });
     expect(registeredStoreIdentity(other)).toBeUndefined();
+    expect(() => registerStoreIdentity(other)).toThrow(/immutable ID/);
     expect((await getTaskDirectoryRoute(base)).stores.find(s => s.name === "Team")).toMatchObject({ id: null, identityReady: false });
   });
   it("never broadens a malformed subscription and retains only the attached project's access", async () => {
