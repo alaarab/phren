@@ -3,7 +3,7 @@ import { requireOwnerControl } from "./harness/owner-controls.js";
 import { configureStoreLease, changeStoreLease, readStoreLease } from "./harness/store-lease.js";
 import { runnerForPane, runnerRequest } from "./harness/runner-client.js";
 import { proxyOperation, proxyView, registerProxy, reverseProxyPlan } from "./harness/remote-proxy.js";
-import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute } from "./task-routes.js";
+import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute } from "./task-routes.js";
 import { readConductorLease, configureConductorLease, conductorLeaseAuthority, revokeConductorLease, changeConductorLease } from "./conductor-lease.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import type { OwnerInbox } from "./owner-inbox.js";
@@ -156,7 +156,7 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
-  if (snapshot.has("tasks")) { result.taskDependencies = true; }
+  if (snapshot.has("tasks")) { result.taskDependencies = true; result.taskWriterSafety = true; result.taskAtomicCreate = true; }
   return result;
 }
 
@@ -647,6 +647,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             const turnId = z.string().min(1).max(200).parse(data.turnId);
             result = { ok: await adapter.interruptTurn(target.session, turnId) };
           } else result = await paneRoute(ctx, mapped, data, response);
+        } else if (url.pathname === "/v1/tasks/create") {
+          result = createTaskRoute(modules.store, data);
         } else if (url.pathname === "/v1/tasks/update") {
           result = updateTaskRoute(modules.store, data);
         } else if (url.pathname === "/v1/subagents/resume") {

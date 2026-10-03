@@ -564,7 +564,17 @@ export function resolveTaskItem(phrenPath: string, project: string, match: strin
   return phrenOk(parsed.data.items[found.match.section][found.match.index]);
 }
 
+/** Validate raw input before normalization can hide a newline or identity. */
+export function validTaskTitle(value: unknown): value is string {
+  return typeof value === "string" && !!value.trim() && !/[\x00-\x1f\x7f]|<!--\s*bid:/i.test(value);
+}
+const invalidTaskTitle = "Task text must be one nonempty line without control characters or embedded task identities.";
+
 export interface AddTaskOptions {
+  /** Atomic metadata creation, with a caller-retained identity for uncertain replies. */
+  stableId?: string;
+  responsibility?: TaskResponsibility;
+  graphRoot?: string;
   createdAt?: string;
   sessionId?: string;
   scope?: string;
@@ -573,6 +583,7 @@ export interface AddTaskOptions {
 }
 
 export function addTask(phrenPath: string, project: string, item: string, opts?: AddTaskOptions): PhrenResult<TaskItem> {
+  if (!validTaskTitle(item)) return phrenErr(invalidTaskTitle, PhrenError.VALIDATION_ERROR);
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid. Use lowercase letters, numbers, and hyphens (e.g. "my-project").`, PhrenError.INVALID_PROJECT_NAME);
   // Validate project exists before acquiring the lock — withFileLock creates the parent
@@ -580,16 +591,33 @@ export function addTask(phrenPath: string, project: string, item: string, opts?:
   const preCheck = ensureProject(phrenPath, project);
   if (!preCheck.ok) return forwardErr(preCheck);
 
-  return withSafeLock(bPath, () => {
+  const create = () => withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const line = item.replace(/^-\s*/, "").trim();
+    if (!line) return phrenErr(invalidTaskTitle, PhrenError.VALIDATION_ERROR);
+    if (opts?.responsibility !== undefined) {
+      if (!taskFormatStatus(phrenPath).enabled) return phrenErr(taskFormatMigrationHint, PhrenError.VALIDATION_ERROR);
+      if (!["human", "agent"].includes(opts.responsibility) || !opts.stableId || !/^[a-f0-9]{8}$/.test(opts.stableId)) return phrenErr("Atomic creation requires a valid responsibility and stable ID.", PhrenError.VALIDATION_ERROR);
+      if (!line || /[\r\n]/.test(line) || /<!--\s*bid:/i.test(line)) return phrenErr("Task title must be one nonempty line.", PhrenError.VALIDATION_ERROR);
+      const existing = [...parsed.data.items.Active, ...parsed.data.items.Queue, ...parsed.data.items.Done].filter(task => task.stableId === opts.stableId);
+      if (existing.length) {
+        const task = existing[0];
+        if (existing.length === 1 && !task.identityAmbiguous && task.taskContractRaw === undefined && task.line === line && task.responsibility === opts.responsibility) return phrenOk(task);
+        return phrenErr("This creation identity already exists with different task content. Refresh before continuing; no task was created.", PhrenError.VALIDATION_ERROR);
+      }
+      const archive = path.join(phrenPath, ".config", "task-archive", `${project}.md`);
+      try {
+        if (new RegExp(`<!--\\s*bid:${opts.stableId}(?=\\s|-->)`, "i").test(fs.readFileSync(archive, "utf8"))) return phrenErr("This creation identity is already archived. Refresh before continuing; no task was created.", PhrenError.VALIDATION_ERROR);
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    } else if (opts?.stableId !== undefined) return phrenErr("A supplied creation identity requires explicit responsibility.", PhrenError.VALIDATION_ERROR);
     const newItem: TaskItem = {
       id: `Q${parsed.data.items.Queue.length + 1}`,
-      stableId: newBid(),
+      stableId: opts?.stableId ?? newBid(),
       section: "Queue",
       line,
+      ...(opts?.responsibility !== undefined ? { responsibility: opts.responsibility, dependencies: [], history: [{ at: new Date().toISOString(), change: `created as ${opts.responsibility}` }] } : {}),
       checked: false,
       priority: normalizePriority(line),
       createdAt: opts?.createdAt ?? new Date().toISOString(),
@@ -602,6 +630,7 @@ export function addTask(phrenPath: string, project: string, item: string, opts?:
     writeTaskDoc(parsed.data);
     return phrenOk(newItem);
   });
+  return opts?.responsibility !== undefined ? withTaskGraphLock(opts.graphRoot ?? phrenPath, create) : create();
 }
 
 export function addTasks(phrenPath: string, project: string, items: string[], opts?: Pick<AddTaskOptions, "scope">): PhrenResult<{ added: string[]; errors: string[] }> {
@@ -617,6 +646,7 @@ export function addTasks(phrenPath: string, project: string, items: string[], op
     const added: string[] = [];
     const errors: string[] = [];
     for (const item of items) {
+      if (!validTaskTitle(item)) { errors.push(item); continue; }
       const line = item.replace(/^-\s*/, "").trim();
       if (!line) {
         errors.push(item);
@@ -634,7 +664,7 @@ export function addTasks(phrenPath: string, project: string, items: string[], op
       });
       added.push(line);
     }
-    writeTaskDoc(parsed.data);
+    if (added.length) writeTaskDoc(parsed.data);
     return phrenOk({ added, errors });
   });
 }
@@ -794,6 +824,8 @@ export function updateTask(
     }
 
     if (updates.text !== undefined) {
+      if (typeof updates.text === "string" && !updates.text.trim()) return phrenErr("Task text cannot be empty.", PhrenError.EMPTY_INPUT);
+      if (!validTaskTitle(updates.text)) return phrenErr(invalidTaskTitle, PhrenError.VALIDATION_ERROR);
       const nextText = updates.text.trim();
       if (!nextText) return phrenErr("Task text cannot be empty.", PhrenError.EMPTY_INPUT);
       const previousText = item.line;

@@ -1,11 +1,11 @@
 import { z } from "zod";
 import * as path from "node:path";
-import { readTasks, updateTask } from "../data/tasks.js";
+import { addTask, validTaskTitle, readTasks, updateTask } from "../data/tasks.js";
 import { taskView, taskCounts, filterTaskDoc, taskStores, taskStoreHasProject } from "../data/task-contract.js";
 import { permissionDeniedError } from "../governance/rbac.js";
 import { BridgeError } from "./protocol.js";
 import { taskStoreProjects, taskStoreRepositoryIdentity } from "../data/task-store-directory.js";
-import { taskFormatStatus } from "../data/task-format.js";
+import { taskWriterSafety } from "../data/task-format.js";
 
 export const taskUpdatesSchema = z.object({
   responsibility: z.enum(["human", "agent"]).optional(),
@@ -29,10 +29,12 @@ export async function getTaskDirectoryRoute(base: string) {
     const ambiguous = !!store.taskStoreId && stores.filter(s => s.taskStoreId === store.taskStoreId).length !== 1;
     const identityReady = !!store.taskStoreId && !ambiguous;
     const repositoryIdentity = store.available === false ? undefined : await taskStoreRepositoryIdentity(store.path);
+    const writerSafety = store.available === false ? null : taskWriterSafety(store.path);
     return {
       id: store.taskStoreId ?? null, name: store.name, role: store.role, primary: store.role === "primary", available: store.available !== false,
       identityReady, ambiguous, ...(repositoryIdentity ? { repositoryIdentity } : {}),
-      metadataWritable: identityReady && store.role !== "readonly" && !permissionDeniedError(store.path, "update_task") && taskFormatStatus(store.path).enabled,
+      writerSafety,
+      metadataWritable: identityReady && store.role !== "readonly" && !permissionDeniedError(store.path, "update_task") && writerSafety?.activation === "owner-acknowledged",
       projects: taskStoreProjects(store),
     };
   })) };
@@ -47,7 +49,8 @@ export function getTaskRoute(base: string, url: URL) {
   if (path.resolve(result.data.path) !== path.join(path.resolve(store.path), project, "tasks.md")) throw new BridgeError(404, "Project is not in that task store.");
   const filter = z.object({ responsibility: z.enum(["human", "agent"]).optional(), readiness: z.enum(["ready", "waiting-on-human", "waiting-on-task"]).optional() }).parse(Object.fromEntries(url.searchParams));
   const filtered = filterTaskDoc(base, result.data, filter);
-  return { ok: true, version: 1, storeId, project, metadataWritable: store.role !== "readonly" && !permissionDeniedError(store.path, "update_task", project) && taskFormatStatus(store.path).enabled, counts: taskCounts(base, result.data), items: Object.fromEntries(Object.entries(filtered.items).map(([section, items]) => [section, items.map(i => taskView(base, result.data, i))])) };
+  const writerSafety = taskWriterSafety(store.path);
+  return { ok: true, version: 1, storeId, project, writerSafety, metadataWritable: store.role !== "readonly" && !permissionDeniedError(store.path, "update_task", project) && writerSafety.activation === "owner-acknowledged", counts: taskCounts(base, result.data), items: Object.fromEntries(Object.entries(filtered.items).map(([section, items]) => [section, items.map(i => taskView(base, result.data, i))])) };
 }
 
 export function updateTaskRoute(base: string, input: unknown) {
@@ -60,5 +63,23 @@ export function updateTaskRoute(base: string, input: unknown) {
   if (!current.ok || path.resolve(current.data.path) !== path.join(path.resolve(store.path), data.project, "tasks.md")) throw new BridgeError(404, "Project is not in that task store.");
   const result = updateTask(store.path, data.project, `bid:${data.stableId}`, data.updates, base);
   if (!result.ok) throw new BridgeError(400, result.error);
+  return getTaskRoute(base, new URL(`http://phren.local/v1/tasks?storeId=${data.storeId}&project=${data.project}`));
+}
+
+/** One locked write: a Human task is never observable as Agent-ready. The
+ * client keeps one stable ID across uncertain replies; conflicts never recreate. */
+export function createTaskRoute(base: string, input: unknown) {
+  const data = identitySchema.extend({ text: z.string().min(1).max(16000).refine(validTaskTitle, "Task title must be one line without embedded task identities"),
+    responsibility: z.enum(["human", "agent"]) }).strict().parse(input);
+  const store = owner(base, data.storeId, true);
+  if (!taskStoreHasProject(store, data.project)) throw new BridgeError(404, "Project is not in that task store.");
+  for (const operation of ["add_task", "update_task"] as const) {
+    const denied = permissionDeniedError(store.path, operation, data.project);
+    if (denied) throw new BridgeError(403, denied);
+  }
+  const current = readTasks(store.path, data.project);
+  if (!current.ok || path.resolve(current.data.path) !== path.join(path.resolve(store.path), data.project, "tasks.md")) throw new BridgeError(404, "Project is not in that task store.");
+  const result = addTask(store.path, data.project, data.text, { stableId: data.stableId, responsibility: data.responsibility, graphRoot: base });
+  if (!result.ok) throw new BridgeError(409, result.error);
   return getTaskRoute(base, new URL(`http://phren.local/v1/tasks?storeId=${data.storeId}&project=${data.project}`));
 }
