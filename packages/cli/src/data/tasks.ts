@@ -591,7 +591,7 @@ export function addTask(phrenPath: string, project: string, item: string, opts?:
   const preCheck = ensureProject(phrenPath, project);
   if (!preCheck.ok) return forwardErr(preCheck);
 
-  const create = () => withSafeLock(bPath, () => {
+  const create = () => withSafeLock<TaskItem>(bPath, () => {
     const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
