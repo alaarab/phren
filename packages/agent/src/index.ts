@@ -606,7 +606,7 @@ export async function runAgentCli(raw: string[]) {
         // Ink TUI with spawner — LLM can spawn agents via spawn_agent tool
         const { AgentSpawner } = await import("./multi/spawner.js");
         const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
-        const spawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig, getParentProvider: () => agentConfig.provider });
+        const spawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig, getParentProvider: () => agentConfig.provider, getParentHooks: () => registry.hookConfig });
         registerSpawnerTools = () => {
           registry.register(createSpawnAgentTool(spawner, () => registry.permissionConfig));
           registry.register(createSendMessageTool(spawner));
@@ -688,7 +688,7 @@ export async function runAgentCli(raw: string[]) {
   if (!args.noSubagents && !chat) {
     const { AgentSpawner } = await import("./multi/spawner.js");
     const { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } = await import("./tools/spawn-agent.js");
-    oneShotSpawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig, getParentProvider: () => agentConfig.provider });
+    oneShotSpawner = new AgentSpawner({ costTracker, getPermissionDefaults: () => registry.permissionConfig, getParentProvider: () => agentConfig.provider, getParentHooks: () => registry.hookConfig });
     registry.register(createSpawnAgentTool(oneShotSpawner, () => registry.permissionConfig));
     registry.register(createSendMessageTool(oneShotSpawner));
     registry.register(createListAgentsTool(oneShotSpawner));
