@@ -195,6 +195,24 @@ export async function executePalette(host: PaletteHost, input: string): Promise<
     return;
   }
 
+  if (command === "responsibility" || command === "depends") {
+    const project = host.ensureProjectSelected();
+    if (!project) return;
+    const match = parts[1];
+    if (!match) { host.setMessage("  Usage: :responsibility <id> human|agent or :depends <id> <JSON array>"); return; }
+    const value = parts.slice(2).join(" ");
+    let updates: Parameters<typeof updateTask>[3];
+    if (command === "responsibility") {
+      if (value !== "human" && value !== "agent") { host.setMessage("  Responsibility must be human or agent."); return; }
+      updates = { responsibility: value };
+    } else {
+      try { updates = { dependencies: JSON.parse(value) }; } catch { host.setMessage("  Dependencies must be a JSON array."); return; }
+    }
+    host.snapshotForUndo(command, taskFileForProject(host.phrenPath, project));
+    host.setMessage(`  ${resultMsg(updateTask(host.phrenPath, project, match, updates))}`);
+    return;
+  }
+
   if (command === "complete") {
     const project = host.ensureProjectSelected();
     if (!project) return;

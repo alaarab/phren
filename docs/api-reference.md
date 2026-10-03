@@ -1619,3 +1619,5 @@ verified finished pane after reading its done return; false keeps it open.
 Optional `integrator:{computer?,target}` overrides the configured default.
 Done returns can carry `prs` and `integratorDelivery`; receipts also retain
 `closedAt` and pending closes. CLI dispatch `--keep-open` opts out of closure.
+
+Task responsibility and stable-ID prerequisites are independent of Queue/Active/Done. See [the shared task contract](task-responsibility.md) for persistence, MCP/Hook fields, readiness and controls. Conductors select only ready agent tasks.

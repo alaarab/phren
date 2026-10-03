@@ -708,3 +708,5 @@ remain open with `live:false` until resolved. Resolving does not approve or
 answer an agent, and the same source stays resolved on later polls; a new
 question creates a new item. The phone UI is a follow-up using the contract in
 [Phren Hook](phren-hook.md#owner-inbox-phone-contract).
+
+Task responsibility and stable-ID prerequisites are independent of Queue/Active/Done. See [the shared task contract](task-responsibility.md) for persistence, MCP/Hook fields, readiness and controls. Conductors select only ready agent tasks.

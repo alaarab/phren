@@ -69,6 +69,27 @@ export function pickTask<T extends TaskEntry>(base: T | undefined, ours: T | und
   return theirs;
 }
 
+/** Merge independent responsibility/dependency edits and retain both histories.
+ * Ordinary task conflict precedence still controls title, claim and section. */
+function mergeContract(base: TaskEntry | undefined, ours: TaskEntry | undefined, theirs: TaskEntry | undefined, winner: TaskEntry): TaskEntry {
+  const read = (entry: TaskEntry | undefined) => {
+    const raw = entry?.lines.find(line => line.trimStart().startsWith("Task:"));
+    if (!raw) return { raw, value: { version: 1, responsibility: "agent", dependencies: [], history: [] } };
+    try {
+      const value = JSON.parse(raw.trim().slice(5));
+      if (value.version === 1 && ["human", "agent"].includes(value.responsibility) && Array.isArray(value.dependencies) && Array.isArray(value.history)) return { raw, value };
+    } catch { /* Unknown metadata remains with its record. */ }
+    return { raw, value: undefined };
+  };
+  const b = read(base), o = read(ours), t = read(theirs);
+  if (!o.raw && !t.raw) return winner;
+  if (!b.value || !o.value || !t.value) return winner;
+  const pick = (field: string) => JSON.stringify(t.value[field]) === JSON.stringify(b.value[field]) ? o.value[field] : t.value[field];
+  const history = [...new Map([...o.value.history, ...t.value.history].map((h: unknown) => [JSON.stringify(h), h] as const)).values()];
+  const contract = { version: 1, responsibility: pick("responsibility"), dependencies: pick("dependencies"), history };
+  return { ...winner, lines: [...winner.lines.filter(line => !line.trimStart().startsWith("Task:")), `  Task: ${JSON.stringify(contract)}`] };
+}
+
 /**
  * Merges three versions of a tasks.md. `base` is empty when the file was
  * added on both sides.
@@ -83,7 +104,7 @@ export function mergeTasksByBid(base: string, ours: string, theirs: string): str
   const chosen = new Map<string, TaskEntry>();
   for (const key of new Set([...b.keys(), ...o.keys(), ...t.keys()])) {
     const winner = pickTask(b.get(key), o.get(key), t.get(key));
-    if (winner) chosen.set(key, winner);
+    if (winner) chosen.set(key, mergeContract(b.get(key), o.get(key), t.get(key), winner));
   }
 
   // Local order, per section, so a task only the local side placed there lands after its local predecessor.

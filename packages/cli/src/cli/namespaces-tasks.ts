@@ -13,7 +13,7 @@ function printTaskUsage() {
   console.log('  phren task link <project> "<text>" --issue <number> [--url <url>]');
   console.log('  phren task link <project> "<text>" --unlink');
   console.log('  phren task create-issue <project> "<text>" [--repo <owner/name>] [--title "<title>"] [--done]');
-  console.log('  phren task update <project> "<text>" [--priority=high|medium|low] [--section=Active|Queue|Done] [--context="..."]');
+  console.log('  phren task update <project> "<text>" [--priority=high|medium|low] [--section=Active|Queue|Done] [--context="..."] [--responsibility=human|agent] [--dependencies=JSON]');
   console.log('  phren task pin <project> "<text>"');
   console.log('  phren task reorder <project> "<text>" --rank=<n>');
 }
@@ -71,9 +71,15 @@ export async function handleTaskNamespace(args: string[]) {
     }
     // Collect non-flag args as the match text, flags as updates
     const positional: string[] = [];
-    const updates: { priority?: string; context?: string; section?: string } = {};
+    const updates: Parameters<typeof updateTask>[3] = {};
     for (const arg of args.slice(2)) {
-      if (arg.startsWith("--priority=")) {
+      if (arg.startsWith("--responsibility=")) {
+        const value = arg.slice(17);
+        if (value !== "human" && value !== "agent") { console.error("Responsibility must be human or agent."); process.exit(1); }
+        updates.responsibility = value;
+      } else if (arg.startsWith("--dependencies=")) {
+        try { updates.dependencies = JSON.parse(arg.slice(15)); } catch { console.error("Dependencies must be a JSON array of storeId/project/stableId objects."); process.exit(1); }
+      } else if (arg.startsWith("--priority=")) {
         updates.priority = arg.slice("--priority=".length);
       } else if (arg.startsWith("--section=")) {
         updates.section = arg.slice("--section=".length);

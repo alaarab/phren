@@ -310,6 +310,7 @@ ${NOTES_UI_STYLES}
         <option value="Queue">Queue only</option>
         <option value="Done">Completed</option>
       </select>
+      <select id="tasks-filter-responsibility" class="task-filter-select" aria-label="Task responsibility"><option value="">Human + Agent</option><option value="human">Human</option><option value="agent">Agent</option></select>
       <span id="tasks-count" class="task-count-label"></span>
     </div>
     <div id="tasks-list">

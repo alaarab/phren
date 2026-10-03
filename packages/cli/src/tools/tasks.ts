@@ -1,3 +1,4 @@
+import { taskView } from "../data/task-contract.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
@@ -163,7 +164,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
         const all = [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done];
-        const bidLookup = id && id.startsWith("bid:") ? id.slice(4) : null;
+        const bidLookup = id && /^(?:bid:)?[a-f0-9]{8}$/.test(id) ? id.replace(/^bid:/, "") : null;
         const match = all.find((entry) =>
           (bidLookup && entry.stableId === bidLookup) ||
           (id && !bidLookup && entry.id.toLowerCase() === id.toLowerCase()) ||
@@ -174,6 +175,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           ok: true,
           message: `${match.id}: ${match.line} (${match.section})`,
           data: {
+            ...taskView(phrenPath, doc, match),
             project,
             id: match.id,
             stableId: match.stableId || null,
@@ -200,7 +202,7 @@ export function register(server: McpServer, ctx: McpContext): void {
           return mcpResponse({
             ok: true,
             message: `No tasks found for "${project}".`,
-            data: { project, items: view.doc.items, includedSections: view.includedSections, totalItems: view.totalItems },
+            data: { project, items: Object.fromEntries(TASK_SECTION_ORDER.map(section => [section, view.doc.items[section].map(entry => taskView(phrenPath, doc, entry))])), includedSections: view.includedSections, totalItems: view.totalItems },
           });
         }
         if (summary) {
@@ -219,7 +221,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({
           ok: true,
           message: `## ${project}\n${taskMarkdown(view.doc)}${paginationNote}`,
-          data: { project, items: view.doc.items, issues: doc.issues, includedSections: view.includedSections, totalItems: view.totalItems, totalUnpaged: view.totalUnpaged, offset: offset ?? 0, truncated: view.truncated },
+          data: { project, items: Object.fromEntries(TASK_SECTION_ORDER.map(section => [section, view.doc.items[section].map(entry => taskView(phrenPath, doc, entry))])), issues: doc.issues, includedSections: view.includedSections, totalItems: view.totalItems, totalUnpaged: view.totalUnpaged, offset: offset ?? 0, truncated: view.truncated },
         });
       }
 
@@ -235,9 +237,9 @@ export function register(server: McpServer, ctx: McpContext): void {
         parts = views.map(({ project, view }) => `## ${project}\n${taskMarkdown(view.doc)}`);
       }
       const truncationNote = anyTruncated && !summary ? `\n\n_Results capped (Active/Queue: ${limit ?? DEFAULT_TASK_LIMIT}, Done: ${done_limit ?? DEFAULT_DONE_LIMIT}). Pass limit/done_limit to see more._` : "";
-      const projectData = views.map(({ project, view, issues }) => ({
+      const projectData = views.map(({ project, doc, view, issues }) => ({
         project,
-        items: view.doc.items,
+        items: Object.fromEntries(TASK_SECTION_ORDER.map(section => [section, view.doc.items[section].map(entry => taskView(phrenPath, doc, entry))])),
         issues,
         includedSections: view.includedSections,
         totalItems: view.totalItems,
@@ -426,6 +428,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           priority: z.enum(["high", "medium", "low"]).optional().describe("New priority tag: high, medium, or low."),
           context: z.string().optional().describe("Text to set on the Context: line below the task."),
           replace_context: z.boolean().optional().describe("If true, replace the existing Context: value instead of appending."),
+          responsibility: z.enum(["human", "agent"]).optional().describe("Who must act; independent of task section. Legacy tasks default to agent."),
+          dependencies: z.array(z.object({ storeId: z.string().regex(/^[a-f0-9]{8}$/), project: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/), stableId: z.string().regex(/^[a-f0-9]{8}$/) }).strict()).max(100).optional().describe("Replace prerequisites with immutable store/project/task identities; [] clears. Rejects self-links, cycles and missing targets."),
           section: z.enum(["queue", "active", "done", "Queue", "Active", "Done"]).optional().describe("Move item to this section: Queue, Active, or Done."),
           github_issue: z.union([z.number().int().positive(), z.string()]).optional().describe("GitHub issue number (for example 14 or '#14')."),
           github_url: z.string().optional().describe("GitHub issue URL to associate with the task item."),
@@ -471,6 +475,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           updates.move_to_active,
           updates.work_next,
           updates.replace_context,
+          updates.responsibility,
+          updates.dependencies,
         ].some((value) => value !== undefined);
         if (extraUpdates) {
           return mcpResponse({ ok: false, error: "create_issue must be used by itself." });
@@ -556,7 +562,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         // Handle github issue linking via update_task when github_issue or github_url is set (and no other field updates)
-        if ((updates.github_issue !== undefined || updates.github_url || updates.unlink_github) && !updates.text && !updates.priority && !updates.context && !updates.section) {
+        if ((updates.github_issue !== undefined || updates.github_url || updates.unlink_github) && !updates.text && !updates.priority && !updates.context && !updates.section && updates.responsibility === undefined && updates.dependencies === undefined) {
           if (updates.unlink_github && (updates.github_issue !== undefined || updates.github_url)) {
             return mcpResponse({ ok: false, error: "Use either unlink_github=true or github_issue/github_url, not both." });
           }
@@ -583,7 +589,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         // Standard update path
-        const result = updateTaskStore(targetPath, project, item!, updates);
+        const result = updateTaskStore(targetPath, project, item!, updates, phrenPath);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, targetPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item, updates } });

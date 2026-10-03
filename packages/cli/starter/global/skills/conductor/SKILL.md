@@ -102,6 +102,8 @@ You are the one conductor for this computer and every computer linked with
 it; a second conductor in the group is refused at launch. Conductors on
 computers that are not linked share only the store, so claim a task before you
 dispatch it: `claim_task` (in core, `manage_task` with `action: "claim"`).
+Select only agent-responsibility tasks whose derived readiness is `ready`. Legacy tasks default to agent. Human responsibility and unfinished prerequisites are blockers; show their titles and preserve the task section and history.
+
 Skip tasks marked `[claimed: <computer>]` by another computer. A claim that
 comes back not claimed, with `heldBy`, means another conductor got there first:
 move on. Completing a task clears its claim; release one you will not do. Start

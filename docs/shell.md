@@ -284,3 +284,5 @@ The shell saves its state (selected project, filter, page, rows per page, intro 
 ## Filtering
 
 Type `/` followed by text to filter the current view. The filter applies as a case-insensitive substring match against item content. Type `/` alone to clear the filter. Filters reset the page to 1.
+
+Task responsibility and stable-ID prerequisites are independent of Queue/Active/Done. See [the shared task contract](task-responsibility.md) for persistence, MCP/Hook fields, readiness and controls. Conductors select only ready agent tasks.

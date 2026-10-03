@@ -1,3 +1,4 @@
+import { taskReadiness } from "../data/task-contract.js";
 import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
@@ -39,7 +40,9 @@ export function handleTaskView(profile: string) {
       for (const item of activeWithGravity) {
         const rankTag = item.rank !== undefined ? ` [#${item.rank}]` : "";
         const github = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
-        console.log(`    - ${item.line}${rankTag}${github}`);
+        const ready = taskReadiness(getPhrenPath(), doc, item);
+        console.log(`    - ${item.line}${rankTag}${github} [${ready.responsibility} · ${ready.readiness}]`);
+        for (const prerequisite of ready.prerequisites) console.log(`      ${prerequisite.completed ? "✓" : "Waiting on"} ${prerequisite.title}`);
       }
     }
     if (queueCount > 0) {
@@ -48,7 +51,9 @@ export function handleTaskView(profile: string) {
       for (const item of queueWithGravity) {
         const rankTag = item.rank !== undefined ? ` [#${item.rank}]` : "";
         const github = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
-        console.log(`    - ${item.line}${rankTag}${github}`);
+        const ready = taskReadiness(getPhrenPath(), doc, item);
+        console.log(`    - ${item.line}${rankTag}${github} [${ready.responsibility} · ${ready.readiness}]`);
+        for (const prerequisite of ready.prerequisites) console.log(`      ${prerequisite.completed ? "✓" : "Waiting on"} ${prerequisite.title}`);
       }
     }
   }

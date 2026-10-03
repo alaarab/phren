@@ -943,6 +943,37 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       });
     }
 
+    window.editTaskContract = function(index, field, value) {
+      var task = _allTasks[index];
+      if (!task) return;
+      var updates = { project: task.project, item: task.stableId ? 'bid:' + task.stableId : task.id };
+      if (field === 'dependencies') {
+        var choices = _allTasks.filter(function(t) { return t.identity && t !== task; });
+        var selected = task.dependencies || [];
+        var panel = document.getElementById('task-prerequisites-' + index);
+        if (!panel) return;
+        if (value !== 'save') {
+          panel.hidden = !panel.hidden;
+          panel.innerHTML = choices.map(function(t, choice) {
+            var checked = selected.some(function(d) { return d.storeId === t.identity.storeId && d.project === t.identity.project && d.stableId === t.identity.stableId; });
+            return '<label><input type="checkbox" data-task-choice="' + choice + '"' + (checked ? ' checked' : '') + '> ' + esc(t.project + ': ' + t.line) + '</label><br>';
+          }).join('') + '<button data-ts-action="savePrerequisites" data-index="' + index + '">Save prerequisites</button>';
+          panel._choices = choices;
+          return;
+        }
+        // Retain unavailable prerequisites unless explicitly removed through CLI/API.
+        var dependencies = selected.filter(function(d) { return !choices.some(function(t) { return t.identity.storeId === d.storeId && t.identity.project === d.project && t.identity.stableId === d.stableId; }); });
+        panel.querySelectorAll('input:checked').forEach(function(input) { dependencies.push(panel._choices[Number(input.getAttribute('data-task-choice'))].identity); });
+        updates.dependencies = JSON.stringify(dependencies);
+      } else updates[field] = value;
+      var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
+      fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrf) {
+        var body = new URLSearchParams(updates);
+        if (csrf.token) body.set('_csrf', csrf.token);
+        return fetch(_tsAuthToken ? tsAuthUrl('/api/tasks/update') : '/api/tasks/update', { method: 'POST', body: body });
+      }).then(function(r) { return r.json(); }).then(function(data) { if (data.ok) loadTasks(); else alert(data.error || 'Task update failed'); });
+    };
+
     window.completeTaskFromUi = function(project, item) {
       var csrfUrl = _tsAuthToken ? tsAuthUrl('/api/csrf-token') : '/api/csrf-token';
       fetch(csrfUrl).then(function(r) { return r.json(); }).then(function(csrfData) {
@@ -1005,15 +1036,18 @@ export function renderTasksAndSettingsScript(authToken: string): string {
     window.filterTasks = function() {
       var projectFilter = (document.getElementById('tasks-filter-project') || {}).value || '';
       var sectionFilter = (document.getElementById('tasks-filter-section') || {}).value || '';
+      var responsibilityFilter = (document.getElementById('tasks-filter-responsibility') || {}).value || '';
       var showDone = sectionFilter === 'Done';
       var tasks = _allTasks.filter(function(t) {
         if (projectFilter && t.project !== projectFilter) return false;
+        if (responsibilityFilter && (t.responsibility || 'agent') !== responsibilityFilter) return false;
         if (sectionFilter && t.section !== sectionFilter) return false;
         if (!sectionFilter && t.section === 'Done') return false;
         return true;
       });
       var doneTasks = showDone ? [] : _allTasks.filter(function(t) {
         if (projectFilter && t.project !== projectFilter) return false;
+        if (responsibilityFilter && (t.responsibility || 'agent') !== responsibilityFilter) return false;
         return t.section === 'Done' || t.checked;
       });
 
@@ -1040,12 +1074,17 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       function isNotDone(t) { return t.section !== 'Done' && !t.checked; }
 
       function renderTaskRow(t) {
+        var index = _allTasks.indexOf(t);
+        var taskMatch = t.stableId ? 'bid:' + t.stableId : t.id;
         var isDone = t.section === 'Done' || t.checked;
         var priClass = t.priority ? 'task-row-priority-' + esc(t.priority) : 'task-row-priority-none';
         var html = '<div class="task-row' + (isDone ? ' task-row-done' : '') + '">';
         html += '<div class="task-row-priority ' + priClass + '"></div>';
         html += '<div class="task-row-content">';
         html += '<span class="task-row-text">' + esc(t.line) + '</span>';
+        html += '<div>' + esc((t.responsibility || 'agent') === 'human' ? 'Human' : 'Agent') + ' · ' + esc(t.readiness || 'ready') + '</div>';
+        (t.prerequisites || []).forEach(function(d) { html += '<div>' + (d.completed ? '✓ ' : 'Waiting on ') + esc(d.title) + '</div>'; });
+        html += '<div id="task-prerequisites-' + index + '" hidden></div>';
         html += '</div>';
         html += '<div class="task-row-meta">';
         html += pinIndicator(t.pinned);
@@ -1054,10 +1093,13 @@ export function renderTasksAndSettingsScript(authToken: string): string {
         html += projectBadge(t.project);
         html += '</div>';
         html += '<div class="task-row-actions">';
+        html += '<select aria-label="Task responsibility" data-task-field="responsibility" data-index="' + index + '"><option value="agent"' + ((t.responsibility || 'agent') === 'agent' ? ' selected' : '') + '>Agent</option><option value="human"' + (t.responsibility === 'human' ? ' selected' : '') + '>Human</option></select>';
+        html += '<select aria-label="Task section" data-task-field="section" data-index="' + index + '">' + ['Queue', 'Active', 'Done'].map(function(section) { return '<option' + (t.section === section ? ' selected' : '') + '>' + section + '</option>'; }).join('') + '</select>';
+        html += '<button data-ts-action="editPrerequisites" data-index="' + index + '">Prerequisites</button>';
         if (!isDone) {
-          html += '<button class="task-action-btn task-action-complete" data-ts-action="completeTask" data-project="' + esc(t.project) + '" data-item="' + esc(t.line) + '" title="Mark done"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>';
+          html += '<button class="task-action-btn task-action-complete" data-ts-action="completeTask" data-project="' + esc(t.project) + '" data-item="' + esc(taskMatch) + '" title="Mark done"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.5 3.5 6.5-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>';
         }
-        html += '<button class="task-action-btn task-action-delete" data-ts-action="removeTask" data-project="' + esc(t.project) + '" data-item="' + esc(t.line) + '" title="Delete task"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
+        html += '<button class="task-action-btn task-action-delete" data-ts-action="removeTask" data-project="' + esc(t.project) + '" data-item="' + esc(taskMatch) + '" title="Delete task"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
         html += '</div>';
         html += '</div>';
         return html;
@@ -1668,7 +1710,9 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       var actionEl = target.closest('[data-ts-action]');
       if (!actionEl) return;
       var action = actionEl.getAttribute('data-ts-action');
-      if (action === 'toggleDoneSection') { toggleDoneSection(actionEl); }
+      if (action === 'editPrerequisites') { editTaskContract(Number(actionEl.getAttribute('data-index')), 'dependencies', 'edit'); }
+      else if (action === 'savePrerequisites') { editTaskContract(Number(actionEl.getAttribute('data-index')), 'dependencies', 'save'); }
+      else if (action === 'toggleDoneSection') { toggleDoneSection(actionEl); }
       else if (action === 'completeTask') { completeTaskFromUi(actionEl.getAttribute('data-project'), actionEl.getAttribute('data-item')); }
       else if (action === 'removeTask') { removeTaskFromUi(actionEl.getAttribute('data-project'), actionEl.getAttribute('data-item')); }
       else if (action === 'addTask') { addTaskFromUi(actionEl.getAttribute('data-project')); }
@@ -2062,6 +2106,9 @@ export function renderEventWiringScript(): string {
   // --- Tasks filters ---
   var tasksFilterProject = document.getElementById('tasks-filter-project');
   if (tasksFilterProject) tasksFilterProject.addEventListener('change', function() { filterTasks(); });
+  document.addEventListener('change', function(e) { var el = e.target; if (el && el.hasAttribute('data-task-field')) editTaskContract(Number(el.getAttribute('data-index')), el.getAttribute('data-task-field'), el.value); });
+  var taskResponsibilityFilter = document.getElementById('tasks-filter-responsibility');
+  if (taskResponsibilityFilter) taskResponsibilityFilter.addEventListener('change', function() { filterTasks(); });
   var tasksFilterSection = document.getElementById('tasks-filter-section');
   if (tasksFilterSection) tasksFilterSection.addEventListener('change', function() { filterTasks(); });
 

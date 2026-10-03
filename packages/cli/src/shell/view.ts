@@ -1,3 +1,4 @@
+import { taskReadiness } from "../data/task-contract.js";
 import { moduleEnabled } from "../modules/runtime.js";
 /**
  * View rendering functions for the phren interactive shell.
@@ -440,12 +441,15 @@ function renderTaskView(ctx: ViewContext, cursor: number, height: number, subsec
     const lineText = isDone ? style.dim(item.line) : item.line;
     const idStr = style.dim(item.id.padEnd(3));
 
-    let row = `    ${prioIcon} ${statusIcon} ${idStr} ${lineText}${pinTag}${ghTag}`;
+    const ready = taskReadiness(ctx.phrenPath, parsed, item);
+    const laneTag = ` [${ready.responsibility} · ${ready.readiness}]`;
+    let row = `    ${prioIcon} ${statusIcon} ${idStr} ${lineText}${pinTag}${ghTag}${laneTag}`;
     row = isSelected && !isDone
       ? formatSelectableLine(row, cols, true)
       : truncateLine(row, cols);
     allLines.push(row);
 
+    for (const prerequisite of ready.prerequisites) allLines.push(truncateLine(`              ${prerequisite.completed ? "✓" : "Waiting on"} ${prerequisite.title}`, cols));
     if (item.context) {
       const ctxLine = `              ${style.dimItalic("→ " + item.context)}`;
       allLines.push(isSelected && !isDone ? formatSelectableLine(ctxLine, cols, true) : truncateLine(ctxLine, cols));
