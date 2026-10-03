@@ -47,8 +47,12 @@ export class SearchResponseError extends Error {
 export function searchTokenUsage(raw: unknown, inputKey = "input_tokens", outputKey = "output_tokens"): TokenUsage | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const value = raw as Record<string, unknown>;
-  const count = (key: string) => typeof value[key] === "number" && Number.isFinite(value[key]) && (value[key] as number) >= 0 ? value[key] as number : 0;
-  return { input_tokens: count(inputKey), output_tokens: count(outputKey) };
+  const count = (key: string) => typeof value[key] === "number" && Number.isSafeInteger(value[key]) && (value[key] as number) >= 0 ? value[key] as number : 0;
+  const cacheRead = count("cache_read_input_tokens"), cacheWrite = count("cache_creation_input_tokens");
+  return { input_tokens: count(inputKey), output_tokens: count(outputKey),
+    ...(cacheRead ? { cache_read_input_tokens: cacheRead } : {}),
+    ...(cacheWrite ? { cache_creation_input_tokens: cacheWrite } : {}),
+  };
 }
 
 /** Native API search is $10/1,000 calls, in addition to model tokens.

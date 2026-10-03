@@ -65,6 +65,7 @@ export interface AgentSpawnerOptions {
   depth?: number;
   maxDepth?: number;
   getPermissionDefaults?: () => PermissionConfig | undefined;
+  getParentHooks?: () => import("../user-hooks.js").HooksConfig | null;
 }
 
 export interface AgentSpawnerEvents {
@@ -143,6 +144,7 @@ export class AgentSpawner extends EventEmitter {
   private maxDepth: number;
   private getPermissionDefaults?: () => PermissionConfig | undefined;
   private getParentProvider?: AgentSpawnerOptions["getParentProvider"];
+  private getParentHooks?: AgentSpawnerOptions["getParentHooks"];
 
   constructor(opts: AgentSpawnerOptions = {}) {
     super();
@@ -151,6 +153,7 @@ export class AgentSpawner extends EventEmitter {
     this.maxDepth = opts.maxDepth ?? MAX_SPAWN_DEPTH;
     this.getPermissionDefaults = opts.getPermissionDefaults;
     this.getParentProvider = opts.getParentProvider;
+    this.getParentHooks = opts.getParentHooks;
   }
 
   canSpawn(): boolean {
@@ -200,6 +203,7 @@ export class AgentSpawner extends EventEmitter {
       network: defaults?.network,
       allowedPaths: opts.allowedPaths ?? defaults?.allowedPaths ?? [],
       rules: defaults?.rules,
+      ...(this.getParentHooks ? { hookConfig: this.getParentHooks() } : {}),
     };
 
     const entry: AgentEntry = {

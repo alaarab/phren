@@ -1,4 +1,4 @@
-import { SearchResponseError, nativeSearchFee, searchJson, searchSources, type WebSearchResponse } from "./web-search.js";
+import { SearchResponseError, nativeSearchFee, searchJson, searchSources, searchTokenUsage, type WebSearchResponse } from "./web-search.js";
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta, TokenUsage } from "./types.js";
 import { IncompleteStreamError, RetryableProviderError, withPartialUsage } from "./types.js";
 import { stripForeignReasoning } from "./history.js";
@@ -79,7 +79,7 @@ export class AnthropicProvider implements LlmProvider {
     });
     if (!res.ok) { await res.body?.cancel(); throw new Error(`Anthropic search returned HTTP ${res.status}`); }
     const data = await searchJson(res), sources: unknown[] = [], text: string[] = [];
-    const usage = data.usage ? anthropicUsage(data.usage) : undefined, searchFee = nativeSearchFee(data.usage?.server_tool_use?.web_search_requests);
+    const usage = searchTokenUsage(data.usage), searchFee = nativeSearchFee(data.usage?.server_tool_use?.web_search_requests);
     if (data.type === "error" || data.stop_reason !== "end_turn" || !Array.isArray(data.content)) throw new SearchResponseError("Anthropic search did not complete.", usage, undefined, searchFee);
     for (const block of data.content) {
       if (!block || typeof block !== "object") continue;
