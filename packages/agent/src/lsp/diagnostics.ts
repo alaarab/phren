@@ -53,8 +53,8 @@ export class LspConnection {
     child.stdin.on("error", () => this.close());
     // Drain stderr; its arbitrary server text is never inserted into model context.
     child.stderr.resume();
-    child.on("error", () => this.fail());
-    child.on("exit", () => this.fail());
+    child.on("error", () => this.close());
+    child.on("exit", () => this.close());
     this.ready = this.request("initialize", { processId: process.pid, rootUri: pathToFileURL(root).href,
       workspaceFolders: [{ uri: pathToFileURL(root).href, name: path.basename(root) }],
       capabilities: { workspace: { applyEdit: false, configuration: true }, textDocument: { publishDiagnostics: { versionSupport: true }, diagnostic: {} } },
