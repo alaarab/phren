@@ -1,4 +1,4 @@
-import { SearchResponseError, searchJson, searchSources, type WebSearchResponse } from "./web-search.js";
+import { SearchResponseError, nativeSearchFee, searchJson, searchSources, type WebSearchResponse } from "./web-search.js";
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta, TokenUsage } from "./types.js";
 import { IncompleteStreamError, RetryableProviderError, withPartialUsage } from "./types.js";
 import { stripForeignReasoning } from "./history.js";
@@ -79,15 +79,16 @@ export class AnthropicProvider implements LlmProvider {
     });
     if (!res.ok) { await res.body?.cancel(); throw new Error(`Anthropic search returned HTTP ${res.status}`); }
     const data = await searchJson(res), sources: unknown[] = [], text: string[] = [];
-    const usage = data.usage ? anthropicUsage(data.usage) : undefined;
-    if (data.type === "error" || data.stop_reason !== "end_turn" || !Array.isArray(data.content)) throw new SearchResponseError("Anthropic search did not complete.", usage);
+    const usage = data.usage ? anthropicUsage(data.usage) : undefined, searchFee = nativeSearchFee(data.usage?.server_tool_use?.web_search_requests);
+    if (data.type === "error" || data.stop_reason !== "end_turn" || !Array.isArray(data.content)) throw new SearchResponseError("Anthropic search did not complete.", usage, undefined, searchFee);
     for (const block of data.content) {
+      if (!block || typeof block !== "object") continue;
       if (block.type === "web_search_tool_result") {
         if (Array.isArray(block.content)) sources.push(...block.content);
-        else if (block.content?.type === "web_search_tool_result_error") throw new SearchResponseError("Anthropic search failed.", usage);
+        else if (block.content?.type === "web_search_tool_result_error") throw new SearchResponseError("Anthropic search failed.", usage, undefined, searchFee);
       } else if (block.type === "text") { if (typeof block.text === "string") text.push(block.text); sources.push(...(Array.isArray(block.citations) ? block.citations : [])); }
     }
-    return { answer: text.join("\n").slice(0, 8000), sources: searchSources(sources, limit), usage };
+    return { answer: text.join("\n").slice(0, 8000), sources: searchSources(sources, limit), usage, searchFee };
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {

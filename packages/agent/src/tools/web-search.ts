@@ -49,6 +49,7 @@ export function createWebSearchTool(options: { provider?: () => LlmProvider; cos
           const priorCost = tracker.totalCost;
           if (response.usage) recordTokenUsage(tracker, response.usage);
           if (typeof response.billedCost === "number" && Number.isFinite(response.billedCost) && response.billedCost >= 0) { tracker.totalCost = priorCost + response.billedCost; tracker.metered = true; }
+          else if (typeof response.searchFee === "number" && Number.isFinite(response.searchFee) && response.searchFee >= 0) { tracker.totalCost += response.searchFee; tracker.metered = true; }
         }
         // A selected native backend owns this request, even if its response
         // is empty or malformed. Never spend again through a fallback.
@@ -69,7 +70,10 @@ export function createWebSearchTool(options: { provider?: () => LlmProvider; cos
         if (tracker) {
           const priorCost = tracker.totalCost;
           if (usage) recordTokenUsage(tracker, usage);
-          if (err instanceof SearchResponseError && typeof err.billedCost === "number" && Number.isFinite(err.billedCost) && err.billedCost >= 0) { tracker.totalCost = priorCost + err.billedCost; tracker.metered = true; }
+          if (err instanceof SearchResponseError) {
+            if (typeof err.billedCost === "number" && Number.isFinite(err.billedCost) && err.billedCost >= 0) { tracker.totalCost = priorCost + err.billedCost; tracker.metered = true; }
+            else if (typeof err.searchFee === "number" && Number.isFinite(err.searchFee) && err.searchFee >= 0) { tracker.totalCost += err.searchFee; tracker.metered = true; }
+          }
         }
         // Provider bodies may contain credentials or echoed prompt text.
         return { output: signal?.aborted ? "Search cancelled." : "Web search failed or returned an incomplete response; no fallback was attempted.", is_error: true };
