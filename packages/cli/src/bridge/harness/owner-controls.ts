@@ -27,10 +27,10 @@ export async function requireOwnerControl(headers: IncomingHttpHeaders, method: 
   if (!/^\d{13}$/.test(time) || Math.abs(Date.now() - Number(time)) > 120000 || !z.string().uuid().safeParse(nonce).success
     || !/^[A-Za-z0-9+/]{86}==$/.test(signature)) throw new BridgeError(403, "A fresh signed owner request is required.");
   const key = publicComputerKey("ssh-ed25519 " + encoded);
-  const directory = await lstat(sshDirectory), file = path.join(sshDirectory, "authorized_keys"), info = await lstat(file);
-  if (!directory.isDirectory() || directory.isSymbolicLink() || directory.mode & 0o022 || !info.isFile() || info.isSymbolicLink() || info.size > 1048576
+  const directory = await lstat(sshDirectory).catch(() => undefined), file = path.join(sshDirectory, "authorized_keys"), info = await lstat(file).catch(() => undefined);
+  if (!directory?.isDirectory() || directory.isSymbolicLink() || directory.mode & 0o022 || !info?.isFile() || info.isSymbolicLink() || info.size > 1048576
     || (info.mode & 0o022) || process.getuid && (info.uid !== process.getuid() || directory.uid !== process.getuid())) throw new BridgeError(403, "Paired owner keys are unavailable.");
-  const text = await readFile(file, "utf8");
+  const text = await readFile(file, "utf8").catch(() => { throw new BridgeError(403, "Paired owner keys are unavailable."); });
   const paired = text.split(/\r?\n/).some(line => {
     const match = /^(.*) (ssh-ed25519 [A-Za-z0-9+/]+={0,2}) phren-(iphone|android)\s*$/.exec(line);
     return match?.[2] === key && match[1].startsWith("restrict,") && match[1].includes('command="sh ~/.local/share/phren/bridge/dispatch"');

@@ -751,15 +751,23 @@ identity, scoped authorization and owner proof remain required. The return RPC
 and actual existing-agent binding remain incomplete; this scope change does not
 claim they work. No new SSH connection or substitute agent is authorized.
 
-The owner deferred new computer enrollment, phone enrollment management and
-general peer administration from 176. Their isolated donor source and review
-evidence are retained for later work. The new computer-enrollment and harness
-peer-administration HTTP routes are unavailable and absent from the advertised
-manifest. The phone linking screen is unavailable and its enrollment client
-methods cannot reach transport. Existing pairing and previously enrolled
-connections remain supported. Conductor leases, owner signatures, tasks,
-dependencies and other requested core/iOS work remain in scope.
+The current owner assignment restores reachable native lease, two-sided computer
+enrollment and existing-peer repair source to Astra's scope; R remains task-only.
+The conductor module exposes canonical generation/claim controls and the four
+`/v1/computers/enrollment/{prepare,review,confirm,verify}` routes. Their POSTs and
+peer repair require fresh paired-phone Ed25519 proof plus configuration rights.
+`canonicalOwnerControls: "ed25519-v1"` advertises that canonical protection;
+`harnessOwnerControls` alone is insufficient. No runtime action is authorized by
+this source integration.
 
-Only this explicit deferral is removed from complete-candidate acceptance.
-Build-only feature checks precede one full immutable core+iOS RC/TestFlight;
-Android remains independent. No execution is authorized by the scope change.
+The phone uses two existing paired connections, shows exact computer IDs,
+connection details and public host/dispatch-key fingerprints, and asks separately
+before preparation and each trust confirmation. Partial key acceptance stays
+incomplete. Retries and verification are explicit. Existing-peer repair changes
+local routing only, with an unchanged reviewed pin and exact remote ID; missing
+enrollment never triggers an automatic enrollment fallback. Unknown holder,
+config and review fields and full owner-control error bodies are retained.
+
+This is unbuilt source, not phone acceptance. Build-only checks and the full
+immutable core+iOS RC remain required; Android is independent. Live enrollment,
+lease changes, service operations and task metadata activation remain unauthorized.

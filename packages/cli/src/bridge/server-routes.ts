@@ -1,6 +1,8 @@
 import { harnessInfo, boundHarness } from "./harness/bindings.js";
 import { requireOwnerControl } from "./harness/owner-controls.js";
-import { configureStoreLease, changeStoreLease, readStoreLease } from "./harness/store-lease.js";
+import { permissionDeniedError } from "../governance/rbac.js";
+import { peerRepairView, repairPeer } from "./harness/peer-controls.js";
+import { prepareComputerEnrollment, reviewComputerEnrollment, confirmComputerEnrollment, verifyComputerEnrollment } from "./computer-enrollment.js";
 import { runnerForPane, runnerRequest } from "./harness/runner-client.js";
 import { proxyOperation, proxyView, registerProxy, reverseProxyPlan } from "./harness/remote-proxy.js";
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute } from "./task-routes.js";
@@ -147,7 +149,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 }
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
-  harnessOwnerControls: "ed25519-v1", harnessProxy: true, storeConductorLease: true,
+  harnessOwnerControls: "ed25519-v1", harnessProxy: true, canonicalOwnerControls: "ed25519-v1", computerEnrollment: true, peerRepair: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
   files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, conductorLease: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, harnessAdapters: true };
@@ -161,14 +163,13 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
 }
 
 export function requireRoute(snapshot: ModuleSnapshot, method: string, route: string): void {
-  // Owner deferred new enrollment and general peer administration from 176.
-  // Reject before body handling, key creation, peer SSH or trust mutation.
-  if (route === "/v1/computers/enrollment" || route.startsWith("/v1/computers/enrollment/")
-    || route === "/v1/harness/peers" || route.startsWith("/v1/harness/peers/")) {
-    throw new BridgeError(404, "Computer enrollment and peer administration are unavailable in this release.");
+  // Retired Q lease/enrollment protocols must not bypass the canonical workflow.
+  if (route === "/v1/harness/lease" || route.startsWith("/v1/harness/lease/")
+    || route === "/v1/harness/peers/enroll" || route === "/v1/harness/peers/enrollment-plan" || route === "/v1/harness/peers/plan") {
+    throw new BridgeError(404, "Use the canonical conductor lease and two-sided computer enrollment routes.");
   }
-  if (route.startsWith("/v1/harness/")) {
-    const module = route.startsWith("/v1/harness/lease") ? "conductor" : "hook";
+  if (route.startsWith("/v1/harness/") || route.startsWith("/v1/computers/enrollment/")) {
+    const module = route.startsWith("/v1/harness/peers") || route.startsWith("/v1/computers/enrollment/") ? "conductor" : "hook";
     if (!snapshot.has(module)) throw new BridgeError(404, disabledHint(module));
   }
   const owner = BUILTIN_MODULES.find(module => module.hookRoutes.some(entry => entry.method === method && entry.path === route));
@@ -369,7 +370,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       } else if (request.method === "GET") {
         switch (url.pathname) {
           case "/v1/harness/session": result = await harnessInfo(targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}"))); break;
-          case "/v1/harness/lease": result = await readStoreLease(modules.store, url.searchParams.get("storeId") ?? undefined, url.searchParams.get("authority") === "1"); break;
+          case "/v1/harness/peers": result = await peerRepairView(); break;
           case "/v1/harness/proxies": result = await proxyView(info.computer.name); break;
           case "/v1/harness/proxy/session": case "/v1/harness/proxy/thread": case "/v1/harness/proxy/events": case "/v1/harness/proxy/requests": case "/v1/harness/proxy/delivery":
             result = await proxyOperation(url.pathname.split("/").at(-1)!, Object.fromEntries(url.searchParams)); break;
@@ -617,11 +618,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       } else if (request.method === "POST") {
         const data = await body(request);
         if (url.pathname.startsWith("/v1/harness/")) await requireOwnerControl(request.headers, "POST", url.pathname, data);
-        if (url.pathname === "/v1/harness/lease/authority") result = await configureStoreLease(modules.store, data);
-        else if (url.pathname === "/v1/harness/proxies/register") result = await registerProxy(data);
+        if (url.pathname === "/v1/harness/peers/repair") {
+          const denied = permissionDeniedError(modules.store, "manage_config");
+          if (denied) throw new BridgeError(403, denied);
+          result = await repairPeer(data);
+        } else if (url.pathname === "/v1/harness/proxies/register") result = await registerProxy(data);
         else if (url.pathname === "/v1/harness/proxy/plan") result = reverseProxyPlan(data);
         else if (url.pathname.startsWith("/v1/harness/proxy/")) result = await proxyOperation(url.pathname.split("/").at(-1)!, data);
-        else if (["/v1/harness/lease/acquire", "/v1/harness/lease/revoke", "/v1/harness/lease/takeover"].includes(url.pathname)) result = await changeStoreLease(modules.store, url.pathname.split("/").at(-1) as "acquire" | "revoke" | "takeover", data);
         else if (["/v1/harness/model", "/v1/harness/takeover", "/v1/harness/approval", "/v1/harness/input"].includes(url.pathname)) {
           const target = targetSchema.parse(data.target), adapter = await boundHarness(target, data.ownerId);
           if (url.pathname === "/v1/harness/model") {
@@ -718,6 +721,18 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           if (data.origin !== undefined) throw new BridgeError(403, "Only the owner changes the release authority policy, from the phone or `phren authority` in their own terminal.");
           result = url.pathname === "/v1/authority" ? { ok: true, authority: await setProjectAuthority(data, "phone") }
             : { ok: true, confirmation: await confirmAuthority(data, "phone") };
+        } else if (url.pathname === "/v1/computers/enrollment/prepare") {
+          await requireOwnerControl(request.headers, "POST", url.pathname, data);
+          result = await prepareComputerEnrollment(modules.store, computerID, data);
+        } else if (url.pathname === "/v1/computers/enrollment/review") {
+          await requireOwnerControl(request.headers, "POST", url.pathname, data);
+          result = await reviewComputerEnrollment(modules.store, computerID, data);
+        } else if (url.pathname === "/v1/computers/enrollment/confirm") {
+          await requireOwnerControl(request.headers, "POST", url.pathname, data);
+          result = await confirmComputerEnrollment(modules.store, computerID, data);
+        } else if (url.pathname === "/v1/computers/enrollment/verify") {
+          await requireOwnerControl(request.headers, "POST", url.pathname, data);
+          result = await verifyComputerEnrollment(modules.store, data);
         } else if (url.pathname === "/v1/conductor/lease/grant") {
           await requireOwnerControl(request.headers, "POST", url.pathname, data);
           result = await changeConductorLease(modules.store, "acquire", data);

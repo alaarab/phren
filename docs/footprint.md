@@ -289,3 +289,10 @@ identity configuration), `.runtime/conductor-lease.json`,
 The runtime files are private. A failed launch keeps its admission; no age-based
 cleanup releases a conductor. These owner-state writers use exclusive `.lock`
 directories whose interrupted writes require explicit owner reconciliation.
+
+Canonical two-sided enrollment stores private, expiring public-identity reviews
+at `<bridge>/computer-enrollment/<UUID>.json`. Signed owner writes also update the
+private `<bridge>/harness/owner-nonces.json` replay ledger. Merely opening the
+native linking screen creates neither; preparation, review and confirmation are
+separate explicit actions. Repair updates `<bridge>/hooks.yaml` under its shared
+nonwaiting owner lock and never changes keys or pins.

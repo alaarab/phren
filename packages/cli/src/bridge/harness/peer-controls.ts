@@ -10,7 +10,10 @@ import { lockedState } from "./private-state.js";
 import { linkComputer, sshConfigHosts } from "../link.js";
 
 export async function peerRepairView() {
-  const peers = await hookPeers();
+  const peers = await hookPeers().catch(error => {
+    if (error instanceof BridgeError && error.details?.hooksYaml === "missing") return [];
+    throw error;
+  });
   return { peers: peers.map(peer => ({ ...peer, repairScope: "existing-enrollment-and-unchanged-pin" })), newEnrollment: "explicit-owner-confirmation-and-verified-pin" };
 }
 
@@ -18,9 +21,9 @@ export async function peerRepairView() {
 export async function repairPeer(input: unknown) {
   const data = z.object({ name: computerName, expectedHostKey: z.string().transform(publicComputerKey), backPeer: peerSchema, expectedComputerId: z.string().uuid() }).strict().parse(input);
   if (data.backPeer.name !== data.name || data.backPeer.hostKey !== data.expectedHostKey) throw new BridgeError(409, "Repair must retain the peer name and verified pin.");
-  const keys = path.join(homedir(), ".ssh", "authorized_keys"), info = await lstat(keys);
-  if (!info.isFile() || info.isSymbolicLink() || info.size > 1048576 || (info.mode & 0o022)) throw new BridgeError(409, "Existing computer enrollment cannot be verified.");
-  const enrolled = (await readFile(keys, "utf8")).split(/\r?\n/).some(line => line.startsWith("restrict,") && line.includes('command="sh ~/.local/share/phren/bridge/dispatch"') && line.endsWith(" phren-computer:" + data.name));
+  const keys = path.join(homedir(), ".ssh", "authorized_keys"), info = await lstat(keys).catch(() => undefined);
+  if (!info?.isFile() || info.isSymbolicLink() || info.size > 1048576 || (info.mode & 0o022)) throw new BridgeError(409, "Existing computer enrollment cannot be verified.");
+  const enrolled = (await readFile(keys, "utf8").catch(() => { throw new BridgeError(409, "Existing computer enrollment cannot be verified."); })).split(/\r?\n/).some(line => line.startsWith("restrict,") && line.includes('command="sh ~/.local/share/phren/bridge/dispatch"') && line.endsWith(" phren-computer:" + data.name));
   if (!enrolled) throw new BridgeError(409, "This computer has no existing SSH enrollment for that peer. New enrollment requires explicit owner confirmation and a verified pin.");
   const health = await peerRequest(data.backPeer, "/v1/health");
   if ((health.computer as { id?: string })?.id !== data.expectedComputerId) throw new BridgeError(409, "The pinned peer reports a different computer identity.");

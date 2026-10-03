@@ -106,8 +106,7 @@ owner decision with a new proof after refreshing its current state.
 
 All lease routes use the one registered store identity, canonical
 `.config/conductor-authority.json` and `.runtime/conductor-lease.json` ledger.
-The `/v1/harness/lease` routes are compatibility views over that ledger; they
-never create a second authority. Distribute the fixed configuration to every
+The competing `/v1/harness/lease` HTTP routes are retired (404). Distribute the fixed configuration to every
 participating checkout. Public identity configuration may be Git mode 0644;
 private runtime state and admissions remain mode 0600.
 
@@ -118,14 +117,8 @@ private runtime state and admissions remain mode 0600.
 | POST `/v1/conductor/lease/grant` | `{expectedGeneration, computerId, launchId, confirm:true}`; signed owner, empty holder only |
 | POST `/v1/conductor/lease/revoke` | `{expectedGeneration, holder, confirm:true}`; exact reviewed holder, signed owner |
 | POST `/v1/conductor/lease/authority` | Peer read/admit/bind only; peers cannot acquire, revoke or replace a grant |
-| GET `/v1/harness/lease` | Compatibility holder with `leaseId` mapped to canonical `claimId`, plus generation |
-| GET `/v1/harness/lease?authority=1&storeId=<8hex>` | Must be the named authority and registered store; refuses redirects |
-| POST `/v1/harness/lease/authority` | `{storeId:<8hex>, computerId:<UUID>}`; same canonical configuration |
-| POST `/v1/harness/lease/acquire` | `{expectedGeneration, computerId, launchId}`; signed owner, empty holder only |
-| POST `/v1/harness/lease/revoke` | `{expectedGeneration, expectedLeaseId}` |
-| POST `/v1/harness/lease/takeover` | `{expectedGeneration, expectedLeaseId, computerId, launchId}`; atomic explicit owner replacement |
 
-Grant/revoke/takeover go directly to the paired authority computer. The holder
+Grant and exact-holder revoke go directly to the paired authority computer. The holder
 has no expiration. An unreachable authority blocks every new launch, including
 schedules and workers. A conductor consumes one durable admission at the fixed authority for the
 owner-granted launch ID; failed or uncertain launches retain that reservation.
@@ -152,26 +145,30 @@ changes to the exact paired authority. Its explicit conductor move reviews the
 holder/generation before revocation; uncertain launches never automatically
 start a replacement on the old machine. All native/runtime checks remain UNRUN.
 
-## Deferred source: existing-peer repair and new enrollment
+## Existing-peer repair and canonical two-sided enrollment
 
-The APIs in this section are retained donor design, unavailable in 176.
+`GET /v1/harness/peers` returns existing routing and repair scope. Signed
+`POST /v1/harness/peers/repair` takes `{name, expectedHostKey,
+expectedComputerId, backPeer}`. It verifies existing restricted enrollment,
+unchanged host pin and pinned remote identity before updating local routing under
+the same hooks.yaml lock used by enrollment. Missing enrollment is refused.
 
-| API | Contract |
-| --- | --- |
-| GET `/v1/harness/peers` | Existing peer rows and repair scope |
-| POST `/v1/harness/peers/repair` | `{name, expectedHostKey, expectedComputerId, backPeer:<existing Peer schema>}` |
-| POST `/v1/harness/peers/enrollment-plan` | `{ownerConfirmed:true, name, hostKey}`; returns `performed:false`, manual steps |
-| POST `/v1/harness/peers/enroll` | `{ownerConfirmed:true, host:<existing owner SSH alias>, expectedHostKey, name?, as?, backAddress?}` |
+New enrollment uses only `/v1/computers/enrollment/prepare`, `/review`, `/confirm`
+and `/verify` under the conductor module. Prepare takes `{name,
+confirmKeyCreation:true}`; review takes `{peer}` from the other authenticated
+Hook. The flattened review has a required ISO-8601 string `expiresAt`. Confirm
+relays `{reviewId, confirm:true, peerComputerId, hostFingerprint, keyFingerprint}`.
+`key-accepted-awaiting-verification` with `linked:false` is partial trust, not a
+successful link. After reverse confirmation, retry the same unexpired review
+explicitly, then verify both saved directions. Verify takes `{name, computerId,
+hostFingerprint}` and returns `state:"verified"` without a `linked` field.
+Q's alternative peer-enroll and leaseId phone protocols are not exposed.
 
-Repair verifies an existing `phren-computer:<name>` local enrollment, uses the
-existing dispatch identity and supplied unchanged host pin to check the remote
-computer UUID, then updates routing under the shared hooks.yaml lock. It never
-generates/exchanges keys or silently replaces a stored pin. New enrollment is a
-separate explicit owner-confirmed operation: existing owner SSH access, strict
-known-host checking and independently verified Ed25519 host key are required
-before the existing link workflow may exchange keys. CLI link now requires
-`--host-key <verified ssh-ed25519 public key>` and explicit confirmation/`--yes`.
-No repair, enrollment, SSH or credential operation was performed in this task.
+All these owner writes use the paired-phone Ed25519 proof. Native health gating
+requires `canonicalOwnerControls:"ed25519-v1"` and the relevant conductor
+capability. HTTP errors retain status and the full JSON body; optional details
+are not coerced into a fixed error enum. No SSH, key, enrollment, service or
+lease operation was performed during this source integration.
 
 ## One QL agent through Omarchy, without QL enrollment
 
@@ -312,15 +309,23 @@ identity, scoped authorization and owner proof remain required. The return RPC
 and actual existing-agent binding remain incomplete; this scope change does not
 claim they work. No new SSH connection or substitute agent is authorized.
 
-The owner deferred new computer enrollment, phone enrollment management and
-general peer administration from 176. Their isolated donor source and review
-evidence are retained for later work. The new computer-enrollment and harness
-peer-administration HTTP routes are unavailable and absent from the advertised
-manifest. The phone linking screen is unavailable and its enrollment client
-methods cannot reach transport. Existing pairing and previously enrolled
-connections remain supported. Conductor leases, owner signatures, tasks,
-dependencies and other requested core/iOS work remain in scope.
+The current owner assignment restores reachable native lease, two-sided computer
+enrollment and existing-peer repair source to Astra's scope; R remains task-only.
+The conductor module exposes canonical generation/claim controls and the four
+`/v1/computers/enrollment/{prepare,review,confirm,verify}` routes. Their POSTs and
+peer repair require fresh paired-phone Ed25519 proof plus configuration rights.
+`canonicalOwnerControls: "ed25519-v1"` advertises that canonical protection;
+`harnessOwnerControls` alone is insufficient. No runtime action is authorized by
+this source integration.
 
-Only this explicit deferral is removed from complete-candidate acceptance.
-Build-only feature checks precede one full immutable core+iOS RC/TestFlight;
-Android remains independent. No execution is authorized by the scope change.
+The phone uses two existing paired connections, shows exact computer IDs,
+connection details and public host/dispatch-key fingerprints, and asks separately
+before preparation and each trust confirmation. Partial key acceptance stays
+incomplete. Retries and verification are explicit. Existing-peer repair changes
+local routing only, with an unchanged reviewed pin and exact remote ID; missing
+enrollment never triggers an automatic enrollment fallback. Unknown holder,
+config and review fields and full owner-control error bodies are retained.
+
+This is unbuilt source, not phone acceptance. Build-only checks and the full
+immutable core+iOS RC remain required; Android is independent. Live enrollment,
+lease changes, service operations and task metadata activation remain unauthorized.
