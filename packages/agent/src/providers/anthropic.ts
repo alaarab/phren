@@ -1,4 +1,4 @@
-import { searchSources, type WebSearchResponse } from "./web-search.js";
+import { SearchResponseError, searchJson, searchSources, type WebSearchResponse } from "./web-search.js";
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta, TokenUsage } from "./types.js";
 import { IncompleteStreamError, RetryableProviderError, withPartialUsage } from "./types.js";
 import { stripForeignReasoning } from "./history.js";
@@ -74,18 +74,20 @@ export class AnthropicProvider implements LlmProvider {
   supportsWebSearch() { return true; }
   async searchWeb(query: string, limit: number, signal?: AbortSignal): Promise<WebSearchResponse> {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST", headers: { "Content-Type": "application/json", "x-api-key": this.apiKey, "anthropic-version": "2023-06-01" }, signal,
+      method: "POST", redirect: "error", headers: { "Content-Type": "application/json", "x-api-key": this.apiKey, "anthropic-version": "2023-06-01" }, signal,
       body: JSON.stringify({ model: this.model, max_tokens: Math.min(this.maxOutputTokens, 2048), messages: [{ role: "user", content: `Search the web for: ${query}. Provide concise findings with source citations.` }], tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 1 }] }),
     });
-    if (!res.ok) throw new Error(`Anthropic search returned HTTP ${res.status}`);
-    const data = await res.json() as Record<string, any>, sources: unknown[] = [], text: string[] = [];
-    for (const block of data.content ?? []) {
+    if (!res.ok) { await res.body?.cancel(); throw new Error(`Anthropic search returned HTTP ${res.status}`); }
+    const data = await searchJson(res), sources: unknown[] = [], text: string[] = [];
+    const usage = data.usage ? anthropicUsage(data.usage) : undefined;
+    if (data.type === "error" || data.stop_reason !== "end_turn" || !Array.isArray(data.content)) throw new SearchResponseError("Anthropic search did not complete.", usage);
+    for (const block of data.content) {
       if (block.type === "web_search_tool_result") {
         if (Array.isArray(block.content)) sources.push(...block.content);
-        else if (block.content?.type === "web_search_tool_result_error") throw new Error(`Anthropic search failed: ${block.content.error_code}`);
-      } else if (block.type === "text") { text.push(block.text ?? ""); sources.push(...(block.citations ?? [])); }
+        else if (block.content?.type === "web_search_tool_result_error") throw new SearchResponseError("Anthropic search failed.", usage);
+      } else if (block.type === "text") { if (typeof block.text === "string") text.push(block.text); sources.push(...(Array.isArray(block.citations) ? block.citations : [])); }
     }
-    return { answer: text.join("\n").slice(0, 8000), sources: searchSources(sources, limit), usage: data.usage ? anthropicUsage(data.usage) : undefined };
+    return { answer: text.join("\n").slice(0, 8000), sources: searchSources(sources, limit), usage };
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {

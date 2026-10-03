@@ -129,6 +129,15 @@ async function runTurnImpl(
   let stopHooksRan = false;
 
   // Why the loop ended; stays "max_turns" if the turn cap runs out.
+  const appendSteering = async (input: string): Promise<boolean> => {
+    const feedback = hookConfig ? await runLifecycleHooks(hookConfig, "UserPromptSubmit", { prompt: input }) : null;
+    if (feedback?.blocked) { status("[steering blocked by a UserPromptSubmit hook]\n"); return false; }
+    let content: string | ContentBlock[] = feedback?.context ? `${input}\n\n<user-prompt-submit-hook>\n${feedback.context}\n</user-prompt-submit-hook>` : input;
+    if (modelSupportsVision(provider.name, provider.model ?? "")) content = attachImages(String(content), registry.permissionConfig.projectRoot).content;
+    session.log.append("user/message", { message: { role: "user", content }, source: "steer", turn: session.turns });
+    resetRepeatChain(session.repeatChain);
+    return true;
+  };
   let endReason: TurnStopReason = "max_turns";
   while (session.turns - turnStart < maxTurns) {
     // Abort check
@@ -238,38 +247,43 @@ async function runTurnImpl(
           // The phone's live preview drops the abandoned attempt's text too.
           preview?.clear();
         };
-        const result = await withRetry(
-          async () => {
-            if (liveSteering) throw new Error("Model response interrupted for steering.");
-            preview?.start(prompted.time);
-            const controller = new AbortController();
-            const streamSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-            // Steering cancels only this unfinished model response. No tool from
-            // it has executed or entered history; the complete prompt is retained.
-            const poll = hooks?.getSteeringInput ? setInterval(() => {
-              if (signal?.aborted || liveSteering) return;
-              const input = hooks.getSteeringInput?.();
-              if (input) { liveSteering = input; controller.abort(); }
-            }, 50) : undefined;
-            try {
-              const result = await consumeStream(
+        const controller = new AbortController();
+        const streamSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+        let onAbort: (() => void) | undefined;
+        const interrupted = new Promise<never>((_, reject) => {
+          onAbort = () => reject(new Error("Model response interrupted."));
+          streamSignal.addEventListener("abort", onAbort, { once: true });
+          if (streamSignal.aborted) onAbort();
+        });
+        // The same signal spans request AND retry backoff. A provider that
+        // ignores abort cannot delay steering or publish abandoned output.
+        const poll = hooks?.getSteeringInput ? setInterval(() => {
+          if (streamSignal.aborted) return;
+          const input = hooks.getSteeringInput?.();
+          if (input) { liveSteering = input; controller.abort(); }
+        }, 50) : undefined;
+        let result: Awaited<ReturnType<typeof consumeStream>>;
+        try {
+          result = await Promise.race([
+            withRetry(async () => {
+              preview?.start(prompted.time);
+              return consumeStream(
                 provider.chatStream!(systemPrompt, session.messages, turnTools, streamSignal),
                 costTracker,
                 {
-                  onTextDelta: (text: string) => { shown += text; onTextDelta(text); preview?.append(text); },
-                  onReasoningDelta,
+                  onTextDelta: (text: string) => { if (!streamSignal.aborted) { shown += text; onTextDelta(text); preview?.append(text); } },
+                  onReasoningDelta: text => { if (!streamSignal.aborted) onReasoningDelta?.(text); },
                   providerName: provider.name,
-                },
-                streamSignal,
+                }, streamSignal,
               );
-              if (liveSteering) throw new Error("Model response interrupted for steering.");
-              return result;
-            } finally { if (poll) clearInterval(poll); }
-          },
-          { onRetry },
-          verbose,
-          signal,
-        );
+            }, { onRetry }, verbose, streamSignal),
+            interrupted,
+          ]);
+          if (liveSteering) throw new Error("Model response interrupted for steering.");
+        } finally {
+          if (poll) clearInterval(poll);
+          if (onAbort) streamSignal.removeEventListener("abort", onAbort);
+        }
         assistantContent = result.content;
         stopReason = result.stop_reason;
         invalidToolCalls = result.invalidToolCalls;
@@ -311,12 +325,13 @@ async function runTurnImpl(
       spinner.stop();
       preview?.clear();
       if (liveSteering) {
-        resetRepeatChain(session.repeatChain);
-        session.log.append("user/message", { message: { role: "user", content: liveSteering }, source: "steer", turn: session.turns });
+        const accepted = await appendSteering(liveSteering);
         hooks?.onStreamRetry?.();
+        if (!accepted) { endReason = "hook_blocked"; break; }
         status("\x1b[2m[steering received; continuing with the new instruction]\x1b[0m\n");
         if (!signal?.aborted) continue;
       }
+      if (signal?.aborted) { endReason = "aborted"; break; }
       // The token estimate is approximate; when the provider itself says the
       // prompt is too long, compact harder (keep 2 turns) and retry once.
       if (!overflowRecovered && !signal?.aborted && isContextOverflowError(err)) {
@@ -358,8 +373,7 @@ async function runTurnImpl(
       // A complete response can contain tool calls; close those before the
       // steering message, so no superseded action executes and no call is orphaned.
       closeDanglingToolUses(session, "Cancelled for a new steering instruction.");
-      session.log.append("user/message", { message: { role: "user", content: completedSteering }, source: "steer", turn: session.turns });
-      resetRepeatChain(session.repeatChain);
+      if (!await appendSteering(completedSteering)) { endReason = "hook_blocked"; break; }
       if (!signal?.aborted) continue;
     }
 
@@ -564,12 +578,7 @@ async function runTurnImpl(
     // Steering input injection (TUI mid-turn input)
     const steer = hooks?.getSteeringInput?.();
     if (steer) {
-      resetRepeatChain(session.repeatChain);
-      session.log.append("user/message", {
-        message: { role: "user", content: steer },
-        source: "steer",
-        turn: session.turns,
-      });
+      if (!await appendSteering(steer)) { endReason = "hook_blocked"; break; }
     }
   }
 
