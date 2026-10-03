@@ -57,6 +57,8 @@ export interface SpawnPayload {
   rules?: import("../permissions/rules.js").PermissionRules;
   /** The parent's --context-window / --price-* and the model they apply to. */
   modelOverrides?: ScopedModelOverrides;
+  /** The parent's approved hooks, retained even when isolation changes cwd. */
+  hookConfig?: import("../user-hooks.js").HooksConfig | null;
 }
 
 /** Parent can send a cancellation signal. */

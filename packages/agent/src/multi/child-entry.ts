@@ -38,6 +38,7 @@ import { buildPhrenContext, } from "../memory/context.js";
 import { startSession, endSession, } from "../memory/session.js";
 import { runAgent, } from "../agent-loop.js";
 import { flushTelemetry } from "../telemetry.js";
+import { loadHooksConfig } from "../user-hooks.js";
 import { createCostTracker } from "../cost.js";
 import { scopeModelOverrides } from "../model-overrides.js";
 import { getAgentType, applyAgentType } from "./agent-types.js";
@@ -112,6 +113,7 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
   if (phrenCtx) { sessionId = startSession(phrenCtx); }
 
   const registry = new ToolRegistry();
+  registry.hookConfig = payload.hookConfig !== undefined ? payload.hookConfig : loadHooksConfig(cwd);
   registry.setPermissions({
     mode: permissions,
     allowedPaths: payload.allowedPaths ?? [],
@@ -171,7 +173,7 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
   let spawner: AgentSpawner | null = null;
   const depth = payload.depth ?? 0;
   if (depth < MAX_SPAWN_DEPTH) {
-    spawner = new AgentSpawner({ costTracker, depth, getPermissionDefaults: () => registry.permissionConfig, getParentProvider: () => provider });
+    spawner = new AgentSpawner({ costTracker, depth, getPermissionDefaults: () => registry.permissionConfig, getParentProvider: () => provider, getParentHooks: () => registry.hookConfig });
     registry.register(createSpawnAgentTool(spawner, () => registry.permissionConfig));
     registry.register(createSendMessageTool(spawner));
     registry.register(createListAgentsTool(spawner));
@@ -221,6 +223,7 @@ async function runTask(state: AgentState, task: string): Promise<DoneEvent["resu
     costTracker: state.costTracker,
     plan: state.plan && state.taskCount === 0, // Plan mode only on first task
     hooks: state.hooks,
+    hookConfig: state.registry.hookConfig,
   };
 
   const result = await runAgent(task, config);
