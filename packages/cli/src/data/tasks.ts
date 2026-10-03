@@ -565,6 +565,10 @@ export function resolveTaskItem(phrenPath: string, project: string, match: strin
 }
 
 export interface AddTaskOptions {
+  /** Atomic metadata creation, with a caller-retained identity for uncertain replies. */
+  stableId?: string;
+  responsibility?: TaskResponsibility;
+  graphRoot?: string;
   createdAt?: string;
   sessionId?: string;
   scope?: string;
@@ -580,16 +584,32 @@ export function addTask(phrenPath: string, project: string, item: string, opts?:
   const preCheck = ensureProject(phrenPath, project);
   if (!preCheck.ok) return forwardErr(preCheck);
 
-  return withSafeLock(bPath, () => {
+  const create = () => withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const line = item.replace(/^-\s*/, "").trim();
+    if (opts?.responsibility !== undefined) {
+      if (!taskFormatStatus(phrenPath).enabled) return phrenErr(taskFormatMigrationHint, PhrenError.VALIDATION_ERROR);
+      if (!["human", "agent"].includes(opts.responsibility) || !opts.stableId || !/^[a-f0-9]{8}$/.test(opts.stableId)) return phrenErr("Atomic creation requires a valid responsibility and stable ID.", PhrenError.VALIDATION_ERROR);
+      if (!line || /[\r\n]/.test(line) || /<!--\s*bid:/i.test(line)) return phrenErr("Task title must be one nonempty line.", PhrenError.VALIDATION_ERROR);
+      const existing = [...parsed.data.items.Active, ...parsed.data.items.Queue, ...parsed.data.items.Done].filter(task => task.stableId === opts.stableId);
+      if (existing.length) {
+        const task = existing[0];
+        if (existing.length === 1 && !task.identityAmbiguous && task.taskContractRaw === undefined && task.line === line && task.responsibility === opts.responsibility) return phrenOk(task);
+        return phrenErr("This creation identity already exists with different task content. Refresh before continuing; no task was created.", PhrenError.VALIDATION_ERROR);
+      }
+      const archive = path.join(phrenPath, ".config", "task-archive", `${project}.md`);
+      try {
+        if (fs.readFileSync(archive, "utf8").includes(`bid:${opts.stableId}`)) return phrenErr("This creation identity is already archived. Refresh before continuing; no task was created.", PhrenError.VALIDATION_ERROR);
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    } else if (opts?.stableId !== undefined) return phrenErr("A supplied creation identity requires explicit responsibility.", PhrenError.VALIDATION_ERROR);
     const newItem: TaskItem = {
       id: `Q${parsed.data.items.Queue.length + 1}`,
-      stableId: newBid(),
+      stableId: opts?.stableId ?? newBid(),
       section: "Queue",
       line,
+      ...(opts?.responsibility !== undefined ? { responsibility: opts.responsibility, dependencies: [], history: [{ at: new Date().toISOString(), change: `created as ${opts.responsibility}` }] } : {}),
       checked: false,
       priority: normalizePriority(line),
       createdAt: opts?.createdAt ?? new Date().toISOString(),
@@ -602,6 +622,7 @@ export function addTask(phrenPath: string, project: string, item: string, opts?:
     writeTaskDoc(parsed.data);
     return phrenOk(newItem);
   });
+  return opts?.responsibility !== undefined ? withTaskGraphLock(opts.graphRoot ?? phrenPath, create) : create();
 }
 
 export function addTasks(phrenPath: string, project: string, items: string[], opts?: Pick<AddTaskOptions, "scope">): PhrenResult<{ added: string[]; errors: string[] }> {

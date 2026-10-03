@@ -39,11 +39,35 @@ Capability `taskDependencies` is advertised only when the tasks module is enable
 - `GET /v1/tasks?storeId=<immutable-id>&project=<slug>` also accepts optional `responsibility`/`readiness` query filters and returns `{ok, version:1, storeId, project, metadataWritable, counts, items:{Active:[],Queue:[],Done:[]}}`. Entries have the same enriched shape as MCP.
 - `POST /v1/tasks/update` accepts `{storeId, project, stableId, updates:{responsibility?, dependencies?, section?}}`. Section uses `Active`, `Queue` or `Done`. The response is the refreshed project task document. The existing contributor/admin `update_task` policy applies; readonly stores refuse updates. No client path can select a store.
 
+Each available directory row and project GET/update response includes:
+
+```typescript
+writerSafety: {
+  version: 1;
+  metadataVersion: 1;
+  activation: "disabled" | "owner-acknowledged";
+  requiresCoordinatedAdoption: true;
+  legacyWritersFenced: false;
+  acknowledgedAt?: string; // Present only for a valid store-bound acknowledgement.
+}
+```
+
+Directory `metadataWritable` checks access across subscribed projects; the project GET applies the project override. These are mutation permissions under existing policy, not a new read-ACL system. Dependency targets are resolved against this same attached-store directory, including subscribed projects and readonly prerequisites. Duplicate immutable IDs, unknown IDs and unavailable stores cannot be selected by an update. Clients cannot supply arbitrary store paths.
+
 ## Deliberate compatible activation
 
 Task metadata creation is disabled by default. After every CLI, MCP process, Hook, sync writer and app that can write this store is upgraded, an owner with the existing `manage_config` permission runs `phren task format enable --all-writers-compatible`. This records a versioned acknowledgement tied to the canonical store identity in `.config/task-format.json`; it does not rewrite or relabel any task. `phren task format` reads the status. The shared data layer rejects responsibility/dependency edits until activation, so CLI, TUI, MCP, Hook and web writers use the same gate. Existing task metadata is read and preserved even before activation, and autonomous selection still honors its responsibility and dependencies.
 
 This acknowledgement cannot prevent an older binary from ignoring the activation file. Coordinated compatible-writer adoption is a real prerequisite, including existing long-lived MCP/sync processes. A serving Hook’s capability or a new app version alone is insufficient. No live activation or runtime upgrade has been performed in this source lane. Hook task responses expose `metadataWritable` using activation and existing access rights; a native client must retain drafts and explain unavailable edits when false. Per-project GET rights are authoritative for project-scoped access.
+
+The parser on public main `87fc768a` stops reading continuations at an unknown `Task:` line. Its whole-file renderer then omits that metadata and any subsequent context, claim or issue link. Moving `Task:` to the end would still lose ownership and dependencies. A compatible Hook cannot intercept an older MCP, CLI, app or sync writer with direct access to the files or repository. This source supplies **no enforceable legacy-writer fence**; `legacyWritersFenced` remains false after acknowledgement. A marker, capability, advisory lock or new merge driver cannot make an old binary honor a rule it does not implement.
+
+Release is blocked until the integrator records compatible adoption for every writer that can reach each participating store: CLI and long-lived MCP/Hook processes, sync/merge writers, native whole-file editors, and returning offline copies or pending edits. Merely upgrading an executable on disk does not upgrade a running process. Existing work and source pins must be preserved; replacement happens at a coordinated safe boundary, without arbitrary busy-process restarts. If an old writer cannot yet adopt or be excluded from writes under existing owner-authorized controls, leave activation disabled. This is an external adoption prerequisite, not completed source work. No writer inventory, runtime cutover or activation has been performed by this source change.
+
+
+Phone preflight requires `taskDependencies`, `taskWriterSafety`, the matched store identity and current project `metadataWritable:true` plus supported `writerSafety.activation:"owner-acknowledged"`. Missing status leaves the draft intact. This acknowledges the separately completed adoption prerequisite; it does not prove adoption.
+
+`taskAtomicCreate:true` adds `POST /v1/tasks/create` with `{storeId, project, stableId, text, responsibility}`. The phone retains the randomly chosen eight-hex task identity across uncertain replies. The Hook checks both add/update permissions and activation, then writes Queue membership and responsibility under the same task/graph locks. Repeating the exact identity, title and responsibility returns the existing document without another task; conflicting or archived identities are refused. Titles are single-line and cannot embed a BID comment. There is no transient Agent-ready Human task. Human creation uses this endpoint, never a whole-file queued edit. Old queued Human edits remain visible and fail with an actionable explanation. Legacy Agent capture retains its existing path.
 
 Phones should preserve unknown metadata when writing older tasks, use stable identities for links, show prerequisite titles, and keep responsibility controls separate from section controls. Integrator owns native iOS implementation; the Android lead owns Android. This core change does not modify either app repository or installed Hooks.
 

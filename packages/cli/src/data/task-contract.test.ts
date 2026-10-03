@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
 import { addTask, readTasks, updateTask, completeTask, tidyDoneTasks, workNextTask, claimTask, parseTaskContent } from "./tasks.js";
 import { taskReadiness, taskIdentity, filterTaskDoc, taskCounts } from "./task-contract.js";
-import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute } from "../bridge/task-routes.js";
+import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute } from "../bridge/task-routes.js";
 import { mergeTasksByBid } from "../sync/task-merge.js";
 import { enableTaskFormat } from "./task-format.js";
 
@@ -33,6 +33,58 @@ function item(project: string, id: string) { const d = doc(project); return [...
 function identity(project: string, id: string) { return taskIdentity(base, doc(project), item(project, id))!; }
 
 describe("task responsibility and prerequisites (RC source, unrun)", () => {
+  // Literal persisted fixtures guard the old parser's stop-at-Task failure.
+  // Exercise the real whole-file writer; no copied old parser or test-only seam.
+  it.each([
+    { name: "legacy", records: [] as string[], opaque: false },
+    { name: "v1", records: ['{"version":1,"responsibility":"human","dependencies":[{"storeId":"11111111","project":"app","stableId":"bbbbbbbb"}],"history":[{"at":"2026-10-01T00:00:00Z","change":"Owner assigned prerequisite"}]}'], opaque: false },
+    { name: "future", records: ['{"version":2,"future":true}'], opaque: true },
+    { name: "blank", records: [""], opaque: true },
+    { name: "duplicate", records: ['{"version":1,"responsibility":"human","dependencies":[],"history":[]}', '{"version":2,"future":true}'], opaque: true },
+  ])("preserves $name metadata and later context/claim during ordinary rewrites before activation", ({ name, records, opaque }) => {
+    const file = path.join(base, "core/tasks.md");
+    fs.unlinkSync(path.join(base, ".config/task-format.json"));
+    const continuations = records.map(raw => `  Task: ${raw}\n`).join("");
+    fs.writeFileSync(file, `# core tasks\n\n## Queue\n\n- [ ] Preserve me <!-- bid:aaaaaaaa created:2026-10-01T00:00:00Z -->\n${continuations}  Context: Preserve owner context\n  Claimed: Desk 2026-10-02T00:00:00Z session:existing-worker\n  GitHub: #42 https://github.com/alaarab/phren/issues/42\n`);
+    expect(updateTask(base, "core", "bid:aaaaaaaa", { text: "Renamed", section: "Active" }).ok).toBe(true);
+    const retained = fs.readFileSync(file, "utf8");
+    expect(retained).toContain("  Context: Preserve owner context\n");
+    expect(retained).toContain("  Claimed: Desk 2026-10-02T00:00:00Z session:existing-worker\n");
+    const current = item("core", "aaaaaaaa");
+    expect(current).toMatchObject({ line: "Renamed", stableId: "aaaaaaaa", createdAt: "2026-10-01T00:00:00Z", section: "Active", context: "Preserve owner context", githubIssue: 42, githubUrl: "https://github.com/alaarab/phren/issues/42", claim: { computer: "Desk", at: "2026-10-02T00:00:00Z", session: "existing-worker" } });
+    if (name === "legacy") expect(retained).not.toContain("  Task:");
+    if (name === "v1") {
+      expect(current.responsibility).toBe("human");
+      expect(current.dependencies).toEqual([{ storeId: "11111111", project: "app", stableId: "bbbbbbbb" }]);
+      expect(current.history?.[0]).toEqual({ at: "2026-10-01T00:00:00Z", change: "Owner assigned prerequisite" });
+      expect(current.history).toHaveLength(2);
+    }
+    if (opaque) {
+      expect(retained.split("\n").filter(line => line.startsWith("  Task:"))).toEqual(records.map(raw => "  Task: " + raw));
+      expect(taskReadiness(base, doc("core"), current).readiness).toBe("waiting-on-task");
+      // Once enabled, rejection must come from opaque metadata, not activation.
+      enableTaskFormat(base, true);
+      const result = updateTask(base, "core", "bid:aaaaaaaa", { responsibility: "agent" });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toMatch(/invalid or from a newer version/);
+      expect(fs.readFileSync(file, "utf8")).toBe(retained);
+    }
+  });
+  it("creates Human metadata atomically and retries an uncertain reply without creating an Agent task", () => {
+    const input = { storeId: "11111111", project: "core", stableId: "dddddddd", text: "Owner must approve", responsibility: "human" };
+    const created = createTaskRoute(base, input);
+    expect(created.items.Queue).toHaveLength(1);
+    expect(item("core", "dddddddd")).toMatchObject({ responsibility: "human", section: "Queue" });
+    expect(workNextTask(base, "core").ok).toBe(false);
+    const before = fs.readFileSync(path.join(base, "core/tasks.md"), "utf8");
+    createTaskRoute(base, input);
+    expect(fs.readFileSync(path.join(base, "core/tasks.md"), "utf8")).toBe(before);
+    expect(() => createTaskRoute(base, { ...input, text: "Different intent" })).toThrow(/identity already exists/);
+    fs.unlinkSync(path.join(base, ".config/task-format.json"));
+    expect(() => createTaskRoute(base, { ...input, stableId: "eeeeeeee" })).toThrow(/not enabled/);
+    expect(fs.readFileSync(path.join(base, "core/tasks.md"), "utf8")).toBe(before);
+    expect(getTaskRoute(base, new URL("http://phren.local/v1/tasks?storeId=11111111&project=core"))).toMatchObject({ writerSafety: { activation: "disabled", legacyWritersFenced: false, requiresCoordinatedAdoption: true } });
+  });
   it("blocks new responsibility metadata until the owner acknowledges compatible writers", () => {
     const a = add("core", "Keep legacy writer compatibility"), file = path.join(base, "core/tasks.md");
     fs.unlinkSync(path.join(base, ".config/task-format.json"));

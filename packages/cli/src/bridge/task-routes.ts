@@ -1,11 +1,11 @@
 import { z } from "zod";
 import * as path from "node:path";
-import { readTasks, updateTask } from "../data/tasks.js";
+import { addTask, readTasks, updateTask } from "../data/tasks.js";
 import { taskView, taskCounts, filterTaskDoc, taskStores, taskStoreHasProject } from "../data/task-contract.js";
 import { permissionDeniedError } from "../governance/rbac.js";
 import { BridgeError } from "./protocol.js";
 import { taskStoreProjects, taskStoreRepositoryIdentity } from "../data/task-store-directory.js";
-import { taskFormatStatus } from "../data/task-format.js";
+import { taskFormatStatus, taskWriterSafety } from "../data/task-format.js";
 
 export const taskUpdatesSchema = z.object({
   responsibility: z.enum(["human", "agent"]).optional(),
@@ -44,6 +44,7 @@ export async function getTaskDirectoryRoute(base: string) {
       id: store.taskStoreId ?? null, name: store.name, role: store.role, primary: store.role === "primary", available: store.available !== false,
       identityReady, ambiguous, ...(repositoryIdentity ? { repositoryIdentity } : {}),
       ...metadataAccess(store, identityReady, projects),
+      writerSafety: store.available === false ? null : taskWriterSafety(store.path),
       projects,
     };
   })) };
@@ -58,7 +59,7 @@ export function getTaskRoute(base: string, url: URL) {
   if (path.resolve(result.data.path) !== path.join(path.resolve(store.path), project, "tasks.md")) throw new BridgeError(404, "Project is not in that task store.");
   const filter = z.object({ responsibility: z.enum(["human", "agent"]).optional(), readiness: z.enum(["ready", "waiting-on-human", "waiting-on-task"]).optional() }).parse(Object.fromEntries(url.searchParams));
   const filtered = filterTaskDoc(base, result.data, filter);
-  return { ok: true, version: 1, storeId, project, ...metadataAccess(store, true, [project]), counts: taskCounts(base, result.data), items: Object.fromEntries(Object.entries(filtered.items).map(([section, items]) => [section, items.map(i => taskView(base, result.data, i))])) };
+  return { ok: true, version: 1, storeId, project, ...metadataAccess(store, true, [project]), writerSafety: taskWriterSafety(store.path), counts: taskCounts(base, result.data), items: Object.fromEntries(Object.entries(filtered.items).map(([section, items]) => [section, items.map(i => taskView(base, result.data, i))])) };
 }
 
 export function updateTaskRoute(base: string, input: unknown) {
@@ -71,5 +72,23 @@ export function updateTaskRoute(base: string, input: unknown) {
   if (!current.ok || path.resolve(current.data.path) !== path.join(path.resolve(store.path), data.project, "tasks.md")) throw new BridgeError(404, "Project is not in that task store.");
   const result = updateTask(store.path, data.project, `bid:${data.stableId}`, data.updates, base);
   if (!result.ok) throw new BridgeError(400, result.error);
+  return getTaskRoute(base, new URL(`http://phren.local/v1/tasks?storeId=${data.storeId}&project=${data.project}`));
+}
+
+/** One locked write: a Human task is never observable as Agent-ready. The
+ * client keeps one stable ID across uncertain replies; conflicts never recreate. */
+export function createTaskRoute(base: string, input: unknown) {
+  const data = identitySchema.extend({ text: z.string().trim().min(1).max(16000).refine(value => !/[\r\n]/.test(value), "Task title must be one line"),
+    responsibility: z.enum(["human", "agent"]) }).strict().parse(input);
+  const store = owner(base, data.storeId, true);
+  if (!taskStoreHasProject(store, data.project)) throw new BridgeError(404, "Project is not in that task store.");
+  for (const operation of ["add_task", "update_task"] as const) {
+    const denied = permissionDeniedError(store.path, operation, data.project);
+    if (denied) throw new BridgeError(403, denied);
+  }
+  const current = readTasks(store.path, data.project);
+  if (!current.ok || path.resolve(current.data.path) !== path.join(path.resolve(store.path), data.project, "tasks.md")) throw new BridgeError(404, "Project is not in that task store.");
+  const result = addTask(store.path, data.project, data.text, { stableId: data.stableId, responsibility: data.responsibility, graphRoot: base });
+  if (!result.ok) throw new BridgeError(409, result.error);
   return getTaskRoute(base, new URL(`http://phren.local/v1/tasks?storeId=${data.storeId}&project=${data.project}`));
 }
