@@ -606,6 +606,8 @@ Copy a note into `FINDINGS.md` and mark the original as promoted without deletin
 
 ### `get_tasks`
 
+Tasks expose independent Human/Agent responsibility, stable-ID prerequisites and derived readiness. See [Task responsibility and prerequisites](task-responsibility.md) for filters, updates, activation and the Hook directory/create APIs.
+
 Get tasks for a project (or all projects). Supports progressive disclosure: use `summary:true` for lightweight planning views (~200 tokens), pagination for browsing, or `id` with a stable `bid:` hash for single-item fetches during execution. Stable IDs are also used by cross-session task checkpoints.
 
 | Parameter | Type | Required | Description |

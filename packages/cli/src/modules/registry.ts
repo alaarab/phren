@@ -62,8 +62,8 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ...core(["get_tasks", "add_task", "manage_task"]),
       ...full(["complete_task", "remove_task", "update_task", "tidy_done_tasks", "pin_task", "claim_task"]),
     ],
-    cliCommands: ["task", "tasks", "config task-mode", "config proactivity.tasks"], agentHooks: [], hookRoutes: [], capabilities: ["tasks"],
-    storeFiles: ["<project>/tasks.md", ".sessions/checkpoint-*.json"], localFiles: [],
+    cliCommands: ["task", "tasks", "config task-mode", "config proactivity.tasks"], agentHooks: [], hookRoutes: [{ method: "GET", path: "/v1/tasks" }, { method: "GET", path: "/v1/tasks/stores" }, { method: "POST", path: "/v1/tasks/update" }, { method: "POST", path: "/v1/tasks/create" }], capabilities: ["tasks", "taskDependencies", "taskWriterSafety", "taskAtomicCreate"],
+    storeFiles: ["<project>/tasks.md", ".sessions/checkpoint-*.json", ".config/task-format.json", ".config/task-archive/*.md", "stores.yaml"], localFiles: [".runtime/task-dependencies.lock"],
     phoneScreens: [{ screen: "TasksView", capability: "tasks" }], skills: [],
   },
   {
