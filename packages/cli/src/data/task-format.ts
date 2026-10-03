@@ -23,20 +23,6 @@ export function taskFormatStatus(base: string): { enabled: boolean; version: 1; 
   return { enabled: false, version: 1 };
 }
 
-/** Wire status describes admission, never proof that old filesystem/Git writers
- * have been upgraded. Such writers do not consult our activation file. */
-export function taskWriterSafety(base: string) {
-  const status = taskFormatStatus(base);
-  return {
-    version: 1 as const,
-    metadataVersion: 1 as const,
-    activation: status.enabled ? "owner-acknowledged" as const : "disabled" as const,
-    requiresCoordinatedAdoption: true as const,
-    legacyWritersFenced: false as const,
-    ...(status.acknowledgedAt ? { acknowledgedAt: status.acknowledgedAt } : {}),
-  };
-}
-
 export function enableTaskFormat(base: string, allWritersCompatible: boolean): void {
   const denied = permissionDeniedError(base, "manage_config");
   if (denied) throw new Error(denied);

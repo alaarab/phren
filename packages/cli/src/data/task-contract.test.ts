@@ -33,26 +33,22 @@ function item(project: string, id: string) { const d = doc(project); return [...
 function identity(project: string, id: string) { return taskIdentity(base, doc(project), item(project, id))!; }
 
 describe("task responsibility and prerequisites (RC source, unrun)", () => {
-  it("reports the adoption prerequisite and blocks Hook metadata writes until owner acknowledgement", async () => {
+  it("reports activation permissions and blocks Hook metadata writes until owner acknowledgement", async () => {
     const a = add("core", "Keep legacy writer compatibility"), file = path.join(base, "core/tasks.md");
     fs.unlinkSync(path.join(base, ".config/task-format.json"));
     const before = fs.readFileSync(file, "utf8");
     const url = new URL("http://phren.local/v1/tasks?storeId=11111111&project=core");
     const ref = { storeId: "11111111", project: "core", stableId: a.stableId! };
-    const disabled = { activation: "disabled", requiresCoordinatedAdoption: true, legacyWritersFenced: false };
-    expect(getTaskRoute(base, url)).toMatchObject({ metadataWritable: false, writerSafety: disabled });
-    expect((await getTaskDirectoryRoute(base)).stores[0]).toMatchObject({ metadataWritable: false, writerSafety: disabled });
+    expect(getTaskRoute(base, url).metadataWritable).toBe(false);
+    expect((await getTaskDirectoryRoute(base)).stores[0].metadataWritable).toBe(false);
     expect(() => updateTaskRoute(base, { ...ref, updates: { responsibility: "human" } })).toThrow(/not enabled/);
     expect(updateTask(base, "core", a.stableId!, { responsibility: "human" }).ok).toBe(false);
     expect(fs.readFileSync(file, "utf8")).toBe(before);
     expect(() => enableTaskFormat(base, false)).toThrow();
     enableTaskFormat(base, true);
     const updated = updateTaskRoute(base, { ...ref, updates: { responsibility: "human" } });
-    expect(updated).toMatchObject({ metadataWritable: true, writerSafety: {
-      version: 1, metadataVersion: 1, activation: "owner-acknowledged", requiresCoordinatedAdoption: true, legacyWritersFenced: false,
-    } });
+    expect(updated.metadataWritable).toBe(true);
     expect(updated.items.Queue[0].responsibility).toBe("human");
-    expect(updated.writerSafety.acknowledgedAt).toEqual(expect.any(String));
   });
   it("requires explicit portable identity registration without changing legacy task bytes", async () => {
     const a = add("core", "Legacy store"), file = path.join(base, "core/tasks.md");
