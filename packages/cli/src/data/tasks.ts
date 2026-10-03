@@ -4,7 +4,7 @@ import { moduleEnabled } from "../modules/runtime.js";
 import { disabledHint } from "../modules/registry.js";
 import * as fs from "fs";
 import * as path from "path";
-import { randomBytes, randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 import {
   phrenErr,
   PhrenError,
@@ -19,7 +19,7 @@ import { withSafeLock, ensureProject } from "../shared/data-utils.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
 import { storeAwareProjectPath } from "../store-routing.js";
 import { TASKS_FILENAME } from "../filenames.js";
-import { taskReadiness, validateTaskDependencies, withTaskGraphLock, type TaskDependency, type TaskResponsibility, type TaskChange } from "./task-contract.js";
+import { taskIdentity, taskReadiness, validateTaskDependencies, withTaskGraphLock, type TaskDependency, type TaskResponsibility, type TaskChange } from "./task-contract.js";
 import { recordTaskWrite } from "./task-receipts.js";
 
 const ACTIVE_HEADINGS = new Set(["active", "in progress", "in-progress", "current", "wip"]);
@@ -82,6 +82,8 @@ function formatClaim(claim: TaskClaim): string {
 }
 
 export interface TaskDoc {
+  /** Digest of the exact bytes read, shared by every entry in this document. */
+  revision?: string;
   project: string;
   title: string;
   items: Record<TaskSection, TaskItem[]>;
@@ -396,6 +398,7 @@ export function parseTaskContent(project: string, taskPath: string, content: str
     title,
     path: taskPath,
     items,
+    revision: createHash("sha256").update(content).digest("hex"),
     issues: validateTaskFormat(content),
   };
 }
@@ -510,6 +513,7 @@ export function readTasks(phrenPath: string, project: string): PhrenResult<TaskD
     return phrenOk({
       project,
       title: `# ${project} tasks`,
+      revision: createHash("sha256").update("").digest("hex"),
       path: taskPath,
       issues: [],
       items: { Active: [], Queue: [], Done: [] },
@@ -788,6 +792,7 @@ export function updateTask(
     dependencies?: TaskDependency[];
   },
   graphRoot = phrenPath,
+  expectedRevision?: string,
 ): PhrenResult<string> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
   if (!bPath) return phrenErr(`Project name "${project}" is not valid.`, PhrenError.INVALID_PROJECT_NAME);
@@ -798,11 +803,18 @@ export function updateTask(
     const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
+    if (expectedRevision !== undefined && parsed.data.revision !== expectedRevision) {
+      return phrenErr("Task revision changed; refresh and review your draft before saving.", PhrenError.VALIDATION_ERROR);
+    }
     const found = findItemByMatch(parsed.data, match);
     if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
     if (!found.match) return taskItemNotFound(project, match);
 
     const item = parsed.data.items[found.match.section][found.match.index];
+    if (expectedRevision !== undefined && (!taskFormatStatus(phrenPath).enabled
+      || !taskIdentity(graphRoot, parsed.data, item) || item.taskContractRaw !== undefined || item.taskContractRecords !== undefined)) {
+      return phrenErr("Task metadata is disabled, unsupported or ambiguous; preserve your draft.", PhrenError.VALIDATION_ERROR);
+    }
     const changes: string[] = [];
     if (updates.responsibility !== undefined || updates.dependencies !== undefined) {
       const storeRoot = path.dirname(path.dirname(parsed.data.path));
@@ -845,7 +857,8 @@ export function updateTask(
       }
     }
 
-    if (updates.context) {
+    if (updates.context !== undefined && (updates.context !== "" || updates.replace_context)) {
+      if (typeof updates.context !== "string" || /[\x00-\x1f\x7f]/.test(updates.context)) return phrenErr("Task context must be one line without control characters.", PhrenError.VALIDATION_ERROR);
       if (updates.replace_context || !item.context) item.context = updates.context;
       // Agents sometimes send the existing context with their new note. Do
       // not append the complete history to itself on every such update.
@@ -896,6 +909,42 @@ export function updateTask(
     if (changes.length && (item.responsibility !== undefined || item.dependencies !== undefined || item.history !== undefined)) item.history = [...(item.history ?? []), { at: new Date().toISOString(), change: changes.join(", ") }];
     writeTaskDoc(parsed.data);
     return phrenOk(`Updated item in ${project}: ${changes.join(", ") || "no changes"}`);
+  }));
+}
+
+/** Reserve exactly the saved task before external launch work. The durable claim
+ * survives errors/restarts: a retry must not silently start a second worker.
+ * The returned snapshot is the only source of the worker's prompt. */
+export function reserveTaskLaunch(phrenPath: string, project: string, stableId: string, expectedRevision: string,
+  computer: string, graphRoot = phrenPath): PhrenResult<{ identity: TaskDependency; revision: string; text: string; context?: string; launchId: string }> {
+  const file = canonicalTaskFilePath(phrenPath, project);
+  if (!file || !/^[a-f0-9]{8}$/.test(stableId) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$/.test(computer)) {
+    return phrenErr("Invalid task launch identity.", PhrenError.VALIDATION_ERROR);
+  }
+  return withTaskGraphLock(graphRoot, () => withSafeLock(file, () => {
+    const parsed = readTasks(phrenPath, project);
+    if (!parsed.ok) return forwardErr(parsed);
+    if (parsed.data.revision !== expectedRevision) return phrenErr("Task revision changed; refresh before starting.", PhrenError.VALIDATION_ERROR);
+    const found = findItemByMatch(parsed.data, `bid:${stableId}`);
+    if (found.error || !found.match) return phrenErr(found.error ?? "Task is missing.", PhrenError.VALIDATION_ERROR);
+    const item = parsed.data.items[found.match.section][found.match.index];
+    const identity = taskIdentity(graphRoot, parsed.data, item);
+    if (!identity || !taskFormatStatus(phrenPath).enabled || item.taskContractRaw !== undefined || item.taskContractRecords !== undefined
+      || item.checked || item.section === "Done" || taskReadiness(graphRoot, parsed.data, item).readiness !== "ready") {
+      return phrenErr("Task is not eligible for agent launch. Refresh responsibility and prerequisites.", PhrenError.VALIDATION_ERROR);
+    }
+    if (item.claim) return phrenErr("Task already has a claim. Review the existing worker before explicitly releasing it.", PhrenError.VALIDATION_ERROR);
+    if (!validTaskTitle(item.line) || (item.context && /[\x00-\x1f\x7f]/.test(item.context))
+      || item.line.length + (item.context?.length ?? 0) > 30000) return phrenErr("Task text/context cannot be carried safely in a launch brief.", PhrenError.VALIDATION_ERROR);
+    const launchId = randomUUID(), at = new Date().toISOString();
+    item.claim = { computer, at, session: `task-launch:${launchId}` };
+    item.responsibility ??= "agent";
+    item.history = [...(item.history ?? []), { at, change: `reserved task launch ${launchId}` }];
+    parsed.data.items[found.match.section].splice(found.match.index, 1);
+    item.section = "Active";
+    parsed.data.items.Active.unshift(item);
+    writeTaskDoc(parsed.data);
+    return phrenOk({ identity, revision: expectedRevision, text: item.line, context: item.context, launchId });
   }));
 }
 
