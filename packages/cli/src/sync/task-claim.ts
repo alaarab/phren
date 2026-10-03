@@ -1,5 +1,6 @@
 import { runBestEffortGit } from "../cli/session-git.js";
-import { claimTask, resolveTaskItem, type TaskClaim, type TaskItem } from "../data/tasks.js";
+import { claimTask, readTasks, resolveTaskItem, type TaskClaim, type TaskItem } from "../data/tasks.js";
+import { taskReadiness } from "../data/task-contract.js";
 import { withFileLock } from "../governance/locks.js";
 import { runtimeFile } from "../phren-paths.js";
 import { trackTaskWriteCommits } from "../data/task-receipts.js";
@@ -29,7 +30,7 @@ export interface ClaimOutcome {
  * keeps theirs, so the task is read again after the push to see who won.
  */
 export async function claimTaskSynced(phrenPath: string, project: string, match: string, claim: TaskClaim,
-  opts: { release?: boolean; force?: boolean } = {}): Promise<ClaimOutcome> {
+  opts: { release?: boolean; force?: boolean; graphRoot?: string } = {}): Promise<ClaimOutcome> {
   return withFileLock(runtimeFile(phrenPath, "git-op"), async () => {
     const pulled = await mergeStoreUpstream(phrenPath, { git, commitMessage: "auto-save phren (task claim)" });
     const offline = pulled.status === "error" || pulled.status === "busy" ? pulled.detail : undefined;
@@ -53,6 +54,12 @@ export async function claimTaskSynced(phrenPath: string, project: string, match:
     const now = current.ok ? current.data : undefined;
     if (!opts.release && now?.claim && now.claim.computer !== claim.computer) {
       return { claimed: false, item: now, heldBy: now.claim, synced: pushed.ok, detail: `${now.claim.computer} claimed this task first.` };
+    }
+    const doc = readTasks(phrenPath, project);
+    if (!opts.release && (!now || now.section !== "Active" || now.checked || now.claim?.computer !== claim.computer || !doc.ok
+      || taskReadiness(opts.graphRoot ?? phrenPath, doc.data, now).readiness !== "ready")) {
+      return { claimed: false, ...(now ? { item: now } : {}), synced: pushed.ok,
+        detail: "The task changed while syncing; this computer no longer holds a ready agent task." };
     }
     return { claimed: !opts.release, item: now ?? written.data, synced: pushed.ok,
       detail: pushed.ok ? "Pushed to the store's remote." : `Committed but not pushed: ${pushed.error ?? "push failed"}` };

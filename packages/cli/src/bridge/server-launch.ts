@@ -476,7 +476,8 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   }
   return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(account ? { account } : {}), ...(permissionMode ? { permissionMode } : {}), ...(unchecked.length ? { unchecked } : {}),
     // The caller types the brief itself unless it went with the launch.
-    ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief } : {}),
+    ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief,
+      briefState: appServer ? briefTurn ?? "unconfirmed" : served ? (servedBrief?.delivered ? "sent" : "uncertain") : briefLaunch ? "sent" : "unconfirmed" } : {}),
     ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}) };
 }
 export async function workspaceAction(server: string, operation: string, data: Json): Promise<Json> {
