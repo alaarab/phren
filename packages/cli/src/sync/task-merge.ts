@@ -1,3 +1,4 @@
+import { parseTaskMetadata, type TaskMetadata } from "../data/task-metadata.js";
 /**
  * Three-way merge of a tasks.md file by task id, for store sync conflicts.
  *
@@ -72,19 +73,17 @@ export function pickTask<T extends TaskEntry>(base: T | undefined, ours: T | und
 /** Merge independent responsibility/dependency edits and retain both histories.
  * Ordinary task conflict precedence still controls title, claim and section. */
 function mergeContract(base: TaskEntry | undefined, ours: TaskEntry | undefined, theirs: TaskEntry | undefined, winner: TaskEntry): TaskEntry {
-  const read = (entry: TaskEntry | undefined) => {
-    const raw = entry?.lines.find(line => line.trimStart().startsWith("Task:"));
-    if (!raw) return { raw, value: { version: 1, responsibility: "agent", dependencies: [], history: [] } };
-    try {
-      const value = JSON.parse(raw.trim().slice(5));
-      if (value.version === 1 && ["human", "agent"].includes(value.responsibility) && Array.isArray(value.dependencies) && Array.isArray(value.history)) return { raw, value };
-    } catch { /* Unknown metadata remains with its record. */ }
-    return { raw, value: undefined };
+  const read = (entry: TaskEntry | undefined): { raw?: string; value?: TaskMetadata } => {
+    const records = entry?.lines.filter(line => line.trimStart().startsWith("Task:")) ?? [];
+    if (!records.length) return { value: { version: 1, responsibility: "agent", dependencies: [], history: [] } };
+    if (records.length !== 1) return { raw: records.join("\n") };
+    return { raw: records[0], value: parseTaskMetadata(records[0].trim().slice(5).trim()) };
   };
   const b = read(base), o = read(ours), t = read(theirs);
   if (!o.raw && !t.raw) return winner;
   if (!b.value || !o.value || !t.value) return winner;
-  const pick = (field: string) => JSON.stringify(t.value[field]) === JSON.stringify(b.value[field]) ? o.value[field] : t.value[field];
+  const baseValue = b.value, ourValue = o.value, theirValue = t.value;
+  const pick = (field: "responsibility" | "dependencies") => JSON.stringify(theirValue[field]) === JSON.stringify(baseValue[field]) ? ourValue[field] : theirValue[field];
   const history = [...new Map([...o.value.history, ...t.value.history].map((h: unknown) => [JSON.stringify(h), h] as const)).values()];
   const contract = { version: 1, responsibility: pick("responsibility"), dependencies: pick("dependencies"), history };
   return { ...winner, lines: [...winner.lines.filter(line => !line.trimStart().startsWith("Task:")), `  Task: ${JSON.stringify(contract)}`] };

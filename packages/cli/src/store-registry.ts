@@ -146,6 +146,27 @@ function readSyncedRegistry(phrenPath: string): RegistryReadResult {
   return { registry, problems, lossy: skippedEntries > 0 };
 }
 
+/** Identity carried by the store itself, never an attachment ID or path hash.
+ * Reading identity must not migrate this machine's attachments. */
+export function registeredStoreIdentity(phrenPath: string): string | undefined {
+  const result = readSyncedRegistry(phrenPath);
+  return result.lossy ? undefined : result.registry?.stores.find(s => s.role === "primary")?.id;
+}
+
+/** Explicit, idempotent registration for legacy stores. Callers enforce the
+ * existing manage_config permission. No task or attachment is rewritten. */
+export function registerStoreIdentity(phrenPath: string): string {
+  return withFileLock(registryLockPath(phrenPath), () => {
+    const result = readSyncedRegistry(phrenPath);
+    if (result.lossy) throw new Error(`Cannot register store identity: ${result.problems.join(" | ")}`);
+    const existing = result.registry?.stores.find(s => s.role === "primary");
+    if (existing) return existing.id;
+    const primary = { ...implicitPrimaryStore(phrenPath), id: generateStoreId() };
+    writeSyncedPrimary(phrenPath, primary);
+    return primary.id;
+  });
+}
+
 interface AttachedStoresRead {
   stores: StoreEntry[];
   problems: string[];
