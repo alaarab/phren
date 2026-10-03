@@ -184,7 +184,7 @@ export function toTmuxId(value: string, kind: keyof typeof SIGILS): string {
 
 /** The agent a command line runs, by the harness's executable or package. */
 export function agentFromCommand(command: string): string | undefined {
-  const structured = /(?:bridge-hook\.mjs|hook-main\.js|index\.js)\s+(?:bridge\s+)?harness-runner\s+--source=(claude|phren)(?:\s|$)/.exec(command);
+  const structured = /(?:bridge-hook\.mjs|hook-main\.js|index\.js)\s+(?:bridge\s+)?harness-runner\s+--source=(claude|phren|codex)(?:\s|$)/.exec(command);
   if (structured) return structured[1];
   const words = command.trim().split(/\s+/).filter(Boolean).slice(0, 4);
   const [first, second] = words, base = (word?: string) => word ? path.basename(word) : "";

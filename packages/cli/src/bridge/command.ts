@@ -19,14 +19,18 @@ import { addClaudeAccount } from "./claude-account-setup.js";
 import { setAccountLabel } from "./claude-accounts.js";
 import { ModelCatalog, type AgentModel } from "./models.js";
 
-const LINK_USAGE = "Usage: phren bridge link <ssh-host> [--name <its name here>] [--as <this computer's name there>] [--back-address <address it dials>] [--yes]";
+const LINK_USAGE = "Usage: phren bridge link <ssh-host> --host-key <verified ed25519 public key> [--name <its name here>] [--as <this computer's name there>] [--back-address <address it dials>] [--yes]";
 
 export async function runBridge(args: string[], version: string): Promise<number> {
   switch (args[0]) {
     case "harness-runner": {
-      if (args.length !== 3 || !/^--source=(claude|phren)$/.test(args[1])) throw new Error("Invalid private harness runner invocation.");
+      if (args.length !== 3 || !/^--source=(claude|phren|codex)$/.test(args[1])) throw new Error("Invalid private harness runner invocation.");
       const { runHarnessWorker } = await import("./harness/runner.js");
-      return runHarnessWorker(JSON.parse(await readFile(args[2], "utf8")));
+      const { readPrivateState } = await import("./harness/private-state.js");
+      const raw = await readPrivateState(args[2]); if (!raw) throw new Error("Private harness configuration was not found.");
+      const config = JSON.parse(raw), source = config.backend === "codex-stdio" ? "codex" : config.backend === "claude-sdk" ? "claude" : "phren";
+      if (args[1] !== "--source=" + source) throw new Error("The harness command source does not match its configured backend.");
+      return runHarnessWorker(config);
     }
     case "enroll-computer": {
       if (args.length === 2) console.log(await enrollComputer(args[1]));
@@ -67,7 +71,7 @@ export async function runBridge(args: string[], version: string): Promise<number
     case "link": {
       const host = args[1];
       const flag = (name: string) => { const index = args.indexOf(name); return index > 1 ? args[index + 1] : undefined; };
-      if (!host || host.startsWith("-")) throw new Error(LINK_USAGE);
+      if (!host || host.startsWith("-") || !flag("--host-key")) throw new Error(LINK_USAGE);
       if (!args.includes("--yes")) {
         if (!process.stdin.isTTY) throw new Error(`Linking ${host} lets each computer run agents on the other. Pass --yes to confirm.`);
         const { createInterface } = await import("node:readline/promises");
@@ -76,7 +80,7 @@ export async function runBridge(args: string[], version: string): Promise<number
         prompt.close();
         if (!/^y(es)?$/i.test(answer.trim())) { console.log("Not linked."); return 1; }
       }
-      const result = await linkComputer(host, { name: flag("--name"), as: flag("--as"), backAddress: flag("--back-address") });
+      const result = await linkComputer(host, { name: flag("--name"), as: flag("--as"), backAddress: flag("--back-address"), expectedHostKey: flag("--host-key") });
       console.log(JSON.stringify(result, null, 2));
       return result.reachable && result.remote.reachable ? 0 : 1;
     }

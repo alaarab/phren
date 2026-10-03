@@ -8,8 +8,9 @@ import { logger } from "../logger.js";
 import { hookRequest } from "./client.js";
 import { computerName, dispatchKeyPath, publicComputerKey } from "./computers.js";
 import { atomic, BridgeError, bridgeRoot, serverName, withErrorCode, type Json } from "./protocol.js";
+import { lockedState } from "./harness/private-state.js";
 
-const peerSchema = z.object({
+export const peerSchema = z.object({
   name: computerName,
   address: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$/),
   username: z.string().regex(/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/),
@@ -38,6 +39,9 @@ export async function hookPeers(root = bridgeRoot()): Promise<HookPeer[]> {
  * the same name or address is refused rather than replaced.
  */
 export async function addHookPeer(input: unknown, root = bridgeRoot()): Promise<{ added: boolean; peer: HookPeer }> {
+  return lockedState(path.join(root, "hooks.yaml"), () => addHookPeerLocked(input, root));
+}
+async function addHookPeerLocked(input: unknown, root: string): Promise<{ added: boolean; peer: HookPeer }> {
   const peer = peerSchema.parse(input);
   const existing = await hookPeers(root).catch(error => {
     if (error instanceof BridgeError && error.details?.hooksYaml === "missing") return [];

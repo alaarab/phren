@@ -1,4 +1,9 @@
 import { harnessInfo, boundHarness } from "./harness/bindings.js";
+import { requireOwnerControl } from "./harness/owner-controls.js";
+import { configureStoreLease, changeStoreLease, readStoreLease } from "./harness/store-lease.js";
+import { runnerForPane, runnerRequest } from "./harness/runner-client.js";
+import { peerRepairView, repairPeer, peerEnrollmentPlan, enrollPinnedPeer } from "./harness/peer-controls.js";
+import { proxyOperation, proxyView, registerProxy, reverseProxyPlan } from "./harness/remote-proxy.js";
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import type { OwnerInbox } from "./owner-inbox.js";
@@ -151,10 +156,16 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
   if (snapshot.has("tasks")) result.taskDependencies = true;
+  if (snapshot.has("hook")) { result.harnessAdapters = true; result.harnessOwnerControls = "ed25519-v1"; result.harnessProxy = true; }
+  if (snapshot.has("conductor")) result.storeConductorLease = true;
   return result;
 }
 
 export function requireRoute(snapshot: ModuleSnapshot, method: string, route: string): void {
+  if (route.startsWith("/v1/harness/")) {
+    const module = route.startsWith("/v1/harness/lease") ? "conductor" : "hook";
+    if (!snapshot.has(module)) throw new BridgeError(404, disabledHint(module));
+  }
   const owner = BUILTIN_MODULES.find(module => module.hookRoutes.some(entry => entry.method === method && entry.path === route));
   if (owner && !snapshot.has(owner.name)) throw new BridgeError(404, disabledHint(owner.name));
 }
@@ -353,6 +364,16 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       } else if (request.method === "GET") {
         switch (url.pathname) {
           case "/v1/harness/session": result = await harnessInfo(targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}"))); break;
+          case "/v1/harness/lease": result = await readStoreLease(scheduleStore, url.searchParams.get("storeId") ?? undefined, url.searchParams.get("authority") === "1"); break;
+          case "/v1/harness/peers": result = await peerRepairView(); break;
+          case "/v1/harness/proxies": result = await proxyView(info.computer.name); break;
+          case "/v1/harness/proxy/session": case "/v1/harness/proxy/thread": case "/v1/harness/proxy/events": case "/v1/harness/proxy/delivery":
+            result = await proxyOperation(url.pathname.split("/").at(-1)!, Object.fromEntries(url.searchParams)); break;
+          case "/v1/harness/delivery": {
+            const target = targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}")), runner = await runnerForPane(target.server, await validateTarget(target, false, true));
+            if (!runner) throw new BridgeError(409, "This session has no worker-owned delivery journal.");
+            result = await runnerRequest(runner, "delivery", { deliveryId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/).parse(url.searchParams.get("deliveryId")) }); break;
+          }
           case "/v1/harness/thread": { const target = targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}")); const adapter = await boundHarness(target); if (!adapter.capabilities.readThread) throw new BridgeError(409, "This harness does not support thread reads."); result = { thread: await adapter.readThread(target.session) }; break; }
           case "/v1/harness/events": {
             const target = targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}")), adapter = await boundHarness(target);
@@ -589,7 +610,16 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         }
       } else if (request.method === "POST") {
         const data = await body(request);
-        if (["/v1/harness/model", "/v1/harness/takeover", "/v1/harness/approval", "/v1/harness/input"].includes(url.pathname)) {
+        if (url.pathname.startsWith("/v1/harness/")) await requireOwnerControl(request.headers, "POST", url.pathname, data);
+        if (url.pathname === "/v1/harness/lease/authority") result = await configureStoreLease(scheduleStore, data);
+        else if (url.pathname === "/v1/harness/peers/repair") result = await repairPeer(data);
+        else if (url.pathname === "/v1/harness/peers/enrollment-plan") result = peerEnrollmentPlan(data);
+        else if (url.pathname === "/v1/harness/peers/enroll") result = await enrollPinnedPeer(data);
+        else if (url.pathname === "/v1/harness/proxies/register") result = await registerProxy(data);
+        else if (url.pathname === "/v1/harness/proxy/plan") result = reverseProxyPlan(data);
+        else if (url.pathname.startsWith("/v1/harness/proxy/")) result = await proxyOperation(url.pathname.split("/").at(-1)!, data);
+        else if (["/v1/harness/lease/acquire", "/v1/harness/lease/revoke", "/v1/harness/lease/takeover"].includes(url.pathname)) result = await changeStoreLease(scheduleStore, url.pathname.split("/").at(-1) as "acquire" | "revoke" | "takeover", data);
+        else if (["/v1/harness/model", "/v1/harness/takeover", "/v1/harness/approval", "/v1/harness/input"].includes(url.pathname)) {
           const target = targetSchema.parse(data.target), adapter = await boundHarness(target);
           if (url.pathname === "/v1/harness/model") {
             if (!adapter.capabilities.setModel || !adapter.setModel) throw new BridgeError(409, "Model selection is unavailable.");

@@ -68,7 +68,7 @@ export async function runHandOff(args: string[]): Promise<number> {
   return result.ok ? 0 : 1;
 }
 
-const CONDUCTOR_USAGE = "Usage: phren conductor status | make [--pane <id>] [--mux herdr:<name>|tmux:<name>] | stop [--pane <id>] | sets [--json] | sets name <name>|--clear | grants [list|add|remove]";
+const CONDUCTOR_USAGE = "Usage: phren conductor status | make --launch-id <owner-granted UUID> [--pane <id>] [--mux herdr:<name>|tmux:<name>] | stop [--pane <id>] | sets [--json] | sets name <name>|--clear | grants [list|add|remove]";
 
 /** The Hook route for a pane's multiplexer: `--mux`, else the pane the command runs in. */
 function muxQuery(mux: string | undefined, here: { server: string } | undefined): string {
@@ -101,12 +101,13 @@ export async function runConductor(args: string[]): Promise<number> {
   const [namespace = "status", action = "list", ...rest] = args;
   if (namespace === "status") { console.log(JSON.stringify(await hookRequest("/v1/conductor"), null, 2)); return 0; }
   if (namespace === "make" || namespace === "stop") {
-    const { values } = parseArgs({ args: args.slice(1), options: { pane: { type: "string" }, mux: { type: "string" } } });
+    const { values } = parseArgs({ args: args.slice(1), options: { pane: { type: "string" }, mux: { type: "string" }, "launch-id": { type: "string" } } });
     const here = await terminalPaneFromEnv();
     if (namespace === "make") {
       const pane = values.pane ?? here?.pane;
       if (!pane) throw new Error("Run phren conductor make inside the agent's pane, or name it with --pane <id>.");
-      const place = values.pane ? { paneId: values.pane } : { workspaceId: here!.workspace, tabId: here!.tab, paneId: here!.pane };
+      if (!values["launch-id"]) throw new Error("An authenticated owner must grant a store lease before conductor make; pass its --launch-id <UUID>.");
+      const place = { ...(values.pane ? { paneId: values.pane } : { workspaceId: here!.workspace, tabId: here!.tab, paneId: here!.pane }), launchId: values["launch-id"] };
       const result = await hookRequest(`/v1/conductor/make${muxQuery(values.mux, values.pane ? undefined : here)}`, place);
       console.log(JSON.stringify(result, null, 2));
       return result.ok === true ? 0 : 1;

@@ -42,7 +42,7 @@ export function sshConfigHosts(text: string): string[] {
 
 async function ssh(host: string, command: string, input?: string, timeout = 20_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile("ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", host, command],
+    const child = execFile("ssh", ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=5", "--", host, command],
       { timeout, maxBuffer: 1_048_576 }, (error, stdout, stderr) => {
         if (error) reject(new BridgeError(503, `ssh ${host}: ${(stderr || error.message).split("\n").find(Boolean)?.slice(0, 200) ?? "failed"}`));
         else resolve(stdout);
@@ -101,7 +101,9 @@ export interface LinkResult { name: string; as: string; local: { added: boolean 
  * side's ed25519 host key is read over that login (never keyscanned) and
  * pinned in the other's hooks.yaml. Both sides then check the link.
  */
-export async function linkComputer(host: string, options: { name?: string; as?: string; backAddress?: string } = {}): Promise<LinkResult> {
+export async function linkComputer(host: string, options: { name?: string; as?: string; backAddress?: string; expectedHostKey?: string } = {}): Promise<LinkResult> {
+  if (!options.expectedHostKey) throw new BridgeError(400, "New SSH enrollment requires explicit owner confirmation and an independently verified --host-key pin.");
+  const expectedHostKey = publicComputerKey(options.expectedHostKey);
   const remote = await probe(host);
   if (!remote) throw new BridgeError(409, `${host} answers over ssh but Phren Hook is not installed there. Run phren bridge install on it first.`);
   const own = (await readFile(path.join(bridgeRoot(), "computer-id"), "utf8").catch(() => "")).trim();
@@ -114,6 +116,7 @@ export async function linkComputer(host: string, options: { name?: string; as?: 
   const resolved = Object.fromEntries((await exec("ssh", ["-G", "--", host], { timeout: 5_000 })).stdout.split("\n")
     .map(line => line.split(" ")).filter(parts => parts.length >= 2).map(([key, ...rest]) => [key, rest.join(" ")]));
   const remoteHostKey = publicComputerKey((await ssh(host, "cat /etc/ssh/ssh_host_ed25519_key.pub")).trim().split(/\s+/).slice(0, 2).join(" "));
+  if (remoteHostKey !== expectedHostKey) throw new BridgeError(409, "The remote host key differs from the owner's verified pin; no key enrollment was attempted.");
   const localHostKey = publicComputerKey((await readFile("/etc/ssh/ssh_host_ed25519_key.pub", "utf8")).trim().split(/\s+/).slice(0, 2).join(" "));
 
   const remoteLine = (await ssh(host, `${REMOTE_PATH} phren bridge enroll-computer ${name}`)).trim();
