@@ -198,7 +198,7 @@ Native source now lists this one agent separately, uses only its proxy target,
 signs owner controls, retains uncertain delivery IDs on the phone, and shows
 partial text history and current pending requests. It never enrolls QL or
 reconstructs a local pane. **No phone or runtime acceptance is claimed.**
-Existing transport reuse, Windows ACLs, actual Copilot session support and phone
+Existing transport reuse, actual Copilot session support and phone
 interaction remain integration and RC gates. An overview row marked working
 without a chat Target is not evidence of a routable chat or return channel.
 
@@ -214,17 +214,19 @@ Herdr's [machine guide](https://herdr.dev/docs/connecting-machines/) and
 [CLI reference](https://herdr.dev/docs/cli-reference/) distinguish saved-profile
 API routing from a TUI's live connections. `--machine` selects that profile's
 remote session; sidebar selection does not retarget commands in existing panes.
-The CLI does not route through another TUI's connections. Managed shared SSH
-recovery is documented for Linux/macOS clients, not local Windows clients;
-neither a working overview row nor a machine profile proves a usable return
-channel. Do not assume Windows mux support or adopt current documentation's
-features without checking the installed client's capabilities.
+The CLI does not route through another TUI's connections. The owner confirms
+QL runs WSL with Omarchy: assess its actual SSH client as Linux when it is the
+WSL Linux binary. Linux managed ControlMaster reuse is a possible transport;
+native Windows OpenSSH limitations are not a blocker for that path. Neither a
+working overview row nor a machine profile proves a usable return channel.
+Check the installed client and existing control socket before assuming reuse.
+No duplicate workspace or QL enrollment is required by this design.
 
 The owner's read-only Mini report identifies Herdr 0.9.1 with `--machine` but
 without `machine status`/`machine reconnect`, and an empty local saved catalog.
 Those observations do not describe Omarchy's or QL's catalog or capabilities.
-Await w7Z's existing read-only assessment of connection direction, client OS,
-installed protocol and available control channel. No update, restart, link,
+Await w7Z's existing read-only assessment of the actual SSH binary, connection
+direction, installed protocol and existing control socket/channel. No update, restart, link,
 catalog edit or fresh connection is a substitute for that evidence.
 
 The receiver must bind each RPC to the current proxy owner/native session/process
