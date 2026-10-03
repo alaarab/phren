@@ -1,10 +1,10 @@
-import { writeStoreRegistry, registeredStoreIdentity, registerStoreIdentity } from "../store-registry.js";
+import { writeStoreRegistry, registeredStoreIdentity, registerStoreIdentity, attachedStoresFilePath } from "../store-registry.js";
 /** Prepared for the consolidated RC. Do not run during build-only development. */
 import { beforeEach, afterEach, describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import { addTask, readTasks, updateTask, completeTask, tidyDoneTasks, workNextTask, claimTask } from "./tasks.js";
+import { addTask, readTasks, updateTask, completeTask, tidyDoneTasks, workNextTask, claimTask, parseTaskContent } from "./tasks.js";
 import { taskReadiness, taskIdentity, filterTaskDoc, taskCounts } from "./task-contract.js";
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute } from "../bridge/task-routes.js";
 import { mergeTasksByBid } from "../sync/task-merge.js";
@@ -33,15 +33,22 @@ function item(project: string, id: string) { const d = doc(project); return [...
 function identity(project: string, id: string) { return taskIdentity(base, doc(project), item(project, id))!; }
 
 describe("task responsibility and prerequisites (RC source, unrun)", () => {
-  it("blocks new responsibility metadata until the owner acknowledges compatible writers", () => {
+  it("reports activation permissions and blocks Hook metadata writes until owner acknowledgement", async () => {
     const a = add("core", "Keep legacy writer compatibility"), file = path.join(base, "core/tasks.md");
     fs.unlinkSync(path.join(base, ".config/task-format.json"));
     const before = fs.readFileSync(file, "utf8");
+    const url = new URL("http://phren.local/v1/tasks?storeId=11111111&project=core");
+    const ref = { storeId: "11111111", project: "core", stableId: a.stableId! };
+    expect(getTaskRoute(base, url).metadataWritable).toBe(false);
+    expect((await getTaskDirectoryRoute(base)).stores[0].metadataWritable).toBe(false);
+    expect(() => updateTaskRoute(base, { ...ref, updates: { responsibility: "human" } })).toThrow(/not enabled/);
     expect(updateTask(base, "core", a.stableId!, { responsibility: "human" }).ok).toBe(false);
     expect(fs.readFileSync(file, "utf8")).toBe(before);
     expect(() => enableTaskFormat(base, false)).toThrow();
     enableTaskFormat(base, true);
-    expect(updateTask(base, "core", a.stableId!, { responsibility: "human" }).ok).toBe(true);
+    const updated = updateTaskRoute(base, { ...ref, updates: { responsibility: "human" } });
+    expect(updated.metadataWritable).toBe(true);
+    expect(updated.items.Queue[0].responsibility).toBe("human");
   });
   it("requires explicit portable identity registration without changing legacy task bytes", async () => {
     const a = add("core", "Legacy store"), file = path.join(base, "core/tasks.md");
@@ -56,24 +63,59 @@ describe("task responsibility and prerequisites (RC source, unrun)", () => {
     expect(taskIdentity(base, doc("core"), item("core", a.stableId!))?.storeId).toBe(id);
     expect(fs.readFileSync(file, "utf8")).toBe(before);
   });
-  it("preserves blank and duplicate metadata records while blocking selection and reassignment", () => {
-    const a = add("core", "Opaque"), file = path.join(base, "core/tasks.md");
-    for (const records of [[""], [JSON.stringify({ version: 1, responsibility: "human", dependencies: [], history: [] }), '{"version":2,"future":true}']]) {
-      const body = `# core tasks\n\n## Queue\n\n- [ ] Opaque <!-- bid:${a.stableId} -->\n${records.map(raw => "  Task: " + raw).join("\n")}\n  Context: Retain this context\n`;
-      fs.writeFileSync(file, body);
-      expect(taskReadiness(base, doc("core"), item("core", a.stableId!)).readiness).toBe("waiting-on-task");
-      expect(updateTask(base, "core", a.stableId!, { responsibility: "agent" }).ok).toBe(false);
-      expect(updateTask(base, "core", a.stableId!, { text: "Opaque renamed" }).ok).toBe(true);
-      const retained = fs.readFileSync(file, "utf8"); for (const raw of records) expect(retained).toContain("  Task: " + raw);
-      expect(retained).toContain("Context: Retain this context"); expect(workNextTask(base, "core").ok).toBe(false);
+  // Literal persisted fixtures guard the old parser's stop-at-Task failure.
+  // Exercise the real whole-file writer; no copied old parser or test-only seam.
+  it.each([
+    { name: "legacy", records: [] as string[], opaque: false },
+    { name: "v1", records: ['{"version":1,"responsibility":"human","dependencies":[{"storeId":"11111111","project":"app","stableId":"bbbbbbbb"}],"history":[{"at":"2026-10-01T00:00:00Z","change":"Owner assigned prerequisite"}]}'], opaque: false },
+    { name: "future", records: ['{"version":2,"future":true}'], opaque: true },
+    { name: "blank", records: [""], opaque: true },
+    { name: "blank-duplicate", records: ["", '{"version":1,"responsibility":"agent","dependencies":[],"history":[]}'], opaque: true },
+    { name: "duplicate", records: ['{"version":1,"responsibility":"human","dependencies":[],"history":[]}', '{"version":2,"future":true}'], opaque: true },
+  ])("preserves $name metadata and later context/claim during ordinary rewrites before activation", ({ name, records, opaque }) => {
+    const file = path.join(base, "core/tasks.md");
+    fs.unlinkSync(path.join(base, ".config/task-format.json"));
+    const future = name === "blank" ? "  Future: preserve before metadata\n" : "";
+    const continuations = records.map(raw => `  Task: ${raw}\n`).join("");
+    fs.writeFileSync(file, `# core tasks\n\n## Queue\n\n- [ ] Preserve me <!-- bid:aaaaaaaa created:2026-10-01T00:00:00Z -->\n${future}${continuations}  Context: Preserve owner context\n  Claimed: Desk 2026-10-02T00:00:00Z session:existing-worker\n  GitHub: #42 https://github.com/alaarab/phren/issues/42\n`);
+    expect(updateTask(base, "core", "bid:aaaaaaaa", { text: "Renamed", section: "Active" }).ok).toBe(true);
+    const retained = fs.readFileSync(file, "utf8");
+    expect(retained).toContain("  Context: Preserve owner context\n");
+    expect(retained).toContain("  Claimed: Desk 2026-10-02T00:00:00Z session:existing-worker\n");
+    if (future) expect(retained).toContain(future);
+    const current = item("core", "aaaaaaaa");
+    expect(current).toMatchObject({ line: "Renamed", stableId: "aaaaaaaa", createdAt: "2026-10-01T00:00:00Z", section: "Active", context: "Preserve owner context", githubIssue: 42, githubUrl: "https://github.com/alaarab/phren/issues/42", claim: { computer: "Desk", at: "2026-10-02T00:00:00Z", session: "existing-worker" } });
+    if (name === "legacy") expect(retained).not.toContain("  Task:");
+    if (name === "v1") {
+      expect(current.responsibility).toBe("human");
+      expect(current.dependencies).toEqual([{ storeId: "11111111", project: "app", stableId: "bbbbbbbb" }]);
+      expect(current.history?.[0]).toEqual({ at: "2026-10-01T00:00:00Z", change: "Owner assigned prerequisite" });
+      expect(current.history).toHaveLength(2);
+    }
+    if (opaque) {
+      expect(retained.split("\n").filter(line => line.startsWith("  Task:"))).toEqual(records.map(raw => "  Task: " + raw));
+      expect(taskReadiness(base, doc("core"), current).readiness).toBe("waiting-on-task");
+      expect(workNextTask(base, "core").ok).toBe(false);
+      // Once enabled, rejection must come from opaque metadata, not activation.
+      enableTaskFormat(base, true);
+      const result = updateTask(base, "core", "bid:aaaaaaaa", { responsibility: "agent" });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toMatch(/invalid or from a newer version/);
+      expect(fs.readFileSync(file, "utf8")).toBe(retained);
     }
   });
-  it("retains opaque root/dependency/history extensions in the sync winner", () => {
+  it("retains opaque root/dependency/history extensions across ordinary writes and sync", () => {
     const a = add("core", "Unknown"), source = fs.readFileSync(path.join(base, "core/tasks.md"), "utf8");
     const metadata = { version: 1, responsibility: "human", dependencies: [], history: [] };
-    for (const extended of [{ ...metadata, future: true }, { ...metadata, dependencies: [{ storeId: "12345678", project: "core", stableId: "87654321", future: true }] }, { ...metadata, history: [{ at: "now", change: "owner action", future: true }] }]) {
-      const raw = JSON.stringify(extended), theirs = source.replace(/(<!-- bid:[^\n]+-->)/, `$1\n  Task: ${raw}`);
-      expect(mergeTasksByBid(source, source, theirs)).toContain(`Task: ${raw}`);
+    for (const extended of [{ ...metadata, responsibility: ["human"] }, { ...metadata, future: true }, { ...metadata, dependencies: [{ storeId: "12345678", project: "core", stableId: "87654321", future: true }] }, { ...metadata, history: [{ at: "now", change: "owner action", future: true }] }]) {
+      const line = `    Task:   ${JSON.stringify(extended)}  `, theirs = source.replace(/(<!-- bid:[^\n]+-->)/, `$1\n${line}`);
+      fs.writeFileSync(path.join(base, "core/tasks.md"), theirs);
+      expect(updateTask(base, "core", a.stableId!, { text: "Keep future bytes", section: "Active" }).ok).toBe(true);
+      const retained = fs.readFileSync(path.join(base, "core/tasks.md"), "utf8");
+      expect(retained.split("\n")).toContain(line);
+      expect(taskReadiness(base, doc("core"), item("core", a.stableId!)).readiness).toBe("waiting-on-task");
+      expect(claimTask(base, "core", a.stableId!, { computer: "Desk", at: "2026-10-03T00:00:00Z" }).ok).toBe(false);
+      expect(mergeTasksByBid(source, source, retained).split("\n")).toContain(line);
     }
   });
   it("never satisfies a prerequisite from a title reference or duplicate archived stable IDs", () => {
@@ -84,8 +126,23 @@ describe("task responsibility and prerequisites (RC source, unrun)", () => {
     expect(taskReadiness(base, current, dependent).prerequisites[0].missing).toBe(true);
     fs.writeFileSync(file, "- [x] First <!-- bid:abcdef12 -->\n- [x] Second <!-- bid:abcdef12 -->\n");
     expect(taskReadiness(base, current, dependent).prerequisites[0].missing).toBe(true);
+    fs.writeFileSync(file, "- [x] First <!-- bid:abcdef12 -->\n- [ ] Reopened duplicate <!-- bid:abcdef12 -->\n");
+    expect(taskReadiness(base, current, dependent).prerequisites[0].missing).toBe(true);
+    fs.writeFileSync(file, "- [x] Conflicting comments <!-- bid:abcdef12 --> <!-- bid:11111111 -->\n");
+    expect(taskReadiness(base, current, dependent).prerequisites[0].missing).toBe(true);
     fs.writeFileSync(file, "- [ ] Unfinished archived record <!-- bid:abcdef12 -->\n");
     expect(taskReadiness(base, current, dependent).prerequisites[0].missing).toBe(true);
+  });
+  it("never falls back from a missing stable identity to a title or claims duplicated live identities", () => {
+    const a = add("core", "Mentions bid:abcdef12 in its title"), file = path.join(base, "core/tasks.md");
+    const before = fs.readFileSync(file, "utf8");
+    expect(updateTaskRoute.bind(null, base, { storeId: "11111111", project: "core", stableId: "abcdef12", updates: { section: "Done" } })).toThrow();
+    expect(fs.readFileSync(file, "utf8")).toBe(before);
+    fs.writeFileSync(file, `${before}\n- [ ] Duplicate <!-- bid:${a.stableId} -->\n`);
+    expect(workNextTask(base, "core").ok).toBe(false);
+    expect(updateTask(base, "core", "Q1", { text: "Must retain the duplicated IDs" }).ok).toBe(false);
+    expect(taskIdentity(base, doc("core"), item("core", a.stableId!))).toBeUndefined();
+    expect(() => mergeTasksByBid(before, before, fs.readFileSync(file, "utf8"))).toThrow(/unique/);
   });
   it("defaults legacy tasks to agent without writing or relabeling them", () => {
     const file = path.join(base, "core/tasks.md"), source = "# tasks\n\n## Queue\n\n- [ ] Legacy\n";
@@ -96,12 +153,14 @@ describe("task responsibility and prerequisites (RC source, unrun)", () => {
   });
   it("reassigns and moves the same stable task without losing context, creation or history", () => {
     const a = add("core", "Keep identity");
-    expect(updateTask(base, "core", a.stableId!, { responsibility: "human", context: "Owner account action", section: "Active" }).ok).toBe(true);
+    expect(claimTask(base, "core", a.stableId!, { computer: "Desk", at: "2026-10-03T00:00:00Z" }).ok).toBe(true);
+    expect(updateTask(base, "core", a.stableId!, { responsibility: "human", context: "Owner account action", github_issue: 47, section: "Active" }).ok).toBe(true);
     expect(updateTask(base, "core", a.stableId!, { responsibility: "agent", section: "Queue" }).ok).toBe(true);
     const restored = item("core", a.stableId!);
-    expect(restored).toMatchObject({ stableId: a.stableId, createdAt: a.createdAt, context: "Owner account action", responsibility: "agent", section: "Queue" });
+    expect(restored).toMatchObject({ stableId: a.stableId, createdAt: a.createdAt, context: "Owner account action", githubIssue: 47, responsibility: "agent", section: "Queue", claim: undefined });
     expect(restored.history).toHaveLength(2);
     expect(restored.history![0].change).toContain("agent -> human");
+    expect(restored.history![0].change).toContain("released claim by Desk");
     expect(restored.history![1].change).toContain("human -> agent");
   });
   it("shows cross-project prerequisite titles and resumes after completion and archival", () => {
@@ -133,14 +192,6 @@ describe("task responsibility and prerequisites (RC source, unrun)", () => {
     expect(doc("core").items.Active[0].stableId).toBe(ready.stableId);
     expect(completeTask(base, "core", human.stableId!).ok).toBe(true);
   });
-  it("preserves unsupported metadata and never dispatches it", () => {
-    const a = add("core", "Future"), file = path.join(base, "core/tasks.md");
-    const raw = fs.readFileSync(file, "utf8");
-    fs.writeFileSync(file, raw.replace(/(<!-- bid:[^\n]+-->)/, '$1\n  Task: {"version":2,"future":true}'));
-    expect(updateTask(base, "core", a.stableId!, { text: "Future retained" }).ok).toBe(true);
-    expect(fs.readFileSync(file, "utf8")).toContain('Task: {"version":2,"future":true}');
-    expect(workNextTask(base, "core").ok).toBe(false);
-  });
   it("Hook uses the same stable identity and refuses arbitrary stores", () => {
     const a = add("core", "Hook action"), ref = identity("core", a.stableId!);
     const value = updateTaskRoute(base, { ...ref, updates: { responsibility: "human" } });
@@ -155,6 +206,63 @@ describe("task responsibility and prerequisites (RC source, unrun)", () => {
     expect(merged).toContain('"stableId":"cccccccc"');
     expect(merged).toContain('"change":"lane"');
     expect(merged).toContain('"change":"dependency"');
+  });
+  it("releases a racing claim when independent sync edits merge to human responsibility", () => {
+    const bullet = "# core\n\n## Queue\n\n- [ ] A <!-- bid:aaaaaaaa -->\n";
+    const ours = bullet + '  Task: {"version":1,"responsibility":"human","dependencies":[],"history":[{"at":"2026-10-03T00:00:00Z","change":"agent -> human"}]}\n';
+    const theirs = bullet.replace("## Queue", "## Active") + "  Claimed: Desk 2026-10-03T00:01:00Z\n";
+    const merged = mergeTasksByBid(bullet, ours, theirs), parsed = parseTaskContent("core", path.join(base, "core/tasks.md"), merged);
+    expect(parsed.items.Active[0]).toMatchObject({ responsibility: "human", claim: undefined });
+    expect(parsed.items.Active[0].history?.some(h => h.change.includes("released claim by Desk"))).toBe(true);
+    expect(taskReadiness(base, parsed, parsed.items.Active[0]).readiness).toBe("waiting-on-human");
+  });
+  it("keeps directory discovery read-only for old registries and refuses partial identity evidence", async () => {
+    const other = path.join(base, "secondary"); fs.mkdirSync(path.join(other, "app"), { recursive: true }); grantAdmin(other);
+    writeStoreRegistry(other, { version: 1, stores: [{ id: "22222222", name: "Team", path: other, role: "primary", sync: "managed-git" }] });
+    const synced = `version: 1\nstores:\n  - id: '11111111'\n    name: Personal\n    path: ${JSON.stringify(base)}\n    role: primary\n  - id: '99999999'\n    name: Team\n    path: ${JSON.stringify(other)}\n    role: readonly\n    projects: [app]\n`;
+    fs.writeFileSync(path.join(base, "stores.yaml"), synced);
+    fs.unlinkSync(attachedStoresFilePath(base));
+    const directory = await getTaskDirectoryRoute(base);
+    expect(directory.stores.find(s => s.name === "Team")).toMatchObject({ id: "22222222", role: "readonly", projects: ["app"], metadataWritable: false });
+    expect(fs.existsSync(attachedStoresFilePath(base))).toBe(false);
+    expect(fs.readFileSync(path.join(base, "stores.yaml"), "utf8")).toBe(synced);
+    expect(JSON.stringify(directory)).not.toContain(base);
+    expect(() => updateTaskRoute(base, { storeId: "22222222", project: "app", stableId: "aaaaaaaa", updates: { section: "Done" } })).toThrow(/read-only/);
+    fs.writeFileSync(attachedStoresFilePath(base), "version: 1\nstores:\n  - id: malformed\n");
+    expect((await getTaskDirectoryRoute(base)).stores).toEqual([]);
+    expect(() => getTaskRoute(base, new URL("http://phren.local/v1/tasks?storeId=11111111&project=core"))).toThrow(/ambiguous/);
+  });
+  it("rejects duplicate canonical stores and non-hex registries rather than guessing identity", async () => {
+    const other = path.join(base, "secondary"); fs.mkdirSync(path.join(other, "app"), { recursive: true }); grantAdmin(other);
+    writeStoreRegistry(other, { version: 1, stores: [{ id: "11111111", name: "Team", path: other, role: "primary", sync: "managed-git" }] });
+    writeStoreRegistry(base, { version: 1, stores: [
+      { id: "11111111", name: "Personal", path: base, role: "primary", sync: "managed-git" },
+      { id: "99999999", name: "Team", path: other, role: "team", sync: "managed-git", projects: ["app"] },
+    ] });
+    const directory = await getTaskDirectoryRoute(base);
+    const duplicateStores = directory.stores.filter(s => s.id === "11111111");
+    expect(duplicateStores).toHaveLength(2);
+    expect(duplicateStores.every(s => s.ambiguous && !s.identityReady && !s.metadataWritable)).toBe(true);
+    expect(() => getTaskRoute(base, new URL("http://phren.local/v1/tasks?storeId=11111111&project=core"))).toThrow(/ambiguous/);
+    writeStoreRegistry(other, { version: 1, stores: [{ id: "not-hex-id", name: "Team", path: other, role: "primary", sync: "managed-git" }] });
+    expect(registeredStoreIdentity(other)).toBeUndefined();
+    expect(() => registerStoreIdentity(other)).toThrow(/immutable ID/);
+    expect((await getTaskDirectoryRoute(base)).stores.find(s => s.name === "Team")).toMatchObject({ id: null, identityReady: false });
+  });
+  it("never broadens a malformed subscription and retains only the attached project's access", async () => {
+    const other = path.join(base, "secondary"); fs.mkdirSync(path.join(other, "app"), { recursive: true }); fs.mkdirSync(path.join(other, "private")); grantAdmin(other);
+    writeStoreRegistry(other, { version: 1, stores: [{ id: "22222222", name: "Team", path: other, role: "primary", sync: "managed-git" }] });
+    writeStoreRegistry(base, { version: 1, stores: [
+      { id: "11111111", name: "Personal", path: base, role: "primary", sync: "managed-git" },
+      { id: "99999999", name: "Team", path: other, role: "team", sync: "managed-git", projects: ["app"] },
+    ] });
+    expect((await getTaskDirectoryRoute(base)).stores.find(s => s.name === "Team")?.projects).toEqual(["app"]);
+    expect(() => getTaskRoute(base, new URL("http://phren.local/v1/tasks?storeId=22222222&project=private"))).toThrow(/not in/);
+    const registry = fs.readFileSync(attachedStoresFilePath(base), "utf8");
+    for (const projects of ["[42]", "[app, '../private']", "app"]) {
+      fs.writeFileSync(attachedStoresFilePath(base), registry.replace(/projects:\n\s+- app/, `projects: ${projects}`));
+      expect((await getTaskDirectoryRoute(base)).stores).toEqual([]);
+    }
   });
   it("filters a lane without making excluded prerequisites disappear", () => {
     const human = add("core", "Owner"), agent = add("core", "Agent");

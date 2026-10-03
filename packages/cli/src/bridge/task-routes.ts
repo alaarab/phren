@@ -1,11 +1,10 @@
 import { z } from "zod";
 import * as path from "node:path";
-import { getStoreProjectDirs } from "../store-registry.js";
 import { readTasks, updateTask } from "../data/tasks.js";
 import { taskView, taskCounts, filterTaskDoc, taskStores, taskStoreHasProject } from "../data/task-contract.js";
 import { permissionDeniedError } from "../governance/rbac.js";
 import { BridgeError } from "./protocol.js";
-import { storeRepositoryIdentity } from "./memory-store.js";
+import { taskStoreProjects, taskStoreRepositoryIdentity } from "../data/task-store-directory.js";
 import { taskFormatStatus } from "../data/task-format.js";
 
 export const taskUpdatesSchema = z.object({
@@ -29,13 +28,12 @@ export async function getTaskDirectoryRoute(base: string) {
   return { ok: true, version: 1, stores: await Promise.all(stores.map(async store => {
     const ambiguous = !!store.taskStoreId && stores.filter(s => s.taskStoreId === store.taskStoreId).length !== 1;
     const identityReady = !!store.taskStoreId && !ambiguous;
-    const repositoryIdentity = store.available === false ? undefined : await storeRepositoryIdentity(store.path);
+    const repositoryIdentity = store.available === false ? undefined : await taskStoreRepositoryIdentity(store.path);
     return {
       id: store.taskStoreId ?? null, name: store.name, role: store.role, primary: store.role === "primary", available: store.available !== false,
       identityReady, ambiguous, ...(repositoryIdentity ? { repositoryIdentity } : {}),
       metadataWritable: identityReady && store.role !== "readonly" && !permissionDeniedError(store.path, "update_task") && taskFormatStatus(store.path).enabled,
-      projects: store.available === false ? [] : getStoreProjectDirs(store).map(dir => path.basename(dir))
-        .filter(project => /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(project)).sort(),
+      projects: taskStoreProjects(store),
     };
   })) };
 }
