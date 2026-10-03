@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Simulator touches and keys: when macOS refuses the helper, the Hook now asks for the Accessibility grant (the helper appears in the Accessibility list and the system dialog shows), the 403 names the switch to turn on and how to add the hidden helper path, and a new `accessibility-settings` simulator action opens the Accessibility pane on the Mac. The helper's source changed, so a grant given to an older build must be given once more.
+
 ## [0.3.29] - 2026-10-03
 
 ### Added
