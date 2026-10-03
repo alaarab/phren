@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Hand-offs and dispatch returns no longer stop on two Hooks that owe each other hand-off notices. Each Hook sent its notices while holding its own hand-off queue, so each waited on the other, and its 5-second ticks queued up behind that wait. After that, every `hand_off`, hand-off status and `dispatch_returns` call ended with "Hook did not confirm the request" until the Hook restarted. A Hook now runs one tick at a time and sends notices to other computers after releasing its queue.
+
 ## [0.3.26] - 2026-10-02
 
 ### Fixed
