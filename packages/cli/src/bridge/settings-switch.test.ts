@@ -23,6 +23,7 @@ describe("claudeFooterMode", () => {
     for (const [mode, line] of Object.entries(footers)) expect(claudeFooterMode(`some reply\n❯\n──\n  ${line}\n`)).toBe(mode);
     expect(claudeFooterMode("plan mode on is what I said\n❯\n")).toBeUndefined();
     expect(claudeFooterMode("❯\n")).toBeUndefined();
+    expect(claudeFooterMode("Turn bypass permissions on and retry\n❯\n")).toBeUndefined();
   });
 });
 
@@ -135,6 +136,15 @@ describe("settings route transaction", () => {
     screen = "";
     vi.mocked(rpc).mockImplementation(async (_server, method) => method === "agent.read" ? { read: { text: `❯\n  ${footers.default}\n` } } : {});
     expect(await switcher.switch(claude, { fast: false })).toMatchObject({ fast: false, verified: false });
+  });
+
+  it("says nothing of the mode when a fast-only change cannot read the footer", async () => {
+    vi.mocked(rpc).mockImplementation(async (_server, method, params) => {
+      if (method === "agent.prompt") await appendFile(transcript, stdout("Fast mode ON"));
+      return method === "agent.read" ? { read: { text: "❯\n" } } : {};
+    });
+    expect(await switcher.switch(claude, { fast: true })).toEqual({ ok: true, fast: true, verified: true });
+    await expect(switcher.switch(claude, { fast: true, mode: "x" } as never)).rejects.toThrow();
   });
 
   it("reports the footer's state and offers full access once bypass shows", async () => {
