@@ -46,7 +46,7 @@ export async function simulatorScreenshot(udid: string): Promise<Buffer> {
  * URL go through simctl; touches and keys go through the Simulator app's
  * window with UI scripting, which needs Accessibility for the Hook's node. */
 export type SimulatorAction =
-  | { action: "boot" | "shutdown" | "home" | "lock" | "screenshot-ready" }
+  | { action: "boot" | "shutdown" | "home" | "lock" | "screenshot-ready" | "accessibility-settings" }
   | { action: "launch"; bundleId: string }
   | { action: "openurl"; url: string }
   | { action: "tap"; x: number; y: number }
@@ -55,7 +55,8 @@ export type SimulatorAction =
 /** The native helper (native/simtap.swift) that finds the Simulator window
  * through the Accessibility API and posts touches and keys with CGEvent.
  * AppleScript would need Automation consent, which a launchd agent can never
- * be prompted for; the helper needs one Accessibility grant, added by hand.
+ * be prompted for; the helper needs one Accessibility grant. Its `prompt`
+ * command puts it in the Accessibility list and shows the system dialog.
  * Compiled once per Hook version with swiftc, which any Mac with the
  * simulators has. */
 let building: Promise<string> | undefined;
@@ -96,27 +97,54 @@ function simtap(name: string, ...args: string[]): Promise<void> {
   inputQueue = task;
   return task;
 }
-async function executeSimtap(name: string, ...args: string[]): Promise<void> {
+/** The helper, hashed again right before it runs. */
+async function verifiedHelper(): Promise<string> {
   const binary = await helper();
   const saved = await readFile(binary + ".sha256", "utf8").then(JSON.parse).catch(() => undefined);
   const binarySha = createHash("sha256").update(await readFile(binary)).digest("hex");
   if (!saved || saved.binarySha !== binarySha) throw new BridgeError(409, "Simulator input helper integrity check failed.");
+  return binary;
+}
+async function executeSimtap(name: string, ...args: string[]): Promise<void> {
+  const binary = await verifiedHelper();
   try { await exec(binary, [name, ...args], { timeout: 60_000 }); } catch (error) {
     const failure = error as { stderr?: string; message?: string };
     const message = String(failure?.stderr ?? failure?.message ?? "");
-    if (/accessibility/.test(message)) throw new BridgeError(403, `Touches and keys need one permission on the Mac: System Settings → Privacy & Security → Accessibility → add ${binary}`);
+    if (/accessibility/.test(message)) {
+      await promptAccessibility(binary, false);
+      throw new BridgeError(403, accessibilityHelp(binary), { code: "simulator-accessibility", helper: binary });
+    }
     if (/no window/.test(message)) throw new BridgeError(409, "That simulator has no window on screen.");
     if (/not running/.test(message)) throw new BridgeError(409, "The Simulator app is not running.");
     throw new BridgeError(409, `The simulator did not take that: ${message.slice(0, 160) || "unknown error"}`);
   }
 }
 
+/** The steps for the Accessibility grant, for the 403 and the docs. */
+export function accessibilityHelp(binary: string): string {
+  return "Touches and keys need Accessibility for Phren's simulator helper. On the Mac, open System Settings → Privacy & Security → Accessibility and switch on simtap. "
+    + `If it isn't listed, click +, press ⌘⇧G, paste ${binary} and click Open.`;
+}
+
+/** Asks macOS for the helper's Accessibility grant: the helper joins the
+ * Accessibility list, switched off, and the system dialog shows. Once per Hook
+ * run unless the person asks again, so a burst of taps raises one dialog.
+ * Resolves whether the helper is already trusted. */
+let prompted = false;
+async function promptAccessibility(binary: string, force: boolean): Promise<boolean> {
+  if (prompted && !force) return false;
+  prompted = true;
+  return exec(binary, ["-", "prompt"], { timeout: 15_000 }).then(() => true, () => false);
+}
+
+const ACCESSIBILITY_PANE = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+
 // macOS virtual key codes.
 const KEY_H = "4", KEY_L = "37";
 
 export async function simulatorAct(udid: string, request: SimulatorAction): Promise<Json> {
   if (!UDID.test(udid)) throw new BridgeError(400, "Invalid simulator identifier.");
-  if (!["boot", "shutdown", "launch", "openurl", "home", "lock", "type", "tap", "screenshot-ready"].includes(request.action)) throw new BridgeError(400, "Unknown simulator action.");
+  if (!["boot", "shutdown", "launch", "openurl", "home", "lock", "type", "tap", "screenshot-ready", "accessibility-settings"].includes(request.action)) throw new BridgeError(400, "Unknown simulator action.");
   if (process.platform !== "darwin") throw new BridgeError(404, "Simulators run on macOS only.");
   const simctl = (...args: string[]) => exec("/usr/bin/xcrun", ["simctl", ...args], { timeout: 30_000 }).catch(() => { throw new BridgeError(409, `simctl ${args[0]} failed for that simulator.`); });
   switch (request.action) {
@@ -142,6 +170,16 @@ export async function simulatorAct(udid: string, request: SimulatorAction): Prom
       await simtap(await deviceName(udid), "tap", String(x), String(y)); break;
     }
     case "screenshot-ready": break;
+    case "accessibility-settings": {
+      // The phone's "Open Accessibility settings": ask for the grant again and
+      // open the pane on this Mac, where the switch is.
+      const binary = await verifiedHelper();
+      const trusted = await promptAccessibility(binary, true);
+      await exec("/usr/bin/open", [ACCESSIBILITY_PANE], { timeout: 15_000 }).catch(() => {
+        throw new BridgeError(409, "Couldn't open System Settings on the Mac.");
+      });
+      return { ok: true, trusted, helper: binary };
+    }
     default: throw new BridgeError(400, "Unknown simulator action.");
   }
   return { ok: true };
