@@ -203,3 +203,11 @@ transaction. Fault-injection and actual service readiness remain unrun.
 
 
 Native structured sessions now discover `GET /v1/harness/session` with the real pane target and receive the runner's `ownerId` and `nativeSession`. Phone reads/controls retain that owner independently of the pane/session; a replaced runner refuses stale controls. `GET /v1/harness/requests` returns the current pending snapshot, including after Hook restart. Native SDK/ACP chat uses actual thread/event responses, displays SDK text deltas separately until history catches up, persists uncertain delivery receipts without resending, and gates interrupt, question, approval, model and explicit SDK-to-terminal takeover on capabilities. QL retains its distinct opaque proxy target. Native, SDK login/resume and provider runtime acceptance remain UNRUN.
+
+SDK/ACP observations feed the existing rich native conversation; controls use a
+separate sheet, preserving talk, attachments, tool rows and file links. ACP's
+local `user-message` is a submission observation, never a native acknowledgment.
+The phone admits its confirming transcript row only after a reply or prompt
+completion for that exact turn. Live chunks stay a streamed preview until the
+turn ends. Legacy pane keys/model/settings and slash-command paths refuse
+structured workers; ordinary prompt submission requires the retained owner.

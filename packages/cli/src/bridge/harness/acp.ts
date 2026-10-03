@@ -55,12 +55,14 @@ export class AcpAdapter implements HarnessAdapter {
   async sendTurn(id: string, text: string) {
     const session = this.session(id); if (session.active) throw new Error("ACP is still processing its previous turn.");
     const turnId = newTurnId(); session.active = turnId;
+    this.events.publish(id, "user-message", { text }, turnId);
+    this.events.publish(id, "turn-queued", undefined, turnId);
     // session/prompt returns at completion, not start. It has no native turn id.
     void this.peer.request("session/prompt", { sessionId: id, prompt: [{ type: "text", text }] }, 0).then(result => {
       if (session.active === turnId) session.active = undefined;
       this.events.publish(id, "turn-ended", result, turnId);
     }, () => { if (session.active === turnId) session.active = undefined; this.events.publish(id, "failed", { reason: "ACP prompt failed; do not retry automatically." }, turnId); });
-    this.events.publish(id, "turn-queued", undefined, turnId); return { turnId, acknowledged: false };
+    return { turnId, acknowledged: false };
   }
   async interruptTurn(id: string, turnId: string) { const session = this.session(id); if (session.active !== turnId) return false; for (const [key, request] of this.pending) if (request.session === id) { this.peer.respond(request.rpcId, { outcome: { outcome: "cancelled" } }); this.pending.delete(key); this.events.publish(id, "request-resolved", { requestId: key }); } this.peer.notify("session/cancel", { sessionId: id }); return true; }
   async respondToRequest(id: string, requestId: string, response: unknown) {

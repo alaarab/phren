@@ -316,7 +316,19 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
   // blocked or waiting; the status check below is theirs alone.
   const pane = await validateTarget(target, false, sendsInput || url.pathname === "/v1/upload");
   if (sendsInput) { modelSwitcher.assertAvailable(target); settingsSwitcher.assertAvailable(target); permissionModeSwitcher.assertAvailable(target); sideQuestions.assertAvailable(target); }
+  if (["/v1/keys", "/v1/secret", "/v1/model", "/v1/settings", "/v1/agents/permission-mode"].includes(url.pathname)) {
+    const { runnerForPane } = await import("./harness/runner-client.js");
+    if (await runnerForPane(target.server, pane)) throw new BridgeError(409, "Use the capability-gated worker controls; terminal commands cannot control this structured worker.");
+  }
   if (url.pathname === "/v1/prompt") {
+    const { runnerForPane } = await import("./harness/runner-client.js");
+    const runner = await runnerForPane(target.server, pane);
+    if (runner && (data.ownerId !== runner.ownerId || runner.session !== target.session)) {
+      throw new BridgeError(409, "Refresh this structured worker's owner before sending; no text was sent.");
+    }
+    if (runner && typeof data.text === "string" && data.text.trim().startsWith("/")) {
+      throw new BridgeError(422, "Use the structured harness controls for this worker.");
+    }
     // A waiting agent takes typed text only when nothing structured
     // is pending there: an approval the Hook holds or saw, or a
     // status Herdr cannot read. Otherwise the answer keys are the way.
