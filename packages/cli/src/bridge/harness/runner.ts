@@ -73,7 +73,7 @@ async function runOwnedHarnessWorker(config: RunnerConfig): Promise<number> {
     await noteTurn(entry.server, entry.pane, { terminal: entry.terminal, source, session: alias, event, cwd: config.cwd, ...(config.briefId ? { dispatch: config.briefId } : {}), ...(reply ? { reply } : {}) });
     await terminalProvider().reportAgent?.(entry.server, entry.pane, source, status as "idle" | "working" | "blocked").catch(() => {});
   }
-  async function turn(text: string, deliveryId = randomUUID()) {
+  async function turn(text: string, deliveryId: string = randomUUID()) {
     const prompt = z.string().min(1).max(32768).parse(text);
     return submissions.run(z.string().regex(/^[A-Za-z0-9_-]{8,64}$/).parse(deliveryId), prompt, async () => {
     if (submission) throw new Error("A turn submission is still in flight.");
