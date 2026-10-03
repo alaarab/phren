@@ -72,8 +72,9 @@ adoption; neither these routes nor a phone sync elects a replacement authority.
 All three mutation controls reject agent-origin calls and require existing
 `manage_config` authority. They add no dispatch or release grants. The private
 `/v1/conductor/lease/authority` coordination route is not a phone control.
-`POST /v1/conductor/stop` ends the local role and returns `leaseRetained:true`
-when configured; it does not implicitly revoke the reservation. CLI lease
+`POST /v1/conductor/stop` ends the local role and returns `leaseUnchanged:true`
+when configured; it does not implicitly revoke the reservation or assert that
+the authority currently has a holder. Read the lease for its actual state. CLI lease
 configure/revoke/takeover requires the owner's interactive terminal. Takeover
 uses `phren conductor lease takeover --review-file <request.json> --confirm
 '<oldClaimId>-><newComputerId>/<newSession>'` on the replacement computer.

@@ -206,9 +206,9 @@ export async function stopConductor(data: Json): Promise<Json> {
   if (pane !== undefined && held && held.pane !== pane) throw new BridgeError(409, "That pane is not this computer's conductor.");
   // Ending a role is not authority to release its store reservation. Only an
   // explicit owner revoke/takeover of the reviewed holder may do that.
-  const leaseRetained = !!await conductorLeaseConfig();
+  const leaseUnchanged = !!await conductorLeaseConfig();
   const stopped = await clearConductor(pane);
-  return { ok: true, stopped: !!stopped, ...(leaseRetained ? { leaseRetained: true } : {}) };
+  return { ok: true, stopped: !!stopped, ...(leaseUnchanged ? { leaseUnchanged: true } : {}) };
 }
 
 /** How long a pane the Hook just created may take to reach its shell prompt. */
