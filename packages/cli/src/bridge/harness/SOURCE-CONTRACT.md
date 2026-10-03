@@ -27,6 +27,9 @@ foreground runner process. Cached adapters are invalidated on owner change.
 Hook restart reconstructs the adapter and outstanding request cards from the
 still-running worker. Closing a Hook observer does not close that worker.
 Stale registries are refused; elapsed time never authorizes socket replacement.
+An exclusive ownership lock is acquired before native adapter construction and
+held for the runner's lifetime, so concurrent runner starts cannot spawn a second
+owned agent. An abandoned lock requires explicit owner repair, never age clearing.
 
 Structured worker turns require a stable 8–64 character ASCII `deliveryId`
 matching `[A-Za-z0-9_-]+`. Same ID and same text join or replay one worker-owned

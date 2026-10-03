@@ -17,6 +17,7 @@ import { HarnessEvents, type HarnessAdapter } from "./contract.js";
 import { TurnSubmissions } from "./submissions.js";
 import { CodexStdioAdapter } from "./codex-stdio.js";
 import { privateRunnerDirectory, runnerEntrySchema, runnerPaths, type RunnerEntry } from "./runner-client.js";
+import { lockedState } from "./private-state.js";
 
 export const runnerConfigSchema = z.object({
   backend: z.string().regex(/^(codex-stdio|claude-sdk|acp:[a-z][a-z0-9-]{0,31})$/), cwd: z.string().min(1).max(4096).refine(path.isAbsolute),
@@ -31,8 +32,19 @@ export type RunnerConfig = z.infer<typeof runnerConfigSchema>;
 
 /** Runs in the worker's pane, outside the Hook's service lifetime. Never called by a build. */
 export async function runHarnessWorker(raw: unknown): Promise<number> {
-  const config = runnerConfigSchema.parse(raw), source = config.backend === "claude-sdk" ? "claude" : config.backend === "codex-stdio" ? "codex" : "phren";
+  const config = runnerConfigSchema.parse(raw);
   if (config.proxy && (config.pane || config.once)) throw new Error("A remote proxy owns exactly one persistent agent; it cannot share a pane launch or a headless once run.");
+  const files = config.pane ? runnerPaths(config.pane.server, config.pane.pane) : config.proxy ? runnerPaths("remote-agent", "remote-agent") : undefined;
+  if (!files) return runOwnedHarnessWorker(config);
+  await mkdir(files.directory, { recursive: true, mode: 0o700 }); await privateRunnerDirectory(files.directory);
+  // Reserve ownership before constructing an adapter: Codex construction itself spawns a process.
+  return lockedState(files.entry + ".owner", async () => {
+    if (await lstat(files.entry).catch(error => { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; })) throw new Error("A prior runner owns this registry; explicit owner repair is required before native startup.");
+    return runOwnedHarnessWorker(config);
+  });
+}
+async function runOwnedHarnessWorker(config: RunnerConfig): Promise<number> {
+  const source = config.backend === "claude-sdk" ? "claude" : config.backend === "codex-stdio" ? "codex" : "phren";
   const adapter: HarnessAdapter = source === "codex" ? new CodexStdioAdapter(config.executable, config.cwd) : source === "claude"
     ? new ClaudeSdkAdapter(await installedClaudeSdk(), config.executable, { permissionMode: config.permissionMode })
     : new AcpAdapter(openAcpStdio(config.executable, config.args, config.cwd, process.env), config.backend.slice(4));

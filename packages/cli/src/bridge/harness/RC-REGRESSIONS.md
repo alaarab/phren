@@ -32,6 +32,7 @@ not the live store. The owner-proof fixture does not call production signing cod
 | Hook reconstruction with runner alive, turn RPC reply lost, then same delivery ID | One native submission, stable receipt; noack remains queued/uncertain; approvals and thread window reconstruct from runner |
 | Runner dies, native session resumed by a replacement runner | Old owner target rejected; explicit registration required; UI does not claim old delivery IDs survived runner death |
 | IPC registry/socket symlink, nonprivate mode, foreign UID, changed terminal or foreground PID | Reject before delivery; never unlink/take over a socket due to age; closing observer keeps actual worker alive |
+| Concurrent starts for one pane or the one-agent proxy, using two configured ports; prior or abandoned owner registry/lock | Ownership reservation rejects before native adapter construction; at most one agent starts; abandoned lock never clears by timeout |
 | Owner POST replay after Hook restart, ±120 s limit, method/body/path change, computer SSH key | Refusal without control; revoked paired phone key is checked on every request; fresh-nonce capacity refuses before mutation |
 | Fixed lease authority offline during schedule, worker, conductor or canary launch | No new launch; old conductor never loses authority due to time; no machine linking or authority election |
 | Two computers race the same conductor grant; failed launch retains admission | At most one admission per lease; expectedLeaseId must match for owner revoke/takeover; no silent retry/failover |
