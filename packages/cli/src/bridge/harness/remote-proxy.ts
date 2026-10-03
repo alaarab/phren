@@ -66,10 +66,15 @@ export async function proxyOperation(operation: string, input: Json) {
   return remote(row, operation, payload);
 }
 
-/** Source plan only. QL initiates the SSH connection; Omarchy forwards one private agent socket. */
+/** Source plan only. Existing SSH access is not proof of a reusable live transport. */
 export function reverseProxyPlan(input: unknown) {
   const data = z.object({ id: proxyId, omarchySSHHost: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/), omarchySocket: z.string().min(1).max(100).refine(value => path.posix.isAbsolute(value) && !/[\x00-\x20\x7f:]/.test(value)), remotePort: z.number().int().min(1024).max(65535), ownerConfirmed: z.literal(true) }).strict().parse(input);
   if (!data.omarchySocket.endsWith("/harness/proxies/" + data.id + ".sock")) throw new BridgeError(400, "Choose this proxy's private Omarchy socket path.");
-  return { performed: false, scope: "one-agent", direction: "QL-to-Omarchy", enrollmentRequired: false, requiresExistingOwnerSSHAccessAndVerifiedOmarchyPin: true,
-    file: "ssh", args: ["-N", "-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3", "-R", `${data.omarchySocket}:127.0.0.1:${data.remotePort}`, "--", data.omarchySSHHost] };
+  // Do not emit an ssh command: -N -R would create another connection, and an
+  // ordinary -S invocation can fall back to connecting if its master is gone.
+  // The active client's channel/mux capability must be established separately.
+  return { performed: false, scope: "one-agent", direction: "bidirectional", enrollmentRequired: false,
+    code: "existing-transport-capability-unverified", reuseExistingTransport: true, newConnectionAllowed: false,
+    returnHandoffAvailable: false, controlledReconnectRequired: "unknown",
+    message: "The existing transport must support a bounded return channel or an existing SSH multiplex channel. No connection or forwarding command is authorized by this plan." };
 }

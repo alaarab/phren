@@ -147,18 +147,24 @@ No repair, enrollment, SSH or credential operation was performed in this task.
 
 ## One QL agent through Omarchy, without QL enrollment
 
-This is an optional tunnel, independent of machine enrollment. QL owns one
-runner/agent. The source runner binds HTTP only on `127.0.0.1:<port>` with a
-64-hex-character private bearer token; it exposes one adapter session. A future
-owner-run reverse SSH connection forwards one owner-private Omarchy Unix socket
-to that loopback listener. Neither side runs another Hook on QL or enrolls QL
-as a computer. Codex stdio starts an explicitly installed Codex app-server
-child; Claude SDK and configured ACP are other source options. Downloads,
-credential discovery and automatic SSH execution are absent from the plan.
+The owner requires the existing authenticated transport for the one existing
+QL agent, including replies and handoffs back to authorized panes. No new SSH
+connection, replacement agent, broad Hook tunnel or QL enrollment is authorized.
+The current source only sends operations from Omarchy to a private runner socket;
+it does not implement the required QL-to-pane return RPC. Generic SDK/ACP support
+is not evidence of compatibility with the existing QL Copilot session.
+
+The source runner exposes one token-bound loopback adapter session. Using its
+forwarded socket does not itself prove that the current QL client's transport can
+carry a return RPC. `peerRequest` cannot be a fallback: it spawns SSH per request
+and disables multiplexing. The plan therefore emits no SSH executable/arguments
+and reports transport capability unverified and return handoff unavailable.
+Existing w7Z owns the read-only live-client capability assessment; no duplicate
+probe, connection, forwarding change or reconnect is performed here.
 
 | API | Contract |
 | --- | --- |
-| POST `/v1/harness/proxy/plan` | `{id, omarchySSHHost:<existing alias>, omarchySocket:<absolute private .../harness/proxies/id.sock>, remotePort, ownerConfirmed:true}`; returns `performed:false`, `file:"ssh"`, argument array, `enrollmentRequired:false` |
+| POST `/v1/harness/proxy/plan` | `{id, omarchySSHHost:<existing alias>, omarchySocket:<absolute private .../harness/proxies/id.sock>, remotePort, ownerConfirmed:true}`; returns `performed:false`, `code:"existing-transport-capability-unverified"`, `reuseExistingTransport:true`, `newConnectionAllowed:false`, `returnHandoffAvailable:false`, `controlledReconnectRequired:"unknown"`; no executable or argument array |
 | POST `/v1/harness/proxies/register` | `{id, originComputer:"QL", label, entry:<RunnerEntry from owner>, token:<64hex>, expectedOwnerId?}`; max one registration; replacement must name the previous owner |
 | GET `/v1/harness/proxies` | Separate `{version:1, scope:"one-agent", proxies:[...]}` listing |
 | GET `/v1/harness/proxy/session?proxyId=<id>` | Verified provider, native session, capabilities and proxy Target |
@@ -183,10 +189,42 @@ Native source now lists this one agent separately, uses only its proxy target,
 signs owner controls, retains uncertain delivery IDs on the phone, and shows
 partial text history and current pending requests. It never enrolls QL or
 reconstructs a local pane. **No phone or runtime acceptance is claimed.**
-Native SSH forwarding,
-Windows ACLs, SDK subscription/resume and Codex stdio initialization remain RC
-runtime gates. The owner must establish existing SSH access and verify Omarchy's
-host pin outside this source task; the plan always uses strict host-key checking.
+Existing transport reuse, Windows ACLs, actual Copilot session support and phone
+interaction remain integration and RC gates. An overview row marked working
+without a chat Target is not evidence of a routable chat or return channel.
+
+### Required bidirectional return channel — not implemented
+
+The selected implementation must provide only `handoff` and `receipt` RPCs over
+the same authenticated live connection, or a verified existing SSH mux channel
+that cannot fall back to opening a connection. If the actual client cannot add
+such a channel, report that a controlled reconnect is needed and leave it blocked
+until separately authorized. A reconnect is not authorized by this source plan.
+
+The receiver must bind each RPC to the current proxy owner/native session/process
+and a revocable owner-approved list of exact destination Targets (computer,
+server, workspace, tab, pane, source, session). No wildcard, session-name search,
+client-supplied origin impersonation, arbitrary command, arbitrary URL/path,
+remote peerRequest forwarding or full Hook exposure is allowed. A destination
+on another computer needs its own verified reusable transport; the proxy must
+not silently open a peer SSH connection. Recheck ACL and live destination before
+admission and before delivery, including after queueing or owner replacement.
+
+Requests require a stable ASCII deliveryId of 8–64 characters, text of at most
+32768 characters, bounded serialized frames, bounded pending/receipt counts and
+backpressure. Bind ID to exact origin, target and text; reject changed payloads.
+Persist admission/attempt state before side effects and retain receipts across
+Hook reconstruction. Return queued, delivered, failed or uncertain truthfully;
+query uncertain outcomes without resubmission. A transport loss or lost reply
+must never trigger a new SSH connection or another native submission. Retention,
+overflow and restart behavior must be explicit, without claiming exactly-once
+native delivery or receipt survival across runner death without durable proof.
+
+Reuse the receiving Hook's existing handoff queue and live target checks through
+a narrow authorized entry, not a public proxy to `/v1/*`. The local agent-facing
+client and native transport integration must both exist before this requirement
+can be marked source-complete. This section is the acceptance contract, not a
+claim that these RPCs or the current QL client's reuse support exist.
 
 ## Returns and installer
 
