@@ -4,7 +4,7 @@ import { moduleEnabled } from "../modules/runtime.js";
 import { disabledHint } from "../modules/registry.js";
 import * as fs from "fs";
 import * as path from "path";
-import { randomBytes, randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 import {
   phrenErr,
   PhrenError,
@@ -19,7 +19,7 @@ import { withSafeLock, ensureProject } from "../shared/data-utils.js";
 import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
 import { storeAwareProjectPath } from "../store-routing.js";
 import { TASKS_FILENAME } from "../filenames.js";
-import { taskReadiness, validateTaskDependencies, withTaskGraphLock, type TaskDependency, type TaskResponsibility, type TaskChange } from "./task-contract.js";
+import { taskIdentity, taskReadiness, validateTaskDependencies, withTaskGraphLock, type TaskDependency, type TaskResponsibility, type TaskChange } from "./task-contract.js";
 import { recordTaskWrite } from "./task-receipts.js";
 
 const ACTIVE_HEADINGS = new Set(["active", "in progress", "in-progress", "current", "wip"]);
@@ -82,6 +82,8 @@ function formatClaim(claim: TaskClaim): string {
 }
 
 export interface TaskDoc {
+  /** Revision of the exact project task bytes; absent-file and empty-file differ. */
+  revision?: string;
   project: string;
   title: string;
   items: Record<TaskSection, TaskItem[]>;
@@ -397,6 +399,7 @@ export function parseTaskContent(project: string, taskPath: string, content: str
     path: taskPath,
     items,
     issues: validateTaskFormat(content),
+    revision: taskDocumentRevision(content),
   };
 }
 
@@ -486,12 +489,18 @@ function taskItemNotFound(project: string, match: string): PhrenResult<never> {
   );
 }
 
-function writeTaskDoc(doc: TaskDoc): void {
+function taskDocumentRevision(content?: string): string {
+  return createHash("sha256").update(content === undefined ? "absent\0" : "present\0").update(content ?? "").digest("hex");
+}
+
+function writeTaskDoc(doc: TaskDoc): string {
   const tmpPath = `${doc.path}.tmp-${randomUUID()}`;
   const content = renderTask(doc);
   fs.writeFileSync(tmpPath, content);
   fs.renameSync(tmpPath, doc.path);
+  doc.revision = taskDocumentRevision(content);
   recordTaskWrite(doc.path, content);
+  return content;
 }
 
 function taskArchivePath(phrenPath: string, project: string): string {
@@ -510,6 +519,7 @@ export function readTasks(phrenPath: string, project: string): PhrenResult<TaskD
     return phrenOk({
       project,
       title: `# ${project} tasks`,
+      revision: taskDocumentRevision(),
       path: taskPath,
       issues: [],
       items: { Active: [], Queue: [], Done: [] },
@@ -565,10 +575,6 @@ export function resolveTaskItem(phrenPath: string, project: string, match: strin
 }
 
 export interface AddTaskOptions {
-  /** Atomic metadata creation, with a caller-retained identity for uncertain replies. */
-  stableId?: string;
-  responsibility?: TaskResponsibility;
-  graphRoot?: string;
   createdAt?: string;
   sessionId?: string;
   scope?: string;
@@ -584,32 +590,16 @@ export function addTask(phrenPath: string, project: string, item: string, opts?:
   const preCheck = ensureProject(phrenPath, project);
   if (!preCheck.ok) return forwardErr(preCheck);
 
-  const create = () => withSafeLock(bPath, () => {
+  return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
     const line = item.replace(/^-\s*/, "").trim();
-    if (opts?.responsibility !== undefined) {
-      if (!taskFormatStatus(phrenPath).enabled) return phrenErr(taskFormatMigrationHint, PhrenError.VALIDATION_ERROR);
-      if (!["human", "agent"].includes(opts.responsibility) || !opts.stableId || !/^[a-f0-9]{8}$/.test(opts.stableId)) return phrenErr("Atomic creation requires a valid responsibility and stable ID.", PhrenError.VALIDATION_ERROR);
-      if (!line || /[\r\n]/.test(line) || /<!--\s*bid:/i.test(line)) return phrenErr("Task title must be one nonempty line.", PhrenError.VALIDATION_ERROR);
-      const existing = [...parsed.data.items.Active, ...parsed.data.items.Queue, ...parsed.data.items.Done].filter(task => task.stableId === opts.stableId);
-      if (existing.length) {
-        const task = existing[0];
-        if (existing.length === 1 && !task.identityAmbiguous && task.taskContractRaw === undefined && task.line === line && task.responsibility === opts.responsibility) return phrenOk(task);
-        return phrenErr("This creation identity already exists with different task content. Refresh before continuing; no task was created.", PhrenError.VALIDATION_ERROR);
-      }
-      const archive = path.join(phrenPath, ".config", "task-archive", `${project}.md`);
-      try {
-        if (fs.readFileSync(archive, "utf8").includes(`bid:${opts.stableId}`)) return phrenErr("This creation identity is already archived. Refresh before continuing; no task was created.", PhrenError.VALIDATION_ERROR);
-      } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    } else if (opts?.stableId !== undefined) return phrenErr("A supplied creation identity requires explicit responsibility.", PhrenError.VALIDATION_ERROR);
     const newItem: TaskItem = {
       id: `Q${parsed.data.items.Queue.length + 1}`,
-      stableId: opts?.stableId ?? newBid(),
+      stableId: newBid(),
       section: "Queue",
       line,
-      ...(opts?.responsibility !== undefined ? { responsibility: opts.responsibility, dependencies: [], history: [{ at: new Date().toISOString(), change: `created as ${opts.responsibility}` }] } : {}),
       checked: false,
       priority: normalizePriority(line),
       createdAt: opts?.createdAt ?? new Date().toISOString(),
@@ -622,7 +612,6 @@ export function addTask(phrenPath: string, project: string, item: string, opts?:
     writeTaskDoc(parsed.data);
     return phrenOk(newItem);
   });
-  return opts?.responsibility !== undefined ? withTaskGraphLock(opts.graphRoot ?? phrenPath, create) : create();
 }
 
 export function addTasks(phrenPath: string, project: string, items: string[], opts?: Pick<AddTaskOptions, "scope">): PhrenResult<{ added: string[]; errors: string[] }> {
@@ -762,22 +751,24 @@ export function removeTasks(phrenPath: string, project: string, matches: string[
   });
 }
 
+export interface TaskUpdates {
+  text?: string;
+  priority?: string;
+  context?: string | null;
+  replace_context?: boolean;
+  section?: string;
+  github_issue?: number | string;
+  github_url?: string;
+  unlink_github?: boolean;
+  responsibility?: TaskResponsibility;
+  dependencies?: TaskDependency[];
+}
+
 export function updateTask(
   phrenPath: string,
   project: string,
   match: string,
-  updates: {
-    text?: string;
-    priority?: string;
-    context?: string;
-    replace_context?: boolean;
-    section?: string;
-    github_issue?: number | string;
-    github_url?: string;
-    unlink_github?: boolean;
-    responsibility?: TaskResponsibility;
-    dependencies?: TaskDependency[];
-  },
+  updates: TaskUpdates,
   graphRoot = phrenPath,
 ): PhrenResult<string> {
   const bPath = canonicalTaskFilePath(phrenPath, project);
@@ -789,102 +780,180 @@ export function updateTask(
     const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
 
-    const found = findItemByMatch(parsed.data, match);
-    if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
-    if (!found.match) return taskItemNotFound(project, match);
+    return updateTaskDocument(parsed.data, match, updates, graphRoot);
+  }));
+}
 
-    const item = parsed.data.items[found.match.section][found.match.index];
-    const changes: string[] = [];
-    if (updates.responsibility !== undefined || updates.dependencies !== undefined) {
-      const storeRoot = path.dirname(path.dirname(parsed.data.path));
-      if (!taskFormatStatus(storeRoot).enabled) return phrenErr(taskFormatMigrationHint, PhrenError.VALIDATION_ERROR);
-      if (item.taskContractRaw !== undefined) return phrenErr("Task metadata is invalid or from a newer version; preserve it and repair before editing responsibility/dependencies.", PhrenError.VALIDATION_ERROR);
-      if (updates.responsibility !== undefined && !["human", "agent"].includes(updates.responsibility)) return phrenErr("Responsibility must be human or agent.", PhrenError.VALIDATION_ERROR);
-      item.stableId ??= newBid();
-      if (updates.dependencies !== undefined) {
-        const error = validateTaskDependencies(graphRoot, parsed.data, item, updates.dependencies);
-        if (error) return phrenErr(error, PhrenError.VALIDATION_ERROR);
-        item.dependencies = updates.dependencies;
-        changes.push("dependencies updated");
-      }
-      if (updates.responsibility !== undefined && updates.responsibility !== (item.responsibility ?? "agent")) {
-        changes.push(`responsibility ${(item.responsibility ?? "agent")} -> ${updates.responsibility}`);
-        item.responsibility = updates.responsibility;
-        if (updates.responsibility === "human" && item.claim) { changes.push(`released claim by ${item.claim.computer} at ${item.claim.at}`); item.claim = undefined; }
-      }
+function updateTaskDocument(doc: TaskDoc, match: string, updates: TaskUpdates, graphRoot: string): PhrenResult<string> {
+  const found = findItemByMatch(doc, match);
+  if (found.error) return phrenErr(found.error, found.errorCode ?? PhrenError.AMBIGUOUS_MATCH);
+  if (!found.match) return taskItemNotFound(doc.project, match);
+
+  const item = doc.items[found.match.section][found.match.index];
+  const changes: string[] = [];
+  if (updates.responsibility !== undefined || updates.dependencies !== undefined) {
+    const storeRoot = path.dirname(path.dirname(doc.path));
+    if (!taskFormatStatus(storeRoot).enabled) return phrenErr(taskFormatMigrationHint, PhrenError.VALIDATION_ERROR);
+    if (item.taskContractRaw !== undefined) return phrenErr("Task metadata is invalid or from a newer version; preserve it and repair before editing responsibility/dependencies.", PhrenError.VALIDATION_ERROR);
+    if (updates.responsibility !== undefined && !["human", "agent"].includes(updates.responsibility)) return phrenErr("Responsibility must be human or agent.", PhrenError.VALIDATION_ERROR);
+    item.stableId ??= newBid();
+    if (updates.dependencies !== undefined) {
+      const error = validateTaskDependencies(graphRoot, doc, item, updates.dependencies);
+      if (error) return phrenErr(error, PhrenError.VALIDATION_ERROR);
+      item.dependencies = updates.dependencies;
+      changes.push("dependencies updated");
     }
-
-    if (updates.text !== undefined) {
-      const nextText = updates.text.trim();
-      if (!nextText) return phrenErr("Task text cannot be empty.", PhrenError.EMPTY_INPUT);
-      const previousText = item.line;
-      item.line = nextText;
-      item.priority = normalizePriority(nextText);
-      item.pinned = detectPinned(nextText) || undefined;
-      changes.push(`text updated from ${JSON.stringify(previousText)}`);
+    if (updates.responsibility !== undefined && updates.responsibility !== (item.responsibility ?? "agent")) {
+      changes.push(`responsibility ${(item.responsibility ?? "agent")} -> ${updates.responsibility}`);
+      item.responsibility = updates.responsibility;
+      if (updates.responsibility === "human" && item.claim) { changes.push(`released claim by ${item.claim.computer} at ${item.claim.at}`); item.claim = undefined; }
     }
+  }
 
-    if (updates.priority) {
-      const priority = updates.priority.toLowerCase();
-      if (["high", "medium", "low"].includes(priority)) {
-        item.priority = priority as "high" | "medium" | "low";
-        item.line = stripPriorityTag(item.line);
-        item.line = `${item.line} [${item.priority}]`;
-        changes.push(`priority -> ${priority}`);
-      }
+  if (updates.text !== undefined) {
+    const nextText = updates.text.trim();
+    if (!nextText) return phrenErr("Task text cannot be empty.", PhrenError.EMPTY_INPUT);
+    const previousText = item.line;
+    item.line = nextText;
+    item.priority = normalizePriority(nextText);
+    item.pinned = detectPinned(nextText) || undefined;
+    changes.push(`text updated from ${JSON.stringify(previousText)}`);
+  }
+
+  if (updates.priority) {
+    const priority = updates.priority.toLowerCase();
+    if (["high", "medium", "low"].includes(priority)) {
+      item.priority = priority as "high" | "medium" | "low";
+      item.line = stripPriorityTag(item.line);
+      item.line = `${item.line} [${item.priority}]`;
+      changes.push(`priority -> ${priority}`);
     }
+  }
 
-    if (updates.context) {
-      if (updates.replace_context || !item.context) item.context = updates.context;
-      // Agents sometimes send the existing context with their new note. Do
-      // not append the complete history to itself on every such update.
-      else if (updates.context.startsWith(`${item.context}; `)) item.context = updates.context;
-      else if (updates.context !== item.context && !item.context.endsWith(`; ${updates.context}`)) {
-        item.context = `${item.context}; ${updates.context}`;
-      }
-      changes.push("context updated");
+  if (updates.context === null || (updates.replace_context && updates.context === "")) {
+    item.context = undefined;
+    changes.push("context cleared");
+  } else if (updates.context) {
+    if (updates.replace_context || !item.context) item.context = updates.context;
+    // Agents sometimes send the existing context with their new note. Do
+    // not append the complete history to itself on every such update.
+    else if (updates.context.startsWith(`${item.context}; `)) item.context = updates.context;
+    else if (updates.context !== item.context && !item.context.endsWith(`; ${updates.context}`)) {
+      item.context = `${item.context}; ${updates.context}`;
     }
+    changes.push("context updated");
+  }
 
-    if (updates.unlink_github) {
-      item.githubIssue = undefined;
-      item.githubUrl = undefined;
-      changes.push("github link removed");
-    } else if (updates.github_issue !== undefined || updates.github_url !== undefined) {
-      if (updates.github_url && !isValidGitHubIssueUrl(updates.github_url)) {
-        return phrenErr("github_url must be a valid GitHub issue URL.", PhrenError.VALIDATION_ERROR);
-      }
-      const githubIssueRaw = typeof updates.github_issue === "string"
-        ? updates.github_issue.trim()
-        : updates.github_issue !== undefined
-          ? String(updates.github_issue)
-          : "";
-      const parsedIssue = parseGitHubIssueReference([
-        githubIssueRaw,
-        updates.github_url?.trim() || "",
-      ].filter(Boolean).join(" "));
-      if (!parsedIssue.githubIssue && !parsedIssue.githubUrl) {
-        return phrenErr("GitHub link update requires a valid issue number and/or GitHub issue URL.", PhrenError.VALIDATION_ERROR);
-      }
-      item.githubIssue = parsedIssue.githubIssue;
-      item.githubUrl = parsedIssue.githubUrl;
-      changes.push(item.githubIssue ? `github -> #${item.githubIssue}` : "github link updated");
+  if (updates.unlink_github) {
+    item.githubIssue = undefined;
+    item.githubUrl = undefined;
+    changes.push("github link removed");
+  } else if (updates.github_issue !== undefined || updates.github_url !== undefined) {
+    if (updates.github_url && !isValidGitHubIssueUrl(updates.github_url)) {
+      return phrenErr("github_url must be a valid GitHub issue URL.", PhrenError.VALIDATION_ERROR);
     }
-
-    if (updates.section) {
-      const target = updates.section[0].toUpperCase() + updates.section.slice(1).toLowerCase();
-      if (["Active", "Queue", "Done"].includes(target)) {
-        parsed.data.items[found.match.section].splice(found.match.index, 1);
-        const section = target as TaskSection;
-        item.section = section;
-        item.checked = section === "Done";
-        parsed.data.items[section].unshift(item);
-        changes.push(`moved ${found.match.section} -> ${section}`);
-      }
+    const githubIssueRaw = typeof updates.github_issue === "string"
+      ? updates.github_issue.trim()
+      : updates.github_issue !== undefined
+        ? String(updates.github_issue)
+        : "";
+    const parsedIssue = parseGitHubIssueReference([
+      githubIssueRaw,
+      updates.github_url?.trim() || "",
+    ].filter(Boolean).join(" "));
+    if (!parsedIssue.githubIssue && !parsedIssue.githubUrl) {
+      return phrenErr("GitHub link update requires a valid issue number and/or GitHub issue URL.", PhrenError.VALIDATION_ERROR);
     }
+    item.githubIssue = parsedIssue.githubIssue;
+    item.githubUrl = parsedIssue.githubUrl;
+    changes.push(item.githubIssue ? `github -> #${item.githubIssue}` : "github link updated");
+  }
 
-    if (changes.length && (item.responsibility !== undefined || item.dependencies !== undefined || item.history !== undefined)) item.history = [...(item.history ?? []), { at: new Date().toISOString(), change: changes.join(", ") }];
-    writeTaskDoc(parsed.data);
-    return phrenOk(`Updated item in ${project}: ${changes.join(", ") || "no changes"}`);
+  if (updates.section) {
+    const target = updates.section[0].toUpperCase() + updates.section.slice(1).toLowerCase();
+    if (["Active", "Queue", "Done"].includes(target)) {
+      doc.items[found.match.section].splice(found.match.index, 1);
+      const section = target as TaskSection;
+      item.section = section;
+      item.checked = section === "Done";
+      doc.items[section].unshift(item);
+      changes.push(`moved ${found.match.section} -> ${section}`);
+    }
+  }
+
+  if (changes.length && (item.responsibility !== undefined || item.dependencies !== undefined || item.history !== undefined)) item.history = [...(item.history ?? []), { at: new Date().toISOString(), change: changes.join(", ") }];
+  const content = writeTaskDoc(doc);
+  Object.assign(doc, parseTaskContent(doc.project, doc.path, content));
+  return phrenOk(`Updated item in ${doc.project}: ${changes.join(", ") || "no changes"}`);
+}
+
+export const taskRevisionConflict = "Task document changed. Refresh it and review the draft before saving again.";
+export type TaskSaveUpdates = Pick<TaskUpdates, "text" | "context" | "responsibility" | "dependencies"> & { section?: TaskSection };
+export type TaskSaveOperation =
+  | { mode: "create"; task: { text: string; context?: string | null; responsibility: TaskResponsibility; dependencies?: TaskDependency[] } }
+  | { mode: "update"; stableId: string; updates: TaskSaveUpdates };
+
+/** One revision check and one rename under the graph/document locks. The HTTP
+ * entry point additionally enforces the native adoption hold. No launch occurs. */
+export function saveTask(
+  phrenPath: string, project: string, expectedRevision: string, operation: TaskSaveOperation, graphRoot = phrenPath,
+): PhrenResult<{ doc: TaskDoc; identity: TaskDependency }> {
+  const file = canonicalTaskFilePath(phrenPath, project);
+  if (!file || path.resolve(file) !== path.join(path.resolve(phrenPath), project, TASKS_FILENAME)) {
+    return phrenErr("Project is not in that task store.", PhrenError.INVALID_PROJECT_NAME);
+  }
+  const ensured = ensureProject(phrenPath, project);
+  if (!ensured.ok) return forwardErr(ensured);
+  const fields = operation.mode === "create" ? operation.task : operation.updates;
+  if (fields.text !== undefined && (typeof fields.text !== "string" || !fields.text.trim() || fields.text.length > 10000
+    || /[\x00-\x1f\x7f]|<!--\s*bid:/i.test(fields.text))) {
+    return phrenErr("Task text must be one nonempty line without embedded task identities (at most 10000 characters).", PhrenError.VALIDATION_ERROR);
+  }
+  if (fields.context !== undefined && fields.context !== null && (typeof fields.context !== "string"
+    || fields.context.length > 64000 || /[\x00-\x1f\x7f]/.test(fields.context))) {
+    return phrenErr("Task context must be one line (at most 64000 characters), or null to clear it.", PhrenError.VALIDATION_ERROR);
+  }
+  return withTaskGraphLock(graphRoot, () => withSafeLock(file, () => {
+    if (!taskFormatStatus(phrenPath).enabled) return phrenErr(taskFormatMigrationHint, PhrenError.VALIDATION_ERROR);
+    const parsed = readTasks(phrenPath, project);
+    if (!parsed.ok) return forwardErr(parsed);
+    const doc = parsed.data;
+    if (!/^[a-f0-9]{64}$/.test(expectedRevision) || doc.revision !== expectedRevision) {
+      return phrenErr(taskRevisionConflict, PhrenError.VALIDATION_ERROR);
+    }
+    if (operation.mode === "update") {
+      if (!/^[a-f0-9]{8}$/.test(operation.stableId)) return phrenErr("A stable task identity is required.", PhrenError.VALIDATION_ERROR);
+      const found = findItemByMatch(doc, `bid:${operation.stableId}`);
+      if (!found.match) return phrenErr(found.error ?? "Task is unavailable.", found.errorCode ?? PhrenError.NOT_FOUND);
+      const identity = taskIdentity(graphRoot, doc, doc.items[found.match.section][found.match.index]);
+      if (!identity) return phrenErr("Task identity is unavailable or ambiguous.", PhrenError.VALIDATION_ERROR);
+      const updated = updateTaskDocument(doc, `bid:${operation.stableId}`, { ...operation.updates, replace_context: true }, graphRoot);
+      return updated.ok ? phrenOk({ doc, identity }) : forwardErr(updated);
+    }
+    if (!["human", "agent"].includes(operation.task.responsibility)) return phrenErr("Choose Human or Agent explicitly.", PhrenError.VALIDATION_ERROR);
+    const used = new Set(TASK_SECTIONS.flatMap(section => doc.items[section]).map(item => item.stableId));
+    try {
+      for (const match of fs.readFileSync(taskArchivePath(phrenPath, project), "utf8").matchAll(/<!--\s*bid:([a-f0-9]{8})\b/g)) used.add(match[1]);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return phrenErr("Task archive is unavailable; cannot allocate an immutable identity.", PhrenError.FILE_NOT_FOUND);
+    }
+    let stableId = newBid();
+    for (let attempt = 0; used.has(stableId) && attempt < 128; attempt++) stableId = newBid();
+    if (used.has(stableId)) return phrenErr("Could not allocate a unique task identity.", PhrenError.VALIDATION_ERROR);
+    const at = new Date().toISOString(), text = operation.task.text.trim();
+    const item: TaskItem = {
+      id: `Q${doc.items.Queue.length + 1}`, stableId, section: "Queue", line: text, checked: false,
+      createdAt: at, priority: normalizePriority(text), pinned: detectPinned(text) || undefined,
+      context: operation.task.context || undefined, responsibility: operation.task.responsibility,
+      dependencies: operation.task.dependencies ?? [], history: [{ at, change: `created ${operation.task.responsibility} task` }],
+    };
+    doc.items.Queue.push(item);
+    const identity = taskIdentity(graphRoot, doc, item);
+    if (!identity) return phrenErr("Task identity is unavailable or ambiguous.", PhrenError.VALIDATION_ERROR);
+    const invalid = validateTaskDependencies(graphRoot, doc, item, item.dependencies!);
+    if (invalid) return phrenErr(invalid, PhrenError.VALIDATION_ERROR);
+    const content = writeTaskDoc(doc);
+    return phrenOk({ doc: parseTaskContent(project, file, content), identity });
   }));
 }
 
