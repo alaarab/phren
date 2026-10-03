@@ -21,7 +21,7 @@ export async function installedClaudeSdk(): Promise<Sdk> {
 }
 export class ClaudeSdkAdapter implements HarnessAdapter {
   readonly provider = "claude-sdk";
-  readonly capabilities = { ...noCapabilities, startSession: true, interrupt: true, approvals: true, userInput: true, readThread: true, events: true, setModel: true, takeover: true };
+  readonly capabilities = { ...noCapabilities, startSession: true, interrupt: true, approvals: true, userInput: true, readThread: true, events: true, setModel: true };
   private sessions = new Map<string, Session>(); private events = new HarnessEvents();
   constructor(private sdk: Sdk, private executable: string, private settings: { permissionMode: "default" | "plan"; env?: Record<string, string | undefined>; pane?: PaneBinding }) {}
   private session(id: string) { const session = this.sessions.get(id); if (!session || session.stopped) throw new Error("Claude SDK session is not active."); return session; }
@@ -92,6 +92,7 @@ export class ClaudeSdkAdapter implements HarnessAdapter {
   streamEvents(id: string, after?: number, signal?: AbortSignal) { if (!this.sessions.has(id)) throw new Error("Unknown SDK session."); return this.events.stream(id, after, signal); }
   async setModel(id: string, model: string) { await this.session(id).query.setModel(model); }
   private async stop(id: string) { const session = this.sessions.get(id); if (!session || session.stopped) return; session.stopped = true; session.input.close(); for (const request of [...session.pending.values()]) request.answer({ behavior: "deny", message: "SDK ownership ended." }); session.query.close(); }
-  async takeover(id: string, _pane: PaneBinding) { if (!this.sessions.has(id)) throw new Error("Unknown SDK session."); await this.stop(id); this.events.publish(id, "takeover", { command: "claude", session: id }); return { command: this.executable, args: ["--resume", id, "--permission-mode", this.settings.permissionMode] }; }
+  // Native takeover remains unavailable until account continuity, SDK child exit
+  // and resumed TUI readiness can be established without overlapping owners.
   async close() { for (const id of this.sessions.keys()) await this.stop(id); this.events.close(); }
 }

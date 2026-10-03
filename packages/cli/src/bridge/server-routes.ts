@@ -149,6 +149,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 }
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
+  harnessOwnerControls: "ed25519-v1", harnessProxy: true, storeConductorLease: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
   files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, conductorLease: true, computerEnrollment: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, harnessAdapters: true };
@@ -158,8 +159,6 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
   if (snapshot.has("tasks")) { result.taskDependencies = true; result.taskWriterSafety = true; }
-  if (snapshot.has("hook")) { result.harnessAdapters = true; result.harnessOwnerControls = "ed25519-v1"; result.harnessProxy = true; }
-  if (snapshot.has("conductor")) result.storeConductorLease = true;
   return result;
 }
 

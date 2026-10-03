@@ -732,3 +732,12 @@ for wire schemas, structured-worker ownership, delivery receipts and the
 separate one-agent QL proxy. These new paths are source-integrated; provider,
 service, native and RC verification remain outstanding until recorded against
 the complete candidate.
+
+The module catalog declares structured harness, owner-control, proxy and fixed
+lease APIs. Those declarations describe available handlers, not native readiness.
+SDK terminal takeover remains disabled pending account continuity, child exit
+and resumed TUI evidence. Configured ACP worker admission checks its own installed
+executable and supervised permissions, independently of `@phren/agent` inventory.
+SDK replay correlation and the existing QL Copilot session's bidirectional return
+channel remain open acceptance gates; a generic proxy or overview row does not
+prove either behavior.

@@ -159,6 +159,25 @@ Feature flags follow a convention: set to `0`, `false`, `off`, or `no` to disabl
 
 ### Phren Hook locations
 
+Structured worker source uses `PHREN_CLAUDE_SDK=1` to select the SDK for Claude
+worker launches, `PHREN_CLAUDE_EXECUTABLE` for its installed absolute executable
+(otherwise an executable on absolute PATH entries), and
+`PHREN_CLAUDE_SDK_MODULE` for the installed SDK module (default
+`@anthropic-ai/claude-agent-sdk`). No SDK installation is automatic. The SDK
+query removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_USE_BEDROCK`,
+`CLAUDE_CODE_USE_VERTEX` and `CLAUDE_CODE_USE_FOUNDRY` from its child environment.
+SDK terminal takeover is unavailable pending verified account and process handoff.
+
+Explicit `acp:<name>` workers read the owner's `PHREN_ACP_CONFIG` file (default
+`<bridge>/acp.json`), mapping names to an absolute installed `executable` and
+an optional argument array. ACP executable access is checked even when the
+ordinary launch inventory is skipped; it does not probe `phren agent` to infer
+ACP availability. Brand names do not prove protocol support. Configured ACP
+workers accept supervised permissions only and refuse Phren-specific mode,
+resume-session and named-account overrides. These are source contracts; installed
+SDK/ACP protocol, authentication and resume behavior remain unverified.
+
 The optional iPhone helper is installed with `phren bridge install`; it uses
 `PHREN_SPEECH_VOICE` only as a legacy ElevenLabs voice id for talk mode when
 `phren bridge speech-voice set` has stored none (it is then copied into

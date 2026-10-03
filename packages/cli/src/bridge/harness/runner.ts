@@ -2,7 +2,6 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { chmod, lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { createInterface } from "node:readline";
-import { spawn } from "node:child_process";
 import path from "node:path";
 import { z } from "zod";
 import { atomicInPrivateDir, id, serverName, type Target } from "../protocol.js";
@@ -135,12 +134,11 @@ async function runOwnedHarnessWorker(config: RunnerConfig): Promise<number> {
         case "/thread": result = await adapter.readThread(session.id); break;
         case "/events": { const after = z.number().int().nonnegative().parse(input.after ?? 0); const rows = events.read(alias), first = rows[0]?.seq; result = { events: [...(first && after < first - 1 ? [{ seq: first - 1, session: alias, type: "event-gap" }] : []), ...rows.filter(row => row.seq > after).slice(0, 100)], closed }; break; }
         case "/model": if (!adapter.setModel || !adapter.capabilities.setModel) throw new Error("Model selection is unavailable."); await adapter.setModel(session.id, z.string().min(1).max(200).parse(input.model)); result = { ok: true }; break;
-        case "/takeover": if (config.proxy || !adapter.takeover) throw new Error("Takeover is unavailable."); result = await adapter.takeover(session.id, { server: entry.server, pane: entry.pane, terminal: entry.terminal }); break;
+        case "/takeover": throw new Error("Native takeover is unavailable pending verified account and process handoff.");
         default: throw new Error("Unknown harness operation.");
       }
       const body = JSON.stringify(result ?? {}); if (Buffer.byteLength(body) > 8 * 1024 * 1024) throw new Error("Harness reply exceeded its limit.");
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(body);
-      if (request.url === "/takeover") { const next = result as { command: string; args: string[] }; await finish(); const child = spawn(next.command, next.args, { cwd: config.cwd, env: process.env, stdio: "inherit" }); child.on("error", () => { process.exitCode = 1; }); }
     } catch { if (!response.headersSent) response.writeHead(409, { "Content-Type": "application/json" }); response.end(JSON.stringify({ error: "Harness operation failed or ownership changed; do not automatically retry a submitted turn." })); }
   });
   const input = createInterface({ input: process.stdin, terminal: false });

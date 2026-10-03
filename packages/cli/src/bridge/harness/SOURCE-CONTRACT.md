@@ -14,6 +14,23 @@ without structured chat, request IDs or delivery acknowledgment. ACP thread
 reads return the observed event window with `partial: true`; there is no ACP v1
 arbitrary historical thread-read method. ACP user questions remain unsupported.
 
+The module manifest declares the harness routes, capabilities and state files.
+Health capabilities mean an API is present; they do not establish installed
+SDK/ACP availability, successful subscription authentication or native maturity.
+Configured ACP launches check their owner-configured executable with `X_OK`,
+accept only supervised worker permissions, and do not depend on a separate
+`@phren/agent` installation. Phren-specific mode/resume fields and named accounts
+are refused for ACP rather than silently applied to another provider.
+
+SDK terminal takeover is disabled in both adapter capabilities and runner IPC.
+There is no resumed CLI spawn: account continuity, SDK child shutdown and TUI
+readiness must be established before this operation can be enabled. SDK resume
+replay correlation remains unverified; an old result arriving after a fresh
+turn must not be claimed safe until the exact native behavior is validated or
+submission identity is correlated. Codex request IDs exposed by the shared
+adapter encode the native type and value, retaining session scoping; numeric
+`1` and string `"1"` cannot select each other's approvals or questions.
+
 `/v1/harness/session?target=<encoded JSON pane Target>` returns the actual
 provider, native session, binding and capabilities. The existing pane Target
 retains its server, workspace, tab, pane, source and session identity. Herdr and
@@ -193,6 +210,9 @@ native session, process and provider. Views omit the token. A changed or missing
 owner becomes `offline`, not an invented local agent. Unsupported chat becomes
 `terminal-only`, with no chat target. Session creation, terminal takeover,
 arbitrary commands and machine administration are unavailable through the proxy.
+Each live identity check also refuses session creation, takeover, or any enabled
+capability absent from the owner's registration. A changed endpoint cannot widen
+the displayed capability set without explicit owner registration.
 
 Native source now lists this one agent separately, uses only its proxy target,
 signs owner controls, retains uncertain delivery IDs on the phone, and shows

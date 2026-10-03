@@ -274,6 +274,15 @@ The Hook's private `harness/` directory holds runner registries and sockets,
 stay in private state and never appear in listings. A worker owns its runner;
 restarting its observing Hook does not terminate the worker.
 
+Runner launch configuration also lives in `harness/*.claude.json`,
+`harness/*.codex.json` or `harness/*.phren.json`. A pane or proxy runner holds
+`harness/<registry>.json.owner.lock` for its lifetime, acquired before native
+adapter construction. Nonce and proxy registry writes use their own `.lock`
+directories. Interrupted locks require explicit owner reconciliation. Optional
+owner-authored ACP executable configuration defaults to `<bridge>/acp.json`.
+The Hook and conductor module manifests declare these locations and the single
+canonical conductor state below; the harness API creates no second lease ledger.
+
 A registered store may hold `.config/conductor-authority.json` (public fixed
 identity configuration), `.runtime/conductor-lease.json`,
 `.runtime/conductor-claim.json`, and `.runtime/conductor-admissions/<claimId>.json`.

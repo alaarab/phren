@@ -21,6 +21,10 @@ async function remote(row: Registration, operation: string, input: unknown = {})
 async function verified(row: Registration) {
   const current = runnerEntrySchema.parse(await remote(row, "info"));
   if (current.ownerId !== row.entry.ownerId || current.session !== row.entry.session || current.nativeSession !== row.entry.nativeSession || current.pid !== row.entry.pid || current.provider !== row.entry.provider) throw new BridgeError(409, "The registered remote agent changed; explicit owner registration is required.");
+  if (current.capabilities.startSession || current.capabilities.takeover
+    || (Object.keys(current.capabilities) as Array<keyof typeof current.capabilities>).some(key => current.capabilities[key] && !row.entry.capabilities[key])) {
+    throw new BridgeError(409, "The remote agent's capabilities exceed its registered scope; explicit owner registration is required.");
+  }
   return current;
 }
 const target = (row: Registration) => ({ proxyId: row.id, session: row.entry.session, ownerId: row.entry.ownerId });

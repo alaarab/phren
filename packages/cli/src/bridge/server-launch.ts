@@ -330,10 +330,12 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const permissionMode = z.enum(PERMISSION_MODES).optional().parse(data.permissionMode ?? undefined);
   if (permissionMode && role === "conductor") throw new BridgeError(400, "A conductor starts with its own permissions; permissionMode is for workers.");
   if (permissionMode && kind === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
-  if (permissionMode && kind === "phren") throw new BridgeError(400, "phren agent takes its permissions from its own settings; permissionMode is for Claude, Codex and Copilot workers.");
+  if (permissionMode && kind === "phren" && !backend) throw new BridgeError(400, "phren agent takes its permissions from its own settings; permissionMode is for Claude, Codex and Copilot workers.");
   if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
   if (role === "conductor" && kind === "phren") throw new BridgeError(400, PHREN_NO_CONDUCTOR);
-  const phrenArgs = await phrenLaunchArgs(kind, data);
+  if (backend && (data.mode != null || data.resumeSession != null)) throw new BridgeError(400, "Phren agent mode and resumeSession cannot be applied to a structured backend.");
+  if (backend?.backend.startsWith("acp:") && account && account !== DEFAULT_ACCOUNT) throw new BridgeError(400, "Configured ACP uses its owner's executable environment; named Phren accounts are unavailable.");
+  const phrenArgs = backend ? [] : await phrenLaunchArgs(kind, data);
   // A dispatched worker's or scheduled run's first prompt. It rides on the
   // launch where the harness takes one; elsewhere the caller types it.
   const brief = data.brief === undefined || data.brief === null ? undefined : launchBriefSchema.parse(data.brief);
@@ -354,7 +356,9 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // Herdr 0.9.1 refuses a start timeout of 3000 ms or less (invalid_agent_timeout).
   const timeout = Math.min(120_000, Math.max(3_001, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
   // Checked before anything is created, so a refusal leaves no pane, worktree or brief file behind.
-  await requireAvailable(kind, account);
+  // configuredHarness already checked the configured ACP executable with X_OK.
+  // The unrelated phren-agent package inventory cannot establish ACP availability.
+  if (!backend?.backend.startsWith("acp:")) await requireAvailable(kind, account);
   const home = kind === "claude" && account && account !== DEFAULT_ACCOUNT ? claudeHome(account) : undefined;
   if (kind === "claude" && account && account !== DEFAULT_ACCOUNT && !home) throw new BridgeError(409, `No claude account "${account}"`, { code: "account_unavailable" });
   const before = await snapshot(server);
@@ -370,7 +374,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // conductor's name; it gets its own workspace instead.
   const conductorHere = role === "agent" && workspace ? await conductorPane(server, before) : undefined;
   if (conductorHere && conductorHere.workspace_id === workspace) workspace = undefined;
-  const args = role === "conductor" ? await prepareConductor(kind, effort, model)
+  const args = backend ? [] : role === "conductor" ? await prepareConductor(kind, effort, model)
     : [...(kind === "phren" ? [...PHREN_AGENT_ARGS, ...phrenArgs] : []), ...(model && kind === "phren" ? phrenModelArgs(model) : model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
       ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : []), ...(permissionMode && kind === "copilot" ? copilotModeFlags(permissionMode) : [])];
   // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
