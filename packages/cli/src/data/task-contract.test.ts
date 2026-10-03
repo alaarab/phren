@@ -1,17 +1,22 @@
 import { writeStoreRegistry, registeredStoreIdentity, registerStoreIdentity, attachedStoresFilePath } from "../store-registry.js";
 /** Prepared for the consolidated RC. Do not run during build-only development. */
-import { beforeEach, afterEach, describe, it, expect } from "vitest";
+import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
 import { addTask, readTasks, updateTask, completeTask, tidyDoneTasks, workNextTask, claimTask, parseTaskContent } from "./tasks.js";
 import { taskReadiness, taskIdentity, filterTaskDoc, taskCounts } from "./task-contract.js";
-import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute } from "../bridge/task-routes.js";
+import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "../bridge/task-routes.js";
 import { mergeTasksByBid } from "../sync/task-merge.js";
 import { enableTaskFormat } from "./task-format.js";
 
+import { launchSession } from "../bridge/server-launch.js";
+import { writeProjectConfig } from "../project-config.js";
+vi.mock("../bridge/server-launch.js", () => ({ launchSession: vi.fn() }));
+
 let base: string, cleanup: () => void;
 beforeEach(() => {
+  vi.mocked(launchSession).mockReset();
   ({ path: base, cleanup } = makeTempDir("task-contract-"));
   grantAdmin(base);
   writeStoreRegistry(base, { version: 1, stores: [{ id: "11111111", name: "Personal", path: base, role: "primary", sync: "managed-git" }] });
@@ -60,6 +65,48 @@ describe("task responsibility and prerequisites (RC source, unrun)", () => {
     expect(fs.readFileSync(file, "utf8")).toBe(before);
     expect(() => createTaskRoute(base, { ...request, text: "Different work" })).toThrow();
     expect(fs.readFileSync(file, "utf8")).toBe(before);
+  });
+  it("saves text/context/metadata together and refuses stale documents without losing any fields", () => {
+    const created = createTaskRoute(base, { storeId: "11111111", project: "core", stableId: "aaaaaaaa", text: "Original", responsibility: "agent" });
+    const ref = { storeId: "11111111", project: "core", stableId: "aaaaaaaa" };
+    const updated = saveTaskRoute(base, { ...ref, expectedRevision: created.revision,
+      updates: { text: "Reviewed title", context: "Owner context", responsibility: "human" } });
+    expect(updated.items.Queue[0]).toMatchObject({ line: "Reviewed title", context: "Owner context", responsibility: "human", stableId: "aaaaaaaa" });
+    const file = path.join(base, "core/tasks.md"), saved = fs.readFileSync(file, "utf8");
+    expect(() => saveTaskRoute(base, { ...ref, expectedRevision: created.revision, updates: { text: "Stale overwrite", context: "Lost context" } })).toThrow(/revision changed/);
+    expect(() => saveTaskRoute(base, { ...ref, expectedRevision: updated.revision, updates: { text: "Partial write", dependencies: [{ ...ref, stableId: "bbbbbbbb" }] } })).toThrow();
+    expect(fs.readFileSync(file, "utf8")).toBe(saved);
+    const cleared = saveTaskRoute(base, { ...ref, expectedRevision: updated.revision, updates: { context: "" } });
+    expect(cleared.items.Queue[0].context).toBeUndefined();
+    expect(cleared.items.Queue[0].line).toBe("Reviewed title");
+    expect(cleared.items.Queue[0].responsibility).toBe("human");
+    // Even an external formatting-only edit invalidates the document token.
+    fs.appendFileSync(file, "\n");
+    expect(() => saveTaskRoute(base, { ...ref, expectedRevision: cleared.revision, updates: { text: "Stale bytes" } })).toThrow(/revision changed/);
+  });
+  it("launches only a reserved saved task and retains the claim across a lost launch reply", async () => {
+    const ref = { storeId: "11111111", project: "core", stableId: "aaaaaaaa" };
+    const url = new URL("http://phren.local/v1/tasks?storeId=11111111&project=core");
+    const created = createTaskRoute(base, { ...ref, text: "Saved work", responsibility: "human" });
+    writeProjectConfig(base, "core", { sourcePath: base });
+    await expect(launchTaskRoute(base, "default", { ...ref, expectedRevision: created.revision, kind: "claude" })).rejects.toThrow(/not eligible/);
+    expect(launchSession).not.toHaveBeenCalled();
+    const ready = saveTaskRoute(base, { ...ref, expectedRevision: created.revision, updates: { responsibility: "agent", context: "Exact saved context" } });
+    await expect(launchTaskRoute(base, "default", { ...ref, expectedRevision: created.revision, kind: "claude" })).rejects.toThrow(/revision changed/);
+    await expect(launchTaskRoute(base, "default", { ...ref, expectedRevision: ready.revision, kind: "claude", brief: { text: "Injected work" } })).rejects.toThrow();
+    expect(launchSession).not.toHaveBeenCalled();
+    vi.mocked(launchSession).mockImplementationOnce(async (_server, data) => {
+      const held = item("core", "aaaaaaaa");
+      expect(held.section).toBe("Active");
+      expect(held.claim?.session).toBe(`task-launch:${data.launchId}`);
+      expect(data.brief).toEqual({ id: data.launchId, text: "Work on task 11111111/core/aaaaaaaa.\n\nSaved work\n\nContext: Exact saved context" });
+      throw new Error("Lost reply after worker creation");
+    });
+    await expect(launchTaskRoute(base, "default", { ...ref, expectedRevision: ready.revision, kind: "claude" })).rejects.toMatchObject({ details: { code: "task-launch-uncertain", claimPreserved: true } });
+    const refreshed = getTaskRoute(base, url);
+    await expect(launchTaskRoute(base, "default", { ...ref, expectedRevision: refreshed.revision, kind: "claude" })).rejects.toThrow(/already has a claim/);
+    expect(launchSession).toHaveBeenCalledTimes(1);
+    expect(item("core", "aaaaaaaa").claim).toBeDefined();
   });
   it("requires explicit portable identity registration without changing legacy task bytes", async () => {
     const a = add("core", "Legacy store"), file = path.join(base, "core/tasks.md");

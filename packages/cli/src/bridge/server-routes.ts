@@ -1,4 +1,4 @@
-import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute } from "./task-routes.js";
+import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import type { OwnerInbox } from "./owner-inbox.js";
 import { closeFinishedWorker } from "./worker-close.js";
@@ -149,7 +149,7 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
-  if (snapshot.has("tasks")) { result.taskDependencies = true; result.taskWriterSafety = true; result.taskAtomicCreate = true; }
+  if (snapshot.has("tasks")) { result.taskDependencies = true; result.taskWriterSafety = true; result.taskAtomicCreate = true; result.taskAtomicSave = true; result.taskBoundLaunch = true; }
   return result;
 }
 
@@ -577,7 +577,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         }
       } else if (request.method === "POST") {
         const data = await body(request);
-        if (url.pathname === "/v1/tasks/create") {
+        if (url.pathname === "/v1/tasks/launch") {
+          result = await launches.run(async () => launchTaskRoute(modules.store, selectedServer(url), data));
+        } else if (url.pathname === "/v1/tasks/save") {
+          result = saveTaskRoute(modules.store, data);
+        } else if (url.pathname === "/v1/tasks/create") {
           result = createTaskRoute(modules.store, data);
         } else if (url.pathname === "/v1/tasks/update") {
           result = updateTaskRoute(modules.store, data);
