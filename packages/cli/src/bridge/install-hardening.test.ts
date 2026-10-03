@@ -2,19 +2,29 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, readlink, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-const state = vi.hoisted(() => ({ home: "", exec: vi.fn(), health: vi.fn() }));
+const state = vi.hoisted(() => ({ home: "", exec: vi.fn(), health: vi.fn(), failSettingsRead: false, failActivation: false }));
 vi.mock("node:os", async importOriginal => ({ ...await importOriginal<typeof import("node:os")>(), homedir: () => state.home }));
 vi.mock("node:child_process", async importOriginal => ({ ...await importOriginal<typeof import("node:child_process")>(),
   execFile: Object.assign(() => {}, { [Symbol.for("nodejs.util.promisify.custom")]: state.exec }),
 }));
 vi.mock("node:fs/promises", async importOriginal => {
   const fs = await importOriginal<typeof import("node:fs/promises")>();
-  return { ...fs, copyFile: async (src: string, dst: string) => src.endsWith("bridge-hook.mjs") ? fs.writeFile(dst, "bundle fixture") : fs.copyFile(src, dst) };
+  return { ...fs,
+    readFile: (...args: Parameters<typeof fs.readFile>) => {
+      if (state.failSettingsRead && String(args[0]).endsWith("settings.json")) return Promise.reject(new Error("settings rollback denied"));
+      return fs.readFile(...args);
+    },
+    rename: async (from: string, to: string) => {
+      if (state.failActivation && to.endsWith("/current")) { state.failActivation = false; throw new Error("activation rename denied"); }
+      return fs.rename(from, to);
+    },
+    copyFile: async (src: string, dst: string) => src.endsWith("bridge-hook.mjs") ? fs.writeFile(dst, "bundle fixture") : fs.copyFile(src, dst) };
 });
 vi.mock("./transport.js", () => ({ health: state.health }));
 import { install, OPENCODE_PLUGIN_MARKER, opencodePluginNeedsWrite } from "./install.js";
 
 beforeEach(async () => {
+  state.failSettingsRead = false; state.failActivation = false;
   state.home = await mkdtemp("/tmp/phren-install-");
   vi.stubEnv("HOME", state.home); vi.stubEnv("PHREN_BRIDGE_HOME", path.join(state.home, "bridge's folder"));
   vi.stubEnv("PHREN_HERDR_HOME", path.join(state.home, "herdr's folder"));
@@ -192,6 +202,36 @@ it.skipIf(process.platform === "win32")("keeps the running version's own forward
   expect(await readFile(path.join(root, "current/claude-hook.mjs"), "utf8")).toBe("// 0.2.13's forwarder\n");
   expect(await readFile(claudeSettings(), "utf8")).toBe(before);
   expect(JSON.parse(before).hooks.Stop).toEqual([{ hooks: [{ type: "command", command: forwarder(), timeout: 15 }] }]);
+});
+
+it.skipIf(process.platform === "win32")("restores the prior Mac plist and restarts after activation fails following bootout", async () => {
+  const root = process.env.PHREN_BRIDGE_HOME!, plist = path.join(state.home, "Library/LaunchAgents/com.phren.hook.plist");
+  await install("0.2.14");
+  await writeFile(plist, "prior plist with owner environment");
+  state.exec.mockClear(); state.failActivation = true;
+  await expect(install("0.2.15")).rejects.toThrow("activation rename denied");
+  expect(await readFile(plist, "utf8")).toBe("prior plist with owner environment");
+  expect(await readlink(path.join(root, "current"))).toBe(path.join("versions", "0.2.14"));
+  expect(state.exec.mock.calls.some(([file, args]) => file === "launchctl" && args[0] === "bootstrap")).toBe(true);
+});
+
+it.skipIf(process.platform === "win32")("continues executable and service rollback after an independent settings restoration failure", async () => {
+  const root = process.env.PHREN_BRIDGE_HOME!, live = { value: "0.2.14" };
+  liveVersion(live);
+  await install("0.2.14");
+  const plist = path.join(state.home, "Library/LaunchAgents/com.phren.hook.plist"), before = await readFile(plist, "utf8");
+  // Force a settings plan; the failing read starts only after activation.
+  await writeFile(claudeSettings(), JSON.stringify({ model: "owner-model" }));
+  state.health.mockImplementation(async () => { state.failSettingsRead = true; return { version: "0.2.14" }; });
+  state.exec.mockClear();
+  const error = await install("0.2.15").catch(failure => failure);
+  state.failSettingsRead = false;
+  expect(String(error)).toContain("did not become ready");
+  expect(String(error)).toContain("settings rollback denied");
+  expect(await readlink(path.join(root, "current"))).toBe(path.join("versions", "0.2.14"));
+  expect(await readFile(plist, "utf8")).toBe(before);
+  expect(JSON.parse(await readFile(path.join(root, "installed.json"), "utf8")).version).toBe("0.2.14");
+  expect(state.exec.mock.calls.filter(([file, args]) => file === "launchctl" && args[0] === "bootstrap")).toHaveLength(3);
 });
 
 it.skipIf(process.platform === "win32")("points Claude back at the bundle when rolling back to a version without the forwarder, and forward again", async () => {

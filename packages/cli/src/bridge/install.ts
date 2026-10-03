@@ -258,7 +258,8 @@ async function installLocked(version: string, noService: boolean, force: boolean
   const previous = previousMetadata ? JSON.parse(previousMetadata.toString("utf8")) as { version: string; previous?: string } : null;
   const unitFile = path.join(homedir(), ".config/systemd/user", unit);
   const previousUnit = process.platform === "linux" ? await missingFile(readFile(unitFile)) : undefined;
-  let activated = false;
+  const previousPlist = process.platform === "darwin" ? await missingFile(readFile(launchAgentPlist())) : undefined;
+  let activated = false, stoppedForActivation = false;
   try {
   await copyFile(bundle, stagedBundle); await rename(stagedBundle, installedBundle);
   await atomic(fastHookPath(destination), FAST_HOOK_SOURCE);
@@ -285,7 +286,7 @@ async function installLocked(version: string, noService: boolean, force: boolean
     if (!force) await waitForCodexWorkers();
     // Linux keeps the old Hook available until one systemd restart transaction.
     // Activation first also survives an installer interruption without a stopped job.
-    if (process.platform === "darwin") await stopService();
+    if (process.platform === "darwin") { stoppedForActivation = true; await stopService(); }
   }
     await activate(version);
     activated = true;
@@ -334,29 +335,43 @@ async function installLocked(version: string, noService: boolean, force: boolean
     console.log(`SSH gateway: ${gateway}${gateway === "node" ? " (no socat or nc -U found)" : ""}.`);
     console.log(`Phren Hook ${version} installed${noService ? " (service not started)" : " and running"}. Run phren bridge doctor.`);
   } catch (error) {
-    await restoreAgentHooks(hookEdits);
-    if (!noService && activated) await stopService();
-    if (process.platform === "linux" && !noService) {
-      if (previousUnit) await atomic(unitFile, previousUnit.toString("utf8"));
-      else await unlink(unitFile).catch(() => {});
-    }
-    if (previousBundle) { await writeFile(stagedBundle, previousBundle); await rename(stagedBundle, installedBundle); }
-    else await unlink(installedBundle).catch(() => {});
-    if (previousFastHook) await atomic(fastHookPath(destination), previousFastHook.toString("utf8"));
-    else await unlink(fastHookPath(destination)).catch(() => {});
-    if (previousDispatch) await atomic(dispatchFile, previousDispatch.toString("utf8"), 0o700);
-    else await unlink(dispatchFile).catch(() => {});
-    if (previousAskpass) await atomic(askpassPath(), previousAskpass.toString("utf8"), 0o700);
-    else await unlink(askpassPath()).catch(() => {});
-    if (activated) {
+    const failures: string[] = [];
+    const restore = async (name: string, action: () => Promise<unknown>) => {
+      try { await action(); return true; }
+      catch (failure) { failures.push(`${name}: ${failure instanceof Error ? failure.message : String(failure)}`); return false; }
+    };
+    // Each restoration is independent: a settings failure must not strand the
+    // stopped Hook or skip restoring its executable and service definition.
+    for (const edit of hookEdits) await restore(`agent settings ${edit.file}`, () => restoreAgentHooks([edit]));
+    if (!noService && activated) await restore("stop failed version", stopService);
+    const restoreFile = (file: string, previous: Buffer | undefined, mode?: number) => previous !== undefined
+      ? atomic(file, previous.toString("utf8"), mode) : unlink(file).catch(failure => { if (failure.code !== "ENOENT") throw failure; });
+    let serviceRestored = true;
+    if (!noService) serviceRestored = process.platform === "linux"
+      ? await restore("systemd unit", () => restoreFile(unitFile, previousUnit))
+      : await restore("launchd plist", () => restoreFile(launchAgentPlist(), previousPlist));
+    const bundleRestored = await restore("Hook bundle", async () => {
+      if (previousBundle !== undefined) { await writeFile(stagedBundle, previousBundle); await rename(stagedBundle, installedBundle); }
+      else await unlink(installedBundle).catch(failure => { if (failure.code !== "ENOENT") throw failure; });
+    });
+    await restore("fast Hook", () => restoreFile(fastHookPath(destination), previousFastHook));
+    await restore("dispatch", () => restoreFile(dispatchFile, previousDispatch, 0o700));
+    await restore("askpass", () => restoreFile(askpassPath(), previousAskpass, 0o700));
+    let linkRestored = true;
+    if (activated) linkRestored = await restore("current version", async () => {
       if (previousCurrent) {
         const rollbackLink = path.join(root, `current-${randomUUID()}`);
         await symlink(previousCurrent, rollbackLink); await rename(rollbackLink, path.join(root, "current"));
-        if (!noService) await startService();
-      } else await unlink(path.join(root, "current")).catch(() => {});
+      } else await unlink(path.join(root, "current")).catch(failure => { if (failure.code !== "ENOENT") throw failure; });
+    });
+    await restore("installation metadata", () => restoreFile(installedMetadata, previousMetadata));
+    if (!noService && (activated || stoppedForActivation) && previousCurrent && serviceRestored && bundleRestored && linkRestored) {
+      await restore("restart previous Hook", async () => {
+        const failure = await startService();
+        if (failure) throw new Error(failure);
+      });
     }
-    if (previousMetadata) await atomic(installedMetadata, previousMetadata.toString("utf8"));
-    else await unlink(installedMetadata).catch(() => {});
+    if (failures.length) throw new Error(`${error instanceof Error ? error.message : String(error)}\nRollback needs attention: ${failures.join("; ")}`, { cause: error });
     throw error;
   }
 }
