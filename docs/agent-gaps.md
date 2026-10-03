@@ -30,13 +30,18 @@ rest.
 | Headless | `--json-schema` validates the final result against a supplied schema | #317 |
 | Sandbox | `--no-network` for shell commands (bwrap, Seatbelt) | #316 |
 
-## Still open
+## Prepared source awaiting complete release validation
 
-- **Next big item: LSP diagnostics.** Type errors scoped to the edited file
-  right after each edit, from the project's language server, as OpenCode does.
-  The parse check and the post-edit type-check run cover the cheap part.
-- Smaller: steering that lands mid-stream (today between tool batches),
-  provider-native web search (today a DuckDuckGo scrape), OpenTelemetry.
+The 176 integration adds installed-language-server diagnostics after edits and
+through `lsp_diagnostics`, steering during streamed responses and retry backoff,
+selected-provider native web search with billing/capability checks, and explicit
+opt-in OpenTelemetry traces. Read/shell permissions, network isolation,
+cancellation and provider inheritance remain enforced. See [agent behavior and
+configuration](agent.md#tools).
+
+Regression source is prepared but UNRUN. Current-source build, full RC,
+real language-server/provider behavior and authorized live benchmark evidence
+remain outstanding; source presence is not a completed maturity claim.
 
 ## DeepSeek V4.1 Flash readiness
 

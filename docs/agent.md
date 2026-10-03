@@ -599,6 +599,7 @@ the prompt stays cacheable. `--dry-run` prints it.
 - **apply_patch** — Codex-format patches (`*** Begin Patch` … add, delete, update, move) across files, atomic
 - **glob** — Find files by pattern. Uses `rg --files` when ripgrep is on PATH, so `.gitignore` applies; hidden files such as `.github/` are listed, `.git` and `node_modules` are not. Says when it shows only part of the matches
 - **grep** — Search file contents with regex, case-sensitive unless `-i` is set. Uses ripgrep when it is on PATH (`.gitignore` honoured, hidden directories searched, lines cut at 500 characters); otherwise a JS walker that skips `.git`, `node_modules` and the directories in the root `.gitignore`, and says when it stopped at its 5,000-file cap. `PHREN_AGENT_RIPGREP=off` forces the walker
+- **lsp_diagnostics** — Ask an installed language server for diagnostics on one workspace file. Uses the same read and shell authorization as other tools; never installs a server or downloads its dependencies.
 
 The write tools check the file against what the agent last saw. An existing
 file has to be read before `write_file` (or an `apply_patch` Add File) may
@@ -615,6 +616,13 @@ TypeScript parser (Node 22.13 or later; JSX files are skipped), Python uses
 `python3`'s `ast`, and JSON uses `JSON.parse` (files with comments are
 skipped). Errors the file had before the edit are not reported, and nothing
 type-checks. `PHREN_AGENT_SYNTAX_CHECK=off` turns it off.
+
+Successful edits also request diagnostics from an installed language server when
+one matches the file. These processes require a working kernel network fence,
+including when the session otherwise allows network access. Missing servers,
+unavailable isolation, cancellation and stale diagnostics are reported without
+claiming the file is clean. Permissions changing or the agent exiting retires
+its owned server processes. `PHREN_AGENT_LSP=off` disables this integration.
 
 After a batch of edits the agent also runs the project's own checks through
 the shell tool (same permissions and sandbox), and a failure goes back to the
@@ -642,7 +650,30 @@ detected.
 
 ### Web
 - **web_fetch** — Fetch URL contents
-- **web_search** — Search the web
+- **web_search** — Use the selected provider's native search when supported; otherwise use the existing DuckDuckGo backend. A failed or malformed native response never starts a fallback search. API-key OpenAI and Anthropic searches include reported native search fees in the session budget. OpenRouter verifies the selected model's endpoint `native_tools` and limits routing to native-search providers, disables provider fallback and duplicate web-plugin execution, and uses the reported total cost when available. An unavailable capability directory blocks the paid request. Subscription or arbitrary compatible endpoints are not treated as native API search credentials. Returned citations are bounded and filtered; an answer without source URLs is labeled uncited.
+
+OpenRouter endpoint admission follows its [native execution contract](https://openrouter.ai/docs/guides/features/server-tools#native-execution)
+and [provider routing controls](https://openrouter.ai/docs/guides/routing/provider-selection).
+These checks do not replace account billing or retention policies.
+
+### Steering during a response
+
+In steering mode, a new instruction interrupts the unfinished streamed response
+and its retry backoff. The complete new prompt goes through `UserPromptSubmit`
+hooks and enters session history before the next response starts. Abandoned text
+and tool calls cannot publish or execute later if a provider ignores cancellation.
+Queue mode keeps its existing behavior.
+
+### Optional OpenTelemetry traces
+
+Set `PHREN_AGENT_OTEL=1` and `OTEL_EXPORTER_OTLP_ENDPOINT` (or the specific
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) to send bounded OTLP/HTTP JSON turn and tool
+spans to your collector. Optional standard OTLP headers configure collector
+authentication. `OTEL_SDK_DISABLED=true` disables export. Trace metadata contains
+categorical provider/tool names, timing, parent spans and success/failure only;
+prompts, responses, paths, session IDs, model aliases and arbitrary MCP tool names
+are excluded. Export errors are nonfatal. Network revocation cancels pending
+exports and discards queued spans.
 
 ### Phren memory
 - **phren_search** — Search findings across all projects
@@ -766,9 +797,11 @@ empty network namespace, and on macOS a Seatbelt profile denies outbound IP
 `PHREN_AGENT_MACOS_SANDBOX=1`). It applies whatever `--sandbox` says, and fails
 closed: with no backend that can isolate, every shell call errors instead of
 running with network. A connection that fails for it gets a `[sandbox]`
-annotation, and subagents inherit it. The agent's own `web_fetch` and
-`web_search` tools are separate; deny them with
-`--disallowedTools web_fetch,web_search` for a fully offline run.
+annotation, and subagents inherit it. The agent's own `web_fetch`, `web_search`
+and optional telemetry export also honor `--no-network`; language-server
+diagnostics always run with network isolation. Model-provider requests still
+require their configured connection; this setting does not turn a remote model
+into an offline model.
 
 ### web_fetch SSRF guard
 
@@ -883,4 +916,3 @@ one-shot runs (not just the TUI); disable with `--no-subagents`. In `suggest`
 permission mode, spawning asks first — a child runs with auto-confirm
 permissions. Headless children auto-deny any tool that would need an
 interactive approval.
-
