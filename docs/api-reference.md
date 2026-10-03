@@ -423,6 +423,16 @@ Append one or more tasks to a project's tasks.md file. Adds to the Queue section
 | `item` | string or string[] | yes | The task(s) to add. Pass a single string for one task, or an array of strings for batch add. |
 | `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
 
+Task mutations (`add_task` and every `manage_task` action, including their individual tools in the full profile) add `data.write` alongside the existing result fields:
+
+```json
+{ "path": "/absolute/store/project/tasks.md", "commit": null }
+```
+
+`path` is the absolute file actually written, including when the project belongs to a team store. `commit` is a full store commit hash only when this call observed a successful commit and verified that it changed that file to the exact content written. Ordinary task edits save the file without committing, so they return `commit: null`; later session or background sync may commit them. Claims can return a verified local commit even if pushing fails. A commit receipt does not guarantee remote delivery or that a later sync kept the same task state; use the claim's existing `synced` and `heldBy` fields for that outcome. No Git repository, no new commit, a failed commit, or unavailable verification also yields `commit: null`, never an unrelated `HEAD`.
+
+Scalar and batch writes use the same receipt. Partial batches retain their existing success lists and `errors`. Even a fully rejected batch can rewrite task formatting and then includes a receipt; it still reports `ok: false`. Successful dry runs and no-op operations that do not write return `data.write: null`. Validation failures before a write retain their existing error response without a receipt.
+
 ### `complete_task`
 
 Move one or more tasks to the Done section by matching text. Supports batch completion by passing an array.
