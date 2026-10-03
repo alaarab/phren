@@ -244,6 +244,8 @@ export async function consumeStream(
     throw err;
   }
 
+  if (signal?.aborted) return { content: [], stop_reason: "end_turn", invalidToolCalls: [], usage };
+
   // Flush remaining reasoning, then text
   flushReasoning();
   if (currentText) {

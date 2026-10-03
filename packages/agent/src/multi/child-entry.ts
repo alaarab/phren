@@ -37,6 +37,7 @@ import { gitStatusTool, gitDiffTool, gitCommitTool } from "../tools/git.js";
 import { buildPhrenContext, } from "../memory/context.js";
 import { startSession, endSession, } from "../memory/session.js";
 import { runAgent, } from "../agent-loop.js";
+import { flushTelemetry } from "../telemetry.js";
 import { createCostTracker } from "../cost.js";
 import { scopeModelOverrides } from "../model-overrides.js";
 import { getAgentType, applyAgentType } from "./agent-types.js";
@@ -129,6 +130,7 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
       return false;
     };
   }
+  registry.registerDiagnosticsTool();
   registry.register(readFileTool);
   registry.register(writeFileTool);
   registry.register(editFileTool);
@@ -144,7 +146,7 @@ async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
     registry.register(createReadImageTool(provider));
   }
   registry.register(createWebFetchTool());
-  registry.register(createWebSearchTool());
+  registry.register(createWebSearchTool({ provider: () => provider, costTracker: () => costTracker, network: () => registry.permissionConfig.network !== "off" }));
   registry.register(updatePlanTool);
   registry.register(listMcpResourcesTool);
   registry.register(readMcpResourceTool);
@@ -252,14 +254,16 @@ function goIdle(state: AgentState, reason: "task_complete" | "awaiting_input" | 
 }
 
 /** Clean up and exit. */
-function shutdown(state: AgentState): void {
+async function shutdown(state: AgentState): Promise<void> {
+  state.registry.close();
   // End phren session
   if (state.phrenCtx && state.sessionId) {
     endSession(state.phrenCtx, state.sessionId, `Agent shut down after ${state.taskCount} tasks`);
   }
 
   const spawner = state.spawner;
-  if (spawner) void spawner.shutdown().catch(() => {});
+  if (spawner) await spawner.shutdown().catch(() => {});
+  await flushTelemetry(state.registry.permissionConfig.network !== "off");
 
   send({ type: "shutdown_approved", agentId: state.agentId });
   process.exit(0);
@@ -376,6 +380,7 @@ async function handleMessage(msg: ParentMessage): Promise<void> {
     }
 
     case "cancel": {
+      agentState.registry.close();
       // Hard cancel — exit immediately
       if (agentState.phrenCtx && agentState.sessionId) {
         endSession(agentState.phrenCtx, agentState.sessionId, "Cancelled by parent");
@@ -390,7 +395,7 @@ async function handleMessage(msg: ParentMessage): Promise<void> {
         messageQueue.push(msg);
         return;
       }
-      shutdown(agentState);
+      await shutdown(agentState);
       break;
     }
   }
@@ -402,7 +407,7 @@ async function drainQueue(): Promise<void> {
   const shutdownIdx = messageQueue.findIndex((m) => m.type === "shutdown_request");
   if (shutdownIdx !== -1) {
     messageQueue.length = 0;
-    if (agentState) shutdown(agentState);
+    if (agentState) await shutdown(agentState);
     return;
   }
 
@@ -437,6 +442,7 @@ process.on("message", (msg: ParentMessage) => {
 });
 
 process.on("disconnect", () => {
+  agentState?.registry.close();
   process.exit(0);
 });
 

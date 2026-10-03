@@ -155,6 +155,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
     emitHerdrHook("UserPromptSubmit");
     try {
       await runTurn(trimmed, session, config, {
+        ...config.hooks,
         getSteeringInput: () => {
           if (inputMode !== "steering") return null;
           const value = pendingInput; pendingInput = null; return value;
@@ -188,6 +189,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
           process.stderr.write(`${YELLOW}↳ steering with: ${queued.slice(0, 80)}${RESET}\n`);
         }
         await runTurn(queued, session, config, {
+          ...config.hooks,
           getSteeringInput: () => {
             if (inputMode !== "steering") return null;
             const value = pendingInput; pendingInput = null; return value;
