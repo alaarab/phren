@@ -106,9 +106,9 @@ export interface RegistryReadResult {
   lossy: boolean;
 }
 
-export function readStoreRegistryDetailed(phrenPath: string): RegistryReadResult {
+export function readStoreRegistryDetailed(phrenPath: string, options: { migrateAttachments?: boolean } = {}): RegistryReadResult {
   const synced = readSyncedRegistry(phrenPath);
-  const attached = readAttachedStores(phrenPath, synced.registry);
+  const attached = readAttachedStores(phrenPath, synced.registry, options.migrateAttachments !== false);
   const problems = [...synced.problems, ...attached.problems];
   const lossy = synced.lossy || attached.lossy;
   if (!synced.registry && attached.stores.length === 0) return { registry: null, problems, lossy };
@@ -146,15 +146,41 @@ function readSyncedRegistry(phrenPath: string): RegistryReadResult {
   return { registry, problems, lossy: skippedEntries > 0 };
 }
 
+/** Identity carried by the store itself, never an attachment ID or path hash.
+ * Reading identity must not migrate this machine's attachments. */
+export function registeredStoreIdentity(phrenPath: string): string | undefined {
+  const result = readSyncedRegistry(phrenPath);
+  const id = result.lossy ? undefined : result.registry?.stores.find(s => s.role === "primary")?.id;
+  return id && /^[a-f0-9]{8}$/.test(id) ? id : undefined;
+}
+
+/** Explicit, idempotent registration for legacy stores. Callers enforce the
+ * existing manage_config permission. No task or attachment is rewritten. */
+export function registerStoreIdentity(phrenPath: string): string {
+  return withFileLock(registryLockPath(phrenPath), () => {
+    const result = readSyncedRegistry(phrenPath);
+    if (result.lossy) throw new Error(`Cannot register store identity: ${result.problems.join(" | ")}`);
+    const existing = result.registry?.stores.find(s => s.role === "primary");
+    if (existing) {
+      if (!/^[a-f0-9]{8}$/.test(existing.id)) throw new Error("Existing store identity is not a canonical eight-hex ID. Review the registry; identity registration cannot replace an immutable ID.");
+      return existing.id;
+    }
+    const primary = { ...implicitPrimaryStore(phrenPath), id: generateStoreId() };
+    writeSyncedPrimary(phrenPath, primary);
+    return primary.id;
+  });
+}
+
 interface AttachedStoresRead {
   stores: StoreEntry[];
   problems: string[];
   lossy: boolean;
 }
 
-function readAttachedStores(phrenPath: string, synced: StoreRegistry | null): AttachedStoresRead {
+function readAttachedStores(phrenPath: string, synced: StoreRegistry | null, migrate = true): AttachedStoresRead {
   const parsed = readYamlFile(attachedStoresFilePath(phrenPath), ATTACHED_STORES_FILENAME);
-  if (!parsed.exists) return { stores: migrateSyncedAttachments(phrenPath, synced), problems: [], lossy: false };
+  if (!parsed.exists) return { stores: migrate ? migrateSyncedAttachments(phrenPath, synced)
+    : (synced?.stores.filter(s => s.role !== "primary" && storePathExists(s.path)) ?? []), problems: [], lossy: false };
   if (parsed.problems.length > 0) return { stores: [], problems: parsed.problems, lossy: true };
 
   const problems: string[] = [];
@@ -295,6 +321,29 @@ export function storePathExists(storePath: string): boolean {
  */
 export function resolveAllStores(phrenPath: string): StoreEntry[] {
   const registry = readStoreRegistry(phrenPath);
+  return resolveStoreEntries(phrenPath, registry);
+}
+
+/** Task discovery must neither migrate attachments nor treat a partial registry
+ * as proof of an unambiguous task identity. No writes or warnings on this path. */
+export function readTaskStoreEntries(phrenPath: string): StoreEntry[] {
+  const result = readStoreRegistryDetailed(phrenPath, { migrateAttachments: false });
+  if (result.lossy) return [];
+  // The legacy registry normalizer tolerates bad subscription members by
+  // dropping them. For task access that could turn an invalid list into "all
+  // projects", so validate the original evidence before using that view.
+  for (const [file, label] of [[storesFilePath(phrenPath), STORES_FILENAME], [attachedStoresFilePath(phrenPath), ATTACHED_STORES_FILENAME]]) {
+    const raw = readYamlFile(file, label);
+    if (raw.exists && (!isRecord(raw.value) || !Array.isArray(raw.value.stores)
+      || raw.value.stores.some(store => !isRecord(store) || (store.projects !== undefined
+        && (!Array.isArray(store.projects) || store.projects.some(project => typeof project !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(project))))))) return [];
+  }
+  const registry = result.registry && { ...result.registry, stores: result.registry.stores.map(store =>
+    store.role === "primary" ? { ...store, path: path.resolve(phrenPath) } : store) };
+  return resolveStoreEntries(phrenPath, registry);
+}
+
+function resolveStoreEntries(phrenPath: string, registry: StoreRegistry | null): StoreEntry[] {
   const stores: StoreEntry[] = registry ? [...registry.stores] : [implicitPrimaryStore(phrenPath)];
 
   // Append PHREN_FEDERATION_PATHS entries that aren't already in the registry

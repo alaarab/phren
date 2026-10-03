@@ -1,3 +1,4 @@
+import { parseTaskMetadata, type TaskMetadata } from "../data/task-metadata.js";
 /**
  * Three-way merge of a tasks.md file by task id, for store sync conflicts.
  *
@@ -69,6 +70,34 @@ export function pickTask<T extends TaskEntry>(base: T | undefined, ours: T | und
   return theirs;
 }
 
+/** Merge independent responsibility/dependency edits and retain both histories.
+ * Ordinary task conflict precedence still controls title, claim and section. */
+function mergeContract(base: TaskEntry | undefined, ours: TaskEntry | undefined, theirs: TaskEntry | undefined, winner: TaskEntry): TaskEntry {
+  const read = (entry: TaskEntry | undefined): { raw?: string; value?: TaskMetadata } => {
+    const records = entry?.lines.filter(line => line.trimStart().startsWith("Task:")) ?? [];
+    if (!records.length) return { value: { version: 1, responsibility: "agent", dependencies: [], history: [] } };
+    if (records.length !== 1) return { raw: records.join("\n") };
+    return { raw: records[0], value: parseTaskMetadata(records[0].trim().slice(5).trim()) };
+  };
+  const b = read(base), o = read(ours), t = read(theirs);
+  if (o.raw === undefined && t.raw === undefined) return winner;
+  if (!b.value || !o.value || !t.value) return winner;
+  const baseValue = b.value, ourValue = o.value, theirValue = t.value;
+  const pick = (field: "responsibility" | "dependencies") => JSON.stringify(theirValue[field]) === JSON.stringify(baseValue[field]) ? ourValue[field] : theirValue[field];
+  const history = [...new Map([...o.value.history, ...t.value.history].map(h => [JSON.stringify(h), h] as const)).values()];
+  const contract = { version: 1, responsibility: pick("responsibility"), dependencies: pick("dependencies"), history };
+  let lines = winner.lines.filter(line => !line.trimStart().startsWith("Task:"));
+  if (contract.responsibility === "human") {
+    lines = lines.filter(line => {
+      const claim = /^Claimed:\s+([A-Za-z0-9][A-Za-z0-9._-]{0,252})\s+(\d{4}-\d{2}-\d{2}T[0-9:.]+Z)(?:\s+session:[A-Za-z0-9._:-]{1,128})?$/.exec(line.trim());
+      if (!claim) return true;
+      history.push({ at: history.at(-1)?.at ?? claim[2], change: `released claim by ${claim[1]} during human responsibility merge` });
+      return false;
+    });
+  }
+  return { ...winner, lines: [...lines, `  Task: ${JSON.stringify(contract)}`] };
+}
+
 /**
  * Merges three versions of a tasks.md. `base` is empty when the file was
  * added on both sides.
@@ -80,10 +109,23 @@ export function mergeTasksByBid(base: string, ours: string, theirs: string): str
   const o = index(oursSections);
   const t = index(theirsSections);
 
+  // A duplicated identity cannot be reconciled by first-win indexing. Leave
+  // the sync conflict unresolved, retaining both original files for repair.
+  for (const sections of [parse(base), oursSections, theirsSections]) {
+    const seen = new Set<string>();
+    for (const section of sections) for (const row of section.rows) {
+      if (row.kind !== "task" || !row.entry.key.startsWith("bid:")) continue;
+      if (seen.has(row.entry.key) || [...row.entry.lines[0].matchAll(/<!--\s*bid:([a-f0-9]{8})\b[^>]*-->/g)].length !== 1) {
+        throw new Error("Task merge requires unique, unambiguous stable IDs; repair the conflicting records first.");
+      }
+      seen.add(row.entry.key);
+    }
+  }
+
   const chosen = new Map<string, TaskEntry>();
   for (const key of new Set([...b.keys(), ...o.keys(), ...t.keys()])) {
     const winner = pickTask(b.get(key), o.get(key), t.get(key));
-    if (winner) chosen.set(key, winner);
+    if (winner) chosen.set(key, mergeContract(b.get(key), o.get(key), t.get(key), winner));
   }
 
   // Local order, per section, so a task only the local side placed there lands after its local predecessor.

@@ -1,3 +1,4 @@
+import { taskView, taskCounts, filterTaskDoc } from "../data/task-contract.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
 import { z } from "zod";
@@ -107,8 +108,9 @@ function buildTaskView(doc: TaskDoc, status?: TaskStatus, limit?: number, doneLi
   };
 }
 
-function buildTaskSummary(doc: TaskDoc, includedSections: TaskSection[]): string {
-  const lines: string[] = [`## ${doc.project}`];
+function buildTaskSummary(doc: TaskDoc, includedSections: TaskSection[], base: string, original = doc): string {
+  const counts = taskCounts(base, original);
+  const lines: string[] = [`## ${doc.project}`, `Human: ${counts.human}; Agent ready: ${counts.agentReady}; Agent waiting on human: ${counts.agentWaitingOnHuman}; Agent waiting on task: ${counts.agentWaitingOnTask}.`];
   for (const section of includedSections) {
     const items = doc.items[section];
       const highCount = items.filter(i => i.priority === "high").length;
@@ -146,6 +148,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         project: z.string().optional().describe("Project name. Omit to get all projects."),
         id: z.string().optional().describe("Task ID like A1, Q3, D2. Requires project."),
         item: z.string().optional().describe("Exact task text. Requires project."),
+        responsibility: z.enum(["human", "agent"]).optional().describe("Independent responsibility lane filter."),
+        readiness: z.enum(["ready", "waiting-on-human", "waiting-on-task"]).optional().describe("Derived readiness filter; does not change task section."),
         status: z.enum(["all", "active", "queue", "done", "active+queue"]).optional().describe("Which task sections to include. Defaults to 'active+queue'."),
         limit: z.number().int().min(1).max(200).optional().describe("Max items per Active/Queue section to return. Default 20."),
         done_limit: z.number().int().min(1).max(200).optional().describe("Max Done items to return (most recent). Default 5. Done sections are capped tightly to avoid large responses."),
@@ -153,7 +157,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         summary: z.boolean().optional().describe("If true, return counts and titles only (no full content). Reduces token usage."),
       }),
     },
-    async ({ project, id, item, status, limit, done_limit, offset, summary }) => {
+    async ({ project, id, item, status, responsibility, readiness, limit, done_limit, offset, summary }) => {
       // Single item lookup
       if (id || item) {
         if (!project) return mcpResponse({ ok: false, error: "Provide `project` when looking up a single item." });
@@ -163,17 +167,20 @@ export function register(server: McpServer, ctx: McpContext): void {
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
         const all = [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done];
-        const bidLookup = id && id.startsWith("bid:") ? id.slice(4) : null;
-        const match = all.find((entry) =>
+        const bidLookup = id && /^(?:bid:)?[a-f0-9]{8}$/.test(id) ? id.replace(/^bid:/, "") : null;
+        const matches = all.filter((entry) =>
           (bidLookup && entry.stableId === bidLookup) ||
           (id && !bidLookup && entry.id.toLowerCase() === id.toLowerCase()) ||
           (item && entry.line.trim() === item.trim())
         );
+        if (matches.length > 1) return mcpResponse({ ok: false, error: "Task identity is ambiguous." });
+        const match = matches[0];
         if (!match) return mcpResponse({ ok: false, error: `No task found in ${project} for ${id ? `id=${id}` : `item="${item}"`}.` });
         return mcpResponse({
           ok: true,
           message: `${match.id}: ${match.line} (${match.section})`,
           data: {
+            ...taskView(phrenPath, doc, match),
             project,
             id: match.id,
             stableId: match.stableId || null,
@@ -195,19 +202,19 @@ export function register(server: McpServer, ctx: McpContext): void {
         const result = readTasks(resolvedPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
-        const view = buildTaskView(doc, status, limit, done_limit, offset);
+        const view = buildTaskView(filterTaskDoc(phrenPath, doc, { responsibility, readiness }), status, limit, done_limit, offset);
         if (!fs.existsSync(doc.path)) {
           return mcpResponse({
             ok: true,
             message: `No tasks found for "${project}".`,
-            data: { project, items: view.doc.items, includedSections: view.includedSections, totalItems: view.totalItems },
+            data: { project, counts: taskCounts(phrenPath, doc), items: Object.fromEntries(TASK_SECTION_ORDER.map(section => [section, view.doc.items[section].map(entry => taskView(phrenPath, doc, entry))])), includedSections: view.includedSections, totalItems: view.totalItems },
           });
         }
         if (summary) {
           return mcpResponse({
             ok: true,
-            message: buildTaskSummary(view.doc, view.includedSections),
-            data: { project, includedSections: view.includedSections, totalItems: view.totalItems, summary: true },
+            message: buildTaskSummary(view.doc, view.includedSections, phrenPath, doc),
+            data: { project, counts: taskCounts(phrenPath, doc), includedSections: view.includedSections, totalItems: view.totalItems, summary: true },
           });
         }
         const sectionCounts = view.includedSections
@@ -219,25 +226,26 @@ export function register(server: McpServer, ctx: McpContext): void {
         return mcpResponse({
           ok: true,
           message: `## ${project}\n${taskMarkdown(view.doc)}${paginationNote}`,
-          data: { project, items: view.doc.items, issues: doc.issues, includedSections: view.includedSections, totalItems: view.totalItems, totalUnpaged: view.totalUnpaged, offset: offset ?? 0, truncated: view.truncated },
+          data: { project, counts: taskCounts(phrenPath, doc), items: Object.fromEntries(TASK_SECTION_ORDER.map(section => [section, view.doc.items[section].map(entry => taskView(phrenPath, doc, entry))])), issues: doc.issues, includedSections: view.includedSections, totalItems: view.totalItems, totalUnpaged: view.totalUnpaged, offset: offset ?? 0, truncated: view.truncated },
         });
       }
 
       // All projects
       const docs = readTasksAcrossProjects(phrenPath, profile);
       if (!docs.length) return mcpResponse({ ok: true, message: "No tasks found.", data: { projects: [] } });
-      const views = docs.map((doc) => ({ project: doc.project, doc, view: buildTaskView(doc, status, limit, done_limit, offset), issues: doc.issues }));
+      const views = docs.map((doc) => ({ project: doc.project, doc, view: buildTaskView(filterTaskDoc(phrenPath, doc, { responsibility, readiness }), status, limit, done_limit, offset), issues: doc.issues }));
       const anyTruncated = views.some(({ view }) => view.truncated);
       let parts: string[];
       if (summary) {
-        parts = views.map(({ view }) => buildTaskSummary(view.doc, view.includedSections));
+        parts = views.map(({ view, doc }) => buildTaskSummary(view.doc, view.includedSections, phrenPath, doc));
       } else {
         parts = views.map(({ project, view }) => `## ${project}\n${taskMarkdown(view.doc)}`);
       }
       const truncationNote = anyTruncated && !summary ? `\n\n_Results capped (Active/Queue: ${limit ?? DEFAULT_TASK_LIMIT}, Done: ${done_limit ?? DEFAULT_DONE_LIMIT}). Pass limit/done_limit to see more._` : "";
-      const projectData = views.map(({ project, view, issues }) => ({
+      const projectData = views.map(({ project, doc, view, issues }) => ({
         project,
-        items: view.doc.items,
+        counts: taskCounts(phrenPath, doc),
+        items: Object.fromEntries(TASK_SECTION_ORDER.map(section => [section, view.doc.items[section].map(entry => taskView(phrenPath, doc, entry))])),
         issues,
         includedSections: view.includedSections,
         totalItems: view.totalItems,
@@ -426,6 +434,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           priority: z.enum(["high", "medium", "low"]).optional().describe("New priority tag: high, medium, or low."),
           context: z.string().optional().describe("Text to set on the Context: line below the task."),
           replace_context: z.boolean().optional().describe("If true, replace the existing Context: value instead of appending."),
+          responsibility: z.enum(["human", "agent"]).optional().describe("Who must act; independent of task section. Legacy tasks default to agent."),
+          dependencies: z.array(z.object({ storeId: z.string().regex(/^[a-f0-9]{8}$/), project: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/), stableId: z.string().regex(/^[a-f0-9]{8}$/) }).strict()).max(100).optional().describe("Replace prerequisites with immutable store/project/task identities; [] clears. Rejects self-links, cycles and missing targets."),
           section: z.enum(["queue", "active", "done", "Queue", "Active", "Done"]).optional().describe("Move item to this section: Queue, Active, or Done."),
           github_issue: z.union([z.number().int().positive(), z.string()]).optional().describe("GitHub issue number (for example 14 or '#14')."),
           github_url: z.string().optional().describe("GitHub issue URL to associate with the task item."),
@@ -471,6 +481,8 @@ export function register(server: McpServer, ctx: McpContext): void {
           updates.move_to_active,
           updates.work_next,
           updates.replace_context,
+          updates.responsibility,
+          updates.dependencies,
         ].some((value) => value !== undefined);
         if (extraUpdates) {
           return mcpResponse({ ok: false, error: "create_issue must be used by itself." });
@@ -492,7 +504,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       return withWriteQueue(async () => {
         // Handle work_next: pick highest-priority Queue item, move to Active
         if (updates.work_next) {
-          const result = workNextTask(targetPath, project);
+          const result = workNextTask(targetPath, project, phrenPath);
           if (!result.ok) return mcpResponse({ ok: false, error: result.error });
           refreshTaskIndex(updateFileInIndex, targetPath, project);
           return mcpResponse({ ok: true, message: result.data, data: { project } });
@@ -556,7 +568,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         // Handle github issue linking via update_task when github_issue or github_url is set (and no other field updates)
-        if ((updates.github_issue !== undefined || updates.github_url || updates.unlink_github) && !updates.text && !updates.priority && !updates.context && !updates.section) {
+        if ((updates.github_issue !== undefined || updates.github_url || updates.unlink_github) && !updates.text && !updates.priority && !updates.context && !updates.section && updates.responsibility === undefined && updates.dependencies === undefined) {
           if (updates.unlink_github && (updates.github_issue !== undefined || updates.github_url)) {
             return mcpResponse({ ok: false, error: "Use either unlink_github=true or github_issue/github_url, not both." });
           }
@@ -583,7 +595,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
 
         // Standard update path
-        const result = updateTaskStore(targetPath, project, item!, updates);
+        const result = updateTaskStore(targetPath, project, item!, updates, phrenPath);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         refreshTaskIndex(updateFileInIndex, targetPath, project);
         return mcpResponse({ ok: true, message: result.data, data: { project, item, updates } });
@@ -645,7 +657,7 @@ export function register(server: McpServer, ctx: McpContext): void {
         // The Claimed line takes a plain token; a name with spaces would never parse back.
         const computer = getMachineName().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[^A-Za-z0-9]+/, "") || "computer";
         const claim = { computer, at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), ...(session ? { session } : {}) };
-        const outcome = await claimTaskSynced(targetPath, project, item, claim, { release, force });
+        const outcome = await claimTaskSynced(targetPath, project, item, claim, { release, force, graphRoot: phrenPath });
         if (outcome.error) return mcpResponse({ ok: false, error: outcome.error });
         refreshTaskIndex(updateFileInIndex, targetPath, project);
         const message = release ? `Released in ${project}. ${outcome.detail}`

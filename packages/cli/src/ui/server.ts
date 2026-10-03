@@ -1,3 +1,4 @@
+import { taskView } from "../data/task-contract.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { moduleSnapshot } from "../modules/runtime.js";
 import { disabledHint } from "../modules/registry.js";
@@ -639,11 +640,12 @@ function handleGetScores(res: Res, ctx: RouteCtx): void {
 function handleGetTasks(res: Res, ctx: RouteCtx): void {
   try {
     const docs = readTasksAcrossProjects(ctx.phrenPath, ctx.profile);
-    const tasks: Array<{ project: string; section: string; line: string; priority?: string; pinned?: boolean; githubIssue?: number; githubUrl?: string; context?: string; checked?: boolean; sessionId?: string }> = [];
+    const tasks: Array<ReturnType<typeof taskView> & { project: string }> = [];
     for (const doc of docs) {
       for (const section of ["Active", "Queue", "Done"] as const) {
         for (const item of doc.items[section]) {
           tasks.push({
+            ...taskView(ctx.phrenPath, doc, item),
             project: doc.project, section: item.section, line: item.line, priority: item.priority,
             pinned: item.pinned, githubIssue: item.githubIssue, githubUrl: item.githubUrl,
             context: item.context, checked: item.checked, sessionId: item.sessionId,
@@ -958,7 +960,16 @@ function handlePostTaskUpdate(req: Req, res: Res, url: string, ctx: RouteCtx): v
     const project = String(parsed.project || "");
     const item = String(parsed.item || "");
     if (!project || !item || !isValidProjectName(project)) return jsonErr(res, "Missing or invalid project/item", 400);
-    const updates: { text?: string; priority?: string; section?: string } = {};
+    const denied = permissionDeniedError(ctx.phrenPath, "update_task", project);
+    if (denied) return jsonErr(res, denied, 403);
+    const updates: Parameters<typeof updateTaskStore>[3] = {};
+    if (parsed.responsibility !== undefined) {
+      if (parsed.responsibility !== "human" && parsed.responsibility !== "agent") return jsonErr(res, "Responsibility must be human or agent", 400);
+      updates.responsibility = parsed.responsibility;
+    }
+    if (parsed.dependencies !== undefined) {
+      try { updates.dependencies = JSON.parse(String(parsed.dependencies)); } catch { return jsonErr(res, "Dependencies must be a JSON array", 400); }
+    }
     if (Object.prototype.hasOwnProperty.call(parsed, "text")) updates.text = String(parsed.text || "");
     if (Object.prototype.hasOwnProperty.call(parsed, "priority")) updates.priority = String(parsed.priority || "");
     if (Object.prototype.hasOwnProperty.call(parsed, "section")) updates.section = String(parsed.section || "");
