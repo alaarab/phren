@@ -1,5 +1,5 @@
 import { configuredHarness, prepareHarnessCommand } from "./harness/launch.js";
-import { conductorLeaseConfig, reserveConductorLease, bindConductorLease, releaseLocalConductorLease } from "./conductor-lease.js";
+import { conductorLeaseConfig, reserveConductorLease, bindConductorLease, requireAvailableConductorAuthority } from "./conductor-lease.js";
 import { markPaneClosed } from "./worker-close.js";
 import { mkdir, readFile } from "node:fs/promises";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -204,9 +204,8 @@ export async function stopConductor(data: Json): Promise<Json> {
   }
   const held = (await readRoleState())?.conductor;
   if (pane !== undefined && held && held.pane !== pane) throw new BridgeError(409, "That pane is not this computer's conductor.");
-  await releaseLocalConductorLease();
   const stopped = await clearConductor(pane);
-  return { ok: true, stopped: !!stopped };
+  return { ok: true, stopped: !!stopped, leasePreserved: true };
 }
 
 /** How long a pane the Hook just created may take to reach its shell prompt. */
@@ -313,6 +312,7 @@ async function stillListed(server: string, result: Json): Promise<boolean> {
 }
 
 async function startSession(server: string, data: Json, options: LaunchOptions): Promise<Json> {
+  await requireAvailableConductorAuthority();
   const role = z.enum(["agent", "conductor"]).default("agent").parse(data.role);
   const projectDirectory = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
   const worktreeRequest = data.worktree === undefined || data.worktree === null ? undefined : launchWorktreeSchema.parse(data.worktree);
@@ -327,7 +327,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const permissionMode = z.enum(PERMISSION_MODES).optional().parse(data.permissionMode ?? undefined);
   if (permissionMode && role === "conductor") throw new BridgeError(400, "A conductor starts with its own permissions; permissionMode is for workers.");
   if (permissionMode && kind === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
-  if (permissionMode && kind === "phren") throw new BridgeError(400, "phren agent takes its permissions from its own settings; permissionMode is for Claude, Codex and Copilot workers.");
+  if (permissionMode && kind === "phren" && !backend) throw new BridgeError(400, "phren agent takes its permissions from its own settings; permissionMode is for Claude, Codex and Copilot workers.");
   if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
   if (role === "conductor" && kind === "phren") throw new BridgeError(400, PHREN_NO_CONDUCTOR);
   const phrenArgs = await phrenLaunchArgs(kind, data);
@@ -351,7 +351,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // Herdr 0.9.1 refuses a start timeout of 3000 ms or less (invalid_agent_timeout).
   const timeout = Math.min(120_000, Math.max(3_001, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
   // Checked before anything is created, so a refusal leaves no pane, worktree or brief file behind.
-  await requireAvailable(kind, account);
+  if (!backend || backend.backend === "claude-sdk") await requireAvailable(kind, account);
   const home = kind === "claude" && account && account !== DEFAULT_ACCOUNT ? claudeHome(account) : undefined;
   if (kind === "claude" && account && account !== DEFAULT_ACCOUNT && !home) throw new BridgeError(409, `No claude account "${account}"`, { code: "account_unavailable" });
   const before = await snapshot(server);

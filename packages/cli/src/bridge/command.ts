@@ -26,6 +26,8 @@ export async function runBridge(args: string[], version: string): Promise<number
     case "harness-runner": {
       if (args.length !== 3 || !/^--source=(claude|phren)$/.test(args[1])) throw new Error("Invalid private harness runner invocation.");
       const { runHarnessWorker } = await import("./harness/runner.js");
+      const { requireAvailableConductorAuthority } = await import("./conductor-lease.js");
+      await requireAvailableConductorAuthority();
       return runHarnessWorker(JSON.parse(await readFile(args[2], "utf8")));
     }
     case "enroll-computer": {

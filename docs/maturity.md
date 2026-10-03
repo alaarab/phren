@@ -1,5 +1,18 @@
 # Feature maturity, September 26
 
+October 3 source correction: the owner requested store leases, phone linking
+and expired returns. Fixed authority, no expiry and exact explicit takeover are
+conductor design judgments, not owner quotations. Frozen donor `1f8dfdf5` is a
+source donor rather than accepted RC evidence. Q's isolated canonical correction
+retains the lease on Stop, adds signed atomic exact-holder takeover, guards new
+launches against an offline authority, and requires paired-owner proof on the
+existing enrollment controls. Native screens/transport belong to Astra; their
+source does not establish live linking. The exact API and prepared UNRUN
+regressions are in
+[CANONICAL-LEASE-CONTRACT.md](../packages/cli/src/bridge/harness/CANONICAL-LEASE-CONTRACT.md).
+The historical scores below are not a claim that this correction was built or
+that its tests, native flow, provider/SSH behavior or RC were exercised.
+
 Level 5 means a feature **works**, is **reliable** (errors, restarts and
 offline states are handled), is **visible** (the phone or CLI shows its real
 state), is **real-tool tested** (tests or fixtures from the real harness, Herdr,

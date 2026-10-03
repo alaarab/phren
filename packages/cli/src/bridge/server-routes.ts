@@ -1,7 +1,8 @@
 import { harnessInfo, boundHarness } from "./harness/bindings.js";
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute } from "./task-routes.js";
 import { prepareComputerEnrollment, reviewComputerEnrollment, confirmComputerEnrollment, verifyComputerEnrollment } from "./computer-enrollment.js";
-import { readConductorLease, configureConductorLease, conductorLeaseAuthority, revokeConductorLease } from "./conductor-lease.js";
+import { readConductorLease, configureConductorLease, conductorLeaseAuthority, revokeConductorLease, takeoverConductorLease } from "./conductor-lease.js";
+import { requireOwnerControl } from "./harness/owner-controls.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import type { OwnerInbox } from "./owner-inbox.js";
 import { closeFinishedWorker } from "./worker-close.js";
@@ -146,7 +147,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, conductorLease: true, computerEnrollment: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, harnessAdapters: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, conductorLease: true, conductorLeaseTakeover: true, computerEnrollment: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, harnessAdapters: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -592,6 +593,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         }
       } else if (request.method === "POST") {
         const data = await body(request);
+        if (url.pathname.startsWith("/v1/computers/enrollment/") || url.pathname === "/v1/conductor/lease/configure") {
+          await requireOwnerControl(request.headers, "POST", url.pathname, data);
+        }
         if (["/v1/harness/model", "/v1/harness/takeover", "/v1/harness/approval", "/v1/harness/input"].includes(url.pathname)) {
           const target = targetSchema.parse(data.target), adapter = await boundHarness(target);
           if (url.pathname === "/v1/harness/model") {
@@ -689,7 +693,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/conductor/lease/configure") {
           result = await configureConductorLease(modules.store, data);
         } else if (url.pathname === "/v1/conductor/lease/revoke") {
-          result = await revokeConductorLease(modules.store, data);
+          result = await revokeConductorLease(modules.store, data, request.headers);
+        } else if (url.pathname === "/v1/conductor/lease/takeover") {
+          result = await launches.run(async () => takeoverConductorLease(modules.store, data, request.headers));
         } else if (url.pathname === "/v1/conductor/lease/authority") {
           result = await conductorLeaseAuthority(modules.store, data);
         } else if (url.pathname === "/v1/computers/enrollment/prepare") {
