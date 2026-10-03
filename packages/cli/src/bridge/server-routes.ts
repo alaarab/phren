@@ -3,7 +3,7 @@ import { requireOwnerControl } from "./harness/owner-controls.js";
 import { configureStoreLease, changeStoreLease, readStoreLease } from "./harness/store-lease.js";
 import { runnerForPane, runnerRequest } from "./harness/runner-client.js";
 import { peerRepairView, repairPeer, peerEnrollmentPlan, enrollPinnedPeer } from "./harness/peer-controls.js";
-import { proxyOperation, proxyView, registerProxy, reverseProxyPlan } from "./harness/remote-proxy.js";
+import { proxyOperation, proxyView, registerProxy, removeProxy, reverseProxyPlan } from "./harness/remote-proxy.js";
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import type { OwnerInbox } from "./owner-inbox.js";
@@ -156,7 +156,10 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
   if (snapshot.has("tasks")) result.taskDependencies = true;
-  if (snapshot.has("hook")) { result.harnessAdapters = true; result.harnessOwnerControls = "ed25519-v1"; result.harnessProxy = true; }
+  if (snapshot.has("hook")) {
+    result.harnessAdapters = true; result.harnessOwnerControls = "ed25519-v1"; result.harnessProxy = true;
+    result.harnessProxyContract = { version: 2, scope: "one-agent", provider: "copilot", transport: "existing-reverse-ssh-terminal", chatSupported: false, nativeSession: false, readScreen: true, terminalWrites: false };
+  }
   if (snapshot.has("conductor")) result.storeConductorLease = true;
   return result;
 }
@@ -367,7 +370,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/harness/lease": result = await readStoreLease(scheduleStore, url.searchParams.get("storeId") ?? undefined, url.searchParams.get("authority") === "1"); break;
           case "/v1/harness/peers": result = await peerRepairView(); break;
           case "/v1/harness/proxies": result = await proxyView(info.computer.name); break;
-          case "/v1/harness/proxy/session": case "/v1/harness/proxy/thread": case "/v1/harness/proxy/events": case "/v1/harness/proxy/delivery":
+          case "/v1/harness/proxy/session": case "/v1/harness/proxy/screen": case "/v1/harness/proxy/thread": case "/v1/harness/proxy/events": case "/v1/harness/proxy/delivery":
             result = await proxyOperation(url.pathname.split("/").at(-1)!, Object.fromEntries(url.searchParams)); break;
           case "/v1/harness/delivery": {
             const target = targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}")), runner = await runnerForPane(target.server, await validateTarget(target, false, true));
@@ -616,6 +619,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         else if (url.pathname === "/v1/harness/peers/enrollment-plan") result = peerEnrollmentPlan(data);
         else if (url.pathname === "/v1/harness/peers/enroll") result = await enrollPinnedPeer(data);
         else if (url.pathname === "/v1/harness/proxies/register") result = await registerProxy(data);
+        else if (url.pathname === "/v1/harness/proxies/remove") result = await removeProxy(data);
         else if (url.pathname === "/v1/harness/proxy/plan") result = reverseProxyPlan(data);
         else if (url.pathname.startsWith("/v1/harness/proxy/")) result = await proxyOperation(url.pathname.split("/").at(-1)!, data);
         else if (["/v1/harness/lease/acquire", "/v1/harness/lease/revoke", "/v1/harness/lease/takeover"].includes(url.pathname)) result = await changeStoreLease(scheduleStore, url.pathname.split("/").at(-1) as "acquire" | "revoke" | "takeover", data);

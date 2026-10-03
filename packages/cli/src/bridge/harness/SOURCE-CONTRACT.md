@@ -133,47 +133,73 @@ before the existing link workflow may exchange keys. CLI link now requires
 `--host-key <verified ssh-ed25519 public key>` and explicit confirmation/`--yes`.
 No repair, enrollment, SSH or credential operation was performed in this task.
 
-## One QL agent through Omarchy, without QL enrollment
+## One QL Copilot terminal through Omarchy, without QL enrollment
 
-This is an optional tunnel, independent of machine enrollment. QL owns one
-runner/agent. The source runner binds HTTP only on `127.0.0.1:<port>` with a
-64-hex-character private bearer token; it exposes one adapter session. A future
-owner-run reverse SSH connection forwards one owner-private Omarchy Unix socket
-to that loopback listener. Neither side runs another Hook on QL or enrolls QL
-as a computer. Codex stdio starts an explicitly installed Codex app-server
-child; Claude SDK and configured ACP are other source options. Downloads,
-credential discovery and automatic SSH execution are absent from the plan.
+Version 2 narrows the former generic SDK/ACP/Codex proxy contract to the owner's
+one existing reverse-SSH-attached Copilot terminal. There is no Copilot runner
+API in this source. No native remote session, transcript, turn acknowledgement,
+permission transport or phone chat acceptance has been established. The observed
+startingToken belongs only to the current Omarchy pane/process; it must never be
+used as a native session ID, transcript ID or chat Target.
 
-| API | Contract |
+The source binds one owner-confirmed existing pane. It performs no SSH, remote
+launch, machine enrollment, credential discovery, pin change or automatic repair.
+QL origin and reverse-SSH transport are owner declarations, not inferred proof.
+`identity.remoteSessionVerified` and `identity.remoteTransportVerified` remain
+false even while the local pane is verified. An SSH-only/unknown pane cannot be
+registered as Copilot: the current local listing must actually name Copilot.
+
+| API | Version-2 contract |
 | --- | --- |
-| POST `/v1/harness/proxy/plan` | `{id, omarchySSHHost:<existing alias>, omarchySocket:<absolute private .../harness/proxies/id.sock>, remotePort, ownerConfirmed:true}`; returns `performed:false`, `file:"ssh"`, argument array, `enrollmentRequired:false` |
-| POST `/v1/harness/proxies/register` | `{id, originComputer:"QL", label, entry:<RunnerEntry from owner>, token:<64hex>, expectedOwnerId?}`; max one registration; replacement must name the previous owner |
-| GET `/v1/harness/proxies` | Separate `{version:1, scope:"one-agent", proxies:[...]}` listing |
-| GET `/v1/harness/proxy/session?proxyId=<id>` | Verified provider, native session, capabilities and proxy Target |
-| GET `/v1/harness/proxy/thread` | Query `proxyId`, `session`, `ownerId` |
-| GET `/v1/harness/proxy/events` | Same query plus `after` cursor |
-| GET `/v1/harness/proxy/delivery` | Same query plus `deliveryId` |
-| POST `/v1/harness/proxy/turn` | `{target:<ProxyTarget>, text, deliveryId}` |
-| POST `/v1/harness/proxy/interrupt` | `{target, turnId}` |
-| POST `/v1/harness/proxy/approval` or `/input` | `{target, requestId, response}` |
-| POST `/v1/harness/proxy/model` | `{target, model}` |
+| POST `/v1/harness/proxy/plan` | Registration-shaped input below; returns `performed:false`, `commands:[]`, prerequisites and no native session; describes an existing attachment only |
+| POST `/v1/harness/proxies/register` | `{id, originComputer:"QL", viaPlatform:"omarchy", provider:"copilot", transport:"existing-reverse-ssh-terminal", label, terminalTarget, terminal, ownerConfirmed:true, expectedOwnerId?}` |
+| POST `/v1/harness/proxies/remove` | `{proxyId, ownerId, ownerConfirmed:true}`; exact current registration owner only; removes routing without stopping SSH or closing the pane |
+| GET `/v1/harness/proxies` | `{version:2, scope:"one-agent", proxies:[]}`; max one separate discovery row, never computer enrollment |
+| GET `/v1/harness/proxy/session?proxyId=<id>` | Attachment metadata with `session:null`, `nativeSession:null`, `target:null`, `chatTarget:null` and `chatSupported:false` |
+| GET `/v1/harness/proxy/screen?proxyId=<id>&ownerId=<uuid>` | Verified visible terminal screen, max 100 lines / 65536 characters, `scope:"terminal-screen"`, `session:null`, `transcript:false`, `truncated` |
+| GET `/v1/harness/proxy/thread`, `/events`, `/delivery` | HTTP 409 `proxy-capability-unsupported`; no native reads or receipts |
+| POST `/v1/harness/proxy/turn`, `/interrupt`, `/approval`, `/input`, `/model`, `/takeover`, `/start`, `/keys`, `/prompt` | HTTP 409 `proxy-capability-unsupported`; no typing, native delivery, optimistic queue/ack or permission change |
 
-`ProxyTarget` is `{proxyId, session, ownerId}`. It is **not** a local pane Target
-and never enters `/v1/computers` or the regular workspace/pane listing. Each
-operation checks the private forwarded socket, token and live runner owner,
-native session, process and provider. Views omit the token. A changed or missing
-owner becomes `offline`, not an invented local agent. Unsupported chat becomes
-`terminal-only`, with no chat target. Session creation, terminal takeover,
-arbitrary commands and machine administration are unavailable through the proxy.
+`terminalTarget` is strictly `{server, workspace, tab, pane, source:"copilot",
+starting:true, startingToken:<64hex>}`; `terminal` is the independently checked
+current terminal identifier as a string. Extra session/nativeSession fields in
+registration are rejected. Proxy operation references are `{proxyId, ownerId?}`;
+screen requires the exact current ownerId. The registration UUID is routing
+ownership only, never a remote session. Supplying a fake session/nativeSession or
+using startingToken as a proxy operation reference returns 409
+`proxy-no-native-session`. Unknown operations return 404.
 
-The listing gap for iOS is exactly this separate discovery endpoint and proxy
-Target/control path. iOS must add its own row/target model, sign owner POSTs,
-retain turn delivery IDs, distinguish offline/terminal-only, and display partial
-history. The ordinary overview/computers listing does not advertise this proxy.
-**No local chat or phone acceptance is claimed.** Native SSH forwarding,
-Windows ACLs, SDK subscription/resume and Codex stdio initialization remain RC
-runtime gates. The owner must establish existing SSH access and verify Omarchy's
-host pin outside this source task; the plan always uses strict host-key checking.
+All structured harness capabilities plus `sendTurn` and `deliveryReceipts` are
+false. `terminalCapabilities` is `{readScreen:<binding valid>, keys:false,
+prompt:false}`. Every row includes exact per-operation unsupported explanations.
+Its state is `terminal-only`, `binding-changed` or `unavailable`; stale rows retain
+null session/chat targets and expose no usable terminalTarget. Screen reads verify
+the binding before and after the read, then verify the registration owner again.
+
+State is private `<bridge>/harness/copilot-proxy-v2.json`, separate from the old
+runner registry. No old entries or starting rows are silently migrated. One
+attachment is persisted under an atomic owner-state lock; replacement must name
+the prior ownerId and receives a new UUID. Hook restart retires startingToken;
+existing state becomes binding-changed and requires explicit owner registration
+against a fresh listing. No timeout takeover or automatic reconstruction occurs.
+
+All proxy POSTs use the existing paired-owner Ed25519 route/body proof; a body
+confirmation alone is insufficient. GETs use the existing authenticated Hook
+transport. `harnessProxyContract` advertises version 2, Copilot, terminal-screen
+support and false chat/nativeSession/terminalWrites; other local providers'
+computer-wide capabilities must not be applied to this row.
+
+iOS discovery must query the separate proxy list, keep the row as a terminal
+attachment, deduplicate its terminal address if also shown locally, and never
+open `/v1/transcripts`, normal chat routes or approval UI for this row. It may
+show the guarded screen. No native app source or phone request was exercised.
+
+The owner must establish or confirm the single existing reverse-SSH attachment,
+using existing access and independently verified host pins outside this task.
+The source cannot verify the actual tunnel from a startingToken. Remote terminal
+writes, Copilot native conversation discovery, transcripts, acknowledgements,
+permissions, resume and full phone chat remain explicit gaps. General donor
+computer enrollment and conductor lease source are separate and untouched.
 
 ## Returns and installer
 

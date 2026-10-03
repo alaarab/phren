@@ -16,6 +16,7 @@ must be integrated before one full RC/TestFlight. Android may trail; no App Revi
 | contract.test.ts: ACP request IDs | Typed native permission IDs cannot collide; one-time approval remains session-scoped |
 | contract.test.ts: expired blocked return | Aging a blocked worker retains approval data and cannot close its pane |
 | owner-controls.test.ts | Independently signed wire fixture succeeds once, persists nonce, rejects computer key, route/body tampering and revoked owner key |
+| remote-proxy.test.ts | Existing Copilot pane stays session-less; structured controls cannot read/type/ack; stale screen binding is discarded; exact registration owner gates replacement/removal; fake session/generic runner registration rejected |
 | store-lease.test.ts | Lease required, one admission only, no elapsed-time expiry, expected-ID revoke only; offline pinned authority blocks ordinary launches and cannot redirect authority |
 
 These tests are source, not evidence of a pass. Their pre-fix failures were not
@@ -38,9 +39,9 @@ not the live store. The owner-proof fixture does not call production signing cod
 | Two computers race the same conductor grant; failed launch retains admission | At most one admission per lease; expectedLeaseId must match for owner revoke/takeover; no silent retry/failover |
 | Existing peer repair after missing routing row | Same independently verified pin and UUID, existing enrollment only, no key exchange; wrong pin/UUID and endpoint collision reject |
 | New enrollment presented without signed owner, confirmation or verified known-host pin | Reject before SSH/key exchange; authorized explicit path preserves existing unrelated keys and peer rows |
-| One QL Codex/ACP/SDK runner; owner establishes QL→Omarchy private reverse socket | Only one agent visible through separate proxy listing; QL absent from computer enrollment; no forwarding of Hook admin APIs |
-| Proxy native owner/session/process/provider replaced, tunnel down, terminal-only backend | Offline or terminal-only row; no chat target or stale approval; tokens absent from listing/plan/logs |
-| iOS proxy discovery/thread/events/send/status/approval/interrupt | Uses ProxyTarget, signed POST and retained delivery IDs; no local pane coercion; honest partial/offline/noack display |
+| Owner confirms one existing QL reverse-SSH Copilot terminal under Omarchy; no enrollment | Separate version-2 terminal-only row; null session/nativeSession/chatTarget; owner-declared origin and unverified remote transport; no SSH or runner launch by proxy source |
+| Copilot pane/process/terminal changes, Hook restarts, registration replaced during screen read | Binding-changed/unavailable row; read discarded; no token promotion to session; explicit signed owner re-registration and exact prior ownerId required |
+| iOS version-2 proxy discovery, metadata, terminal screen, attempted chat/transcript/control | Terminal attachment only; correct unsupported 409/code; no transcript route, queued turn/ack or native approval UI; screen is not a conversation or phone acceptance |
 | Actual Herdr + default/hidden/custom tmux servers concurrently | Every server/terminal identity kept distinct; no missing or duplicate agent introduced by harness overlay; public aggregation verified on actual combined source |
 | Codex direct and OpenCode native requests during Hook restart | Native request IDs and session identity remain scoped; unavailable native status/history capabilities stay false rather than fabricated |
 | Accepted/uncertain worker blocked for >24 h | `expired` with approval retained; never done, never auto-close; owner resolves the existing native request |
@@ -56,7 +57,7 @@ not a promise that the partial checkout includes every other lead WIP module.
 In particular inherited server-routes expects the lead task directory route;
 its task/data owner must supply that implementation. This worker does not edit
 task-routes/data/sync or packages/agent. SDK/native schema/version compatibility,
-Windows executable/ACL behavior, SSH stream-local forwarding and phone UI
+Windows executable/ACL behavior, the owner-established SSH attachment and phone UI
 adoption are external runtime/integration gates, not source-validation results.
 
 The owner-specified Astra integrator exclusively combines and publicly pushes.
