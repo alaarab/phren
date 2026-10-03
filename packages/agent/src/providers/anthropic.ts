@@ -1,3 +1,4 @@
+import { searchSources, type WebSearchResponse } from "./web-search.js";
 import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta, TokenUsage } from "./types.js";
 import { IncompleteStreamError, RetryableProviderError, withPartialUsage } from "./types.js";
 import { stripForeignReasoning } from "./history.js";
@@ -68,6 +69,23 @@ export class AnthropicProvider implements LlmProvider {
     if (!this.reasoningEffort) return null;
     const budget = Math.min(THINKING_BUDGETS[this.reasoningEffort], Math.floor(this.maxOutputTokens / 2));
     return budget >= MIN_THINKING_BUDGET ? budget : null;
+  }
+
+  supportsWebSearch() { return true; }
+  async searchWeb(query: string, limit: number, signal?: AbortSignal): Promise<WebSearchResponse> {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST", headers: { "Content-Type": "application/json", "x-api-key": this.apiKey, "anthropic-version": "2023-06-01" }, signal,
+      body: JSON.stringify({ model: this.model, max_tokens: Math.min(this.maxOutputTokens, 2048), messages: [{ role: "user", content: `Search the web for: ${query}. Provide concise findings with source citations.` }], tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 1 }] }),
+    });
+    if (!res.ok) throw new Error(`Anthropic search returned HTTP ${res.status}`);
+    const data = await res.json() as Record<string, any>, sources: unknown[] = [], text: string[] = [];
+    for (const block of data.content ?? []) {
+      if (block.type === "web_search_tool_result") {
+        if (Array.isArray(block.content)) sources.push(...block.content);
+        else if (block.content?.type === "web_search_tool_result_error") throw new Error(`Anthropic search failed: ${block.content.error_code}`);
+      } else if (block.type === "text") { text.push(block.text ?? ""); sources.push(...(block.citations ?? [])); }
+    }
+    return { answer: text.join("\n").slice(0, 8000), sources: searchSources(sources, limit), usage: data.usage ? anthropicUsage(data.usage) : undefined };
   }
 
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {

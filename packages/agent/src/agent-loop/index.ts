@@ -1,3 +1,4 @@
+import { traceOperation } from "../telemetry.js";
 import type { ContentBlock, InvalidToolCall, TokenUsage, ToolUseBlock } from "../providers/types.js";
 import { createSpinner, formatTurnHeader, formatToolCall } from "../spinner.js";
 import { planToolResultClearing } from "../context/clear-tool-results.js";
@@ -58,7 +59,7 @@ export function closeDanglingToolUses(session: AgentSession, reason = "Cancelled
   return calls.length;
 }
 
-export async function runTurn(
+async function runTurnImpl(
   userInput: string,
   session: AgentSession,
   config: AgentConfig,
@@ -207,6 +208,7 @@ export async function runTurn(
     let stopReason: "end_turn" | "tool_use" | "max_tokens";
     let invalidToolCalls: InvalidToolCall[] = [];
     let usage: TokenUsage | undefined;
+    let liveSteering: string | null = null;
 
     try {
       if (useStream) {
@@ -238,17 +240,31 @@ export async function runTurn(
         };
         const result = await withRetry(
           async () => {
+            if (liveSteering) throw new Error("Model response interrupted for steering.");
             preview?.start(prompted.time);
-            return consumeStream(
-              provider.chatStream!(systemPrompt, session.messages, turnTools, signal),
-              costTracker,
-              {
-                onTextDelta: (text: string) => { shown += text; onTextDelta(text); preview?.append(text); },
-                onReasoningDelta,
-                providerName: provider.name,
-              },
-              signal,
-            );
+            const controller = new AbortController();
+            const streamSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+            // Steering cancels only this unfinished model response. No tool from
+            // it has executed or entered history; the complete prompt is retained.
+            const poll = hooks?.getSteeringInput ? setInterval(() => {
+              if (signal?.aborted || liveSteering) return;
+              const input = hooks.getSteeringInput?.();
+              if (input) { liveSteering = input; controller.abort(); }
+            }, 50) : undefined;
+            try {
+              const result = await consumeStream(
+                provider.chatStream!(systemPrompt, session.messages, turnTools, streamSignal),
+                costTracker,
+                {
+                  onTextDelta: (text: string) => { shown += text; onTextDelta(text); preview?.append(text); },
+                  onReasoningDelta,
+                  providerName: provider.name,
+                },
+                streamSignal,
+              );
+              if (liveSteering) throw new Error("Model response interrupted for steering.");
+              return result;
+            } finally { if (poll) clearInterval(poll); }
           },
           { onRetry },
           verbose,
@@ -294,6 +310,13 @@ export async function runTurn(
     } catch (err: unknown) {
       spinner.stop();
       preview?.clear();
+      if (liveSteering) {
+        resetRepeatChain(session.repeatChain);
+        session.log.append("user/message", { message: { role: "user", content: liveSteering }, source: "steer", turn: session.turns });
+        hooks?.onStreamRetry?.();
+        status("\x1b[2m[steering received; continuing with the new instruction]\x1b[0m\n");
+        if (!signal?.aborted) continue;
+      }
       // The token estimate is approximate; when the provider itself says the
       // prompt is too long, compact harder (keep 2 turns) and retry once.
       if (!overflowRecovered && !signal?.aborted && isContextOverflowError(err)) {
@@ -329,6 +352,16 @@ export async function runTurn(
     preview?.clear();
     session.turns++;
     hooks?.onAssistantMessage?.(assistantContent, stopReason);
+
+    const completedSteering = hooks?.getSteeringInput?.();
+    if (completedSteering) {
+      // A complete response can contain tool calls; close those before the
+      // steering message, so no superseded action executes and no call is orphaned.
+      closeDanglingToolUses(session, "Cancelled for a new steering instruction.");
+      session.log.append("user/message", { message: { role: "user", content: completedSteering }, source: "steer", turn: session.turns });
+      resetRepeatChain(session.repeatChain);
+      if (!signal?.aborted) continue;
+    }
 
     // Abort check after LLM response. Tool calls the model already made must
     // still get results, or the next request carries an unpaired tool_use,
@@ -571,4 +604,10 @@ export async function runAgent(task: string, config: AgentConfig): Promise<Agent
     messages: session.messages,
     session,
   };
+}
+
+/** Parent span carries only provider/model identifiers, never user or session text. */
+export async function runTurn(...args: Parameters<typeof runTurnImpl>): Promise<TurnResult> {
+  const config = args[2];
+  return traceOperation("agent.turn", { "gen_ai.provider.name": config.provider.name, "gen_ai.request.model": config.provider.model ?? "unknown" }, () => runTurnImpl(...args), config.registry.permissionConfig.network !== "off");
 }

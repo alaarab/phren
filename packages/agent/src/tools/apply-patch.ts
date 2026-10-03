@@ -363,6 +363,6 @@ export const applyPatchTool: AgentTool = {
       const note = w.content === null ? null : syntaxCheckNote(w.path, w.before, w.content);
       return note ? [note] : [];
     });
-    return { output: `Success. Updated the following files:\n${summary}${notes.length > 0 ? `\n\n${notes.join("\n\n")}` : ""}` };
+    return { changedFiles: writes.filter(w => w.content !== null).map(w => path.resolve(cwd, w.path)), output: `Success. Updated the following files:\n${summary}${notes.length > 0 ? `\n\n${notes.join("\n\n")}` : ""}` };
   },
 };
