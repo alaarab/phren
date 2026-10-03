@@ -369,7 +369,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/harness/lease": result = await readStoreLease(modules.store, url.searchParams.get("storeId") ?? undefined, url.searchParams.get("authority") === "1"); break;
           case "/v1/harness/peers": result = await peerRepairView(); break;
           case "/v1/harness/proxies": result = await proxyView(info.computer.name); break;
-          case "/v1/harness/proxy/session": case "/v1/harness/proxy/thread": case "/v1/harness/proxy/events": case "/v1/harness/proxy/delivery":
+          case "/v1/harness/proxy/session": case "/v1/harness/proxy/thread": case "/v1/harness/proxy/events": case "/v1/harness/proxy/requests": case "/v1/harness/proxy/delivery":
             result = await proxyOperation(url.pathname.split("/").at(-1)!, Object.fromEntries(url.searchParams)); break;
           case "/v1/harness/delivery": {
             const target = targetSchema.parse(JSON.parse(url.searchParams.get("target") ?? "{}")), runner = await runnerForPane(target.server, await validateTarget(target, false, true));

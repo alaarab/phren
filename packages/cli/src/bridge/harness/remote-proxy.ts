@@ -54,7 +54,7 @@ export async function proxyOperation(operation: string, input: Json) {
   if (operation === "session") return { version: 1, provider: entry.provider, target: target(row), nativeSession: entry.nativeSession, capabilities: entry.capabilities, scope: "one-agent" };
   if (requested.session !== entry.session || requested.ownerId !== entry.ownerId) throw new BridgeError(409, "The remote agent target changed.");
   const capability: Record<string, keyof typeof entry.capabilities> = { thread: "readThread", events: "events", interrupt: "interrupt", approval: "approvals", input: "userInput", model: "setModel" };
-  if (!["thread", "events", "delivery", "turn", "interrupt", "approval", "input", "model"].includes(operation)) throw new BridgeError(404, "That remote agent operation is unavailable.");
+  if (!["thread", "events", "requests", "delivery", "turn", "interrupt", "approval", "input", "model"].includes(operation)) throw new BridgeError(404, "That remote agent operation is unavailable.");
   if (capability[operation] && !entry.capabilities[capability[operation]]) throw new BridgeError(409, "This remote agent does not support that structured control.");
   const payload: Json = {};
   if (operation === "turn") { payload.text = z.string().min(1).max(32768).parse(input.text); payload.deliveryId = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/).parse(input.deliveryId); }

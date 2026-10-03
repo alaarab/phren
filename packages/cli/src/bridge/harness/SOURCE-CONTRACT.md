@@ -161,6 +161,7 @@ credential discovery and automatic SSH execution are absent from the plan.
 | GET `/v1/harness/proxy/session?proxyId=<id>` | Verified provider, native session, capabilities and proxy Target |
 | GET `/v1/harness/proxy/thread` | Query `proxyId`, `session`, `ownerId` |
 | GET `/v1/harness/proxy/events` | Same query plus `after` cursor |
+| GET `/v1/harness/proxy/requests` | Current pending requests from the live runner, including after observer restart |
 | GET `/v1/harness/proxy/delivery` | Same query plus `deliveryId` |
 | POST `/v1/harness/proxy/turn` | `{target:<ProxyTarget>, text, deliveryId}` |
 | POST `/v1/harness/proxy/interrupt` | `{target, turnId}` |
@@ -175,11 +176,11 @@ owner becomes `offline`, not an invented local agent. Unsupported chat becomes
 `terminal-only`, with no chat target. Session creation, terminal takeover,
 arbitrary commands and machine administration are unavailable through the proxy.
 
-The listing gap for iOS is exactly this separate discovery endpoint and proxy
-Target/control path. iOS must add its own row/target model, sign owner POSTs,
-retain turn delivery IDs, distinguish offline/terminal-only, and display partial
-history. The ordinary overview/computers listing does not advertise this proxy.
-**No local chat or phone acceptance is claimed.** Native SSH forwarding,
+Native source now lists this one agent separately, uses only its proxy target,
+signs owner controls, retains uncertain delivery IDs on the phone, and shows
+partial text history and current pending requests. It never enrolls QL or
+reconstructs a local pane. **No phone or runtime acceptance is claimed.**
+Native SSH forwarding,
 Windows ACLs, SDK subscription/resume and Codex stdio initialization remain RC
 runtime gates. The owner must establish existing SSH access and verify Omarchy's
 host pin outside this source task; the plan always uses strict host-key checking.
