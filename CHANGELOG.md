@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.29] - 2026-10-03
+
+### Added
+
+- Tasks can carry Human or Agent responsibility and stable prerequisites across registered stores, with readiness derived from current dependencies and coordinated writer adoption required before metadata edits.
+- Hook task APIs support revision-checked text, context and metadata saves, plus task-bound launch reservations that preserve uncertain outcomes without automatic retries.
+
 ## [0.3.28] - 2026-10-02
 
 ### Fixed
