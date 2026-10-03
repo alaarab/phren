@@ -4,9 +4,9 @@ import { beforeEach, afterEach, describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { makeTempDir, grantAdmin } from "../test-helpers.js";
-import { addTask, readTasks, updateTask, completeTask, tidyDoneTasks, workNextTask, claimTask, parseTaskContent, saveTask, taskRevisionConflict } from "./tasks.js";
+import { addTask, readTasks, updateTask, completeTask, tidyDoneTasks, workNextTask, claimTask, parseTaskContent } from "./tasks.js";
 import { taskReadiness, taskIdentity, filterTaskDoc, taskCounts } from "./task-contract.js";
-import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, saveTaskRoute } from "../bridge/task-routes.js";
+import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute } from "../bridge/task-routes.js";
 import { mergeTasksByBid } from "../sync/task-merge.js";
 import { enableTaskFormat } from "./task-format.js";
 
@@ -33,56 +33,26 @@ function item(project: string, id: string) { const d = doc(project); return [...
 function identity(project: string, id: string) { return taskIdentity(base, doc(project), item(project, id))!; }
 
 describe("task responsibility and prerequisites (RC source, unrun)", () => {
-  // Literal persisted fixtures guard the old parser's stop-at-Task failure.
-  // Exercise the real whole-file writer; no copied old parser or test-only seam.
-  it.each([
-    { name: "legacy", records: [] as string[], opaque: false },
-    { name: "v1", records: ['{"version":1,"responsibility":"human","dependencies":[{"storeId":"11111111","project":"app","stableId":"bbbbbbbb"}],"history":[{"at":"2026-10-01T00:00:00Z","change":"Owner assigned prerequisite"}]}'], opaque: false },
-    { name: "future", records: ['{"version":2,"future":true}'], opaque: true },
-    { name: "blank", records: [""], opaque: true },
-    { name: "duplicate", records: ['{"version":1,"responsibility":"human","dependencies":[],"history":[]}', '{"version":2,"future":true}'], opaque: true },
-  ])("preserves $name metadata and later context/claim during ordinary rewrites before activation", ({ name, records, opaque }) => {
-    const file = path.join(base, "core/tasks.md");
-    fs.unlinkSync(path.join(base, ".config/task-format.json"));
-    const continuations = records.map(raw => `  Task: ${raw}\n`).join("");
-    fs.writeFileSync(file, `# core tasks\n\n## Queue\n\n- [ ] Preserve me <!-- bid:aaaaaaaa created:2026-10-01T00:00:00Z -->\n${continuations}  Context: Preserve owner context\n  Claimed: Desk 2026-10-02T00:00:00Z session:existing-worker\n  GitHub: #42 https://github.com/alaarab/phren/issues/42\n`);
-    expect(updateTask(base, "core", "bid:aaaaaaaa", { text: "Renamed", section: "Active" }).ok).toBe(true);
-    const retained = fs.readFileSync(file, "utf8");
-    expect(retained).toContain("  Context: Preserve owner context\n");
-    expect(retained).toContain("  Claimed: Desk 2026-10-02T00:00:00Z session:existing-worker\n");
-    const current = item("core", "aaaaaaaa");
-    expect(current).toMatchObject({ line: "Renamed", stableId: "aaaaaaaa", createdAt: "2026-10-01T00:00:00Z", section: "Active", context: "Preserve owner context", githubIssue: 42, githubUrl: "https://github.com/alaarab/phren/issues/42", claim: { computer: "Desk", at: "2026-10-02T00:00:00Z", session: "existing-worker" } });
-    if (name === "legacy") expect(retained).not.toContain("  Task:");
-    if (name === "v1") {
-      expect(current.responsibility).toBe("human");
-      expect(current.dependencies).toEqual([{ storeId: "11111111", project: "app", stableId: "bbbbbbbb" }]);
-      expect(current.history?.[0]).toEqual({ at: "2026-10-01T00:00:00Z", change: "Owner assigned prerequisite" });
-      expect(current.history).toHaveLength(2);
-    }
-    if (opaque) {
-      expect(retained.split("\n").filter(line => line.startsWith("  Task:"))).toEqual(records.map(raw => "  Task: " + raw));
-      expect(taskReadiness(base, doc("core"), current).readiness).toBe("waiting-on-task");
-      // Once enabled, rejection must come from opaque metadata, not activation.
-      enableTaskFormat(base, true);
-      const result = updateTask(base, "core", "bid:aaaaaaaa", { responsibility: "agent" });
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.error).toMatch(/invalid or from a newer version/);
-      expect(fs.readFileSync(file, "utf8")).toBe(retained);
-    }
-  });
-  it("blocks new responsibility metadata until the owner acknowledges compatible writers", () => {
+  it("reports the adoption prerequisite and blocks Hook metadata writes until owner acknowledgement", async () => {
     const a = add("core", "Keep legacy writer compatibility"), file = path.join(base, "core/tasks.md");
     fs.unlinkSync(path.join(base, ".config/task-format.json"));
     const before = fs.readFileSync(file, "utf8");
-    expect(getTaskRoute(base, new URL("http://phren.local/v1/tasks?storeId=11111111&project=core"))).toMatchObject({
-      metadataWritable: false, metadataWriteBlock: "compatible-writer-adoption-required",
-      writerSafety: { activation: "disabled", legacyWritersFenced: false, requiresCoordinatedAdoption: true },
-    });
+    const url = new URL("http://phren.local/v1/tasks?storeId=11111111&project=core");
+    const ref = { storeId: "11111111", project: "core", stableId: a.stableId! };
+    const disabled = { activation: "disabled", requiresCoordinatedAdoption: true, legacyWritersFenced: false };
+    expect(getTaskRoute(base, url)).toMatchObject({ metadataWritable: false, writerSafety: disabled });
+    expect((await getTaskDirectoryRoute(base)).stores[0]).toMatchObject({ metadataWritable: false, writerSafety: disabled });
+    expect(() => updateTaskRoute(base, { ...ref, updates: { responsibility: "human" } })).toThrow(/not enabled/);
     expect(updateTask(base, "core", a.stableId!, { responsibility: "human" }).ok).toBe(false);
     expect(fs.readFileSync(file, "utf8")).toBe(before);
     expect(() => enableTaskFormat(base, false)).toThrow();
     enableTaskFormat(base, true);
-    expect(updateTask(base, "core", a.stableId!, { responsibility: "human" }).ok).toBe(true);
+    const updated = updateTaskRoute(base, { ...ref, updates: { responsibility: "human" } });
+    expect(updated).toMatchObject({ metadataWritable: true, writerSafety: {
+      version: 1, metadataVersion: 1, activation: "owner-acknowledged", requiresCoordinatedAdoption: true, legacyWritersFenced: false,
+    } });
+    expect(updated.items.Queue[0].responsibility).toBe("human");
+    expect(updated.writerSafety.acknowledgedAt).toEqual(expect.any(String));
   });
   it("requires explicit portable identity registration without changing legacy task bytes", async () => {
     const a = add("core", "Legacy store"), file = path.join(base, "core/tasks.md");
@@ -97,17 +67,45 @@ describe("task responsibility and prerequisites (RC source, unrun)", () => {
     expect(taskIdentity(base, doc("core"), item("core", a.stableId!))?.storeId).toBe(id);
     expect(fs.readFileSync(file, "utf8")).toBe(before);
   });
-  it("preserves blank and duplicate metadata records while blocking selection and reassignment", () => {
-    const a = add("core", "Opaque"), file = path.join(base, "core/tasks.md");
-    for (const records of [[""], ["", '{"version":1,"responsibility":"agent","dependencies":[],"history":[]}'], [JSON.stringify({ version: 1, responsibility: "human", dependencies: [], history: [] }), '{"version":2,"future":true}']]) {
-      const body = `# core tasks\n\n## Queue\n\n- [ ] Opaque <!-- bid:${a.stableId} -->\n  Future: preserve this continuation\n${records.map(raw => "  Task: " + raw).join("\n")}\n  Context: Retain this context\n`;
-      fs.writeFileSync(file, body);
-      expect(taskReadiness(base, doc("core"), item("core", a.stableId!)).readiness).toBe("waiting-on-task");
-      expect(updateTask(base, "core", a.stableId!, { responsibility: "agent" }).ok).toBe(false);
-      expect(updateTask(base, "core", a.stableId!, { text: "Opaque renamed" }).ok).toBe(true);
-      const retained = fs.readFileSync(file, "utf8"); for (const raw of records) expect(retained).toContain("  Task: " + raw);
-      expect(retained).toContain("Context: Retain this context"); expect(workNextTask(base, "core").ok).toBe(false);
-      expect(retained).toContain("  Future: preserve this continuation");
+  // Literal persisted fixtures guard the old parser's stop-at-Task failure.
+  // Exercise the real whole-file writer; no copied old parser or test-only seam.
+  it.each([
+    { name: "legacy", records: [] as string[], opaque: false },
+    { name: "v1", records: ['{"version":1,"responsibility":"human","dependencies":[{"storeId":"11111111","project":"app","stableId":"bbbbbbbb"}],"history":[{"at":"2026-10-01T00:00:00Z","change":"Owner assigned prerequisite"}]}'], opaque: false },
+    { name: "future", records: ['{"version":2,"future":true}'], opaque: true },
+    { name: "blank", records: [""], opaque: true },
+    { name: "blank-duplicate", records: ["", '{"version":1,"responsibility":"agent","dependencies":[],"history":[]}'], opaque: true },
+    { name: "duplicate", records: ['{"version":1,"responsibility":"human","dependencies":[],"history":[]}', '{"version":2,"future":true}'], opaque: true },
+  ])("preserves $name metadata and later context/claim during ordinary rewrites before activation", ({ name, records, opaque }) => {
+    const file = path.join(base, "core/tasks.md");
+    fs.unlinkSync(path.join(base, ".config/task-format.json"));
+    const future = name === "blank" ? "  Future: preserve before metadata\n" : "";
+    const continuations = records.map(raw => `  Task: ${raw}\n`).join("");
+    fs.writeFileSync(file, `# core tasks\n\n## Queue\n\n- [ ] Preserve me <!-- bid:aaaaaaaa created:2026-10-01T00:00:00Z -->\n${future}${continuations}  Context: Preserve owner context\n  Claimed: Desk 2026-10-02T00:00:00Z session:existing-worker\n  GitHub: #42 https://github.com/alaarab/phren/issues/42\n`);
+    expect(updateTask(base, "core", "bid:aaaaaaaa", { text: "Renamed", section: "Active" }).ok).toBe(true);
+    const retained = fs.readFileSync(file, "utf8");
+    expect(retained).toContain("  Context: Preserve owner context\n");
+    expect(retained).toContain("  Claimed: Desk 2026-10-02T00:00:00Z session:existing-worker\n");
+    if (future) expect(retained).toContain(future);
+    const current = item("core", "aaaaaaaa");
+    expect(current).toMatchObject({ line: "Renamed", stableId: "aaaaaaaa", createdAt: "2026-10-01T00:00:00Z", section: "Active", context: "Preserve owner context", githubIssue: 42, githubUrl: "https://github.com/alaarab/phren/issues/42", claim: { computer: "Desk", at: "2026-10-02T00:00:00Z", session: "existing-worker" } });
+    if (name === "legacy") expect(retained).not.toContain("  Task:");
+    if (name === "v1") {
+      expect(current.responsibility).toBe("human");
+      expect(current.dependencies).toEqual([{ storeId: "11111111", project: "app", stableId: "bbbbbbbb" }]);
+      expect(current.history?.[0]).toEqual({ at: "2026-10-01T00:00:00Z", change: "Owner assigned prerequisite" });
+      expect(current.history).toHaveLength(2);
+    }
+    if (opaque) {
+      expect(retained.split("\n").filter(line => line.startsWith("  Task:"))).toEqual(records.map(raw => "  Task: " + raw));
+      expect(taskReadiness(base, doc("core"), current).readiness).toBe("waiting-on-task");
+      expect(workNextTask(base, "core").ok).toBe(false);
+      // Once enabled, rejection must come from opaque metadata, not activation.
+      enableTaskFormat(base, true);
+      const result = updateTask(base, "core", "bid:aaaaaaaa", { responsibility: "agent" });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toMatch(/invalid or from a newer version/);
+      expect(fs.readFileSync(file, "utf8")).toBe(retained);
     }
   });
   it("retains opaque root/dependency/history extensions across ordinary writes and sync", () => {
@@ -198,65 +196,11 @@ describe("task responsibility and prerequisites (RC source, unrun)", () => {
     expect(doc("core").items.Active[0].stableId).toBe(ready.stableId);
     expect(completeTask(base, "core", human.stableId!).ok).toBe(true);
   });
-  it("preserves unsupported metadata and never dispatches it", () => {
-    const a = add("core", "Future"), file = path.join(base, "core/tasks.md");
-    const raw = fs.readFileSync(file, "utf8");
-    fs.writeFileSync(file, raw.replace(/(<!-- bid:[^\n]+-->)/, '$1\n  Task: {"version":2,"future":true}'));
-    expect(updateTask(base, "core", a.stableId!, { text: "Future retained" }).ok).toBe(true);
-    expect(fs.readFileSync(file, "utf8")).toContain('Task: {"version":2,"future":true}');
-    expect(workNextTask(base, "core").ok).toBe(false);
-  });
-  it("Hook keeps native metadata writes blocked despite a compatible-writer acknowledgement", () => {
+  it("Hook uses the same stable identity and refuses arbitrary stores", () => {
     const a = add("core", "Hook action"), ref = identity("core", a.stableId!);
-    const file = path.join(base, "core/tasks.md"), before = fs.readFileSync(file, "utf8");
-    const value = getTaskRoute(base, new URL("http://phren.local/v1/tasks?storeId=11111111&project=core"));
-    expect(value).toMatchObject({ saveWritable: false, metadataWritable: false, metadataWriteBlock: "legacy-writer-fence-required",
-      writerSafety: { activation: "owner-acknowledged", legacyWritersFenced: false, requiresCoordinatedAdoption: true } });
-    expect(() => updateTaskRoute(base, { ...ref, updates: { responsibility: "human" } })).toThrow(/adoption fence/);
-    expect(() => updateTaskRoute(base, { ...ref, updates: { dependencies: [] } })).toThrow(/adoption fence/);
-    expect(() => saveTaskRoute(base, { storeId: ref.storeId, project: ref.project, expectedRevision: value.revision,
-      mode: "create", task: { text: "Owner only", responsibility: "human" } })).toThrow(/adoption fence/);
-    expect(fs.readFileSync(file, "utf8")).toBe(before);
-    expect(updateTaskRoute(base, { ...ref, updates: { section: "Active" } }).items.Active[0]).toMatchObject({ identity: ref, responsibility: "agent" });
+    const value = updateTaskRoute(base, { ...ref, updates: { responsibility: "human" } });
+    expect(value.items.Queue[0]).toMatchObject({ stableId: a.stableId, responsibility: "human", readiness: "waiting-on-human" });
     expect(() => getTaskRoute(base, new URL("http://phren.local/v1/tasks?storeId=ffffffff&project=core"))).toThrow();
-  });
-  it("atomic creation publishes explicit Human metadata and rejects invalid prerequisites without partial writes", () => {
-    const prerequisite = add("app", "Owner prerequisite"), dependency = identity("app", prerequisite.stableId!);
-    const file = path.join(base, "core/tasks.md"), revision = doc("core").revision!;
-    const rejected = saveTask(base, "core", revision, { mode: "create", task: {
-      text: "Do not publish partial work", responsibility: "human", dependencies: [{ ...dependency, stableId: "ffffffff" }],
-    } });
-    expect(rejected.ok).toBe(false);
-    expect(fs.existsSync(file)).toBe(false);
-    expect(doc("core").revision).toBe(revision);
-    const created = saveTask(base, "core", revision, { mode: "create", task: {
-      text: "Owner approval", responsibility: "human", context: "Decide after review", dependencies: [dependency],
-    } });
-    if (!created.ok) throw new Error(created.error);
-    expect(created.data.identity).toMatchObject({ storeId: "11111111", project: "core", stableId: expect.stringMatching(/^[a-f0-9]{8}$/) });
-    expect(item("core", created.data.identity.stableId)).toMatchObject({ responsibility: "human", context: "Decide after review", dependencies: [dependency] });
-    expect(workNextTask(base, "core").ok).toBe(false);
-    expect(created.data.doc.revision).toBe(doc("core").revision);
-    expect(created.data.doc.revision).not.toBe(revision);
-  });
-  it("atomic saves reject stale drafts and replace or clear context and dependencies without losing identity or issue links", () => {
-    const a = add("core", "Original"), b = add("app", "Prerequisite"), ref = identity("app", b.stableId!);
-    updateTask(base, "core", a.stableId!, { responsibility: "human", context: "Original context", dependencies: [ref], github_issue: 17 });
-    const staleRevision = doc("core").revision!;
-    updateTask(base, "core", a.stableId!, { text: "Concurrent edit" });
-    const file = path.join(base, "core/tasks.md"), concurrent = fs.readFileSync(file, "utf8");
-    const stale = saveTask(base, "core", staleRevision, { mode: "update", stableId: a.stableId!, updates: { text: "Stale draft", context: null, dependencies: [] } });
-    expect(stale).toMatchObject({ ok: false, error: taskRevisionConflict });
-    expect(fs.readFileSync(file, "utf8")).toBe(concurrent);
-    const changed = saveTask(base, "core", doc("core").revision!, { mode: "update", stableId: a.stableId!, updates: { text: "Reviewed draft", context: "Replacement" } });
-    if (!changed.ok) throw new Error(changed.error);
-    expect(item("core", a.stableId!)).toMatchObject({ line: "Reviewed draft", context: "Replacement", dependencies: [ref], githubIssue: 17, createdAt: a.createdAt });
-    const cleared = saveTask(base, "core", changed.data.doc.revision!, { mode: "update", stableId: a.stableId!, updates: { context: null, dependencies: [], section: "Active" } });
-    if (!cleared.ok) throw new Error(cleared.error);
-    expect(cleared.data.identity).toEqual(changed.data.identity);
-    expect(cleared.data.doc.items.Active[0]).toMatchObject({ id: "A1", section: "Active", stableId: a.stableId });
-    expect(item("core", a.stableId!)).toMatchObject({ context: undefined, dependencies: [], responsibility: "human", githubIssue: 17 });
-    expect(fs.readFileSync(file, "utf8")).not.toContain("  Context:");
   });
   it("sync retains independent lane and prerequisite edits with both histories", () => {
     const bullet = "# core\n\n## Queue\n\n- [ ] A <!-- bid:aaaaaaaa -->\n";
@@ -283,7 +227,7 @@ describe("task responsibility and prerequisites (RC source, unrun)", () => {
     fs.writeFileSync(path.join(base, "stores.yaml"), synced);
     fs.unlinkSync(attachedStoresFilePath(base));
     const directory = await getTaskDirectoryRoute(base);
-    expect(directory.stores.find(s => s.name === "Team")).toMatchObject({ id: "22222222", role: "readonly", projects: ["app"], metadataWritable: false, metadataWriteBlock: "readonly-store" });
+    expect(directory.stores.find(s => s.name === "Team")).toMatchObject({ id: "22222222", role: "readonly", projects: ["app"], metadataWritable: false });
     expect(fs.existsSync(attachedStoresFilePath(base))).toBe(false);
     expect(fs.readFileSync(path.join(base, "stores.yaml"), "utf8")).toBe(synced);
     expect(JSON.stringify(directory)).not.toContain(base);

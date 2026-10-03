@@ -4,7 +4,7 @@ import { configureStoreLease, changeStoreLease, readStoreLease } from "./harness
 import { runnerForPane, runnerRequest } from "./harness/runner-client.js";
 import { peerRepairView, repairPeer, peerEnrollmentPlan, enrollPinnedPeer } from "./harness/peer-controls.js";
 import { proxyOperation, proxyView, registerProxy, reverseProxyPlan } from "./harness/remote-proxy.js";
-import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, saveTaskRoute } from "./task-routes.js";
+import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute } from "./task-routes.js";
 import { prepareComputerEnrollment, reviewComputerEnrollment, confirmComputerEnrollment, verifyComputerEnrollment } from "./computer-enrollment.js";
 import { readConductorLease, configureConductorLease, conductorLeaseAuthority, revokeConductorLease, changeConductorLease } from "./conductor-lease.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
@@ -648,8 +648,6 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             const turnId = z.string().min(1).max(200).parse(data.turnId);
             result = { ok: await adapter.interruptTurn(target.session, turnId) };
           } else result = await paneRoute(ctx, mapped, data, response);
-        } else if (url.pathname === "/v1/tasks/save") {
-          result = saveTaskRoute(modules.store, data);
         } else if (url.pathname === "/v1/tasks/update") {
           result = updateTaskRoute(modules.store, data);
         } else if (url.pathname === "/v1/subagents/resume") {

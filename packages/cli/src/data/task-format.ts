@@ -8,14 +8,6 @@ import { registeredStoreIdentity } from "../store-registry.js";
 const file = (base: string) => path.join(base, ".config", "task-format.json");
 export const taskFormatMigrationHint = "Task metadata is not enabled for this store. Upgrade every CLI, MCP, Hook, sync and app writer first; an owner can then run phren task format enable --all-writers-compatible. Existing writers must be replaced through the coordinated adoption workflow.";
 
-/** Phone writes stay closed until the integrator establishes a compatible
- * adoption/fencing protocol for installed writers. The owner acknowledgement
- * below cannot enforce this: an old MCP process never reads that file.
- * No Hook version, capability, environment variable or config toggle lifts it. */
-export function nativeTaskWriteBlock(base: string): "compatible-writer-adoption-required" | "legacy-writer-fence-required" {
-  return taskFormatStatus(base).enabled ? "legacy-writer-fence-required" : "compatible-writer-adoption-required";
-}
-
 /** An explicit store-owner acknowledgement, not inferred from one serving Hook.
  * It cannot fence an old binary that ignores this file: coordinated adoption of
  * every writer remains a prerequisite, and is stated at the activation boundary. */
