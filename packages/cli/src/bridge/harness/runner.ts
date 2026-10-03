@@ -140,7 +140,12 @@ async function runOwnedHarnessWorker(config: RunnerConfig): Promise<number> {
       }
       const body = JSON.stringify(result ?? {}); if (Buffer.byteLength(body) > 8 * 1024 * 1024) throw new Error("Harness reply exceeded its limit.");
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(body);
-      if (request.url === "/takeover") { const next = result as { command: string; args: string[] }; await finish(); const child = spawn(next.command, next.args, { cwd: config.cwd, env: process.env, stdio: "inherit" }); child.on("error", () => { process.exitCode = 1; }); }
+      if (request.url === "/takeover") {
+        const next = result as { command: string; args: string[] };
+        const resumeEnv = adapter instanceof ClaudeSdkAdapter ? adapter.nativeResumeEnvironment(session.id) : process.env;
+        await finish();
+        const child = spawn(next.command, next.args, { cwd: config.cwd, env: resumeEnv, stdio: "inherit" }); child.on("error", () => { process.exitCode = 1; });
+      }
     } catch { if (!response.headersSent) response.writeHead(409, { "Content-Type": "application/json" }); response.end(JSON.stringify({ error: "Harness operation failed or ownership changed; do not automatically retry a submitted turn." })); }
   });
   const input = createInterface({ input: process.stdin, terminal: false });

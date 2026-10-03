@@ -11,7 +11,7 @@ class InputStream implements AsyncIterable<unknown> {
   async *[Symbol.asyncIterator]() { while (!this.closed) { const row = this.rows.shift(); if (row) yield row; else await new Promise<void>(resolve => { this.wake = resolve; }); } }
 }
 interface Pending { answer: (value: unknown) => void; input: Record<string, unknown>; tool: string }
-interface Session { cwd: string; input: InputStream; query: SdkQuery; active?: string; stopped: boolean; pending: Map<string, Pending>; pump: Promise<void> }
+interface Session { cwd: string; env: NodeJS.ProcessEnv; input: InputStream; query: SdkQuery; active?: string; stopped: boolean; pending: Map<string, Pending>; pump: Promise<void> }
 /** Injected for regression source; normal loading uses an already-installed SDK, never npx/install. */
 export async function installedClaudeSdk(): Promise<Sdk> {
   const module = process.env.PHREN_CLAUDE_SDK_MODULE ?? "@anthropic-ai/claude-agent-sdk";
@@ -49,7 +49,7 @@ export class ClaudeSdkAdapter implements HarnessAdapter {
         });
       },
     } });
-    const session: Session = { cwd: input.cwd, input: messages, query, pending, stopped: false, pump: Promise.resolve() };
+    const session: Session = { cwd: input.cwd, env, input: messages, query, pending, stopped: false, pump: Promise.resolve() };
     this.sessions.set(id, session);
     session.pump = (async () => {
       try {
@@ -92,6 +92,11 @@ export class ClaudeSdkAdapter implements HarnessAdapter {
   streamEvents(id: string, after?: number, signal?: AbortSignal) { if (!this.sessions.has(id)) throw new Error("Unknown SDK session."); return this.events.stream(id, after, signal); }
   async setModel(id: string, model: string) { await this.session(id).query.setModel(model); }
   private async stop(id: string) { const session = this.sessions.get(id); if (!session || session.stopped) return; session.stopped = true; session.input.close(); for (const request of [...session.pending.values()]) request.answer({ behavior: "deny", message: "SDK ownership ended." }); session.query.close(); }
+  /** Private runner spawn policy: never serialized into an IPC or phone reply. */
+  nativeResumeEnvironment(id: string): NodeJS.ProcessEnv {
+    const session = this.sessions.get(id); if (!session) throw new Error("Unknown SDK session.");
+    return { ...session.env };
+  }
   async takeover(id: string, _pane: PaneBinding) { if (!this.sessions.has(id)) throw new Error("Unknown SDK session."); await this.stop(id); this.events.publish(id, "takeover", { command: "claude", session: id }); return { command: this.executable, args: ["--resume", id, "--permission-mode", this.settings.permissionMode] }; }
   async close() { for (const id of this.sessions.keys()) await this.stop(id); this.events.close(); }
 }

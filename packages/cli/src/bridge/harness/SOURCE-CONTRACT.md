@@ -5,6 +5,22 @@ build or test was run. Phone adoption and native compatibility are unverified.
 It requires the frozen lead harness snapshot recorded in the handoff manifest;
 the integrator must combine the other lead-owned dependencies separately.
 
+The owner requires lease, linking and expired returns. Fixed authority, no lease
+expiry and explicit exact-holder takeover are conductor design judgments, not
+owner quotations. Stop retains the lease; only an authenticated explicit owner
+revoke or atomic takeover may change the holder.
+
+The October 3 Q correction separately rooted at frozen donor `1f8dfdf5` adopts
+the canonical generation/claim lease API. Its signed revoke/takeover and Stop
+behavior must replace this branch's older competing harness lease state/routes
+during integration; do not enable two authorities. Direct Codex request tokens
+are now `number:<native-id>` or `string:<native-id>` and must remain opaque.
+SDK native takeover uses the same sanitized subscription/account environment
+and default/plan permission mode as the SDK session; environment values never
+appear in the takeover reply. Configured ACP launch uses its own verified
+executable rather than requiring an unrelated phren-agent login, and still
+accepts only supervised structured-worker permissions.
+
 ## Ownership and capabilities
 
 `HarnessAdapter` covers direct Codex app-server, direct OpenCode, PaneTyping,

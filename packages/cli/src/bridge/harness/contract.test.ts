@@ -2,12 +2,32 @@
 import { describe, expect, it, vi } from "vitest";
 import { HarnessEvents } from "./contract.js";
 import { AcpAdapter, type AcpPeer } from "./acp.js";
-import { PaneTypingAdapter } from "./direct.js";
+import { CodexAppServerAdapter, PaneTypingAdapter } from "./direct.js";
+import type { AppServerClient, AppServerEvent, PendingServerRequest } from "../codex-app-server.js";
 import { TurnSubmissions } from "./submissions.js";
 import { expireObservation, WATCH_MS, noticeLine } from "../dispatch-returns.js";
 import type { Receipt } from "../dispatch.js";
 
 describe("structured harness safety", () => {
+  it("keeps number and string Codex approval IDs distinct and rejects untyped aliases", async () => {
+    let listener: (event: AppServerEvent) => void = () => {};
+    const pending = new Map<string | number, PendingServerRequest>();
+    const respond = vi.fn();
+    const client = { pending, respond, on(fn: typeof listener) { listener = fn; return () => {}; }, onClose() { return () => {}; } } as unknown as AppServerClient;
+    const adapter = new CodexAppServerAdapter(client, {}, undefined, "owned-session");
+    for (const requestId of [1, "1"]) {
+      const request = { requestId, method: "item/commandExecution/requestApproval", threadId: "owned-session", params: { threadId: "owned-session" } };
+      pending.set(requestId, request); listener({ kind: "request", ...request });
+    }
+    const stream = adapter.streamEvents("owned-session")[Symbol.asyncIterator]();
+    expect((await stream.next()).value?.data).toMatchObject({ requestId: "number:1" });
+    expect((await stream.next()).value?.data).toMatchObject({ requestId: "string:1" });
+    expect(await adapter.respondToRequest("owned-session", "1", { decision: "approve" })).toBe(false);
+    await adapter.respondToRequest("owned-session", "string:1", { decision: "deny" });
+    await adapter.respondToRequest("owned-session", "number:1", { decision: "approve" });
+    expect(respond.mock.calls).toEqual([["1", { decision: "decline" }], [1, { decision: "accept" }]]);
+    await adapter.close(); await stream.return?.();
+  });
   it("reports a bounded-journal gap rather than silently losing events", async () => {
     const events = new HarnessEvents(); for (let i = 0; i < 1002; i++) events.publish("session", "text", { text: String(i) });
     const abort = new AbortController(), stream = events.stream("session", 0, abort.signal)[Symbol.asyncIterator]();

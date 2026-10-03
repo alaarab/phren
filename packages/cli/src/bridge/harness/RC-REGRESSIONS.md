@@ -14,6 +14,7 @@ must be integrated before one full RC/TestFlight. Android may trail; no App Revi
 | contract.test.ts: journal shutdown | Final closed-journal events are drained; a waiting ended-session consumer exits |
 | contract.test.ts: TurnSubmissions | Concurrent/repeated stable ID submits once; changed text rejects; an uncertain reply never submits again |
 | contract.test.ts: ACP request IDs | Typed native permission IDs cannot collide; one-time approval remains session-scoped |
+| contract.test.ts: direct Codex request IDs | Numeric and string native IDs retain separate opaque tokens; untyped aliases cannot approve either request |
 | contract.test.ts: expired blocked return | Aging a blocked worker retains approval data and cannot close its pane |
 | owner-controls.test.ts | Independently signed wire fixture succeeds once, persists nonce, rejects computer key, route/body tampering and revoked owner key |
 | remote-proxy.test.ts | Existing Copilot pane stays session-less; structured controls cannot read/type/ack; stale screen binding is discarded; exact registration owner gates replacement/removal; fake session/generic runner registration rejected |
@@ -24,11 +25,19 @@ executed under the owner's source-only restriction. Transport doubles in the
 lease suite isolate the network boundary; the future tests use temporary state,
 not the live store. The owner-proof fixture does not call production signing code.
 
+The new direct Codex regression protects public native request identity absent
+from the ACP/queue suite. SDK resume policy requires the real native spawn
+boundary below; no helper-only automated case substitutes for that observation.
+The resume environment method has a private runner production caller and is
+never returned over IPC. No test-only production export or flag was introduced.
+Actual SDK authentication, native readiness and resume/replay remain UNRUN.
+
 ## Required native/phone/fault-injection RC scenarios
 
 | Scenario and setup | Acceptance boundary |
 | --- | --- |
 | Claude SDK with owner's existing subscription; fresh session, turn, approve once, deny, interrupt, default/plan resume | Exact native session retained; no credential probing, API-billing fallback or broader resume permission; replayed old result cannot finish a new turn |
+| SDK native takeover with default/plan permission mode, alternate owner account directory, and synthetic API-route variables in the worker's original environment | Native spawn uses the same sanitized subscription/account environment as SDK startup; default/plan flags remain exact; no environment values appear in the IPC/phone reply; observe actual spawn rather than testing a helper |
 | SDK or ACP ends/crashes while a stream consumer waits | Final failure drains and consumer terminates; parked requests cannot be approved after owner/process replacement |
 | Hook reconstruction with runner alive, turn RPC reply lost, then same delivery ID | One native submission, stable receipt; noack remains queued/uncertain; approvals and thread window reconstruct from runner |
 | Runner dies, native session resumed by a replacement runner | Old owner target rejected; explicit registration required; UI does not claim old delivery IDs survived runner death |
@@ -49,6 +58,7 @@ not the live store. The owner-proof fixture does not call production signing cod
 | Inject copy/rename/fast-hook/dispatch/askpass/unit failure before activation | Prior Linux Hook is never stopped; exact prior mutable artifacts restored; install lock prevents concurrent writer |
 | Inject activation/restart/readiness/apply-hooks/metadata failure; same-version reinstall and first install | Prior symlink/bundle/unit/metadata restored, or newly activated first-install link removed; previous version restarted only when activation occurred; concurrent agent setting edits preserved |
 | Kill installer at staging, activation or restart boundary | No truncated bundle/unit; old running service retained until restart; report interrupted install and require explicit owner reconciliation, without claiming catch rollback executed |
+| Manual rollback overlaps an installer or selected rollback version fails readiness | Same install lock rejects concurrent writer; metadata is not committed to an unready version; interrupted/failed rollback remains an owner recovery case |
 
 ## Source integration dependencies and limits
 

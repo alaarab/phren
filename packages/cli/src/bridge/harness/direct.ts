@@ -4,6 +4,8 @@ import type { PaneClient, PromptOptions } from "../opencode-pane-server.js";
 import { terminalProvider } from "../terminal.js";
 import { HarnessEvents, noCapabilities, sessionResult, UnsupportedHarnessOperation, newTurnId, type HarnessAdapter, type HarnessStart, type HarnessSession, type PaneBinding } from "./contract.js";
 
+const codexRequestToken = (id: string | number) => `${typeof id}:${id}`;
+
 export class CodexAppServerAdapter implements HarnessAdapter {
   readonly provider = "codex-app-server";
   readonly capabilities = { ...noCapabilities, startSession: true, turnAcknowledgement: true, interrupt: true, approvals: true, userInput: true, readThread: true, events: true, setModel: true };
@@ -14,9 +16,9 @@ export class CodexAppServerAdapter implements HarnessAdapter {
   constructor(private client: AppServerClient, private defaults: Record<string, unknown>, private pane?: PaneBinding, existingSession?: string) {
     if (existingSession) this.sessions.add(existingSession);
     this.unsubscribe = client.on(event => {
-      if (event.kind === "resolved") { if (event.threadId && this.sessions.has(event.threadId)) this.events.publish(event.threadId, "request-resolved", { requestId: String(event.requestId) }); return; }
+      if (event.kind === "resolved") { if (event.threadId && this.sessions.has(event.threadId)) this.events.publish(event.threadId, "request-resolved", { requestId: codexRequestToken(event.requestId) }); return; }
       const params = event.params as Record<string, any>, session = (event.kind === "request" ? event.threadId : undefined) ?? params?.threadId ?? params?.thread?.id;
-      if (typeof session === "string" && this.sessions.has(session)) this.events.publish(session, event.kind === "request" ? (serverQuestion(event) ? "user-input" : "approval") : event.method, event.kind === "request" ? { requestId: String(event.requestId), method: event.method, input: params } : params, params?.turnId ?? params?.turn?.id);
+      if (typeof session === "string" && this.sessions.has(session)) this.events.publish(session, event.kind === "request" ? (serverQuestion(event) ? "user-input" : "approval") : event.method, event.kind === "request" ? { requestId: codexRequestToken(event.requestId), method: event.method, input: params } : params, params?.turnId ?? params?.turn?.id);
     });
     this.unsubscribeClose = client.onClose(() => { for (const session of this.sessions) this.events.publish(session, "failed", { reason: "Codex connection ended; turn acceptance may be uncertain." }); this.events.close(); });
   }
@@ -33,14 +35,14 @@ export class CodexAppServerAdapter implements HarnessAdapter {
     if (!result.thread?.turns?.some(turn => turn.id === turnId && turn.status === "inProgress")) return false;
     await this.client.interruptTurn(session, turnId); return true;
   }
-  async respondToRequest(session: string, requestId: string, response: unknown) { this.require(session); const pending = [...this.client.pending.values()].find(r => String(r.requestId) === requestId && r.threadId === session); if (!pending) return false;
+  async respondToRequest(session: string, requestId: string, response: unknown) { this.require(session); const pending = [...this.client.pending.values()].find(r => codexRequestToken(r.requestId) === requestId && r.threadId === session); if (!pending) return false;
     const decision = (response as { decision?: string })?.decision;
     if (decision !== "approve" && decision !== "deny") throw new Error("Send approve or deny.");
     if (pending.method === "item/permissions/requestApproval" && decision === "approve") throw new Error("Permission expansion belongs to the existing owner approval workflow.");
     if (!["item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval"].includes(pending.method)) throw new UnsupportedHarnessOperation("this approval method");
     this.client.respond(pending.requestId, pending.method === "item/permissions/requestApproval" ? { permissions: {}, scope: "turn" } : { decision: decision === "approve" ? "accept" : "decline" }); return true; }
   async respondToUserInput(session: string, requestId: string, response: unknown) { this.require(session);
-    const pending = [...this.client.pending.values()].find(r => String(r.requestId) === requestId && r.threadId === session), shown = pending && serverQuestion(pending);
+    const pending = [...this.client.pending.values()].find(r => codexRequestToken(r.requestId) === requestId && r.threadId === session), shown = pending && serverQuestion(pending);
     if (!pending || !shown) return false;
     const values = (response as { answers?: unknown })?.answers;
     if (!Array.isArray(values) || values.length !== shown.questions.length || values.some(value => typeof value !== "string")) throw new Error("Send one text answer for each question.");

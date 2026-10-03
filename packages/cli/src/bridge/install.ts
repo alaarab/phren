@@ -510,9 +510,13 @@ async function restoreAgentHooks(edits: SettingsEdit[]) {
 }
 
 export async function rollback() {
+  return lockedState(path.join(bridgeRoot(), "install"), rollbackLocked);
+}
+async function rollbackLocked() {
   const config = JSON.parse(await readFile(path.join(bridgeRoot(), "installed.json"), "utf8")) as { version: string; previous?: string; store?: string };
   if (!config.previous || !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(config.previous)) throw new Error("No previous helper version is available.");
   await stopService(); await activate(config.previous); await startService();
+  if (!await serviceReady(config.previous)) throw new Error("The selected rollback version did not become ready. Installation metadata is unchanged; owner review of the active service is required.");
   // The version now in `current/` decides whether Claude's callbacks run its
   // forwarder or, from before the forwarder, its bundle.
   const root = bridgeRoot();
