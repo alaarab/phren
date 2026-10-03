@@ -152,7 +152,9 @@ changes to the exact paired authority. Its explicit conductor move reviews the
 holder/generation before revocation; uncertain launches never automatically
 start a replacement on the old machine. All native/runtime checks remain UNRUN.
 
-## Existing-peer repair and optional new enrollment
+## Deferred source: existing-peer repair and new enrollment
+
+The APIs in this section are retained donor design, unavailable in 176.
 
 | API | Contract |
 | --- | --- |
@@ -300,3 +302,25 @@ The phone admits its confirming transcript row only after a reply or prompt
 completion for that exact turn. Live chunks stay a streamed preview until the
 turn ends. Legacy pane keys/model/settings and slash-command paths refuse
 structured workers; ordinary prompt submission requires the retained owner.
+
+## Owner-approved 176 remote scope
+
+The required remote path is one existing WSL agent exchanging prompts, replies
+and handoffs with authorized Omarchy panes over the existing trusted connection,
+with visible connection status and honest delivery/offline receipts. Exact agent
+identity, scoped authorization and owner proof remain required. The return RPC
+and actual existing-agent binding remain incomplete; this scope change does not
+claim they work. No new SSH connection or substitute agent is authorized.
+
+The owner deferred new computer enrollment, phone enrollment management and
+general peer administration from 176. Their isolated donor source and review
+evidence are retained for later work. The new computer-enrollment and harness
+peer-administration HTTP routes are unavailable and absent from the advertised
+manifest. The phone linking screen is unavailable and its enrollment client
+methods cannot reach transport. Existing pairing and previously enrolled
+connections remain supported. Conductor leases, owner signatures, tasks,
+dependencies and other requested core/iOS work remain in scope.
+
+Only this explicit deferral is removed from complete-candidate acceptance.
+Build-only feature checks precede one full immutable core+iOS RC/TestFlight;
+Android remains independent. No execution is authorized by the scope change.
