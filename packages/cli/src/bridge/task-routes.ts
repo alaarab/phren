@@ -6,7 +6,7 @@ import { taskView, taskCounts, filterTaskDoc, taskStores, taskStoreHasProject } 
 import { permissionDeniedError } from "../governance/rbac.js";
 import { BridgeError } from "./protocol.js";
 import { storeRepositoryIdentity } from "./memory-store.js";
-import { taskFormatStatus } from "../data/task-format.js";
+import { taskWriterSafety } from "../data/task-format.js";
 
 export const taskUpdatesSchema = z.object({
   responsibility: z.enum(["human", "agent"]).optional(),
@@ -30,10 +30,12 @@ export async function getTaskDirectoryRoute(base: string) {
     const ambiguous = !!store.taskStoreId && stores.filter(s => s.taskStoreId === store.taskStoreId).length !== 1;
     const identityReady = !!store.taskStoreId && !ambiguous;
     const repositoryIdentity = store.available === false ? undefined : await storeRepositoryIdentity(store.path);
+    const writerSafety = store.available === false ? null : taskWriterSafety(store.path);
     return {
       id: store.taskStoreId ?? null, name: store.name, role: store.role, primary: store.role === "primary", available: store.available !== false,
       identityReady, ambiguous, ...(repositoryIdentity ? { repositoryIdentity } : {}),
-      metadataWritable: identityReady && store.role !== "readonly" && !permissionDeniedError(store.path, "update_task") && taskFormatStatus(store.path).enabled,
+      writerSafety,
+      metadataWritable: identityReady && store.role !== "readonly" && !permissionDeniedError(store.path, "update_task") && writerSafety?.activation === "owner-acknowledged",
       projects: store.available === false ? [] : getStoreProjectDirs(store).map(dir => path.basename(dir))
         .filter(project => /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(project)).sort(),
     };
@@ -49,7 +51,8 @@ export function getTaskRoute(base: string, url: URL) {
   if (path.resolve(result.data.path) !== path.join(path.resolve(store.path), project, "tasks.md")) throw new BridgeError(404, "Project is not in that task store.");
   const filter = z.object({ responsibility: z.enum(["human", "agent"]).optional(), readiness: z.enum(["ready", "waiting-on-human", "waiting-on-task"]).optional() }).parse(Object.fromEntries(url.searchParams));
   const filtered = filterTaskDoc(base, result.data, filter);
-  return { ok: true, version: 1, storeId, project, metadataWritable: store.role !== "readonly" && !permissionDeniedError(store.path, "update_task", project) && taskFormatStatus(store.path).enabled, counts: taskCounts(base, result.data), items: Object.fromEntries(Object.entries(filtered.items).map(([section, items]) => [section, items.map(i => taskView(base, result.data, i))])) };
+  const writerSafety = taskWriterSafety(store.path);
+  return { ok: true, version: 1, storeId, project, writerSafety, metadataWritable: store.role !== "readonly" && !permissionDeniedError(store.path, "update_task", project) && writerSafety.activation === "owner-acknowledged", counts: taskCounts(base, result.data), items: Object.fromEntries(Object.entries(filtered.items).map(([section, items]) => [section, items.map(i => taskView(base, result.data, i))])) };
 }
 
 export function updateTaskRoute(base: string, input: unknown) {

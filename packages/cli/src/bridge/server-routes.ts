@@ -152,7 +152,10 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
-  if (snapshot.has("tasks")) result.taskDependencies = true;
+  if (snapshot.has("tasks")) {
+    result.taskDependencies = true;
+    result.taskWriterSafety = true;
+  }
   return result;
 }
 
