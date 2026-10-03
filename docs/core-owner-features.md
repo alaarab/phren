@@ -2,6 +2,28 @@
 
 Source baseline: public `main` **87fc768acfcfd905952a8e73e87100d90515c8df**, CLI/agent **0.3.28**, verified directly from GitHub on 2026-10-03. Work is isolated on `feat/core-owner-features`; original checkouts, installed pins, source/logs and runtime processes are preserved. This inventory reads the original task contexts rather than turning every historical idea into a new requirement. No item below is release-candidate validation evidence.
 
+## Integration source status
+
+The historical intake table below is superseded for source presence by this
+integration checkpoint. Exact bundle and file-map receipts are retained outside
+the repository by the sole release integrator; original worktrees remain intact.
+
+| Request | Prepared integrated source | Acceptance still required |
+| --- | --- | --- |
+| Human/Agent and prerequisites | Strict metadata preservation, immutable store directory, exact BID/archive identity, graph/claim locking, readiness across interfaces, writer acknowledgement status and atomic Hook Human creation; native source consumes the contract | Compatible adoption of every live and returning writer; activation remains off until then; real sync/runtime and complete RC |
+| Agent quality/inheritance | Installed LSP diagnostics, steering cancellation/backoff, capability-gated paid native search including exact OpenRouter endpoint selection, opt-in bounded tracing, inherited subagent permissions | Consolidated regression execution, authorized provider credentials/benchmark/spend and real LSP/provider evidence |
+| Claude SDK and common harness | SDK lifecycle/streaming input/parked approvals/model/takeover; shared direct and ACP contracts, worker IPC identity checks/delivery receipts; native SDK/ACP chat follows exact owners and capabilities | Installed SDK subscription-auth and close/resume spike; real adapters, approval lifecycle and native RC |
+| Store conductor and enrollment | One canonical fixed authority, owner-signed generation/claim controls and launch admission, no timeout failover; two-way enrollment and native review controls | Verified authority distribution and actual owner-led enrollment/lease adoption without disrupting existing work |
+| QL one-agent path | Loopback/token/private reverse-socket proxy, no broad enrollment; separate native one-agent list/chat/requests/receipts | Exact QL runner/tunnel/ACL/pin setup and phone acceptance; no runtime setup performed |
+| Installer and dispatch returns | Expired observation reported; Linux service restart transaction; rollback attempts independent restorations and restores the Mac plist/service after failed activation | Coordinated real rollout and restart/failure evidence |
+| Stranded public source | 25 historical rows consumed; 25 integration-ancestor and 53 integration-blob checks verified; nine superseding production dispositions retain their guards | This scoped result does not authorize branch/worktree cleanup or resolve unrelated uncommitted work |
+
+Core integration prepares 0.3.29; public 0.3.28 remains the accepted baseline.
+Combined-source builds and tests have not run. Native source/pin, publication,
+rollout and TestFlight acceptance belong to the same integrator and remain open.
+
+## Historical donor intake
+
 Core owns public persistence, CLI/TUI/MCP, Hook/API, conductor selection and shipped web surfaces. The verified existing integrator owns all phren-apps/iOS and the candidate manifest; the existing Android lead owns Android. No app source is changed in this lane. Development is build-only, with no tests, provider requests, simulators, emulators or previews. Builds await fresh capacity and shared-lock clearance. Publication remains with the integrator/conductor.
 
 | Owner task | Current source evidence | Remaining source or prerequisite |
