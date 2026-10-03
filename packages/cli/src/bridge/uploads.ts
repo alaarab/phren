@@ -57,6 +57,19 @@ export async function listUploads(session: string): Promise<{ name: string; path
   return files.sort((a, b) => b.modified.localeCompare(a.modified)).slice(0, 200);
 }
 
+/** Removes one file the phone put in uploads/<session>/, by the path
+ * `listUploads` gave. Anything that does not resolve to a regular file
+ * directly inside that folder is 404, so no other file can be named. */
+export async function removeUpload(session: string, requested: string): Promise<void> {
+  const missing = new BridgeError(404, "This file is not one of the phone's uploads.");
+  if (!requested || requested.length > 4096 || !path.isAbsolute(requested)) throw missing;
+  const folder = await realpath(path.join(bridgeRoot(), "uploads", session)).catch(() => undefined);
+  const file = await realpath(requested).catch(() => undefined);
+  if (!folder || !file || path.dirname(file) !== folder) throw missing;
+  if (!(await lstat(file)).isFile()) throw missing;
+  await unlink(file);
+}
+
 /** The bytes of one image the phone put under uploads/, by the absolute
  * path the transcript names. Served only when the path resolves (through
  * any link) to a regular file inside the uploads folder whose bytes are

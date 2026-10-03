@@ -43,7 +43,7 @@ import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
 import type { TabActivityStore } from "./tab-activity.js";
 import { childAgentTree, historicalImage, publicChildAgents, refreshTranscript, runningChildAgents, targetTranscriptPath } from "./transcripts.js";
-import { listUploads, saveUpload, uploadImage } from "./uploads.js";
+import { listUploads, removeUpload, saveUpload, uploadImage } from "./uploads.js";
 import type { ModelCatalog } from "./models.js";
 import type { ModelSwitcher } from "./model-switch.js";
 import type { PermissionModeSwitcher } from "./permission-mode.js";
@@ -683,6 +683,9 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           // Files the phone keeps on this computer, outside any session.
           const { name, bytes } = uploadBody(data);
           result = { ok: true, path: await saveUpload("files", name, bytes) };
+        } else if (url.pathname === "/v1/files/delete") {
+          // One of those files, removed by the path the listing gave.
+          await removeUpload("files", z.string().parse(data.path)); result = { ok: true };
         } else if (url.pathname === "/v1/projects/add") {
           // Enrolling a repository with phren from the phone: an existing
           // checkout, or a clone. Serialized like launches — one at a time.

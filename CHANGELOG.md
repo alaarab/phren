@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Phren Hook `POST /v1/files/delete` removes one file the phone uploaded outside a conversation, by the path the listing gave.
+
 ## [0.3.29] - 2026-10-03
 
 ### Added
