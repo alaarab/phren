@@ -41,9 +41,29 @@ export class OpenRouterProvider implements LlmProvider {
     // models. Refuse unverified models locally instead of authorizing it.
     const nativeModel = /^(?:anthropic\/claude-(?:3-5-haiku|3\.5-haiku|3-7-sonnet|3\.7-sonnet|(?:opus|sonnet|haiku|fable|mythos)-[4-9]|[4-9])|openai\/(?:gpt-(?:4\.1(?:-|$)|[5-9](?:[.-]|$))|o3(?:-|$)|o4-mini(?:-|$))|google\/gemini-3(?:[.-]|$)|x-ai\/grok-[4-9](?:[.-]|$)|perplexity\/)/.test(this.model);
     if (!nativeModel || /:online(?:$|:)/.test(this.model)) throw new Error("Native search is not verified for the selected OpenRouter model.");
+    // Model families are not proof for a particular routed endpoint. Check the
+    // current endpoint's native_tools and restrict the paid request to those
+    // routes; a provider without native search can otherwise invoke paid Exa.
+    const parts = this.model.split("/");
+    if (parts.length !== 2 || parts.some(part => !/^[A-Za-z0-9_.:-]+$/.test(part))) throw new Error("Native search requires an exact model ID.");
+    const directory = await fetch(`${this.baseUrl}/models/${parts.map(encodeURIComponent).join("/")}/endpoints`, {
+      redirect: "error", signal, headers: { Authorization: `Bearer ${this.apiKey}` },
+    });
+    if (!directory.ok) { await directory.body?.cancel(); throw new Error("Native search endpoint discovery failed."); }
+    const catalog = await searchJson(directory);
+    const endpoints: Record<string, any>[] = catalog.data?.id === this.model && Array.isArray(catalog.data?.endpoints)
+      ? catalog.data.endpoints.filter((entry: unknown) => entry && typeof entry === "object" && !Array.isArray(entry)) : [];
+    const native = (entry: Record<string, any>) => typeof entry.native_tools?.["openrouter:web_search"]?.type === "string"
+      && entry.native_tools["openrouter:web_search"].type.length > 0;
+    const only = [...new Set<string>(endpoints.filter(entry => native(entry) && typeof entry.tag === "string"
+      && /^[a-z0-9][a-z0-9_/-]{0,199}$/.test(entry.tag)
+      // Base provider slugs also select their region/variant endpoints.
+      && endpoints.filter(other => other.tag === entry.tag || (typeof other.tag === "string" && other.tag.startsWith(entry.tag + "/"))).every(native)
+    ).map(entry => entry.tag))];
+    if (!only.length) throw new Error("No verified native search endpoint for the selected model.");
     const res = await fetch(`${this.baseUrl}/chat/completions`, { method: "POST", redirect: "error", signal,
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.apiKey}`, "HTTP-Referer": "https://github.com/alaarab/phren", "X-Title": "phren-agent" },
-      body: JSON.stringify({ model: this.model, max_tool_calls: 1, max_tokens: Math.min(this.maxOutputTokens, 2048), plugins: [{ id: "web", enabled: false }], messages: [{ role: "user", content: `Search the web for: ${query}. Return concise findings with citations.` }], tools: [{ type: "openrouter:web_search", parameters: { engine: "native", max_results: limit, max_total_results: limit, max_uses: 1 } }] }),
+      body: JSON.stringify({ model: this.model, provider: { only, allow_fallbacks: false, require_parameters: true }, max_tool_calls: 1, max_tokens: Math.min(this.maxOutputTokens, 2048), plugins: [{ id: "web", enabled: false }], messages: [{ role: "user", content: `Search the web for: ${query}. Return concise findings with citations.` }], tools: [{ type: "openrouter:web_search", parameters: { engine: "native", max_results: limit, max_total_results: limit, max_uses: 1 } }] }),
     });
     if (!res.ok) { await res.body?.cancel(); throw new Error(`OpenRouter search returned HTTP ${res.status}`); }
     const data = await searchJson(res), message = data.choices?.[0]?.message;

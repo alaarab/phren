@@ -81,7 +81,11 @@ describe("owner opt-in telemetry contract", () => {
 });
 
 describe("native search response contracts", () => {
-  it("preserves citations from all three native response formats without a second request", async () => {
+  const nativeEndpoint = { data: { id: "anthropic/claude-sonnet-5", endpoints: [
+    { tag: "anthropic", native_tools: { "openrouter:web_search": { type: "web_search_20260209" } } },
+    { tag: "unverified", native_tools: {} },
+  ] } };
+  it("preserves citations from all three native response formats without a second paid request", async () => {
     const { AnthropicProvider } = await import("../providers/anthropic.js");
     const { OpenAiProvider, OpenRouterProvider } = await import("../providers/openrouter.js");
     const cases = [
@@ -90,11 +94,28 @@ describe("native search response contracts", () => {
       { provider: new OpenRouterProvider("fixture", "anthropic/claude-sonnet-5"), body: { choices: [{ finish_reason: "stop", message: { content: "Grounded answer", annotations: [{ type: "url_citation", url_citation: { url: "https://example.org/primary", title: "Primary" } }] } }], usage: { prompt_tokens: 7, completion_tokens: 3, cost: 0.02 } } },
     ];
     for (const value of cases) {
-      const fetch = vi.fn(async () => new Response(JSON.stringify(value.body))); vi.stubGlobal("fetch", fetch);
+      const paid: any[] = [];
+      const fetch = vi.fn(async (url: string, request?: RequestInit) => {
+        if (url.endsWith("/endpoints")) return new Response(JSON.stringify(nativeEndpoint));
+        paid.push(JSON.parse(String(request?.body)));
+        return new Response(JSON.stringify(value.body));
+      }); vi.stubGlobal("fetch", fetch);
       const result = await createWebSearchTool({ provider: () => value.provider }).execute({ query: "q" });
-      expect(fetch).toHaveBeenCalledTimes(1); expect(result.is_error).not.toBe(true);
+      expect(paid).toHaveLength(1); expect(result.is_error).not.toBe(true);
+      if (value.provider.name === "openrouter") expect(paid[0].provider).toEqual({ only: ["anthropic"], allow_fallbacks: false, require_parameters: true });
       expect(result.output).toContain("https://example.org/primary"); expect(result.output).not.toContain("private encrypted payload");
     }
+  });
+  it("refuses a paid search when the model name suggests support but its endpoint does not", async () => {
+    const { OpenRouterProvider } = await import("../providers/openrouter.js");
+    const requests: { url: string; method?: string }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, request?: RequestInit) => {
+      requests.push({ url, method: request?.method });
+      return new Response(JSON.stringify({ data: { id: "anthropic/claude-sonnet-5", endpoints: [{ tag: "anthropic", native_tools: {} }] } }));
+    }));
+    const result = await createWebSearchTool({ provider: () => new OpenRouterProvider("fixture", "anthropic/claude-sonnet-5") }).execute({ query: "q" });
+    expect(result.is_error).toBe(true);
+    expect(requests).toEqual([{ url: "https://openrouter.ai/api/v1/models/anthropic/claude-sonnet-5/endpoints", method: undefined }]);
   });
   it("rejects unsupported OpenRouter models locally, rather than authorizing paid Exa fallback", async () => {
     const { OpenRouterProvider } = await import("../providers/openrouter.js");
@@ -123,10 +144,11 @@ describe("native search response contracts", () => {
   it("retains the reported charge on a failed OpenRouter search", async () => {
     const { OpenRouterProvider } = await import("../providers/openrouter.js");
     const tracker = createCostTracker("mock", 1); tracker.totalCost = 0.2;
-    const fetch = vi.fn(async () => new Response(JSON.stringify({ error: { message: "private upstream detail" }, usage: { prompt_tokens: 8, completion_tokens: 2, cost: 0.04 } })));
+    const fetch = vi.fn(async (url: string) => new Response(JSON.stringify(url.endsWith("/endpoints") ? nativeEndpoint
+      : { error: { message: "private upstream detail" }, usage: { prompt_tokens: 8, completion_tokens: 2, cost: 0.04 } })));
     vi.stubGlobal("fetch", fetch);
     const result = await createWebSearchTool({ provider: () => new OpenRouterProvider("fixture", "anthropic/claude-sonnet-5"), costTracker: () => tracker }).execute({ query: "q" });
-    expect(result.is_error).toBe(true); expect(fetch).toHaveBeenCalledTimes(1);
+    expect(result.is_error).toBe(true); expect(fetch).toHaveBeenCalledTimes(2);
     expect(tracker.totalInputTokens).toBe(8); expect(tracker.totalCost).toBeCloseTo(0.24);
     expect(result.output).not.toContain("private upstream detail");
   });
