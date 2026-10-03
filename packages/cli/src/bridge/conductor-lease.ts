@@ -5,7 +5,7 @@ import { z } from "zod";
 import { tryFileLock } from "../governance/locks.js";
 import { permissionDeniedError } from "../governance/rbac.js";
 import { registeredStoreIdentity } from "../store-registry.js";
-import { atomicInPrivateDir, bridgeRoot, BridgeError, id, object, provider, serverName } from "./protocol.js";
+import { atomicInPrivateDir, bridgeRoot, BridgeError, id, object, objects, provider, serverName, targetSchema } from "./protocol.js";
 import { optionalHookPeers, peerRequest } from "./peers.js";
 import { phrenStoreRoot } from "./transcripts.js";
 
@@ -21,6 +21,7 @@ export type LeaseClaim = z.infer<typeof holderSchema>;
 const configFile = (store: string) => path.join(store, ".config", "conductor-authority.json");
 const stateFile = (store: string) => path.join(store, ".runtime", "conductor-lease.json");
 const claimFile = (store: string) => path.join(store, ".runtime", "conductor-claim.json");
+const sameHolder = (left: LeaseClaim | null, right: LeaseClaim) => left !== null && JSON.stringify(holderSchema.parse(left)) === JSON.stringify(holderSchema.parse(right));
 
 async function readPrivate(file: string): Promise<unknown | undefined> {
   const stat = await lstat(file).catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
@@ -81,10 +82,12 @@ async function readState(store: string, config: Config): Promise<State> {
 /** Called only on the configured authority, through the existing authenticated
  * Hook transport. A lost reply never frees a reservation or starts a second one. */
 export async function conductorLeaseAuthority(store: string, raw: unknown) {
-  const input = z.object({ storeId: z.string().regex(/^[a-f0-9]{8}$/), operation: z.enum(["read", "claim", "bind", "release"]),
-    claim: holderSchema.optional(), expectedGeneration: z.number().int().nonnegative().optional(), ownerConfirmedRelease: z.literal(true).optional() }).strict().parse(raw);
+  if (["release", "takeover"].includes(String(object(raw).operation))) requireOwner(store, raw);
+  const input = z.object({ storeId: z.string().regex(/^[a-f0-9]{8}$/), operation: z.enum(["read", "claim", "bind", "release", "takeover"]),
+    claim: holderSchema.optional(), expectedHolder: holderSchema.optional(), expectedGeneration: z.number().int().nonnegative().optional(),
+    ownerConfirmedRelease: z.literal(true).optional(), ownerConfirmedTakeover: z.literal(true).optional() }).strict().parse(raw);
   if (input.operation === "release" && input.ownerConfirmedRelease !== true) throw new BridgeError(403, "Lease release requires an explicit owner decision.");
-  if (input.operation === "release") requireOwner(store, raw);
+  if (input.operation === "takeover" && input.ownerConfirmedTakeover !== true) throw new BridgeError(403, "Lease takeover requires an explicit owner decision.");
   const config = await conductorLeaseConfig(store);
   if (!config || config.authorityComputerId !== await localId() || input.storeId !== config.storeId) throw new BridgeError(409, "This Hook is not the configured authority for this store.");
   const release = tryFileLock(stateFile(store)); if (!release) throw new BridgeError(409, "Conductor lease is being updated; read its current identity before retrying.");
@@ -98,12 +101,24 @@ export async function conductorLeaseAuthority(store: string, raw: unknown) {
       if (same) return { ok: true, state };
       if (state.holder) throw new BridgeError(409, "This store already has a conductor reservation. An offline holder keeps it until explicit owner revocation.", { lease: state });
       state.holder = claim;
+    } else if (input.operation === "takeover") {
+      if (!input.expectedHolder || !sameHolder(state.holder, input.expectedHolder) || input.expectedGeneration !== state.generation) {
+        throw new BridgeError(409, "The exact conductor identity changed since review.", { lease: state });
+      }
+      if (!claim.place?.session || !targetSchema.shape.session.safeParse(claim.place.session).success
+        || !["claude", "codex", "opencode"].includes(claim.place.source) || claim.claimId === state.holder?.claimId) {
+        throw new BridgeError(400, "Takeover requires a distinct claim for an identified replacement conductor session.");
+      }
+      state.holder = claim;
     } else {
       if (!same || input.expectedGeneration !== state.generation) throw new BridgeError(409, "Conductor lease changed since it was reviewed.", { lease: state });
       if (input.operation === "bind") {
         if (!claim.place) throw new BridgeError(400, "Binding requires the exact conductor pane identity.");
         state.holder = { ...state.holder!, place: claim.place };
-      } else state.holder = null;
+      } else {
+        if (!sameHolder(state.holder, claim)) throw new BridgeError(409, "The exact conductor identity changed since review.", { lease: state });
+        state.holder = null;
+      }
     }
     state.generation++;
     await atomicInPrivateDir(stateFile(store), state);
@@ -111,10 +126,12 @@ export async function conductorLeaseAuthority(store: string, raw: unknown) {
   } finally { release(); }
 }
 
-async function requestAuthority(store: string, operation: "read" | "claim" | "bind" | "release", claim?: LeaseClaim, expectedGeneration?: number): Promise<State> {
+async function requestAuthority(store: string, operation: "read" | "claim" | "bind" | "release" | "takeover", claim?: LeaseClaim, expectedGeneration?: number, expectedHolder?: LeaseClaim): Promise<State> {
   const config = await conductorLeaseConfig(store);
   if (!config) throw new BridgeError(409, "Configure this store's fixed conductor authority before starting or assigning a conductor.");
-  const input = { storeId: config.storeId, operation, ...(operation === "release" ? { ownerConfirmedRelease: true as const } : {}), ...(claim ? { claim } : {}), ...(expectedGeneration === undefined ? {} : { expectedGeneration }) };
+  const input = { storeId: config.storeId, operation, ...(operation === "release" ? { ownerConfirmedRelease: true as const } : {}),
+    ...(operation === "takeover" ? { ownerConfirmedTakeover: true as const } : {}), ...(expectedHolder ? { expectedHolder } : {}),
+    ...(claim ? { claim } : {}), ...(expectedGeneration === undefined ? {} : { expectedGeneration }) };
   const reply = config.authorityComputerId === await localId() ? await conductorLeaseAuthority(store, input)
     : await peerRequest(await authorityPeer(config.authorityComputerId), "/v1/conductor/lease/authority", input, 15000);
   const state = stateSchema.parse(reply.state);
@@ -145,15 +162,43 @@ export async function revokeConductorLease(store: string, raw: unknown) {
   requireOwner(store, raw);
   const input = z.object({ expectedGeneration: z.number().int().nonnegative(), holder: holderSchema, confirm: z.literal(true) }).strict().parse(raw);
   const state = await requestAuthority(store, "read");
-  if (JSON.stringify(state.holder) !== JSON.stringify(input.holder) || state.generation !== input.expectedGeneration) throw new BridgeError(409, "The exact conductor identity changed since review.");
+  if (!sameHolder(state.holder, input.holder) || state.generation !== input.expectedGeneration) throw new BridgeError(409, "The exact conductor identity changed since review.");
   return { ok: true, state: await requestAuthority(store, "release", input.holder, input.expectedGeneration), existingWorkPreserved: true };
 }
-export async function releaseLocalConductorLease(store = phrenStoreRoot()) {
-  if (!await conductorLeaseConfig(store)) return;
-  const raw = await readPrivate(claimFile(store));
-  if (raw === undefined) return;
-  const claim = holderSchema.parse(raw), state = await requestAuthority(store, "read");
-  if (state.holder?.claimId === claim.claimId && state.holder.computerId === await localId()) await requestAuthority(store, "release", state.holder, state.generation);
+
+/** Explicit transfer to an already running local session. Review includes both
+ * identities; it neither launches a process nor stops the previous holder. */
+export async function takeoverConductorLease(store: string, raw: unknown) {
+  requireOwner(store, raw);
+  const input = z.object({ expectedGeneration: z.number().int().nonnegative(), holder: holderSchema,
+    newHolder: z.object({ computerId: z.string().uuid(), target: targetSchema, terminal: z.string().min(1).max(200) }).strict(),
+    confirm: z.literal(true) }).strict().parse(raw);
+  if (input.newHolder.computerId !== await localId()) throw new BridgeError(409, "Confirm takeover on the replacement computer's authenticated Hook.");
+  const { target, terminal } = input.newHolder;
+  if (!["claude", "codex", "opencode"].includes(target.source)) throw new BridgeError(400, "The selected harness cannot run as a conductor.");
+  const { snapshot, paneIdentity } = await import("./herdr.js");
+  const { runsAgent, recordConductor } = await import("./conductor-role.js");
+  const checkedPane = async () => {
+    const pane = objects((await snapshot(target.server)).panes).find(row => row.pane_id === target.pane
+      && row.workspace_id === target.workspace && row.tab_id === target.tab && row.terminal_id === terminal && row.agent === target.source);
+    if (!runsAgent(pane) || await paneIdentity(target.server, pane, true) !== target.session) throw new BridgeError(409, "The reviewed replacement session changed; no inferred target is allowed.");
+    return pane;
+  };
+  await checkedPane();
+  const claim: LeaseClaim = { computerId: input.newHolder.computerId, claimId: randomUUID(), since: new Date().toISOString(),
+    place: { server: target.server, pane: target.pane, terminal, source: target.source, session: target.session } };
+  // Keep the reviewed identities even if the authority's response is lost.
+  // Existing local claim evidence is not replaced until transfer is confirmed.
+  await atomicInPrivateDir(path.join(store, ".runtime", "conductor-takeovers", `${claim.claimId}.json`), { ...input, claim });
+  const state = await requestAuthority(store, "takeover", claim, input.expectedGeneration, input.holder);
+  try {
+    await atomicInPrivateDir(claimFile(store), claim);
+    const pane = await checkedPane();
+    await recordConductor(target.server, pane, "owner", target.session);
+  } catch {
+    throw new BridgeError(409, "Lease transferred, but the replacement role could not be confirmed. Read the lease and review it explicitly; existing work is preserved and no automatic retry or release occurred.", { lease: state, transferred: true, existingWorkPreserved: true });
+  }
+  return { ok: true, state, previousHolder: input.holder, existingWorkPreserved: true, launched: false };
 }
 export async function requireConductorLease(place: { server: string; pane: string; terminal?: string; source?: string }, store = phrenStoreRoot()) {
   // Existing conductors keep their work during deliberate configuration migration.

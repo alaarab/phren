@@ -1,7 +1,7 @@
 import { harnessInfo, boundHarness } from "./harness/bindings.js";
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute } from "./task-routes.js";
 import { prepareComputerEnrollment, reviewComputerEnrollment, confirmComputerEnrollment, verifyComputerEnrollment } from "./computer-enrollment.js";
-import { readConductorLease, configureConductorLease, conductorLeaseAuthority, revokeConductorLease } from "./conductor-lease.js";
+import { readConductorLease, configureConductorLease, conductorLeaseAuthority, revokeConductorLease, takeoverConductorLease } from "./conductor-lease.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import type { OwnerInbox } from "./owner-inbox.js";
 import { closeFinishedWorker } from "./worker-close.js";
@@ -690,6 +690,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await configureConductorLease(modules.store, data);
         } else if (url.pathname === "/v1/conductor/lease/revoke") {
           result = await revokeConductorLease(modules.store, data);
+        } else if (url.pathname === "/v1/conductor/lease/takeover") {
+          result = await launches.run(() => takeoverConductorLease(modules.store, data));
         } else if (url.pathname === "/v1/conductor/lease/authority") {
           result = await conductorLeaseAuthority(modules.store, data);
         } else if (url.pathname === "/v1/computers/enrollment/prepare") {

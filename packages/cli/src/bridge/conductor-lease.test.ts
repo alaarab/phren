@@ -44,4 +44,22 @@ describe("store conductor ownership", () => {
     await expect(read()).rejects.toThrow();
     await expect(conductorLeaseAuthority(store, { storeId: "11111111", operation: "claim", claim: claim("40000000-0000-4000-8000-000000000003") })).rejects.toThrow();
   });
+  it("checks the complete old holder at the authority and permits only one reviewed takeover", async () => {
+    const held = (await conductorLeaseAuthority(store, { storeId: "11111111", operation: "claim", claim: claim("40000000-0000-4000-8000-000000000003") })).state;
+    const replacement = (claimId: string) => ({ ...claim(claimId), computerId: authority,
+      place: { server: "default", pane: "w2:p1", terminal: "terminal-2", source: "codex", session: "40000000-0000-4000-8000-000000000009" } });
+    await expect(conductorLeaseAuthority(store, { storeId: "11111111", operation: "release", ownerConfirmedRelease: true,
+      expectedGeneration: held.generation, claim: { ...held.holder!, since: "2026-01-01T00:00:00.000Z" } })).rejects.toThrow("identity changed");
+    const transfer = { storeId: "11111111", operation: "takeover", expectedGeneration: held.generation,
+      expectedHolder: held.holder, ownerConfirmedTakeover: true };
+    await expect(conductorLeaseAuthority(store, { ...transfer, claim: replacement("40000000-0000-4000-8000-000000000004"), origin: {} })).rejects.toMatchObject({ status: 403 });
+    expect((await read()).state.holder).toEqual(held.holder);
+    const contenders = [replacement("40000000-0000-4000-8000-000000000004"), replacement("40000000-0000-4000-8000-000000000005")];
+    const results = await Promise.allSettled(contenders.map(candidate => conductorLeaseAuthority(store, { ...transfer, claim: candidate })));
+    expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    const state = (await read()).state;
+    expect(state.generation).toBe(held.generation + 1);
+    expect(contenders).toContainEqual(state.holder);
+    await expect(conductorLeaseAuthority(store, { ...transfer, claim: contenders[0] })).rejects.toThrow("identity changed");
+  });
 });

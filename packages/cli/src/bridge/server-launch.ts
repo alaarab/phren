@@ -1,5 +1,5 @@
 import { configuredHarness, prepareHarnessCommand } from "./harness/launch.js";
-import { conductorLeaseConfig, reserveConductorLease, bindConductorLease, releaseLocalConductorLease } from "./conductor-lease.js";
+import { conductorLeaseConfig, reserveConductorLease, bindConductorLease } from "./conductor-lease.js";
 import { markPaneClosed } from "./worker-close.js";
 import { mkdir, readFile } from "node:fs/promises";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -204,9 +204,11 @@ export async function stopConductor(data: Json): Promise<Json> {
   }
   const held = (await readRoleState())?.conductor;
   if (pane !== undefined && held && held.pane !== pane) throw new BridgeError(409, "That pane is not this computer's conductor.");
-  await releaseLocalConductorLease();
+  // Ending a role is not authority to release its store reservation. Only an
+  // explicit owner revoke/takeover of the reviewed holder may do that.
+  const leaseRetained = !!await conductorLeaseConfig();
   const stopped = await clearConductor(pane);
-  return { ok: true, stopped: !!stopped };
+  return { ok: true, stopped: !!stopped, ...(leaseRetained ? { leaseRetained: true } : {}) };
 }
 
 /** How long a pane the Hook just created may take to reach its shell prompt. */

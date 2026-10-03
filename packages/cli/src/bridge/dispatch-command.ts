@@ -114,7 +114,15 @@ export async function runConductor(args: string[]): Promise<number> {
       if (!state.holder || values.confirm !== state.holder.claimId) throw new Error("Confirm the exact reviewed holder claimId; nothing changed.");
       console.log(JSON.stringify(await hookRequest("/v1/conductor/lease/revoke", { expectedGeneration: state.generation, holder: state.holder, confirm: true }), null, 2)); return 0;
     }
-    throw new Error("Usage: phren conductor lease [status | configure --computer <UUID> --confirm <same-UUID> | revoke --review-file <lease.json> --confirm <claimId>]");
+    if (action === "takeover" && values["review-file"]) {
+      const { readFile } = await import("node:fs/promises");
+      const review = JSON.parse(await readFile(values["review-file"], "utf8"));
+      const confirmation = `${review.holder?.claimId}->${review.newHolder?.computerId}/${review.newHolder?.target?.session}`;
+      if (!review.holder || !review.newHolder || values.confirm !== confirmation) throw new Error("Confirm the reviewed old claimId->new computerId/session; nothing changed.");
+      console.log(JSON.stringify(await hookRequest("/v1/conductor/lease/takeover", { expectedGeneration: review.expectedGeneration,
+        holder: review.holder, newHolder: review.newHolder, confirm: true }), null, 2)); return 0;
+    }
+    throw new Error("Usage: phren conductor lease [status | configure --computer <UUID> --confirm <same-UUID> | revoke --review-file <lease.json> --confirm <claimId> | takeover --review-file <takeover.json> --confirm '<oldClaimId>-><newComputerId>/<newSession>']");
   }
   if (namespace === "status") { console.log(JSON.stringify(await hookRequest("/v1/conductor"), null, 2)); return 0; }
   if (namespace === "make" || namespace === "stop") {
