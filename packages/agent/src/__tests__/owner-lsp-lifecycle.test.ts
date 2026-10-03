@@ -46,7 +46,7 @@ afterEach(() => {
   for (const registry of registries.splice(0)) registry.close();
   for (const connection of connections.splice(0)) connection.close();
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
-  vi.clearAllMocks(); vi.unstubAllEnvs();
+  vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllEnvs();
 });
 
 describe("installed diagnostics ownership", () => {
@@ -104,6 +104,15 @@ describe("LSP protocol cancellation", () => {
     const count = wire.received.length;
     await expect(connection.request("workspace/symbol", {}, abort.signal)).rejects.toThrow("cancelled");
     expect(wire.received).toHaveLength(count);
+  });
+  it.skipIf(process.platform === "win32")("retires its owned process group at exit and never signals a stale cached identity again", async () => {
+    const { root } = fixture(), wire = server(); Object.assign(wire.child, { pid: 987654 });
+    const kill = vi.spyOn(process, "kill").mockReturnValue(true);
+    const connection = new LspConnection(wire.child, root, true); connections.push(connection); await connection.ready;
+    Object.assign(wire.child, { exitCode: 0 }); wire.child.emit("exit", 0);
+    expect(kill).toHaveBeenCalledTimes(1); expect(kill).toHaveBeenCalledWith(-987654, "SIGKILL");
+    connection.close(); expect(kill).toHaveBeenCalledTimes(1);
+    kill.mockRestore();
   });
   it("refuses server-requested edits and malformed frames instead of granting implicit writes", async () => {
     const { root } = fixture(), wire = server(); const connection = new LspConnection(wire.child, root); connections.push(connection); await connection.ready;
