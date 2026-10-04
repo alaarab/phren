@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Resources report each computer's `hardware`: model ("MacBook Pro", "Dell XPS 13 9310"), chip or CPU, memory and cores, read once per Hook run, so the phone can say which machine each computer is.
+
 ### Fixed
 
 - Simulator touches and keys: when macOS refuses the helper, the Hook now asks for the Accessibility grant (the helper appears in the Accessibility list and the system dialog shows), the 403 names the switch to turn on and how to add the hidden helper path, and a new `accessibility-settings` simulator action opens the Accessibility pane on the Mac. The helper's source changed, so a grant given to an older build must be given once more.
