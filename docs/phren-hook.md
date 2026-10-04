@@ -7,7 +7,7 @@ other phone or terminal applications.
 
 ## Install on each computer
 
-Requires macOS or Linux, Node 20 or newer, Herdr or tmux 3.0+, SSH, and `lsof`.
+Requires macOS or Linux, Node 22.19 or newer, Herdr or tmux 3.0+, SSH, and `lsof`.
 Linux uses a systemd user service; macOS uses a LaunchAgent in your signed-in
 user session. Without Herdr the Hook uses tmux; see [Without Herdr: tmux](#without-herdr-tmux).
 
