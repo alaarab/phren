@@ -71,6 +71,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - name: Build typecheck dependencies
+        run: pnpm build
       - name: Typecheck all packages
         run: |
           for package in cli code agent vscode push-relay; do
