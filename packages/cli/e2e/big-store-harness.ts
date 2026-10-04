@@ -82,6 +82,8 @@ export async function createBigStoreHarness(): Promise<BigStoreHarness> {
 
   const { phrenDir, env } = isolatedEnv(rootDir);
   execFileSync(process.execPath, [CLI_PATH, "init", "-y", "--profile", "work"], { cwd: workDir, env, stdio: ["ignore", "pipe", "pipe"], timeout: 30_000 });
+  // init is memory-only; the seeded store explicitly includes active/queued tasks.
+  execFileSync(process.execPath, [CLI_PATH, "modules", "enable", "tasks"], { cwd: workDir, env, stdio: ["ignore", "pipe", "pipe"], timeout: 30_000 });
 
   // Replace the default profile/projects with a big cross-linked store.
   seedBigStore(phrenDir, "work");

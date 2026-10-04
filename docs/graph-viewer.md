@@ -10,6 +10,8 @@ The same graph is also drawn in the terminal by the interactive shell's Graph vi
 
 Beyond navigating the graph itself, the viewer is a maintenance surface: find memories, review aging ones, and edit, merge, or prune them without leaving the view.
 
+On SwiftShader (software WebGL), the viewer renders the scene at half resolution and omits bloom to keep controls responsive. Labels and controls remain at native resolution; hardware WebGL retains bloom.
+
 ## Labels
 
 Project (group) labels always draw first: they claim slots from the

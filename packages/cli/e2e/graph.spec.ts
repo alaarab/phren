@@ -855,11 +855,15 @@ test.describe.serial("graph visualization e2e", () => {
     expect(start).toBeTruthy();
 
     await expect(page.locator("#graph-node-popover")).toBeVisible({ timeout: 8_000 });
+    const description = page.locator("#graph-node-text");
+    await expect(description).toHaveText(start!);
     const nextBtn = page.locator('[data-graph-action="next-node"]');
     await expect(nextBtn).toBeVisible({ timeout: 8_000 });
     await nextBtn.click();
-    // Selection flies to the sibling; the dossier re-renders with different content
-    await expect(page.locator("#graph-node-content")).not.toContainText(start!, { timeout: 8_000 });
+    // The selected description changes; Strongest relationships may still
+    // mention the previous finding elsewhere in the dossier.
+    await expect(description).not.toContainText(start!, { timeout: 8_000 });
+    await expect(description).not.toBeEmpty();
   });
 
   test("search Enter flies to the best hit and opens the dossier", async ({ page }) => {
