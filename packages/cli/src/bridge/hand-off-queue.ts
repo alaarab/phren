@@ -43,6 +43,7 @@ export class HandOffQueue {
   private root: string;
   private now: () => number;
   private lastPrune = -Infinity;
+  private ticking?: Promise<void>;
   constructor(private options: QueueOptions) { this.root = options.root ?? path.join(bridgeRoot(), "hand-offs"); this.now = options.now ?? Date.now; }
   private serial<T>(run: () => Promise<T>): Promise<T> {
     const result = this.pending.then(run); this.pending = result.catch(() => {}); return result;
@@ -143,24 +144,26 @@ export class HandOffQueue {
     if (row.state === "delivered") delete row.error;
     await this.save(row);
   }
+  /** Coalesced: the Hook calls this every 5 s whether or not the last tick
+   * finished, and queuing each behind the lock would hold every enqueue and
+   * status behind a backlog that grows faster than a slow tick drains it. */
   tick(): Promise<void> {
-    return this.serial(async () => {
+    return this.ticking ??= this.sweep().finally(() => { this.ticking = undefined; });
+  }
+  private async sweep(): Promise<void> {
+    const remote = await this.serial(async () => {
       let rows = await this.rows();
       if (this.now() - this.lastPrune >= DAY) rows = await this.prune(rows);
-      const attempted = new Set<string>();
+      const attempted = new Set<string>(), remote: Row[] = [];
       for (const row of rows) if (row.state === "queued") {
         const key = JSON.stringify(row.target);
         if (attempted.has(key)) continue;
         attempted.add(key); await this.attempt(row);
       }
       for (const row of rows) if (row.origin && !row.notified && ["delivered", "failed", "uncertain"].includes(row.state)) {
+        if (row.originComputer) { remote.push(row); continue; }
         // A notice is itself an idempotent queued hand-off, without an origin.
-        const id = `handoff-notice-${createHash("sha256").update(row.deliveryId).digest("hex").slice(0, 40)}`;
-        if (row.originComputer) {
-          const result = await this.options.notify?.(row.origin, `Hand-off ${row.deliveryId}: ${row.state}.`, id, row.originComputer).catch(() => undefined);
-          if (!result || (!result.queued && !result.delivered && !result.deliveryUncertain)) continue;
-          row.notified = true; await this.save(row); continue;
-        }
+        const id = this.noticeId(row);
         if (!await this.read(id)) {
           const pane = await this.options.validate(row.origin).catch(() => undefined);
           if (!pane || typeof pane.terminal_id !== "string") continue;
@@ -170,8 +173,21 @@ export class HandOffQueue {
         }
         row.notified = true; await this.save(row);
       }
+      return remote;
     });
+    // Sent outside the lock: the sender's Hook may be holding its own lock
+    // while it waits on this one, and two Hooks each waiting on the other
+    // left both refusing every hand-off until a peer request timed out.
+    await Promise.all(remote.map(async row => {
+      const result = await this.options.notify?.(row.origin!, `Hand-off ${row.deliveryId}: ${row.state}.`, this.noticeId(row), row.originComputer!).catch(() => undefined);
+      if (!result || (!result.queued && !result.delivered && !result.deliveryUncertain)) return;
+      await this.serial(async () => {
+        const current = await this.read(row.deliveryId);
+        if (current && !current.notified) { current.notified = true; await this.save(current); }
+      });
+    }));
   }
+  private noticeId(row: Row) { return `handoff-notice-${createHash("sha256").update(row.deliveryId).digest("hex").slice(0, 40)}`; }
   /** Hold enqueues and delivery while the Hook validates and closes a worker.
    * A new hand-off cannot be accepted between the pending check and closure. */
   whenNoPending(target: Target, close: () => Promise<Json>): Promise<Json> {
