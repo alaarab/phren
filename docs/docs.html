@@ -2950,9 +2950,11 @@ updateActiveSidebarLink();
 <!-- Mermaid loads as a module, so it never blocks first paint. Diagrams change
      height when they render, so a deep link is re-scrolled once they are in. -->
 <script type="module">
-  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@12.1.0/dist/mermaid.esm.min.mjs';
   mermaid.initialize({
     startOnLoad: false,
+    layout: 'dagre',
+    look: 'classic',
     theme: 'dark',
     themeVariables: {
       darkMode: true,
