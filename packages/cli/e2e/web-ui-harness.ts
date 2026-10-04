@@ -278,6 +278,8 @@ export async function createWebUiHarness(): Promise<WebUiHarness> {
 
   const { homeDir, phrenDir, env } = makeIsolatedEnv(rootDir);
   runCli(["init", "-y", "--profile", "work"], repoADir, env);
+  // init is memory-only; this fixture also exercises task views and graph nodes.
+  runCli(["modules", "enable", "tasks"], repoADir, env);
   runCli(["add", repoBDir], repoADir, env);
 
   seedHookFixtures(phrenDir, homeDir);
