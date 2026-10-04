@@ -1265,11 +1265,11 @@
   <!-- ── Phren Motion Lab sprite renderer ── -->
   <!-- Replaces static phren-hero.svg at .phren-sprite-mount nodes with live, rigged sprites. -->
   <script src="vendor/react.production.min.js"></script>
-  <script src="vendor/react-dom.production.min.js"></script>
   <script src="vendor/babel.min.js"></script>
+  <script src="vendor/babel-react.js"></script>
   <script src="motion-lab/sprite-data.js"></script>
-  <script type="text/babel" src="motion-lab/sprite.jsx"></script>
-  <script type="text/babel" data-presets="react">
+  <script type="text/babel" data-presets="phren-react" src="motion-lab/sprite.jsx"></script>
+  <script type="text/babel" data-presets="phren-react">
     (function () {
       const { useEffect, useState } = React;
       const { createRoot } = ReactDOM;
