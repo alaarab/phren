@@ -85,6 +85,22 @@ describe("durable Hook hand-off queue", () => {
     await q.enqueue({ ...message(), origin }); pane.agent_status = "idle"; await q.tick(); await q.tick(); await q.tick();
     expect(send.mock.calls.map(call => call[1])).toEqual(["Review parser", "Hand-off handoff-0001: delivered."]);
   });
+  it("keeps accepting hand-offs while a notice waits on the sender's Hook, and coalesces ticks", async () => {
+    // Two Hooks each notifying the other while holding their own queue lock refused every hand-off on both.
+    let answer!: (value: Json) => void;
+    const notify = vi.fn(() => new Promise<Json>(resolve => { answer = resolve; }));
+    const q = new HandOffQueue({ root, validate, send, notify }), origin = { ...target, pane: "sender" };
+    pane.agent_status = "idle";
+    await q.enqueue({ ...message(), origin, originComputer: "Mac" });
+    const ticks = [q.tick(), q.tick(), q.tick()];
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(1));
+    expect(await q.enqueue(message("handoff-0002", "Next change"))).toMatchObject({ delivered: true });
+    expect(await q.status("handoff-0001", target)).toMatchObject({ delivered: true });
+    answer({ queued: true }); await Promise.all(ticks);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(await readFile(path.join(root, "handoff-0001.json"), "utf8"))).toMatchObject({ notified: true });
+    await q.tick(); expect(notify).toHaveBeenCalledTimes(1);
+  });
   describe("retention", () => {
     const DAY = 86_400_000;
     const names = async () => (await readdir(root)).sort();
