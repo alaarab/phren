@@ -1,5 +1,5 @@
 
-import { Box, Text, useStdout } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 import type { PermissionMode } from "../../permissions/types.js";
 import { PERMISSION_ICONS, PERMISSION_LABELS } from "../ansi.js";
 import type { Theme } from "../themes.js";
@@ -17,8 +17,8 @@ export interface InputAreaProps {
 }
 
 export function InputArea({ value, onChange, onSubmit, bashMode, focus, separatorColor, theme, completionOpen }: InputAreaProps) {
-  const { stdout } = useStdout();
-  const columns = stdout?.columns || 80;
+  const { columns: windowColumns } = useWindowSize();
+  const columns = windowColumns || 80;
   const _sep = "\u2500".repeat(columns);
   const sepColor = theme?.input.separator ?? separatorColor ?? "gray";
   const promptColor = theme?.input.prompt ?? undefined;

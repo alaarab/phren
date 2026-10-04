@@ -913,9 +913,9 @@ export function runPostInitVerify(phrenPath: string): { ok: boolean; checks: Pos
   });
   checks.push({
     name: "node-version",
-    ok: versionAtLeast(nodeVersion, 20),
+    ok: versionAtLeast(nodeVersion, 22, 19),
     detail: nodeVersion || "node not found in PATH",
-    fix: versionAtLeast(nodeVersion, 20) ? undefined : "Install Node.js 20+ before using phren.",
+    fix: versionAtLeast(nodeVersion, 22, 19) ? undefined : "Install Node.js 22.19+ before using phren.",
   });
 
   if (manifest?.installMode === "project-local") {
