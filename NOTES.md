@@ -1,0 +1,4 @@
+Root cause: vitest's global setup sandboxes HOME to /tmp/phren-test-home-*. Bridge code paths (models.ts readCodexModels, usage.ts readCodexLimits, questions.ts, spawnAppServer) resolve `codex` via codexExecutable() on PATH; tests that hit them without injecting a binary ran real `codex app-server`, which on Codex 0.158 leaves a detached --managed-daemon + pid-update-loop under that HOME, reparented to init. Teardown only rm -rf'd the HOME.
+Fix: PHREN_CODEX_BINARY=off (vitest env) makes codexExecutable() return an unrunnable path; test-sandbox.ts removeSandboxHome runs `codex app-server daemon stop` under the HOME and kills app-server/pid-update-loop processes naming it, then removes it.
+Files: vitest.config.ts, bridge/codex-binary.ts, bridge/questions.test.ts (opts back in for its PATH-shim test), test-sandbox.ts(+test), test-global-setup.ts, CHANGELOG.md.
+Tests: full root vitest 370 files passed; build and lint clean.
