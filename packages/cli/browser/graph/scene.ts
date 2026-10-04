@@ -254,13 +254,15 @@ export function setupForceGraph(): void {
 
   state.fg = fg;
 
-  // Renderer: filmic tone mapping keeps the glow in check; SwiftShader
-  // (software GL) drops to pixelRatio 1 so captures stay smooth.
+  // Software GL rasterizes on the CPU. Use a half-resolution scene buffer so
+  // large viewports leave time for input; CSS labels and controls stay sharp.
   const renderer = fg.renderer() as THREE.WebGLRenderer;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
   const softwareGl = detectSwiftShader(renderer);
-  renderer.setPixelRatio(softwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 1.5));
+  const pixelRatio = softwareGl ? 0.5 : Math.min(window.devicePixelRatio || 1, 1.5);
+  renderer.setPixelRatio(pixelRatio);
+  fg.postProcessingComposer().setPixelRatio(pixelRatio);
 
   // Idle orbit stays OFF until the graph has settled and the user has been
   // still for a while (tickIdleResume) — auto-rotating during load drifted the
@@ -290,8 +292,10 @@ export function setupForceGraph(): void {
   fg.d3Force("link", null);
   fg.d3Force("center", null);
 
-  // Bloom does the glow for the tiny additive dots — lower threshold, tighter.
-  if (!state.fxOff) {
+  // Bloom's multi-pass blur stalls software GL, starving even DOM controls
+  // and the project navigator. The nodes already have additive glow sprites;
+  // keep those on SwiftShader and reserve postprocessing for hardware GL.
+  if (!state.fxOff && !softwareGl) {
     const size = containerSize();
     bloomPass = new UnrealBloomPass(new THREE.Vector2(Math.max(1, size.w / 2), Math.max(1, size.h / 2)), 0.55, 0.5, 0.2);
     fg.postProcessingComposer().addPass(bloomPass);

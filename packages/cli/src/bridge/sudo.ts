@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, readlinkSync } from "node:fs";
 import { open, readdir, readFile, readlink, unlink } from "node:fs/promises";
 import { request, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
@@ -123,7 +123,7 @@ export interface ProcessRecord {
   line: string;
   /** Environment names, where the platform shows them (Linux). */
   env?: string[];
-  /** When it started (`ps -o lstart`), to tell it from a later process with its pid. */
+  /** When it started (procfs start ticks on Linux, `ps -o lstart` elsewhere), to distinguish a recycled pid. */
   started?: string;
 }
 const exec = promisify(execFile);
@@ -131,18 +131,36 @@ const exec = promisify(execFile);
 export async function readProcess(pid: number): Promise<ProcessRecord | undefined> {
   if (!Number.isInteger(pid) || pid <= 1) return undefined;
   try {
+    if (process.platform === "linux") {
+      const base = `/proc/${pid}`;
+      const [status, stat, cmdline, env] = await Promise.all([
+        readFile(`${base}/status`, "utf8"),
+        readFile(`${base}/stat`, "utf8"),
+        readFile(`${base}/cmdline`, "utf8"),
+        readFile(`${base}/environ`, "utf8").catch(() => undefined),
+      ]);
+      const ppid = /^PPid:\s+(\d+)$/m.exec(status)?.[1];
+      const euid = /^Uid:\s+\d+\s+(\d+)/m.exec(status)?.[1];
+      const name = /^Name:\s+(.+)$/m.exec(status)?.[1];
+      // Field 22 is the process's start tick. The comm field can contain
+      // spaces or parentheses, so split only after its closing parenthesis.
+      const start = (value: string) => value.slice(value.lastIndexOf(")") + 2).trim().split(/\s+/)[19];
+      const started = start(stat);
+      if (!ppid || !euid || !name || !started || !/^\d+$/.test(started)) return undefined;
+      // Refuse a recycled pid rather than combining two process records.
+      if (start(await readFile(`${base}/stat`, "utf8")) !== started) return undefined;
+      const argv = cmdline.split("\0").filter(Boolean);
+      return { ppid: Number(ppid), euid: Number(euid), name: path.basename(name), argv, line: argv.join(" "), started,
+        ...(env === undefined ? {} : { env: env.split("\0").filter(Boolean).map(item => item.split("=", 1)[0]) }) };
+    }
     const { stdout } = await exec("ps", ["-ww", "-o", "ppid=", "-o", "uid=", "-o", "comm=", "-p", String(pid)], { timeout: 3_000, maxBuffer: 65_536 });
     const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(stdout.trim().split("\n")[0] ?? "");
     if (!match) return undefined;
     const args = await exec("ps", ["-ww", "-o", "args=", "-p", String(pid)], { timeout: 3_000, maxBuffer: 65_536 });
     const line = args.stdout.trim();
     const started = (await exec("ps", ["-o", "lstart=", "-p", String(pid)], { timeout: 3_000, maxBuffer: 4_096 }).catch(() => ({ stdout: "" }))).stdout.trim();
-    let argv = line.split(/\s+/).filter(Boolean), env: string[] | undefined;
-    if (process.platform === "linux") {
-      argv = await readFile(`/proc/${pid}/cmdline`, "utf8").then(text => text.split("\0").filter(Boolean)).catch(() => argv);
-      env = await readFile(`/proc/${pid}/environ`, "utf8").then(text => text.split("\0").filter(Boolean).map(item => item.split("=", 1)[0])).catch(() => undefined);
-    }
-    return { ppid: Number(match[1]), euid: Number(match[2]), name: path.basename(match[3]), argv, line, ...(env ? { env } : {}), ...(started ? { started } : {}) };
+    const argv = line.split(/\s+/).filter(Boolean);
+    return { ppid: Number(match[1]), euid: Number(match[2]), name: path.basename(match[3]), argv, line, ...(started ? { started } : {}) };
   } catch { return undefined; }
 }
 
@@ -153,13 +171,26 @@ export async function stdoutReaders(pid: number, allowed: number[]): Promise<"su
     if (process.platform === "linux") {
       const target = await readlink(`/proc/${pid}/fd/1`);
       if (!/^pipe:\[\d+\]$/.test(target)) return "other";
-      for (const entry of await readdir("/proc")) {
-        const holder = Number(entry);
-        if (!Number.isInteger(holder) || holder === pid || allowed.includes(holder)) continue;
-        const fds = await readdir(`/proc/${holder}/fd`).catch(() => [] as string[]);
-        for (const fd of fds) if (await readlink(`/proc/${holder}/fd/${fd}`).catch(() => "") === target) return "other";
-      }
-      return "sudo";
+      const holders = (await readdir("/proc")).map(Number)
+        .filter(holder => Number.isInteger(holder) && holder !== pid && !allowed.includes(holder));
+      let next = 0, other = false;
+      // Busy machines can have thousands of descriptors. Bound the process
+      // concurrency while checking every visible descriptor of each holder.
+      await Promise.all(Array.from({ length: Math.min(16, holders.length) }, async () => {
+        while (!other && next < holders.length) {
+          const holder = holders[next++];
+          const fds = await readdir(`/proc/${holder}/fd`).catch(() => [] as string[]);
+          // procfs links are kernel metadata, without disk I/O. Reading a
+          // holder's links directly avoids thousands of thread-pool jobs;
+          // the directory awaits above still yield between holders.
+          for (const fd of fds) {
+            try {
+              if (readlinkSync(`/proc/${holder}/fd/${fd}`) === target) { other = true; break; }
+            } catch { /* The descriptor closed or its process exited. */ }
+          }
+        }
+      }));
+      return other ? "other" : "sudo";
     }
     // macOS: each pipe end has its own address, and `n->` names the other end.
     const own = await exec("lsof", ["-nP", "-a", "-p", String(pid), "-d", "1", "-F", "tdn"], { timeout: 5_000, maxBuffer: 65_536 });

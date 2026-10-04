@@ -23,7 +23,7 @@
 <ul>
 <li>An iPhone with iOS 17 or later, or an Android phone with Android 8.0 or later.</li>
 <li>A Mac or a Linux computer where you run coding agents: Claude Code, Codex, Copilot or OpenCode.</li>
-<li><a href="https://nodejs.org">Node.js</a> 20 or newer on that computer.</li>
+<li><a href="https://nodejs.org">Node.js</a> 22.19 or newer on that computer.</li>
 <li><a href="https://herdr.dev">Herdr</a> on that computer, for chat, status, approvals and starting agents from the phone. tmux 3.0 or newer also works; see <a href="#herdr">what works without Herdr</a>.</li>
 <li>Optional: a GitHub account, to sync memory when you are away from your computer.</li>
 <li>Optional: Tailscale on the phone and the computer, to reach it away from home.</li>
@@ -64,7 +64,7 @@
 <span class="label do">Do this</span>
 <ol>
 <li><strong>Turn on SSH.</strong> On a Mac: System Settings → General → Sharing → <strong>Remote Login</strong>. On Linux: <code>sudo systemctl enable --now sshd</code> (the service is called <code>ssh</code> on some distributions).</li>
-<li><strong>Check Node.</strong> Run <code>node --version</code>. It should print v20 or higher.</li>
+<li><strong>Check Node.</strong> Run <code>node --version</code>. It should print v22.19 or higher.</li>
 <li><strong>Install Herdr</strong> from <a href="https://herdr.dev">herdr.dev</a> and run your agents inside it. Herdr keeps each agent in a named pane that Phren Hook can find, read and type into.</li>
 </ol>
 <span class="label see">You should see</span>

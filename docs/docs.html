@@ -837,7 +837,7 @@
                 <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
                 Requires
               </div>
-              <p>Node.js 20 or later. Check with <code>node --version</code>.</p>
+              <p>Node.js 22.19 or later. Check with <code>node --version</code>.</p>
             </div>
           </div>
         </div>
@@ -1009,8 +1009,8 @@ phren store sync</code></pre>
         <h2 id="gs-troubleshooting">Troubleshooting <a href="#gs-troubleshooting" class="anchor-link">#</a></h2>
 
         <h3>Node.js Version Mismatch</h3>
-        <p>phren requires Node.js 20+. If you see syntax errors:</p>
-        <pre><code>node --version   # must be v20.0.0 or later
+        <p>phren requires Node.js 22.19+. If you see syntax errors:</p>
+        <pre><code>node --version   # must be v22.19.0 or later
 nvm use 20       # if using nvm</code></pre>
 
         <h3>Permission Errors</h3>
@@ -1061,7 +1061,7 @@ phren hooks errors --limit 5</code></pre>
         </ul>
 
         <h2 id="ios-hook">Phren Hook <a href="#ios-hook" class="anchor-link">#</a></h2>
-        <p>Phren Hook is a local helper that connects your phone to the agents on a computer. It needs macOS or Linux, Node.js 20+, <a href="https://herdr.dev">Herdr</a>, SSH, and <code>lsof</code>. Install it as the user who runs your agents:</p>
+        <p>Phren Hook is a local helper that connects your phone to the agents on a computer. It needs macOS or Linux, Node.js 22.19+, <a href="https://herdr.dev">Herdr</a>, SSH, and <code>lsof</code>. Install it as the user who runs your agents:</p>
         <pre><code>npx --yes @phren/cli@0.3.30 bridge install
 npx --yes @phren/cli@0.3.30 bridge doctor</code></pre>
         <p>Then open <strong>Agents &rarr; Add computer</strong> in the app and follow the steps. <a href="phren-hook.html">The Phren Hook page</a> covers setup, updates, and troubleshooting.</p>
@@ -2290,7 +2290,7 @@ pnpm test</code></pre>
         <p>The repo is a pnpm workspace built with turborepo. <code>pnpm build</code> compiles every package; the CLI builds from <code>packages/cli/src/</code> into <code>packages/cli/dist/</code>.</p>
         <h3>Prerequisites</h3>
         <ul>
-          <li>Node.js 20+</li>
+          <li>Node.js 22.19+</li>
           <li>pnpm 10 (the version is pinned in <code>package.json</code>; <code>corepack enable</code> picks it up)</li>
         </ul>
 
@@ -2950,9 +2950,11 @@ updateActiveSidebarLink();
 <!-- Mermaid loads as a module, so it never blocks first paint. Diagrams change
      height when they render, so a deep link is re-scrolled once they are in. -->
 <script type="module">
-  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@12.1.0/dist/mermaid.esm.min.mjs';
   mermaid.initialize({
     startOnLoad: false,
+    layout: 'dagre',
+    look: 'classic',
     theme: 'dark',
     themeVariables: {
       darkMode: true,
