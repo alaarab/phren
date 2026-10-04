@@ -18,6 +18,7 @@ import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { removeSandboxHome } from "./test-sandbox.js";
+import { sweepTestServers } from "./bridge/tmux-test-server.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,10 +64,14 @@ function sandboxHomeDir(): void {
 
 export async function teardown(): Promise<void> {
   if (sandboxHome) removeSandboxHome(sandboxHome);
+  // Workers are gone now: any tmux test server still up was leaked by one.
+  if (process.platform !== "win32") sweepTestServers();
 }
 
 export async function setup(): Promise<void> {
   sandboxHomeDir();
+  // Private tmux servers and sockets earlier, killed runs left behind.
+  if (process.platform !== "win32") sweepTestServers();
   if (fs.existsSync(CLI_PATH)) {
     // Dist already present — skip build. This is the common path when
     // `npm test` is used (pretest already built it) or during watch mode
