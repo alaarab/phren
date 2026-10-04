@@ -79,6 +79,24 @@ describe.skipIf(process.platform === "win32")("simulator input hardening", () =>
     await expect(simulatorAct(udid, { action: "home" })).rejects.toMatchObject({ status: 409 });
     expect(await readdir(path.join(root, "native"))).toEqual([]);
   });
+  it("asks macOS for the Accessibility grant once, explains the 403, and opens the pane on request", async () => {
+    const impl = mocks.execute.getMockImplementation()!;
+    mocks.execute.mockImplementation(async (file: string, args: string[]) => {
+      if (file.endsWith("/simtap") && args[1] !== "prompt") { calls.push({ file, args }); throw { stderr: "accessibility" }; }
+      return impl(file, args);
+    });
+    const binary = path.join(root, "native/simtap");
+    for (let i = 0; i < 2; i++) {
+      await expect(simulatorAct(udid, { action: "home" })).rejects.toMatchObject({
+        status: 403, message: expect.stringContaining("switch on simtap"), details: { code: "simulator-accessibility", helper: binary },
+      });
+    }
+    const prompts = () => calls.filter(c => c.file === binary && c.args[1] === "prompt");
+    expect(prompts()).toHaveLength(1);
+    await expect(simulatorAct(udid, { action: "accessibility-settings" })).resolves.toEqual({ ok: true, trusted: true, helper: binary });
+    expect(prompts()).toHaveLength(2);
+    expect(calls.at(-1)).toEqual({ file: "/usr/bin/open", args: ["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"] });
+  });
   it("keeps all native event posts behind Simulator PID and foreground checks", async () => {
     const source = await readFile(new URL("./native/simtap.swift", import.meta.url), "utf8");
     expect(source).not.toContain("cghidEventTap");
