@@ -203,7 +203,7 @@ WebSockets on the same socket.
 | `POST /v1/code/reindex`, `/v1/code/note` | Reindex takes `project` and optional registered `store`. Note adds `symbol`, `file`, `line`, `text` and optional target session or worker harness; it saves a cited finding before optional conductor delivery. Selected read-only stores reject writes. Save and delivery results remain separate. |
 | `GET /v1/web-servers` | Discover local web servers; discovery does not constrain the SSH web relay. |
 | `GET /v1/simulators`, `/v1/simulators/apps`, `/v1/simulators/screenshot` | Booted simulators, installed apps and a selected device screenshot on macOS. |
-| `POST /v1/simulators/action` | Validated simulator lifecycle, launch, URL, tap, home/lock and text actions. |
+| `POST /v1/simulators/action` | Validated simulator lifecycle, launch, URL, tap, home/lock and text actions, and `accessibility-settings` (asks macOS for the helper's grant and opens the Accessibility pane on the Mac). |
 | `POST /v1/approvals/answer` | Answer an exact, live watched approval request. For Claude Code's `AskUserQuestion` an approval may carry `updatedInput`: the original input plus `answers` keyed by question text (a label, labels for multiSelect, any other string for a typed "Other") and an optional `response`; the hook then allows the call with that input. Rewritten questions, answers on another tool, or answers with a denial are refused (400). An opencode permission ask the plugin writes to `.runtime/approvals` is watched the same way: the Hook maps it to its pane through the recorded session binding or Herdr's opencode session id, pushes it to registered phones, and this route writes the plugin's answer file. A fan-out worker's ask (its request names the job, whose manifest must confirm the worker session) is shown on the worker's parent conversation under an action id of the parent's shape (a UUID, or 32 hex characters for an opencode parent); answering it there or from its push writes the answer the fan-out launcher waits on. A served OpenCode pane's ask (see *OpenCode panes the Hook starts*) is answered over that pane's HTTP API with `once`, `always` or `reject`: the card's "Allow for this project" and "Allow everywhere" both reply `always`, and "Allow everywhere" also writes an allow rule for the tool into `~/.config/opencode/opencode.json`. |
 | `POST /v1/push/register` | Register this authenticated phone for suspended approval delivery: its APNs `token` (sent direct with the Hook's own `apns.json` key), or a `relay` registration `{url, relayId, secret, key}` from the phren push relay, whose alerts are encrypted with the phone's `key` (ChaCha20-Poly1305) so the relay can't read them. A relay `410` drops the phone until it registers again. Stored mode 0600 on the computer. |
 | `POST /v1/push/answer` | Consume a one-time push binding with Approve or Deny. The binding outlives the 55-second hold for ten minutes: once the hold ends it answers the dialog the agent draws in its terminal. The APNs payload never carries the provider action or conversation identity. |
@@ -523,7 +523,12 @@ servers absent from each activity pass.
 
 Simulator lifecycle and discovery use `/usr/bin/xcrun`; the native helper is
 compiled with `/usr/bin/swiftc`. Touches and keys require the user to grant the
-helper Accessibility access in macOS System Settings. The helper identifies the
+helper Accessibility access in macOS System Settings. The first refusal in a
+Hook run calls `simtap - prompt` (`AXIsProcessTrustedWithOptions` with the
+prompt option), which lists the helper in Privacy & Security → Accessibility
+and shows the system dialog; the 403 carries `code: "simulator-accessibility"`
+and `helper` (the binary's path) so the phone can offer the
+`accessibility-settings` action. The helper identifies the
 Simulator application and its device window, raises that window, and checks
 before **every** event that Simulator is still the frontmost application.
 Every mouse/key event uses `postToPid(app.processIdentifier)`; no event uses the
