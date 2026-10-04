@@ -8,9 +8,16 @@ import Cocoa
 func fail(_ code: Int32, _ message: String) -> Never { FileHandle.standardError.write((message + "\n").data(using: .utf8)!); exit(code) }
 
 let args = CommandLine.arguments
-guard args.count >= 3 else { fail(2, "usage: simtap <window-title-prefix> tap <fx> <fy> | key <keycode> [cmd] [shift] | type <text> | raise") }
+guard args.count >= 3 else { fail(2, "usage: simtap <window-title-prefix> tap <fx> <fy> | key <keycode> [cmd] [shift] | type <text> | raise | prompt") }
 let prefix = args[1], command = args[2]
 
+// "prompt" asks macOS for the grant: it adds this helper to Privacy & Security
+// → Accessibility (switched off) and shows the system's own dialog, so the
+// person switches it on instead of hunting for a hidden folder behind +.
+if command == "prompt" {
+    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+    exit(AXIsProcessTrustedWithOptions(options) ? 0 : 3)
+}
 guard AXIsProcessTrusted() else { fail(3, "accessibility") }
 guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.iphonesimulator").first else { fail(4, "Simulator is not running") }
 let element = AXUIElementCreateApplication(app.processIdentifier)
