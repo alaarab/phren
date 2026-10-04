@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Phren Hook `POST /v1/files/delete` removes one file the phone uploaded outside a conversation, by the path the listing gave.
 - Resources report each computer's `hardware`: model ("MacBook Pro", "Dell XPS 13 9310"), chip or CPU, memory and cores, read once per Hook run, so the phone can say which machine each computer is.
 
 ### Fixed
