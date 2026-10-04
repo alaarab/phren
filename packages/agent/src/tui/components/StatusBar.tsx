@@ -1,4 +1,4 @@
-import { Box, Text, useStdout } from "ink";
+import { Box, Text, useWindowSize } from "ink";
 import type { Theme } from "../themes.js";
 
 export interface StatusBarProps {
@@ -38,8 +38,8 @@ function truncate(text: string, max: number): string {
 }
 
 export function StatusBar({ provider, model, project, turns, cost, contextTokens, contextLimit, reasoningEffort, theme }: StatusBarProps) {
-  const { stdout } = useStdout();
-  const width = stdout?.columns || 80;
+  const { columns } = useWindowSize();
+  const width = columns || 80;
   const leftParts = ["\u25c6 phren", provider];
   if (model) leftParts.push(model);
   if (project) leftParts.push(project);

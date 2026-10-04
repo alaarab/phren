@@ -16,8 +16,8 @@ This is a pnpm monorepo managed by [Turborepo](https://turbo.build/). `pnpm buil
 
 ### Prerequisites
 
-- Node.js 20+
-- pnpm 10+
+- Node.js 22.12+ (required by the test tooling)
+- pnpm 12.9.1 (pinned in `package.json`)
 
 ## Project Structure
 
