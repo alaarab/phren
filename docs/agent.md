@@ -24,7 +24,7 @@ phren init              # once: creates the memory store (~/.phren)
 ```
 
 `@phren/agent` is released with `@phren/cli` and carries the same version
-number. It needs Node.js 20 or later. Without it, `phren agent` prints
+number. It needs Node.js 22.19 or later. Without it, `phren agent` prints
 `phren agent needs @phren/agent: run npm install -g @phren/agent` and exits.
 
 The CLI looks for the agent in this order: the directory in

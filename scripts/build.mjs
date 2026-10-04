@@ -117,7 +117,7 @@ try {
   await esbuild({
     entryPoints: [path.join(srcRoot, "bridge/hook-main.ts")],
     outfile: path.join(tempRoot, "bridge-hook.mjs"), bundle: true,
-    platform: "node", target: "node20", format: "esm",
+    platform: "node", target: "node22", format: "esm",
     banner: { js: 'import { createRequire as __phrenCreateRequire } from "node:module"; const require = __phrenCreateRequire(import.meta.url);' },
     external: ["bufferutil", "utf-8-validate", "@phren/code"],
     define: {

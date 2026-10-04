@@ -160,7 +160,7 @@
     "zod": "^4.6.5"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.19.0"
   },
   "keywords": [
     "claude",

@@ -10,7 +10,7 @@
 <h1>Your agents.<br>Your computers.<br>One place to pick up.</h1>
 <p class="lead">Bring live conversations and Herdr terminals into phren on your iPhone or Android phone, alongside the memory, skills, and projects your agents use.</p>
 <div class="grid"><section><h3>Continue the conversation</h3><p>Claude Code, Codex, Copilot and OpenCode chat, images, live updates, and the usage each agent reports.</p></section><section><h3>Keep the context</h3><p>Use project memory and skills in chat. Read diffs, explore running web apps, and switch to the exact terminal.</p></section><section><h3>Stay on your machines</h3><p>The helper runs locally. Your phone connects through pinned SSH, with Tailscale when you’re away.</p></section></div>
-<h2>Install on each computer</h2><p>You’ll need macOS or Linux, Node 20+, Herdr, SSH, and <code>lsof</code>. Run as the same user who runs your agents.</p>
+<h2>Install on each computer</h2><p>You’ll need macOS or Linux, Node 22.19+, Herdr, SSH, and <code>lsof</code>. Run as the same user who runs your agents.</p>
 <pre><code>npx --yes @phren/cli@0.3.30 bridge install
 npx --yes @phren/cli@0.3.30 bridge doctor</code></pre>
 <p class="note">Herdr or tmux (3.0 or newer) is what lets Phren Hook find your agents, read their conversations and type into them. Your own tmux sessions show up beside Herdr's when both run. Without either, the app still gives you memory and an SSH terminal (a shell, or an agent started in a project folder) that ends when the connection drops.</p>
