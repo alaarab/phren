@@ -66,13 +66,27 @@ describe("hand-off submission confirmation", () => {
     expect(sendKeys).not.toHaveBeenCalled();
   });
 
-  it("confirms an owned Codex server's turn acknowledgement without typing", async () => {
+  it("confirms an owned Codex server's message by Codex's UserPromptSubmit, without typing", async () => {
     const owned = { threadId: target.session } as NonNullable<ReturnType<typeof codexServers.forTarget>>;
     vi.mocked(codexServers.forTarget).mockReturnValue(owned);
-    vi.spyOn(codexServers, "prompt").mockResolvedValue({ turnId: "turn-1" });
+    vi.spyOn(codexServers, "send").mockResolvedValue({ turnId: "turn-1" });
+    expectDelivery.mockResolvedValue("delivered");
     expect(await hand()).toEqual({ ok: true, delivered: true, target });
-    expect(codexServers.prompt).toHaveBeenCalledExactlyOnceWith(owned, text);
+    expect(codexServers.send).toHaveBeenCalledExactlyOnceWith(owned, text);
+    expect(expectDelivery).toHaveBeenCalledExactlyOnceWith(target, text, 4_000, expect.any(AbortSignal), deliveryId, "terminal-1");
     expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("answers an owned Codex server's message queued until its model takes it, not delivered on the turn id", async () => {
+    // Codex 0.160 merges text sent during a turn into it and runs
+    // UserPromptSubmit only at the model's next step, after the running tool call.
+    const owned = { threadId: target.session, activeTurn: "turn-9" } as NonNullable<ReturnType<typeof codexServers.forTarget>>;
+    vi.mocked(codexServers.forTarget).mockReturnValue(owned);
+    vi.spyOn(codexServers, "send").mockResolvedValue({ turnId: "turn-9" });
+    const send = () => paneRoute(context, new URL("http://phren.local/v1/prompt"), { target, text, deliveryId }, {} as never);
+    expect(await send()).toEqual({ ok: true, queued: true, state: "queued", turnId: "turn-9" });
+    expect(expectDelivery).toHaveBeenCalledExactlyOnceWith(target, text, 300, expect.any(AbortSignal), deliveryId, "terminal-1");
+    expect(deliveries.queue).toHaveBeenCalledExactlyOnceWith(deliveryId, target);
   });
 
   it("keeps a lost app-server acknowledgement uncertain without a terminal fallback", async () => {

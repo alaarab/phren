@@ -232,7 +232,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   // Codex panes on the Hook's own app-servers: their requests become
   // approval cards, and servers a previous Hook started are rejoined.
   codexServers.setSink({ request: (target, request, answer) => agentHooks.codexRequest(target, request, answer),
-    resolved: (target, requestId) => agentHooks.codexResolved(target, requestId) });
+    resolved: (target, requestId) => agentHooks.codexResolved(target, requestId),
+    threadChanged: previous => agentHooks.deliveries.threadChanged(previous) });
   await codexServers.adopt().catch(() => {});
   void scheduler?.tick().catch(() => {});
   const scheduleTimer = scheduler ? setInterval(() => { countTick("schedules"); void scheduler.tick().catch(() => {}); }, 30_000) : undefined;

@@ -367,21 +367,30 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
       return { ok: true, delivered: true, sideQuestion: await sideQuestions.ask(target, pane, text) };
     }
     if (target.source === "codex" && /^\s*\/model\s+\S/i.test(text)) throw new BridgeError(422, "Use the model picker to switch Codex models.");
-    // A Codex pane on the Hook's own app-server takes the prompt as a turn on
-    // its thread, acknowledged with the turn id; nothing is typed. A slash
+    // A Codex pane on the Hook's own app-server takes the prompt on its
+    // thread, as the TUI takes Enter: steered into a running turn, else a new
+    // turn; nothing is typed. The turn id only says Codex has it: the model
+    // reads it at its next step, possibly after a long tool call, and Codex's
+    // UserPromptSubmit says when. Until then it is queued, like typed text. A slash
     // command is the TUI's own and is still typed. An unreachable server
     // sent nothing, so the pane is typed into instead; a request that may
     // have reached it is reported uncertain and never retried.
     const owned = text.trim().startsWith("/") ? undefined : codexServers.forTarget(target);
     if (owned) {
       await typing();
+      const id = deliveryIdSchema.parse(data.deliveryId), refused = new AbortController();
+      // An idle thread starts the turn and confirms in about two seconds; a
+      // running one takes the text only after its current step.
+      const taken = agentHooks.deliveries.expect(target, text, owned.activeTurn ? 300 : 4_000, refused.signal, id, typeof pane.terminal_id === "string" ? pane.terminal_id : undefined);
       try {
-        const { turnId } = await codexServers.prompt(owned, text);
-        agentHooks.deliveries.delivered(deliveryIdSchema.parse(data.deliveryId), target, text);
-        return { ok: true, delivered: true, state: "delivered", turnId };
+        const { turnId } = await codexServers.send(owned, text);
+        if (await taken === "delivered") return { ok: true, delivered: true, state: "delivered", turnId };
+        if (id) agentHooks.deliveries.queue(id, target);
+        return { ok: true, queued: true, ...(id ? { state: "queued" } : {}), turnId };
       } catch (error) {
-        if (error instanceof AppServerRpcError) throw new BridgeError(409, `Codex refused the message: ${error.message}`);
-        if (!(error instanceof CodexServerUnavailable)) return { ok: true, deliveryUncertain: true };
+        if (error instanceof AppServerRpcError) { refused.abort(); throw new BridgeError(409, `Codex refused the message: ${error.message}`); }
+        if (error instanceof CodexServerUnavailable) refused.abort();
+        else { if (id) agentHooks.deliveries.queue(id, target); return { ok: true, deliveryUncertain: true, ...(id ? { state: "queued" } : {}) }; }
       }
     }
     const deliveryId = deliveryIdSchema.parse(data.deliveryId);
