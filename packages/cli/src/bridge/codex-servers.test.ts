@@ -125,6 +125,9 @@ describe.skipIf(process.platform === "win32")("launching a pane's Codex server",
     expect(await registry(entry)).toMatchObject({ id: entry.id, threadId: "thread-1", pane: "w1:p1" });
     const again = await servers.launch({ ...place, pane: "w1:p2" }, { cwd: root, startThread: true });
     expect(again.args).toEqual(["resume", "thread-1", "--remote", `unix://${again.entry.socket}`]);
+    // A resumed pane keeps its model for a later /new.
+    const withModel = await servers.launch({ ...place, pane: "w1:p4" }, { cwd: root, startThread: true, model: "gpt-6.1-sol", effort: "medium" });
+    expect(withModel.args).toEqual(["resume", "thread-1", "--remote", `unix://${withModel.entry.socket}`, "--model", "gpt-6.1-sol", "-c", "model_reasoning_effort=medium"]);
     expect(servers.forTarget(target)).toBe(entry);
     expect(servers.forTarget({ ...target, session: "other" })).toBeUndefined();
   });
@@ -151,6 +154,32 @@ describe.skipIf(process.platform === "win32")("launching a pane's Codex server",
     await until(() => fakes[0].sent("thread/resume").length === 1, "the join");
     expect(fakes[0].sent("thread/resume")[0].params).toEqual({ excludeTurns: true, threadId: "tui-thread" });
     expect(servers.forTarget({ ...target, session: "tui-thread" })).toBe(entry);
+  });
+
+  it("never follows the guardian reviewer or a codex exec in the pane's folder", async () => {
+    // w63 (2026-10-04): the auto-review guardian's thread, a top-level thread
+    // in the pane's folder, moved the pane's server off the TUI's conversation.
+    const changed: Target[] = [];
+    servers.setSink({ request: () => {}, resolved: () => {}, threadChanged: previous => changed.push(previous) });
+    const entry = await launched();
+    fakes[0].send({ method: "thread/started", params: { thread: { id: "guardian", environments: [{ cwd: root }], parentThreadId: null, source: { subAgent: { other: "guardian" } } } } });
+    fakes[0].send({ method: "thread/started", params: { thread: { id: "exec", environments: [{ cwd: root }], parentThreadId: null, source: "exec" } } });
+    fakes[0].send({ method: "thread/started", params: { thread: { id: "thread-2", environments: [{ cwd: root }], parentThreadId: null, source: "cli" } } });
+    await until(() => entry.threadId === "thread-2", "the TUI's /new");
+    expect(changed).toEqual([target]);
+  });
+
+  it("sends a phone message as the TUI's Enter: a steer into the running turn, else a new turn", async () => {
+    const entry = await launched();
+    expect(await servers.send(entry, "idle")).toEqual({ turnId: "turn-1" });
+    fakes[0].running = "turn-9";
+    fakes[0].send({ method: "turn/started", params: { threadId: "thread-1", turn: { id: "turn-9" } } });
+    await until(() => entry.activeTurn === "turn-9", "the running turn");
+    expect(await servers.send(entry, "mid-turn")).toEqual({ turnId: "turn-9" });
+    expect(fakes[0].sent("turn/steer").at(-1)?.params).toMatchObject({ expectedTurnId: "turn-9", input: [{ type: "text", text: "mid-turn", text_elements: [] }] });
+    // A compaction cannot be steered: the text goes as a turn instead.
+    fakes[0].running = undefined;
+    expect(await servers.send(entry, "during compaction")).toEqual({ turnId: "turn-2" });
   });
 
   it("follows the pane's TUI to a new thread (/new or /resume)", async () => {

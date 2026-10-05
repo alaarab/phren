@@ -160,6 +160,17 @@ export class PromptDeliveries {
     if (!record || record.state === "delivered") return;
     record.state = "failed"; record.reason = reason.slice(0, 500); record.settledAt = this.now(); this.save();
   }
+  /** The pane's Codex server moved to another thread (/new, /resume):
+   * input still pending on the old one stays there, out of the pane's view.
+   * Fails loudly; a late UserPromptSubmit from the old thread still settles it. */
+  threadChanged(previous: Target): void {
+    let changed = false;
+    for (const record of this.records) if ((record.state === "typed" || record.state === "queued") && this.samePane(record, previous) && record.session === previous.session) {
+      record.state = "failed"; record.settledAt = this.now(); changed = true;
+      record.reason = "The pane moved to another Codex conversation before the agent took the message.";
+    }
+    if (changed) this.save();
+  }
   /** False when `id` names another message: other words or another pane. */
   sameMessage(id: string, target: Pick<Target, "server" | "pane" | "source">, text: string): boolean {
     const record = this.byId(id);

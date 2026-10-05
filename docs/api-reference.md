@@ -468,6 +468,13 @@ still turns `delivered` if the agent takes it later. States are kept for 24
 hours in `deliveries.json` in the bridge folder (a hash of the words, never
 the text), so a Hook restart keeps them.
 
+A Codex pane on the Hook's own app-server takes the message over the
+app-server instead of typing: steered into a running turn (as the TUI's Enter
+does), else a new turn. Codex holds it until the model's next step reads it,
+which can follow a long tool call, and runs UserPromptSubmit then; the reply
+is `queued` until that hook (or `delivered` when it fires within the wait),
+with the `turnId` Codex acknowledged.
+
 A retry under the same `deliveryId` answers with the message's state now and
 `replayed: true`, typing nothing, while it is queued or delivered, including
 after a Hook restart; only a `failed` message is typed again, under the same

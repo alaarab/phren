@@ -124,6 +124,19 @@ describe("a message the agent never takes fails loudly", () => {
   });
 });
 
+describe("a message held by a Codex thread the pane has left", () => {
+  it("fails loudly, and still settles if the old thread takes it after all", async () => {
+    const store = deliveries();
+    await send(store, "left-0001", "Run the suite");
+    await send(store, "other-0002", "Elsewhere", { ...target, pane: "w6:p2" });
+    store.threadChanged(target);
+    expect(store.status("left-0001", target)).toEqual({ state: "failed", reason: "The pane moved to another Codex conversation before the agent took the message.", session: target.session });
+    expect(store.status("other-0002", { ...target, pane: "w6:p2" }).state).toBe("queued");
+    store.submitted(target, "Run the suite");
+    expect(store.status("left-0001", target).state).toBe("delivered");
+  });
+});
+
 describe("user text in transcripts", () => {
   it("reads Claude user rows and Codex user messages, not assistant rows", () => {
     expect(userTexts({ type: "user", message: { content: "Hello" } })).toEqual(["Hello"]);
