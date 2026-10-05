@@ -166,6 +166,8 @@ export async function runBridge(args: string[], version: string): Promise<number
       break;
     }
     case "ssh": await dispatch(process.env.SSH_ORIGINAL_COMMAND || ""); break;
+    // Run by <bridge>/enroll over a password SSH session, never by the forced command.
+    case "enroll-device": return (await import("./device-enroll.js")).runEnrollDevice(args.slice(1), version);
     case "install": case "update": await install(version, args.includes("--no-service"), args.includes("--force")); break;
     case "uninstall": await uninstall(); break;
     case "rollback": await rollback(); break;

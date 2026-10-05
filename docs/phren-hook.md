@@ -42,9 +42,21 @@ minutes (`--minutes` up to 30). SSH itself must be on: Remote Login on macOS,
 `sshd` on Linux.
 
 The manual route still works: in Phren, choose **Enter details** under Add
-computer, copy the SSH authorization line into that user's
-`~/.ssh/authorized_keys`, then verify the computer's SSH fingerprint. Existing
-Phren device keys are migrated with a backup by the installer.
+computer and type the address, port and user. Then choose how this phone gets in:
+
+- **Password**: after you confirm the computer's SSH fingerprint, the phone
+  signs in once with your password and runs `~/.local/share/phren/bridge/enroll`,
+  which adds the same restricted `phren-iphone` line `phren pair` adds. From
+  then on the phone connects with that key. The password is not kept unless you
+  choose to save it, and then only in the phone's Keychain. The computer must
+  allow SSH password sign-in; keyboard-interactive prompts such as one-time
+  codes are not supported.
+- **This phone's key**: copy the SSH authorization line into that user's
+  `~/.ssh/authorized_keys`, then verify the computer's SSH fingerprint.
+
+Either way, Phren Hook must already be installed (`npx -y @phren/cli@latest pair`
+or `phren bridge install`). Existing Phren device keys are migrated with a
+backup by the installer.
 
 ### Memory without GitHub
 
