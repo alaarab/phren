@@ -54,6 +54,15 @@ computer and type the address, port and user. Then choose how this phone gets in
 - **This phone's key**: copy the SSH authorization line into that user's
   `~/.ssh/authorized_keys`, then verify the computer's SSH fingerprint.
 
+A computer the phone can't reach directly can sit behind a jump host
+(**Advanced → Connect through a jump host**, like ProxyJump). The phone checks
+the jump host's SSH fingerprint, then the computer's, and reaches the computer
+by running `nc <computer> <port>` on the jump host. The jump host needs `nc` but
+not Phren Hook. Its `authorized_keys` line for the phone only runs that `nc`
+command: `restrict,command="nc <computer> <port>" ssh-ed25519 … phren-iphone-jump`.
+Sign in to the jump host with its password once to add the line, or copy it from
+the form.
+
 Either way, Phren Hook must already be installed (`npx -y @phren/cli@latest pair`
 or `phren bridge install`). Existing Phren device keys are migrated with a
 backup by the installer.
