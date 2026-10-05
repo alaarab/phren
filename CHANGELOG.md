@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.31] - 2026-10-05
+
 ### Fixed
 
 - Phone chat messages no longer get lost when the pane's conversation changes while the agent holds them. A message is now bound to its pane: the conversation there when the agent takes it receives it, where the Hook used to refuse it as "sent to a different conversation" and the agent dropped it. Queued `hand_off`s follow their pane's conversation the same way instead of ending "This pane's conversation changed".
