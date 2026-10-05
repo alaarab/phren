@@ -101,6 +101,32 @@ describe("durable Hook hand-off queue", () => {
     expect(JSON.parse(await readFile(path.join(root, "handoff-0001.json"), "utf8"))).toMatchObject({ notified: true });
     await q.tick(); expect(notify).toHaveBeenCalledTimes(1);
   });
+  it("follows its pane to the conversation that replaced the one it was queued for", async () => {
+    // A Codex pane went through four threads in six hours (w6D, 2026-10-04);
+    // each queued hand-off failed as "This pane's conversation changed".
+    let session = target.session;
+    validate.mockImplementation(async (where: Target) => { if (where.session !== session) throw new BridgeError(409, "This pane's conversation changed. Reopen the chat."); return pane; });
+    const current = vi.fn(async () => ({ session, terminal: pane.terminal_id }));
+    const q = new HandOffQueue({ root, validate, send, current });
+    await q.enqueue(message());
+    session = "22222222-2222-4222-8222-222222222222"; pane.agent_status = "idle";
+    await q.tick();
+    expect(send).toHaveBeenCalledExactlyOnceWith({ ...target, session }, "Review parser", "handoff-0001", expect.any(Function));
+    // Still found by the target it was sent to, and replayed rather than resent.
+    expect(await q.status("handoff-0001", target)).toMatchObject({ delivered: true, target: { ...target, session } });
+    expect(await q.enqueue(message())).toMatchObject({ delivered: true, replayed: true });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+  it("still fails loudly when the pane's agent was replaced by another terminal", async () => {
+    let session = target.session;
+    validate.mockImplementation(async (where: Target) => { if (where.session !== session) throw new BridgeError(409, "This pane's conversation changed. Reopen the chat."); return pane; });
+    const q = new HandOffQueue({ root, validate, send, current: async () => ({ session, terminal: "term2" }) });
+    await q.enqueue(message());
+    session = "22222222-2222-4222-8222-222222222222"; pane.agent_status = "idle";
+    await q.tick();
+    expect(await q.status("handoff-0001", target)).toMatchObject({ state: "failed", error: "This pane's conversation changed. Reopen the chat." });
+    expect(send).not.toHaveBeenCalled();
+  });
   describe("retention", () => {
     const DAY = 86_400_000;
     const names = async () => (await readdir(root)).sort();

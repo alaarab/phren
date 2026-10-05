@@ -482,53 +482,57 @@ describe.skipIf(process.platform === "win32")("the Hook recording a worker's tur
   it("confirms a picture send, which Claude submits with an [Image #N] label in place of its path", async () => {
     await post({ target, event: "SessionStart" });
     const typed = "Look at this probe picture\n\nAttached files on this computer:\n/Users/me/.local/share/phren/bridge/uploads/s/1c74-Screen Shot.png";
-    const delivery = hooks.expectDelivery(target, typed);
+    const delivery = hooks.deliveries.expect(target, typed, 1_500);
     expect(await post({ target, event: "UserPromptSubmit", prompt: "[Image #26]Look at this probe picture\nAttached files on this computer:" })).toBe("{}");
     expect(await delivery).toBe("delivered");
   });
 
-  it("settles the same words sent to two conversations by conversation, not by which was typed first", async () => {
+  it("settles the same words typed twice into a pane by conversation, then oldest first", async () => {
     await post({ target, event: "SessionStart" });
     const first = { ...target, session: "00000009-1111-4111-8111-111111111111" };
-    const toFirst = hooks.expectDelivery(first, "Same words", 1_500, undefined, "same-words-1"), toThis = hooks.expectDelivery(target, "Same words", 1_500, undefined, "same-words-2");
-    hooks.queueDelivery("same-words-1", first); hooks.queueDelivery("same-words-2", target);
+    const toFirst = hooks.deliveries.expect(first, "Same words", 1_500, undefined, "same-words-1"), toThis = hooks.deliveries.expect(target, "Same words", 1_500, undefined, "same-words-2");
+    hooks.deliveries.queue("same-words-1", first); hooks.deliveries.queue("same-words-2", target);
     expect(await post({ target, event: "UserPromptSubmit", prompt: "Same words" })).toBe("{}");
     expect(await toThis).toBe("delivered");
-    expect(hooks.deliveryState("same-words-2", target)).toBe("delivered");
-    expect(hooks.deliveryState("same-words-1", first)).toBe("queued");
-    expect(hooks.deliveryState("same-words-2", first)).toBe("unknown");
-    expect(hooks.deliveryPending(first, "Same words")).toBe(true);
+    expect(hooks.deliveries.status("same-words-2", target).state).toBe("delivered");
+    expect(hooks.deliveries.status("same-words-1", first).state).toBe("queued");
+    expect(hooks.deliveries.pending(first, "Same words")).toBe(true);
     void toFirst;
   });
 
   it("settles a phone message by its delivery id, and keeps only a hash of the typed words", async () => {
     await post({ target, event: "SessionStart" });
-    const queued = hooks.expectDelivery(target, "Run the suite again", 1, undefined, "by-id-0001");
+    const queued = hooks.deliveries.expect(target, "Run the suite again", 1, undefined, "by-id-0001");
     expect(await queued).toBe("pending");
     // Not answered yet: the phone has no reply to ask about.
-    expect(hooks.deliveryState("by-id-0001", target)).toBe("unknown");
-    hooks.queueDelivery("by-id-0001", target);
-    expect(hooks.deliveriesFor(target)).toEqual([{ deliveryId: "by-id-0001", state: "queued" }]);
-    expect([...(hooks as unknown as { deliveries: Map<string, unknown> }).deliveries.keys()]).toEqual([expect.stringMatching(/^[0-9a-f]{64}$/)]);
+    expect(hooks.deliveries.status("by-id-0001", target).state).toBe("unknown");
+    hooks.deliveries.queue("by-id-0001", target);
+    expect(hooks.deliveries.forPane(target)).toEqual([{ deliveryId: "by-id-0001", state: "queued", session: target.session }]);
+    expect(JSON.stringify((hooks.deliveries as unknown as { records: unknown[] }).records)).not.toContain("suite");
     expect(await post({ target, event: "UserPromptSubmit", prompt: "<pasted_content id=\"3\">\nRun the suite   again\n</pasted_content id=\"3\">" })).toBe("{}");
-    expect(hooks.deliveryState("by-id-0001", target)).toBe("delivered");
+    expect(hooks.deliveries.status("by-id-0001", target).state).toBe("delivered");
     // One the Hook answered uncertain still turns delivered when its hook takes it.
-    const uncertain = hooks.expectDelivery(target, "Check the logs", 1, undefined, "by-id-0002");
+    const uncertain = hooks.deliveries.expect(target, "Check the logs", 1, undefined, "by-id-0002");
     expect(await uncertain).toBe("pending");
     expect(await post({ target, event: "UserPromptSubmit", prompt: "Check the logs" })).toBe("{}");
-    expect(hooks.deliveryState("by-id-0002", target)).toBe("delivered");
+    expect(hooks.deliveries.status("by-id-0002", target).state).toBe("delivered");
     // A late queue call never moves a settled message back.
-    hooks.queueDelivery("by-id-0002", target);
-    expect(hooks.deliveryState("by-id-0002", target)).toBe("delivered");
+    hooks.deliveries.queue("by-id-0002", target);
+    expect(hooks.deliveries.status("by-id-0002", target).state).toBe("delivered");
   });
 
-  it("records no turn for a prompt it refused because it was meant for another conversation", async () => {
+  it("delivers a message queued for a conversation the pane has since replaced to the one there now", async () => {
     await post({ target, event: "SessionStart" });
+    // Sent while the pane showed an older conversation (a Codex thread change, a /clear).
     const meant = { ...target, session: "00000009-1111-4111-8111-111111111111" };
-    const delivery = hooks.expectDelivery(meant, "Only for the other one");
-    expect(await post({ target, event: "UserPromptSubmit", prompt: "Only for the other one" })).toContain("\"decision\":\"block\"");
-    expect(await delivery).toBe("blocked");
-    expect(turnPhase((await readTurn("default", "w1:p2"))!)).toEqual({ phase: "unprompted" });
+    const delivery = hooks.deliveries.expect(meant, "Only for the pane", 1, undefined, "rotated-0001");
+    expect(await delivery).toBe("pending");
+    hooks.deliveries.queue("rotated-0001", meant);
+    expect(await post({ target, event: "UserPromptSubmit", prompt: "Only for the pane" })).toBe("{}");
+    // Asked by either conversation's target: the record belongs to the pane.
+    expect(hooks.deliveries.status("rotated-0001", meant)).toEqual({ state: "delivered", session: target.session });
+    expect(hooks.deliveries.forPane(target)).toEqual([{ deliveryId: "rotated-0001", state: "delivered", session: target.session }]);
+    expect(turnPhase((await readTurn("default", "w1:p2"))!).phase).toBe("working");
   });
 });
 

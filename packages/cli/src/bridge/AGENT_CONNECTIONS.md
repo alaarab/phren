@@ -74,12 +74,14 @@ contract.
 
 A prompt may carry `deliveryId` (8 to 64 of `A-Z a-z 0-9 _ -`, a UUID works), the
 client's name for one composed message, kept on every attempt to send it (the
-`promptOnce` capability). For ten minutes the Hook types that id at most once:
-a repeat for the same pane, agent and text waits for the first attempt and
-answers with its reply (or its error) plus `"replayed": true`, typing nothing;
-a repeat after the first failed before typing runs normally; the same id with
-other text or another pane is 409. A dropped connection is then safe to retry.
-A request without an id behaves as before.
+`promptOnce` capability). The Hook types that id at most once: a repeat for
+the same pane, agent and text waits for the first attempt and answers with its
+reply (or its error) plus `"replayed": true`, typing nothing; a repeat after
+the first failed before typing runs normally; the same id with other text or
+another pane is 409. Once answered, the id's state (`prompt-deliveries.ts`,
+24 hours, kept across Hook restarts) answers a repeat with where the message
+is now; only a `failed` message is typed again under it. A dropped connection
+is then safe to retry. A request without an id behaves as before.
 
 A `startingToken` issued while a pane is proven to have no transcript remains
 valid as its first conversation becomes identified, for up to one minute after

@@ -216,10 +216,12 @@ export function transcriptStreams(ctx: StreamContext) {
             }
           }
           if (deliveryFrames) {
-            for (const { deliveryId, state } of agentHooks.deliveriesFor(target)) {
+            // Every message typed into this pane, also those sent while an
+            // earlier conversation was showing there.
+            for (const { deliveryId, state, reason } of agentHooks.deliveries.forPane(target)) {
               if (sentDelivery.get(deliveryId) === state) continue;
               sentDelivery.set(deliveryId, state);
-              send(client, { type: "delivery", ...conversation, deliveryId, state });
+              send(client, { type: "delivery", ...conversation, deliveryId, state, ...(reason ? { reason } : {}) });
             }
           }
           first = false;

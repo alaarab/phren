@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Phone chat messages no longer get lost when the pane's conversation changes while the agent holds them. A message is now bound to its pane: the conversation there when the agent takes it receives it, where the Hook used to refuse it as "sent to a different conversation" and the agent dropped it. Queued `hand_off`s follow their pane's conversation the same way instead of ending "This pane's conversation changed".
+- A `codex exec` or a Codex subagent started inside a Codex pane (fanout workers, review runs, the guardian reviewer) no longer takes over the pane: its hook callbacks used to rebind the pane and the Hook's Codex app-server to that thread, so phone sends were refused, queued hand-offs failed and dispatch returns reported the worker gone. Callbacks from those threads are ignored, and the pane's own next prompt moves a server that was taken back to its thread.
+- Delivery states are kept for 24 hours and across Hook restarts (a hash of the words, never the text), not ten minutes in memory, so a long Codex turn no longer turns a queued message `unknown`.
+
+### Added
+
+- `POST /v1/prompt` and `/v1/prompt/status` report `state` (`queued`, `delivered`, `failed` with a `reason`) and the conversation that took the message; capability `paneDeliveries`. A message the agent never takes fails loudly: its pane closed, its agent restarted, or the agent finished its turn without it. A retry under the same `deliveryId` answers with the current state and types again only a failed message.
+
 ## [0.3.30] - 2026-10-03
 
 ### Added
