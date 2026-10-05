@@ -29,6 +29,13 @@ Matching also had a collision: two identical messages in flight to two
 conversations in the same pane settled the oldest record, so the second
 conversation's own submission was refused as the wrong conversation.
 
+Since `paneDeliveries` (2026-10-05) there is no **blocked** outcome: a message
+is bound to its pane, not its conversation, and whichever conversation in the
+pane submits it receives it (`prompt-deliveries.ts`). A Codex pane's thread
+changed several times an hour while fanout `codex exec` runs inside it took it
+over, and every message refused that way was lost. Records live 24 hours, on
+disk, and a message the agent never takes fails with a reason.
+
 ## What can and cannot be matched by id
 
 Typed input carries no id. Claude's UserPromptSubmit payload has the prompt

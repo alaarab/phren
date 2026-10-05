@@ -69,6 +69,8 @@ export type CodexNextTurn = NonNullable<CodexServerEntry["nextTurn"]>;
 export interface CodexApprovalSink {
   request(target: Target, request: PendingServerRequest, answer: (result: Json) => void): void;
   resolved(target: Target, requestId: AppServerRequestId): void;
+  /** The pane moved to another thread; input still pending on `previous` will not show there. */
+  threadChanged?(previous: Target): void;
 }
 
 export interface CodexServerDeps {
@@ -269,8 +271,11 @@ export class CodexServers {
       await this.save(entry);
       this.live.set(serverId, live);
       this.lost.delete(paneKey(place.server, place.pane));
-      const args = entry.threadId ? ["resume", entry.threadId, "--remote", `unix://${socket}`]
-        : ["--remote", `unix://${socket}`, ...(options.model ? ["--model", options.model] : []), ...(options.effort ? ["-c", `model_reasoning_effort=${options.effort}`] : []), ...(options.remoteArgs ?? [])];
+      // The resumed TUI carries the model too: without it a /new in the pane
+      // fell back to config.toml's default, not the model this pane was given.
+      const model = [...(options.model ? ["--model", options.model] : []), ...(options.effort ? ["-c", `model_reasoning_effort=${options.effort}`] : [])];
+      const args = entry.threadId ? ["resume", entry.threadId, "--remote", `unix://${socket}`, ...model]
+        : ["--remote", `unix://${socket}`, ...model, ...(options.remoteArgs ?? [])];
       return { entry, args };
     } catch (error) {
       client?.close();
@@ -320,6 +325,24 @@ export class CodexServers {
     // Codex took the override with the turn; the turn's own record shows it.
     if (next && live.nextTurn === next) { delete live.nextTurn; void this.save(live).catch(() => undefined); }
     return started;
+  }
+
+  /** A phone message, sent as the pane's TUI sends Enter: steered into the
+   * running turn, else a new turn. Either way Codex holds it as input until
+   * the model's next step takes it (after the tool call that is running, which
+   * can be long), and only then runs UserPromptSubmit; on Codex 0.160 a
+   * `turn/start` during a turn is merged into it the same way. So the turn id
+   * acknowledges the hand-over, not the delivery. A held model change starts
+   * a turn, which carries it. */
+  async send(entry: CodexServerEntry, text: string): Promise<{ turnId: string }> {
+    if (!entry.threadId) throw new CodexServerUnavailable("The Codex pane has not started its thread yet.");
+    const live = this.live.get(entry.id)?.entry ?? entry, running = live.activeTurn;
+    if (running && !live.nextTurn) {
+      const client = await this.client(entry);
+      try { return await client.turnSteer({ threadId: entry.threadId, expectedTurnId: running, input: [{ type: "text", text, text_elements: [] }] }); }
+      catch (error) { if (!(error instanceof AppServerRpcError)) throw error; }
+    }
+    return await this.prompt(entry, text);
   }
 
   /** `thread/name/set` on the pane's thread: Codex's own rename, which its TUI
@@ -485,6 +508,7 @@ export class CodexServers {
     const entry = live.entry;
     if (entry.threadId === threadId) return;
     const previous = entry.threadId;
+    if (previous) this.sink?.threadChanged?.(this.target(entry));
     // The old thread's cards cannot be answered from this pane any more.
     if (previous && live.client) {
       const target = this.target(entry);
@@ -572,9 +596,13 @@ export class CodexServers {
         // thread only at launch, so a top-level thread in the pane's folder
         // is the one the pane now shows (helper threads, such as the one
         // naming the thread, have no environment; subagents have a parent).
+        // Codex's auto-review guardian runs as a subagent thread in the
+        // pane's folder with no parent id, and a `codex exec` is not the TUI's:
+        // following either moved the pane off its conversation (w63, 2026-10-04).
         const thread = object(event.params.thread);
         const here = objects(thread.environments).some(environment => typeof environment.cwd === "string" && path.resolve(environment.cwd) === path.resolve(entry.cwd));
-        if (typeof thread.id === "string" && thread.id && !thread.parentThreadId && here) this.rebind(live, thread.id);
+        const foreign = thread.source === "exec" || (typeof thread.source === "object" && thread.source !== null && "subAgent" in thread.source) || thread.ephemeral === true;
+        if (typeof thread.id === "string" && thread.id && !thread.parentThreadId && here && !foreign) this.rebind(live, thread.id);
         return;
       }
       if (!entry.threadId) return;

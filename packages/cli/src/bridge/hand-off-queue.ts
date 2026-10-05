@@ -21,6 +21,8 @@ export interface QueueOptions {
   validate: (target: Target) => Promise<Json>;
   send: (target: Target, text: string, deliveryId: string, typing: () => Promise<void>) => Promise<Json>;
   notify?: (target: Target, text: string, deliveryId: string, computer: string) => Promise<Json>;
+  /** The conversation the target's pane shows now, and its terminal. */
+  current?: (target: Target) => Promise<{ session: string; terminal: unknown } | undefined>;
   now?: () => number;
   root?: string;
 }
@@ -31,7 +33,8 @@ export const HAND_OFF_RETENTION_MS = 7 * DAY;
 /** At most this many rows stay on disk; the oldest settled rows go first. */
 export const HAND_OFF_MAX_ROWS = 512;
 const settled = (row: Row) => row.state !== "queued" && row.state !== "attempting";
-const sameTarget = (a: Target, b: Target) => ["server", "workspace", "tab", "pane", "source", "session"].every(key => a[key as keyof Target] === b[key as keyof Target]);
+/** A row follows its pane's conversation, so it is found by pane. */
+const samePane = (a: Target, b: Target) => ["server", "workspace", "tab", "pane", "source"].every(key => a[key as keyof Target] === b[key as keyof Target]);
 
 /** A durable outbox on the receiving Hook. Persist 'attempting' before input,
  * so a crash in the input/ack gap recovers as uncertain, never as a retry.
@@ -103,25 +106,40 @@ export class HandOffQueue {
       const data = queuedHandOffSchema.parse(input), id = data.deliveryId ?? randomUUID().replaceAll("-", "");
       const prior = await this.read(id);
       if (prior) {
-        if (!sameTarget(prior.target, data.target) || prior.text !== data.text) throw new BridgeError(409, "This message id was already used for a different message.");
+        if (!samePane(prior.target, data.target) || prior.text !== data.text) throw new BridgeError(409, "This message id was already used for a different message.");
         return { ...this.reply(prior), replayed: true };
       }
-      const pane = await this.options.validate(data.target);
+      const row = { ...data, deliveryId: id } as Row;
+      const pane = await this.validate(row);
       if (typeof pane.terminal_id !== "string") throw new BridgeError(409, "This agent has no terminal binding.");
       const at = new Date(this.now()).toISOString();
-      const row: Row = { ...data, deliveryId: id, terminal: pane.terminal_id, state: "queued", createdAt: at, updatedAt: at };
+      Object.assign(row, { terminal: pane.terminal_id, state: "queued", createdAt: at, updatedAt: at });
       await this.save(row);
       // Older queued messages take precedence even if this one arrives at idle.
-      const ahead = (await this.prune(await this.rows())).some(other => other.deliveryId !== id && sameTarget(other.target, row.target) && other.state === "queued");
+      const ahead = (await this.prune(await this.rows())).some(other => other.deliveryId !== id && samePane(other.target, row.target) && other.state === "queued");
       if (!ahead) await this.attempt(row, pane);
       return this.reply(row);
     });
   }
   status(id: string, target: Target): Promise<Json> {
-    return this.serial(async () => { const row = await this.read(id); if (!row || !sameTarget(row.target, target)) throw new BridgeError(404, "No hand-off with this id and target."); return this.reply(row); });
+    return this.serial(async () => { const row = await this.read(id); if (!row || !samePane(row.target, target)) throw new BridgeError(404, "No hand-off with this id and target."); return this.reply(row); });
+  }
+  /** Validates the row's target. When the pane's conversation was replaced
+   * in the same terminal (a Codex thread change, a Claude /clear), the row
+   * follows it: a queued message is for the pane, not for a conversation
+   * that is no longer there. Saved by the caller's next state change. */
+  private async validate(row: Row): Promise<Json> {
+    try { return await this.options.validate(row.target); } catch (error) {
+      if (!(error instanceof BridgeError) || error.status !== 409 || !this.options.current) throw error;
+      const now = await this.options.current(row.target).catch(() => undefined);
+      if (!now || now.session === row.target.session || (row.terminal && now.terminal !== row.terminal)) throw error;
+      row.target = { ...row.target, session: now.session };
+      return await this.options.validate(row.target);
+    }
   }
   private async attempt(row: Row, pane?: Json): Promise<void> {
-    try { pane ??= await this.options.validate(row.target); } catch (error) {
+    const session = row.target.session;
+    try { pane ??= await this.validate(row); if (row.target.session !== session) await this.save(row); } catch (error) {
       if (error instanceof BridgeError && [404, 409].includes(error.status)) { row.state = "failed"; row.error = error.message.slice(0, 500); await this.save(row); }
       return; // Offline is not gone and does not discard a queued message.
     }
@@ -156,7 +174,7 @@ export class HandOffQueue {
       if (this.now() - this.lastPrune >= DAY) rows = await this.prune(rows);
       const attempted = new Set<string>(), remote: Row[] = [];
       for (const row of rows) if (row.state === "queued") {
-        const key = JSON.stringify(row.target);
+        const key = JSON.stringify({ ...row.target, session: undefined });
         if (attempted.has(key)) continue;
         attempted.add(key); await this.attempt(row);
       }
@@ -192,9 +210,9 @@ export class HandOffQueue {
    * A new hand-off cannot be accepted between the pending check and closure. */
   whenNoPending(target: Target, close: () => Promise<Json>): Promise<Json> {
     return this.serial(async () => {
-      if ((await this.rows()).some(row => sameTarget(row.target, target) && ["queued", "attempting", "uncertain"].includes(row.state))) return { ok: true, closed: false };
+      if ((await this.rows()).some(row => samePane(row.target, target) && ["queued", "attempting", "uncertain"].includes(row.state))) return { ok: true, closed: false };
       return close();
     });
   }
-  hasPending(target: Target): Promise<boolean> { return this.serial(async () => (await this.rows()).some(row => sameTarget(row.target, target) && ["queued", "attempting", "uncertain"].includes(row.state))); }
+  hasPending(target: Target): Promise<boolean> { return this.serial(async () => (await this.rows()).some(row => samePane(row.target, target) && ["queued", "attempting", "uncertain"].includes(row.state))); }
 }

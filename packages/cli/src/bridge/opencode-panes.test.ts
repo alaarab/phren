@@ -178,7 +178,7 @@ describe("prompts", () => {
     const context = { agentHooks: new AgentHooks(), modelSwitcher: { assertAvailable() {} }, settingsSwitcher: { assertAvailable() {} }, permissionModeSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as never;
     const send = (text: string, deliveryId?: string) => paneRoute(context, new URL("http://phren.local/v1/prompt"), { target, text, ...(deliveryId ? { deliveryId } : {}) }, {} as never);
     expect(await send("hello", "delivery-served-1")).toEqual({ ok: true, delivered: true });
-    expect(await send("hello", "delivery-served-1")).toEqual({ ok: true, delivered: true, replayed: true });
+    expect(await send("hello", "delivery-served-1")).toEqual({ ok: true, delivered: true, state: "delivered", replayed: true });
     server.state.deliver = false;
     expect(await send("later")).toEqual({ ok: true, deliveryUncertain: true });
     expect(server.state.prompts.map(prompt => prompt.text)).toEqual(["hello", "later"]);

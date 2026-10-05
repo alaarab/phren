@@ -49,6 +49,9 @@ export class PromptOnce {
     }
   }
 
+  /** Lets a message the Hook found failed be typed again under its id. */
+  forget(id: string): void { this.attempts.delete(id); }
+
   private prune() {
     const cutoff = this.now() - REMEMBER_MS;
     for (const [id, attempt] of this.attempts) if (attempt.at < cutoff) this.attempts.delete(id);
