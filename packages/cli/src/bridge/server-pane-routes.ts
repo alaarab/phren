@@ -2,7 +2,8 @@ import type { ServerResponse } from "node:http";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
-import type { AgentHooks, DeliveryOutcome } from "./agent-hooks.js";
+import type { AgentHooks } from "./agent-hooks.js";
+import type { DeliveryOutcome } from "./prompt-deliveries.js";
 import type { DialogAnswer, DialogQuestion } from "./claude-question-dialog.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
 import { fanoutWorktrees } from "./fanouts.js";
@@ -139,7 +140,7 @@ const secretText = z.string().min(1).max(256).refine(t => !/[\x00-\x1f\x7f]/.tes
 async function resubmitIfIdle(agentHooks: AgentHooks, target: Target, text: string): Promise<DeliveryOutcome | "unsubmitted"> {
   const status = async () => { try { return String(findPane(await snapshot(target.server), target)?.agent_status ?? "unknown"); } catch { return "unknown"; } };
   if (await status() === "working") return "pending";
-  const late = agentHooks.awaitLateDelivery(target, text);
+  const late = agentHooks.deliveries.awaitLate(target, text);
   await terminalProvider().sendKeys(target.server, target.pane, ["enter"]);
   const outcome = await late;
   if (outcome !== "pending") return outcome;
@@ -156,7 +157,7 @@ export function followQueuedDelivery(agentHooks: AgentHooks, target: Target, ter
   const started = Date.now();
   let finishedLooks = 0;
   const look = async () => {
-    if (!agentHooks.deliveryPending(target, text) || Date.now() - started > 600_000) return;
+    if (!agentHooks.deliveries.pending(target, text) || Date.now() - started > 600_000) return;
     let pane: Json | undefined;
     try { pane = findPane(await snapshot(target.server), target); } catch { pane = undefined; }
     if (!pane) { schedule(); return; }
@@ -239,13 +240,30 @@ async function servedPrompt(target: { server: string; pane: string; source: stri
   return sent.delivered ? { ok: true, delivered: true } : { ok: true, deliveryUncertain: true };
 }
 
+/** A known message's reply by its id: `state` plus the legacy flags. */
+function deliveryReply(agentHooks: AgentHooks, id: string, target: Json, text: string): Json | undefined {
+  const parsed = targetSchema.safeParse(target);
+  if (!parsed.success) return undefined;
+  if (!agentHooks.deliveries.sameMessage(id, parsed.data, text)) throw new BridgeError(409, "This message id was already used for a different message.");
+  const status = agentHooks.deliveries.status(id, parsed.data);
+  if (status.state === "unknown") return undefined;
+  return { ok: status.state !== "failed", state: status.state, ...(status.state === "delivered" ? { delivered: true } : {}),
+    ...(status.state === "queued" ? { queued: true } : {}), ...(status.reason ? { reason: status.reason } : {}) };
+}
+
 export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse): Promise<unknown> {
   if (url.pathname !== "/v1/prompt") return paneRouteOnce(ctx, url, data, response, () => {});
   // A retried send carries its first attempt's id; the Hook answers it with
   // that attempt's reply instead of typing the message a second time.
   const id = deliveryIdSchema.parse(data.deliveryId);
-  return promptOnce.run(id, promptScope(object(data.target), String(data.text ?? "")),
-    async typing => object(await paneRouteOnce(ctx, url, data, response, typing)));
+  const scope = promptScope(object(data.target), String(data.text ?? ""));
+  // The Hook keeps each message's state by its id (prompt-deliveries.ts), so
+  // a retry, even after a Hook restart, answers with where the message is
+  // now. Only a failed one is typed again, under the same id.
+  const known = id ? deliveryReply(ctx.agentHooks, id, object(data.target), String(data.text ?? "")) : undefined;
+  if (known && known.state !== "failed") return { ...known, replayed: true };
+  if (known) promptOnce.forget(id!);
+  return promptOnce.run(id, scope, async typing => object(await paneRouteOnce(ctx, url, data, response, typing)));
 }
 
 export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse, typing: () => void | Promise<void>): Promise<unknown> {
@@ -327,6 +345,7 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     }
     const text = typeof data.text === "string" && data.text && data.text.length <= 32768 && !/[\x00-\x08\x0b-\x1f\x7f]/.test(data.text) ? data.text : undefined;
     const served = text === undefined ? undefined : await servedPrompt(target, target.session, text, typing);
+    if (served?.delivered && text) agentHooks.deliveries.delivered(deliveryIdSchema.parse(data.deliveryId), target, text);
     if (served) return served;
   }
   if (url.pathname === "/v1/prompt") {
@@ -348,27 +367,38 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
       return { ok: true, delivered: true, sideQuestion: await sideQuestions.ask(target, pane, text) };
     }
     if (target.source === "codex" && /^\s*\/model\s+\S/i.test(text)) throw new BridgeError(422, "Use the model picker to switch Codex models.");
-    // A Codex pane on the Hook's own app-server takes the prompt as a turn on
-    // its thread, acknowledged with the turn id; nothing is typed. A slash
+    // A Codex pane on the Hook's own app-server takes the prompt on its
+    // thread, as the TUI takes Enter: steered into a running turn, else a new
+    // turn; nothing is typed. The turn id only says Codex has it: the model
+    // reads it at its next step, possibly after a long tool call, and Codex's
+    // UserPromptSubmit says when. Until then it is queued, like typed text. A slash
     // command is the TUI's own and is still typed. An unreachable server
     // sent nothing, so the pane is typed into instead; a request that may
     // have reached it is reported uncertain and never retried.
     const owned = text.trim().startsWith("/") ? undefined : codexServers.forTarget(target);
     if (owned) {
       await typing();
+      const id = deliveryIdSchema.parse(data.deliveryId), refused = new AbortController();
+      // An idle thread starts the turn and confirms in about two seconds; a
+      // running one takes the text only after its current step.
+      const taken = agentHooks.deliveries.expect(target, text, owned.activeTurn ? 300 : 4_000, refused.signal, id, typeof pane.terminal_id === "string" ? pane.terminal_id : undefined);
       try {
-        const { turnId } = await codexServers.prompt(owned, text);
-        return { ok: true, delivered: true, turnId };
+        const { turnId } = await codexServers.send(owned, text);
+        if (await taken === "delivered") return { ok: true, delivered: true, state: "delivered", turnId };
+        if (id) agentHooks.deliveries.queue(id, target);
+        return { ok: true, queued: true, ...(id ? { state: "queued" } : {}), turnId };
       } catch (error) {
-        if (error instanceof AppServerRpcError) throw new BridgeError(409, `Codex refused the message: ${error.message}`);
-        if (!(error instanceof CodexServerUnavailable)) return { ok: true, deliveryUncertain: true };
+        if (error instanceof AppServerRpcError) { refused.abort(); throw new BridgeError(409, `Codex refused the message: ${error.message}`); }
+        if (error instanceof CodexServerUnavailable) refused.abort();
+        else { if (id) agentHooks.deliveries.queue(id, target); return { ok: true, deliveryUncertain: true, ...(id ? { state: "queued" } : {}) }; }
       }
     }
     const deliveryId = deliveryIdSchema.parse(data.deliveryId);
     let busy = String(pane.agent_status) === "working";
     let outcome: DeliveryOutcome | "unsubmitted" = await promptWithStartupRetry(async () => {
       const refused = new AbortController();
-      const expected = agentHooks.expectDelivery(target, text, busy && target.source !== "claude" ? 300 : 1_500, refused.signal, deliveryId);
+      const expected = agentHooks.deliveries.expect(target, text, busy && target.source !== "claude" ? 300 : 1_500, refused.signal, deliveryId,
+        typeof pane.terminal_id === "string" ? pane.terminal_id : undefined);
       await typing();
       try { await terminalProvider().prompt(target.server, target.pane, text); } catch (error) {
         if (agentNotReady(error)) refused.abort();
@@ -390,43 +420,41 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
       if (!busy) outcome = await resubmitIfIdle(agentHooks, target, text);
       else followQueuedDelivery(agentHooks, target, pane.terminal_id, text);
     }
-    const refusedHere = () => new BridgeError(409, "The conversation in this pane changed; the message was not delivered. Reopen the chat and send it again.");
-    if (outcome === "blocked") throw refusedHere();
     // A bare slash command opens the agent's own menu; the phone may
     // walk it with keys for the next half minute. The command rides
     // along so a Codex /permissions walk can find its confirmation.
     if (/^\/[a-z][a-z0-9_-]*$/i.test(text.trim())) agentHooks.menuOpened(target, text.trim());
-    if (outcome === "delivered") result = { ok: true, delivered: true };
-    else if (outcome === "unsubmitted") { result = { ok: true, deliveryUncertain: true, unsubmitted: true }; }
-    else {
-      // The agent has not submitted it yet (a busy agent queues typed
-      // input). Recheck fresh identity and never retry; a late
-      // submission to another conversation is still refused above. A bare
-      // ok acknowledges transport only, even if this is still the same
-      // conversation. Callers needing a submitted turn require delivered.
+    if (outcome === "delivered") result = { ok: true, delivered: true, state: "delivered" };
+    else if (outcome === "unsubmitted") {
+      const reason = "The agent did not take the message; it may still be in its input line.";
+      if (deliveryId) agentHooks.deliveries.fail(deliveryId, target, reason);
+      result = { ok: true, deliveryUncertain: true, unsubmitted: true, ...(deliveryId ? { state: "failed", reason } : {}) };
+    } else {
+      // The agent has not submitted it yet: a busy agent holds typed input
+      // until its turn ends. The record is bound to the pane, so whichever
+      // conversation is there then takes it, and the Hook fails it loudly if
+      // the agent closes, restarts or ends its turn without it. A failed
+      // identity probe still says deliveryUncertain to phones without
+      // `paneDeliveries`. Never retried here.
       let confirmed = false;
       try {
         const current = findPane(await snapshot(target.server), target);
         confirmed = !!current && current.terminal_id === pane.terminal_id && await paneIdentity(target.server, current, true) === target.session;
       } catch { /* No reliable post-delivery identity. */ }
-      // The hook can take it while the identity probe runs; its answer,
-      // keyed by the delivery id, beats the probe.
-      const late = deliveryId ? agentHooks.deliveryState(deliveryId, target) : "unknown";
-      if (late === "blocked") throw refusedHere();
-      if (late === "delivered") result = { ok: true, delivered: true };
+      // The hook can take it while the identity probe runs.
+      const late = deliveryId ? agentHooks.deliveries.status(deliveryId, target).state : "unknown";
+      if (late === "delivered") result = { ok: true, delivered: true, state: "delivered" };
       else {
-        // Still this conversation, in the same terminal: the agent holds the
-        // message (a busy turn queues it) and its hook has not submitted it
-        // yet. Queued, not delivered; `/v1/prompt/status` says when it lands.
-        if (confirmed && deliveryId) agentHooks.queueDelivery(deliveryId, target);
-        result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : { queued: true }) };
+        if (deliveryId) agentHooks.deliveries.queue(deliveryId, target);
+        result = { ok: true, ...(!confirmed ? { deliveryUncertain: true } : { queued: true }), ...(deliveryId ? { state: "queued" } : {}) };
       }
     }
   } else if (url.pathname === "/v1/prompt/status") {
     // Asked by the phone's own delivery id, so no text is matched again.
     const id = deliveryIdSchema.parse(data.deliveryId);
     if (!id) throw new BridgeError(400, "Name the message by its deliveryId.");
-    result = { ok: true, state: agentHooks.deliveryState(id, target) };
+    // Bound to the pane: the conversation that took it may be a newer one.
+    result = { ok: true, ...agentHooks.deliveries.status(id, target) };
   } else if (url.pathname === "/v1/side-question/dismiss") {
     result = sideQuestions.dismiss(target, z.string().uuid().parse(data.id));
   } else if (url.pathname === "/v1/model") {

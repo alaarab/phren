@@ -27,7 +27,7 @@ import { CodeReindexer, CodeRoutes } from "./code-routes.js";
 import { WorkspaceContextUsage } from "./context.js";
 import { DispatchService } from "./dispatch.js";
 import { DispatchReturns, hookWorkers } from "./dispatch-returns.js";
-import { findPane, paneChatState, recentServers, sharedSnapshot, snapshot, validateTarget } from "./herdr.js";
+import { findPane, paneChatState, paneIdentity, recentServers, sharedSnapshot, snapshot, validateTarget } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { BridgeError, bridgeRoot, objects, PROTOCOL, provider, socketPath, targetSchema } from "./protocol.js";
@@ -79,7 +79,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     : undefined;
   const locatedDirectories = new Set<string>();
   const journal = new ActivityJournal();
-  const agentHooks = new AgentHooks(undefined, modules);
+  const agentHooks = new AgentHooks(undefined, modules, path.join(bridgeRoot(), "deliveries.json"));
   // Follows what dispatched workers do and tells the dispatching agent.
   const returns: DispatchReturns | undefined = dispatches ? new DispatchReturns({
     localWorkers: hookWorkers(agentHooks),
@@ -132,6 +132,11 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const sideQuestions = new SideQuestions();
   const handOffs = dispatches ? new HandOffQueue({
     validate: target => validateTarget(target, false, true),
+    current: async target => {
+      const pane = findPane(await snapshot(target.server), target);
+      const session = pane ? await paneIdentity(target.server, pane, true) : undefined;
+      return pane && session ? { session, terminal: pane.terminal_id } : undefined;
+    },
     notify: (target, text, deliveryId, computer) => handOff({ computer, target, text, deliveryId }, { notifySender: false }),
     send: async (target, text, deliveryId, typing) => await paneRouteOnce({ agentHooks, modelSwitcher, settingsSwitcher, permissionModeSwitcher, codexQuestions, sideQuestions },
       new URL("http://phren.local/v1/prompt"), { target, text, deliveryId, hookQueued: true }, {} as never, typing) as Record<string, unknown>,
@@ -227,7 +232,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   // Codex panes on the Hook's own app-servers: their requests become
   // approval cards, and servers a previous Hook started are rejoined.
   codexServers.setSink({ request: (target, request, answer) => agentHooks.codexRequest(target, request, answer),
-    resolved: (target, requestId) => agentHooks.codexResolved(target, requestId) });
+    resolved: (target, requestId) => agentHooks.codexResolved(target, requestId),
+    threadChanged: previous => agentHooks.deliveries.threadChanged(previous) });
   await codexServers.adopt().catch(() => {});
   void scheduler?.tick().catch(() => {});
   const scheduleTimer = scheduler ? setInterval(() => { countTick("schedules"); void scheduler.tick().catch(() => {}); }, 30_000) : undefined;
@@ -256,6 +262,9 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
           const name = String(server.session), current = await sharedSnapshot(name, 4000);
           await tabActivity.observe(name, current);
           await journal.record(name, objects(current.panes));
+          // Phone messages a pane still holds: fail loudly when it closed,
+          // restarted or finished without them.
+          await agentHooks.deliveries.observe(name, objects(current.panes)).catch(() => {});
           // A Codex app-server whose pane closed is stopped; a dead one forgotten.
           await codexServers.reap(name, current).catch(() => {});
           // Approvals drawn in a terminal reach a phone with phren closed.
