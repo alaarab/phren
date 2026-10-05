@@ -63,16 +63,16 @@ it("removes only the submission guard for a definitely unwritten prompt", async 
   const hooks = new AgentHooks(), refused = new AbortController();
   const target: Target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude",
     session: "aaaaaaaa-1111-4111-8111-111111111111" };
-  const rejected = hooks.expectDelivery(target, "same prompt", 1_500, refused.signal);
+  const rejected = hooks.deliveries.expect(target, "same prompt", 1_500, refused.signal);
   const other = new AbortController();
-  const otherTarget = { ...target, session: "bbbbbbbb-1111-4111-8111-111111111111" };
-  const pending = hooks.expectDelivery(otherTarget, "same prompt", 1_500, other.signal);
+  const otherTarget = { ...target, pane: "p2", session: "bbbbbbbb-1111-4111-8111-111111111111" };
+  const pending = hooks.deliveries.expect(otherTarget, "same prompt", 1_500, other.signal);
   // A slow refusal can arrive after the short confirmation wait elapsed.
   await vi.advanceTimersByTimeAsync(1_500);
   refused.abort();
   expect(await rejected).toBe("pending");
-  expect(hooks.deliveryPending(target, "same prompt")).toBe(false);
-  expect(hooks.deliveryPending(otherTarget, "same prompt")).toBe(true);
+  expect(hooks.deliveries.pending(target, "same prompt")).toBe(false);
+  expect(hooks.deliveries.pending(otherTarget, "same prompt")).toBe(true);
   other.abort();
   await pending;
 });

@@ -18,7 +18,9 @@ const target: Target = { server: "default", workspace: "w1", tab: "w1:t1", pane:
 const text = "Review the parser";
 let pane: Json, restore: () => void, sequence = 0, deliveryId: string;
 const prompt = vi.fn(), sendKeys = vi.fn(), expectDelivery = vi.fn();
-const context = { agentHooks: { expectDelivery, queueDelivery: vi.fn(), deliveryState: vi.fn(() => "unknown") }, modelSwitcher: { assertAvailable() {} },
+const deliveries = { expect: expectDelivery, queue: vi.fn(), status: vi.fn(() => ({ state: "unknown" })), sameMessage: vi.fn(() => true),
+  delivered: vi.fn(), fail: vi.fn(), pending: vi.fn(() => false), awaitLate: vi.fn(async () => "pending") };
+const context = { agentHooks: { deliveries }, modelSwitcher: { assertAvailable() {} },
   settingsSwitcher: { assertAvailable() {} }, permissionModeSwitcher: { assertAvailable() {} }, sideQuestions: { assertAvailable() {} } } as unknown as PaneRouteContext;
 const hand = (where = target) => handOff({ target: where, text }, { deliveryId });
 
@@ -32,13 +34,14 @@ beforeEach(() => {
   vi.spyOn(codexServers, "forTarget").mockReturnValue(undefined);
   prompt.mockResolvedValue(undefined);
   expectDelivery.mockResolvedValue("pending");
-  vi.mocked(context.agentHooks.deliveryState).mockReturnValue("unknown");
+  deliveries.status.mockReturnValue({ state: "unknown" }); deliveries.sameMessage.mockReturnValue(true);
   restore = setTerminalProvider({ prompt, sendKeys } as unknown as TerminalProvider);
   vi.mocked(hookRequest).mockImplementation(async (route, body) => {
     if (route !== "/v1/hand-off") return {};
     const result = await paneRoute(context, new URL("http://phren.local/v1/prompt"), body!, {} as never) as Json;
     // The durable outbox treats a transport-only composer queue as uncertain.
-    return result.queued ? { ...result, queued: false, deliveryUncertain: true } : result;
+    const { state: _, ...reply } = result;
+    return reply.queued ? { ...reply, queued: false, deliveryUncertain: true } : reply;
   });
 });
 afterEach(() => { restore(); vi.restoreAllMocks(); vi.resetAllMocks(); });
@@ -52,7 +55,7 @@ describe("hand-off submission confirmation", () => {
     expectDelivery.mockResolvedValue("delivered");
     expect(await hand()).toMatchObject({ delivered: false, deliveryUncertain: true });
     expect(prompt).toHaveBeenCalledExactlyOnceWith(target.server, target.pane, text);
-    expect(expectDelivery).toHaveBeenCalledExactlyOnceWith(target, text, status === "working" ? 300 : 1_500, expect.any(AbortSignal), deliveryId);
+    expect(expectDelivery).toHaveBeenCalledExactlyOnceWith(target, text, status === "working" ? 300 : 1_500, expect.any(AbortSignal), deliveryId, "terminal-1");
     expect(sendKeys).not.toHaveBeenCalled();
   });
 
@@ -109,20 +112,49 @@ describe("a queued message its own hook takes during the identity probe", () => 
   const send = () => paneRoute(context, new URL("http://phren.local/v1/prompt"), { target, text, deliveryId }, {} as never);
 
   it("is answered delivered, by its delivery id", async () => {
-    vi.mocked(context.agentHooks.deliveryState).mockReturnValue("delivered");
-    expect(await send()).toEqual({ ok: true, delivered: true });
-    expect(context.agentHooks.deliveryState).toHaveBeenCalledWith(deliveryId, target);
-    expect(context.agentHooks.queueDelivery).not.toHaveBeenCalled();
-  });
-
-  it("is refused when another conversation in the pane took it", async () => {
-    vi.mocked(context.agentHooks.deliveryState).mockReturnValue("blocked");
-    await expect(send()).rejects.toMatchObject({ status: 409 });
+    // Unknown when the send arrives; taken while the Hook probes the pane.
+    deliveries.status.mockReturnValueOnce({ state: "unknown" }).mockReturnValue({ state: "delivered" });
+    expect(await send()).toEqual({ ok: true, delivered: true, state: "delivered" });
+    expect(deliveries.status).toHaveBeenCalledWith(deliveryId, target);
+    expect(deliveries.queue).not.toHaveBeenCalled();
   });
 
   it("is otherwise queued under its id", async () => {
-    expect(await send()).toEqual({ ok: true, queued: true });
-    expect(context.agentHooks.queueDelivery).toHaveBeenCalledExactlyOnceWith(deliveryId, target);
+    expect(await send()).toEqual({ ok: true, queued: true, state: "queued" });
+    expect(deliveries.queue).toHaveBeenCalledExactlyOnceWith(deliveryId, target);
+  });
+
+  it("is still queued, and marked uncertain for older phones, when the identity probe fails", async () => {
+    vi.mocked(paneIdentity).mockResolvedValue(undefined);
+    expect(await send()).toEqual({ ok: true, deliveryUncertain: true, state: "queued" });
+    expect(deliveries.queue).toHaveBeenCalledExactlyOnceWith(deliveryId, target);
+  });
+});
+
+describe("a retried phone message, by its delivery id", () => {
+  const send = (extra: Json = {}) => paneRoute(context, new URL("http://phren.local/v1/prompt"), { target, text, deliveryId, ...extra }, {} as never);
+
+  it("answers a queued or delivered one with its state now and types nothing, even after a Hook restart", async () => {
+    deliveries.status.mockReturnValue({ state: "queued" });
+    expect(await send()).toEqual({ ok: true, queued: true, state: "queued", replayed: true });
+    deliveries.status.mockReturnValue({ state: "delivered" });
+    expect(await send()).toEqual({ ok: true, delivered: true, state: "delivered", replayed: true });
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("types a failed one again under the same id", async () => {
+    expect(await send()).toEqual({ ok: true, queued: true, state: "queued" });
+    deliveries.status.mockReturnValueOnce({ state: "failed", reason: "The agent finished its turn without taking the message." });
+    expect(await send()).toEqual({ ok: true, queued: true, state: "queued" });
+    expect(prompt).toHaveBeenCalledTimes(2);
+    expect(expectDelivery.mock.calls.map(call => call[4])).toEqual([deliveryId, deliveryId]);
+  });
+
+  it("refuses the id for other words", async () => {
+    deliveries.status.mockReturnValue({ state: "queued" });
+    deliveries.sameMessage.mockReturnValue(false);
+    await expect(send({ text: "Something else" })).rejects.toMatchObject({ status: 409 });
+    expect(prompt).not.toHaveBeenCalled();
   });
 });
 

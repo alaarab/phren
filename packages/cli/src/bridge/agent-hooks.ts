@@ -8,17 +8,18 @@ import { request, createServer, type Server, type ServerResponse } from "node:ht
 import { mkdir, readFile, chmod, unlink, lstat } from "node:fs/promises";
 import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { findPane, knownPanes, paneIdentity, paneForCodexSession, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
 import { hookOutput, TOOL_HOOK_BUDGET_MS } from "./hook-fast.js";
 import { underCodexDaemon } from "./codex-daemon.js";
 import { codexAutoReview } from "./codex-review-mode.js";
+import { codexForeignThread } from "./codex-thread-origin.js";
 import { terminalPaneFromEnv, terminalProvider } from "./terminal.js";
 import { readPaneText } from "./pane-text.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
-import { phrenStoreRoot, unwrapPastedContent } from "./transcripts.js";
+import { phrenStoreRoot } from "./transcripts.js";
 import { archiveFinishedFanouts, blockedFanouts, fanoutAsking } from "./fanouts.js";
 import { ensureGrant, findGrant } from "./grants.js";
 import { ApprovalPushService } from "./push.js";
@@ -34,6 +35,7 @@ import { ApprovalWatchLeases, bindingPath, localSocket, PushBindingStore } from 
 import { notePaneTranscript, paneAccountKey } from "./pane-accounts.js";
 import { eventStatus, notePaneStatus, settleBlockedPane } from "./pane-status.js";
 import { noteTurn as recordTurn } from "./turn-records.js";
+import { PromptDeliveries } from "./prompt-deliveries.js";
 import { countTick } from "./metrics.js";
 import { briefId, briefIdInPrompt, briefLabel, DISPATCH_ID_ENV, recordBriefArrival } from "./launch-brief.js";
 import { SudoBroker } from "./sudo.js";
@@ -175,27 +177,6 @@ export function opencodePermissionReply(decision: unknown): "once" | "always" | 
   return undefined;
 }
 
-export type DeliveryOutcome = "delivered" | "blocked" | "pending";
-interface Delivery { source: Provider; session: string; id?: string; settle: (outcome: DeliveryOutcome) => void; timer: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
-/** A phone message typed under its delivery id, so the phone can ask what
- * became of it by that id. `typed` until the Hook answers it queued; the
- * typed record's own settlement moves it on by id, never by its words. */
-interface TrackedDelivery { source: Provider; session: string; state: "typed" | "queued" | "delivered" | "blocked"; at: number }
-export type TrackedState = Exclude<TrackedDelivery["state"], "typed"> | "unknown";
-/** As long as a typed prompt's own record guards it (`expectDelivery`). */
-const TRACK_MS = 600_000;
-
-/** What the agent hands its UserPromptSubmit hook is the terminal's pasted
- * form of what Phren typed; compare the words, not the wrapping. Claude Code
- * also takes each attached picture's path line out of the text and puts an
- * "[Image #N]" label at the front, so neither side keeps picture paths or
- * labels. */
-function promptKey(text: string): string {
-  return unwrapPastedContent(text).split("\n").filter(line => !PICTURE_PATH_LINE.test(line)).join("\n")
-    .replace(/\[Image #\d+\]/g, " ").replace(/\s+/g, " ").trim();
-}
-const PICTURE_PATH_LINE = /^\s*\/.*\.(?:png|jpe?g|gif|webp)\s*$/i;
-const promptHash = (text: string) => createHash("sha256").update(promptKey(text)).digest("hex");
 
 /** This socket is deliberately separate from the phone's HTTP pipe. Only local
  * agent callbacks can register identities or create an approval request. */
@@ -209,14 +190,9 @@ function projectField(cwd: string | undefined): { project?: string } {
 export class AgentHooks {
   readonly changes = new ToolChanges();
   private pending = new Map<string, Pending>();
-  /** Prompts Phren has typed into a pane, by a hash of their words, until the agent that
-   * actually receives one reports in through UserPromptSubmit. Herdr writes
-   * to a pane, not a conversation; the receiving agent's hook is the only
-   * party that knows which conversation consumed the text, so it is the one
-   * that can refuse it when that is not the conversation the phone meant. */
-  private deliveries = new Map<string, Delivery[]>();
-  /** Phone messages by delivery id, until TRACK_MS: see `queueDelivery`. */
-  private tracked = new Map<string, TrackedDelivery>();
+  /** Phone messages Phren typed into a pane, until a conversation there
+   * submits them through UserPromptSubmit: see prompt-deliveries.ts. */
+  readonly deliveries: PromptDeliveries;
   /** The permission request a conversation is drawing in its own terminal
    * because nobody was there to hold it: what the phone shows above its
    * answer keys until the pane stops waiting. `dialog` marks a choice parsed
@@ -279,7 +255,8 @@ export class AgentHooks {
   private computerName = hostname().replace(/\.local$/i, "").split(".")[0] || "Computer";
   /** sudo -A requests from askpass, answered from the phone (sudo.ts). */
   readonly sudo: SudoBroker;
-  constructor(readonly push = new ApprovalPushService(), private modules?: ModuleSnapshot) {
+  constructor(readonly push = new ApprovalPushService(), private modules?: ModuleSnapshot, deliveriesFile?: string) {
+    this.deliveries = new PromptDeliveries(deliveriesFile);
     void computerDisplayName().then(name => { this.computerName = name; }, () => {});
     this.sudo = new SudoBroker({ computer: () => this.computerName, push, label: briefLabel,
       describe: async place => {
@@ -578,101 +555,6 @@ export class AgentHooks {
     const key = JSON.stringify(target);
     this.watching.set(key, (this.watching.get(key) || 0) + 1);
     return () => { const n = (this.watching.get(key) || 1) - 1; if (n) this.watching.set(key, n); else this.watching.delete(key); };
-  }
-  /** Register a prompt about to be typed into `target`'s pane. The returned
-   * promise settles "delivered" once that conversation's own hook submits the
-   * text, "blocked" if another conversation in the pane tried to, or "pending"
-   * after `waitMs`: a busy agent queues typed input and submits it only when
-   * its turn ends, so the record outlives the wait (up to ten minutes) and a
-   * late submission to the wrong conversation is still refused. A phone
-   * message's `id` follows the record, so its outcome lands on that id. */
-  expectDelivery(target: Target, text: string, waitMs = 1_500, signal?: AbortSignal, id?: string): Promise<DeliveryOutcome> {
-    if (!promptKey(text) || signal?.aborted) return Promise.resolve("pending");
-    const key = promptHash(text);
-    if (id) this.track(id, target, "typed");
-    return new Promise<DeliveryOutcome>(resolve => {
-      let settled = false;
-      const list = this.deliveries.get(key) ?? [];
-      const remove = () => {
-        signal?.removeEventListener("abort", cancel);
-        const current = this.deliveries.get(key) ?? []; const index = current.indexOf(delivery);
-        if (index >= 0) current.splice(index, 1);
-        if (!current.length) this.deliveries.delete(key);
-      };
-      const settle = (outcome: DeliveryOutcome) => {
-        if (!settled) { settled = true; resolve(outcome); } else if (outcome !== "pending") delivery.late?.(outcome);
-        if (outcome !== "pending") { clearTimeout(delivery.timer); remove(); this.settleTracked(delivery, outcome); }
-      };
-      const delivery: Delivery = { source: target.source, session: target.session, ...(id ? { id } : {}), settle, timer: setTimeout(() => settle("pending"), waitMs) };
-      // Only cancel after a provider explicitly refused before writing. A
-      // possibly delivered paste keeps its guard against the wrong session.
-      const cancel = () => { clearTimeout(delivery.timer); settle("pending"); remove(); };
-      signal?.addEventListener("abort", cancel, { once: true });
-      delivery.timer.unref?.();
-      const expiry = setTimeout(remove, 600_000); expiry.unref?.();
-      list.push(delivery); this.deliveries.set(key, list);
-      while (this.deliveries.size > 256) this.deliveries.delete(this.deliveries.keys().next().value!);
-    });
-  }
-  /** A prompt Phren typed into `target` that its conversation has not submitted yet. */
-  deliveryPending(target: Target, text: string): boolean {
-    return !!this.deliveries.get(promptHash(text))?.some(entry => entry.source === target.source && entry.session === target.session);
-  }
-  /** Wait again for a delivery `expectDelivery` already reported pending,
-   * after the Hook pressed Enter a second time. */
-  awaitLateDelivery(target: Target, text: string, waitMs = 2_500): Promise<DeliveryOutcome> {
-    const delivery = this.deliveries.get(promptHash(text))?.find(entry => entry.source === target.source && entry.session === target.session);
-    if (!delivery) return Promise.resolve("pending");
-    return new Promise<DeliveryOutcome>(resolve => {
-      const timer = setTimeout(() => { delivery.late = undefined; resolve("pending"); }, waitMs);
-      timer.unref?.();
-      delivery.late = outcome => { clearTimeout(timer); delivery.late = undefined; resolve(outcome); };
-    });
-  }
-  private track(id: string, target: Target, state: TrackedDelivery["state"]): void {
-    const now = Date.now();
-    for (const [key, entry] of this.tracked) if (now - entry.at > TRACK_MS) this.tracked.delete(key);
-    while (this.tracked.size >= 512) this.tracked.delete(this.tracked.keys().next().value!);
-    this.tracked.set(id, { source: target.source, session: target.session, state, at: now });
-  }
-  /** The Hook answered the phone message `id` as queued: its typed record
-   * still waits for the agent's hook, which settles it by this id. */
-  queueDelivery(id: string, target: Target): void {
-    const entry = this.tracked.get(id);
-    if (entry?.state === "typed" && entry.source === target.source && entry.session === target.session) entry.state = "queued";
-  }
-  /** What became of the phone message `id` sent to `target`'s conversation:
-   * queued until the agent submits it, then delivered, or blocked when
-   * another conversation in the pane took it. Unknown while the Hook has not
-   * answered it, for another conversation, or older than TRACK_MS. A
-   * message answered uncertain still turns delivered once its hook takes it. */
-  deliveryState(id: string, target: Target): TrackedState {
-    const entry = this.tracked.get(id);
-    return entry && entry.state !== "typed" && entry.source === target.source && entry.session === target.session && Date.now() - entry.at <= TRACK_MS ? entry.state : "unknown";
-  }
-  /** Every known phone message to `target`'s conversation, for its stream. */
-  deliveriesFor(target: Target): { deliveryId: string; state: TrackedState }[] {
-    return [...this.tracked.keys()].map(deliveryId => ({ deliveryId, state: this.deliveryState(deliveryId, target) })).filter(item => item.state !== "unknown");
-  }
-  private settleTracked(delivery: Delivery, outcome: "delivered" | "blocked"): void {
-    const entry = delivery.id ? this.tracked.get(delivery.id) : undefined;
-    if (entry && entry.source === delivery.source && entry.session === delivery.session) { entry.state = outcome; entry.at = Date.now(); }
-  }
-  /** The conversation `target` just submitted `prompt`. Nothing Phren typed
-   * matches: a locally typed prompt, always allowed. Otherwise the oldest
-   * matching delivery decides: its own conversation consumes it; any other
-   * conversation is told to drop it, so the text is never spoken to the
-   * wrong agent and the phone can safely send it again. */
-  private submitted(target: Target, prompt: string): Json {
-    const list = this.deliveries.get(promptHash(prompt));
-    // The same words sent to two conversations at once: each one's own
-    // submission settles its own record, not whichever was typed first.
-    const delivery = list?.find(entry => entry.source === target.source && entry.session === target.session) ?? list?.[0];
-    if (!delivery) return {};
-    const own = delivery.source === target.source && delivery.session === target.session;
-    if (own) { delivery.settle("delivered"); return {}; }
-    delivery.settle("blocked");
-    return { decision: "block", reason: "Phren sent this message to a different conversation in this pane; it was not delivered here. Send it again from the phone." };
   }
   /** The conversation's own turn events, for dispatch returns (turn-records.ts).
    * A failed write never fails the agent's callback. */
@@ -1464,16 +1346,18 @@ export class AgentHooks {
         }
         // `/new` or `/resume` in a pane on the Hook's own Codex server: follow
         // the TUI to its new thread. Only a callback trusted to name its pane.
-        if (body.event === "SessionStart" && target.source === "codex" && !daemon) codexServers.follow(target.server, target.pane, target.session);
+        // A prompt or a turn's end also moves a server a nested `codex exec`
+        // had taken (before codex-thread-origin.ts) back to the TUI's thread.
+        if (["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event)) && target.source === "codex" && !daemon) codexServers.follow(target.server, target.pane, target.session);
         if (body.event === "PreCompact") { this.startCompacting(target); res.end("{}"); return; }
         if (["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event))) this.stopCompacting(target);
         if (body.event === "UserPromptSubmit") {
-          const answer = typeof body.prompt === "string" ? this.submitted(target, body.prompt.slice(0, 65_536)) : {};
-          // A prompt refused here never starts a turn in this conversation.
-          if (answer.decision !== "block") await this.recordTurn(target, pane, body, dispatch);
-          const context = answer.decision === "block" || this.modules?.has("conductor") === false ? undefined : await conductorContext(target, s).catch(() => undefined);
-          res.end(JSON.stringify({ ...answer, ...(context ? { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } } : {}) })); return;
+          if (typeof body.prompt === "string") this.deliveries.submitted(target, body.prompt.slice(0, 65_536));
+          await this.recordTurn(target, pane, body, dispatch);
+          const context = this.modules?.has("conductor") === false ? undefined : await conductorContext(target, s).catch(() => undefined);
+          res.end(JSON.stringify(context ? { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context } } : {})); return;
         }
+        if (body.event === "Stop") this.deliveries.stopped(target);
         if (body.event === "SessionStart" || body.event === "Stop") await this.recordTurn(target, pane, body, dispatch);
         if (body.event === "SessionStart") {
           const context = this.modules?.has("conductor") === false ? undefined : await conductorContext(target, s).catch(() => undefined);
@@ -1627,6 +1511,8 @@ export async function agentHook(source: Provider, elapsed: () => number = () => 
   for await (const chunk of process.stdin) { input += chunk.toString(); if (input.length > 1_048_576) return; }
   const value = object(JSON.parse(input));
   if (value.agent_id || value.agentId || value.isSidechain || value.is_sidechain) return;
+  // A `codex exec` or a subagent inside a Codex pane is not the pane's conversation.
+  if (source === "codex" && await codexForeignThread(value.transcript_path).catch(() => false)) return;
   const target = targetSchema.parse({ server: place.server, workspace: place.workspace, tab: place.tab,
     pane: place.pane, source, session: value.session_id || value.sessionId });
   const event = String(value.hook_event_name || "SessionStart");

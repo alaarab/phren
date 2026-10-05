@@ -448,23 +448,39 @@ a narrow pane cut short with `…` are never sent. Codex, OpenCode and Copilot
 have no such prediction and never send it.
 
 `POST /v1/prompt { target, text, deliveryId? }` answers with how far the
-message got: `{ ok, delivered: true }` once the conversation's own
-UserPromptSubmit hook took it; `{ ok, queued: true }` when the agent holds it
-unsubmitted (a busy turn queues typed input) and the pane still shows the same
-conversation in the same terminal; `{ ok, deliveryUncertain: true }` when that
-could not be checked (`unsubmitted: true` when an idle agent never took it).
-409 means another conversation in the pane took it and refused it, so nothing
-was delivered. A retry under the same `deliveryId` types nothing and returns
-the first reply with `replayed: true`. `POST /v1/prompt/status { target,
-deliveryId }` (capability `promptStatus`) returns `{ ok, state }`, where
-`state` is `queued`, `delivered`, `blocked` (another conversation in the pane
-took it) or `unknown` (not tracked, another conversation, or older than ten
-minutes), for a message sent with a `deliveryId`. The id follows the typed text
-until the conversation's hook submits it, so a message answered
-`deliveryUncertain` still turns `delivered` once the agent takes it. A
-`/v1/transcripts` stream opened with `deliveries=1` (capability
+message got, as `state` plus the older flags: `{ ok, delivered: true, state:
+"delivered" }` once a conversation in the pane submitted it through its
+UserPromptSubmit hook; `{ ok, queued: true, state: "queued" }` when the agent
+holds it unsubmitted (a busy turn queues typed input);
+`{ ok, deliveryUncertain: true, state: "queued" }` when the pane's identity
+could not be rechecked; `{ ok, deliveryUncertain: true, unsubmitted: true,
+state: "failed", reason }` when an idle agent never took it.
+
+A message is bound to its pane (server, pane and agent kind), not to the
+conversation it was sent to (capability `paneDeliveries`). If the pane's
+conversation changes while the agent holds the text (a Codex thread change, a
+Claude `/clear` or `/resume`), the conversation there when the agent takes it
+is where it went; the Hook never refuses it. One the agent never takes fails
+loudly with a `reason`: its pane closed, its agent restarted in another
+terminal, or the agent ended its turn and stayed idle 30 seconds without it
+(unless the conversation's transcript shows it arrived). A failed message
+still turns `delivered` if the agent takes it later. States are kept for 24
+hours in `deliveries.json` in the bridge folder (a hash of the words, never
+the text), so a Hook restart keeps them.
+
+A retry under the same `deliveryId` answers with the message's state now and
+`replayed: true`, typing nothing, while it is queued or delivered, including
+after a Hook restart; only a `failed` message is typed again, under the same
+id. The same id with other words or another pane is 409. `POST
+/v1/prompt/status { target, deliveryId }` (capability `promptStatus`) returns
+`{ ok, state, reason?, session? }`, where `state` is `queued`, `delivered`,
+`failed` or `unknown` (not tracked, another pane, or older than 24 hours) and
+`session` is the conversation that took or holds it. Older Hooks also answered
+`blocked`. A `/v1/transcripts` stream opened with `deliveries=1` (capability
 `deliveryFrames`) pushes `{ type: "delivery", source, session, deliveryId,
-state }` for that conversation's messages whenever one's state changes.
+state, reason? }` for every message typed into that conversation's pane,
+including those sent while an earlier conversation showed there, whenever
+one's state changes.
 
 A working pane returns 409 before any model command is typed. `/v1/prompt`
 also refuses every slash command while working, except Claude Code's
