@@ -189,9 +189,10 @@ No extra request per iPhone row is needed.
 From a project, the iPhone can open a new session on a computer:
 A general agent can start without a project or a folder. With
 `agentFolder: true` on `POST /v1/workspaces/launch`, the Hook creates a private
-directory under `<PHREN_PATH>/agents/<UTC-date>-<label-slug>-<unique-suffix>`.
+directory under `<PHREN_PATH>/.runtime/agents/<UTC-date>-<label-slug>-<unique-suffix>`.
 It uses this computer's configured Phren directory, the same root used for a
 conductor launch, and returns the actual `cwd` with the pane identifiers.
+The runtime directory stays local and is excluded from project discovery and store sync.
 Separate launches get separate directories; retries with the same `launchId`
 reuse the first pane and directory. This also works with `kind: "phren",
 mode: "chat"`. Do not combine `agentFolder` with a project, a nonempty `cwd`,

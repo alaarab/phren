@@ -2791,7 +2791,7 @@ schedules:
       const request = { label: "No project / ../ chat", kind: "claude", agentFolder: true, launchId, permissionMode: "auto-edits" };
       const first = await api("/v1/workspaces/launch?mux=herdr:default", request);
       expect(first.status, JSON.stringify(first.data)).toBe(200);
-      const agents = path.join(realpathSync.native(path.join(root, ".phren")), "agents");
+      const agents = path.join(realpathSync.native(path.join(root, ".phren")), ".runtime", "agents");
       expect(path.dirname(first.data.cwd)).toBe(agents);
       expect(path.basename(first.data.cwd)).toMatch(/^\d{4}-\d{2}-\d{2}-no-project-chat-[a-zA-Z0-9]+$/);
       expect((await stat(first.data.cwd)).isDirectory()).toBe(true);
@@ -2805,6 +2805,17 @@ schedules:
       expect(path.dirname(quick.data.cwd)).toBe(agents);
       expect(quick.data.cwd).not.toBe(first.data.cwd);
       expect(await readdir(agents)).toHaveLength(2);
+      // Scratch files stay local: never become a memory project or sync in git add -A.
+      const store = path.join(root, ".phren");
+      const { getProjectDirs } = await import("../phren-paths.js");
+      expect(getProjectDirs(store).map(dir => path.basename(dir))).not.toContain("agents");
+      const { STORE_SECRET_GITIGNORE_LINES } = await import("../init/store-gitignore.js");
+      await writeFile(path.join(store, ".gitignore"), STORE_SECRET_GITIGNORE_LINES.join("\n") + "\n");
+      await execFileAsync("git", ["-C", store, "init", "-q"]);
+      await writeFile(path.join(first.data.cwd, "scratch.txt"), "private scratch work\n");
+      await execFileAsync("git", ["-C", store, "add", "-A"]);
+      const indexed = await execFileAsync("git", ["-C", store, "ls-files"]);
+      expect(indexed.stdout).not.toContain("scratch.txt");
       const health = await api("/v1/health");
       expect(health.data.capabilities).toMatchObject({ agentFolder: true, launchPermissionMode: true });
     });
@@ -2816,7 +2827,7 @@ schedules:
         expect(refused.status, JSON.stringify(refused.data)).toBe(400);
       }
       expect(commands.some(c => c.method === "workspace.create")).toBe(false);
-      expect(await readdir(path.join(root, ".phren", "agents")).catch(() => [])).toEqual([]);
+      expect(await readdir(path.join(root, ".phren", ".runtime", "agents")).catch(() => [])).toEqual([]);
     });
 
     it.each([
