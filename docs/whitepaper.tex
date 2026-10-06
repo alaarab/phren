@@ -1,0 +1,424 @@
+\documentclass[10pt]{article}
+
+\usepackage[margin=0.68in, top=0.72in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage[table]{xcolor}
+\usepackage{hyperref}
+\usepackage{titlesec}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{pgfplots}
+\usepackage{xurl}
+\pgfplotsset{compat=1.18}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric,arrows.meta,positioning,fit,backgrounds,calc}
+\usepackage{multicol}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!45!black,
+  urlcolor=blue!45!black,
+  citecolor=blue!45!black,
+  pdftitle={Phren: A Git-Backed Project Memory System},
+  pdfauthor={Ala Arab}
+}
+
+\setlength{\columnsep}{0.24in}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.18em}
+\setlength{\emergencystretch}{1.25em}
+\Urlmuskip=0mu plus 1mu
+\linespread{0.98}
+\setlist{itemsep=2pt,topsep=2pt,leftmargin=1.2em}
+\captionsetup{justification=raggedright,singlelinecheck=false}
+\titlespacing*{\section}{0pt}{0.9ex plus .2ex minus .2ex}{0.5ex}
+\titlespacing*{\subsection}{0pt}{0.7ex plus .2ex minus .2ex}{0.4ex}
+\titlespacing*{\subsubsection}{0pt}{0.6ex plus .2ex minus .2ex}{0.3ex}
+
+\renewenvironment{abstract}{%
+  \begin{center}\textbf{Abstract}\end{center}\small\noindent%
+}{\par\medskip}
+
+\definecolor{scoreHi}{HTML}{CFEAD6}
+\definecolor{scoreMed}{HTML}{F5E8C8}
+\definecolor{scoreLow}{HTML}{F6CDCD}
+\definecolor{scoreLkin}{HTML}{F6CDCD}
+\definecolor{scoreLklo}{HTML}{CFEAD6}
+\definecolor{scoreDark}{HTML}{134E4A}
+
+\title{\vspace{-0.8em}Phren: A Git-Backed Project Memory System\\[2pt]
+\large Architecture, Governance, Concurrent Use, and Comparative Assessment}
+\author{Ala Arab}
+\date{March 12, 2026}
+
+\begin{document}
+
+% ─── HEADER: full-width title + abstract + criteria ──────────────────────────
+\maketitle\vspace{-1em}
+
+\begin{abstract}
+\noindent Persistent project memory becomes operationally important once work spans sessions, tools, and machines. This paper examines Phren as a markdown-native, git-backed project memory system with hook-driven capture, trust-scored retrieval, and configurable governance. The contribution is a systems-design case study and operator-workflow argument rather than a claim to invent long-term memory, progressive disclosure, or hybrid retrieval as general ideas. In Phren's default path, memory compounds as repo state while retrieval stays bounded through a local SQLite FTS5 index with no network hop, no required hosted service, and a more predictable latency profile for everyday code-memory lookup. Comparisons to Supermemory, claude-mem, and GitHub Copilot Memory are architecture-level unless explicitly labeled as measured Phren implementation notes.
+\end{abstract}
+
+\vspace{0.1em}
+\section{Evaluation Frame}
+\label{sec:criteria}
+Agent memory systems are often compared on retrieval quality alone, even though production fit also depends on governance, portability, and operator workflow. This paper uses eight dimensions:
+\begin{multicols}{2}
+\raggedright
+\begin{enumerate}
+  \item \textbf{Representation}: where memory lives and who owns it.
+  \item \textbf{Capture path}: how memory is created (hooks/API/workers).
+  \item \textbf{Retrieval path}: ranking, trust, and capped injection.
+  \item \textbf{Governance}: forgetting, validation, review, and policy controls.
+  \item \textbf{Economics}: token overhead + human maintenance burden.
+  \item \textbf{Portability}: migration risk and lock-in profile.
+  \item \textbf{Multi-agent readiness}: concurrent sessions and shared state.
+  \item \textbf{Operability}: CLI, shell, direct management without the model in the loop.
+\end{enumerate}
+\end{multicols}
+
+Phren should be read as a system in the same design space as prior memory work such as MemoryBank, MemGPT, claude-mem, Supermemory, Mem0, and Copilot Memory. The goal is not to claim invention of persistent memory itself, but to evaluate a particular combination of storage ownership, governance, and operator workflow.
+
+% ─── ARCHITECTURE: full-width intro + inline diagram, then two-column body ────
+\vspace{0.2em}
+\section{Phren Architecture}
+\label{sec:arch}
+
+The system has three primary subsystems: \textbf{Storage \& Retrieval}, \textbf{Lifecycle Automation}, and \textbf{Governance}. Phren now supports two install modes rooted by \texttt{phren.root.yaml}: \textbf{shared} (\texttt{\textasciitilde/.phren/}) and \textbf{project-local} (\texttt{<repo>/.phren/}). In both modes, markdown and JSON files remain the source of truth for \textbf{findings}, \textbf{tasks}, \textbf{truths}, \textbf{fragment links}, and \textbf{session checkpoints}; the FTS5 index is a local cache. The diagram below shows the current runtime loop.
+
+\vspace{0.2em}
+\begin{center}
+\resizebox{0.88\textwidth}{!}{%
+\begin{tikzpicture}[
+  font=\small,
+  node distance=0.45cm and 0.75cm,
+  box/.style={rectangle, rounded corners=3pt, draw, fill=blue!8, minimum height=1.9em, align=center, inner sep=4pt},
+  hook/.style={rectangle, rounded corners=3pt, draw, fill=orange!15, minimum height=1.9em, align=center, inner sep=4pt},
+  store/.style={rectangle, rounded corners=3pt, draw, fill=green!12, minimum height=1.9em, align=center, inner sep=4pt},
+  gov/.style={rectangle, rounded corners=3pt, draw, fill=purple!10, minimum height=1.9em, align=center, inner sep=4pt},
+  arr/.style={-{Stealth[length=5pt]}, thick},
+  dasharr/.style={-{Stealth[length=5pt]}, dashed, gray},
+]
+\node[box] (prompt) {User Prompt};
+\node[hook, right=0.9cm of prompt] (ss) {SessionStart\\[-2pt]{\scriptsize sync + context warmup}};
+\node[hook, below=0.45cm of ss]    (ups) {UserPromptSubmit\\[-2pt]{\scriptsize keyword extract, inject}};
+\node[hook, below=0.45cm of ups]   (ptu) {PostToolUse\\[-2pt]{\scriptsize tool-level continuity}};
+\node[hook, below=0.45cm of ptu]   (stop) {Stop\\[-2pt]{\scriptsize persist + sync}};
+\node[box, right=0.9cm of ups] (fts) {FTS5 Index\\[-2pt]{\scriptsize SQLite, cached snapshot}};
+\node[box, above=0.45cm of fts] (syn)  {Synonym Expansion\\[-2pt]{\scriptsize keyword expansion}};
+\node[box, below=0.45cm of fts] (trust) {Trust Filter\\[-2pt]{\scriptsize age decay, citation score}};
+\node[store, right=0.9cm of fts] (md) {Data Layer\\[-2pt]{\scriptsize \textasciitilde/.phren/ or <repo>/.phren}};
+\node[store, above=0.45cm of md]  (git) {Git History\\[-2pt]{\scriptsize audit + portability}};
+\node[store, below=0.45cm of md]  (mcp) {MCP Tools (53)\\[-2pt]{\scriptsize 12 domain modules}};
+\node[store, below=0.45cm of mcp] (ckpt) {Session \& Task Checkpoints\\[-2pt]{\scriptsize .runtime/sessions + .sessions/checkpoint-*}};
+\node[gov, right=0.9cm of md] (pol) {Policy Engine\\[-2pt]{\scriptsize .governance/*.json}};
+\node[gov, above=0.45cm of pol] (rbac) {Access Control\\[-2pt]{\scriptsize 4 roles, 6 actions}};
+\node[gov, below=0.45cm of pol] (aud) {Audit Log\\[-2pt]{\scriptsize audit.log}};
+\draw[arr] (prompt) -- (ss);
+\draw[arr] (prompt) -- (ups);
+\draw[arr] (ups)    -- (ptu);
+\draw[arr] (ptu)    -- (stop);
+\draw[arr] (ups) -- (syn);
+\draw[arr] (syn) -- (fts);
+\draw[arr] (fts) -- (trust);
+\draw[arr] (trust) -- (ups);
+\draw[arr] (fts) -- (md);
+\draw[arr] (md)  -- (git);
+\draw[arr] (mcp) -- (md);
+\draw[arr] (ptu) -- (mcp);
+\draw[arr] (mcp) -- (ckpt);
+\draw[arr] (stop) -- (md);
+\draw[arr] (stop) -- (ckpt);
+\draw[arr] (md)  -- (pol);
+\draw[arr] (pol) -- (rbac);
+\draw[arr] (pol) -- (aud);
+\draw[dasharr] (ss) to[bend left=18] (fts);
+% Legend removed — colors are self-evident from node styling
+\end{tikzpicture}%
+}% end resizebox
+\end{center}
+\captionsetup{font=footnotesize}
+\captionof{figure}{Phren runtime loop. Lifecycle events (\texttt{SessionStart}, \texttt{UserPromptSubmit}, optional \texttt{PostToolUse}, \texttt{Stop}) drive retrieval and persistence over a shared or project-local phren root. Findings, tasks, and checkpoint artifacts stay file-backed; FTS5 remains a local cache.}
+\label{fig:arch}
+
+% ─── BODY: two columns for dense technical content ───────────────────────────
+\vspace{0.2em}
+\begin{multicols}{2}
+
+\subsection{Storage and Retrieval}
+Phren keeps memory in local files and builds a local SQLite FTS5 index for retrieval \cite{phren-readme,phren-shared,phren-cli}. In shared mode, state lives in \texttt{\textasciitilde/.phren}; in project-local mode, state lives in \texttt{<repo>/.phren} with a single primary project. Runtime path resolution prefers an explicit path or nearest rooted \texttt{.phren} before falling back to home scope. Markdown/JSON files remain the source of truth; the index is a cached snapshot that hook and MCP entrypoints refresh incrementally. This preserves inspectability (git history, plain-text grep, portable exports) while keeping retrieval bounded and local.
+
+Before injection, a trust filter scores each entry by age decay and citation validity (Section~\ref{sec:decay}), suppressing entries below a configurable confidence floor. Archived entries are stripped so consolidated history does not pollute active search. When semantic recovery is enabled, embeddings are cached locally and init can pre-warm coverage so the first real session is not starting from zero. Recovery queries use a persistent candidate index rather than re-embedding the corpus on every search.
+
+\subsection{Lifecycle Automation}
+Lifecycle automation is now a four-event model with tool-level continuity support \cite{phren-cli,phren-hooks}:
+\begin{enumerate}
+  \item \texttt{SessionStart}: sync + health checks + prior-session context restore.
+  \item \texttt{UserPromptSubmit}: keyword extraction, retrieval, trust filtering, and bounded context injection.
+  \item \texttt{PostToolUse}: optional hook surface for tool-call continuity and follow-up capture.
+  \item \texttt{Stop}: persistence path (save, sync scheduling, metrics/task finalization).
+\end{enumerate}
+Claude uses native lifecycle hooks; Copilot/Cursor/Codex use generated wrappers + tool configs to enforce equivalent lifecycle semantics. The architectural point is unchanged: memory capture and retrieval stay inside the normal agent loop rather than becoming a separate manual habit.
+
+\subsection{MCP Module Surface}
+Phren MCP currently exposes \textbf{59 tools across 13 modules}: search/browse, task management, finding capture and lifecycle, lightweight daily notes, memory quality, data management, fragment graph, session management, operations/review, skills management, hooks management, extraction, and configuration. Notes provide explicit-search scratch context and promotion to findings without automatic prompt injection.
+
+\subsection{Token Budget and Progressive Disclosure}
+\label{sec:context-opt}
+MCP tool responses consume context tokens, so retrieval quality is only half the problem; the other half is how much context the system spends to expose that memory. Phren uses progressive disclosure: automatic injection surfaces compact summaries with stable \texttt{mem:} IDs for large result sets, and agents expand only what they need. Tasks support summary-only, paginated, and single-item fetch modes.
+
+This matters most in multi-tool coding sessions where search, task lookup, review notes, and shell output all compete for the same window. The design goal is to let project memory compound over time without turning long-lived context into prompt bloat. The same bounded path also keeps retrieval work small enough to stay responsive in daily use. A broad search may inject a compact index for five matching memories, after which the agent expands one \texttt{mem:project/file} entry instead of paying to inline every candidate up front.
+
+\subsection{Governance}
+\label{sec:governance}
+The governance engine \cite{phren-shared} provides four configurable policy layers: retention and TTL (default 120-day decay, 365-day retention), workflow approval gates for risky queue items, role-based access control (admin/maintainer/contributor/viewer with 6 action types), and canonical locks protecting truths from bulk overwrites. All governance events are appended to a timestamped audit log. These controls exist to contain familiar failure modes: stale memory, unreviewed risky writes, accidental overwrites, and unaudited shared-store drift.
+
+\subsection{Finding Lifecycle, Provenance, and Impact}
+Finding records now include normalized lifecycle metadata and provenance tracking. The lifecycle status set is \texttt{active}, \texttt{superseded}, \texttt{contradicted}, \texttt{stale}, \texttt{invalid\_citation}, and \texttt{retracted}, with status updates and reasons persisted inline in finding metadata comments. Provenance is carried through a typed \texttt{source} field (\texttt{human}, \texttt{agent}, \texttt{hook}, \texttt{extract}, \texttt{consolidation}, \texttt{unknown}).
+
+Impact scoring is session-linked rather than static: surfaced finding IDs are logged at retrieval time, completion outcomes are marked when session work lands, and repeatedly surfaced plus completed findings are promoted as higher-impact candidates in subsequent ranking.
+
+\subsection{Trust Decay and Confidence Scoring}
+\label{sec:decay}
+
+Not all memories deserve equal weight. Each entry is scored before injection:
+\begin{itemize}
+  \item \textbf{Age decay}: confidence degrades over four windows (\texttt{d30}/\texttt{d60}/\texttt{d90}/\texttt{d120}), defaulting to 1.0, 0.85, 0.65, and 0.45.
+  \item \textbf{Citation validity}: entries with valid file/line/commit citations score higher; entries without citations receive a 0.8 multiplier.
+  \item \textbf{Minimum confidence}: entries below 0.35 are suppressed entirely.
+  \item \textbf{Quality feedback}: helpful-count, reprompt penalty, and regression penalty are tracked per entry.
+\end{itemize}
+These thresholds are operational defaults rather than scientific constants; they are meant to suppress stale or weak context in day-to-day usage.
+
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[
+  width=\columnwidth,
+  height=3.5cm,
+  xlabel={Age (days)},
+  ylabel={Confidence},
+  xmin=0, xmax=135,
+  ymin=0, ymax=1.08,
+  xtick={0,30,60,90,120},
+  ytick={0,0.35,0.5,0.75,1.0},
+  yticklabel style={font=\scriptsize},
+  xticklabel style={font=\scriptsize},
+  xlabel style={font=\small},
+  ylabel style={font=\small},
+  grid=both,
+  grid style={gray!20},
+  legend style={font=\scriptsize, at={(0.98,0.98)}, anchor=north east},
+  clip=true,
+]
+\addplot[draw=none, fill=red!8, forget plot] coordinates {
+  (0,0)(0,0.35)(135,0.35)(135,0)
+} \closedcycle;
+\node[font=\scriptsize, text=red!60!black, anchor=west] at (axis cs:1,0.12) {not injected};
+\addplot[blue!70!black, thick, mark=*, mark size=2pt] coordinates {
+  (0,1.0)(30,1.0)(60,0.85)(90,0.65)(120,0.45)
+};
+\addlegendentry{Cited}
+\addplot[orange!80!black, thick, dashed, mark=square*, mark size=2pt] coordinates {
+  (0,0.8)(30,0.8)(60,0.68)(90,0.52)(120,0.36)
+};
+\addlegendentry{Uncited ($\times$0.8)}
+\addplot[red!70!black, dotted, very thick] coordinates {(0,0.35)(135,0.35)};
+\addlegendentry{Floor (0.35)}
+\end{axis}
+\end{tikzpicture}
+\end{center}
+\captionof{figure}{Trust decay. Cited entries hold full confidence for 30 days, then step down at 60/90/120. Uncited start at 0.8$\times$. Below 0.35: suppressed. All thresholds configurable.}
+\label{fig:decay}
+
+\subsection{Extensibility}
+Nine custom integration hook events cover save, search, finding, indexing, session-end, and consolidation lifecycles \cite{phren-hooks}. Lifecycle registration also supports \texttt{PostToolUse} in addition to \texttt{SessionStart}, \texttt{UserPromptSubmit}, and \texttt{Stop}. Projects export and import as self-contained JSON bundles. Migration tooling mines git history, CI failures, and PR reviews to seed an initial \texttt{FINDINGS.md}.
+
+\pagebreak[2]
+\section{Concurrent and Cross-Machine Use}
+Modern workflows frequently involve multiple sessions, tools, or machines touching the same project. Memory systems that assume a single serial session break under this pattern.
+
+Phren handles multi-agent use through four mechanisms. \textbf{Dual-root storage model}: teams can share one git-backed root (\texttt{\textasciitilde/.phren}) or run isolated project-local roots (\texttt{<repo>/.phren}) per workspace. \textbf{Serialized writes with resilient sync}: concurrent reads are filesystem-safe; MCP writes are serialized by lock files with stale-lock cleanup; shared-mode sync merges divergent commits with union handling for safe markdown files. \textbf{Deterministic skill resolution}: project-scoped skills override global skills by name, and skills can be enabled/disabled without deleting source files. \textbf{Cross-session task checkpoints}: session end persists resumable checkpoint snapshots (task, edited files, failing tests, next-step hints), and session start restores them into continuity context.
+
+This is an eventually consistent shared-memory model optimized for append-heavy agent workflows, not strong coordination in the distributed-systems sense.
+
+\subsection{Multi-Store Architecture}
+
+Real teams need memory to belong to different scopes: personal notes stay private, team knowledge is shared, and reference material (company standards, public docs) is read-only. Phren's multi-store model enables this without requiring every agent to manage a federation manually.
+
+\textbf{Store registry and roles.} A central \texttt{stores.yaml} file registers all accessible knowledge stores. Each store has an immutable UUID for provenance, a mutable display name, a file path (local or cloned from git), a role (\texttt{primary}, \texttt{team}, or \texttt{readonly}), and a sync mode (\texttt{managed-git} for read-write, \texttt{pull-only} for read-only). The primary store is the user's personal memory; team stores are shared via git (one per team or initiative); readonly stores are reference libraries maintained by others. This replaces manual federation paths: instead of \texttt{PHREN\_FEDERATION\_PATHS}, users join team stores with \texttt{phren store add --remote <url>}, and the registry becomes the single source of truth for multi-store behavior.
+
+\textbf{Write routing and project claims.} When an agent writes a finding or task, the system resolves which store should receive it. The registry allows each store to claim ownership of specific projects: if a project is claimed by an arc-team store, writes go there by default. Users can also explicitly route writes via store-qualified names (\texttt{arc-team/arc}). If a project is not claimed, writes default to the primary store. This avoids silent confusion: bare project names resolve unambiguously when only one store contains them; otherwise the agent must disambiguate.
+
+\textbf{Conflict-free multi-user writes via journals.} Team stores do not use monolithic \texttt{FINDINGS.md} files for writes. Instead, findings are appended to per-actor daily journal files (\texttt{2026-03-28-alice.md}, \texttt{2026-03-28-bob.md}). Git merges these files trivially: both actors' changes are included without rebase conflicts. A background consolidation step generates a materialized \texttt{FINDINGS.md} from the journal entries for read performance. This design scales multi-user collaboration without merge storms; each actor writes their own file, and there is no risk of two agents clobbering the same line.
+
+\textbf{Store subscriptions and project filtering.} Users can subscribe to only the projects they care about within a team store via \texttt{phren store subscribe <store> <projects...>}. When searching or listing projects, the system filters results to subscribed projects (and always includes all projects in the primary store). This reduces cognitive load for large team stores: engineers working on the arc-platform team see arc and arc-ui, not every company project.
+
+\textbf{Per-store sync and git provenance.} On session start, phren pulls all readable stores. During the stop hook, it commits and pushes changes per store: primary store uses a standard git workflow; team stores commit journal entries only (append-only, never rewrite existing lines); readonly stores pull only. Every finding carries provenance metadata (store ID, actor, machine, timestamp) in inline comments, enabling audit trails and conflict detection. A store ID is immutable and included in provenance even if the store is later renamed, preserving historical integrity.
+
+This model is not a fully distributed system — it assumes eventual consistency and does not solve Byzantine quorum problems. But for agent memory, eventual consistency is natural: findings are appended, not mutated after merge; conflicts are logged (contradictions tracked in metadata), not silently resolved; and humans retain the authority to review and approve high-stakes changes. The design trades off strong consistency for scalability, auditability, and simplicity.
+
+\subsection{Operator Surfaces}
+Phren ships three operator-facing review planes: \texttt{phren shell}, \texttt{phren web-ui}, and a VS Code extension. The web UI is hardened for local operation (loopback bind, per-run auth token validation, single-use CSRF tokens with TTL, CSP + anti-framing headers). The VS Code extension adds an activity-bar tree view for projects/findings/tasks/skills/hooks, an interactive fragment-graph webview, and first-run onboarding that validates local MCP/runtime wiring before enabling live operations.
+
+\pagebreak[2]
+\section{Comparative Assessment}
+\textit{Evidence window: representative public documentation reviewed through March 6, 2026.}
+
+This section separates what public evidence can support from what still needs direct measurement. Documentation and product surfaces support architecture-level comparison, but not cross-vendor retrieval or latency claims on their own. Measured results in this paper are therefore limited to Phren implementation notes and shared-corpus local reruns called out explicitly. The systems below are reference points rather than an exhaustive survey.
+
+\subsection{Current comparison scope}
+\raggedright
+\begin{itemize}
+  \item \textbf{Supermemory}: hosted API-first memory with metadata partitioning, graph-memory semantics, and benchmark tooling \cite{sm-intro,sm-create,sm-filter,sm-graph,sm-bench}.
+  \item \textbf{claude-mem}: local hook-driven memory with SQLite/FTS5 plus an optional semantic layer \cite{cm-overview,cm-hooks,cm-db,cm-search}.
+  \item \textbf{Copilot Memory}: repository-scoped managed memory with policy controls and expiry semantics in GitHub Copilot \cite{gh-memory-docs,gh-changelog-jan2026,gh-changelog-mar2026}.
+\end{itemize}
+
+Two claim types are currently defensible. Architecture-level differences such as ownership, governance, portability, and review workflow can be compared from public evidence. Direct retrieval or latency claims are defensible only for systems that have been run on shared corpora under controlled conditions. No public benchmark spans all four systems in that form. Managed API systems may offer broader centralized capabilities, but local retrieval paths can hold a real latency advantage when the query is exact-ish and the corpus already lives on disk.
+
+\subsection{Measured local comparison on a shared synthetic corpus}
+
+A fresh March 10, 2026 rerun exercised Phren and claude-mem on the same identifier-heavy synthetic corpora at 1k, 10k, and 100k memories using persisted local stores and the same query shape \cite{phren-bench,phren-bench-claude,phren-bench-compare}. The result is operational rather than universal: Phren averaged 5.19/13.20/91.63\,ms lexical query latency with exact top-hit rates of 12/12 at each size, while claude-mem averaged 221.07/147.91/225.11\,ms with exact top-hit rates of 0/8. Even with \texttt{--skip-seed}, claude-mem still paid 25--4062\,ms of Chroma-side backfill/check work before the query path settled. On this coding-style corpus with strong identifiers, Phren's lexical-first path was cheaper, more stable, and more exact.
+
+\subsection{Operational fit (non-empirical)}
+
+\begin{itemize}
+  \item \textbf{Phren}: favors repo-backed project memory, git auditability, and stronger governance; tradeoff is more local setup and operator burden.
+  \item \textbf{Supermemory}: favors a hosted API-first workflow; tradeoff is less local inspectability and portability.
+  \item \textbf{claude-mem}: favors a lighter local hook-driven setup; tradeoff is a smaller governance and operator-tooling surface.
+  \item \textbf{Copilot Memory}: favors teams already standardized on GitHub/Copilot; tradeoff is tighter platform scope and less control over storage and workflow.
+\end{itemize}
+
+\subsection{Operational Design Differences}
+
+The systems differ less in whether they can retrieve a relevant memory and more in how they behave once memory becomes a shared, long-lived artifact.
+
+\raggedright
+\begin{itemize}
+  \item \textbf{Multi-store federation with conflict-free writes}: Phren enables personal, team, and readonly stores with journal-based writes that avoid merge conflicts. Neither Supermemory nor claude-mem offer this: they are single-store systems with shared-file mutation risk in multi-user scenarios. Copilot Memory is repository-scoped but does not expose team store models.
+  \item \textbf{Git-backed auditability}: every memory write is a commit. You can \texttt{git blame} any learning, revert a bulk operation, or audit who added what and when. Managed systems expose different audit primitives rather than equivalent git-native transparency.
+  \item \textbf{Policy and access governance}: role-based access control, approval workflows, TTL and retention policy, and canonical locks are first-class features.
+  \item \textbf{Trust filtering}: citation decay, confidence scores, and regression penalties suppress stale or low-quality memories before injection.
+  \item \textbf{Human review surfaces}: \texttt{phren shell}, hardened \texttt{phren web-ui}, and the VS Code extension (tree view + graph + onboarding) let operators review, approve, and clean memories without starting an LLM session. The materials examined did not surface an equivalent model-free review path.
+\end{itemize}
+
+Any memory system can add a vector index. Governance, auditability, multi-store models, and review tooling require deliberate architectural choices that are harder to retrofit.
+
+\pagebreak[2]
+\section{FTS5 vs Semantic Search}
+\label{sec:fts5}
+
+Phren is fundamentally anchored in SQLite FTS5 (BM25 ranking), with fallback layers in some paths. That choice is deliberate. In the default path, FTS5 gives Phren zero required hosted dependencies, deterministic and auditable results, low-latency lookup on typical corpus sizes, and offline operation with no retrieval-side token cost. The tradeoff is familiar: vocabulary mismatch remains real, paraphrased concepts do not align automatically, and BM25 ranks by term frequency rather than meaning. Semantic search retrieves better on paraphrase-heavy queries. FTS5 retrieves better when vocabulary is consistent, offline operation is required, or zero retrieval-side token cost matters. Phren's claim is narrower: lexical-first is often the right default for repo-backed coding memory because it is cheap, inspectable, and predictable.
+
+\subsection{Hybrid Retrieval: Current State}
+\label{sec:hybrid}
+
+Phren now shares the same staged hybrid policy across hook injection and \texttt{search\_knowledge}: strict FTS5 first, a relaxed lexical rescue query if the strict pass misses, cheap local fallback scoring, and vector recovery only when lexical hits are sparse or weak. The vector path uses persistent embeddings and a cached candidate index, then the shared reranker weights local lexical overlap ahead of weaker semantic tails. Benchmark claims still require published conditions because corpus size, cache warmth, and query mix change the outcome \cite{phren-bench}.
+
+\subsection{Retrieval Complexity}
+
+The staged design matters because each retrieval tier has a different cost profile. The practical hot path is sublinear because the linear fallbacks are gated and bounded rather than paid on every request.
+
+\begin{table}[htbp]
+\centering
+\begin{tabularx}{\columnwidth}{>{\raggedright\arraybackslash}p{2.2cm} >{\raggedright\arraybackslash}p{2.4cm} >{\raggedright\arraybackslash}X}
+\toprule
+Stage & Cost shape & Notes \\
+\midrule
+Strict / relaxed FTS5 & index-driven, bounded by FTS postings rather than a full corpus scan & Default hot path. The relaxed query only runs after a zero-hit strict pass. \\
+Cheap lexical fallback & $O(W \cdot L)$ on hook injection, or bounded cosine on MCP search & Hook retrieval scores a capped sample/window set; MCP search only runs cosine on sparse FTS cases. \\
+Keyword overlap fallback & $O(N \cdot T)$ & Worst-case full scan over corpus size $N$ and query terms $T$; only used after earlier lexical passes fail. \\
+Vector recovery & $O(E_q + C \cdot d)$ after candidate pruning & $E_q$ is query-embedding latency, $C$ is the candidate set, and $d$ is embedding dimension. Before candidate pruning this was effectively $O(E_q + N \cdot d)$. \\
+Rerank + snippets & $O(R \log R + S)$ & $R$ is a small capped candidate set and $S$ is the bounded snippet-selection budget. \\
+\bottomrule
+\end{tabularx}
+\caption{Retrieval stage complexity. The common path stays cheap because expensive fallbacks are gated behind weak lexical signals.}
+\end{table}
+
+\subsection{Measured Retrieval Notes}
+
+These numbers are implementation checks on one live phren store, not a general ranking of memory systems. A single author-local benchmark on March 9, 2026 measured the current lexical-first and gated-hybrid paths against a warm Phren store with 139 indexed documents, real workflow queries, and the default 550-token hook budget \cite{phren-bench}. Lexical latency averaged 14.71--15.93\,ms; the gated hybrid path stayed in nearly the same range at 12.90--13.60\,ms because the lexical stages usually satisfied the query before vector recovery was needed; injected payload remained stable at roughly 326--342 tokens; both modes hit every published query; and persistent candidate pruning still reduced the cosine stage to roughly 6.3--8.6\% of the eligible corpus when vector recovery did fire.
+The interpretation is intentionally modest: on this corpus the lexical path was strong enough that vector recovery was usually unnecessary, so the hybrid path inherited nearly the same speed profile. Synthetic large-corpus scaling runs are documented separately because they answer a different question than this live-store measurement.
+The March 10 shared-corpus rerun against claude-mem reached the same practical conclusion from the other direction: on identifier-heavy coding queries, lexical-first retrieval stayed cheaper and more exact than the semantic-first alternative, even when the competing corpus had already been seeded. Taken together, the measured results support a narrow latency claim: local lexical-first retrieval is a real speed advantage for this style of code-memory workload.
+
+\pagebreak[2]
+\section{Limitations}
+\label{sec:limitations}
+
+\textbf{FTS5 retrieval ceiling.} Vocabulary mismatch remains a real failure mode in large projects, partially mitigated by synonym expansion.
+
+\textbf{Hook-path indexing overhead.} Index load and validation adds perceptible latency for large phren repos, even with a warm cache.
+
+\textbf{Ranking quality.} BM25 is not calibrated to agent-context relevance. The quality feedback loop requires usage history; new projects start cold.
+
+\textbf{Semantic recovery latency.} On small corpora, vector candidate pruning changes asymptotic behavior but does not automatically improve wall-clock latency. Query embedding remains the dominant cost when semantic recovery fires.
+
+\textbf{Residual retrieval uncertainty.} The published March 9 benchmark set no longer has misses, but that is still bounded evidence for one corpus and one query set. Broader paraphrase-heavy evaluation is still needed before making stronger semantic-completeness claims.
+
+\textbf{Governance complexity.} The four-file governance system is powerful but non-trivial to configure. Initial setup is guided, but advanced policy configuration still requires direct CLI commands.
+
+\textbf{Web UI is opt-in.} \texttt{phren web-ui} is not started automatically; memory triage requires an explicit invocation. This is intentional---triage is a deliberate act, not an ambient background process.
+
+\textbf{Uni-directional portability.} Export/import works for project data; migrating governance configuration to another memory system is manual.
+
+\textbf{Operator burden.} Local-first operation shifts responsibility to the user or team: git hygiene, policy tuning, backup expectations, and occasional conflict repair do not disappear just because the system is local.
+
+\pagebreak[2]
+\section{Conclusion}
+The decision is less about ``who retrieves best on a single prompt'' and more about long-horizon operational fit. Phren treats memory as repo-backed project state rather than a hosted feature: trust filtering reduces noise in injected context, the governance engine adds policy control, and the shell plus review surfaces make memory maintenance possible without starting an LLM session. File locks serialize in-process writes, the background sync worker merges divergent commits and union-merges safe markdown changes, and the shared store remains eventually consistent for append-heavy workflows.
+
+Managed alternatives are reasonable when memory is expected to arrive bundled with a platform and data custody is not a priority. Phren fits best when the priority is repo-backed project memory: markdown as source of truth, predictable token discipline, git auditability, and enough governance to keep shared memory usable over time.
+
+\end{multicols}
+
+% ─── REFERENCES ──────────────────────────────────────────────────
+\vspace{0.5em}
+\begin{multicols}{2}
+\footnotesize
+\setlength{\itemsep}{0pt}
+\setlength{\parsep}{0pt}
+\setlength{\parskip}{0pt}
+\setlength{\topsep}{0pt}
+\raggedright
+\sloppy
+\begin{thebibliography}{99}
+\setlength{\itemsep}{0pt}
+\setlength{\parsep}{0pt}
+\bibitem{rag2020} Lewis, P. et al. \textit{Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks}. \url{https://arxiv.org/abs/2005.11401}
+\bibitem{selfrag2023} Asai, A. et al. \textit{Self-RAG}. \url{https://arxiv.org/abs/2310.11511}
+\bibitem{memorybank2023} Zhong, W. et al. \textit{MemoryBank}. \url{https://arxiv.org/abs/2305.10250}
+\bibitem{memgpt2023} Packer, C. et al. \textit{MemGPT}. \url{https://arxiv.org/abs/2310.08560}
+\bibitem{sm-intro} Supermemory Docs: Introduction. \url{https://supermemory.ai/docs/introduction}
+\bibitem{sm-create} Supermemory Docs: Memory API Creation. \url{https://supermemory.ai/docs/memory-api/creation/adding-memories}
+\bibitem{sm-filter} Supermemory Docs: Filtering. \url{https://supermemory.ai/docs/memory-api/features/filtering}
+\bibitem{sm-graph} Supermemory Docs: Graph Memory. \url{https://supermemory.ai/docs/concepts/graph-memory}
+\bibitem{sm-bench} Supermemory Docs: MemoryBench. \url{https://supermemory.ai/docs/memorybench/quickstart}
+\bibitem{cm-overview} claude-mem Docs: Overview. \url{https://docs.claude-mem.ai/architecture/overview}
+\bibitem{cm-hooks} claude-mem Docs: Hooks Architecture. \url{https://docs.claude-mem.ai/hooks-architecture}
+\bibitem{cm-db} claude-mem Docs: Database Architecture. \url{https://docs.claude-mem.ai/architecture/database}
+\bibitem{cm-search} claude-mem Docs: Search Architecture. \url{https://docs.claude-mem.ai/architecture/search-architecture}
+\bibitem{gh-memory-docs} GitHub Docs: Copilot Memory. \url{https://docs.github.com/en/copilot/how-tos/use-copilot-agents/copilot-memory}
+\bibitem{gh-changelog-jan2026} GitHub Changelog (Jan 15, 2026). \href{https://github.blog/changelog/2026-01-15-agentic-memory-for-github-copilot-is-in-public-preview/}{github.blog}
+\bibitem{gh-changelog-mar2026} GitHub Changelog (Mar 4, 2026). \href{https://github.blog/changelog/2026-03-04-copilot-memory-now-on-by-default-for-pro-and-pro-users-in-public-preview/}{github.blog}
+\bibitem{phren-readme} Phren README. \url{https://github.com/alaarab/phren/blob/main/README.md}
+\bibitem{phren-cli} Phren: \texttt{mcp/src/cli.ts}. \url{https://github.com/alaarab/phren/blob/main/mcp/src/cli.ts}
+\bibitem{phren-shared} Phren: \texttt{mcp/src/shared.ts}. \url{https://github.com/alaarab/phren/blob/main/mcp/src/shared.ts}
+\bibitem{phren-hooks} Phren: \texttt{mcp/src/hooks.ts}. \url{https://github.com/alaarab/phren/blob/main/mcp/src/hooks.ts}
+\bibitem{phren-index} Phren: \texttt{mcp/src/index.ts}. \url{https://github.com/alaarab/phren/blob/main/mcp/src/index.ts}
+\bibitem{phren-bench} Phren: \texttt{scripts/bench-retrieval-modes.ts}. \url{https://github.com/alaarab/phren/blob/main/scripts/bench-retrieval-modes.ts}
+\bibitem{phren-bench-claude} Phren: \texttt{scripts/bench-claude-mem-synthetic.ts}. \url{https://github.com/alaarab/phren/blob/main/scripts/bench-claude-mem-synthetic.ts}
+\bibitem{phren-bench-compare} Phren: \texttt{docs/benchmark-comparison-fair.md}. \url{https://github.com/alaarab/phren/blob/main/docs/benchmark-comparison-fair.md}
+\end{thebibliography}
+\end{multicols}
+
+\end{document}

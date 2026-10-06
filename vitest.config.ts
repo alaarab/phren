@@ -1,0 +1,49 @@
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { defineConfig } from "vitest/config";
+
+const dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      "@phren/cli/code-host/content/summarize": path.resolve(dirname, "packages/cli/src/content/summarize.ts"),
+      "@phren/cli/code-host/data/access": path.resolve(dirname, "packages/cli/src/data/access.ts"),
+      "@phren/cli/code-host/shared/sqljs": path.resolve(dirname, "packages/cli/src/shared/sqljs.ts"),
+      "@phren/cli/code-host/utils-paths": path.resolve(dirname, "packages/cli/src/utils-paths.ts"),
+      "@phren/cli/code-host/index-query": path.resolve(dirname, "packages/cli/src/index-query.ts"),
+      "@phren/cli/code-host/logger": path.resolve(dirname, "packages/cli/src/logger.ts"),
+      "@phren/cli/code-host/governance/locks": path.resolve(dirname, "packages/cli/src/governance/locks.ts"),
+      "@phren/cli/code-host/utils": path.resolve(dirname, "packages/cli/src/utils.ts"),
+      "@phren/cli/code-host/phren-paths": path.resolve(dirname, "packages/cli/src/phren-paths.ts"),
+      "@phren/cli/code-host/project-config": path.resolve(dirname, "packages/cli/src/project-config.ts"),
+      "@phren/code": path.resolve(dirname, "packages/code/src/index.ts"),
+      // The `vscode` module is only available inside the Extension Host at
+      // runtime; alias it to a lightweight stub so extension units can be
+      // unit-tested under vitest.
+      vscode: path.resolve(dirname, "packages/vscode/test/vscode-stub.ts"),
+    },
+  },
+  test: {
+    globalSetup: ["./packages/cli/src/test-global-setup.ts"],
+    pool: "forks",
+    fileParallelism: true,
+    testTimeout: 15000,
+    // A developer or CI machine with tmux installed must not turn every
+    // "no Herdr running" test into a tmux one; tmux tests opt back in.
+    // Codex launches stay on the typed path unless a test opts in.
+    // The Hook's own helper calls never reach a real `codex` (bridge/codex-binary.ts); tests inject their own binary.
+    // Launches skip the installed-harness check (it probes real binaries); tests of it inject an inventory.
+    env: { PHREN_TMUX: "off", PHREN_CODEX_APP_SERVER: "off", PHREN_CODEX_BINARY: "off", PHREN_LAUNCH_CHECK: "off", PHREN_ELEVENLABS_USAGE: "off" },
+    include: [
+      "packages/cli/src/**/*.test.ts",
+      "packages/code/src/**/*.test.ts",
+      "packages/push-relay/src/**/*.test.ts",
+      "packages/vscode/test/**/*.test.ts",
+      // packages/agent (@phren/agent) is not listed: its suite runs under its
+      // own vitest.config.ts without this root globalSetup, in CI's agent-test
+      // job and in release.yml. Run it with
+      // `pnpm exec turbo run test --filter=@phren/agent`.
+    ],
+  },
+});

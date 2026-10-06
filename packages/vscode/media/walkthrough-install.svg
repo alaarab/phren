@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300" fill="none">
+  <style>
+    .outline { stroke: var(--vscode-foreground, #cccccc); fill: none; }
+    .text-fill { fill: var(--vscode-foreground, #cccccc); }
+    .purple-fill { fill: #5D43F3; }
+    .purple-light-fill { fill: #9B8EF8; }
+    .cyan-fill { fill: #28D3F2; }
+    .purple-stroke { stroke: #5D43F3; fill: none; }
+    .cyan-stroke { stroke: #28D3F2; fill: none; }
+  </style>
+
+  <!-- Package box body -->
+  <rect x="140" y="100" width="120" height="100" rx="8" class="outline" stroke-width="2.5" />
+
+  <!-- Box flap lines (open top) -->
+  <path d="M140 130 L170 100" class="outline" stroke-width="2.5" />
+  <path d="M260 130 L230 100" class="outline" stroke-width="2.5" />
+
+  <!-- Lid flaps -->
+  <path d="M140 130 L160 115 L200 135 L240 115 L260 130" class="outline" stroke-width="2.5" stroke-linejoin="round" />
+
+  <!-- Phren diamond/gem inside box -->
+  <path d="M200 148 L215 163 L200 185 L185 163 Z" class="purple-fill" opacity="0.9" />
+  <path d="M200 148 L207 163 L200 185 L193 163 Z" class="purple-light-fill" opacity="0.6" />
+
+  <!-- Down arrow above box -->
+  <line x1="200" y1="30" x2="200" y2="80" class="cyan-stroke" stroke-width="3" stroke-linecap="round" />
+  <polyline points="182,62 200,82 218,62" class="cyan-stroke" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Small decorative dots -->
+  <circle cx="120" cy="60" r="3" class="purple-light-fill" opacity="0.4" />
+  <circle cx="280" cy="50" r="2.5" class="cyan-fill" opacity="0.3" />
+  <circle cx="300" cy="160" r="3" class="purple-light-fill" opacity="0.3" />
+  <circle cx="100" cy="170" r="2" class="cyan-fill" opacity="0.4" />
+
+  <!-- Label -->
+  <text x="200" y="240" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="600" class="text-fill">Install Phren</text>
+  <text x="200" y="262" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" class="text-fill" opacity="0.6">Set up the extension</text>
+</svg>

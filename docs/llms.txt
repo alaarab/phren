@@ -1,0 +1,22 @@
+phren - Your agents forget everything. Phren doesn't.
+
+Install: npm install -g @phren/cli && phren init
+
+Key features:
+- Automatic context injection into every prompt via lifecycle hooks
+- 76 MCP tools across 16 catalog modules (search, tasks, findings, notes, memory, data, graph, sessions, ops/review, skills, hooks, extraction, configuration)
+- Daily notes are explicitly searchable lightweight scratch context with CRUD and promote-to-finding; they are not automatically injected
+- Finding lifecycle tooling (`supersede_finding`, `retract_finding`, `resolve_contradiction`, `get_contradictions`) with provenance and impact scoring
+- Session continuity via cross-session task checkpoints + `session_history`
+- Skill system with source precedence, alias-collision handling, visibility gating, and generated `skill-manifest.json`
+- Memory governance with confidence decay, trust filtering, and quality feedback
+- Governance identity and RBAC via `PHREN_ACTOR`, `access-control.local.json`, and role policies
+- Web UI security by default: loopback-only, auth token, CSRF, CSP
+- Telemetry is opt-in and local-only (`.runtime/telemetry.json`)
+- Interactive terminal shell with seven views (Projects, Tasks, Findings, Review Queue, Skills, Hooks, Health)
+- Team stores for shared knowledge across collaborators (`phren team init`, `phren team join`)
+- Multi-agent support: Claude Code, Copilot CLI, Cursor, OpenAI Codex
+
+Docs: https://alaarab.github.io/phren/
+Full LLM reference: https://alaarab.github.io/phren/llms-full.txt
+npm: https://www.npmjs.com/package/@phren/cli

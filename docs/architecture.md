@@ -1,0 +1,355 @@
+# Phren Architecture
+
+How project memory flows through the system, from user prompt to repo-backed state and back into bounded retrieval.
+
+Current public surface: 70 MCP tools across 16 modules, exposed through two profiles: `core` (10 tools, the default) and `full`; see `api-reference.md`.
+
+## System Overview
+
+```
+Claude / Copilot / Cursor / Codex
+            |
+            v
++-------------------------------+
+| Lifecycle Entry               |
+| Claude: native hooks          |
+| Others: wrapper + hook config |
++---------------+---------------+
+                |
+                v
++---------------+---------------+
+| Retrieval Path                |
+| hook-context + hook-prompt    |
+| FTS5 lexical-first ranking    |
+| optional vector recovery      |
++---------------+---------------+
+                |
+                v
++---------------+---------------+
+| MCP Server (phren-mcp)       |
+| 76 tools · core profile: 10  |
++---------------+---------------+
+                |
+                v
++---------------+---------------+
+| Data Layer (~/.phren or      |
+| <repo>/.phren)               |
+| markdown + json + git         |
++---------------+---------------+
+                |
+                v
++---------------+---------------+
+| Governance + Persistence       |
+| RBAC, trust filters, review    |
+| queue, sync + session tracking |
++-------------------------------+
+```
+
+## Install Modes
+
+Phren has two install modes, rooted by `phren.root.yaml`:
+
+- `shared`: default personal memory at `~/.phren`, with profiles, machine mappings, user-scoped MCP config, and full Claude lifecycle hooks
+- `project-local`: repo-owned memory at `<repo>/.phren`, with one primary project, workspace-managed git, and workspace MCP wiring
+
+Runtime path resolution order:
+
+1. explicit CLI path argument
+2. `PHREN_PATH`
+3. nearest ancestor `.phren` containing `phren.root.yaml`
+4. shared root at `~/.phren` only if it contains `phren.root.yaml`
+
+## End-to-End Runtime Loop
+
+```
+[1] Session lifecycle trigger
+    Claude: SessionStart/UserPromptSubmit/Stop
+    Copilot/Cursor/Codex: session wrapper + tool hook config
+
+[2] Retrieval
+    keyword extraction + synonym expansion
+    lexical-first FTS5 retrieval
+    optional vector fallback when lexical confidence is low
+    recency/task-aware reranking
+
+[3] Governance
+    citation checks + confidence decay + policy gates
+    stale/low-confidence items filtered or queued
+
+[4] Persistence
+    MCP writes to markdown/json
+    stop lifecycle persists via git and sync worker
+
+[5] Next prompt
+    retrieval reads newly persisted state
+```
+
+## Hook and Integration Model
+
+Claude uses native lifecycle hooks in `~/.claude/settings.json`:
+
+- `SessionStart` -> `hook-session-start`
+- `UserPromptSubmit` -> `hook-prompt`
+- `Stop` -> `hook-stop`
+
+Copilot CLI, Cursor, and Codex use two layers:
+
+- generated per-tool hook config files
+- generated session wrapper binaries in `~/.local/bin/` that enforce lifecycle behavior around each tool invocation
+
+This gives Claude full native lifecycle parity while keeping other tools synchronized through wrappers + config.
+
+Running MCP servers can poll shared Git stores on a configurable interval (off by default; enable with `phren config pull-interval 60` for one minute). A per-store process lock and shared timestamp coordinate checks across clients. `git ls-remote` compares the upstream commit before fetching; a shared Git-operation lock protects clean fast-forward updates against session hooks and pushes. Polling defers dirty or diverged stores and backs off network failures. Each server watches local HEAD changes to refresh its index and existing managed skill/instruction mirrors, including updates pulled by a sibling client. This runs only during the MCP server's lifetime, respects lifecycle-automation presets, and excludes project-local/workspace-Git installs.
+
+Local index freshness is independent of that remote polling. Before tool calls,
+the MCP server checks a process-owned snapshot of file and directory metadata
+at most once per second. External summary, document, store attachment and
+profile-membership changes refresh the live index even with pull interval zero
+and without a commit. Concurrent requests share one refresh through the write
+queue. A busy index writer causes a retryable error; active tool calls retain
+their old database handles until they finish. No Hook restart is involved.
+
+## MCP Server Modules
+
+Phren MCP is split into 15 modules:
+
+1. Search and browse
+2. Task management
+3. Finding capture and lifecycle
+4. Daily notes
+5. Memory quality
+6. Data management
+7. Fragment graph
+8. Session management
+9. Operations and review queue
+10. Skills management
+11. Hooks management
+12. Extraction
+13. Configuration
+14. Topic summaries
+15. Dispatch
+
+Finding lifecycle and editing tools:
+
+- `supersede_finding`
+- `retract_finding`
+- `resolve_contradiction`
+- `get_contradictions`
+- `edit_finding`
+
+Session continuity tool:
+
+- `session_history`
+
+## Data Layer
+
+All state stays local as files (markdown/json), with git as transport in shared mode.
+
+```
+~/.phren/
+  machines.yaml
+  profiles/*.yaml
+  <project>/
+    AGENTS.md
+    summary.md
+    FINDINGS.md
+    notes/
+      YYYY-MM-DD.md
+    tasks.md
+    review.md
+    truths.md
+    reference/
+    skills/
+  global/
+    AGENTS.md
+    FINDINGS.md
+    skills/
+
+  .config/
+    access-control.json
+    retention-policy.json
+    workflow-policy.json
+    index-policy.json
+
+  .runtime/
+    runtime-health.json
+    audit.log
+    telemetry.json
+    access-control.local.json
+    shell-state.json
+    session-metrics.json
+
+  .runtime/sessions/
+    session-*.json
+    last-summary.json
+
+  .sessions/
+    checkpoint-<project>-<task>.json
+```
+
+## Findings: Lifecycle, Provenance, Impact
+
+Findings now carry richer state:
+
+- lifecycle state stored inline (active/superseded/contradicted/retracted/stale/invalid_citation)
+- memory scope via `<!-- scope:builder -->` for multi-agent visibility control
+- contradiction and supersession handled by dedicated lifecycle tools
+
+Impact scoring pipeline:
+
+1. injected findings are logged by ID when surfaced in context
+2. session completion checks for task completion in that session
+3. completed outcomes update impact logs
+4. high-impact findings get boosted in future retrieval
+
+## Session Continuity
+
+Session continuity has three parts:
+
+- `session_start` returns prior summary + recent findings + checkpoint hints
+- `session_end` writes summary and task checkpoint snapshots
+- `session_history` lists sessions or returns detailed session artifacts
+
+Task checkpoints include task ID/text, edited files, failing tests, and resume hints (`lastAttempt` and `nextStep`). Completed tasks clear their checkpoint files.
+
+## Skill Resolution System
+
+Skill resolution is deterministic and policy-aware:
+
+- precedence: project scope overrides global scope for same skill name
+- alias collisions: aliases are deduplicated against their own primary command; commands/aliases shared by different skills are marked unregistered (case-insensitive)
+- visibility gating: disabled skills stay on disk but are hidden from active agent mirrors
+- preferences: each discovery or linking pass reads shared and legacy settings once, preserving shared-setting precedence and refreshing on the next pass; malformed shared settings keep skills disabled
+- generated artifacts:
+  - `.claude/skill-manifest.json`
+  - `.claude/skill-commands.json`
+
+## Governance Identity and RBAC
+
+Identity and authorization flow:
+
+- actor identity from `PHREN_ACTOR` (in trusted/test contexts) or OS user identity
+- shared role policy from `.config/access-control.json`
+- local fallback/augmentation from `.runtime/access-control.local.json`
+
+RBAC roles:
+
+- `admin`
+- `maintainer`
+- `contributor`
+- `viewer`
+
+Write/policy/delete operations are checked against RBAC before mutation.
+
+## Web UI Security Model
+
+Web UI (`phren web-ui`) is hardened by default:
+
+- binds only to loopback (`127.0.0.1`)
+- issues random per-run auth token (bearer/query/body)
+- requires CSRF token for mutating routes
+- CSRF tokens are single-use with TTL
+- sets CSP and anti-framing headers (`Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`)
+
+Mutating endpoints require both auth and CSRF.
+Malformed URI components return HTTP 400; unexpected route failures return a
+generic HTTP 500 without exposing internal details or stopping the server.
+
+## Telemetry Model
+
+Telemetry is opt-in and local-only:
+
+- default: disabled
+- enable: `phren config telemetry on`
+- storage: `.runtime/telemetry.json`
+- captured data: tool call counts, CLI command counts, session/error counters, last activity
+- no external reporting by default
+
+## Retrieval and Context Efficiency
+
+Retrieval is optimized for bounded context usage:
+
+- lexical-first FTS5 path handles most queries
+- vector fallback runs only when lexical confidence is weak
+- progressive disclosure keeps injection bounded (`PHREN_CONTEXT_TOKEN_BUDGET`)
+- task APIs support summary/pagination/single-item fetch patterns
+
+This keeps memory growth and prompt context growth decoupled.
+
+## Store Architecture
+
+Phren supports multiple knowledge stores with three roles:
+
+| Role | Read | Write | Git Sync | Use Case |
+|------|------|-------|----------|----------|
+| `primary` | yes | yes | full | Personal store (`~/.phren`) — default write target |
+| `team` | yes | yes | full | Shared team store — journal-based writes avoid merge conflicts |
+| `readonly` | yes | no | pull only | Reference store — company-wide knowledge |
+
+### Store Registry
+
+The primary store is listed in `~/.phren/stores.yaml`, which syncs with the store, so every machine on it agrees on its id. Team and readonly stores are attached per machine in `~/.phren/.runtime/attached-stores.yaml`, which never syncs: joining a team store on one machine never attaches it on another, and `phren doctor` checks only this machine's stores. Each store has an immutable UUID for provenance tracking and a mutable display name. Together the two files are the single source of truth for project-to-store routing on a machine.
+
+Older versions listed team stores in the synced `stores.yaml`. The first run of this version on a machine moves the ones whose folder exists there into `attached-stores.yaml`, ignores the rest, and leaves the synced file as it is for machines still on an older version.
+
+### Multi-Store Data Flow
+
+```
+Session Start
+  ├─ git pull ALL stores (primary + team + readonly)
+  ├─ Build per-store FTS5 indexes
+  └─ Merge search results with store provenance tags
+
+During Session
+  ├─ Reads: search across all readable stores
+  ├─ Writes: routed by registry project claims
+  │   ├─ store-qualified ("arc-team/arc") → explicit store
+  │   ├─ registry claim match → claimed store
+  │   └─ no match → primary store
+  └─ Team writes use append-only journal (one file per actor/day)
+
+Stop Hook
+  ├─ primary: git add -A, commit, push
+  ├─ team: git add journal/, commit, fetch, merge, push
+  └─ readonly: fetch, then fast-forward or merge
+```
+
+### Write Routing
+
+Projects are claimed by stores in the registry. Bare project names resolve unambiguously when only one store contains the project; otherwise `store/project` syntax disambiguates. The `phren promote` command moves findings from personal to team stores explicitly — no silent routing.
+
+## Phren Hook and the iPhone
+
+`packages/cli/src/bridge/` implements the independent local agent helper. The
+build produces a self-contained `bridge-hook.mjs`. The iPhone's `PhrenLive`
+package opens a pinned SSH session and executes only `phren-hook v1 pipe`,
+`phren-hook v1 terminal <Herdr server>`, or `phren-hook v1 shell <folder> [agent]`
+(agent `codex`, `claude`, `copilot`, `opencode` or `phren`, which runs `phren agent -i`).
+HTTP/WebSocket requests travel over a private Unix socket; terminals use an SSH
+PTY attached to the existing Herdr server, or, when Herdr is not running, a
+shell or agent started directly on the PTY in a validated project folder (no
+chat, transcripts, or persistence for that one). Herdr's public JSON socket supplies workspace and pane control. Every
+chat mutation revalidates server, workspace, tab, pane, provider, and conversation.
+An agent-only socket registers lifecycle callbacks and explicit permission
+requests; it is inaccessible through the phone dispatcher. No Moshi installation
+or service is required. See [the connection protocol](../packages/cli/src/bridge/AGENT_CONNECTIONS.md).
+
+## Scheduling
+
+A project's `schedules.yaml` names an assigned computer, a harness, and one of
+five timing forms. The assigned computer's Phren Hook evaluates them in its
+local time and launches the prompt through Herdr or a headless wrapper, keeping
+its own run ledger. `phren schedule` edits the store file directly and asks the
+Hook to run now or list local history. See [Scheduled prompts](schedules.md).
+
+## Conductor
+
+The conductor is the owner's single conversation that reads a project's tasks
+and sends independent worker briefs across enrolled computers. The first slice
+covers enrollment and placement: a reusable restricted dispatch key, pinned SSH
+peers in the Hook's private `hooks.yaml`, `POST /v1/dispatch` with named or
+`anywhere` placement, durable receipts, the `dispatch` MCP tool, and the
+`phren dispatch` command. The returns loop follows each dispatched worker to
+done, needs-you, failed, blocked or gone, keeps its final reply in the receipt, serves
+unread returns through `dispatch_returns`, and tells an idle dispatching agent
+in one line. See [Conductor](conductor.md).

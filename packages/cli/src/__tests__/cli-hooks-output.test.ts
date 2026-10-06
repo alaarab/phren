@@ -1,0 +1,105 @@
+import { describe, it, expect } from "vitest";
+import { buildHookOutput } from "../cli/hooks-output.js";
+import type { SelectedSnippet } from "../shared/retrieval.js";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+
+const TEST_PHREN_PATH = fs.mkdtempSync(path.join(os.tmpdir(), "phren-hooks-output-"));
+
+function makeSnippet(overrides: Partial<SelectedSnippet> = {}): SelectedSnippet {
+  return {
+    doc: {
+      project: "test-project",
+      filename: "FINDINGS.md",
+      type: "findings",
+      content: "- Some finding content",
+      path: "/test/FINDINGS.md",
+    },
+    snippet: "- Some finding content",
+    key: "test-project/FINDINGS.md",
+    score: 1.0,
+    ...overrides,
+  };
+}
+
+describe("cli-hooks-output", () => {
+  // The whole point of printing the key: memory_feedback scores an
+  // entryScoreKey, and until it appeared in the injected header there was no
+  // way for an agent to learn one. Nothing asserted it, so the feature could
+  // regress silently.
+  describe("feedback key in snippet headers", () => {
+    it("prints the score key as an fb: token an agent can pass back", () => {
+      const parts = buildHookOutput(
+        [makeSnippet({ key: "test-project/FINDINGS.md:a1b2c3d4e5f6" })],
+        50,
+        "test-query",
+        null,
+        "test-project",
+        { indexMs: 1, searchMs: 2, trustMs: 3, rankMs: 4, selectMs: 5 },
+        500,
+        TEST_PHREN_PATH
+      );
+
+      const header = parts.find((p) => p.startsWith("[") && p.includes("(findings)"));
+      expect(header).toBeDefined();
+      expect(header).toContain("fb:test-project/FINDINGS.md:a1b2c3d4e5f6");
+    });
+
+    it("emits one fb: token per rendered snippet", () => {
+      const selected = [
+        makeSnippet({ key: "p/FINDINGS.md:aaaaaaaaaaaa" }),
+        makeSnippet({ key: "p/FINDINGS.md:bbbbbbbbbbbb" }),
+      ];
+      const parts = buildHookOutput(
+        selected, 50, "q", null, "p",
+        { indexMs: 1, searchMs: 1, trustMs: 1, rankMs: 1, selectMs: 1 },
+        5000, TEST_PHREN_PATH
+      );
+      const keys = parts.join("\n").match(/fb:\S+/g) || [];
+      expect(keys).toHaveLength(2);
+      expect(keys).toContain("fb:p/FINDINGS.md:aaaaaaaaaaaa");
+      expect(keys).toContain("fb:p/FINDINGS.md:bbbbbbbbbbbb");
+    });
+  });
+
+  describe("buildHookOutput", () => {
+    it("omits project label when detectedProject is null", () => {
+      const parts = buildHookOutput(
+        [makeSnippet()],
+        50,
+        "query",
+        null,
+        null,
+        { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 },
+        500,
+        TEST_PHREN_PATH
+      );
+      expect(parts[0]).not.toContain(" \u00b7 test-project");
+    });
+
+    it("trims middle items when over token budget with 3+ snippets", () => {
+      const bigSnippet = (key: string) =>
+        makeSnippet({ snippet: "x".repeat(2000), key });
+      const selected = [
+        bigSnippet("a"),
+        bigSnippet("b"),
+        bigSnippet("c"),
+        bigSnippet("d"),
+      ];
+      const parts = buildHookOutput(
+        selected,
+        2000,
+        "query",
+        null,
+        "test-project",
+        { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 },
+        100, // very tight budget
+        TEST_PHREN_PATH
+      );
+      // Should have fewer snippet blocks than input
+      const snippetBlocks = parts.filter(p => p.startsWith("["));
+      expect(snippetBlocks.length).toBeLessThan(4);
+    });
+  });
+});

@@ -1,0 +1,353 @@
+/**
+ * Slash command dispatch for the REPL.
+ */
+import type { AgentSession } from "./agent-loop.js";
+import type { AgentToolDef, LlmMessage, LlmProvider } from "./providers/types.js";
+import type { AgentSpawner } from "./multi/spawner.js";
+import type { PickerResult } from "./multi/model-picker.js";
+import type { PhrenContext } from "./memory/context.js";
+import type { ReasoningEffort } from "./models.js";
+import type { CostTracker } from "./cost.js";
+
+// Sub-module handlers
+import { helpCommand, turnsCommand, clearCommand, cwdCommand, filesCommand, costCommand, planCommand, undoCommand, contextCommand } from "./commands/info.js";
+import { sessionCommand, historyCommand, compactCommand, diffCommand, gitCommand, resumeCommand, rewindCommand } from "./commands/session.js";
+import { memCommand, askCommand } from "./commands/memory.js";
+import { reviewCommand } from "./commands/review.js";
+import { findSkill, getScopedSkills } from "@phren/cli/skill/registry";
+import { modelCommand, providerCommand, presetCommand, reasoningCommand } from "./commands/model.js";
+import { configCommand } from "./commands/config.js";
+import type { PermissionMode, PermissionConfig } from "./permissions/types.js";
+import { loadInputMode, saveInputMode, savePermissionMode } from "./settings.js";
+import { addAllow } from "./permissions/allowlist.js";
+import { loadCustomCommands, expandCustomCommand, customCommandInfos, type CustomCommand, type CustomCommandInfo } from "./custom-commands.js";
+
+const DIM = "\x1b[2m";
+const RESET = "\x1b[0m";
+
+export interface CommandContext {
+  session: AgentSession;
+  costTracker?: CostTracker | null;
+  contextLimit: number;
+  undoStack: LlmMessage[][];
+  spawner?: AgentSpawner;
+  /** Current provider name for /model command */
+  providerName?: string;
+  /** Current model ID for /model command */
+  currentModel?: string;
+  /** Current reasoning effort for /model command */
+  currentReasoning?: ReasoningEffort | null;
+  /** Callback when model/reasoning changes; returns the provider now in use. */
+  onModelChange?: (result: PickerResult) => void | LlmProvider | Promise<void | LlmProvider>;
+  /** Open the host UI's interactive model picker. */
+  pickModel?: () => Promise<PickerResult | null>;
+  /** Open the host UI's pick-one list; resolves to the chosen index, or null. */
+  pickFromList?: (title: string, items: Array<{ label: string; detail?: string }>) => Promise<number | null>;
+  /** LLM provider for /ask side-channel queries */
+  provider?: LlmProvider;
+  /** System prompt for /ask queries */
+  systemPrompt?: string;
+  /** Session ID for /session commands */
+  sessionId?: string | null;
+  /** Session start time (epoch ms) */
+  startTime?: number;
+  /** Phren data directory for session save/export */
+  phrenPath?: string | null;
+  /** Full phren context for /mem commands */
+  phrenCtx?: PhrenContext | null;
+  /** Tool registry for /permissions command */
+  registry?: {
+    permissionConfig: PermissionConfig;
+    setPermissions: (cfg: PermissionConfig) => void;
+    /** For /compact: the summary request carries the session's tools. */
+    getDefinitions?: () => AgentToolDef[];
+  };
+  /** Fork the session at the current point into a new durable log. */
+  forkSession?: () => { ok: boolean; sessionId?: string; message: string };
+  /** Quick chat only: continue this conversation as an agent with tools. */
+  promote?: () => Promise<string>;
+}
+
+export function createCommandContext(session: AgentSession, contextLimit: number): CommandContext {
+  return {
+    session,
+    contextLimit,
+    undoStack: [],
+  };
+}
+
+const BUILTIN_COMMAND_NAMES: readonly string[] = [
+  "/help", "/turns", "/clear", "/cwd", "/files", "/cost", "/plan", "/undo",
+  "/context", "/model", "/provider", "/reasoning", "/preset", "/session", "/history",
+  "/compact", "/diff", "/git", "/mem", "/ask", "/resume", "/review", "/config", "/spawn", "/agents",
+  "/allow",
+  "/mode", "/permissions", "/verbose", "/theme", "/agent", "/rewind", "/fork", "/promote",
+  "/exit", "/quit", "/q",
+];
+
+/**
+ * All slash commands available in the agent, including TUI-only commands.
+ * Used for tab completion in the TUI.
+ */
+export const COMMAND_NAMES: string[] = [...BUILTIN_COMMAND_NAMES];
+
+const BUILTIN_BARE_NAMES = new Set(BUILTIN_COMMAND_NAMES.map((name) => name.slice(1)));
+
+let customCommands: CustomCommand[] = [];
+
+export function setCustomCommands(commands: CustomCommand[]): void {
+  customCommands = commands.filter((command) => !BUILTIN_BARE_NAMES.has(command.name));
+  COMMAND_NAMES.length = 0;
+  COMMAND_NAMES.push(...BUILTIN_COMMAND_NAMES, ...customCommands.map((command) => `/${command.name}`));
+}
+
+/** Extra command names for completion (MCP prompts, found after servers connect). */
+export function addCommandNames(names: string[]): void {
+  for (const name of names) if (!COMMAND_NAMES.includes(name)) COMMAND_NAMES.push(name);
+}
+
+export function loadAndRegisterCustomCommands(cwd = process.cwd()): CustomCommand[] {
+  const commands = loadCustomCommands(cwd);
+  setCustomCommands(commands);
+  return commands;
+}
+
+export function getCustomCommands(): CustomCommand[] {
+  return customCommands;
+}
+
+export function getCustomCommandInfos(): CustomCommandInfo[] {
+  return customCommandInfos(customCommands);
+}
+
+export function resolveCustomCommand(input: string): string | null {
+  if (!input.startsWith("/")) return null;
+  const trimmed = input.trim();
+  const parts = trimmed.split(/\s+/);
+  const cmd = parts[0];
+  if (BUILTIN_BARE_NAMES.has(cmd.slice(1))) return null;
+  const bare = cmd.slice(1);
+  if (!bare) return null;
+  const match = customCommands.find((command) => command.name === bare);
+  if (!match) return null;
+  const args = trimmed.slice(cmd.length).trim();
+  const expanded = expandCustomCommand(match, args);
+  return expanded.length > 0 ? expanded : null;
+}
+
+/**
+ * /skill-name gesture: an unknown slash input matching a phren skill (by name,
+ * frontmatter command, or alias) becomes a model task that invokes run_skill.
+ * Returns the rewritten task, or null when the input is not a skill gesture.
+ * Built-in commands always win. Never throws.
+ */
+export function resolveSkillGesture(input: string, phrenCtx?: PhrenContext | null): string | null {
+  if (!phrenCtx || !input.startsWith("/")) return null;
+  const parts = input.trim().split(/\s+/);
+  const cmd = parts[0];
+  if (COMMAND_NAMES.includes(cmd)) return null;
+  const args = parts.slice(1).join(" ");
+  const bare = cmd.slice(1);
+  if (!bare) return null;
+  try {
+    let name: string | null = null;
+    const byName = findSkill(phrenCtx.phrenPath, phrenCtx.profile, phrenCtx.project ?? undefined, bare);
+    if (byName && !("error" in byName) && byName.enabled) name = byName.name;
+    if (!name) {
+      const all = getScopedSkills(phrenCtx.phrenPath, phrenCtx.profile, phrenCtx.project ?? undefined);
+      const match = all.find((s) => s.enabled && (s.command === cmd || s.aliases.includes(cmd)));
+      if (match) name = match.name;
+    }
+    if (!name) return null;
+    return `[user invoked ${cmd}] Call run_skill with name="${name}"${args ? ` and args="${args}"` : ""}, then follow the skill's instructions.`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Try to handle a slash command. Returns true if the input was a command.
+ * Returns a Promise<boolean> for async commands like /ask.
+ */
+export function handleCommand(input: string, ctx: CommandContext): boolean | Promise<boolean> {
+  const parts = input.trim().split(/\s+/);
+  const name = parts[0];
+
+  switch (name) {
+    case "/help":     return helpCommand(parts, ctx);
+    case "/turns":    return turnsCommand(parts, ctx);
+    case "/clear":    return clearCommand(parts, ctx);
+    case "/cwd":      return cwdCommand(parts, ctx);
+    case "/files":    return filesCommand(parts, ctx);
+    case "/cost":     return costCommand(parts, ctx);
+    case "/plan":     return planCommand(parts, ctx);
+    case "/undo":     return undoCommand(parts, ctx);
+    case "/context":  return contextCommand(parts, ctx);
+    case "/model":    return modelCommand(parts, ctx);
+    case "/provider": return providerCommand(parts, ctx);
+    case "/reasoning": return reasoningCommand(parts, ctx);
+    case "/preset":   return presetCommand(parts, ctx);
+    case "/session":  return sessionCommand(parts, ctx);
+    case "/history":  return historyCommand(parts, ctx);
+    case "/compact":  return compactCommand(parts, ctx);
+    case "/diff":     return diffCommand(parts, ctx);
+    case "/git":      return gitCommand(parts, ctx);
+    case "/mem":      return memCommand(parts, ctx);
+    case "/ask":      return askCommand(parts, ctx);
+    case "/resume":   return resumeCommand(parts, ctx);
+    case "/review":   return reviewCommand(parts, ctx);
+    case "/config":   return configCommand(parts, ctx);
+    case "/rewind":   return rewindCommand(parts, ctx);
+
+    case "/promote": {
+      const promote = ctx.promote;
+      if (!promote) {
+        process.stderr.write(`${DIM}Already an agent session: /promote turns a quick chat (--mode chat) into one.${RESET}\n`);
+        return true;
+      }
+      return promote().then((message) => {
+        process.stderr.write(`\x1b[32m${message}${RESET}\n`);
+        return true;
+      }, (err: unknown) => {
+        process.stderr.write(`\x1b[31mPromote failed: ${err instanceof Error ? err.message : String(err)}${RESET}\n`);
+        return true;
+      });
+    }
+
+    case "/fork": {
+      const result = ctx.forkSession?.();
+      if (!result) {
+        process.stderr.write(`${DIM}Fork is not available here.${RESET}\n`);
+        return true;
+      }
+      process.stderr.write(`${result.ok ? "\x1b[32m" : "\x1b[31m"}${result.message}${RESET}\n`);
+      return true;
+    }
+
+    case "/mode": {
+      const current = loadInputMode();
+      const newMode = current === "steering" ? "queue" : "steering";
+      saveInputMode(newMode);
+      process.stderr.write(`${DIM}Input mode: ${newMode}${RESET}\n`);
+      return true;
+    }
+
+    case "/permissions": {
+      const VALID_MODES: PermissionMode[] = ["suggest", "auto-confirm", "full-auto"];
+      const arg = parts[1] as PermissionMode | undefined;
+      if (!ctx.registry || !arg || !VALID_MODES.includes(arg)) {
+        const current = ctx.registry?.permissionConfig.mode ?? "unknown";
+        process.stderr.write(`${DIM}Permission mode: ${current}${RESET}\n`);
+        process.stderr.write(`${DIM}Usage: /permissions <suggest|auto-confirm|full-auto>${RESET}\n`);
+      } else {
+        ctx.registry.setPermissions({ ...ctx.registry.permissionConfig, mode: arg });
+        savePermissionMode(arg);
+        process.stderr.write(`${DIM}Permission mode: ${arg}${RESET}\n`);
+      }
+      return true;
+    }
+
+    case "/allow": {
+      const toolName = parts[1];
+      if (!toolName) {
+        process.stderr.write(`${DIM}Usage: /allow <tool> [pattern] [--global]${RESET}\n`);
+        return true;
+      }
+      const global = parts.includes("--global");
+      const pattern = parts.slice(2).find((p) => p !== "--global");
+      if (toolName === "shell" && !pattern) {
+        process.stderr.write(`${DIM}shell rules need a command/prefix, e.g. /allow shell git${RESET}\n`);
+        return true;
+      }
+      const input: Record<string, unknown> = {};
+      if (pattern) {
+        if (toolName === "shell") input.command = pattern;
+        else input.path = pattern;
+      }
+      const scope = global ? "global" : "project";
+      addAllow(toolName, input, scope, process.cwd());
+      process.stderr.write(`${DIM}Allowed ${toolName}${pattern ? ` (${pattern})` : ""} [${scope}]${RESET}\n`);
+      return true;
+    }
+
+    case "/spawn": {
+      if (!ctx.spawner) {
+        process.stderr.write(`${DIM}Spawner not available. Start with --multi or --team to enable.${RESET}\n`);
+        return true;
+      }
+      const rest = parts.slice(1);
+      const spawnName = rest[0];
+      let isolation: "worktree" | undefined;
+      let agentType: string | undefined;
+      let provider: string | undefined;
+      let model: string | undefined;
+      let permissions: PermissionMode | undefined;
+      const taskParts: string[] = [];
+      const VALID_MODES: PermissionMode[] = ["suggest", "auto-confirm", "plan", "full-auto"];
+      for (let i = 1; i < rest.length; i++) {
+        const token = rest[i];
+        if (token === "--worktree") { isolation = "worktree"; }
+        else if (token === "--agent" && rest[i + 1]) { agentType = rest[++i]; }
+        else if (token === "--provider" && rest[i + 1]) { provider = rest[++i]; }
+        else if (token === "--model" && rest[i + 1]) { model = rest[++i]; }
+        else if (token === "--permissions" && rest[i + 1]) {
+          const mode = rest[++i] as PermissionMode;
+          if (VALID_MODES.includes(mode)) permissions = mode;
+        }
+        else { taskParts.push(token); }
+      }
+      const spawnTask = taskParts.join(" ");
+      if (!spawnName || !spawnTask) {
+        process.stderr.write(`${DIM}Usage: /spawn <name> <task> [--worktree] [--agent <type>] [--provider <p>] [--model <m>] [--permissions <mode>]${RESET}\n`);
+        return true;
+      }
+      const perms = ctx.registry?.permissionConfig;
+      const agentId = ctx.spawner.spawn({
+        task: spawnTask,
+        displayName: spawnName,
+        cwd: perms?.projectRoot ?? process.cwd(),
+        isolation,
+        agentType,
+        provider,
+        model,
+        permissions: permissions ?? perms?.mode,
+        sandboxMode: perms?.sandboxMode,
+        allowedPaths: perms?.allowedPaths,
+      });
+      process.stderr.write(`${DIM}Spawned agent "${spawnName}" (${agentId}): ${spawnTask}${RESET}\n`);
+      return true;
+    }
+
+    case "/agents": {
+      if (!ctx.spawner) {
+        process.stderr.write(`${DIM}No spawner available. Start with --multi or --team to enable.${RESET}\n`);
+        return true;
+      }
+      const agents = ctx.spawner.listAgents();
+      if (agents.length === 0) {
+        process.stderr.write(`${DIM}No agents running.${RESET}\n`);
+      } else {
+        const lines = agents.map((a) => {
+          const elapsed = a.finishedAt
+            ? `${((a.finishedAt - a.startedAt) / 1000).toFixed(1)}s`
+            : `${((Date.now() - a.startedAt) / 1000).toFixed(0)}s`;
+          return `  ${a.id} [${a.status}] ${elapsed} — ${a.task.slice(0, 60)}`;
+        });
+        process.stderr.write(`${DIM}Agents (${agents.length}):\n${lines.join("\n")}${RESET}\n`);
+      }
+      return true;
+    }
+
+    case "/exit":
+    case "/quit":
+    case "/q":
+      process.exit(0);
+
+    default:
+      if (input.startsWith("/")) {
+        process.stderr.write(`${DIM}Unknown command: ${name}. Type /help for commands.${RESET}\n`);
+        return true;
+      }
+      return false;
+  }
+}

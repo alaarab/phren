@@ -1,0 +1,44 @@
+[
+  {
+    "project": "myproj",
+    "filename": "FINDINGS.md",
+    "snippet": "[pattern] Use the shared cache for repeated lookups",
+    "scoreKey": "myproj/FINDINGS.md:ca3f5c9148b6",
+    "nodeId": "finding:9a196b878ed9"
+  },
+  {
+    "project": "myproj",
+    "filename": "FINDINGS.md",
+    "snippet": "Plain untagged finding with enough length",
+    "scoreKey": "myproj/FINDINGS.md:45ca54a8081e",
+    "nodeId": "finding:fd8b8219df89"
+  },
+  {
+    "project": "myproj",
+    "filename": "FINDINGS.md",
+    "snippet": "[pitfall] Use the shared cache for repeated lookups",
+    "scoreKey": "myproj/FINDINGS.md:87fe45886aff",
+    "nodeId": "finding:885b28841dbf"
+  },
+  {
+    "project": "other-proj",
+    "filename": "tasks.md",
+    "snippet": "Ship the iOS app",
+    "scoreKey": "other-proj/tasks.md:49237a1f9b23",
+    "nodeId": "finding:07ffdc19cf22"
+  },
+  {
+    "project": "myproj",
+    "filename": "FINDINGS.md",
+    "snippet": "[bug]   collapses\n   runs   of\twhitespace",
+    "scoreKey": "myproj/FINDINGS.md:4d7bb390b946",
+    "nodeId": "finding:864b4d058215"
+  },
+  {
+    "project": "myproj",
+    "filename": "FINDINGS.md",
+    "snippet": "[decision] xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "scoreKey": "myproj/FINDINGS.md:88d900ceae57",
+    "nodeId": "finding:d571e6f7bfad"
+  }
+]

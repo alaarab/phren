@@ -1,0 +1,57 @@
+/* Shared styles for the phone app pages: get-started, ios, android, phren-hook, privacy, support. */
+:root{color-scheme:dark;--bg:#171a23;--panel:#20232e;--line:#424653;--text:#eeeaf4;--body:#c4c7d4;--muted:#9aa0b2;--accent:#91d7e1;--violet:#a9a1d0;--ok:#8fd19e;--warn:#e8c07d}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:17px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow-wrap:break-word}
+main{max-width:800px;margin:auto;padding:40px 24px 88px}
+a{color:var(--accent)}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+.appnav{display:flex;flex-wrap:wrap;gap:8px 20px;margin-bottom:56px;font-size:15px}
+.appnav a{text-decoration:none;color:var(--body)}
+.appnav a:hover{color:var(--accent)}
+.appnav a[aria-current="page"]{color:var(--text);border-bottom:2px solid var(--violet)}
+.appnav .home{color:var(--accent)}
+h1{font-size:clamp(34px,7vw,60px);line-height:1.08;letter-spacing:-.03em;margin:14px 0 24px}
+h2{font-size:25px;line-height:1.25;margin:48px 0 12px}
+h3{font-size:18px;line-height:1.3;margin:28px 0 6px}
+p,li,td{color:var(--body)}
+strong{color:var(--text)}
+ul,ol{padding-left:22px}
+li{margin:8px 0}
+pre{padding:16px 18px;border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow-x:auto;font-size:14px;line-height:1.5}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;overflow-wrap:anywhere}
+pre code{font-size:inherit;overflow-wrap:normal}
+.eyebrow{color:var(--violet);letter-spacing:.12em;font-size:13px;text-transform:uppercase}
+.lead{font-size:20px;max-width:650px;color:var(--body)}
+.status{display:inline-block;padding:3px 12px;border:1px solid var(--line);border-radius:999px;font-size:14px;color:var(--violet)}
+.note{padding-left:16px;border-left:2px solid var(--violet)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px;margin:32px 0}
+.grid h3{margin:0}
+.grid p{margin:6px 0}
+.cta{display:flex;flex-wrap:wrap;gap:12px;margin:28px 0}
+.button{display:inline-block;padding:10px 18px;border-radius:12px;background:var(--accent);color:#10131a;font-weight:600;text-decoration:none}
+.button.secondary{background:transparent;color:var(--accent);border:1px solid var(--line)}
+.toc{border:1px solid var(--line);border-radius:14px;padding:14px 20px;margin:28px 0;background:var(--panel)}
+.toc ol{margin:6px 0}
+.toc li{margin:4px 0}
+.step{border:1px solid var(--line);border-radius:16px;padding:6px 22px 14px;margin:24px 0;background:rgba(32,35,46,.55)}
+.step>h2{margin-top:18px}
+.step h2 .num{color:var(--violet);font-size:.8em;margin-right:6px}
+.label{display:block;margin-top:18px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;font-weight:600}
+.label.do{color:var(--accent)}
+.label.see{color:var(--ok)}
+.label.fail{color:var(--warn)}
+.table-wrap{overflow-x:auto;margin:16px 0}
+table{border-collapse:collapse;width:100%;font-size:15px;min-width:520px}
+td,th{text-align:left;vertical-align:top;padding:8px 12px 8px 0;border-bottom:1px solid #2e3240}
+th{color:var(--muted);font-weight:500}
+dt{font-weight:600;color:var(--text);margin-top:18px}
+dd{margin:4px 0 0;color:var(--body)}
+footer{margin-top:64px;font-size:14px;color:var(--muted)}
+@media (max-width:480px){
+  main{padding:28px 16px 64px}
+  .appnav{margin-bottom:40px;gap:6px 16px}
+  .lead{font-size:18px}
+  .step{padding:4px 16px 12px}
+  h2{font-size:22px}
+}

@@ -1,0 +1,24 @@
+[
+  {
+    "id": "L1",
+    "stableId": "00001234",
+    "date": "2026-07-24",
+    "text": "Active finding outside any archive block",
+    "status": "active",
+    "status_updated": "2026-07-24",
+    "archived": false,
+    "tier": "current"
+  },
+  {
+    "id": "L2",
+    "stableId": "0000abcd",
+    "date": "2026-01-05",
+    "text": "Archived finding inside a legacy details block",
+    "status": "superseded",
+    "status_updated": "2026-01-06",
+    "status_reason": "superseded_by",
+    "status_ref": "replacement text",
+    "archived": true,
+    "tier": "archived"
+  }
+]

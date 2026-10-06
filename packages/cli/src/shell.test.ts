@@ -1,0 +1,521 @@
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { PhrenShell } from "./shell/shell.js";
+import { readTasks, readFindings, readReviewQueue, loadShellState } from "./data/access.js";
+import { writeFile as write, makeTempDir, initTestPhrenRoot } from "./test-helpers.js";
+import { shellStartupFrames, stripAnsi } from "./shell/render.js";
+
+interface TempContext {
+  root: string;
+  project: string;
+}
+
+function seedPhren(root: string): TempContext {
+  initTestPhrenRoot(root);
+  const project = "demo";
+  write(
+    path.join(root, project, "summary.md"),
+    "# demo\n\nSmall demo project for tests.\n"
+  );
+  write(
+    path.join(root, project, "tasks.md"),
+    [
+      "# demo task",
+      "",
+      "## Active",
+      "",
+      "- [ ] active item [high]",
+      "  Context: active context",
+      "",
+      "## Queue",
+      "",
+      "- [ ] queued item",
+      "",
+      "## Done",
+      "",
+      "- [x] done item",
+      "",
+    ].join("\n")
+  );
+  write(
+    path.join(root, project, "FINDINGS.md"),
+    [
+      "# demo FINDINGS",
+      "",
+      "## 2026-03-01",
+      "",
+      "- Existing finding",
+      "  <!-- phren:cite {\"created_at\":\"2026-03-01T00:00:00.000Z\"} -->",
+      "",
+    ].join("\n")
+  );
+  write(
+    path.join(root, project, "review.md"),
+    [
+      "# demo Review Queue",
+      "",
+      "## Review",
+      "",
+      "- [2026-03-05] Keep this memory [confidence 0.90]",
+      "",
+      "## Stale",
+      "",
+      "- [2026-03-04] Remove stale memory [confidence 0.55]",
+      "",
+      "## Conflicts",
+      "",
+      "",
+    ].join("\n")
+  );
+
+  write(path.join(root, ".runtime", "runtime-health.json"), JSON.stringify({
+    lastPromptAt: "2026-03-05T10:00:00.000Z",
+    lastAutoSave: { at: "2026-03-05T10:01:00.000Z", status: "saved-pushed" },
+    lastGovernance: { at: "2026-03-05T10:02:00.000Z", status: "ok", detail: "ok" },
+  }, null, 2) + "\n");
+
+  write(path.join(root, "machines.yaml"), "machine-a: personal\n");
+  write(path.join(root, "profiles", "personal.yaml"), "name: personal\nprojects:\n  - demo\n");
+
+  return { root, project };
+}
+
+function createShell(phrenPath: string) {
+  return new PhrenShell(phrenPath, "", {
+    runDoctor: async (_phrenPath: string, fix?: boolean) => ({
+      ok: !fix,
+      machine: "machine-a",
+      profile: "personal",
+      checks: [
+        { name: "machine-registered", ok: true, detail: "ok" },
+        { name: "runtime-auto-save", ok: true, detail: "saved-pushed" },
+      ],
+    } as any),
+    runRelink: async () => "Relink ok",
+    runHooks: async () => "Hooks rerun",
+    runUpdate: async () => "Updated phren",
+  });
+}
+
+async function withTerminalSize<T>(rows: number, columns: number, run: () => Promise<T>): Promise<T> {
+  const rowDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+  const colDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "columns");
+  Object.defineProperty(process.stdout, "rows", { configurable: true, value: rows });
+  Object.defineProperty(process.stdout, "columns", { configurable: true, value: columns });
+  try {
+    return await run();
+  } finally {
+    if (rowDescriptor) Object.defineProperty(process.stdout, "rows", rowDescriptor);
+    else Reflect.deleteProperty(process.stdout, "rows");
+    if (colDescriptor) Object.defineProperty(process.stdout, "columns", colDescriptor);
+    else Reflect.deleteProperty(process.stdout, "columns");
+  }
+}
+
+describe("PhrenShell", () => {
+  let dir: string;
+  let dirCleanup: () => void;
+  const priorActor = process.env.PHREN_ACTOR;
+
+  beforeEach(() => {
+    ({ path: dir, cleanup: dirCleanup } = makeTempDir("phren-shell-test-"));
+    seedPhren(dir);
+    process.env.PHREN_ACTOR = "shell-test-admin";
+    write(
+      path.join(dir, ".config", "access-control.json"),
+      JSON.stringify({
+        admins: ["shell-test-admin"],
+        maintainers: [],
+        contributors: [],
+        viewers: [],
+      }, null, 2) + "\n"
+    );
+  });
+
+  afterEach(() => {
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
+    dirCleanup();
+  });
+
+  it("navigates between views and preserves selected project context", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput("b");
+    let output = await shell.render();
+    expect(output).toContain("▤ Tasks");
+    expect(output).toContain("demo");
+
+    await shell.handleInput("l");
+    output = await shell.render();
+    expect(output).toContain("✦ Findings");
+    expect(output).toContain("demo");
+
+    shell.close();
+    const state = loadShellState(dir);
+    expect(state.project).toBe("demo");
+  });
+
+  it("renders a useful dashboard before project selection", async () => {
+    const shell = createShell(dir);
+    const output = await shell.render();
+    expect(output).toContain("◉ Projects");
+    expect(output).toContain("Task pulse");
+    expect(output).toContain("Recent fragments");
+    expect(output).toContain("No project selected yet");
+  });
+
+  it("keeps the projects view within the terminal viewport on small screens", async () => {
+    await withTerminalSize(14, 80, async () => {
+      const shell = createShell(dir);
+      const output = await shell.render();
+      expect(output).toContain("◉ Projects");
+      expect(output).toContain("demo");
+      expect(output.split("\n").length).toBeLessThanOrEqual(14);
+    });
+  });
+
+  it("keeps every rendered line under terminal width on very narrow screens", async () => {
+    await withTerminalSize(14, 20, async () => {
+      const shell = createShell(dir);
+      await shell.handleInput(":open demo");
+      await shell.handleInput("b");
+      const output = await shell.render();
+      for (const line of output.split("\n")) {
+        expect(stripAnsi(line).length).toBeLessThan(20);
+      }
+    });
+  });
+
+  it("wraps shell chrome instead of overflowing on ultra-narrow screens", async () => {
+    await withTerminalSize(16, 16, async () => {
+      const shell = createShell(dir);
+      await shell.handleInput(":open demo");
+      await shell.handleInput("b");
+      const output = await shell.render();
+      expect(output).toContain("…");
+      expect(output.split("\n").length).toBeLessThanOrEqual(16);
+      for (const line of output.split("\n")) {
+        expect(stripAnsi(line).length).toBeLessThan(16);
+      }
+    });
+  });
+
+  it("supports task mutations including work next and tidy", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput(":add write shell tests [medium]");
+    await shell.handleInput(":work next");
+    await shell.handleInput(":complete write shell tests");
+    await shell.handleInput("y");
+
+    const parsedInitial = readTasks(dir, "demo");
+    expect(parsedInitial.ok).toBe(true);
+    if (!parsedInitial.ok) throw new Error(parsedInitial.error);
+    expect(parsedInitial.data.items.Done.some((item) => item.line.includes("write shell tests"))).toBe(true);
+
+    // Force multiple done entries and archive old ones.
+    await shell.handleInput(":add prune this task");
+    await shell.handleInput(":complete prune this task");
+    await shell.handleInput("y");
+    await shell.handleInput(":tidy 1");
+
+    const parsedAfterTidy = readTasks(dir, "demo");
+    expect(parsedAfterTidy.ok).toBe(true);
+    if (!parsedAfterTidy.ok) throw new Error(parsedAfterTidy.error);
+    expect(parsedAfterTidy.data.items.Done.length).toBe(1);
+    const archiveFile = path.join(dir, ".config", "task-archive", "demo.md");
+    expect(fs.existsSync(archiveFile)).toBe(true);
+  });
+
+  it("adds and removes findings from shell commands", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput(":find add Shell can write findings");
+
+    let findings = readFindings(dir, "demo");
+    expect(findings.ok).toBe(true);
+    if (findings.ok) expect(findings.data.some((entry) => entry.text.includes("Shell can write findings"))).toBe(true);
+
+    await shell.handleInput(":find remove Shell can write findings");
+    await shell.handleInput("y");
+    findings = readFindings(dir, "demo");
+    if (findings.ok) expect(findings.data.some((entry) => entry.text.includes("Shell can write findings"))).toBe(false);
+  });
+
+  it("removed queue triage commands are not recognized", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput(":mq approve M1");
+    const output = await shell.render();
+    expect(output).toContain("Unknown:");
+  });
+
+  it("renders health dashboard and supports remediation commands", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput("h");
+    let output = await shell.render();
+    expect(output).toContain("♡ Health");
+    expect(output).toContain("runtime-auto-save");
+    expect(output).toContain("last auto-save");
+
+    await shell.handleInput(":run fix");
+    output = await shell.render();
+    expect(output).toContain("doctor --fix:");
+
+    await shell.handleInput(":update");
+    output = await shell.render();
+    expect(output).toContain("Updated phren");
+  });
+
+  it("falls back to the default shell view when persisted state is invalid", async () => {
+    const statePath = path.join(dir, ".runtime", "shell-state.json");
+    write(statePath, JSON.stringify({ view: "Task", project: "demo", page: 2 }, null, 2));
+
+    const shell = createShell(dir);
+    const output = await shell.render();
+    // Always starts at Projects view regardless of saved view state
+    expect(output).toContain("◉ Projects");
+    expect(output).toContain("demo");
+  });
+
+  it("persists intro mode changes from the palette", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":intro off");
+    expect(loadShellState(dir).introMode).toBe("off");
+  });
+
+  it(":help renders help text as main content and clears on next input", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":help");
+    let output = await shell.render();
+    expect(output).toContain("Navigation");
+    expect(output).toContain("to dismiss");
+
+    await shell.handleInput("");
+    output = await shell.render();
+    expect(output).not.toContain("Navigation");
+  });
+
+  it("scrolls the help rather than clipping what does not fit", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":help");
+    const first = await shell.render();
+    // The help is longer than a terminal, so it now says where you are in it
+    // instead of silently dropping the rest.
+    expect(first).toContain("Navigation");
+    expect(first).toMatch(/of \d+/);
+
+    // Arrows scroll instead of dismissing; the later sections become reachable.
+    for (let i = 0; i < 30; i++) await shell.handleRawKey("\x1b[B");
+    const scrolled = await shell.render();
+    expect(scrolled).toContain("Palette commands");
+    expect(shell.showHelp).toBe(true);
+
+    // Anything else still dismisses.
+    await shell.handleRawKey("x");
+    expect(shell.showHelp).toBe(false);
+    expect(await shell.render()).not.toContain("Palette commands");
+  });
+
+  it("switching views resets scroll and preserves cursor map", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+
+    await shell.handleInput("b");
+    const stateAfterTask = loadShellState(dir);
+    expect(stateAfterTask.view).toBe("Tasks");
+
+    await shell.handleInput("l");
+    const stateAfterFindings = loadShellState(dir);
+    expect(stateAfterFindings.view).toBe("Findings");
+
+    await shell.handleInput("b");
+    const stateBackAgain = loadShellState(dir);
+    expect(stateBackAgain.view).toBe("Tasks");
+  });
+
+  it("renders a branded startup intro frame set", () => {
+    const frames = shellStartupFrames("1.18.0");
+    expect(frames.length).toBeGreaterThanOrEqual(1);
+    expect(frames[0]).toContain("local memory for working agents");
+    expect(frames[0]).toContain("phren");
+    expect(frames[0]).toContain("v1.18.0");
+  });
+
+  it(":govern and :consolidate require a selected project", async () => {
+    const tmp = makeTempDir("phren-shell-empty-");
+    try {
+      const shell = new PhrenShell(tmp.path, "", {
+        runDoctor: async () => ({ ok: true, checks: [] }) as any,
+        runRelink: async () => "ok",
+        runHooks: async () => "ok",
+        runUpdate: async () => "ok",
+      });
+
+      await shell.handleInput(":govern");
+      let output = await shell.render();
+      expect(output).toContain("No project selected");
+
+      await shell.handleInput(":consolidate");
+      output = await shell.render();
+      expect(output).toContain("No project selected");
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  it("toggles skill enabled state without deleting the file", async () => {
+    write(path.join(dir, "demo", "skills", "helper.md"), "---\nname: helper\ndescription: test\n---\nbody\n");
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput("s");
+    await shell.handleRawKey("t");
+
+    let output = await shell.render();
+    expect(output).toContain("Disabled helper");
+    expect(fs.existsSync(path.join(dir, "demo", "skills", "helper.md"))).toBe(true);
+
+    await shell.handleRawKey("t");
+    output = await shell.render();
+    expect(output).toContain("Enabled helper");
+  });
+
+  it("shows loading indicators during async operations", async () => {
+    let relinkResolve: (() => void) | undefined;
+    const relinkPromise = new Promise<string>((resolve) => {
+      relinkResolve = () => resolve("Relink done");
+    });
+
+    const shell = new PhrenShell(dir, "", {
+      runDoctor: async () => ({ ok: true, checks: [] }) as any,
+      runRelink: async () => relinkPromise,
+      runHooks: async () => "ok",
+      runUpdate: async () => "ok",
+    });
+    await shell.handleInput(":open demo");
+
+    const inputPromise = shell.handleInput(":relink");
+    relinkResolve!();
+    await inputPromise;
+
+    const output = await shell.render();
+    expect(output).toContain("Relink done");
+  });
+
+  it("groups review queue items by section with headers", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput("m");
+    const output = await shell.render();
+    expect(output).toContain("◈ Review Queue");
+    expect(output).toContain("Review");
+    expect(output).toContain("Stale");
+    expect(output).toMatch(/━{10,}/);
+  });
+
+  it(":undo restores file after destructive :complete action", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+
+    const taskBefore = fs.readFileSync(path.join(dir, "demo", "tasks.md"), "utf8");
+    await shell.handleInput(":complete active item");
+    await shell.handleInput("y");
+
+    const parsedAfter = readTasks(dir, "demo");
+    expect(parsedAfter.ok).toBe(true);
+    if (parsedAfter.ok) {
+      expect(parsedAfter.data.items.Done.some((i) => i.line.includes("active item"))).toBe(true);
+    }
+
+    await shell.handleInput(":undo");
+    const taskAfterUndo = fs.readFileSync(path.join(dir, "demo", "tasks.md"), "utf8");
+    expect(taskAfterUndo).toBe(taskBefore);
+  });
+
+  it(":undo reports nothing when stack is empty", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":undo");
+    const output = await shell.render();
+    expect(output).toContain("Nothing to undo");
+  });
+
+  it("bulk :complete with comma-separated text matches completes multiple items", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput(":add first bulk task");
+    await shell.handleInput(":add second bulk task");
+
+    await shell.handleInput(":complete first bulk task,second bulk task");
+    await shell.handleInput("y");
+
+    const parsed = readTasks(dir, "demo");
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      const doneLines = parsed.data.items.Done.map((i) => i.line);
+      expect(doneLines.some((l) => l.includes("first bulk task"))).toBe(true);
+      expect(doneLines.some((l) => l.includes("second bulk task"))).toBe(true);
+    }
+  });
+
+  it("long-running commands include timing in status message", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput(":relink");
+    const output = await shell.render();
+    expect(output).toMatch(/Relink ok.*\(\d+\.\d+s\)/);
+  });
+
+  it("displays task subsection headers (P0, P1, etc) when present", async () => {
+    write(
+      path.join(dir, "demo", "tasks.md"),
+      [
+        "# demo task",
+        "",
+        "## Active",
+        "",
+        "### P0: Critical",
+        "",
+        "- [ ] fix crash on startup",
+        "",
+        "### P1: Important",
+        "",
+        "- [ ] add logging",
+        "",
+        "## Queue",
+        "",
+        "### P2: Nice to have",
+        "",
+        "- [ ] update docs",
+        "",
+        "## Done",
+        "",
+        "- [x] done item",
+        "",
+      ].join("\n")
+    );
+
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput("b");
+    const output = await shell.render();
+    expect(output).toContain("P0: Critical");
+    expect(output).toContain("P1: Important");
+    expect(output).toContain("P2: Nice to have");
+    expect(output).toContain("fix crash on startup");
+    expect(output).toContain("add logging");
+    expect(output).toContain("update docs");
+  });
+
+  it("per-section task IDs start at 1 for each section (#112)", async () => {
+    const shell = createShell(dir);
+    await shell.handleInput(":open demo");
+    await shell.handleInput("b");
+    const output = await shell.render();
+    expect(output).toContain("A1");
+    expect(output).toContain("Q1");
+    expect(output).toContain("D1");
+  });
+});

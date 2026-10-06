@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alaarab/phren/blob/main/docs/agent-stream-json.schema.json",
+  "title": "phren agent stream-json",
+  "description": "One JSON object per line. Output: phren agent --output-format stream-json. Input: --input-format stream-json reads InputMessage lines.",
+  "$defs": {
+    "SystemInit": {
+      "type": "object",
+      "description": "First output line of a run.",
+      "required": ["type", "subtype", "session_id", "provider", "model", "cwd", "permission_mode", "tools"],
+      "properties": {
+        "type": { "const": "system" },
+        "subtype": { "const": "init" },
+        "session_id": { "type": "string", "description": "Pass to --session to resume." },
+        "provider": { "type": "string" },
+        "model": { "type": ["string", "null"] },
+        "cwd": { "type": "string" },
+        "permission_mode": { "enum": ["suggest", "auto-confirm", "plan", "full-auto"] },
+        "tools": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "Assistant": {
+      "type": "object",
+      "description": "The text of one assistant message (omitted when the message has no text).",
+      "required": ["type", "text", "stop_reason"],
+      "properties": {
+        "type": { "const": "assistant" },
+        "text": { "type": "string" },
+        "stop_reason": { "enum": ["end_turn", "tool_use", "max_tokens"] }
+      }
+    },
+    "ToolUse": {
+      "type": "object",
+      "description": "A tool call the model made.",
+      "required": ["type", "id", "name", "input"],
+      "properties": {
+        "type": { "const": "tool_use" },
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "input": { "type": "object" }
+      }
+    },
+    "ToolResult": {
+      "type": "object",
+      "description": "A tool call's result; output is cut at 4,000 characters.",
+      "required": ["type", "tool_use_id", "name", "is_error", "output"],
+      "properties": {
+        "type": { "const": "tool_result" },
+        "tool_use_id": { "type": "string" },
+        "name": { "type": ["string", "null"] },
+        "is_error": { "type": "boolean" },
+        "output": { "type": "string" }
+      }
+    },
+    "Result": {
+      "type": "object",
+      "description": "Last line of a turn (with --input-format stream-json, one per input message). Also the whole stdout of --output-format json.",
+      "required": ["type", "subtype", "is_error", "result", "num_turns", "tool_calls", "duration_ms", "session_id", "provider", "model", "usage", "total_cost_usd", "permission_denials"],
+      "properties": {
+        "type": { "const": "result" },
+        "subtype": { "enum": ["success", "error_max_turns", "error_budget", "error_plan_rejected", "cancelled", "error_during_execution", "error_hook_blocked", "error_structured_output"] },
+        "is_error": { "type": "boolean" },
+        "result": { "type": "string" },
+        "num_turns": { "type": "integer" },
+        "tool_calls": { "type": "integer" },
+        "duration_ms": { "type": "integer" },
+        "session_id": { "type": ["string", "null"] },
+        "provider": { "type": "string" },
+        "model": { "type": ["string", "null"] },
+        "usage": {
+          "type": "object",
+          "required": ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"],
+          "properties": {
+            "input_tokens": { "type": "integer", "description": "Excludes cache hits and writes." },
+            "output_tokens": { "type": "integer" },
+            "cache_read_input_tokens": { "type": "integer" },
+            "cache_creation_input_tokens": { "type": "integer" }
+          }
+        },
+        "total_cost_usd": { "type": ["number", "null"], "description": "Null on a flat-rate subscription." },
+        "permission_denials": { "type": "integer" },
+        "structured_output": { "description": "With --json-schema: the value matching that schema." },
+        "error": { "type": "string" }
+      }
+    },
+    "InputMessage": {
+      "type": "object",
+      "description": "One --input-format stream-json line: a user message, run as one turn.",
+      "required": ["type", "message"],
+      "properties": {
+        "type": { "const": "user" },
+        "message": {
+          "type": "object",
+          "required": ["role", "content"],
+          "properties": {
+            "role": { "const": "user" },
+            "content": {
+              "type": ["string", "array"],
+              "items": {
+                "type": "object",
+                "required": ["type", "text"],
+                "properties": { "type": { "const": "text" }, "text": { "type": "string" } }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/SystemInit" },
+    { "$ref": "#/$defs/Assistant" },
+    { "$ref": "#/$defs/ToolUse" },
+    { "$ref": "#/$defs/ToolResult" },
+    { "$ref": "#/$defs/Result" }
+  ]
+}

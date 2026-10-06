@@ -1,0 +1,456 @@
+#!/usr/bin/env node
+/**
+ * Child agent entry point — persistent process that:
+ * 1. Receives SpawnPayload via IPC from parent
+ * 2. Resolves the LLM provider and registers tools
+ * 3. Runs the agent loop
+ * 4. Goes idle after task completion — stays alive waiting for messages
+ * 5. Wakes on WakeMessage or DeliverMessage to continue
+ * 6. Shuts down gracefully on ShutdownRequest
+ */
+
+import type { SpawnPayload, ChildMessage, ParentMessage, DoneEvent } from "./types.js";
+import { MAX_SPAWN_DEPTH } from "./types.js";
+import type { TurnHooks, } from "../agent-loop.js";
+import { createIpcHooks } from "./ipc-hooks.js";
+import { resolveProvider } from "../providers/resolve.js";
+import { ToolRegistry } from "../tools/registry.js";
+import { readFileTool } from "../tools/read-file.js";
+import { writeFileTool } from "../tools/write-file.js";
+import { editFileTool, multiEditTool } from "../tools/edit-file.js";
+import { applyPatchTool } from "../tools/apply-patch.js";
+import { createShellTool, taskOutputTool, taskStopTool } from "../tools/shell.js";
+import { globTool } from "../tools/glob.js";
+import { grepTool } from "../tools/grep.js";
+import { createReadImageTool } from "../tools/read-image.js";
+import { modelSupportsVision } from "../models.js";
+import { createWebFetchTool } from "../tools/web-fetch.js";
+import { createWebSearchTool } from "../tools/web-search.js";
+import { updatePlanTool } from "../tools/update-plan.js";
+import { listMcpResourcesTool, readMcpResourceTool } from "../tools/mcp-resources.js";
+import { createPhrenSearchTool } from "../tools/phren-search.js";
+import { createPhrenFindingTool } from "../tools/phren-finding.js";
+import { createPhrenGetTasksTool, createPhrenCompleteTaskTool } from "../tools/phren-tasks.js";
+import { createPhrenAddTaskTool } from "../tools/phren-add-task.js";
+import { createSkillTool } from "../tools/skill.js";
+import { gitStatusTool, gitDiffTool, gitCommitTool } from "../tools/git.js";
+import { buildPhrenContext, } from "../memory/context.js";
+import { startSession, endSession, } from "../memory/session.js";
+import { runAgent, } from "../agent-loop.js";
+import { flushTelemetry } from "../telemetry.js";
+import { loadHooksConfig } from "../user-hooks.js";
+import { createCostTracker } from "../cost.js";
+import { scopeModelOverrides } from "../model-overrides.js";
+import { getAgentType, applyAgentType } from "./agent-types.js";
+import { AgentSpawner } from "./spawner.js";
+import { createSpawnAgentTool, createSendMessageTool, createListAgentsTool } from "../tools/spawn-agent.js";
+import type { LlmProvider } from "../providers/types.js";
+import type { PhrenContext } from "../memory/context.js";
+import type { CostTracker } from "../cost.js";
+
+/** Send a typed message to the parent process. */
+function send(msg: ChildMessage): void {
+  if (process.send) {
+    process.send(msg);
+  }
+}
+
+// ── Persistent agent state (survives across idle/wake cycles) ──────────────
+
+interface AgentState {
+  agentId: string;
+  provider: LlmProvider;
+  registry: ToolRegistry;
+  systemPrompt: string;
+  phrenCtx: PhrenContext | null;
+  sessionId: string | null;
+  costTracker: CostTracker;
+  maxTurns: number;
+  verbose: boolean;
+  plan: boolean;
+  hooks: TurnHooks;
+  spawner: AgentSpawner | null;
+  /** Accumulated DM summaries while running, flushed on idle. */
+  pendingDms: Array<{ from: string; content: string; timestamp: string }>;
+  /** Track whether we've completed at least one task. */
+  taskCount: number;
+}
+
+/** Build a lightweight system prompt for child agents. No "search memory first" forcing. */
+function buildChildPrompt(task: string): string {
+  return [
+    "You are a team agent. You have coding tools available but only use them when the task requires it.",
+    "If someone asks you a question or sends a conversational message, just respond directly — do NOT search, read files, or call tools unless the task explicitly requires code work.",
+    "When given a coding task, use your tools effectively: read files, make edits, run commands.",
+    "Be direct and concise.",
+    "",
+    `Your assignment: ${task}`,
+  ].join("\n");
+}
+
+/** Initialize the persistent agent state from the spawn payload. */
+async function initAgentState(payload: SpawnPayload): Promise<AgentState> {
+  const { agentId, task: _task, cwd, provider: providerName, model, project, permissions, maxTurns, budget, plan, verbose } = payload;
+
+  // Set cwd (use worktree path if provided)
+  process.chdir(payload.worktreePath ?? cwd);
+
+  // Resolve LLM provider; the parent's --context-window / --price-* apply
+  // only if this child runs the model they were given for.
+  if (payload.modelOverrides) {
+    const { model: overridden, ...overrides } = payload.modelOverrides;
+    scopeModelOverrides(overridden, overrides);
+  }
+  const provider = resolveProvider(providerName, model, undefined, payload.reasoning, { baseUrl: payload.baseUrl });
+
+  // Child agents get a lightweight prompt — no "search memory first" forcing
+  const systemPrompt = buildChildPrompt(_task);
+
+  // Quick phren init — just resolve context, skip slow FTS5 search
+  // Child agents call phren_search themselves when they actually need it
+  const phrenCtx = await buildPhrenContext(project);
+  let sessionId: string | null = null;
+  if (phrenCtx) { sessionId = startSession(phrenCtx); }
+
+  const registry = new ToolRegistry();
+  registry.hookConfig = payload.hookConfig !== undefined ? payload.hookConfig : loadHooksConfig(cwd);
+  registry.setPermissions({
+    mode: permissions,
+    allowedPaths: payload.allowedPaths ?? [],
+    projectRoot: payload.worktreePath ?? cwd,
+    sandboxMode: payload.sandboxMode,
+    network: payload.network,
+    rules: payload.rules,
+  });
+  // Headless child: an "ask" verdict has no human to answer it, and the
+  // default readline prompt would hang forever on a closed stdin. Deny with
+  // a clear message instead (children normally run auto-confirm, so this
+  // only fires for the ask-category edge cases).
+  if (!process.stdin.isTTY) {
+    registry.askUser = async (toolName, _input, reason) => {
+      process.stderr.write(`[child] denied ${toolName} (needs approval, no interactive user): ${reason}\n`);
+      return false;
+    };
+  }
+  registry.registerDiagnosticsTool();
+  registry.register(readFileTool);
+  registry.register(writeFileTool);
+  registry.register(editFileTool);
+  registry.register(multiEditTool);
+  registry.register(applyPatchTool);
+  // Children inherit the kernel write fence via the live registry config
+  registry.register(createShellTool(() => registry.permissionConfig));
+  registry.register(taskOutputTool);
+  registry.register(taskStopTool);
+  registry.register(globTool);
+  registry.register(grepTool);
+  if (modelSupportsVision(provider.name, provider.model ?? "")) {
+    registry.register(createReadImageTool(provider));
+  }
+  registry.register(createWebFetchTool());
+  registry.register(createWebSearchTool({ provider: () => provider, costTracker: () => costTracker, network: () => registry.permissionConfig.network !== "off" }));
+  registry.register(updatePlanTool);
+  registry.register(listMcpResourcesTool);
+  registry.register(readMcpResourceTool);
+
+  if (phrenCtx) {
+    registry.register(createPhrenSearchTool(phrenCtx));
+    registry.register(createPhrenFindingTool(phrenCtx, sessionId));
+    registry.register(createPhrenGetTasksTool(phrenCtx));
+    registry.register(createPhrenCompleteTaskTool(phrenCtx, sessionId));
+    registry.register(createPhrenAddTaskTool(phrenCtx, sessionId));
+    registry.register(createSkillTool(phrenCtx));
+  }
+
+  registry.register(gitStatusTool);
+  registry.register(gitDiffTool);
+  registry.register(gitCommitTool);
+
+  // Cost tracker
+  const modelName = (provider as { model?: string }).model ?? model ?? provider.name;
+  const costTracker = createCostTracker(modelName, budget, provider.name, provider.baseUrl);
+
+  let spawner: AgentSpawner | null = null;
+  const depth = payload.depth ?? 0;
+  if (depth < MAX_SPAWN_DEPTH) {
+    spawner = new AgentSpawner({ costTracker, depth, getPermissionDefaults: () => registry.permissionConfig, getParentProvider: () => provider, getParentHooks: () => registry.hookConfig });
+    registry.register(createSpawnAgentTool(spawner, () => registry.permissionConfig));
+    registry.register(createSendMessageTool(spawner));
+    registry.register(createListAgentsTool(spawner));
+  }
+
+  // Apply agent type restrictions (tool allow/disallow lists, prompt prefix)
+  if (payload.agentType) {
+    const typeDef = getAgentType(payload.agentType);
+    if (typeDef) {
+      applyAgentType(registry, typeDef);
+    }
+  }
+
+  return {
+    agentId,
+    provider,
+    registry,
+    systemPrompt,
+    phrenCtx,
+    sessionId,
+    costTracker,
+    maxTurns,
+    verbose,
+    plan,
+    hooks: createIpcHooks(agentId, send),
+    spawner,
+    pendingDms: [],
+    taskCount: 0,
+  };
+}
+
+/** Run a single task. Returns the result. */
+async function runTask(state: AgentState, task: string): Promise<DoneEvent["result"]> {
+  const beforeInput = state.costTracker.totalInputTokens;
+  const beforeOutput = state.costTracker.totalOutputTokens;
+  const beforeCacheRead = state.costTracker.totalCacheReadTokens;
+  const beforeCacheWrite = state.costTracker.totalCacheWriteTokens;
+  const beforeCost = state.costTracker.totalCost;
+
+  const config = {
+    provider: state.provider,
+    registry: state.registry,
+    systemPrompt: state.systemPrompt,
+    maxTurns: state.maxTurns,
+    verbose: state.verbose,
+    phrenCtx: state.phrenCtx,
+    costTracker: state.costTracker,
+    plan: state.plan && state.taskCount === 0, // Plan mode only on first task
+    hooks: state.hooks,
+    hookConfig: state.registry.hookConfig,
+  };
+
+  const result = await runAgent(task, config);
+  state.taskCount++;
+
+  return {
+    finalText: result.finalText,
+    turns: result.turns,
+    toolCalls: result.toolCalls,
+    totalCost: result.totalCost,
+    inputTokens: state.costTracker.totalInputTokens - beforeInput,
+    outputTokens: state.costTracker.totalOutputTokens - beforeOutput,
+    cacheReadTokens: state.costTracker.totalCacheReadTokens - beforeCacheRead,
+    cacheWriteTokens: state.costTracker.totalCacheWriteTokens - beforeCacheWrite,
+    costUsd: state.costTracker.totalCost - beforeCost,
+  };
+}
+
+/** Enter idle state — notify parent, wait for wake/shutdown/message. */
+function goIdle(state: AgentState, reason: "task_complete" | "awaiting_input" | "available"): void {
+  // Flush pending DM summaries
+  const dmSummaries = state.pendingDms.length > 0 ? [...state.pendingDms] : undefined;
+  state.pendingDms = [];
+
+  send({
+    type: "idle",
+    agentId: state.agentId,
+    idleReason: reason,
+    dmSummaries,
+  });
+}
+
+/** Clean up and exit. */
+async function shutdown(state: AgentState): Promise<void> {
+  state.registry.close();
+  // End phren session
+  if (state.phrenCtx && state.sessionId) {
+    endSession(state.phrenCtx, state.sessionId, `Agent shut down after ${state.taskCount} tasks`);
+  }
+
+  const spawner = state.spawner;
+  if (spawner) await spawner.shutdown().catch(() => {});
+  await flushTelemetry(state.registry.permissionConfig.network !== "off");
+
+  send({ type: "shutdown_approved", agentId: state.agentId });
+  process.exit(0);
+}
+
+// ── Main: persistent event loop ────────────────────────────────────────────
+
+let agentState: AgentState | null = null;
+let isRunning = false;
+
+/** Queue of messages received while the agent was busy running a task. */
+const messageQueue: ParentMessage[] = [];
+
+async function handleMessage(msg: ParentMessage): Promise<void> {
+  if (msg.type === "spawn") {
+    // Initial spawn — initialize state and run first task
+    try {
+      agentState = await initAgentState(msg);
+    } catch (err: unknown) {
+      send({ type: "error", agentId: msg.agentId, error: err instanceof Error ? err.message : String(err) });
+      process.exit(1);
+    }
+
+    isRunning = true;
+    try {
+      const result = await runTask(agentState, msg.task);
+
+      // Send done event (task completed, but process stays alive)
+      send({
+        type: "done",
+        agentId: agentState.agentId,
+        result,
+      });
+
+      isRunning = false;
+
+      // Process any queued messages before going idle
+      await drainQueue();
+
+      // Go idle if not already running another task
+      if (!isRunning) {
+        goIdle(agentState, "task_complete");
+      }
+    } catch (err: unknown) {
+      isRunning = false;
+      if (agentState.phrenCtx && agentState.sessionId) {
+        endSession(agentState.phrenCtx, agentState.sessionId, `Error: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      send({
+        type: "error",
+        agentId: agentState.agentId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // Don't exit on error — go idle so parent can send new work or shutdown
+      goIdle(agentState, "available");
+    }
+    return;
+  }
+
+  if (!agentState) {
+    // Not initialized yet — ignore
+    return;
+  }
+
+  switch (msg.type) {
+    case "wake": {
+      if (isRunning) {
+        messageQueue.push(msg);
+        return;
+      }
+      isRunning = true;
+      const task = msg.task ?? msg.message ?? "Continue working";
+      try {
+        const result = await runTask(agentState, task);
+        send({ type: "done", agentId: agentState.agentId, result });
+        isRunning = false;
+        await drainQueue();
+        if (!isRunning) goIdle(agentState, "task_complete");
+      } catch (err: unknown) {
+        isRunning = false;
+        send({ type: "error", agentId: agentState.agentId, error: err instanceof Error ? err.message : String(err) });
+        goIdle(agentState, "available");
+      }
+      break;
+    }
+
+    case "deliver_message": {
+      if (isRunning) {
+        // Record DM for later idle notification
+        agentState.pendingDms.push({
+          from: msg.from,
+          content: msg.content,
+          timestamp: new Date().toISOString(),
+        });
+        // Also queue it as a wake message for when current task finishes
+        messageQueue.push({ type: "wake", message: `Message from ${msg.from}: ${msg.content}`, from: msg.from });
+        return;
+      }
+      // Not running — treat as a wake message
+      isRunning = true;
+      const wakeTask = `Message from ${msg.from}: ${msg.content}`;
+      try {
+        const result = await runTask(agentState, wakeTask);
+        send({ type: "done", agentId: agentState.agentId, result });
+        isRunning = false;
+        await drainQueue();
+        if (!isRunning) goIdle(agentState, "task_complete");
+      } catch (err: unknown) {
+        isRunning = false;
+        send({ type: "error", agentId: agentState.agentId, error: err instanceof Error ? err.message : String(err) });
+        goIdle(agentState, "available");
+      }
+      break;
+    }
+
+    case "cancel": {
+      agentState.registry.close();
+      // Hard cancel — exit immediately
+      if (agentState.phrenCtx && agentState.sessionId) {
+        endSession(agentState.phrenCtx, agentState.sessionId, "Cancelled by parent");
+      }
+      process.exit(130);
+      break;
+    }
+
+    case "shutdown_request": {
+      if (isRunning) {
+        // Queue shutdown for after current task
+        messageQueue.push(msg);
+        return;
+      }
+      await shutdown(agentState);
+      break;
+    }
+  }
+}
+
+/** Drain queued messages (received while running). Shutdown takes priority. */
+async function drainQueue(): Promise<void> {
+  // Check for shutdown first
+  const shutdownIdx = messageQueue.findIndex((m) => m.type === "shutdown_request");
+  if (shutdownIdx !== -1) {
+    messageQueue.length = 0;
+    if (agentState) await shutdown(agentState);
+    return;
+  }
+
+  // Process remaining messages
+  while (messageQueue.length > 0) {
+    const next = messageQueue.shift()!;
+    await handleMessage(next);
+    if (!agentState) return; // shutdown happened
+  }
+}
+
+// ── Message listener ───────────────────────────────────────────────────────
+
+process.on("message", (msg: ParentMessage) => {
+  if (isRunning && msg.type !== "cancel" && msg.type !== "shutdown_request") {
+    // Queue non-urgent messages while running
+    if (msg.type === "deliver_message" && agentState) {
+      agentState.pendingDms.push({
+        from: msg.from,
+        content: msg.content,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    messageQueue.push(msg);
+    return;
+  }
+
+  handleMessage(msg).catch((err) => {
+    const agentId = agentState?.agentId ?? "unknown";
+    send({ type: "error", agentId, error: err instanceof Error ? err.message : String(err) });
+  });
+});
+
+process.on("disconnect", () => {
+  agentState?.registry.close();
+  process.exit(0);
+});
+
+// If no IPC channel (run directly), exit with error
+if (!process.send) {
+  process.stderr.write("child-entry.ts must be spawned via AgentSpawner (requires IPC channel)\n");
+  process.exit(1);
+}

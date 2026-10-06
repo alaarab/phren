@@ -1,0 +1,5 @@
+{
+  "task": "`npm test` fails in this repo. Find the bug in the source and fix it. Do not modify anything under test/. Run the tests to confirm they pass.",
+  "check": ["npm", "test", "--silent"],
+  "unchanged": ["test/cart.test.js"]
+}

@@ -1,0 +1,4 @@
+# machine-name: profile-name
+# Add entries here via link.sh --register or by running link.sh on a new machine
+work-desktop: work
+home-laptop: personal

@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish (must match packages/cli/package.json)
+        required: true
+        type: string
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+    env:
+      # The dispatch input is interpolated only here, into an env var, so it
+      # reaches bash as data. Using `${{ }}` inside `run:` would splice it into
+      # the script before bash parses it.
+      INPUT_VERSION: ${{ github.event.inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Ensure version matches packages/cli and packages/agent
+        # @phren/agent is version-locked to @phren/cli: it imports the CLI's
+        # internal subpath exports, so it pins the exact CLI version it was
+        # built against and both ship together.
+        run: |
+          for pkg in cli agent; do
+            PKG_VERSION=$(node -p "require('./packages/$pkg/package.json').version")
+            if [ "$PKG_VERSION" != "$INPUT_VERSION" ]; then
+              echo "Version mismatch: packages/$pkg/package.json=$PKG_VERSION, input=$INPUT_VERSION"
+              exit 1
+            fi
+          done
+
+      - name: Ensure changelog contains this version
+        run: |
+          grep -q "^## \[$INPUT_VERSION\]" CHANGELOG.md || {
+            echo "CHANGELOG.md missing header for $INPUT_VERSION"
+            exit 1
+          }
+
+      - name: Require successful full release candidate validation of this exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=workflow_dispatch&per_page=100" > "$RUNNER_TEMP/phren-rc-runs.json"
+          # shellcheck disable=SC2016
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const runs = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).workflow_runs;
+            const run = runs.find(r => r.head_sha === process.env.GITHUB_SHA && r.event === "workflow_dispatch" && r.display_title === "RC validation" && r.status === "completed" && r.conclusion === "success");
+            if (!run) { console.error("No successful full RC validation for this exact commit. Dispatch CI with release_candidate=true first."); process.exit(1); }
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Full RC tests already passed for ${run.head_sha}: ${run.html_url}. Publication reuses that evidence without rerunning tests.\n`);
+          ' "$RUNNER_TEMP/phren-rc-runs.json"
+
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Validate docs
+        run: pnpm run validate-docs
+
+      - name: Pack agent
+        # pnpm pack rewrites the agent's `workspace:*` dependency on @phren/cli
+        # to this exact version; npm publish of the directory would not.
+        working-directory: packages/agent
+        run: |
+          pnpm pack --pack-destination "$RUNNER_TEMP"
+          test -f "$RUNNER_TEMP/phren-agent-$INPUT_VERSION.tgz"
+          tar -xzOf "$RUNNER_TEMP/phren-agent-$INPUT_VERSION.tgz" package/package.json \
+            | node -e 'const m = JSON.parse(require("fs").readFileSync(0, "utf8")); if (m.dependencies["@phren/cli"] !== process.env.INPUT_VERSION) { console.error("@phren/agent does not pin @phren/cli " + process.env.INPUT_VERSION); process.exit(1); }'
+
+      - name: Publish CLI package
+        working-directory: packages/cli
+        # The publish token is scoped to this step only. At job level it was
+        # visible to install/build/lint/test, so any dependency script could
+        # have used it to publish.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+      - name: Publish agent package
+        # After @phren/cli, whose exact version it depends on.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish "$RUNNER_TEMP/phren-agent-$INPUT_VERSION.tgz" --access public --provenance
+
+      - name: Create git tag
+        run: |
+          VERSION="$INPUT_VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+          git push origin "v$VERSION"

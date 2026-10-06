@@ -1,0 +1,37 @@
+#!/bin/bash
+# Open phren from the Omarchy bar: the shell, the terminal graph, or the web
+# viewer. TUIs go through omarchy-launch-or-focus-tui so a second click
+# focuses the window you already have; the web viewer starts phren's server
+# the first time and then opens it as an app window.
+#
+#   phren-omarchy-launch shell
+#   phren-omarchy-launch graph
+#   phren-omarchy-launch web [port]
+set -u
+
+what="${1:-shell}"
+port="${2:-3499}"
+phren_bin=$(command -v phren 2>/dev/null || echo "$HOME/.local/bin/phren")
+
+case $what in
+  shell)
+    exec omarchy-launch-or-focus-tui --app-id=org.omarchy.phren "$phren_bin" shell
+    ;;
+  graph)
+    exec omarchy-launch-or-focus-tui --app-id=org.omarchy.phren-graph "$phren_bin" shell --view graph
+    ;;
+  web)
+    if ! ss -ltn 2>/dev/null | grep -q ":$port "; then
+      setsid "$phren_bin" web-ui --port "$port" --no-open >/dev/null 2>&1 &
+      for _ in $(seq 1 50); do
+        ss -ltn 2>/dev/null | grep -q ":$port " && break
+        sleep 0.1
+      done
+    fi
+    exec omarchy-launch-webapp "http://127.0.0.1:$port"
+    ;;
+  *)
+    echo "usage: phren-omarchy-launch <shell|graph|web> [port]" >&2
+    exit 1
+    ;;
+esac

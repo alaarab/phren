@@ -1,0 +1,133 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { makeTempDir } from "./test-helpers.js";
+import * as fs from "fs";
+import * as path from "path";
+import { resetPhrenDotEnvBootstrapForTests } from "./phren-dotenv.js";
+import {
+  isFeatureEnabled,
+  normalizeExecCommand,
+  runGit,
+  runGitOrThrow,
+  buildRobustFtsQuery,
+  learnSynonym,
+  loadLearnedSynonyms,
+  removeLearnedSynonym,
+} from "./utils.js";
+
+describe("runGit", () => {
+  let tmp: { path: string; cleanup: () => void };
+
+  beforeEach(() => {
+    tmp = makeTempDir("run-git-");
+  });
+
+  afterEach(() => {
+    tmp.cleanup();
+  });
+
+  it("includes git stderr in debug output when a command fails", () => {
+    const logs: string[] = [];
+
+    const result = runGit(tmp.path, ["rev-parse", "HEAD"], 1000, (msg) => logs.push(msg));
+
+    expect(result).toBeNull();
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain("not a git repository");
+  });
+
+  it("throws with captured git stderr when callers need hard failures", () => {
+    expect(() => runGitOrThrow(tmp.path, ["rev-parse", "HEAD"], 1000)).toThrow(/not a git repository/);
+  });
+});
+
+describe("feature flag bootstrap", () => {
+  let tmp: { path: string; cleanup: () => void };
+  const origHome = process.env.HOME;
+  const origUserProfile = process.env.USERPROFILE;
+  const origDedup = process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
+  const origPhrenPath = process.env.PHREN_PATH;
+
+  beforeEach(() => {
+    tmp = makeTempDir("feature-flags-");
+    process.env.HOME = tmp.path;
+    process.env.USERPROFILE = tmp.path;
+    delete process.env.PHREN_PATH;
+    delete process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
+    fs.mkdirSync(path.join(tmp.path, ".phren"), { recursive: true });
+    resetPhrenDotEnvBootstrapForTests();
+  });
+
+  afterEach(() => {
+    if (origHome === undefined) delete process.env.HOME;
+    else process.env.HOME = origHome;
+    if (origUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = origUserProfile;
+    if (origPhrenPath === undefined) delete process.env.PHREN_PATH;
+    else process.env.PHREN_PATH = origPhrenPath;
+    if (origDedup === undefined) delete process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
+    else process.env.PHREN_FEATURE_SEMANTIC_DEDUP = origDedup;
+    resetPhrenDotEnvBootstrapForTests();
+    tmp.cleanup();
+  });
+
+  it("loads persisted feature flags from ~/.phren/.env when env is unset", () => {
+    fs.writeFileSync(path.join(tmp.path, ".phren", ".env"), "PHREN_FEATURE_SEMANTIC_DEDUP=1\n");
+
+    expect(isFeatureEnabled("PHREN_FEATURE_SEMANTIC_DEDUP", false)).toBe(true);
+  });
+
+  it("does not override an explicit environment setting with ~/.phren/.env", () => {
+    fs.writeFileSync(path.join(tmp.path, ".phren", ".env"), "PHREN_FEATURE_SEMANTIC_DEDUP=1\n");
+    process.env.PHREN_FEATURE_SEMANTIC_DEDUP = "0";
+
+    expect(isFeatureEnabled("PHREN_FEATURE_SEMANTIC_DEDUP", true)).toBe(false);
+  });
+});
+
+describe("normalizeExecCommand", () => {
+  it.each([
+    ["keeps plain commands unchanged on POSIX", ["gh", "linux"], { command: "gh", shell: false }],
+    ["prefers resolved .exe targets on Windows without shell mode", ["gh", "win32", "C:\\Program Files\\GitHub CLI\\gh.exe\r\n"], { command: "C:\\Program Files\\GitHub CLI\\gh.exe", shell: false }],
+    ["enables shell mode for resolved .cmd targets on Windows", ["gh", "win32", "C:\\Users\\ala\\AppData\\Roaming\\npm\\gh.cmd\r\n"], { command: "C:\\Users\\ala\\AppData\\Roaming\\npm\\gh.cmd", shell: true }],
+    ["preserves explicit wrapper paths on Windows", ["C:\\tools\\gh.cmd", "win32"], { command: "C:\\tools\\gh.cmd", shell: true }],
+  ] as const)("%s", (_label, args, expected) => {
+    expect(normalizeExecCommand(...(args as unknown as Parameters<typeof normalizeExecCommand>))).toEqual(expected);
+  });
+});
+
+describe("learned synonyms", () => {
+  let tmp: { path: string; cleanup: () => void };
+
+  beforeEach(() => {
+    tmp = makeTempDir("learned-synonyms-");
+  });
+
+  afterEach(() => {
+    tmp.cleanup();
+  });
+
+  it("learnSynonym persists and merges learned terms into robust query expansion", () => {
+    fs.mkdirSync(path.join(tmp.path, "demo"), { recursive: true });
+    learnSynonym(tmp.path, "demo", "bugfix", ["regression", "hotfix"]);
+    const loaded = loadLearnedSynonyms("demo", tmp.path);
+    expect(loaded.bugfix).toContain("regression");
+    expect(loaded.bugfix).toContain("hotfix");
+
+    const query = buildRobustFtsQuery("bugfix", "demo", tmp.path);
+    expect(query).toContain("\"bugfix\"");
+    expect(query).toContain("\"regression\"");
+  });
+
+  it("removeLearnedSynonym removes selected values and then key", () => {
+    fs.mkdirSync(path.join(tmp.path, "demo"), { recursive: true });
+    learnSynonym(tmp.path, "demo", "latency", ["slow", "lag", "delay"]);
+    removeLearnedSynonym(tmp.path, "demo", "latency", ["lag"]);
+    let loaded = loadLearnedSynonyms("demo", tmp.path);
+    expect(loaded.latency).toContain("slow");
+    expect(loaded.latency).not.toContain("lag");
+
+    removeLearnedSynonym(tmp.path, "demo", "latency");
+    loaded = loadLearnedSynonyms("demo", tmp.path);
+    expect(loaded.latency).toBeUndefined();
+  });
+});

@@ -1,0 +1,4 @@
+name: work
+description: "Work machine defaults"
+projects:
+  - global

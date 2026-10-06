@@ -1,0 +1,124 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  isDuplicateFinding,
+  addFindingsToFile,
+  checkSemanticDedup,
+} from "../shared/content.js";
+import { makeTempDir, grantAdmin } from "../test-helpers.js";
+import * as fs from "fs";
+import * as path from "path";
+
+describe("isDuplicateFinding", () => {
+  it("detects near-duplicates via Jaccard similarity", () => {
+    const existing = "- Always restart the dev server after changing environment variables\n";
+    // Same meaning, slightly different wording
+    const nearDup = "- Restart dev server when environment variables change";
+    expect(isDuplicateFinding(existing, nearDup)).toBe(true);
+  });
+});
+
+describe("addFindingsToFile rejects secrets", () => {
+  let tmpDir: string;
+  let tmpCleanup: (() => void) | undefined;
+
+  function makePhren(): string {
+    ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-bulk-secrets-"));
+    return tmpDir;
+  }
+
+  function makeProject(phrenDir: string, name: string, files: Record<string, string>): void {
+    const dir = path.join(phrenDir, name);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [file, content] of Object.entries(files)) {
+      fs.writeFileSync(path.join(dir, file), content);
+    }
+  }
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    if (tmpCleanup) {
+      tmpCleanup();
+      tmpCleanup = undefined;
+    }
+  });
+
+  it("puts secret-containing findings in rejected[], not added[]", () => {
+    const phren = makePhren();
+    grantAdmin(phren);
+    makeProject(phren, "myproj", { "summary.md": "# myproj\n" });
+
+    const result = addFindingsToFile(phren, "myproj", [
+      "Always use parameterized queries",
+      "Use AKIAIOSFODNN7EXAMPLE for the API",
+      "Cache invalidation is hard",
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect(result.data.added).toContain("Always use parameterized queries");
+    expect(result.data.added).toContain("Cache invalidation is hard");
+    expect(result.data.added).not.toContain("Use AKIAIOSFODNN7EXAMPLE for the API");
+    expect(result.data.rejected).toHaveLength(1);
+    expect(result.data.rejected[0].text).toBe("Use AKIAIOSFODNN7EXAMPLE for the API");
+    expect(result.data.rejected[0].reason).toContain("AWS access key");
+  });
+});
+
+describe("checkSemanticDedup", () => {
+  let tmpDir: string;
+  let tmpCleanup: (() => void) | undefined;
+
+  function makePhren(): string {
+    ({ path: tmpDir, cleanup: tmpCleanup } = makeTempDir("phren-semantic-dedup-"));
+    return tmpDir;
+  }
+
+  beforeEach(() => {
+    process.env.PHREN_FEATURE_SEMANTIC_DEDUP = "1";
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
+    delete process.env.PHREN_ACTOR;
+    vi.restoreAllMocks();
+    if (tmpCleanup) {
+      tmpCleanup();
+      tmpCleanup = undefined;
+    }
+  });
+
+  it("returns false when feature flag is off", async () => {
+    delete process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
+    const phren = makePhren();
+    const result = await checkSemanticDedup(phren, "proj", "some finding");
+    expect(result).toBe(false);
+  });
+
+  it("uses cache on second call (cache hit)", async () => {
+    process.env.PHREN_FEATURE_SEMANTIC_DEDUP = "1";
+    const phren = makePhren();
+    // Create project with a finding that has moderate Jaccard overlap
+    const projDir = path.join(phren, "proj");
+    fs.mkdirSync(projDir, { recursive: true });
+    fs.mkdirSync(path.join(phren, ".runtime"), { recursive: true });
+    // a and b: Jaccard ~0.36 — in [0.30, 0.40) range so semantic dedup triggers
+    // shared: {restart, server, environment, configuration} = 4; union = 11; Jaccard ≈ 0.36
+    const a = "always restart server after changing environment configuration";
+    const b = "restart application server when environment configuration changes detected";
+    fs.writeFileSync(
+      path.join(projDir, "FINDINGS.md"),
+      `# proj Findings\n\n## 2026-01-01\n\n- ${b}\n`
+    );
+
+    // Pre-populate the cache with a result
+    const crypto = await import("node:crypto");
+    const key = crypto.createHash("sha256").update(a + "|||" + b).digest("hex");
+    const cachePath = path.join(phren, ".runtime", "dedup-cache.json");
+    fs.writeFileSync(cachePath, JSON.stringify({ [key]: { result: true, ts: Date.now() } }));
+
+    // This should return true from cache without calling Anthropic
+    const result = await checkSemanticDedup(phren, "proj", a);
+    expect(result).toBe(true);
+
+    delete process.env.PHREN_FEATURE_SEMANTIC_DEDUP;
+  });
+});

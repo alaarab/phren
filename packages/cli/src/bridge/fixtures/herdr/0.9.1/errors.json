@@ -1,0 +1,234 @@
+[
+  {
+    "request": {
+      "method": "pane.read",
+      "params": {
+        "pane_id": "w999:p9",
+        "source": "recent",
+        "lines": 5
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "error": {
+        "code": "pane_not_found",
+        "message": "pane w999:p9 not found"
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "agent.read",
+      "params": {
+        "target": "no-such-agent"
+      }
+    },
+    "response": {
+      "id": "",
+      "error": {
+        "code": "invalid_request",
+        "message": "invalid request: missing field `source` at line 1 column 76"
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "agent.read",
+      "params": {
+        "target": "no-such-agent",
+        "source": "visible",
+        "format": "text"
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "error": {
+        "code": "agent_not_found",
+        "message": "agent target no-such-agent not found"
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "agent.prompt",
+      "params": {
+        "target": "no-such-agent",
+        "text": "x"
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "error": {
+        "code": "agent_not_found",
+        "message": "agent target no-such-agent not found"
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "agent.start",
+      "params": {
+        "name": "x",
+        "kind": "codex",
+        "pane_id": "w999:p9"
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "error": {
+        "code": "agent_pane_not_found",
+        "message": "agent target pane w999:p9 not found"
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "agent.send_keys",
+      "params": {
+        "target": "no-such-agent",
+        "keys": [
+          "enter"
+        ]
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "error": {
+        "code": "agent_not_found",
+        "message": "agent target no-such-agent not found"
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "pane.process_info",
+      "params": {
+        "pane_id": "w999:p9"
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "error": {
+        "code": "pane_not_found",
+        "message": "pane not found"
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "workspace.close",
+      "params": {
+        "workspace_id": "w999"
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "error": {
+        "code": "workspace_not_found",
+        "message": "workspace w999 not found"
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "agent.prompt",
+      "params": {
+        "target": "pending-agent",
+        "text": "hello"
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "error": {
+        "code": "agent_not_ready",
+        "message": "agent pending-agent is not an active named agent"
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "agent.start",
+      "params": {
+        "name": "pending-agent",
+        "kind": "codex",
+        "pane_id": "w1T:p1",
+        "timeout_ms": 1
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "error": {
+        "code": "invalid_agent_timeout",
+        "message": "agent start timeout must be greater than 3000ms and at most 300000ms"
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "agent.prompt",
+      "params": {
+        "target": "pending-agent",
+        "text": "hello"
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "error": {
+        "code": "agent_not_found",
+        "message": "agent target pending-agent not found"
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "agent.start",
+      "params": {
+        "name": "pending-agent",
+        "kind": "codex",
+        "pane_id": "w1T:p1",
+        "timeout_ms": 1000
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "error": {
+        "code": "invalid_agent_timeout",
+        "message": "agent start timeout must be greater than 3000ms and at most 300000ms"
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "agent.prompt",
+      "params": {
+        "target": "blocked-agent",
+        "text": "hello"
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "error": {
+        "code": "agent_blocked",
+        "message": "agent blocked-agent is blocked and requires interactive input"
+      }
+    }
+  },
+  {
+    "request": {
+      "method": "agent.start",
+      "params": {
+        "name": "busy-agent",
+        "kind": "codex",
+        "pane_id": "w1X:p1",
+        "timeout_ms": 3001
+      }
+    },
+    "response": {
+      "id": "fixture-1",
+      "error": {
+        "code": "agent_pane_busy",
+        "message": "agent target pane w1X:p1 is not an available shell"
+      }
+    }
+  }
+]

@@ -1,0 +1,702 @@
+import { taskView, taskCounts, filterTaskDoc } from "../data/task-contract.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { type McpContext, mcpResponse, resolveStoreForProject } from "./types.js";
+import { z } from "zod";
+import * as fs from "fs";
+import * as path from "path";
+import { isValidProjectName } from "../utils.js";
+import {
+  addTask as addTaskStore,
+  addTasks as addTasksBatch,
+  taskMarkdown,
+  type TaskDoc,
+  type TaskItem,
+  type TaskSection,
+  completeTask as completeTaskStore,
+  completeTasks as completeTasksBatch,
+  removeTask as removeTaskStore,
+  removeTasks as removeTasksBatch,
+  linkTaskIssue,
+  pinTask,
+  unpinTask,
+  workNextTask,
+  tidyDoneTasks,
+  readTasks,
+  readTasksAcrossProjects,
+  resolveTaskItem,
+  TASKS_FILENAME,
+  updateTask as updateTaskStore,
+  promoteTask,
+} from "../data/access.js";
+import { applyGravity } from "../data/tasks.js";
+import { captureTaskWrites } from "../data/task-receipts.js";
+import {
+  buildTaskIssueBody,
+  createGithubIssueForTask,
+  parseGithubIssueUrl,
+  resolveProjectGithubRepo,
+} from "../task/github.js";
+import { clearTaskCheckpoint } from "../session/checkpoints.js";
+import { incrementSessionTasksCompleted } from "./session.js";
+import { normalizeMemoryScope } from "../shared.js";
+import { permissionDeniedError } from "../governance/rbac.js";
+import { getMachineName } from "../machine-identity.js";
+import { claimTaskSynced } from "../sync/task-claim.js";
+
+type TaskStatus = "all" | "active" | "queue" | "done" | "active+queue";
+
+const TASK_SECTION_ORDER: TaskSection[] = ["Active", "Queue", "Done"];
+
+const DEFAULT_TASK_LIMIT = 20;
+/** Done items are historical — cap tightly by default to avoid large responses. */
+const DEFAULT_DONE_LIMIT = 5;
+
+function refreshTaskIndex(updateFileInIndex: (filePath: string) => void, phrenPath: string, project: string): void {
+  updateFileInIndex(path.join(phrenPath, project, TASKS_FILENAME));
+}
+
+function buildTaskView(doc: TaskDoc, status?: TaskStatus, limit?: number, doneLimit?: number, offset?: number): { doc: TaskDoc; includedSections: TaskSection[]; totalItems: number; totalUnpaged: number; truncated: boolean } {
+  let includedSections: TaskSection[];
+  if (status === "all") {
+    includedSections = TASK_SECTION_ORDER;
+  } else if (status === "done") {
+    includedSections = ["Done"];
+  } else if (status === "active") {
+    includedSections = ["Active"];
+  } else if (status === "queue") {
+    includedSections = ["Queue"];
+  } else {
+    includedSections = ["Active", "Queue"];
+  }
+
+  const effectiveLimit = limit ?? DEFAULT_TASK_LIMIT;
+  const effectiveDoneLimit = doneLimit ?? DEFAULT_DONE_LIMIT;
+  const effectiveOffset = offset ?? 0;
+  let truncated = false;
+
+  const items: Record<TaskSection, TaskDoc["items"][TaskSection]> = {
+    Active: [],
+    Queue: [],
+    Done: [],
+  };
+
+  let totalUnpaged = 0;
+
+  for (const section of includedSections) {
+    // Apply gravity to Active and Queue items so stale tasks drift down
+    const rawItems = doc.items[section];
+    const sectionItems = (section === "Active" || section === "Queue") ? applyGravity(rawItems) : rawItems;
+    const cap = section === "Done" ? effectiveDoneLimit : effectiveLimit;
+    const sliced = effectiveOffset > 0 ? sectionItems.slice(effectiveOffset) : sectionItems;
+    totalUnpaged += sectionItems.length;
+    if (sliced.length > cap) {
+      items[section] = sliced.slice(0, cap);
+      truncated = true;
+    } else {
+      items[section] = sliced;
+    }
+  }
+
+  const totalItems = TASK_SECTION_ORDER.reduce((sum, section) => sum + items[section].length, 0);
+
+  return {
+    doc: { ...doc, items },
+    includedSections,
+    totalItems,
+    totalUnpaged,
+    truncated,
+  };
+}
+
+function buildTaskSummary(doc: TaskDoc, includedSections: TaskSection[], base: string, original = doc): string {
+  const counts = taskCounts(base, original);
+  const lines: string[] = [`## ${doc.project}`, `Human: ${counts.human}; Agent ready: ${counts.agentReady}; Agent waiting on human: ${counts.agentWaitingOnHuman}; Agent waiting on task: ${counts.agentWaitingOnTask}.`];
+  for (const section of includedSections) {
+    const items = doc.items[section];
+      const highCount = items.filter(i => i.priority === "high").length;
+      const medCount = items.filter(i => i.priority === "medium").length;
+      lines.push(`**${section}**: ${items.length} items${highCount ? ` (${highCount} high` + (medCount ? `, ${medCount} medium` : "") + ")" : ""}`);
+      // Show first 3 items as preview
+      for (const item of items.slice(0, 3)) {
+        const prio = item.priority ? ` [${item.priority}]` : "";
+        const bidPrefix = item.stableId ? `bid:${item.stableId} ` : "";
+        const githubTag = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
+        const claimTag = item.claim ? ` [claimed: ${item.claim.computer}]` : "";
+        lines.push(`  - ${bidPrefix}${item.line.slice(0, 80)}${item.line.length > 80 ? "\u2026" : ""}${prio}${githubTag}${claimTag}`);
+      }
+    if (items.length > 3) lines.push(`  ... and ${items.length - 3} more`);
+  }
+  return lines.join("\n");
+}
+
+export function register(server: McpServer, ctx: McpContext): void {
+  const { phrenPath, profile, updateFileInIndex } = ctx;
+  const withWriteQueue = (fn: () => Promise<ReturnType<typeof mcpResponse>>) => ctx.withWriteQueue(async () => {
+    const { result, write } = await captureTaskWrites(fn);
+    // Preserve each handler's existing data, including per-item batch errors.
+    const payload = JSON.parse(result.content[0].text);
+    if (write || payload.ok) payload.data = { ...payload.data, write };
+    return mcpResponse(payload);
+  });
+
+  server.registerTool(
+    "get_tasks",
+    {
+      title: "◆ phren · tasks",
+      description: "Get tasks. Defaults to Active and Queue sections only. Pass status='all' to include Done items.",
+      inputSchema: z.object({
+        project: z.string().optional().describe("Project name. Omit to get all projects."),
+        id: z.string().optional().describe("Task ID like A1, Q3, D2. Requires project."),
+        item: z.string().optional().describe("Exact task text. Requires project."),
+        responsibility: z.enum(["human", "agent"]).optional().describe("Independent responsibility lane filter."),
+        readiness: z.enum(["ready", "waiting-on-human", "waiting-on-task"]).optional().describe("Derived readiness filter; does not change task section."),
+        status: z.enum(["all", "active", "queue", "done", "active+queue"]).optional().describe("Which task sections to include. Defaults to 'active+queue'."),
+        limit: z.number().int().min(1).max(200).optional().describe("Max items per Active/Queue section to return. Default 20."),
+        done_limit: z.number().int().min(1).max(200).optional().describe("Max Done items to return (most recent). Default 5. Done sections are capped tightly to avoid large responses."),
+        offset: z.number().int().min(0).optional().describe("Skip the first N items in each section before applying limit. Use with limit for pagination (e.g. offset:20, limit:20 for page 2)."),
+        summary: z.boolean().optional().describe("If true, return counts and titles only (no full content). Reduces token usage."),
+      }),
+    },
+    async ({ project, id, item, status, responsibility, readiness, limit, done_limit, offset, summary }) => {
+      // Single item lookup
+      if (id || item) {
+        if (!project) return mcpResponse({ ok: false, error: "Provide `project` when looking up a single item." });
+        if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+        const resolvedPath = resolveStoreForProject(ctx, project, "read").phrenPath;
+        const result = readTasks(resolvedPath, project);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        const doc = result.data;
+        const all = [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done];
+        const bidLookup = id && /^(?:bid:)?[a-f0-9]{8}$/.test(id) ? id.replace(/^bid:/, "") : null;
+        const matches = all.filter((entry) =>
+          (bidLookup && entry.stableId === bidLookup) ||
+          (id && !bidLookup && entry.id.toLowerCase() === id.toLowerCase()) ||
+          (item && entry.line.trim() === item.trim())
+        );
+        if (matches.length > 1) return mcpResponse({ ok: false, error: "Task identity is ambiguous." });
+        const match = matches[0];
+        if (!match) return mcpResponse({ ok: false, error: `No task found in ${project} for ${id ? `id=${id}` : `item="${item}"`}.` });
+        return mcpResponse({
+          ok: true,
+          message: `${match.id}: ${match.line} (${match.section})`,
+          data: {
+            ...taskView(phrenPath, doc, match),
+            project,
+            id: match.id,
+            stableId: match.stableId || null,
+            section: match.section,
+            checked: match.checked,
+            line: match.line,
+            context: match.context || null,
+            priority: match.priority || null,
+            githubIssue: match.githubIssue ?? null,
+            githubUrl: match.githubUrl || null,
+          },
+        });
+      }
+
+      // Full task list for one project
+      if (project) {
+        if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+        const resolvedPath = resolveStoreForProject(ctx, project, "read").phrenPath;
+        const result = readTasks(resolvedPath, project);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        const doc = result.data;
+        const view = buildTaskView(filterTaskDoc(phrenPath, doc, { responsibility, readiness }), status, limit, done_limit, offset);
+        if (!fs.existsSync(doc.path)) {
+          return mcpResponse({
+            ok: true,
+            message: `No tasks found for "${project}".`,
+            data: { project, counts: taskCounts(phrenPath, doc), items: Object.fromEntries(TASK_SECTION_ORDER.map(section => [section, view.doc.items[section].map(entry => taskView(phrenPath, doc, entry))])), includedSections: view.includedSections, totalItems: view.totalItems },
+          });
+        }
+        if (summary) {
+          return mcpResponse({
+            ok: true,
+            message: buildTaskSummary(view.doc, view.includedSections, phrenPath, doc),
+            data: { project, counts: taskCounts(phrenPath, doc), includedSections: view.includedSections, totalItems: view.totalItems, summary: true },
+          });
+        }
+        const sectionCounts = view.includedSections
+          .map((s) => `${s}: ${view.doc.items[s].length}/${doc.items[s].length}`)
+          .join(", ");
+        const paginationNote = view.truncated
+          ? `\n\n_${sectionCounts} (offset ${offset ?? 0}). Use offset/limit to page._`
+          : (offset ? `\n\n_Page offset: ${offset}. ${sectionCounts}._` : "");
+        return mcpResponse({
+          ok: true,
+          message: `## ${project}\n${taskMarkdown(view.doc)}${paginationNote}`,
+          data: { project, counts: taskCounts(phrenPath, doc), items: Object.fromEntries(TASK_SECTION_ORDER.map(section => [section, view.doc.items[section].map(entry => taskView(phrenPath, doc, entry))])), issues: doc.issues, includedSections: view.includedSections, totalItems: view.totalItems, totalUnpaged: view.totalUnpaged, offset: offset ?? 0, truncated: view.truncated },
+        });
+      }
+
+      // All projects
+      const docs = readTasksAcrossProjects(phrenPath, profile);
+      if (!docs.length) return mcpResponse({ ok: true, message: "No tasks found.", data: { projects: [] } });
+      const views = docs.map((doc) => ({ project: doc.project, doc, view: buildTaskView(filterTaskDoc(phrenPath, doc, { responsibility, readiness }), status, limit, done_limit, offset), issues: doc.issues }));
+      const anyTruncated = views.some(({ view }) => view.truncated);
+      let parts: string[];
+      if (summary) {
+        parts = views.map(({ view, doc }) => buildTaskSummary(view.doc, view.includedSections, phrenPath, doc));
+      } else {
+        parts = views.map(({ project, view }) => `## ${project}\n${taskMarkdown(view.doc)}`);
+      }
+      const truncationNote = anyTruncated && !summary ? `\n\n_Results capped (Active/Queue: ${limit ?? DEFAULT_TASK_LIMIT}, Done: ${done_limit ?? DEFAULT_DONE_LIMIT}). Pass limit/done_limit to see more._` : "";
+      const projectData = views.map(({ project, doc, view, issues }) => ({
+        project,
+        counts: taskCounts(phrenPath, doc),
+        items: Object.fromEntries(TASK_SECTION_ORDER.map(section => [section, view.doc.items[section].map(entry => taskView(phrenPath, doc, entry))])),
+        issues,
+        includedSections: view.includedSections,
+        totalItems: view.totalItems,
+        truncated: view.truncated,
+      }));
+      return mcpResponse({ ok: true, message: parts.join("\n\n") + truncationNote, data: { projects: projectData, summary: summary || false } });
+    }
+  );
+
+  server.registerTool(
+    "add_task",
+    {
+      title: "◆ phren · add task",
+      description: "Append one or more tasks to a project's tasks.md file. Adds to the Queue section. Pass a single string or an array of strings.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name (must match a directory in your phren)."),
+        item: z.preprocess(
+          (v) => (typeof v === "string" ? [v] : v),
+          z.array(z.string()).min(1),
+        ).describe("The task(s) to add. Always pass as an array of strings — use a single-element array for one task."),
+        scope: z.string().optional().describe("Optional memory scope label. Defaults to 'shared'. Example: 'researcher' or 'builder'."),
+      }),
+    },
+    async ({ project: projectInput, item, scope }) => {
+      // Resolve store-qualified project names (e.g., "team/arc")
+      let targetPhrenPath: string;
+      let project: string;
+      try {
+        const resolved = resolveStoreForProject(ctx, projectInput);
+        targetPhrenPath = resolved.phrenPath;
+        project = resolved.project;
+      } catch (err: unknown) {
+        return mcpResponse({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const addTaskDenied = permissionDeniedError(targetPhrenPath, "add_task", project);
+      if (addTaskDenied) return mcpResponse({ ok: false, error: addTaskDenied });
+
+      const normalizedScope = normalizeMemoryScope(scope ?? "shared");
+      if (!normalizedScope) return mcpResponse({ ok: false, error: `Invalid scope: "${scope}". Use lowercase letters/numbers with '-' or '_' (max 64 chars), e.g. "researcher".` });
+
+      if (Array.isArray(item)) {
+        return withWriteQueue(async () => {
+          const result = addTasksBatch(targetPhrenPath, project, item, { scope: normalizedScope });
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+          const { added, errors } = result.data;
+          if (added.length > 0) refreshTaskIndex(updateFileInIndex, targetPhrenPath, project);
+          return mcpResponse({ ok: added.length > 0, ...(added.length === 0 ? { error: `No tasks added: ${errors.join("; ")}` } : {}), message: `Added ${added.length} of ${item.length} tasks to ${project}`, data: { project, added, errors } });
+        });
+      }
+
+      return withWriteQueue(async () => {
+        const result = addTaskStore(targetPhrenPath, project, item, { scope: normalizedScope });
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        refreshTaskIndex(updateFileInIndex, targetPhrenPath, project);
+        return mcpResponse({ ok: true, message: `Task added: ${result.data.line}`, data: { project, item, scope: normalizedScope } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "complete_task",
+    {
+      title: "◆ phren · done",
+      description: "Move one or more tasks to the Done section by matching text. Pass a single string or an array of strings.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.preprocess(
+          (v) => (typeof v === "string" ? [v] : v),
+          z.array(z.string()).min(1),
+        ).describe("The task(s) to complete. Always pass as an array of strings — use a single-element array for one."),
+        sessionId: z.string().optional().describe("Optional session ID from session_start. Pass this to track per-session task completion metrics."),
+      }),
+    },
+    async ({ project: projectInput, item, sessionId }) => {
+      const resolved = resolveStoreForProject(ctx, projectInput);
+      const project = resolved.project;
+      const targetPath = resolved.phrenPath;
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const completeTaskDenied = permissionDeniedError(targetPath, "complete_task", project);
+      if (completeTaskDenied) return mcpResponse({ ok: false, error: completeTaskDenied });
+
+      if (Array.isArray(item)) {
+        return withWriteQueue(async () => {
+          const resolvedItems = item
+            .map((match) => {
+              const resolvedItem = resolveTaskItem(targetPath, project, match);
+              return resolvedItem.ok ? resolvedItem.data : null;
+            })
+            .filter((task): task is TaskItem => task !== null);
+          const result = completeTasksBatch(targetPath, project, item);
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+          const { completed, errors } = result.data;
+          if (completed.length > 0) {
+            const completedSet = new Set(completed);
+            for (const task of resolvedItems) {
+              if (!completedSet.has(task.line)) continue;
+              clearTaskCheckpoint(targetPath, {
+                project,
+                taskId: task.stableId ?? task.id,
+                stableId: task.stableId,
+                positionalId: task.id,
+                taskLine: task.line,
+              });
+            }
+            incrementSessionTasksCompleted(targetPath, completed.length, sessionId, project);
+          }
+          if (completed.length > 0) refreshTaskIndex(updateFileInIndex, targetPath, project);
+          return mcpResponse({ ok: completed.length > 0, ...(completed.length === 0 ? { error: `No tasks completed: ${errors.join("; ")}` } : {}), message: `Completed ${completed.length}/${item.length} items`, data: { project, completed, errors } });
+        });
+      }
+
+      return withWriteQueue(async () => {
+        const before = resolveTaskItem(targetPath, project, item);
+        const result = completeTaskStore(targetPath, project, item);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        if (before.ok) {
+          clearTaskCheckpoint(targetPath, {
+            project,
+            taskId: before.data.stableId ?? before.data.id,
+            stableId: before.data.stableId,
+            positionalId: before.data.id,
+            taskLine: before.data.line,
+          });
+        }
+        incrementSessionTasksCompleted(targetPath, 1, sessionId, project);
+        refreshTaskIndex(updateFileInIndex, targetPath, project);
+        return mcpResponse({ ok: true, message: result.data, data: { project, item } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "remove_task",
+    {
+      title: "◆ phren · remove task",
+      description: "Remove one or more tasks from a project's tasks.md file by matching text or ID. Pass a single string or an array of strings.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.preprocess(
+          (v) => (typeof v === "string" ? [v] : v),
+          z.array(z.string()).min(1),
+        ).describe("The task(s) to remove. Always pass as an array of strings (or task IDs like A1/Q3/D2) — use a single-element array for one."),
+      }),
+    },
+    async ({ project: projectInput, item }) => {
+      const resolved = resolveStoreForProject(ctx, projectInput);
+      const project = resolved.project;
+      const targetPath = resolved.phrenPath;
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const removeTaskDenied = permissionDeniedError(targetPath, "remove_task", project);
+      if (removeTaskDenied) return mcpResponse({ ok: false, error: removeTaskDenied });
+
+      if (Array.isArray(item)) {
+        return withWriteQueue(async () => {
+          const result = removeTasksBatch(targetPath, project, item);
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+          const { removed, errors } = result.data;
+          if (removed.length > 0) refreshTaskIndex(updateFileInIndex, targetPath, project);
+          return mcpResponse({ ok: removed.length > 0, ...(removed.length === 0 ? { error: `No tasks removed: ${errors.join("; ")}` } : {}), message: `Removed ${removed.length}/${item.length} items`, data: { project, removed, errors } });
+        });
+      }
+
+      return withWriteQueue(async () => {
+        const result = removeTaskStore(targetPath, project, item);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        refreshTaskIndex(updateFileInIndex, targetPath, project);
+        return mcpResponse({ ok: true, message: result.data, data: { project, item } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "update_task",
+    {
+      title: "◆ phren · update task",
+      description:
+        "Update a task's text, priority, context, section, GitHub metadata, pin status, or promote it. " +
+        "Also supports work_next (pick highest-priority Queue item) and promote (clear speculative flag). " +
+        "When work_next is true, item is not needed.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().optional().describe("Partial text to match against existing tasks. Required unless work_next is true."),
+        updates: z.object({
+          text: z.string().optional().describe("Replacement text for the task line."),
+          priority: z.enum(["high", "medium", "low"]).optional().describe("New priority tag: high, medium, or low."),
+          context: z.string().optional().describe("Text to set on the Context: line below the task."),
+          replace_context: z.boolean().optional().describe("If true, replace the existing Context: value instead of appending."),
+          responsibility: z.enum(["human", "agent"]).optional().describe("Who must act; independent of task section. Legacy tasks default to agent."),
+          dependencies: z.array(z.object({ storeId: z.string().regex(/^[a-f0-9]{8}$/), project: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/), stableId: z.string().regex(/^[a-f0-9]{8}$/) }).strict()).max(100).optional().describe("Replace prerequisites with immutable store/project/task identities; [] clears. Rejects self-links, cycles and missing targets."),
+          section: z.enum(["queue", "active", "done", "Queue", "Active", "Done"]).optional().describe("Move item to this section: Queue, Active, or Done."),
+          github_issue: z.union([z.number().int().positive(), z.string()]).optional().describe("GitHub issue number (for example 14 or '#14')."),
+          github_url: z.string().optional().describe("GitHub issue URL to associate with the task item."),
+          unlink_github: z.boolean().optional().describe("If true, remove any linked GitHub issue metadata from the item."),
+          create_issue: z.boolean().optional().describe("If true, create a GitHub issue for this task and link it."),
+          pin: z.boolean().optional().describe("If true, pin the task so it floats to the top of its section."),
+          promote: z.boolean().optional().describe("If true, clear the speculative flag on this task (confirm the user wants it)."),
+          move_to_active: z.boolean().optional().describe("Used with promote: also move the task to the Active section."),
+          work_next: z.boolean().optional().describe("If true, pick the highest-priority Queue item and move it to Active. Ignores item param."),
+          item: z.unknown().optional().describe("Not read here: item is a top-level parameter beside updates."),
+        }).describe("Fields to update. All are optional."),
+      }),
+    },
+    async ({ project: projectInput, item, updates: given }) => {
+      // A caller that nests item inside updates would otherwise hear only that item is missing.
+      const { item: misplacedItem, ...updates } = given;
+      if (misplacedItem !== undefined) {
+        return mcpResponse({ ok: false, error: "item is a top-level parameter, not a field of updates. Pass it beside updates: { project, item, updates }." });
+      }
+      const resolved = resolveStoreForProject(ctx, projectInput);
+      const project = resolved.project;
+      const targetPath = resolved.phrenPath;
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const updateTaskDenied = permissionDeniedError(targetPath, "update_task", project);
+      if (updateTaskDenied) return mcpResponse({ ok: false, error: updateTaskDenied });
+
+      // Runtime validation: item is required unless work_next is true
+      if (!updates.work_next && !item) {
+        return mcpResponse({ ok: false, error: "item is required unless updates.work_next is true." });
+      }
+
+      if (updates.create_issue) {
+        const extraUpdates = [
+          updates.text,
+          updates.priority,
+          updates.context,
+          updates.section,
+          updates.github_issue,
+          updates.github_url,
+          updates.unlink_github,
+          updates.pin,
+          updates.promote,
+          updates.move_to_active,
+          updates.work_next,
+          updates.replace_context,
+          updates.responsibility,
+          updates.dependencies,
+        ].some((value) => value !== undefined);
+        if (extraUpdates) {
+          return mcpResponse({ ok: false, error: "create_issue must be used by itself." });
+        }
+      }
+
+      // Cross-validate github_issue and github_url
+      if (updates.github_url) {
+        const parsed = parseGithubIssueUrl(updates.github_url);
+        if (!parsed) return mcpResponse({ ok: false, error: "github_url must be a valid GitHub issue URL." });
+        if (updates.github_issue !== undefined) {
+          const normalizedIssue = Number.parseInt(String(updates.github_issue).replace(/^#/, ""), 10);
+          if (normalizedIssue !== parsed.issueNumber) {
+            return mcpResponse({ ok: false, error: "github_issue and github_url refer to different issues." });
+          }
+        }
+      }
+
+      return withWriteQueue(async () => {
+        // Handle work_next: pick highest-priority Queue item, move to Active
+        if (updates.work_next) {
+          const result = workNextTask(targetPath, project, phrenPath);
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+          refreshTaskIndex(updateFileInIndex, targetPath, project);
+          return mcpResponse({ ok: true, message: result.data, data: { project } });
+        }
+
+        // Handle pin
+        if (updates.pin) {
+          const result = pinTask(targetPath, project, item!);
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+          refreshTaskIndex(updateFileInIndex, targetPath, project);
+          return mcpResponse({ ok: true, message: result.data, data: { project, item } });
+        }
+
+        // Handle promote (clear speculative flag)
+        if (updates.promote) {
+          const result = promoteTask(targetPath, project, item!, updates.move_to_active ?? false);
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+          refreshTaskIndex(updateFileInIndex, targetPath, project);
+          return mcpResponse({
+            ok: true,
+            message: `Promoted task "${result.data.line}" in ${project}${updates.move_to_active ? " (moved to Active)" : ""}.`,
+            data: { project, item: result.data },
+          });
+        }
+
+        if (updates.create_issue) {
+          const resolvedItem = resolveTaskItem(targetPath, project, item!);
+          if (!resolvedItem.ok) return mcpResponse({ ok: false, error: resolvedItem.error });
+          const repo = resolveProjectGithubRepo(targetPath, project);
+          if (!repo) {
+            return mcpResponse({
+              ok: false,
+              error: "Could not infer a GitHub repo. Add a GitHub URL to AGENTS.md or summary.md, or link an existing issue instead.",
+            });
+          }
+          const created = createGithubIssueForTask({
+            repo,
+            title: resolvedItem.data.line.replace(/\s*\[(high|medium|low)\]\s*$/i, "").trim(),
+            body: buildTaskIssueBody(project, resolvedItem.data),
+          });
+          if (!created.ok) return mcpResponse({ ok: false, error: created.error, errorCode: created.code });
+          const linked = linkTaskIssue(targetPath, project, item!, {
+            github_issue: created.data.issueNumber,
+            github_url: created.data.url,
+          });
+          if (!linked.ok) return mcpResponse({ ok: false, error: linked.error, errorCode: linked.code });
+          refreshTaskIndex(updateFileInIndex, targetPath, project);
+          return mcpResponse({
+            ok: true,
+            message: `Created GitHub issue ${created.data.issueNumber ? `#${created.data.issueNumber}` : created.data.url} for ${project} task.`,
+            data: {
+              project,
+              item,
+              issue_number: created.data.issueNumber ?? null,
+              issue_url: created.data.url,
+              githubIssue: linked.data.githubIssue ?? null,
+              githubUrl: linked.data.githubUrl || null,
+              stableId: linked.data.stableId || null,
+            },
+          });
+        }
+
+        // Handle github issue linking via update_task when github_issue or github_url is set (and no other field updates)
+        if ((updates.github_issue !== undefined || updates.github_url || updates.unlink_github) && !updates.text && !updates.priority && !updates.context && !updates.section && updates.responsibility === undefined && updates.dependencies === undefined) {
+          if (updates.unlink_github && (updates.github_issue !== undefined || updates.github_url)) {
+            return mcpResponse({ ok: false, error: "Use either unlink_github=true or github_issue/github_url, not both." });
+          }
+          const result = linkTaskIssue(targetPath, project, item!, {
+            github_issue: updates.github_issue,
+            github_url: updates.github_url,
+            unlink: updates.unlink_github ?? false,
+          });
+          if (!result.ok) return mcpResponse({ ok: false, error: result.error, errorCode: result.code });
+          refreshTaskIndex(updateFileInIndex, targetPath, project);
+          return mcpResponse({
+            ok: true,
+            message: updates.unlink_github
+              ? `Removed GitHub link from ${project} task.`
+              : `Linked ${project} task to ${result.data.githubIssue ? `#${result.data.githubIssue}` : result.data.githubUrl}.`,
+            data: {
+              project,
+              item,
+              stableId: result.data.stableId || null,
+              githubIssue: result.data.githubIssue ?? null,
+              githubUrl: result.data.githubUrl || null,
+            },
+          });
+        }
+
+        // Standard update path
+        const result = updateTaskStore(targetPath, project, item!, updates, phrenPath);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        refreshTaskIndex(updateFileInIndex, targetPath, project);
+        return mcpResponse({ ok: true, message: result.data, data: { project, item, updates } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "tidy_done_tasks",
+    {
+      title: "◆ phren · tidy done",
+      description: "Archive old Done items beyond the keep limit to keep the task list tidy.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        keep: z.number().optional().describe("Number of recent Done items to keep. Default 30."),
+        dry_run: z.boolean().optional().describe("If true, preview changes without writing."),
+      }),
+    },
+    async ({ project: projectInput, keep, dry_run }) => {
+      const resolved = resolveStoreForProject(ctx, projectInput);
+      const project = resolved.project;
+      const targetPath = resolved.phrenPath;
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      return withWriteQueue(async () => {
+        const result = tidyDoneTasks(targetPath, project, keep ?? 30, dry_run ?? false);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        if (!dry_run) refreshTaskIndex(updateFileInIndex, targetPath, project);
+        return mcpResponse({ ok: true, message: result.data, data: { project, keep: keep ?? 30, dryRun: dry_run ?? false } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "claim_task",
+    {
+      title: "◆ phren · claim task",
+      description:
+        "Claim a task for this computer so conductors that are not linked do not take the same work: " +
+        "syncs the store, moves the task to Active with a `Claimed:` line naming this computer, then commits and pushes. " +
+        "Refuses a task another computer holds. With release, clears this computer's claim and returns the task to the Queue. " +
+        "Conductors skip tasks claimed by other computers.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Task to claim: bid:XXXXXXXX, a positional ID (Q3) or its text."),
+        session: z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/).optional().describe("The claiming conductor's session id, recorded with the claim."),
+        release: z.boolean().optional().describe("Release this computer's claim instead of taking one."),
+        force: z.boolean().optional().describe("Take over another computer's claim once it is more than a day old."),
+      }),
+    },
+    async ({ project: projectInput, item, session, release, force }) => {
+      const resolved = resolveStoreForProject(ctx, projectInput);
+      const project = resolved.project;
+      const targetPath = resolved.phrenPath;
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const denied = permissionDeniedError(targetPath, "claim_task", project);
+      if (denied) return mcpResponse({ ok: false, error: denied });
+
+      return withWriteQueue(async () => {
+        // The Claimed line takes a plain token; a name with spaces would never parse back.
+        const computer = getMachineName().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[^A-Za-z0-9]+/, "") || "computer";
+        const claim = { computer, at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), ...(session ? { session } : {}) };
+        const outcome = await claimTaskSynced(targetPath, project, item, claim, { release, force, graphRoot: phrenPath });
+        if (outcome.error) return mcpResponse({ ok: false, error: outcome.error });
+        refreshTaskIndex(updateFileInIndex, targetPath, project);
+        const message = release ? `Released in ${project}. ${outcome.detail}`
+          : outcome.claimed ? `Claimed for ${claim.computer} in ${project}. ${outcome.detail}` : `Not claimed: ${outcome.detail}`;
+        return mcpResponse({ ok: release ? true : outcome.claimed, message,
+          data: { project, item: outcome.item?.stableId ? `bid:${outcome.item.stableId}` : item, claim: outcome.item?.claim, heldBy: outcome.heldBy, synced: outcome.synced } });
+      });
+    }
+  );
+
+  server.registerTool(
+    "pin_task",
+    {
+      title: "◆ phren · pin task",
+      description:
+        "Pin or unpin a task. Pinned tasks always appear in hook context regardless of priority, " +
+        "so they stay visible across every prompt.",
+      inputSchema: z.object({
+        project: z.string().describe("Project name."),
+        item: z.string().describe("Partial text or task ID (A1, Q3) to match."),
+        unpin: z.boolean().optional().describe("If true, unpin instead of pin."),
+      }),
+    },
+    async ({ project: projectInput, item, unpin: shouldUnpin }) => {
+      const resolved = resolveStoreForProject(ctx, projectInput);
+      const project = resolved.project;
+      const targetPath = resolved.phrenPath;
+      if (!isValidProjectName(project)) return mcpResponse({ ok: false, error: `Invalid project name: "${project}"` });
+      const denied = permissionDeniedError(targetPath, "pin_task", project);
+      if (denied) return mcpResponse({ ok: false, error: denied });
+
+      return withWriteQueue(async () => {
+        const result = shouldUnpin
+          ? unpinTask(targetPath, project, item)
+          : pinTask(targetPath, project, item);
+        if (!result.ok) return mcpResponse({ ok: false, error: result.error });
+        refreshTaskIndex(updateFileInIndex, targetPath, project);
+        return mcpResponse({ ok: true, message: result.data, data: { project, item, pinned: !shouldUnpin } });
+      });
+    }
+  );
+}
