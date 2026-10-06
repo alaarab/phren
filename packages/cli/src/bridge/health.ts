@@ -9,7 +9,7 @@ import { resolveAllStores } from "../store-registry.js";
 import { publicComputerKey } from "./computers.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { BridgeError, bridgeRoot, errorCode, type Json } from "./protocol.js";
-import { canonicalComputer, readScheduleDocument, readScheduleRuns, scheduleRunsFile } from "./schedules.js";
+import { canonicalComputer, latestScheduleBatch, readScheduleDocument, readScheduleRuns, scheduleRunsFile } from "./schedules.js";
 import { countGit } from "./metrics.js";
 import { tmuxHealth, type TmuxHealth } from "./terminal-tmux.js";
 
@@ -173,12 +173,16 @@ export async function storeSync(store: string): Promise<StoreSync[]> {
 /** The newest run in schedule-runs.jsonl, with its schedule's name when the project still has it. */
 export async function lastScheduledRun(store: string, runsFile = scheduleRunsFile()): Promise<LastScheduledRun | null> {
   const runs = await readScheduleRuns(runsFile).catch(() => []);
-  const last = runs.reduce<(typeof runs)[number] | undefined>((newest, run) => !newest || run.startedAt >= newest.startedAt ? run : newest, undefined);
-  if (!last) return null;
+  const newest = runs.reduce<(typeof runs)[number] | undefined>((newest, run) => !newest || run.startedAt >= newest.startedAt ? run : newest, undefined);
+  if (!newest) return null;
+  const owner = newest.scheduleProject ?? newest.project;
+  const matching = runs.filter(run => (run.scheduleProject ?? run.project) === owner && run.scheduleId === newest.scheduleId
+    && (newest.batchId ? run.batchId === newest.batchId : run.id === newest.id));
+  const last = latestScheduleBatch(matching).lastRun!;
   let name: string | undefined;
-  const directory = getProjectDirs(store).find(dir => path.basename(dir).toLowerCase() === last.project.toLowerCase());
+  const directory = getProjectDirs(store).find(dir => path.basename(dir).toLowerCase() === owner.toLowerCase());
   if (directory) name = (await readScheduleDocument(directory).catch(() => undefined))?.schedules.find(item => item.id === last.scheduleId)?.name;
-  return { ...(name ? { name } : {}), project: last.project, status: last.status, ...(last.reason ? { reason: plainError(last.reason) } : {}),
+  return { ...(name ? { name } : {}), project: owner, status: last.status, ...(last.reason ? { reason: plainError(last.reason) } : {}),
     startedAt: last.startedAt, ...(last.finishedAt ? { finishedAt: last.finishedAt } : {}) };
 }
 
