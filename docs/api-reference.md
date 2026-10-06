@@ -1734,7 +1734,12 @@ to `list`; optional `includeResolved` shows history. `add` requires `title`, wit
 optional `project` and stable UUID `id`. `resolve` requires `id`, with optional
 `resolution` and `computer` (the listed item's `inboxComputer`, omitted for
 local). A resolve does not answer or approve a prompt. Lists include local and
-linked computers' inboxes plus `unreachable` entries.
+linked computers' inboxes plus `unreachable` entries. Automatic items are
+deduplicated by pane, session and question and shown only while verified live.
+Answered or disappeared sources resolve automatically on reads or the five-second
+Hook tick; manual items require explicit resolution. The first reconciliation
+after upgrade resolves legacy stale automatic rows with `stale: source gone`.
+Unreachable workers are hidden as unverified without resolving their items.
 
 Dispatch additions: optional `closeOnFinish` defaults to true, closing a
 verified finished pane after reading its done return; false keeps it open.
