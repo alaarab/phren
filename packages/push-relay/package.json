@@ -1,0 +1,15 @@
+{
+  "name": "@phren/push-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stateless APNs relay so phren's App Store build can notify any user's phone without their own push key",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": { "phren-push-relay": "./dist/server.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "biome lint --config-path ../../biome.json src/"
+  },
+  "engines": { "node": ">=20" },
+  "license": "MIT"
+}

@@ -1,0 +1,1623 @@
+# MCP API Reference
+
+Phren exposes 76 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+
+## Core profile
+
+| Tool | Does | Stands for (full-profile names) |
+|------|------|--------------------------------|
+| `search_knowledge` | Search the store | None |
+| `get_memory_detail` | Fetch one memory entry in full | None |
+| `get_project_summary` | A project's summary and counts | None |
+| `add_finding` | Save a finding; `kind: "note"` saves a daily note instead | `add_note` |
+| `revise_finding` | `action`: supersede, retract, edit, remove, link, resolve_contradiction, pin, feedback | `supersede_finding`, `retract_finding`, `edit_finding`, `remove_finding`, `link_findings`, `resolve_contradiction`, `pin_memory`, `memory_feedback` |
+| `get_tasks` | List tasks | None |
+| `add_task` | Add a task | None |
+| `manage_task` | `action`: complete, update, remove, pin, claim, tidy | `complete_task`, `update_task`, `remove_task`, `pin_task`, `claim_task`, `tidy_done_tasks` |
+| `session` | `action`: start, end, context, history | `session_start`, `session_end`, `session_context`, `session_history` |
+| `phren_admin` | `action`: any remaining tool by name, or `list_actions` | skills, hooks, config, notes, review queue, export/import, doctor, health, stores, projects, fragment graph, extraction, topic summaries (`get_topic_summaries`, `set_topic_summary`), code index (`code_search`, `code_definition`, `code_references`, `code_outline`, `code_usage`), dispatch and hand-off |
+
+A composite takes `action` plus the target tool's own parameters, validated against that tool's schema; a miss returns the parameter list. A nested object parameter (`manage_task` `updates`, `set_config` `settings`, `add_finding` `citation`) may arrive as a real object or as its JSON string (some hosts serialize what a passthrough schema does not name); both are accepted, and a decoded value that misses its own schema fails at the inner field rather than as a type error on the parameter. `phren_admin list_actions` returns every admin action with its full parameter list. The individual tool sections below still describe each tool's parameters; in the core profile, reach them through the composite that stands for them.
+
+Most tools return structured JSON: `{ ok, message, data?, error? }`. The five code query tools return compact text.
+
+Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration, topic summaries, code index, dispatch and hand-off.
+
+## Cross-computer dispatch
+
+### `dispatch`
+
+Send a worker brief through the local Phren Hook to an enrolled computer. In the
+core profile use `phren_admin(action: "dispatch", ...)`; full exposes `dispatch`
+directly. The local Hook must be running. Enroll the sender's computer key on the
+receiver with `phren bridge enroll-computer <name>` and its `--accept` command,
+then configure verified SSH peers in the local Hook's private `hooks.yaml`.
+See [Conductor](conductor.md) for setup, trust boundaries and worker contracts.
+`phren bridge accounts` lists this computer's harnesses and Claude accounts; see
+[Accounts](accounts.md).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `computer` | string | yes | Enrolled name, or `anywhere` for the connected peer with the fewest working agents, skipping one whose account for this harness has no quota left (see below). |
+| `project` | string | yes | Project slug whose `phren.project.yaml` sourcePath exists on the receiver. No local checkout paths. |
+| `harness` | enum | yes | `codex`, `claude`, `opencode` or `copilot`. |
+| `model` | string | no | Explicit remote model, up to 200 characters; otherwise its configured default. |
+| `effort` | enum | no | Reasoning effort: `minimal`, `low`, `medium`, `high`, `xhigh` or `max`; otherwise the harness default. Codex takes it as `model_reasoning_effort`, Claude as `--effort`, OpenCode as `--variant`, Copilot as `--reasoning-effort`. |
+| `account` | string | no | Claude account id (`default` or a slug from `phren bridge accounts`). `anywhere` skips computers whose `harnesses` do not report that account usable (an older Hook that reports none is skipped too) and lists each in `skipped`; a named computer that lacks it fails before launching. Recorded on the receipt. |
+| `permissionMode` | enum | no | Permission mode the worker starts in: `supervised`, `auto-edits`, `auto` or `full-access`; otherwise the receiving computer's own default. Claude, Codex and Copilot (see [Conductor](conductor.md#copilot-workers) for Copilot's flags); `opencode` is refused with 400 before a receipt is saved. |
+| `releaseActions` | string[] | no | Release actions the brief asks for: `merge`, `publish`, `deploy`, `app-store`, `github-admin`. From an agent, an action the project's release authority policy marks ask-first is refused with 403 until the owner confirms it. An ask-first project also lowers the agent's permission ceiling there and starts a worker with no mode at it. See docs/authority.md. |
+| `prompt` | string | yes | Worker brief, up to 32768 characters. |
+| `label` | string | yes | Task label, up to 200 characters. |
+| `parent` | object | no | Conversation identity to retain in the dispatch receipt. |
+| `parentTarget` | object | no | Live local target used to validate the parent identity. |
+
+Returns the receipt in `data`: dispatch ID, computer, project, harness/model/effort/permissionMode,
+label, timestamps, state, remote target when known, grant match (`granted`), and an optional error.
+`accepted` means first-prompt acceptance, not task completion: for Claude and
+Codex the brief goes with the launch and the worker's own hook confirms it by
+dispatch ID (`brief: "launch"`); OpenCode and Copilot get it typed (`brief: "typed"`).
+`uncertain` means delivery might have occurred; never retry it automatically.
+A launched brief that was not confirmed yet (a startup screen holds it) turns
+`accepted` when the worker confirms it. Receipts are available
+through `phren dispatch status`. Remote leads and their workers appear in
+`/v1/subagents`. When the call comes from an agent running in a Herdr pane,
+the receipt keeps that pane as `origin` for return notices. After placement
+the Hook follows the worker (see `dispatch_returns`), and receipts gain
+`worker` (its last observed state) and `returned` (the latest return).
+
+With `anywhere`, the Hook asks each computer's `GET /v1/dispatch/capacity`,
+which returns `working`, `harnesses` and `usage: [{ source, account?,
+leftPercent?, exhausted?, until? }]`: the least room left on Codex and on each
+Claude home there, and `exhausted: true` (with `until`, when its last spent
+window resets) once a window is at 100% or refusing requests. It is read in
+parallel with the harness inventory and bounded to 2.5 seconds; a missing
+`usage` (an older Hook or a slow read) means unknown. A computer whose account
+for this dispatch (Codex's, or the named Claude home, `default` when none) is
+exhausted sits out and is named in `skipped`; when no computer is left for that
+reason the dispatch fails with code `out_of_quota`. Low quota is not a reason
+to skip one: the least busy computer wins, then name. A named computer is never
+refused for quota.
+
+CLI equivalent:
+`phren dispatch Desk phren --harness codex --label 'Checks' --prompt 'Run the assigned checks'`.
+
+### `dispatch_returns`
+
+List unread returns from dispatched workers, oldest first, and mark them read.
+No parameters. In the core profile use `phren_admin(action: "dispatch_returns")`.
+
+A return is recorded when a worker changes to one of these states. The
+worker's Hook decides from the turn events its harness reported (a Stop after
+the prompt is a finished turn), falling back to the pane's Herdr status and
+transcript when there are none; see [Returns](conductor.md#returns).
+
+| State | Meaning |
+|-------|---------|
+| `done` | The worker finished its turn. `reply` holds its final reply from the Stop hook or the transcript, at most 4000 UTF-8 bytes (`truncated` when cut). `background` counts background tasks still running when it was counted done after waiting two hours for them (every task that finishes wakes the worker, so the wait only runs out when none has finished for two hours). `waited` is the most background tasks the worker waited on before it finished, when none is still running. |
+| `needs-you` | The worker finished by asking the owner something. `question` holds the question line, `reply` the whole reply. |
+| `failed` | The harness ended the worker's turn on an error instead of a reply, such as Codex's usage limit, or the owner interrupted it in the worker's terminal. `error` holds the message. |
+| `blocked` | The worker waits on terminal input, such as a permission prompt. |
+| `gone` | The worker's pane closed or another conversation took it over. |
+
+Each row carries `id` (the dispatch ID), `computer`, `project`, `label`,
+`harness`, `state`, `at` and the worker's `target` for `hand_off`. A worker
+that takes more work after `done` and finishes again produces a new return.
+The dispatching Hook asks each enrolled computer about its open dispatches at
+most every 15 seconds, in one request per computer. Dispatches are followed
+for 24 hours or until the worker is gone. When the dispatching agent is idle,
+the Hook also types one line into it, at most once every two minutes, for
+example `Return: Linuxbox parser checks done, tests passed (dispatch <id>).
+Call dispatch_returns.` It never types into a working agent; a return waiting
+on a working agent is tried again every 5 seconds, under the same `deliveryId`.
+
+CLI equivalent: `phren dispatch returns`.
+
+A `blocked` row with an `approval` object is a permission request the worker is
+waiting on, forwarded by its Hook: `actionId`, `tool`, and, when known,
+`request`, `title` and `terminal` (a dialog the pane draws itself). Answer it
+with `dispatch_approve`. See [Worker approvals](conductor.md#worker-approvals).
+
+### `dispatch_approve`
+
+Answer the permission request a dispatched worker is waiting on, forwarded from
+its computer. Parameters: `id` (the dispatch ID from `dispatch_returns`),
+`decision` (`approve` or `deny`) and `actionId` (required: the approval's
+`actionId`, so a request that has changed since is never answered blind).
+Only the agent that dispatched the worker can answer: the tool sends the
+caller's own pane as `origin`, and a call from any other pane, or from the
+worker's own pane, fails with 403. A worker dispatched from the phone or the
+CLI has no origin pane, so any call from a pane fails with 403 for it. A call
+with no pane (the owner's phone, the CLI) is not restricted. The owner's standing grants already answer the `dispatch` and `hand_off`
+requests they cover. Fails with 409 when the worker is not waiting on an
+approval. In the core profile use `phren_admin(action: "dispatch_approve")`.
+
+Route: `POST /v1/dispatch/approve` with `{ "id": "<uuid>", "decision":
+"approve" | "deny" | "allow-project" | "allow-everywhere", "actionId"?: "<id>" }`
+returns `{ "ok": true }`. The two grant scopes answer an OpenCode worker's
+permission ask with `always`. The Hook sends the answer to the worker's Hook at
+`POST /v1/approvals/answer`.
+
+On the receiving computer, each observation in the `POST /v1/dispatch/workers`
+answer may carry `approval`: `{ actionId, tool, title?, request?,
+requestKind?, terminal?, conductor?, expiresAt?, pushed? }`, with `request` at
+most 500 characters and `title` at most 200. The request also keeps that
+pane's permission requests held for about 45 seconds. `actionId` is a UUID for
+a held request, or `dialog-<uuid>` for a terminal dialog; `POST
+/v1/approvals/answer` accepts both, refuses `updatedInput` for a `dialog-` id,
+and refuses a target that is not the dialog's own.
+
+### `live_sessions`
+
+List every live agent session on this computer and each enrolled computer:
+computer, project (none for a conductor), harness, status, `idleFor` (seconds
+since the tab last changed, when the Hook has seen it change), role, branch,
+model and the `target` that `hand_off` takes. Computers that could not be
+reached come back in `unreachable`. Computers registered in the store's
+`machines.yaml` but not linked in `hooks.yaml` come back in
+`notLinked: [{ name, aliases? }]`: their sessions were not checked, which is not
+the same as nothing running there. Names are compared by their first DNS label,
+ignoring case, against this computer's names and each peer's name, address and
+aliases; registered names sharing a first label are one entry. `enrolled` counts this Hook's peers, and `peerError`
+says why none were read when `hooks.yaml` is broken. No parameters. In the
+core profile use `phren_admin(action: "live_sessions")`.
+
+CLI equivalent: `phren dispatch sessions`.
+
+### `account_usage`
+
+List agent usage on this computer and each enrolled computer, merged by
+account, so a conductor can pick a harness, account and computer with room
+before it dispatches. The tool asks this Hook (`GET /v1/health` and
+`GET /v1/usage?sources=claude,codex,copilot,opencode,opencode-go,openrouter&goPlan=1&accounts=all`)
+and each `hooks.yaml` peer over its pinned SSH pipe (the same routes), as
+`live_sessions` does. ElevenLabs is left out, since each read of it spends
+quota. No parameters. `message` is a one-line summary: how many accounts, which
+are out of quota (do not dispatch to them), which are low but usable, which are
+stale, and a warning when every account with limits is out of quota.
+
+One account is one allowance whichever computers report it. Rows merge by `id`,
+which is `source` or `source|key` (the phone's card key); a Claude row whose key
+is `claude:home:<id>` (a login with no identity) stays per computer. The
+freshest whole report with windows stands, and `from` names its computer.
+OpenCode and OpenCode Go spend is summed across computers; OpenRouter spend is
+counted once per key.
+
+Each row carries `id`, `harness`, `name`, `account` (the login's email, else its
+label), `windows`, `leftPercent` (the least room on any window), `nearLimit`
+(under 20% left: information, not a reason to avoid the account), `exhausted`
+(a window at 100% or refusing requests: never dispatch to it) with
+`availableIn` (when its last spent window resets), `spend`, `subscription`, `updatedAt`, `age`, `stale`,
+`from`, `computers: [{ name, account? }]` and `message`. `account` on a
+computer is the Claude account id `dispatch`'s `account` takes there. Each
+window carries `usedPercent`, `leftPercent`, `resetsAt` and `resetsIn`; once
+its reset time has passed it says `reset: true` and has no percent, and while
+the service refuses requests it says `limited: true` with `leftPercent` 0. A
+window at 100% or limited also says `exhausted: true`. A
+row is `stale` when its report is over 15 minutes old, has no timestamp, or has
+a window that reset since the report.
+
+The view also returns `noData: [{ harness, name, computers, message? }]` for
+harnesses no computer reported numbers for, `computers` (those that answered,
+this one first), `unreachable: [{ computer, error, code? }]`,
+`notLinked: [{ name, aliases? }]` (their usage is unknown, not zero),
+`enrolled` and `peerError` when `hooks.yaml` is broken. In the core profile use
+`phren_admin(action: "account_usage")`.
+
+CLI equivalent: `phren dispatch usage` (text; `--json` for the view).
+
+### `authority`
+
+Read the owner's release authority policy. With `project`, returns
+`{ authority: { project, listed, go, ask, maxPermissionMode?, note?, line } }`;
+without, `{ source, updatedAt?, updatedBy?, projects, confirmations }`.
+Read-only: the owner changes it from the phone or `phren authority`. In the
+core profile use `phren_admin(action: "authority")`. Route: `GET /v1/authority`.
+See docs/authority.md.
+
+CLI equivalent: `phren authority list` and `phren authority show <project>`.
+
+### `hand_off`
+
+Deliver a prompt to an existing session through the local Hook or a verified
+peer. In the core profile use `phren_admin(action: "hand_off", ...)`; full
+exposes `hand_off` directly. Supply exactly one of `target` or `session`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `computer` | string | no | Enrolled computer name. Omit for the local Hook. |
+| `account` | string | no | Claude account id the `session` must run under. A session of another account is refused with 409 `account_mismatch`; an overview row without an account counts as `default`. Not checked for an explicit `target`. |
+| `target` | object | one of | Complete live Hook target. |
+| `session` | string | one of | Session id resolved through the selected Hook's workspace overview. |
+| `text` | string | yes | Prompt to deliver, up to 32768 characters. |
+| `project` | string | no | Project scope for standing-grant matching. |
+
+Returns `{ ok, delivered, target, granted }`. CLI equivalent:
+`phren hand-off local --session <id> --text 'Continue with the review'`.
+
+### Standing grants
+
+`GET /v1/conductor/grants` lists grants. `POST /v1/conductor/grants` adds a
+validated `scope`, `actions` and optional `computers` rule.
+`DELETE /v1/conductor/grants` takes an `index` and optional `expected` grant;
+a changed row returns 409 instead of revoking a different grant.
+Concurrent writes are serialized per store and protected by a file lock.
+`computers` takes any name or alias of a computer and is stored under its
+canonical name. See [Conductor](conductor.md) for scope and matching rules.
+
+### Computers
+
+`GET /v1/computers` returns `{ computers }`: one row per real computer
+(`id`, `name`, `aliases`, `profile`, `local`, `linked`, `reachable`) with
+machines.yaml names folded in, this computer first. Part of the `conductor`
+module. Folding rules are in [Conductor](conductor.md#computers).
+
+### Conductor role and linked sets
+
+The Hook records which pane is this computer's conductor in
+`<bridge>/conductor-role.json`; the Herdr agent name or tmux `@phren_agent` is
+only a label. A restart or new login in the same pane keeps the role.
+`GET /v1/conductor` returns this computer's live `conductor` (or `null`), its
+`peers` (hooks.yaml names), `set` (`{ name, namedAt }`) and, when asked with
+`?name=` or `?hostKey=`, `knowsCaller`. `GET /v1/sets` returns `{ sets,
+unlinked }`: each set's `id`, `name`, `computers` (`name`, `id`, `reachable`,
+`link` of `self`, `two-way`, `one-way`, `indirect` or `unknown`, `conductor`,
+`hint`), `conductor` and `conductors`. `POST /v1/conductor/make` takes
+`{ workspaceId?, tabId?, paneId }` (and `?mux=`) for a pane already running an
+agent; a second conductor in the set is refused with 409. `POST
+/v1/conductor/stop` takes an optional `paneId`. `POST /v1/sets/name` takes
+`{ name }` (1 to 60 characters, or `null`) and tells every reachable member.
+Peer-reported names with the local computer id fold into `self`, using the
+friendly peer name for display and keeping its conductor. The `self` row has
+no link hint; clients should key computers by `id` when present. Unresolved
+names are checked through peers' `/v1/computers` directories in a second
+parallel round; unavailable directories retain the name-only view.
+`/v1/health` lists `conductorSets` among its capabilities. See
+[Conductor sets](conductor-sets.md).
+
+### Hook workspace launch fields
+
+`POST /v1/workspaces/launch` accepts `role: "agent" | "conductor"` (default
+`agent`) and `effort: "low" | "medium" | "high"` (default `medium`). Workers
+also take an optional `permissionMode` (`supervised`, `auto-edits`, `auto` or
+`full-access`): Claude gets `--permission-mode`, Codex gets its approval and
+sandbox settings, and OpenCode, Copilot, phren and conductors are refused with 400
+before any pane exists. `kind` is `codex`, `claude`, `copilot`, `opencode` or
+`phren` (phren's own agent, started as `phren agent -i`, with `model` as
+`--model` and `effort` as `--reasoning`, `minimal` as `low`; a dispatched brief
+is typed after it starts, since its TUI takes no first prompt). For `phren`
+only, `mode: "chat"` starts a quick chat (`--mode chat`: no tools, its memory
+read into the prompt up front) and `resumeSession: "<session id>"` continues
+that session's history (`--session <id>`); the id is the pane target's
+`session`. Resuming a chat with `mode: "agent"` (or no `mode`) promotes it:
+the same conversation with tools. Either field on another `kind` is 400.
+`mode: "chat"` with a `resumeSession` whose history holds tool calls or
+results (an agent session that used tools, unless a compaction summary
+replaced them) is 400 with `code: "chat-has-tools"`: a request with no tools
+may not carry them. Resume such a session with `mode: "agent"`.
+Health advertises `capabilities.quickChat`. Any launch may carry a
+`launchId` (a UUID the caller keeps for one intended launch): the same
+`launchId` again within 10 minutes joins the launch in flight, or returns its
+pane with `reused: true` while that tab is listed, instead of starting a second
+agent. A double tap or a retry after a lost reply opens one pane. The reply repeats `permissionMode` when it was applied,
+so a caller can tell an older Hook that ignored it. A
+conductor launch supports Claude, Codex and OpenCode (Copilot and phren are
+refused with 400: phren-agent takes no system brief at startup), attaches the shipped
+conductor brief, prefixes the Herdr agent name with `conductor-`, records the
+pane as this computer's conductor and returns `role: "conductor"`. Workspace
+overview tabs report that role. A second running conductor in this computer's
+set of linked computers is rejected with status 409 and the existing target.
+
+An agent launch may add `worktree: { branch }`. The Hook runs `git worktree add
+-b <branch> <repo>/.claude/worktrees/<name> HEAD` from the project folder's
+repository, where `<name>` is the branch with `/` and `.` turned into `-`, and
+starts the agent in the same folder inside the new worktree. The reply adds
+`worktree: { path, branch }`. A folder outside Git, a repository with no
+commits, an existing branch or worktree folder answer 409, an invalid branch
+name 400, and a conductor with a worktree 400, all before Herdr is asked for
+anything. A failed Herdr create removes the new worktree and branch.
+
+---
+
+## Scheduled prompts
+
+A project's `schedules.yaml` names an assigned computer, a harness, and one of
+five timing forms (interval, daily, weekly, once, cron) that the assigned
+computer's Phren Hook evaluates in its local time. Manage them with
+`phren schedule list|add|remove|enable|disable|run|history`; `run` and `history`
+call the local Hook, the other commands edit the store file directly. See
+[Scheduled prompts](schedules.md) for the store format, timing forms and run
+history.
+
+---
+
+## Model catalogue
+
+`GET /v1/models?source=<codex|claude|opencode|phren>[&account=<id>]` on Phren Hook returns the
+`/model` menu of the agent that source names (any other source answers an empty
+list), shaped as
+`{ "models": [ { "id", "name", "description", "isDefault" } ] }`. For `phren`
+the list is phren agent's own catalog (`phren-agent models --json`), only the
+providers with credentials on this computer, each id `<provider>/<model>` with
+the provider in `description`; a launch with `kind: "phren"` passes the
+`anthropic`, `deepseek`, `ollama` and `openrouter` ones as `--provider` and
+`--model`. `account` names a Claude home (default `default`) and reads that home's catalogue cache; an account that is not on this computer, or a non-default one for another source, answers 404 with `code: "account_unavailable"`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | The model identifier sent to `POST /v1/model`. The Hook caps Codex ids at 100 characters; OpenCode catalogue ids are not capped. |
+| `name` | string | The display name the picker shows, at most 100 characters. |
+| `description` | string? | Optional caption under the name, at most 300 characters. |
+| `isDefault` | boolean? | Present and `true` on the harness default; the picker marks it with a chip. |
+| `defaultReasoningEffort` | string? | Codex's default effort from its app-server catalogue. |
+| `supportedReasoningEfforts` | string[]? | Codex's supported effort identifiers. |
+
+Per source: Codex comes from its app-server `model/list` (hidden entries
+dropped, at most 32). Claude reads the newest
+`<CLAUDE_CONFIG_DIR>/cache/model-catalog/*-cc.json`, defaulting to `~/.claude`.
+It preserves the terminal's names, main/overflow order and default, filters
+minimum client versions against `claude --version`, and adds a 1M context row
+for the default. The built-in menu is used only when no usable cached catalogue
+is available. OpenCode comes from `opencode models`
+(`provider/model` ids, the Go plan first, the configured default marked, at
+most 400). An unknown source returns an empty `models` list, and answers are
+cached per source for ten minutes. The phone's chat picker shows a
+`model-loading` row until this route answers, never another harness's list,
+and falls back to its per-harness built-in names only when the route fails.
+The phone keeps at most 64 rows and only ids the model route accepts: up to 100
+characters of letters, digits, and `. - _ [ ] : /`, one token with no
+whitespace.
+
+`POST /v1/model { target, model, effort? }` switches an established, idle pane.
+The reply is `{ ok: true, model, name, effort? }` only after verification.
+Codex receives bare `/model`, optionally walks through `All models`, matches
+the catalogue's display name, verifies the cursor before Enter, then chooses
+the requested or default reasoning effort and verifies the new model in its
+status line. An unreadable menu, missing row, or unconfirmed result returns an
+error; open menus are escaped without interrupting a working or replacement
+session. Claude receives `/model <id-or-alias>` and must show its confirmation.
+With `effort`, Claude then receives `/effort <level>` and must answer "Set
+effort level to" below that confirmation (a cap's lower level is returned as
+`effort`); the level must be one the catalogue lists for the model, or low,
+medium, high, xhigh or max when it lists none.
+OpenCode returns 422 with a direction to use its terminal `/models` picker.
+A Codex pane on the Hook's own app-server is not driven through its menu: the
+model and effort are checked against the catalogue and held for the pane's next
+Hook-sent turn (`turn/start` overrides, which Codex keeps for later turns). The
+reply adds `applies: "next-turn"`, and the switch is accepted while the agent
+works.
+
+What is in effect is in the transcript: Claude's assistant rows carry
+`message.model` and a top-level `effort`, and Codex's `turn_context` rows carry
+`model` and `effort`.
+
+`POST /v1/settings { target, permissionMode?, plan?, fast? }` changes the
+composer's settings (at least one). `permissionMode` is `supervised`,
+`auto-edits`, `auto` or `full-access`. A Codex pane on the Hook's own
+app-server holds them for its next turn (approval policy, sandbox and reviewer
+as T3 maps them, plan as a collaboration mode) merged with a pending model, and
+replies `{ ok, permissionMode?, plan?, applies: "next-turn" }`, even while it
+works. An idle Claude pane gets `/fast on|off` and `/plan` typed, and Shift+Tab
+pressed (at most 6 times) until the footer under its composer (`⏸ manual mode
+on`, `⏵⏵ accept edits on`, `⏸ plan mode on`, `⏵⏵ auto mode on`, `bypass
+permissions on`) shows the wanted mode; a lap back to the start answers 422
+"Claude doesn't offer that mode in this session". The reply is the verified state
+`{ ok, permissionMode?, plan, fast?, verified? }`. Fast mode is verified from
+Claude's `<local-command-stdout>` transcript row after the command (422 with
+Claude's own message when it says fast mode is unavailable), else from the
+screen, else `verified: false`. Any other pane answers 422, a
+busy Claude pane 409. The stream's `capabilities.settings` says what a pane
+offers: `{ permissionModes, plan, fast }`, and for a Claude pane
+`settingsState: { permissionMode?, plan? }` beside `capabilities` is its current
+state read from that footer (throttled like the dialog check; `full-access` is
+offered once bypass has shown there). Codex's state is in the transcript, and so is Claude's when its
+footer can't be read:
+Claude's `permission-mode` rows (written when a prompt is submitted), `permissionMode` on user rows and
+`message.usage.speed`; Codex's `turn_context` `approval_policy`,
+`approvals_reviewer`, `sandbox_policy.type` and `collaboration_mode.mode`.
+
+`POST /v1/agents/permission-mode { target, mode }` is the phone's mode
+picker. `mode` is Claude's own permission name — `default`, `acceptEdits`, `plan`
+or `auto`, and `bypassPermissions` only where the session was launched allowing
+bypass. The Hook presses Shift+Tab through the pane's existing key path,
+re-reading the footer after each press, for at most one full cycle plus one
+press, and replies `{ ok, permissionMode, setBy: "owner" }` with the mode the
+footer confirmed. A working agent or an open permission prompt/dialog is 409;
+another harness, or a mode this session does not offer, is 422. This is the
+owner's own choice, so the authority `maxPermissionMode` ceiling does not apply.
+Only the owner may make it: a request that names a pane as `origin` (an agent's
+call) is refused with 403, whatever the mode, so no agent can lift itself or
+another pane past its ceiling or into `bypassPermissions`. Same rule as
+`/v1/sudo/answer`.
+
+The footer read is also published on the chat status frame as
+`agentStatus.permissionMode` (`default`, `acceptEdits`, `plan` or `auto`) beside
+`agentStatus.permissionModes`, the modes this session offers in Shift+Tab cycle
+order (`bypassPermissions` last, only when it was launched allowing bypass). Both
+appear only when the footer was read. Codex and OpenCode keep their permission
+mode in config rather than the pane and send neither.
+
+The same footer read gives a Claude pane's `agentStatus.suggestion`: the
+predicted next prompt Claude Code draws as dim text in its empty input box
+after a turn. The screen is its only source for a live pane: Claude keeps it in
+memory and writes it to no transcript, file or hook event. It is present only
+while the pane is idle or done with nothing pending, and only from a read taken
+after the last busy status this stream saw, so a new turn drops it at once and
+the owner typing in the pane drops it with the next read. Claude's other dim
+input text (`Try "…"`, the queued-message hints, `Message @…`) and a suggestion
+a narrow pane cut short with `…` are never sent. Codex, OpenCode and Copilot
+have no such prediction and never send it.
+
+`POST /v1/prompt { target, text, deliveryId? }` answers with how far the
+message got: `{ ok, delivered: true }` once the conversation's own
+UserPromptSubmit hook took it; `{ ok, queued: true }` when the agent holds it
+unsubmitted (a busy turn queues typed input) and the pane still shows the same
+conversation in the same terminal; `{ ok, deliveryUncertain: true }` when that
+could not be checked (`unsubmitted: true` when an idle agent never took it).
+409 means another conversation in the pane took it and refused it, so nothing
+was delivered. A retry under the same `deliveryId` types nothing and returns
+the first reply with `replayed: true`. `POST /v1/prompt/status { target,
+deliveryId }` (capability `promptStatus`) returns `{ ok, state }`, where
+`state` is `queued`, `delivered`, `blocked` (another conversation in the pane
+took it) or `unknown` (not tracked, another conversation, or older than ten
+minutes), for a message sent with a `deliveryId`. The id follows the typed text
+until the conversation's hook submits it, so a message answered
+`deliveryUncertain` still turns `delivered` once the agent takes it. A
+`/v1/transcripts` stream opened with `deliveries=1` (capability
+`deliveryFrames`) pushes `{ type: "delivery", source, session, deliveryId,
+state }` for that conversation's messages whenever one's state changes.
+
+A working pane returns 409 before any model command is typed. `/v1/prompt`
+also refuses every slash command while working, except Claude Code's
+`/btw <question>` side question, which is made to run beside a turn.
+
+`/v1/prompt` with `/btw <question>` on a Claude pane answers
+`{ ok: true, delivered: true, sideQuestion: { id } }` at once. Claude writes
+nothing of a side question to its session file, so the Hook reads the panel
+from the pane (scrolling a long answer to its end), closes it with Escape and
+sends the result on the conversation's `/v1/transcripts` stream as
+`{ type: "side-answer", source, session, id, question, state, answer? }`, with
+`state` one of `pending`, `answer`, `error` (no answer within 90 s, or the pane
+changed) or `cancelled` (closed in the terminal). The frame is sent only to a
+stream opened with `sideAnswers=1`, and never becomes a transcript row. While
+the question is open every other input to that pane returns 409, since typed
+keys would land in the panel. `POST /v1/side-question/dismiss { target, id }`
+cancels a pending question (closing its panel) or forgets an answered one. The phone offers
+`Switch after this turn`, holds only the model selection until the pane goes
+idle, allows cancellation, and displays a verified switch as a system row.
+An uncertain result is never retried automatically.
+
+---
+
+## Search and Browse
+
+### `get_memory_detail`
+
+Fetch the full content of a specific memory entry by its ID. This is Layer 3 of the progressive disclosure system: when `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1`, the hook-prompt injects a compact memory index instead of full snippets for 3+ results. Use this tool to expand any entry from that index.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | yes | Memory ID in the format `mem:project/filename` (e.g. `mem:my-app/FINDINGS.md`). Returned by the hook-prompt compact index. |
+
+---
+
+### `search_knowledge`
+
+Search the user's personal project store using FTS5 full-text search with synonym expansion.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | yes | Search query. Supports FTS5 syntax: AND, OR, NOT, phrase matching with quotes. |
+| `limit` | number | no | Max results to return (1-20, default 5). |
+| `project` | string | no | Filter results to a specific project. |
+| `type` | enum | no | Filter by document type. One of: `claude`, `findings`, `notes`, `reference`, `skills`, `summary`, `task`, `changelog`, `canonical`, `review-queue`, `skill`, `other`. |
+| `tag` | enum | no | Filter findings by type tag: `decision`, `pitfall`, `pattern`, `bug`, `workaround`, `context`. |
+| `since` | string | no | Filter findings by creation date. Formats: `7d`, `30d`, `YYYY-MM`, `YYYY-MM-DD`. |
+| `status` | enum | no | Filter findings by lifecycle status: `active`, `superseded`, `contradicted`, `stale`, `invalid_citation`, `retracted`. |
+| `include_history` | boolean | no | Include historical findings (`superseded`, `retracted`). Defaults to `false`. |
+| `synthesize` | boolean | no | Generate a short synthesis paragraph from top hits (requires LLM endpoint/key configuration). |
+
+A findings result carries the linked function, type or variable in its `symbol` field (and `symbols`) when the finding has a code link, so a client can show which code the finding is about.
+
+### `get_project_summary`
+
+Get a project's summary card and list of indexed documents.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | yes | Project name (e.g. "my-app", "backend"). |
+
+### `list_projects`
+
+List all projects in the active phren profile with a brief summary of each. Shows which documentation files exist per project.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `page` | number | no | 1-based page number (default 1). |
+| `page_size` | number | no | Results per page (default 20, max 50). |
+
+### `get_findings`
+
+List recent findings for a project without requiring a search query.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `limit` | number | no | Max rows to return (1-200, default 50). |
+| `include_superseded` | boolean | no | Include superseded findings (legacy compatibility flag). |
+| `include_history` | boolean | no | Include historical findings (`superseded`, `retracted`). |
+| `status` | enum | no | Filter by lifecycle status: `active`, `superseded`, `contradicted`, `stale`, `invalid_citation`, `retracted`. |
+
+Each returned finding includes its `citationData` and, when it is linked to a function, type or variable, that name in a top-level `symbol` field.
+
+---
+
+## Daily Notes
+
+Notes are lightweight, user-authored scratch context stored in `<project>/notes/YYYY-MM-DD.md`. They are indexed for explicit search and synchronized with team stores, but are excluded from automatic prompt injection, finding decay/review, and the fragment graph. Promote a note when it becomes durable reusable knowledge.
+
+### `get_notes`
+
+List daily notes newest-first.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `date` | string | no | Filter to a `YYYY-MM-DD` date. |
+| `limit` | number | no | Maximum results (1-500, default 100). |
+
+### `add_note`
+
+Add Markdown text to a daily note file.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `text` | string | yes | Note text; multiple lines and Markdown are supported. |
+| `date` | string | no | Target `YYYY-MM-DD`; defaults to today. |
+
+### `edit_note`
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `note` | string | yes | Stable `nid:xxxxxxxx` or unambiguous text match. |
+| `text` | string | yes | Replacement Markdown text. |
+
+### `remove_note`
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `note` | string | yes | Stable `nid:xxxxxxxx` or unambiguous text match. |
+
+### `promote_note`
+
+Copy a note into `FINDINGS.md` and mark the original as promoted without deleting it.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `note` | string | yes | Stable `nid:xxxxxxxx` or unambiguous text match. |
+| `findingType` | enum | no | `decision`, `pitfall`, `pattern`, or `bug`. |
+
+---
+
+## Task Management
+
+### `get_tasks`
+
+Get tasks for a project (or all projects). Supports progressive disclosure: use `summary:true` for lightweight planning views (~200 tokens), pagination for browsing, or `id` with a stable `bid:` hash for single-item fetches during execution. Stable IDs are also used by cross-session task checkpoints.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | no | Project name. Omit to get all projects. |
+| `id` | string | no | Task item ID. Accepts positional IDs (A1, Q3, D2) or stable `bid:XXXXXXXX` hashes. Requires project. Stable hashes are preferred for cross-session references because positional IDs shift when items complete. |
+| `item` | string | no | Exact task item text. Requires project. |
+| `summary` | boolean | no | If true, return counts and titles only (no full content). Reduces token usage to ~200 tokens. Use for planning and status checks. |
+| `limit` | number | no | Max items per Active/Queue section to return (1-200, default 20). Use with `offset` for pagination. |
+| `done_limit` | number | no | Max Done items to return, most recent first (1-200, default 5). Done sections are capped tightly by default to avoid large responses. |
+| `offset` | number | no | Skip the first N items in each section before applying limit. Use with `limit` for pagination (e.g. offset:20, limit:20 for page 2). |
+| `status` | enum | no | Filter by section: `all`, `active`, `queue`, `done`, `active+queue` (default). |
+
+### `add_task`
+
+Append one or more tasks to a project's tasks.md file. Adds to the Queue section. Supports batch adds by passing an array.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name (must match a directory in your phren). |
+| `item` | string or string[] | yes | The task(s) to add. Pass a single string for one task, or an array of strings for batch add. |
+| `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
+
+Task mutations (`add_task` and every `manage_task` action, including their individual tools in the full profile) add `data.write` alongside the existing result fields:
+
+```json
+{ "path": "/absolute/store/project/tasks.md", "commit": null }
+```
+
+`path` is the absolute file actually written, including when the project belongs to a team store. `commit` is a full store commit hash only when this call observed a successful commit and verified that it changed that file to the exact content written. Ordinary task edits save the file without committing, so they return `commit: null`; later session or background sync may commit them. Claims can return a verified local commit even if pushing fails. A commit receipt does not guarantee remote delivery or that a later sync kept the same task state; use the claim's existing `synced` and `heldBy` fields for that outcome. No Git repository, no new commit, a failed commit, or unavailable verification also yields `commit: null`, never an unrelated `HEAD`.
+
+Scalar and batch writes use the same receipt. Partial batches retain their existing success lists and `errors`. Even a fully rejected batch can rewrite task formatting and then includes a receipt; it still reports `ok: false`. Successful dry runs and no-op operations that do not write return `data.write: null`. Validation failures before a write retain their existing error response without a receipt.
+
+### `complete_task`
+
+Move one or more tasks to the Done section by matching text. Supports batch completion by passing an array.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `item` | string or string[] | yes | The task(s) to complete. Pass a single string for one task, or an array of partial/exact text strings for batch completion. |
+| `sessionId` | string | no | Optional session ID from `session_start` for per-session completion metrics. |
+
+When a task is completed, phren clears any checkpoint file associated with that task.
+
+### `remove_task`
+
+Remove a task from a project's `tasks.md` by matching text or task ID.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `item` | string | yes | Exact/partial task text, or task ID like `A1`, `Q3`, `D2`. |
+
+### `update_task`
+
+Update a task's text, priority, context, section, GitHub metadata, pin status, or promote it. Also supports work_next (pick highest-priority Queue item) and promote (clear speculative flag). When work_next is true, item is not needed.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `item` | string | no | Partial text to match against existing task items. Required unless `updates.work_next` is true. |
+| `updates` | object | yes | Fields to update (all optional inside the object). |
+
+The `updates` object accepts:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `text` | string | Replacement text for the task line. |
+| `priority` | string | New priority tag: `high`, `medium`, or `low`. |
+| `context` | string | Text to append to the Context line below the item. |
+| `replace_context` | boolean | Replace the existing `Context:` value instead of appending. |
+| `section` | string | Move item to this section: `Queue`, `Active`, or `Done`. |
+| `github_issue` | number or string | GitHub issue number (for example `14` or `#14`). |
+| `github_url` | string | GitHub issue URL to associate with the item. |
+| `unlink_github` | boolean | Remove any linked issue metadata from the item. |
+| `pin` | boolean | Pin the task so it floats to the top of its section. |
+| `promote` | boolean | Clear the speculative flag on this task (confirm the user wants it). |
+| `move_to_active` | boolean | Used with `promote`: also move the task to the Active section. |
+| `work_next` | boolean | Pick the highest-priority Queue item and move it to Active. Ignores `item` param. |
+
+### `tidy_done_tasks`
+
+Archive older Done items beyond a keep threshold to keep task lists short.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `keep` | number | no | Number of recent Done items to keep (default 30). |
+| `dry_run` | boolean | no | Preview what would change without writing. |
+
+### `pin_task`
+
+Pin or unpin a task. Pinned tasks always appear in hook context regardless of priority, so they stay visible across every prompt.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `item` | string | yes | Partial text or task ID (A1, Q3) to match. |
+| `unpin` | boolean | no | If true, unpin instead of pin. |
+
+### `claim_task`
+
+Claim a task for this computer, so conductors that are not linked through the Hook do not take the same work. Syncs the store, moves the task to Active with a `Claimed: <computer> <ISO time> [session:<id>]` line under it, then commits and pushes. A task another computer holds is refused; when two claims race, the one that reached the store's remote first wins and the other call returns `heldBy`. Completing a task clears its claim. Conductors skip tasks claimed by other computers.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `item` | string | yes | Task to claim: `bid:XXXXXXXX`, a positional ID (Q3) or its text. |
+| `session` | string | no | The claiming conductor's session id, recorded with the claim. |
+| `release` | boolean | no | Release this computer's claim and return the task to the Queue. |
+| `force` | boolean | no | Take over another computer's claim once it is more than a day old. |
+
+---
+
+## Finding Capture
+
+### `add_finding`
+
+Record a single insight to a project's FINDINGS.md. Call this the moment you discover a non-obvious pattern, hit a subtle bug, or find a workaround.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `finding` | string or string[] | yes | The insight, as a single bullet point (or an array of bullet points for batch capture). Be specific enough to act on without extra context. |
+| `citation` | object | no | Optional source citation: `{ file?, line?, repo?, commit?, name?, task_item? }`. `name` links the finding to a function, type or variable; the older `symbol` spelling is accepted until 0.3.1. |
+| `sessionId` | string | no | Optional session ID from `session_start`. Pass it if you want session metrics to include this write. |
+| `findingType` | enum | no | Prefix the finding inline with a type tag. One of: `decision`, `pitfall`, `pattern`, `bug`. |
+| `scope` | string | no | Optional memory scope label (defaults to `shared`; for example `researcher` or `builder`). |
+
+The finding is always saved as `active`. `add_finding` never auto-marks a finding as `contradicted`: instead it runs cheap lexical heuristics (no extra LLM/API call) and, when an existing finding looks like a possible duplicate or contradiction, returns it in the response as `potentialDuplicates` / `potentialConflicts` for the calling agent to judge. If a returned candidate is a genuine contradiction, resolve it explicitly with `resolve_contradiction` (or `supersede_finding`); if it is unrelated, ignore it. (Opt-in LLM-confirmed contradiction detection is still available via `PHREN_FEATURE_SEMANTIC_CONFLICT`.)
+
+`citation.name` names the function, type or variable the finding is about, as `Name`, `Type.member` or `name()`. When the project has a code index, the finding text is scanned for a name that resolves to exactly one declaration (four or more characters, and not a local variable unless exported) and that link is attached automatically; the finding text is never rewritten. An explicit `name` is validated against the index and stored either way: an unresolved one is kept and marked unresolved (the stored citation keeps its `symbol` and `symbol_unresolved` keys), the counterpart of an invalid file citation, and the trust filter treats it as `invalid_citation`.
+
+### `supersede_finding`
+
+Mark an existing finding as superseded by a newer finding.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `finding_text` | string | yes | Finding selector (supports `fid:`, exact text, or partial match). |
+| `superseded_by` | string | yes | New finding text that supersedes the old one. |
+
+### `retract_finding`
+
+Retract an existing finding and record the reason in lifecycle metadata.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `finding_text` | string | yes | Finding selector (supports `fid:`, exact text, or partial match). |
+| `reason` | string | yes | Retraction reason. |
+
+### `resolve_contradiction`
+
+Resolve a contradiction between two findings and update lifecycle statuses.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `finding_text` | string | yes | First finding selector (`fid:`, exact text, or partial match). |
+| `finding_text_other` | string | yes | Second finding selector (`fid:`, exact text, or partial match). |
+| `resolution` | enum | yes | One of: `keep_a`, `keep_b`, `keep_both`, `retract_both`. |
+
+### `get_contradictions`
+
+List unresolved contradicted findings (status = `contradicted`) in one project or across all projects.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | no | Optional project filter. Omit to scan all projects. |
+| `finding_text` | string | no | Optional finding selector (`fid:`, exact text, or partial match). |
+
+### `edit_finding`
+
+Edit a finding in place while preserving inline metadata such as `fid` and citations.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `old_text` | string | yes | Existing finding text to match. |
+| `new_text` | string | yes | Replacement finding text. |
+
+### `remove_finding`
+
+Remove a finding from FINDINGS.md by matching text.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `finding` | string | yes | Partial text to match against existing findings. |
+
+### `push_changes`
+
+Commit and push any changes in the phren repo.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `message` | string | no | Commit message. Defaults to "update phren". |
+
+Finding lifecycle and impact scoring notes:
+- Lifecycle state is stored inline on finding bullets (for example: active, superseded, contradicted, retracted).
+- Hook/context injection records which finding IDs were surfaced.
+- `session_end` marks those entries as successful when tasks from that session reach Done, powering high-impact finding ranking.
+
+---
+
+## Memory Quality
+
+### `pin_memory`
+
+Write a truth into truths.md, a high-confidence entry that never decays. Truths for the detected project are always prepended to hook-prompt context injection with priority second only to findings. Use `get_truths` to read all truths for a project.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `memory` | string | yes | Truth text. |
+
+### `get_truths`
+
+Read all pinned truths for a project. Returns the full list of truth entries from truths.md.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+
+### `memory_feedback`
+
+Record feedback on whether an injected memory was helpful or noisy.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | string | yes | Memory key to score. |
+| `feedback` | enum | yes | One of: `helpful`, `reprompt`, `regression`. |
+
+---
+
+## Data Management
+
+### `add_project`
+
+Bootstraps a repo or working directory into phren and adds it to the active profile. Pass the path explicitly; when no `profile` is provided, phren uses `PHREN_PROFILE` or the current machine mapping from `machines.yaml`.
+Creates or copies `AGENTS.md`, `summary.md`, `FINDINGS.md`, and `tasks.md` under `~/.phren/<project>`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | yes | Project path to import. Pass the current repo path explicitly. |
+| `profile` | string | no | Profile to update. Defaults to the active profile. |
+| `ownership` | enum | no | Repo-file ownership mode: `phren-managed`, `detached`, or `repo-managed`. |
+
+### `export_project`
+
+Export a project's data (findings, task, summary, AGENTS.md) as portable JSON.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name to export. |
+
+### `import_project`
+
+Import project data from a previously exported JSON payload. Creates the project directory if needed.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `data` | string | yes | JSON string from a previous `export_project` call. |
+
+### `manage_project`
+
+Archive or unarchive a project. Archive renames the directory with `.archived` suffix, removing it from the active index without deleting data.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `action` | enum | yes | `archive` or `unarchive`. |
+
+---
+
+## Fragment Graph
+
+### `search_fragments`
+
+Find fragments and related docs by name.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | yes | Fragment name to search for (partial match). |
+| `project` | string | no | Optional project filter. |
+| `limit` | number | no | Max results (default 10). |
+
+### `get_related_docs`
+
+Compatibility: graph tools use the established `entity` / `entity_type` parameter
+keys for fragments. `manual-links.json` retains `entity` / `entityType`, and the
+rebuildable SQLite graph retains `entities`, `entity_links`, and `global_entities`.
+These internal names do not introduce additional user-facing concepts. The
+`canonical` document type and `search --type canonical` continue to mean
+`truths.md`. Keeping these identifiers avoids breaking existing tools and filters.
+
+Get docs linked to a named fragment.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entity` | string | yes | Fragment name to look up related documents for. |
+| `project` | string | no | Optional project filter. |
+| `limit` | number | no | Max docs to return (default 10). |
+
+### `read_graph`
+
+Read the fragment graph for a project or all projects.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | no | Project name. Omit to read the graph across all projects. |
+| `limit` | number | no | Max fragments to return (default 500, max 2000). |
+| `offset` | number | no | Pagination offset (default 0). |
+
+### `link_findings`
+
+Manually link a finding to a fragment. The link persists to `manual-links.json` and survives graph rebuilds.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `finding_text` | string | yes | Text of the finding to link. |
+| `entity` | string | yes | Fragment name to link to (e.g. "Redis", "Docker"). |
+| `relation` | string | no | Relationship type (e.g. "mentions", "implements"). |
+| `entity_type` | string | no | Fragment type label (for example `library`, `service`, `concept`, `architecture`). Defaults to `fragment`. |
+
+### `cross_project_fragments`
+
+Find fragments that appear in multiple projects. Useful for discovering shared patterns and dependencies.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `entity` | string | yes | Fragment name to search for (partial match). |
+| `exclude_project` | string | no | Exclude one project from the result set. |
+| `limit` | number | no | Max results (default 20). |
+
+---
+
+## Session Management
+
+### `session_start`
+
+Mark the start of a session. Returns prior summary, recent findings, active task context, and task checkpoints for resume guidance. Designed for agents without native lifecycle hooks.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | no | Project name to scope the session to. |
+| `agentScope` | string | no | Optional memory scope for the session (for example `researcher` or `builder`). |
+| `connectionId` | string | no | Optional stable client identifier. Bind once at `session_start`, then use it instead of passing `sessionId` every time. |
+
+### `session_end`
+
+Mark the end of a session and save a summary for the next session. Reports duration and findings added, writes a task checkpoint snapshot for active work, and updates finding impact outcomes when session tasks were completed.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `summary` | string | no | Free-text summary of what was accomplished. |
+| `sessionId` | string | no | Session ID returned by `session_start`. Required unless you pass `connectionId`. |
+| `connectionId` | string | no | Stable client identifier previously passed to `session_start`. Required unless you pass `sessionId`. |
+
+### `session_context`
+
+Get the current session state including project, duration, and findings added so far.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sessionId` | string | no | Session ID returned by `session_start`. Required unless you pass `connectionId`. |
+| `connectionId` | string | no | Stable client identifier previously passed to `session_start`. Required unless you pass `sessionId`. |
+
+### `session_history`
+
+List recent sessions, or drill into one session to return artifacts (findings + tasks) linked to that session.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `limit` | number | no | Max sessions to return (default 20). |
+| `sessionId` | string | no | If provided, returns detailed artifacts for that session. |
+| `project` | string | no | Optional project filter for listing or artifact drill-down. |
+
+---
+
+## Skills Management
+
+### `list_skills`
+
+List installed skills with resolved metadata (name, command, aliases, scope, enabled/visible state, command registration state).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | no | Filter skills to a specific project. Omit to list all skills (global + per-project). |
+
+### `read_skill`
+
+Read the full content of a skill file including parsed frontmatter.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | yes | Skill name (e.g. "commit", "review-pr"). |
+| `project` | string | no | Project scope. Omit to search global skills. |
+
+### `write_skill`
+
+Create or update a skill file.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | yes | Skill name. |
+| `content` | string | yes | Full skill file content (frontmatter + body). |
+| `scope` | string | yes | Where to save: `global` or a project name. |
+
+### `remove_skill`
+
+Delete a skill file.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | yes | Skill name to remove. |
+| `project` | string | no | Project scope. Omit to remove from global skills. |
+
+### `toggle_skill`
+
+Enable or disable a skill without deleting its file.
+Choices are stored in the synced `.config/skill-preferences.json` (schema 1,
+`enabledSkills` keys `<source-scope>:<lowercase-name>`). An explicit shared
+choice takes precedence over legacy machine-local `disabledSkills`; absent
+keys keep that computer's existing preference. Selecting an inherited global
+skill changes its global source setting for all projects. It does not create
+a project override of the global skill. Updated desktop clients apply phone
+changes to existing managed mirrors after pulling; agent reload boundaries
+still apply.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | yes | Skill name to toggle. |
+| `enabled` | boolean | yes | `true` to enable, `false` to disable. |
+| `project` | string | yes | Skill scope: `global` or a project name. |
+
+Skill resolution behavior:
+- Source precedence: project scope overrides global scope for same skill name.
+- Alias/command collisions are detected and marked unregistered in generated command output.
+- Visibility gating: disabled skills stay on disk but are hidden from active agent links.
+- Generated artifacts: `.claude/skill-manifest.json` and `.claude/skill-commands.json`.
+
+---
+
+## Hooks Management
+
+### `list_hooks`
+
+Show hook enable/disable status for all tools (claude, copilot, cursor, codex), custom hooks, and config paths.
+
+Integration model:
+- Claude uses full native lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `Stop`).
+- Copilot/Cursor/Codex use generated hook config plus session wrappers that enforce start/stop lifecycle behavior around tool invocation.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | no | Include project-level lifecycle hook overrides from `<phrenPath>/<project>/phren.project.yaml`. |
+
+### `toggle_hooks`
+
+Enable or disable hooks globally, for a specific tool, or for a tracked project.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `enabled` | boolean | yes | Whether to enable or disable hooks. |
+| `tool` | string | no | Specific tool to toggle (e.g. "claude", "cursor"). Omit for global toggle. |
+| `project` | string | no | Tracked project name for project-level lifecycle hook overrides. |
+| `event` | string | no | Optional lifecycle event for a project override: `UserPromptSubmit`, `Stop`, `SessionStart`, `PostToolUse`. Requires `project`. |
+
+### `add_custom_hook`
+
+Add a custom integration hook that runs on phren events.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event` | string | yes | Hook event (e.g. "pre-finding", "post-finding", "pre-save", "post-save"). |
+| `command` | string | no | Shell command to execute (use this or `webhook`, but not both). |
+| `webhook` | string | no | HTTP POST URL for async webhook delivery (use this or `command`, but not both). |
+| `secret` | string | no | Optional HMAC signing secret for webhook hooks (`X-Phren-Signature`). |
+| `timeout` | number | no | Timeout in milliseconds. |
+
+### `remove_custom_hook`
+
+Remove custom hooks by event and optional command match.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event` | string | yes | Hook event to remove. |
+| `command` | string | no | Specific command to remove. Omit to remove all hooks for the event. |
+
+---
+
+## Operations and Review
+
+### `health_check`
+
+Return runtime health status (version, profile, project count, index status, MCP/hooks state) and consolidation status for all projects.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `include_consolidation` | boolean | no | Include consolidation status for all projects (default true). |
+
+### `list_hook_errors`
+
+Read recent hook/debug failures from runtime logs.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `limit` | number | no | Max rows to return (default 20). |
+
+### `get_review_queue`
+
+Read review queue items for one project or all active-profile projects. The review queue is read-only.
+
+The optional queue is retained for quarantined candidates and deliberate manual
+triage (September 2026 decision). Normal agent memory capture does not require
+the user to approve each finding. `memory_feedback` adjusts retrieval ranking;
+it does not replace the trust boundary around unreviewed candidate content.
+There is not sufficient usage evidence to remove the working queue safely.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | no | Optional project filter. |
+
+### `manage_review_item`
+
+Manage a review queue item: approve (**promotes** the queued line into FINDINGS.md through the same path a direct add uses, dedup, fid assignment, citation metadata, and the findings-cap auto-archive all apply; if the finding is already live or already archived to `reference/topics/`, approve just dequeues it), reject (removes from queue AND from FINDINGS.md), or edit (updates text in both).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name. |
+| `line` | string | yes | The raw queue line text (as returned by `get_review_queue`). Max 10,000 chars. |
+| `action` | enum | yes | Action to perform: `approve`, `reject`, or `edit`. |
+| `new_text` | string | no | The new finding text. Required when action is `edit`. Max 10,000 chars. |
+
+### `doctor_fix`
+
+Run doctor self-heal checks and apply fixes (missing files, broken symlinks, stale locks).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `check_data` | boolean | no | Also validate data files (findings, tasks) for structural issues. |
+
+### `store_list`
+
+List all registered phren stores and their sync status. Shows the primary store plus any team or readonly stores from the store registry.
+
+*No parameters. Accepts an empty input.*
+
+---
+
+## Extraction
+
+### `auto_extract_findings`
+
+Extract candidate findings from session/transcript context for bulk capture workflows.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name to save findings to. |
+| `text` | string | yes | Source text to mine for finding candidates (max 10,000 chars). |
+| `model` | string | no | Optional Ollama model override. |
+| `dryRun` | boolean | no | If true, return extracted candidates without writing findings. |
+
+---
+
+## Configuration
+
+### `get_config`
+
+Read current governance and policy configuration. Supports all config domains including topic.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `domain` | enum | no | Config domain to read: `proactivity`, `taskMode`, `findingSensitivity`, `retention`, `workflow`, `access`, `index`, `topic`, or `all` (default). |
+| `project` | string | no | Project name. When provided, returns merged view with project overrides and `_source` annotations. Required for `topic` domain. |
+
+### `set_config`
+
+Update configuration for a specific domain. Unified setter for all config domains.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `domain` | enum | yes | Config domain: `proactivity`, `taskMode`, `findingSensitivity`, `retention`, `workflow`, `index`, or `topic`. |
+| `settings` | object | yes | Domain-specific settings (see below). |
+| `project` | string | no | Project name. When provided, writes to project's `phren.project.yaml` instead of global `.config/`. Required for `topic` domain. |
+
+**Domain-specific settings:**
+
+- **proactivity**: `{ level: "high"|"medium"|"low", scope?: "base"|"findings"|"tasks" }`
+- **taskMode**: `{ mode: "off"|"manual"|"suggest"|"auto" }`. In `auto`, the prompt hook files what it picks up on its own into **Queue**; a prompt that asks to be tracked ("add this to task") goes to Active, as does a prompt matching a task already in Active. Task proactivity `high` captures any actionable request, `medium` only prompts with that explicit signal, `low` none. Text inside terminal paste wrappers (`<pasted_content>`, which also carry phone messages and messages relayed into the pane) never files or touches a task, only what was typed outside them; neither do messages relayed from another agent ("From the conductor, ...", "From tidy-phren: ..."), nor frames from another agent or the harness (`<agent-message>` hand-backs, `<cross-session-message>`, delivery notices, `[SYSTEM NOTIFICATION]`, `<task-notification>`, `<system-reminder>`), questions, and replies that ask for nothing are never filed and never touch an existing task. A prompt that matches an existing task moves it to Active but never rewrites its Context or GitHub link. The hook never completes a task: a saved turn leaves the task where it is, and completion is explicit.
+- **findingSensitivity**: `{ level: "minimal"|"conservative"|"balanced"|"aggressive" }`
+- **retention**: `{ ttlDays?, retentionDays?, autoAcceptThreshold?, minInjectConfidence?, decay?: { d30?, d60?, d90?, d120? } }`
+- **workflow**: `{ lowConfidenceThreshold?, riskySections?, taskMode?, findingSensitivity? }`
+- **index**: `{ includeGlobs?, excludeGlobs?, includeHidden? }`
+- **topic**: `{ topics: [{ slug, label, description?, keywords? }], domain? }`
+
+---
+
+## Runtime Notes
+
+### Governance identity and RBAC
+
+- Actor identity is resolved from `PHREN_ACTOR` (in trusted/test contexts) or OS user identity.
+- Access policy comes from `.config/access-control.json` with local augmentation from `.runtime/access-control.local.json`.
+- RBAC is enforced before write/policy/delete operations.
+
+### Web UI security model
+
+- Web UI binds loopback-only (`127.0.0.1`).
+- A random per-run auth token is required.
+- Mutating routes require CSRF tokens (single-use, TTL-bound).
+- CSP and anti-framing response headers are set by default.
+
+### Telemetry model
+
+- Telemetry is opt-in (`phren config telemetry on`).
+- Data is stored locally in `.runtime/telemetry.json`.
+- No external reporting is sent by default.
+
+---
+
+Maintenance tools (govern, prune, consolidate, extract) are CLI-only. See `phren config` and `phren maintain`.
+
+---
+
+## Topic Summaries
+
+Summaries written by the agent itself, with the model it is already running as; no API key and no local model. Driven by the `/phren-summarize` skill. In the core profile both are reached through `phren_admin`.
+
+### `get_topic_summaries`
+
+Every `reference/topics` file of a project with its bullet count, its current `## Now` text and whether that text is structural or prose. Pass `topic` to also get that topic's newest bullets.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `topic` | string | no | A topic slug from the list; returns its newest bullets. |
+| `bullets` | number | no | How many of the newest bullets to return for `topic` (5–200, default 60). |
+
+---
+
+### `set_topic_summary`
+
+Store the paragraph you wrote as the topic's `## Now` block and refresh the project's `What phren knows` block. Refused, with the offending names returned, if the paragraph names anything the topic's bullets do not.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `topic` | string | yes | Topic slug, as listed by `get_topic_summaries`. |
+| `text` | string | yes | Four to six plain sentences; only facts the bullets state, names spelled as the bullets spell them. |
+
+---
+
+## Code Index
+
+Read tools over the local code index the `code` module keeps per project under `<store>/.runtime/code/<project>.sqlite`. The module is off by default; enable it with `phren modules enable code`, then build the index with `phren code index <project>` (`--repo <path>` for a checkout the project does not register). Results are compact text, one line per hit, not JSON. The `/code` skill drives them.
+
+### `code_search`
+
+Find functions, methods, types and variables by name, signature or doc comment. Use it instead of grep when you want a declaration rather than raw text. Ranking is exact name, then prefix, then FTS5 relevance, then how often it is used.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `query` | string | yes | A name, or words from its signature or doc comment. |
+| `kind` | enum | no | `function`, `method`, `class`, `struct`, `enum`, `interface`, `type` or `variable`. |
+| `limit` | number | no | Maximum hits (1-100, default 20). |
+
+### `code_definition`
+
+Go to where a function, method, type or variable is defined. Accepts `Foo`, `Foo.bar` and `bar()`; returns the file and lines, signature, doc, the last change (blame hash and date, never a name) and a source snippet of at most 40 lines. When a common name matches several declarations it prefers an exported, non-variable one and reports the candidate count. After the snippet it adds a `Findings` block, one line per finding linked to it (its id and first 160 characters), read from the project's FINDINGS.md and archived topic files.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `name` | string | yes | What to look up: `Foo`, `Foo.bar` or `bar()`. The older `symbol` spelling is accepted until 0.3.1. |
+
+### `code_references`
+
+Every place a function, method, type or variable is used, grouped by file, with a total and a candidate count when the name is ambiguous. Accepts the same name forms as `code_definition`. Only uses the index could resolve to exactly one definition are counted.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `name` | string | yes | What to look up: `Foo`, `Foo.bar` or `bar()`. The older `symbol` spelling is accepted until 0.3.1. |
+| `limit` | number | no | Maximum reference lines (1-500, default 200). |
+
+### `code_outline`
+
+A file's functions, types and variables in source order, methods nested under their class or container, with line, signature and doc. Use it before reading a large file.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `path` | string | yes | Project-relative file path, as stored in the index. |
+
+### `code_usage`
+
+The most used and least used functions and types, by how many places use them, so rarely used code is visible too. Local variables are left out of the most-used list so a busy local or a one-letter loop name cannot dominate it.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `project` | string | yes | Project name, optionally store-qualified. |
+| `top` | number | no | How many most used and how many least used (1-100, default 10). |
+
+CLI equivalents: `phren code search <project> <query> [--kind k] [--limit n]`, `phren code def <project> <name>`, `phren code refs <project> <name>`, `phren code outline <project> <path>`, `phren code usage <project> [--top n]`.
+
+### Hook routes
+
+The `code` module exposes these routes through Hook's private HTTP pipe. All
+require `project`; GET routes accept optional `store` in the query, and POST
+routes accept it in the JSON body. The selector must resolve uniquely to an
+available registered store by ID, name or GitHub repository name. Omitting it
+uses the Hook's base store. A selected read-only store rejects note and reindex
+writes. A missing index returns 404 with the `phren code index` command.
+
+| Method and path | Other inputs | Result |
+| --- | --- | --- |
+| `GET /v1/code/status` | None | File, declaration and use counts, languages, counts per kind, last index time and the most used functions and types. |
+| `GET /v1/code/tree` | `directory`, optional relative directory | `{project, directory, entries}`; immediate indexed children with `path`, `directory`, descendant `files`, declaration count (`symbols`) and `languages`. |
+| `GET /v1/code/search` | `q`, optional `kind`, `directory`, `limit` (1-500, default 20) | `{project, query, symbols}`: matching functions, types and variables, ranked by exact name, prefix, full-text relevance and usage. |
+| `GET /v1/code/files` | `name` (filename or relative path suffix), optional `limit` (1-100, default 20) | `{project, name, files: [{path, language}], truncated}`: exact, case-sensitive filename/suffix matches in the index, including files without declarations. Exact paths come first, then shorter paths. `%` and `_` are literal characters. Advertised as `codeFiles`. |
+| `GET /v1/code/outline` | `path`, relative file path | `{project, path, entries}` in source order with nested members. |
+| `GET /v1/code/outline-summary` | `paths`, a JSON array of 1-200 relative paths | `{project, entries}` with declaration totals and up to three leading kinds per file or directory, including descendants. Kept for phones older than 1.0.3; newer phones use `change-counts`. |
+| `GET /v1/code/change-counts` | `paths`, a JSON array of 1-200 relative paths | `{project, entries}`, one per path: `functions` and `types`, each `{changed, added}`, from the working-tree diff (an untracked file is new throughout), and `first`, the first function or type to open. The Changes tree's chips read like "2 functions changed · 1 new type". |
+| `GET /v1/code/changed` | None beyond `project` | `{project, files}`: what changed, the functions, types and variables that today's agent sessions (the Hook's recorded edits in this checkout) and the last 10 commits touched, grouped by file, most recent work first. Each item has `name`, `kind`, `family` (`function`, `type` or `variable`), `file`, `line`, `endLine`, `parent`, `isNew` (every line was added) and `uses`. Only top-level or exported variables count. The repository's first commit is left out. |
+| `GET /v1/code/file-references` | `path`, relative file path | `{project, path, references}`: every resolved use made from that file, in line order, each with `line`, `kind`, `name`, the declaration it names as a file-qualified `symbol` (`file::Container.name`), its `file`, `targetLine` and `targetKind`. At most 5000 rows. The phone's code viewer makes these names tappable. |
+| `GET /v1/code/definition` | `name` (older phones send `symbol`) | `{project, definition}` with declaration, snippet, last Git change and the `findings` linked to it. |
+| `GET /v1/code/references` | `name` (older phones send `symbol`), optional `limit` (1-500, default 200) | `{project, references}` with every resolved use, grouped by file. |
+| `GET /v1/code/usage` | `top` (1-100, default 10) | `{project, usage: {hot, cold}}`, the older compact ranking of most and least used. |
+| `GET /v1/code/usage-page` | Optional `kind`, `file`, `directory`, `offset` (default 0), `limit` (1-100, default 50), `end=0\|1` | `{project, entries, total, offset, limit, maxUses}` across every function, type and variable, including zero uses. `end=1` selects the last page. |
+| `POST /v1/code/reindex` | None beyond `project` and optional `store` | Runs an incremental scan and returns status. |
+| `POST /v1/code/note` | `name` (older phones send `symbol`), `file`, `line`, `text`, optional `target` | Remembers the note as a finding linked to that function, type or variable, then optionally delivers it to an agent. See below. |
+
+Hook `kind` accepts the individual kinds above plus `types`, the family
+of class, struct, enum, interface and type declarations. Directory scopes match
+descendants by literal path boundary. Definition and reference queries accept
+`Name`, `Type.member`, `name()` and `file::Type.member` to stay in one file.
+Usage pages sort by descending reference count, then name, file, line and ID;
+`maxUses` covers the filtered distribution, not only the current page.
+
+#### Code notes
+
+`POST /v1/code/note` takes this JSON shape:
+
+```json
+{
+  "store": "personal",
+  "project": "demo",
+  "name": "src/parser.ts::Parser.parse",
+  "file": "src/parser.ts",
+  "line": 42,
+  "text": "Keep this empty-input case in the regression tests.",
+  "target": { "session": "<session-id>" }
+}
+```
+
+Omit `target` to save only, or use `{ "harness": "codex" }` to dispatch a new
+worker (`codex`, `claude`, `opencode`). A session target hands off locally;
+a new worker uses conductor placement with `computer: "anywhere"`. Sending
+requires the conductor module. The selected line must still belong to the
+indexed declaration and its returned snippet; otherwise the route returns 409 and
+asks the caller to refresh. Text is trimmed, nonempty and at most 4500 characters.
+
+The result is `{ok: true, saved: true, findings, delivery?}`. Save happens before
+delivery. A delivery error is returned inside `delivery` without undoing the
+finding; callers must not treat `saved: true` as proof of delivery or retry an
+uncertain send automatically. Session Code entry points keep their explicit
+recipient instead of presenting another chooser.
+
+See [Code index](code-index.md), [Phren Hook](phren-hook.md) and the
+[connection contract](../packages/cli/src/bridge/AGENT_CONNECTIONS.md).
+
+### Repository files and tree
+
+`GET /v1/projects/files?project=&directory=&path=` browses a checkout discovered
+by Hook. Optional `directory` must exactly match a discovered checkout; omitted,
+the first candidate is used. `path` is relative and defaults to its root.
+Directories return `{path, kind: "directory", truncated, entries}` with at most
+500 entries, directories first. Files return `{path, kind: "file", size, data}`
+with up to 2 MiB of file content encoded as base64. Symlinks, `.git`, traversal and paths
+outside the selected checkout are refused. This route is read-only.
+
+`GET /v1/files/resolve` takes the full session target in the query, `path`,
+and optional `child` or `worktree`, validated like the session's Git routes.
+It resolves relative paths against the selected pane/worker folder first, then
+the repository root. Absolute paths must be in that repository. `..` may move
+within the repository; escapes, `.git`, symlinks and non-files are refused.
+Only a missing cwd-relative file permits a root-relative fallback. The reply
+is `{path, size, contentType, version}`, with a repository-relative path that
+can be passed to `/v1/files/range` with the same target/worktree. No file bytes
+or absolute server paths are returned. Hook advertises `fileResolution`.
+
+`POST /v1/git/tree` takes the session's full target, optional `child` or
+`worktree`, relative `path` and optional `ignored: true`. It returns one directory
+with descendant file counts and a snapshot version; with `ignored`, the level's
+git-ignored folders and files are added, marked `ignored: true`.
+
+`POST /v1/git/worktrees` lists the pane repository's other worktrees (`git worktree
+list --porcelain`): `{worktrees: [{id, path, branch, head, ahead, behind, changed,
+main?, locked?, worker?: {label, provider, child?, state?}}]}`. `ahead`/`behind`
+are against the pane's HEAD, `changed` counts uncommitted files, and `worker`
+names a fan-out job, this conversation's sub-agent or a Herdr agent (by its
+agent name) editing there. Every other
+`/v1/git/*` route, `/v1/diff`, `/v1/files/range` and `/v1/files/resolve` accept `worktree=<id>`,
+resolved only against that listing. The bounded repository cache is keyed by HEAD and a file/status hash;
+it expires after two seconds and is invalidated by status refresh and mutations.
+Opening a directory does not collect diff statistics or upstream history.
+
+### Commit, push and pull request
+
+Each takes the session's full target and optional `child` or `worktree`, like
+the other `/v1/git/*` routes, and answers `{ok: true, ...}` or, when Git or gh
+refused, `{ok: false, output}` with the output exactly as printed (stdout and
+stderr interleaved, at most 64 KiB). Input errors are ordinary 400/409 errors.
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `POST /v1/git/commit` | `message` (required, at most 20,000 characters) | `{ok, sha, short, subject, branch, output?}`. Commits the index only; 409 when nothing is staged. Hooks always run (never `--no-verify`), and a hook's refusal is `{ok: false, output}`. |
+| `POST /v1/git/push` | `confirmDefault?: true` | `{ok, branch, remote, upstream, setUpstream, output}`. Pushes the current branch to its upstream, or to `origin` with the upstream set. Never forced. The default branch (the remote's `HEAD`, else `main`/`master`) is 409 without `confirmDefault`; a detached HEAD or missing remote is 409. |
+| `POST /v1/git/pr` | `draft?: true` | `{ok, url, branch, draft?, existing?}` through `gh pr create --fill`. `{ok: false, reason: "missing" \| "auth", message}` when gh is not installed or not signed in; `reason: "failed"` with gh's `output` otherwise. |
+
+`POST /v1/git/pulls` also returns `branch` and `current`: the checked-out
+branch's pull request in any state, `{number, title, url, head, base, draft,
+state, checks}`, where `checks` is `passing`, `failing`, `pending` or null.
+`POST /v1/git/status` returns `defaultBranch`, the branch a push asks to confirm.
+
+### Terminal sources and independent overviews
+
+`GET /v1/muxes?typed=1` enumerates both Herdr and tmux sources in `{muxes: [...]}`.
+Each source carries `id` (`herdr:default`, `tmux:tmux`, `tmux:tmux-work`),
+`kind` (`herdr` or `tmux`), `session` (the existing server name) and `running`.
+The hidden `tmux-phren` source remains visible when it is running alongside
+Herdr; without Herdr it is also offered before its first phone launch.
+A failed socket probe does not remove the other responding sources.
+
+Read each source with `GET /v1/workspaces?mux=<id>`,
+`GET /v1/workspaces/panes?mux=<id>&groupId=...&childId=...`, or
+`WS /v1/overview?mux=<id>`. Overview and pane replies carry the actual `kind`
+and `mux: {id, kind, session}`. Group, pane and target identities are unchanged;
+`target.source` still names the agent harness. Clients combine successful
+sources independently, preserving their rows if another source fails.
+Installed clients require the historical Herdr envelope: without `typed=1`,
+`/v1/muxes` retains `herdr:<session>` IDs and `kind: "herdr"`, with an additive
+accurate `mux` descriptor for tmux entries. Legacy no-mux, `server=` and
+`mux=herdr:tmux` workspace/pane/overview requests likewise retain top-level
+`kind: "herdr"`; their `mux` descriptor still identifies the real source.
+New clients opt in with `mux=tmux:<server>`. Older Hooks ignore `typed=1`, so
+clients must accept legacy discovery aliases during upgrades. A typed tmux
+selector that would resolve to Herdr returns 409 `mux-kind-mismatch`.
+
+Each tab in the `/v1/workspaces` and `WS /v1/overview` replies carries
+`agentStatus` and `title`. A session whose main turn ended while background
+work still runs is `agentStatus: "working"` with `backgroundTasks: <n>`,
+where Herdr or tmux say idle or done. `n` counts the work the session is
+waiting on: its running Codex or Claude sub-agents, teammates, workflow agents
+and fanout jobs (`runningChildren`), plus, for Claude, the background shells
+and monitors started since the owner's last prompt that still run. A shell
+that follows a log, watches files or serves a dev build (`tail -f`,
+`log stream`, `--watch`, `npm run dev`) never counts, and neither does a
+shell left running from an earlier exchange. The shells counted are at most
+the Stop hook's count of Claude background tasks less each task the
+transcript shows finishing after that Stop (a task-notification with a final
+status, including one still queued in an idle session), and none count two
+hours after the Stop, so an old count never keeps a finished session working. `backgroundTasks` is absent on a tab that is working, blocked or waiting
+on its own turn, and such a tab has no `currentStep`. The Hook's `live_sessions`
+list carries the same field. `title` is the dispatch label for a dispatched
+worker (kept in `<bridge>/briefs/<id>/label`); a dispatch sent before labels
+were kept uses its tab or workspace label. Otherwise it is the harness's own
+title, except a title made from the brief launch's first prompt ("Read and
+follow the brief...", a `/briefs/` path, "Brief" and a bare id), which is
+dropped so the client falls back to `label`. `GET /v1/workspaces/panes` gives
+each pane's `title` by the same rule.
+
+Existing HTTP transcript lookup failures carry 404 `code: "transcript-unavailable"`
+after route target validation. This code does not mean every 404 is a missing
+transcript. An identified conversation whose transcript has not been written
+yet still opens an empty transcript WebSocket and waits for it; startup does
+not trigger terminal fallback merely because its file is absent.
+
+### Live transcript previews
+
+The transcript WebSocket includes `preview: {turnStartedAt, text}` or
+`preview: null` on backlog/append frames, or sends a standalone `type: "preview"`
+frame with the same conversation identity. Claude previews come from pane text anchored to the current
+prompt; Codex, OpenCode and phren's agent use their delta text. Updates arrive at most twice
+a second.
+
+A preview built from a harness's own deltas also carries `streamed: true` and
+`delta`, the text appended since the previous preview frame on this socket:
+`{preview: {turnStartedAt, text, delta, streamed: true}}`. Either field marks
+`text` as the reply's own Markdown for the current assistant text block rather
+than text read off a terminal. `delta` is the whole `text` on the first preview
+frame of a block, after `preview: null`, and on the first frame of a new socket
+(a reconnect resends the text so far once, then continues with deltas). A
+block that does not extend the previous text (the next block in the same turn)
+also starts over with `delta` equal to `text`. Frames without either field
+(Claude's pane text) keep their old meaning. `text` is the source of truth:
+`delta` is a hint for animating the new words, and a phone that finds
+`text` does not start with what it already shows (a dropped frame, a block
+that restarted) replaces its preview with `text`. Health advertises
+`capabilities.previewDeltas`.
+
+| Harness | Preview source | Streaming |
+| --- | --- | --- |
+| phren agent | provider text deltas in `<event log>.preview.json`, written at most every 100 ms | token-level, `streamed: true` |
+| Codex | the thread's in-progress `agentMessage` (Hook app-server or `thread_history_1.sqlite`), else rollout `agent_message_delta` rows | as often as Codex records deltas, `streamed: true` |
+| OpenCode | the plugin's `.preview.json`, flushed with its event log | token-level, `streamed: true` |
+| Claude Code | the pane, read at most twice a second, anchored to the prompt, until the turn's first entry lands | screen text, no `delta`; later blocks arrive per block as entries |
+| Copilot | none (only its thinking state) | per block, as entries |
+
+Preview text stays out of history and never advances the transcript
+cursor. A completed entry clears the preview without the throttle delay. The
+phone replaces it in place and keeps the reveal progress, avoiding duplicate
+text. Reconnect history retains existing rows unless Hook explicitly resets
+the conversation.
+
+### Computer memory
+
+`GET /v1/store/head` returns the working-tree `sha`. When the store has a
+GitHub origin and an attached branch, it also returns
+`repositoryIdentity: { repository: "owner/repo", branch: "main" }`.
+The repository name is lowercase; branch names retain their case. The remote
+URL, embedded credentials and local paths are never included. The field is
+absent for older Hooks, detached heads and other remotes. Phones use the
+repository and branch together to recognize the same store through a computer
+and GitHub; independent stores and branches remain separate.
+
+`GET /v1/store/blob?sha=<sha>` reads blobs up to 4 MiB, matching the write
+limit. Larger blobs return HTTP 413 with `code: "store-file-too-large"`,
+`size` and `limit` in bytes. The recursive tree includes each blob's size so
+clients can name oversized files before requesting them and continue syncing
+other files. An incomplete pull must retain its previous successful head and
+retry after the file is archived or shortened on the computer.
+
+### `GET /v1/usage`
+
+Account limits and spend for the phone's Account usage screen: `{accounts: [...]}`, each account carrying `source` (`codex`, `claude`, `opencode`, `opencode-go`, `openrouter`, `copilot`, `elevenlabs`), `windows`, optional `updatedAt`, `message`, `spend`, `accountName`, `accountId`, for Claude `origin`, and `account: {id, label, key}` on Claude and Codex rows (Claude rows add `email` when the login names one). A Claude window whose reset passed after its report is sent as `reset: true` without `usedPercent`, and Claude windows reported over three days ago are dropped. By default there is one `claude` row, the default home; `?accounts=all` adds one row per extra Claude home (`~/.claude-<id>`), default first, since a phone built before accounts refuses two rows of one source. Extra homes have no live read on macOS and use the status-line snapshot (`usage/claude-<id>.json`) plus their own `.claude.json`. The optional `?sources=` comma list names the sources the phone understands; an older phone that sends none gets the original four so it never meets a source it cannot read. `elevenlabs` appears only on a computer with the ElevenLabs key spoken replies use (`phren bridge speech-key set`): the Hook reads `GET /v1/user/subscription` on the `speech-region` endpoint (`api.elevenlabs.io` by default) with that key, sent only there, and reports one `elevenlabs:characters` window with `usedPercent`, `usedCharacters`, `limitCharacters` and `resetsAt`; the key never reaches the phone. `copilot` is GitHub Copilot's own quota report read through the GitHub CLI's sign-in (`gh api /copilot_internal/user`): one window per limited quota (premium requests) with its monthly reset, unlimited quotas named in `message`; the token never reaches Phren. OpenCode Go's windows come from Go's own account report (`GET https://opencode.ai/zen/go/v1/usage`, with the local Go key sent only there): `opencode-go:plan:5h|7d|30d` with `usedPercent`, `resetsAt` and `limited: true` while Go refuses requests on that window. They are account-wide, so they already count every computer. They carry no dollar amounts, and are sent only with `?goPlan=1`, since older phones reject a Go window with a percentage and no dollar limit. The Go account's `message` says which limit is reached and how many requests OpenCode's own log shows refused with "usage limit exceeded" in the last day. The log is read incrementally; the first read covers at most its last 64 MB. With `?peers=1` the answer adds `computer` and `peers: [{name, computer, accounts} | {name, error, code?}]`, each linked computer's own answer over its pinned SSH pipe.
+
+Usage rows may also carry `subscription: { plan, startedAt?, renewsAt?, renewsEstimated?, checkedAt? }`. Dates are ISO 8601 UTC; missing metadata is omitted. Subscription freshness is independent of quota freshness and is preserved by `account_usage` when merging each account. See [subscription metadata](accounts.md#subscription-metadata) for provider fields and estimated renewals.
+
+### `GET /v1/resources`
+
+This computer's live resources, `{computer, resources}`, collected at most once per `PHREN_RESOURCES_MAX_AGE_MS` (10 s) by `bridge/resources.ts`: `cpu` (`cores`, `load1`/`load5`/`load15`, `loadPerCore`), `memory` (`totalBytes`, `availablePercent`, `pressure` normal/warn/critical, `swapUsedBytes`), `disk` (the home volume's `totalBytes` and `freeBytes`), `battery` (`percent`, `charging`, `onAC`) when there is one, `uptimeSeconds`, and `heavy`: simulators (one per `launchd_sim`, test clones named as such), Android emulators, xcodebuild, Gradle and Kotlin daemons, Java, Codex, OpenCode and Claude Code, each with its processes, CPU and memory and the Herdr or tmux pane that started it (`pane: {server, workspace, pane, agent, label}`) when one did; any other program whose processes together hold half a core shows as `busy`. `processes` counts OS processes, including helpers, never active agents or sessions. Known programs, including simulators and emulators, are included at 10% CPU or 200 MiB resident memory. Classification uses executable names and explicit interpreter launchers, not arbitrary command-line mentions. `resourceReason` is `cpu` or `memory` (`tracked` may appear from older Hooks): memory-only rows may be idle sessions or background services, and resource use alone does not establish session status. Codex app/MCP servers are named explicitly; an npm launcher and its native Codex child share one group, including both processes in CPU/RSS totals. Other processes count toward their nearest heavy ancestor, so a Codex worker running xcodebuild shows both without double-counting. CPU is the OS `ps` percentage (a lifetime average on Linux), and resident-memory totals may include shared pages. `pressure` (`cpu`, `memory`, `disk`, `overall`, 0 to 1) fills every client's gauge the same way, `level` is `ok`, `busy` or `stressed`, and `warnings` lists `load-high` (load above twice the cores), `disk-low` (under 10 GB free), `memory-low` and `battery-low`. macOS reads sysctl, pmset and ps; Linux reads /proc, /sys and ps. With `?peers=1` it adds `peers`, as `/v1/usage` does. Advertised as `capabilities.resources`. A phone that opens `WS /v1/overview` with `resources=1` also gets `{type: "resources", resources}` first and every `PHREN_OVERVIEW_RESOURCES_MS` (12 s) after.
+
+
+### `GET /v1/sudo`, `POST /v1/sudo/answer`
+
+Pending `sudo -A` requests from this computer's askpass helper (`<bridge>/askpass`, see docs/phren-hook.md, *sudo from the phone*), and the phone's answer. `GET` returns `{requests: [{id, computer, command, account?, user?, cwd?, session?, askedAt, expiresAt}]}`, oldest first; `account` is whose password sudo asks for (the user running sudo), `user` who the command runs as; `command` is what sudo will run, read by the Hook from the sudo process itself, and `session` (`source`, `label`, `server`, `workspace`, `tab`, `pane`) names the pane that asked when the helper ran in one. `POST /v1/sudo/answer` takes `{id, password}` (1 to 1024 characters, no newline, carriage return or NUL) or `{id, deny: true}` and answers `{ok: true}`. With `outcome: true` next to a password it answers, within about `PHREN_SUDO_OUTCOME_MS` (6 s), `{ok: true, outcome}`: `rejected` when the same sudo process (pid and start time) asked again, `accepted` when it did not on an earlier try or is still running, `unknown` when it gave up after its last try or the password could not be handed over (capability `sudoOutcome`; the phone uses it to save a typed password or forget a saved one that failed). The request is then gone, and an unknown, answered or expired id is 404. A request lasts `PHREN_SUDO_TIMEOUT_MS` (120 s). The password is handed to the waiting askpass once and never logged, stored or sent anywhere else. A phone that opens `WS /v1/overview` with `sudo=1` gets `{type: "sudo", requests}` after the first overview and whenever the list changes, and phones registered for approval pushes get one push per request (category `PHREN_SUDO`, `phren.kind: "sudo"`, with `id`, `computer`, `command`, `expiresAt`, never a password). Advertised as `capabilities.sudo`.
+### `POST /v1/speech`
+
+Voices `text` (1 to 2,000 characters) for talk mode with this computer's ElevenLabs key. Inputs: `text`, optional `timestamps` (answer JSON with the character alignment), `voice` (an ElevenLabs voice id) and `formats`, the output formats the phone plays, from `capabilities.speechFormats` (`pcm_44100`, `mp3_44100_192`, `mp3_44100_128`, `pcm_24000`). The Hook serves the first the phone plays and the ElevenLabs plan allows, learning refusals from ElevenLabs' `output_format_not_allowed` and skipping them for 6 hours; without `formats` it is always `pcm_24000`. The streamed reply carries `X-Phren-Audio` (e.g. `pcm_s16le;rate=44100;channels=1`), `X-Phren-Audio-Rate` and `X-Phren-Speech-Model`; the timestamped JSON is `{audio, audioFormat, sampleRate, format, model, alignment}` with alignment times in seconds. The model is `phren bridge speech-model` (default `eleven_v4_turbo`), replaced by `eleven_flash_v2_5` for 10 minutes when it errors or the median of its last three short replies took more than 1.5 s to start. With `timestamps` and `stream` (capability `speechTimestampStream`) the reply streams as `application/x-ndjson`, one `{audio, alignment}` line per ElevenLabs chunk. `phren bridge speech-region us|global` picks the ElevenLabs endpoint. A request ElevenLabs goes quiet on for 30 s, before its headers or between chunks, is given up on. See [spoken replies](phren-hook.md#spoken-replies-for-talk-mode).
+
+### `WS /v1/speech/live`
+
+Voices one reply while it is being written (capability `speechLive`). Query: optional `voice`, repeated `format` (as `formats` above). Send `{"text": "..."}` pieces and `{"done": true}`. Receive `{type: "start", model, format, audioFormat, sampleRate}` with the first audio, `{type: "audio", audio, alignment}` (base64 audio; alignment `{characters, starts, ends}` in seconds from the start of the socket's audio, or null), `{type: "done"}`, or `{type: "error", code, error}`. The model is `phren bridge speech-model` (v3/v4 models on ElevenLabs' text-to-dialogue WebSocket, others on text-to-speech stream-input with `auto_mode`), falling back to `eleven_flash_v2_5` before any audio when ElevenLabs refuses the model, answers an error frame other than the key, quota or rate limit, closes the socket, takes over 5 s to open it, or sends no audio 5 s after it must be voicing (the reply is done, or 300 characters of it are in). Frames sent while the socket is being set up are kept. A reply with nothing speakable ends with `{type: "done"}`; one past ten minutes ends with `speech-limit`; a phone that stops reading the audio (over 4 MB queued) gets `speech-failed`.
+
+## Computers and usage without memory
+
+`phren computers mcp` is a separate stdio MCP server (`phren-computers`) for agents that should see the owner's computers and usage but not their memory: it never opens a Phren store and has only these read-only tools, all answered by the local Hook (and, through it, each linked computer). Register it with `claude mcp add phren-computers -- phren computers mcp` (or `codex mcp add phren-computers -- phren computers mcp`).
+
+| Tool | Input | Returns |
+|------|-------|---------|
+| `list_computers` | none | Each computer: `online`, `platform`, `level`, `warnings`, `pressure`, `cores`, `load1`, `memoryFreePercent`, `diskFreeGB`, `heavyJobs`, a one-line `summary`; offline ones with `error`. |
+| `get_resources` | `computer?` (name or prefix; omit for this one) | That computer's full `/v1/resources` reading, heavy jobs and their panes included. |
+| `pick_computer` | `platform?` (`mac` default, `linux`, `any`), `exclude?` | `{pick, reason, ranked}`: the least-loaded online computer (stressed ones last, then overall pressure, load per core, free disk). It starts nothing. |
+| `get_usage` | `computer?`, `view?` (`combined` default, `per-computer`, `both`) | Per harness (Claude, Codex, GitHub Copilot, OpenCode local spend incl. DeepSeek, OpenCode Go, OpenRouter): windows with `usedPercent`, `resetsAt` and `resetsIn`, `spend` where reported, and `message` when a harness reports nothing. Combined takes each account's freshest limits and sums OpenCode's per-computer spend. No key identities or credentials. |
+
+The same readings from a shell: `phren computers` (one line per computer), `phren computers --resources [name]` (numbers and heavy jobs), `phren computers --pick [mac|linux|any]`, `phren usage` (combined) and `phren usage --per-computer`; each takes `--json`. They run without a store too. Without a Hook, `phren computers` reports this computer from its own reading and says so.
+
+Each Claude number has one documented source:
+
+- `five_hour` ("5-hour limit") and `seven_day` ("7-day, all models") come from Claude Code's documented status-line `rate_limits` payload, reported as `origin: "status-line"`, or from the OAuth usage endpoint when the computer's sign-in token is readable, reported as `origin: "oauth"`. The phone captions the card with that origin and the report's age ("from Claude Code status line, updated 6 s ago").
+- A per-model weekly window such as `seven_day_fable` ("7-day, Fable") comes from Claude Code's own usage snapshot in `~/.claude.json` (`cachedUsageUtilization`, `kind: weekly_scoped`) when the status line does not carry it, and then carries its own `asOf` so the phone can show how old it is; the live endpoint reports the same window without `asOf`.
+
+Every window carries its own `resetsAt`. A per-model window is its own allowance with its own denominator, not a subset of `seven_day`, so it can show a higher percentage than the all-models window without contradicting it; the phone labels it "only" (for example "7-day, Fable only") and shows its own reset time. The Live sessions header ring binds to `five_hour`, the window the Account usage page shows first, never a higher window.
+
+
+Hand-off delivery: `text` is required for sending. `deliveryId` is optional
+on the first call and required on retries. Use `status:true` with the id and
+target or session, without text, to read the durable receiving-Hook record.
+`queued:true` acknowledges a persisted message awaiting idle; `delivered:true`
+confirms submission. `deliveryUncertain:true` never authorizes an automatic
+retry with a new id. Working rows may carry `stalled:true`, `stalledSince` and
+`stallFor` (seconds); dispatch returns use state `stalled` for that transition.
+
+### `dispatch_report`
+
+Worker tool, full profile or `phren_admin(action:"dispatch_report",prs)` in core.
+`prs` is an array of `{url,repo,branch,tests,notes?}` bound to the caller's own
+terminal and submitted turn. HTTPS URLs only, at most 16 rows and 24000 UTF-8
+bytes. The done return carries the report and the Hook queues it to the
+configured integrator. CLI: `phren dispatch report --prs '<JSON array>'`.
+
+### `owner_inbox`
+
+Full profile or `phren_admin(action:"owner_inbox",...)` in core. `operation` defaults
+to `list`; optional `includeResolved` shows history. `add` requires `title`, with
+optional `project` and stable UUID `id`. `resolve` requires `id`, with optional
+`resolution` and `computer` (the listed item's `inboxComputer`, omitted for
+local). A resolve does not answer or approve a prompt. Lists include local and
+linked computers' inboxes plus `unreachable` entries.
+
+Dispatch additions: optional `closeOnFinish` defaults to true, closing a
+verified finished pane after reading its done return; false keeps it open.
+Optional `integrator:{computer?,target}` overrides the configured default.
+Done returns can carry `prs` and `integratorDelivery`; receipts also retain
+`closedAt` and pending closes. CLI dispatch `--keep-open` opts out of closure.
+
+Task responsibility and stable-ID prerequisites are independent of Queue/Active/Done. See [the shared task contract](task-responsibility.md) for persistence, MCP/Hook fields, readiness and controls. Conductors select only ready agent tasks.

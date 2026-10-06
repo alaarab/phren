@@ -1,0 +1,4 @@
+name: personal
+description: "Personal machine defaults"
+projects:
+  - global

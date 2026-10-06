@@ -1,0 +1,496 @@
+/**
+ * Codex provider — uses ChatGPT subscription via OAuth token.
+ * Calls chatgpt.com/backend-api/codex/responses (Responses API format).
+ */
+import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
+import { IncompleteStreamError, toolResultText } from "./types.js";
+import { getAccessToken } from "./codex-auth.js";
+import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
+import { wireReasoningEffort } from "./openai-compat.js";
+import type { ReasoningEffort } from "../models.js";
+import { lookupContextWindow, lookupMaxOutputTokens, modelSupportsVision } from "../models.js";
+
+const CODEX_API = "https://chatgpt.com/backend-api/codex/responses";
+const PROVIDER_NAME = "openai-codex";
+
+/** Convert our tool defs to Responses API tool format. Exported for tests. */
+export function toResponsesTools(tools: AgentToolDef[]) {
+  return tools.map((t) => ({
+    type: "function" as const,
+    name: t.name,
+    description: t.description,
+    parameters: t.input_schema,
+  }));
+}
+
+/** Convert our messages to Responses API input format. Exported for tests. */
+export function toResponsesInput(messages: LlmMessage[], vision = false) {
+  const input: Record<string, unknown>[] = [];
+
+  for (const msg of stripForeignReasoning(messages, PROVIDER_NAME)) {
+    if (msg.role === "user") {
+      if (typeof msg.content === "string") {
+        input.push({
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: msg.content }],
+        });
+      } else {
+        // tool_result blocks
+        for (const block of msg.content) {
+          if (block.type === "tool_result") {
+            input.push({
+              type: "function_call_output",
+              call_id: block.tool_use_id,
+              output: toolResultText(block),
+            });
+            // Images cannot ride a function_call_output; they follow as a
+            // user message with input_image parts. Text-only models get a
+            // marker so durable history never produces an unsendable request.
+            if (Array.isArray(block.content)) {
+              const imageParts = block.content.filter((c) => c.type === "image");
+              if (imageParts.length > 0) {
+                input.push({
+                  type: "message",
+                  role: "user",
+                  content: vision
+                    ? imageParts.map((c) => (c.type === "image" ? {
+                        type: "input_image",
+                        image_url: `data:${c.source.media_type};base64,${c.source.data}`,
+                      } : { type: "input_text", text: "" }))
+                    : [{ type: "input_text", text: IMAGE_OMITTED_MARKER }],
+                });
+              }
+            }
+          } else if (block.type === "image") {
+            input.push({
+              type: "message",
+              role: "user",
+              content: vision
+                ? [{ type: "input_image", image_url: `data:${block.source.media_type};base64,${block.source.data}` }]
+                : [{ type: "input_text", text: IMAGE_OMITTED_MARKER }],
+            });
+          } else if (block.type === "text") {
+            input.push({
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: block.text }],
+            });
+          }
+        }
+      }
+    } else if (msg.role === "assistant") {
+      if (typeof msg.content === "string") {
+        input.push({
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: msg.content }],
+        });
+      } else {
+        for (const block of msg.content) {
+          if (block.type === "reasoning") {
+            // Round-trip: with store:false the encrypted payload is the only
+            // way the model recovers its prior chain of thought. Content
+            // order already places reasoning before its sibling
+            // function_call, which the API requires.
+            if (block.id && block.encrypted_content) {
+              input.push({
+                type: "reasoning",
+                id: block.id,
+                encrypted_content: block.encrypted_content,
+                summary: [],
+              });
+            }
+          } else if (block.type === "text") {
+            input.push({
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: block.text }],
+            });
+          } else if (block.type === "tool_use") {
+            input.push({
+              type: "function_call",
+              call_id: block.id,
+              name: block.name,
+              arguments: JSON.stringify(block.input),
+            });
+          }
+        }
+      }
+    }
+  }
+  return input;
+}
+
+const DEBUG = process.env.PHREN_DEBUG === "1";
+
+function debugLog(label: string, data: unknown): void {
+  if (!DEBUG) return;
+  process.stderr.write(`[codex:debug] ${label}: ${JSON.stringify(data, null, 2)}\n`);
+}
+
+/** Join a Responses reasoning item's summary parts into display text. */
+function reasoningSummaryText(item: Record<string, unknown>): string {
+  const summary = item.summary;
+  if (!Array.isArray(summary)) return "";
+  return (summary as Array<{ type?: string; text?: string }>)
+    .map((part) => part?.text ?? "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Parse non-streaming Responses API output into our ContentBlock format. Exported for tests. */
+export function parseResponsesOutput(data: Record<string, unknown>): LlmResponse {
+  debugLog("parseResponsesOutput input", data);
+
+  // The Responses API may return output at top-level or nested under a "response" key.
+  // Handle both shapes defensively.
+  const root = (data.output !== undefined ? data : (data.response as Record<string, unknown> | undefined) ?? data) as Record<string, unknown>;
+  const output = root.output as Record<string, unknown>[] | undefined;
+  const content: ContentBlock[] = [];
+  let hasToolUse = false;
+
+  if (output) {
+    for (const item of output) {
+      debugLog("output item", item);
+      if (item.type === "message") {
+        // Content may be an array of blocks or a plain string
+        const msgContent = item.content;
+        if (Array.isArray(msgContent)) {
+          for (const c of msgContent as Array<{ type: string; text?: string }>) {
+            if ((c.type === "output_text" || c.type === "text") && c.text) {
+              content.push({ type: "text", text: c.text });
+            }
+          }
+        } else if (typeof msgContent === "string" && msgContent) {
+          content.push({ type: "text", text: msgContent });
+        }
+      } else if (item.type === "function_call") {
+        hasToolUse = true;
+        let input: Record<string, unknown> = {};
+        const rawArgs = item.arguments as string | undefined;
+        if (rawArgs) {
+          try { input = JSON.parse(rawArgs); } catch { /* malformed arguments */ }
+        }
+        const callId = (item.call_id ?? item.id) as string;
+        content.push({
+          type: "tool_use",
+          id: callId,
+          name: item.name as string,
+          input,
+        });
+      } else if (item.type === "reasoning") {
+        // Keep reasoning: the id + encrypted_content pair must be re-sent on
+        // the next request or the model loses its chain of thought mid-task.
+        const encrypted = item.encrypted_content as string | undefined;
+        content.push({
+          type: "reasoning",
+          text: reasoningSummaryText(item),
+          provider: PROVIDER_NAME,
+          ...(typeof item.id === "string" ? { id: item.id } : {}),
+          ...(typeof encrypted === "string" ? { encrypted_content: encrypted } : {}),
+        });
+      }
+    }
+  } else {
+    debugLog("no output array found in response", { keys: Object.keys(data) });
+  }
+
+  const status = (root.status ?? data.status) as string | undefined;
+  const stop_reason = hasToolUse ? "tool_use"
+    : status === "incomplete" ? "max_tokens"
+    : "end_turn";
+
+  const usage = (root.usage ?? data.usage) as Record<string, number> | undefined;
+
+  debugLog("parseResponsesOutput result", { content, stop_reason, usage });
+
+  return {
+    content,
+    stop_reason,
+    usage: usage ? { input_tokens: usage.input_tokens ?? 0, output_tokens: usage.output_tokens ?? 0 } : undefined,
+  };
+}
+
+export class CodexProvider implements LlmProvider {
+  name = "openai-codex";
+  contextWindow: number;
+  maxOutputTokens: number;
+  model: string;
+  reasoningEffort?: ReasoningEffort;
+
+  constructor(model?: string, maxOutputTokens?: number, reasoningEffort?: ReasoningEffort) {
+    this.model = model ?? "gpt-5.4";
+    this.maxOutputTokens = maxOutputTokens ?? lookupMaxOutputTokens(this.model, this.name);
+    this.reasoningEffort = reasoningEffort;
+    this.contextWindow = lookupContextWindow(this.model, this.name);
+  }
+
+  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {
+    const { accessToken } = await getAccessToken();
+
+    const body: Record<string, unknown> = {
+      model: this.model,
+      instructions: system,
+      input: toResponsesInput(messages, modelSupportsVision(this.name, this.model)),
+      store: false,
+      stream: true,
+      // Without this the API omits the encrypted payload and reasoning
+      // cannot round-trip (chatStream already requested it; chat() didn't).
+      include: ["reasoning.encrypted_content"],
+    };
+    const effort = wireReasoningEffort(this.name, this.model, this.reasoningEffort);
+    if (effort) body.reasoning = { effort };
+    if (tools.length > 0) {
+      body.tools = toResponsesTools(tools);
+      body.tool_choice = "auto";
+    }
+    return parseResponsesOutput(await this.requestResponse(accessToken, body, signal));
+  }
+
+  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): AsyncIterable<StreamDelta> {
+    const { accessToken } = await getAccessToken();
+
+    const body: Record<string, unknown> = {
+      model: this.model,
+      instructions: system,
+      input: toResponsesInput(messages, modelSupportsVision(this.name, this.model)),
+      store: false,
+      stream: true,
+      include: ["reasoning.encrypted_content"],
+    };
+    const effort = wireReasoningEffort(this.name, this.model, this.reasoningEffort);
+    if (effort) body.reasoning = { effort };
+    if (tools.length > 0) {
+      body.tools = toResponsesTools(tools);
+      body.tool_choice = "auto";
+    }
+
+    // OpenClaw treats transport as auto: try WebSocket first, then fall back to the
+    // HTTP responses stream if the WS path is unavailable.
+    try {
+      yield* this.chatStreamWs(accessToken, body, signal);
+    } catch {
+      const response = await this.requestResponse(accessToken, body, signal);
+      const parsed = parseResponsesOutput(response);
+      for (const block of parsed.content) {
+        if (block.type === "reasoning") {
+          if (block.text) yield { type: "reasoning_delta", text: block.text };
+          yield {
+            type: "reasoning_end",
+            ...(block.id !== undefined ? { id: block.id } : {}),
+            ...(block.encrypted_content !== undefined
+              ? { encrypted_content: block.encrypted_content }
+              : {}),
+          };
+        } else if (block.type === "text") {
+          yield { type: "text_delta", text: block.text };
+        } else if (block.type === "tool_use") {
+          yield { type: "tool_use_start", id: block.id, name: block.name };
+          yield { type: "tool_use_delta", id: block.id, json: JSON.stringify(block.input) };
+          yield { type: "tool_use_end", id: block.id };
+        }
+      }
+      yield { type: "done", stop_reason: parsed.stop_reason, usage: parsed.usage };
+    }
+  }
+
+  private async requestResponse(accessToken: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    const res = await fetch(CODEX_API, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Codex API error ${res.status}: ${text}`);
+    }
+
+    if (!res.body) throw new Error("Provider returned empty response body");
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalResponse: Record<string, unknown> | null = null;
+    const seenEventTypes = new Set<string>();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop()!;
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") continue;
+        try {
+          const event = JSON.parse(data) as Record<string, unknown>;
+          const evType = event.type as string | undefined;
+          if (evType) seenEventTypes.add(evType);
+          debugLog("SSE event", { type: evType });
+          // Accept response.completed or response.done (API may use either)
+          if (
+            (evType === "response.completed" || evType === "response.done") &&
+            event.response
+          ) {
+            finalResponse = event.response as Record<string, unknown>;
+          } else if (evType === "response.completed" || evType === "response.done") {
+            // Response data at the top level (no nested .response key)
+            if (event.output !== undefined || event.status !== undefined) {
+              finalResponse = event;
+            }
+          }
+        } catch { /* skip malformed events */ }
+      }
+    }
+
+    if (!finalResponse) {
+      debugLog("no finalResponse found, seenEventTypes", [...seenEventTypes]);
+    }
+
+    if (!finalResponse) {
+      throw new IncompleteStreamError("Codex stream ended without response.completed event");
+    }
+
+    return finalResponse;
+  }
+
+  /** WebSocket streaming — sends request, yields deltas as they arrive. */
+  private async *chatStreamWs(accessToken: string, body: Record<string, unknown>, signal?: AbortSignal): AsyncIterable<StreamDelta> {
+    const wsUrl = CODEX_API.replace(/^https:/, "wss:").replace(/^http:/, "ws:");
+
+    // Queue for events received from the WebSocket before the consumer pulls them
+    const queue: Array<StreamDelta | Error> = [];
+    let resolve: (() => void) | null = null;
+    let done = false;
+
+    const push = (item: StreamDelta | Error) => {
+      queue.push(item);
+      if (resolve) { resolve(); resolve = null; }
+    };
+
+    // Node.js (undici) WebSocket accepts headers in the second argument object,
+    // but the DOM typings only allow string | string[]. Cast to bypass.
+    const ws = new WebSocket(wsUrl, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    } as unknown as string[]);
+
+    let activeToolCallId = "";
+
+    ws.addEventListener("open", () => {
+      // Wrap the request body in a response.create envelope (Codex WS protocol)
+      const wsRequest = { type: "response.create", ...body };
+      ws.send(JSON.stringify(wsRequest));
+    });
+
+    ws.addEventListener("message", (evt: MessageEvent) => {
+      const data = typeof evt.data === "string" ? evt.data : String(evt.data);
+
+      let event: Record<string, unknown>;
+      try { event = JSON.parse(data); } catch { return; }
+
+      const type = event.type as string;
+
+      // Handle server-side errors
+      if (type === "error") {
+        const err = event.error as Record<string, string> | undefined;
+        const msg = err?.message ?? "Codex WebSocket error";
+        const status = event.status as number | undefined;
+        push(new Error(`Codex WS error${status ? ` ${status}` : ""}: ${msg}`));
+        done = true;
+        try { ws.close(); } catch { /* ignore */ }
+        return;
+      }
+
+      if (type === "response.output_text.delta") {
+        const delta = event.delta as string;
+        if (delta) push({ type: "text_delta", text: delta });
+      } else if (type === "response.reasoning_summary_text.delta") {
+        const delta = event.delta as string;
+        if (delta) push({ type: "reasoning_delta", text: delta });
+      } else if (type === "response.output_item.done") {
+        // The completed reasoning item carries the encrypted payload we must
+        // re-send on the next request.
+        const item = event.item as Record<string, unknown> | undefined;
+        if (item?.type === "reasoning") {
+          const encrypted = item.encrypted_content as string | undefined;
+          push({
+            type: "reasoning_end",
+            ...(typeof item.id === "string" ? { id: item.id } : {}),
+            ...(typeof encrypted === "string" ? { encrypted_content: encrypted } : {}),
+          });
+        }
+      } else if (type === "response.output_item.added") {
+        if ((event.item as Record<string, unknown>)?.type === "function_call") {
+          const item = event.item as Record<string, unknown>;
+          activeToolCallId = item.call_id as string;
+          push({ type: "tool_use_start", id: activeToolCallId, name: item.name as string });
+        }
+      } else if (type === "response.function_call_arguments.delta") {
+        push({ type: "tool_use_delta", id: activeToolCallId, json: event.delta as string });
+      } else if (type === "response.function_call_arguments.done") {
+        push({ type: "tool_use_end", id: activeToolCallId });
+      } else if (type === "response.completed") {
+        const response = event.response as Record<string, unknown> | undefined;
+        const usage = response?.usage as Record<string, number> | undefined;
+        const output = response?.output as Record<string, unknown>[] | undefined;
+        const hasToolCalls = output?.some((o) => o.type === "function_call");
+        push({
+          type: "done",
+          stop_reason: hasToolCalls ? "tool_use" : "end_turn",
+          usage: usage ? { input_tokens: usage.input_tokens ?? 0, output_tokens: usage.output_tokens ?? 0 } : undefined,
+        });
+        done = true;
+        try { ws.close(); } catch { /* ignore */ }
+      }
+    });
+
+    ws.addEventListener("error", () => {
+      if (!done) {
+        push(new Error("Codex WebSocket connection error"));
+        done = true;
+      }
+    });
+
+    ws.addEventListener("close", () => {
+      if (!done) {
+        push(new IncompleteStreamError("Codex WebSocket closed before response.completed"));
+        done = true;
+      }
+    });
+
+    const onAbort = () => {
+      done = true;
+      try { ws.close(); } catch { /* ignore */ }
+      if (resolve) { resolve(); resolve = null; }
+    };
+    signal?.addEventListener("abort", onAbort);
+    if (signal?.aborted) onAbort();
+
+    // Async iteration: drain the queue, wait for new events
+    try {
+      while (true) {
+        while (queue.length > 0) {
+          const item = queue.shift()!;
+          if (item instanceof Error) throw item;
+          yield item;
+          if (item.type === "done") return;
+        }
+        if (done) return;
+        await new Promise<void>((r) => { resolve = r; });
+      }
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        try { ws.close(); } catch { /* ignore */ }
+      }
+    }
+  }
+}

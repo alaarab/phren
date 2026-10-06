@@ -1,0 +1,327 @@
+{
+ "entries": [
+  {
+   "line": 1,
+   "raw": {
+    "type": "turn_context",
+    "timestamp": "2026-09-26T10:00:01.000Z",
+    "payload": {
+     "model": "gpt-test",
+     "approval_policy": "on-request"
+    }
+   }
+  },
+  {
+   "line": 2,
+   "raw": {
+    "timestamp": "2026-09-26T10:00:02.000Z",
+    "ordinal": 2,
+    "type": "response_item",
+    "payload": {
+     "type": "message",
+     "role": "user",
+     "content": [
+      {
+       "type": "input_text",
+       "text": "Check the build and fix the label."
+      }
+     ]
+    }
+   }
+  },
+  {
+   "line": 7,
+   "raw": {
+    "timestamp": "2026-09-26T10:00:07.000Z",
+    "ordinal": 7,
+    "type": "response_item",
+    "payload": {
+     "type": "message",
+     "role": "assistant",
+     "content": [
+      {
+       "type": "output_text",
+       "text": "I will look at the tree first."
+      }
+     ]
+    }
+   }
+  },
+  {
+   "line": 10,
+   "raw": {
+    "type": "response_item",
+    "timestamp": "2026-09-26T10:00:10.000Z",
+    "payload": {
+     "type": "function_call",
+     "name": "exec_command",
+     "arguments": "{\"cmd\":\"git status --short\",\"workdir\":\"/work/app\"}",
+     "call_id": "exec-0001"
+    }
+   }
+  },
+  {
+   "line": 10,
+   "raw": {
+    "type": "response_item",
+    "timestamp": "2026-09-26T10:00:10.000Z",
+    "payload": {
+     "type": "function_call_output",
+     "output": "{\"output\":\" M src/label.ts\\n\",\"exit_code\":0}",
+     "call_id": "exec-0001"
+    }
+   }
+  },
+  {
+   "line": 11,
+   "raw": {
+    "type": "response_item",
+    "timestamp": "2026-09-26T10:00:11.000Z",
+    "payload": {
+     "type": "function_call",
+     "name": "exec_command",
+     "arguments": "{\"cmd\":\"npm test\",\"workdir\":\"/work/app\"}",
+     "call_id": "exec-0002"
+    }
+   }
+  },
+  {
+   "line": 11,
+   "raw": {
+    "type": "response_item",
+    "timestamp": "2026-09-26T10:00:11.000Z",
+    "payload": {
+     "type": "function_call_output",
+     "output": "{\"output\":\"1 failing\\n\",\"exit_code\":1}",
+     "call_id": "exec-0002"
+    }
+   }
+  },
+  {
+   "line": 13,
+   "raw": {
+    "timestamp": "2026-09-26T10:00:13.000Z",
+    "ordinal": 13,
+    "type": "event_msg",
+    "payload": {
+     "type": "token_count",
+     "info": null
+    }
+   }
+  },
+  {
+   "line": 15,
+   "raw": {
+    "type": "response_item",
+    "timestamp": "2026-09-26T10:00:15.000Z",
+    "payload": {
+     "type": "custom_tool_call",
+     "name": "apply_patch",
+     "input": "*** Begin Patch\n*** Update File: /work/app/src/label.ts\n@@ -1,2 +1,2 @@\n export const a = 1;\n-export const label = \"old\";\n+export const label = \"new\";\n*** Add File: /work/app/src/extra.ts\n+export const extra = 2;\n*** Delete File: /work/app/src/unused.ts\n*** Update File: /work/app/src/before.ts\n*** Move to: /work/app/src/after.ts\n@@ -1 +1 @@\n-x\n+y\n*** End Patch",
+     "call_id": "exec-0003"
+    }
+   }
+  },
+  {
+   "line": 15,
+   "raw": {
+    "type": "response_item",
+    "timestamp": "2026-09-26T10:00:15.000Z",
+    "payload": {
+     "type": "custom_tool_call_output",
+     "output": "Success. Updated the following files:\nM /work/app/src/label.ts\n",
+     "call_id": "exec-0003"
+    }
+   }
+  },
+  {
+   "line": 18,
+   "raw": {
+    "type": "response_item",
+    "timestamp": "2026-09-26T10:00:18.000Z",
+    "payload": {
+     "type": "function_call",
+     "name": "mcp__phren__get_tasks",
+     "arguments": "{\"project\":\"demo\"}",
+     "call_id": "exec-0004"
+    }
+   }
+  },
+  {
+   "line": 18,
+   "raw": {
+    "type": "response_item",
+    "timestamp": "2026-09-26T10:00:18.000Z",
+    "payload": {
+     "type": "function_call_output",
+     "output": "{\"ok\":true,\"message\":\"2 tasks\"}",
+     "call_id": "exec-0004"
+    }
+   }
+  },
+  {
+   "line": 20,
+   "raw": {
+    "type": "response_item",
+    "timestamp": "2026-09-26T10:00:20.000Z",
+    "payload": {
+     "type": "function_call",
+     "name": "view_image",
+     "call_id": "call_image",
+     "arguments": "{\"path\":\"/tmp/shot.png\"}"
+    }
+   }
+  },
+  {
+   "line": 22,
+   "raw": {
+    "timestamp": "2026-09-26T10:00:22.000Z",
+    "ordinal": 22,
+    "type": "response_item",
+    "payload": {
+     "type": "custom_tool_call_output",
+     "id": "ctco_call_image",
+     "call_id": "call_image",
+     "output": [
+      {
+       "type": "input_image"
+      }
+     ],
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a0aaaa-0000-7000-8000-000000000002"
+     }
+    }
+   }
+  },
+  {
+   "line": 26,
+   "raw": {
+    "type": "response_item",
+    "timestamp": "2026-09-26T10:00:25.000Z",
+    "payload": {
+     "type": "custom_tool_call",
+     "name": "exec",
+     "call_id": "call_broken",
+     "input": "text(await tools.exec_command({cmd:\"ls\"})\n"
+    }
+   }
+  },
+  {
+   "line": 26,
+   "raw": {
+    "timestamp": "2026-09-26T10:00:26.000Z",
+    "ordinal": 26,
+    "type": "response_item",
+    "payload": {
+     "type": "custom_tool_call_output",
+     "id": "ctco_call_broken",
+     "call_id": "call_broken",
+     "output": [
+      {
+       "type": "input_text",
+       "text": "Script failed\nWall time 0.0 seconds\nOutput:\n"
+      },
+      {
+       "type": "input_text",
+       "text": "Script error: SyntaxError: missing ) after argument list"
+      }
+     ],
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a0aaaa-0000-7000-8000-000000000002"
+     }
+    }
+   }
+  },
+  {
+   "line": 27,
+   "raw": {
+    "timestamp": "2026-09-26T10:00:27.000Z",
+    "ordinal": 27,
+    "type": "response_item",
+    "payload": {
+     "type": "custom_tool_call",
+     "id": "ctc_call_list",
+     "status": "completed",
+     "call_id": "call_list",
+     "name": "exec",
+     "input": "text(ALL_TOOLS.map(x => x.name));\n",
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a0aaaa-0000-7000-8000-000000000002"
+     }
+    }
+   }
+  },
+  {
+   "line": 28,
+   "raw": {
+    "timestamp": "2026-09-26T10:00:28.000Z",
+    "ordinal": 28,
+    "type": "response_item",
+    "payload": {
+     "type": "custom_tool_call_output",
+     "id": "ctco_call_list",
+     "call_id": "call_list",
+     "output": [
+      {
+       "type": "input_text",
+       "text": "Script completed\nWall time 0.0 seconds\nOutput:\n"
+      },
+      {
+       "type": "input_text",
+       "text": "[\"exec_command\"]"
+      }
+     ],
+     "internal_chat_message_metadata_passthrough": {
+      "turn_id": "01a0aaaa-0000-7000-8000-000000000002"
+     }
+    }
+   }
+  },
+  {
+   "line": 31,
+   "raw": {
+    "timestamp": "2026-09-26T10:00:31.000Z",
+    "ordinal": 31,
+    "type": "response_item",
+    "payload": {
+     "type": "function_call",
+     "name": "wait",
+     "arguments": "{\"timeout_ms\":1000}",
+     "call_id": "call_wait"
+    }
+   }
+  },
+  {
+   "line": 32,
+   "raw": {
+    "timestamp": "2026-09-26T10:00:32.000Z",
+    "ordinal": 32,
+    "type": "response_item",
+    "payload": {
+     "type": "function_call_output",
+     "call_id": "call_wait",
+     "output": "timed out"
+    }
+   }
+  },
+  {
+   "line": 33,
+   "raw": {
+    "timestamp": "2026-09-26T10:00:33.000Z",
+    "ordinal": 33,
+    "type": "event_msg",
+    "payload": {
+     "type": "task_complete",
+     "turn_id": "01a0aaaa-0000-7000-8000-000000000002"
+    }
+   }
+  }
+ ],
+ "totalLines": 34,
+ "startLine": 0,
+ "hasMore": false,
+ "reset": true,
+ "type": "backlog",
+ "source": "codex",
+ "session": "01a0aaaa-0000-7000-8000-000000000001"
+}

@@ -1,0 +1,94 @@
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { clearSpeechModel, clearSpeechVoice, DEFAULT_SPEECH_MODEL, DEFAULT_SPEECH_VOICE, listSpeechVoices, readStoredModel, readStoredVoice, resolveSpeechModel, resolveSpeechRegion, resolveSpeechVoice, writeSpeechModel, writeSpeechRegion, writeSpeechVoice } from "./speech-voice.js";
+
+describe("the talk-mode voice setting", () => {
+  let root: string, file: string;
+  beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-voice-")); file = path.join(root, "speech.json"); });
+  afterEach(async () => { await rm(root, { recursive: true, force: true }); });
+
+  it("uses the default on a new computer, and a stored voice once set", async () => {
+    expect(await resolveSpeechVoice(undefined, { env: {}, file })).toEqual({ voice: DEFAULT_SPEECH_VOICE, source: "default" });
+    await writeSpeechVoice(" S9EGwlCtMF7VXtENq79v ", file);
+    // Windows has no POSIX permission bits.
+    if (process.platform !== "win32") expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(await resolveSpeechVoice(undefined, { env: {}, file })).toEqual({ voice: "S9EGwlCtMF7VXtENq79v", source: "setting" });
+    expect(await resolveSpeechVoice("UgBBYS2sOqTuMpoF3BR0", { env: {}, file })).toEqual({ voice: "UgBBYS2sOqTuMpoF3BR0", source: "request" });
+    await clearSpeechVoice(file);
+    expect(await readStoredVoice(file)).toBeUndefined();
+  });
+
+  // 2026-09-28: the owner's voice lived only in PHREN_SPEECH_VOICE in the
+  // service environment, and an update that rewrote the plist dropped it.
+  it("moves the old environment override into the setting, which then wins", async () => {
+    const env = { PHREN_SPEECH_VOICE: "S9EGwlCtMF7VXtENq79v" };
+    expect(await resolveSpeechVoice(undefined, { env, file })).toEqual({ voice: "S9EGwlCtMF7VXtENq79v", source: "environment" });
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ voice: "S9EGwlCtMF7VXtENq79v" });
+    expect(await resolveSpeechVoice(undefined, { env: {}, file })).toEqual({ voice: "S9EGwlCtMF7VXtENq79v", source: "setting" });
+    expect(await resolveSpeechVoice(undefined, { env: { PHREN_SPEECH_VOICE: "UgBBYS2sOqTuMpoF3BR0" }, file })).toMatchObject({ source: "setting" });
+  });
+
+  it("stores the model next to the voice, and clearing one keeps the other", async () => {
+    expect(await resolveSpeechModel(file)).toEqual({ model: DEFAULT_SPEECH_MODEL, source: "default" });
+    await writeSpeechVoice("S9EGwlCtMF7VXtENq79v", file);
+    await writeSpeechModel(" eleven_v4 ", file);
+    if (process.platform !== "win32") expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ voice: "S9EGwlCtMF7VXtENq79v", model: "eleven_v4" });
+    expect(await resolveSpeechModel(file)).toEqual({ model: "eleven_v4", source: "setting" });
+    await clearSpeechVoice(file);
+    expect(await resolveSpeechModel(file)).toEqual({ model: "eleven_v4", source: "setting" });
+    await writeSpeechVoice("S9EGwlCtMF7VXtENq79v", file);
+    await clearSpeechModel(file);
+    expect(await readStoredVoice(file)).toBe("S9EGwlCtMF7VXtENq79v");
+    expect(await readStoredModel(file)).toBeUndefined();
+    await clearSpeechVoice(file);
+    await expect(stat(file)).rejects.toThrow();
+    for (const bad of ["", "ab", "../v1/user", "Eleven V4", "eleven_v4?x=1"]) await expect(writeSpeechModel(bad, file)).rejects.toThrow();
+  });
+
+  it("stores the US region next to the model, and global goes back to the default", async () => {
+    expect(await resolveSpeechRegion(file)).toEqual({ region: "global", origin: "https://api.elevenlabs.io", source: "default" });
+    await writeSpeechModel("eleven_v4", file);
+    expect(await writeSpeechRegion("us", file)).toBe("us");
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ model: "eleven_v4", region: "us" });
+    expect(await resolveSpeechRegion(file)).toEqual({ region: "us", origin: "https://api.us.elevenlabs.io", source: "setting" });
+    await writeSpeechRegion("global", file);
+    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ model: "eleven_v4" });
+    for (const bad of ["eu", "", "https://evil.example"]) await expect(writeSpeechRegion(bad, file)).rejects.toThrow();
+  });
+
+  it("refuses anything that is not an ElevenLabs voice id", async () => {
+    for (const bad of ["", "short", "../../v1/user", "S9EGwlCtMF7VXtENq79v?x=1"]) {
+      await expect(writeSpeechVoice(bad, file)).rejects.toThrow();
+      await expect(resolveSpeechVoice(bad || "x", { env: {}, file })).rejects.toThrow();
+    }
+    expect(await resolveSpeechVoice(undefined, { env: { PHREN_SPEECH_VOICE: "not a voice" }, file })).toMatchObject({ source: "default" });
+  });
+
+  it("lists voices from the stored region's endpoint", async () => {
+    const urls: string[] = [];
+    await writeSpeechRegion("us", file);
+    const fetcher = (async (url: string) => { urls.push(url); return Response.json({ voices: [] }); }) as typeof fetch;
+    await listSpeechVoices("sk_test", fetcher, undefined, (await resolveSpeechRegion(file)).origin);
+    expect(urls).toEqual(["https://api.us.elevenlabs.io/v1/voices"]);
+  });
+
+  it("lists the account's voices by name with only id, name, category and description", async () => {
+    const fetcher = (async (url: string, init: RequestInit) => {
+      expect(url).toBe("https://api.elevenlabs.io/v1/voices");
+      expect((init.headers as Record<string, string>)["xi-api-key"]).toBe("sk_test");
+      return Response.json({ voices: [
+        { voice_id: "UgBBYS2sOqTuMpoF3BR0", name: "Mark", category: "professional", description: "Natural conversations", samples: [{ secret: 1 }] },
+        { voice_id: "S9EGwlCtMF7VXtENq79v", name: "Emma Taylor", category: "generated", labels: { accent: "british" } },
+        { voice_id: "../bad", name: "Nope" }, { voice_id: "SAz9YHcvj6GT2YYXdXww" },
+      ] });
+    }) as typeof fetch;
+    expect(await listSpeechVoices("sk_test", fetcher, undefined, "https://api.elevenlabs.io")).toEqual([
+      { id: "S9EGwlCtMF7VXtENq79v", name: "Emma Taylor", category: "generated" },
+      { id: "UgBBYS2sOqTuMpoF3BR0", name: "Mark", category: "professional", description: "Natural conversations" },
+    ]);
+    await expect(listSpeechVoices("sk_test", (async () => new Response("", { status: 401 })) as typeof fetch, undefined, "https://api.elevenlabs.io")).rejects.toThrow("refused this computer's key");
+  });
+});

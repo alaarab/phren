@@ -1,0 +1,1278 @@
+import * as fs from "fs";
+import * as path from "path";
+import { createHmac } from "crypto";
+import { lookup } from "dns/promises";
+import { execFileSync } from "child_process";
+import { isIP } from "net";
+import { fileURLToPath } from "url";
+import { EXEC_TIMEOUT_QUICK_MS, PhrenError, debugLog, runtimeFile, homePath, installPreferencesFile, atomicWriteText, type PhrenErrorCode } from "./shared.js";
+import { errorMessage } from "./utils.js";
+import { hookConfigPath } from "./provider-adapters.js";
+import { PACKAGE_SPEC } from "./package-metadata.js";
+import { logger } from "./logger.js";
+import { withFileLock } from "./shared/governance.js";
+import { resolveManagementCapabilities } from "./init/management-preset.js";
+// Dependency-free leaf module — hooks.ts runs in a per-PostToolUse subprocess
+// and must not pull in content/dedup.ts's import graph.
+import { redactSecretsForLog } from "./content/secrets.js";
+
+export interface HookError {
+  code: PhrenErrorCode;
+  message: string;
+}
+
+// Tool probes (`which`/`where.exe`) are deterministic for a given PATH but run
+// several times for the same command during one `phren init`. On POSIX a spawn
+// is cheap; on Windows every `where.exe` is a full process creation, and init
+// already spawns git and node. Cache results and key the cache on PATH so a
+// caller (or a test) that edits PATH still gets a fresh probe.
+// Entries also expire: the MCP server and the Hook are long-lived, and a tool
+// installed after a probe must show up without a restart.
+const COMMAND_EXISTS_TTL_MS = 60_000;
+let commandExistsPath: string | undefined;
+const commandExistsCache = new Map<string, { found: boolean; at: number }>();
+
+function commandExistsCacheForCurrentPath(): Map<string, { found: boolean; at: number }> {
+  const path = process.env.PATH ?? "";
+  if (commandExistsPath !== path) {
+    commandExistsCache.clear();
+    commandExistsPath = path;
+  }
+  return commandExistsCache;
+}
+
+export function commandExists(cmd: string): boolean {
+  const cache = commandExistsCacheForCurrentPath();
+  const cached = cache.get(cmd);
+  if (cached && Date.now() - cached.at < COMMAND_EXISTS_TTL_MS) return cached.found;
+  let found: boolean;
+  try {
+    const whichCmd = process.platform === "win32" ? "where.exe" : "which";
+    execFileSync(whichCmd, [cmd], { stdio: ["ignore", "ignore", "ignore"], timeout: EXEC_TIMEOUT_QUICK_MS });
+    found = true;
+  } catch (err: unknown) {
+    debugLog(`commandExists: ${cmd} not found: ${errorMessage(err)}`);
+    found = false;
+  }
+  cache.set(cmd, { found, at: Date.now() });
+  return found;
+}
+
+/** Whether the GitHub Copilot CLI is present. Cheaper than
+ *  `detectInstalledTools()` for the one call site that only needs copilot. */
+export function isCopilotInstalled(): boolean {
+  return (
+    commandExists("copilot")
+    || commandExists("github-copilot-cli")
+    || fs.existsSync(homePath(".local", "share", "gh", "extensions", "gh-copilot"))
+    || fs.existsSync(homePath(".copilot", "config.json"))
+  );
+}
+
+export function detectInstalledTools(): Set<string> {
+  const tools = new Set<string>();
+  if (isCopilotInstalled()) {
+    tools.add("copilot");
+  }
+  if (commandExists("cursor")) {
+    tools.add("cursor");
+  }
+  if (commandExists("codex") || fs.existsSync(homePath(".codex"))) {
+    tools.add("codex");
+  }
+  return tools;
+}
+
+function resolveToolBinary(tool: string): string | null {
+  // The probe above already established presence; skip the extra `which -a` /
+  // `where` spawn (and its null result) when the tool is not installed. The
+  // cache makes this check free at sites that probed the tool already.
+  if (!commandExists(tool)) return null;
+  try {
+    const wrapperPath = path.resolve(homePath(".local", "bin", tool));
+    const whichCmd = process.platform === "win32" ? "where.exe" : "which";
+    const whichArgs = process.platform === "win32" ? [tool] : ["-a", tool];
+    const raw = execFileSync(whichCmd, whichArgs, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    });
+    const candidates = raw.split("\n").map((line) => line.trim()).filter(Boolean);
+    for (const candidate of candidates) {
+      const resolved = path.resolve(candidate);
+      if (resolved !== wrapperPath) return candidate;
+    }
+  } catch (err: unknown) {
+    debugLog(`resolveToolBinary: failed for ${tool}: ${errorMessage(err)}`);
+    return null;
+  }
+  return null;
+}
+
+function resolveCliEntryScript(): string | null {
+  const local = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
+  return fs.existsSync(local) ? local : null;
+}
+
+/**
+ * True if a path lives inside an ephemeral npx download cache
+ * (`~/.npm/_npx/<hash>/…`). Baking such a path into a hook command that has no
+ * self-healing fallback is fragile: npx prunes that cache and the `<hash>`
+ * segment changes between versions, silently breaking every phren hook. Hook
+ * commands that resolve here must fall back to `npx -y <spec>` (which
+ * re-resolves on every run) or the ~/.local/bin/phren wrapper instead.
+ */
+export function isEphemeralNpxPath(p: string): boolean {
+  return /(^|[/\\])_npx[/\\]/.test(p);
+}
+
+/** Split a hook command into tokens, honouring single and double quotes. */
+function tokenizeCommand(command: string): string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  let started = false;
+
+  for (const ch of command) {
+    if (quote) {
+      if (ch === quote) quote = null;
+      else current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      started = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (started || current) tokens.push(current);
+      current = "";
+      started = false;
+      continue;
+    }
+    current += ch;
+    started = true;
+  }
+  if (started || current) tokens.push(current);
+  return tokens;
+}
+
+function isPathLike(token: string): boolean {
+  return token.startsWith("/")
+    || token.startsWith("~/")
+    || token.startsWith("\\\\")
+    || /^[A-Za-z]:[\\/]/.test(token);
+}
+
+/**
+ * The local file a hook command depends on — the `~/.local/bin/phren` wrapper,
+ * or the script passed to `node`.
+ *
+ * Returns `null` for commands that re-resolve themselves on every run
+ * (`npx -y @phren/cli …`), which cannot go stale, and for commands with no
+ * recognisable path.
+ *
+ * Why this matters: `npm install -g @phren/cli` can move the package entry
+ * between versions (0.1.40 moved it from `mcp/dist/index.js` to
+ * `dist/index.js`). Hook commands in settings.json keep the old absolute path
+ * and every hook then dies with MODULE_NOT_FOUND on every prompt and every
+ * Stop — silently, because hook failures are not surfaced.
+ */
+function extractHookScriptPath(command: string): string | null {
+  if (!command) return null;
+  // `npx` re-resolves the package each run, so it is never stale.
+  if (/(^|\s)npx(\.cmd)?(\s|$)/.test(command)) return null;
+
+  const tokens = tokenizeCommand(command);
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token) continue;
+    // Skip shell scaffolding: `set`, `&&`, and `VAR=value` assignments.
+    if (token === "&&" || token === "set" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) continue;
+    if (/^node(\.exe)?$/i.test(token)) {
+      const next = tokens[i + 1];
+      return next && isPathLike(next) ? next : null;
+    }
+    if (isPathLike(token)) return token;
+  }
+  return null;
+}
+
+/**
+ * Hook commands whose entrypoint no longer exists on disk. Deduplicated, so an
+ * upgrade that breaks all four lifecycle hooks reports one path, not four.
+ */
+export function findStaleHookEntrypoints(commands: readonly string[]): string[] {
+  const stale = new Set<string>();
+  for (const command of commands) {
+    const scriptPath = extractHookScriptPath(command);
+    if (!scriptPath) continue;
+    const expanded = scriptPath.startsWith("~/") ? homePath(scriptPath.slice(2)) : scriptPath;
+    if (!fs.existsSync(expanded)) stale.add(scriptPath);
+  }
+  return [...stale];
+}
+
+export function phrenPackageSpec(): string {
+  return PACKAGE_SPEC;
+}
+
+/** Shell-escape a value by wrapping in single quotes with proper escaping of embedded single quotes. */
+export function shellEscape(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
+
+export interface LifecycleCommands {
+  sessionStart: string;
+  userPromptSubmit: string;
+  stop: string;
+  hookTool: string;
+}
+
+function buildPackageLifecycleCommands(): LifecycleCommands {
+  const packageSpec = phrenPackageSpec();
+  return {
+    sessionStart: `npx -y ${packageSpec} hook-session-start`,
+    userPromptSubmit: `npx -y ${packageSpec} hook-prompt`,
+    stop: `npx -y ${packageSpec} hook-stop`,
+    hookTool: `npx -y ${packageSpec} hook-tool`,
+  };
+}
+
+export interface BuildLifecycleOptions {
+  /**
+   * Force POSIX shell syntax even on Windows. Used for tools that execute
+   * hook commands via Git Bash (e.g. GitHub Copilot CLI's `bash:` key).
+   */
+  forcePosix?: boolean;
+}
+
+export function buildLifecycleCommands(
+  phrenPath: string,
+  options: BuildLifecycleOptions = {},
+): LifecycleCommands {
+  const rawEntry = resolveCliEntryScript();
+  // A bare `node <entry>` hook has no fallback if <entry> disappears. When the
+  // package is running from the npx cache, that entry path is ephemeral, so we
+  // drop it here and let resolution fall through to the ~/.local/bin/phren
+  // wrapper (preferred) or the self-healing `npx -y <spec>` last resort.
+  const entry = rawEntry && !isEphemeralNpxPath(rawEntry) ? rawEntry : null;
+  const nativeWindows = process.platform === "win32" && !options.forcePosix;
+  const escapedPhren = phrenPath.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const quotedPhren = shellEscape(phrenPath);
+
+  // Prefer the stable wrapper at ~/.local/bin/phren — it survives nvm switches
+  // and npx cache clears because it has a built-in npx fallback.
+  const localBinDir = homePath(".local", "bin");
+  const wrapperBaseName = process.platform === "win32" ? "phren.cmd" : "phren";
+  const wrapperPath = path.join(localBinDir, wrapperBaseName);
+  const wrapperExists = fs.existsSync(wrapperPath) && (() => {
+    try { return fs.readFileSync(wrapperPath, "utf8").includes("PHREN_CLI_WRAPPER"); } catch { return false; }
+  })();
+
+  if (wrapperExists) {
+    if (nativeWindows) {
+      return {
+        sessionStart: `set "PHREN_PATH=${escapedPhren}" && "${wrapperPath}" hook-session-start`,
+        userPromptSubmit: `set "PHREN_PATH=${escapedPhren}" && "${wrapperPath}" hook-prompt`,
+        stop: `set "PHREN_PATH=${escapedPhren}" && "${wrapperPath}" hook-stop`,
+        hookTool: `set "PHREN_PATH=${escapedPhren}" && "${wrapperPath}" hook-tool`,
+      };
+    }
+    const quotedWrapper = shellEscape(wrapperPath);
+    return {
+      sessionStart: `PHREN_PATH=${quotedPhren} ${quotedWrapper} hook-session-start`,
+      userPromptSubmit: `PHREN_PATH=${quotedPhren} ${quotedWrapper} hook-prompt`,
+      stop: `PHREN_PATH=${quotedPhren} ${quotedWrapper} hook-stop`,
+      hookTool: `PHREN_PATH=${quotedPhren} ${quotedWrapper} hook-tool`,
+    };
+  }
+
+  // Direct node path — used when wrapper hasn't been installed yet
+  if (entry) {
+    const escapedEntry = entry.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    const quotedEntry = shellEscape(entry);
+    if (nativeWindows) {
+      return {
+        sessionStart: `set "PHREN_PATH=${escapedPhren}" && node "${escapedEntry}" hook-session-start`,
+        userPromptSubmit: `set "PHREN_PATH=${escapedPhren}" && node "${escapedEntry}" hook-prompt`,
+        stop: `set "PHREN_PATH=${escapedPhren}" && node "${escapedEntry}" hook-stop`,
+        hookTool: `set "PHREN_PATH=${escapedPhren}" && node "${escapedEntry}" hook-tool`,
+      };
+    }
+    return {
+      sessionStart: `PHREN_PATH=${quotedPhren} node ${quotedEntry} hook-session-start`,
+      userPromptSubmit: `PHREN_PATH=${quotedPhren} node ${quotedEntry} hook-prompt`,
+      stop: `PHREN_PATH=${quotedPhren} node ${quotedEntry} hook-stop`,
+      hookTool: `PHREN_PATH=${quotedPhren} node ${quotedEntry} hook-tool`,
+    };
+  }
+
+  // Last resort — npx
+  const packageSpec = phrenPackageSpec();
+  if (nativeWindows) {
+    return {
+      sessionStart: `set "PHREN_PATH=${escapedPhren}" && npx -y ${packageSpec} hook-session-start`,
+      userPromptSubmit: `set "PHREN_PATH=${escapedPhren}" && npx -y ${packageSpec} hook-prompt`,
+      stop: `set "PHREN_PATH=${escapedPhren}" && npx -y ${packageSpec} hook-stop`,
+      hookTool: `set "PHREN_PATH=${escapedPhren}" && npx -y ${packageSpec} hook-tool`,
+    };
+  }
+  return {
+    sessionStart: `PHREN_PATH=${quotedPhren} npx -y ${packageSpec} hook-session-start`,
+    userPromptSubmit: `PHREN_PATH=${quotedPhren} npx -y ${packageSpec} hook-prompt`,
+    stop: `PHREN_PATH=${quotedPhren} npx -y ${packageSpec} hook-stop`,
+    hookTool: `PHREN_PATH=${quotedPhren} npx -y ${packageSpec} hook-tool`,
+  };
+}
+
+export function buildSharedLifecycleCommands(): LifecycleCommands {
+  return buildPackageLifecycleCommands();
+}
+
+function withHookToolEnv(
+  command: string,
+  tool: "claude" | "copilot" | "cursor" | "codex",
+  forcePosix = false,
+): string {
+  if (process.platform === "win32" && !forcePosix) {
+    return `set "PHREN_HOOK_TOOL=${tool}" && ${command}`;
+  }
+  return `PHREN_HOOK_TOOL=${shellEscape(tool)} ${command}`;
+}
+
+function withHookToolLifecycleCommands(
+  lifecycle: LifecycleCommands,
+  tool: "claude" | "copilot" | "cursor" | "codex",
+  forcePosix = false,
+): LifecycleCommands {
+  return {
+    sessionStart: withHookToolEnv(lifecycle.sessionStart, tool, forcePosix),
+    userPromptSubmit: withHookToolEnv(lifecycle.userPromptSubmit, tool, forcePosix),
+    stop: withHookToolEnv(lifecycle.stop, tool, forcePosix),
+    hookTool: withHookToolEnv(lifecycle.hookTool, tool, forcePosix),
+  };
+}
+
+function installSessionWrapper(tool: string, phrenPath: string): boolean {
+  const isWindows = process.platform === "win32";
+  const realBinary = resolveToolBinary(tool);
+  if (!realBinary) return false;
+
+  const entry = resolveCliEntryScript();
+
+  const localBinDir = homePath(".local", "bin");
+  const wrapperPath = path.join(localBinDir, isWindows ? `${tool}.cmd` : tool);
+
+  const packageSpec = phrenPackageSpec();
+
+  if (isWindows) {
+    const sessionStartCmd = entry
+      ? `node "${entry}" hook-session-start`
+      : `npx -y ${packageSpec} hook-session-start`;
+    const stopCmd = entry
+      ? `node "${entry}" hook-stop`
+      : `npx -y ${packageSpec} hook-stop`;
+    const timeoutSec = Math.ceil(HOOK_TIMEOUT_MS / 1000);
+    // Bound hook execution with PowerShell Start-Job + Wait-Job so a hung
+    // hook can never stall the user's real command. The hook command is
+    // passed via env var to avoid nested-quote escaping hell in cmd.
+    const content = `@echo off\r
+setlocal\r
+set "REAL_BIN=${realBinary}"\r
+if not defined PHREN_PATH set "PHREN_PATH=${phrenPath}"\r
+set "PHREN_HOOK_TOOL=${tool}"\r
+if not defined PHREN_HOOK_TIMEOUT_S set "PHREN_HOOK_TIMEOUT_S=${timeoutSec}"\r
+\r
+if "%~1"=="-h" goto :passthrough\r
+if "%~1"=="--help" goto :passthrough\r
+if "%~1"=="help" goto :passthrough\r
+if "%~1"=="-V" goto :passthrough\r
+if "%~1"=="--version" goto :passthrough\r
+if "%~1"=="version" goto :passthrough\r
+if "%~1"=="completion" goto :passthrough\r
+\r
+set "PHREN_HOOK_CMD=${sessionStartCmd}"\r
+call :run_with_timeout\r
+"%REAL_BIN%" %*\r
+set "EXIT_STATUS=%ERRORLEVEL%"\r
+set "PHREN_HOOK_CMD=${stopCmd}"\r
+call :run_with_timeout\r
+exit /b %EXIT_STATUS%\r
+\r
+:passthrough\r
+"%REAL_BIN%" %*\r
+exit /b %ERRORLEVEL%\r
+\r
+:run_with_timeout\r
+powershell -NoProfile -NonInteractive -Command "$j = Start-Job -ScriptBlock { & cmd /c $env:PHREN_HOOK_CMD *> $null }; if (-not (Wait-Job $j -Timeout ([int]$env:PHREN_HOOK_TIMEOUT_S))) { Stop-Job $j -ErrorAction SilentlyContinue }; Remove-Job $j -Force -ErrorAction SilentlyContinue | Out-Null" >nul 2>&1\r
+exit /b 0\r
+`;
+
+    try {
+      fs.mkdirSync(localBinDir, { recursive: true });
+      atomicWriteText(wrapperPath, content);
+      return true;
+    } catch (err: unknown) {
+      debugLog(`installSessionWrapper: failed for ${tool}: ${errorMessage(err)}`);
+      return false;
+    }
+  }
+
+  const sessionStartCmd = entry
+    ? `env PHREN_PATH="$PHREN_PATH" node "$ENTRY_SCRIPT" hook-session-start`
+    : `env PHREN_PATH="$PHREN_PATH" npx -y ${packageSpec} hook-session-start`;
+  const stopCmd = entry
+    ? `env PHREN_PATH="$PHREN_PATH" node "$ENTRY_SCRIPT" hook-stop`
+    : `env PHREN_PATH="$PHREN_PATH" npx -y ${packageSpec} hook-stop`;
+  const content = `#!/bin/sh
+set -u
+
+REAL_BIN=${shellEscape(realBinary)}
+DEFAULT_PHREN_PATH=${shellEscape(phrenPath)}
+PHREN_PATH="\${PHREN_PATH:-$DEFAULT_PHREN_PATH}"
+ENTRY_SCRIPT=${shellEscape(entry || "")}
+export PHREN_HOOK_TOOL="${tool}"
+
+if [ ! -x "$REAL_BIN" ]; then
+  echo "phren wrapper error: real ${tool} binary not executable: $REAL_BIN" >&2
+  exit 127
+fi
+
+case "\${1:-}" in
+  -h|--help|help|-V|--version|version|completion)
+    exec "$REAL_BIN" "$@"
+    ;;
+esac
+
+run_with_timeout() {
+  _timeout_val="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$_timeout_val" "$@" || true
+  else
+    "$@" || true
+  fi
+}
+
+HOOK_TIMEOUT="\${PHREN_HOOK_TIMEOUT_S:-${Math.ceil(HOOK_TIMEOUT_MS / 1000)}}s"
+
+run_with_timeout "$HOOK_TIMEOUT" ${sessionStartCmd} >/dev/null 2>&1
+
+"$REAL_BIN" "$@"
+status=$?
+
+run_with_timeout "$HOOK_TIMEOUT" ${stopCmd} >/dev/null 2>&1
+
+exit $status
+`;
+
+  try {
+    fs.mkdirSync(localBinDir, { recursive: true });
+    atomicWriteText(wrapperPath, content);
+    fs.chmodSync(wrapperPath, 0o755);
+    return true;
+  } catch (err: unknown) {
+    debugLog(`installSessionWrapper: failed for ${tool}: ${errorMessage(err)}`);
+    return false;
+  }
+}
+
+/**
+ * Windows-only: append `~/.local/bin` to the user's persistent PATH if it
+ * isn't already there. On Linux/macOS `~/.local/bin` is on PATH by default
+ * (XDG / `.profile`); on Windows nothing adds it, so the `phren.cmd` wrapper
+ * is invisible to cmd/PowerShell/Git Bash until we fix PATH.
+ *
+ * Reads/writes the User PATH directly from the registry under
+ * `HKCU\Environment` so we (a) keep the original value kind — `REG_EXPAND_SZ`
+ * vs `REG_SZ` — intact, and (b) preserve any `%VAR%` references the user has
+ * in their PATH. Going through `[Environment]::GetEnvironmentVariable` /
+ * `SetEnvironmentVariable` would silently expand `%VAR%` on read and write
+ * the result back as `REG_SZ`, baking expansions in permanently and
+ * downgrading the registry type — corrupting unrelated PATH entries.
+ *
+ * After writing, broadcasts `WM_SETTINGCHANGE` so newly-launched processes
+ * pick up the change without waiting for a logoff.
+ *
+ * Returns:
+ *   "added"      — PATH was updated (user must open a new terminal).
+ *   "already"    — dir was already on the user PATH.
+ *   "skipped"    — not Windows (nothing to do).
+ *   "failed"     — PowerShell call failed; caller should surface a manual hint.
+ */
+export function ensureLocalBinOnWindowsPath(): "added" | "already" | "skipped" | "failed" {
+  if (process.platform !== "win32") return "skipped";
+  const target = homePath(".local", "bin");
+  const escapedTarget = target.replace(/'/g, "''");
+
+  const script = `
+$ErrorActionPreference = 'Stop'
+try {
+  $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+  if ($null -eq $key) { Write-Output 'FAILED'; exit 1 }
+  if (@($key.GetValueNames()) -contains 'Path') {
+    $rawPath = $key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    $kind = $key.GetValueKind('Path')
+  } else {
+    $rawPath = ''
+    $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
+  }
+  $target = '${escapedTarget}'
+  $targetNorm = ([Environment]::ExpandEnvironmentVariables($target)).TrimEnd('\\').ToLowerInvariant()
+  $present = $false
+  if ($rawPath) {
+    foreach ($entry in ($rawPath -split ';')) {
+      if (-not $entry) { continue }
+      $expanded = ([Environment]::ExpandEnvironmentVariables($entry)).TrimEnd('\\').ToLowerInvariant()
+      if ($expanded -eq $targetNorm) { $present = $true; break }
+    }
+  }
+  if ($present) { $key.Close(); Write-Output 'ALREADY'; exit 0 }
+  $newRaw = if ($rawPath) { $rawPath.TrimEnd(';') + ';' + $target } else { $target }
+  $key.SetValue('Path', $newRaw, $kind)
+  $key.Close()
+  Add-Type -Namespace PhrenInit -Name PathBroadcast -MemberDefinition '[System.Runtime.InteropServices.DllImport("user32.dll", SetLastError=true, CharSet=System.Runtime.InteropServices.CharSet.Auto)] public static extern System.IntPtr SendMessageTimeout(System.IntPtr hWnd, uint Msg, System.UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out System.UIntPtr lpdwResult);' | Out-Null
+  $r = [System.UIntPtr]::Zero
+  [void][PhrenInit.PathBroadcast]::SendMessageTimeout([System.IntPtr]0xFFFF, 0x1A, [System.UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$r)
+  Write-Output 'ADDED'
+} catch {
+  Write-Output ('FAILED: ' + $_.Exception.Message)
+  exit 1
+}
+`;
+
+  let out = "";
+  try {
+    out = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    }).trim();
+  } catch (err: unknown) {
+    debugLog(`ensureLocalBinOnWindowsPath: ${errorMessage(err)}`);
+    return "failed";
+  }
+  const lastLine = out.split(/\r?\n/).pop()?.trim() ?? "";
+  if (lastLine === "ADDED") return "added";
+  if (lastLine === "ALREADY") return "already";
+  debugLog(`ensureLocalBinOnWindowsPath: unexpected output: ${out}`);
+  return "failed";
+}
+
+/**
+ * Install a lightweight `phren` CLI wrapper at ~/.local/bin/phren so the bare
+ * `phren` command works without a global npm install. The wrapper simply execs
+ * `node <entry_script> "$@"`.
+ */
+/** Whether a wrapper may be rewritten for `entry`: always, unless `entry` is
+ * an ephemeral npx copy and the wrapper already runs a lasting entry that exists. */
+export function keepsWrapperEntry(existing: string, entry: string, exists: (file: string) => boolean = fs.existsSync): boolean {
+  if (!isEphemeralNpxPath(entry)) return true;
+  const current = [...existing.matchAll(/exec node '([^']+)'/g)].map(match => match[1]);
+  return !current.some(file => !isEphemeralNpxPath(file) && exists(file));
+}
+
+export function installPhrenCliWrapper(phrenPath: string): boolean {
+  const isWindows = process.platform === "win32";
+  const entry = resolveCliEntryScript();
+  if (!entry) return false;
+
+  const localBinDir = homePath(".local", "bin");
+  const wrapperPath = path.join(localBinDir, isWindows ? "phren.cmd" : "phren");
+
+  // Don't overwrite a real global install — only our own wrapper
+  if (fs.existsSync(wrapperPath)) {
+    try {
+      const existing = fs.readFileSync(wrapperPath, "utf8");
+      if (!existing.includes("PHREN_CLI_WRAPPER")) return false;
+      // A one-off `npx @phren/cli` run must not repoint a wrapper that runs a
+      // lasting install (a checkout's build, a global package): the npx copy
+      // is older more often than not and its cache can vanish.
+      if (!keepsWrapperEntry(existing, entry)) return false;
+    } catch {
+      // File exists but unreadable — don't overwrite, could be a real binary
+      return false;
+    }
+  }
+
+  const packageSpec = phrenPackageSpec();
+  const content = isWindows
+    ? `@echo off\r\nrem PHREN_CLI_WRAPPER — managed by phren init; safe to delete\r\nif not defined PHREN_PATH set "PHREN_PATH=${phrenPath}"\r\nif exist "${entry}" (node "${entry}" %*) else (npx -y ${packageSpec} %*)\r\n`
+    : `#!/bin/sh
+# PHREN_CLI_WRAPPER — managed by phren init; safe to delete
+set -u
+PHREN_PATH="\${PHREN_PATH:-${phrenPath}}"
+export PHREN_PATH
+if [ -f ${shellEscape(entry)} ]; then
+  exec node ${shellEscape(entry)} "$@"
+else
+  exec npx -y ${packageSpec} "$@"
+fi
+`;
+
+  try {
+    fs.mkdirSync(localBinDir, { recursive: true });
+    atomicWriteText(wrapperPath, content);
+    if (!isWindows) fs.chmodSync(wrapperPath, 0o755);
+    return true;
+  } catch (err: unknown) {
+    debugLog(`installPhrenCliWrapper: failed: ${errorMessage(err)}`);
+    return false;
+  }
+}
+
+// Hook config schemas for each tool. Validates shape before writing to catch
+// breaking changes if any tool updates its config format.
+interface HookEntry { type: string; [k: string]: unknown }
+interface CopilotHookConfig {
+  version: number;
+  hooks: {
+    sessionStart: HookEntry[];
+    userPromptSubmitted: HookEntry[];
+    sessionEnd: HookEntry[];
+  };
+}
+interface CursorHookConfig {
+  version: number;
+  sessionStart: { command: string };
+  beforeSubmitPrompt: { command: string };
+  stop: { command: string };
+}
+interface CodexHookConfig {
+  hooks: {
+    SessionStart: HookEntry[];
+    UserPromptSubmit: HookEntry[];
+    Stop: HookEntry[];
+  };
+}
+
+function validateCopilotConfig(config: CopilotHookConfig): boolean {
+  return (
+    typeof config.version === "number" &&
+    Array.isArray(config.hooks?.sessionStart) &&
+    Array.isArray(config.hooks?.userPromptSubmitted) &&
+    Array.isArray(config.hooks?.sessionEnd)
+  );
+}
+
+function validateCursorConfig(config: CursorHookConfig): boolean {
+  return (
+    typeof config.version === "number" &&
+    typeof config.sessionStart?.command === "string" &&
+    typeof config.beforeSubmitPrompt?.command === "string" &&
+    typeof config.stop?.command === "string"
+  );
+}
+
+function validateCodexConfig(config: CodexHookConfig): boolean {
+  return (
+    Array.isArray(config.hooks?.SessionStart) &&
+    Array.isArray(config.hooks?.UserPromptSubmit) &&
+    Array.isArray(config.hooks?.Stop)
+  );
+}
+
+export interface HookToolPreferences {
+  claude?: boolean;
+  copilot?: boolean;
+  cursor?: boolean;
+  codex?: boolean;
+}
+
+// ── mtime-based install-preferences cache (shared by readHookPreferences + readCustomHooks) ──
+const _installPrefsJsonCache = new Map<string, { mtimeMs: number; parsed: Record<string, unknown> }>();
+
+export function clearHookPrefsCache(): void {
+  _installPrefsJsonCache.clear();
+}
+
+function cachedReadInstallPrefsJson(phrenPath: string): Record<string, unknown> | null {
+  const prefsPath = installPreferencesFile(phrenPath);
+  let mtimeMs: number;
+  try {
+    mtimeMs = fs.statSync(prefsPath).mtimeMs;
+  } catch {
+    _installPrefsJsonCache.delete(prefsPath);
+    return null;
+  }
+  const cached = _installPrefsJsonCache.get(prefsPath);
+  if (cached && cached.mtimeMs === mtimeMs) {
+    return cached.parsed;
+  }
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(fs.readFileSync(prefsPath, "utf8")) as Record<string, unknown>;
+  } catch {
+    _installPrefsJsonCache.delete(prefsPath);
+    return null;
+  }
+  _installPrefsJsonCache.set(prefsPath, { mtimeMs, parsed });
+  return parsed;
+}
+
+function readHookPreferences(phrenPath: string): { enabled: boolean; toolPrefs: HookToolPreferences } {
+  try {
+    const prefs = cachedReadInstallPrefsJson(phrenPath);
+    if (!prefs) return { enabled: true, toolPrefs: {} };
+    const enabled = prefs.hooksEnabled !== false;
+    const toolPrefs: HookToolPreferences = prefs.hookTools && typeof prefs.hookTools === "object"
+      ? prefs.hookTools as HookToolPreferences
+      : {};
+    return { enabled, toolPrefs };
+  } catch (err: unknown) {
+    debugLog(`readHookPreferences: ${errorMessage(err)}`);
+    return { enabled: true, toolPrefs: {} };
+  }
+}
+
+export function isToolHookEnabled(phrenPath: string, tool: string): boolean {
+  const { enabled, toolPrefs } = readHookPreferences(phrenPath);
+  if (!enabled) return false;
+  const key = tool as keyof HookToolPreferences;
+  if (key in toolPrefs) return toolPrefs[key] !== false;
+  return true;
+}
+
+// ── #218: Custom integration hooks ──────────────────────────────────────
+
+export type CustomHookEvent =
+  | "pre-save"         // Before push_changes commits
+  | "post-save"        // After push_changes pushes
+  | "post-search"      // After search_knowledge returns results
+  | "pre-finding"      // Before a finding is written to FINDINGS.md
+  | "post-finding"     // After a finding is written
+  | "pre-index"        // Before FTS index rebuild
+  | "post-index"       // After FTS index rebuild
+  | "post-session-end" // After session_end completes
+  | "post-consolidate" // After FINDINGS.md consolidation runs
+  | "pre-prompt";      // Before hook-prompt output; stdout is prepended to phren's response
+
+export interface CommandHookEntry {
+  event: CustomHookEvent;
+  command: string;
+  timeout?: number; // ms, default 5000
+}
+
+export interface WebhookHookEntry {
+  event: CustomHookEvent;
+  webhook: string; // HTTP POST URL
+  secret?: string; // Optional HMAC-SHA256 signing secret
+  timeout?: number; // ms, default 5000
+}
+
+export type CustomHookEntry = CommandHookEntry | WebhookHookEntry;
+
+export const HOOK_EVENT_VALUES = [
+  "pre-save", "post-save", "post-search",
+  "pre-finding", "post-finding",
+  "pre-index", "post-index",
+  "post-session-end", "post-consolidate",
+  "pre-prompt",
+] as const;
+
+const VALID_HOOK_EVENTS = new Set<string>(HOOK_EVENT_VALUES);
+const MAX_HOOK_COMMAND_LENGTH = 1000;
+
+/** Return the target (URL or shell command) for display or matching. */
+export function getHookTarget(h: CustomHookEntry): string {
+  return "webhook" in h ? h.webhook : h.command;
+}
+
+export function validateCustomHookCommand(command: string): string | null {
+  const trimmed = command.trim();
+  if (!trimmed) return "Command cannot be empty.";
+  if (trimmed.length > MAX_HOOK_COMMAND_LENGTH) return `Command too long (max ${MAX_HOOK_COMMAND_LENGTH} characters).`;
+  if (/[`$(){}&|;<>\n\r#]/.test(trimmed)) {
+    return "Command contains disallowed shell characters: ` $ ( ) { } & | ; < > # \\n \\r";
+  }
+  if (/\b(eval|source)\b/.test(trimmed)) return "eval and source are not permitted in hook commands.";
+  if (!/^[\w./~"'"]/.test(trimmed)) return "Command must begin with an executable name or path.";
+  return null;
+}
+
+function normalizeWebhookHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/^\[|\]$/g, "");
+}
+
+function isPrivateOrLoopbackIpv4(address: string): boolean {
+  const octets = address.split(".").map((part) => Number.parseInt(part, 10));
+  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  if (octets[0] === 0 || octets[0] === 10 || octets[0] === 127) return true;
+  if (octets[0] === 169 && octets[1] === 254) return true;
+  if (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) return true;
+  if (octets[0] === 192 && octets[1] === 168) return true;
+  return false;
+}
+
+function isPrivateOrLoopbackAddress(address: string): boolean {
+  const normalized = address.toLowerCase();
+  const ipVersion = isIP(normalized);
+  if (ipVersion === 4) return isPrivateOrLoopbackIpv4(normalized);
+  if (ipVersion !== 6) return false;
+  if (normalized === "::" || normalized === "::1") return true;
+  if (normalized.startsWith("::ffff:")) return true;
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
+  if (/^fe[89ab]/.test(normalized)) return true;
+  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isPrivateOrLoopbackIpv4(mapped[1]);
+  return false;
+}
+
+function blockedWebhookHostnameReason(hostname: string): string | null {
+  const normalized = normalizeWebhookHostname(hostname);
+  if (
+    normalized === "localhost" ||
+    normalized.endsWith(".local") ||
+    normalized.endsWith(".internal") ||
+    /^(0x[0-9a-f]+|0\d+)$/i.test(normalized) ||
+    /^\d{8,10}$/.test(normalized)
+  ) {
+    return `webhook hostname "${hostname}" is a private or loopback address.`;
+  }
+  if (isPrivateOrLoopbackAddress(normalized)) {
+    return `webhook hostname "${hostname}" is a private or loopback address.`;
+  }
+  return null;
+}
+
+export function validateCustomWebhookUrl(webhook: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(webhook.trim());
+  } catch {
+    return "webhook is not a valid URL.";
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return "webhook must be an http:// or https:// URL.";
+  }
+  return blockedWebhookHostnameReason(parsed.hostname);
+}
+
+/**
+ * Validate a webhook URL at execution time and return the resolved IP address
+ * to use for the fetch. Resolving once and re-using the IP prevents DNS
+ * rebinding attacks where the hostname resolves to a safe IP during validation
+ * but a private/loopback IP when fetch performs its own lookup.
+ *
+ * Returns { error } if blocked, or { resolvedUrl, host } if safe.
+ */
+async function validateAndResolveWebhook(webhook: string): Promise<
+  | { error: string; resolvedUrl?: undefined; host?: undefined }
+  | { error?: undefined; resolvedUrl: string; host: string }
+> {
+  let parsed: URL;
+  try {
+    parsed = new URL(webhook);
+  } catch {
+    return { error: "webhook is not a valid URL." };
+  }
+
+  const literalBlock = blockedWebhookHostnameReason(parsed.hostname);
+  if (literalBlock) return { error: literalBlock };
+
+  // If the hostname is already a literal IP, validate it directly
+  if (isIP(parsed.hostname)) {
+    if (isPrivateOrLoopbackAddress(parsed.hostname)) {
+      return { error: `webhook hostname "${parsed.hostname}" is a private or loopback address.` };
+    }
+    return { resolvedUrl: webhook, host: parsed.hostname };
+  }
+
+  try {
+    const records = await lookup(parsed.hostname, { all: true, verbatim: true });
+    if (records.length === 0) {
+      return { error: `webhook hostname "${parsed.hostname}" did not resolve to any address.` };
+    }
+    if (records.some((record) => isPrivateOrLoopbackAddress(record.address))) {
+      return { error: `webhook hostname "${parsed.hostname}" resolved to a private or loopback address.` };
+    }
+    // Use the first resolved IP to build a pinned URL, preventing DNS rebinding
+    const resolvedIp = records[0].address;
+    const pinnedUrl = new URL(webhook);
+    pinnedUrl.hostname = records[0].family === 6 ? `[${resolvedIp}]` : resolvedIp;
+    return { resolvedUrl: pinnedUrl.href, host: parsed.host };
+  } catch (err: unknown) {
+    debugLog(`validateAndResolveWebhook lookup failed for ${parsed.hostname}: ${errorMessage(err)}`);
+    return { error: `webhook hostname "${parsed.hostname}" could not be resolved: ${errorMessage(err)}` };
+  }
+}
+
+const DEFAULT_CUSTOM_HOOK_TIMEOUT = 5000;
+const HOOK_TIMEOUT_MS = parseInt(process.env.PHREN_HOOK_TIMEOUT_MS || '14000', 10);
+const HOOK_ERROR_LOG_MAX_LINES = 1000;
+
+export function readCustomHooks(phrenPath: string): CustomHookEntry[] {
+  try {
+    const prefs = cachedReadInstallPrefsJson(phrenPath);
+    if (!prefs || !Array.isArray(prefs.customHooks)) return [];
+    return (prefs.customHooks as unknown[]).filter(
+      (h): h is CustomHookEntry => {
+        if (!h || typeof h !== "object") return false;
+        const rec = h as Record<string, unknown>;
+        return (
+          typeof rec.event === "string" &&
+          VALID_HOOK_EVENTS.has(rec.event) &&
+          (
+            (typeof rec.command === "string" && rec.command.trim().length > 0) ||
+            (typeof rec.webhook === "string" && rec.webhook.trim().length > 0)
+          )
+        );
+      }
+    );
+  } catch (err: unknown) {
+    debugLog(`readCustomHooks: ${errorMessage(err)}`);
+    return [];
+  }
+}
+
+/**
+ * Every path that reports a custom-hook failure funnels through here and
+ * through buildHookErrorMessage below, so redaction happens in one place.
+ *
+ * The composed message is the hook's own command plus the child's stderr.
+ * Hook commands legitimately carry inline credentials — `curl -H
+ * "Authorization: Bearer …"` contains none of the shell metacharacters
+ * validateCustomHookCommand rejects — and a failing child prints whatever it
+ * wants to stderr, which execFileSync appends to the thrown error's message.
+ * That string was going verbatim into .runtime/hook-errors.log *and* back to
+ * the MCP caller, i.e. into the agent's context and transcript.
+ */
+function buildHookErrorMessage(event: string, command: string, detail: string): string {
+  return redactSecretsForLog(`${event}: ${command}: ${detail}`);
+}
+
+function appendHookErrorLog(phrenPath: string, event: string, message: string): void {
+  const logPath = runtimeFile(phrenPath, "hook-errors.log");
+  const line = `[${new Date().toISOString()}] [${event}] ${redactSecretsForLog(message)}\n`;
+  try {
+    withFileLock(logPath, () => {
+      fs.appendFileSync(logPath, line);
+      try {
+        const stat = fs.statSync(logPath);
+        if (stat.size > 200_000) {
+          const content = fs.readFileSync(logPath, "utf-8");
+          const lines = content.split("\n").filter(Boolean);
+          atomicWriteText(logPath, lines.slice(-HOOK_ERROR_LOG_MAX_LINES).join("\n") + "\n");
+        }
+      } catch (err: unknown) {
+        logger.debug("appendHookErrorLog rotate", errorMessage(err));
+      }
+    });
+  } catch (err: unknown) {
+    logger.debug("appendHookErrorLog lock", errorMessage(err));
+  }
+}
+
+export function runCustomHooks(
+  phrenPath: string,
+  event: CustomHookEvent,
+  env: Record<string, string> = {}
+): { ran: number; errors: HookError[] } {
+  const hooks = readCustomHooks(phrenPath);
+  const matching = hooks.filter((h) => h.event === event);
+  const errors: HookError[] = [];
+
+  const isWindows = process.platform === "win32";
+  const shellCmd = isWindows ? "cmd" : "sh";
+
+  for (const hook of matching) {
+    if ("webhook" in hook) {
+      // Webhook hook: fire-and-forget HTTP POST (async, does not block runCustomHooks)
+      const payload = JSON.stringify({ event, env, timestamp: new Date().toISOString() });
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (hook.secret) {
+        headers["X-Phren-Signature"] = `sha256=${createHmac("sha256", hook.secret).update(payload).digest("hex")}`;
+      }
+      void validateAndResolveWebhook(hook.webhook)
+        .then((result) => {
+          if ("error" in result && result.error) {
+            const message = `${event}: skipped webhook ${hook.webhook}: ${result.error}`;
+            debugLog(`runCustomHooks webhook: ${message}`);
+            appendHookErrorLog(phrenPath, event, message);
+            return;
+          }
+          // Use the pinned resolved URL to prevent DNS rebinding;
+          // set Host header to the original hostname for correct routing.
+          const { resolvedUrl, host } = result as { resolvedUrl: string; host: string };
+          const fetchHeaders = { ...headers };
+          if (host) {
+            fetchHeaders["Host"] = host;
+          }
+          return fetch(resolvedUrl, {
+            method: "POST",
+            headers: fetchHeaders,
+            body: payload,
+            redirect: "manual",
+            signal: AbortSignal.timeout(hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT),
+          });
+        })
+        .catch((err: unknown) => {
+          const message = `${event}: ${hook.webhook}: ${errorMessage(err)}`;
+          debugLog(`runCustomHooks webhook: ${message}`);
+          try {
+            appendHookErrorLog(phrenPath, event, message);
+          } catch (logErr: unknown) {
+            logger.debug("runCustomHooks webhookErrorLog", errorMessage(logErr));
+          }
+        });
+      continue;
+    }
+    const cmdErr = validateCustomHookCommand(hook.command);
+    if (cmdErr) {
+      const message = `${event}: skipped hook (re-validation failed): ${cmdErr}`;
+      debugLog(`runCustomHooks: ${message}`);
+      errors.push({ code: PhrenError.VALIDATION_ERROR, message });
+      appendHookErrorLog(phrenPath, event, message);
+      continue;
+    }
+    const shellArgs = isWindows ? ["/c", hook.command] : ["-c", hook.command];
+    // On Windows, cmd /c expands %VAR% in the command string.
+    // Sanitize env values to prevent shell metacharacter injection.
+    const mergedEnv: Record<string, string | undefined> = { ...process.env, PHREN_PATH: phrenPath, PHREN_HOOK_EVENT: event, ...env };
+    if (isWindows) {
+      for (const [key, val] of Object.entries(mergedEnv)) {
+        if (typeof val === "string") {
+          mergedEnv[key] = val.replace(/[&|<>^%]/g, "");
+        }
+      }
+    }
+    try {
+      execFileSync(shellCmd, shellArgs, {
+        cwd: phrenPath,
+        encoding: "utf8",
+        timeout: hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT,
+        env: mergedEnv,
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+    } catch (err: unknown) {
+      const message = buildHookErrorMessage(event, hook.command, errorMessage(err));
+      debugLog(`runCustomHooks: ${message}`);
+      errors.push({ code: PhrenError.VALIDATION_ERROR, message });
+      try {
+        appendHookErrorLog(phrenPath, event, errorMessage(err));
+      } catch (logErr: unknown) {
+        logger.debug("runCustomHooks hookErrorLog", errorMessage(logErr));
+      }
+    }
+  }
+
+  return { ran: matching.length, errors };
+}
+
+/**
+ * Read the set of pre-prompt command strings already registered as sibling
+ * UserPromptSubmit entries in Claude Code's settings.json. Used by
+ * runPrePromptHooks to avoid double-running a hook that Claude Code is
+ * already invoking directly (in parallel with phren's own hook).
+ *
+ * Returns an empty set on any error or if the settings file doesn't exist.
+ */
+export function getRegisteredPrePromptSiblingCommands(): Set<string> {
+  const out = new Set<string>();
+  try {
+    const settingsPath = hookConfigPath("claude");
+    if (!fs.existsSync(settingsPath)) return out;
+    const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object") return out;
+    const hooksObj = (parsed as Record<string, unknown>).hooks;
+    if (!hooksObj || typeof hooksObj !== "object") return out;
+    const ups = (hooksObj as Record<string, unknown>).UserPromptSubmit;
+    if (!Array.isArray(ups)) return out;
+    for (const entry of ups) {
+      if (!entry || typeof entry !== "object") continue;
+      const inner = (entry as Record<string, unknown>).hooks;
+      if (!Array.isArray(inner)) continue;
+      for (const h of inner) {
+        if (h && typeof h === "object") {
+          const cmd = (h as Record<string, unknown>).command;
+          if (typeof cmd === "string" && cmd.length > 0) out.add(cmd);
+        }
+      }
+    }
+  } catch (err: unknown) {
+    debugLog(`getRegisteredPrePromptSiblingCommands: ${errorMessage(err)}`);
+  }
+  return out;
+}
+
+/**
+ * Run pre-prompt custom hooks, piping stdinJson to each and capturing stdout.
+ * Returns concatenated stdout from all matching hooks (empty string if none).
+ *
+ * Skips any hook whose command is already registered as a sibling
+ * UserPromptSubmit entry in Claude Code's settings.json — those are dispatched
+ * directly by Claude Code in parallel with phren's hook, so re-running them
+ * here would duplicate their work and (worse) re-import their slow latency
+ * into phren's response budget.
+ */
+export function runPrePromptHooks(
+  phrenPath: string,
+  stdinJson: string,
+  siblingCommandsOverride?: Set<string>,
+): string {
+  const hooks = readCustomHooks(phrenPath);
+  const siblingCommands = siblingCommandsOverride ?? getRegisteredPrePromptSiblingCommands();
+  const matching = hooks.filter(
+    (h) =>
+      h.event === "pre-prompt" &&
+      "command" in h &&
+      !siblingCommands.has(h.command)
+  );
+  if (matching.length === 0) return "";
+
+  const isWindows = process.platform === "win32";
+  const shellCmd = isWindows ? "cmd" : "sh";
+  const outputs: string[] = [];
+
+  for (const hook of matching) {
+    if (!("command" in hook)) continue;
+    const cmdErr = validateCustomHookCommand(hook.command);
+    if (cmdErr) {
+      debugLog(`runPrePromptHooks: skipped (validation failed): ${cmdErr}`);
+      appendHookErrorLog(phrenPath, "pre-prompt", cmdErr);
+      continue;
+    }
+    const shellArgs = isWindows ? ["/c", hook.command] : ["-c", hook.command];
+    const mergedEnv: Record<string, string | undefined> = { ...process.env, PHREN_PATH: phrenPath, PHREN_HOOK_EVENT: "pre-prompt" };
+    if (isWindows) {
+      for (const [key, val] of Object.entries(mergedEnv)) {
+        if (typeof val === "string") {
+          mergedEnv[key] = val.replace(/[&|<>^%]/g, "");
+        }
+      }
+    }
+    try {
+      const result = execFileSync(shellCmd, shellArgs, {
+        cwd: phrenPath,
+        encoding: "utf8",
+        input: stdinJson,
+        timeout: hook.timeout ?? DEFAULT_CUSTOM_HOOK_TIMEOUT,
+        env: mergedEnv,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const trimmed = (result ?? "").trim();
+      if (trimmed) outputs.push(trimmed);
+    } catch (err: unknown) {
+      const message = buildHookErrorMessage("pre-prompt", hook.command, errorMessage(err));
+      debugLog(`runPrePromptHooks: ${message}`);
+      try {
+        appendHookErrorLog(phrenPath, "pre-prompt", errorMessage(err));
+      } catch (logErr: unknown) {
+        logger.debug("runPrePromptHooks hookErrorLog", errorMessage(logErr));
+      }
+    }
+  }
+
+  return outputs.join("\n");
+}
+
+export interface HookConfigOptions {
+  tools?: Set<string>;
+  allTools?: boolean;
+  /**
+   * Whether to install ~/.local/bin session wrappers. Defaults to the current
+   * management preset's `installWrappers` capability. Assisted/manual presets
+   * skip wrappers (hooks fall back to node/npx invocation).
+   */
+  installWrappers?: boolean;
+}
+
+export function configureAllHooks(phrenPath: string, options: HookConfigOptions = {}): string[] {
+  const configured: string[] = [];
+  const detected: Set<string> = options.tools
+    ? options.tools
+    : options.allTools
+      ? new Set(["copilot", "cursor", "codex"])
+      : detectInstalledTools();
+
+  const installWrappers = options.installWrappers
+    ?? resolveManagementCapabilities(phrenPath).installWrappers;
+
+  const lifecycle = buildLifecycleCommands(phrenPath);
+
+  // ── GitHub Copilot CLI (user-level: ~/.github/hooks/phren.json) ──────────
+  if (detected.has("copilot")) {
+    // Copilot CLI invokes the `bash` key through Git Bash on Windows, so the
+    // lifecycle commands must use POSIX shell syntax (not cmd's `set "VAR="`).
+    const copilotLifecycleBase = process.platform === "win32"
+      ? buildLifecycleCommands(phrenPath, { forcePosix: true })
+      : lifecycle;
+    const copilotLifecycle = withHookToolLifecycleCommands(copilotLifecycleBase, "copilot", true);
+    const copilotFile = hookConfigPath("copilot", phrenPath);
+    const copilotHooksDir = path.dirname(copilotFile);
+    try {
+      fs.mkdirSync(copilotHooksDir, { recursive: true });
+      const config: CopilotHookConfig = {
+        version: 1,
+        hooks: {
+          sessionStart: [{ type: "command", bash: copilotLifecycle.sessionStart }],
+          userPromptSubmitted: [{ type: "command", bash: copilotLifecycle.userPromptSubmit }],
+          sessionEnd: [{ type: "command", bash: copilotLifecycle.stop }],
+        },
+      };
+      if (!validateCopilotConfig(config)) throw new Error("invalid copilot hook config shape");
+      atomicWriteText(copilotFile, JSON.stringify(config, null, 2));
+      configured.push("Copilot CLI");
+    } catch (err: unknown) {
+      console.warn(`configureAllHooks: copilot hook config failed: ${errorMessage(err)}`);
+    }
+    if (installWrappers && isToolHookEnabled(phrenPath, "copilot")) installSessionWrapper("copilot", phrenPath);
+  }
+
+  // ── Cursor (user-level: ~/.cursor/hooks.json) ────────────────────────────
+  if (detected.has("cursor")) {
+    const cursorLifecycle = withHookToolLifecycleCommands(lifecycle, "cursor");
+    const cursorFile = hookConfigPath("cursor", phrenPath);
+    try {
+      fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
+      let existing: Record<string, unknown> = {};
+      try { existing = JSON.parse(fs.readFileSync(cursorFile, "utf8")); } catch (err: unknown) {
+        logger.debug("configureAllHooks cursorRead", errorMessage(err));
+      }
+      const config: CursorHookConfig = {
+        ...existing,
+        version: 1,
+        // Cursor parity: sessionStart is best-effort where supported; wrapper also enforces lifecycle.
+        sessionStart: { command: cursorLifecycle.sessionStart },
+        beforeSubmitPrompt: { command: cursorLifecycle.userPromptSubmit },
+        stop: { command: cursorLifecycle.stop },
+      };
+      if (!validateCursorConfig(config)) throw new Error("invalid cursor hook config shape");
+      atomicWriteText(cursorFile, JSON.stringify(config, null, 2));
+      configured.push("Cursor");
+    } catch (err: unknown) {
+      console.warn(`configureAllHooks: cursor hook config failed: ${errorMessage(err)}`);
+    }
+    if (installWrappers && isToolHookEnabled(phrenPath, "cursor")) installSessionWrapper("cursor", phrenPath);
+  }
+
+  // ── Codex (codex.json in phren path) ─────────────────────────────────────
+  if (detected.has("codex")) {
+    const codexFile = hookConfigPath("codex", phrenPath);
+    try {
+      const codexLifecycle = withHookToolLifecycleCommands(buildSharedLifecycleCommands(), "codex");
+      let existing: Record<string, unknown> = {};
+      try { existing = JSON.parse(fs.readFileSync(codexFile, "utf8")); } catch (err: unknown) {
+        logger.debug("configureAllHooks codexRead", errorMessage(err));
+      }
+      const config: CodexHookConfig = {
+        ...existing,
+        hooks: {
+          SessionStart: [{ type: "command", command: codexLifecycle.sessionStart }],
+          UserPromptSubmit: [{ type: "command", command: codexLifecycle.userPromptSubmit }],
+          Stop: [{ type: "command", command: codexLifecycle.stop }],
+        },
+      };
+      if (!validateCodexConfig(config)) throw new Error("invalid codex hook config shape");
+      atomicWriteText(codexFile, JSON.stringify(config, null, 2));
+      configured.push("Codex");
+    } catch (err: unknown) {
+      console.warn(`configureAllHooks: codex hook config failed: ${errorMessage(err)}`);
+    }
+    if (installWrappers && isToolHookEnabled(phrenPath, "codex")) installSessionWrapper("codex", phrenPath);
+  }
+
+  return configured;
+}

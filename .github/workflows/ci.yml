@@ -1,0 +1,112 @@
+name: CI
+run-name: ${{ inputs.release_candidate && 'RC validation' || 'Development build' }}
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_candidate:
+        description: Run the consolidated release candidate test suites
+        type: boolean
+        default: false
+
+env:
+  PHREN_RC: ${{ github.event_name == 'workflow_dispatch' && inputs.release_candidate }}
+
+# Superseded commits should not keep consuming runners.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      # One OS failing must not cancel the others and hide their results.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node-version: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+      # The tmux provider's integration test runs against a real tmux; it
+      # skips where there is none (Windows).
+      - name: Install tmux (Linux)
+        if: runner.os == 'Linux' && env.PHREN_RC == 'true'
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Install tmux (macOS)
+        if: runner.os == 'macOS' && env.PHREN_RC == 'true'
+        run: brew install tmux
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Release candidate tests
+        if: env.PHREN_RC == 'true'
+        run: pnpm test -- --coverage
+      - name: Development build summary
+        if: env.PHREN_RC != 'true'
+        run: echo 'Build passed. Tests deferred to the consolidated release candidate; tests were not run.' >> "$GITHUB_STEP_SUMMARY"
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+
+  agent-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # turbo's test task depends on build -> ^build, which produces the
+      # packages/cli dist output the agent's tests import at runtime.
+      - name: Build agent
+        run: pnpm exec turbo run build --filter=@phren/agent
+      - name: Release candidate agent tests
+        if: env.PHREN_RC == 'true'
+        run: pnpm --filter @phren/agent test
+      - name: Development agent summary
+        if: env.PHREN_RC != 'true'
+        run: echo 'Agent build passed. Agent tests deferred to the consolidated release candidate; tests were not run.' >> "$GITHUB_STEP_SUMMARY"
+
+  validate-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run validate-docs

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>phren for iPhone</title>
+<meta name="description" content="The phren iPhone app: your project memory on your phone, and native chat, terminals and diffs for the Claude Code, Codex, Copilot and OpenCode sessions running on your own computers.">
+<link rel="icon" href="phren-icon-64.svg"><link rel="stylesheet" href="app.css">
+</head><body><main>
+<nav class="appnav" aria-label="App"><a class="home" href="index.html">phren</a><a href="get-started.html">Get started</a><a href="ios.html" aria-current="page">iPhone</a><a href="android.html">Android</a><a href="phren-hook.html">Phren Hook</a><a href="support.html">Support</a><a href="privacy.html">Privacy</a><a href="docs.html">Docs</a></nav>
+
+<div class="eyebrow">phren for iPhone</div>
+<h1>Your memory.<br>Your agents.<br>In your pocket.</h1>
+<p class="lead">A native iPhone app for your phren store and for the coding agents running on your own computers. Nothing goes through a phren server, because there isn't one.</p>
+<p><span class="status">In TestFlight testing · version 1.0.3 · iOS 17 or later</span></p>
+<div class="cta"><a class="button" href="get-started.html">Get started</a><a class="button secondary" href="support.html">Support</a></div>
+
+<div class="grid">
+<section><h3>Memory, live</h3><p>Findings, notes, tasks, truths and the review queue from every store you attach. New findings an agent saves on another computer show up within seconds.</p></section>
+<section><h3>Sessions, wherever they run</h3><p>Every Claude Code, Codex, Copilot and OpenCode session across your computers, grouped by what needs you. Tap one to chat, or open its terminal.</p></section>
+<section><h3>Nothing in between</h3><p>GitHub for the store, pinned SSH to your computers, Tailscale when you're away. Tokens and keys stay in the iPhone Keychain.</p></section>
+</div>
+
+<h2>Install</h2>
+<p>phren for iPhone is in testing through Apple's TestFlight. Install <a href="https://apps.apple.com/app/testflight/id899247664">TestFlight</a>, open the invite link we sent you, and tap Install. We are preparing the App Store release; this page will say so when it ships. Want an invite? <a href="support.html#contact">Write to us</a>.</p>
+<p>Then follow <a href="get-started.html">Get started</a>: pair a computer, connect your memory, and open your first chat.</p>
+
+<h2>What you need</h2>
+<ul>
+<li><strong>Phren Hook on each computer</strong> that runs your agents. <code>npx --yes @phren/cli@latest pair</code> installs it and pairs the phone in one step. See <a href="phren-hook.html">Phren Hook</a>.</li>
+<li><strong>Herdr</strong> on that computer for chat, status, approvals and starting agents. <a href="get-started.html#herdr">What works without Herdr</a>.</li>
+<li><strong>SSH</strong> turned on, and <strong>Tailscale</strong> when you are away from home. No public port, Funnel or relay.</li>
+<li><strong>A phren store</strong>, read from a paired computer or synced through a GitHub repository you own. Agents and terminals work without GitHub.</li>
+</ul>
+
+<h2>Projects and memory</h2>
+<p><strong>Projects</strong> lists every project in every attached store, with counts and a read-only marker on shared tiers like <code>global</code>. Inside a project: findings by date, notes by day, pinned truths, the summary, skills, agent instructions and the archive of older topics, fetched when you open one.</p>
+<p><strong>Tasks</strong> shows Backlog, Active and Done with search, filters and sorting. Swipe to start or finish a task, or select several and move them. <strong>Search</strong> runs across every store. The <strong>memory graph</strong> is the same 3D viewer as the web UI and VS Code.</p>
+<p>Edits apply on the phone at once, wait offline, and go to GitHub as commits authored by you. Anything that can't be pushed shows under <strong>Settings → Needs attention</strong>, where you can retry or discard it.</p>
+
+<h2>Sessions and chat</h2>
+<p><strong>Agents</strong> lists the sessions on every saved computer: working and waiting first, then idle and done. Each row names its computer, project, agent and state. On a cold launch it shows the last known list greyed out while it reconnects.</p>
+<ul>
+<li><strong>Chat</strong> streams the agent's own conversation: replies as they are written, commands as compact rows that expand to their output, diffs of the files each command changed, images, token counts, Stop, and permission requests you can answer from the phone.</li>
+<li><strong>Git</strong> in the chat options shows changes with staging, history, branches, pull requests and the repository's other worktrees, with a side-by-side or inline diff.</li>
+<li><strong>Terminal</strong> opens the exact Herdr pane, with a key bar, hold-for-Ctrl shortcut panels you can arrange, pinch to resize and image uploads into the running agent.</li>
+<li><strong>Start an agent</strong> in a project folder on any computer, in a new worktree if you like.</li>
+<li><strong>Talk mode</strong> listens, sends when you pause, and reads the reply aloud with your computer's ElevenLabs voice or the phone's own voice.</li>
+<li><strong>Code</strong> shows what your agents changed today, the project's files, and each function's definition and uses, from the computer's code index.</li>
+<li><strong>Schedules</strong> lists the prompts set to run on your computers, with each one's next and last run.</li>
+<li><strong>Web servers</strong> previews development servers running on a computer, tunnelled over SSH, so apps bound to localhost work.</li>
+<li><strong>Simulators</strong> shows the iOS simulators booted on a Mac, live, and lets you tap, type, press Home or open a URL.</li>
+<li><strong>Account usage</strong> shows Claude and Codex limits and reset times per computer.</li>
+</ul>
+
+<h2>Only on iPhone</h2>
+<ul>
+<li><strong>Siri and Shortcuts.</strong> "Add a phren task" works from a locked phone. "Talk to my conductor" opens your conductor with talk mode on. Add Task and Add Note can sit on the Action Button.</li>
+<li><strong>Live Activities.</strong> One activity for all your agents on the Lock Screen and Dynamic Island, with Deny and Approve when one asks for permission. Answers still need Face ID or your passcode.</li>
+<li><strong>Controls.</strong> Talk to Conductor and Pause All Agents for Control Center and the Lock Screen.</li>
+<li><strong>Widgets</strong> for the Home Screen and Lock Screen: your memory count and top active task.</li>
+<li><strong>On-device summaries.</strong> On iPhones with Apple Intelligence, long replies are summarized on the phone before they are spoken.</li>
+</ul>
+
+<h2>Permissions it asks for</h2>
+<ul>
+<li><strong>Camera</strong>: to scan a computer's pairing code, and when you take a photo for an agent.</li>
+<li><strong>Microphone and Speech Recognition</strong>: only while you dictate or use talk mode.</li>
+<li><strong>Local Network</strong>: to reach computers on your Wi-Fi over SSH.</li>
+<li><strong>Notifications</strong>: to tell you when an agent is waiting on you, if you turn them on.</li>
+</ul>
+<p>Decline any of them and the rest of the app still works.</p>
+
+<h2>Where your data goes</h2>
+<p>Store data moves between the phone and GitHub, or between the phone and your own computer. Session data comes from your own computers over SSH. We receive nothing: no analytics, no crash reports, no telemetry. The <a href="privacy.html">privacy policy</a> lists, item by item, what the app keeps on the phone and what leaves it.</p>
+<p>The iPhone app is closed source. The CLI, Phren Hook and everything the app talks to on your computers are <a href="https://github.com/alaarab/phren">open source</a>.</p>
+
+<footer><a href="get-started.html">Get started</a> · <a href="android.html">Android</a> · <a href="support.html">Support</a> · <a href="privacy.html">Privacy</a> · <a href="https://github.com/alaarab/phren/blob/main/packages/cli/src/bridge/AGENT_CONNECTIONS.md">Protocol and security details</a></footer>
+</main></body></html>

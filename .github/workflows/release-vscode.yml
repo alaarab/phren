@@ -1,0 +1,106 @@
+name: Release VS Code extension
+
+# The extension ships to the Marketplace, not npm, so it releases on its own
+# cadence from its own version in packages/vscode/package.json. Same shape as
+# Release: dispatch with the version you expect, verify it, build and test the
+# whole workspace, then publish.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish (must match packages/vscode/package.json)
+        required: true
+        type: string
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      # The dispatch input is interpolated only here, into an env var, so it
+      # reaches bash as data rather than being spliced into the script.
+      INPUT_VERSION: ${{ github.event.inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Ensure version matches packages/vscode/package.json
+        run: |
+          PKG_VERSION=$(node -p "require('./packages/vscode/package.json').version")
+          if [ "$PKG_VERSION" != "$INPUT_VERSION" ]; then
+            echo "Version mismatch: packages/vscode/package.json=$PKG_VERSION, input=$INPUT_VERSION"
+            exit 1
+          fi
+
+      - name: Ensure the extension changelog contains this version
+        run: |
+          grep -q "^## \[$INPUT_VERSION\]" packages/vscode/CHANGELOG.md || {
+            echo "packages/vscode/CHANGELOG.md missing header for $INPUT_VERSION"
+            echo "The Marketplace listing shows this file, so a release needs an entry there."
+            exit 1
+          }
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The extension is a thin client over the CLI's MCP tools, and the whole
+      # workspace's tests include the check that every tool it calls still
+      # exists. Building and testing everything is the point, not overkill.
+      - name: Build
+        run: pnpm build
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Package extension
+        working-directory: packages/vscode
+        run: pnpm exec vsce package --no-dependencies --out "phren-vscode-$INPUT_VERSION.vsix"
+
+      # Attached whether or not the publish succeeds, so a missing or expired
+      # token costs you a manual upload rather than a rebuild.
+      - name: Upload the .vsix
+        uses: actions/upload-artifact@v4
+        with:
+          name: phren-vscode-${{ github.event.inputs.version }}
+          path: packages/vscode/*.vsix
+          if-no-files-found: error
+
+      - name: Check the Marketplace token is present
+        run: |
+          if [ -z "${{ secrets.VSCE_PAT }}" ]; then
+            echo "No VSCE_PAT secret, so nothing was published."
+            echo "The .vsix is attached to this run; upload it at"
+            echo "  https://marketplace.visualstudio.com/manage/publishers/alaarab"
+            echo "Or add the secret: an Azure DevOps personal access token with"
+            echo "Marketplace > Manage scope, saved as VSCE_PAT in this repo."
+            exit 1
+          fi
+
+      - name: Publish to the Marketplace
+        working-directory: packages/vscode
+        # Token scoped to this step only: at job level it would be readable by
+        # every install and build script.
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: pnpm exec vsce publish --no-dependencies --packagePath "phren-vscode-$INPUT_VERSION.vsix"
+
+      - name: Create git tag
+        run: |
+          VERSION="$INPUT_VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "vscode-v$VERSION" -m "VS Code extension v$VERSION"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+          git push origin "vscode-v$VERSION"

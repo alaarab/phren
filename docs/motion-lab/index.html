@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Phren — Motion Lab</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<template id="__bundler_thumbnail" data-bg-color="#0a0a1a">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">
+    <rect width="1200" height="800" fill="#0a0a1a"/>
+    <!-- Phren pixel silhouette, centered & scaled up (cell = 28px) -->
+    <g transform="translate(264 88) scale(28)">
+      <!-- sparkle -->
+      <rect x="16" y="5" width="1" height="1" fill="#28D3F2"/>
+      <rect x="18" y="5" width="1" height="1" fill="#28D3F2"/>
+      <!-- simplified body blob -->
+      <rect x="8" y="7" width="9" height="1" fill="#9c8ff8"/>
+      <rect x="7" y="8" width="11" height="1" fill="#9c8ff8"/>
+      <rect x="6" y="9" width="13" height="1" fill="#9c8ff8"/>
+      <rect x="6" y="10" width="13" height="1" fill="#9c8ff8"/>
+      <rect x="6" y="11" width="13" height="1" fill="#9c8ff8"/>
+      <rect x="6" y="12" width="13" height="1" fill="#9c8ff8"/>
+      <rect x="6" y="13" width="13" height="1" fill="#7e6bf5"/>
+      <rect x="6" y="14" width="13" height="1" fill="#7e6bf5"/>
+      <rect x="7" y="15" width="11" height="1" fill="#6b57e8"/>
+      <rect x="8" y="16" width="9" height="1" fill="#5945c5"/>
+      <!-- eyes -->
+      <rect x="7" y="12" width="1" height="1" fill="#12122a"/>
+      <rect x="11" y="12" width="1" height="1" fill="#12122a"/>
+      <!-- smile -->
+      <rect x="11" y="15" width="2" height="1" fill="#12122a"/>
+      <!-- feet -->
+      <rect x="9" y="19" width="7" height="1" fill="#9ea1f8"/>
+    </g>
+  </svg>
+</template>
+
+<style>
+:root {
+  --bg: #0a0a1a;
+  --panel-bg: #12122a;
+  --panel-border: rgba(156,143,248,0.18);
+  --fg: #ece9f5;
+  --muted: rgba(236,233,245,0.55);
+  --accent: #7C3AED;
+  --cyan: #28D3F2;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+  --sans: "Space Grotesk", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); }
+body { min-height: 100vh; }
+@keyframes pop {
+  from { transform: scale(0.8); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.wrap { max-width: 1400px; margin: 0 auto; padding: 40px 32px 80px; }
+.hero {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 40px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--panel-border);
+}
+.eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 3px; color: var(--accent); text-transform: uppercase; margin-bottom: 14px; }
+h1 { font-size: 64px; font-weight: 700; line-height: 0.95; margin: 0; letter-spacing: -0.02em; }
+h1 .dim { color: var(--muted); font-weight: 400; }
+.sub { color: var(--muted); max-width: 560px; margin-top: 16px; font-size: 16px; line-height: 1.5; }
+.hero-phren { width: 180px; height: 180px; display: grid; place-items: center; }
+.meta-row { margin-top: 24px; display: flex; gap: 24px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.meta-row span strong { color: var(--fg); font-weight: 500; }
+
+.section-label {
+  margin-top: 56px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+.section-label h2 { font-size: 22px; margin: 0; font-weight: 600; }
+.section-label .kbd {
+  font-family: var(--mono); font-size: 10px;
+  color: var(--muted);
+  border: 1px solid var(--panel-border); padding: 2px 8px; border-radius: 3px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+
+.card {
+  display: flex;
+  flex-direction: column;
+}
+.card-scene { position: relative; }
+.card-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 4px 0;
+  font-family: var(--mono); font-size: 11px;
+}
+.card-foot .name { color: var(--fg); }
+.card-foot .desc { color: var(--muted); }
+
+/* Hero scene spotlight */
+.spotlight {
+  margin-top: 32px;
+  background: linear-gradient(180deg, rgba(124,58,237,0.08), transparent);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 28px;
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 32px;
+  align-items: center;
+}
+@media (max-width: 800px) { .spotlight { grid-template-columns: 1fr; } }
+.spotlight h3 { font-size: 28px; margin: 0 0 12px; font-weight: 600; letter-spacing: -0.01em; }
+.spotlight p { color: var(--muted); line-height: 1.55; margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.chip {
+  font-family: var(--mono); font-size: 11px;
+  padding: 5px 10px; border-radius: 3px;
+  border: 1px solid var(--panel-border);
+  color: var(--fg);
+  background: rgba(255,255,255,0.02);
+  cursor: pointer; user-select: none;
+  transition: all 0.15s;
+}
+.chip:hover { border-color: var(--accent); }
+.chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* tweaks panel */
+.tweaks-panel {
+  position: fixed; right: 20px; bottom: 20px;
+  width: 280px;
+  background: rgba(18,18,42,0.95);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 18px;
+  font-family: var(--mono); font-size: 11px;
+  z-index: 1000;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+}
+.tweaks-panel h4 { font-size: 12px; margin: 0 0 14px; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+.tweak-row { margin-bottom: 12px; }
+.tweak-row label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; }
+.tweak-row input[type="range"] { width: 100%; accent-color: var(--accent); }
+.tweak-row .seg { display: flex; gap: 0; border: 1px solid var(--panel-border); border-radius: 4px; overflow: hidden; }
+.tweak-row .seg button { flex: 1; background: transparent; color: var(--fg); border: none; padding: 6px; font-family: var(--mono); font-size: 10px; cursor: pointer; }
+.tweak-row .seg button.active { background: var(--accent); color: #fff; }
+.tweak-row .seg button + button { border-left: 1px solid var(--panel-border); }
+
+/* light theme overrides */
+body.light {
+  --bg: #f4f1ea;
+  --panel-bg: #fffdf8;
+  --panel-border: rgba(36,25,138,0.12);
+  --fg: #12122a;
+  --muted: rgba(18,22,101,0.6);
+}
+body.light .spotlight { background: linear-gradient(180deg, rgba(124,58,237,0.04), transparent); }
+body.light .chip { background: rgba(0,0,0,0.02); }
+body.light .tweaks-panel { background: rgba(255,253,248,0.95); }
+body.light h1 .dim { color: rgba(18,22,101,0.45); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="hero">
+    <div>
+      <div class="eyebrow">Phren · Motion Lab v0.1</div>
+      <h1>Meet phren.<br/><span class="dim">He remembers so you don't have to.</span></h1>
+      <p class="sub">A little purple fella who lives in your terminal, sniffs around your findings, hands notes to Claude, and naps between sessions. Here he is, in motion.</p>
+      <div class="meta-row">
+        <span><strong>15</strong> loops</span>
+        <span><strong>24×24</strong> pixel grid</span>
+        <span><strong>svg</strong> · no raster</span>
+      </div>
+    </div>
+    <div class="hero-phren" id="hero-phren"></div>
+  </div>
+
+  <!-- spotlight / hero scene -->
+  <div class="spotlight">
+    <div id="spotlight-scene"></div>
+    <div>
+      <div class="eyebrow">Spotlight</div>
+      <h3 id="spot-title">Idle</h3>
+      <p id="spot-desc">phren bobs gently, blinks about once every five seconds, sparkles on an easygoing cadence. use this loop anywhere you want ambient life.</p>
+      <div class="chips" id="spot-chips"></div>
+    </div>
+  </div>
+
+  <div class="section-label">
+    <h2>The reel</h2>
+    <span class="kbd">15 loops, running live</span>
+  </div>
+
+  <div class="grid" id="reel"></div>
+
+  <div class="section-label">
+    <h2>Pose lab</h2>
+    <span class="kbd">stances · faces · arms · hats</span>
+  </div>
+
+  <div id="sheet"></div>
+</div>
+
+<div class="tweaks-panel" id="tweaks-panel" style="display:none;">
+  <h4>Tweaks</h4>
+  <div class="tweak-row">
+    <label>Theme</label>
+    <div class="seg" id="theme-seg">
+      <button data-v="dark" class="active">dark</button>
+      <button data-v="light">light</button>
+    </div>
+  </div>
+  <div class="tweak-row">
+    <label>Speed <span id="speed-val" style="float:right;color:#fff">1.0×</span></label>
+    <input type="range" id="speed" min="0.3" max="2.5" step="0.1" value="1" />
+  </div>
+  <div class="tweak-row">
+    <label>Sprite size <span id="size-val" style="float:right;color:#fff">1.0×</span></label>
+    <input type="range" id="scale" min="0.6" max="1.6" step="0.05" value="1" />
+  </div>
+  <div class="tweak-row">
+    <label>Spotlight loop</label>
+    <div class="seg" id="spot-seg" style="flex-wrap:wrap;">
+    </div>
+  </div>
+</div>
+
+<script>
+// persist & tweak defaults
+window.TWEAKS = /*EDITMODE-BEGIN*/{
+  "theme": "dark",
+  "speed": 1.7,
+  "scale": 0.9,
+  "spotlight": "run"
+}/*EDITMODE-END*/;
+</script>
+
+<script src="vendor/react.development.js"></script>
+<script src="vendor/react-dom.development.js"></script>
+<script src="vendor/babel.min.js"></script>
+<script src="sprite-data.js"></script>
+<script type="text/babel" src="sprite.jsx"></script>
+<script type="text/babel" src="scenes.jsx"></script>
+<script type="text/babel" src="scenes-extra.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+
+</body>
+</html>

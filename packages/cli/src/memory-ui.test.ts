@@ -1,0 +1,604 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { writeFile as write, makeTempDir, grantAdmin, writeFile } from "./test-helpers.js";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import * as http from "http";
+import * as querystring from "querystring";
+import { createWebUiServer, renderPageForTests } from "./ui/memory-ui.js";
+import { getWebUiBrowserCommand, waitForWebUiReady } from "./ui/server.js";
+import { buildGraph } from "./ui/data.js";
+
+function seedProject(root: string): void {
+  write(
+    path.join(root, "demo", "FINDINGS.md"),
+    [
+      "# demo FINDINGS",
+      "",
+      "## 2026-03-01",
+      "",
+      "- Existing finding",
+      "",
+    ].join("\n")
+  );
+  write(
+    path.join(root, "demo", "review.md"),
+    [
+      "# demo Review Queue",
+      "",
+      "## Review",
+      "",
+      "- [2026-03-05] Keep this memory [confidence 0.90]",
+      "",
+      "## Stale",
+      "",
+      "- [2026-03-04] Remove stale memory [confidence 0.55]",
+      "",
+      "## Conflicts",
+      "",
+      "",
+    ].join("\n")
+  );
+}
+
+async function postForm(
+  port: number,
+  route: string,
+  body: Record<string, string>
+): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> {
+  return requestForm(port, "POST", route, body);
+}
+
+async function requestForm(
+  port: number,
+  method: "POST" | "PUT" | "DELETE",
+  route: string,
+  body: Record<string, string>
+): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> {
+  const payload = querystring.stringify(body);
+  return await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        method,
+        host: "127.0.0.1",
+        port,
+        path: route,
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": Buffer.byteLength(payload),
+        },
+      },
+      (res) => {
+        let out = "";
+        res.on("data", (chunk) => { out += String(chunk); });
+        res.on("end", () => {
+          resolve({
+            status: res.statusCode || 0,
+            body: out,
+            headers: res.headers,
+          });
+        });
+      }
+    );
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+describe("web-ui server", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  const priorActor = process.env.PHREN_ACTOR;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-web-ui-test-"));
+    seedProject(tmpRoot);
+    process.env.PHREN_ACTOR = "web-ui-admin";
+    write(
+      path.join(tmpRoot, ".config", "access-control.json"),
+      JSON.stringify({
+        admins: ["web-ui-admin"],
+        maintainers: [],
+        contributors: [],
+        viewers: [],
+      }, null, 2) + "\n"
+    );
+    server = createWebUiServer(tmpRoot);
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("removed queue mutation routes return 404", async () => {
+    const reviewLine = "- [2026-03-05] Keep this memory [confidence 0.90]";
+
+    const approveRes = await postForm(port, "/approve", {
+      project: "demo",
+      line: reviewLine,
+    });
+    expect(approveRes.status).toBe(404);
+
+    const rejectRes = await postForm(port, "/reject", {
+      project: "demo",
+      line: reviewLine,
+    });
+    expect(rejectRes.status).toBe(404);
+
+    const editRes = await postForm(port, "/edit", {
+      project: "demo",
+      line: reviewLine,
+      new_text: "updated",
+    });
+    expect(editRes.status).toBe(404);
+  });
+
+  it("removed routes stay absent regardless of payload shape", async () => {
+    const res = await postForm(port, "/approve", {
+      project: "../escape",
+      line: "- [2026-03-05] anything",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 for unknown GET route", async () => {
+    const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/unknown`, (res) => {
+        let out = "";
+        res.on("data", (chunk) => { out += String(chunk); });
+        res.on("end", () => resolve({ status: res.statusCode || 0, body: out }));
+      }).on("error", reject);
+    });
+    expect(res.status).toBe(404);
+    expect(res.body).toBe("Not found");
+
+    const post = await new Promise<number>((resolve, reject) => {
+      const req = http.request({ host: "127.0.0.1", port, path: "/unknown-action", method: "POST" }, (res) => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode || 0));
+      });
+      req.on("error", reject);
+      req.end("project=demo");
+    });
+    expect(post).toBe(404);
+  });
+
+  it("serves a resolved config view with schema via /api/config/view", async () => {
+    const body = await new Promise<string>((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/api/config/view`, (res) => {
+        let out = "";
+        res.on("data", (chunk) => { out += String(chunk); });
+        res.on("end", () => resolve(out));
+      }).on("error", reject);
+    });
+    const parsed = JSON.parse(body);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.view.scope).toBe("global");
+    expect(parsed.view.fields["retention.ttlDays"].value).toBe(120);
+    expect(parsed.view.fields["retention.ttlDays"].source).toBe("default");
+    expect(Array.isArray(parsed.schema)).toBe(true);
+    expect(parsed.schema.length).toBe(8);
+  });
+
+  it("includes the resolved view and index policy in /api/settings", async () => {
+    const body = await new Promise<string>((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/api/settings`, (res) => {
+        let out = "";
+        res.on("data", (chunk) => { out += String(chunk); });
+        res.on("end", () => resolve(out));
+      }).on("error", reject);
+    });
+    const parsed = JSON.parse(body);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.view).toBeTruthy();
+    expect(parsed.view.fields.taskMode).toBeTruthy();
+    expect(parsed.indexPolicy).toBeTruthy();
+    expect(Array.isArray(parsed.indexPolicy.includeGlobs)).toBe(true);
+  });
+
+  it("updates the index policy via POST /api/settings/index-policy", async () => {
+    const res = await postForm(port, "/api/settings/index-policy", {
+      includeGlobs: "**/*.md, docs/**/*.md",
+      includeHidden: "true",
+    });
+    expect(res.status).toBe(200);
+    const parsed = JSON.parse(res.body);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.indexPolicy.includeGlobs).toContain("docs/**/*.md");
+    expect(parsed.indexPolicy.includeHidden).toBe(true);
+  });
+
+  it("supports daily note CRUD and promotion through the web API", async () => {
+    const added = await postForm(port, "/api/notes/demo", { text: "Web daily note", date: "2026-07-20" });
+    const addedBody = JSON.parse(added.body);
+    expect(addedBody.ok).toBe(true);
+    const noteId = addedBody.data.note.id as string;
+
+    const read = await new Promise<string>((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/api/notes/demo`, (res) => {
+        let out = "";
+        res.on("data", (chunk) => { out += String(chunk); });
+        res.on("end", () => resolve(out));
+      }).on("error", reject);
+    });
+    expect(JSON.parse(read).data.notes[0].id).toBe(noteId);
+
+    const edited = await requestForm(port, "PUT", "/api/notes/demo", { note: noteId, text: "Edited web daily note" });
+    expect(JSON.parse(edited.body).ok).toBe(true);
+
+    const promoted = await postForm(port, "/api/notes/demo", { action: "promote", note: noteId, finding_type: "pattern" });
+    expect(JSON.parse(promoted.body).ok).toBe(true);
+    expect(fs.readFileSync(path.join(tmpRoot, "demo", "FINDINGS.md"), "utf8")).toContain("[pattern] Edited web daily note");
+
+    const removed = await requestForm(port, "DELETE", "/api/notes/demo", { note: noteId });
+    expect(JSON.parse(removed.body).ok).toBe(true);
+  });
+
+  it("change token updates when project content changes", async () => {
+    const readToken = async (): Promise<string> => {
+      return await new Promise((resolve, reject) => {
+        http.get(`http://127.0.0.1:${port}/api/change-token`, (res) => {
+          let out = "";
+          res.on("data", (chunk) => { out += String(chunk); });
+          res.on("end", () => resolve(JSON.parse(out).token));
+        }).on("error", reject);
+      });
+    };
+
+    const before = await readToken();
+    fs.appendFileSync(path.join(tmpRoot, "demo", "tasks.md"), "\n- [ ] Live refresh item\n");
+    const after = await readToken();
+    expect(after).not.toBe(before);
+  });
+
+  it("lists shared hook config paths for Claude and Codex", async () => {
+    const origHome = process.env.HOME;
+    const origProfile = process.env.USERPROFILE;
+    process.env.HOME = tmpRoot;
+    process.env.USERPROFILE = tmpRoot;
+    fs.mkdirSync(path.join(tmpRoot, ".claude"), { recursive: true });
+    fs.writeFileSync(path.join(tmpRoot, ".claude", "settings.json"), JSON.stringify({ hooks: {} }, null, 2));
+    fs.writeFileSync(path.join(tmpRoot, "codex.json"), JSON.stringify({ hooks: {} }, null, 2));
+
+    try {
+      const body = await new Promise<string>((resolve, reject) => {
+        http.get(`http://127.0.0.1:${port}/api/hooks`, (res) => {
+          let out = "";
+          res.on("data", (chunk) => { out += String(chunk); });
+          res.on("end", () => resolve(out));
+        }).on("error", reject);
+      });
+
+      const parsed = JSON.parse(body) as {
+        tools: Array<{ tool: string; configPath: string; exists: boolean }>;
+      };
+      const claude = parsed.tools.find((tool) => tool.tool === "claude");
+      const codex = parsed.tools.find((tool) => tool.tool === "codex");
+
+      expect(claude?.configPath).toBe(path.join(tmpRoot, ".claude", "settings.json"));
+      expect(claude?.exists).toBe(true);
+      expect(codex?.configPath).toBe(path.join(tmpRoot, "codex.json"));
+      expect(codex?.exists).toBe(true);
+    } finally {
+      process.env.HOME = origHome;
+      process.env.USERPROFILE = origProfile;
+    }
+  });
+
+  it("returns 413 for request body exceeding 1MB", async () => {
+    const bigPayload = querystring.stringify({
+      project: "demo",
+      line: "x".repeat(1_100_000),
+    });
+    const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = http.request(
+        {
+          method: "POST",
+          host: "127.0.0.1",
+          port,
+          path: "/api/hook-toggle",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": Buffer.byteLength(bigPayload),
+          },
+        },
+        (res) => {
+          let out = "";
+          res.on("data", (chunk) => { out += String(chunk); });
+          res.on("end", () => resolve({ status: res.statusCode || 0, body: out }));
+        }
+      );
+      req.on("error", () => resolve({ status: 413, body: "connection destroyed" }));
+      req.write(bigPayload);
+      req.end();
+    });
+    expect(res.status).toBe(413);
+  });
+});
+
+describe("web-ui CSRF protection", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  let csrfTokens: Map<string, number>;
+  const priorActor = process.env.PHREN_ACTOR;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-csrf-test-"));
+    seedProject(tmpRoot);
+    process.env.PHREN_ACTOR = "web-ui-admin";
+    write(
+      path.join(tmpRoot, ".config", "access-control.json"),
+      JSON.stringify({
+        admins: ["web-ui-admin"],
+        maintainers: [],
+        contributors: [],
+        viewers: [],
+      }, null, 2) + "\n"
+    );
+    csrfTokens = new Map<string, number>();
+    server = createWebUiServer(tmpRoot, { csrfTokens });
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("GET / returns HTML with a CSRF token embedded", async () => {
+    const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/`, (res) => {
+        let out = "";
+        res.on("data", (chunk) => { out += String(chunk); });
+        res.on("end", () => resolve({ status: res.statusCode || 0, body: out }));
+      }).on("error", reject);
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toContain("_csrf");
+    expect(csrfTokens.size).toBe(1);
+  });
+
+  it("POST /api/hook-toggle with valid CSRF token succeeds", async () => {
+    // Get a CSRF token first
+    await new Promise<void>((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/`, (res) => {
+        res.resume();
+        res.on("end", () => resolve());
+      }).on("error", reject);
+    });
+    const token = [...csrfTokens.keys()][0];
+
+    const res = await postForm(port, "/api/hook-toggle", {
+      _csrf: token,
+      tool: "claude",
+      enabled: "true",
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("POST /api/hook-toggle without CSRF token returns 403", async () => {
+    const res = await postForm(port, "/api/hook-toggle", {
+      tool: "claude",
+      enabled: "true",
+    });
+    expect(res.status).toBe(403);
+    expect(res.body).toContain("CSRF");
+  });
+
+  it("POST /api/hook-toggle with invalid CSRF token returns 403", async () => {
+    const res = await postForm(port, "/api/hook-toggle", {
+      _csrf: "bogus-token",
+      tool: "claude",
+      enabled: "true",
+    });
+    expect(res.status).toBe(403);
+    expect(res.body).toContain("CSRF");
+  });
+
+  it("CSRF token is single-use", async () => {
+    await new Promise<void>((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/`, (res) => {
+        res.resume();
+        res.on("end", () => resolve());
+      }).on("error", reject);
+    });
+    const token = [...csrfTokens.keys()][0];
+
+    // First use succeeds
+    const first = await postForm(port, "/api/hook-toggle", {
+      _csrf: token,
+      tool: "claude",
+      enabled: "true",
+    });
+    expect(first.status).toBe(200);
+
+    // Replay with same token fails
+    const replay = await postForm(port, "/api/hook-toggle", {
+      _csrf: token,
+      tool: "claude",
+      enabled: "true",
+    });
+    expect(replay.status).toBe(403);
+  });
+});
+
+describe("web-ui HTML rendering", () => {
+  it("uses element-based handlers for skills and hooks instead of inline quoted values", () => {
+    const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-html-");
+    try {
+      seedProject(tmpRoot);
+      const body = renderPageForTests(tmpRoot, "csrf-token");
+      expect(body).toContain('data-ui-action="selectSkillFromEl"');
+      expect(body).toContain('data-ui-action="selectHookFromEl"');
+      expect(body).toContain('data-ui-action="toggleHookToolFromEl"');
+      expect(body).not.toContain('JSON.stringify(s.path).replace(/"/g, "\'")');
+      expect(body).not.toContain('JSON.stringify(t.configPath).replace(/"/g,"\'")');
+      expect(body).not.toContain('JSON.stringify(toolName).replace(/"/g,"\'")');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("renders the review queue with approve/reject/edit actions and escapes queue item text", () => {
+    const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-review-html-");
+    try {
+      seedProject(tmpRoot);
+      const body = renderPageForTests(tmpRoot, "csrf-token");
+      expect(body).toContain("review-cards-list");
+      expect(body).toContain("var cardText = esc(item.text);");
+      expect(body).toContain("textEl.innerHTML = esc(item.text).replace(/\\n/g, '<br>');");
+      expect(body).toContain('data-ui-action="reviewAction"');
+      expect(body).not.toContain("marked.parse(item.text)");
+      expect(body).not.toContain("JSON.stringify(item.line)");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("renders graph popup scaffolding and enhanced graph controls", () => {
+    const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-graph-html-");
+    try {
+      seedProject(tmpRoot);
+      const body = renderPageForTests(tmpRoot, "csrf-token");
+      expect(body).toContain('id="graph-node-popover"');
+      expect(body).toContain('id="graph-node-content"');
+      expect(body).toContain("phrenGraph");
+      expect(body).toContain("/api/tasks/update");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("renders a project-level finding capture operation with a working refresh bridge", () => {
+    const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-capture-html-");
+    try {
+      seedProject(tmpRoot);
+      const body = renderPageForTests(tmpRoot, "csrf-token");
+      expect(body).toContain("+ Add finding");
+      expect(body).toContain("window.selectProjectFile = function(file)");
+      expect(body).toContain("data-finding-capture-submit");
+      expect(body).toContain("Record durable knowledge");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("renders the daily notes tab and full note operations", () => {
+    const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-notes-html-");
+    try {
+      seedProject(tmpRoot);
+      const body = renderPageForTests(tmpRoot, "csrf-token");
+      expect(body).toContain("+ Add note");
+      expect(body).toContain("notes:daily");
+      expect(body).toContain("Promote to finding");
+      expect(body).toContain("What happened today?");
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("web-ui launch helpers", () => {
+  it("builds browser launch commands for each supported platform", () => {
+    expect(getWebUiBrowserCommand("http://127.0.0.1:3499", "darwin")).toEqual({
+      command: "open",
+      args: ["http://127.0.0.1:3499"],
+    });
+    expect(getWebUiBrowserCommand("http://127.0.0.1:3499", "win32")).toEqual({
+      command: process.env.ComSpec || "cmd.exe",
+      args: ["/c", "start", "", "http://127.0.0.1:3499"],
+    });
+    expect(getWebUiBrowserCommand("http://127.0.0.1:3499", "linux")).toEqual({
+      command: "xdg-open",
+      args: ["http://127.0.0.1:3499"],
+    });
+  });
+
+  it("waits for the web-ui server to answer before launch", async () => {
+    const { path: tmpRoot, cleanup } = makeTempDir("phren-web-ui-ready-");
+    const server = createWebUiServer(tmpRoot);
+    seedProject(tmpRoot);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("failed to bind test server");
+      const ready = await waitForWebUiReady(`http://127.0.0.1:${address.port}/`);
+      expect(ready).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      cleanup();
+    }
+  });
+});
+
+describe("buildGraph fragment refs", () => {
+  let tmp: { path: string; cleanup: () => void };
+
+  beforeEach(() => {
+    tmp = makeTempDir("phren-memory-ui-data-");
+    grantAdmin(tmp.path);
+    writeFile(
+      path.join(tmp.path, "demo", "FINDINGS.md"),
+      [
+        "# demo FINDINGS",
+        "",
+        "## 2026-03-01",
+        "",
+        "- Explicit network cleanup belongs in finally blocks",
+        "",
+      ].join("\n"),
+    );
+
+    const manualLinksPath = path.join(tmp.path, ".runtime", "manual-links.json");
+    fs.mkdirSync(path.dirname(manualLinksPath), { recursive: true });
+    fs.writeFileSync(
+      manualLinksPath,
+      JSON.stringify([
+        { entity: "service-mesh", entityType: "library", sourceDoc: "demo/FINDINGS.md", relType: "mentions" },
+      ]),
+    );
+  });
+
+  afterEach(() => tmp.cleanup());
+
+  it("resolves fragment ref docs by source key", async () => {
+    const graph = await buildGraph(tmp.path);
+    const entityNode = graph.nodes.find((node) => node.fullLabel === "service-mesh");
+    expect(entityNode).toBeDefined();
+    expect(entityNode?.refDocs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ doc: "demo/FINDINGS.md", project: "demo" }),
+      ]),
+    );
+  });
+});

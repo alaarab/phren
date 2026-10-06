@@ -1,0 +1,6 @@
+.vscode/**
+.vscode-test/**
+node_modules/**
+src/**
+scratch/**
+tsconfig.json

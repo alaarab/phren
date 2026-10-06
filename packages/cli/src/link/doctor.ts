@@ -1,0 +1,1103 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
+import * as fs from "fs";
+import * as path from "path";
+import { execFileSync } from "child_process";
+import {
+  debugLog,
+  EXEC_TIMEOUT_QUICK_MS,
+  getProjectDirs,
+  isRecord,
+  homeDir,
+  homePath,
+  hookConfigPath,
+  listInvalidProjectDirs,
+  runtimeHealthFile,
+} from "../shared.js";
+import { migrateInvalidProjectNames, formatMigrationSummary } from "../project-migrate.js";
+import { ROOT_MANIFEST_FILENAME } from "../phren-paths.js";
+import { STORES_FILENAME } from "../store-registry.js";
+import { commandVersion, versionAtLeast, nearestWritableTarget, resolveEntryScript } from "../init/shared.js";
+import { validateGovernanceJson } from "../shared/governance.js";
+import { errorMessage } from "../utils.js";
+import { buildIndex, queryRows } from "../shared/index.js";
+import { validateTaskFormat, validateFindingsFormat } from "../shared/content.js";
+import { commandExists, detectInstalledTools, isEphemeralNpxPath, findStaleHookEntrypoints } from "../hooks.js";
+import { validateSkillFrontmatter, validateSkillsDir } from "./skills.js";
+import { verifyFileChecksums, updateFileChecksums } from "./checksums.js";
+import { buildSkillManifest } from "../skill/registry.js";
+import { inspectTaskHygiene } from "../task/hygiene.js";
+import { resolveTaskFilePath, TASK_FILE_ALIASES } from "../data/tasks.js";
+import { FINDINGS_FILENAME } from "../data/access.js";
+import { repairPreexistingInstall } from "../init/setup.js";
+import { getManagementPreset, resolveManagementCapabilities } from "../init/management-preset.js";
+import {
+  getMachineName,
+  lookupProfile,
+  findProfileFile,
+  getProfileProjects,
+  findProjectDir,
+} from "./link.js";
+import { claudeProjectKey } from "./context.js";
+import { scanContextImports, fixContextImports } from "./context-imports.js";
+import type { DoctorResult } from "./link.js";
+import { getProjectOwnershipMode, readProjectConfig } from "../project-config.js";
+import { readInstallPreferences } from "../init/preferences.js";
+import { logger } from "../logger.js";
+import { CONTEXT_COST_LIMITS, medianHookInjectionTokens, storeWeight } from "../store-weight.js";
+import { resolveMcpProfile } from "../mcp/profile.js";
+import { activeStoreAuthFailure, isGitAuthFailure, recordStoreAuthFailure, storeAuthDetail, storeSyncRemote } from "../sync/auth.js";
+import { storeCredentialCheck, type ConfirmStoreRemoval } from "../sync/auth-doctor.js";
+import { describeAutoSave } from "../sync/outcome.js";
+
+// ── Doctor ──────────────────────────────────────────────────────────────────
+
+/**
+ * Where `tool` stands relative to its ~/.local/bin wrapper, as far as this
+ * process can tell. Doctor often runs without the user's shell setup (over
+ * SSH, from a hook or a LaunchAgent), where ~/.local/bin is added only by
+ * .zshrc; then PATH says nothing about what the user's shell runs, and an
+ * installed wrapper is reported as unconfirmed rather than missing.
+ */
+export type WrapperState =
+  | { state: "active" | "missing" | "off-path" }
+  | { state: "shadowed"; by: string };
+
+export function wrapperState(
+  tool: string,
+  env: NodeJS.ProcessEnv = process.env,
+  resolve: (tool: string) => string = resolveOnPath,
+): WrapperState {
+  const isWindows = process.platform === "win32";
+  const wrapperPath = homePath(".local", "bin", isWindows ? `${tool}.cmd` : tool);
+  if (!fs.existsSync(wrapperPath)) return { state: "missing" };
+  const same = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+  const dirs = (env.PATH ?? env.Path ?? "").split(path.delimiter).filter(Boolean);
+  if (!dirs.some((dir) => same(dir, path.dirname(wrapperPath)))) return { state: "off-path" };
+  const first = resolve(tool);
+  return first && same(first, wrapperPath) ? { state: "active" } : { state: "shadowed", by: first };
+}
+
+function resolveOnPath(tool: string): string {
+  try {
+    const raw = execFileSync(process.platform === "win32" ? "where.exe" : "which", [tool], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    }).trim();
+    // `where.exe` can print multiple paths, one per line; check the first hit.
+    return raw.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "";
+  } catch (err: unknown) {
+    debugLog(`wrapperState: resolve ${tool} failed: ${errorMessage(err)}`);
+    return "";
+  }
+}
+
+/** One doctor line per wrapper. The phren wrapper works off PATH too: hooks call it by its full path. */
+export function wrapperCheck(tool: string, state: WrapperState): { name: string; ok: boolean; detail: string } {
+  const where = `~/.local/bin/${tool}${process.platform === "win32" ? ".cmd" : ""}`;
+  const name = tool === "phren" ? "wrapper:phren-cli" : `wrapper:${tool}`;
+  const label = tool === "phren" ? "phren CLI" : tool;
+  switch (state.state) {
+    case "active":
+      return { name, ok: true, detail: `${label} wrapper active via ${where}` };
+    case "off-path":
+      return {
+        name, ok: true,
+        detail: `${label} wrapper installed at ${where}; ~/.local/bin is not on this process's PATH ` +
+          `(shell startup files such as .zshrc add it only to interactive shells), so doctor cannot confirm it comes first there`,
+      };
+    case "shadowed":
+      return {
+        name, ok: false,
+        detail: state.by
+          ? `${tool} resolves to ${state.by} before the wrapper at ${where}; move ~/.local/bin earlier in PATH`
+          : `${label} wrapper at ${where} is on PATH but does not run; check that it is executable`,
+      };
+    case "missing":
+      return {
+        name, ok: false,
+        detail: tool === "phren" ? "phren CLI wrapper missing — run 'npx @phren/cli init' to install" : `${tool} wrapper missing`,
+      };
+  }
+}
+
+function gitRemoteStatus(phrenPath: string, syncIntent?: "sync" | "local"): { ok: boolean; detail: string } {
+  const auth = activeStoreAuthFailure(phrenPath);
+  if (auth) return { ok: false, detail: storeAuthDetail(auth) };
+  try {
+    execFileSync("git", ["-C", phrenPath, "rev-parse", "--is-inside-work-tree"], {
+      env: nonInteractiveGitEnv(),
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    });
+  } catch {
+    return { ok: false, detail: "phren path is not a git repository" };
+  }
+
+  let remote: string | undefined;
+  const remoteName = storeSyncRemote(phrenPath)?.remoteName || "origin";
+  try {
+    remote = execFileSync("git", ["-C", phrenPath, "remote", "get-url", "--", remoteName], {
+      env: nonInteractiveGitEnv(),
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    }).trim();
+  } catch {
+    // no remote configured
+  }
+
+  if (!remote) {
+    if (syncIntent === "sync") {
+      return {
+        ok: false,
+        detail: "sync configured but no git remote found. Run: cd ~/.phren && git remote add origin <YOUR_REPO_URL> && git push -u origin main",
+      };
+    }
+    return { ok: true, detail: "no remote configured (local-only sync mode)" };
+  }
+
+  // Remote exists — verify it's reachable
+  try {
+    execFileSync("git", ["-C", phrenPath, "ls-remote", "--exit-code", "--", remoteName], {
+      env: nonInteractiveGitEnv(),
+      stdio: ["ignore", "ignore", "pipe"],
+      timeout: 10_000,
+    });
+    return { ok: true, detail: `${remoteName}=${remote}` };
+  } catch (err: unknown) {
+    if (isGitAuthFailure(err)) {
+      return { ok: false, detail: storeAuthDetail(recordStoreAuthFailure(phrenPath, remoteName, remote)) };
+    }
+    if (syncIntent === "sync") {
+      return { ok: false, detail: `${remoteName}=${remote} (unreachable); check your network or SSH keys` };
+    }
+    return { ok: true, detail: `${remoteName}=${remote} (unreachable, local-only mode)` };
+  }
+}
+
+/**
+ * Root-level config the CLI reads straight off disk. Sparse-checkout can leave these
+ * tracked-but-unmaterialized, and both failures are silent: without the root manifest
+ * the MCP entrypoint never recognizes the store path (so MCP never starts), and without
+ * stores.yaml the registry falls back to a single implicit store, hiding every team store.
+ */
+function rootConfigStatus(
+  phrenPath: string,
+  filename: string,
+): { present: boolean; trackedInHead: boolean } {
+  if (fs.existsSync(path.join(phrenPath, filename))) {
+    return { present: true, trackedInHead: false };
+  }
+  try {
+    execFileSync("git", ["cat-file", "-e", `HEAD:${filename}`], {
+      env: nonInteractiveGitEnv(),
+      cwd: phrenPath,
+      stdio: "ignore",
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    });
+    return { present: false, trackedInHead: true };
+  } catch {
+    return { present: false, trackedInHead: false };
+  }
+}
+
+/** Materialize a tracked-but-excluded root config file by widening sparse-checkout. */
+function materializeRootConfig(phrenPath: string, filename: string): boolean {
+  try {
+    execFileSync("git", ["sparse-checkout", "add", `/${filename}`], {
+      env: nonInteractiveGitEnv(),
+      cwd: phrenPath,
+      stdio: "ignore",
+      timeout: EXEC_TIMEOUT_QUICK_MS,
+    });
+    return fs.existsSync(path.join(phrenPath, filename));
+  } catch (err: unknown) {
+    debugLog(`materializeRootConfig(${filename}): ${errorMessage(err)}`);
+    return false;
+  }
+}
+
+function pushSkillMirrorChecks(
+  checks: Array<{ name: string; ok: boolean; detail: string }>,
+  scope: string,
+  manifest: ReturnType<typeof buildSkillManifest>,
+  destDir: string,
+): void {
+  const parentDir = path.dirname(destDir);
+  checks.push({
+    name: `skills-manifest:${scope}`,
+    ok: fs.existsSync(path.join(parentDir, "skill-manifest.json")),
+    detail: fs.existsSync(path.join(parentDir, "skill-manifest.json"))
+      ? `generated: ${path.join(parentDir, "skill-manifest.json")}`
+      : `missing generated manifest at ${path.join(parentDir, "skill-manifest.json")}`,
+  });
+  checks.push({
+    name: `skills-commands:${scope}`,
+    ok: fs.existsSync(path.join(parentDir, "skill-commands.json")),
+    detail: fs.existsSync(path.join(parentDir, "skill-commands.json"))
+      ? `generated: ${path.join(parentDir, "skill-commands.json")}`
+      : `missing generated command registry at ${path.join(parentDir, "skill-commands.json")}`,
+  });
+
+  for (const skill of manifest.skills.filter((entry) => entry.visibleToAgents)) {
+    const dest = path.join(destDir, skill.format === "folder" ? skill.name : path.basename(skill.path));
+    let ok = false;
+    try {
+      ok = fs.existsSync(dest) && fs.realpathSync(dest) === fs.realpathSync(skill.root);
+    } catch (err: unknown) {
+      debugLog(`doctor: skill mirror check failed for ${dest}: ${errorMessage(err)}`);
+      ok = false;
+    }
+    checks.push({
+      name: `skills-mirror:${scope}/${skill.name}`,
+      ok,
+      detail: ok ? "ok" : `missing/drifted link at ${dest}`,
+    });
+  }
+
+  for (const problem of manifest.problems) {
+    checks.push({
+      name: `skills-problem:${scope}:${problem.code}`,
+      ok: false,
+      detail: problem.message,
+    });
+  }
+}
+
+export async function runDoctor(phrenPath: string, fix: boolean = false, checkData: boolean = false, confirmStoreRemoval?: ConfirmStoreRemoval): Promise<DoctorResult> {
+  // Import runLink lazily to avoid circular dependency at module load time
+  const { runLink } = await import("./link.js");
+  const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
+  const machine = getMachineName();
+  const profile = lookupProfile(phrenPath, machine);
+  const gitVersion = commandVersion("git");
+  const nodeVersion = commandVersion("node");
+  checks.push({
+    name: "git-installed",
+    ok: Boolean(gitVersion),
+    detail: gitVersion || "git not found in PATH",
+  });
+  checks.push({
+    name: "node-version",
+    ok: versionAtLeast(nodeVersion, 20),
+    detail: nodeVersion || "node not found in PATH",
+  });
+  const prefs = readInstallPreferences(phrenPath);
+  const managementPreset = getManagementPreset(phrenPath);
+  const caps = resolveManagementCapabilities(phrenPath);
+  const gitRemote = gitRemoteStatus(phrenPath, prefs.syncIntent);
+  checks.push({
+    name: "git-remote",
+    ok: gitRemote.ok,
+    detail: gitRemote.detail,
+  });
+
+  // Root config must be materialized on disk, not merely tracked in git.
+  const manifestStatus = rootConfigStatus(phrenPath, ROOT_MANIFEST_FILENAME);
+  const manifestRepaired =
+    !manifestStatus.present && manifestStatus.trackedInHead && fix
+      ? materializeRootConfig(phrenPath, ROOT_MANIFEST_FILENAME)
+      : false;
+  checks.push({
+    name: "root-manifest",
+    ok: manifestStatus.present || manifestRepaired,
+    detail: manifestStatus.present
+      ? path.join(phrenPath, ROOT_MANIFEST_FILENAME)
+      : manifestRepaired
+        ? `${ROOT_MANIFEST_FILENAME} restored (was excluded by sparse-checkout)`
+        : manifestStatus.trackedInHead
+          ? `${ROOT_MANIFEST_FILENAME} is tracked in git but excluded by sparse-checkout — MCP cannot start; run 'phren doctor --fix'`
+          : `${ROOT_MANIFEST_FILENAME} missing from ${phrenPath}`,
+  });
+
+  // stores.yaml is optional (single-store installs have none), so this is only a
+  // failure when it exists in git but was never materialized.
+  const storesStatus = rootConfigStatus(phrenPath, STORES_FILENAME);
+  if (!storesStatus.present && storesStatus.trackedInHead) {
+    const storesRepaired = fix ? materializeRootConfig(phrenPath, STORES_FILENAME) : false;
+    checks.push({
+      name: "store-registry-materialized",
+      ok: storesRepaired,
+      detail: storesRepaired
+        ? `${STORES_FILENAME} restored (was excluded by sparse-checkout)`
+        : `${STORES_FILENAME} is tracked in git but excluded by sparse-checkout — team stores are hidden; run 'phren doctor --fix'`,
+    });
+  }
+
+  checks.push({
+    name: "machine-registered",
+    ok: Boolean(profile),
+    detail: profile
+      ? `machine=${machine} profile=${profile}`
+      : `no profile mapping for machine=${machine} in machines.yaml`,
+  });
+
+  const profileFile = profile ? findProfileFile(phrenPath, profile) : null;
+  checks.push({
+    name: "profile-exists",
+    ok: Boolean(profileFile),
+    detail: profileFile ? `profile file found: ${profileFile}` : "profile file missing",
+  });
+
+  const projects = profileFile ? getProfileProjects(profileFile) : [];
+  checks.push({
+    name: "profile-projects",
+    ok: projects.length > 0,
+    detail: projects.length ? `${projects.length} projects in profile` : "no projects listed",
+  });
+
+  const invalidProjectDirs = listInvalidProjectDirs(phrenPath);
+  checks.push({
+    name: "project-names-valid",
+    ok: invalidProjectDirs.length === 0,
+    detail: invalidProjectDirs.length === 0
+      ? "all project directories use valid names"
+      : `${invalidProjectDirs.length} invalid project dir(s): ${invalidProjectDirs.join(", ")}. These are ignored by the UI and indexer. Run \`phren doctor --fix\` to rename to lowercase.`,
+  });
+
+  // Filesystem speed check
+  const fsBenchFile = path.join(phrenPath, ".fs-bench-tmp");
+  let fsMs = 0;
+  try {
+    const t0 = Date.now();
+    fs.writeFileSync(fsBenchFile, "phren-fs-check");
+    fs.readFileSync(fsBenchFile, "utf8");
+    fs.unlinkSync(fsBenchFile);
+    fsMs = Date.now() - t0;
+  } catch (err: unknown) {
+    logger.debug("doctor", `doctor fsBenchmark: ${errorMessage(err)}`);
+    fsMs = -1;
+    try { fs.unlinkSync(fsBenchFile); } catch (e2: unknown) {
+      logger.debug("doctor", `doctor fsBenchmarkCleanup: ${e2 instanceof Error ? e2.message : String(e2)}`);
+    }
+  }
+  const fsSlow = fsMs > 500 || fsMs < 0;
+  checks.push({
+    name: "filesystem-speed",
+    ok: !fsSlow,
+    detail: fsMs < 0
+      ? "could not benchmark filesystem, check ~/.phren permissions"
+      : `write+read+delete in ${fsMs}ms${fsSlow ? " (slow, check if ~/.phren is on a network mount)" : ""}`,
+  });
+
+  // Both generated home files are self-heal surfaces; under a preset without
+  // selfHeal a missing one is expected, not a failure.
+  const notSelfHealed = `not re-created under ${managementPreset} preset`;
+  const contextFile = homePath(".phren-context.md");
+  checks.push({
+    name: "context-file",
+    ok: fs.existsSync(contextFile) || !caps.selfHeal,
+    detail: fs.existsSync(contextFile) ? contextFile : caps.selfHeal ? "missing ~/.phren-context.md" : notSelfHealed,
+  });
+
+  const memoryFile = path.join(
+    homeDir(),
+    ".claude",
+    "projects",
+    claudeProjectKey(),
+    "memory",
+    "MEMORY.md"
+  );
+  checks.push({
+    name: "root-memory",
+    ok: fs.existsSync(memoryFile) || !caps.selfHeal,
+    detail: fs.existsSync(memoryFile) ? memoryFile : caps.selfHeal ? "missing generated MEMORY.md" : notSelfHealed,
+  });
+
+  // Under presets that don't symlink into ~/.claude, the "missing" links are
+  // expected — report them as ok with a preset note instead of failures.
+  if (caps.linkGlobalClaudeMd) {
+    const globalClaudeSrc = path.join(phrenPath, "global", "AGENTS.md");
+    const globalClaudeDest = homePath(".claude", "CLAUDE.md");
+    let globalLinkOk = false;
+    try {
+      globalLinkOk = fs.existsSync(globalClaudeDest) && fs.realpathSync(globalClaudeDest) === fs.realpathSync(globalClaudeSrc);
+    } catch (err: unknown) {
+      debugLog(`doctor: global AGENTS.md symlink check failed: ${errorMessage(err)}`);
+      globalLinkOk = false;
+    }
+    checks.push({
+      name: "global-link",
+      ok: globalLinkOk,
+      detail: globalLinkOk ? "global AGENTS.md symlink ok" : "global AGENTS.md link drifted/missing",
+    });
+  } else {
+    checks.push({
+      name: "global-link",
+      ok: true,
+      detail: `not managed under ${managementPreset} preset (phren does not write ~/.claude/CLAUDE.md)`,
+    });
+  }
+  if (caps.installSkillLinks) {
+    pushSkillMirrorChecks(
+      checks,
+      "global",
+      buildSkillManifest(phrenPath, profile || "", "global", homePath(".claude", "skills")),
+      homePath(".claude", "skills"),
+    );
+  } else {
+    checks.push({ name: "skills-mirror:global", ok: true, detail: `skills not mirrored under ${managementPreset} preset` });
+  }
+
+  for (const project of projects) {
+    if (project === "global") continue;
+    const config = readProjectConfig(phrenPath, project);
+    const ownership = getProjectOwnershipMode(phrenPath, project, config);
+    const target = findProjectDir(project);
+    if (!caps.repoMirroring) {
+      checks.push({
+        name: `ownership:${project}`,
+        ok: true,
+        detail: `repo mirrors disabled (${managementPreset} preset)`,
+      });
+      continue;
+    }
+    if (ownership !== "phren-managed") {
+      checks.push({
+        name: `ownership:${project}`,
+        ok: true,
+        detail: `repo mirrors disabled (${ownership})`,
+      });
+      continue;
+    }
+    if (!target) {
+      checks.push({ name: `project-path:${project}`, ok: false, detail: "project directory not found on disk" });
+      continue;
+    }
+    for (const f of ["AGENTS.md", "REFERENCE.md", FINDINGS_FILENAME]) {
+      const src = path.join(phrenPath, project, f);
+      if (!fs.existsSync(src)) continue;
+      const dest = path.join(target, f);
+      let ok = false;
+      try {
+        ok = fs.existsSync(dest) && fs.realpathSync(dest) === fs.realpathSync(src);
+      } catch (err: unknown) {
+        debugLog(`doctor: symlink check failed for ${dest}: ${errorMessage(err)}`);
+        ok = false;
+      }
+      checks.push({
+        name: `symlink:${project}/${f}`,
+        ok,
+        detail: ok ? "ok" : `missing/drifted link at ${dest}`,
+      });
+    }
+    pushSkillMirrorChecks(
+      checks,
+      project,
+      buildSkillManifest(phrenPath, profile || "", project, path.join(target, ".claude", "skills")),
+      path.join(target, ".claude", "skills"),
+    );
+  }
+
+  // Store registry health
+  try {
+    const { resolveAllStores, storesFilePath, attachedStoresFilePath, describeUnavailableStore, ignoredSyncedStores } =
+      await import("../store-registry.js");
+    if (fs.existsSync(storesFilePath(phrenPath)) || fs.existsSync(attachedStoresFilePath(phrenPath))) {
+      const stores = resolveAllStores(phrenPath);
+      checks.push({
+        name: "store-registry",
+        ok: stores.length > 0,
+        detail: stores.length > 0
+          ? `${stores.length} stores on this machine`
+          : "stores.yaml exists but no stores parsed",
+      });
+      // Only this machine's attachments are checked. Team stores another
+      // machine joined with an older phren still sit in the synced file.
+      const ignored = ignoredSyncedStores(phrenPath);
+      if (ignored.length > 0) {
+        checks.push({
+          name: "store-registry-synced",
+          ok: true,
+          detail: `ignoring ${ignored.map((s) => s.name).join(", ")} in the synced ${path.basename(storesFilePath(phrenPath))}: ` +
+            `team stores are attached per machine (${attachedStoresFilePath(phrenPath)}); remove them from stores.yaml once every machine runs this phren`,
+        });
+      }
+      // Projects claimed by a store that is not attached here cannot be written
+      // at all — phren refuses rather than diverting them to the primary store.
+      const orphanedClaims = stores
+        .filter((store) => store.available === false && store.projects?.length)
+        .map((store) => `${store.name} → ${store.projects!.join(", ")}`);
+      checks.push({
+        name: "store-claims-attached",
+        ok: orphanedClaims.length === 0,
+        detail: orphanedClaims.length === 0
+          ? "every claimed project resolves to an attached store"
+          : `projects claimed by unattached stores (writes to them will fail): ${orphanedClaims.join("; ")}`,
+      });
+      for (const store of stores) {
+        const credentials = await storeCredentialCheck(phrenPath, store, fix, confirmStoreRemoval);
+        if (credentials) {
+          checks.push(credentials);
+          continue;
+        }
+        const pathExists = store.available !== false;
+        const gitExists = pathExists && fs.existsSync(path.join(store.path, ".git"));
+        if (!pathExists) {
+          checks.push({
+            name: `store:${store.name}`,
+            ok: false,
+            detail: describeUnavailableStore(store),
+          });
+        } else if (!gitExists) {
+          checks.push({
+            name: `store:${store.name}`,
+            ok: false,
+            detail: `store '${store.name}' path exists but .git directory missing`,
+          });
+        } else {
+          checks.push({
+            name: `store:${store.name}`,
+            ok: true,
+            detail: `${store.role} store, sync=${store.sync}${store.remote ? `, remote=${store.remote}` : ""}`,
+          });
+        }
+      }
+    }
+  } catch (err: unknown) {
+    debugLog(`doctor: store registry check failed: ${errorMessage(err)}`);
+  }
+
+  const settingsPath = hookConfigPath("claude");
+  const configWritable = nearestWritableTarget(settingsPath);
+  checks.push({
+    name: "config-writable",
+    ok: configWritable,
+    detail: configWritable ? `writable: ${settingsPath}` : `not writable: ${settingsPath}`,
+  });
+  let hookOk = false;
+  let lifecycleOk = false;
+  let hooksEphemeral = false;
+  let staleEntrypoints: string[] = [];
+
+  /** Every `command` string under a Claude settings.json hook event. */
+  const phrenHookCommands = (hooks: Record<string, unknown>): string[] => {
+    const commands: string[] = [];
+    for (const event of ["UserPromptSubmit", "Stop", "SessionStart", "PostToolUse"]) {
+      const entries = hooks[event];
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        if (!isRecord(entry) || !Array.isArray(entry.hooks)) continue;
+        for (const hook of entry.hooks) {
+          if (isRecord(hook) && typeof hook.command === "string") commands.push(hook.command);
+        }
+      }
+    }
+    return commands.filter((command) => /hook-(prompt|stop|session-start|tool)\b/.test(command));
+  };
+
+  const readHookState = () => {
+    const cfg = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    const hooks = isRecord(cfg?.hooks) ? cfg.hooks as Record<string, unknown> : {};
+    const promptHooks = JSON.stringify(hooks.UserPromptSubmit || []);
+    const stopHooks = JSON.stringify(hooks.Stop || []);
+    const startHooks = JSON.stringify(hooks.SessionStart || []);
+    const commands = phrenHookCommands(hooks);
+    return {
+      hookOk: promptHooks.includes("hook-prompt"),
+      lifecycleOk: stopHooks.includes("hook-stop") && startHooks.includes("hook-session-start"),
+      // A hook command that points into the npx cache (~/.npm/_npx/<hash>/…)
+      // works until npx prunes that cache, then breaks silently.
+      ephemeral: [promptHooks, stopHooks, startHooks].some(isEphemeralNpxPath),
+      // A command whose entrypoint no longer exists is worse: it fails on every
+      // single turn with MODULE_NOT_FOUND. `npm i -g @phren/cli` moved the
+      // package entry in 0.1.40, so every upgraded install hit exactly this and
+      // doctor still reported the path as fine.
+      stale: findStaleHookEntrypoints(commands),
+    };
+  };
+
+  try {
+    const state = readHookState();
+    hookOk = state.hookOk;
+    lifecycleOk = state.lifecycleOk;
+    hooksEphemeral = state.ephemeral;
+    staleEntrypoints = state.stale;
+  } catch (err: unknown) {
+    debugLog(`doctor: failed to read Claude settings for hook check: ${errorMessage(err)}`);
+    hookOk = false;
+    lifecycleOk = false;
+  }
+
+  // Repair stale/ephemeral hook commands before reporting, so `--fix` actually
+  // fixes the thing rather than reporting it as OK and doing nothing.
+  let hookPathRepaired = false;
+  if (fix && (staleEntrypoints.length > 0 || hooksEphemeral)) {
+    try {
+      const { configureClaude } = await import("../init/config.js");
+      configureClaude(phrenPath);
+      const state = readHookState();
+      hookOk = state.hookOk;
+      lifecycleOk = state.lifecycleOk;
+      hooksEphemeral = state.ephemeral;
+      hookPathRepaired = state.stale.length === 0 && !state.ephemeral;
+      staleEntrypoints = state.stale;
+    } catch (err: unknown) {
+      debugLog(`doctor: hook path repair failed: ${errorMessage(err)}`);
+    }
+  }
+
+  checks.push({
+    name: "claude-hooks",
+    ok: hookOk,
+    detail: hookOk ? "prompt hook configured" : "missing prompt hook in settings.json",
+  });
+  checks.push({
+    name: "lifecycle-hooks",
+    ok: lifecycleOk,
+    detail: lifecycleOk
+      ? "session-start + stop lifecycle hooks configured"
+      : "missing lifecycle hooks (expected hook-session-start and hook-stop)",
+  });
+  checks.push({
+    name: "hook-path-stable",
+    ok: !hooksEphemeral && staleEntrypoints.length === 0,
+    detail: staleEntrypoints.length > 0
+      ? `hook commands point at ${staleEntrypoints.length} entrypoint(s) that no longer exist: ${staleEntrypoints.join(", ")}. `
+        + `Every hook fails with MODULE_NOT_FOUND — usually after \`npm install -g @phren/cli\` moved the package entry. `
+        + `Run \`phren doctor --fix\` to repoint them at ${resolveEntryScript()}`
+      : hooksEphemeral
+        ? "hook commands point into the ephemeral npx cache (~/.npm/_npx/…); re-run `npx @phren/cli init` to repoint at the stable ~/.local/bin/phren wrapper"
+        : hookPathRepaired
+          ? "hook commands repaired to the current entrypoint"
+          : "hook commands resolve to an entrypoint that exists",
+  });
+
+  const runtimeHealthPath = runtimeHealthFile(phrenPath);
+  let runtime: Record<string, unknown> | null = null;
+  if (fs.existsSync(runtimeHealthPath)) {
+    try { runtime = JSON.parse(fs.readFileSync(runtimeHealthPath, "utf8")); } catch (err: unknown) {
+      logger.debug("doctor", `doctor runtimeHealth: ${errorMessage(err)}`);
+      runtime = null;
+    }
+  }
+  // What an agent pays before it says a word, and per prompt after. None of
+  // the tidying stays done unless this is visible.
+  try {
+    const weight = storeWeight(phrenPath);
+    const profile = resolveMcpProfile(phrenPath);
+    const injection = medianHookInjectionTokens(phrenPath);
+    const problems: string[] = [];
+    if (weight.globalClaude > CONTEXT_COST_LIMITS.globalClaudeWords) problems.push(`global AGENTS.md is ${weight.globalClaude} words (aim under ${CONTEXT_COST_LIMITS.globalClaudeWords})`);
+    if (profile === "full") problems.push("MCP profile is full (61 tools, ~53k chars of schema per session); `phren config mcp-profile core` is ~17k");
+    if (injection.medianTokens > CONTEXT_COST_LIMITS.medianInjectionTokens) problems.push(`median hook injection is ${injection.medianTokens} tokens over the last ${injection.prompts} prompts`);
+    checks.push({
+      name: "context-cost",
+      ok: problems.length === 0,
+      detail: problems.length
+        ? problems.join("; ")
+        : `global AGENTS.md ${weight.globalClaude} words · MCP profile ${profile} (${profile === "core" ? "10 tools, ~17k chars" : "61 tools, ~53k chars"})${injection.prompts ? ` · median injection ${injection.medianTokens} tokens over ${injection.prompts} prompts` : ""} · store: findings ${weight.findings.toLocaleString("en-US")} words, archive ${weight.reference.toLocaleString("en-US")}, tasks ${weight.tasks.toLocaleString("en-US")}, skills ${weight.skills.toLocaleString("en-US")}`,
+    });
+  } catch (err: unknown) {
+    logger.debug("doctor", `context-cost: ${errorMessage(err)}`);
+  }
+
+  checks.push({
+    name: "runtime-health-file",
+    ok: Boolean(runtime),
+    detail: runtime ? runtimeHealthPath : "missing or unreadable .runtime/runtime-health.json",
+  });
+  const lastAutoSave = runtime?.["lastAutoSave"];
+  const autoSaveObj = isRecord(lastAutoSave) ? lastAutoSave : null;
+  const autoSaveStatus = typeof autoSaveObj?.["status"] === "string" ? autoSaveObj["status"] : undefined;
+  const autoSaveAt = typeof autoSaveObj?.["at"] === "string" ? autoSaveObj["at"] : undefined;
+  checks.push({
+    name: "runtime-auto-save",
+    ok: autoSaveStatus === "saved-pushed" || autoSaveStatus === "saved-local" || autoSaveStatus === "clean",
+    detail: describeAutoSave(
+      { status: autoSaveStatus, at: autoSaveAt, detail: typeof autoSaveObj?.["detail"] === "string" ? autoSaveObj["detail"] : undefined },
+      isRecord(runtime?.["lastSync"]) ? runtime["lastSync"] as { ahead?: number; behind?: number } : undefined,
+    ),
+  });
+  checks.push({
+    name: "runtime-prompt",
+    ok: Boolean(runtime?.["lastPromptAt"]),
+    detail: runtime?.["lastPromptAt"] ? `last prompt hook run @ ${runtime["lastPromptAt"]}` : "no prompt runtime record yet",
+  });
+
+  try {
+    const db = await buildIndex(phrenPath, profile || undefined);
+    const healthRow = queryRows(db, "SELECT count(*) FROM docs", []);
+    const count = Number((healthRow?.[0]?.[0] as number | string | undefined) ?? 0);
+    checks.push({
+      name: "fts-index",
+      ok: Number.isFinite(count) && count >= 0,
+      detail: `index query ok (docs=${count})`,
+    });
+  } catch (err: unknown) {
+    checks.push({
+      name: "fts-index",
+      ok: false,
+      detail: `index build/query failed: ${errorMessage(err)}`,
+    });
+  }
+
+  // Repair before the hook and wrapper checks below, so they report what
+  // --fix left behind: the relink is what writes codex.json, the Copilot and
+  // Cursor hook files and the wrappers.
+  if (fix) {
+    const repaired = repairPreexistingInstall(phrenPath);
+    const details: string[] = [];
+    if (repaired.removedLegacyProjects > 0) details.push(`removed ${repaired.removedLegacyProjects} legacy sample profile entries`);
+    if (repaired.createdContextFile) details.push("recreated ~/.phren-context.md");
+    if (repaired.createdRootMemory) details.push("recreated generated MEMORY.md");
+    if (details.length === 0) details.push("baseline repair complete");
+    checks.push({ name: "baseline-repair", ok: true, detail: details.join("; ") });
+  }
+
+  if (fix && invalidProjectDirs.length > 0) {
+    const migration = migrateInvalidProjectNames(phrenPath);
+    const unresolved = migration.outcomes.filter((o) => o.action !== "renamed");
+    checks.push({
+      name: "project-names-migrate",
+      ok: unresolved.length === 0,
+      detail: formatMigrationSummary(migration),
+    });
+  }
+
+  if (fix && profile && profileFile) {
+    await runLink(phrenPath, { machine, profile });
+    checks.push({ name: "self-heal", ok: true, detail: "relinked hooks, symlinks, context, memory pointers" });
+  } else if (fix) {
+    checks.push({ name: "self-heal", ok: false, detail: "relink blocked: machine/profile not fully configured" });
+  }
+
+  const detected = detectInstalledTools();
+  if (detected.has("copilot")) {
+    const copilotHooks = hookConfigPath("copilot", phrenPath);
+    const copilotWritable = nearestWritableTarget(copilotHooks);
+    checks.push({
+      name: "copilot-hooks",
+      ok: fs.existsSync(copilotHooks),
+      detail: fs.existsSync(copilotHooks) ? "copilot hooks config present" : "missing copilot hooks config",
+    });
+    checks.push({
+      name: "copilot-config-writable",
+      ok: copilotWritable,
+      detail: copilotWritable ? `writable: ${copilotHooks}` : `not writable: ${copilotHooks}`,
+    });
+  }
+  if (detected.has("cursor")) {
+    const cursorHooks = hookConfigPath("cursor", phrenPath);
+    const cursorWritable = nearestWritableTarget(cursorHooks);
+    checks.push({
+      name: "cursor-hooks",
+      ok: fs.existsSync(cursorHooks),
+      detail: fs.existsSync(cursorHooks) ? "cursor hooks config present" : "missing ~/.cursor/hooks.json",
+    });
+    checks.push({
+      name: "cursor-config-writable",
+      ok: cursorWritable,
+      detail: cursorWritable ? `writable: ${cursorHooks}` : `not writable: ${cursorHooks}`,
+    });
+  }
+  if (detected.has("codex")) {
+    const codexHooks = hookConfigPath("codex", phrenPath);
+    const codexWritable = nearestWritableTarget(codexHooks);
+    checks.push({
+      name: "codex-hooks",
+      ok: fs.existsSync(codexHooks),
+      detail: fs.existsSync(codexHooks) ? "codex hooks config present" : "missing codex hooks config in phren root",
+    });
+    checks.push({
+      name: "codex-config-writable",
+      ok: codexWritable,
+      detail: codexWritable ? `writable: ${codexHooks}` : `not writable: ${codexHooks}`,
+    });
+  }
+  for (const tool of ["copilot", "cursor", "codex"]) {
+    // A tool can count as detected from its config folder alone (Copilot's
+    // ~/.copilot, say); a wrapper only makes sense around a binary on PATH.
+    if (!detected.has(tool) || !commandExists(tool)) continue;
+    checks.push(wrapperCheck(tool, wrapperState(tool)));
+  }
+  checks.push(wrapperCheck("phren", wrapperState("phren")));
+
+  if (!fix) {
+    // Read-only mode: just check if hook configs exist, don't write anything
+    const detectedTools = detected;
+    const hookChecks: string[] = [];
+    const missing: string[] = [];
+    for (const tool of detectedTools) {
+      let configPath = "";
+      if (tool === "copilot" || tool === "cursor" || tool === "codex") {
+        configPath = hookConfigPath(tool, phrenPath);
+      }
+      if (configPath && fs.existsSync(configPath)) hookChecks.push(tool);
+      else if (configPath) missing.push(tool);
+    }
+    checks.push({
+      name: "hooks",
+      ok: missing.length === 0,
+      detail: hookChecks.length
+        ? `hook configs present for: ${hookChecks.join(", ")}${missing.length ? `; missing: ${missing.join(", ")}` : ""}`
+        : detectedTools.size === 0
+          ? "no external tools detected"
+          : `missing hook configs for: ${missing.join(", ")}`,
+    });
+  }
+
+  if (checkData) {
+    const governanceChecks: Array<{ file: string; schema: "retention-policy" | "workflow-policy" | "index-policy" }> = [
+      { file: "retention-policy.json", schema: "retention-policy" },
+      { file: "workflow-policy.json", schema: "workflow-policy" },
+      { file: "index-policy.json", schema: "index-policy" },
+    ];
+
+    for (const item of governanceChecks) {
+      const filePath = path.join(phrenPath, ".config", item.file);
+      const exists = fs.existsSync(filePath);
+      const valid = exists ? validateGovernanceJson(filePath, item.schema) : false;
+      checks.push({
+        name: `data:governance:${item.file}`,
+        ok: exists && valid,
+        detail: !exists ? "missing governance file" : valid ? "valid" : "invalid JSON/schema",
+      });
+    }
+
+    const runtimeChecks = [
+      { filePath: runtimeHealthFile(phrenPath), name: "data:runtime:runtime-health.json" },
+    ];
+    for (const item of runtimeChecks) {
+      const exists = fs.existsSync(item.filePath);
+      checks.push({
+        name: item.name,
+        ok: exists,
+        detail: exists ? "present" : "missing runtime file",
+      });
+    }
+
+    for (const projectDir of getProjectDirs(phrenPath, profile)) {
+      const projectName = path.basename(projectDir);
+      if (projectName === "global") continue;
+
+      const taskPath = resolveTaskFilePath(phrenPath, projectName);
+      if (taskPath && fs.existsSync(taskPath)) {
+        const content = fs.readFileSync(taskPath, "utf8");
+        const issues = validateTaskFormat(content);
+        checks.push({
+          name: `data:tasks:${projectName}`,
+          ok: issues.length === 0,
+          detail: issues.length ? issues.join("; ") : "valid task file",
+        });
+
+        const repoPath = findProjectDir(projectName);
+        const hygiene = inspectTaskHygiene(phrenPath, projectName, repoPath);
+        checks.push({
+          name: `data:task-hygiene:${projectName}`,
+          ok: hygiene.ok,
+          detail: hygiene.detail,
+        });
+      }
+
+      const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
+      if (fs.existsSync(findingsPath)) {
+        const content = fs.readFileSync(findingsPath, "utf8");
+        const issues = validateFindingsFormat(content);
+        checks.push({
+          name: `data:findings:${projectName}`,
+          ok: issues.length === 0,
+          detail: issues.length ? issues.join("; ") : "valid",
+        });
+      }
+    }
+
+    // Detect conflict markers in project markdown files
+    for (const projectDir of getProjectDirs(phrenPath, profile)) {
+      const projectName = path.basename(projectDir);
+      if (projectName === "global") continue;
+
+      for (const mdFile of [FINDINGS_FILENAME, ...TASK_FILE_ALIASES, "review.md", "AGENTS.md", "REFERENCE.md"]) {
+        const filePath = path.join(projectDir, mdFile);
+        if (!fs.existsSync(filePath)) continue;
+        const content = fs.readFileSync(filePath, "utf8");
+        const hasConflict = /^<{7} |^={7}$|^>{7} /m.test(content);
+        if (hasConflict) {
+          checks.push({
+            name: `data:conflict-markers:${projectName}/${mdFile}`,
+            ok: false,
+            detail: `${projectName}/${mdFile} contains git conflict markers`,
+          });
+        }
+      }
+    }
+
+    // Validate skill frontmatter in global/skills under phren data dir
+    const globalSkillsDir = path.join(phrenPath, "global", "skills");
+    const skillResults = validateSkillsDir(fs.existsSync(globalSkillsDir) ? globalSkillsDir : path.join(phrenPath, "global"));
+    const invalidSkills = skillResults.filter(r => !r.valid);
+    checks.push({
+      name: "data:skills-frontmatter",
+      ok: invalidSkills.length === 0,
+      detail: invalidSkills.length
+        ? `${invalidSkills.length} skill(s) with invalid frontmatter: ${invalidSkills.flatMap(r => r.errors).join("; ")}`
+        : `${skillResults.length} skill(s) validated`,
+    });
+
+    // Validate phren.SKILL.md manifest
+    const manifestPath = path.join(phrenPath, "phren.SKILL.md");
+    if (fs.existsSync(manifestPath)) {
+      const manifestResult = validateSkillFrontmatter(fs.readFileSync(manifestPath, "utf8"), manifestPath);
+      checks.push({
+        name: "data:skill-manifest",
+        ok: manifestResult.valid,
+        detail: manifestResult.valid ? "phren.SKILL.md frontmatter valid" : manifestResult.errors.join("; "),
+      });
+    }
+
+    // Verify file checksums
+    const checksumResults = verifyFileChecksums(phrenPath);
+    const mismatches = checksumResults.filter((r) => r.status === "mismatch");
+    const missingFiles = checksumResults.filter((r) => r.status === "missing");
+    if (checksumResults.length > 0) {
+      checks.push({
+        name: "data:file-checksums",
+        ok: mismatches.length === 0 && missingFiles.length === 0,
+        detail: mismatches.length || missingFiles.length
+          ? `${mismatches.length} mismatch(es), ${missingFiles.length} missing`
+          : `${checksumResults.length} file(s) verified`,
+      });
+    }
+
+    if (fix) {
+      updateFileChecksums(phrenPath, profile);
+    }
+  }
+
+  // Zombie blocked-task scan: pre-0.1.25 task lifecycle promoted tasks to Active
+  // and stamped them "Blocked: Command failed: git add -A" on transient git
+  // failures. Those tasks never resolve themselves. With --fix, archive them
+  // to Done with a phren-managed comment so they stop appearing in Active.
+  try {
+    const zombieResult = scanAndOptionallyFixZombieTasks(phrenPath, fix);
+    if (zombieResult.scanned > 0) {
+      const cleared = zombieResult.zombies === 0 || fix;
+      checks.push({
+        name: "zombie-blocked-tasks",
+        ok: cleared,
+        detail: zombieResult.zombies === 0
+          ? `0 zombie blocked tasks across ${zombieResult.scanned} project(s)`
+          : fix
+            ? `archived ${zombieResult.zombies} zombie task(s) across ${zombieResult.fixedProjects} project(s)`
+            : `${zombieResult.zombies} zombie blocked task(s) found across ${zombieResult.affectedProjects} project(s). Run \`phren doctor --fix\` to archive them.`,
+      });
+    }
+  } catch (err: unknown) {
+    debugLog(`doctor: zombie task scan failed: ${errorMessage(err)}`);
+  }
+
+  // `@path` import lines in store-managed AGENTS.md/CLAUDE.md resolve outside
+  // the repo (the repo file is a symlink into the store), so Claude Code blocks
+  // on its external-imports dialog. With --fix, rewrite them as plain mentions.
+  try {
+    const importHits = scanContextImports(phrenPath);
+    const fixedFiles = importHits.length && fix ? fixContextImports(phrenPath, importHits) : [];
+    const scopes = [...new Set(importHits.map((h) => h.scope))];
+    checks.push({
+      name: "context-imports",
+      ok: importHits.length === 0 || fixedFiles.length > 0,
+      detail: importHits.length === 0
+        ? "no @imports in managed AGENTS.md/CLAUDE.md"
+        : fixedFiles.length
+          ? `rewrote ${importHits.length} @import line(s) as plain references in ${fixedFiles.length} file(s) (${scopes.join(", ")})`
+          : `${importHits.length} @import line(s) in ${scopes.join(", ")} resolve outside the repo and trigger Claude Code's "Allow external CLAUDE.md file imports?" dialog. Run \`phren doctor --fix\` to rewrite them as plain references.`,
+    });
+  } catch (err: unknown) {
+    debugLog(`doctor: context-imports scan failed: ${errorMessage(err)}`);
+  }
+
+  // Spoken replies are optional, so only a stored key other users can read,
+  // or a broken file, fails the check. The key itself is never shown.
+  try {
+    const { speechKeyStatus } = await import("../bridge/speech-key.js");
+    const speech = await speechKeyStatus();
+    checks.push({ name: "speech-key", ok: !speech.problem, detail: `${speech.configured ? "configured" : "not configured"}: ${speech.detail}` });
+  } catch (err: unknown) {
+    debugLog(`doctor: speech-key check failed: ${errorMessage(err)}`);
+  }
+
+  const ok = checks.every((c) => c.ok);
+  return { ok, machine, profile: profile || undefined, checks };
+}
+
+interface ZombieScanResult {
+  scanned: number;
+  affectedProjects: number;
+  fixedProjects: number;
+  zombies: number;
+}
+
+const ZOMBIE_BLOCKED_CONTEXT_RE = /^\s*Context:\s*Blocked:\s*Command failed:\s*git\s+(?:add|commit|push|stage|pull|fetch|stash)\b/i;
+
+function scanAndOptionallyFixZombieTasks(phrenPath: string, fix: boolean): ZombieScanResult {
+  const result: ZombieScanResult = { scanned: 0, affectedProjects: 0, fixedProjects: 0, zombies: 0 };
+  const projectDirs = getProjectDirs(phrenPath);
+  for (const project of projectDirs) {
+    const filePath = resolveTaskFilePath(phrenPath, project);
+    if (!filePath || !fs.existsSync(filePath)) continue;
+    result.scanned += 1;
+    const original = fs.readFileSync(filePath, "utf8");
+    const lines = original.split("\n");
+    // Walk in Active section; find task lines whose next line is a zombie Context.
+    let section: string | null = null;
+    const zombieIndices: number[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const heading = line.match(/^##\s+(\w+)/);
+      if (heading) {
+        section = heading[1];
+        continue;
+      }
+      if (section !== "Active") continue;
+      if (!/^- \[ \]/.test(line)) continue;
+      const next = lines[i + 1];
+      if (next && ZOMBIE_BLOCKED_CONTEXT_RE.test(next)) {
+        zombieIndices.push(i);
+      }
+    }
+    if (zombieIndices.length === 0) continue;
+    result.affectedProjects += 1;
+    result.zombies += zombieIndices.length;
+    if (!fix) continue;
+
+    // Build edited file: move zombie tasks (and their Context line) to ## Done.
+    // Mark them [x] and prepend "(phren: archived zombie git-failure block)".
+    const archived: string[] = [];
+    const keepLines: string[] = [];
+    section = null;
+    let insertDoneAfter: number | null = null;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const heading = line.match(/^##\s+(\w+)/);
+      if (heading) {
+        section = heading[1];
+        if (section === "Done") insertDoneAfter = keepLines.length;
+        keepLines.push(line);
+        continue;
+      }
+      if (section === "Active" && zombieIndices.includes(i)) {
+        const taskLine = line.replace(/^- \[ \]/, "- [x]");
+        archived.push(`${taskLine}  <!-- phren: archived zombie git-failure block -->`);
+        // Carry Context line if present.
+        const next = lines[i + 1];
+        if (next && ZOMBIE_BLOCKED_CONTEXT_RE.test(next)) {
+          archived.push(next);
+          i += 1;
+        }
+        continue;
+      }
+      keepLines.push(line);
+    }
+    if (archived.length > 0 && insertDoneAfter !== null) {
+      // Insert the archived block right after `## Done` heading (and the blank line).
+      const before = keepLines.slice(0, insertDoneAfter + 1);
+      const after = keepLines.slice(insertDoneAfter + 1);
+      const archivedBlock = ["", ...archived];
+      const next = [...before, ...archivedBlock, ...after].join("\n");
+      fs.writeFileSync(filePath, next, "utf8");
+      result.fixedProjects += 1;
+    }
+  }
+  return result;
+}

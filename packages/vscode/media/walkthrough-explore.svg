@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300" fill="none">
+  <style>
+    .outline { stroke: var(--vscode-foreground, #cccccc); fill: none; }
+    .text-fill { fill: var(--vscode-foreground, #cccccc); }
+    .subtle { stroke: var(--vscode-foreground, #cccccc); opacity: 0.3; }
+    .purple-fill { fill: #5D43F3; }
+    .purple-light-fill { fill: #9B8EF8; }
+    .cyan-fill { fill: #28D3F2; }
+    .purple-stroke { stroke: #5D43F3; fill: none; }
+    .cyan-stroke { stroke: #28D3F2; fill: none; }
+  </style>
+
+  <!-- Sidebar panel frame -->
+  <rect x="110" y="40" width="180" height="200" rx="8" class="outline" stroke-width="2" />
+
+  <!-- Header bar -->
+  <rect x="110" y="40" width="180" height="32" rx="8" class="outline" stroke-width="2" />
+  <rect x="110" y="56" width="180" height="16" fill="var(--vscode-foreground, #cccccc)" opacity="0.04" />
+  <text x="200" y="61" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="600" class="text-fill" opacity="0.7">PHREN</text>
+
+  <!-- Tree items -->
+  <!-- Item 1: expanded section -->
+  <g transform="translate(128, 92)">
+    <polygon points="0,0 8,5 0,10" class="purple-fill" opacity="0.8" />
+    <rect x="14" y="1" width="8" height="8" rx="1.5" class="purple-fill" opacity="0.6" />
+    <line x1="28" y1="5" x2="80" y2="5" stroke="var(--vscode-foreground, #cccccc)" stroke-width="2" stroke-linecap="round" opacity="0.5" />
+  </g>
+
+  <!-- Item 1a: child -->
+  <g transform="translate(148, 114)">
+    <circle cx="4" cy="5" r="3" class="cyan-fill" opacity="0.6" />
+    <line x1="14" y1="5" x2="55" y2="5" stroke="var(--vscode-foreground, #cccccc)" stroke-width="2" stroke-linecap="round" opacity="0.35" />
+  </g>
+
+  <!-- Item 1b: child -->
+  <g transform="translate(148, 134)">
+    <circle cx="4" cy="5" r="3" class="cyan-fill" opacity="0.6" />
+    <line x1="14" y1="5" x2="70" y2="5" stroke="var(--vscode-foreground, #cccccc)" stroke-width="2" stroke-linecap="round" opacity="0.35" />
+  </g>
+
+  <!-- Item 1c: child (highlighted/selected) -->
+  <g transform="translate(148, 154)">
+    <rect x="-12" y="-4" width="130" height="18" rx="3" class="purple-fill" opacity="0.12" />
+    <circle cx="4" cy="5" r="3" class="purple-fill" opacity="0.8" />
+    <line x1="14" y1="5" x2="62" y2="5" stroke="#5D43F3" stroke-width="2" stroke-linecap="round" opacity="0.7" />
+  </g>
+
+  <!-- Item 2: collapsed section -->
+  <g transform="translate(128, 180)">
+    <polygon points="0,0 8,5 0,10" class="text-fill" opacity="0.4" transform="rotate(0)" />
+    <rect x="14" y="1" width="8" height="8" rx="1.5" stroke="var(--vscode-foreground, #cccccc)" stroke-width="1.5" fill="none" opacity="0.4" />
+    <line x1="28" y1="5" x2="90" y2="5" stroke="var(--vscode-foreground, #cccccc)" stroke-width="2" stroke-linecap="round" opacity="0.3" />
+  </g>
+
+  <!-- Item 3: collapsed section -->
+  <g transform="translate(128, 204)">
+    <polygon points="0,0 8,5 0,10" class="text-fill" opacity="0.4" />
+    <rect x="14" y="1" width="8" height="8" rx="1.5" stroke="var(--vscode-foreground, #cccccc)" stroke-width="1.5" fill="none" opacity="0.4" />
+    <line x1="28" y1="5" x2="75" y2="5" stroke="var(--vscode-foreground, #cccccc)" stroke-width="2" stroke-linecap="round" opacity="0.3" />
+  </g>
+
+  <!-- Cursor pointer near the highlighted item -->
+  <g transform="translate(300, 148)">
+    <path d="M0 0 L0 20 L6 15 L12 22 L15 20 L9 13 L16 12 Z" class="cyan-fill" opacity="0.7" />
+    <path d="M0 0 L0 20 L6 15 L12 22 L15 20 L9 13 L16 12 Z" class="cyan-stroke" stroke-width="1.5" />
+  </g>
+
+  <!-- Decorative dots -->
+  <circle cx="90" cy="80" r="2.5" class="purple-light-fill" opacity="0.3" />
+  <circle cx="310" cy="100" r="3" class="cyan-fill" opacity="0.25" />
+  <circle cx="95" cy="200" r="2" class="purple-light-fill" opacity="0.35" />
+
+  <!-- Label -->
+  <text x="200" y="270" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="600" class="text-fill">Explore the Sidebar</text>
+  <text x="200" y="292" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" class="text-fill" opacity="0.6">Browse projects, tasks &amp; findings</text>
+</svg>

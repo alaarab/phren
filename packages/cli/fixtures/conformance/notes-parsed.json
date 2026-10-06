@@ -1,0 +1,20 @@
+[
+  {
+    "id": "nid:5588c05d",
+    "stableId": "5588c05d",
+    "project": "myproj",
+    "date": "2026-07-25",
+    "time": "15:00:00",
+    "text": "Second note, single line",
+    "promoted": false
+  },
+  {
+    "id": "nid:688893f1",
+    "stableId": "688893f1",
+    "project": "myproj",
+    "date": "2026-07-25",
+    "time": "14:30:05",
+    "text": "First note, edited",
+    "promoted": true
+  }
+]

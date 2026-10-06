@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300" fill="none">
+  <style>
+    .outline { stroke: var(--vscode-foreground, #cccccc); fill: none; }
+    .text-fill { fill: var(--vscode-foreground, #cccccc); }
+    .purple-fill { fill: #5D43F3; }
+    .purple-light-fill { fill: #9B8EF8; }
+    .cyan-fill { fill: #28D3F2; }
+    .purple-stroke { stroke: #5D43F3; fill: none; }
+    .cyan-stroke { stroke: #28D3F2; fill: none; }
+  </style>
+
+  <!-- Folder back -->
+  <path d="M120 85 L120 75 C120 71, 123 68, 127 68 L170 68 C173 68, 175 69, 177 71 L187 81 C189 83, 191 85, 195 85 L273 85 C277 85, 280 88, 280 92 L280 85" class="outline" stroke-width="2.5" />
+
+  <!-- Folder body -->
+  <rect x="120" y="85" width="160" height="110" rx="6" class="outline" stroke-width="2.5" />
+
+  <!-- Purple tint on folder -->
+  <rect x="123" y="88" width="154" height="104" rx="4" class="purple-fill" opacity="0.08" />
+
+  <!-- Plus sign in circle -->
+  <circle cx="200" cy="140" r="24" stroke="#5D43F3" stroke-width="2.5" fill="none" />
+  <circle cx="200" cy="140" r="24" class="purple-fill" opacity="0.12" />
+  <line x1="200" y1="127" x2="200" y2="153" stroke="#5D43F3" stroke-width="3" stroke-linecap="round" />
+  <line x1="187" y1="140" x2="213" y2="140" stroke="#5D43F3" stroke-width="3" stroke-linecap="round" />
+
+  <!-- Checkmark floating top-right -->
+  <g transform="translate(295, 70)">
+    <circle cx="0" cy="0" r="16" class="cyan-fill" opacity="0.15" />
+    <circle cx="0" cy="0" r="16" class="cyan-stroke" stroke-width="2" />
+    <polyline points="-7,0 -2,6 8,-5" class="cyan-stroke" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+
+  <!-- Small decorative elements -->
+  <circle cx="100" cy="110" r="3" class="purple-light-fill" opacity="0.4" />
+  <circle cx="305" cy="170" r="2.5" class="cyan-fill" opacity="0.3" />
+  <circle cx="95" cy="175" r="2" class="purple-light-fill" opacity="0.3" />
+
+  <!-- Label -->
+  <text x="200" y="235" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="600" class="text-fill">Add Your First Project</text>
+  <text x="200" y="257" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" class="text-fill" opacity="0.6">Start tracking a project</text>
+</svg>

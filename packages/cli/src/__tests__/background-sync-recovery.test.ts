@@ -1,0 +1,243 @@
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
+import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
+
+const RECOVERY_TEST_TIMEOUT_MS = process.platform === "win32" ? 20000 : 10000;
+
+function git(cwd: string, args: string[], encoding: "utf8" | null = null): string {
+  return execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"], encoding: encoding ?? undefined as any }).toString();
+}
+
+function currentBranch(repo: string): string {
+  return git(repo, ["branch", "--show-current"], "utf8").trim();
+}
+
+function checkoutRemoteBranch(repo: string, branch: string) {
+  execFileSync("git", ["fetch", "origin", branch], { cwd: repo, stdio: "ignore" });
+  execFileSync("git", ["checkout", "-B", branch, `origin/${branch}`], { cwd: repo, stdio: "ignore" });
+  execFileSync("git", ["branch", "--set-upstream-to", `origin/${branch}`, branch], { cwd: repo, stdio: "ignore" });
+}
+
+function configureRepo(repo: string) {
+  execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: repo, stdio: "ignore" });
+  execFileSync("git", ["config", "user.name", "test"], { cwd: repo, stdio: "ignore" });
+}
+
+describe("handleBackgroundSync", () => {
+  let tmp: { path: string; cleanup: () => void };
+  const origPhrenPath = process.env.PHREN_PATH;
+
+  beforeEach(() => {
+    tmp = makeTempDir("phren-bg-sync-");
+    execFileSync("git", ["init"], { cwd: tmp.path, stdio: "ignore" });
+    fs.mkdirSync(path.join(tmp.path, ".config"), { recursive: true });
+    initTestPhrenRoot(tmp.path);
+    process.env.PHREN_PATH = tmp.path;
+  });
+
+  afterEach(() => {
+    if (origPhrenPath === undefined) delete process.env.PHREN_PATH;
+    else process.env.PHREN_PATH = origPhrenPath;
+    tmp.cleanup();
+  });
+
+  it("records saved-local state when no remote is configured", async () => {
+    const { handleBackgroundSync } = await import("../cli/hooks-session.js");
+    await handleBackgroundSync();
+
+    const runtimePath = path.join(tmp.path, ".runtime", "runtime-health.json");
+    expect(fs.existsSync(runtimePath)).toBe(true);
+    const runtime = JSON.parse(fs.readFileSync(runtimePath, "utf8"));
+    expect(runtime.lastSync.lastPushStatus).toBe("saved-local");
+    expect(runtime.lastSync.lastPushDetail).toContain("no remote configured");
+  });
+});
+
+describe("handleBackgroundSync recovery", () => {
+  let tmp: { path: string; cleanup: () => void };
+  const origPhrenPath = process.env.PHREN_PATH;
+
+  beforeEach(() => {
+    tmp = makeTempDir("phren-bg-sync-recovery-");
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    if (origPhrenPath === undefined) delete process.env.PHREN_PATH;
+    else process.env.PHREN_PATH = origPhrenPath;
+    tmp.cleanup();
+  });
+
+  it("recovers from non-fast-forward push by pull-rebase and retrying push", async () => {
+    const remote = path.join(tmp.path, "remote.git");
+    const repoA = path.join(tmp.path, "repo-a");
+    const repoB = path.join(tmp.path, "repo-b");
+
+    execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+    execFileSync("git", ["clone", remote, repoA], { stdio: "ignore" });
+    execFileSync("git", ["clone", remote, repoB], { stdio: "ignore" });
+    configureRepo(repoA);
+    configureRepo(repoB);
+    initTestPhrenRoot(repoA);
+
+    fs.mkdirSync(path.join(repoA, "demo"), { recursive: true });
+    fs.writeFileSync(path.join(repoA, "demo", "tasks.md"), "# task\n\n## Active\n\n- Base task\n");
+    execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "base"], { cwd: repoA, stdio: "ignore" });
+    const primaryBranch = currentBranch(repoA);
+    execFileSync("git", ["push", "-u", "origin", primaryBranch], { cwd: repoA, stdio: "ignore" });
+
+    checkoutRemoteBranch(repoB, primaryBranch);
+
+    fs.writeFileSync(path.join(repoA, "demo", "tasks.md"), "# task\n\n## Active\n\n- Base task\n- Remote task\n");
+    execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "remote"], { cwd: repoA, stdio: "ignore" });
+    execFileSync("git", ["push"], { cwd: repoA, stdio: "ignore" });
+
+    fs.writeFileSync(path.join(repoB, "demo", "summary.md"), "# summary\n\nlocal only\n");
+    execFileSync("git", ["add", "."], { cwd: repoB, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "local"], { cwd: repoB, stdio: "ignore" });
+
+    process.env.PHREN_PATH = repoB;
+    const { handleBackgroundSync } = await import("../cli/hooks-session.js");
+    await handleBackgroundSync();
+
+    execFileSync("git", ["pull", "--quiet"], { cwd: repoA, stdio: "ignore" });
+    const summary = fs.readFileSync(path.join(repoA, "demo", "summary.md"), "utf8");
+    expect(summary).toContain("local only");
+
+    const runtime = JSON.parse(fs.readFileSync(path.join(repoB, ".runtime", "runtime-health.json"), "utf8"));
+    expect(runtime.lastSync.lastPushStatus).toBe("saved-pushed");
+    expect(runtime.lastSync.lastPullStatus).toBe("ok");
+    expect(runtime.lastSync).toMatchObject({ ahead: 0, behind: 0 });
+    expect(fs.readFileSync(path.join(repoB, ".runtime", "background-sync.log"), "utf8"))
+      .toMatch(/background-sync: ok saved-pushed: commit pushed after merging remote changes \(ahead 0, behind 0\)\n/);
+  }, RECOVERY_TEST_TIMEOUT_MS);
+
+  it("keeps commits local when the remote becomes unavailable", async () => {
+    const remote = path.join(tmp.path, "remote-down.git");
+    const repo = path.join(tmp.path, "repo-down");
+
+    execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+    execFileSync("git", ["clone", remote, repo], { stdio: "ignore" });
+    configureRepo(repo);
+    fs.mkdirSync(path.join(repo, ".config"), { recursive: true });
+    initTestPhrenRoot(repo);
+
+    fs.mkdirSync(path.join(repo, "demo"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "demo", "summary.md"), "# summary\n\nbase\n");
+    execFileSync("git", ["add", "."], { cwd: repo, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "base"], { cwd: repo, stdio: "ignore" });
+    execFileSync("git", ["push", "-u", "origin", currentBranch(repo)], { cwd: repo, stdio: "ignore" });
+
+    fs.rmSync(remote, { recursive: true, force: true });
+
+    fs.writeFileSync(path.join(repo, "demo", "summary.md"), "# summary\n\nlocal after remote loss\n");
+    execFileSync("git", ["add", "."], { cwd: repo, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "local"], { cwd: repo, stdio: "ignore" });
+
+    process.env.PHREN_PATH = repo;
+    const { handleBackgroundSync } = await import("../cli/hooks-session.js");
+    await handleBackgroundSync();
+
+    expect(git(repo, ["log", "--oneline", "-1"], "utf8")).toContain("local");
+    expect(fs.existsSync(path.join(repo, ".runtime", "background-sync.lock"))).toBe(false);
+  }, RECOVERY_TEST_TIMEOUT_MS);
+
+  it("aborts rebase and leaves commit local when conflicts require manual resolution", async () => {
+    const remote = path.join(tmp.path, "remote-manual.git");
+    const repoA = path.join(tmp.path, "repo-manual-a");
+    const repoB = path.join(tmp.path, "repo-manual-b");
+    // CLAUDE.md has no conflict strategy (summary.md takes the incoming side), so this needs a person.
+
+    execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+    execFileSync("git", ["clone", remote, repoA], { stdio: "ignore" });
+    execFileSync("git", ["clone", remote, repoB], { stdio: "ignore" });
+    configureRepo(repoA);
+    configureRepo(repoB);
+    fs.mkdirSync(path.join(repoA, ".config"), { recursive: true });
+    fs.mkdirSync(path.join(repoB, ".config"), { recursive: true });
+    initTestPhrenRoot(repoA);
+
+    fs.mkdirSync(path.join(repoA, "demo"), { recursive: true });
+    fs.writeFileSync(path.join(repoA, "demo", "CLAUDE.md"), "# summary\n\nshared line\n");
+    execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "base"], { cwd: repoA, stdio: "ignore" });
+    const primaryBranch = currentBranch(repoA);
+    execFileSync("git", ["push", "-u", "origin", primaryBranch], { cwd: repoA, stdio: "ignore" });
+    checkoutRemoteBranch(repoB, primaryBranch);
+
+    fs.writeFileSync(path.join(repoA, "demo", "CLAUDE.md"), "# summary\n\nremote change\n");
+    execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "remote"], { cwd: repoA, stdio: "ignore" });
+    execFileSync("git", ["push"], { cwd: repoA, stdio: "ignore" });
+
+    fs.writeFileSync(path.join(repoB, "demo", "CLAUDE.md"), "# summary\n\nlocal conflicting change\n");
+    execFileSync("git", ["add", "."], { cwd: repoB, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "local"], { cwd: repoB, stdio: "ignore" });
+
+    process.env.PHREN_PATH = repoB;
+    const { handleBackgroundSync } = await import("../cli/hooks-session.js");
+    await handleBackgroundSync();
+
+    expect(git(repoB, ["log", "--oneline", "-1"], "utf8")).toContain("local");
+    expect(fs.existsSync(path.join(repoB, ".git", "rebase-merge"))).toBe(false);
+    expect(fs.existsSync(path.join(repoB, ".runtime", "background-sync.lock"))).toBe(false);
+    expect(fs.readFileSync(path.join(repoB, "demo", "CLAUDE.md"), "utf8")).toContain("local conflicting change");
+    expect(fs.readFileSync(path.join(repoB, "demo", "CLAUDE.md"), "utf8")).not.toContain("<<<<<<<");
+
+    // The failure keeps its reason and counts, in the log and where doctor reads them.
+    const runtime = JSON.parse(fs.readFileSync(path.join(repoB, ".runtime", "runtime-health.json"), "utf8"));
+    expect(runtime.lastAutoSave.status).toBe("sync-failed");
+    expect(runtime.lastSync).toMatchObject({ ahead: 1, behind: 1 });
+    const log = fs.readFileSync(path.join(repoB, ".runtime", "background-sync.log"), "utf8");
+    expect(log).toMatch(/background-sync: failed pull-failed: .+ \(ahead 1, behind 1\)\n/);
+    const { describeAutoSave } = await import("../sync/outcome.js");
+    expect(describeAutoSave(runtime.lastAutoSave, runtime.lastSync)).toMatch(/^sync failed: .+ \(ahead 1, behind 1\) @ /);
+  }, RECOVERY_TEST_TIMEOUT_MS);
+
+  it("auto-merges task conflicts without leaving merge markers behind", async () => {
+    const remote = path.join(tmp.path, "remote-task.git");
+    const repoA = path.join(tmp.path, "repo-task-a");
+    const repoB = path.join(tmp.path, "repo-task-b");
+
+    execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+    execFileSync("git", ["clone", remote, repoA], { stdio: "ignore" });
+    execFileSync("git", ["clone", remote, repoB], { stdio: "ignore" });
+    configureRepo(repoA);
+    configureRepo(repoB);
+    fs.mkdirSync(path.join(repoA, ".config"), { recursive: true });
+    fs.mkdirSync(path.join(repoB, ".config"), { recursive: true });
+    initTestPhrenRoot(repoA);
+
+    fs.mkdirSync(path.join(repoA, "demo"), { recursive: true });
+    fs.writeFileSync(path.join(repoA, "demo", "tasks.md"), "# demo task\n\n## Active\n\n- [ ] Base task\n\n## Queue\n\n## Done\n");
+    execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "base"], { cwd: repoA, stdio: "ignore" });
+    const primaryBranch = currentBranch(repoA);
+    execFileSync("git", ["push", "-u", "origin", primaryBranch], { cwd: repoA, stdio: "ignore" });
+    checkoutRemoteBranch(repoB, primaryBranch);
+
+    fs.writeFileSync(path.join(repoA, "demo", "tasks.md"), "# demo task\n\n## Active\n\n- [ ] Base task\n- [ ] Remote task\n\n## Queue\n\n## Done\n");
+    execFileSync("git", ["add", "."], { cwd: repoA, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "remote task"], { cwd: repoA, stdio: "ignore" });
+    execFileSync("git", ["push"], { cwd: repoA, stdio: "ignore" });
+
+    fs.writeFileSync(path.join(repoB, "demo", "tasks.md"), "# demo task\n\n## Active\n\n- [ ] Base task\n- [ ] Local task\n\n## Queue\n\n## Done\n");
+    execFileSync("git", ["add", "."], { cwd: repoB, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "local task"], { cwd: repoB, stdio: "ignore" });
+
+    process.env.PHREN_PATH = repoB;
+    const { handleBackgroundSync } = await import("../cli/hooks-session.js");
+    await handleBackgroundSync();
+
+    execFileSync("git", ["pull", "--quiet"], { cwd: repoA, stdio: "ignore" });
+    const task = fs.readFileSync(path.join(repoA, "demo", "tasks.md"), "utf8");
+    expect(task).toContain("Remote task");
+    expect(task).toContain("Local task");
+    expect(task).not.toContain("<<<<<<<");
+  }, RECOVERY_TEST_TIMEOUT_MS);
+
+});

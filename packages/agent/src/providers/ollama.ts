@@ -1,0 +1,190 @@
+import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta } from "./types.js";
+import { IncompleteStreamError, toolResultText } from "./types.js";
+import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
+import { lookupContextWindow } from "../models.js";
+
+const PROVIDER_NAME = "ollama";
+
+/** Convert Anthropic tool defs to OpenAI function format (Ollama uses OpenAI-compat). */
+function toOllamaTools(tools: AgentToolDef[]) {
+  return tools.map((t) => ({
+    type: "function" as const,
+    function: { name: t.name, description: t.description, parameters: t.input_schema },
+  }));
+}
+
+function toOllamaMessages(system: string, messages: LlmMessage[]) {
+  const out: Record<string, unknown>[] = [{ role: "system", content: system }];
+  // Reasoning is display-only for Ollama: local models regenerate their own
+  // thinking each turn, so history drops it entirely (own and foreign).
+  for (const msg of stripForeignReasoning(messages, undefined)) {
+    if (typeof msg.content === "string") {
+      out.push({ role: msg.role, content: msg.content });
+    } else {
+      for (const block of msg.content) {
+        if (block.type === "text") {
+          out.push({ role: msg.role, content: block.text });
+        } else if (block.type === "tool_result") {
+          // Text only: local models are text-only in this integration, so
+          // image parts degrade to a marker rather than an unsendable body.
+          const text = toolResultText(block);
+          const hasImages = Array.isArray(block.content) && block.content.some((c) => c.type === "image");
+          out.push({
+            role: "tool",
+            tool_call_id: block.tool_use_id,
+            content: hasImages ? `${text}\n${IMAGE_OMITTED_MARKER}` : text,
+          });
+        } else if (block.type === "tool_use") {
+          out.push({
+            role: "assistant",
+            tool_calls: [{ id: block.id, type: "function", function: { name: block.name, arguments: JSON.stringify(block.input) } }],
+          });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+export class OllamaProvider implements LlmProvider {
+  name = PROVIDER_NAME;
+  contextWindow: number;
+  maxOutputTokens: number;
+  readonly baseUrl: string;
+  model: string;
+
+  constructor(model?: string, baseUrl?: string, maxOutputTokens?: number) {
+    this.baseUrl = baseUrl ?? "http://localhost:11434";
+    this.model = model ?? "qwen2.5-coder:14b";
+    this.maxOutputTokens = maxOutputTokens ?? 8192;
+    this.contextWindow = lookupContextWindow(this.model, this.name);
+  }
+
+  /** Thinking models (deepseek-r1 etc.) need think:true to separate reasoning from answer. */
+  private supportsThinking(): boolean {
+    return /deepseek-r1|qwen3|gpt-oss/i.test(this.model);
+  }
+
+  async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {
+    const body: Record<string, unknown> = {
+      model: this.model,
+      messages: toOllamaMessages(system, messages),
+      options: { num_predict: this.maxOutputTokens },
+      stream: false,
+    };
+    if (this.supportsThinking()) body.think = true;
+    if (tools.length > 0) body.tools = toOllamaTools(tools);
+
+    const res = await fetch(`${this.baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Ollama API error ${res.status}: ${text}`);
+    }
+
+    const data = await res.json() as Record<string, unknown>;
+    const message = data.message as Record<string, unknown> | undefined;
+    const content: ContentBlock[] = [];
+
+    if (message?.thinking && typeof message.thinking === "string") {
+      content.push({ type: "reasoning", text: message.thinking, provider: PROVIDER_NAME });
+    }
+
+    if (message?.content && typeof message.content === "string") {
+      content.push({ type: "text", text: message.content });
+    }
+
+    const toolCalls = message?.tool_calls as Record<string, unknown>[] | undefined;
+    if (toolCalls) {
+      for (let i = 0; i < toolCalls.length; i++) {
+        const fn = toolCalls[i].function as Record<string, unknown>;
+        content.push({
+          type: "tool_use",
+          id: `call_${i}`,
+          name: fn.name as string,
+          input: typeof fn.arguments === "string" ? JSON.parse(fn.arguments) : fn.arguments as Record<string, unknown>,
+        });
+      }
+    }
+
+    const stop_reason = toolCalls && toolCalls.length > 0 ? "tool_use" : "end_turn";
+    return { content, stop_reason };
+  }
+
+  async *chatStream(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): AsyncIterable<StreamDelta> {
+    const body: Record<string, unknown> = {
+      model: this.model,
+      messages: toOllamaMessages(system, messages),
+      options: { num_predict: this.maxOutputTokens },
+      stream: true,
+    };
+    if (this.supportsThinking()) body.think = true;
+    if (tools.length > 0) body.tools = toOllamaTools(tools);
+
+    const res = await fetch(`${this.baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Ollama API error ${res.status}: ${text}`);
+    }
+
+    if (!res.body) throw new Error("Provider returned empty response body");
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let stopReason: LlmResponse["stop_reason"] = "end_turn";
+    let toolCallIndex = 0;
+    let finished = false;
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+
+      const lines = buf.split("\n");
+      buf = lines.pop()!;
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let chunk: Record<string, unknown>;
+        try { chunk = JSON.parse(line); } catch { continue; }
+
+        const message = chunk.message as Record<string, unknown> | undefined;
+        if (message?.thinking && typeof message.thinking === "string") {
+          yield { type: "reasoning_delta", text: message.thinking };
+        }
+        if (message?.content && typeof message.content === "string") {
+          yield { type: "text_delta", text: message.content };
+        }
+
+        // Ollama sends tool_calls in the final message (done=true)
+        const tcalls = message?.tool_calls as Record<string, unknown>[] | undefined;
+        if (tcalls) {
+          stopReason = "tool_use";
+          for (const tc of tcalls) {
+            const fn = tc.function as Record<string, unknown>;
+            const id = `call_${toolCallIndex++}`;
+            yield { type: "tool_use_start", id, name: fn.name as string };
+            yield { type: "tool_use_delta", id, json: JSON.stringify(typeof fn.arguments === "string" ? JSON.parse(fn.arguments) : fn.arguments) };
+            yield { type: "tool_use_end", id };
+          }
+        }
+
+        if (chunk.done === true) finished = true;
+      }
+    }
+
+    if (!finished) throw new IncompleteStreamError("Ollama stream ended before done");
+    yield { type: "done", stop_reason: stopReason };
+  }
+}

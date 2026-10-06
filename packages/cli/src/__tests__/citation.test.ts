@@ -1,0 +1,264 @@
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import {
+  buildCitationComment,
+  parseCitationComment,
+  buildSourceComment,
+  parseSourceComment,
+  isFindingProvenanceSource,
+  filterTrustedFindings,
+  filterTrustedFindingsDetailed,
+  type FindingCitation,
+  type FindingProvenance,
+} from "../content/citation.js";
+
+// ── isFindingProvenanceSource ──────────────────────────────────────────────
+
+describe("isFindingProvenanceSource", () => {
+  it("accepts all valid sources", () => {
+    for (const s of ["human", "agent", "hook", "extract", "consolidation", "unknown"]) {
+      expect(isFindingProvenanceSource(s)).toBe(true);
+    }
+    for (const s of ["robot", "", undefined]) {
+      expect(isFindingProvenanceSource(s)).toBe(false);
+    }
+  });
+});
+
+// ── buildCitationComment / parseCitationComment ────────────────────────────
+
+describe("citation comment round-trip", () => {
+  it("round-trips a full citation", () => {
+    const citation: FindingCitation = {
+      created_at: "2025-06-01",
+      repo: "/tmp/repo",
+      file: "src/main.ts",
+      line: 42,
+      commit: "abc123",
+      supersedes: "old pattern",
+      task_item: "Fix the login bug",
+    };
+    const comment = buildCitationComment(citation);
+    expect(comment).toContain("phren:cite");
+    expect(comment).toContain("2025-06-01");
+
+    const parsed = parseCitationComment(comment);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.created_at).toBe("2025-06-01");
+    expect(parsed!.repo).toBe("/tmp/repo");
+    expect(parsed!.file).toBe("src/main.ts");
+    expect(parsed!.line).toBe(42);
+    expect(parsed!.commit).toBe("abc123");
+    expect(parsed!.supersedes).toBe("old pattern");
+    expect(parsed!.task_item).toBe("Fix the login bug");
+
+    const minimal = parseCitationComment(buildCitationComment({ created_at: "2025-01-01" }));
+    expect(minimal).toEqual({ created_at: "2025-01-01" });
+  });
+});
+
+describe("parseCitationComment edge cases", () => {
+  it("returns null for non-citation lines", () => {
+    expect(parseCitationComment("- just a finding")).toBeNull();
+    expect(parseCitationComment("<!-- some other comment -->")).toBeNull();
+  });
+
+  it("returns null for malformed JSON", () => {
+    expect(parseCitationComment("<!-- phren:cite not-json -->")).toBeNull();
+    expect(parseCitationComment('<!-- phren:cite [1,2,3] -->')).toBeNull();
+    expect(parseCitationComment('<!-- phren:cite "string" -->')).toBeNull();
+  });
+
+  it("returns null when created_at is missing", () => {
+    expect(parseCitationComment('<!-- phren:cite {"file":"x.ts"} -->')).toBeNull();
+  });
+
+  it("ignores non-string repo/file/commit and non-number line", () => {
+    const comment = '<!-- phren:cite {"created_at":"2025-01-01","repo":123,"file":true,"commit":null,"line":"notnum"} -->';
+    const parsed = parseCitationComment(comment);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.repo).toBeUndefined();
+    expect(parsed!.file).toBeUndefined();
+    expect(parsed!.commit).toBeUndefined();
+    expect(parsed!.line).toBeUndefined();
+  });
+});
+
+// ── buildSourceComment / parseSourceComment ────────────────────────────────
+
+describe("source comment round-trip", () => {
+  it("round-trips all fields", () => {
+    const prov: FindingProvenance = {
+      source: "agent",
+      machine: "ci-box",
+      actor: "bot",
+      tool: "cursor",
+      model: "claude-3",
+      session_id: "s-abc",
+      scope: "project",
+    };
+    const comment = buildSourceComment(prov);
+    const parsed = parseSourceComment(`- Finding ${comment}`);
+    expect(parsed).toEqual(prov);
+  });
+
+  it("returns empty string for empty provenance", () => {
+    expect(buildSourceComment({})).toBe("");
+  });
+
+  it("parses partial provenance", () => {
+    const comment = buildSourceComment({ source: "hook", tool: "copilot" });
+    const parsed = parseSourceComment(`- ${comment}`);
+    expect(parsed!.source).toBe("hook");
+    expect(parsed!.tool).toBe("copilot");
+    expect(parsed!.machine).toBeUndefined();
+  });
+
+  it("returns null for lines without source comment", () => {
+    expect(parseSourceComment("- plain finding")).toBeNull();
+    // A source comment with no recognizable fields
+    expect(parseSourceComment("<!-- source: -->")).toBeNull();
+  });
+
+  it("handles scope with empty string as shared", () => {
+    const parsed = parseSourceComment('- Finding <!-- source:agent scope:"" -->');
+    expect(parsed).not.toBeNull();
+    expect(parsed!.scope).toBe("shared");
+  });
+});
+
+// ── filterTrustedFindings ──────────────────────────────────────────────────
+
+describe("filterTrustedFindings", () => {
+  it("strips archive blocks", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const content = [
+      "# Findings",
+      "",
+      `## ${today}`,
+      "- Active finding",
+      "<!-- phren:archive:start -->",
+      "- Archived old thing",
+      "<!-- phren:archive:end -->",
+      "",
+    ].join("\n");
+
+    const result = filterTrustedFindings(content, 120);
+    expect(result).toContain("Active finding");
+    expect(result).not.toContain("Archived old thing");
+  });
+
+  it("skips non-bullet lines", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const content = [
+      "# Findings",
+      "",
+      `## ${today}`,
+      "Some random paragraph text",
+      "- Actual finding",
+      "",
+    ].join("\n");
+
+    const result = filterTrustedFindings(content, 120);
+    expect(result).toContain("Actual finding");
+    expect(result).not.toContain("random paragraph");
+  });
+});
+
+describe("filterTrustedFindingsDetailed", () => {
+  it("reduces confidence for uncited findings", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const content = [
+      "# Findings",
+      "",
+      `## ${today}`,
+      "- Uncited finding",
+      "",
+    ].join("\n");
+
+    // Uncited findings get *0.8, so with minConfidence=0.9 it should be filtered
+    const { content: filtered } = filterTrustedFindingsDetailed(content, {
+      ttlDays: 365,
+      minConfidence: 0.9,
+    });
+    expect(filtered).not.toContain("Uncited finding");
+  });
+
+  it("uses inline created date when no heading date", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const content = [
+      "# Findings",
+      "",
+      `- Fresh finding <!-- created: ${today} -->`,
+      "",
+    ].join("\n");
+
+    const result = filterTrustedFindings(content, 120);
+    expect(result).toContain("Fresh finding");
+  });
+
+  it("uses citation created_at when no heading or inline date", () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const content = [
+      "# Findings",
+      "",
+      "- Cited finding",
+      `<!-- phren:cite {"created_at":"${today}"} -->`,
+      "",
+    ].join("\n");
+
+    const result = filterTrustedFindings(content, 120);
+    expect(result).toContain("Cited finding");
+  });
+
+  it("applies type-specific decay for context findings", () => {
+    // "context" has maxAgeDays: 30 (contextual facts decay fast), so a
+    // 40-day-old context finding should be filtered even though the general
+    // TTL below is nowhere close to expiring it.
+    // (This used to test "observation", which had a maxAgeDays: 14 row —
+    // that tag was dropped from FINDING_TYPE_DECAY because nothing ever
+    // produced it; "context" is the tag phren's auto-detector actually
+    // writes for this kind of short-lived note.)
+    const d = new Date();
+    d.setDate(d.getDate() - 40);
+    const date = d.toISOString().slice(0, 10);
+    const content = [
+      "# Findings",
+      "",
+      `## ${date}`,
+      "- [context] Temp debug log was present",
+      "",
+    ].join("\n");
+
+    const { content: filtered, issues } = filterTrustedFindingsDetailed(content, {
+      ttlDays: 365,
+    });
+    expect(filtered).not.toContain("Temp debug log");
+    expect(issues.some((i) => i.reason === "stale")).toBe(true);
+  });
+
+  it("decisions never decay below floor", () => {
+    // Decisions have maxAgeDays: Infinity and floor 0.6.
+    // At 200 days, base confidence is d120=0.45, but decision floor lifts to 0.6.
+    // Without citation (*0.8) and unknown source, effective = 0.48.
+    // Use minConfidence below that to verify the floor is applied.
+    const d = new Date();
+    d.setDate(d.getDate() - 200);
+    const date = d.toISOString().slice(0, 10);
+    const content = [
+      "# Findings",
+      "",
+      `## ${date}`,
+      "- [decision] We chose PostgreSQL over MySQL",
+      "",
+    ].join("\n");
+
+    const { content: filtered } = filterTrustedFindingsDetailed(content, {
+      ttlDays: 365,
+      minConfidence: 0.4,
+    });
+    expect(filtered).toContain("chose PostgreSQL");
+  });
+});

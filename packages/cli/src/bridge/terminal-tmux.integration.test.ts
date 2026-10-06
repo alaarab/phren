@@ -1,0 +1,228 @@
+// The tmux provider against a real tmux, on a private socket. Skipped when
+// this computer has no tmux.
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { chmod, mkdir, mkdtemp, realpath, rm, unlink, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { request } from "node:http";
+import { AgentHooks } from "./agent-hooks.js";
+import { localSocket } from "./agent-hook-stores.js";
+import { paneChatState, paneIdentity, snapshot, validateStartingTarget, validateTarget, workspaceSnapshot } from "./herdr.js";
+import { objects } from "./protocol.js";
+import type { ApprovalPushService } from "./push.js";
+import { launchSession, localConductor, stopConductor } from "./server-launch.js";
+import { conductorPane } from "./conductor-role.js";
+import { resetTmuxBinary, tmuxBinary, tmuxHealth, tmuxPaneFromEnv, tmuxServers, tmuxSnapshot, tmuxSocketFolders, tmuxTerminal, toTmuxId } from "./terminal-tmux.js";
+
+const saved = process.env.PHREN_TMUX;
+delete process.env.PHREN_TMUX;
+resetTmuxBinary();
+const binary = tmuxBinary();
+if (saved !== undefined) process.env.PHREN_TMUX = saved;
+const server = `tmux-phren-test-${process.pid}`;
+
+async function until<T>(read: () => Promise<T>, done: (value: T) => boolean, ms = 10_000): Promise<T> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const value = await read();
+    if (done(value) || Date.now() > deadline) return value;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+}
+
+/** A pane's dying login shell can still be writing as teardown runs; retry. */
+async function removeFolder(target: string): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try { await rm(target, { recursive: true, force: true }); return; }
+    catch { await new Promise(resolve => setTimeout(resolve, 100)); }
+  }
+  await rm(target, { recursive: true, force: true }).catch(() => undefined);
+}
+
+describe.skipIf(!binary || process.platform === "win32")("tmux provider on a real tmux", () => {
+  let folder: string;
+  const env = { PHREN_TMUX: process.env.PHREN_TMUX, SHELL: process.env.SHELL, PATH: process.env.PATH, HOME: process.env.HOME,
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, XDG_DATA_HOME: process.env.XDG_DATA_HOME, HISTFILE: process.env.HISTFILE,
+    PHREN_BRIDGE_HOME: process.env.PHREN_BRIDGE_HOME, PHREN_HERDR_HOME: process.env.PHREN_HERDR_HOME, PHREN_PATH: process.env.PHREN_PATH };
+  beforeAll(async () => {
+    delete process.env.PHREN_TMUX;
+    resetTmuxBinary();
+    folder = await realpath(await mkdtemp(path.join(tmpdir(), "phren-tmux-it-")));
+    // The Hook's own files, Herdr's (none) and the store stay in the test folder.
+    process.env.PHREN_BRIDGE_HOME = path.join(folder, "bridge");
+    process.env.PHREN_HERDR_HOME = path.join(folder, "herdr");
+    process.env.PHREN_PATH = path.join(folder, "store");
+    await mkdir(process.env.PHREN_BRIDGE_HOME, { recursive: true, mode: 0o700 });
+    // A throwaway home: the started agent's login shell (`sh -l`) must not read
+    // the owner's profile or mise config, which would put a real `claude` ahead
+    // of the stand-in below. With HOME and the XDG dirs inside the test folder,
+    // no user profile or mise activation is found.
+    const home = path.join(folder, "home");
+    await mkdir(path.join(home, ".config"), { recursive: true, mode: 0o700 });
+    await mkdir(path.join(home, ".local", "share"), { recursive: true, mode: 0o700 });
+    process.env.HOME = home;
+    process.env.XDG_CONFIG_HOME = path.join(home, ".config");
+    process.env.XDG_DATA_HOME = path.join(home, ".local", "share");
+    // The pane's fallback login shell writes history on exit; keep it out of
+    // the test home so cleanup is not racing a write.
+    process.env.HISTFILE = process.platform === "win32" ? path.join(home, ".history") : "/dev/null";
+    // A stand-in for Claude Code: a Node script named claude that echoes what it is sent.
+    // "DIALOG" draws Claude's permission dialog, as its auto-mode fallback
+    // does with no hook behind it; "CLEAR" clears the screen.
+    await writeFile(path.join(folder, "claude"), `#!${process.execPath}\nconst rl = require("node:readline").createInterface({ input: process.stdin });\n`
+      + `const dialog = ${JSON.stringify(CLAUDE_DIALOG)};\nprocess.stdout.write("fake claude ready\\n");\n`
+      + `rl.on("line", line => process.stdout.write(line === "DIALOG" ? dialog : line === "CLEAR" ? "\\x1b[2J\\x1b[H" : "got: " + line + "\\n"));\n`);
+    await chmod(path.join(folder, "claude"), 0o755);
+    // A stand-in for a fresh Codex: its startup menu (hooks to review), then,
+    // once "3" answers it, its composer. It sends no lifecycle event, as Codex
+    // holds SessionStart until the first turn, and sets a spinning title.
+    await writeFile(path.join(folder, "codex"), `#!${process.execPath}\nconst rl = require("node:readline").createInterface({ input: process.stdin });\n`
+      + `const menu = ${JSON.stringify(CODEX_MENU)}, composer = ${JSON.stringify(CODEX_COMPOSER)};\n`
+      + `process.stdout.write("\\x1b]0;\\u2838 Fix the tests\\x07" + menu);\nlet ready = false;\n`
+      + `rl.on("line", line => { if (!ready && line === "3") { ready = true; process.stdout.write("\\x1b[2J\\x1b[H" + composer); } else process.stdout.write("got: " + line + "\\n"); });\n`);
+    await chmod(path.join(folder, "codex"), 0o755);
+    process.env.SHELL = "/bin/sh";
+    process.env.PATH = `${folder}${path.delimiter}${process.env.PATH}`;
+  });
+  afterAll(async () => {
+    const socket = server.slice("tmux-".length);
+    try { execFileSync(binary!, ["-L", socket, "kill-server"], { stdio: "ignore" }); } catch { /* already gone */ }
+    // tmux can leave the socket file behind when the server is killed; remove
+    // it so a killed run does not seed the next one's stale-socket pile.
+    for (const dir of tmuxSocketFolders()) await unlink(path.join(dir, socket)).catch(() => undefined);
+    for (const [name, value] of Object.entries(env)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    resetTmuxBinary();
+    await removeFolder(folder);
+  });
+
+  it("opens a session, reads a shell back, types into it and starts an agent there", async () => {
+    await tmuxTerminal.create(server, { label: "it work", cwd: folder });
+    const first = await until(() => tmuxSnapshot(server), s => objects(s.panes).length === 1);
+    expect(objects(first.workspaces).map(w => w.label)).toEqual(["it work"]);
+    const pane = String(objects(first.panes)[0].pane_id);
+    expect(objects(first.panes)[0]).toMatchObject({ workspace_id: expect.stringMatching(/^s\d+$/), tab_id: expect.stringMatching(/^w\d+$/), cwd: folder });
+
+    await tmuxTerminal.sendKeys(server, pane, [..."echo hello-$((6*7))", "enter"]);
+    const screen = await until(() => tmuxTerminal.readScreen(server, pane, { scope: "pane", source: "visible", lines: 50 }), text => text.includes("hello-42"));
+    expect(screen).toContain("hello-42");
+    expect((await tmuxTerminal.processes(server, pane)).foregroundPids.length).toBeGreaterThan(0);
+
+    await tmuxTerminal.startAgent(server, pane, { name: "it-agent", kind: "claude", args: ["--effort", "high; echo injected"], timeoutMs: 15_000 });
+    const started = objects((await tmuxSnapshot(server)).panes).find(p => p.pane_id === pane)!;
+    expect(started).toMatchObject({ agent: "claude", agent_status: "unknown", agent_name: "it-agent" });
+    await until(() => tmuxTerminal.readScreen(server, pane, { scope: "agent", source: "visible", lines: 50 }), text => text.includes("fake claude ready"));
+
+    await tmuxTerminal.prompt(server, pane, "a prompt with $(id) and `quotes`");
+    const echoed = await until(() => tmuxTerminal.readScreen(server, pane, { scope: "agent", source: "recent", lines: 200 }), text => text.includes("got: a prompt"));
+    expect(echoed).toContain("got: a prompt with $(id) and `quotes`");
+    expect(echoed).not.toContain("injected");
+
+    await tmuxTerminal.create(server, { workspace: String(first.workspaces && objects(first.workspaces)[0].workspace_id), label: "second", cwd: folder });
+    const two = await until(() => tmuxSnapshot(server), s => objects(s.tabs).length === 2);
+    const second = objects(two.tabs).find(t => t.label === "second")!;
+    await tmuxTerminal.groupAction(server, "close", { tab: String(second.tab_id) });
+    expect(objects((await until(() => tmuxSnapshot(server), s => objects(s.tabs).length === 1)).tabs)).toHaveLength(1);
+  }, 60_000);
+
+  it("launches Claude from the phone, then binds and follows it through Claude's lifecycle hooks", async () => {
+    const launched = await launchSession(server, { cwd: folder, label: "phone launch", kind: "claude" });
+    expect(launched).toMatchObject({ ok: true, agent: "claude", agentStatus: "unknown", target: { server, source: "claude", starting: true } });
+    const place = { server, workspace: String(launched.workspaceId), tab: String(launched.tabId), pane: String(launched.paneId) };
+    const overview = workspaceSnapshot(await snapshot(server));
+    expect(objects(overview.groups).find(g => g.label === "phone launch")).toMatchObject({ children: [{ label: "phone launch", agent: "claude", agentStatus: "unknown" }] });
+
+    // What Claude's hook process finds from the variables tmux gives it.
+    const socket = execFileSync(binary!, ["-L", server.slice("tmux-".length), "display-message", "-p", "-t", toTmuxId(place.pane, "p"), "#{socket_path}"]).toString().trim();
+    expect(await tmuxPaneFromEnv({ TMUX: `${socket},1,0`, TMUX_PANE: toTmuxId(place.pane, "p") })).toEqual(place);
+
+    const hooks = new AgentHooks({ available: false, start: async () => {}, status: { configured: false } } as unknown as ApprovalPushService);
+    await hooks.start();
+    try {
+      const target = { ...place, source: "claude" as const, session: SESSION };
+      await hook({ target, event: "SessionStart" });
+      expect(await paneIdentity(server, (await validateTarget(target, true)))).toBe(SESSION);
+      await hook({ target, event: "UserPromptSubmit", prompt: "hi" });
+      expect(await validateTarget(target)).toMatchObject({ agent_status: "working" });
+      // A dialog drawn while working, with no PermissionRequest behind it,
+      // blocks the pane until it is gone.
+      const status = async () => objects((await tmuxSnapshot(server)).panes).find(p => p.pane_id === place.pane)?.agent_status;
+      await tmuxTerminal.prompt(server, place.pane, "DIALOG");
+      expect(await until(status, value => value === "blocked", 12_000)).toBe("blocked");
+      await tmuxTerminal.prompt(server, place.pane, "CLEAR");
+      expect(await until(status, value => value === "working", 12_000)).toBe("working");
+      await hook({ target, event: "Stop" });
+      expect(workspaceSnapshot(await snapshot(server)).groups).toContainEqual(expect.objectContaining({ label: "phone launch",
+        children: [expect.objectContaining({ agent: "claude", agentStatus: "idle" })] }));
+    } finally { hooks.close(); }
+  }, 60_000);
+
+  it("takes the first chat message for a Codex it launched without a terminal visit", async () => {
+    const launched = await launchSession(server, { cwd: folder, label: "codex launch", kind: "codex" });
+    expect(launched).toMatchObject({ ok: true, agent: "codex" });
+    const place = { server, workspace: String(launched.workspaceId), tab: String(launched.tabId), pane: String(launched.paneId) };
+    const pane = async () => objects((await tmuxSnapshot(server)).panes).find(p => p.pane_id === place.pane);
+    // No lifecycle event yet: its startup menu blocks it, and the title loses its spinner.
+    expect(await until(async () => (await pane())?.agent_status, value => value === "blocked", 12_000)).toBe("blocked");
+    expect((await pane())?.title).toBe("Fix the tests");
+    await tmuxTerminal.sendKeys(server, place.pane, ["3", "enter"]);
+    // Its composer is up: idle, so the phone's first message is taken.
+    expect(await until(async () => (await pane())?.agent_status, value => value === "idle", 12_000)).toBe("idle");
+    const current = (await pane())!;
+    const state = await paneChatState(server, current);
+    expect(state).toMatchObject({ starting: true, startingToken: expect.any(String) });
+    const target = { ...place, source: "codex" as const, starting: true as const, startingToken: String(state.startingToken) };
+    await expect(validateStartingTarget(target)).resolves.toMatchObject({ agent: "codex", agent_status: "idle" });
+    await tmuxTerminal.prompt(server, place.pane, "hi");
+    expect(await until(() => tmuxTerminal.readScreen(server, place.pane, { scope: "agent", source: "recent", lines: 50 }), text => text.includes("got: hi"))).toContain("got: hi");
+  }, 60_000);
+
+  it("keeps the conductor role on its pane when tmux loses the name and the agent restarts", async () => {
+    const launched = await launchSession(server, { cwd: folder, label: "it conductor", kind: "claude", role: "conductor" });
+    expect(launched).toMatchObject({ ok: true, role: "conductor" });
+    const pane = String(launched.paneId), socket = server.slice("tmux-".length);
+    const role = async () => {
+      const s = await snapshot(server);
+      const recorded = await conductorPane(server, s);
+      return objects(objects(workspaceSnapshot(s, undefined, undefined, undefined, recorded ? String(recorded.pane_id) : null).groups)
+        .find(group => group.label === "it conductor")?.children)[0]?.role;
+    };
+    expect(await role()).toBe("conductor");
+    // The name was only a label: without it, and across a restart in the same pane, the role stays.
+    execFileSync(binary!, ["-L", socket, "set-option", "-p", "-u", "-t", toTmuxId(pane, "p"), "@phren_agent"]);
+    expect(await role()).toBe("conductor");
+    // Claude exited (/exit): the pane falls back to its login shell, the same process.
+    await tmuxTerminal.sendKeys(server, pane, ["ctrl+d"]);
+    await until(() => tmuxSnapshot(server), s => !objects(s.panes).find(p => p.pane_id === pane)?.agent);
+    await tmuxTerminal.prompt(server, pane, "claude");
+    await until(() => tmuxSnapshot(server), s => objects(s.panes).find(p => p.pane_id === pane)?.agent === "claude");
+    expect(objects((await tmuxSnapshot(server)).panes).find(p => p.pane_id === pane)?.agent_name).toBeUndefined();
+    expect(await role()).toBe("conductor");
+    expect(await localConductor({ server, snapshot: await snapshot(server) })).toMatchObject({ server, target: { pane } });
+    await stopConductor({ paneId: pane });
+    expect(await role()).toBeUndefined();
+  }, 60_000);
+
+  it("finds this test's socket among the owner's servers and reports tmux's health", async () => {
+    expect((await tmuxServers()).map(entry => entry.session)).toContain(server);
+    const health = await tmuxHealth();
+    expect(health).toMatchObject({ state: "ok", launches: true, hidden: { running: expect.any(Boolean) } });
+    expect(health.version).toMatch(/^\d+\.\d+/);
+    expect(health.servers).toContain(server);
+  }, 30_000);
+});
+
+const CLAUDE_DIALOG = " Bash command\n\n   rm -rf build\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n\n Esc to cancel · Tab to amend\n";
+const CODEX_MENU = "  Hooks need review\n  3 hooks are new or changed.\n\n\u203a 1. Review hooks\n  2. Trust all and continue\n  3. Continue without trusting (hooks won't run)\n\n  enter confirm \u00b7 esc skip\n";
+const CODEX_COMPOSER = "  >_ OpenAI Codex (v0.158.0)\n\n\u203a Ask Codex to do anything\n  GPT-6-Luna high \u00b7 ~/work\n  \u2190 for agents \u00b7 ? for shortcuts\n";
+const SESSION = "bbbbbbbb-2222-4222-8222-222222222222";
+/** Claude's hook process: one lifecycle event posted to the Hook's agent socket. */
+function hook(body: Record<string, unknown>): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const req = request({ socketPath: localSocket(), path: "/hook", method: "POST" }, res => {
+      let text = ""; res.on("data", chunk => { text += chunk; }); res.on("end", () => res.statusCode === 200 ? resolve(text) : reject(new Error(`hook ${res.statusCode}`)));
+    });
+    req.on("error", reject);
+    req.end(JSON.stringify(body));
+  });
+}
