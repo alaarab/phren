@@ -1,3 +1,4 @@
+import { approvalRuleContext, approvalRuleEffect } from "./approval-rules.js";
 import { recordedConductor } from "./conductor-role.js";
 import { conductorContext } from "./conductor-context.js";
 import { defaultPhrenPath } from "../shared.js";
@@ -1373,8 +1374,22 @@ export class AgentHooks {
           } else await this.changes.after(conversation, id);
           res.end("{}"); return;
         }
+        // Validate applicable shell restrictions before any directory/Git reads.
+        const ruleEffect = body.event === "PermissionRequest" && target.source === "claude"
+          ? await approvalRuleEffect(String(body.tool), body.input, async () => {
+            if (typeof body.cwd !== "string" || !path.isAbsolute(body.cwd)) return undefined;
+            const [paneContext, requestContext] = await Promise.all([
+              trustedDirectory(pane).then(cwd => approvalRuleContext(cwd, target.source, target.session)).catch(() => undefined),
+              approvalRuleContext(body.cwd, target.source, target.session),
+            ]);
+            return paneContext && requestContext?.project === paneContext.project ? requestContext : undefined;
+          }, undefined, { harness: target.source, session: target.session, computer: hostname() }) : undefined;
+        if (ruleEffect === "deny") {
+          res.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny", message: "Denied by an owner approval rule." } } }));
+          return;
+        }
         if (body.event === "PermissionRequest") this.terminalPrompts.delete(JSON.stringify(target));
-        if (body.event === "PermissionRequest") {
+        if (body.event === "PermissionRequest" && ruleEffect !== "always-ask") {
           const conductor = conductorCall(String(body.tool || "action"), body.input);
           if (conductor) {
             // A standing grant answers the call before it becomes an approval card.
