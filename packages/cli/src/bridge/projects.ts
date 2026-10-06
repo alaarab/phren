@@ -70,11 +70,12 @@ export async function git(cwd: string, ...args: string[]): Promise<string> {
     const failure = error as NodeJS.ErrnoException & { stderr?: string; stdout?: string; killed?: boolean; signal?: string };
     if (budget && (budget.controller.signal.aborted || performance.now() >= budget.deadline)) throw gitTimeout();
     const stderr = String(failure.stderr ?? "");
-    // Only a successful no-index comparison uses exit 1 without diagnostics.
-    // Read errors (including a file disappearing) must never become empty counts.
+    // No-index uses exit 1 for differences, even with conversion warnings.
+    // Keep read errors and unknown diagnostics fatal, including partial output.
+    const diagnostics = stderr.split(/\r?\n/).filter(line => line.trim() && !line.startsWith("warning:"));
     const options = args.slice(0, args.indexOf("--") < 0 ? args.length : args.indexOf("--"));
     if (args[0] === "diff" && options.includes("--no-index") && String(failure.code) === "1"
-      && !stderr && !failure.killed && !failure.signal && failure.errno === undefined
+      && diagnostics.length === 0 && !failure.killed && !failure.signal && failure.errno === undefined
       && failure.syscall === undefined && failure.name !== "AbortError") return failure.stdout ?? "";
     const [status, code, message] = failure.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
       ? [413, "git-output-limit", "Git output exceeded the 4 MiB limit. Narrow the selection."] as const
