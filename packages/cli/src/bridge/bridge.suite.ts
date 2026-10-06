@@ -2786,6 +2786,39 @@ schedules:
       expect((await api("/v1/dispatch", undefined, "DELETE")).status).toBe(404);
     });
 
+    it("launches projectless agents in isolated Phren folders, reusing one launch id", async () => {
+      const launchId = "a655a44e-5606-48bf-8a59-1daa237d8fae";
+      const request = { label: "No project / ../ chat", kind: "claude", agentFolder: true, launchId, permissionMode: "auto-edits" };
+      const first = await api("/v1/workspaces/launch?mux=herdr:default", request);
+      expect(first.status, JSON.stringify(first.data)).toBe(200);
+      const agents = path.join(realpathSync.native(path.join(root, ".phren")), "agents");
+      expect(path.dirname(first.data.cwd)).toBe(agents);
+      expect(path.basename(first.data.cwd)).toMatch(/^\d{4}-\d{2}-\d{2}-no-project-chat-[a-zA-Z0-9]+$/);
+      expect((await stat(first.data.cwd)).isDirectory()).toBe(true);
+      if (process.platform !== "win32") expect((await stat(first.data.cwd)).mode & 0o777).toBe(0o700);
+      expect(commands.find(c => c.method === "workspace.create")?.params.cwd).toBe(first.data.cwd);
+      expect(commands.find(c => c.method === "agent.start")?.params.args).toEqual(["--permission-mode", "acceptEdits"]);
+      const retry = await api("/v1/workspaces/launch?mux=herdr:default", request);
+      expect(retry.data).toMatchObject({ cwd: first.data.cwd, tabId: first.data.tabId, reused: true });
+      const quick = await api("/v1/workspaces/launch?mux=herdr:default", { agentFolder: true, label: "No project / ../ chat", kind: "claude" });
+      expect(quick.status, JSON.stringify(quick.data)).toBe(200);
+      expect(path.dirname(quick.data.cwd)).toBe(agents);
+      expect(quick.data.cwd).not.toBe(first.data.cwd);
+      expect(await readdir(agents)).toHaveLength(2);
+      const health = await api("/v1/health");
+      expect(health.data.capabilities).toMatchObject({ agentFolder: true, launchPermissionMode: true });
+    });
+
+    it("refuses conflicting agent-folder requests before creating a folder or pane", async () => {
+      const request = { agentFolder: true, label: "New chat", kind: "claude" };
+      for (const extra of [{ cwd: root }, { project: "phren" }, { role: "conductor" }, { worktree: { branch: "phren/new" } }]) {
+        const refused = await api("/v1/workspaces/launch?mux=herdr:default", { ...request, ...extra });
+        expect(refused.status, JSON.stringify(refused.data)).toBe(400);
+      }
+      expect(commands.some(c => c.method === "workspace.create")).toBe(false);
+      expect(await readdir(path.join(root, ".phren", "agents")).catch(() => [])).toEqual([]);
+    });
+
     it.each([
       { kind: "claude", effort: "high", required: ["--append-system-prompt-file", "--effort", "high"] },
       { kind: "codex", effort: "low", required: ["-c", "model_reasoning_effort=low", "-c"] },
