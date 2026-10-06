@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Git status and repository diffs report the checkout they read, partial results and Git failures. Untracked folders stay collapsed until expanded, binary files retain their classification, and risky staging selections require confirmation. A child with no known checkout no longer silently uses its parent repository.
+
 ### Changed
 
 - The Hook's release authority policy restricts nothing until you write one. It used to start from built-in defaults that named specific projects. If you relied on those defaults, write them with `phren authority set <project> --default ask` before upgrading.

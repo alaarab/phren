@@ -603,5 +603,6 @@ export async function validateTarget(target: Target, sending = false, refreshIde
 export async function trustedDirectory(pane: Json): Promise<string> {
   const cwd = pane.foreground_cwd || pane.cwd;
   if (typeof cwd !== "string" || !path.isAbsolute(cwd)) throw new BridgeError(409, "This pane has no project folder.");
-  return realpath(cwd);
+  try { return await realpath(cwd); }
+  catch { throw new BridgeError(409, "This pane's project folder is no longer available. Reopen the chat from its current checkout."); }
 }

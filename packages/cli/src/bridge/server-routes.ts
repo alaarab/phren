@@ -38,7 +38,8 @@ import { liveBackground, markBackground, paneRecord, recordTitle } from "./sessi
 import { paneAccountField, paneChatState, panes, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
-import { gitRoot, launchDirectory, repositoryBranch, webServers } from "./projects.js";
+import { gitStatus } from "./git.js";
+import { gitRoot, launchDirectory, repositoryBranch, webServers, withGitReadDeadline } from "./projects.js";
 import { approvalDecisions, BridgeError, bridgeRoot, type Json, MAX_FRAME, object, objects, PROTOCOL, provider, type Provider, serverName, targetFromURL, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import { bootedSimulators, type SimulatorAction, simulatorAct, simulatorApps, simulatorScreenshot } from "./simulators.js";
@@ -425,6 +426,14 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             response.setHeader("Content-Type", "image/png"); response.end(bytes); return;
           }
           case "/v1/files": result = { files: await listUploads("files") }; break;
+          case "/v1/git/status": {
+            result = await withGitReadDeadline(async () => {
+              const target = targetFromURL(url), pane = await validateTarget(target);
+              const cwd = await gitRepository(pane, target, url.searchParams.get("child") ?? undefined, url.searchParams.get("worktree") ?? undefined);
+              return gitStatus(cwd, z.string().min(1).max(4096).optional().parse(url.searchParams.get("untrackedPath") ?? undefined));
+            });
+            break;
+          }
           case "/v1/files/resolve": {
             const target = targetFromURL(url), pane = await validateTarget(target);
             const cwd = await gitRepository(pane, target, url.searchParams.get("child") ?? undefined, url.searchParams.get("worktree") ?? undefined);

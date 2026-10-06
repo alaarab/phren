@@ -331,7 +331,17 @@ export class TranscriptReader {
               const ids = outputCallIds(raw, this.source);
               if (before === undefined && ids.some(id => this.changes!.pending(id))) { held = row.line; entries.length = 0; bytes = 0; cursor = row.line; continue; }
               const attached: Json = {};
-              for (const id of ids) { const files = await this.changes.changes(id); if (files) attached[id] = files; }
+              const failures: Json = {};
+              for (const id of ids) {
+                try { const files = await this.changes.changes(id); if (files) attached[id] = files; }
+                catch (error) {
+                  // Keep the tool output visible; the outer malformed-row guard
+                  // must never hide it just because Git could not collect changes.
+                  failures[id] = { error: error instanceof BridgeError ? error.message : "Git change capture failed.",
+                    code: error instanceof BridgeError ? error.details?.code ?? "git-capture-failed" : "git-capture-failed" };
+                }
+              }
+              if (Object.keys(failures).length) raw = { ...raw, phren_change_errors: failures };
               // A row that already carries a worker's own diff (OpenCode edit,
               // write or patch) keeps it; the shell lookup only fills in the rest.
               if (Object.keys(attached).length) raw = { ...raw, phren_changes: { ...attached, ...object(raw.phren_changes) } };

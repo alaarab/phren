@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -12,46 +13,138 @@ import { BridgeError, type Json } from "./protocol.js";
 import { countGit } from "./metrics.js";
 
 const exec = promisify(execFile);
+interface GitReadBudget { deadline: number; controller: AbortController; pending: Set<Promise<unknown>> }
+const gitReadBudget = new AsyncLocalStorage<GitReadBudget>();
+const GIT_READ_MS = 10_000;
+const gitTimeout = () => new BridgeError(504, "Git did not finish within the request time limit. Retry when the repository is idle.", { code: "git-timeout" });
+
+function remainingGitTime(budget: GitReadBudget): number {
+  const remaining = budget.deadline - performance.now();
+  if (budget.controller.signal.aborted || remaining <= 0) throw gitTimeout();
+  return Math.max(1, Math.ceil(remaining));
+}
+
+/** Nested reads share one deadline. Abort and reap outstanding Git processes on
+ * expiry or failure; never leave a timed-out request running its command chain. */
+export async function withGitReadDeadline<T>(read: () => Promise<T>): Promise<T> {
+  const inherited = gitReadBudget.getStore();
+  if (inherited) { remainingGitTime(inherited); return read(); }
+  const budget: GitReadBudget = { deadline: performance.now() + GIT_READ_MS, controller: new AbortController(), pending: new Set() };
+  const timer = setTimeout(() => budget.controller.abort(), GIT_READ_MS);
+  try {
+    return await gitReadBudget.run(budget, async () => {
+      const result = await read();
+      remainingGitTime(budget);
+      return result;
+    });
+  } finally {
+    clearTimeout(timer);
+    budget.controller.abort();
+    await Promise.allSettled([...budget.pending]);
+  }
+}
+
+/** Bind Git to the selected checkout, even when Hook inherited another Git
+ * process's repository/index environment. Keep user config (including excludes). */
+export function checkoutGitEnv(): NodeJS.ProcessEnv {
+  const env = nonInteractiveGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0", LC_ALL: "C" });
+  for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX"]) delete env[key];
+  return env;
+}
+
 export async function git(cwd: string, ...args: string[]): Promise<string> {
+  const budget = gitReadBudget.getStore();
+  const timeout = budget ? remainingGitTime(budget) : 10_000;
   countGit("projects");
-  return (await exec("git", ["-C", cwd, "--no-pager", ...args], {
-    timeout: 10_000, maxBuffer: 4_194_304, env: nonInteractiveGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1" }),
-  })).stdout;
+  let pending: Promise<{ stdout: string; stderr: string }> | undefined;
+  try {
+    pending = exec("git", ["-C", cwd, "--no-pager", ...args], {
+      timeout, maxBuffer: 4_194_304, env: checkoutGitEnv(),
+      ...(budget ? { signal: budget.controller.signal, killSignal: "SIGKILL" as const } : {}),
+    });
+    budget?.pending.add(pending);
+    const result = await pending;
+    if (budget) remainingGitTime(budget);
+    return result.stdout;
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException & { stderr?: string; stdout?: string; killed?: boolean; signal?: string };
+    if (budget && (budget.controller.signal.aborted || performance.now() >= budget.deadline)) throw gitTimeout();
+    const stderr = String(failure.stderr ?? "");
+    // Only a successful no-index comparison uses exit 1 without diagnostics.
+    // Read errors (including a file disappearing) must never become empty counts.
+    const options = args.slice(0, args.indexOf("--") < 0 ? args.length : args.indexOf("--"));
+    if (args[0] === "diff" && options.includes("--no-index") && String(failure.code) === "1"
+      && !stderr && !failure.killed && !failure.signal && failure.errno === undefined
+      && failure.syscall === undefined && failure.name !== "AbortError") return failure.stdout ?? "";
+    const [status, code, message] = failure.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
+      ? [413, "git-output-limit", "Git output exceeded the 4 MiB limit. Narrow the selection."] as const
+      : failure.killed || failure.signal ? [504, "git-timeout", "Git did not finish within its time limit. Retry when the repository is idle."] as const
+      : /index\.lock/.test(stderr) ? [409, "git-index-locked", "Git could not lock the index. Wait for the other Git operation to finish; the Hook has not removed the lock."] as const
+      : /not a git repository/.test(stderr) ? [409, "git-not-repository", "This folder is not a Git repository."] as const
+      : [503, "git-failed", `Git ${args[0]} failed: ${stderr.trim().slice(0, 1000) || "the command could not complete"}`] as const;
+    throw new BridgeError(status, message, { code, ...(failure.code !== undefined ? { exitCode: String(failure.code) } : {}) });
+  } finally { if (pending) budget?.pending.delete(pending); }
 }
 export async function gitRoot(dir: string): Promise<string | undefined> {
-  try { return await realpath((await git(dir, "rev-parse", "--show-toplevel")).trim()); } catch { return undefined; }
+  try { return await realpath((await git(dir, "rev-parse", "--show-toplevel")).replace(/\r?\n$/, "")); }
+  catch (error) {
+    if (error instanceof BridgeError && error.details?.code === "git-not-repository") return undefined;
+    throw error;
+  }
+}
+
+/** An unborn HEAD is normal; process/configuration failures are not. */
+export async function gitHead(root: string): Promise<string | undefined> {
+  try { return (await git(root, "rev-parse", "--verify", "--quiet", "HEAD")).trim(); }
+  catch (error) {
+    if (error instanceof BridgeError && error.details?.exitCode === "1") return undefined;
+    throw error;
+  }
 }
 
 /** `git status` as the app lists it: one record per file, a staged and an
  * unstaged section where each has a patch. Limited to `pathspecs` when given. */
-async function statusFiles(root: string, pathspecs: string[] = []): Promise<Json[]> {
+async function statusFiles(root: string, pathspecs: string[] = []): Promise<{ files: Json[]; totalFiles: number; truncated: boolean }> {
   const status = (await git(root, "status", "--porcelain=v1", "-z", "--untracked-files=normal", "--", ...pathspecs.map(spec => `:(literal)${spec}`))).split("\0");
   const files: Json[] = [];
-  for (let index = 0; index < status.length && files.length < 500; index++) {
+  let totalFiles = 0, truncated = false, remaining = 1_000_000;
+  for (let index = 0; index < status.length; index++) {
     const record = status[index]; if (!record) continue;
     const code = record.slice(0, 2), file = record.slice(3);
-    if (/[RC]/.test(code)) index++; // porcelain -z carries a second pathname.
+    const original = /[RC]/.test(code) ? status[++index] : undefined;
+    totalFiles++;
+    if (files.length >= 500) { truncated = true; continue; }
     const sections: Json[] = [];
-    for (const [kind, staged] of [["staged", true], ["unstaged", false]] as const) {
-      if (code === "??") continue;
-      const patch = await git(root, "diff", "--no-ext-diff", "--no-textconv", ...(staged ? ["--cached"] : []), "--", `:(literal)${file}`);
-      if (patch) sections.push({ id: `${kind}:${file}`, kind, binary: patch.includes("Binary files"), loadState: "loaded", patch });
+    for (const [kind, staged, column] of [["staged", true, 0], ["unstaged", false, 1]] as const) {
+      if (code === "??" || code[column] === " ") continue;
+      if (remaining <= 0) {
+        sections.push({ id: `${kind}:${file}`, kind, loadState: "loaded", patch: "", truncated: true });
+        truncated = true; continue;
+      }
+      const patch = await git(root, "diff", "--no-ext-diff", "--no-textconv", "--no-color", ...(staged ? ["--cached"] : []), "--",
+        ...[file, ...(original ? [original] : [])].map(name => `:(literal)${name}`));
+      if (patch) {
+        const limit = Math.min(200_000, remaining), clipped = patch.length > limit;
+        sections.push({ id: `${kind}:${file}`, kind, binary: /^(?:Binary files |GIT binary patch)/m.test(patch), loadState: "loaded", patch: patch.slice(0, limit), truncated: clipped });
+        remaining -= Math.min(patch.length, limit); truncated ||= clipped;
+      }
     }
-    files.push({ path: file, status: code, sections });
+    files.push({ path: file, status: code, ...(file.endsWith("/") ? { directory: true, countsComplete: false } : {}), sections });
   }
-  return files;
+  return { files, totalFiles, truncated };
 }
 
 /** The last commit that touched `pathspec` in the past half hour — what a
  * command changed when a hook (phren's own Stop hook, say) committed it before
  * anyone looked. */
 async function committed(root: string, pathspec: string): Promise<Json | undefined> {
-  const log = await git(root, "log", "-1", "--since=30.minutes", "--format=%h%x1f%s%x1f%cr", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--", `:(literal)${pathspec}`).catch(() => "");
+  if (!await gitHead(root)) return undefined;
+  const log = await git(root, "log", "-1", "--since=30.minutes", "--format=%h%x1f%s%x1f%cr", "-p", "--no-ext-diff", "--no-textconv", "--no-color", "--", `:(literal)${pathspec}`);
   const newline = log.indexOf("\n"); if (newline < 0) return undefined;
   const [hash, subject, when] = log.slice(0, newline).split("\x1f");
   const patch = log.slice(newline + 1).replace(/^\n+/, "");
   if (!patch) return undefined;
-  return { id: `committed:${pathspec}`, kind: "committed", binary: patch.includes("Binary files"), loadState: "loaded", patch, note: `${hash} · ${subject.slice(0, 120)} · ${when}` };
+  return { id: `committed:${pathspec}`, kind: "committed", binary: patch.includes("Binary files"), loadState: "loaded", patch: patch.slice(0, 200_000), truncated: patch.length > 200_000, note: `${hash} · ${subject.slice(0, 120)} · ${when}` };
 }
 
 /** A path a command named, made absolute and real — `~/` expanded, relative
@@ -74,9 +167,13 @@ async function resolveTouched(raw: string, cwd: string): Promise<string | undefi
 /** The pane's working tree, plus anything the command named: files in the
  * same repository that a hook already committed, and files in other
  * repositories — the phren store, a sibling checkout — grouped by root. */
-export async function repositoryDiff(cwd: string, touched: unknown[] = [], allowedPaths: string[] = []): Promise<Json> {
+export function repositoryDiff(cwd: string, touched: unknown[] = [], allowedPaths: string[] = []): Promise<Json> {
+  return withGitReadDeadline(() => readRepositoryDiff(cwd, touched, allowedPaths));
+}
+
+async function readRepositoryDiff(cwd: string, touched: unknown[], allowedPaths: string[]): Promise<Json> {
   const root = await gitRoot(cwd);
-  if (!root) throw new BridgeError(409, "This pane is not in a Git repository.");
+  if (!root) throw new BridgeError(409, "This pane is not in a Git repository.", { code: "git-not-repository" });
   const allowed = (await Promise.all([root, phrenStoreRoot(), ...allowedPaths].map(raw => resolveTouched(raw, cwd)))).filter((p): p is string => !!p);
   const requested: string[] = [];
   for (const raw of touched.slice(0, 24)) {
@@ -85,7 +182,7 @@ export async function repositoryDiff(cwd: string, touched: unknown[] = [], allow
     requested.push(file);
   }
   const branch = (await git(root, "branch", "--show-current")).trim();
-  const files = await statusFiles(root);
+  const listing = await statusFiles(root);
   const byRoot = new Map<string, string[]>();
   for (const file of requested) {
     const owner = await gitRoot((await stat(file).catch(() => undefined))?.isDirectory() ? file : path.dirname(file)); if (!owner) continue;
@@ -97,17 +194,24 @@ export async function repositoryDiff(cwd: string, touched: unknown[] = [], allow
   const related: Json[] = [];
   for (const [owner, specs] of byRoot) {
     if (related.length >= 8) break;
-    const listed = owner === root ? files : await statusFiles(owner, specs);
+    const ownerListing = owner === root ? listing : await statusFiles(owner, specs);
+    const listed = ownerListing.files;
     const seen = new Set(listed.map(file => (file as { path: string }).path));
     for (const spec of specs) {
       // Uncommitted changes under the path are already listed; otherwise show the commit.
       if ([...seen].some(file => file === spec || spec === "." || file.startsWith(spec + "/"))) continue;
+      if (ownerListing.truncated) continue; // An omitted dirty row must not be replaced with a historical commit.
       const section = await committed(owner, spec);
-      if (section) { listed.push({ path: spec, status: "  ", sections: [section] }); seen.add(spec); }
+      if (section) {
+        ownerListing.totalFiles++;
+        if (listed.length >= 500) { ownerListing.truncated = true; continue; }
+        listed.push({ path: spec, status: "  ", sections: [section] }); seen.add(spec);
+        ownerListing.truncated ||= section.truncated === true;
+      }
     }
-    if (owner !== root && listed.length) related.push({ root: owner, branch: (await git(owner, "branch", "--show-current")).trim(), files: listed });
+    if (owner !== root && listed.length) related.push({ root: owner, branch: (await git(owner, "branch", "--show-current")).trim(), ...ownerListing });
   }
-  return { branch, root, launchPath: cwd, files, ...(related.length ? { related } : {}) };
+  return { branch, root, repository: root, observedAt: new Date().toISOString(), launchPath: cwd, ...listing, ...(related.length ? { related } : {}) };
 }
 
 /** The HEAD file of the repository holding `cwd` (`.git/HEAD`, or a linked

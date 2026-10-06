@@ -3,7 +3,7 @@ import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { BridgeError, type Json } from "./protocol.js";
-import { git, gitRoot } from "./projects.js";
+import { git, gitHead, gitRoot, withGitReadDeadline } from "./projects.js";
 
 /** Workers edit in their own worktrees, so the pane's repository diff never
  * shows their work. These are the repository's other worktrees, exactly as
@@ -35,10 +35,10 @@ export function worktreeId(abs: string): string {
 /** `git worktree list --porcelain`: one block per worktree. Bare entries and
  * worktrees missing on disk are left out; nothing there can be shown. */
 async function listed(root: string): Promise<{ main: string | undefined; worktrees: ListedWorktree[] }> {
-  const output = await git(root, "worktree", "list", "--porcelain");
+  const output = await git(root, "worktree", "list", "--porcelain", "-z");
   const blocks: Array<Record<string, string>> = [];
   let current: Record<string, string> | undefined;
-  for (const line of output.split("\n")) {
+  for (const line of output.split("\0")) {
     if (!line) { current = undefined; continue; }
     const space = line.indexOf(" ");
     const key = space < 0 ? line : line.slice(0, space), value = space < 0 ? "" : line.slice(space + 1);
@@ -101,22 +101,24 @@ async function workerFor(abs: string, workers: WorktreeWorker[], all: string[] =
 /** The pane repository's other worktrees with branch, HEAD, commits ahead of
  * and behind this pane's HEAD, uncommitted file count and, when known, the
  * worker editing there. */
-export async function gitWorktrees(cwd: string, workers: WorktreeWorker[] = []): Promise<Json> {
+export function gitWorktrees(cwd: string, workers: WorktreeWorker[] = []): Promise<Json> {
+  return withGitReadDeadline(() => readGitWorktrees(cwd, workers));
+}
+
+async function readGitWorktrees(cwd: string, workers: WorktreeWorker[]): Promise<Json> {
   const root = await gitRoot(cwd);
-  if (!root) throw new BridgeError(409, "This pane is not in a Git repository.");
+  if (!root) throw new BridgeError(409, "This pane is not in a Git repository.", { code: "git-not-repository" });
   const { main, worktrees } = await listed(root);
-  const base = (await git(root, "rev-parse", "--verify", "HEAD").catch(() => "")).trim();
+  const base = await gitHead(root);
   const roots = [root, ...(main && main !== root ? [main] : [])];
   const others = worktrees.filter(worktree => worktree.abs !== root);
   const rows = await Promise.all(others.map(async worktree => {
     let ahead = 0, behind = 0;
     if (base && worktree.head && worktree.head !== base) {
-      try {
-        const counts = (await git(root, "rev-list", "--left-right", "--count", `${base}...${worktree.head}`)).trim().split(/\s+/);
-        behind = Number(counts[0]) || 0; ahead = Number(counts[1]) || 0;
-      } catch { ahead = 0; behind = 0; }
+      const counts = (await git(root, "rev-list", "--left-right", "--count", `${base}...${worktree.head}`)).trim().split(/\s+/);
+      behind = Number(counts[0]); ahead = Number(counts[1]);
     }
-    const changed = uncommitted(await git(worktree.abs, "status", "--porcelain=v1", "-z", "--untracked-files=normal").catch(() => ""));
+    const changed = uncommitted(await git(worktree.abs, "status", "--porcelain=v1", "-z", "--untracked-files=normal"));
     const worker = await workerFor(worktree.abs, workers, worktrees.map(item => item.abs));
     return {
       id: worktreeId(worktree.abs), path: displayPath(worktree.abs, roots), branch: worktree.branch,
@@ -138,7 +140,7 @@ export async function gitWorktrees(cwd: string, workers: WorktreeWorker[] = []):
 export async function resolveWorktree(cwd: string, id: unknown): Promise<string> {
   if (typeof id !== "string" || !worktreeIdPattern.test(id)) throw new BridgeError(400, "Invalid worktree.");
   const root = await gitRoot(cwd);
-  if (!root) throw new BridgeError(409, "This pane is not in a Git repository.");
+  if (!root) throw new BridgeError(409, "This pane is not in a Git repository.", { code: "git-not-repository" });
   const match = (await listed(root)).worktrees.find(worktree => worktreeId(worktree.abs) === id);
   if (!match) throw new BridgeError(404, "That worktree is not part of this repository.");
   return match.abs;
