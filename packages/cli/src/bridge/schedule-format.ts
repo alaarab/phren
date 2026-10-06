@@ -5,6 +5,7 @@ import * as yaml from "js-yaml";
 import { z } from "zod";
 import type { SchedulePush, SchedulePushResult } from "./push.js";
 import { atomicInPrivateDir, bridgeRoot, object } from "./protocol.js";
+import { isValidProjectName } from "../utils-paths.js";
 import { isAccountSlug } from "./claude-accounts.js";
 
 /** The schedules.yaml store: the schedule and run record shapes, validation,
@@ -34,6 +35,8 @@ export interface Schedule {
   /** Claude account id (a slug) the run uses; absent means the default account. */
   account?: string;
   notify?: ScheduleNotify[];
+  /** Explicit targets; absent means the directory owning this schedule. */
+  projects?: string[];
   every: ScheduleEvery;
   at?: string;
   days?: Weekday[];
@@ -60,6 +63,8 @@ export interface ScheduleRun {
   id: string;
   scheduleId: string;
   project: string;
+  scheduleProject?: string;
+  batchId?: string;
   startedAt: string;
   finishedAt?: string;
   status: ScheduleRunStatus;
@@ -96,6 +101,7 @@ export interface ScheduleStatus extends Schedule {
   project: string;
   nextRun: string | null;
   lastRun: Omit<ScheduleRun, "id" | "scheduleId" | "project"> | null;
+  lastRuns: ScheduleRun[];
   running: boolean;
 }
 
@@ -153,6 +159,8 @@ export function parseSchedule(value: unknown): Schedule {
     createdAt: timestamp.parse(raw.createdAt),
     updatedAt: timestamp.parse(raw.updatedAt),
   };
+  if (raw.projects !== undefined) schedule.projects = z.array(z.string().refine(isValidProjectName, "Invalid project slug."))
+    .min(1).max(64).refine(projects => new Set(projects).size === projects.length, "Projects must be unique.").parse(raw.projects);
   if (raw.model !== undefined) schedule.model = singleLine(200).parse(raw.model);
   if (raw.account !== undefined) schedule.account = z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(raw.account);
   if (raw.notify !== undefined) schedule.notify = z.array(z.enum(SCHEDULE_NOTIFY)).max(3).parse(raw.notify)
@@ -292,6 +300,18 @@ export function nextRun(schedule: Schedule, lastRun?: ScheduleRun): Date | null 
   return nextDailyOrWeekly(schedule, after);
 }
 
+/** Summarize the newest firing of one owner's schedule, including old single runs. */
+export function latestScheduleBatch(runs: ScheduleRun[]): { lastRun: ScheduleRun | undefined; lastRuns: ScheduleRun[] } {
+  const latest = runs.at(-1);
+  const lastRuns = latest ? runs.filter(run => latest.batchId ? run.batchId === latest.batchId : run.id === latest.id) : [];
+  const priority: ScheduleRunStatus[] = ["blocked", "running", "launched", "failed", "needs-you", "finished", "skipped"];
+  const representative = [...lastRuns].sort((a, b) => priority.indexOf(a.status) - priority.indexOf(b.status))[0];
+  if (!representative) return { lastRun: undefined, lastRuns };
+  const finishedAt = lastRuns.some(run => runningStatuses.has(run.status)) ? undefined
+    : lastRuns.map(run => run.finishedAt).filter((time): time is string => Boolean(time)).sort().at(-1);
+  return { lastRun: { ...representative, finishedAt }, lastRuns };
+}
+
 export async function readScheduleRuns(file: string): Promise<ScheduleRun[]> {
   let text: string;
   try { text = await readFile(file, "utf8"); }
@@ -304,6 +324,8 @@ export async function readScheduleRuns(file: string): Promise<ScheduleRun[]> {
       const launch = object(raw.launch);
       if (typeof raw.id !== "string" || typeof raw.scheduleId !== "string" || typeof raw.project !== "string"
           || typeof raw.startedAt !== "string" || !(SCHEDULE_RUN_STATUSES as readonly string[]).includes(String(raw.status))
+          || (raw.scheduleProject !== undefined && typeof raw.scheduleProject !== "string")
+          || (raw.batchId !== undefined && typeof raw.batchId !== "string")
           || !["herdr", "headless"].includes(String(launch.mode))) continue;
       runs.push(raw as unknown as ScheduleRun);
     } catch { /* A torn final line does not hide older history. */ }
@@ -312,7 +334,12 @@ export async function readScheduleRuns(file: string): Promise<ScheduleRun[]> {
 }
 
 export async function writeScheduleRuns(file: string, runs: ScheduleRun[]): Promise<void> {
-  const kept = runs.slice(-MAX_RUNS);
+  // Open children still block their owner. Keep entire retained batches so
+  // trimming cannot hide a sibling's failure from the aggregate status.
+  const recent = new Set(runs.slice(-MAX_RUNS).map(run => run.id));
+  const batches = new Set(runs.filter(run => recent.has(run.id) || runningStatuses.has(run.status))
+    .map(run => run.batchId).filter((id): id is string => Boolean(id)));
+  const kept = runs.filter(run => recent.has(run.id) || runningStatuses.has(run.status) || (run.batchId && batches.has(run.batchId)));
   await atomicInPrivateDir(file, kept.map(run => JSON.stringify(run)).join("\n") + (kept.length ? "\n" : ""));
 }
 
