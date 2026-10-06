@@ -44,6 +44,7 @@ interface BootstrapProjectOptions {
   profile?: string;
   profilePhrenPath?: string;
   ownership?: ProjectOwnershipMode;
+  projectName?: string;
 }
 
 interface BootstrapProjectResult {
@@ -599,9 +600,13 @@ export function bootstrapFromExisting(
   const derivedName = isProjectLocal
     ? String(manifest?.primaryProject)
     : projectSlugFromPath(sourceRoot);
+  const requestedName = typeof opts === "string" ? undefined : opts.projectName;
+  if (isProjectLocal && requestedName && requestedName !== derivedName) {
+    throw new Error(`Project-local phren can only enroll ${derivedName}.`);
+  }
   const projectName = isProjectLocal
     ? derivedName
-    : (findExistingProjectForSource(phrenPath, sourceRoot, derivedName) ?? derivedName);
+    : (requestedName ?? findExistingProjectForSource(phrenPath, sourceRoot, derivedName) ?? derivedName);
   if (projectName !== derivedName) {
     debugLog(`bootstrapFromExisting: reusing existing project "${projectName}" for ${sourceRoot} (derived "${derivedName}")`);
   }
