@@ -159,6 +159,11 @@ describe("scheduled prompt timing", () => {
     expect(computerMatches("Desk", "desk.local")).toBe(true);
     expect(computerMatches("DESK.local", "desk")).toBe(true);
     expect(computerMatches("Desk.example", "desk")).toBe(false);
+    // macOS names one Mac three ways: Sharing's ComputerName, the Bonjour name and the hostname.
+    expect(computerMatches("Sam’s Mac mini", "Sams-Mac-mini")).toBe(true);
+    expect(computerMatches("Sam's Mac mini", "Sams-Mac-mini.local")).toBe(true);
+    expect(computerMatches("Sam’s Mac mini", "Mac")).toBe(false);
+    expect(computerMatches("Desk", "Desk 2")).toBe(false);
   });
 });
 
@@ -244,6 +249,18 @@ describe("scheduled startup prompts", () => {
     const tail = classifyStartupBlock({ elapsedMs: STARTUP_BLOCK_WINDOW_MS, transcriptActive: false, status: "blocked", lines: banner });
     expect(tail).toContain("Allow external CLAUDE.md file imports?");
     expect(tail).not.toContain("banner line 0");
+  });
+
+  it("reports ownership: another computer's schedule has no next run and refuses Run now; the Hook id is a name", async () => {
+    const fixture = await storeFixture(schedule({ computer: "Laptop" }));
+    const launch = async () => { throw new Error("must not launch"); };
+    const desk = new Scheduler({ now: () => new Date("2026-09-21T10:00:00.000Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", launch });
+    expect((await desk.statuses()).schedules[0]).toMatchObject({ owned: false, nextRun: null });
+    await expect(desk.launchNow("demo", "7f3a2c1d")).rejects.toThrow("Laptop owns this schedule");
+    const byId = new Scheduler({ now: () => new Date("2026-09-21T10:00:00.000Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "laptop-hostname", aliases: ["Laptop"], launch });
+    expect((await byId.statuses()).schedules[0]).toMatchObject({ owned: true, nextRun: expect.any(String) });
   });
 
   it("records a run blocked at startup with the visible prompt and pushes it as blocked", async () => {

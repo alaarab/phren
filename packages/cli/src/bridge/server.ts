@@ -148,6 +148,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const codexQuestions = new CodexQuestions(undefined, codexServers);
   const scheduleStore = defaultPhrenPath();
   const scheduler = modules.has("schedules") ? new Scheduler({ now: () => new Date(), store: scheduleStore, runsFile: scheduleRunsFile(),
+    aliases: [computerID],
     // A schedule starts in its project's folder, which the Hook resolved itself.
     launch: createScheduleLauncher((server, data) => launchSession(server, data, { trustFolder: true }), scheduleStore),
     push: { notify: value => agentHooks.push.notifySchedule(value) },

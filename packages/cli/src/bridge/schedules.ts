@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
-import { hostname } from "node:os";
+import { localNames, stableComputerName } from "./computer-names.js";
 import path from "node:path";
 import type { SchedulePush, SchedulePushKind, SchedulePushResult } from "./push.js";
 import { BridgeError } from "./protocol.js";
@@ -22,6 +22,8 @@ export class Scheduler {
   private readonly launch: ScheduleLauncher;
   private readonly runsFile: string;
   private readonly computer: () => string;
+  /** Every name this computer answers to; a schedule names one of them. */
+  private readonly names: () => string[];
   private readonly locateProject: (project: string) => Promise<string | undefined>;
   private readonly push?: SchedulePushSender;
   private readonly log: (message: string) => void;
@@ -35,10 +37,14 @@ export class Scheduler {
   lastTickAt?: Date;
 
   constructor(options: { now: () => Date; store: string; launch: ScheduleLauncher; runsFile: string; computer?: string | (() => string);
+    /** Further names this computer answers to, such as its Hook computer id. */
+    aliases?: string[];
     locateProject?: (project: string) => Promise<string | undefined>; push?: SchedulePushSender; log?: (message: string) => void }) {
     this.now = options.now; this.store = options.store; this.launch = options.launch; this.runsFile = options.runsFile;
     if (typeof options.computer === "function") this.computer = options.computer;
-    else { const computer = options.computer; this.computer = () => computer ?? hostname(); }
+    else { const computer = options.computer; this.computer = () => computer ?? stableComputerName(); }
+    const aliases = options.aliases ?? [];
+    this.names = options.computer === undefined ? () => [...localNames(), ...aliases] : () => [this.computer(), ...aliases];
     this.locateProject = options.locateProject ?? (async () => undefined);
     this.push = options.push;
     this.log = options.log ?? (message => console.error(message));
@@ -60,8 +66,12 @@ export class Scheduler {
     try { return await operation(); } finally { release(); }
   }
 
+  private owns(schedule: Schedule, names = this.names()): boolean {
+    return names.some(name => computerMatches(schedule.computer, name));
+  }
+
   async statuses(): Promise<{ computer: string; timeZone: string; schedules: ScheduleStatus[] }> {
-    const runs = await readScheduleRuns(this.runsFile), result: ScheduleStatus[] = [], computer = this.computer();
+    const runs = await readScheduleRuns(this.runsFile), result: ScheduleStatus[] = [], computer = this.computer(), names = this.names();
     for (const directory of this.projectDirectories()) {
       let schedules: Schedule[];
       try { schedules = (await readScheduleDocument(directory)).schedules; } catch { continue; }
@@ -70,8 +80,9 @@ export class Scheduler {
         const matching = runs.filter(run => (run.scheduleProject ?? run.project) === project && run.scheduleId === schedule.id);
         const { lastRun: last, lastRuns } = latestScheduleBatch(matching);
         const running = matching.some(run => runningStatuses.has(run.status));
-        const due = computerMatches(schedule.computer, computer) ? nextRun(schedule, last) : null;
-        result.push({ ...schedule, project, lastRuns, nextRun: due?.toISOString() ?? null,
+        const due = this.owns(schedule, names) ? nextRun(schedule, last) : null;
+        const owned = this.owns(schedule, names);
+        result.push({ ...schedule, project, lastRuns, owned, nextRun: due?.toISOString() ?? null,
           lastRun: last ? { startedAt: last.startedAt, ...(last.finishedAt ? { finishedAt: last.finishedAt } : {}), status: last.status,
             ...(last.batchId ? { batchId: last.batchId, scheduleProject: last.scheduleProject } : {}),
             ...(last.reason ? { reason: last.reason } : {}),
@@ -104,7 +115,7 @@ export class Scheduler {
       if (expectedUpdatedAt !== undefined && Date.parse(expectedUpdatedAt) !== Date.parse(schedule.updatedAt)) {
         throw new BridgeError(409, "This computer has a different schedule revision. Wait for store sync to finish, refresh the schedule, and try Run now again.");
       }
-      if (!computerMatches(schedule.computer, this.computer())) throw new BridgeError(409, `${schedule.computer} owns this schedule; run it from that computer.`);
+      if (!this.owns(schedule)) throw new BridgeError(409, `${schedule.computer} owns this schedule; run it from that computer.`);
       const runs = await readScheduleRuns(this.runsFile);
       const matching = runs.filter(run => (run.scheduleProject ?? run.project) === project && run.scheduleId === id);
       if (matching.some(run => runningStatuses.has(run.status))) {
