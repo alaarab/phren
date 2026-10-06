@@ -81,6 +81,8 @@ export interface CliArgs {
   mode: "agent" | "chat";
   help: boolean;
   version: boolean;
+  /** Refresh provider model catalogues and exit. */
+  refreshModels: boolean;
 }
 
 const HELP = `
@@ -93,7 +95,7 @@ Options:
                        openai-compat, ollama
   --base-url <url>     Endpoint for openai-compat (or to override deepseek's)
   --model <model>      Override LLM model
-  --reasoning <level>  Reasoning effort: none, low, medium, high, xhigh (max)
+  --reasoning <level>  Reasoning effort: low, medium, high (model extras: none, minimal, xhigh, max)
   --project <name>     Force phren project context
   --max-turns <n>      Max tool-use turns (default: 50)
   --max-output <n>     Max output tokens per response (default: auto per model)
@@ -137,6 +139,7 @@ Options:
   --append-system-prompt-file <path>  Append a UTF-8 system brief
   --dry-run            Show system prompt and exit
   --verbose            Show tool calls as they execute
+  --refresh-models     Refresh cached provider model catalogues and exit
   --version            Show version
   --help               Show this help
 
@@ -145,7 +148,7 @@ Providers (auto-detected from env, or use --provider):
                        (no API key needed, flat rate via your subscription)
                        Setup: phren-agent auth login
                        Legacy alias: codex
-  openai               OPENAI_API_KEY — OpenAI direct (defaults to gpt-5.4)
+  openai               OPENAI_API_KEY — OpenAI direct (discovered model catalog)
   openrouter           OPENROUTER_API_KEY — routes to any model
   anthropic            ANTHROPIC_API_KEY — Claude direct
   deepseek             DEEPSEEK_API_KEY — DeepSeek's own API (api.deepseek.com)
@@ -161,6 +164,7 @@ Environment:
   PHREN_AGENT_BASE_URL  Endpoint for openai-compat (and for deepseek with
                         PHREN_AGENT_PROVIDER=deepseek)
   PHREN_AGENT_API_KEY   Key for openai-compat
+  OPENCODE_BASE_URL, OPENCODE_API_KEY  Reuse an OpenCode-compatible connector
   PHREN_AGENT_CONTEXT_WINDOW, PHREN_AGENT_PRICE_IN, PHREN_AGENT_PRICE_OUT,
   PHREN_AGENT_PRICE_CACHE  Same as the flags, for every model (the flags apply
                            only to the model they were given with, and win)
@@ -170,7 +174,7 @@ Environment:
 Examples:
   phren-agent "fix the login bug"
   phren-agent --provider openai-codex "add input validation"
-  phren-agent --model openai-codex/gpt-5.4 --reasoning high "add input validation"
+  phren-agent --model openai-codex/gpt-6.1-sol --reasoning high "add input validation"
   phren-agent --provider anthropic --verbose "refactor the database layer"
 `.trim();
 
@@ -200,6 +204,7 @@ export function parseArgs(argv: string[]): CliArgs {
     mode: "agent",
     help: false,
     version: false,
+    refreshModels: false,
   };
 
   const positional: string[] = [];
@@ -210,6 +215,7 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--version" || arg === "-v") { args.version = true; }
     else if (arg === "--dry-run") { args.dryRun = true; }
     else if (arg === "--verbose") { args.verbose = true; }
+    else if (arg === "--refresh-models") { args.refreshModels = true; }
     else if (arg === "--interactive" || arg === "-i") { args.interactive = true; }
     else if (arg === "--no-subagents") { args.noSubagents = true; }
     else if (arg === "--no-llm-compact") { args.noLlmCompact = true; }
@@ -261,7 +267,9 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--provider" && argv[i + 1]) { args.provider = argv[++i]; }
     else if (arg === "--model" && argv[i + 1]) { args.model = argv[++i]; }
     else if (arg === "--reasoning" && argv[i + 1]) {
-      args.reasoning = normalizeReasoningEffort(argv[++i]) ?? args.reasoning;
+      const value = argv[++i];
+      args.reasoning = normalizeReasoningEffort(value);
+      if (!args.reasoning) throw new Error(`Unknown reasoning effort "${value}". Use low, medium, high, or a model-supported extra: none, minimal, xhigh, max.`);
     }
     else if (arg === "--project" && argv[i + 1]) { args.project = argv[++i]; }
     else if (arg === "--max-turns" && argv[i + 1]) { args.maxTurns = parseInt(argv[++i], 10) || 50; }
@@ -292,6 +300,7 @@ export function parseArgs(argv: string[]): CliArgs {
   }
   if (!args.reasoning && process.env.PHREN_AGENT_REASONING) {
     args.reasoning = normalizeReasoningEffort(process.env.PHREN_AGENT_REASONING);
+    if (!args.reasoning) throw new Error("Invalid PHREN_AGENT_REASONING; use low, medium, high or a supported model extra.");
   }
 
   return args;

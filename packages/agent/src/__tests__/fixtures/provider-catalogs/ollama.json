@@ -1,0 +1,6 @@
+{
+  "models": [
+    { "name": "qwen3:14b", "details": { "families": ["qwen3"] } },
+    { "name": "llama3.2:latest", "details": { "families": ["llama"] } }
+  ]
+}

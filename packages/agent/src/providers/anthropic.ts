@@ -8,10 +8,13 @@ const PROVIDER_NAME = "anthropic";
 /** Thinking budget per effort level; always clamped below max_tokens. */
 const THINKING_BUDGETS: Record<ReasoningEffort, number> = {
   none: 0,
+  minimal: 1024,
   low: 2048,
   medium: 8192,
   high: 16384,
   xhigh: 32768,
+  max: 32768,
+  ultra: 32768,
 };
 
 /** Anthropic rejects budget_tokens below this. */
@@ -32,6 +35,7 @@ export class AnthropicProvider implements LlmProvider {
   contextWindow = 200_000;
   maxOutputTokens: number;
   private apiKey: string;
+  readonly baseUrl: string;
   model: string;
   private cacheEnabled: boolean;
   reasoningEffort?: ReasoningEffort;
@@ -42,20 +46,22 @@ export class AnthropicProvider implements LlmProvider {
     maxOutputTokens?: number,
     cacheEnabled = true,
     reasoningEffort?: ReasoningEffort,
+    baseUrl = "https://api.anthropic.com",
   ) {
     this.apiKey = apiKey;
+    this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.model = model ?? "claude-sonnet-5";
     this.maxOutputTokens = maxOutputTokens ?? 8192;
     this.cacheEnabled = cacheEnabled;
     // "none" is thinking off, which on Anthropic means sending no thinking config.
     this.reasoningEffort = reasoningEffort === "none" ? undefined : reasoningEffort;
     const metadata = getModelMetadata(PROVIDER_NAME, this.model);
-    if (metadata) this.contextWindow = metadata.contextWindow;
+    if (metadata?.contextWindow) this.contextWindow = metadata.contextWindow;
   }
 
   /** True when the model takes adaptive thinking instead of budget_tokens. */
   usesAdaptiveThinking(): boolean {
-    return ADAPTIVE_THINKING_RE.test(this.model);
+    return getModelMetadata(PROVIDER_NAME, this.model)?.reasoningMode === "adaptive" || ADAPTIVE_THINKING_RE.test(this.model);
   }
 
   /**
@@ -73,7 +79,7 @@ export class AnthropicProvider implements LlmProvider {
   async chat(system: string, messages: LlmMessage[], tools: AgentToolDef[], signal?: AbortSignal): Promise<LlmResponse> {
     const body = this.buildRequestBody(system, messages, tools);
 
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch(`${this.baseUrl}/v1/messages`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -108,7 +114,7 @@ export class AnthropicProvider implements LlmProvider {
     const body = this.buildRequestBody(system, messages, tools);
     body.stream = true;
 
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetch(`${this.baseUrl}/v1/messages`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -255,18 +261,24 @@ export class AnthropicProvider implements LlmProvider {
       max_tokens: this.maxOutputTokens,
     };
 
+    const metadata = getModelMetadata(PROVIDER_NAME, this.model);
+    const advertisedEffort = this.reasoningEffort && metadata?.catalogSource && metadata.reasoningRange.length === 0
+      ? undefined
+      : this.reasoningEffort && metadata?.reasoningRange.length && !metadata.reasoningRange.includes(this.reasoningEffort)
+        ? undefined
+        : this.reasoningEffort;
     if (this.usesAdaptiveThinking()) {
       // Adaptive thinking: the model decides when/how much to think; effort
       // controls depth. budget_tokens would 400 on 4.7+/5-family models.
-      if (this.reasoningEffort) {
+      if (advertisedEffort) {
         body.thinking = { type: "adaptive" };
-        const effort = EFFORT_NO_XHIGH_RE.test(this.model) && this.reasoningEffort === "xhigh"
+        const effort = EFFORT_NO_XHIGH_RE.test(this.model) && advertisedEffort === "xhigh"
           ? "max"
-          : this.reasoningEffort;
+          : advertisedEffort;
         body.output_config = { effort };
       }
     } else {
-      const budget = this.thinkingBudget();
+      const budget = advertisedEffort ? this.thinkingBudget() : null;
       if (budget !== null) {
         body.thinking = { type: "enabled", budget_tokens: budget };
       }

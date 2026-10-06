@@ -71,28 +71,40 @@ directory (or `--project <name>`) and loads that project's memory.
 
 ## Providers
 
+Model lists are discovered per provider and cached; see
+[agent provider catalogues](agent-providers.md) for sources, stale/offline
+behavior, connector settings, and effort-wire rules. `phren-agent models
+--json` is the same catalog consumed by the Hook and both interactive pickers.
+
 The agent picks a provider from the credentials it finds, in this order, or
 the one you name with `--provider` (or `PHREN_AGENT_PROVIDER`):
 
 | Provider | `--provider` | Credentials | Default model |
 |----------|--------------|-------------|---------------|
-| ChatGPT / Codex subscription | `openai-codex` | `phren agent auth login` (browser sign-in) | the Codex CLI's configured `model`, else `gpt-5.4` |
-| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-5.4` |
-| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4-20250514` |
-| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5` |
-| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-flash` |
-| Any OpenAI-compatible endpoint | `openai-compat` | `--base-url` or `PHREN_AGENT_BASE_URL`, plus `PHREN_AGENT_API_KEY` | none: pass `--model` |
-| Ollama (local) | `ollama` | none; `PHREN_OLLAMA_URL` (default `http://localhost:11434`) | `qwen2.5-coder:14b` |
+| ChatGPT / Codex subscription | `openai-codex` | `phren agent auth login` (browser sign-in) | the Codex CLI's configured model, else discovered catalog |
+| OpenAI | `openai` | `OPENAI_API_KEY` | discovered catalog |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | configured model, else discovered catalog |
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | configured model, else discovered catalog |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | configured model, else discovered catalog |
+| Any OpenAI-compatible endpoint | `openai-compat` | `--base-url` or `PHREN_AGENT_BASE_URL`, plus `PHREN_AGENT_API_KEY` | configured/discovered model, else pass `--model` |
+| Ollama (local) | `ollama` | none; `PHREN_OLLAMA_URL` (default `http://localhost:11434`) | configured model, else discovered catalog |
 
 An unknown `--provider` name is an error rather than a silent fallback to
-auto-detection. `openai-compat` is only used when named.
+auto-detection. A configured compatible connector can also be auto-detected.
+The connector resolver
+also accepts `OPENCODE_BASE_URL` and `OPENCODE_API_KEY`, and can reuse an
+OpenCode Go connector when it is present. For persistent endpoint overrides,
+see [agent provider catalogues](agent-providers.md).
 
 Choose a model with `--model <id>` (or `PHREN_AGENT_MODEL`) and a reasoning
-effort with `--reasoning none|low|medium|high|xhigh` (or `PHREN_AGENT_REASONING`;
-`max` is accepted as `xhigh`, `off` as `none`). `none` turns thinking off on
-Anthropic, DeepSeek and OpenAI's GPT-5.1 and later; other models reject it,
-so there no effort is sent and the model's default applies.
-In the terminal UI, `/model` switches both mid-session.
+effort with `--reasoning low|medium|high` (or `PHREN_AGENT_REASONING`). The
+selected model may also support `minimal`, `xhigh`, or `max`; `max` is distinct
+from `xhigh`. `none` (alias `off`) is accepted only on routes that can turn
+thinking off. Unsupported choices fail before a request is sent. Unknown
+models accept an explicit effort override; their picker does not invent
+capabilities. In the terminal UI, `/model` filters models as you type and
+switches provider, model and effort together; `/reasoning` lists the current
+model's supported levels. Offline operation uses the labeled fallback catalog.
 
 ### ChatGPT or Codex subscription
 
@@ -891,4 +903,3 @@ one-shot runs (not just the TUI); disable with `--no-subagents`. In `suggest`
 permission mode, spawning asks first — a child runs with auto-confirm
 permissions. Headless children auto-deny any tool that would need an
 interactive approval.
-
