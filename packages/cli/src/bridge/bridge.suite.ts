@@ -1,5 +1,6 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { stableComputerName } from "./computer-names.js";
 import { once } from "node:events";
 import { readFileSync, realpathSync } from "node:fs";
 import { appendFile, chmod, copyFile, mkdir, mkdtemp, open, readdir, readFile, realpath as realpathAsync, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
@@ -973,8 +974,9 @@ schedules:
 `);
       const listing = await api("/v1/schedules", {});
       expect(listing.status).toBe(200);
-      expect(listing.data.computer).toBe(computer);
-      expect(listing.data.schedules[0]).toMatchObject({ id: "7f3a2c1d", project: "demo", running: false, lastRun: null });
+      // Schedules name a Mac by its Sharing name (the hostname follows the network); health keeps the hostname.
+      expect(listing.data.computer).toBe(stableComputerName());
+      expect(listing.data.schedules[0]).toMatchObject({ id: "7f3a2c1d", project: "demo", running: false, lastRun: null, owned: true });
       // OpenCode takes no first prompt at launch, so the run types it; the
       // agent is still starting when the run first prompts, and the run waits for it.
       promptNotReady = 1;
