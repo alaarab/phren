@@ -75,6 +75,22 @@ export function emptyComposer(line: string): boolean {
   return prompt;
 }
 
+/** Typing a slash command into a draft or an open menu would corrupt both, so
+ * the terminal must show an empty composer and no menu first. The `code` says
+ * which: the phone names the cause and offers the terminal. */
+export function assertComposerReady(before: string, action: string): void {
+  const composer = before.split(/\r?\n/).reverse().find(line => /^\s*[›❯>]/.test(stripTerminal(line)));
+  if (visibleTerminalChoice(stripTerminal(before))) {
+    throw new BridgeError(409, `A menu is open in the terminal. Open terminal to finish it, then ${action}.`, { code: "terminal-menu" });
+  }
+  if (!composer) {
+    throw new BridgeError(409, `Phren couldn't find the terminal's input line. Open terminal to ${action}.`, { code: "terminal-unreadable" });
+  }
+  if (!emptyComposer(composer)) {
+    throw new BridgeError(409, `There's unsent text in the terminal. Send or clear it, then ${action}.`, { code: "terminal-draft" });
+  }
+}
+
 /** Only a footer below Codex's empty composer proves the active model. Text
  * in history, a menu, or the startup banner must never confirm a switch. */
 export function codexModelStatus(text: string, model: AgentModel): boolean {
@@ -162,10 +178,7 @@ export class ModelSwitcher {
       let claudeEffort: string | undefined;
       const before = await this.hooks.paneLines(target, false);
       // Preserve a person's draft and any pre-existing menu. Never clear it.
-      const composer = before.split(/\r?\n/).reverse().find(line => /^\s*[›❯>]/.test(stripTerminal(line)));
-      if (!composer || !emptyComposer(composer) || visibleTerminalChoice(stripTerminal(before))) {
-        throw new BridgeError(409, "The terminal has a draft or an unreadable prompt. Open terminal before switching models.");
-      }
+      assertComposerReady(before, "switch models");
       await validate(true);
       opened = true;
       this.hooks.menuOpened(target, "/model");
