@@ -1,0 +1,370 @@
+import { mkdir, readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { z } from "zod";
+import { homeDir } from "../home-paths.js";
+import { agentNames, findPane, isConductorName, paneAgentName, paneChatState, paneIdentity, servers, snapshot } from "./herdr.js";
+import { agentNotReady, terminalName, terminalProvider } from "./terminal.js";
+import { intervalFromEnv } from "./limits.js";
+import { createLaunchWorktree, launchWorktreeSchema } from "./launch-worktree.js";
+import { briefArgs, DISPATCH_ID_ENV, launchBriefSchema, launchesWithBrief, recordBriefArrival, writeLaunchBrief } from "./launch-brief.js";
+import { prepareServedLaunch, registerServedPane, sendServedBrief } from "./opencode-panes.js";
+import { groupConductor } from "./conductor-group.js";
+import { pretrustFolder } from "./folder-trust.js";
+import { claudeHome, claudeLaunchEnv, isAccountSlug, DEFAULT_ACCOUNT } from "./claude-accounts.js";
+import { harnessInventoryWithin, hasUsable, launchCheckOff } from "./harnesses.js";
+import { paneAccountKey, recordPaneAccount } from "./pane-accounts.js";
+import { optionalHookPeers } from "./peers.js";
+import { AppServerRpcError } from "./codex-app-server.js";
+import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
+import { logger } from "../logger.js";
+import { atomic, BridgeError, bridgeRoot, id, launchEfforts, objects, provider } from "./protocol.js";
+/** Starting agents in Herdr from the phone: the launch route's harness
+ * arguments, the conductor brief, and workspace, tab and pane actions. */
+const launchKinds = ["codex", "claude", "copilot", "opencode"];
+const plainText = (max) => z.string().min(1).max(max).refine(t => !/[\x00-\x1f\x7f]/.test(t));
+async function conductorBrief() {
+    let source;
+    if (typeof CONDUCTOR_SKILL_SOURCE === "string")
+        source = CONDUCTOR_SKILL_SOURCE;
+    else {
+        const here = path.dirname(fileURLToPath(import.meta.url));
+        for (const candidate of [
+            path.join(here, "..", "starter", "global", "skills", "conductor", "SKILL.md"),
+            path.join(here, "..", "..", "starter", "global", "skills", "conductor", "SKILL.md"),
+        ]) {
+            source = await readFile(candidate, "utf8").catch(() => undefined);
+            if (source !== undefined)
+                break;
+        }
+    }
+    if (source === undefined)
+        throw new BridgeError(503, "The shipped conductor brief is unavailable. Reinstall Phren Hook.");
+    const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n([\s\S]*)$/.exec(source);
+    const brief = (match?.[1] ?? source).trim();
+    if (!brief)
+        throw new BridgeError(503, "The shipped conductor brief is empty. Reinstall Phren Hook.");
+    return brief;
+}
+/** How each harness takes a reasoning effort at startup. */
+function effortArgs(kind, effort) {
+    if (kind === "claude")
+        return ["--effort", effort];
+    if (kind === "codex")
+        return ["-c", `model_reasoning_effort=${effort}`];
+    if (kind === "opencode")
+        return ["--variant", effort];
+    return [];
+}
+async function prepareConductor(kind, effort, model) {
+    const brief = await conductorBrief();
+    const briefDirectory = path.join(bridgeRoot(), "conductor");
+    await mkdir(briefDirectory, { recursive: true, mode: 0o700 });
+    const briefFile = path.join(briefDirectory, "brief.md");
+    if (await readFile(briefFile, "utf8").catch(() => undefined) !== brief + "\n")
+        await atomic(briefFile, brief + "\n");
+    // A multi-line argument cannot be typed safely into every shell (Herdr
+    // refuses it for zsh); Claude reads the brief from its file instead.
+    if (kind === "claude")
+        return [...(model ? ["--model", model] : []), "--append-system-prompt-file", briefFile, "--effort", effort];
+    if (kind === "codex")
+        return [...(model ? ["--model", model] : []), "-c", `model_reasoning_effort=${effort}`, "-c", `developer_instructions=${JSON.stringify(brief)}`];
+    if (kind === "opencode") {
+        const directory = path.join(process.env.XDG_CONFIG_HOME || path.join(homeDir(), ".config"), "opencode", "agents");
+        const file = path.join(directory, "conductor.md");
+        const definition = `---\ndescription: Coordinate the owner's work across agent sessions.\nmode: primary\n---\n\n${brief}\n`;
+        await mkdir(directory, { recursive: true, mode: 0o700 });
+        if (await readFile(file, "utf8").catch(() => undefined) !== definition)
+            await atomic(file, definition, 0o644);
+        return [...(model ? ["--model", model] : []), "--agent", "conductor", "--variant", effort];
+    }
+    throw new BridgeError(400, "The selected harness cannot run as a conductor.");
+}
+async function targetForPane(server, pane) {
+    if (!provider.safeParse(pane.agent).success || !id.safeParse(pane.workspace_id).success || !id.safeParse(pane.tab_id).success || !id.safeParse(pane.pane_id).success)
+        return undefined;
+    const binding = { server, workspace: pane.workspace_id, tab: pane.tab_id, pane: pane.pane_id, source: pane.agent };
+    const session = await paneIdentity(server, pane);
+    if (session)
+        return { ...binding, session };
+    const chat = await paneChatState(server, pane).catch(() => ({}));
+    return chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
+}
+/** The live conductor on this computer, on any Herdr server, as a target.
+ * `known` reuses a snapshot the caller already took. */
+export async function localConductor(known) {
+    const names = [...new Set([...(known ? [known.server] : []), ...(await servers()).map(item => String(item.session))])];
+    for (const name of names) {
+        const value = known && name === known.server ? known.snapshot : await snapshot(name);
+        const existing = objects(value.panes).find(pane => isConductorName(paneAgentName(value, pane))
+            && provider.safeParse(pane.agent).success && !["completed", "exited", "failed", "stopped"].includes(String(pane.agent_status)));
+        if (existing)
+            return { server: name, target: await targetForPane(name, existing) };
+    }
+    return undefined;
+}
+/** How long a pane the Hook just created may take to reach its shell prompt. */
+const SHELL_READY_MS = intervalFromEnv("PHREN_SHELL_READY_MS", 15_000);
+/** Herdr starts an agent only at an interactive shell prompt and refuses
+ * with `agent_pane_busy` ("is not an available shell") before that. A pane
+ * created a moment ago is busy only while its login shell starts, which a
+ * loaded computer can stretch to seconds (three Linuxbox dispatches failed
+ * this way on 2026-09-27; the same pane took the agent by hand a minute
+ * later). Nothing is typed on a refusal, so retry until the shell is up. */
+async function startWhenShellReady(server, pane, agent) {
+    const deadline = Date.now() + SHELL_READY_MS;
+    for (;;) {
+        try {
+            await terminalProvider().startAgent(server, pane, agent);
+            return;
+        }
+        catch (error) {
+            const starting = error instanceof BridgeError && error.details?.herdrCode === "agent_pane_busy";
+            if (!starting || Date.now() >= deadline)
+                throw error;
+            await new Promise(resolve => setTimeout(resolve, 250));
+        }
+    }
+}
+/** The Herdr agent-name slug for a human label: "Conductor smoke 4" becomes "conductor-smoke-4". */
+export function herdrAgentName(label) {
+    const slug = label.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^[^a-z]+/, "").replace(/-+$/, "").slice(0, 32).replace(/-+$/, "");
+    return slug || "agent";
+}
+let inventoryReader;
+/** Only for tests: what this computer can launch. Without one, `PHREN_LAUNCH_CHECK=off` skips the early availability check. */
+export function setLaunchInventory(reader) { inventoryReader = reader; }
+/** Refuses a launch the computer cannot run before any pane exists: the harness is not installed
+ * (`harness_unavailable`), or the account is unknown, signed out, or given for a harness without accounts
+ * (`account_unavailable`). Only a definite answer refuses; an inventory that cannot be read lets the launch go on. */
+async function requireAvailable(kind, account) {
+    if (!inventoryReader && launchCheckOff())
+        return;
+    // Bounded: a cold sign-in check per home can take seconds, and an unready inventory lets the launch go on.
+    const inventory = await (inventoryReader ?? (() => harnessInventoryWithin(2_500)))().catch(() => undefined);
+    if (!inventory)
+        return;
+    const availability = hasUsable(inventory, kind, account);
+    if (!availability.ok)
+        throw new BridgeError(409, availability.reason, { code: availability.code });
+}
+/**
+ * "Open on a computer": a new Herdr workspace (or a tab in an existing one)
+ * in the project's directory, with the chosen agent started in its pane.
+ * Herdr's create calls do not return identifiers, so the new tab is found
+ * by diffing snapshots; `agent.start` returns once Herdr has detected the
+ * agent and it is ready for input, which can take most of `timeoutMs`.
+ */
+export async function launchSession(server, data, options = {}) {
+    const role = z.enum(["agent", "conductor"]).default("agent").parse(data.role);
+    const projectDirectory = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
+    const worktreeRequest = data.worktree === undefined || data.worktree === null ? undefined : launchWorktreeSchema.parse(data.worktree);
+    if (worktreeRequest && role === "conductor")
+        throw new BridgeError(400, "A conductor works across projects, so it cannot start in a worktree.");
+    const label = plainText(200).parse(data.label);
+    const kind = z.enum(launchKinds).parse(data.kind);
+    const effort = z.enum(launchEfforts).default("medium").parse(data.effort);
+    const account = data.account === undefined || data.account === null ? undefined : z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(data.account);
+    if (role === "conductor" && kind === "copilot")
+        throw new BridgeError(400, "Copilot cannot run as a conductor.");
+    // A dispatched worker's or scheduled run's first prompt. It rides on the
+    // launch where the harness takes one; elsewhere the caller types it.
+    const brief = data.brief === undefined || data.brief === null ? undefined : launchBriefSchema.parse(data.brief);
+    if (brief && role === "conductor")
+        throw new BridgeError(400, "A conductor starts with its own brief.");
+    // Herdr's agent name is a slug (lowercase, digits, - or _, 1 to 32 chars);
+    // the label a person typed is not, so derive one from it.
+    const baseName = herdrAgentName(data.name === undefined ? label : plainText(200).parse(data.name));
+    // "Conductor" stays "conductor", never "conductor-conductor".
+    // The canary's conductor is not the store's conductor: it keeps its own
+    // name, so the phone never pins it and a real conductor is never refused.
+    // A worker never takes a conductor's name, whatever its label says:
+    // "Conductor voice fluency" would otherwise read as role=conductor.
+    const wanted = options.canary ? "phren-canary" : role === "conductor" ? (isConductorName(baseName) ? baseName : herdrAgentName(`conductor-${baseName}`))
+        : isConductorName(baseName) ? herdrAgentName(`worker-${baseName}`) : baseName;
+    const model = typeof data.model === "string" && data.model.trim() ? plainText(200).parse(data.model.trim()) : undefined;
+    const modelFlag = { codex: "--model", claude: "--model", opencode: "--model" };
+    let workspace = data.workspaceId === undefined ? undefined : id.parse(data.workspaceId);
+    // Herdr 0.9.1 refuses a start timeout of 3000 ms or less (invalid_agent_timeout).
+    const timeout = Math.min(120_000, Math.max(3_001, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
+    // Checked before anything is created, so a refusal leaves no pane, worktree or brief file behind.
+    await requireAvailable(kind, account);
+    const home = kind === "claude" && account && account !== DEFAULT_ACCOUNT ? claudeHome(account) : undefined;
+    if (kind === "claude" && account && account !== DEFAULT_ACCOUNT && !home)
+        throw new BridgeError(409, `No claude account "${account}"`, { code: "account_unavailable" });
+    const before = await snapshot(server);
+    // Herdr agent names are unique per server; a scheduled run or a second
+    // launch with the same label would otherwise collide with the first.
+    const taken = agentNames(before);
+    let name = wanted;
+    for (let n = 2; taken.has(name) && n < 100; n++)
+        name = `${wanted.slice(0, 32 - String(n).length - 1)}-${n}`;
+    // One conductor per connected group: this computer and every linked peer.
+    let unchecked = [];
+    if (role === "conductor" && !options.canary) {
+        const existing = await localConductor({ server, snapshot: before });
+        if (existing)
+            throw new BridgeError(409, "A conductor is already running on this computer.", { target: existing.target });
+        const group = await groupConductor((await optionalHookPeers()).peers);
+        if (group.found)
+            throw new BridgeError(409, `A conductor is already running on ${group.found.computer}, which is linked with this computer. A connected group shares one conductor.`, { computer: group.found.computer, target: group.found.target });
+        unchecked = group.unchecked;
+    }
+    // A worker opened in the conductor's workspace would be listed under the
+    // conductor's name; it gets its own workspace instead.
+    if (role === "agent" && workspace && objects(before.panes).some(pane => pane.workspace_id === workspace && isConductorName(paneAgentName(before, pane))))
+        workspace = undefined;
+    const args = role === "conductor" ? await prepareConductor(kind, effort, model)
+        : [...(model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort))];
+    // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
+    // pane joins the thread the Hook started, and the brief is that thread's
+    // first turn. The typed arguments below stay the fallback.
+    const structured = kind === "codex" && role === "agent" && !options.canary && codexAppServerEnabled();
+    // OpenCode serves its own API on a port of its own (opencode-panes.ts): the
+    // Hook sends its prompts, answers its asks and interrupts it over HTTP, and
+    // the pane stays the owner's view. A brief goes the same way once it
+    // answers; its file still marks the dispatch so the arrival is recorded here.
+    const served = kind === "opencode" ? await prepareServedLaunch() : undefined;
+    if (served)
+        args.push(...served.args);
+    const briefFile = brief && (launchesWithBrief(kind) || structured || served) ? await writeLaunchBrief(brief, Date.now(), label) : undefined;
+    const briefLaunch = brief && briefFile && launchesWithBrief(kind) ? briefArgs(kind, briefFile) : undefined;
+    const variables = { ...(brief ? { [DISPATCH_ID_ENV]: brief.id } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
+    const env = Object.keys(variables).length ? variables : undefined;
+    if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace))
+        throw new BridgeError(409, "The workspace changed.");
+    const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));
+    const knownTabs = new Set(objects(before.tabs).map(t => t.tab_id));
+    // Created last, once nothing else can refuse the launch, so a refusal
+    // never leaves a worktree or branch behind.
+    const worktree = worktreeRequest ? await createLaunchWorktree(projectDirectory, worktreeRequest) : undefined;
+    const cwd = worktree?.cwd ?? projectDirectory;
+    // Claude's folder-trust screen defaults to "No, exit" and Codex's holds the
+    // agent too; a folder the Hook picked or just created is trusted up front.
+    if (worktree || options.trustFolder)
+        await pretrustFolder(kind, cwd, worktree ? `new worktree for ${worktree.branch}` : "project folder", home ? { ...process.env, ...claudeLaunchEnv(home) } : process.env);
+    try {
+        await terminalProvider().create(server, { workspace, label, cwd, ...(env ? { env } : {}) });
+    }
+    catch (error) {
+        await worktree?.discard();
+        throw error;
+    }
+    let created;
+    for (let attempt = 0; attempt < 25 && !created; attempt++) {
+        const s = await snapshot(server);
+        const fresh = objects(s.tabs).filter(t => !knownTabs.has(t.tab_id)
+            && (workspace ? t.workspace_id === workspace : !knownWorkspaces.has(t.workspace_id)));
+        const tab = fresh.find(t => t.label === label)
+            ?? fresh.find(t => objects(s.workspaces).some(w => w.workspace_id === t.workspace_id && w.label === label))
+            ?? fresh[0];
+        const pane = tab && objects(s.panes).find(p => p.tab_id === tab.tab_id && p.workspace_id === tab.workspace_id && !p.agent);
+        if (tab && pane && id.safeParse(tab.workspace_id).success && id.safeParse(tab.tab_id).success && id.safeParse(pane.pane_id).success) {
+            created = { workspaceId: String(tab.workspace_id), tabId: String(tab.tab_id), paneId: String(pane.pane_id) };
+        }
+        else
+            await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    if (!created)
+        throw new BridgeError(409, `${terminalName(server)} created "${label}" but its pane did not appear. Check ${terminalName(server)} on the computer.`);
+    const place = { workspace: created.workspaceId, tab: created.tabId, pane: created.paneId };
+    const structuredLaunch = structured ? await codexServers.launch({ server, ...place }, { cwd, ...(model ? { model } : {}),
+        ...(data.effort === undefined ? {} : { effort }), env: { ...(terminalProvider().paneEnv?.(server, place) ?? {}), ...(env ?? {}) },
+        ...(brief ? { dispatchId: brief.id } : {}), startThread: !!brief }).catch(error => {
+        logger.warn("launch", `Codex app-server unavailable, typing instead: ${error instanceof Error ? error.message : String(error)}`);
+        return undefined;
+    }) : undefined;
+    const appServer = structuredLaunch?.entry;
+    const binding = { server, workspace: created.workspaceId, tab: created.tabId, pane: created.paneId, source: kind };
+    // The brief is the thread's first turn, acknowledged with its id before
+    // the pane even starts; the pane's TUI shows it running when it joins.
+    // Refused outright, nothing was sent and the caller types it; a lost
+    // reply may have started it, so it is not offered for typing again.
+    let briefTurn;
+    if (appServer?.threadId && brief) {
+        try {
+            await codexServers.prompt(appServer, brief.text);
+            briefTurn = "sent";
+            await recordBriefArrival(brief.id, "UserPromptSubmit", { ...binding, session: appServer.threadId }).catch(() => undefined);
+        }
+        catch (error) {
+            briefTurn = error instanceof AppServerRpcError ? undefined : "uncertain";
+        }
+    }
+    const agentArgs = structuredLaunch ? structuredLaunch.args : [...args, ...(briefLaunch ?? [])];
+    try {
+        await startWhenShellReady(server, created.paneId, { name, kind, args: agentArgs, timeoutMs: timeout, ...(env ? { env } : {}) });
+    }
+    catch (error) {
+        if (appServer && !agentNotReady(error))
+            await codexServers.stop(appServer).catch(() => undefined);
+        // A first-run screen (Claude's folder trust, a login notice) holds the
+        // agent at startup. It did start: hand the pane back so the owner answers
+        // that screen from the chat instead of stranding the workspace.
+        const blocked = agentNotReady(error);
+        if (!blocked) {
+            const host = terminalName(server);
+            const reason = error instanceof BridgeError && error.status === 504 ? "it did not become ready in time"
+                : error instanceof BridgeError && error.message.startsWith(`${host}: `) ? error.message.slice(host.length + 2) : `${host} reported an error`;
+            throw new BridgeError(409, `${host} couldn't start ${kind} in the new "${label}" pane (${reason}). The workspace was created and is still open on the computer — open it from ${host === "Herdr" ? "Herdr workspaces" : "its tmux session"}.`);
+        }
+    }
+    // Without a brief the pane's TUI started the thread; the Hook heard it.
+    if (appServer && !appServer.threadId)
+        await codexServers.awaitThread(appServer);
+    let servedBrief;
+    if (served) {
+        const variant = role === "conductor" || data.effort !== undefined ? effort : undefined;
+        const entry = await registerServedPane(server, created.paneId, cwd, served, { defaults: { ...(role === "conductor" ? { agent: "conductor" } : {}), ...(model ? { model } : {}), ...(variant ? { variant } : {}) } }).catch(() => undefined);
+        const sent = entry && brief ? await sendServedBrief(entry, brief.text) : undefined;
+        if (brief && sent?.sent) {
+            // Sent is enough to never type it again; the user turn appearing in
+            // the session is the acceptance the dispatch receipt waits for.
+            servedBrief = { session: sent.session, delivered: sent.delivered };
+            const at = { ...binding, session: sent.session };
+            await recordBriefArrival(brief.id, "SessionStart", at).catch(() => { });
+            if (sent.delivered)
+                await recordBriefArrival(brief.id, "UserPromptSubmit", at).catch(() => { });
+        }
+    }
+    const after = await snapshot(server);
+    const pane = findPane(after, { workspace: created.workspaceId, tab: created.tabId, pane: created.paneId });
+    const agentStatus = typeof pane?.agent_status === "string" ? pane.agent_status : undefined;
+    if (kind === "claude" && account)
+        recordPaneAccount(paneAccountKey(server, created.paneId), account, typeof pane?.terminal_id === "string" ? pane.terminal_id : undefined);
+    const sessionId = appServer?.threadId ?? (pane && pane.agent === kind ? await paneIdentity(server, pane) : undefined) ?? servedBrief?.session;
+    const chat = !sessionId && pane && pane.agent === kind ? await paneChatState(server, pane).catch(() => ({})) : {};
+    const target = sessionId ? { ...binding, session: sessionId }
+        : chat.starting === true ? { ...binding, starting: true, startingToken: chat.startingToken } : undefined;
+    return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(account ? { account } : {}), ...(unchecked.length ? { unchecked } : {}),
+        // The caller types the brief itself unless it went with the launch.
+        ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief } : {}),
+        ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}) };
+}
+export async function workspaceAction(server, operation, data) {
+    if (!["focus", "rename", "create", "close"].includes(operation))
+        throw new BridgeError(400, "Unsupported Herdr action.");
+    const s = await snapshot(server);
+    const workspace = typeof data.workspaceId === "string" ? data.workspaceId : undefined;
+    const tab = typeof data.tabId === "string" ? data.tabId : undefined;
+    const pane = typeof data.paneId === "string" ? data.paneId : undefined;
+    if (workspace && !objects(s.workspaces).some(w => w.workspace_id === workspace))
+        throw new BridgeError(409, "The workspace changed.");
+    if (tab && !objects(s.tabs).some(t => t.tab_id === tab && (!workspace || t.workspace_id === workspace)))
+        throw new BridgeError(409, "The tab changed.");
+    if (pane && !objects(s.panes).some(p => p.pane_id === pane && (!tab || p.tab_id === tab) && (!workspace || p.workspace_id === workspace)))
+        throw new BridgeError(409, "The pane changed.");
+    const label = data.label === undefined ? undefined : z.string().min(1).max(200).refine(t => !/[\x00-\x1f\x7f]/.test(t)).parse(data.label);
+    const cwd = data.cwd === undefined ? undefined : z.string().max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
+    if (operation === "create")
+        await terminalProvider().create(server, { workspace, label, cwd });
+    else if (!workspace && !tab && !pane)
+        throw new BridgeError(400, "Choose a Herdr destination.");
+    else if (pane && operation === "focus")
+        await terminalProvider().focusPane(server, pane);
+    else if (pane)
+        throw new BridgeError(400, "This pane action is not available.");
+    else
+        await terminalProvider().groupAction(server, operation, { workspace, tab }, label);
+    return { ok: true };
+}

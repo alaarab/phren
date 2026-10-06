@@ -1,0 +1,1067 @@
+// shared-retrieval.ts — shared retrieval core used by hooks and MCP search.
+import { getQualityMultiplier, entryScoreKey, } from "./governance.js";
+import { queryDocRows, queryRows, cosineFallback, extractSnippet, getDocSourceKey, getFragmentBoostDocs, decodeFiniteNumber, rowToDocWithRowid, buildIndex, } from "./index.js";
+import { filterTrustedFindingsDetailed, } from "./content.js";
+import { parseCitationComment } from "../content/citation.js";
+import { getHighImpactFindings } from "../finding/impact.js";
+import { buildFtsQueryVariants, buildRelaxedFtsQuery, isFeatureEnabled, STOP_WORDS, errorMessage } from "../utils.js";
+import { logger } from "../logger.js";
+import * as fs from "fs";
+import * as path from "path";
+import { getProjectGlobBoost } from "../cli/hooks-globs.js";
+import { vectorFallback, deterministicSeed } from "./search-fallback.js";
+import { getOllamaUrl, getCloudEmbeddingUrl } from "./ollama.js";
+import { keywordFallbackSearch } from "../core/search.js";
+import { debugLog } from "../shared.js";
+// ── Scoring constants ─────────────────────────────────────────────────────────
+/** Number of docs sampled for token-overlap semantic fallback search. */
+const SEMANTIC_FALLBACK_SAMPLE_LIMIT = 100;
+const SEMANTIC_FALLBACK_WINDOW_COUNT = 4;
+/** Minimum overlap score for a doc to be included in semantic fallback results. */
+const SEMANTIC_OVERLAP_MIN_SCORE = 0.25;
+const VECTOR_FALLBACK_SKIP_COUNT = 3;
+const VECTOR_FALLBACK_STRONG_MATCH_SCORE = 0.2;
+const LOCAL_QUERY_OVERLAP_WEIGHT = 3.5;
+const CROSS_PROJECT_QUERY_OVERLAP_WEIGHT = 1.35;
+const WEAK_CROSS_PROJECT_OVERLAP_MAX = 0.18;
+const WEAK_CROSS_PROJECT_OVERLAP_PENALTY = 0.75;
+const LOW_FOCUS_SNIPPET_SCORE = 0.3;
+const VERY_LOW_FOCUS_SNIPPET_SCORE = 0.14;
+/**
+ * Per-snippet overhead charged against the token budget: the header line
+ * (`[<source key>] (<type>) fb:<score key>`) plus its blank separator.
+ *
+ * Selection and rendering MUST charge the same amount. When they drifted
+ * apart, `selectSnippets` admitted a snippet on one estimate and
+ * `buildHookOutput` re-checked it against a larger one, silently dropping a
+ * middle snippet that legitimately fit.
+ */
+export const SNIPPET_OVERHEAD_TOKENS = 24;
+const LOW_FOCUS_SNIPPET_LINE_CAP = 3;
+const LOW_FOCUS_SNIPPET_CHAR_FRACTION = 0.55;
+/** Query-relevance floor (see applyRelevanceFloor). A doc with no structural
+ * signal must clear this query-overlap score to be worth injecting; on the
+ * overlapScore scale (matched / max(2, min(tokens, 10))) ~0.12 means "shares at
+ * least one query token" — enough to drop priors-only noise without hurting
+ * recall. Cross-project docs face a higher bar. Tunable via
+ * PHREN_MIN_QUERY_RELEVANCE (0 disables the floor). */
+const DEFAULT_MIN_QUERY_RELEVANCE = 0.12;
+const CROSS_PROJECT_MIN_QUERY_RELEVANCE = 0.25;
+/** A chunk (one bullet or paragraph) must match this many distinct prompt
+ * keywords before its doc is worth injecting. */
+const MIN_CHUNK_MATCHES = 2;
+/** The matched keywords' summed rarity (normalised IDF, 0..1 each) a chunk
+ * needs. Common words across the index ("main", "push", "agent") weigh little,
+ * project and technical terms a lot, so a prompt of common words clears
+ * nothing. With no detected project (the conductor) the bar is higher. */
+const MIN_CHUNK_RARITY = 0.55;
+const NO_PROJECT_MIN_CHUNK_RARITY = 0.6;
+/** Rarity for a token the index never saw, or when no index is at hand. */
+const DEFAULT_TOKEN_RARITY = 0.5;
+const TASK_RESCUE_MIN_OVERLAP = 0.3;
+const TASK_RESCUE_OVERLAP_MARGIN = 0.12;
+const TASK_RESCUE_SCORE_MARGIN = 0.6;
+/** Fraction of bullets that must be low-value before applying the low-value penalty. */
+const LOW_VALUE_BULLET_FRACTION = 0.5;
+// ── Intent and scoring helpers ───────────────────────────────────────────────
+const INTENT_SKILL_CMD_RE = /(?:^|\s)\/(?!(?:home|usr|var|tmp|etc|opt|api|mnt)\b)[a-z][\w-]*\b/;
+const INTENT_SKILL_KW_RE = /\bskill\b/;
+const INTENT_DEBUG_RE = /(bug|error|fix|broken|regression|fail|stack trace)/;
+const INTENT_REVIEW_RE = /(review|audit|pr|pull request|nit|refactor)/;
+const INTENT_BUILD_RE = /(build|deploy|release|ci|workflow|pipeline|test)/;
+const INTENT_DOCS_RE = /\b(doc|docs|readme|explain|guide|instructions?)\b/;
+const WANTS_TASKS_RE = /\b(tasks?|todos?|backlog|queue|what'?s (left|next|remaining)|what is (left|next|remaining)|next up|remaining work|priorit(y|ies))\b/i;
+/**
+ * Tasks are a backlog, not memory: a to-do list injected into a debugging
+ * question is noise that costs findings their budget. They go in only when the
+ * prompt is about building or asks about the work itself.
+ */
+export function wantsTasks(prompt, intent) {
+    return intent === "build" || WANTS_TASKS_RE.test(prompt);
+}
+export function detectTaskIntent(prompt) {
+    const p = prompt.toLowerCase();
+    if (INTENT_SKILL_CMD_RE.test(p) || INTENT_SKILL_KW_RE.test(p))
+        return "skill";
+    if (INTENT_DEBUG_RE.test(p))
+        return "debug";
+    if (INTENT_REVIEW_RE.test(p))
+        return "review";
+    if (INTENT_BUILD_RE.test(p))
+        return "build";
+    if (INTENT_DOCS_RE.test(p))
+        return "docs";
+    return "general";
+}
+function intentBoost(intent, docType) {
+    if (intent === "debug" && (docType === "findings" || docType === "reference"))
+        return 3;
+    if (intent === "review" && (docType === "canonical" || docType === "changelog"))
+        return 3;
+    if (intent === "build" && (docType === "task" || docType === "reference"))
+        return 2;
+    if (intent === "docs" && (docType === "summary" || docType === "claude"))
+        return 2;
+    if (docType === "canonical")
+        return 2;
+    return 0;
+}
+// fileRelevanceBoost runs once per candidate doc during ranking, all sharing the
+// same changedFiles Set. Cache the normalized view (keyed by the Set instance) so
+// path normalization happens once per ranking pass instead of once per doc.
+const _normalizedChangedFiles = new WeakMap();
+function normalizeChangedFiles(changedFiles) {
+    let cached = _normalizedChangedFiles.get(changedFiles);
+    if (cached)
+        return cached;
+    const basenames = new Set();
+    const paths = [];
+    for (const cf of changedFiles) {
+        const n = cf.replace(/\\/g, "/");
+        basenames.add(path.basename(n));
+        paths.push(n);
+    }
+    cached = { basenames, paths };
+    _normalizedChangedFiles.set(changedFiles, cached);
+    return cached;
+}
+export function fileRelevanceBoost(filePath, changedFiles) {
+    if (changedFiles.size === 0)
+        return 0;
+    const normalized = filePath.replace(/\\/g, "/");
+    const docBasename = path.basename(normalized);
+    const { basenames, paths } = normalizeChangedFiles(changedFiles);
+    // Exact basename match to avoid 'index.ts' matching 'shared-index.ts'
+    if (basenames.has(docBasename))
+        return 3;
+    // Also match if the full changed-file path is a suffix of the doc path
+    for (const n of paths) {
+        if (normalized.endsWith(`/${n}`))
+            return 3;
+    }
+    return 0;
+}
+function branchTokens(branch) {
+    return branch
+        .split(/[\/._-]/g)
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.length > 2 && !["main", "master", "feature", "fix", "bugfix", "hotfix"].includes(s));
+}
+export function branchMatchBoost(content, branch) {
+    if (!branch)
+        return 0;
+    const text = content.toLowerCase();
+    const tokens = branchTokens(branch);
+    let score = 0;
+    for (const token of tokens) {
+        if (text.includes(token))
+            score += 1;
+    }
+    return Math.min(3, score);
+}
+let _lowValueRegex = null;
+let _lowValuePatternKey = "";
+function getLowValuePattern() {
+    const key = (process.env.PHREN_LOW_VALUE_PATTERNS) || "";
+    if (_lowValueRegex && _lowValuePatternKey === key)
+        return _lowValueRegex;
+    const defaults = ["fixed stuff", "updated things", "misc", "temp", "wip", "todo", "placeholder", "cleanup"];
+    const configured = key.split(",").map((s) => s.trim()).filter(Boolean);
+    const fragments = configured.length ? configured : defaults;
+    _lowValueRegex = new RegExp(`(${fragments.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "i");
+    _lowValuePatternKey = key;
+    return _lowValueRegex;
+}
+function lowValuePenalty(content, docType) {
+    if (docType !== "findings")
+        return 0;
+    const bullets = content.split("\n").filter((l) => l.startsWith("- "));
+    if (bullets.length === 0)
+        return 0;
+    const pattern = getLowValuePattern();
+    const low = bullets.filter((b) => pattern.test(b) || b.length < 16).length;
+    return low >= Math.ceil(bullets.length * LOW_VALUE_BULLET_FRACTION) ? 2 : 0;
+}
+// ── Token and snippet helpers ────────────────────────────────────────────────
+function normalizeToken(token) {
+    let normalized = token.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+    if (normalized.length > 4 && normalized.endsWith("s") && !normalized.endsWith("ss"))
+        normalized = normalized.slice(0, -1);
+    return normalized;
+}
+function tokenizeForOverlap(text, maxTokens = 24) {
+    const tokens = text
+        .toLowerCase()
+        .replace(/[^a-z0-9_\-\s]/g, " ")
+        .split(/\s+/)
+        .map(normalizeToken)
+        .filter((t) => t.length > 1 && !STOP_WORDS.has(t));
+    const uniqueTokens = [...new Set(tokens)];
+    if (!Number.isFinite(maxTokens) || maxTokens < 1)
+        return uniqueTokens;
+    return uniqueTokens.slice(0, maxTokens);
+}
+function overlapScore(queryTokens, content) {
+    if (!queryTokens.length)
+        return 0;
+    const contentTokens = new Set(tokenizeForOverlap(content, Number.POSITIVE_INFINITY));
+    if (!contentTokens.size)
+        return 0;
+    let matched = 0;
+    for (const token of queryTokens) {
+        if (contentTokens.has(token))
+            matched += 1;
+    }
+    const denominator = Math.max(2, Math.min(queryTokens.length, 10));
+    return matched / denominator;
+}
+function docOverlapScore(queryTokens, doc) {
+    // Never the path: every store path contains "/.phren/", so "phren" would match every doc.
+    const corpus = `${doc.project} ${doc.filename} ${doc.type}\n${doc.content.slice(0, 5000)}`;
+    return overlapScore(queryTokens, corpus);
+}
+/** A doc's bullets (with their continuation lines) or, with none, its
+ * paragraphs: the unit relevance is judged on. Topic archives are one doc
+ * with hundreds of bullets, so a whole-file score matches almost anything. */
+export function contentChunks(content, maxChunks = 600) {
+    const chunks = [];
+    let current = [];
+    const flush = () => { if (current.length)
+        chunks.push(current.join("\n")); current = []; };
+    for (const line of content.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            flush();
+            continue;
+        }
+        if (/^([-*+]|\d+[.)])\s/.test(trimmed) || trimmed.startsWith("#"))
+            flush();
+        current.push(line);
+        if (chunks.length >= maxChunks)
+            break;
+    }
+    flush();
+    return chunks.slice(0, maxChunks);
+}
+/** The doc's best chunk for this prompt: most summed keyword rarity among
+ * chunks with the most distinct keyword matches. */
+export function bestChunkMatch(queryTokens, doc, rarity) {
+    if (!queryTokens.length)
+        return null;
+    const wanted = new Set(queryTokens);
+    let best = null;
+    for (const chunk of contentChunks(doc.content)) {
+        const tokens = new Set(tokenizeForOverlap(chunk, Number.POSITIVE_INFINITY));
+        let distinct = 0, weight = 0;
+        for (const token of wanted) {
+            if (!tokens.has(token))
+                continue;
+            distinct += 1;
+            weight += rarity?.get(token) ?? DEFAULT_TOKEN_RARITY;
+        }
+        if (!distinct)
+            continue;
+        if (!best || weight > best.rarity || (weight === best.rarity && distinct > best.distinct))
+            best = { chunk, distinct, rarity: weight };
+    }
+    return best;
+}
+/** How rare each prompt token is across the index: normalised IDF, 1 for a
+ * token in one doc, near 0 for one in every doc. One FTS count per token. */
+/** `tokenRarity` for a prompt's keywords, tokenised as the floor tokenises them. */
+export function promptRarity(db, keywords) {
+    return tokenRarity(db, tokenizeForOverlap(keywords));
+}
+export function tokenRarity(db, queryTokens) {
+    const rarity = new Map();
+    if (!db || !queryTokens.length)
+        return rarity;
+    try {
+        const total = Number(queryRows(db, "SELECT COUNT(*) FROM docs", [])?.[0]?.[0] ?? 0);
+        if (!(total > 1))
+            return rarity;
+        const scale = Math.log(total + 1);
+        for (const token of queryTokens.slice(0, 12)) {
+            if (!/^[a-z0-9_-]+$/.test(token))
+                continue;
+            const df = Number(queryRows(db, "SELECT COUNT(*) FROM docs WHERE docs MATCH ?", [`"${token}"*`])?.[0]?.[0] ?? 0);
+            rarity.set(token, Math.max(0, Math.min(1, Math.log((total + 1) / (df + 1)) / scale)));
+        }
+    }
+    catch { /* the default rarity stands in */ }
+    return rarity;
+}
+function loadSemanticFallbackWindow(db, startRowid, limit, project, wrapBefore) {
+    const where = [
+        project ? "project = ?" : "",
+        wrapBefore === undefined ? "rowid >= ?" : "rowid < ?",
+    ].filter(Boolean).join(" AND ");
+    const params = [
+        ...(project ? [project] : []),
+        wrapBefore ?? startRowid,
+        limit,
+    ];
+    const rows = queryRows(db, `SELECT rowid, project, filename, type, content, path FROM docs WHERE ${where} ORDER BY rowid LIMIT ?`, params) || [];
+    return rows.map((row) => rowToDocWithRowid(row));
+}
+// k=60 is the standard RRF constant from Cormack et al. (2009); higher values reduce
+// the impact of top-ranked results, lower values amplify them. 60 is the community default.
+const RRF_K = 60;
+/**
+ * Item 4: Reciprocal Rank Fusion — merges ranked result lists from multiple search tiers.
+ * Documents appearing in multiple tiers get a higher combined score.
+ * Formula: score(d) = Σ 1/(k + rank_i) for each tier i containing d, where k=60 (standard).
+ */
+/** @internal Exported for tests. */
+export function rrfMerge(tiers, k = RRF_K) {
+    const scores = new Map();
+    const docs = new Map();
+    for (const tier of tiers) {
+        for (let rank = 0; rank < tier.length; rank++) {
+            const doc = tier[rank];
+            const key = doc.path || `${doc.project}/${doc.filename}`;
+            if (!docs.has(key))
+                docs.set(key, doc);
+            scores.set(key, (scores.get(key) ?? 0) + 1 / (k + rank + 1));
+        }
+    }
+    return [...scores.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([key]) => docs.get(key));
+}
+function semanticFallbackDocs(db, prompt, project) {
+    const terms = tokenizeForOverlap(prompt);
+    if (!terms.length)
+        return [];
+    const sampleLimit = SEMANTIC_FALLBACK_SAMPLE_LIMIT;
+    const statsRows = queryRows(db, project
+        ? "SELECT MIN(rowid), MAX(rowid), COUNT(*) FROM docs WHERE project = ?"
+        : "SELECT MIN(rowid), MAX(rowid), COUNT(*) FROM docs", project ? [project] : []);
+    if (!statsRows?.length)
+        return [];
+    let minRowid = 0;
+    let maxRowid = 0;
+    let rowCount = 0;
+    try {
+        minRowid = decodeFiniteNumber(statsRows[0][0], "semanticFallbackDocs.minRowid");
+        maxRowid = decodeFiniteNumber(statsRows[0][1], "semanticFallbackDocs.maxRowid");
+        rowCount = decodeFiniteNumber(statsRows[0][2], "semanticFallbackDocs.rowCount");
+    }
+    catch {
+        return [];
+    }
+    if (rowCount <= 0 || maxRowid < minRowid)
+        return [];
+    const cappedLimit = Math.min(sampleLimit, rowCount);
+    const docs = [];
+    const seenRowids = new Set();
+    const pushRows = (rows) => {
+        for (const row of rows) {
+            if (seenRowids.has(row.rowid))
+                continue;
+            seenRowids.add(row.rowid);
+            docs.push(row.doc);
+            if (docs.length >= cappedLimit)
+                break;
+        }
+    };
+    if (rowCount <= cappedLimit) {
+        pushRows(loadSemanticFallbackWindow(db, minRowid, cappedLimit, project));
+    }
+    else {
+        const span = Math.max(1, maxRowid - minRowid + 1);
+        const windowCount = Math.min(SEMANTIC_FALLBACK_WINDOW_COUNT, cappedLimit);
+        const perWindow = Math.max(1, Math.ceil(cappedLimit / windowCount));
+        const stride = Math.max(1, Math.floor(span / windowCount));
+        const seed = deterministicSeed(`${project ?? "*"}\n${terms.join(" ")}`);
+        for (let i = 0; i < windowCount && docs.length < cappedLimit; i++) {
+            const offset = (seed + i * stride) % span;
+            const startRowid = minRowid + offset;
+            pushRows(loadSemanticFallbackWindow(db, startRowid, perWindow, project));
+            if (docs.length >= cappedLimit)
+                break;
+            pushRows(loadSemanticFallbackWindow(db, startRowid, perWindow, project, startRowid));
+        }
+    }
+    if (docs.length < cappedLimit) {
+        pushRows(loadSemanticFallbackWindow(db, minRowid, cappedLimit - docs.length, project));
+    }
+    const scored = docs
+        .map((doc) => {
+        const score = docOverlapScore(terms, doc);
+        return { doc, score };
+    })
+        .filter((x) => x.score >= SEMANTIC_OVERLAP_MIN_SCORE)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 8)
+        .map((x) => x.doc);
+    return scored;
+}
+/** @internal Exported for tests. */
+function shouldRunVectorExpansion(rows, prompt, desiredResults = VECTOR_FALLBACK_SKIP_COUNT) {
+    if (!rows || rows.length === 0)
+        return true;
+    const targetCount = Math.max(2, Math.min(VECTOR_FALLBACK_SKIP_COUNT, desiredResults));
+    if (rows.length >= targetCount)
+        return false;
+    const queryTokens = tokenizeForOverlap(prompt);
+    if (queryTokens.length === 0)
+        return false;
+    const bestOverlap = rows
+        .slice(0, 2)
+        .reduce((maxScore, doc) => Math.max(maxScore, docOverlapScore(queryTokens, doc)), 0);
+    return bestOverlap < VECTOR_FALLBACK_STRONG_MATCH_SCORE;
+}
+function approximateTokens(text) {
+    return Math.ceil(text.length / 3.5 + (text.match(/\s+/g) || []).length * 0.1);
+}
+function compactSnippet(snippet, maxLines, maxChars) {
+    const lines = snippet
+        .split("\n")
+        .map((l) => l.trimEnd())
+        .filter((l) => l.trim().length > 0)
+        .slice(0, Math.max(1, maxLines));
+    let out = lines.join("\n");
+    if (out.length > maxChars)
+        out = out.slice(0, Math.max(24, maxChars - 1)).trimEnd() + "\u2026";
+    return out;
+}
+// ── Task priority filtering ───────────────────────────────────────────────
+const PRIORITY_TAG_RE = /\[(high|medium|low)\]/i;
+export function filterTaskByPriority(items, allowedPriorities) {
+    const envPriorities = (process.env.PHREN_TASK_PRIORITY);
+    const allowed = new Set((allowedPriorities || (envPriorities ? envPriorities.split(",").map(s => s.trim().toLowerCase()) : ["high", "medium"])));
+    return items.filter(item => {
+        const match = item.match(PRIORITY_TAG_RE);
+        if (!match) {
+            return allowed.has("high") || allowed.has("medium");
+        }
+        return allowed.has(match[1].toLowerCase());
+    });
+}
+// ── Search ───────────────────────────────────────────────────────────────────
+const SHARED_PROJECTS = ["shared", "org"];
+export function searchDocuments(db, safeQuery, prompt, keywords, detectedProject, searchAllProjects = false, phrenPath) {
+    // Tier 1: FTS5 — run project-scoped and global in one pass, dedup
+    const ftsDocs = [];
+    const ftsSeenKeys = new Set();
+    const relaxedQuery = buildRelaxedFtsQuery(keywords || prompt, detectedProject, phrenPath);
+    const addFtsRows = (rows) => {
+        if (!rows)
+            return;
+        for (const doc of rows) {
+            const key = doc.path || `${doc.project}/${doc.filename}`;
+            if (!ftsSeenKeys.has(key)) {
+                ftsSeenKeys.add(key);
+                ftsDocs.push(doc);
+            }
+        }
+    };
+    const runScopedFtsQuery = (query) => {
+        if (!query)
+            return;
+        if (detectedProject) {
+            addFtsRows(queryDocRows(db, "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? AND project = ? ORDER BY rank LIMIT 7", [query, detectedProject]));
+        }
+        if (searchAllProjects || !detectedProject) {
+            addFtsRows(queryDocRows(db, "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 10", [query]));
+            return;
+        }
+        const scopeProjects = [detectedProject, ...SHARED_PROJECTS];
+        const placeholders = scopeProjects.map(() => "?").join(", ");
+        addFtsRows(queryDocRows(db, `SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ? AND project IN (${placeholders}) ORDER BY rank LIMIT 10`, [query, ...scopeProjects]));
+    };
+    runScopedFtsQuery(safeQuery);
+    if (ftsDocs.length === 0 && relaxedQuery && relaxedQuery !== safeQuery) {
+        runScopedFtsQuery(relaxedQuery);
+    }
+    // Tier 2: Token-overlap semantic — always run, scored independently
+    const semanticDocs = semanticFallbackDocs(db, `${prompt}\n${keywords}`, detectedProject);
+    // Merge with Reciprocal Rank Fusion so documents found by both tiers rank highest
+    const merged = rrfMerge([ftsDocs, semanticDocs]);
+    if (merged.length === 0)
+        return null;
+    return merged.slice(0, 12);
+}
+/**
+ * Async variant of searchDocuments that also runs real vector search (Tier 3)
+ * when cloud embeddings (PHREN_EMBEDDING_API_URL) or Ollama are available.
+ * Falls back to the sync result if vector search is unavailable or fails.
+ */
+export async function searchDocumentsAsync(db, safeQuery, prompt, keywords, detectedProject, searchAllProjects = false, phrenPath) {
+    // Sync result (Tier 1 + Tier 2)
+    let syncResult = searchDocuments(db, safeQuery, prompt, keywords, detectedProject, searchAllProjects, phrenPath);
+    if (!syncResult || syncResult.length === 0) {
+        const keywordRows = keywordFallbackSearch(db, prompt, { project: detectedProject ?? undefined, limit: 8 });
+        if (keywordRows?.length)
+            syncResult = keywordRows;
+    }
+    // Tier 3: Real vector search — only if embeddings are available and phrenPath provided
+    const hasVectorBackend = Boolean(getCloudEmbeddingUrl() || getOllamaUrl());
+    if (!phrenPath || !hasVectorBackend || !shouldRunVectorExpansion(syncResult, `${prompt}\n${keywords}`)) {
+        return syncResult;
+    }
+    try {
+        const existingPaths = new Set((syncResult ?? []).map((d) => d.path || `${d.project}/${d.filename}`));
+        const vectorDocs = await vectorFallback(phrenPath, `${prompt}\n${keywords}`, existingPaths, 8, detectedProject);
+        if (vectorDocs.length === 0)
+            return syncResult;
+        // RRF-merge all three tiers
+        const tiers = [syncResult ?? [], vectorDocs];
+        const merged = rrfMerge(tiers);
+        if (merged.length === 0)
+            return syncResult;
+        return merged.slice(0, 12);
+    }
+    catch (err) {
+        // Vector search failure is non-fatal — return sync result
+        logger.debug("hybridSearch vectorFallback", errorMessage(err));
+        return syncResult;
+    }
+}
+export async function searchKnowledgeRows(db, options) {
+    const { query, maxResults, fetchLimit = maxResults, filterProject, filterType, phrenPath, } = options;
+    const queryVariants = buildFtsQueryVariants(query, filterProject, phrenPath);
+    const safeQuery = queryVariants[0] ?? "";
+    if (!safeQuery)
+        return { safeQuery, rows: null, usedFallback: false };
+    let sql = "SELECT project, filename, type, content, path FROM docs WHERE docs MATCH ?";
+    const params = [safeQuery];
+    if (filterProject) {
+        sql += " AND project = ?";
+        params.push(filterProject);
+    }
+    if (filterType) {
+        sql += " AND type = ?";
+        params.push(filterType);
+    }
+    sql += " ORDER BY rank LIMIT ?";
+    params.push(fetchLimit);
+    let activeFtsQuery = safeQuery;
+    let rows = queryDocRows(db, sql, params);
+    if ((!rows || rows.length === 0) && queryVariants.length > 1) {
+        for (const variant of queryVariants.slice(1)) {
+            const relaxedParams = [...params];
+            relaxedParams[0] = variant;
+            rows = queryDocRows(db, sql, relaxedParams);
+            if (rows?.length) {
+                activeFtsQuery = variant;
+                break;
+            }
+        }
+    }
+    let usedFallback = false;
+    if (rows && rows.length < 3) {
+        const ftsRowids = new Set();
+        try {
+            let rowidSql = "SELECT rowid, project, filename, type, content, path FROM docs WHERE docs MATCH ?";
+            const rowidParams = [activeFtsQuery];
+            if (filterProject) {
+                rowidSql += " AND project = ?";
+                rowidParams.push(filterProject);
+            }
+            if (filterType) {
+                rowidSql += " AND type = ?";
+                rowidParams.push(filterType);
+            }
+            rowidSql += " ORDER BY rank LIMIT ?";
+            rowidParams.push(maxResults);
+            const rowidResult = db.exec(rowidSql, rowidParams);
+            if (rowidResult?.length && rowidResult[0]?.values?.length) {
+                for (const row of rowidResult[0].values) {
+                    ftsRowids.add(rowToDocWithRowid(row).rowid);
+                }
+            }
+        }
+        catch (err) {
+            debugLog(`rowid dedup query failed: ${errorMessage(err)}`);
+        }
+        const cosineResults = cosineFallback(db, query, ftsRowids, maxResults - rows.length)
+            .filter((doc) => (!filterProject || doc.project === filterProject) && (!filterType || doc.type === filterType));
+        if (cosineResults.length > 0) {
+            rows = [...rows, ...cosineResults];
+            usedFallback = true;
+        }
+    }
+    if (!rows) {
+        const cosineResults = cosineFallback(db, query, new Set(), maxResults)
+            .filter((doc) => (!filterProject || doc.project === filterProject) && (!filterType || doc.type === filterType));
+        if (cosineResults.length > 0) {
+            rows = cosineResults;
+            usedFallback = true;
+        }
+    }
+    if (!rows) {
+        const fallbackRows = keywordFallbackSearch(db, query, {
+            project: filterProject ?? undefined,
+            type: filterType ?? undefined,
+            limit: maxResults,
+        });
+        if (fallbackRows) {
+            rows = fallbackRows;
+            usedFallback = true;
+        }
+    }
+    if (shouldRunVectorExpansion(rows, query, maxResults)) {
+        try {
+            const existingRows = rows ?? [];
+            const alreadyFoundPaths = new Set(existingRows.map((row) => row.path));
+            const vecRows = await vectorFallback(phrenPath, query, alreadyFoundPaths, Math.max(0, maxResults - existingRows.length), filterProject ?? undefined);
+            const filteredVecRows = filterType ? vecRows.filter((row) => row.type === filterType) : vecRows;
+            if (filteredVecRows.length > 0) {
+                rows = [...existingRows, ...filteredVecRows];
+                usedFallback = true;
+            }
+        }
+        catch (err) {
+            logger.debug("vectorFallback", errorMessage(err));
+        }
+    }
+    return { safeQuery, rows, usedFallback };
+}
+/**
+ * Search additional phren stores defined in the store registry (or PHREN_FEDERATION_PATHS).
+ * Returns an array of results tagged with their source store. Read-only — no mutations.
+ */
+export async function searchFederatedStores(localPhrenPath, options) {
+    // Registered non-primary stores are already included in the main FTS index
+    // by buildIndex (via refreshStoreProjectDirs). Only search unregistered
+    // federation paths from PHREN_FEDERATION_PATHS to avoid double indexing.
+    let registeredStorePaths;
+    try {
+        const { getNonPrimaryStores } = await import("../store-registry.js");
+        registeredStorePaths = new Set(getNonPrimaryStores(localPhrenPath).map((s) => s.path));
+    }
+    catch {
+        registeredStorePaths = new Set();
+    }
+    const raw = process.env.PHREN_FEDERATION_PATHS ?? "";
+    const nonPrimaryStores = raw.split(":").map((p) => p.trim())
+        .filter((p) => p.length > 0 && p !== localPhrenPath && !registeredStorePaths.has(p) && fs.existsSync(p))
+        .map((p) => ({ path: p, name: path.basename(p), id: "" }));
+    if (nonPrimaryStores.length === 0)
+        return [];
+    const allRows = [];
+    for (const store of nonPrimaryStores) {
+        try {
+            const federatedDb = await buildIndex(store.path);
+            const result = await searchKnowledgeRows(federatedDb, { ...options, phrenPath: store.path });
+            if (result.rows && result.rows.length > 0) {
+                for (const row of result.rows) {
+                    allRows.push({
+                        ...row,
+                        federationSource: store.path,
+                        storeName: store.name,
+                        storeId: store.id || undefined,
+                    });
+                }
+            }
+        }
+        catch (err) {
+            logger.debug(`federatedSearch store=${store.name}`, errorMessage(err));
+            // Federation errors are non-fatal — continue with other stores
+        }
+    }
+    return allRows;
+}
+// ── Trust filter ─────────────────────────────────────────────────────────────
+// "knowledge" was a doc type until the 0.0.x renames; classifyFile can no
+// longer produce it, so listing it here was dead weight that made the set
+// read as broader than it is.
+const TRUST_FILTERED_TYPES = new Set(["findings", "reference"]);
+/**
+ * Doc types that must never be pushed into an agent's prompt automatically.
+ *
+ * - `notes` — personal scratch context; the user's, not the agent's.
+ * - `review-queue` — review.md, which is a *quarantine*. Its entries are candidates
+ *   nobody has approved yet, and the trust filter does not even look at them (they are
+ *   not in TRUST_FILTERED_TYPES), so an unreviewed line would reach a prompt with no
+ *   staleness, confidence, or citation checks at all. Injecting the queue would also
+ *   defeat the point of having a queue: approve/reject would decide nothing, because
+ *   the content is already in play.
+ *
+ * Both remain indexed and reachable through explicit `search_knowledge` — a pull the
+ * caller asked for, tagged with its doc type — which is how a user answers "why is this
+ * in my review queue?" without the content leaking into every prompt.
+ */
+export const NON_INJECTABLE_TYPES = new Set(["notes", "review-queue"]);
+/** True when a doc type is allowed on the automatic injection path. */
+export function isInjectableDocType(type) {
+    return !NON_INJECTABLE_TYPES.has(type);
+}
+/** Apply trust filter to rows. Returns filtered rows plus any queue/audit items to be written
+ * by the caller — retrieval itself should remain side-effect-free.
+ *
+ * This runs only on the automatic injection path, so it is also where non-injectable
+ * doc types (notes, review-queue) are dropped. */
+export function applyTrustFilter(rows, ttlDays, minConfidence, decay, phrenPath) {
+    const queueItems = [];
+    const auditEntries = [];
+    const highImpactFindingIds = phrenPath ? getHighImpactFindings(phrenPath, 3) : undefined;
+    const filtered = rows
+        .filter((doc) => isInjectableDocType(doc.type))
+        .map((doc) => {
+        if (!TRUST_FILTERED_TYPES.has(doc.type))
+            return doc;
+        const trust = filterTrustedFindingsDetailed(doc.content, {
+            ttlDays,
+            minConfidence,
+            decay,
+            project: doc.project,
+            highImpactFindingIds,
+        });
+        if (trust.issues.length > 0) {
+            const stale = trust.issues.filter((i) => i.reason === "stale").map((i) => i.bullet);
+            const conflicts = trust.issues.filter((i) => i.reason === "invalid_citation").map((i) => i.bullet);
+            if (stale.length)
+                queueItems.push({ project: doc.project, section: "Stale", items: stale });
+            if (conflicts.length)
+                queueItems.push({ project: doc.project, section: "Conflicts", items: conflicts });
+            auditEntries.push(`project=${doc.project} type=${doc.type} stale=${stale.length} invalid_citation=${conflicts.length}`);
+        }
+        return { ...doc, content: trust.content };
+    })
+        .filter((doc) => {
+        return !TRUST_FILTERED_TYPES.has(doc.type) || Boolean(doc.content.trim());
+    });
+    return { rows: filtered, queueItems, auditEntries };
+}
+// ── Ranking ──────────────────────────────────────────────────────────────────
+function mostRecentDate(content) {
+    const matches = content.match(/^## (\d{4}-\d{2}-\d{2})/gm);
+    if (!matches || matches.length === 0)
+        return "0000-00-00";
+    return matches.map((m) => m.slice(3)).sort().reverse()[0];
+}
+/** Shared helper: compute age in days from a YYYY-MM-DD date string. Returns Infinity for invalid/missing dates. */
+function ageInDaysFromDate(dateStr) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || dateStr === "0000-00-00")
+        return Infinity;
+    const todayUtc = Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate());
+    const entryUtc = Date.parse(`${dateStr}T00:00:00Z`);
+    if (Number.isNaN(entryUtc))
+        return Infinity;
+    return Math.max(0, Math.floor((todayUtc - entryUtc) / 86_400_000));
+}
+/** Item 3: Recency boost for findings. Recent findings rank higher. Accepts pre-computed date string. */
+export function recencyBoost(docType, latestDate) {
+    if (docType !== "findings")
+        return 0;
+    const age = ageInDaysFromDate(latestDate);
+    if (age <= 7)
+        return 0.3;
+    if (age <= 30)
+        return 0.15;
+    return 0;
+}
+function crossProjectAgeMultiplier(doc, detectedProject, latestDate) {
+    if (doc.type !== "findings" || !detectedProject || doc.project === detectedProject)
+        return 1;
+    const decayDaysRaw = Number.parseInt((process.env.PHREN_CROSS_PROJECT_DECAY_DAYS) ?? "30", 10);
+    const decayDays = Number.isFinite(decayDaysRaw) && decayDaysRaw > 0 ? decayDaysRaw : 30;
+    const age = ageInDaysFromDate(latestDate);
+    const ageInDays = Number.isFinite(age) ? age : 90;
+    return Math.max(0.1, 1 - (ageInDays / decayDays));
+}
+export function rankResults(rows, intent, gitCtx, detectedProject, phrenPathLocal, db, cwd, query, opts) {
+    let ranked = [...rows];
+    const queryTokens = query ? tokenizeForOverlap(query) : [];
+    if (detectedProject) {
+        const localByType = new Set(ranked.filter((r) => r.project === detectedProject).map((r) => r.type));
+        // Keep all local docs, and allow up to 2 shared/org docs per type even if
+        // that type exists locally — avoids suppressing cross-project knowledge.
+        const sharedCountByType = new Map();
+        const MAX_SHARED_PER_TYPE = 2;
+        ranked = ranked.filter((r) => {
+            if (r.project === detectedProject)
+                return true;
+            if (!localByType.has(r.type))
+                return true;
+            const count = sharedCountByType.get(r.type) ?? 0;
+            if (count < MAX_SHARED_PER_TYPE) {
+                sharedCountByType.set(r.type, count + 1);
+                return true;
+            }
+            return false;
+        });
+        // Always-inject: truths for detected project are prepended regardless of search
+        // relevance. Dedup against rows already in the result set.
+        const canonicalRows = queryDocRows(db, "SELECT project, filename, type, content, path FROM docs WHERE project = ? AND type = 'canonical'", [detectedProject]);
+        if (canonicalRows) {
+            const existingPaths = new Set(ranked.map((r) => r.path));
+            const newCanonicals = canonicalRows.filter((r) => !existingPaths.has(r.path));
+            if (newCanonicals.length > 0)
+                ranked = [...newCanonicals, ...ranked];
+        }
+    }
+    const entityBoost = query ? getFragmentBoostDocs(db, query) : new Set();
+    const entityBoostPaths = new Set();
+    for (const doc of ranked) {
+        // Use getDocSourceKey to build the full project/relFile key, matching what
+        // entity_links stores (e.g. project/reference/arch.md, not project/arch.md).
+        const docKey = getDocSourceKey(doc, phrenPathLocal);
+        if (entityBoost.has(docKey))
+            entityBoostPaths.add(doc.path);
+    }
+    // Pre-compute mostRecentDate once per findings doc to avoid O(n log n) regex rescans in sort.
+    const recentDateCache = new Map();
+    for (const doc of ranked) {
+        if (doc.type === "findings") {
+            const key = doc.path || `${doc.project}/${doc.filename}`;
+            recentDateCache.set(key, mostRecentDate(doc.content));
+        }
+    }
+    const getRecentDate = (doc) => recentDateCache.get(doc.path || `${doc.project}/${doc.filename}`) ?? "0000-00-00";
+    // Precompute per-doc ranking metadata once — avoids recomputing inside sort comparator.
+    const changedFiles = gitCtx?.changedFiles || new Set();
+    const FILE_MATCH_BOOST = 1.5;
+    const scored = ranked.map((doc) => {
+        const globBoost = getProjectGlobBoost(phrenPathLocal, doc.project, cwd, gitCtx?.changedFiles);
+        const key = entryScoreKey(doc.project, doc.filename, doc.content);
+        const entity = entityBoostPaths.has(doc.path) ? 1.3 : 1;
+        const date = getRecentDate(doc);
+        const fileRel = fileRelevanceBoost(doc.path, changedFiles);
+        const branchMat = branchMatchBoost(doc.content, gitCtx?.branch);
+        const qualityMult = getQualityMultiplier(phrenPathLocal, key);
+        const queryOverlap = queryTokens.length > 0 ? docOverlapScore(queryTokens, doc) : 0;
+        const queryOverlapWeight = detectedProject && doc.project === detectedProject
+            ? LOCAL_QUERY_OVERLAP_WEIGHT
+            : CROSS_PROJECT_QUERY_OVERLAP_WEIGHT;
+        const weakCrossProjectPenalty = detectedProject
+            && doc.project !== detectedProject
+            && queryTokens.length > 0
+            && queryOverlap < WEAK_CROSS_PROJECT_OVERLAP_MAX
+            ? WEAK_CROSS_PROJECT_OVERLAP_PENALTY
+            : 0;
+        const score = Math.round((intentBoost(intent, doc.type) +
+            fileRel +
+            branchMat +
+            globBoost +
+            qualityMult +
+            entity +
+            queryOverlap * queryOverlapWeight +
+            recencyBoost(doc.type, date) -
+            weakCrossProjectPenalty -
+            lowValuePenalty(doc.content, doc.type)) * crossProjectAgeMultiplier(doc, detectedProject, date) * 10000) / 10000;
+        const fileMatch = fileRel > 0 || branchMat > 0;
+        return { doc, score, fileMatch, globBoost, qualityMult, entity, date, queryOverlap };
+    });
+    // Single composite sort on cached values.
+    scored.sort((a, b) => {
+        if (isFeatureEnabled("PHREN_FEATURE_GIT_CONTEXT_FILTER", false)) {
+            if (gitCtx && gitCtx.changedFiles.size > 0) {
+                const scoreDiff = (b.fileMatch ? FILE_MATCH_BOOST : 1) - (a.fileMatch ? FILE_MATCH_BOOST : 1);
+                if (scoreDiff !== 0)
+                    return scoreDiff;
+            }
+        }
+        const isFindingsA = a.doc.type === "findings";
+        const isFindingsB = b.doc.type === "findings";
+        if (isFindingsA !== isFindingsB)
+            return isFindingsA ? -1 : 1;
+        if (isFindingsA && isFindingsB) {
+            const byDate = b.date.localeCompare(a.date);
+            if (byDate !== 0)
+                return byDate;
+        }
+        const scoreDelta = b.score - a.score;
+        if (Math.abs(scoreDelta) > 0.01)
+            return scoreDelta;
+        const overlapDelta = b.queryOverlap - a.queryOverlap;
+        if (Math.abs(overlapDelta) > 0.01)
+            return overlapDelta;
+        const globDelta = b.globBoost - a.globBoost;
+        if (Math.abs(globDelta) > 0.01)
+            return globDelta;
+        const qualityDelta = b.qualityMult - a.qualityMult;
+        if (qualityDelta !== 0)
+            return qualityDelta;
+        if (b.entity !== a.entity)
+            return b.entity - a.entity;
+        return (a.doc.path || `${a.doc.project}/${a.doc.filename}`).localeCompare(b.doc.path || `${b.doc.project}/${b.doc.filename}`);
+    });
+    const shouldFilterTask = intent !== "build" && !opts?.skipTaskFilter && opts?.filterType !== "task";
+    const rescuedTaskPaths = new Set();
+    if (shouldFilterTask && queryTokens.length > 0) {
+        const bestTask = scored.find((entry) => entry.doc.type === "task");
+        if (bestTask && bestTask.queryOverlap >= TASK_RESCUE_MIN_OVERLAP) {
+            const bestNonTask = scored.find((entry) => entry.doc.type !== "task");
+            if (!bestNonTask
+                || bestTask.queryOverlap >= bestNonTask.queryOverlap + TASK_RESCUE_OVERLAP_MARGIN
+                || bestTask.score >= bestNonTask.score + TASK_RESCUE_SCORE_MARGIN) {
+                rescuedTaskPaths.add(bestTask.doc.path || `${bestTask.doc.project}/${bestTask.doc.filename}`);
+            }
+        }
+    }
+    ranked = scored.map((s) => s.doc);
+    ranked = ranked.slice(0, 8);
+    if (shouldFilterTask) {
+        ranked = ranked.filter((r) => {
+            if (r.type !== "task")
+                return true;
+            const key = r.path || `${r.project}/${r.filename}`;
+            return rescuedTaskPaths.has(key);
+        });
+    }
+    return ranked;
+}
+/** Mark snippet lines with stale citations (cited file missing or line content changed).
+ * @internal Exported for tests. */
+export function markStaleCitations(snippet) {
+    const lines = snippet.split("\n");
+    const result = [];
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        // Check if the next line is a citation comment
+        const nextLine = lines[i + 1];
+        if (nextLine) {
+            const citation = parseCitationComment(nextLine);
+            if (citation && citation.file) {
+                const resolvedFile = citation.repo
+                    ? path.resolve(citation.repo, citation.file)
+                    : (path.isAbsolute(citation.file) ? citation.file : null);
+                if (resolvedFile) {
+                    let stale = false;
+                    if (!fs.existsSync(resolvedFile)) {
+                        stale = true;
+                    }
+                    else if (citation.line !== undefined && citation.line >= 1) {
+                        // Verify the cited line still has content (not beyond EOF)
+                        try {
+                            const fileLines = fs.readFileSync(resolvedFile, "utf8").split("\n");
+                            if (citation.line > fileLines.length) {
+                                stale = true;
+                            }
+                            else if (fileLines[citation.line - 1].trim() === "") {
+                                // Line exists but is now empty — content has drifted
+                                stale = true;
+                            }
+                        }
+                        catch (err) {
+                            logger.debug("applyCitationAnnotations fileRead", errorMessage(err));
+                            stale = true;
+                        }
+                    }
+                    if (stale) {
+                        result.push(line + " [stale citation]");
+                        i++; // skip the citation comment line
+                        continue;
+                    }
+                }
+            }
+        }
+        result.push(line);
+    }
+    return result.join("\n");
+}
+export { DEFAULT_MIN_QUERY_RELEVANCE };
+/**
+ * Relevance floor: drop ranked docs that aren't actually relevant to *this*
+ * prompt, so the hook injects signal or nothing — never noise to fill a quota.
+ *
+ * `rankResults` intentionally scores on priors too (intent, recency, project,
+ * feedback history), so a doc can rank well with zero query overlap. That's the
+ * right call for *ordering*, but the wrong thing to *inject*. This stage keeps a
+ * doc only when it has a real connection to the prompt:
+ *   - a structural signal: it's a changed file, or matches the branch name, or
+ *   - it's a canonical doc for the project you're actually in, or
+ *   - its text clears a query-overlap floor (higher for cross-project docs).
+ *
+ * When there's no usable query signal (no tokens) it is a no-op. Setting the
+ * floor to 0 (env PHREN_MIN_QUERY_RELEVANCE=0) disables it and restores the
+ * previous always-fill behavior.
+ */
+export function applyRelevanceFloor(rows, keywords, gitCtx, detectedProject, floor = DEFAULT_MIN_QUERY_RELEVANCE, rarity) {
+    if (!(floor > 0))
+        return rows;
+    const queryTokens = tokenizeForOverlap(keywords);
+    const changedFiles = gitCtx?.changedFiles ?? new Set();
+    const crossFloor = Math.max(floor, CROSS_PROJECT_MIN_QUERY_RELEVANCE);
+    // Fewer meaningful keywords than a chunk must match: nothing can be about
+    // this prompt ("Yes"), so only the structural signals remain.
+    const minRarity = detectedProject ? MIN_CHUNK_RARITY : NO_PROJECT_MIN_CHUNK_RARITY;
+    return rows.filter((doc) => {
+        // A changed file is a tie to this work; a branch name is not: its words
+        // ("audio") run through a whole project's memory. It still orders results.
+        if (fileRelevanceBoost(doc.path, changedFiles) > 0)
+            return true;
+        if (queryTokens.length < MIN_CHUNK_MATCHES)
+            return false;
+        const match = bestChunkMatch(queryTokens, doc, rarity);
+        if (!match || match.distinct < MIN_CHUNK_MATCHES || match.rarity < minRarity)
+            return false;
+        const isCrossProject = Boolean(detectedProject) && doc.project !== detectedProject;
+        return overlapScore(queryTokens, match.chunk) >= (isCrossProject ? crossFloor : floor);
+    });
+}
+export function selectSnippets(rows, keywords, tokenBudget, lineBudget, charBudget) {
+    const selected = [];
+    let usedTokens = 36;
+    const queryTokens = tokenizeForOverlap(keywords);
+    const seenBullets = new Set();
+    // For each snippet being added, hash its bullet lines and skip duplicates
+    function dedupSnippetBullets(snippet) {
+        return snippet.split('\n').filter(line => {
+            if (!line.startsWith('- '))
+                return true; // Keep non-bullet lines (headers, etc)
+            const normalized = line.replace(/<!--.*?-->/g, '').trim().toLowerCase();
+            if (seenBullets.has(normalized))
+                return false;
+            seenBullets.add(normalized);
+            return true;
+        }).join('\n');
+    }
+    for (const doc of rows) {
+        // Last gate before content becomes prompt text. Quarantined and personal doc types
+        // never get this far on the normal path, but this is the only place that is
+        // unconditionally true of everything injected, so it is checked here too.
+        if (!isInjectableDocType(doc.type))
+            continue;
+        // The bullet that matched, not the doc's opening lines.
+        const match = bestChunkMatch(queryTokens, doc);
+        const source = match && match.distinct >= MIN_CHUNK_MATCHES ? match.chunk : extractSnippet(doc.content, keywords, 8);
+        let snippet = compactSnippet(source, lineBudget, charBudget);
+        if (!snippet.trim())
+            continue;
+        // Mark findings with stale citations before injection
+        if (TRUST_FILTERED_TYPES.has(doc.type)) {
+            snippet = markStaleCitations(snippet);
+        }
+        snippet = dedupSnippetBullets(snippet);
+        if (!snippet.trim())
+            continue;
+        let focusScore = queryTokens.length > 0
+            ? overlapScore(queryTokens, `${doc.filename}\n${snippet}`)
+            : 1;
+        if (focusScore < LOW_FOCUS_SNIPPET_SCORE) {
+            snippet = compactSnippet(snippet, Math.min(lineBudget, LOW_FOCUS_SNIPPET_LINE_CAP), Math.max(120, Math.floor(charBudget * LOW_FOCUS_SNIPPET_CHAR_FRACTION)));
+            focusScore = queryTokens.length > 0
+                ? overlapScore(queryTokens, `${doc.filename}\n${snippet}`)
+                : focusScore;
+        }
+        let est = approximateTokens(snippet) + SNIPPET_OVERHEAD_TOKENS;
+        if (selected.length > 0 && focusScore < VERY_LOW_FOCUS_SNIPPET_SCORE && usedTokens + est > Math.floor(tokenBudget * 0.8)) {
+            continue;
+        }
+        if (selected.length > 0 && usedTokens + est > tokenBudget)
+            break;
+        if (selected.length === 0 && usedTokens + est > tokenBudget) {
+            snippet = compactSnippet(snippet, 3, Math.floor(charBudget * 0.55));
+            est = approximateTokens(snippet) + SNIPPET_OVERHEAD_TOKENS;
+        }
+        const key = entryScoreKey(doc.project, doc.filename, doc.content);
+        selected.push({ doc, snippet, key });
+        usedTokens += est;
+        if (selected.length >= 3)
+            break;
+    }
+    // Final pass: trim from the end if token budget is exceeded (guards against
+    // rounding / compaction producing more tokens than estimated during selection)
+    while (selected.length > 1 && usedTokens > tokenBudget) {
+        const removed = selected.pop();
+        usedTokens -= approximateTokens(removed.snippet) + SNIPPET_OVERHEAD_TOKENS;
+    }
+    return { selected, usedTokens };
+}
+// Re-export approximateTokens for use in output module
+export { approximateTokens };

@@ -1,0 +1,45 @@
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from "url";
+import { createRequire } from "module";
+import { errorMessage } from "../utils.js";
+import { logger } from "../logger.js";
+const require = createRequire(import.meta.url);
+/**
+ * Locate the sql.js-fts5 WASM binary by require.resolve with path-probe fallback.
+ * Shared between shared-index.ts and embedding.ts to avoid duplication.
+ */
+function findWasmBinary() {
+    try {
+        const resolved = require.resolve("sql.js-fts5/dist/sql-wasm.wasm");
+        if (fs.existsSync(resolved))
+            return fs.readFileSync(resolved);
+    }
+    catch (err) {
+        logger.debug("sqljs", `findWasmBinary requireResolve: ${errorMessage(err)}`);
+        // fall through to path probing
+    }
+    const __filename = fileURLToPath(import.meta.url);
+    let dir = path.dirname(__filename);
+    for (let i = 0; i < 5; i++) {
+        const candidateA = path.join(dir, "node_modules", "sql.js-fts5", "dist", "sql-wasm.wasm");
+        if (fs.existsSync(candidateA))
+            return fs.readFileSync(candidateA);
+        const candidateB = path.join(dir, "sql.js-fts5", "dist", "sql-wasm.wasm");
+        if (fs.existsSync(candidateB))
+            return fs.readFileSync(candidateB);
+        dir = path.dirname(dir);
+    }
+    return undefined;
+}
+/**
+ * Bootstrap sql.js-fts5: find the WASM binary and initialise the library.
+ * Shared across shared-index.ts and embedding.ts to avoid duplication.
+ * The require is lazy so importing this module (the Hook bundle pulls it in
+ * through the CLI context) does not need the native package on disk.
+ */
+export async function bootstrapSqlJs() {
+    const initSqlJs = require("sql.js-fts5");
+    const wasmBinary = findWasmBinary();
+    return initSqlJs(wasmBinary ? { wasmBinary } : {});
+}

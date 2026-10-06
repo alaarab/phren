@@ -1,0 +1,16 @@
+import { type SearchOptions } from "./search.js";
+export declare function handleSearch(opts: SearchOptions, profile: string): Promise<void>;
+export declare function handleFragmentSearch(args: string[], profile: string): Promise<void>;
+export declare function handleRelatedDocs(args: string[], profile: string): Promise<void>;
+export declare function handleAddFinding(project: string, learning: string): Promise<void>;
+export declare function handlePinCanonical(project: string, memory: string): Promise<void>;
+export declare function handleTruths(project: string): Promise<void>;
+export declare function handleDoctor(args: string[]): Promise<void>;
+export declare function handleStatus(): Promise<void>;
+export declare function handleQualityFeedback(args: string[]): Promise<void>;
+export declare function handleMemoryUi(args: string[]): Promise<void>;
+export declare function handleShell(args: string[], profile: string): Promise<void>;
+export declare function handleUpdate(args: string[]): Promise<void>;
+export declare function handleReview(args: string[]): Promise<void>;
+export declare function handleConsolidationStatus(args: string[]): Promise<void>;
+export declare function handleSessionContext(): void;

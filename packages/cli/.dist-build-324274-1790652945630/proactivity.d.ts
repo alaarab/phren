@@ -1,0 +1,14 @@
+export declare const PROACTIVITY_LEVELS: readonly ["high", "medium", "low"];
+export type ProactivityLevel = typeof PROACTIVITY_LEVELS[number];
+export declare function parseProactivityLevel(raw: string | undefined | null): ProactivityLevel | undefined;
+export declare function getProactivityLevel(explicitPhrenPath?: string): ProactivityLevel;
+export declare function getProactivityLevelForFindings(explicitPhrenPath?: string): ProactivityLevel;
+export declare function getProactivityLevelForTask(explicitPhrenPath?: string): ProactivityLevel;
+export declare function hasExplicitFindingSignal(...texts: Array<string | undefined | null>): boolean;
+export declare function hasExplicitTaskSignal(...texts: Array<string | undefined | null>): boolean;
+export declare function shouldAutoCaptureFindingsForLevel(level: ProactivityLevel, ...texts: Array<string | undefined | null>): boolean;
+export declare function shouldAutoCaptureTaskForLevel(level: ProactivityLevel, ...texts: Array<string | undefined | null>): boolean;
+export declare function hasExecutionIntent(...texts: Array<string | undefined | null>): boolean;
+export declare function hasDiscoveryIntent(...texts: Array<string | undefined | null>): boolean;
+export declare function hasSuppressTaskIntent(...texts: Array<string | undefined | null>): boolean;
+export declare function hasCodeChangeContext(...texts: Array<string | undefined | null>): boolean;

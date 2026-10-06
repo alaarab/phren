@@ -1,0 +1,720 @@
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
+import { migrateInstalledModules, moduleEnabled } from "../modules/runtime.js";
+import { initializeModules } from "../modules/config.js";
+import { skillEnabled } from "../modules/provision.js";
+import { reconcileModuleHooks } from "../bridge/install.js";
+/**
+ * CLI orchestrator for phren init, mcp-mode, hooks-mode, and uninstall.
+ * Delegates to focused helpers in init-config, init-setup, init-preferences,
+ * init-walkthrough, init-mcp-mode, init-hooks-mode, and init-uninstall.
+ */
+import * as fs from "fs";
+import * as path from "path";
+import { execFileSync } from "child_process";
+import { getMachineName, persistMachineName } from "../machine-identity.js";
+import { atomicWriteText, debugLog, expandHomePath, homePath, projectSlugFromPath, writeRootManifest, } from "../shared.js";
+import { isValidProjectName, errorMessage } from "../utils.js";
+import { logger } from "../logger.js";
+export { configureClaude, configureVSCode, configureCursorMcp, configureCopilotMcp, configureCodexMcp, logMcpTargetStatus, resetVSCodeProbeCache, patchJsonFile, } from "./config.js";
+export { getMcpEnabledPreference, setMcpEnabledPreference, getHooksEnabledPreference, setHooksEnabledPreference, } from "./preferences.js";
+export { PROJECT_OWNERSHIP_MODES, parseProjectOwnershipMode, getProjectOwnershipDefault, } from "../project-config.js";
+export { PROACTIVITY_LEVELS, getProactivityLevel, getProactivityLevelForFindings, getProactivityLevelForTask, } from "../proactivity.js";
+export { ensureGovernanceFiles, repairPreexistingInstall, runPostInitVerify, getVerifyOutcomeNote, listTemplates, detectProjectDir, isProjectTracked, ensureLocalGitRepo, resolvePreferredHomeDir, inferInitScaffoldFromRepo, } from "./setup.js";
+// Re-export from extracted modules so consumers can still import from init.js
+export { configureMcpTargets, warmSemanticSearch, runProjectLocalInit } from "./init-configure.js";
+export { runMcpMode } from "./init-mcp-mode.js";
+export { runHooksMode } from "./init-hooks-mode.js";
+export { runPreset } from "./init-preset.js";
+export { printSelfWiringSnippet } from "./self-wiring.js";
+export { runUninstall } from "./init-uninstall.js";
+// Internal imports from extracted modules (used by runInit)
+import { configureMcpTargets, configureHooksIfEnabled, applyOnboardingPreferences, writeWalkthroughEnvDefaults, collectRepairedAssetLabels, applyProjectStorageBindings, warmSemanticSearch, runProjectLocalInit, } from "./init-configure.js";
+import { runWalkthrough, createWalkthroughPrompts, createWalkthroughStyle } from "./init-walkthrough.js";
+import { assertNoGlobalWiringConflict } from "./guard-globals.js";
+import { getMcpEnabledPreference, getHooksEnabledPreference, writeInstallPreferences, readInstallPreferences, setManagementPresetPreference, } from "./preferences.js";
+import { ensureGovernanceFiles, repairPreexistingInstall, runPostInitVerify, applyStarterTemplateUpdates, listTemplates, applyTemplate, ensureProjectScaffold, ensureLocalGitRepo, bootstrapFromExisting, updateMachinesYaml, detectProjectDir, isProjectTracked, } from "./setup.js";
+import { STARTER_DIR, VERSION, log } from "./shared.js";
+import { PROJECT_OWNERSHIP_MODES, getProjectOwnershipDefault, } from "../project-config.js";
+import { getWorkflowPolicy } from "../shared/governance.js";
+import { addProjectToProfile } from "../profile-store.js";
+import { DEFAULT_MANAGEMENT_PRESET, capabilitiesForPreset, getManagementPreset, parseManagementPreset, presetSummaryLines, } from "./management-preset.js";
+import { printSelfWiringSnippet } from "./self-wiring.js";
+export { parseMcpMode } from "./shared.js";
+function parseVersion(version) {
+    const match = version.trim().match(/^(\d+)\.(\d+)\.(\d+)(?:-(.+))?/);
+    if (!match)
+        return { major: 0, minor: 0, patch: 0, pre: "" };
+    return {
+        major: Number.parseInt(match[1], 10) || 0,
+        minor: Number.parseInt(match[2], 10) || 0,
+        patch: Number.parseInt(match[3], 10) || 0,
+        pre: match[4] || "",
+    };
+}
+/**
+ * Compare two semver strings. Returns true when `current` is strictly newer
+ * than `previous`. Pre-release versions (e.g. 1.2.3-rc.1) sort before the
+ * corresponding release (1.2.3). Among pre-release tags, comparison is
+ * lexicographic.
+ */
+export function isVersionNewer(current, previous) {
+    if (!previous)
+        return false;
+    const c = parseVersion(current);
+    const p = parseVersion(previous);
+    if (c.major !== p.major)
+        return c.major > p.major;
+    if (c.minor !== p.minor)
+        return c.minor > p.minor;
+    if (c.patch !== p.patch)
+        return c.patch > p.patch;
+    if (c.pre && !p.pre)
+        return false;
+    if (!c.pre && p.pre)
+        return true;
+    return c.pre > p.pre;
+}
+function hasGitRemote(phrenPath) {
+    try {
+        return execFileSync("git", ["-C", phrenPath, "remote"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env: nonInteractiveGitEnv() }).trim() !== "";
+    }
+    catch {
+        return false;
+    }
+}
+/** Commit the new store and publish it as a private repo with gh. Returns whether it is now synced. */
+async function createGithubStore(phrenPath, username, repo) {
+    const git = (args) => execFileSync("git", ["-C", phrenPath, ...args], { stdio: ["ignore", "pipe", "pipe"], env: nonInteractiveGitEnv() });
+    try {
+        git(["add", "-A"]);
+        try {
+            git(["commit", "-q", "-m", "Initial phren setup"]);
+        }
+        catch { /* nothing new to commit */ }
+        log(`\nCreating private repo ${username}/${repo} and pushing your memory…`);
+        execFileSync("gh", ["repo", "create", `${username}/${repo}`, "--private", `--source=${phrenPath}`, "--remote=origin", "--push"], { stdio: ["ignore", "pipe", "pipe"], timeout: 120_000 });
+        writeInstallPreferences(phrenPath, { syncIntent: "sync" });
+        log(`  Synced: https://github.com/${username}/${repo} (private). Hooks pull and push it after each session.`);
+        return true;
+    }
+    catch (err) {
+        const stderr = String(err.stderr ?? "").trim().split("\n")[0];
+        log(`  Couldn't create the GitHub repo${stderr ? `: ${stderr}` : ""}. Your memory is safe locally.`);
+        return false;
+    }
+}
+function normalizedBootstrapProjectName(projectPath) {
+    return projectSlugFromPath(projectPath);
+}
+export function getPendingBootstrapTarget(phrenPath, _opts) {
+    const cwdProject = detectProjectDir(process.cwd(), phrenPath);
+    if (!cwdProject)
+        return null;
+    const projectName = normalizedBootstrapProjectName(cwdProject);
+    if (isProjectTracked(phrenPath, projectName))
+        return null;
+    return { path: cwdProject, mode: "detected" };
+}
+function hasInstallMarkers(phrenPath) {
+    // Require at least two markers to consider this a real install.
+    // A partial clone or failed init may create one directory but not finish.
+    if (!fs.existsSync(phrenPath))
+        return false;
+    let found = 0;
+    if (fs.existsSync(path.join(phrenPath, "machines.yaml")))
+        found++;
+    if (fs.existsSync(path.join(phrenPath, ".config")))
+        found++;
+    if (fs.existsSync(path.join(phrenPath, "global")))
+        found++;
+    return found >= 2;
+}
+function resolveInitPhrenPath(opts) {
+    // Resolve the default store path live (homePath reads HOME at call time) rather
+    // than via the import-frozen DEFAULT_PHREN_PATH const. The const is captured at
+    // module load, so any caller that changes HOME afterward — notably test suites
+    // that point HOME at a temp dir in beforeEach — would otherwise resolve to the
+    // real ~/.phren and mutate the developer's live install.
+    const raw = opts._walkthroughStoragePath || (process.env.PHREN_PATH) || homePath(".phren");
+    return path.resolve(expandHomePath(raw));
+}
+export async function runInit(opts = {}) {
+    if ((opts.mode || "shared") === "project-local") {
+        await runProjectLocalInit(opts);
+        return;
+    }
+    let phrenPath = resolveInitPhrenPath(opts);
+    const dryRun = Boolean(opts.dryRun);
+    // Capture whether ownership/preset came from an explicit CLI flag BEFORE the
+    // walkthrough merges its own answers into opts — needed to decide whether an
+    // assisted/manual preset may override a fast-path (express/clone) ownership.
+    const cliOwnershipExplicit = opts.projectOwnershipDefault !== undefined;
+    if (!dryRun) {
+        assertNoGlobalWiringConflict(phrenPath, Boolean(opts.force));
+    }
+    // Migrate the legacy hidden store directory into ~/.phren when upgrading
+    // from the previous product name. Only runs when the resolved phrenPath
+    // doesn't exist yet but the legacy directory does.
+    if (!opts._walkthroughStoragePath && !fs.existsSync(phrenPath)) {
+        // Pre-rebrand directory name — kept as literal for migration
+        const legacyPath = path.resolve((await import("../shared.js")).homePath(".cortex"));
+        if (legacyPath !== phrenPath && fs.existsSync(legacyPath) && hasInstallMarkers(legacyPath)) {
+            if (!dryRun) {
+                fs.renameSync(legacyPath, phrenPath);
+            }
+            console.log(`Migrated legacy store → ~/.phren`);
+        }
+    }
+    // Rename stale legacy skill names left over from the rebrand. Runs on every
+    // init so users who already migrated the directory still get the fix.
+    const skillsMigrateDir = path.join(phrenPath, "global", "skills");
+    if (!dryRun && fs.existsSync(skillsMigrateDir)) {
+        const legacySkillName = "cortex.md";
+        const legacySkillPrefix = "cortex-";
+        for (const entry of fs.readdirSync(skillsMigrateDir)) {
+            if (!entry.endsWith(".md"))
+                continue;
+            if (entry === legacySkillName) {
+                const dest = path.join(skillsMigrateDir, "phren.md");
+                if (!fs.existsSync(dest)) {
+                    fs.renameSync(path.join(skillsMigrateDir, entry), dest);
+                }
+            }
+            else if (entry.startsWith(legacySkillPrefix)) {
+                const newName = `phren-${entry.slice(legacySkillPrefix.length)}`;
+                const dest = path.join(skillsMigrateDir, newName);
+                if (!fs.existsSync(dest)) {
+                    fs.renameSync(path.join(skillsMigrateDir, entry), dest);
+                }
+            }
+        }
+    }
+    let hasExistingInstall = hasInstallMarkers(phrenPath);
+    // Interactive walkthrough for first-time installs (skip with --yes or non-TTY)
+    // --express bypasses the TTY check since it skips all interactive prompts
+    const isTTY = process.stdin.isTTY && process.stdout.isTTY;
+    if (!hasExistingInstall && !dryRun && !opts.yes && (isTTY || opts.express)) {
+        const answers = await runWalkthrough(phrenPath, { express: opts.express, advanced: opts.advanced });
+        opts._walkthroughStorageChoice = answers.storageChoice;
+        opts._walkthroughStoragePath = answers.storagePath;
+        opts._walkthroughStorageRepoRoot = answers.storageRepoRoot;
+        phrenPath = resolveInitPhrenPath(opts);
+        hasExistingInstall = hasInstallMarkers(phrenPath);
+        opts.machine = opts.machine || answers.machine;
+        opts.profile = opts.profile || answers.profile;
+        opts.mcp = opts.mcp || answers.mcp;
+        opts.hooks = opts.hooks || answers.hooks;
+        opts.projectOwnershipDefault = opts.projectOwnershipDefault || answers.projectOwnershipDefault;
+        opts.managementPreset = opts.managementPreset || answers.managementPreset;
+        opts.findingsProactivity = opts.findingsProactivity || answers.findingsProactivity;
+        opts.taskProactivity = opts.taskProactivity || answers.taskProactivity;
+        if (typeof opts.lowConfidenceThreshold !== "number")
+            opts.lowConfidenceThreshold = answers.lowConfidenceThreshold;
+        if (!Array.isArray(opts.riskySections))
+            opts.riskySections = answers.riskySections;
+        opts.taskMode = opts.taskMode || answers.taskMode;
+        if (answers.cloneUrl) {
+            opts._walkthroughCloneUrl = answers.cloneUrl;
+        }
+        if (answers.githubRepo) {
+            opts._walkthroughGithub = { username: answers.githubUsername, repo: answers.githubRepo, create: answers.githubCreate };
+        }
+        opts._walkthroughPair = answers.connectPhone;
+        opts._walkthroughDomain = answers.domain;
+        if (answers.inferredScaffold) {
+            opts._walkthroughInferredScaffold = answers.inferredScaffold;
+        }
+        if (!answers.ollamaEnabled) {
+            // User explicitly declined Ollama — note it but don't set env (they can set it themselves)
+            process.env._PHREN_WALKTHROUGH_OLLAMA_SKIP = "1";
+        }
+        else {
+            opts._walkthroughSemanticSearch = true;
+        }
+        // Persist the walkthrough choice so init writes an explicit .env default.
+        opts._walkthroughAutoCapture = answers.autoCaptureEnabled;
+        if (answers.semanticDedupEnabled) {
+            opts._walkthroughSemanticDedup = true;
+        }
+        if (answers.semanticConflictEnabled) {
+            opts._walkthroughSemanticConflict = true;
+        }
+        if (answers.findingSensitivity && answers.findingSensitivity !== "balanced") {
+            opts.findingSensitivity = answers.findingSensitivity;
+        }
+        opts._walkthroughBootstrapCurrentProject = answers.bootstrapCurrentProject;
+        opts._walkthroughBootstrapOwnership = answers.bootstrapOwnership;
+    }
+    // If the walkthrough provided a clone URL, clone it and treat as existing install
+    if (opts._walkthroughCloneUrl) {
+        log(`\nCloning existing phren from ${opts._walkthroughCloneUrl}...`);
+        try {
+            execFileSync("git", ["clone", opts._walkthroughCloneUrl, phrenPath], {
+                env: nonInteractiveGitEnv(),
+                stdio: ["ignore", "pipe", "pipe"],
+                timeout: 60_000,
+            });
+            log(`  Cloned to ${phrenPath}`);
+            // Re-check: the cloned repo should now be treated as an existing install
+            hasExistingInstall = true;
+        }
+        catch (e) {
+            log(`  Clone failed: ${e instanceof Error ? e.message : String(e)}`);
+            log("");
+            log("  ┌──────────────────────────────────────────────────────────────────┐");
+            log("  │  WARNING: Sync is NOT configured. Your phren data is local-only. │");
+            log("  │                                                                  │");
+            log("  │  To fix later:                                                   │");
+            log(`  │    cd ${phrenPath}`);
+            log("  │    git remote add origin <YOUR_REPO_URL>                         │");
+            log("  │    git push -u origin main                                       │");
+            log("  └──────────────────────────────────────────────────────────────────┘");
+            log("");
+            log(`  Continuing with fresh local-only install.`);
+        }
+    }
+    // Record sync intent: "sync" if a clone URL was provided (regardless of success), "local" otherwise.
+    // On re-runs of existing installs, preserve the existing syncIntent unless the user provided a new clone URL.
+    const existingSyncIntent = hasExistingInstall ? readInstallPreferences(phrenPath).syncIntent : undefined;
+    const syncIntent = opts._walkthroughCloneUrl ? "sync" : (existingSyncIntent ?? "local");
+    // Resolve the management preset for this run: explicit flag/walkthrough answer,
+    // else the stored preset on existing installs, else the default (managed).
+    const managementPreset = parseManagementPreset(opts.managementPreset)
+        ?? (hasExistingInstall ? getManagementPreset(phrenPath) : DEFAULT_MANAGEMENT_PRESET);
+    const managementCaps = capabilitiesForPreset(phrenPath, managementPreset);
+    const mcpEnabled = opts.mcp ? opts.mcp === "on" : getMcpEnabledPreference(phrenPath);
+    // Under presets whose hooksDefault is false (manual), hooks stay off unless the
+    // user explicitly passed --hooks on. Otherwise fall back to the stored preference.
+    const hooksEnabled = opts.hooks
+        ? opts.hooks === "on"
+        : managementCaps.hooksDefault && getHooksEnabledPreference(phrenPath);
+    const skillsScope = opts.skillsScope ?? "global";
+    const storageChoice = opts._walkthroughStorageChoice;
+    const storageRepoRoot = opts._walkthroughStorageRepoRoot;
+    let ownershipDefault = opts.projectOwnershipDefault
+        ?? (hasExistingInstall ? getProjectOwnershipDefault(phrenPath) : "detached");
+    // Assisted/manual presets never write into project repos, so fresh installs
+    // default to detached ownership — overriding even the express/clone fast-paths,
+    // unless the user explicitly set --project-ownership.
+    if (managementCaps.ownershipForcedDetached && !cliOwnershipExplicit && ownershipDefault !== "detached") {
+        ownershipDefault = "detached";
+        opts.projectOwnershipDefault = "detached";
+    }
+    if (!hasExistingInstall && !opts.projectOwnershipDefault) {
+        opts.projectOwnershipDefault = ownershipDefault;
+    }
+    const mcpLabel = mcpEnabled ? "ON (recommended)" : "OFF (hooks-only fallback)";
+    const hooksLabel = hooksEnabled ? "ON (active)" : "OFF (disabled)";
+    const pendingBootstrap = getPendingBootstrapTarget(phrenPath, opts);
+    let shouldBootstrapCurrentProject = opts._walkthroughBootstrapCurrentProject === true;
+    let bootstrapOwnership = opts._walkthroughBootstrapOwnership ?? ownershipDefault;
+    if (pendingBootstrap && !dryRun) {
+        const walkthroughAlreadyHandled = opts._walkthroughBootstrapCurrentProject !== undefined;
+        if (walkthroughAlreadyHandled) {
+            shouldBootstrapCurrentProject = opts._walkthroughBootstrapCurrentProject === true;
+            bootstrapOwnership = opts._walkthroughBootstrapOwnership ?? ownershipDefault;
+        }
+        else if (opts.yes || !process.stdin.isTTY || !process.stdout.isTTY) {
+            shouldBootstrapCurrentProject = true;
+            bootstrapOwnership = ownershipDefault;
+        }
+        else {
+            const prompts = await createWalkthroughPrompts();
+            const style = await createWalkthroughStyle();
+            const detectedProjectName = path.basename(pendingBootstrap.path);
+            log("");
+            log(style.header("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+            log(style.header("Current Project"));
+            log(style.header("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"));
+            log(`Detected project: ${detectedProjectName}`);
+            shouldBootstrapCurrentProject = await prompts.confirm("Add this project to phren now?", true);
+            if (!shouldBootstrapCurrentProject) {
+                shouldBootstrapCurrentProject = false;
+                log(style.warning(`  Skipped. Later: cd ${pendingBootstrap.path} && phren add`));
+            }
+            else {
+                bootstrapOwnership = await prompts.select("Ownership for detected project", [
+                    { value: ownershipDefault, name: `${ownershipDefault} (default)` },
+                    ...PROJECT_OWNERSHIP_MODES
+                        .filter((mode) => mode !== ownershipDefault)
+                        .map((mode) => ({ value: mode, name: mode })),
+                ], ownershipDefault);
+            }
+        }
+    }
+    if (dryRun) {
+        log("\nInit dry run. No files will be written.\n");
+        if (storageChoice) {
+            log(`Storage location: ${storageChoice} (${phrenPath})`);
+            if (storageChoice === "project" && storageRepoRoot) {
+                log(`  Would update ${path.join(storageRepoRoot, ".gitignore")} with .phren/`);
+                log(`  Would set PHREN_PATH in ${path.join(storageRepoRoot, ".env")}`);
+            }
+        }
+        if (hasExistingInstall) {
+            log(`phren install detected at ${phrenPath}`);
+            log(`Would update configuration for the existing install:\n`);
+            log(`  MCP mode: ${mcpLabel}`);
+            log(`  Hooks mode: ${hooksLabel}`);
+            log(`  Reconfigure Claude Code MCP/hooks`);
+            log(`  Reconfigure VS Code, Cursor, Copilot CLI, and Codex MCP targets`);
+            if (hooksEnabled) {
+                log(`  Reconfigure lifecycle hooks for detected tools`);
+            }
+            if (pendingBootstrap?.mode === "detected") {
+                log(`  Would offer to add current project directory (${pendingBootstrap.path})`);
+            }
+            if (opts.applyStarterUpdate) {
+                log(`  Apply starter template updates to global/AGENTS.md and global skills`);
+            }
+            log(`  Run post-init verification checks`);
+            log(`\nDry run complete.\n`);
+            return;
+        }
+        log(`No existing phren install found at ${phrenPath}`);
+        log(`Would create a new phren install:\n`);
+        log(`  Copy starter files to ${phrenPath} (or create minimal structure)`);
+        log(`  Update machines.yaml for machine "${opts.machine || getMachineName()}"`);
+        log(`  Create/update config files`);
+        log(`  MCP mode: ${mcpLabel}`);
+        log(`  Hooks mode: ${hooksLabel}`);
+        log(`  Configure Claude Code plus detected MCP targets (VS Code/Cursor/Copilot/Codex)`);
+        if (hooksEnabled) {
+            log(`  Configure lifecycle hooks for detected tools`);
+        }
+        if (pendingBootstrap?.mode === "detected") {
+            log(`  Would offer to add current project directory (${pendingBootstrap.path})`);
+        }
+        log(`  Write install preferences and run post-init verification checks`);
+        log(`\nDry run complete.\n`);
+        return;
+    }
+    if (storageChoice === "project") {
+        if (!storageRepoRoot) {
+            throw new Error("Per-project storage requires a detected repository root.");
+        }
+        const storageChanges = applyProjectStorageBindings(storageRepoRoot, phrenPath);
+        for (const change of storageChanges) {
+            log(`  Updated storage binding: ${change}`);
+        }
+    }
+    if (hasExistingInstall)
+        migrateInstalledModules(phrenPath);
+    else {
+        initializeModules(phrenPath);
+        log("Memory only. Enable what you need with phren modules enable <name>.");
+    }
+    if (hasExistingInstall) {
+        writeRootManifest(phrenPath, {
+            version: 1,
+            installMode: "shared",
+            syncMode: "managed-git",
+        });
+        ensureGovernanceFiles(phrenPath);
+        // Persist the preset before repair so the every-session self-heal and any
+        // caps resolution see the intended value.
+        setManagementPresetPreference(phrenPath, managementPreset);
+        const repaired = repairPreexistingInstall(phrenPath, { caps: managementCaps, preset: managementPreset });
+        applyOnboardingPreferences(phrenPath, opts);
+        const existingGitRepo = ensureLocalGitRepo(phrenPath);
+        log(`\nphren already exists at ${phrenPath}`);
+        log(`Updating configuration...\n`);
+        log(`  Management preset: ${managementPreset} — ${presetSummaryLines(managementPreset)}`);
+        log(`  MCP mode: ${mcpLabel}`);
+        log(`  Hooks mode: ${hooksLabel}`);
+        log(`  Default project ownership: ${ownershipDefault}`);
+        if (moduleEnabled(phrenPath, "tasks"))
+            log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
+        log(`  Git repo: ${existingGitRepo.detail}`);
+        // Always reconfigure MCP and hooks (picks up new features on upgrade)
+        configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled, caps: managementCaps }, "Updated");
+        configureHooksIfEnabled(phrenPath, hooksEnabled, "Updated", managementCaps);
+        await reconcileModuleHooks(phrenPath);
+        const prefs = readInstallPreferences(phrenPath);
+        const previousVersion = prefs.installedVersion;
+        if (isVersionNewer(VERSION, previousVersion)) {
+            log(`\n  Starter template update available: v${previousVersion} -> v${VERSION}`);
+            log(`  Run \`phren init --apply-starter-update\` to refresh global/AGENTS.md and global skills.`);
+        }
+        if (opts.applyStarterUpdate) {
+            const updated = applyStarterTemplateUpdates(phrenPath);
+            if (updated.length) {
+                log(`  Applied starter template updates (${updated.length} file${updated.length === 1 ? "" : "s"}).`);
+            }
+            else {
+                log(`  No starter template updates were applied (starter files not found).`);
+            }
+        }
+        writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION, syncIntent });
+        if (repaired.removedLegacyProjects > 0) {
+            log(`  Removed ${repaired.removedLegacyProjects} legacy starter project entr${repaired.removedLegacyProjects === 1 ? "y" : "ies"} from profiles.`);
+        }
+        const repairedAssets = collectRepairedAssetLabels(repaired);
+        if (repairedAssets.length > 0) {
+            log(`  Recreated missing generated assets: ${repairedAssets.join(", ")}`);
+        }
+        // Post-update verification
+        log(`\nVerifying setup...`);
+        const verify = runPostInitVerify(phrenPath);
+        for (const check of verify.checks) {
+            log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
+        }
+        if (pendingBootstrap && shouldBootstrapCurrentProject) {
+            try {
+                const created = bootstrapFromExisting(phrenPath, pendingBootstrap.path, {
+                    profile: opts.profile,
+                    ownership: bootstrapOwnership,
+                });
+                log(`\nAdded current project "${created.project}" (${created.ownership})`);
+            }
+            catch (e) {
+                debugLog(`Bootstrap from CWD failed: ${e instanceof Error ? e.message : String(e)}`);
+            }
+        }
+        for (const envLabel of writeWalkthroughEnvDefaults(phrenPath, opts, {
+            preset: managementPreset,
+            explicit: Boolean(opts.managementPreset),
+        })) {
+            log(`  ${envLabel}`);
+        }
+        if (managementPreset !== "managed") {
+            printSelfWiringSnippet(phrenPath, managementPreset);
+        }
+        log(`\n\x1b[95m◆\x1b[0m phren updated successfully`);
+        log(`\nNext steps:`);
+        log(`  1. Start a new Claude session in your project directory — phren injects context automatically`);
+        log(`  2. Run \`phren doctor\` to verify everything is wired correctly`);
+        log(`  3. Change defaults anytime: \`phren config project-ownership\`, \`phren config workflow\`, \`phren config proactivity.findings\`, \`phren config proactivity.tasks\``);
+        log(`  4. After your first week, run phren-discover to surface gaps in your project knowledge`);
+        log(`  5. After working across projects, run phren-consolidate to find cross-project patterns`);
+        log(``);
+        return;
+    }
+    log("\nSetting up phren...\n");
+    const walkthroughProject = opts._walkthroughProject;
+    if (walkthroughProject) {
+        if (!walkthroughProject.trim()) {
+            console.error("Error: project name cannot be empty.");
+            process.exit(1);
+        }
+        if (walkthroughProject.length > 100) {
+            console.error("Error: project name must be 100 characters or fewer.");
+            process.exit(1);
+        }
+        if (!isValidProjectName(walkthroughProject)) {
+            console.error(`Error: invalid project name "${walkthroughProject}". Use lowercase letters, numbers, and hyphens.`);
+            process.exit(1);
+        }
+    }
+    // Determine if CWD is a project that should be bootstrapped instead of
+    // creating a dummy "my-first-project".
+    const cwdProjectPath = !walkthroughProject ? detectProjectDir(process.cwd(), phrenPath) : null;
+    const useTemplateProject = Boolean(walkthroughProject) || Boolean(opts.template);
+    const firstProjectName = walkthroughProject || "my-first-project";
+    const firstProjectDomain = opts._walkthroughDomain ?? "software";
+    // Copy bundled starter to ~/.phren.
+    //
+    // Note: packages/cli/starter/ no longer ships my-api/my-frontend/
+    // my-first-project sample-project directories — they were bundled but
+    // never copied (this loop used to skip them by name) and ensureProjectScaffold()
+    // below generates the real first-project content instead. Those three names
+    // still appear in LEGACY_SAMPLE_PROJECTS (init/setup.ts) purely to prune them
+    // out of profiles left behind by installs that predate this cleanup.
+    function copyDir(src, dest) {
+        fs.mkdirSync(dest, { recursive: true });
+        for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+            if (entry.name === "tasks.md" && !moduleEnabled(phrenPath, "tasks"))
+                continue;
+            if (path.basename(src) === "skills" && !skillEnabled(phrenPath, entry.name))
+                continue;
+            const srcPath = path.join(src, entry.name);
+            const destPath = path.join(dest, entry.name);
+            if (entry.isDirectory()) {
+                copyDir(srcPath, destPath);
+            }
+            else {
+                fs.copyFileSync(srcPath, destPath);
+            }
+        }
+    }
+    if (fs.existsSync(STARTER_DIR)) {
+        copyDir(STARTER_DIR, phrenPath);
+        writeRootManifest(phrenPath, {
+            version: 1,
+            installMode: "shared",
+            syncMode: "managed-git",
+        });
+        if (useTemplateProject) {
+            const targetProject = walkthroughProject || firstProjectName;
+            const projectDir = path.join(phrenPath, targetProject);
+            const templateApplied = Boolean(opts.template && applyTemplate(projectDir, opts.template, targetProject));
+            if (templateApplied) {
+                log(`  Applied "${opts.template}" template to ${targetProject}`);
+            }
+            ensureProjectScaffold(projectDir, targetProject, firstProjectDomain, opts._walkthroughInferredScaffold);
+            const targetProfile = opts.profile || "default";
+            const addToProfile = addProjectToProfile(phrenPath, targetProfile, targetProject);
+            if (!addToProfile.ok) {
+                debugLog(`fresh init addProjectToProfile failed for ${targetProfile}/${targetProject}: ${addToProfile.error}`);
+            }
+            if (opts.template && !templateApplied) {
+                log(`  Template "${opts.template}" not found. Available: ${listTemplates().join(", ") || "none"}`);
+            }
+            log(`  Seeded project "${targetProject}"`);
+        }
+        log(`  Created phren v${VERSION} \u2192 ${phrenPath}`);
+    }
+    else {
+        log(`  Starter not found in package, creating minimal structure...`);
+        writeRootManifest(phrenPath, {
+            version: 1,
+            installMode: "shared",
+            syncMode: "managed-git",
+        });
+        fs.mkdirSync(path.join(phrenPath, "global", "skills"), { recursive: true });
+        fs.mkdirSync(path.join(phrenPath, "profiles"), { recursive: true });
+        atomicWriteText(path.join(phrenPath, "global", "AGENTS.md"), `# Global Context\n\nThis file is loaded in every project.\n\n## General preferences\n\n<!-- Your coding style, preferred tools, things Claude should always know -->\n`);
+        if (useTemplateProject) {
+            const projectDir = path.join(phrenPath, firstProjectName);
+            if (opts.template && applyTemplate(projectDir, opts.template, firstProjectName)) {
+                log(`  Applied "${opts.template}" template to ${firstProjectName}`);
+            }
+            ensureProjectScaffold(projectDir, firstProjectName, firstProjectDomain, opts._walkthroughInferredScaffold);
+        }
+        const profileName = opts.profile || "default";
+        const profileProjects = useTemplateProject
+            ? `  - global\n  - ${firstProjectName}`
+            : `  - global`;
+        atomicWriteText(path.join(phrenPath, "profiles", `${profileName}.yaml`), `name: ${profileName}\ndescription: Default profile\nprojects:\n${profileProjects}\n`);
+    }
+    // If CWD is a project dir, bootstrap it now when onboarding or defaults allow it.
+    if (cwdProjectPath && shouldBootstrapCurrentProject) {
+        try {
+            const created = bootstrapFromExisting(phrenPath, cwdProjectPath, {
+                profile: opts.profile,
+                ownership: bootstrapOwnership,
+            });
+            log(`  Added current project "${created.project}" (${created.ownership})`);
+        }
+        catch (e) {
+            // Fresh-install bootstrap is best-effort. If it fails, the install
+            // still succeeded and the user can add the project explicitly later.
+            debugLog(`Bootstrap from CWD during fresh install failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+    }
+    // Persist the local machine alias and map it to the selected profile.
+    const effectiveMachine = opts.machine?.trim() || getMachineName();
+    persistMachineName(effectiveMachine);
+    updateMachinesYaml(phrenPath, effectiveMachine, opts.profile);
+    ensureGovernanceFiles(phrenPath);
+    setManagementPresetPreference(phrenPath, managementPreset);
+    const repaired = repairPreexistingInstall(phrenPath, { caps: managementCaps, preset: managementPreset });
+    applyOnboardingPreferences(phrenPath, opts);
+    const localGitRepo = ensureLocalGitRepo(phrenPath);
+    log(`  Updated machines.yaml with machine "${effectiveMachine}"`);
+    log(`  Management preset: ${managementPreset} — ${presetSummaryLines(managementPreset)}`);
+    log(`  MCP mode: ${mcpLabel}`);
+    log(`  Hooks mode: ${hooksLabel}`);
+    log(`  Default project ownership: ${ownershipDefault}`);
+    if (moduleEnabled(phrenPath, "tasks"))
+        log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
+    log(`  Git repo: ${localGitRepo.detail}`);
+    if (repaired.removedLegacyProjects > 0) {
+        log(`  Removed ${repaired.removedLegacyProjects} legacy starter project entr${repaired.removedLegacyProjects === 1 ? "y" : "ies"} from profiles.`);
+    }
+    const repairedAssets = collectRepairedAssetLabels(repaired);
+    if (repairedAssets.length > 0) {
+        log(`  Recreated missing generated assets: ${repairedAssets.join(", ")}`);
+    }
+    // Configure MCP for all detected AI coding tools and hooks
+    configureMcpTargets(phrenPath, { mcpEnabled, hooksEnabled, caps: managementCaps }, "Configured");
+    configureHooksIfEnabled(phrenPath, hooksEnabled, "Configured", managementCaps);
+    await reconcileModuleHooks(phrenPath);
+    writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION, syncIntent });
+    // Post-init verification
+    log(`\nVerifying setup...`);
+    const verify = runPostInitVerify(phrenPath);
+    for (const check of verify.checks) {
+        log(`  ${check.ok ? "pass" : "FAIL"} ${check.name}: ${check.detail}`);
+    }
+    log(`\nWhat was created:`);
+    log(`  ${phrenPath}/global/AGENTS.md    Global instructions loaded in every session`);
+    log(`  ${phrenPath}/global/skills/      Phren slash commands`);
+    log(`  ${phrenPath}/profiles/           Machine-to-project mappings`);
+    log(`  ${phrenPath}/.config/        Memory quality settings and config`);
+    // Ollama status summary (skip if already covered in walkthrough)
+    const walkthroughCoveredOllama = Boolean(process.env._PHREN_WALKTHROUGH_OLLAMA_SKIP) || (!hasExistingInstall && !opts.yes);
+    if (!walkthroughCoveredOllama) {
+        try {
+            const { checkOllamaStatus } = await import("../shared/ollama.js");
+            const status = await checkOllamaStatus();
+            if (status === "ready") {
+                log("\n  Semantic search: Ollama + nomic-embed-text ready.");
+            }
+            else if (status === "no_model") {
+                log("\n  Semantic search: Ollama running, but nomic-embed-text not pulled.");
+                log("  Run: ollama pull nomic-embed-text");
+            }
+            else if (status === "not_running") {
+                log("\n  Tip: Install Ollama for semantic search (optional).");
+                log("  https://ollama.com → then: ollama pull nomic-embed-text");
+                log("  (Set PHREN_OLLAMA_URL=off to hide this message)");
+            }
+        }
+        catch (err) {
+            logger.debug("init", `init ollamaInstallHint: ${errorMessage(err)}`);
+        }
+    }
+    for (const envLabel of writeWalkthroughEnvDefaults(phrenPath, opts, {
+        preset: managementPreset,
+        explicit: Boolean(opts.managementPreset),
+    })) {
+        log(`  ${envLabel}`);
+    }
+    if (managementPreset !== "managed") {
+        printSelfWiringSnippet(phrenPath, managementPreset);
+    }
+    if (opts._walkthroughSemanticSearch) {
+        log(`\nWarming semantic search...`);
+        try {
+            log(`  ${await warmSemanticSearch(phrenPath, opts.profile)}`);
+        }
+        catch (err) {
+            log(`  Semantic search warmup failed: ${errorMessage(err)}`);
+        }
+    }
+    log(`\n\x1b[95m◆\x1b[0m phren initialized`);
+    const gh = opts._walkthroughGithub;
+    let synced = hasGitRemote(phrenPath);
+    if (!synced && gh?.create && gh.username)
+        synced = await createGithubStore(phrenPath, gh.username, gh.repo);
+    let paired = false;
+    if (opts._walkthroughPair) {
+        const { enableHookForPhone } = await import("../modules/config.js");
+        const { runPair } = await import("../bridge/pair.js");
+        enableHookForPhone(phrenPath);
+        try {
+            paired = await runPair([], VERSION) === 0;
+        }
+        catch (err) {
+            log(`  Phone pairing didn't finish: ${errorMessage(err)}`);
+        }
+    }
+    log(`\nNext:`);
+    let step = 1;
+    log(`  ${step++}. Start a new agent session (Claude, Codex, Copilot…) in a project. Phren loads its memory automatically.`);
+    const { agentInstalled } = await import("../modules/agent-package.js");
+    log(agentInstalled()
+        ? `     Or use phren's own coding agent: phren agent -i`
+        : `     phren's own coding agent is optional: npm install -g @phren/agent, then phren agent -i`);
+    if (!paired)
+        log(`  ${step++}. Connect your phone any time: phren pair`);
+    if (!synced) {
+        const repo = gh ? `${gh.username ? `${gh.username}/` : ""}${gh.repo}` : "my-phren";
+        log(`  ${step++}. Sync across computers: cd ${phrenPath} && gh repo create ${repo} --private --source=. --push`);
+    }
+    if (!mcpEnabled)
+        log(`  ${step++}. Turn MCP on: phren mcp-mode on`);
+    log(`  Settings: phren config · Health check: phren doctor`);
+    log(``);
+}

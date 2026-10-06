@@ -1,0 +1,12 @@
+export declare const STOP_WORDS: Set<string>;
+export declare function extractKeywordEntries(text: string): string[];
+export declare function extractKeywords(text: string): string;
+export declare function learnedSynonymsPath(phrenPath: string, project: string): string | null;
+export declare function loadLearnedSynonyms(project?: string | null, phrenPath?: string | null): Record<string, string[]>;
+export declare function loadSynonymMap(project?: string | null, phrenPath?: string | null): Record<string, string[]>;
+export declare function learnSynonym(phrenPath: string, project: string, term: string, synonyms: string[]): Record<string, string[]>;
+export declare function removeLearnedSynonym(phrenPath: string, project: string, term: string, synonyms?: string[]): Record<string, string[]>;
+export declare function sanitizeFts5Query(raw: string): string;
+export declare function buildRobustFtsQuery(raw: string, project?: string | null, phrenPath?: string): string;
+export declare function buildRelaxedFtsQuery(raw: string, project?: string | null, phrenPath?: string): string;
+export declare function buildFtsQueryVariants(raw: string, project?: string | null, phrenPath?: string): string[];

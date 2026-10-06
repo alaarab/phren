@@ -1,0 +1,158 @@
+// Shared Phren result types, validation tags, and low-level helpers.
+/**
+ * Minimal cross-domain starter set for fragment/conflict detection.
+ *
+ * Kept intentionally small: only terms that are genuinely universal across
+ * disciplines (languages, infra primitives, version control). Framework-specific
+ * tools (React, Django, Unity, JUCE, Ansible, ...) are learned dynamically from
+ * each project's FINDINGS.md via extractDynamicEntities().
+ */
+export const UNIVERSAL_TECH_TERMS_RE = /\b(Python|Rust|Go|Java|TypeScript|JavaScript|Docker|Kubernetes|AWS|GCP|Azure|SQL|Git|React|Vue|Angular|Svelte|Next\.?js|Nuxt|Vite|esbuild|Webpack|Rollup|Babel|ESLint|Biome|Prettier|Jest|Vitest|Playwright|Cypress|Node\.?js|Deno|Bun|Express|Fastify|Hono|Koa|NestJS|Prisma|Drizzle|Sequelize|TypeORM|Postgres|PostgreSQL|MySQL|SQLite|MongoDB|Redis|Elasticsearch|GraphQL|REST|gRPC|tRPC|Zod|Pydantic|FastAPI|Django|Flask|Rails|Spring|Laravel|Tailwind|Bootstrap|MUI|Material|Fluent|Chakra|Radix|shadcn|SharePoint|SPFx|Teams|OneDrive|Power\s*Apps|Deltek|VantagePoint|Hangfire|ASP\.?NET|MVC|Blazor|MAUI|Electron|VSCode|GitHub|GitLab|Bitbucket|Vercel|Netlify|Railway|Fly\.io|Cloudflare|Lambda|S3|EC2|RDS|DynamoDB|Stripe|Twilio|SendGrid|OpenAI|Anthropic|Claude|LLM|MCP|FTS5|SQLCipher|Sigma|ForceAtlas|Graphology|Playwright|Puppeteer|Selenium|Turbo|Turborepo|Lerna|nx|pnpm|yarn|npm|Bun)\b/gi;
+/**
+ * Additional fragment patterns beyond CamelCase and acronyms.
+ * Each pattern has a named group so callers can identify the fragment type.
+ */
+export const EXTRA_FRAGMENT_PATTERNS = [
+    // Semantic version numbers: v1.2.3, 2.0.0-beta.1
+    { re: /\bv?\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?\b/g, label: "version" },
+    // Environment variable keys: PHREN_*, NODE_ENV, etc. (2+ uppercase segments separated by _)
+    { re: /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g, label: "env_key" },
+    // File paths: at least one slash with an extension or known dir prefix
+    { re: /(?:~\/|\.\/|\/)[a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+/g, label: "file_path" },
+    // Error codes: E0001, ERR_MODULE_NOT_FOUND, TS2345, etc.
+    { re: /\b(?:ERR_[A-Z0-9_]{3,}|(?:TS|RS|PY|E)\d{3,})\b/g, label: "error_code" },
+    // ISO date references: 2025-03-11, 2025/03/11
+    { re: /\b\d{4}[-/]\d{2}[-/]\d{2}\b/g, label: "date" },
+];
+/** Union of all directory names reserved by phren infrastructure — not valid project names. */
+export const RESERVED_PROJECT_DIR_NAMES = new Set(["global", ".runtime", ".sessions", ".config", "profiles", "templates"]);
+// Default timeout for execFileSync calls (30s for most operations, 10s for quick probes like `which`)
+export const EXEC_TIMEOUT_MS = 30_000;
+export const EXEC_TIMEOUT_QUICK_MS = 10_000;
+// Structured error codes for consistent error handling across data-access and MCP tools
+export const PhrenError = {
+    PROJECT_NOT_FOUND: "PROJECT_NOT_FOUND",
+    INVALID_PROJECT_NAME: "INVALID_PROJECT_NAME",
+    FILE_NOT_FOUND: "FILE_NOT_FOUND",
+    PERMISSION_DENIED: "PERMISSION_DENIED",
+    MALFORMED_JSON: "MALFORMED_JSON",
+    MALFORMED_YAML: "MALFORMED_YAML",
+    NOT_FOUND: "NOT_FOUND",
+    AMBIGUOUS_MATCH: "AMBIGUOUS_MATCH",
+    LOCK_TIMEOUT: "LOCK_TIMEOUT",
+    EMPTY_INPUT: "EMPTY_INPUT",
+    VALIDATION_ERROR: "VALIDATION_ERROR",
+    INDEX_ERROR: "INDEX_ERROR",
+    NETWORK_ERROR: "NETWORK_ERROR",
+};
+export function phrenOk(data) {
+    return { ok: true, data };
+}
+export function phrenErr(error, code) {
+    return { ok: false, error, code };
+}
+// Forward a failed PhrenResult to a different result type (re-types the error branch).
+// Safe to call after an `if (!result.ok)` guard; extracts error and code from the union.
+export function forwardErr(result) {
+    if (!result.ok)
+        return { ok: false, error: result.error, code: result.code };
+    return { ok: false, error: "unexpected forward of ok result" };
+}
+const ERROR_CODES = new Set(Object.values(PhrenError));
+// Extract the error code from an error string (e.g. "PROJECT_NOT_FOUND: ...").
+// Returns the code if the string starts with a known PhrenError, or undefined.
+export function parsePhrenErrorCode(msg) {
+    const prefix = msg.split(":")[0]?.trim();
+    if (prefix && ERROR_CODES.has(prefix))
+        return prefix;
+    return undefined;
+}
+export function isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+/**
+ * `yaml.load` with js-yaml 4's empty-document behaviour.
+ *
+ * js-yaml 5 throws YAMLException("expected a document, but the input is empty")
+ * for input that is blank, whitespace, or comments only — where 4 returned
+ * `undefined`. phren's config files legitimately look like that: a freshly
+ * scaffolded `machines.yaml` is a single header comment, and an untouched
+ * profile can be empty. Every caller already handles `undefined`, but a throw
+ * is read as a parse failure, which would report those files as malformed —
+ * and `stores.yaml` refuses to write back over a file it could not parse, so
+ * an empty registry would have become unrepairable by the CLI.
+ *
+ * Only genuinely empty documents are absorbed. `---`, `null` and real syntax
+ * errors reach js-yaml exactly as before.
+ */
+export function loadYamlDocument(source, load) {
+    // Strip blank and comment-only lines; anything left is a document to parse.
+    if (!source.replace(/^\s*(#.*)?$/gm, "").trim())
+        return undefined;
+    return load(source);
+}
+/** Shallow-merge data onto defaults so missing keys get filled in. */
+export function withDefaults(data, defaults) {
+    const merged = { ...defaults };
+    for (const key of Object.keys(data)) {
+        const val = data[key];
+        if (val !== undefined && val !== null) {
+            if (typeof val === "object" && !Array.isArray(val) && typeof merged[key] === "object" && !Array.isArray(merged[key])) {
+                merged[key] = { ...merged[key], ...val };
+            }
+            else {
+                merged[key] = val;
+            }
+        }
+    }
+    return merged;
+}
+/**
+ * Finding types offered as an explicit choice: add_finding's findingType
+ * param, promote_note --type, and the web/iOS type pickers. Deliberately the
+ * intersection of what used to be three disjoint lists (this enum, the decay
+ * table, and the auto-detector) — "tradeoff" and "architecture" were offered
+ * here but had no decay rule and no max-age, so they never actually worked.
+ * Legacy stores may still contain those two tags; reading/searching them as
+ * plain text still works, they just aren't offered or decay-tracked anymore.
+ */
+export const FINDING_TYPES = ["decision", "pitfall", "pattern", "bug"];
+/**
+ * Every finding tag phren can actually produce or needs to search for: the
+ * offered FINDING_TYPES above, plus tags autoDetectFindingType
+ * (content/learning.ts) writes on its own initiative — "workaround" and
+ * "context" — which aren't offered as an explicit pick but still need a
+ * decay rule (finding/lifecycle.ts's FINDING_TYPE_DECAY is typed against
+ * this exact set) and need to stay filterable via search_knowledge's `tag`
+ * param.
+ */
+export const FINDING_TAGS = [...FINDING_TYPES, "workaround", "context"];
+/** Canonical set of known finding tags for the "unknown tag" write-time warning — derived from FINDING_TAGS (not just FINDING_TYPES) so phren never flags its own auto-written workaround/context tags as unknown. */
+export const KNOWN_OBSERVATION_TAGS = new Set(FINDING_TAGS);
+/**
+ * Document types in the FTS index.
+ *
+ * "canonical" is `truths.md`'s type (see FILE_TYPE_MAP in shared/index.ts):
+ * the file was renamed from `canonical_memories.md` to `truths.md` in the
+ * 0.0.5 rename, but the type string was not renamed with it, so it still
+ * leaks as the literal `--type canonical` / `type: "canonical"` value across
+ * the CLI and API (docs/api-reference.md documents it as-is because that is
+ * what the index actually produces). Renaming it requires touching
+ * shared/index.ts and shared/retrieval.ts together with this file, since all
+ * three must agree on the type string.
+ */
+export const DOC_TYPES = ["claude", "findings", "notes", "reference", "skills", "summary", "task", "changelog", "canonical", "review-queue", "skill", "other"];
+// ── Cache eviction helper ────────────────────────────────────────────────────
+const CACHE_MAX = 1000;
+const CACHE_EVICT = 100;
+export function capCache(cache) {
+    if (cache.size > CACHE_MAX) {
+        const it = cache.keys();
+        for (let i = 0; i < CACHE_EVICT; i++) {
+            const k = it.next();
+            if (k.done)
+                break;
+            cache.delete(k.value);
+        }
+    }
+}

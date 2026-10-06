@@ -1,0 +1,283 @@
+import { open, stat } from "node:fs/promises";
+import { z } from "zod";
+import { visibleTerminalChoice } from "./agent-hooks.js";
+import { codexServers } from "./codex-servers.js";
+import { validateTarget } from "./herdr.js";
+import { intervalFromEnv } from "./limits.js";
+import { emptyComposer } from "./model-switch.js";
+import { BridgeError, object } from "./protocol.js";
+import { terminalProvider } from "./terminal.js";
+import { transcriptPath } from "./transcripts.js";
+import { stripTerminal } from "../terminal-text.js";
+/** The phone's permission modes, in T3's words. */
+export const PERMISSION_MODES = ["supervised", "auto-edits", "auto", "full-access"];
+/** T3's CodexSessionRuntime mapping. The reviewer is always sent: leaving it
+ * out would keep `auto_review` from an earlier turn. */
+const CODEX_MODES = {
+    supervised: { approvalPolicy: "untrusted", approvalsReviewer: "user", sandboxPolicy: { type: "readOnly" } },
+    "auto-edits": { approvalPolicy: "on-request", approvalsReviewer: "user", sandboxPolicy: { type: "workspaceWrite" } },
+    auto: { approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandboxPolicy: { type: "workspaceWrite" } },
+    "full-access": { approvalPolicy: "never", approvalsReviewer: "user", sandboxPolicy: { type: "dangerFullAccess" } },
+};
+/** Claude Code's `permissionMode` values, as the phone names them. */
+const CLAUDE_MODES = { default: "supervised", acceptEdits: "auto-edits", auto: "auto", bypassPermissions: "full-access", plan: "plan" };
+const CLAUDE_NAMES = Object.fromEntries(Object.entries(CLAUDE_MODES).map(([raw, phone]) => [phone, raw]));
+const MAX_PRESSES = 6, STEP_WAIT_MS = 2_000;
+/** What this pane can change from the phone; undefined for harnesses that
+ * offer nothing. A hand-started Codex TUI is empty: its state is still read
+ * from its transcript, but switching is not offered. Claude's cycle holds
+ * `full-access` only when it was launched allowing bypass. */
+export function settingsCapabilities(source, codexServed, claudeBypass = false) {
+    if (source === "codex")
+        return codexServed ? { permissionModes: [...PERMISSION_MODES], plan: true, fast: false } : { permissionModes: [], plan: false, fast: false };
+    if (source === "claude")
+        return { permissionModes: PERMISSION_MODES.filter(mode => mode !== "full-access" || claudeBypass), plan: true, fast: true };
+    return undefined;
+}
+const request = z.object({ permissionMode: z.enum(PERMISSION_MODES).optional(), plan: z.boolean().optional(), fast: z.boolean().optional() })
+    .strict().refine(value => value.permissionMode !== undefined || value.plan !== undefined || value.fast !== undefined, "Choose a setting to change.");
+/** Claude's permission mode from the footer line its TUI draws under the
+ * composer. The transcript lags it: a `permission-mode` row is written only
+ * when a prompt is submitted, and a fresh session has no file yet. The line may
+ * trail hints ("(shift+tab to cycle) · 1 agent"), so only its start counts. */
+export function claudeFooterMode(screen) {
+    for (const line of stripTerminal(screen).split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(-8).reverse()) {
+        const text = line.replace(/^[⏵⏸]+\s*/, "");
+        if (text === line)
+            continue;
+        if (/bypass permissions on/i.test(text))
+            return "bypassPermissions";
+        if (/^manual mode on\b/i.test(text))
+            return "default";
+        if (/^accept edits on\b/i.test(text))
+            return "acceptEdits";
+        if (/^plan mode on\b/i.test(text))
+            return "plan";
+        if (/^auto mode on\b/i.test(text))
+            return "auto";
+    }
+    return undefined;
+}
+/** A Claude pane's settings as its footer shows them, read at most once per
+ * `PHREN_DIALOG_THROTTLE_MS` like the dialog check, and whether bypass was
+ * ever seen in it (which is when full access is offered). */
+export class ClaudeSettingsReader {
+    hooks;
+    every;
+    cache = new Map();
+    constructor(hooks, every = intervalFromEnv("PHREN_DIALOG_THROTTLE_MS", 3_000)) {
+        this.hooks = hooks;
+        this.every = every;
+    }
+    async read(target, terminal) {
+        const key = `${target.server}:${target.pane}`;
+        let entry = this.cache.get(key);
+        if (!entry || entry.terminal !== terminal)
+            entry = { terminal, at: 0, bypass: false };
+        // Re-set on every use so the Map's order is recency.
+        this.cache.delete(key);
+        this.cache.set(key, entry);
+        if (Date.now() - entry.at >= this.every) {
+            entry.at = Date.now();
+            entry.mode = await this.hooks.paneLines(target).then(claudeFooterMode, () => entry.mode);
+            if (entry.mode === "bypassPermissions")
+                entry.bypass = true;
+            while (this.cache.size > 64)
+                this.cache.delete(this.cache.keys().next().value);
+        }
+        const phone = entry.mode ? CLAUDE_MODES[entry.mode] : undefined;
+        return { bypass: entry.bypass, ...(phone ? { state: phone === "plan" ? { plan: true } : { permissionMode: phone, plan: false } } : {}) };
+    }
+}
+/** Claude's answer to a slash command: the first `<local-command-stdout>` user
+ * row appended after `from`. */
+async function commandOutput(file, from) {
+    const handle = await open(file, "r");
+    try {
+        const { size } = await handle.stat(), length = Math.min(Math.max(size - from, 0), 1_048_576), buffer = Buffer.alloc(length);
+        await handle.read(buffer, 0, length, from);
+        for (const line of buffer.subarray(0, buffer.lastIndexOf(10) + 1).toString("utf8").split("\n")) {
+            if (!line.includes("local-command-stdout"))
+                continue;
+            try {
+                const content = object(object(JSON.parse(line)).message).content;
+                const text = typeof content === "string" ? content : Array.isArray(content) ? content.map(block => String(object(block).text ?? "")).join("") : "";
+                const match = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/.exec(text);
+                if (match)
+                    return stripTerminal(match[1]).trim().slice(0, 300);
+            }
+            catch { /* Unrelated row. */ }
+        }
+        return undefined;
+    }
+    finally {
+        await handle.close();
+    }
+}
+const fileSize = async (file) => file ? (await stat(file).catch(() => undefined))?.size ?? 0 : 0;
+/** One settings transaction per pane owns its terminal input until it ends. */
+export class SettingsSwitcher {
+    hooks;
+    wait;
+    active = new Set();
+    reader;
+    constructor(hooks, wait = STEP_WAIT_MS) {
+        this.hooks = hooks;
+        this.wait = wait;
+        this.reader = new ClaudeSettingsReader(hooks);
+    }
+    /** A Claude pane's footer-read settings and capabilities for the stream. */
+    async streamSettings(target, terminal, codexServed) {
+        if (target.source !== "claude") {
+            const settings = settingsCapabilities(target.source, codexServed);
+            return settings ? { settings } : {};
+        }
+        const { state, bypass } = await this.reader.read(target, terminal);
+        return { settings: settingsCapabilities("claude", false, bypass), ...(state ? { settingsState: state } : {}) };
+    }
+    key(target) { return `${target.server}:${target.pane}`; }
+    assertAvailable(target) {
+        if (this.active.has(this.key(target)))
+            throw new BridgeError(409, "A settings change is already in progress. Wait for it to finish.");
+    }
+    async switch(target, data) {
+        this.assertAvailable(target);
+        // The route's own envelope is not a setting; anything else unknown is refused.
+        const { target: _target, deliveryId: _delivery, ...settings } = data;
+        const change = request.parse(settings);
+        // A Codex pane on the Hook's own app-server takes the settings with its
+        // next turn/start, whatever it is doing now, as with the model.
+        const served = target.source === "codex" ? codexServers.forTarget(target) : undefined;
+        if (served)
+            return this.hold(served, change);
+        if (target.source !== "claude")
+            throw new BridgeError(422, "Changing these settings is not supported for this harness. Open terminal to change them.");
+        this.active.add(this.key(target));
+        try {
+            return await this.claude(target, change);
+        }
+        finally {
+            this.active.delete(this.key(target));
+        }
+    }
+    hold(entry, change) {
+        if (change.fast !== undefined)
+            throw new BridgeError(422, "Fast mode is Claude's. Codex has no fast setting here.");
+        try {
+            codexServers.holdSettings(entry, { ...(change.permissionMode ? CODEX_MODES[change.permissionMode] : {}),
+                ...(change.plan !== undefined ? { collaborationMode: { mode: change.plan ? "plan" : "default" } } : {}) });
+        }
+        catch (error) {
+            throw new BridgeError(409, error instanceof Error ? error.message : "Codex could not take the setting.");
+        }
+        return { ok: true, ...(change.permissionMode ? { permissionMode: change.permissionMode } : {}), ...(change.plan !== undefined ? { plan: change.plan } : {}), applies: "next-turn" };
+    }
+    async claude(target, change) {
+        if (change.permissionMode && change.plan === true)
+            throw new BridgeError(422, "Claude's plan mode replaces the permission mode. Change one at a time.");
+        if (change.permissionMode === "full-access")
+            throw new BridgeError(422, "Claude only offers full access when it was launched allowing it. Open terminal to check.");
+        const first = await validateTarget(target, false, true);
+        if (!["idle", "done"].includes(String(first.agent_status))) {
+            throw new BridgeError(409, "This agent is working. Settings change between turns; choose it again when the turn ends.");
+        }
+        const terminal = first.terminal_id;
+        const validate = async () => {
+            const pane = await validateTarget(target, false, true);
+            if (pane.terminal_id !== terminal)
+                throw new BridgeError(409, "The terminal changed during the settings change.");
+            if (pane.agent_status === "working")
+                throw new BridgeError(409, "The agent started working during the settings change. The result is unconfirmed; check the terminal.");
+        };
+        const screenMode = async () => claudeFooterMode(await this.hooks.paneLines(target));
+        // The mode after a change: polled from the screen until it differs from `from`.
+        const changed = async (from, wait) => {
+            const deadline = Date.now() + wait;
+            do {
+                await new Promise(resolve => setTimeout(resolve, 150));
+                await validate();
+                const now = await screenMode();
+                if (now && now !== from)
+                    return now;
+            } while (Date.now() < deadline);
+            throw new BridgeError(409, "Could not verify Claude's permission mode. Open terminal to check it.");
+        };
+        const slash = async (command) => {
+            // Typing into a draft would corrupt both it and the command.
+            const before = await this.hooks.paneLines(target, false);
+            const composer = before.split(/\r?\n/).reverse().find(line => /^\s*[›❯>]/.test(stripTerminal(line)));
+            if (!composer || !emptyComposer(composer) || visibleTerminalChoice(stripTerminal(before))) {
+                throw new BridgeError(409, "The terminal has a draft or an unreadable prompt. Open terminal before changing settings.");
+            }
+            await validate();
+            await terminalProvider().prompt(target.server, target.pane, command);
+        };
+        let verified;
+        if (change.fast !== undefined) {
+            const said = async () => [...stripTerminal(await this.hooks.paneLines(target, true)).matchAll(/fast mode (on|off)\b/gi)].map(match => match[1].toLowerCase());
+            // Older answers, in the transcript or the scrollback, must not count.
+            let file = await transcriptPath("claude", target.session).catch(() => undefined);
+            const from = await fileSize(file), earlier = (await said()).length;
+            await slash(`/fast ${change.fast ? "on" : "off"}`);
+            verified = false;
+            // Claude answers in the transcript, as a user row right after the command.
+            const deadline = Date.now() + Math.round(this.wait * 1.5);
+            let answer;
+            do {
+                await new Promise(resolve => setTimeout(resolve, 150));
+                await validate();
+                file ??= await transcriptPath("claude", target.session).catch(() => undefined);
+                answer = file ? await commandOutput(file, from).catch(() => undefined) : undefined;
+            } while (answer === undefined && Date.now() < deadline);
+            if (answer !== undefined) {
+                const state = /fast mode (?:is )?(on|off)\b/i.exec(answer)?.[1].toLowerCase();
+                if (/unavailable|not available/i.test(answer))
+                    throw new BridgeError(422, `Claude: ${answer}`);
+                if (state) {
+                    if ((state === "on") !== change.fast)
+                        throw new BridgeError(409, `Claude answered Fast mode ${state}. Open terminal to check.`);
+                    verified = true;
+                }
+            }
+            else {
+                // No row in time: the screen is the fallback.
+                const answers = await said(), last = answers.length > earlier ? answers.at(-1) : undefined;
+                if (last) {
+                    if ((last === "on") !== change.fast)
+                        throw new BridgeError(409, `Claude answered Fast mode ${last}. Open terminal to check.`);
+                    verified = true;
+                }
+            }
+        }
+        let mode = await screenMode();
+        if ((change.plan !== undefined || change.permissionMode) && !mode)
+            throw new BridgeError(409, "Could not read Claude's permission mode from its screen. Open terminal to check.");
+        const started = mode ?? "default"; // Only used once a change needs the mode, and then the footer was read.
+        if (change.plan === true) {
+            if (started !== "plan") {
+                await slash("/plan");
+                mode = await changed(started, this.wait);
+                if (mode !== "plan")
+                    throw new BridgeError(409, "Claude did not enter plan mode. Open terminal to check.");
+            }
+        }
+        else if (change.permissionMode || change.plan === false) {
+            const wanted = change.permissionMode ? CLAUDE_NAMES[change.permissionMode] : undefined;
+            const reached = (raw) => wanted ? raw === wanted : raw !== "plan";
+            // Shift+Tab steps through the modes Claude offers in this session; a
+            // lap back to the start means it does not offer the one asked for.
+            for (let presses = 0; !reached(mode); presses++) {
+                if (presses >= MAX_PRESSES || (presses > 0 && mode === started))
+                    throw new BridgeError(422, "Claude doesn't offer that mode in this session.");
+                await validate();
+                // Herdr's name for the key (it sends ESC [ Z); shift-tab, backtab and btab are rejected.
+                await terminalProvider().sendKeys(target.server, target.pane, ["shift+tab"]);
+                mode = await changed(mode, this.wait);
+            }
+        }
+        const phone = mode ? CLAUDE_MODES[mode] : undefined;
+        // Only what the footer showed is reported; a fast-only change with an unreadable one says nothing of the mode.
+        return { ok: true, ...(phone && phone !== "plan" ? { permissionMode: phone } : {}), ...(phone ? { plan: phone === "plan" } : {}),
+            ...(change.fast !== undefined ? { fast: change.fast, verified: verified === true } : {}) };
+    }
+}

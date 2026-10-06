@@ -1,0 +1,425 @@
+/**
+ * PostToolUse hook handler and context hook handler.
+ * Extracted from hooks-session.ts for modularity.
+ */
+import * as fs from "fs";
+import * as path from "path";
+import { buildHookContext, debugLog, appendAuditLog, runtimeFile, sessionMarker, getPhrenPath, getWorkflowPolicy, appendReviewQueue, getProactivityLevelForFindings, FINDING_SENSITIVITY_CONFIG, isProjectHookEnabled, errorMessage, detectProject, } from "./hooks-context.js";
+import { logger } from "../logger.js";
+import { findingQualityReason } from "../content/quality.js";
+import { rotateJsonlIfLarge } from "../phren-paths.js";
+import { buildIndex, queryRows, } from "../shared/index.js";
+import { filterTaskByPriority } from "../shared/retrieval.js";
+// ── PostToolUse hook ─────────────────────────────────────────────────────────
+const INTERESTING_TOOLS = new Set(["Read", "Write", "Edit", "Bash", "Glob", "Grep"]);
+const COOLDOWN_MS = parseInt(process.env.PHREN_AUTOCAPTURE_COOLDOWN_MS ?? "30000", 10);
+function getSessionCap() {
+    if (process.env.PHREN_AUTOCAPTURE_SESSION_CAP) {
+        return parseInt(process.env.PHREN_AUTOCAPTURE_SESSION_CAP, 10);
+    }
+    try {
+        const policy = getWorkflowPolicy(getPhrenPath());
+        const sensitivity = policy.findingSensitivity ?? "balanced";
+        return FINDING_SENSITIVITY_CONFIG[sensitivity]?.sessionCap ?? 10;
+    }
+    catch {
+        return 10;
+    }
+}
+function flattenToolResponseText(value, maxChars = 4000) {
+    if (typeof value === "string")
+        return value;
+    const queue = [value];
+    const parts = [];
+    let length = 0;
+    while (queue.length > 0 && length < maxChars) {
+        const current = queue.shift();
+        if (typeof current === "string") {
+            const trimmed = current.trim();
+            if (!trimmed)
+                continue;
+            parts.push(trimmed);
+            length += trimmed.length + 1;
+            continue;
+        }
+        if (Array.isArray(current)) {
+            queue.unshift(...current);
+            continue;
+        }
+        if (current && typeof current === "object") {
+            queue.unshift(...Object.values(current));
+        }
+    }
+    if (parts.length > 0)
+        return parts.join("\n").slice(0, maxChars);
+    return JSON.stringify(value ?? "").slice(0, maxChars);
+}
+export async function handleHookTool() {
+    const ctx = buildHookContext();
+    if (!ctx.hooksEnabled) {
+        process.exit(0);
+    }
+    try {
+        const start = Date.now();
+        let raw = "";
+        if (!process.stdin.isTTY) {
+            try {
+                raw = fs.readFileSync(0, "utf-8");
+            }
+            catch (err) {
+                logger.debug("hooks-session", `hookTool stdinRead: ${errorMessage(err)}`);
+                process.exit(0);
+            }
+        }
+        let data;
+        try {
+            data = JSON.parse(raw);
+        }
+        catch (err) {
+            logger.debug("hooks-session", `hookTool stdinParse: ${errorMessage(err)}`);
+            process.exit(0);
+        }
+        const toolName = String(data.tool_name ?? data.tool ?? "");
+        if (!INTERESTING_TOOLS.has(toolName)) {
+            process.exit(0);
+        }
+        const sessionId = data.session_id;
+        const input = (data.tool_input ?? {});
+        const entry = {
+            at: new Date().toISOString(),
+            session_id: sessionId,
+            tool: toolName,
+        };
+        if (toolName === "Read" || toolName === "Write" || toolName === "Edit") {
+            const filePath = input.file_path ?? input.path ?? undefined;
+            if (filePath)
+                entry.file = String(filePath);
+        }
+        else if (toolName === "Bash") {
+            const cmd = input.command ?? undefined;
+            if (cmd)
+                entry.command = String(cmd).slice(0, 200);
+        }
+        else if (toolName === "Glob") {
+            const pattern = input.pattern ?? undefined;
+            if (pattern)
+                entry.file = String(pattern);
+        }
+        else if (toolName === "Grep") {
+            const pattern = input.pattern ?? undefined;
+            const searchPath = input.path ?? undefined;
+            if (pattern)
+                entry.command = `grep ${pattern}${searchPath ? ` in ${searchPath}` : ""}`.slice(0, 200);
+        }
+        const responseStr = flattenToolResponseText(data.tool_response ?? "");
+        if (/(error|exception|failed|no such file|ENOENT)/i.test(responseStr)) {
+            entry.error = responseStr.slice(0, 300);
+        }
+        const cwd = (data.cwd ?? input.cwd ?? undefined);
+        let activeProject = cwd ? detectProject(ctx.phrenPath, cwd, ctx.profile) : null;
+        if (!isProjectHookEnabled(ctx.phrenPath, activeProject, "PostToolUse")) {
+            appendAuditLog(ctx.phrenPath, "hook_tool", `status=project_disabled project=${activeProject}`);
+            process.exit(0);
+        }
+        try {
+            const logFile = runtimeFile(ctx.phrenPath, "tool-log.jsonl");
+            fs.mkdirSync(path.dirname(logFile), { recursive: true });
+            rotateJsonlIfLarge(logFile);
+            fs.appendFileSync(logFile, JSON.stringify(entry) + "\n");
+        }
+        catch (err) {
+            logger.debug("hooks-session", `hookTool toolLog: ${errorMessage(err)}`);
+        }
+        const cooldownFile = runtimeFile(ctx.phrenPath, "hook-tool-cooldown");
+        try {
+            if (fs.existsSync(cooldownFile)) {
+                const age = Date.now() - fs.statSync(cooldownFile).mtimeMs;
+                if (age < COOLDOWN_MS) {
+                    debugLog(`hook-tool: cooldown active (${Math.round(age / 1000)}s < ${Math.round(COOLDOWN_MS / 1000)}s), skipping extraction`);
+                    activeProject = null;
+                }
+            }
+        }
+        catch (err) {
+            logger.debug("hooks-session", `hookTool cooldownStat: ${errorMessage(err)}`);
+        }
+        if (activeProject && sessionId) {
+            try {
+                const capFile = sessionMarker(ctx.phrenPath, `tool-findings-${sessionId}`);
+                let count = 0;
+                if (fs.existsSync(capFile)) {
+                    count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0;
+                }
+                const sessionCap = getSessionCap();
+                if (count >= sessionCap) {
+                    debugLog(`hook-tool: session cap reached (${count}/${sessionCap}), skipping extraction`);
+                    activeProject = null;
+                }
+            }
+            catch (err) {
+                logger.debug("hooks-session", `hookTool sessionCapCheck: ${errorMessage(err)}`);
+            }
+        }
+        const findingsLevelForTool = getProactivityLevelForFindings(ctx.phrenPath);
+        if (activeProject && findingsLevelForTool !== "low") {
+            try {
+                const candidates = filterToolFindingsForProactivity(extractToolFindings(toolName, input, responseStr, data.tool_response), findingsLevelForTool);
+                for (const { text, confidence } of candidates) {
+                    appendReviewQueue(ctx.phrenPath, activeProject, "Review", [text]);
+                    debugLog(`hook-tool: queued candidate for review (conf=${confidence}): ${text.slice(0, 60)}`);
+                }
+                if (candidates.length > 0) {
+                    try {
+                        fs.writeFileSync(cooldownFile, Date.now().toString());
+                    }
+                    catch (err) {
+                        logger.debug("hooks-session", `hookTool cooldownWrite: ${errorMessage(err)}`);
+                    }
+                    if (sessionId) {
+                        try {
+                            const capFile = sessionMarker(ctx.phrenPath, `tool-findings-${sessionId}`);
+                            let count = 0;
+                            try {
+                                count = Number.parseInt(fs.readFileSync(capFile, "utf8").trim(), 10) || 0;
+                            }
+                            catch (err) {
+                                logger.debug("hooks-session", `hookTool capFileRead: ${errorMessage(err)}`);
+                            }
+                            count += candidates.length;
+                            fs.writeFileSync(capFile, count.toString());
+                        }
+                        catch (err) {
+                            logger.debug("hooks-session", `hookTool capFileWrite: ${errorMessage(err)}`);
+                        }
+                    }
+                }
+            }
+            catch (err) {
+                debugLog(`hook-tool: finding extraction failed: ${errorMessage(err)}`);
+            }
+        }
+        else if (activeProject) {
+            debugLog("hook-tool: skipped because findings proactivity is low");
+        }
+        const elapsed = Date.now() - start;
+        debugLog(`hook-tool: ${toolName} logged in ${elapsed}ms`);
+        process.exit(0);
+    }
+    catch (err) {
+        debugLog(`hook-tool: unhandled error: ${err instanceof Error ? err.stack || err.message : String(err)}`);
+        process.exit(0);
+    }
+}
+// Negative lookahead `(?!\(|\[)` rejects markdown link/reference patterns:
+//   [Pattern](#pattern)  ← TOC anchor, content was being captured as "(#pattern)"
+//   [bug][1]             ← markdown reference link, content was being captured as "[1]"
+// produced garbage review-queue entries like "[pattern] (#pattern)".
+// Tag list mirrors FINDING_TAGS (phren-core.ts): everything phren can write,
+// offered or auto-detected, not just the smaller offered FINDING_TYPES set.
+const EXPLICIT_TAG_PATTERN = /\[(pitfall|decision|pattern|bug|workaround|context)\](?!\(|\[)\s*(.+)/i;
+export function filterToolFindingsForProactivity(candidates, level = getProactivityLevelForFindings(getPhrenPath())) {
+    if (level === "high")
+        return candidates;
+    if (level === "low")
+        return [];
+    return candidates.filter((candidate) => candidate.explicit === true);
+}
+// Bash commands whose non-zero exit codes are routine signal, not bugs.
+// grep/rg/ag/find returning exit 1 (no match) is the common case; conditional
+// shell tests evaluating false is another. Don't surface these as findings.
+const NOISY_BASH_COMMAND_PATTERNS = [
+    /^\s*(?:grep|rg|ag|ack)\b/,
+    /^\s*find\b/,
+    /^\s*which\b/,
+    /^\s*command\s+-v\b/,
+    /^\s*test\b/,
+    /^\s*\[\s/,
+    /^\s*\[\[\s/,
+    /^\s*pgrep\b/,
+    /^\s*pkill\b/,
+    /^\s*git\s+diff\s+--quiet/,
+];
+function isNoisyBashCommand(cmd) {
+    if (/\|\|\s*true\b/.test(cmd))
+        return true;
+    if (/2>\s*\/dev\/null/.test(cmd))
+        return true;
+    return NOISY_BASH_COMMAND_PATTERNS.some((re) => re.test(cmd));
+}
+function extractToolErrorSignal(toolResponse) {
+    if (!toolResponse || typeof toolResponse !== "object") {
+        return { isError: false, hasExitCode: false };
+    }
+    const tr = toolResponse;
+    const isError = Boolean(tr.is_error ?? tr.isError);
+    const rawExit = tr.exit_code ?? tr.exitCode;
+    const exitCode = typeof rawExit === "number" ? rawExit : undefined;
+    return { isError, exitCode, hasExitCode: exitCode !== undefined };
+}
+export function extractToolFindings(toolName, input, responseStr, toolResponse) {
+    const candidates = [];
+    const changedContent = (toolName === "Edit" || toolName === "Write")
+        ? String(input.new_string ?? input.content ?? "")
+        : "";
+    const explicitSource = changedContent || responseStr;
+    const tagMatches = explicitSource.matchAll(new RegExp(EXPLICIT_TAG_PATTERN.source, "gi"));
+    for (const m of tagMatches) {
+        const tag = m[1].toLowerCase();
+        const content = m[2].replace(/\s+/g, " ").trim().slice(0, 200);
+        if (content) {
+            candidates.push({ text: `[${tag}] ${content}`, confidence: 0.85, explicit: true });
+        }
+    }
+    if (toolName === "Edit" || toolName === "Write") {
+        const filePath = String(input.file_path ?? input.path ?? "unknown");
+        const filename = path.basename(filePath);
+        if (/\b(TODO|FIXME)\b/.test(changedContent)) {
+            const firstLine = changedContent.split("\n").find((l) => /\b(TODO|FIXME)\b/.test(l));
+            if (firstLine) {
+                candidates.push({
+                    text: `[pitfall] ${filename}: ${firstLine.trim().slice(0, 150)}`,
+                    confidence: 0.45,
+                    explicit: false,
+                });
+            }
+        }
+        // (Removed: try/catch additions used to emit "[pitfall] ... error handling added near ..."
+        //  candidates. Adding error handling is normal code, not a pitfall — the heuristic produced
+        //  ~21 false positives for every real one in observed stores.)
+    }
+    if (toolName === "Bash") {
+        const fullCmd = String(input.command ?? "");
+        const cmdShort = fullCmd.slice(0, 30);
+        const errorSignal = extractToolErrorSignal(toolResponse);
+        // Only emit a [bug] candidate when (a) we have a definite error signal from the tool
+        // result (is_error or non-zero exit_code) and (b) the command isn't a known-noisy one
+        // like grep/find/test where exit 1 just means "didn't match".
+        const hasDefiniteError = errorSignal.isError || (errorSignal.hasExitCode && (errorSignal.exitCode ?? 0) !== 0);
+        if (hasDefiniteError && cmdShort && !isNoisyBashCommand(fullCmd)) {
+            const firstErrorLine = responseStr.split("\n").find((l) => /(error|exception|failed|ENOENT|command not found|permission denied)/i.test(l));
+            const detail = (firstErrorLine ?? responseStr.split("\n")[0] ?? "").trim().slice(0, 150);
+            if (detail) {
+                candidates.push({
+                    text: `[bug] command '${cmdShort}' failed: ${detail}`,
+                    confidence: 0.55,
+                    explicit: false,
+                });
+            }
+        }
+    }
+    // Single quality gate for everything this hook scrapes. Explicit [tag] matches are not
+    // exempt: the tag scraper happily matched phren's own prompt text and code fragments
+    // like `[pattern] ");` and queued them for review.
+    return candidates.filter((candidate) => {
+        const reason = findingQualityReason(candidate.text);
+        if (!reason)
+            return true;
+        debugLog(`extractToolFindings: rejected (${reason}): ${candidate.text.slice(0, 80)}`);
+        return false;
+    });
+}
+// ── Context hook handler ────────────────────────────────────────────────────
+function readStdinJson() {
+    if (process.stdin.isTTY)
+        return null;
+    try {
+        return JSON.parse(fs.readFileSync(0, "utf-8"));
+    }
+    catch (err) {
+        logger.debug("hooks-session", `readStdinJson: ${errorMessage(err)}`);
+        return null;
+    }
+}
+export async function handleHookContext() {
+    const ctx = buildHookContext();
+    if (!ctx.hooksEnabled) {
+        process.exit(0);
+    }
+    let cwd = ctx.cwd;
+    const ctxStdin = readStdinJson();
+    if (ctxStdin?.cwd)
+        cwd = ctxStdin.cwd;
+    const project = cwd !== ctx.cwd ? detectProject(ctx.phrenPath, cwd, ctx.profile) : ctx.activeProject;
+    if (!isProjectHookEnabled(ctx.phrenPath, project, "UserPromptSubmit")) {
+        process.exit(0);
+    }
+    const db = await buildIndex(ctx.phrenPath, ctx.profile);
+    const contextLabel = project ? `\u25c6 phren \u00b7 ${project} \u00b7 context` : `\u25c6 phren \u00b7 context`;
+    const parts = [contextLabel, "<phren-context>"];
+    if (project) {
+        const summaryRow = queryRows(db, "SELECT content FROM docs WHERE project = ? AND type = 'summary'", [project]);
+        if (summaryRow) {
+            parts.push(`# ${project}`);
+            parts.push(summaryRow[0][0]);
+            parts.push("");
+        }
+        const findingsRow = queryRows(db, "SELECT content FROM docs WHERE project = ? AND type = 'findings'", [project]);
+        if (findingsRow) {
+            const content = findingsRow[0][0];
+            const bullets = content.split("\n").filter(l => l.startsWith("- ")).slice(0, 10);
+            if (bullets.length > 0) {
+                parts.push("## Recent findings");
+                parts.push(bullets.join("\n"));
+                parts.push("");
+            }
+        }
+        // Collect pinned tasks across ALL projects (excluding Done)
+        const allTaskRows = queryRows(db, "SELECT project, content FROM docs WHERE type = 'task'", []);
+        const pinnedFromOtherProjects = [];
+        if (allTaskRows) {
+            for (const row of allTaskRows) {
+                const taskProject = row[0];
+                if (taskProject === project)
+                    continue;
+                const content = row[1];
+                const pinned = content.split("\n")
+                    .filter(l => l.startsWith("- [ ] ") && /\[pinned\]/i.test(l))
+                    .map(l => `[${taskProject}] ${l}`);
+                pinnedFromOtherProjects.push(...pinned);
+            }
+        }
+        // Active project tasks — pinned float to top, exclude Done
+        const taskRow = queryRows(db, "SELECT content FROM docs WHERE project = ? AND type = 'task'", [project]);
+        const pinnedItems = [];
+        const otherItems = [];
+        if (taskRow) {
+            const content = taskRow[0][0];
+            const allItems = content.split("\n").filter(l => l.startsWith("- [ ] "));
+            for (const item of allItems) {
+                if (/\[pinned\]/i.test(item)) {
+                    pinnedItems.push(item);
+                }
+                else {
+                    otherItems.push(item);
+                }
+            }
+        }
+        const filteredOther = filterTaskByPriority(otherItems);
+        const allPinned = [...pinnedItems, ...pinnedFromOtherProjects].slice(0, 10);
+        const remaining = Math.max(0, 5 - allPinned.length);
+        const trimmedOther = filteredOther.slice(0, remaining);
+        if (allPinned.length > 0 || trimmedOther.length > 0) {
+            if (allPinned.length > 0) {
+                parts.push("## Pinned tasks");
+                parts.push(allPinned.join("\n"));
+            }
+            if (trimmedOther.length > 0) {
+                parts.push("## Active tasks");
+                parts.push(trimmedOther.join("\n"));
+            }
+            parts.push("");
+        }
+    }
+    else {
+        const projectRows = queryRows(db, "SELECT DISTINCT project FROM docs ORDER BY project", []);
+        if (projectRows) {
+            parts.push("# Phren projects");
+            parts.push(projectRows.map(r => `- ${r[0]}`).join("\n"));
+            parts.push("");
+        }
+    }
+    parts.push("<phren-context>");
+    if (parts.length > 2) {
+        console.log(parts.join("\n"));
+    }
+}

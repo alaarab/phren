@@ -1,0 +1,727 @@
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import * as crypto from "crypto";
+import * as yaml from "js-yaml";
+import { bootstrapPhrenDotEnv } from "./phren-dotenv.js";
+import { homeDir } from "./home-paths.js";
+import { PhrenError, isRecord, loadYamlDocument, RESERVED_PROJECT_DIR_NAMES } from "./phren-core.js";
+import { errorMessage, isValidProjectName, safeProjectPath } from "./utils.js";
+import { FINDINGS_FILENAME } from "./filenames.js";
+bootstrapPhrenDotEnv();
+function stderrLog(msg) { try {
+    process.stderr.write("[phren] " + msg + "\n");
+}
+catch { } }
+export const ROOT_MANIFEST_FILENAME = "phren.root.yaml";
+export { homeDir };
+export function homePath(...parts) {
+    return path.join(homeDir(), ...parts);
+}
+export function expandHomePath(input) {
+    if (input === "~")
+        return homeDir();
+    if (input.startsWith("~/") || input.startsWith("~\\"))
+        return path.join(homeDir(), input.slice(2));
+    return input;
+}
+export function defaultPhrenPath() {
+    return expandHomePath(process.env.PHREN_PATH || homePath(".phren"));
+}
+export function rootManifestPath(phrenPath) {
+    return path.join(phrenPath, ROOT_MANIFEST_FILENAME);
+}
+export function atomicWriteText(filePath, content, opts = {}) {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const tmpPath = `${filePath}.tmp-${crypto.randomUUID()}`;
+    fs.writeFileSync(tmpPath, content, opts.mode !== undefined ? { mode: opts.mode } : undefined);
+    try {
+        // writeFileSync's mode is masked by umask, so re-assert it explicitly. The
+        // temp name is unguessable and freshly created, so this happens before any
+        // other process can have the file open under its final name.
+        if (opts.mode !== undefined && process.platform !== "win32")
+            fs.chmodSync(tmpPath, opts.mode);
+        fs.renameSync(tmpPath, filePath);
+    }
+    catch (err) {
+        try {
+            fs.unlinkSync(tmpPath);
+        }
+        catch { }
+        throw err;
+    }
+}
+/**
+ * Create (or tighten) a directory that holds per-user private data — runtime
+ * logs, session transcripts, credential stores.
+ *
+ * Plain `fs.mkdirSync(dir, { recursive: true })` yields 0755 under the stock
+ * 0022 umask, which makes every file inside world-listable and world-readable
+ * on a shared machine. Passing `mode` to mkdirSync is not enough on its own:
+ * mkdirSync's mode applies only to directories it actually *creates*, so a
+ * directory that some earlier code path already made at 0755 keeps that mode
+ * forever. That is not hypothetical — `runtimeFile()` created `~/.phren/.runtime`
+ * with no mode long before `auth/profiles.ts` ever asked for 0700, so the
+ * credential directory shipped world-readable in practice.
+ *
+ * Only ever narrows: if the directory is already 0700 or tighter it is left
+ * alone. Best-effort — a chmod failure (foreign filesystem, Windows) must not
+ * break the caller, since the directory itself is usable either way.
+ */
+export function ensurePrivateDir(dir) {
+    fs.mkdirSync(dir, { recursive: true });
+    if (process.platform === "win32")
+        return dir;
+    try {
+        const current = fs.statSync(dir).mode & 0o777;
+        if ((current & 0o077) !== 0)
+            fs.chmodSync(dir, 0o700);
+    }
+    catch {
+        // best-effort hardening; the directory is still usable
+    }
+    return dir;
+}
+export function isInstallMode(value) {
+    return value === "shared" || value === "project-local";
+}
+function isSyncMode(value) {
+    return value === "managed-git" || value === "workspace-git";
+}
+function normalizeManifest(raw) {
+    if (!isRecord(raw))
+        return null;
+    const version = Number(raw.version);
+    const installMode = raw.installMode;
+    const syncMode = raw.syncMode;
+    if (version !== 1 || !isInstallMode(installMode) || !isSyncMode(syncMode))
+        return null;
+    let workspaceRootRaw = typeof raw.workspaceRoot === "string" && raw.workspaceRoot.trim()
+        ? raw.workspaceRoot.trim()
+        : undefined;
+    // Cross-platform path normalization: convert Windows backslashes to forward slashes
+    // when reading on a non-Windows platform (e.g. manifest created on Windows, read on Linux).
+    if (workspaceRootRaw && process.platform !== "win32") {
+        workspaceRootRaw = workspaceRootRaw.replace(/\\/g, "/");
+    }
+    const workspaceRoot = workspaceRootRaw
+        ? path.resolve(expandHomePath(workspaceRootRaw))
+        : undefined;
+    const primaryProject = typeof raw.primaryProject === "string" && raw.primaryProject.trim()
+        ? raw.primaryProject.trim()
+        : undefined;
+    if (installMode === "project-local") {
+        if (!workspaceRoot || !primaryProject || !isValidProjectName(primaryProject))
+            return null;
+    }
+    return {
+        version: 1,
+        installMode,
+        syncMode,
+        workspaceRoot,
+        primaryProject,
+    };
+}
+export function readRootManifest(phrenPath) {
+    const manifestFile = rootManifestPath(phrenPath);
+    if (!fs.existsSync(manifestFile))
+        return null;
+    try {
+        const parsed = loadYamlDocument(fs.readFileSync(manifestFile, "utf8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
+        return normalizeManifest(parsed);
+    }
+    catch (err) {
+        if ((process.env.PHREN_DEBUG))
+            stderrLog(`readRootManifest: ${errorMessage(err)}`);
+        return null;
+    }
+}
+export function writeRootManifest(phrenPath, manifest) {
+    const normalized = normalizeManifest(manifest);
+    if (!normalized) {
+        throw new Error(`${PhrenError.VALIDATION_ERROR}: invalid phren root manifest for ${phrenPath}`);
+    }
+    atomicWriteText(rootManifestPath(phrenPath), yaml.dump(normalized, { lineWidth: 1000 }));
+}
+export function resolveInstallContext(phrenPath) {
+    const resolvedPath = path.resolve(phrenPath);
+    const manifest = readRootManifest(resolvedPath);
+    if (!manifest) {
+        throw new Error(`${PhrenError.NOT_FOUND}: phren root manifest not found: ${rootManifestPath(resolvedPath)}`);
+    }
+    return { phrenPath: resolvedPath, ...manifest };
+}
+function requireDirectory(resolved, label) {
+    if (!fs.existsSync(resolved)) {
+        throw new Error(`${PhrenError.NOT_FOUND}: ${label} not found: ${resolved}`);
+    }
+    if (!fs.statSync(resolved).isDirectory()) {
+        throw new Error(`${PhrenError.VALIDATION_ERROR}: ${label} is not a directory: ${resolved}`);
+    }
+    return resolved;
+}
+function hasRootManifest(candidate) {
+    return fs.existsSync(rootManifestPath(candidate));
+}
+function hasInstallMarkers(candidate) {
+    return fs.existsSync(path.join(candidate, "machines.yaml"))
+        || fs.existsSync(path.join(candidate, ".config"))
+        || fs.existsSync(path.join(candidate, "global"));
+}
+function isPhrenRootCandidate(candidate) {
+    return hasRootManifest(candidate) || hasInstallMarkers(candidate);
+}
+export function findNearestPhrenPath(startDir = process.cwd()) {
+    let current = path.resolve(startDir);
+    while (true) {
+        const localCandidate = path.join(current, ".phren");
+        // Only a manifest counts on the cwd walk. Loose install markers are
+        // enough for the user's own ~/.phren or an explicit PHREN_PATH, but a
+        // cloned repo could ship `.phren/global/` and become the store — with
+        // its `.env` loaded — just by being cd'd into.
+        if (hasRootManifest(localCandidate))
+            return localCandidate;
+        const parent = path.dirname(current);
+        if (parent === current)
+            break;
+        current = parent;
+    }
+    return null;
+}
+function sharedRootCandidate() {
+    return homePath(".phren");
+}
+let cachedPhrenPath;
+let cachedPhrenPathKey;
+export function findPhrenPath() {
+    const cacheKey = [
+        ((process.env.PHREN_PATH) ?? ""),
+        process.env.HOME ?? "",
+        process.env.USERPROFILE ?? "",
+        process.cwd(),
+    ].join("|");
+    if (cachedPhrenPath !== undefined && cachedPhrenPathKey === cacheKey)
+        return cachedPhrenPath;
+    cachedPhrenPathKey = cacheKey;
+    const envVal = (process.env.PHREN_PATH)?.trim();
+    if (envVal) {
+        const resolved = path.resolve(expandHomePath(envVal));
+        cachedPhrenPath = isPhrenRootCandidate(resolved) ? resolved : null;
+        return cachedPhrenPath;
+    }
+    const nearest = findNearestPhrenPath();
+    if (nearest) {
+        cachedPhrenPath = nearest;
+        return nearest;
+    }
+    const shared = sharedRootCandidate();
+    cachedPhrenPath = isPhrenRootCandidate(shared) ? shared : null;
+    return cachedPhrenPath;
+}
+export function ensurePhrenPath() {
+    const existing = findPhrenPath();
+    if (existing)
+        return existing;
+    const defaultPath = sharedRootCandidate();
+    fs.mkdirSync(defaultPath, { recursive: true });
+    writeRootManifest(defaultPath, {
+        version: 1,
+        installMode: "shared",
+        syncMode: "managed-git",
+    });
+    cachedPhrenPath = defaultPath;
+    cachedPhrenPathKey = [
+        ((process.env.PHREN_PATH) ?? ""),
+        process.env.HOME ?? "",
+        process.env.USERPROFILE ?? "",
+        process.cwd(),
+    ].join("|");
+    return defaultPath;
+}
+export function findPhrenPathWithArg(arg) {
+    if (arg) {
+        const resolved = requireDirectory(path.resolve(expandHomePath(arg)), "phren path");
+        if (!hasRootManifest(resolved)) {
+            throw new Error(`${PhrenError.NOT_FOUND}: phren root manifest not found: ${rootManifestPath(resolved)}`);
+        }
+        return resolved;
+    }
+    const existing = findPhrenPath();
+    if (existing)
+        return existing;
+    throw new Error(`${PhrenError.NOT_FOUND}: phren root not found. Run 'phren init'.`);
+}
+export function isProjectLocalMode(phrenPath) {
+    try {
+        return resolveInstallContext(phrenPath).installMode === "project-local";
+    }
+    catch {
+        return false;
+    }
+}
+// Centralized runtime path helpers. All ephemeral/runtime files go in
+// subdirectories to keep the phren root clean.
+export function runtimeDir(phrenPath) {
+    return path.join(phrenPath, ".runtime");
+}
+/** Unlink a file, ignoring ENOENT. Rethrows any other error. */
+export function tryUnlink(filePath) {
+    try {
+        fs.unlinkSync(filePath);
+    }
+    catch (e) {
+        if (e.code !== "ENOENT")
+            throw e;
+    }
+}
+export function sessionsDir(phrenPath) {
+    return path.join(phrenPath, ".sessions");
+}
+// `.runtime` holds debug.log, hook-errors.log, memory-usage.log,
+// lookup-events.jsonl and the auth profile store — i.e. verbatim knowledge-base
+// content plus plaintext API keys. It is per-user runtime state, never shared,
+// so it gets 0700. Because ensurePrivateDir also tightens a directory that
+// already exists, this repairs the 0755 `.runtime` that shipped installs have.
+const runtimeDirsMade = new Set();
+export function runtimeFile(phrenPath, name) {
+    const dir = runtimeDir(phrenPath);
+    if (!runtimeDirsMade.has(dir)) {
+        ensurePrivateDir(dir);
+        runtimeDirsMade.add(dir);
+    }
+    return path.join(dir, name);
+}
+/**
+ * Per-user root for the FTS snapshot cache: `os.tmpdir()/phren-fts-<uid>`.
+ *
+ * Canonical definition of the path lives here, with every other phren path
+ * helper. `shared/index.ts` currently has its own private copy — see
+ * ensureFtsCacheRootPrivate() for why that matters and what still needs to
+ * change there.
+ */
+export function ftsCacheRoot() {
+    let userSuffix;
+    try {
+        userSuffix = String(os.userInfo().uid);
+    }
+    catch {
+        userSuffix = crypto.createHash("sha1").update(homeDir()).digest("hex").slice(0, 12);
+    }
+    return path.join(os.tmpdir(), `phren-fts-${userSuffix}`);
+}
+/**
+ * Make the FTS snapshot cache root private, creating it if needed.
+ *
+ * The snapshot is a SQLite export of the *entire* indexed store — the full
+ * text of every finding, note, task and reference doc. It was being written
+ * as an 0644 file inside an 0755 directory:
+ *
+ *   drwxr-xr-x  $TMPDIR/phren-fts-501
+ *   -rw-r--r--  $TMPDIR/phren-fts-501/<storeKey>/<hash>.db
+ *
+ * On macOS `os.tmpdir()` is a per-user `/var/folders/…/T` at 0700, which is
+ * the only reason this is not already a leak there. On Linux and WSL
+ * `os.tmpdir()` is `/tmp` — mode 1777, world-readable — so any local account
+ * can read another user's whole knowledge base. phren ships cross-platform on
+ * npm, so that is a live exposure, not a theoretical one.
+ *
+ * A 0700 root closes it completely: POSIX denies traversal into the directory,
+ * so the modes of the per-store subdirectory and the .db files inside it stop
+ * being reachable at all. Called once per process from the CLI and MCP-server
+ * entrypoints, which both creates it correctly on a clean machine and repairs
+ * the 0755 root on machines that already have one.
+ *
+ * Still worth doing for defence in depth, in the file that actually writes
+ * them: `shared/index.ts` should pass `{ recursive: true, mode: 0o700 }` to
+ * the `fs.mkdirSync(cacheDir, …)` calls and `{ mode: 0o600 }` to the
+ * `fs.writeFileSync(cacheFile, db.export())` calls. That file is owned by
+ * another change in flight, so it is reported rather than edited here.
+ */
+export function ensureFtsCacheRootPrivate() {
+    try {
+        return ensurePrivateDir(ftsCacheRoot());
+    }
+    catch {
+        // Never let cache hardening break startup; the cache itself is optional.
+        return ftsCacheRoot();
+    }
+}
+export function installPreferencesFile(phrenPath) {
+    return path.join(runtimeDir(phrenPath), "install-preferences.json");
+}
+export function runtimeHealthFile(phrenPath) {
+    return path.join(runtimeDir(phrenPath), "runtime-health.json");
+}
+export function shellStateFile(phrenPath) {
+    return path.join(runtimeDir(phrenPath), "shell-state.json");
+}
+export function sessionMetricsFile(phrenPath) {
+    return path.join(runtimeDir(phrenPath), "session-metrics.json");
+}
+export function memoryScoresFile(phrenPath) {
+    return path.join(runtimeDir(phrenPath), "memory-scores.json");
+}
+export function memoryUsageLogFile(phrenPath) {
+    return path.join(runtimeDir(phrenPath), "memory-usage.log");
+}
+/**
+ * Live "lookup events" log: one JSONL entry per memory a search lands on.
+ * Distinct from memory-usage.log (injection scoring) — this feed powers the
+ * real-time activity surfaces in the web UI and the VS Code extension.
+ */
+export function lookupEventsLogFile(phrenPath) {
+    return path.join(runtimeDir(phrenPath), "lookup-events.jsonl");
+}
+// `.sessions` holds session transcripts and per-session message artifacts —
+// raw conversation content. Same treatment as `.runtime`.
+export function sessionMarker(phrenPath, name) {
+    const dir = ensurePrivateDir(sessionsDir(phrenPath));
+    return path.join(dir, name);
+}
+// Debug logging is best-effort and only writes when a phren root already exists.
+export function debugLog(msg) {
+    if (!(process.env.PHREN_DEBUG))
+        return;
+    const phrenPath = findPhrenPath();
+    if (!phrenPath)
+        return;
+    const logFile = runtimeFile(phrenPath, "debug.log");
+    try {
+        fs.appendFileSync(logFile, `[${new Date().toISOString()}] ${msg}\n`);
+    }
+    catch {
+        // debug log is best-effort; logging errors about logging would recurse
+    }
+}
+/** Always-on structured error log (no PHREN_DEBUG gate). */
+export function errorLog(tool, msg) {
+    try {
+        const phrenPath = findPhrenPath();
+        if (!phrenPath)
+            return;
+        const logFile = runtimeFile(phrenPath, "debug.log");
+        const line = JSON.stringify({ ts: new Date().toISOString(), level: "error", tool, message: msg });
+        fs.appendFileSync(logFile, line + "\n");
+    }
+    catch {
+        // Logging must never throw
+    }
+}
+/**
+ * Truncate an append-only .jsonl to its last `keepLines` lines once it exceeds
+ * `maxBytes`. Best-effort: any IO error (including ENOENT) is ignored so callers
+ * never fail on rotation.
+ */
+export function rotateJsonlIfLarge(filePath, maxBytes = 2_000_000, keepLines = 2000) {
+    try {
+        if (fs.statSync(filePath).size <= maxBytes)
+            return;
+        const lines = fs.readFileSync(filePath, "utf-8").split("\n");
+        fs.writeFileSync(filePath, lines.slice(-keepLines).join("\n"));
+    }
+    catch {
+        // no file yet or IO error — nothing to rotate
+    }
+}
+export function appendIndexEvent(phrenPath, event) {
+    try {
+        const file = runtimeFile(phrenPath, "index-events.jsonl");
+        rotateJsonlIfLarge(file);
+        fs.appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), ...event }) + "\n");
+    }
+    catch (err) {
+        if ((process.env.PHREN_DEBUG))
+            stderrLog(`appendIndexEvent: ${errorMessage(err)}`);
+    }
+}
+/** Resolve the canonical findings file for a project directory. */
+export function resolveFindingsPath(projectDir) {
+    const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
+    if (fs.existsSync(findingsPath))
+        return findingsPath;
+    return undefined;
+}
+function isProjectDirEntry(entry) {
+    return entry.isDirectory()
+        && !entry.name.startsWith(".")
+        && !entry.name.endsWith(".archived")
+        && !RESERVED_PROJECT_DIR_NAMES.has(entry.name);
+}
+// Like isProjectDirEntry, but also rejects names that would fail downstream
+// validation (e.g. uppercase). These dirs exist on disk but can't be read by
+// the UI or CLI read paths, so enumeration surfaces must skip them. Collision
+// detection still uses isProjectDirEntry so we can *see* the stragglers.
+function isIndexableProjectEntry(entry) {
+    return isProjectDirEntry(entry) && isValidProjectName(entry.name);
+}
+// Project directories whose names exist on disk but fail isValidProjectName.
+// Used by `phren doctor` to surface silent half-working state.
+export function listInvalidProjectDirs(phrenPath) {
+    try {
+        return fs.readdirSync(phrenPath, { withFileTypes: true })
+            .filter((entry) => isProjectDirEntry(entry) && !isValidProjectName(entry.name))
+            .map((entry) => entry.name);
+    }
+    catch (err) {
+        if ((process.env.PHREN_DEBUG))
+            stderrLog(`listInvalidProjectDirs: ${errorMessage(err)}`);
+        return [];
+    }
+}
+export function normalizeProjectNameForCreate(name) {
+    return name.trim().toLowerCase();
+}
+/**
+ * The single source of truth for turning a source directory into a project
+ * slug. Previously copy-pasted at five call sites, which is how the same repo
+ * could end up registered twice under near-identical names.
+ *
+ * Runs of non-slug characters collapse to one hyphen and leading/trailing
+ * hyphens are trimmed, so `My.App`, `My..App` and `My App` all yield `my-app`
+ * instead of the old `my-app` / `my--app` / `my-app` split.
+ */
+export function projectSlugFromPath(sourcePath) {
+    return path.basename(path.resolve(sourcePath))
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+}
+/**
+ * Collapse a project name to the key used for duplicate detection: lowercase
+ * with every separator removed. `Max4LivePlugins`, `max4liveplugins` and
+ * `max4live-plugins` all map to `max4liveplugins`, so the second spelling of a
+ * repo can be recognized as the project that already exists.
+ */
+export function canonicalProjectKey(name) {
+    return name.trim().toLowerCase().replace(/[\s_-]+/g, "");
+}
+export function findProjectNameCaseInsensitive(phrenPath, name) {
+    const needle = name.toLowerCase();
+    try {
+        for (const entry of fs.readdirSync(phrenPath, { withFileTypes: true })) {
+            if (!isProjectDirEntry(entry))
+                continue;
+            if (entry.name.toLowerCase() === needle)
+                return entry.name;
+        }
+    }
+    catch (err) {
+        if ((process.env.PHREN_DEBUG))
+            stderrLog(`findProjectNameCaseInsensitive: ${errorMessage(err)}`);
+    }
+    return null;
+}
+/**
+ * Existing project directories whose name canonicalizes to the same key as
+ * `name` (see {@link canonicalProjectKey}). Exact matches are returned first so
+ * callers can prefer them.
+ */
+export function findProjectNamesByCanonicalKey(phrenPath, name) {
+    const needle = canonicalProjectKey(name);
+    if (!needle)
+        return [];
+    const matches = [];
+    try {
+        for (const entry of fs.readdirSync(phrenPath, { withFileTypes: true })) {
+            if (!isProjectDirEntry(entry))
+                continue;
+            if (canonicalProjectKey(entry.name) === needle)
+                matches.push(entry.name);
+        }
+    }
+    catch (err) {
+        if ((process.env.PHREN_DEBUG))
+            stderrLog(`findProjectNamesByCanonicalKey: ${errorMessage(err)}`);
+    }
+    return matches.sort((a, b) => (a === name ? -1 : b === name ? 1 : a.localeCompare(b)));
+}
+export function findArchivedProjectNameCaseInsensitive(phrenPath, name) {
+    const needle = name.toLowerCase();
+    try {
+        for (const entry of fs.readdirSync(phrenPath, { withFileTypes: true })) {
+            if (!entry.isDirectory() || !entry.name.endsWith(".archived"))
+                continue;
+            const archivedName = entry.name.slice(0, -".archived".length);
+            if (archivedName.toLowerCase() === needle)
+                return archivedName;
+        }
+    }
+    catch (err) {
+        if ((process.env.PHREN_DEBUG))
+            stderrLog(`findArchivedProjectNameCaseInsensitive: ${errorMessage(err)}`);
+    }
+    return null;
+}
+function getLocalProjectDirs(phrenPath, manifest) {
+    const primaryProject = manifest.primaryProject;
+    if (!primaryProject || !isValidProjectName(primaryProject))
+        return [];
+    const projectPath = safeProjectPath(phrenPath, primaryProject);
+    if (!projectPath || !fs.existsSync(projectPath) || !fs.statSync(projectPath).isDirectory())
+        return [];
+    const visible = fs.readdirSync(phrenPath, { withFileTypes: true }).filter(isIndexableProjectEntry).map((entry) => entry.name);
+    if (visible.length !== 1 || visible[0] !== primaryProject)
+        return [];
+    return [projectPath];
+}
+// Figure out which project directories to index.
+export function getProjectDirs(phrenPath, profile) {
+    const manifest = readRootManifest(phrenPath);
+    if (manifest?.installMode === "project-local") {
+        return getLocalProjectDirs(phrenPath, manifest);
+    }
+    if (profile) {
+        if (!isValidProjectName(profile)) {
+            errorLog("getProjectDirs", `${PhrenError.VALIDATION_ERROR}: Invalid PHREN_PROFILE value: ${profile}`);
+            return [];
+        }
+        const profilePath = path.join(phrenPath, "profiles", `${profile}.yaml`);
+        if (!fs.existsSync(profilePath)) {
+            errorLog("getProjectDirs", `${PhrenError.FILE_NOT_FOUND}: Profile file not found: ${profilePath}`);
+            return [];
+        }
+        try {
+            const data = loadYamlDocument(fs.readFileSync(profilePath, "utf-8"), (text) => yaml.load(text, { schema: yaml.CORE_SCHEMA }));
+            const projects = isRecord(data) ? data.projects : undefined;
+            if (!Array.isArray(projects)) {
+                errorLog("getProjectDirs", `${PhrenError.MALFORMED_YAML}: Profile YAML missing valid "projects" array: ${profilePath}`);
+                return [];
+            }
+            const listed = projects
+                .map((p) => {
+                const name = String(p);
+                if (!isValidProjectName(name)) {
+                    errorLog("getProjectDirs", `${PhrenError.VALIDATION_ERROR}: Skipping invalid project name in profile: ${name}`);
+                    return null;
+                }
+                return safeProjectPath(phrenPath, name);
+            })
+                .filter((p) => p !== null && fs.existsSync(p));
+            const sharedDirs = ["shared", "org"]
+                .map((name) => safeProjectPath(phrenPath, name))
+                .filter((p) => Boolean(p && fs.existsSync(p) && fs.statSync(p).isDirectory()));
+            return [...new Set([...listed, ...sharedDirs])];
+        }
+        catch (err) {
+            if ((process.env.PHREN_DEBUG))
+                stderrLog(`getProjectDirs yamlParse: ${errorMessage(err)}`);
+            errorLog("getProjectDirs", `${PhrenError.MALFORMED_YAML}: Malformed profile YAML: ${profilePath}`);
+            return [];
+        }
+    }
+    try {
+        return fs.readdirSync(phrenPath, { withFileTypes: true })
+            .filter(isIndexableProjectEntry)
+            .map((entry) => path.join(phrenPath, entry.name));
+    }
+    catch (err) {
+        if ((process.env.PHREN_DEBUG))
+            stderrLog(`getProjectDirs: ${errorMessage(err)}`);
+        return [];
+    }
+}
+/** Claude's own memory directory is indexed only when asked: by default phren indexes phren. */
+export function nativeMemoryEnabled(env = process.env) {
+    const raw = env.PHREN_FEATURE_NATIVE_MEMORY?.trim().toLowerCase();
+    return raw === "1" || raw === "true" || raw === "on";
+}
+// Collect MEMORY*.md files from native agent memory locations (~/.claude/projects/*/memory/)
+export function collectNativeMemoryFiles() {
+    const claudeProjectsDir = homePath(".claude", "projects");
+    if (!fs.existsSync(claudeProjectsDir))
+        return [];
+    const results = [];
+    try {
+        for (const entry of fs.readdirSync(claudeProjectsDir)) {
+            const memDir = path.join(claudeProjectsDir, entry, "memory");
+            if (!fs.existsSync(memDir))
+                continue;
+            for (const file of fs.readdirSync(memDir)) {
+                if (!file.endsWith(".md") || file === "MEMORY.md")
+                    continue;
+                const fullPath = path.join(memDir, file);
+                const match = file.match(/^MEMORY-(.+)\.md$/);
+                const project = match ? match[1] : `native:${entry}`;
+                results.push({ project, file, fullPath });
+            }
+        }
+    }
+    catch (err) {
+        if ((process.env.PHREN_DEBUG))
+            stderrLog(`collectNativeMemoryFiles: ${errorMessage(err)}`);
+    }
+    return results;
+}
+function pushFileToken(parts, filePath) {
+    try {
+        const stat = fs.statSync(filePath);
+        if (stat.isFile())
+            parts.push(`${filePath}:${stat.mtimeMs}:${stat.size}`);
+    }
+    catch {
+        parts.push(`${filePath}:missing`);
+    }
+}
+function pushDirTokens(parts, dirPath) {
+    if (!fs.existsSync(dirPath)) {
+        parts.push(`${dirPath}:missing`);
+        return;
+    }
+    for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+        const fullPath = path.join(dirPath, entry.name);
+        if (entry.isDirectory()) {
+            pushDirTokens(parts, fullPath);
+            continue;
+        }
+        const stat = fs.statSync(fullPath);
+        parts.push(`${fullPath}:${stat.mtimeMs}:${stat.size}`);
+    }
+}
+export function computePhrenLiveStateToken(phrenPath) {
+    const parts = [];
+    const projectDirs = getProjectDirs(phrenPath).sort();
+    const manifest = readRootManifest(phrenPath);
+    for (const projectDir of projectDirs) {
+        const project = path.basename(projectDir);
+        parts.push(`project:${project}`);
+        for (const file of ["AGENTS.md", "summary.md", FINDINGS_FILENAME, "tasks.md", "review.md", "truths.md", "topic-config.json", "phren.project.yaml"]) {
+            pushFileToken(parts, path.join(projectDir, file));
+        }
+        pushDirTokens(parts, path.join(projectDir, "reference"));
+        pushDirTokens(parts, path.join(projectDir, "skills"));
+        pushDirTokens(parts, path.join(projectDir, ".claude", "skills"));
+    }
+    if (manifest?.installMode === "shared") {
+        pushDirTokens(parts, path.join(phrenPath, "profiles"));
+    }
+    pushDirTokens(parts, path.join(phrenPath, "global", "skills"));
+    pushFileToken(parts, path.join(phrenPath, ".config", "access-control.json"));
+    pushFileToken(parts, rootManifestPath(phrenPath));
+    pushFileToken(parts, runtimeHealthFile(phrenPath));
+    pushFileToken(parts, runtimeFile(phrenPath, "audit.log"));
+    pushFileToken(parts, memoryUsageLogFile(phrenPath));
+    pushFileToken(parts, installPreferencesFile(phrenPath));
+    if (manifest?.installMode === "shared") {
+        pushDirTokens(parts, homePath(".github", "hooks"));
+        pushFileToken(parts, homePath(".cursor", "hooks.json"));
+    }
+    return parts.sort().join("|");
+}
+// Lazy singleton for getPhrenPath — shared across all CLI modules.
+let lazyPhrenPath;
+export function getPhrenPath() {
+    if (!lazyPhrenPath) {
+        const existing = findPhrenPath();
+        if (!existing)
+            throw new Error(`${PhrenError.NOT_FOUND}: phren root not found. Run 'phren init'.`);
+        lazyPhrenPath = existing;
+    }
+    return lazyPhrenPath;
+}
+export function qualityMarkers(phrenPathLocal) {
+    const today = new Date().toISOString().slice(0, 10);
+    return {
+        done: runtimeFile(phrenPathLocal, `quality-${today}`),
+        lock: runtimeFile(phrenPathLocal, `quality-${today}.lock`),
+    };
+}

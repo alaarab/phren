@@ -1,0 +1,487 @@
+import * as fs from "fs";
+import { addTask, readTasks, resolveTaskItem, updateTask, } from "../data/access.js";
+import { parseGithubIssueUrl, resolveProjectGithubRepo } from "./github.js";
+import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, hasExecutionIntent, hasDiscoveryIntent, hasExplicitTaskSignal, hasSuppressTaskIntent, hasCodeChangeContext } from "../proactivity.js";
+import { getWorkflowPolicy } from "../shared/governance.js";
+import { debugLog, sessionMarker } from "../shared.js";
+import { errorMessage } from "../utils.js";
+const ACTION_PREFIX_RE = /^(?:please\s+|can you\s+|could you\s+|would you\s+|i want you to\s+|i want to\s+|let(?:'|’)s\s+|lets\s+|help me\s+)/i;
+const EXPLICIT_TASK_PREFIX_RE = /^(?:add(?:\s+(?:this|that|it))?\s+(?:to\s+(?:the\s+)?)?(?:task|todo(?:\s+list)?|task(?:\s+list)?)|add\s+(?:a\s+)?task|put(?:\s+(?:this|that|it))?\s+(?:in|on)\s+(?:the\s+)?(?:task|todo(?:\s+list)?|task(?:\s+list)?))\s*(?::|-|,)?\s*/i;
+const NON_ACTIONABLE_RE = /\b(brainstorm|idea|ideas|maybe|what if|should we|could we|would it make sense|question|explain|why is|how does)\b/i;
+// Conversational noise: only matches when the ENTIRE prompt is a short ack/reaction (under 40 chars).
+// This avoids rejecting "sure, go ahead and fix the build" or "great, now update the docs".
+const CONVERSATIONAL_NOISE_RE = /^(ok|okay|yeah|yep|nah|nope|hi|hey|ss|bro|lol|lmao|got it|sounds good|perfect|great|sure|thanks|thank you|ty|np|no problem|alright|cool|nice|damn|wtf|omg|fok)[\s!.?,]*$/i;
+// Raw system/SQL error fragment signals — patterns that only appear in error output, never real task requests.
+// Intentionally does NOT include "line \d+" or "incorrect syntax" alone (too broad — they appear in dev prompts).
+const RAW_MESSAGE_SIGNALS_RE = /\b(msg \d+, level \d+|cannot insert the value null|insufficient result space|uniqueidentifier value to char|pgevision-prod|task-notification|tool-use-id|toolu_0[a-z0-9])\b/i;
+// Pasted terminal banners and web-page chrome. Observed verbatim as committed tasks: a whole
+// GitHub page starting "Skip to content ... Repository navigation Code Issues Pull requests",
+// and "Windows PowerShell Copyright (C) Microsoft Corporation". None of it is a request.
+const PASTED_CONTENT_RE = new RegExp([
+    // Web page chrome
+    "^\\s*skip to (?:main )?content\\b",
+    "\\brepository navigation\\b",
+    "\\bjump to (?:content|bottom)\\b",
+    "\\byou signed (?:in|out) with another tab\\b",
+    "\\bcode\\s+issues\\s+pull requests\\b",
+    // Terminal banners and prompts
+    "^\\s*windows powershell\\b",
+    "\\bcopyright \\(c\\) microsoft corporation\\b",
+    "\\bmicrosoft windows \\[version\\b",
+    "\\ball rights reserved\\b",
+    "\\bps [a-z]:\\\\",
+    "^[a-z]:\\\\[^\\n]*>",
+    "\\blast login: \\w{3} \\w{3}",
+    "npm ERR!",
+    "Traceback \\(most recent call last\\)",
+].join("|"), "i");
+// Chat filler markers. Unlike CONVERSATIONAL_NOISE_RE these match anywhere in the prompt,
+// because the observed echoes wrap filler around an incidental verb — "Its literally just the
+// start of the day LMAO" clears the substance floor on "start" but is not a task.
+const CONVERSATIONAL_FILLER_RE = /\b(?:lmao|lmfao|rofl|lol+|haha+|idk|idc|tbh|ngl|smh|wtf|meh|yolo)\b/i;
+// Claude Code wraps bracketed-paste input as <pasted_content id="…">…</pasted_content id="…">:
+// any multi-line paste, every message typed in from the phone, and every message another
+// agent relays into the pane. The text inside cannot be told apart from someone else's
+// words (a relayed conductor message rewrote a task's Context three times), so it never
+// files or touches a task; only what was typed outside the wrapper counts.
+const PASTED_CONTENT_WRAPPER_RE = /<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content\b[^>]*>/g;
+// Relays may name one sender ("From tidy-phren:") or a computer and agent
+// ("From macbook android-codex:"). Keep "From now on" as a request.
+// A two-word sender needs the colon; longer names need a parenthesized handle.
+// "From the settings page, add …" stays a request.
+const RELAYED_MESSAGE_RE = /^\s*from\s+(?:the\s+)?(?!(?:now|here|there|then|scratch|today|tomorrow)\b)(?:[\w.-]+\s*[,:]|[\w.-]+\s+[\w.-]+\s*:|[\w.-]+(?:[ \t]+[\w.-]+)*[ \t]+\([\w.-]+\)[ \t]*:)/i;
+// Dispatch returns are typed into an idle agent as ordinary prompts.
+const DISPATCH_RETURN_NOTICE_RE = /^\s*returns?:\s+[^\n]+\bCall dispatch_returns\.\s*$/i;
+// A dispatched or scheduled worker's first prompt names its brief file
+// (launch-brief.ts). The dispatch already tracks that work, so the worker's
+// own hook must not file it again: every dispatched Claude filed one task.
+const LAUNCH_BRIEF_PROMPT_RE = /^\s*Read and follow the brief in \/[^\n]+$/;
+// Completed-work reports can arrive without a relay prefix. Only a status
+// reporting a commit or push, or ending in an opened PR, is excluded;
+// imperative requests stay eligible even when they mention a pushed commit.
+const AGENT_STATUS_REPORT_RE = /(?:\b(?:committed|pushed)\s+(?:as\s+)?[0-9a-f]{7,40}\b|\bPR\s+#\d+\s+opened\s*[.!]?\s*$)/i;
+// Frames another agent or the harness put in the prompt: a cross-session message, a
+// sub-agent hand-back, a delivery/idle notice, a task or system notification, a system
+// reminder. Not the person's request. Matched anywhere, since a harness may put the
+// person's own words inside or after one of these, and a frame is never worth a task.
+const AGENT_FRAME_RE = /<\/?(?:agent-message|cross-session-message|task-notification|system-reminder|system-notification|phren-notice|command-name|command-message)\b|\[(?:SYSTEM NOTIFICATION|Cross-session (?:delivery|idle) notice)\b/i;
+// A reply to the agent — "Yep /herdr the phren agent is there" — starts with an
+// acknowledgement and asks for nothing; a question ends with one.
+const REPLY_OPENER_RE = /^(?:yep|yeah|yes|yup|ya|nah|no|nope|ok|okay|right|correct|exactly|indeed|true|sure|fine|agreed|(?:just\s+)?curious|(?:i(?:'|’)?m\s+)?wondering|i wonder)\b/i;
+const QUESTION_RE = /\?\s*$/;
+/** What the person typed: the prompt without pasted blocks. */
+export function typedPromptText(prompt) {
+    return prompt.includes("<pasted_content") ? prompt.replace(PASTED_CONTENT_WRAPPER_RE, " ").trim() : prompt;
+}
+function isAgentStatusReportPrompt(prompt) {
+    const trimmed = prompt.trim();
+    if (ACTION_PREFIX_RE.test(trimmed) || /^(?:can|could|would|will|should)\b/i.test(trimmed)
+        || ACTIONABLE_RE.exec(trimmed)?.index === 0)
+        return false;
+    return AGENT_STATUS_REPORT_RE.test(trimmed);
+}
+/** A frame from another agent or the harness, or a message relayed from one,
+ *  rather than something the person asked. */
+export function isAgentFramePrompt(prompt) {
+    return AGENT_FRAME_RE.test(prompt) || RELAYED_MESSAGE_RE.test(prompt)
+        || DISPATCH_RETURN_NOTICE_RE.test(prompt) || LAUNCH_BRIEF_PROMPT_RE.test(prompt)
+        || isAgentStatusReportPrompt(prompt);
+}
+/** A reply or a question: conversation with the agent, not a request for work. */
+function isConversationalTurn(prompt) {
+    if (QUESTION_RE.test(prompt))
+        return true;
+    return REPLY_OPENER_RE.test(prompt) && !hasExplicitTaskSignal(prompt) && !hasExecutionIntent(prompt);
+}
+const ACTIONABLE_RE = /\b(add|build|change|complete|continue|create|delete|fix|implement|improve|investigate|make|move|refactor|remove|rename|repair|ship|start|update|wire)\b/i;
+const CONTINUE_RE = /\b(continue|keep going|finish|resume|pick up|work on that|that task)\b/i;
+const GITHUB_URL_RE = /https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/issues\/\d+(?:[?#][^\s]*)?/g;
+const GITHUB_ISSUE_RE = /(^|[^\w/])#(\d+)\b/g;
+const TASK_STOP_WORDS = new Set([
+    "about",
+    "after",
+    "again",
+    "also",
+    "auto",
+    "automatic",
+    "because",
+    "before",
+    "code",
+    "phren",
+    "current",
+    "during",
+    "feature",
+    "from",
+    "have",
+    "into",
+    "just",
+    "like",
+    "make",
+    "more",
+    "need",
+    "really",
+    "should",
+    "some",
+    "something",
+    "stuff",
+    "task",
+    "tasks",
+    "that",
+    "them",
+    "then",
+    "this",
+    "thing",
+    "want",
+    "with",
+    "work",
+]);
+function taskSessionPath(phrenPath, sessionId) {
+    return sessionMarker(phrenPath, `task-${sessionId}.json`);
+}
+function readTaskSessionState(phrenPath, sessionId) {
+    const file = taskSessionPath(phrenPath, sessionId);
+    if (!fs.existsSync(file))
+        return null;
+    try {
+        return JSON.parse(fs.readFileSync(file, "utf8"));
+    }
+    catch (err) {
+        debugLog(`task lifecycle read session ${sessionId}: ${errorMessage(err)}`);
+        return null;
+    }
+}
+function writeTaskSessionState(phrenPath, state) {
+    const file = taskSessionPath(phrenPath, state.sessionId);
+    fs.writeFileSync(file, JSON.stringify(state, null, 2) + "\n");
+}
+function clearTaskSessionState(phrenPath, sessionId) {
+    const file = taskSessionPath(phrenPath, sessionId);
+    try {
+        if (fs.existsSync(file))
+            fs.unlinkSync(file);
+    }
+    catch (err) {
+        debugLog(`task lifecycle clear session ${sessionId}: ${errorMessage(err)}`);
+    }
+}
+function getTaskMode(phrenPath) {
+    return getWorkflowPolicy(phrenPath).taskMode;
+}
+// Hard substance floor — applies before any intent-specific logic so that conversational
+// fragments slipping past the noise regex (e.g. "Here's the thing", "I just clicked on to
+// this page", "<") never become tasks even at proactivityTasks=high. A prompt clears the
+// floor only if it has enough words AND has at least one signal: an actionable verb, a
+// path-like fragment (./, /), a reference (#123 or a 4+ digit ticket number), a file
+// extension, or a URL.
+const MIN_TASK_PROMPT_WORDS = 4;
+const MIN_TASK_PROMPT_CHARS = 12;
+const TASK_SIGNAL_RE = /\b(?:fix|add|update|remove|delete|check|run|build|test|ship|implement|investigate|review|audit|create|change|refactor|rename|deploy|merge|migrate|wire|integrate|debug|explore|evaluate|compare|analy[sz]e|assess|consider|design|document|plan|prototype|prepare|configure|enable|disable|publish|release|rollback|verify|validate|profile|optimi[sz]e|harden|automate|backport|cleanup|cleanse|polish|tune|land)\b|[/\\][\w.\-]+|#\d+|\b\d{4,}\b|\.[a-z]{1,4}\b|https?:\/\//i;
+function hasMinimumTaskSubstance(prompt) {
+    const trimmed = prompt.trim();
+    if (trimmed.length < MIN_TASK_PROMPT_CHARS)
+        return false;
+    const words = trimmed.split(/\s+/).filter((w) => /\w/.test(w));
+    if (words.length < MIN_TASK_PROMPT_WORDS)
+        return false;
+    return TASK_SIGNAL_RE.test(trimmed);
+}
+function isActionablePrompt(prompt, intent) {
+    const normalized = prompt.trim();
+    if (!normalized)
+        return false;
+    if (NON_ACTIONABLE_RE.test(normalized))
+        return false;
+    // Always reject conversational noise and raw system/SQL fragments regardless of intent.
+    if (CONVERSATIONAL_NOISE_RE.test(normalized))
+        return false;
+    if (RAW_MESSAGE_SIGNALS_RE.test(normalized))
+        return false;
+    // Task auto-capture writes the prompt verbatim onto a `Context:` line, so anything that is
+    // not a request becomes a permanent task. Pasted pages/terminals and chat filler never are.
+    if (PASTED_CONTENT_RE.test(normalized))
+        return false;
+    if (CONVERSATIONAL_FILLER_RE.test(normalized))
+        return false;
+    if (isAgentFramePrompt(normalized))
+        return false;
+    if (isConversationalTurn(normalized))
+        return false;
+    // Substance floor — independent of intent / proactivity. Short utterances without
+    // any actionable signal are conversational fragments, not tasks.
+    if (!hasMinimumTaskSubstance(normalized))
+        return false;
+    if (intent === "general")
+        return ACTIONABLE_RE.test(normalized);
+    return true;
+}
+function normalizeTaskSummary(prompt) {
+    const withoutGithub = prompt
+        .replace(GITHUB_URL_RE, " ")
+        .replace(GITHUB_ISSUE_RE, "$1 ")
+        .replace(/\s+/g, " ")
+        .trim();
+    const stripped = withoutGithub.replace(ACTION_PREFIX_RE, "").trim();
+    const withoutTaskPrefix = stripped.replace(EXPLICIT_TASK_PREFIX_RE, "").trim();
+    const taskSource = withoutTaskPrefix || stripped;
+    const firstClause = taskSource.split(/[\n.!?]/)[0]?.trim() || taskSource;
+    const cleaned = firstClause
+        .replace(/^to\s+/i, "")
+        .replace(/\s+/g, " ")
+        .replace(/^["'`]+|["'`]+$/g, "")
+        .trim();
+    const capped = cleaned.length > 110 ? `${cleaned.slice(0, 109).trimEnd()}…` : cleaned;
+    if (!capped)
+        return "Follow up on current work";
+    return capped.charAt(0).toUpperCase() + capped.slice(1);
+}
+function tokenizeTaskText(value) {
+    return value
+        .toLowerCase()
+        .replace(/<!--.*?-->/g, " ")
+        .replace(/[`"'.,!?()[\]{}:/\\]/g, " ")
+        .split(/\s+/)
+        .filter((token) => token.length >= 4 && !TASK_STOP_WORDS.has(token));
+}
+function overlapScore(prompt, item) {
+    const promptTokens = new Set(tokenizeTaskText(prompt));
+    if (promptTokens.size === 0)
+        return 0;
+    const itemTokens = tokenizeTaskText(item.line);
+    let score = 0;
+    for (const token of itemTokens) {
+        if (promptTokens.has(token))
+            score += 1;
+    }
+    if (prompt.toLowerCase().includes(item.line.toLowerCase()))
+        score += 3;
+    return score;
+}
+function matchExistingActiveTask(prompt, activeItems) {
+    if (activeItems.length === 0)
+        return null;
+    if (activeItems.length === 1 && CONTINUE_RE.test(prompt))
+        return activeItems[0];
+    const ranked = activeItems
+        .map((item) => ({ item, score: overlapScore(prompt, item) }))
+        .filter((entry) => entry.score > 0)
+        .sort((a, b) => b.score - a.score);
+    if (ranked.length === 0)
+        return null;
+    if (ranked[0].score >= 2 && (ranked.length === 1 || ranked[0].score > ranked[1].score)) {
+        return ranked[0].item;
+    }
+    return null;
+}
+function resolveTrackedSessionTask(phrenPath, state) {
+    const match = state.stableId ? `bid:${state.stableId}` : state.item;
+    const resolved = resolveTaskItem(phrenPath, state.project, match);
+    return resolved.ok ? resolved.data : null;
+}
+function extractGithubMetadata(phrenPath, project, prompt) {
+    const repo = resolveProjectGithubRepo(phrenPath, project);
+    for (const match of prompt.matchAll(GITHUB_URL_RE)) {
+        const parsed = parseGithubIssueUrl(match[0]);
+        if (!parsed)
+            continue;
+        if (repo && parsed.repo && parsed.repo !== repo)
+            continue;
+        return {
+            github_issue: parsed.issueNumber,
+            github_url: parsed.url,
+        };
+    }
+    if (!repo)
+        return {};
+    const issueMatch = GITHUB_ISSUE_RE.exec(prompt);
+    GITHUB_ISSUE_RE.lastIndex = 0;
+    if (!issueMatch)
+        return {};
+    return { github_issue: Number.parseInt(issueMatch[2], 10) };
+}
+function buildSuggestionNotice(project, line, issueMeta) {
+    const githubLine = issueMeta.github_url
+        ? `Suggested link: ${issueMeta.github_url}`
+        : issueMeta.github_issue
+            ? `Suggested GitHub link: #${issueMeta.github_issue}`
+            : "";
+    return [
+        "<phren-notice>",
+        `Task suggestion for ${project}:`,
+        `- ${line}`,
+        ...(githubLine ? [githubLine] : []),
+        "<phren-notice>",
+    ];
+}
+function persistTaskAttachment(phrenPath, sessionId, project, item, summary, mode) {
+    writeTaskSessionState(phrenPath, {
+        sessionId,
+        project,
+        stableId: item.stableId,
+        item: item.line,
+        summary,
+        mode,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+    });
+}
+export function handleTaskPromptLifecycle(args) {
+    const mode = getTaskMode(args.phrenPath);
+    if (mode === "off" || mode === "manual" || !args.project || !args.sessionId) {
+        return { mode, noticeLines: [] };
+    }
+    // A sub-agent hand-back, a system notification or a harness reminder arrives as a
+    // prompt but nobody typed it: it never creates, moves or reuses a task.
+    if (isAgentFramePrompt(args.prompt)) {
+        debugLog(`task lifecycle skipped ${args.project}: machine-originated prompt`);
+        return { mode, noticeLines: [] };
+    }
+    const prompt = typedPromptText(args.prompt);
+    // Suppression takes absolute priority — user explicitly said not to create a task.
+    if (hasSuppressTaskIntent(prompt)) {
+        debugLog(`task lifecycle suppressed ${args.project}: suppress-task intent detected`);
+        return { mode, noticeLines: [] };
+    }
+    if (!isActionablePrompt(prompt, args.intent)) {
+        return { mode, noticeLines: [] };
+    }
+    const taskLevel = args.taskLevel ?? getProactivityLevelForTask(args.phrenPath);
+    if (mode === "auto" && !shouldAutoCaptureTaskForLevel(taskLevel, prompt)) {
+        debugLog(`task lifecycle skipped ${args.project}: task proactivity=${taskLevel}`);
+        return { mode, noticeLines: [] };
+    }
+    const parsed = readTasks(args.phrenPath, args.project);
+    if (!parsed.ok)
+        return { mode, noticeLines: [] };
+    const summary = normalizeTaskSummary(prompt);
+    const issueMeta = extractGithubMetadata(args.phrenPath, args.project, prompt);
+    const trackedState = readTaskSessionState(args.phrenPath, args.sessionId);
+    const trackedItem = trackedState && trackedState.project === args.project
+        ? resolveTrackedSessionTask(args.phrenPath, trackedState)
+        : null;
+    const activeItems = parsed.data.items.Active;
+    const reusable = trackedItem && trackedItem.section === "Active"
+        ? trackedItem
+        : matchExistingActiveTask(prompt, activeItems);
+    if (mode === "suggest") {
+        const line = reusable?.line || summary;
+        return {
+            mode,
+            noticeLines: buildSuggestionNotice(args.project, line, issueMeta),
+        };
+    }
+    // Intent-aware auto mode: if the user is in discovery mode (brainstorming,
+    // exploring ideas) and NOT in execution mode (approving, committing to work,
+    // or performing code changes), create a speculative task and surface a suggestion.
+    if (mode === "auto" && !hasExecutionIntent(prompt) && !hasCodeChangeContext(prompt) && hasDiscoveryIntent(prompt)) {
+        const line = reusable?.line || summary;
+        debugLog(`task lifecycle auto→speculative ${args.project}: discovery intent detected`);
+        if (!reusable) {
+            addTask(args.phrenPath, args.project, summary, {
+                createdAt: new Date().toISOString(),
+                sessionId: args.sessionId,
+                speculative: true,
+            });
+        }
+        return {
+            mode: "auto",
+            noticeLines: buildSuggestionNotice(args.project, line, issueMeta),
+        };
+    }
+    const targetMatch = reusable?.stableId ? `bid:${reusable.stableId}` : reusable?.id;
+    if (!reusable) {
+        const add = addTask(args.phrenPath, args.project, summary, {
+            createdAt: new Date().toISOString(),
+            sessionId: args.sessionId,
+        });
+        if (!add.ok) {
+            debugLog(`task lifecycle add ${args.project}: ${add.error}`);
+            return { mode, noticeLines: [] };
+        }
+    }
+    // Something the person asked to track ("add this to task") goes to Active, as does
+    // a match on a task that is already there. What the hook picked up on its own is a
+    // guess about the work: it waits in Queue until someone takes it up.
+    // An existing task keeps its own Context and GitHub link: a later prompt that
+    // matches it is not a better description of the work.
+    const section = reusable || hasExplicitTaskSignal(prompt) ? "active" : "queue";
+    const update = updateTask(args.phrenPath, args.project, targetMatch || summary, reusable
+        ? { section }
+        : { section, context: summary, replace_context: true, ...issueMeta });
+    if (!update.ok) {
+        debugLog(`task lifecycle update ${args.project}: ${update.error}`);
+        return { mode, noticeLines: [] };
+    }
+    const resolved = resolveTaskItem(args.phrenPath, args.project, targetMatch || summary);
+    if (!resolved.ok) {
+        debugLog(`task lifecycle resolve ${args.project}: ${resolved.error}`);
+        return { mode, noticeLines: [] };
+    }
+    persistTaskAttachment(args.phrenPath, args.sessionId, args.project, resolved.data, summary, "auto");
+    return {
+        mode,
+        noticeLines: [
+            "<phren-notice>",
+            `${section === "active" ? "Active" : "Queued"} task (${args.project}): ${resolved.data.line}`,
+            "<phren-notice>",
+        ],
+    };
+}
+export function finalizeTaskSession(args) {
+    if (!args.sessionId || getTaskMode(args.phrenPath) !== "auto")
+        return;
+    const state = readTaskSessionState(args.phrenPath, args.sessionId);
+    if (!state || state.mode !== "auto")
+        return;
+    const match = state.stableId ? `bid:${state.stableId}` : state.item;
+    if (args.status === "saved-local" || args.status === "saved-pushed" || args.status === "no-upstream") {
+        // A saved turn is not finished work. The Stop hook runs after every turn, so
+        // completing here marked real work Done as soon as the next prompt came in.
+        // The task stays where it is; completion is explicit. Detaching it keeps the
+        // next prompt from rewriting its context unless that prompt matches it.
+        clearTaskSessionState(args.phrenPath, args.sessionId);
+        return;
+    }
+    if (args.status === "error") {
+        // Don't poison the task with transient git infrastructure failures. Common
+        // observed pattern: git add -A failing because of file locks / permissions
+        // on Windows mounts / sparse-checkout edge cases. The user's task is unrelated;
+        // promoting it to Active and marking it "Blocked: Command failed: git add -A"
+        // creates a permanent zombie that re-blocks every subsequent session.
+        if (isTransientGitFailure(args.detail)) {
+            debugLog(`task lifecycle ignored transient git failure for ${state.project}: ${args.detail}`);
+            // Keep session state intact — next clean session can complete normally.
+            return;
+        }
+        const blocked = updateTask(args.phrenPath, state.project, match, {
+            section: "active",
+            context: `Blocked: ${args.detail}`,
+            replace_context: true,
+        });
+        if (!blocked.ok) {
+            debugLog(`task lifecycle block ${state.project}: ${blocked.error}`);
+            return;
+        }
+        writeTaskSessionState(args.phrenPath, {
+            ...state,
+            summary: `Blocked: ${args.detail}`,
+            updatedAt: new Date().toISOString(),
+        });
+        return;
+    }
+}
+const TRANSIENT_GIT_FAILURE_RE = /^Command failed:\s*git\s+(?:add|commit|push|stage|pull|fetch|stash)\b/i;
+export function isTransientGitFailure(detail) {
+    if (!detail)
+        return false;
+    return TRANSIENT_GIT_FAILURE_RE.test(detail.trim());
+}
+/**
+ * Return the active TaskItem tracked for a session+project, if any.
+ * Used by mcp-finding.ts to link findings to active tasks.
+ */
+export function getActiveTaskForSession(phrenPath, sessionId, project) {
+    const state = readTaskSessionState(phrenPath, sessionId);
+    if (!state || state.project !== project)
+        return null;
+    return resolveTrackedSessionTask(phrenPath, state);
+}

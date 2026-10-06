@@ -1,0 +1,10 @@
+export declare function flushTelemetry(): void;
+export declare function isTelemetryEnabled(phrenPath: string): boolean;
+export declare function setTelemetryEnabled(phrenPath: string, enabled: boolean): void;
+export declare function trackToolCall(phrenPath: string, toolName: string): void;
+export declare function trackCliCommand(phrenPath: string, command: string): void;
+export declare function trackError(phrenPath: string): void;
+export declare function trackSession(phrenPath: string): void;
+export declare function getTelemetrySummary(phrenPath: string): string;
+export declare function resetTelemetry(phrenPath: string): void;
+export declare function _resetBuffer(): void;

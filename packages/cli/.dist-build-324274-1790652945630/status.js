@@ -1,0 +1,438 @@
+import { moduleEnabled } from "./modules/runtime.js";
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from "url";
+import { findPhrenPath, getProjectDirs, EXEC_TIMEOUT_QUICK_MS, debugLog, isRecord, hookConfigPath, homeDir, readRootManifest, } from "./shared.js";
+import { buildIndex, detectProject, findFtsCacheForPath, listIndexedDocumentPaths, queryRows } from "./shared/index.js";
+import { mergeConfig, getWorkflowPolicy } from "./shared/governance.js";
+import { getMcpEnabledPreference, getHooksEnabledPreference } from "./init/init.js";
+import { getManagementPreset, resolveManagementCapabilities } from "./init/management-preset.js";
+import { getTelemetrySummary } from "./telemetry.js";
+import { runGit, errorMessage } from "./utils.js";
+import { logger } from "./logger.js";
+import { readRuntimeHealth, resolveTaskFilePath, FINDINGS_FILENAME } from "./data/access.js";
+import { assessSyncOutage } from "./shared/governance.js";
+import { resolveRuntimeProfile } from "./runtime-profile.js";
+import { describeProfileMapping } from "./profile-store.js";
+import { renderPhrenArt } from "./phren-art.js";
+import { RESET, BOLD, DIM, GREEN, YELLOW, RED, CYAN } from "./shell/render.js";
+import { storeWeight } from "./store-weight.js";
+import { activeStoreAuthFailure, storeAuthDetail } from "./sync/auth.js";
+import { describeAutoSave } from "./sync/outcome.js";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+function readPackageVersion() {
+    try {
+        const pkgPath = path.resolve(__dirname, "..", "package.json");
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+        return typeof pkg.version === "string" ? pkg.version : "unknown";
+    }
+    catch (err) {
+        if ((process.env.PHREN_DEBUG))
+            logger.debug("status", `readPackageVersion: ${errorMessage(err)}`);
+        return "unknown";
+    }
+}
+function check(ok) {
+    return ok ? `${GREEN}ok${RESET}` : `${RED}missing${RESET}`;
+}
+function countBullets(filePath) {
+    if (!fs.existsSync(filePath))
+        return 0;
+    const content = fs.readFileSync(filePath, "utf8");
+    return content.split("\n").filter((l) => l.startsWith("- ")).length;
+}
+function countQueueItems(phrenPath, project) {
+    const queueFile = path.join(phrenPath, project, "review.md");
+    return countBullets(queueFile);
+}
+function hasCommandHook(value) {
+    if (!Array.isArray(value))
+        return false;
+    return value.some((entry) => {
+        if (!isRecord(entry) || !Array.isArray(entry.hooks))
+            return false;
+        return entry.hooks.some((hook) => isRecord(hook) && typeof hook.command === "string" && (hook.command.includes("phren") || hook.command.includes("phren")));
+    });
+}
+export async function runStatus() {
+    const phrenPath = findPhrenPath();
+    if (!phrenPath) {
+        console.log(`${RED}phren not found${RESET}. Run ${CYAN}npx @phren/cli init${RESET} to set up.`);
+        process.exit(1);
+    }
+    const cwd = process.cwd();
+    const manifest = readRootManifest(phrenPath);
+    const profile = resolveRuntimeProfile(phrenPath);
+    const activeProject = detectProject(phrenPath, cwd, profile);
+    const version = readPackageVersion();
+    console.log("");
+    console.log(renderPhrenArt("  "));
+    console.log(`\n${BOLD}phren${RESET} ${DIM}v${version}${RESET}\n`);
+    // Active project
+    if (activeProject) {
+        console.log(`  ${DIM}project${RESET}  ${activeProject}`);
+        // Effective config for this project
+        try {
+            const resolved = mergeConfig(phrenPath, activeProject);
+            const globalWorkflow = getWorkflowPolicy(phrenPath);
+            const projectSensitivity = resolved.findingSensitivity !== globalWorkflow.findingSensitivity
+                ? `${resolved.findingSensitivity} ${DIM}(project override)${RESET}`
+                : resolved.findingSensitivity;
+            const projectTaskMode = resolved.taskMode !== globalWorkflow.taskMode
+                ? `${resolved.taskMode} ${DIM}(project override)${RESET}`
+                : resolved.taskMode;
+            console.log(`  ${DIM}sensitivity${RESET}  ${projectSensitivity}`);
+            if (moduleEnabled(phrenPath, "tasks", profile))
+                console.log(`  ${DIM}task mode${RESET}    ${projectTaskMode}`);
+            if (resolved.proactivity.base || resolved.proactivity.findings || resolved.proactivity.tasks) {
+                const parts = [];
+                if (resolved.proactivity.base)
+                    parts.push(`base:${resolved.proactivity.base}`);
+                if (resolved.proactivity.findings)
+                    parts.push(`findings:${resolved.proactivity.findings}`);
+                if (moduleEnabled(phrenPath, "tasks", profile) && resolved.proactivity.tasks)
+                    parts.push(`tasks:${resolved.proactivity.tasks}`);
+                console.log(`  ${DIM}proactivity${RESET}  ${parts.join(" ")} ${DIM}(project override)${RESET}`);
+            }
+        }
+        catch (err) {
+            if ((process.env.PHREN_DEBUG))
+                logger.debug("status", `statusConfig: ${errorMessage(err)}`);
+        }
+    }
+    // Phren path and config
+    console.log(`  ${DIM}path${RESET}     ${phrenPath}`);
+    console.log(`  ${DIM}mode${RESET}     ${manifest?.installMode || "unknown"}`);
+    try {
+        const w = storeWeight(phrenPath, profile);
+        const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
+        console.log(`  ${DIM}weight${RESET}   ${k(w.findings)} words of findings · ${k(w.reference)} archived${moduleEnabled(phrenPath, "tasks", profile) ? ` · ${k(w.tasks)} in tasks` : ""} · ${k(w.skills)} in skills · AGENTS.md ${w.globalClaude} words`);
+    }
+    catch (err) {
+        logger.debug("status", `weight: ${errorMessage(err)}`);
+    }
+    if (manifest?.workspaceRoot) {
+        console.log(`  ${DIM}workspace${RESET} ${manifest.workspaceRoot}`);
+    }
+    if (manifest?.syncMode) {
+        console.log(`  ${DIM}sync${RESET}     ${manifest.syncMode}`);
+    }
+    if (profile) {
+        const mapping = describeProfileMapping(phrenPath);
+        const assumed = !process.env.PHREN_PROFILE?.trim() && !mapping.mapped && mapping.assumed === profile;
+        const suffix = assumed
+            ? ` ${YELLOW}(assumed; machine "${mapping.machine}" is not mapped in machines.yaml)${RESET}`
+            : "";
+        console.log(`  ${DIM}profile${RESET}  ${profile}${suffix}`);
+    }
+    // Management preset + MCP + hooks status
+    const preset = getManagementPreset(phrenPath);
+    const caps = resolveManagementCapabilities(phrenPath);
+    const mcpEnabled = getMcpEnabledPreference(phrenPath);
+    const hooksEnabled = getHooksEnabledPreference(phrenPath);
+    console.log(`  ${DIM}preset${RESET}   ${preset}`);
+    console.log(`  ${DIM}mcp${RESET}      ${mcpEnabled ? `${GREEN}on${RESET}` : `${YELLOW}off${RESET}`}`);
+    console.log(`  ${DIM}hooks${RESET}    ${hooksEnabled ? `${GREEN}on${RESET}` : `${YELLOW}off${RESET}`}`);
+    // What phren touches on this machine under the current preset.
+    const touches = [
+        caps.linkGlobalClaudeMd ? "~/.claude/CLAUDE.md" : null,
+        caps.installSkillLinks ? "~/.claude/skills" : null,
+        caps.installWrappers ? "~/.local/bin wrappers" : null,
+        caps.repoMirroring ? "repo mirrors" : null,
+    ].filter(Boolean);
+    console.log(`  ${DIM}touches${RESET}  ${touches.length ? touches.join(", ") : `${DIM}store only${RESET}`}`);
+    // Hook health: check ~/.claude/settings.json
+    let hooksInstalled = false;
+    let mcpConfigured = false;
+    if (manifest?.installMode === "project-local" && manifest.workspaceRoot) {
+        const workspaceMcp = path.join(manifest.workspaceRoot, ".vscode", "mcp.json");
+        if (fs.existsSync(workspaceMcp)) {
+            try {
+                const parsed = JSON.parse(fs.readFileSync(workspaceMcp, "utf8"));
+                const settings = isRecord(parsed) ? parsed : {};
+                const servers = isRecord(settings.servers) ? settings.servers : undefined;
+                mcpConfigured = Boolean(servers?.phren || servers?.phren);
+            }
+            catch (err) {
+                if ((process.env.PHREN_DEBUG))
+                    logger.debug("status", `statusWorkspaceMcp parse: ${errorMessage(err)}`);
+            }
+        }
+    }
+    else {
+        const settingsPath = hookConfigPath("claude");
+        if (fs.existsSync(settingsPath)) {
+            try {
+                const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+                const settings = isRecord(parsed) ? parsed : {};
+                const mcpServers = isRecord(settings.mcpServers) ? settings.mcpServers : undefined;
+                const hooks = isRecord(settings.hooks) ? settings.hooks : undefined;
+                mcpConfigured = Boolean(mcpServers?.phren || mcpServers?.phren);
+                const hookEvents = ["UserPromptSubmit", "Stop", "SessionStart"];
+                hooksInstalled = hookEvents.every((event) => hasCommandHook(hooks?.[event]));
+            }
+            catch (err) {
+                if ((process.env.PHREN_DEBUG))
+                    logger.debug("status", `statusHooks settingsParse: ${errorMessage(err)}`);
+            }
+        }
+    }
+    console.log(`  ${DIM}mcp cfg${RESET}  ${check(mcpConfigured)} ${DIM}(${manifest?.installMode === "project-local" ? ".vscode/mcp.json" : "settings.json"})${RESET}`);
+    if (manifest?.installMode === "project-local") {
+        console.log(`  ${DIM}hooks cfg${RESET} ${DIM}n/a in project-local mode${RESET}`);
+    }
+    else {
+        console.log(`  ${DIM}hooks cfg${RESET} ${check(hooksInstalled)} ${DIM}(settings.json)${RESET}`);
+    }
+    // FTS index health
+    let ftsIndexOk = false;
+    let ftsIndexSize = 0;
+    let ftsDocCount = null;
+    try {
+        const cache = findFtsCacheForPath(phrenPath, profile);
+        ftsIndexOk = cache.exists;
+        ftsIndexSize = cache.sizeBytes ?? 0;
+        if (!ftsIndexOk) {
+            const db = await buildIndex(phrenPath, profile || undefined);
+            const healthRow = queryRows(db, "SELECT count(*) FROM docs", []);
+            const count = Number(healthRow?.[0]?.[0] ?? 0);
+            if (Number.isFinite(count) && count >= 0) {
+                ftsIndexOk = true;
+                ftsDocCount = count;
+            }
+        }
+    }
+    catch (err) {
+        if ((process.env.PHREN_DEBUG))
+            logger.debug("status", `statusFtsIndex: ${errorMessage(err)}`);
+    }
+    const ftsLabel = ftsIndexOk
+        ? `${GREEN}ok${RESET} ${DIM}(${ftsIndexSize > 0 ? `${(ftsIndexSize / 1024).toFixed(0)} KB` : `${ftsDocCount ?? 0} docs`})${RESET}`
+        : `${YELLOW}not built${RESET} ${DIM}(run a search to build)${RESET}`;
+    console.log(`  ${DIM}fts${RESET}      ${ftsLabel}`);
+    try {
+        const { getOllamaUrl, checkOllamaAvailable, checkModelAvailable, getEmbeddingModel } = await import("./shared/ollama.js");
+        const { getEmbeddingCache, formatEmbeddingCoverage } = await import("./shared/embedding-cache.js");
+        const ollamaUrl = getOllamaUrl();
+        if (!ollamaUrl) {
+            console.log(`  ${DIM}semantic${RESET} ${DIM}disabled (optional)${RESET}`);
+        }
+        else {
+            const available = await checkOllamaAvailable();
+            if (!available) {
+                console.log(`  ${DIM}semantic${RESET} ${YELLOW}offline${RESET} ${DIM}(${ollamaUrl})${RESET}`);
+            }
+            else {
+                const modelReady = await checkModelAvailable();
+                const model = getEmbeddingModel();
+                if (!modelReady) {
+                    console.log(`  ${DIM}semantic${RESET} ${YELLOW}model missing${RESET} ${DIM}(${model})${RESET}`);
+                }
+                else {
+                    const cache = getEmbeddingCache(phrenPath);
+                    await cache.load().catch(() => { });
+                    const coverage = cache.coverage(listIndexedDocumentPaths(phrenPath, profile || undefined));
+                    console.log(`  ${DIM}semantic${RESET} ${GREEN}ready${RESET} ${DIM}(${model}; ${formatEmbeddingCoverage(coverage)})${RESET}`);
+                }
+            }
+        }
+    }
+    catch (err) {
+        if ((process.env.PHREN_DEBUG))
+            logger.debug("status", `statusSemantic: ${errorMessage(err)}`);
+    }
+    // Agent integration status
+    function hasPhrenEntry(filePath) {
+        if (!fs.existsSync(filePath))
+            return false;
+        try {
+            const raw = fs.readFileSync(filePath, "utf8");
+            return raw.includes('"phren"') || raw.includes("'phren'") || raw.includes('"phren"') || raw.includes("'phren'");
+        }
+        catch (err) {
+            if ((process.env.PHREN_DEBUG))
+                logger.debug("status", `hasPhrenEntry: ${errorMessage(err)}`);
+            return false;
+        }
+    }
+    function agentConfigured(candidates) {
+        return candidates.some(hasPhrenEntry);
+    }
+    const home = homeDir();
+    const agentChecks = manifest?.installMode === "project-local" && manifest.workspaceRoot ? [
+        {
+            name: "VS Code (workspace)",
+            configured: fs.existsSync(path.join(manifest.workspaceRoot, ".vscode", "mcp.json")),
+        },
+    ] : [
+        {
+            name: "Claude Code",
+            configured: agentConfigured([
+                path.join(home, ".claude.json"),
+                path.join(home, ".claude", "settings.json"),
+            ]),
+        },
+        {
+            name: "Cursor",
+            configured: agentConfigured([
+                path.join(home, ".cursor", "mcp.json"),
+                path.join(home, ".config", "Cursor", "User", "mcp.json"),
+                path.join(home, "Library", "Application Support", "Cursor", "User", "mcp.json"),
+            ]),
+        },
+        {
+            name: "Copilot CLI",
+            configured: agentConfigured([
+                path.join(home, ".copilot", "mcp-config.json"),
+                path.join(home, ".config", "github-copilot", "mcp.json"),
+                path.join(home, "Library", "Application Support", "github-copilot", "mcp.json"),
+            ]),
+        },
+        {
+            name: "Codex",
+            configured: agentConfigured([
+                path.join(home, ".codex", "config.json"),
+                path.join(home, ".codex", "mcp.json"),
+                path.join(home, ".codex", "config.toml"),
+            ]),
+        },
+        {
+            name: "Windsurf",
+            configured: agentConfigured([
+                path.join(home, ".windsurf", "mcp.json"),
+                path.join(home, ".config", "Windsurf", "User", "mcp.json"),
+                path.join(home, "Library", "Application Support", "Windsurf", "User", "mcp.json"),
+            ]),
+        },
+    ];
+    const configuredAgents = agentChecks.filter((a) => a.configured).map((a) => a.name);
+    const missingAgents = agentChecks.filter((a) => !a.configured).map((a) => a.name);
+    if (configuredAgents.length > 0) {
+        console.log(`  ${DIM}agents${RESET}   ${GREEN}${configuredAgents.join(", ")}${RESET}`);
+    }
+    if (missingAgents.length > 0) {
+        console.log(`  ${DIM}          Not configured: ${missingAgents.join(", ")} — run phren init to add${RESET}`);
+    }
+    // Stores
+    try {
+        const { resolveAllStores } = await import("./store-registry.js");
+        const stores = resolveAllStores(phrenPath);
+        if (stores.length > 0) {
+            const primaryCount = stores.filter((s) => s.role === "primary").length;
+            const teamCount = stores.filter((s) => s.role === "team").length;
+            const readonlyCount = stores.filter((s) => s.role === "readonly").length;
+            const roleParts = [];
+            if (primaryCount > 0)
+                roleParts.push(`${primaryCount} primary`);
+            if (teamCount > 0)
+                roleParts.push(`${teamCount} team`);
+            if (readonlyCount > 0)
+                roleParts.push(`${readonlyCount} readonly`);
+            console.log(`\n  ${BOLD}Stores${RESET} ${DIM}(${stores.length} stores: ${roleParts.join(", ")})${RESET}`);
+            for (const store of stores) {
+                const exists = store.available !== false;
+                const existsLabel = exists ? `${GREEN}yes${RESET}` : `${RED}no${RESET}`;
+                const auth = exists ? activeStoreAuthFailure(store.path) : undefined;
+                const syncDetail = auth ? ` ${YELLOW}${storeAuthDetail(auth)}${RESET}` : store.remote ? ` remote=${DIM}${store.remote}${RESET}` : "";
+                console.log(`    ${store.name} ${DIM}(${store.role}, ${store.sync})${RESET} path=${existsLabel}${syncDetail}`);
+            }
+            // A store attached here whose folder is gone is not cosmetic: any
+            // project it claims cannot be written until the folder is back.
+            const { describeUnavailableStore } = await import("./store-registry.js");
+            for (const store of stores.filter((s) => s.available === false)) {
+                console.log(`    ${YELLOW}! ${describeUnavailableStore(store)}${RESET}`);
+                if (store.projects?.length) {
+                    console.log(`      ${YELLOW}writes to ${store.projects.join(", ")} will fail until it is attached${RESET}`);
+                }
+            }
+        }
+    }
+    catch (err) {
+        if ((process.env.PHREN_DEBUG))
+            logger.debug("status", `statusStores: ${errorMessage(err)}`);
+    }
+    // Stats
+    const projectDirs = getProjectDirs(phrenPath, profile);
+    let totalFindings = 0;
+    let totalTask = 0;
+    let totalQueue = 0;
+    for (const dir of projectDirs) {
+        const projName = path.basename(dir);
+        totalFindings += countBullets(path.join(phrenPath, projName, FINDINGS_FILENAME));
+        const taskPath = moduleEnabled(phrenPath, "tasks", profile) ? resolveTaskFilePath(phrenPath, projName) : null;
+        if (taskPath)
+            totalTask += countBullets(taskPath);
+        totalQueue += countQueueItems(phrenPath, projName);
+    }
+    console.log(`\n  ${DIM}phren holds${RESET}  ${projectDirs.length} projects, ${totalFindings} findings${moduleEnabled(phrenPath, "tasks", profile) ? `, ${totalTask} tasks` : ""}, ${totalQueue} queued`);
+    const gitTarget = manifest?.installMode === "project-local" && manifest.workspaceRoot ? manifest.workspaceRoot : phrenPath;
+    const isGitRepo = runGit(gitTarget, ["rev-parse", "--is-inside-work-tree"], EXEC_TIMEOUT_QUICK_MS, debugLog) === "true";
+    const hasOriginRemote = isGitRepo && Boolean(runGit(gitTarget, ["remote", "get-url", "origin"], EXEC_TIMEOUT_QUICK_MS, debugLog));
+    const runtime = readRuntimeHealth(phrenPath);
+    if (manifest?.installMode === "project-local") {
+        console.log(`\n  ${DIM}sync${RESET}     workspace-managed`);
+        console.log(`           auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
+    }
+    else if (isGitRepo && !hasOriginRemote) {
+        console.log(`\n  ${DIM}sync${RESET}     local-only ${DIM}(no git remote)${RESET}`);
+        console.log(`           auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
+        console.log(`           local commits ${runtime.lastSync?.unsyncedCommits ?? 0}`);
+    }
+    else {
+        console.log(`\n  ${DIM}sync${RESET}     auto-save ${runtime.lastAutoSave?.status || "n/a"}`);
+        if (runtime.lastAutoSave?.status === "sync-failed" || runtime.lastAutoSave?.status === "error") {
+            console.log(`           ${RED}${describeAutoSave(runtime.lastAutoSave, runtime.lastSync)}${RESET}`);
+        }
+        console.log(`           last pull ${runtime.lastSync?.lastPullStatus || "n/a"}${runtime.lastSync?.lastPullAt ? ` @ ${runtime.lastSync.lastPullAt}` : ""}`);
+        console.log(`           last push ${runtime.lastSync?.lastPushStatus || "n/a"}${runtime.lastSync?.lastPushAt ? ` @ ${runtime.lastSync.lastPushAt}` : ""}`);
+        console.log(`           unsynced commits ${runtime.lastSync?.unsyncedCommits ?? 0}`);
+        if (runtime.lastSync?.lastSuccessfulPushAt) {
+            console.log(`           last successful push ${runtime.lastSync.lastSuccessfulPushAt}`);
+        }
+        if (runtime.lastSync?.lastPushDetail && !activeStoreAuthFailure(phrenPath)) {
+            console.log(`           push detail ${runtime.lastSync.lastPushDetail}`);
+        }
+        const outage = assessSyncOutage(runtime.lastSync);
+        if (outage.degraded) {
+            console.log(`           ${RED}! ${outage.summary}${RESET}`);
+        }
+    }
+    // Recent changes (git log)
+    if (isGitRepo) {
+        const log = runGit(gitTarget, ["log", "--oneline", "-5", "--no-decorate"], EXEC_TIMEOUT_QUICK_MS, debugLog);
+        if (log) {
+            console.log(`\n  ${DIM}recent${RESET}`);
+            for (const line of log.split("\n")) {
+                console.log(`    ${DIM}${line}${RESET}`);
+            }
+        }
+        const dirty = runGit(gitTarget, ["status", "--porcelain"], EXEC_TIMEOUT_QUICK_MS, debugLog);
+        if (dirty) {
+            const count = dirty.split("\n").filter(Boolean).length;
+            console.log(`    ${YELLOW}${count} uncommitted change(s)${RESET}`);
+        }
+    }
+    else {
+        console.log(`\n  ${DIM}${gitTarget} is not a git repo${RESET}`);
+    }
+    // Health: the same data Phren Hook serves at /v1/health/details.
+    if (moduleEnabled(phrenPath, "hook", profile)) {
+        try {
+            const { hookRequest } = await import("./bridge/client.js");
+            const { healthDetails, formatHealth } = await import("./bridge/health.js");
+            const hook = await hookRequest("/v1/health", undefined, undefined, 2_000).catch(() => undefined);
+            const health = await healthDetails({ store: phrenPath, hookVersion: typeof hook?.version === "string" ? hook.version : undefined });
+            console.log(`\n  ${BOLD}Health${RESET} ${DIM}(${health.computer.name})${RESET}`);
+            for (const line of formatHealth(health, { dim: DIM, reset: RESET, red: RED, yellow: YELLOW, green: GREEN }))
+                console.log(line);
+        }
+        catch (err) {
+            logger.debug("status", `health: ${errorMessage(err)}`);
+        }
+    }
+    // Telemetry
+    const telemetry = getTelemetrySummary(phrenPath);
+    const firstLine = telemetry.split("\n")[0];
+    console.log(`\n  ${BOLD}${firstLine}${RESET}`);
+    console.log("");
+}

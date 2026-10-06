@@ -1,0 +1,13 @@
+import { VERSION } from "../package-metadata.js";
+export declare const ROOT: string;
+export { VERSION };
+export declare const STARTER_DIR: string;
+export declare const DEFAULT_PHREN_PATH: string;
+export declare function resolveEntryScript(): string;
+export declare function log(msg: string): void;
+export declare function commandVersion(cmd: string, args?: string[]): string | null;
+export declare function versionAtLeast(raw: string | null, major: number, minor?: number): boolean;
+export declare function nearestWritableTarget(filePath: string): boolean;
+export type McpMode = "on" | "off";
+export declare function parseMcpMode(raw?: string): McpMode | undefined;
+export declare function confirmPrompt(message: string): Promise<boolean>;

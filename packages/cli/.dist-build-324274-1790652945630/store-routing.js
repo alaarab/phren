@@ -1,0 +1,132 @@
+import * as fs from "fs";
+import * as path from "path";
+import { getProjectDirs } from "./phren-paths.js";
+import { PhrenError } from "./phren-core.js";
+import { isValidProjectName, safeProjectPath } from "./utils.js";
+import { resolveAllStores } from "./store-registry.js";
+// ── Parsing ──────────────────────────────────────────────────────────────────
+/**
+ * Parse a project reference that may be store-qualified.
+ *
+ * "arc"          → { projectName: "arc" }
+ * "arc-team/arc" → { storeName: "arc-team", projectName: "arc" }
+ */
+export function parseStoreQualified(input) {
+    const trimmed = input.trim();
+    const slashIdx = trimmed.indexOf("/");
+    if (slashIdx === -1) {
+        return { projectName: trimmed };
+    }
+    const storeName = trimmed.slice(0, slashIdx);
+    const projectName = trimmed.slice(slashIdx + 1);
+    // Only treat as store-qualified if both parts are valid names
+    if (storeName && projectName && !projectName.includes("/")) {
+        return { storeName, projectName };
+    }
+    // Malformed — treat whole thing as project name (will fail validation later)
+    return { projectName: trimmed };
+}
+// ── Resolution ───────────────────────────────────────────────────────────────
+/**
+ * Resolve a project reference to a specific store + directory.
+ *
+ * Resolution rules:
+ * 1. If store-qualified ("store/project"), find that store and project within it
+ * 2. If bare ("project"), scan all readable stores for a matching project dir
+ * 3. Exactly one match → return it
+ * 4. Zero matches → throw NOT_FOUND
+ * 5. Multiple matches → throw VALIDATION_ERROR with disambiguation message
+ */
+export function resolveProject(phrenPath, input, profile) {
+    const { storeName, projectName } = parseStoreQualified(input);
+    if (!isValidProjectName(projectName)) {
+        throw new Error(`${PhrenError.VALIDATION_ERROR}: Invalid project name: "${projectName}"`);
+    }
+    if (storeName && !isValidStoreName(storeName)) {
+        throw new Error(`${PhrenError.VALIDATION_ERROR}: Invalid store name: "${storeName}"`);
+    }
+    const stores = resolveAllStores(phrenPath);
+    // Store-qualified: find exact store
+    if (storeName) {
+        const store = stores.find((s) => s.name === storeName);
+        if (!store) {
+            const available = stores.map((s) => s.name).join(", ");
+            throw new Error(`${PhrenError.NOT_FOUND}: Store "${storeName}" not found. Available: ${available}`);
+        }
+        const projectDir = findProjectInStore(store, projectName, profile);
+        if (!projectDir) {
+            throw new Error(`${PhrenError.NOT_FOUND}: Project "${projectName}" not found in store "${storeName}"`);
+        }
+        return { store, projectName, projectDir };
+    }
+    // Bare project: scan all stores
+    const matches = [];
+    for (const store of stores) {
+        const projectDir = findProjectInStore(store, projectName, profile);
+        if (projectDir) {
+            matches.push({ store, projectName, projectDir });
+        }
+    }
+    if (matches.length === 1)
+        return matches[0];
+    if (matches.length === 0) {
+        throw new Error(`${PhrenError.NOT_FOUND}: Project "${projectName}" not found in any store`);
+    }
+    // Ambiguous — multiple stores have this project
+    const storeNames = matches.map((m) => `${m.store.name}/${projectName}`).join(", ");
+    throw new Error(`${PhrenError.VALIDATION_ERROR}: Project "${projectName}" exists in multiple stores. ` +
+        `Use store-qualified name to disambiguate: ${storeNames}`);
+}
+/**
+ * List all projects across all readable stores.
+ * Returns entries with store context for display.
+ */
+export function listAllProjects(phrenPath, profile) {
+    const stores = resolveAllStores(phrenPath);
+    const results = [];
+    for (const store of stores) {
+        const dirs = getProjectDirs(store.path, store.role === "primary" ? profile : undefined);
+        for (const dir of dirs) {
+            const projectName = path.basename(dir);
+            results.push({ store, projectName, projectDir: dir });
+        }
+    }
+    return results;
+}
+/**
+ * Store-aware variant of safeProjectPath for callers holding the primary store
+ * root: when the project directory does not exist in `phrenPath`, resolve the
+ * owning store from the registry and build the path under it instead. Falls
+ * back to the (nonexistent) primary-store path when the project is in no store
+ * or is ambiguous, so callers' existing not-found handling fires unchanged.
+ */
+export function storeAwareProjectPath(phrenPath, project, ...segments) {
+    let root = phrenPath;
+    const primaryDir = safeProjectPath(phrenPath, project);
+    if (!primaryDir)
+        return null;
+    if (!fs.existsSync(primaryDir)) {
+        try {
+            root = resolveProject(phrenPath, project).store.path;
+        }
+        catch {
+            // keep the primary root
+        }
+    }
+    return safeProjectPath(root, project, ...segments);
+}
+// ── Internal helpers ─────────────────────────────────────────────────────────
+const STORE_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/;
+function isValidStoreName(name) {
+    return STORE_NAME_PATTERN.test(name);
+}
+function findProjectInStore(store, projectName, profile) {
+    if (!fs.existsSync(store.path))
+        return null;
+    const dirs = getProjectDirs(store.path, store.role === "primary" ? profile : undefined);
+    for (const dir of dirs) {
+        if (path.basename(dir) === projectName)
+            return dir;
+    }
+    return null;
+}
