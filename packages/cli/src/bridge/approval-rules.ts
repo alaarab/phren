@@ -1,3 +1,6 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { createHash, createPublicKey, verify } from "node:crypto";
 import { lstat, mkdir, readFile, realpath } from "node:fs/promises";
 import { hostname } from "node:os";
@@ -6,7 +9,14 @@ import { z } from "zod";
 import { homeDir } from "../home-paths.js";
 import { tryFileLock } from "../governance/locks.js";
 import { atomic, BridgeError, bridgeRoot, object } from "./protocol.js";
-import { git } from "./projects.js";
+const exec = promisify(execFile);
+// Each context needs at most two reads; slow Git falls back to ordinary approval.
+async function git(cwd: string, ...args: string[]): Promise<string> {
+  return (await exec("git", ["-C", cwd, "--no-pager", ...args], {
+    timeout: 150, maxBuffer: 4_194_304,
+    env: nonInteractiveGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1" }),
+  })).stdout;
+}
 
 const text = z.string().min(1).max(4096).refine(value => !/[\x00-\x1f\x7f]/.test(value));
 const scopeSchema = z.object({
@@ -15,7 +25,7 @@ const scopeSchema = z.object({
   session: text.optional(), computer: text.optional(),
 }).strict();
 export const approvalRuleDraftSchema = z.object({
-  tool: text, command: text, match: z.enum(["exact", "prefix", "glob"]),
+  tool: z.literal("Bash"), command: text, match: z.enum(["exact", "prefix", "glob"]),
   effect: z.enum(["always-ask", "deny"]), scope: scopeSchema,
   projectName: z.string().min(1).max(100), until: z.string().datetime({ offset: true }).optional(),
 }).strict();
@@ -84,8 +94,14 @@ async function locked<T>(root: string, work: () => Promise<T>): Promise<T> {
   queues.set(key, next);
   try { return await next; } finally { if (queues.get(key) === next) queues.delete(key); }
 }
-export async function listApprovalRules(root = bridgeRoot()): Promise<ApprovalRule[]> {
-  try { return [...(await readPolicy(root)).rules.values()]; }
+export async function listApprovalRules(root = bridgeRoot(), pairedKey?: string) {
+  try {
+    const pairedOwner = pairedKey ? createHash("sha256").update(Buffer.from(pairedKey, "base64")).digest("hex") : undefined;
+    return [...(await readPolicy(root)).rules.values()].map(rule => ({ ...rule,
+      signerFingerprint: "SHA256:" + Buffer.from(rule.owner, "hex").toString("base64").replace(/=+$/, ""),
+      matchesPairedKey: rule.owner === pairedOwner,
+    }));
+  }
   catch { throw new BridgeError(409, "Approval rules could not be loaded. Existing agent permissions and phone approvals continue unchanged."); }
 }
 /** The signed operations remain on disk and are verified again at every decision. */
@@ -140,13 +156,20 @@ function commandMatches(rule: ApprovalRuleDraft, command: string): boolean {
 }
 /** Rules can only restrict a request the harness has already raised. Invalid policy
  * falls back to that ordinary approval path; Settings reports the load error. */
-export async function approvalRuleEffect(tool: string, input: unknown, context: ApprovalRuleContext | undefined, root = bridgeRoot()): Promise<"always-ask" | "deny" | undefined> {
+export async function approvalRuleEffect(tool: string, input: unknown,
+  context: ApprovalRuleContext | undefined | (() => Promise<ApprovalRuleContext | undefined>), root = bridgeRoot(),
+  knownScope: Partial<ApprovalRuleContext> = {}): Promise<"always-ask" | "deny" | undefined> {
   const command = object(input).command;
-  if (!context || typeof command !== "string") return undefined;
+  if (tool !== "Bash" || typeof command !== "string") return undefined;
   try {
     const { rules } = await readPolicy(root), now = Date.now();
-    const matches = [...rules.values()].filter(rule => rule.enabled && rule.tool === tool && (!rule.until || Date.parse(rule.until) > now)
-      && Object.entries(rule.scope).every(([key, value]) => context[key as keyof ApprovalRuleContext] === value) && commandMatches(rule, command));
+    const applicable = [...rules.values()].filter(rule => rule.enabled && rule.tool === tool && (!rule.until || Date.parse(rule.until) > now)
+      && Object.entries(knownScope).every(([key, value]) => !rule.scope[key as keyof ApprovalRuleContext] || rule.scope[key as keyof ApprovalRuleContext] === value)
+      && commandMatches(rule, command));
+    if (!applicable.length) return undefined;
+    const resolved = typeof context === "function" ? await context() : context;
+    if (!resolved) return undefined;
+    const matches = applicable.filter(rule => Object.entries(rule.scope).every(([key, value]) => resolved[key as keyof ApprovalRuleContext] === value));
     if (matches.some(rule => rule.effect === "deny")) return "deny";
     return matches.some(rule => rule.effect === "always-ask") ? "always-ask" : undefined;
   } catch { return undefined; }

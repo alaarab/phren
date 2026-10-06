@@ -1,4 +1,4 @@
-import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, request, type Server } from "node:http";
@@ -11,7 +11,17 @@ import { approvalRuleEffect, approvalRuleContext, type ApprovalRuleDraft } from 
 import { createRouteHandler, type RouteContext } from "./server-routes.js";
 import { snapshot, rpc } from "./herdr.js";
 
-const state = vi.hoisted(() => ({ home: "" }));
+const state = vi.hoisted(() => ({ home: "", spawns: [] as string[] }));
+vi.mock("node:child_process", async original => {
+  const actual = await original<typeof import("node:child_process")>();
+  const { promisify } = await import("node:util");
+  const tracked = Object.assign((...args: any[]) => {
+    state.spawns.push(args[0]); return (actual.execFile as any)(...args);
+  }, { [promisify.custom]: (...args: any[]) => {
+    state.spawns.push(args[0]); return (actual.execFile as any)[promisify.custom](...args);
+  } });
+  return { ...actual, execFile: tracked };
+});
 vi.mock("../home-paths.js", async original => ({ ...await original<object>(), homeDir: () => state.home }));
 vi.mock("./herdr.js", async original => ({ ...await original<object>(), snapshot: vi.fn(), rpc: vi.fn() }));
 const session = "aaaaaaaa-1111-4111-8111-111111111111";
@@ -24,9 +34,9 @@ function envelope(fields: object, key = phone, at = new Date().toISOString(), no
   return { payload: bytes.toString("base64"), signature: sign(null, bytes, key.privateKey).toString("base64"),
     publicKey: key.publicKey.export({ type: "spki", format: "der" }).subarray(-32).toString("base64") };
 }
-function sshKey() {
+function sshKey(raw = publicKey) {
   const size = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
-  return Buffer.concat([size(11), Buffer.from("ssh-ed25519"), size(32), publicKey]).toString("base64");
+  return Buffer.concat([size(11), Buffer.from("ssh-ed25519"), size(32), raw]).toString("base64");
 }
 
 // Policy needs POSIX private files and real local callback sockets.
@@ -112,6 +122,8 @@ describe.skipIf(process.platform === "win32")("owner approval rules through HTTP
       }
       const settings = await http("GET");
       expect(settings.status).toBe(["missing", "empty"].includes(kind) ? 200 : 409);
+      // No-rule callbacks must add no subprocesses to either legacy approval path.
+      state.spawns = [];
       // Without an active phone, preserve the legacy terminal fallback.
       expect((await callback("git status")).data).toEqual({});
       hooks.overview.renew("default");
@@ -124,7 +136,70 @@ describe.skipIf(process.platform === "win32")("owner approval rules through HTTP
       await hooks.answer(target, approval.actionId, "approve");
       expect((await held).data).toEqual({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } });
       expect(hooks.approval(target)).toBeUndefined();
+      expect(state.spawns).toEqual([]);
     });
+
+  it("rejects commandless and MCP tool rule creation, leaving conductor grants independent", async () => {
+    for (const tool of ["mcp__phren__dispatch", "dispatch", "Read", "shell"]) {
+      expect((await add(draft({ tool } as never))).status).toBe(400);
+    }
+    const { command: _command, ...commandless } = draft();
+    expect((await http("POST", undefined, envelope({ operation: "add", rule: commandless }))).status).toBe(400);
+    await add(draft({ command: "*", match: "glob" }));
+    await writeFile(path.join(root, "conductor.yaml"), "grants:\n  - scope: global\n    actions: [dispatch]\n", { mode: 0o600 });
+    state.spawns = [];
+    expect((await callback("", { tool: "mcp__phren__dispatch", input: { project: "app", prompt: "work" } })).data
+      .hookSpecificOutput.decision.behavior).toBe("allow");
+    expect(state.spawns).toEqual([]);
+  });
+
+  it("discloses the original signer relative to each phone and lets this phone revoke an agent-enrolled deny", async () => {
+    const foreignRaw = foreign.publicKey.export({ type: "spki", format: "der" }).subarray(-32);
+    await writeFile(path.join(home, ".ssh", "authorized_keys"),
+      `restrict,pty,command="sh ~/.local/share/phren/bridge/dispatch" ssh-ed25519 ${sshKey()} phren-iphone\n` +
+      `restrict,pty,command="sh ~/.local/share/phren/bridge/dispatch" ssh-ed25519 ${sshKey(foreignRaw)} phren-iphone\n`);
+    await add(draft({ effect: "always-ask" }));
+    expect((await http("POST", undefined, envelope({ operation: "add", rule: draft() }, foreign))).status).toBe(200);
+    const listed = (key: Buffer) => http("GET", "/v1/approval-rules?pairedKey=" + encodeURIComponent(key.toString("base64")));
+    const [own, agent] = (await listed(publicKey)).data.rules;
+    expect(own.matchesPairedKey).toBe(true);
+    expect(agent.matchesPairedKey).toBe(false);
+    expect(agent.signerFingerprint).toBe("SHA256:" + createHash("sha256").update(foreignRaw).digest("base64").replace(/=+$/, ""));
+    expect((await listed(foreignRaw)).data.rules.map((rule: any) => rule.matchesPairedKey)).toEqual([false, true]);
+    expect((await callback("git status")).data.hookSpecificOutput.decision.behavior).toBe("deny");
+    // Toggling with this phone must not relabel who created the rule.
+    await http("POST", undefined, envelope({ operation: "set-enabled", id: agent.id, enabled: false }));
+    expect((await listed(publicKey)).data.rules[1].matchesPairedKey).toBe(false);
+    expect((await http("DELETE", undefined, envelope({ operation: "revoke", id: agent.id }))).status).toBe(200);
+    expect((await listed(publicKey)).data.rules.map((rule: any) => rule.id)).toEqual([own.id]);
+    expect((await callback("git status")).data).toEqual({});
+  });
+
+  it.each(["disabled", "expired", "command", "session", "harness", "computer"])(
+    "skips subprocesses for an inapplicable %s rule", async kind => {
+      const rule = draft(kind === "expired" ? { until: "2000-01-01T00:00:00.000Z" }
+        : kind === "command" ? { command: "npm test" }
+        : ["session", "harness", "computer"].includes(kind) ? { scope: { project, [kind]: kind === "harness" ? "codex" : "other" } } : {});
+      await add(rule);
+      if (kind === "disabled") await http("POST", undefined, envelope({ operation: "set-enabled", id: (await list())[0].id, enabled: false }));
+      state.spawns = [];
+      expect((await callback("git status")).data).toEqual({});
+      expect(state.spawns).toEqual([]);
+    });
+
+  it("falls back promptly to ordinary approval when Git context times out", async () => {
+    await add(draft());
+    const bin = path.join(home, "bin"); await mkdir(bin);
+    await writeFile(path.join(bin, "git"), "#!/bin/sh\nexec /bin/sleep 5\n", { mode: 0o700 });
+    const previousPath = process.env.PATH;
+    process.env.PATH = bin + path.delimiter + previousPath;
+    try {
+      const start = Date.now();
+      expect((await callback("git status")).data).toEqual({});
+      expect(Date.now() - start).toBeLessThan(2000);
+      expect(hooks.approval(target)).toBeUndefined();
+    } finally { process.env.PATH = previousPath; }
+  });
 
   it("rejects the removed allow effect, including signed legacy grants", async () => {
     const legacy = { ...draft(), effect: "allow" };

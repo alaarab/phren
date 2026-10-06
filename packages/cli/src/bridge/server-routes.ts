@@ -150,7 +150,7 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
-  if (snapshot.has("hook")) result.approvalRules = { version: 2, effects: ["always-ask", "deny"], harnesses: ["claude"], events: ["PermissionRequest"], preExecution: false };
+  if (snapshot.has("hook")) result.approvalRules = { version: 2, effects: ["always-ask", "deny"], harnesses: ["claude"], events: ["PermissionRequest"], tools: ["Bash"], inputField: "command", conductorTools: false, mcpTools: false, preExecution: false };
   if (snapshot.has("tasks")) { result.taskDependencies = true; result.taskWriterSafety = true; result.taskAtomicCreate = true; result.taskAtomicSave = true; result.taskBoundLaunch = true; }
   return result;
 }
@@ -370,7 +370,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
           // Receiving side of a launched brief: what the worker's hooks reported for it.
           case "/v1/dispatch/arrival": result = { arrival: await briefArrival(briefId.parse(url.searchParams.get("id"))) ?? null }; break;
-          case "/v1/approval-rules": result = { rules: await listApprovalRules() }; break;
+          case "/v1/approval-rules": result = { rules: await listApprovalRules(undefined,
+            z.string().regex(/^[A-Za-z0-9+/]{43}=$/).optional().parse(url.searchParams.get("pairedKey") ?? undefined)) }; break;
           case "/v1/conductor/grants": result = { grants: await listNamedGrants() }; break;
           // The owner's release authority policy, which conductors read and quote in briefs.
           case "/v1/authority": {
