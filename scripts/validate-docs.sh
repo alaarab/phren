@@ -1,0 +1,89 @@
+#!/bin/bash
+# Validate that documentation stays in sync with the codebase.
+set -e
+
+ERRORS=0
+
+# 1. Check tool count in docs matches actual registrations in tools/*.ts files
+REGISTERED=$(grep -r 'server\.registerTool(' packages/cli/src/tools/*.ts | wc -l | tr -d ' ')
+DOCUMENTED=$(perl -ne 'print "$1\n" if /MCP Tools \((\d+)\)/' docs/llms-install.md | head -n 1)
+DOCUMENTED=${DOCUMENTED:-0}
+
+if [ "$REGISTERED" != "$DOCUMENTED" ]; then
+  echo "FAIL: docs/llms-install.md says $DOCUMENTED MCP tools, but tools/*.ts files have $REGISTERED registrations"
+  ERRORS=$((ERRORS + 1))
+else
+  echo "OK: Tool count matches ($REGISTERED)"
+fi
+
+# 2. Check that package.json version is not a placeholder
+VERSION=$(node -p "require('./packages/cli/package.json').version")
+if [ -z "$VERSION" ] || [ "$VERSION" = "0.0.0" ]; then
+  echo "FAIL: package.json version is missing or placeholder"
+  ERRORS=$((ERRORS + 1))
+else
+  echo "OK: package.json version is $VERSION"
+fi
+
+# 2b. @phren/agent ships version-locked with @phren/cli (release.yml publishes both)
+AGENT_VERSION=$(node -p "require('./packages/agent/package.json').version")
+if [ "$AGENT_VERSION" != "$VERSION" ]; then
+  echo "FAIL: packages/agent/package.json is $AGENT_VERSION but packages/cli is $VERSION; bump both together"
+  ERRORS=$((ERRORS + 1))
+else
+  echo "OK: @phren/agent version matches @phren/cli ($AGENT_VERSION)"
+fi
+
+# 2c. The Claude Code plugin pins the CLI it runs; the release bumps all of these together
+PLUGIN_DRIFT=$(node -e '
+  const fs = require("fs");
+  const v = process.argv[1];
+  const plugin = JSON.parse(fs.readFileSync(".claude-plugin/plugin.json", "utf8"));
+  const market = JSON.parse(fs.readFileSync(".claude-plugin/marketplace.json", "utf8"));
+  const bad = [];
+  if (plugin.version !== v) bad.push(".claude-plugin/plugin.json version " + plugin.version);
+  const entry = (market.plugins || []).find((p) => p.name === "phren");
+  if (!entry || entry.version !== v) bad.push(".claude-plugin/marketplace.json version " + (entry && entry.version));
+  if (!(plugin.mcpServers?.phren?.args || []).includes("@phren/cli@" + v)) bad.push(".claude-plugin/plugin.json mcpServers pin");
+  if (!fs.readFileSync("hooks/phren-hook.sh", "utf8").includes("PHREN_PIN=\"" + v + "\"")) bad.push("hooks/phren-hook.sh PHREN_PIN");
+  console.log(bad.join("; "));
+' "$VERSION")
+if [ -n "$PLUGIN_DRIFT" ]; then
+  echo "FAIL: Claude Code plugin is not at $VERSION: $PLUGIN_DRIFT"
+  ERRORS=$((ERRORS + 1))
+else
+  echo "OK: Claude Code plugin manifests and CLI pin match $VERSION"
+fi
+
+# 3. Verify runtime version comes from shared package metadata (not a hardcoded string)
+if grep -q 'export const VERSION' packages/cli/src/package-metadata.ts && grep -q 'package.json' packages/cli/src/package-metadata.ts && grep -q 'version: PACKAGE_VERSION' packages/cli/src/index.ts; then
+  echo "OK: runtime version is derived from shared package metadata"
+else
+  echo "FAIL: runtime version metadata may be hardcoded or disconnected from package.json"
+  ERRORS=$((ERRORS + 1))
+fi
+
+# 4. Public onboarding docs should not advertise removed enrollment flows
+PUBLIC_DOCS=("README.md" "docs/faq.md" "docs/llms-install.md" "docs/index.html")
+REMOVED_PATTERNS=("phren link" "projects add" "--from-existing")
+for doc in "${PUBLIC_DOCS[@]}"; do
+  for pattern in "${REMOVED_PATTERNS[@]}"; do
+    if grep -n -- "$pattern" "$doc" >/tmp/phren-doc-grep.txt; then
+      echo "FAIL: $doc still mentions removed onboarding flow: $pattern"
+      cat /tmp/phren-doc-grep.txt
+      ERRORS=$((ERRORS + 1))
+    fi
+  done
+done
+if [ "$ERRORS" -eq 0 ]; then
+  echo "OK: Public onboarding docs only advertise supported enrollment flows"
+fi
+
+if [ "$ERRORS" -gt 0 ]; then
+  echo ""
+  echo "$ERRORS validation error(s) found"
+  exit 1
+fi
+
+echo ""
+echo "All doc validations passed"

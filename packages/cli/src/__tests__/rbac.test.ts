@@ -1,0 +1,360 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+import { makeTempDir, initTestPhrenRoot } from "../test-helpers.js";
+import { permissionDeniedError, setAccessRoles } from "../governance/rbac.js";
+import { readProjectConfig } from "../project-config.js";
+
+function writeAccessControl(phrenPath: string, data: Record<string, unknown>): void {
+  const dir = path.join(phrenPath, ".config");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "access-control.json"), JSON.stringify(data));
+}
+
+function writeProjectYaml(phrenPath: string, project: string, yaml: string): void {
+  const dir = path.join(phrenPath, project);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "phren.project.yaml"), yaml);
+}
+
+let tmp: { path: string; cleanup: () => void };
+let phrenPath: string;
+const origActor = process.env.PHREN_ACTOR;
+
+beforeEach(() => {
+  tmp = makeTempDir("rbac-test-");
+  phrenPath = tmp.path;
+  initTestPhrenRoot(phrenPath);
+  delete process.env.PHREN_ACTOR;
+});
+
+afterEach(() => {
+  if (origActor !== undefined) {
+    process.env.PHREN_ACTOR = origActor;
+  } else {
+    delete process.env.PHREN_ACTOR;
+  }
+  tmp.cleanup();
+});
+
+// ── Open mode (no access-control.json) ───────────────────────────────────────
+
+describe("open mode (no access-control.json)", () => {
+  it("allows all actions when no ACL file exists", () => {
+    expect(permissionDeniedError(phrenPath, "add_finding")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "manage_config")).toBeNull();
+  });
+
+  it("allows all actions even with PHREN_ACTOR set when no ACL exists", () => {
+    process.env.PHREN_ACTOR = "alice";
+    expect(permissionDeniedError(phrenPath, "add_finding")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "manage_config")).toBeNull();
+  });
+});
+
+// ── readGlobalAccessControl edge cases ───────────────────────────────────────
+
+describe("readGlobalAccessControl edge cases", () => {
+  it("treats invalid JSON as open mode", () => {
+    const dir = path.join(phrenPath, ".config");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "access-control.json"), "NOT JSON");
+    expect(permissionDeniedError(phrenPath, "add_finding")).toBeNull();
+  });
+
+  it("treats array JSON as open mode", () => {
+    const dir = path.join(phrenPath, ".config");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "access-control.json"), "[]");
+    expect(permissionDeniedError(phrenPath, "add_finding")).toBeNull();
+  });
+});
+
+// ── setAccessRoles (shared writer for CLI + MCP set_config) ──────────────────
+
+describe("setAccessRoles", () => {
+  function readGlobal(): Record<string, unknown> {
+    const file = path.join(phrenPath, ".config", "access-control.json");
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  }
+
+  it("writes global role lists to .config/access-control.json", () => {
+    const written = setAccessRoles(phrenPath, { admins: ["alice"], contributors: ["bob"] });
+    expect(written.admins).toEqual(["alice"]);
+    expect(written.contributors).toEqual(["bob"]);
+    expect(readGlobal()).toMatchObject({ admins: ["alice"], contributors: ["bob"] });
+  });
+
+  it("merges with existing global roles, replacing only the provided keys", () => {
+    setAccessRoles(phrenPath, { admins: ["alice"], readers: ["carol"] });
+    // Once an ACL exists, editing it requires an admin actor — same rule as
+    // every other action under a configured ACL.
+    process.env.PHREN_ACTOR = "alice";
+    setAccessRoles(phrenPath, { admins: ["dave"] });
+    const stored = readGlobal();
+    expect(stored.admins).toEqual(["dave"]);
+    expect(stored.readers).toEqual(["carol"]);
+  });
+
+  it("drops empty and non-string entries", () => {
+    const written = setAccessRoles(phrenPath, { admins: ["alice", "", "  "] as string[] });
+    expect(written.admins).toEqual(["alice"]);
+  });
+
+  it("writes per-project roles to phren.project.yaml without touching global", () => {
+    writeProjectYaml(phrenPath, "demo", "version: 1\n");
+    const written = setAccessRoles(phrenPath, { admins: ["proj-admin"] }, "demo");
+    expect(written.admins).toEqual(["proj-admin"]);
+    expect(readProjectConfig(phrenPath, "demo").access?.admins).toEqual(["proj-admin"]);
+    expect(fs.existsSync(path.join(phrenPath, ".config", "access-control.json"))).toBe(false);
+  });
+
+  it("the written global roles take effect for permission checks", () => {
+    setAccessRoles(phrenPath, { admins: ["alice"] });
+    process.env.PHREN_ACTOR = "alice";
+    expect(permissionDeniedError(phrenPath, "manage_config")).toBeNull();
+    process.env.PHREN_ACTOR = "mallory";
+    expect(permissionDeniedError(phrenPath, "add_finding")).not.toBeNull();
+  });
+});
+
+// ── Admin role ───────────────────────────────────────────────────────────────
+
+describe("admin role", () => {
+  beforeEach(() => {
+    writeAccessControl(phrenPath, {
+      admins: ["admin-user"],
+      contributors: ["contrib-user"],
+      readers: ["reader-user"],
+    });
+  });
+
+  it("allows admins to perform all actions", () => {
+    process.env.PHREN_ACTOR = "admin-user";
+    expect(permissionDeniedError(phrenPath, "add_finding")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "manage_config")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "remove_task")).toBeNull();
+  });
+});
+
+// ── Contributor role ─────────────────────────────────────────────────────────
+
+describe("contributor role", () => {
+  beforeEach(() => {
+    writeAccessControl(phrenPath, {
+      admins: ["admin-user"],
+      contributors: ["contrib-user"],
+      readers: ["reader-user"],
+    });
+  });
+
+  it("allows contributors to add findings and tasks", () => {
+    process.env.PHREN_ACTOR = "contrib-user";
+    expect(permissionDeniedError(phrenPath, "add_finding")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "add_task")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "complete_task")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "edit_finding")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "add_note")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "edit_note")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "remove_note")).toBeNull();
+    expect(permissionDeniedError(phrenPath, "promote_note")).toBeNull();
+  });
+
+  it("blocks contributors from admin-only actions", () => {
+    process.env.PHREN_ACTOR = "contrib-user";
+    const err = permissionDeniedError(phrenPath, "manage_config");
+    expect(err).not.toBeNull();
+    expect(err).toContain("contributor");
+    expect(err).toContain("manage_config");
+  });
+});
+
+// ── Reader role ──────────────────────────────────────────────────────────────
+
+describe("reader role", () => {
+  beforeEach(() => {
+    writeAccessControl(phrenPath, {
+      admins: ["admin-user"],
+      contributors: ["contrib-user"],
+      readers: ["reader-user"],
+    });
+  });
+
+  it("blocks readers from all mutating actions", () => {
+    process.env.PHREN_ACTOR = "reader-user";
+    expect(permissionDeniedError(phrenPath, "add_finding")).not.toBeNull();
+    expect(permissionDeniedError(phrenPath, "remove_finding")).not.toBeNull();
+    expect(permissionDeniedError(phrenPath, "add_task")).not.toBeNull();
+    expect(permissionDeniedError(phrenPath, "add_note")).not.toBeNull();
+    expect(permissionDeniedError(phrenPath, "manage_config")).not.toBeNull();
+  });
+});
+
+// ── Unknown actor ────────────────────────────────────────────────────────────
+
+describe("unknown actor", () => {
+  it("denies access to unknown actors when ACL is configured", () => {
+    writeAccessControl(phrenPath, {
+      admins: ["admin-user"],
+      contributors: ["contrib-user"],
+    });
+    process.env.PHREN_ACTOR = "stranger";
+    const err = permissionDeniedError(phrenPath, "add_finding");
+    expect(err).not.toBeNull();
+    expect(err).toContain("stranger");
+    expect(err).toContain("not listed");
+  });
+});
+
+// ── No PHREN_ACTOR set ───────────────────────────────────────────────────────
+
+describe("no PHREN_ACTOR set", () => {
+  it("denies access when ACL is configured but PHREN_ACTOR is unset", () => {
+    writeAccessControl(phrenPath, {
+      admins: ["admin-user"],
+    });
+    delete process.env.PHREN_ACTOR;
+    const err = permissionDeniedError(phrenPath, "add_finding");
+    expect(err).not.toBeNull();
+    expect(err).toContain("PHREN_ACTOR");
+  });
+
+  it("allows access when ACL has empty role lists (open mode)", () => {
+    writeAccessControl(phrenPath, {
+      admins: [],
+      contributors: [],
+      readers: [],
+    });
+    delete process.env.PHREN_ACTOR;
+    expect(permissionDeniedError(phrenPath, "add_finding")).toBeNull();
+  });
+});
+
+// ── Privilege escalation via the ACL writer ──────────────────────────────────
+//
+// `manage_config` was declared admin-only in the role table and then never
+// checked anywhere, while setAccessRoles — reachable from MCP `set_config`,
+// the web UI's POST /api/settings/access, and `phren config access set` —
+// wrote the ACL unguarded. Any actor the ACL denied could add itself to
+// `admins` and undo every other check. These tests exist so that cannot
+// silently come back.
+
+describe("ACL self-escalation", () => {
+  function storedAdmins(): unknown {
+    const file = path.join(phrenPath, ".config", "access-control.json");
+    return JSON.parse(fs.readFileSync(file, "utf8")).admins;
+  }
+
+  beforeEach(() => {
+    writeAccessControl(phrenPath, {
+      admins: ["admin-user"],
+      contributors: ["contrib-user"],
+      readers: ["reader-user"],
+    });
+  });
+
+  it("blocks a contributor from writing itself into admins", () => {
+    process.env.PHREN_ACTOR = "contrib-user";
+    expect(() => setAccessRoles(phrenPath, { admins: ["contrib-user"] })).toThrow(/Permission denied/);
+    expect(storedAdmins()).toEqual(["admin-user"]);
+  });
+
+  it("blocks a reader from rewriting the ACL", () => {
+    process.env.PHREN_ACTOR = "reader-user";
+    expect(() => setAccessRoles(phrenPath, { admins: ["reader-user"] })).toThrow(/Permission denied/);
+    expect(storedAdmins()).toEqual(["admin-user"]);
+  });
+
+  it("blocks an actor that is not listed at all", () => {
+    process.env.PHREN_ACTOR = "mallory";
+    expect(() => setAccessRoles(phrenPath, { admins: ["mallory"] })).toThrow(/not listed/);
+    expect(storedAdmins()).toEqual(["admin-user"]);
+  });
+
+  it("blocks an unset actor once an ACL is configured", () => {
+    delete process.env.PHREN_ACTOR;
+    expect(() => setAccessRoles(phrenPath, { admins: ["nobody"] })).toThrow(/PHREN_ACTOR/);
+    expect(storedAdmins()).toEqual(["admin-user"]);
+  });
+
+  it("still lets an admin edit the ACL", () => {
+    process.env.PHREN_ACTOR = "admin-user";
+    const written = setAccessRoles(phrenPath, { admins: ["admin-user", "second-admin"] });
+    expect(written.admins).toEqual(["admin-user", "second-admin"]);
+  });
+
+  it("blocks escalation through the per-project ACL too", () => {
+    writeProjectYaml(phrenPath, "myproject", [
+      "access:",
+      "  contributors:",
+      "    - contrib-user",
+    ].join("\n"));
+    process.env.PHREN_ACTOR = "contrib-user";
+    expect(() => setAccessRoles(phrenPath, { admins: ["contrib-user"] }, "myproject")).toThrow(/Permission denied/);
+    expect(readProjectConfig(phrenPath, "myproject").access?.admins ?? []).toEqual([]);
+  });
+});
+
+describe("ACL bootstrap stays possible", () => {
+  it("allows the first write when no ACL exists anywhere (open mode)", () => {
+    delete process.env.PHREN_ACTOR;
+    const written = setAccessRoles(phrenPath, { admins: ["first-admin"] });
+    expect(written.admins).toEqual(["first-admin"]);
+  });
+
+  it("allows a write when the ACL exists but every role list is empty", () => {
+    writeAccessControl(phrenPath, { admins: [], contributors: [], readers: [] });
+    delete process.env.PHREN_ACTOR;
+    const written = setAccessRoles(phrenPath, { admins: ["first-admin"] });
+    expect(written.admins).toEqual(["first-admin"]);
+  });
+
+  it("allows the first per-project write when only a global ACL names the actor", () => {
+    writeAccessControl(phrenPath, { admins: ["admin-user"] });
+    writeProjectYaml(phrenPath, "myproject", "version: 1\n");
+    process.env.PHREN_ACTOR = "admin-user";
+    const written = setAccessRoles(phrenPath, { contributors: ["bob"] }, "myproject");
+    expect(written.contributors).toEqual(["bob"]);
+  });
+});
+
+// ── mergeAccessControl (project ACL overrides global) ────────────────────────
+
+describe("project-level ACL override", () => {
+  it("merges project admins with global admins", () => {
+    writeAccessControl(phrenPath, {
+      admins: ["global-admin"],
+      contributors: [],
+      readers: [],
+    });
+    writeProjectYaml(phrenPath, "myproject", [
+      "access:",
+      "  admins:",
+      "    - project-admin",
+    ].join("\n"));
+
+    process.env.PHREN_ACTOR = "project-admin";
+    expect(permissionDeniedError(phrenPath, "manage_config", "myproject")).toBeNull();
+
+    process.env.PHREN_ACTOR = "global-admin";
+    expect(permissionDeniedError(phrenPath, "manage_config", "myproject")).toBeNull();
+  });
+
+  it("project contributors can write even if not in global list", () => {
+    writeAccessControl(phrenPath, {
+      admins: ["admin"],
+      contributors: [],
+      readers: [],
+    });
+    writeProjectYaml(phrenPath, "myproject", [
+      "access:",
+      "  contributors:",
+      "    - project-contrib",
+    ].join("\n"));
+
+    process.env.PHREN_ACTOR = "project-contrib";
+    expect(permissionDeniedError(phrenPath, "add_finding", "myproject")).toBeNull();
+    // Still blocked from admin-only
+    expect(permissionDeniedError(phrenPath, "manage_config", "myproject")).not.toBeNull();
+  });
+});

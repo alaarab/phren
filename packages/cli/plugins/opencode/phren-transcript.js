@@ -1,0 +1,542 @@
+// Installed by Phren Hook and replaced on every update. Copy it under another name to customize.
+import { request } from "node:http";
+import { execFileSync } from "node:child_process";
+import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
+
+const PHREN_STORE = "__PHREN_STORE__";
+const FLUSH_MS = 250;
+const MAX_TOOL_OUTPUT = 200_000;
+// OpenCode's read tool returns a picture as an inline data URL on the tool
+// part (`state.attachments`). The Hook serves images up to 8 MiB; the session
+// budget bounds what every flush rewrites.
+const MAX_IMAGE_DATA = 4_000_000;
+const MAX_SESSION_IMAGE_DATA = 24_000_000;
+const IMAGE_DATA_URL = /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/=]+)$/;
+const STOP_REASONS = { stop: "end_turn", "tool-calls": "tool_use", length: "max_tokens" };
+const OPENCODE_SESSION = /^ses_[0-9A-Za-z]{1,64}$/;
+const APPROVAL_POLL_MS = 200;
+const APPROVAL_DEADLINE_MS = 50_000;
+// An ask relayed from its event blocks nothing: the TUI keeps its own prompt,
+// so the phone's card can wait as long as the ask does.
+const RELAYED_DEADLINE_MS = 30 * 60_000;
+
+function storeRoot() {
+  if (PHREN_STORE && !PHREN_STORE.startsWith("__")) return PHREN_STORE;
+  const configured = process.env.PHREN_PATH?.trim();
+  if (!configured) return path.join(homedir(), ".phren");
+  const expanded = configured === "~" ? homedir() : configured.startsWith("~/") ? path.join(homedir(), configured.slice(2)) : configured;
+  return path.resolve(expanded);
+}
+
+function text(value) {
+  return typeof value === "string" ? value : "";
+}
+
+function approvalDirectory() {
+  return path.join(storeRoot(), ".runtime", "approvals");
+}
+
+function fanoutDirectory() {
+  const configured = process.env.PHREN_FANOUT_DIR?.trim();
+  if (configured) return path.resolve(configured);
+  return path.join(storeRoot(), ".runtime", "agent-fanouts", text(process.env.PHREN_FANOUT_JOB));
+}
+
+function fanoutPatterns(input) {
+  const value = input?.pattern;
+  if (Array.isArray(value)) return value.filter(entry => typeof entry === "string" && entry);
+  return typeof value === "string" && value ? [value] : [];
+}
+
+/** The worktree's grandparent is the scratch root the fan-out launcher owns:
+ * external reads and writes are allowed only inside it. */
+function underScratchRoot(value) {
+  const scratch = path.dirname(path.dirname(path.resolve(process.cwd())));
+  if (scratch === path.parse(scratch).root) return false;
+  const resolved = path.resolve(scratch, value);
+  return resolved === scratch || resolved.startsWith(scratch + path.sep);
+}
+
+function under(parent, value) {
+  if (!parent || parent === path.parse(parent).root) return false;
+  const root = path.resolve(parent), resolved = path.resolve(root, value);
+  return resolved === root || resolved.startsWith(root + path.sep);
+}
+
+/** Beyond the scratch root, a worker legitimately reads its own machine: the
+ * node_modules its worktree links into the main checkout, the store it was
+ * briefed from, the toolchains a build shells out to, and the temporary
+ * directories those builds write. Everything outside this set is refused. */
+function fanoutReadable(value) {
+  if (underScratchRoot(value)) return true;
+  const home = process.env.HOME || "";
+  const roots = [home, storeRoot(), "/tmp", "/private/tmp", "/var/folders", "/private/var/folders",
+                 "/Applications/Xcode.app", "/Library/Developer"];
+  return roots.some(root => under(root, value));
+}
+
+/** A headless fan-out worker may edit, run commands and fetch, and continue
+ * when OpenCode's own loop detector asks (the launcher's watchdog stops a real
+ * loop and says why, which is a clearer failure than a refused permission).
+ * Anything else is refused outright. */
+function fanoutAllowed(input) {
+  const kind = text(input?.type);
+  if (kind === "edit" || kind === "bash" || kind === "webfetch" || kind === "doom_loop") return true;
+  if (kind !== "external_directory") return false;
+  const patterns = fanoutPatterns(input);
+  return patterns.length > 0 && patterns.every(fanoutReadable);
+}
+
+function writeBlocked(input) {
+  try {
+    const directory = fanoutDirectory();
+    mkdirSync(directory, { recursive: true });
+    writeJsonAtomic(path.join(directory, "blocked.json"), {
+      type: text(input?.type) || "action",
+      pattern: fanoutPatterns(input).join(", "),
+      message: permissionMessage(input),
+      at: new Date().toISOString(),
+    });
+  } catch {}
+}
+
+function approvalPaths(sessionID) {
+  const base = path.join(approvalDirectory(), `opencode-${sessionID}`);
+  return { request: `${base}.request.json`, answer: `${base}.answer.json` };
+}
+
+function writeJsonAtomic(file, value) {
+  const staging = `${file}.${process.pid}.tmp`;
+  writeFileSync(staging, JSON.stringify(value), { mode: 0o600 });
+  renameSync(staging, file);
+}
+
+function removeFile(file) {
+  try { unlinkSync(file); } catch {}
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Started by Phren Hook with a port of its own (`opencode --port N`, with
+ * PHREN_OPENCODE_PORT=N and a server password in its environment): the Hook
+ * lists and answers this process's permission asks over its HTTP API, so no
+ * request file is written for them. The port must be on this process's own
+ * command line, so an OpenCode started by hand in the same shell keeps the
+ * file path. Plugins run in a worker whose `process.argv` is the worker's,
+ * so the command line comes from `ps`, once. */
+let served;
+function servedByHook() {
+  if (served !== undefined) return served;
+  const port = text(process.env.PHREN_OPENCODE_PORT);
+  served = false;
+  if (!/^\d{1,5}$/.test(port) || !text(process.env.OPENCODE_SERVER_PASSWORD)) return served;
+  try {
+    const command = execFileSync("ps", ["-ww", "-o", "command=", "-p", String(process.pid)], { encoding: "utf8", timeout: 2_000 });
+    served = new RegExp(`(?:^|\\s)--port(?:\\s+|=)${port}(?:\\s|$)`).test(command.trim());
+  } catch {}
+  return served;
+}
+
+function setStatus(output, status) {
+  if (output && typeof output === "object") output.status = status;
+}
+
+function permissionMessage(input) {
+  const type = text(input?.type) || "action";
+  const pattern = Array.isArray(input?.pattern)
+    ? input.pattern.filter(value => typeof value === "string").join(", ")
+    : text(input?.pattern);
+  const metadata = input?.metadata && typeof input.metadata === "object" ? input.metadata : {};
+  const detail = [pattern, text(metadata.command), text(metadata.description), text(metadata.path), text(metadata.url)].find(value => value);
+  return (detail ? `${type}: ${detail}` : `opencode asks to use ${type}.`).slice(0, 2000);
+}
+
+function toolOutput(state) {
+  if (!state || typeof state !== "object") return "";
+  const output = state.output ?? state.metadata?.output ?? state.result ?? "";
+  const value = typeof output === "string" ? output : JSON.stringify(output ?? "");
+  return value.length > MAX_TOOL_OUTPUT ? value.slice(0, MAX_TOOL_OUTPUT) : value;
+}
+
+function blocksFor(message) {
+  const blocks = [];
+  for (const id of message.partOrder) {
+    const part = message.parts.get(id);
+    if (!part || typeof part !== "object") continue;
+    if (part.type === "text" && typeof part.text === "string" && part.text.length) {
+      blocks.push({ type: "text", text: part.text });
+    } else if (part.type === "tool" && typeof part.callID === "string") {
+      blocks.push({ type: "tool_use", id: part.callID, name: text(part.tool) || "tool", input: part.state?.input ?? {} });
+    }
+  }
+  return blocks;
+}
+
+/** A tool's picture attachments as Anthropic-shaped image blocks, the form the
+ * Hook's image route and the phone already read from Claude Code. Only inline
+ * data URLs are carried; an image over the caps becomes a text marker. */
+function toolImages(state, budget) {
+  const blocks = [];
+  for (const attachment of Array.isArray(state?.attachments) ? state.attachments : []) {
+    if (attachment?.type !== "file" || typeof attachment.url !== "string") continue;
+    const match = IMAGE_DATA_URL.exec(attachment.url);
+    if (!match) continue;
+    const data = match[2];
+    if (data.length > MAX_IMAGE_DATA || data.length > budget.remaining) {
+      blocks.push({ type: "text", text: "[Image not included: too large to show on the phone]" });
+      continue;
+    }
+    budget.remaining -= data.length;
+    blocks.push({ type: "image", source: { type: "base64", media_type: match[1], data } });
+  }
+  return blocks;
+}
+
+function toolResults(message, budget) {
+  const results = [];
+  for (const id of message.partOrder) {
+    const part = message.parts.get(id);
+    if (!part || part.type !== "tool" || typeof part.callID !== "string") continue;
+    const status = part.state?.status;
+    if (status !== "completed" && status !== "error") continue;
+    const output = toolOutput(part.state), images = toolImages(part.state, budget);
+    const content = images.length ? [{ type: "text", text: output }, ...images] : output;
+    results.push({ type: "tool_result", tool_use_id: part.callID, content, is_error: status === "error" });
+  }
+  return results;
+}
+
+function linesFor(session) {
+  const messages = session.order
+    .map(id => session.messages.get(id))
+    .filter(Boolean)
+    .sort((a, b) => (a.info?.time?.created ?? 0) - (b.info?.time?.created ?? 0) || String(a.info?.id).localeCompare(String(b.info?.id)));
+  const lines = [];
+  const budget = { remaining: MAX_SESSION_IMAGE_DATA };
+  let seq = 0;
+  const emit = (type, data, created) => {
+    lines.push(JSON.stringify({ seq: seq++, time: new Date(created || Date.now()).toISOString(), type, data }));
+  };
+  for (const message of messages) {
+    const info = message.info ?? {};
+    if (info.role === "user") {
+      const blocks = blocksFor(message);
+      if (blocks.length) emit("user/message", { source: "user", message: { role: "user", content: blocks } }, info.time?.created);
+    } else if (info.role === "assistant") {
+      const complete = Boolean(info.time?.completed || info.finish);
+      const blocks = blocksFor(message).filter(block => complete || block.type !== "text");
+      const data = { stop_reason: STOP_REASONS[info.finish] || info.finish || "end_turn", message: { role: "assistant", content: blocks } };
+      if (info.tokens && (typeof info.tokens.input === "number" || typeof info.tokens.output === "number")) {
+        data.usage = { input_tokens: info.tokens.input ?? 0, output_tokens: info.tokens.output ?? 0 };
+      }
+      if (blocks.length) emit("assistant/message", data, info.time?.created);
+      const results = toolResults(message, budget);
+      if (results.length) emit("tool/results", { message: { role: "user", content: results } }, info.time?.updated ?? info.time?.created);
+    }
+  }
+  return lines;
+}
+
+/** Which conversation this OpenCode process is showing, by PID: the Hook
+ * reads it to bind a pane when Herdr reports no session for it. */
+const pidBindingFile = () => path.join(storeRoot(), ".runtime", "sessions", `opencode-pid-${process.pid}.json`);
+function writePidBinding(sessionID) {
+  mkdirSync(path.dirname(pidBindingFile()), { recursive: true });
+  writeJsonAtomic(pidBindingFile(), { session: sessionID, at: new Date().toISOString() });
+}
+
+/** What this OpenCode process is doing, by PID: "working", "idle" or
+ * "blocked" (a permission waits for an answer). The Hook reads it for a pane
+ * whose terminal does not watch its agents (tmux); Herdr has its own. */
+const statusFile = () => path.join(storeRoot(), ".runtime", "sessions", `opencode-status-${process.pid}.json`);
+
+/** Context reads never hold up a model request when the Hook is unavailable. */
+function conductorContext(session) {
+  return new Promise(resolve => {
+    const socketPath = path.join(process.env.PHREN_BRIDGE_HOME || path.join(homedir(), ".local/share/phren/bridge"), "agent.sock");
+    const data = JSON.stringify({ pid: process.pid, session });
+    const req = request({ socketPath, path: "/conductor-context", method: "POST",
+      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, res => {
+      let body = "";
+      res.on("data", chunk => { body += chunk; if (body.length > 16_384) req.destroy(); });
+      res.on("end", () => {
+        try { const value = JSON.parse(body); finish(res.statusCode === 200 && typeof value.context === "string" ? value.context : undefined); }
+        catch { finish(); }
+      });
+      res.on("error", () => finish());
+    });
+    const timer = setTimeout(() => { req.destroy(); finish(); }, 1_000);
+    function finish(value) { clearTimeout(timer); resolve(value); }
+    req.on("error", () => finish()); req.end(data);
+  });
+}
+
+export const PhrenTranscriptPlugin = async input => {
+  // The process's own API, bound to its in-process server (no port needed).
+  const client = input?.client;
+  const sessions = new Map();
+  // Subagent sessions run inside the same process; the pane shows their parent.
+  const children = new Set();
+  let boundSession;
+  // A reused PID must not inherit an old process's conversation or state.
+  try { removeFile(pidBindingFile()); removeFile(statusFile()); } catch {}
+  let recordedStatus;
+  // Permission asks still open, by id: while any is, the process is blocked.
+  const asking = new Set();
+  // The session's last turn: when it went busy, and when it went idle after
+  // that. Dispatch returns read these as the turn's start and Stop.
+  let turn = {};
+  const recordStatus = (status, sessionID) => {
+    // A fan-out worker runs headless, in no pane.
+    if (process.env.PHREN_FANOUT_JOB) return;
+    const next = asking.size && status === "working" ? "blocked" : status;
+    if (next === recordedStatus) return;
+    try {
+      const at = new Date().toISOString();
+      if (sessionID && turn.session !== sessionID) turn = { session: sessionID };
+      if (next !== "idle" && (recordedStatus === undefined || recordedStatus === "idle")) { turn.busyAt = at; delete turn.idleAt; }
+      else if (next === "idle" && turn.busyAt) turn.idleAt = at;
+      mkdirSync(path.dirname(statusFile()), { recursive: true });
+      writeJsonAtomic(statusFile(), { status: next, ...(sessionID ? { session: sessionID } : {}), at,
+        ...(turn.session === sessionID && turn.busyAt ? { busyAt: turn.busyAt } : {}), ...(turn.session === sessionID && turn.idleAt ? { idleAt: turn.idleAt } : {}) });
+      recordedStatus = next;
+    } catch {}
+  };
+  const permissionId = properties => text(properties?.permissionID) || text(properties?.requestID) || text(properties?.id);
+  const timers = new Map();
+  const written = new Map();
+  const pendingApprovals = new Set();
+  // Asks the permission.ask hook took (OpenCode before 1.18), and asks relayed
+  // from their event, by id; `done` once the terminal answered one.
+  const hookAsks = new Set();
+  const relayed = new Map();
+
+  /** OpenCode 1.18 never calls the permission.ask hook: its TUI draws the ask
+   * from the `permission.asked` event. For an OpenCode started by hand the ask
+   * goes to the phone through the same request file, and the phone's answer
+   * is replied through this process's own API. Whichever answers first wins;
+   * an answer in the terminal (`permission.replied`) withdraws the card. */
+  const relayAsk = async ask => {
+    const id = text(ask?.id), sessionID = text(ask?.sessionID);
+    if (process.env.PHREN_FANOUT_JOB || !id || hookAsks.has(id) || relayed.has(id) || !OPENCODE_SESSION.test(sessionID)
+      || typeof client?.postSessionIdPermissionsPermissionId !== "function" || servedByHook() || pendingApprovals.has(sessionID)) return;
+    const shown = { type: text(ask.permission) || text(ask.type), pattern: Array.isArray(ask.patterns) ? ask.patterns : ask.pattern,
+      metadata: ask.metadata, title: ask.title };
+    const state = { done: false };
+    relayed.set(id, state); pendingApprovals.add(sessionID);
+    const { request, answer } = approvalPaths(sessionID);
+    try {
+      mkdirSync(approvalDirectory(), { recursive: true });
+      removeFile(answer);
+      const created = Date.now();
+      writeJsonAtomic(request, { id, sessionID, type: shown.type || "action",
+        title: text(shown.title) || `Allow ${shown.type || "action"}?`, message: permissionMessage(shown),
+        createdAt: new Date(created).toISOString(), expiresAt: new Date(created + RELAYED_DEADLINE_MS).toISOString() });
+      let decision;
+      while (!state.done && Date.now() < created + RELAYED_DEADLINE_MS) {
+        await sleep(APPROVAL_POLL_MS);
+        try {
+          const info = lstatSync(answer);
+          if (!info.isFile() || info.size > 65_536) continue;
+          const value = JSON.parse(readFileSync(answer, "utf8"));
+          if (value && value.id === id && (value.decision === "approve" || value.decision === "deny" || value.decision === "always")) { decision = value.decision; break; }
+        } catch {}
+      }
+      if (decision && !state.done) {
+        await client.postSessionIdPermissionsPermissionId({ path: { id: sessionID, permissionID: id },
+          body: { response: decision === "approve" ? "once" : decision === "always" ? "always" : "reject" } });
+      }
+    } catch {} finally {
+      removeFile(answer); removeFile(request);
+      pendingApprovals.delete(sessionID); relayed.delete(id);
+    }
+  };
+
+  const sessionState = sessionID => {
+    let state = sessions.get(sessionID);
+    if (!state) { state = { messages: new Map(), order: [], idle: false }; sessions.set(sessionID, state); }
+    return state;
+  };
+
+  const messageState = (sessionID, messageID) => {
+    const state = sessionState(sessionID);
+    let message = state.messages.get(messageID);
+    if (!message) { message = { info: { id: messageID }, parts: new Map(), partOrder: [] }; state.messages.set(messageID, message); state.order.push(messageID); }
+    return message;
+  };
+
+  const flush = sessionID => {
+    const state = sessions.get(sessionID);
+    if (!state) return;
+    const body = linesFor(state);
+    const content = body.length ? body.join("\n") + "\n" : "";
+    const directory = path.join(storeRoot(), ".runtime", "sessions");
+    mkdirSync(directory, { recursive: true });
+    const file = path.join(directory, `opencode-${sessionID}.events.jsonl`);
+    const messages = state.order.map(id => state.messages.get(id));
+    const latest = messages.at(-1), info = latest?.info;
+    const user = messages.findLast(message => message.info?.role === "user");
+    const preview = !state.idle && info?.role === "assistant" && !info.time?.completed && !info.finish
+      ? blocksFor(latest).filter(block => block.type === "text").map(block => block.text).join("\n").slice(0, 32_768) : "";
+    if (preview && user?.info.time?.created) writeJsonAtomic(file + ".preview.json", {
+      turnStartedAt: new Date(user.info.time.created).toISOString(), text: preview,
+    });
+    else removeFile(file + ".preview.json");
+    if (written.get(sessionID) === content) return;
+    const staging = `${file}.${process.pid}.tmp`;
+    writeFileSync(staging, content, { mode: 0o600 });
+    renameSync(staging, file);
+    written.set(sessionID, content);
+  };
+
+  const schedule = sessionID => {
+    if (!sessionID || timers.has(sessionID)) return;
+    timers.set(sessionID, setTimeout(() => {
+      timers.delete(sessionID);
+      try { flush(sessionID); } catch {}
+    }, FLUSH_MS));
+  };
+
+  const rememberInfo = (sessionID, info) => {
+    if (!info || typeof info.id !== "string") return;
+    const message = messageState(sessionID, info.id);
+    message.info = { ...message.info, ...info };
+    if (info.role === "user") sessionState(sessionID).idle = false;
+    schedule(sessionID);
+  };
+
+  const rememberPart = (sessionID, messageID, part) => {
+    if (!part || typeof part.id !== "string" || typeof messageID !== "string") return;
+    const message = messageState(sessionID, messageID);
+    if (!message.parts.has(part.id)) message.partOrder.push(part.id);
+    message.parts.set(part.id, part);
+    schedule(sessionID);
+  };
+
+  return {
+    "experimental.chat.system.transform": async (input, output) => {
+      const sessionID = text(input?.sessionID);
+      if (process.env.PHREN_FANOUT_JOB || !OPENCODE_SESSION.test(sessionID) || sessionID !== boundSession || children.has(sessionID) || !Array.isArray(output?.system)) return;
+      const context = await conductorContext(sessionID);
+      if (context) output.system.push(context);
+    },
+    "chat.message": async (input, output) => {
+      if (!OPENCODE_SESSION.test(text(input?.sessionID)) || !output?.message) return;
+      if (!process.env.PHREN_FANOUT_JOB && !children.has(input.sessionID) && boundSession !== input.sessionID) {
+        try { writePidBinding(input.sessionID); boundSession = input.sessionID; } catch {}
+      }
+      rememberInfo(input.sessionID, output.message);
+      for (const part of output.parts ?? []) rememberPart(input.sessionID, output.message.id, part);
+      if (!children.has(input.sessionID)) recordStatus("working", input.sessionID);
+    },
+    "permission.ask": async (input, output) => {
+      // A fan-out worker runs headless in its own worktree with nobody watching
+      // the phone's approval queue, so edits, commands and fetches inside that
+      // worktree are granted here and anything else is refused outright rather
+      // than waiting 50 seconds for an answer that never comes.
+      if (process.env.PHREN_FANOUT_JOB) {
+        if (fanoutAllowed(input)) { setStatus(output, "allow"); return; }
+        // A worker the launcher drives through `opencode serve` relays the
+        // ask to the phone and resumes on the owner's answer.
+        if (process.env.PHREN_FANOUT_APPROVALS === "1") { setStatus(output, "ask"); return; }
+        setStatus(output, "deny");
+        // A denied permission aborts the turn; record what was refused so the
+        // Hook can report the worker as blocked rather than finished.
+        writeBlocked(input);
+        return;
+      }
+      let request, answer, pendingSession, decision;
+      // The ask blocks the process until it is answered: here from the
+      // phone, or in the terminal (permission.replied below).
+      const askId = text(input?.id);
+      if (askId) { hookAsks.add(askId); asking.add(askId); recordStatus("blocked", text(input?.sessionID)); }
+      try {
+        const sessionID = text(input?.sessionID), id = text(input?.id);
+        if (!OPENCODE_SESSION.test(sessionID) || !id || servedByHook()) { setStatus(output, "ask"); return; }
+        // A second request for this session belongs in the terminal until
+        // the existing phone request has finished.
+        if (pendingApprovals.has(sessionID)) { setStatus(output, "ask"); return; }
+        pendingApprovals.add(sessionID);
+        pendingSession = sessionID;
+        const paths = approvalPaths(sessionID);
+        request = paths.request; answer = paths.answer;
+        mkdirSync(approvalDirectory(), { recursive: true });
+        removeFile(answer);
+        const created = Date.now();
+        writeJsonAtomic(request, { id, sessionID, type: text(input.type) || "action",
+          title: text(input.title) || `Allow ${text(input.type) || "action"}?`, message: permissionMessage(input),
+          createdAt: new Date(created).toISOString(), expiresAt: new Date(created + APPROVAL_DEADLINE_MS).toISOString() });
+        const deadline = created + APPROVAL_DEADLINE_MS;
+        while (Date.now() < deadline) {
+          await sleep(APPROVAL_POLL_MS);
+          try {
+            const info = lstatSync(answer);
+            if (!info.isFile() || info.size > 65_536) continue;
+            const value = JSON.parse(readFileSync(answer, "utf8"));
+            if (value && value.id === id) { decision = value.decision; break; }
+          } catch {}
+        }
+        setStatus(output, decision === "approve" || decision === "always" ? "allow" : decision === "deny" ? "deny" : "ask");
+      } catch {
+        setStatus(output, "ask");
+      } finally {
+        if (answer) removeFile(answer);
+        if (request) removeFile(request);
+        if (pendingSession) pendingApprovals.delete(pendingSession);
+        // Answered from the phone: back to work. Otherwise the terminal asks.
+        if (askId && (decision === "approve" || decision === "deny" || decision === "always")) { asking.delete(askId); recordStatus("working", pendingSession); }
+        if (askId) hookAsks.delete(askId);
+      }
+    },
+    event: async ({ event }) => {
+      const properties = event?.properties ?? {};
+      if ((event?.type === "session.created" || event?.type === "session.updated") && properties.info?.parentID
+        && OPENCODE_SESSION.test(text(properties.info.id))) children.add(properties.info.id);
+      const sessionID = typeof properties.sessionID === "string" ? properties.sessionID : properties.info?.sessionID ?? properties.part?.sessionID;
+      // Permission events name the ask (permission.updated / permission.asked)
+      // and its answer, which may come from the terminal.
+      if (event?.type === "permission.updated" || event?.type === "permission.asked") {
+        const id = permissionId(properties);
+        if (id) { asking.add(id); recordStatus("blocked", text(sessionID)); }
+        if (event.type === "permission.asked") void relayAsk(properties).catch(() => {});
+      } else if (event?.type === "permission.replied") {
+        const id = permissionId(properties);
+        if (id) asking.delete(id); else asking.clear();
+        const relay = id && relayed.get(id);
+        if (relay) relay.done = true;
+        recordStatus("working", text(sessionID));
+      }
+      if (!OPENCODE_SESSION.test(text(sessionID))) return;
+      if (event.type === "message.updated") rememberInfo(sessionID, properties.info);
+      else if (event.type === "message.part.updated") rememberPart(sessionID, properties.part?.messageID, properties.part);
+      else if (event.type === "message.part.delta" && properties.field === "text" && typeof properties.delta === "string") {
+        const message = messageState(sessionID, properties.messageID);
+        const part = message.parts.get(properties.partID);
+        if (part?.type === "text") rememberPart(sessionID, properties.messageID, { ...part, text: text(part.text) + properties.delta });
+      }
+      else if (event.type === "message.removed") {
+        const state = sessions.get(sessionID);
+        if (state && typeof properties.messageID === "string") {
+          state.messages.delete(properties.messageID);
+          state.order = state.order.filter(id => id !== properties.messageID);
+          schedule(sessionID);
+        }
+      } else if (event.type === "session.idle" || event.type === "session.error") {
+        sessionState(sessionID).idle = true;
+        flush(sessionID);
+        if (!children.has(sessionID)) { asking.clear(); recordStatus("idle", sessionID); }
+      } else if (event.type === "session.status") {
+        if (properties.status?.type === "busy") sessionState(sessionID).idle = false;
+        // A subagent's session runs inside its parent's turn.
+        if (!children.has(sessionID) && ["busy", "retry", "idle"].includes(properties.status?.type)) {
+          if (properties.status.type === "idle") asking.clear();
+          recordStatus(properties.status.type === "idle" ? "idle" : "working", sessionID);
+        }
+      }
+    },
+  };
+};

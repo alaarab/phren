@@ -1,0 +1,169 @@
+import { configuredHarness } from "./harness/launch.js";
+import { requireLaunchLease } from "./harness/store-lease.js";
+import { spawn, type ChildProcess } from "node:child_process";
+import { createWriteStream } from "node:fs";
+import { mkdir, readFile } from "node:fs/promises";
+import path from "node:path";
+import { finished as streamFinished } from "node:stream/promises";
+import { askpassEnv } from "./sudo.js";
+import { claudeHome, claudeLaunchEnv } from "./claude-accounts.js";
+import { fanoutRoot } from "./fanouts.js";
+import { pretrustFolder } from "./folder-trust.js";
+import { findPane, paneIdentity, servers, snapshot } from "./herdr.js";
+import { agentNotReady, terminalProvider } from "./terminal.js";
+import { atomicInPrivateDir, BridgeError, type Json } from "./protocol.js";
+import { defaultPhrenPath } from "../shared.js";
+import type { Schedule, ScheduleLauncher, ScheduleLaunchContext, ScheduleLaunchRecord, ScheduleLaunchResult, ScheduleRun, ScheduleRunOutcome } from "./schedule-format.js";
+import { watchHerdrRun } from "./schedule-watch.js";
+
+/** Starting a scheduled run: in a Herdr pane when a server is live, otherwise
+ * as a headless job under the fan-out root. */
+
+const CLAUDE_SCHEDULE_SETTINGS = JSON.stringify({ enableAllProjectMcpServers: true });
+
+type HerdrLauncher = (server: string, data: Json) => Promise<Json>;
+
+export function createScheduleLauncher(launchHerdr: HerdrLauncher, store = defaultPhrenPath()): ScheduleLauncher {
+  const abort = new AbortController(), children = new Set<ChildProcess>();
+  const launcher: ScheduleLauncher = async context => {
+    await requireLaunchLease(store);
+    const live = await servers();
+    if (live.length) return launchInHerdr(String(live[0].session), context, launchHerdr, abort.signal);
+    if (await configuredHarness(context.schedule.harness, context.schedule.backend)) {
+      throw new BridgeError(409, "A structured scheduled worker requires an available terminal so its approvals and questions remain reachable. Enable the existing Herdr or tmux integration before scheduling this backend.");
+    }
+    return launchHeadless(context, store, child => { children.add(child); child.once("exit", () => children.delete(child)); });
+  };
+  launcher.close = () => { abort.abort(); for (const child of children) child.kill("SIGTERM"); children.clear(); };
+  launcher.resume = (run, schedule) => resumeScheduleRun(run, schedule, abort.signal);
+  return launcher;
+}
+
+/**
+ * The outcome of a run a previous Hook process launched and never saw finish
+ * (a restart or crash mid-run). A Herdr pane is followed again to its real
+ * end; a headless job's manifest says how it ended, if it got that far. A run
+ * whose end cannot be known fails with that reason rather than staying open,
+ * since an open run blocks its schedule for good.
+ */
+export async function resumeScheduleRun(run: ScheduleRun, schedule: Schedule, signal: AbortSignal,
+  watch: typeof watchHerdrRun = watchHerdrRun): Promise<ScheduleRunOutcome> {
+  const launch = run.launch;
+  if (run.status === "launched") return { status: "failed", reason: "Phren Hook restarted before this run finished launching." };
+  if (launch.mode === "herdr" && launch.server && launch.workspaceId && launch.tabId && launch.paneId) {
+    return watch(launch.server, { workspaceId: launch.workspaceId, tabId: launch.tabId, paneId: launch.paneId }, signal,
+      { source: schedule.harness, startedAt: Date.parse(run.startedAt), sessionId: launch.sessionId });
+  }
+  if (launch.mode === "headless" && launch.jobDir) {
+    const manifest = await readFile(path.join(launch.jobDir, "manifest.json"), "utf8").then(text => JSON.parse(text) as Json).catch(() => undefined);
+    if (manifest?.status === "completed") return { status: "finished" };
+    if (manifest?.status === "failed") {
+      return { status: "failed", reason: typeof manifest.exitCode === "number" ? `The scheduled agent exited with code ${manifest.exitCode}.` : "The scheduled agent failed." };
+    }
+  }
+  return { status: "failed", reason: "Phren Hook restarted while this run was going, so its end was not observed." };
+}
+
+async function launchInHerdr(server: string, context: ScheduleLaunchContext, launchHerdr: HerdrLauncher, signal: AbortSignal): Promise<ScheduleLaunchResult> {
+  // The prompt goes with the launch where the harness takes one (Claude,
+  // Codex); otherwise it is typed once the agent is ready.
+  const brief = context.schedule.prompt.trim() ? { brief: { id: context.runId, text: context.schedule.prompt } } : {};
+  const launched = await launchHerdr(server, { cwd: context.cwd, label: context.schedule.name, kind: context.schedule.harness, ...(context.schedule.backend ? { backend: context.schedule.backend } : {}), model: context.schedule.model, ...(context.schedule.account ? { account: context.schedule.account } : {}), ...brief });
+  const workspaceId = String(launched.workspaceId), tabId = String(launched.tabId), paneId = String(launched.paneId);
+  if (launched.briefLaunched !== true) await promptWhenReady(server, paneId, context.schedule.prompt, signal);
+  let sessionId = typeof launched.sessionId === "string" ? launched.sessionId : undefined;
+  for (let attempt = 0; attempt < 10 && !sessionId; attempt++) {
+    const pane = findPane(await snapshot(server), { workspace: workspaceId, tab: tabId, pane: paneId });
+    if (pane) sessionId = await paneIdentity(server, pane).catch(() => undefined);
+    if (!sessionId) await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  const launch: ScheduleLaunchRecord = { mode: "herdr", server, workspaceId, tabId, paneId,
+    ...(sessionId ? { sessionId } : {}) };
+  return { launch, completion: watchHerdrRun(server, { workspaceId, tabId, paneId }, signal,
+    { source: context.schedule.harness, startedAt: Date.now(), sessionId, onBlocked: context.blockedStartup }) };
+}
+
+/** Herdr refuses a prompt until the agent has finished starting; a run
+ * launched a moment ago waits for it rather than failing on the first try. */
+async function promptWhenReady(server: string, paneId: string, text: string, signal: AbortSignal, waitMs = 60_000): Promise<void> {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try { await terminalProvider().prompt(server, paneId, text, signal); return; }
+    catch (error) {
+      const starting = agentNotReady(error);
+      if (!starting || signal.aborted) throw error;
+      if (Date.now() >= deadline) throw new BridgeError(409, `The agent in ${paneId} never became ready for the prompt; it may be waiting at a startup screen on the computer.`);
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+    }
+  }
+}
+
+/** The environment a headless run gets: this Hook's, SUDO_ASKPASS, plus the chosen Claude account's config directory. */
+export function headlessEnv(schedule: Schedule, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const askpass = askpassEnv();
+  if (askpass.SUDO_ASKPASS) env = { ...env, ...askpass };
+  if (!schedule.account || schedule.harness !== "claude") return env;
+  const home = claudeHome(schedule.account, env);
+  if (!home) throw new Error(`Schedule "${schedule.name}" uses Claude account "${schedule.account}", which is not set up on this computer. Run \`phren bridge accounts\`.`);
+  return { ...env, ...claudeLaunchEnv(home) };
+}
+
+async function launchHeadless(context: ScheduleLaunchContext, store: string, started: (child: ChildProcess) => void): Promise<ScheduleLaunchResult> {
+  const env = headlessEnv(context.schedule);
+  const root = fanoutRoot({ ...process.env, PHREN_PATH: store }), jobDir = path.join(root, context.runId);
+  await mkdir(jobDir, { recursive: true, mode: 0o700 });
+  const eventLog = "events.jsonl", now = new Date().toISOString();
+  const manifest: Record<string, unknown> = { schemaVersion: 1, id: context.runId, provider: context.schedule.harness,
+    taskLabel: context.schedule.name, cwd: context.cwd, worktree: context.cwd, ...(context.schedule.model ? { model: context.schedule.model } : {}),
+    eventLog, createdAt: now, startedAt: now, updatedAt: now, status: "queued", schedule: { id: context.schedule.id, project: context.project } };
+  await writeManifest(jobDir, manifest);
+  const command = headlessCommand(context.schedule, context.cwd);
+  // An untrusted directory only costs Codex a prompt; the run still starts, and the log says why.
+  // Headless Claude (`-p`) has no trust screen, so only Codex needs it here.
+  if (context.schedule.harness === "codex") await pretrustFolder("codex", context.cwd, `scheduled run ${context.runId}`);
+  let child: ChildProcess;
+  try { child = spawn(command.file, command.args, { cwd: command.cwd, env, stdio: ["pipe", "pipe", "pipe"] }); }
+  catch (error) { await writeManifest(jobDir, { ...manifest, status: "failed", updatedAt: new Date().toISOString(), finishedAt: new Date().toISOString() }); throw error; }
+  started(child);
+  const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => {
+    child.once("close", (code, signal) => resolve({ code, signal }));
+  });
+  const output = createWriteStream(path.join(jobDir, eventLog), { flags: "a", mode: 0o600 });
+  const errors = createWriteStream(path.join(jobDir, "stderr.log"), { flags: "a", mode: 0o600 });
+  const streamsFinished = Promise.all([streamFinished(output), streamFinished(errors)]).then(() => undefined).catch(() => undefined);
+  child.stdin?.on("error", () => { /* A child that exits before reading is reported by close. */ });
+  child.stdout?.pipe(output); child.stderr?.pipe(errors); child.stdin?.end(context.schedule.prompt);
+  await new Promise<void>((resolve, reject) => {
+    child.once("spawn", resolve);
+    child.once("error", reject);
+  }).catch(async error => {
+    output.end(); errors.end();
+    await writeManifest(jobDir, { ...manifest, status: "failed", updatedAt: new Date().toISOString(), finishedAt: new Date().toISOString() });
+    throw error;
+  });
+  await writeManifest(jobDir, { ...manifest, status: "running", updatedAt: new Date().toISOString() });
+  const completion = closed.then(async ({ code, signal }): Promise<ScheduleRunOutcome> => {
+    await streamsFinished;
+    const finishedAt = new Date().toISOString(), ok = code === 0;
+    await writeManifest(jobDir, { ...manifest, status: ok ? "completed" : "failed", updatedAt: finishedAt, finishedAt,
+      ...(typeof code === "number" ? { exitCode: code } : {}) }).catch(() => {});
+    return ok ? { status: "finished" } : { status: "failed", reason: signal ? `The scheduled agent exited after ${signal}.` : `The scheduled agent exited with code ${code ?? "unknown"}.` };
+  });
+  return { launch: { mode: "headless", jobDir }, completion };
+}
+
+export function headlessCommand(schedule: Schedule, cwd: string): { file: string; args: string[]; cwd: string } {
+  const model = schedule.model ? ["--model", schedule.model] : [];
+  if (schedule.harness === "codex") return { file: "codex", cwd, args: ["exec", ...model, "--sandbox", "workspace-write", "-C", cwd,
+    "--skip-git-repo-check", "--json", "-"] };
+  if (schedule.harness === "opencode") return { file: "opencode", cwd, args: ["run", "--format", "json", "--dir", cwd, ...model] };
+  // Copilot's non-interactive mode needs every tool allowed up front; file
+  // access stays inside the working folder. `=` keeps a prompt that starts
+  // with "-" from reading as a flag.
+  if (schedule.harness === "copilot") return { file: "copilot", cwd, args: [`--prompt=${schedule.prompt}`, "--allow-all-tools", "--output-format", "json", ...model] };
+  return { file: "claude", cwd, args: ["-p", "--output-format", "stream-json", "--settings", CLAUDE_SCHEDULE_SETTINGS, ...model] };
+}
+
+async function writeManifest(jobDir: string, manifest: Record<string, unknown>): Promise<void> {
+  await atomicInPrivateDir(path.join(jobDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+}

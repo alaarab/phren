@@ -1,0 +1,904 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { commandExists, detectInstalledTools, buildLifecycleCommands, buildSharedLifecycleCommands, configureAllHooks, readCustomHooks, runCustomHooks, runPrePromptHooks, getRegisteredPrePromptSiblingCommands, clearHookPrefsCache } from "./hooks.js";
+import { upsertCustomPrePromptSiblings, type HookMap } from "./init/config.js";
+import { readInstallPreferences } from "./init/preferences.js";
+import { initTestPhrenRoot, makeTempDir } from "./test-helpers.js";
+import { buildRobustFtsQuery, } from "./utils.js";
+import { PhrenError, } from "./shared.js";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import * as http from "http";
+import { fileURLToPath } from "url";
+
+function writeInstallPrefs(phrenPath: string, content: string): void {
+  const runtimeDir = path.join(phrenPath, ".runtime");
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  fs.writeFileSync(path.join(runtimeDir, "install-preferences.json"), content);
+}
+
+describe("hooks", () => {
+  describe("commandExists", () => {
+    it("returns true for a known command and false for a nonexistent one", () => {
+      expect(commandExists("node")).toBe(true);
+      expect(commandExists("definitely-not-a-real-command-xyz")).toBe(false);
+    });
+  });
+
+  describe("detectInstalledTools", () => {
+    it("does not false-positive copilot from bare ~/.github dir", () => {
+      if (commandExists("copilot") || commandExists("github-copilot-cli")) return;
+      const extensionDir = path.join(os.homedir(), ".local", "share", "gh", "extensions", "gh-copilot");
+      const copilotConfig = path.join(os.homedir(), ".copilot", "config.json");
+      if (fs.existsSync(extensionDir) || fs.existsSync(copilotConfig)) return;
+      const tools = detectInstalledTools();
+      expect(tools.has("copilot")).toBe(false);
+    });
+  });
+
+  describe("buildLifecycleCommands", () => {
+    it("includes phren path in commands", () => {
+      const cmds = buildLifecycleCommands("/tmp/fake-phren");
+      expect(cmds.sessionStart).toContain("/tmp/fake-phren");
+      expect(cmds.userPromptSubmit).toContain("/tmp/fake-phren");
+      expect(cmds.stop).toContain("/tmp/fake-phren");
+    });
+  });
+
+  describe("buildSharedLifecycleCommands", () => {
+    it("uses versioned npx commands without embedding local phren paths", () => {
+      const cmds = buildSharedLifecycleCommands();
+      expect(cmds.sessionStart).toContain("npx -y @phren/cli@");
+      expect(cmds.sessionStart).toContain("hook-session-start");
+      expect(cmds.userPromptSubmit).toContain("hook-prompt");
+      expect(cmds.stop).toContain("hook-stop");
+      expect(cmds.hookTool).toContain("hook-tool");
+      expect(cmds.sessionStart).not.toContain("PHREN_PATH=");
+      expect(cmds.sessionStart).not.toContain(".npm/_npx");
+    });
+  });
+
+  describe("configureAllHooks - config validation", () => {
+    let tmpRoot: string;
+    let homeDir: string;
+    let phrenPath: string;
+    const origHome = process.env.HOME;
+    const origUserProfile = process.env.USERPROFILE;
+    const origPath = process.env.PATH;
+
+    let tmpCleanup: () => void;
+
+    beforeEach(() => {
+      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-hooks-test-"));
+      homeDir = path.join(tmpRoot, "home");
+      phrenPath = path.join(tmpRoot, "phren");
+      fs.mkdirSync(homeDir, { recursive: true });
+      fs.mkdirSync(phrenPath, { recursive: true });
+      initTestPhrenRoot(phrenPath);
+      process.env.HOME = homeDir;
+      process.env.USERPROFILE = homeDir;
+    });
+
+    afterEach(() => {
+      process.env.HOME = origHome;
+      process.env.USERPROFILE = origUserProfile;
+      process.env.PATH = origPath;
+      tmpCleanup();
+    });
+
+    function setupFakeBinaries() {
+      const fakeBin = path.join(tmpRoot, "bin");
+      fs.mkdirSync(fakeBin, { recursive: true });
+      for (const tool of ["copilot", "cursor", "codex"]) {
+        if (process.platform === "win32") {
+          // where.exe only finds files with PATHEXT extensions; use .cmd wrappers
+          fs.writeFileSync(path.join(fakeBin, `${tool}.cmd`), `@echo off\r\nexit /b 0\r\n`);
+        } else {
+          const file = path.join(fakeBin, tool);
+          fs.writeFileSync(file, "#!/bin/sh\nexit 0\n");
+          fs.chmodSync(file, 0o755);
+        }
+      }
+      // Use path.delimiter so PATH uses ';' on Windows and ':' on Unix
+      process.env.PATH = `${fakeBin}${path.delimiter}${origPath || ""}`;
+    }
+
+    // Wrapper path: phren installs <tool>.cmd on Windows, <tool> on POSIX.
+    function wrapperFor(tool: string): string {
+      const name = process.platform === "win32" ? `${tool}.cmd` : tool;
+      return path.join(homeDir, ".local", "bin", name);
+    }
+
+    it("writes valid Copilot hook config with correct schema", () => {
+      setupFakeBinaries();
+      configureAllHooks(phrenPath, { tools: new Set(["copilot"]) });
+
+      const copilotFile = path.join(homeDir, ".github", "hooks", "phren.json");
+      expect(fs.existsSync(copilotFile)).toBe(true);
+
+      const config = JSON.parse(fs.readFileSync(copilotFile, "utf8"));
+      expect(config.version).toBe(1);
+      expect(Array.isArray(config.hooks.sessionStart)).toBe(true);
+      expect(Array.isArray(config.hooks.userPromptSubmitted)).toBe(true);
+      expect(Array.isArray(config.hooks.sessionEnd)).toBe(true);
+      expect(config.hooks.sessionStart[0].type).toBe("command");
+      expect(config.hooks.sessionStart[0].bash).toContain("hook-session-start");
+      expect(config.hooks.userPromptSubmitted[0].bash).toContain("hook-prompt");
+      expect(config.hooks.sessionEnd[0].bash).toContain("hook-stop");
+      expect(config.hooks.sessionStart[0].bash).toContain("PHREN_HOOK_TOOL");
+      expect(config.hooks.sessionStart[0].bash).toContain("copilot");
+    });
+
+    it("writes valid Cursor hook config with correct schema", () => {
+      setupFakeBinaries();
+      configureAllHooks(phrenPath, { tools: new Set(["cursor"]) });
+
+      const cursorFile = path.join(homeDir, ".cursor", "hooks.json");
+      expect(fs.existsSync(cursorFile)).toBe(true);
+
+      const config = JSON.parse(fs.readFileSync(cursorFile, "utf8"));
+      expect(config.version).toBe(1);
+      expect(typeof config.sessionStart.command).toBe("string");
+      expect(typeof config.beforeSubmitPrompt.command).toBe("string");
+      expect(typeof config.stop.command).toBe("string");
+      expect(config.sessionStart.command).toContain("hook-session-start");
+      expect(config.beforeSubmitPrompt.command).toContain("hook-prompt");
+      expect(config.stop.command).toContain("hook-stop");
+      expect(config.sessionStart.command).toContain("PHREN_HOOK_TOOL");
+      expect(config.sessionStart.command).toContain("cursor");
+    });
+
+    it("writes valid Codex hook config with correct schema", () => {
+      setupFakeBinaries();
+      configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
+
+      const codexFile = path.join(phrenPath, "codex.json");
+      expect(fs.existsSync(codexFile)).toBe(true);
+
+      const config = JSON.parse(fs.readFileSync(codexFile, "utf8"));
+      expect(Array.isArray(config.hooks.SessionStart)).toBe(true);
+      expect(Array.isArray(config.hooks.UserPromptSubmit)).toBe(true);
+      expect(Array.isArray(config.hooks.Stop)).toBe(true);
+      expect(config.hooks.SessionStart[0].type).toBe("command");
+      expect(config.hooks.SessionStart[0].command).toContain("hook-session-start");
+      expect(config.hooks.UserPromptSubmit[0].command).toContain("hook-prompt");
+      expect(config.hooks.Stop[0].command).toContain("hook-stop");
+      expect(config.hooks.SessionStart[0].command).toContain("PHREN_HOOK_TOOL");
+      expect(config.hooks.SessionStart[0].command).toContain("codex");
+    });
+
+    it("Cursor config preserves existing fields", () => {
+      setupFakeBinaries();
+      const cursorDir = path.join(homeDir, ".cursor");
+      fs.mkdirSync(cursorDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(cursorDir, "hooks.json"),
+        JSON.stringify({ customField: "preserved", version: 0 })
+      );
+
+      configureAllHooks(phrenPath, { tools: new Set(["cursor"]) });
+
+      const config = JSON.parse(fs.readFileSync(path.join(cursorDir, "hooks.json"), "utf8"));
+      expect(config.customField).toBe("preserved");
+      expect(config.version).toBe(1);
+    });
+
+    it.skipIf(process.platform === "win32")("session wrappers use POSIX shebang", () => {
+      setupFakeBinaries();
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+
+      for (const tool of ["copilot", "cursor", "codex"]) {
+        const wrapper = wrapperFor(tool);
+        expect(fs.existsSync(wrapper)).toBe(true);
+        const content = fs.readFileSync(wrapper, "utf8");
+        expect(content.startsWith("#!/bin/sh\n")).toBe(true);
+        expect(content).not.toContain("#!/usr/bin/env bash");
+        // No bash-only syntax
+        expect(content).not.toContain("${@:"); // bash array slicing
+        expect(content).not.toContain("[[");    // bash double bracket
+        // Arguments are consumed with shift, and the timeout is parsed first.
+        expect(content).toContain("shift");
+        expect(content).toContain("_timeout_val");
+      }
+    });
+
+    it.skipIf(process.platform !== "win32")("Windows session wrappers are .cmd scripts with @echo off and PHREN_HOOK_CMD", () => {
+      setupFakeBinaries();
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+
+      for (const tool of ["copilot", "cursor", "codex"]) {
+        const wrapper = wrapperFor(tool);
+        expect(fs.existsSync(wrapper)).toBe(true);
+        expect(wrapper.endsWith(".cmd")).toBe(true);
+        const content = fs.readFileSync(wrapper, "utf8");
+        // Windows wrappers are batch scripts with a timeout subroutine.
+        expect(content.startsWith("@echo off")).toBe(true);
+        expect(content).toContain("PHREN_HOOK_CMD");
+        expect(content).toContain(":run_with_timeout");
+        expect(content).toContain("Start-Job");
+        expect(content).toContain("Wait-Job");
+        // No POSIX shebang or sh syntax on the Windows wrapper.
+        expect(content).not.toContain("#!/bin/sh");
+        expect(content).not.toContain("shift\n");
+      }
+    });
+
+    it("skips wrapper installation when hooks are disabled", () => {
+      setupFakeBinaries();
+
+      // Write preferences with hooks disabled
+      writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: false }));
+
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+
+      // Hook configs should still be written
+      expect(fs.existsSync(path.join(homeDir, ".github", "hooks", "phren.json"))).toBe(true);
+      expect(fs.existsSync(path.join(homeDir, ".cursor", "hooks.json"))).toBe(true);
+      expect(fs.existsSync(path.join(phrenPath, "codex.json"))).toBe(true);
+
+      // But wrappers should NOT be installed
+      for (const tool of ["copilot", "cursor", "codex"]) {
+        expect(fs.existsSync(wrapperFor(tool))).toBe(false);
+      }
+    });
+
+    it("per-tool hookTools disables wrapper for specific tool only", () => {
+      setupFakeBinaries();
+
+      writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: true, hookTools: { copilot: true, cursor: false, codex: true } }));
+
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+
+      // Configs are still written for all tools
+      expect(fs.existsSync(path.join(homeDir, ".github", "hooks", "phren.json"))).toBe(true);
+      expect(fs.existsSync(path.join(homeDir, ".cursor", "hooks.json"))).toBe(true);
+      expect(fs.existsSync(path.join(phrenPath, "codex.json"))).toBe(true);
+
+      // Wrapper installed for copilot and codex but NOT cursor
+      expect(fs.existsSync(wrapperFor("copilot"))).toBe(true);
+      expect(fs.existsSync(wrapperFor("cursor"))).toBe(false);
+      expect(fs.existsSync(wrapperFor("codex"))).toBe(true);
+    });
+
+    it("hookTools defaults to hooksEnabled when key is missing", () => {
+      setupFakeBinaries();
+
+      writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: true, hookTools: { cursor: false } }));
+
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor"]) });
+
+      // copilot not in hookTools, defaults to hooksEnabled=true
+      expect(fs.existsSync(wrapperFor("copilot"))).toBe(true);
+      // cursor explicitly disabled
+      expect(fs.existsSync(wrapperFor("cursor"))).toBe(false);
+    });
+
+    it("hookTools ignored when hooksEnabled is false", () => {
+      setupFakeBinaries();
+
+      writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: false, hookTools: { copilot: true, cursor: true, codex: true } }));
+
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+
+      // All wrappers skipped because hooksEnabled is false
+      for (const tool of ["copilot", "cursor", "codex"]) {
+        expect(fs.existsSync(wrapperFor(tool))).toBe(false);
+      }
+    });
+
+    it("Set param only configures the specified tools", () => {
+      setupFakeBinaries();
+      const configured = configureAllHooks(phrenPath, { tools: new Set(["cursor"]) });
+
+      expect(configured).toContain("Cursor");
+      expect(configured).not.toContain("Copilot CLI");
+      expect(configured).not.toContain("Codex");
+
+      // Only cursor config should exist
+      expect(fs.existsSync(path.join(homeDir, ".cursor", "hooks.json"))).toBe(true);
+      expect(fs.existsSync(path.join(homeDir, ".github", "hooks", "phren.json"))).toBe(false);
+      expect(fs.existsSync(path.join(phrenPath, "codex.json"))).toBe(false);
+    });
+
+    it("allTools option configures all three tools", () => {
+      setupFakeBinaries();
+      const configured = configureAllHooks(phrenPath, { allTools: true });
+
+      expect(configured).toContain("Copilot CLI");
+      expect(configured).toContain("Cursor");
+      expect(configured).toContain("Codex");
+    });
+
+    it.skipIf(process.platform === "win32")("POSIX wrappers carry exec bits", () => {
+      setupFakeBinaries();
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+
+      for (const tool of ["copilot", "cursor", "codex"]) {
+        const stat = fs.statSync(wrapperFor(tool));
+        expect(stat.mode & 0o111).toBeGreaterThan(0);
+      }
+    });
+
+    it("wrapper content references the real binary", () => {
+      setupFakeBinaries();
+      configureAllHooks(phrenPath, { tools: new Set(["codex"]) });
+
+      const wrapper = wrapperFor("codex");
+      expect(fs.existsSync(wrapper)).toBe(true);
+      const content = fs.readFileSync(wrapper, "utf8");
+      // Should reference the real binary file from the fake bin dir. On
+      // Windows, the path that ends up baked into the wrapper is whatever
+      // where.exe returns (canonical long form), but `tmpRoot` can be the
+      // 8.3 short form (e.g. `RUNNER~1`) on GitHub runners — so normalize
+      // via realpathSync and compare on the unique bin/<name> suffix.
+      const realBinName = process.platform === "win32" ? "codex.cmd" : "codex";
+      const binSuffix = path.join("bin", realBinName);
+      expect(content).toContain(binSuffix);
+    });
+
+    it.skipIf(process.platform === "win32")("wrapper scripts pass sh -n syntax check", () => {
+      setupFakeBinaries();
+      configureAllHooks(phrenPath, { tools: new Set(["copilot", "cursor", "codex"]) });
+
+      const { execFileSync } = require("child_process");
+      for (const tool of ["copilot", "cursor", "codex"]) {
+        const wrapper = wrapperFor(tool);
+        expect(fs.existsSync(wrapper)).toBe(true);
+        // sh -n checks syntax without executing
+        expect(() => {
+          execFileSync("sh", ["-n", wrapper], { stdio: "ignore" });
+        }).not.toThrow();
+      }
+    });
+  });
+
+  describe("deterministic coverage", () => {
+    const origHome = process.env.HOME;
+    const origUserProfile = process.env.USERPROFILE;
+    const origPath = process.env.PATH;
+    const localEntryScript = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.js");
+
+    afterEach(() => {
+      process.env.HOME = origHome;
+      process.env.USERPROFILE = origUserProfile;
+      process.env.PATH = origPath;
+      if (fs.existsSync(localEntryScript)) fs.rmSync(localEntryScript, { force: true });
+    });
+
+    it("detects all tools from binaries on PATH", () => {
+      const tmp = makeTempDir("hooks-detect-bin-");
+      const fakeBin = path.join(tmp.path, "bin");
+      fs.mkdirSync(fakeBin, { recursive: true });
+      for (const tool of ["github-copilot-cli", "cursor", "codex"]) {
+        if (process.platform === "win32") {
+          fs.writeFileSync(path.join(fakeBin, `${tool}.cmd`), `@echo off\r\nexit /b 0\r\n`);
+        } else {
+          const file = path.join(fakeBin, tool);
+          fs.writeFileSync(file, "#!/bin/sh\nexit 0\n");
+          fs.chmodSync(file, 0o755);
+        }
+      }
+      process.env.PATH = `${fakeBin}${path.delimiter}${origPath || ""}`;
+
+      const detected = detectInstalledTools();
+      expect(detected).toEqual(new Set(["copilot", "cursor", "codex"]));
+
+      tmp.cleanup();
+    });
+
+    it("detects only tools with reliable home-directory markers when binaries are absent", () => {
+      const tmp = makeTempDir("hooks-detect-home-");
+      const homeDir = path.join(tmp.path, "home");
+      process.env.HOME = homeDir;
+      process.env.USERPROFILE = homeDir;
+      process.env.PATH = "";
+
+      fs.mkdirSync(path.join(homeDir, ".cursor"), { recursive: true });
+      fs.mkdirSync(path.join(homeDir, ".codex"), { recursive: true });
+      fs.mkdirSync(path.join(homeDir, ".local", "share", "gh", "extensions", "gh-copilot"), { recursive: true });
+
+      const detected = detectInstalledTools();
+      expect(detected).toEqual(new Set(["copilot", "codex"]));
+
+      tmp.cleanup();
+    });
+
+    it("buildLifecycleCommands uses npx fallback when local entry script is missing", () => {
+      if (fs.existsSync(localEntryScript)) fs.rmSync(localEntryScript, { force: true });
+      // Override HOME so the real ~/.local/bin/phren wrapper isn't discovered
+      const tmp = makeTempDir("hooks-npx-fallback-");
+      process.env.HOME = tmp.path;
+      process.env.USERPROFILE = tmp.path;
+
+      const cmds = buildLifecycleCommands('/tmp/my "phren" path\\nested');
+      expect(cmds.sessionStart).toMatch(/npx -y @phren\/cli@.+ hook-session-start/);
+      expect(cmds.userPromptSubmit).toMatch(/npx -y @phren\/cli@.+ hook-prompt/);
+      expect(cmds.stop).toMatch(/npx -y @phren\/cli@.+ hook-stop/);
+      if (process.platform === "win32") {
+        expect(cmds.sessionStart).toContain('set "PHREN_PATH=/tmp/my \\"phren\\" path\\\\nested"');
+      } else {
+        expect(cmds.sessionStart).toContain(`PHREN_PATH='/tmp/my "phren" path\\nested'`);
+      }
+      tmp.cleanup();
+    });
+
+    it("buildLifecycleCommands uses local node entry script when available", () => {
+      fs.writeFileSync(localEntryScript, "// test entry for hooks unit tests\n");
+      // Override HOME so the real ~/.local/bin/phren wrapper isn't discovered
+      const tmp = makeTempDir("hooks-node-entry-");
+      process.env.HOME = tmp.path;
+      process.env.USERPROFILE = tmp.path;
+
+      const cmds = buildLifecycleCommands("/tmpphren");
+      expect(cmds.sessionStart).toContain(" node ");
+      expect(cmds.userPromptSubmit).toContain(" node ");
+      expect(cmds.stop).toContain(" node ");
+      expect(cmds.sessionStart).toContain("index.js");
+      expect(cmds.sessionStart).not.toContain("npx phren");
+      tmp.cleanup();
+    });
+
+    it("configureAllHooks() ignores stale cursor config without a real cursor binary", () => {
+      const tmp = makeTempDir("hooks-config-detect-");
+      const tmpRoot = tmp.path;
+      const homeDir = path.join(tmpRoot, "home");
+      const phrenPath = path.join(tmpRoot, "phren");
+      process.env.HOME = homeDir;
+      process.env.USERPROFILE = homeDir;
+      process.env.PATH = "";
+      fs.mkdirSync(phrenPath, { recursive: true });
+      fs.mkdirSync(path.join(homeDir, ".cursor"), { recursive: true });
+      fs.mkdirSync(path.join(homeDir, ".codex"), { recursive: true });
+      fs.mkdirSync(path.join(homeDir, ".local", "share", "gh", "extensions", "gh-copilot"), { recursive: true });
+      fs.mkdirSync(path.join(phrenPath, ".config"), { recursive: true });
+      writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: false }));
+
+      const configured = configureAllHooks(phrenPath);
+      expect(configured).toEqual(["Copilot CLI", "Codex"]);
+
+      // Copilot executes its `bash:` key via Git Bash on Windows, so its
+      // lifecycle commands are always POSIX syntax regardless of platform.
+      const copilotLifecycle = buildLifecycleCommands(phrenPath, { forcePosix: true });
+      const sharedLifecycle = buildSharedLifecycleCommands();
+      const copilot = JSON.parse(fs.readFileSync(path.join(homeDir, ".github", "hooks", "phren.json"), "utf8"));
+      expect(copilot.hooks.sessionStart[0].bash).toContain(copilotLifecycle.sessionStart);
+      expect(copilot.hooks.userPromptSubmitted[0].bash).toContain(copilotLifecycle.userPromptSubmit);
+      expect(copilot.hooks.sessionEnd[0].bash).toContain(copilotLifecycle.stop);
+      expect(copilot.hooks.sessionStart[0].bash).toContain("PHREN_HOOK_TOOL");
+      expect(copilot.hooks.sessionStart[0].bash).toContain("copilot");
+
+      expect(fs.existsSync(path.join(homeDir, ".cursor", "hooks.json"))).toBe(false);
+
+      const codex = JSON.parse(fs.readFileSync(path.join(phrenPath, "codex.json"), "utf8"));
+      expect(codex.hooks.SessionStart[0].command).toContain(sharedLifecycle.sessionStart);
+      expect(codex.hooks.UserPromptSubmit[0].command).toContain(sharedLifecycle.userPromptSubmit);
+      expect(codex.hooks.Stop[0].command).toContain(sharedLifecycle.stop);
+      expect(codex.hooks.SessionStart[0].command).toContain("PHREN_HOOK_TOOL");
+      expect(codex.hooks.SessionStart[0].command).toContain("codex");
+      expect(codex.hooks.SessionStart[0].command).not.toContain(phrenPath);
+      expect(codex.hooks.SessionStart[0].command).not.toContain(".npm/_npx");
+
+      expect(fs.existsSync(path.join(homeDir, ".local", "bin", "copilot"))).toBe(false);
+      expect(fs.existsSync(path.join(homeDir, ".local", "bin", "cursor"))).toBe(false);
+      expect(fs.existsSync(path.join(homeDir, ".local", "bin", "codex"))).toBe(false);
+
+      tmp.cleanup();
+    });
+  });
+
+  describe("custom integration hooks (#218)", () => {
+    let tmpRoot: string;
+    let tmpCleanup: () => void;
+    let phrenPath: string;
+
+    beforeEach(() => {
+      ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-custom-hooks-test-"));
+      phrenPath = path.join(tmpRoot, "phren");
+      fs.mkdirSync(path.join(phrenPath, ".runtime"), { recursive: true });
+      initTestPhrenRoot(phrenPath);
+    });
+
+    afterEach(() => {
+      tmpCleanup();
+    });
+
+    it("readCustomHooks returns empty array when no preferences file exists", () => {
+      fs.rmSync(path.join(phrenPath, ".config"), { recursive: true, force: true });
+      expect(readCustomHooks(phrenPath)).toEqual([]);
+      // Preferences present but without customHooks.
+      writeInstallPrefs(phrenPath, JSON.stringify({ hooksEnabled: true }));
+      expect(readCustomHooks(phrenPath)).toEqual([]);
+    });
+
+    it("readCustomHooks parses valid custom hooks", () => {
+      writeInstallPrefs(phrenPath, JSON.stringify({
+          customHooks: [
+            { event: "pre-save", command: "echo saving" },
+            { event: "post-search", command: "echo searched", timeout: 3000 },
+          ],
+        }));
+      const hooks = readCustomHooks(phrenPath);
+      expect(hooks).toHaveLength(2);
+      expect(hooks[0].event).toBe("pre-save");
+      expect(hooks[0].command).toBe("echo saving");
+      expect(hooks[1].timeout).toBe(3000);
+    });
+
+    it("readCustomHooks filters out invalid events", () => {
+      writeInstallPrefs(phrenPath, JSON.stringify({
+          customHooks: [
+            { event: "pre-save", command: "echo ok" },
+            { event: "invalid-event", command: "echo bad" },
+            { event: "post-search", command: "" },
+            { command: "echo no-event" },
+          ],
+        }));
+      const hooks = readCustomHooks(phrenPath);
+      expect(hooks).toHaveLength(1);
+      expect(hooks[0].event).toBe("pre-save");
+    });
+
+    it("runCustomHooks runs matching hooks and returns count", () => {
+      writeInstallPrefs(phrenPath, JSON.stringify({
+          customHooks: [
+            { event: "post-finding", command: "touch post-finding-ran" },
+            { event: "pre-save", command: "echo not-this-one" },
+          ],
+        }));
+      const result = runCustomHooks(phrenPath, "post-finding");
+      expect(result.ran).toBe(1);
+      expect(result.errors).toHaveLength(0);
+      expect(fs.existsSync(path.join(phrenPath, "post-finding-ran"))).toBe(true);
+    });
+
+    it("runCustomHooks passes environment variables", () => {
+      if (process.platform === "win32") return; // echo $VAR is POSIX sh syntax; cmd.exe does not expand $VAR
+      const envFile = path.join(phrenPath, "env-check.txt");
+      const helperScript = path.join(phrenPath, "env-helper.sh");
+      fs.writeFileSync(helperScript, `#!/bin/sh\necho "$PHREN_QUERY" > "${envFile}"\n`);
+      fs.chmodSync(helperScript, 0o755);
+      writeInstallPrefs(phrenPath, JSON.stringify({
+          customHooks: [
+            { event: "post-search", command: helperScript },
+          ],
+        }));
+      runCustomHooks(phrenPath, "post-search", { PHREN_QUERY: "test-query" });
+      expect(fs.readFileSync(envFile, "utf8").trim()).toBe("test-query");
+    });
+
+    it("runCustomHooks captures errors from failing commands", () => {
+      writeInstallPrefs(phrenPath, JSON.stringify({
+          customHooks: [
+            { event: "pre-save", command: "exit 1" },
+          ],
+        }));
+      const result = runCustomHooks(phrenPath, "pre-save");
+      expect(result.ran).toBe(1);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].message).toContain("pre-save");
+      expect(result.errors[0].code).toBe("VALIDATION_ERROR");
+    });
+
+    // A failing hook's message is composed from the hook's own command plus
+    // the child's stderr, and it goes to two places: .runtime/hook-errors.log
+    // and the MCP response — i.e. straight into the agent's context and its
+    // transcript. Hook commands legitimately carry inline credentials;
+    // validateCustomHookCommand rejects shell metacharacters, not tokens.
+    it("redacts a credential in a failing hook's command from the error and the log", () => {
+      const token = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
+      writeInstallPrefs(phrenPath, JSON.stringify({
+          customHooks: [
+            { event: "pre-save", command: `curl -H "Authorization: Bearer ${token}" https://127.0.0.1:1/nope` },
+          ],
+        }));
+
+      const result = runCustomHooks(phrenPath, "pre-save");
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0].message).not.toContain(token);
+      expect(result.errors[0].message).toContain("redacted");
+
+      const logPath = path.join(phrenPath, ".runtime", "hook-errors.log");
+      const logContent = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8") : "";
+      expect(logContent).not.toContain(token);
+    });
+
+    it("keeps an ordinary failure message readable", () => {
+      writeInstallPrefs(phrenPath, JSON.stringify({
+          customHooks: [
+            { event: "pre-save", command: "exit 7" },
+          ],
+        }));
+      const result = runCustomHooks(phrenPath, "pre-save");
+      expect(result.errors[0].message).toContain("pre-save");
+      expect(result.errors[0].message).toContain("exit 7");
+      expect(result.errors[0].message).not.toContain("redacted");
+    });
+
+    it("runCustomHooks does not follow webhook redirects", async () => {
+      let loopbackHits = 0;
+      const targetServer = http.createServer((_, res) => {
+        loopbackHits += 1;
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("loopback-hit");
+      });
+      await new Promise<void>((resolve) => targetServer.listen(0, "127.0.0.1", () => resolve()));
+      const targetAddress = targetServer.address();
+      if (!targetAddress || typeof targetAddress === "string") throw new Error("failed to bind target server");
+
+      const redirectServer = http.createServer((_, res) => {
+        res.writeHead(302, { location: `http://127.0.0.1:${targetAddress.port}/` });
+        res.end();
+      });
+      await new Promise<void>((resolve) => redirectServer.listen(0, "127.0.0.1", () => resolve()));
+      const redirectAddress = redirectServer.address();
+      if (!redirectAddress || typeof redirectAddress === "string") throw new Error("failed to bind redirect server");
+
+      try {
+        writeInstallPrefs(phrenPath, JSON.stringify({
+            customHooks: [
+              { event: "post-search", webhook: `http://127.0.0.1:${redirectAddress.port}/redirect` },
+            ],
+          }));
+        const result = runCustomHooks(phrenPath, "post-search");
+        expect(result.ran).toBe(1);
+        expect(result.errors).toHaveLength(0);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        expect(loopbackHits).toBe(0);
+      } finally {
+        await new Promise<void>((resolve) => redirectServer.close(() => resolve()));
+        await new Promise<void>((resolve) => targetServer.close(() => resolve()));
+      }
+    });
+
+    it("runCustomHooks blocks webhooks that resolve to loopback at execution time", async () => {
+      let loopbackHits = 0;
+      const loopbackServer = http.createServer((_, res) => {
+        loopbackHits += 1;
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("loopback-hit");
+      });
+      await new Promise<void>((resolve) => loopbackServer.listen(0, "127.0.0.1", () => resolve()));
+      const address = loopbackServer.address();
+      if (!address || typeof address === "string") throw new Error("failed to bind loopback server");
+
+      try {
+        writeInstallPrefs(phrenPath, JSON.stringify({
+          customHooks: [
+            { event: "post-search", webhook: `http://localhost:${address.port}/hook` },
+          ],
+        }));
+        const result = runCustomHooks(phrenPath, "post-search");
+        expect(result.ran).toBe(1);
+        expect(result.errors).toHaveLength(0);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        expect(loopbackHits).toBe(0);
+        const hookErrorLog = path.join(phrenPath, ".runtime", "hook-errors.log");
+        expect(fs.readFileSync(hookErrorLog, "utf8")).toContain("private or loopback address");
+      } finally {
+        await new Promise<void>((resolve) => loopbackServer.close(() => resolve()));
+      }
+    });
+  });
+});
+
+// ── Pre-prompt sibling sync ─────────────────────────────────────────────────
+
+describe("upsertCustomPrePromptSiblings", () => {
+  let phrenPath: string;
+
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    const tmp = makeTempDir("phren-sibling-sync-test-");
+    phrenPath = tmp.path;
+    cleanup = tmp.cleanup;
+    initTestPhrenRoot(phrenPath);
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("adds a sibling UserPromptSubmit entry for each pre-prompt custom hook", () => {
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [
+        { event: "pre-prompt", command: "/usr/local/bin/ss-hook" },
+        { event: "pre-prompt", command: "/home/me/bin/another-hook", timeout: 8000 },
+        { event: "post-finding", command: "/should/not/sync" },
+      ],
+    }));
+
+    const hooksMap: HookMap = {};
+    const result = upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+
+    expect(result.added).toBe(2);
+    expect(result.removed).toBe(0);
+    expect(hooksMap.UserPromptSubmit).toHaveLength(2);
+
+    const entries = hooksMap.UserPromptSubmit ?? [];
+    const commands = entries.map((e) => e.hooks?.[0]?.command);
+    expect(commands).toContain("/usr/local/bin/ss-hook");
+    expect(commands).toContain("/home/me/bin/another-hook");
+
+    // The 8000ms timeout from prefs is rounded up to 8 seconds for Claude Code.
+    const customTimeoutEntry = entries.find((e) => e.hooks?.[0]?.command === "/home/me/bin/another-hook");
+    expect(customTimeoutEntry?.hooks?.[0]?.timeout).toBe(8);
+
+    // The default timeout (when prefs hook has none) is 15 seconds.
+    const defaultTimeoutEntry = entries.find((e) => e.hooks?.[0]?.command === "/usr/local/bin/ss-hook");
+    expect(defaultTimeoutEntry?.hooks?.[0]?.timeout).toBe(15);
+  });
+
+  it("tracks managed sibling commands in install preferences", () => {
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [
+        { event: "pre-prompt", command: "/bin/a" },
+        { event: "pre-prompt", command: "/bin/b" },
+      ],
+    }));
+
+    const hooksMap: HookMap = {};
+    upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+
+    const prefs = readInstallPreferences(phrenPath);
+    expect(prefs.managedPrePromptSiblingCommands).toEqual(["/bin/a", "/bin/b"]);
+  });
+
+  it("is idempotent — re-running with the same prefs makes no changes", () => {
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [{ event: "pre-prompt", command: "/bin/keep-me" }],
+    }));
+
+    const hooksMap: HookMap = {};
+    upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+    expect(hooksMap.UserPromptSubmit).toHaveLength(1);
+
+    const second = upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+    expect(second.added).toBe(0);
+    expect(second.removed).toBe(0);
+    expect(hooksMap.UserPromptSubmit).toHaveLength(1);
+  });
+
+  it("removes sibling entries for commands that were dropped from prefs", () => {
+    // First sync: register two siblings
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [
+        { event: "pre-prompt", command: "/bin/keep" },
+        { event: "pre-prompt", command: "/bin/drop" },
+      ],
+    }));
+    const hooksMap: HookMap = {};
+    upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+    expect(hooksMap.UserPromptSubmit).toHaveLength(2);
+
+    // User removes /bin/drop from prefs (e.g., via remove_custom_hook)
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [{ event: "pre-prompt", command: "/bin/keep" }],
+      // Preserve the bookkeeping from the first sync
+      managedPrePromptSiblingCommands: ["/bin/drop", "/bin/keep"],
+    }));
+    // The in-process mtime cache may return stale data when two writes
+    // happen within the same mtime resolution window. In production the
+    // cache is invalidated by mtime advance between separate process
+    // invocations; tests need to force the invalidation explicitly.
+    clearHookPrefsCache();
+
+    // Resync should remove the stale sibling
+    const result = upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+    expect(result.removed).toBe(1);
+    expect(hooksMap.UserPromptSubmit).toHaveLength(1);
+    expect(hooksMap.UserPromptSubmit?.[0].hooks?.[0].command).toBe("/bin/keep");
+
+    // Bookkeeping is updated to the new state
+    const prefs = readInstallPreferences(phrenPath);
+    expect(prefs.managedPrePromptSiblingCommands).toEqual(["/bin/keep"]);
+  });
+
+  it("does not touch user-authored UserPromptSubmit entries", () => {
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [{ event: "pre-prompt", command: "/bin/phren-managed" }],
+    }));
+
+    // Pre-existing user entry that phren has never managed
+    const hooksMap: HookMap = {
+      UserPromptSubmit: [
+        { matcher: "", hooks: [{ type: "command", command: "/usr/local/bin/user-own-hook", timeout: 5 }] },
+      ],
+    };
+
+    upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+
+    expect(hooksMap.UserPromptSubmit).toHaveLength(2);
+    const userEntry = hooksMap.UserPromptSubmit?.find((e) => e.hooks?.[0]?.command === "/usr/local/bin/user-own-hook");
+    expect(userEntry).toBeDefined();
+    expect(userEntry?.hooks?.[0]?.timeout).toBe(5); // unchanged
+  });
+
+  it("ignores webhook custom hooks (only mirrors command hooks)", () => {
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [
+        { event: "pre-prompt", webhook: "https://example.com/hook" },
+        { event: "pre-prompt", command: "/bin/cmd-only" },
+      ],
+    }));
+
+    const hooksMap: HookMap = {};
+    const result = upsertCustomPrePromptSiblings(hooksMap, phrenPath);
+
+    expect(result.added).toBe(1);
+    expect(hooksMap.UserPromptSubmit).toHaveLength(1);
+    expect(hooksMap.UserPromptSubmit?.[0].hooks?.[0].command).toBe("/bin/cmd-only");
+  });
+});
+
+describe("getRegisteredPrePromptSiblingCommands", () => {
+  it("returns an empty set when settings.json doesn't exist (best-effort)", () => {
+    // We don't override the path here — just verify the function tolerates
+    // a missing/unreadable settings.json by returning empty rather than throwing.
+    const result = getRegisteredPrePromptSiblingCommands();
+    expect(result).toBeInstanceOf(Set);
+  });
+});
+
+describe("runPrePromptHooks skip behavior", () => {
+  let phrenPath: string;
+
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    const tmp = makeTempDir("phren-sibling-sync-test-");
+    phrenPath = tmp.path;
+    cleanup = tmp.cleanup;
+    initTestPhrenRoot(phrenPath);
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("skips hooks whose command is registered as a sibling", () => {
+    if (process.platform === "win32") return; // POSIX shell semantics for the marker file.
+
+    const markerSibling = path.join(phrenPath, "should-not-run-sibling.txt");
+    const markerOther = path.join(phrenPath, "should-run-other.txt");
+    const sibCmd = `touch ${markerSibling}`;
+    const otherCmd = `touch ${markerOther}`;
+
+    writeInstallPrefs(phrenPath, JSON.stringify({
+      customHooks: [
+        { event: "pre-prompt", command: sibCmd },
+        { event: "pre-prompt", command: otherCmd },
+      ],
+    }));
+
+    // sibCmd is "registered as a sibling" — runPrePromptHooks should skip it.
+    runPrePromptHooks(phrenPath, "{}", new Set([sibCmd]));
+
+    expect(fs.existsSync(markerSibling)).toBe(false);
+    expect(fs.existsSync(markerOther)).toBe(true);
+  });
+});
+
+// ── Tests for gamma sprint changes ─────────────────────────────────────────
+
+describe("Stop-word bigrams (buildRobustFtsQuery)", () => {
+  it("produces no bigrams from a query of only stop words", () => {
+    // "the is a" are all stop words — should produce no bigrams in FTS query
+    const result = buildRobustFtsQuery("the is a an");
+    // If all words are stop words and too short after filtering, result should be empty
+    // or contain no quoted bigram phrases
+    // baseWords filters by length > 1, so "a" is dropped but "the", "is", "an" remain
+    // The bigram filter skips pairs where both are stop words
+    // Since no non-stop-word bigrams exist, no bigrams should be in coreTerms
+    // Individual words that aren't consumed remain as core terms
+    expect(result).not.toMatch(/"the is"|"is an"|"the an"/);
+  });
+});
+
+describe("PhrenError codes (shared.ts)", () => {
+  it("values are the same as their keys (const enum pattern)", () => {
+    for (const [key, value] of Object.entries(PhrenError)) {
+      expect(key).toBe(value);
+    }
+  });
+});

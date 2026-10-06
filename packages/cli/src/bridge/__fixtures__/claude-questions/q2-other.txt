@@ -1,0 +1,40 @@
+  ⎿  · Which tools? (Vim / Emacs)
+
+✻ Brewed for 2s · done 9:40 PM
+
+❯ Run the bash command: curl -s https://example.com -o /dev/null
+
+  Ran 1 shell command
+  ⎿  Interrupted · What should Claude do instead?
+
+✻ Brewed for 3s · done 9:40 PM
+
+❯ claude --model haiku --permission-mode auto 'Use AskUserQuestion once: question "Which tools?" header Tools multiSelect true options Vim, Emacs. Nothing else.'
+
+⏺ User answered Claude's questions:
+  ⎿  · Which tools? → Vim
+
+⏺ You selected: Vim
+
+✻ Crunched for 9s · done 9:42 PM
+
+❯ Use the AskUserQuestion tool exactly once, with three questions: 1) header Color, question "Which color should the new onboarding banner use for the dark theme?" options Red, Green,
+  Blue (single select); 2) header Tools, question "Which tools do you use?" options Vim, Emacs, VSCode (multiSelect true); 3) header Size, question "Which size?" options Small, Large
+  (single select). Do nothing else.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Color  ☒ Tools  ☐ Size  ✔ Submit  →
+
+Which tools do you use?
+
+  1. [✔] Vim
+         Vim
+  2. [ ] Emacs
+         Emacs
+  3. [✔] VSCode
+         VSCode
+❯ 4. [✔] Nano
+     Next
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · ctrl+g to edit in VS Code · Esc to cancel

@@ -1,0 +1,592 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
+import { register } from "../tools/search.js";
+import { buildIndex, type SqlJsDatabase } from "../shared/index.js";
+import type { McpContext } from "../tools/types.js";
+
+type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
+
+function makeMockServer() {
+  const tools = new Map<string, ToolHandler>();
+  return {
+    registerTool(name: string, _meta: unknown, handler: ToolHandler) {
+      tools.set(name, handler);
+    },
+    call(name: string, args: Record<string, unknown>) {
+      const handler = tools.get(name);
+      if (!handler) throw new Error(`Tool "${name}" not registered`);
+      return handler(args);
+    },
+  };
+}
+
+function parseResult(res: { content: { type: string; text: string }[] }) {
+  return JSON.parse(res.content[0].text);
+}
+
+function makeProject(phrenPath: string, name: string, files: Record<string, string>) {
+  const dir = path.join(phrenPath, name);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [file, content] of Object.entries(files)) {
+    writeFile(path.join(dir, file), content);
+  }
+}
+
+describe("mcp-search: project filter", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let db: SqlJsDatabase;
+
+  beforeEach(async () => {
+    tmp = makeTempDir("mcp-search-proj-");
+    grantAdmin(tmp.path);
+
+    makeProject(tmp.path, "project-a", {
+      "FINDINGS.md": "# project-a Findings\n\n## 2026-03-01\n\n- Redis caching strategy uses TTL of 300 seconds\n- Authentication uses JWT tokens with refresh rotation\n",
+    });
+    makeProject(tmp.path, "project-b", {
+      "FINDINGS.md": "# project-b Findings\n\n## 2026-03-01\n\n- Redis cluster mode requires explicit slot assignment\n- Database uses PostgreSQL with connection pooling\n",
+    });
+
+    db = await buildIndex(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      phrenPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    db.close();
+    tmp.cleanup();
+  });
+
+  it("search with project filter returns only results from that project", async () => {
+    const res = parseResult(await server.call("search_knowledge", { query: "Redis", project: "project-a" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.results.length).toBeGreaterThan(0);
+    for (const r of res.data.results) {
+      expect(r.project).toBe("project-a");
+    }
+  });
+
+  it("project-filtered search uses the shared reranker and injects canonical context", async () => {
+    writeFile(
+      path.join(tmp.path, "project-a", "truths.md"),
+      "# project-a Truths\n\n- Prefer truths before ad hoc findings when working in project-a.\n"
+    );
+    db.close();
+    db = await buildIndex(tmp.path);
+    const ctx: McpContext = {
+      phrenPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    server = makeMockServer();
+    register(server as any, ctx);
+
+    const res = parseResult(await server.call("search_knowledge", { query: "Redis", project: "project-a" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.results.length).toBeGreaterThan(0);
+    expect(res.data.results.some((result: any) => result.type === "canonical")).toBe(true);
+  });
+
+  it("search without project filter can return results from multiple projects", async () => {
+    const res = parseResult(await server.call("search_knowledge", { query: "Redis" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.results.length).toBeGreaterThan(0);
+    const projects = new Set(res.data.results.map((r: any) => r.project));
+    // Both projects mention Redis, so both should appear
+    expect(projects.size).toBe(2);
+  });
+});
+
+describe("mcp-search: type filter", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let db: SqlJsDatabase;
+
+  beforeEach(async () => {
+    tmp = makeTempDir("mcp-search-type-");
+    grantAdmin(tmp.path);
+
+    makeProject(tmp.path, "myapp", {
+      "FINDINGS.md": "# myapp Findings\n\n## 2026-03-01\n\n- Authentication uses OAuth2 with PKCE flow\n",
+      "summary.md": "# myapp\nAuthentication and authorization service for the platform.",
+      "AGENTS.md": "# myapp instructions\nAlways check authentication before accessing resources.",
+    });
+    // Add a reference doc
+    writeFile(
+      path.join(tmp.path, "myapp", "reference", "auth-guide.md"),
+      "# Authentication Guide\nOAuth2 authentication flow with token refresh."
+    );
+
+    db = await buildIndex(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      phrenPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    db.close();
+    tmp.cleanup();
+  });
+
+  it.each(["reference", "findings", "summary"])("type=%s returns only that doc type", async (type) => {
+    const res = parseResult(await server.call("search_knowledge", { query: "authentication", type }));
+    expect(res.ok).toBe(true);
+    expect(res.data.results.length).toBeGreaterThan(0);
+    for (const r of res.data.results) {
+      expect(r.type).toBe(type);
+    }
+  });
+});
+
+describe("mcp-search: tag filter", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let db: SqlJsDatabase;
+
+  beforeEach(async () => {
+    tmp = makeTempDir("mcp-search-tag-");
+    grantAdmin(tmp.path);
+
+    const recentDate = new Date().toISOString().slice(0, 10);
+    makeProject(tmp.path, "myapp", {
+      "FINDINGS.md": `# myapp Findings\n\n## ${recentDate}\n\n- [bug] Cache warmup fails when Redis is unavailable\n- [decision] Keep SQLite for local mode\n`,
+    });
+
+    db = await buildIndex(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      phrenPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    db.close();
+    tmp.cleanup();
+  });
+
+  it("matches tags case-insensitively", async () => {
+    const res = parseResult(await server.call("search_knowledge", { query: "redis", tag: "Bug" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.results.length).toBeGreaterThan(0);
+    for (const result of res.data.results) {
+      expect(result.snippet.toLowerCase()).toContain("[bug]");
+    }
+  });
+});
+
+describe("mcp-search: no cross-project leakage", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let db: SqlJsDatabase;
+
+  beforeEach(async () => {
+    tmp = makeTempDir("mcp-search-leak-");
+    grantAdmin(tmp.path);
+
+    // project-a has a unique term; project-b has a different unique term
+    makeProject(tmp.path, "project-a", {
+      "FINDINGS.md": "# project-a Findings\n\n## 2026-03-01\n\n- Xylophone configuration requires explicit tuning parameters\n",
+    });
+    makeProject(tmp.path, "project-b", {
+      "FINDINGS.md": "# project-b Findings\n\n## 2026-03-01\n\n- Zylophone orchestration uses automated scheduling pipelines\n",
+    });
+
+    db = await buildIndex(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      phrenPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    db.close();
+    tmp.cleanup();
+  });
+
+  it("searching project-a for project-b's unique term returns no results", async () => {
+    const res = parseResult(await server.call("search_knowledge", {
+      query: "Zylophone",
+      project: "project-a",
+    }));
+    expect(res.ok).toBe(true);
+    // Should get no results since "Zylophone" only exists in project-b
+    expect(res.data.results).toHaveLength(0);
+  });
+
+  it("cosine fallback results also respect project filter", async () => {
+    // Use a query that won't match FTS5 well but might match via cosine/keyword fallback
+    const res = parseResult(await server.call("search_knowledge", {
+      query: "tuning parameters configuration",
+      project: "project-a",
+    }));
+    expect(res.ok).toBe(true);
+    for (const r of res.data.results) {
+      expect(r.project).toBe("project-a");
+    }
+  });
+});
+
+describe("mcp-search: list_projects", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let db: SqlJsDatabase;
+
+  beforeEach(async () => {
+    tmp = makeTempDir("mcp-search-list-");
+    grantAdmin(tmp.path);
+
+    makeProject(tmp.path, "alpha", {
+      "FINDINGS.md": "# alpha Findings\n\n- Something about alpha\n",
+      "summary.md": "# alpha\nAlpha project for testing.",
+    });
+    makeProject(tmp.path, "beta", {
+      "summary.md": "# beta\nBeta project for testing.",
+      "AGENTS.md": "# beta\nUse npm.",
+    });
+
+    db = await buildIndex(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      phrenPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    db.close();
+    tmp.cleanup();
+  });
+
+  it("lists all indexed projects including our test projects", async () => {
+    const res = parseResult(await server.call("list_projects", {}));
+    expect(res.ok).toBe(true);
+    expect(res.data.total).toBeGreaterThanOrEqual(2);
+    const names = res.data.projects.map((p: any) => p.name);
+    expect(names).toContain("alpha");
+    expect(names).toContain("beta");
+  });
+
+  it("paginates with page and page_size", async () => {
+    const res = parseResult(await server.call("list_projects", { page: 1, page_size: 1 }));
+    expect(res.ok).toBe(true);
+    expect(res.data.projects).toHaveLength(1);
+    expect(res.data.totalPages).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("mcp-search: get_project_summary", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let db: SqlJsDatabase;
+
+  beforeEach(async () => {
+    tmp = makeTempDir("mcp-search-summary-");
+    grantAdmin(tmp.path);
+
+    makeProject(tmp.path, "myapp", {
+      "summary.md": "# myapp\nA web application for task management.",
+      "FINDINGS.md": "# myapp Findings\n\n- Always validate inputs\n",
+      "AGENTS.md": "# Instructions\nUse TypeScript.",
+    });
+
+    db = await buildIndex(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      phrenPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    db.close();
+    tmp.cleanup();
+  });
+
+  it("returns project summary and file list", async () => {
+    const res = parseResult(await server.call("get_project_summary", { name: "myapp" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.name).toBe("myapp");
+    expect(res.data.summary).toContain("task management");
+    expect(res.data.files.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("returns error for nonexistent project", async () => {
+    const res = parseResult(await server.call("get_project_summary", { name: "nonexistent" }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("not found");
+  });
+});
+
+describe("mcp-search: get_findings", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let db: SqlJsDatabase;
+
+  beforeEach(async () => {
+    tmp = makeTempDir("mcp-search-findings-");
+    grantAdmin(tmp.path);
+
+    makeProject(tmp.path, "myapp", {
+      "FINDINGS.md": "# myapp FINDINGS\n\n## 2026-03-01\n\n- Finding one\n- Finding two\n- Finding three\n",
+    });
+
+    db = await buildIndex(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      phrenPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    db.close();
+    tmp.cleanup();
+  });
+
+  it("returns findings for a project", async () => {
+    const res = parseResult(await server.call("get_findings", { project: "myapp" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.findings.length).toBe(3);
+    expect(res.data.total).toBe(3);
+  });
+
+  it("respects limit parameter", async () => {
+    const res = parseResult(await server.call("get_findings", { project: "myapp", limit: 2 }));
+    expect(res.ok).toBe(true);
+    expect(res.data.findings.length).toBe(2);
+    expect(res.data.total).toBe(3);
+  });
+
+  it("returns error for invalid project name", async () => {
+    const res = parseResult(await server.call("get_findings", { project: "../escape" }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Invalid project name");
+  });
+
+  it("surfaces provenance metadata in get_findings output", async () => {
+    makeProject(tmp.path, "withmeta", {
+      "FINDINGS.md": "# withmeta FINDINGS\n\n## 2026-03-09\n\n- Provenance stays attached <!-- created: 2026-03-09 --> <!-- source: machine:testbox actor:codex tool:codex model:gpt-5 session:session-1234 -->\n  <!-- phren:cite {\"created_at\":\"2026-03-09T10:00:00Z\",\"task_item\":\"deadbeef\"} -->\n",
+    });
+
+    const res = parseResult(await server.call("get_findings", { project: "withmeta" }));
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("task=deadbeef");
+    expect(res.data.findings[0].taskItem).toBe("deadbeef");
+  });
+
+  it("hides historical findings by default and includes them when include_history=true", async () => {
+    makeProject(tmp.path, "historyproj", {
+      "FINDINGS.md": "# historyproj FINDINGS\n\n## 2026-03-09\n\n- Active finding stays visible <!-- created: 2026-03-09 --> <!-- phren:status \"active\" -->\n- Old finding is historical <!-- created: 2026-03-09 --> <!-- phren:status \"superseded\" -->\n\n<details>\n<summary>Archived</summary>\n\n## 2026-02-20\n\n- Archived historical finding <!-- created: 2026-02-20 --> <!-- phren:status \"retracted\" -->\n</details>\n",
+    });
+
+    const hidden = parseResult(await server.call("get_findings", { project: "historyproj" }));
+    expect(hidden.ok).toBe(true);
+    expect(hidden.data.findings).toHaveLength(1);
+    expect(hidden.data.findings[0].status).toBe("active");
+    expect(hidden.data.include_history).toBe(false);
+
+    const shown = parseResult(await server.call("get_findings", { project: "historyproj", include_history: true }));
+    expect(shown.ok).toBe(true);
+    expect(shown.data.findings).toHaveLength(3);
+    expect(shown.data.findings.some((f: any) => f.status === "superseded")).toBe(true);
+    expect(shown.data.findings.some((f: any) => f.tier === "archived")).toBe(true);
+    expect(shown.data.include_history).toBe(true);
+  });
+
+  it("supports status filter and includes normalized lifecycle fields", async () => {
+    makeProject(tmp.path, "lifecycleproj", {
+      "FINDINGS.md": "# lifecycleproj FINDINGS\n\n## 2026-03-09\n\n- Citation failed on this finding <!-- created: 2026-03-09 --> <!-- phren:status \"invalid_citation\" --> <!-- phren:status_updated \"2026-03-10\" --> <!-- phren:status_reason \"citation_missing\" --> <!-- phren:status_ref \"docs/ref.md:12\" -->\n- Baseline healthy finding <!-- created: 2026-03-09 --> <!-- phren:status \"active\" -->\n",
+    });
+
+    const filtered = parseResult(await server.call("get_findings", { project: "lifecycleproj", status: "invalid_citation" }));
+    expect(filtered.ok).toBe(true);
+    expect(filtered.data.findings).toHaveLength(1);
+    expect(filtered.data.findings[0].status).toBe("invalid_citation");
+    expect(filtered.data.findings[0].status_updated).toBe("2026-03-10");
+    expect(filtered.data.findings[0].status_reason).toBe("citation_missing");
+    expect(filtered.data.findings[0].status_ref).toBe("docs/ref.md:12");
+    expect(filtered.data.findings[0].lifecycle.status).toBe("invalid_citation");
+  });
+});
+
+describe("mcp-search: lifecycle search ordering and filters", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let db: SqlJsDatabase;
+
+  beforeEach(async () => {
+    tmp = makeTempDir("mcp-search-lifecycle-");
+    grantAdmin(tmp.path);
+
+    makeProject(tmp.path, "active-proj", {
+      "FINDINGS.md": "# active-proj Findings\n\n## 2026-03-01\n\n- Shared lifecycle token appears here <!-- created: 2026-03-01 --> <!-- phren:status \"active\" -->\n",
+    });
+    makeProject(tmp.path, "degraded-proj", {
+      "FINDINGS.md": "# degraded-proj Findings\n\n## 2026-03-01\n\n- Shared lifecycle token appears but is stale <!-- created: 2026-03-01 --> <!-- phren:status \"stale\" -->\n",
+    });
+    makeProject(tmp.path, "history-proj", {
+      "FINDINGS.md": "# history-proj Findings\n\n## 2026-03-01\n\n- Shared lifecycle token appears but is retracted <!-- created: 2026-03-01 --> <!-- phren:status \"retracted\" -->\n",
+    });
+
+    db = await buildIndex(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      phrenPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    db.close();
+    tmp.cleanup();
+  });
+
+  it("ranks active findings before degraded findings", async () => {
+    const res = parseResult(await server.call("search_knowledge", {
+      query: "shared lifecycle token",
+      type: "findings",
+      include_history: true,
+      limit: 5,
+    }));
+    expect(res.ok).toBe(true);
+    // Inactive findings stripped from FTS index
+    expect(res.data.results.length).toBeGreaterThanOrEqual(1);
+    expect(res.data.results[0].status).toBe("active");
+  });
+
+  it("hides history by default and supports lifecycle status filter", async () => {
+    const hiddenHistory = parseResult(await server.call("search_knowledge", {
+      query: "shared lifecycle token retracted",
+      type: "findings",
+      limit: 5,
+    }));
+    expect(hiddenHistory.ok).toBe(true);
+    expect(hiddenHistory.data.results.some((r: any) => r.status === "retracted")).toBe(false);
+
+    const filtered = parseResult(await server.call("search_knowledge", {
+      query: "shared lifecycle token",
+      type: "findings",
+      include_history: true,
+      status: "stale",
+      limit: 5,
+    }));
+    expect(filtered.ok).toBe(true);
+    // Stale findings stripped from FTS index
+    expect(filtered.data.results.length).toBe(0);
+  });
+});
+
+describe("mcp-search: get_memory_detail URL decode", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+  let db: SqlJsDatabase;
+
+  beforeEach(async () => {
+    tmp = makeTempDir("mcp-search-memid-");
+    grantAdmin(tmp.path);
+
+    makeProject(tmp.path, "myapp", {
+      "FINDINGS.md": "# myapp Findings\n\n## 2026-03-01\n\n- Important finding about caching\n",
+      "summary.md": "# myapp\nA web application.",
+    });
+
+    db = await buildIndex(tmp.path);
+    server = makeMockServer();
+
+    const ctx: McpContext = {
+      phrenPath: tmp.path,
+      profile: "test",
+      db: () => db,
+      rebuildIndex: async () => {},
+      updateFileInIndex: () => {},
+      withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    };
+    register(server as any, ctx);
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    db.close();
+    tmp.cleanup();
+  });
+
+  it("resolves URL-encoded memory ID with %2F slash", async () => {
+    // mem:myapp/FINDINGS.md with the slash encoded
+    const res = parseResult(await server.call("get_memory_detail", { id: "mem:myapp%2FFINDINGS.md" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.project).toBe("myapp");
+    expect(res.data.content).toContain("caching");
+  });
+
+  it("resolves plain (non-encoded) memory ID", async () => {
+    const res = parseResult(await server.call("get_memory_detail", { id: "mem:myapp/FINDINGS.md" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.project).toBe("myapp");
+  });
+
+  it("returns error for invalid format even after decode", async () => {
+    const res = parseResult(await server.call("get_memory_detail", { id: "invalid-id" }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Invalid memory ID format");
+  });
+});

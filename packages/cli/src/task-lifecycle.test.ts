@@ -1,0 +1,563 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+import { makeTempDir, grantAdmin, writeFile } from "./test-helpers.js";
+import { handleTaskPromptLifecycle, finalizeTaskSession } from "./task/lifecycle.js";
+import { readTasks, addTask, appendChildFinding } from "./data/access.js";
+
+describe("task lifecycle", () => {
+  let tmp: { path: string; cleanup: () => void };
+  const project = "demo";
+
+  beforeEach(() => {
+    tmp = makeTempDir("task-lifecycle-");
+    grantAdmin(tmp.path);
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "manual",
+    }, null, 2) + "\n");
+    writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
+    writeFile(path.join(tmp.path, project, "AGENTS.md"), "Repo: https://github.com/alaarab/phren\n");
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    tmp.cleanup();
+  });
+
+  it("suggest mode proposes a task without mutating tasks.md", () => {
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "suggest",
+    }, null, 2) + "\n");
+
+    const before = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
+    const result = handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Implement automatic task management for hooks",
+      project,
+      sessionId: "session-suggest",
+      intent: "build",
+    });
+
+    expect(result.mode).toBe("suggest");
+    expect(result.noticeLines.join("\n")).toContain("Task suggestion");
+    const after = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
+    // Suggest mode never writes to the task file - it only proposes.
+    expect(after).toBe(before);
+  });
+
+  it("auto mode queues a task and links an explicit GitHub issue URL", () => {
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+
+    const result = handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Implement automatic task management for hooks https://github.com/alaarab/phren/issues/14",
+      project,
+      sessionId: "session-auto",
+      intent: "build",
+    });
+
+    expect(result.mode).toBe("auto");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
+
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    expect(task.data.items.Active).toHaveLength(0);
+    expect(task.data.items.Queue).toHaveLength(1);
+    expect(task.data.items.Queue[0].context).toContain("Implement automatic task management for hooks");
+    expect(task.data.items.Queue[0].githubIssue).toBe(14);
+    expect(task.data.items.Queue[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
+  });
+
+  it("auto mode suggests instead of writing when discovery intent detected", () => {
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+
+    const before = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
+    const result = handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Explore different caching strategies and evaluate the pros and cons",
+      project,
+      sessionId: "session-discovery",
+      intent: "build",
+    });
+
+    expect(result.mode).toBe("auto");
+    expect(result.noticeLines.join("\n")).toContain("Task suggestion");
+    const after = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
+    // Discovery mode (auto) writes a speculative task but surfaces it as a suggestion.
+    expect(after).toContain("Explore different caching strategies");
+  });
+
+  it("auto mode writes task when execution intent detected", () => {
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+
+    const result = handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Yes do it, implement the new caching layer",
+      project,
+      sessionId: "session-execution",
+      intent: "build",
+    });
+
+    expect(result.mode).toBe("auto");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
+
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    expect(task.data.items.Queue).toHaveLength(1);
+  });
+
+  it("auto mode writes task when both execution and discovery signals present", () => {
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+
+    const result = handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Go ahead and explore the caching alternatives then ship it",
+      project,
+      sessionId: "session-both",
+      intent: "build",
+    });
+
+    expect(result.mode).toBe("auto");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
+  });
+
+  it("auto mode writes task when no discovery signal present (default behavior)", () => {
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+
+    const result = handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Fix the authentication middleware",
+      project,
+      sessionId: "session-default",
+      intent: "debug",
+    });
+
+    expect(result.mode).toBe("auto");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
+  });
+
+  it("auto mode does not poison the tracked task on transient git failure", () => {
+    // Regression for the zombie-blocked-task bug. The lifecycle used to promote
+    // the user's active task to Active and stamp it "Blocked: Command failed:
+    // git add -A" when the session-end git auto-stage failed — leaving a
+    // permanent task that re-blocked every subsequent session.
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+
+    handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Fix narrow terminal task rendering",
+      project,
+      sessionId: "session-git-fail",
+      intent: "debug",
+    });
+
+    finalizeTaskSession({
+      phrenPath: tmp.path,
+      sessionId: "session-git-fail",
+      status: "error",
+      detail: "Command failed: git add -A",
+    });
+
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    // Task remains as it was — not stamped with the git failure.
+    const allLines = [...task.data.items.Active, ...task.data.items.Queue].map((i) => i.line);
+    expect(allLines.some((l) => l.includes("narrow terminal task rendering"))).toBe(true);
+    const allContexts = [...task.data.items.Active, ...task.data.items.Queue]
+      .map((i) => i.context)
+      .filter(Boolean);
+    expect(allContexts.some((c) => /Blocked: Command failed: git/.test(c!))).toBe(false);
+  });
+
+  it("auto mode still blocks the task on a non-git error", () => {
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+
+    handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Investigate the build pipeline failure",
+      project,
+      sessionId: "session-real-error",
+      intent: "debug",
+    });
+
+    finalizeTaskSession({
+      phrenPath: tmp.path,
+      sessionId: "session-real-error",
+      status: "error",
+      detail: "Disk full while writing logs",
+    });
+
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    const blocked = task.data.items.Active.find((i) => /Disk full/.test(i.context ?? ""));
+    expect(blocked).toBeDefined();
+  });
+
+  it("auto mode never completes the tracked task after a successful stop", () => {
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+
+    handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Add this to the task list: fix narrow terminal task rendering",
+      project,
+      sessionId: "session-complete",
+      intent: "debug",
+    });
+
+    finalizeTaskSession({
+      phrenPath: tmp.path,
+      sessionId: "session-complete",
+      status: "saved-local",
+      detail: "commit saved; background sync scheduled",
+    });
+
+    // The next turn's prompt arrives; the earlier task must still be open.
+    handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt: "Now update the release notes for the sync worker",
+      project,
+      sessionId: "session-complete",
+      intent: "build",
+    });
+    finalizeTaskSession({
+      phrenPath: tmp.path,
+      sessionId: "session-complete",
+      status: "saved-pushed",
+      detail: "pushed",
+    });
+
+    const task = readTasks(tmp.path, project);
+    expect(task.ok).toBe(true);
+    if (!task.ok) return;
+    expect(task.data.items.Done).toHaveLength(0);
+    const active = task.data.items.Active.find((i) => i.line.includes("narrow terminal task rendering"));
+    expect(active).toBeDefined();
+    // Detached at the turn boundary: the unrelated next prompt did not rewrite it.
+    expect(active?.context ?? "").not.toMatch(/release notes/i);
+  });
+
+  describe("machine-originated prompts", () => {
+    const framed: Array<[string, string]> = [
+      ["a sub-agent hand-back", '<agent-message from="worker-1">\nImplemented the fix for the sync worker retry and updated the tests in packages/cli/src/sync.ts\n</agent-message>'],
+      ["a system notification", "[SYSTEM NOTIFICATION] Background command finished: fix the build pipeline and deploy the release"],
+      ["a task notification", "<task-notification>\n<task-id>abc123</task-id>\n<status>completed</status>\n<summary>Implement the retry queue for sync</summary>\n</task-notification>"],
+      ["a system reminder", "<system-reminder>\nFix the failing tests in packages/cli before continuing\n</system-reminder>"],
+      ["a hand-back with leading whitespace", "  \n<agent-message>Update the docs and fix the lint errors in src/index.ts</agent-message>"],
+      ["a notification inside pasted content", '<pasted_content id="1">\n[SYSTEM NOTIFICATION] Implement the retry queue for sync\n</pasted_content id="1">'],
+    ];
+
+    function autoPolicy(): void {
+      writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+        schemaVersion: 1,
+        lowConfidenceThreshold: 0.7,
+        riskySections: ["Stale", "Conflicts"],
+        taskMode: "auto",
+      }, null, 2) + "\n");
+    }
+
+    for (const [label, prompt] of framed) {
+      it(`never creates a task from ${label}`, () => {
+        autoPolicy();
+        const before = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
+        const result = handleTaskPromptLifecycle({ phrenPath: tmp.path, prompt, project, sessionId: "session-frame", intent: "build" });
+        expect(result.noticeLines).toEqual([]);
+        expect(fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8")).toBe(before);
+      });
+    }
+
+    it("never completes or moves a tracked task when hand-backs arrive", () => {
+      autoPolicy();
+      handleTaskPromptLifecycle({
+        phrenPath: tmp.path,
+        prompt: "Add this to the task list: fix narrow terminal task rendering",
+        project,
+        sessionId: "session-handback",
+        intent: "build",
+      });
+      const before = fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8");
+      for (const [, prompt] of framed) {
+        handleTaskPromptLifecycle({ phrenPath: tmp.path, prompt, project, sessionId: "session-handback", intent: "build" });
+      }
+      expect(fs.readFileSync(path.join(tmp.path, project, "tasks.md"), "utf8")).toBe(before);
+      const task = readTasks(tmp.path, project);
+      expect(task.ok).toBe(true);
+      if (!task.ok) return;
+      expect(task.data.items.Done).toHaveLength(0);
+      expect(task.data.items.Active.some((i) => i.line.includes("narrow terminal task rendering"))).toBe(true);
+    });
+  });
+});
+
+// Auto-capture echoed the raw prompt onto the task and its `Context:` line. In real stores
+// 94% (arc), 100% (intranet2) and 68% (ogrid) of captured tasks were verbatim prompt echoes.
+describe("task auto-capture prompt gate", () => {
+  let tmp: { path: string; cleanup: () => void };
+  const project = "demo";
+
+  beforeEach(() => {
+    tmp = makeTempDir("task-prompt-gate-");
+    grantAdmin(tmp.path);
+    writeFile(path.join(tmp.path, ".config", "workflow-policy.json"), JSON.stringify({
+      schemaVersion: 1,
+      lowConfidenceThreshold: 0.7,
+      riskySections: ["Stale", "Conflicts"],
+      taskMode: "auto",
+    }, null, 2) + "\n");
+    writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
+  });
+
+  afterEach(() => {
+    tmp.cleanup();
+  });
+
+  function capture(prompt: string, sessionId: string) {
+    return handleTaskPromptLifecycle({
+      phrenPath: tmp.path,
+      prompt,
+      project,
+      sessionId,
+      intent: "build",
+    });
+  }
+
+  function taskCount(): number {
+    const tasks = readTasks(tmp.path, project);
+    if (!tasks.ok) return -1;
+    return tasks.data.items.Active.length + tasks.data.items.Queue.length;
+  }
+
+  // Each sample carries a signal word or URL, so it clears the substance floor and only the
+  // pasted-content / filler gates can stop it.
+  const rejected: Array<[string, string]> = [
+    ["pasted GitHub page", "Skip to content admenergy arc Repository navigation Code Issues Pull requests Actions Projects Wiki Security Insights https://github.com/admenergy/arc"],
+    ["pasted PowerShell banner", "Windows PowerShell Copyright (C) Microsoft Corporation. Install the latest PowerShell for new features and improvements! https://aka.ms/PSWindows PS C:\\Users\\alaarab> git status"],
+    ["single character", "3"],
+    ["chat reaction", "Its literally just the start of the day LMAO I havent run anything yet"],
+    ["opinion commentary", "I dont like three sources of truth idk why you did that that was u basically i feel thats slop in a way, check the docs"],
+  ];
+
+  for (const [label, prompt] of rejected) {
+    it(`does not create a task from ${label}`, () => {
+      const result = capture(prompt, `session-${label.replace(/\s+/g, "-")}`);
+      expect(result.noticeLines).toEqual([]);
+      expect(taskCount()).toBe(0);
+    });
+  }
+
+  it("still captures a real request, into Queue", () => {
+    const result = capture("Fix the retry backoff in the sync worker", "session-real");
+    expect(result.noticeLines.join("\n")).toContain("Queued task");
+    expect(taskCount()).toBe(1);
+    const tasks = readTasks(tmp.path, project);
+    expect(tasks.ok && tasks.data.items.Queue).toHaveLength(1);
+  });
+
+  // What the dispatcher session filed on 2026-09-19: replies from the phone
+  // (wrapped by the terminal), a message from another agent, questions.
+  const conversational: Array<[string, string]> = [
+    ["a wrapped reply", '<pasted_content id="92a5">\nYep /herdr the phren agent is there\n</pasted_content id="92a5">'],
+    ["a wrapped musing", '<pasted_content id="1b2c">\ncurious, I want you to look at /home/me/Projects/phren and tell me what changed\n</pasted_content id="1b2c">'],
+    ["a cross-session message", '<cross-session-message from="uds:/run/user/1000/cc-socks/1.sock" from-name="c2">\nFix the sync worker retry and update the docs\n</cross-session-message>'],
+    ["a delivery notice", "[Cross-session delivery notice] fix the sync worker: held for approval"],
+    ["a question", "Should I fix the retry backoff in the sync worker or update the docs first?"],
+    ["a bare acknowledgement of a path", "ok /home/me/Projects/phren is the one"],
+  ];
+  for (const [label, prompt] of conversational) {
+    it(`does not create a task from ${label}`, () => {
+      const result = capture(prompt, `session-${label.replace(/\s+/g, "-")}`);
+      expect(result.noticeLines).toEqual([]);
+      expect(taskCount()).toBe(0);
+    });
+  }
+
+  // Seen 2026-09-24: relayed messages pasted into a worker's pane rewrote an Active task's Context.
+  const relayed: Array<[string, string]> = [
+    ["pasted content", '<pasted_content id="7f01">\nFix the retry backoff in the sync worker\n</pasted_content id="7f01">'],
+    ["a relayed conductor message", "From the conductor, a correction: the owner wants test runs in parallel, fix the runner"],
+    ["a relayed agent message", "From tidy-phren: update the docs and fix the lint errors in src/index.ts"],
+    ["a computer and agent push report", "From macbook android-codex: parity slice 3 done, pushed as 42002c1"],
+    ["a computer and agent commit report", "From linuxbox claude: parser checks done, committed as abc1234"],
+    ["a computer and agent PR report", "From desktop codex: release checklist PR #27 opened"],
+    ["a dispatch return notice", "Return: Linuxbox parser checks done, Parser checks passed. (dispatch 40000000-0000-4000-8000-000000000001). Call dispatch_returns."],
+    ["a dispatch returns notice", "Returns: 2 dispatches (Linuxbox parser checks done, Fix parser regression; Desk nav checks gone). Call dispatch_returns."],
+    ["a dispatch approval notice", "Return: Linuxbox parser checks needs approval, Run: rm -rf build (dispatch 40000000-0000-4000-8000-000000000001; answer with dispatch_approve). Call dispatch_returns."],
+    ["a bare commit report", "Parser checks complete, committed as 42002c1"],
+    ["a bare push report", "Parity slice 3 complete, pushed as 42002c1"],
+    ["a bare PR report", "Release checklist PR #27 opened"],
+    ["a longer sender with a handle", "From the Mini backlog runner (phren-f3): fix complete, pushed ce76826 on hook/retry; all checks passed"],
+    ["a longer relay containing a request", "From the Mini backlog runner (phren-f3): fix the retry backoff and update the docs"],
+    ["a mid-sentence push report", "Parser fix pushed ce76826 on hook/retry; all checks passed"],
+    ["a mid-sentence commit report", "Parser fix committed as ce76826, ready for review"],
+    ["a pasted relay", '<pasted_content id="a1">\nFrom the conductor: fix the retry backoff in the sync worker\n</pasted_content id="a1">'],
+  ];
+  for (const [label, prompt] of relayed) {
+    it(`does not create a task from ${label}`, () => {
+      const result = capture(prompt, `session-${label.replace(/\s+/g, "-")}`);
+      expect(result.noticeLines).toEqual([]);
+      expect(taskCount()).toBe(0);
+    });
+  }
+
+  it("reads what was typed outside a paste, and a request that starts with 'From now on'", () => {
+    const typed = capture('Fix the retry backoff in the sync worker <pasted_content id="7f01">\nstack trace here\n</pasted_content id="7f01">', "session-typed");
+    expect(typed.noticeLines.join("\n")).toContain("Queued task (demo): Fix the retry backoff in the sync worker");
+    const tasks = readTasks(tmp.path, project);
+    expect((tasks.ok && tasks.data.items.Queue[0].context) || "").not.toContain("stack trace");
+    expect(capture("From now on, fix lint errors in src/index.ts before each commit", "session-from-now").noticeLines.join("\n")).toContain("Queued task");
+  });
+
+  it("still captures requests that look like relays or status reports", () => {
+    for (const [session, prompt] of [
+      ["session-settings", "From the settings page, add a toggle for sync notifications"],
+      ["session-pr-request", "Investigate why PR #27 opened"],
+      ["session-polite-pr-request", "Could someone investigate why PR #28 opened"],
+      ["session-push-request", "Investigate why the parser fix pushed ce76826 on hook/retry failed"],
+      ["session-path-request", "From the project settings page, add a sync toggle"],
+    ]) expect(capture(prompt, session).noticeLines.join("\n")).toContain("Queued task");
+    expect(taskCount()).toBe(5);
+  });
+
+  it("never rewrites the Context of the session's tracked task or a matched task", () => {
+    capture("Add this to task: fix the retry backoff in the sync worker", "session-keep");
+    const context = () => { const tasks = readTasks(tmp.path, project); return tasks.ok ? tasks.data.items.Active[0].context : undefined; };
+    const before = context();
+    expect(before).toBe("Fix the retry backoff in the sync worker");
+    capture("Now update the docs for the release checklist in docs/release.md", "session-keep");
+    capture("Fix the retry backoff in the sync worker again after the rebase", "session-other");
+    expect(context()).toBe(before);
+    expect(taskCount()).toBe(1);
+  });
+
+  it("puts a request the person asked to track in Active, and a matched Active task stays there", () => {
+    const explicit = capture("Add this to task: fix the retry backoff in the sync worker", "session-explicit");
+    expect(explicit.noticeLines.join("\n")).toContain("Active task");
+    const tasks = readTasks(tmp.path, project);
+    expect(tasks.ok && tasks.data.items.Active.map((t) => t.line)).toEqual(["Fix the retry backoff in the sync worker"]);
+    const again = capture("Fix the retry backoff in the sync worker properly", "session-again");
+    expect(again.noticeLines.join("\n")).toContain("Active task");
+    expect(taskCount()).toBe(1);
+  });
+});
+
+describe("progressive task model", () => {
+  let tmp: { path: string; cleanup: () => void };
+  const project = "demo";
+
+  beforeEach(() => {
+    tmp = makeTempDir("progressive-task-");
+    grantAdmin(tmp.path);
+    writeFile(path.join(tmp.path, project, "tasks.md"), `# ${project} tasks\n\n## Active\n\n## Queue\n\n## Done\n`);
+  });
+
+  afterEach(() => {
+    tmp.cleanup();
+  });
+
+  it("addTask stores createdAt and sessionId provenance in the task item", () => {
+    const now = new Date().toISOString();
+    const result = addTask(tmp.path, project, "Implement rate limiting", {
+      createdAt: now,
+      sessionId: "sess-abc123",
+      scope: "backend",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.createdAt).toBe(now);
+    expect(result.data.sessionId).toBe("sess-abc123");
+    expect(result.data.scope).toBe("backend");
+    expect(result.data.line).toBe("Implement rate limiting");
+  });
+
+  it("addTask with speculative:true marks the task as speculative", () => {
+    const result = addTask(tmp.path, project, "Explore event sourcing", {
+      speculative: true,
+      sessionId: "sess-explore",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.speculative).toBe(true);
+
+    // Verify it was written to the file
+    const tasks = readTasks(tmp.path, project);
+    expect(tasks.ok).toBe(true);
+    if (!tasks.ok) return;
+    const queued = tasks.data.items.Queue;
+    expect(queued.some((t: any) => t.line.includes("Explore event sourcing"))).toBe(true);
+  });
+
+  it("appendChildFinding links a finding ID to an existing task", () => {
+    const add = addTask(tmp.path, project, "Migrate to Postgres");
+    expect(add.ok).toBe(true);
+    if (!add.ok) return;
+
+    const stableId = `bid:${add.data.stableId}`;
+    const link = appendChildFinding(tmp.path, project, stableId, "fid:aabbccdd");
+    expect(link.ok).toBe(true);
+
+    const tasks = readTasks(tmp.path, project);
+    expect(tasks.ok).toBe(true);
+    if (!tasks.ok) return;
+    const item = tasks.data.items.Queue.find((t: any) => t.line.includes("Migrate to Postgres"));
+    expect(item?.childFindings).toContain("fid:aabbccdd");
+  });
+});

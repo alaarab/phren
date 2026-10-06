@@ -1,0 +1,644 @@
+import { integratorSchema, prsSchema } from "./return-contract.js";
+import { requireConductorLease } from "./conductor-lease.js";
+import { randomUUID } from "node:crypto";
+import { lstat, mkdir, readFile, readdir, realpath, stat } from "node:fs/promises";
+import path from "node:path";
+import { z } from "zod";
+import { logger } from "../logger.js";
+import { homeDir } from "../home-paths.js";
+import { getMachineName } from "../machine-identity.js";
+import { getProjectSourcePath } from "../project-config.js";
+import { computerName } from "./computers.js";
+import { dispatchParentSchema, validateDispatchParent } from "./dispatch-tree.js";
+import { findGrant, grantLabel, permissionModeAllowed, DEFAULT_MAX_PERMISSION_MODE } from "./grants.js";
+import { checkAgentDispatch, projectAuthority, readAuthority, RELEASE_ACTIONS, releaseAction, type AuthorityCheck } from "./authority.js";
+import { hookPeers } from "./peers.js";
+import { callerQuery, localCaller, oneWayHint } from "./conductor-group.js";
+import { recordedConductor } from "./conductor-role.js";
+import { linkedComputer } from "./computer-identity.js";
+import { isLocalComputer, localHost, peerHost, type DispatchHost } from "./dispatch-hosts.js";
+import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, PROTOCOL, provider, serverName, startingTargetSchema, targetSchema, type Json, type Provider, type StartingTarget, type Target } from "./protocol.js";
+import { phrenStoreRoot } from "./transcripts.js";
+import { isAccountSlug } from "./claude-accounts.js";
+import { hasUsable, type HarnessInventory } from "./harnesses.js";
+import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
+
+const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
+export const projectName = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/);
+/** The harnesses a dispatch, a code note's hand-off or a schedule can start. */
+export const DISPATCH_HARNESSES = ["codex", "claude", "opencode", "copilot"] as const;
+export const dispatchSchema = z.object({
+  computer: z.union([z.literal("anywhere"), computerName]).describe("Enrolled computer name, or anywhere for the least busy connected computer."),
+  project: projectName.describe("Project slug registered on the receiving computer."),
+  harness: z.enum(DISPATCH_HARNESSES).describe("Agent harness on the receiving computer."),
+  backend: z.string().regex(/^(claude-sdk|acp:[a-z][a-z0-9-]{0,31})$/).optional().describe("Explicit configured structured backend; otherwise the receiving Hook default."),
+  model: text(200).optional().describe("Explicit model, otherwise the remote harness default."),
+  effort: z.enum(launchEfforts).optional().describe("Reasoning effort for the worker (minimal, low, medium, high, xhigh, max), otherwise the harness default."),
+  account: z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").optional()
+    .describe("Claude account id to run the worker under (default, or a slug from `phren bridge accounts`). anywhere only picks computers where that account is signed in; a named computer without it fails."),
+  permissionMode: z.enum(PERMISSION_MODES).optional().describe("Permission mode the worker starts in: supervised, auto-edits, auto or full-access (Claude, Codex and Copilot; not OpenCode); otherwise the receiving computer's own default."),
+  releaseActions: z.array(releaseAction).min(1).max(RELEASE_ACTIONS.length).optional()
+    .describe("Release-type actions the brief asks the worker to do (merge, publish, deploy, app-store, github-admin). Ask-first projects refuse them from an agent unless the owner confirmed."),
+  prompt: z.string().min(1).max(32768).refine(value => !/[\x00-\x08\x0b-\x1f\x7f]/.test(value)).describe("Worker brief, at most 32768 characters."),
+  label: text(200).describe("Short task label."),
+  closeOnFinish: z.boolean().optional().describe("Close the finished worker pane after its done return is read. Defaults to true; false keeps it open."),
+  integrator: integratorSchema.optional().describe("Forward structured PR reports to this integrator, overriding the Hook default."),
+  parent: dispatchParentSchema.optional().describe("Explicit local conversation parent for work-tree attachment."),
+  parentTarget: targetSchema.optional().describe("Complete live target for the explicit parent."),
+}).strict();
+export type DispatchInput = z.infer<typeof dispatchSchema>;
+const remoteTarget = z.union([targetSchema, startingTargetSchema]);
+/** The local pane that asked for the dispatch, where return notices go. */
+export const originPaneSchema = z.object({ server: serverName, workspace: id, tab: id, pane: id }).strict();
+export type OriginPane = z.infer<typeof originPaneSchema>;
+export const workerStates = ["working", "done", "needs-you", "failed", "blocked", "stalled", "gone", "expired"] as const;
+export type WorkerState = typeof workerStates[number];
+const timestamp = z.string().datetime();
+const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
+  id: z.string().uuid(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
+  computerId: z.string().uuid().optional(),
+  state: z.enum(["launching", "sending", "accepted", "uncertain", "failed"]),
+  target: remoteTarget.optional(), error: z.string().max(500).optional(),
+  brief: z.enum(["launch", "typed"]).optional()
+    .describe("How the brief reached the worker: as its first prompt at launch (confirmed by the worker's hook), or typed into its pane."),
+  granted: z.string().max(200).optional().describe("Scope of the conductor grant that allowed this call."),
+  authority: z.string().max(600).optional().describe("The release authority policy's line for this project, as a conductor quotes it."),
+  authorityConfirmed: z.string().datetime().optional().describe("When the owner confirmed the ask-first release actions this agent dispatch used."),
+  skipped: z.array(z.object({ computer: computerName, reason: z.string().max(200) }).strict()).max(32).optional()
+    .describe("Computers left out of anywhere placement, with the reason each could not report capacity."),
+  origin: originPaneSchema.extend({ agent: provider, terminal: z.string().min(1).max(200) }).strict().optional()
+    .describe("The local agent pane that placed this dispatch; return notices go there."),
+  closedAt: timestamp.optional(),
+  closePending: z.object({ at: timestamp, turn: z.string().optional() }).strict().optional(),
+  worker: z.object({ state: z.enum(workerStates), since: timestamp, checkedAt: timestamp, sawWorking: z.boolean(),
+    background: z.number().int().min(0).max(999).optional().describe("The most background tasks seen running while the worker was working."),
+    waitingSince: timestamp.optional().describe("When the dispatching Hook first saw the worker's finished turn waiting on background tasks; bounds that wait.") }).strict().optional()
+    .describe("The worker pane's last observed state."),
+  returned: z.object({
+    state: z.enum(["done", "needs-you", "failed", "blocked", "stalled", "gone", "expired"]), at: timestamp,
+    reply: z.string().max(4000).optional(), error: z.string().max(500).optional(), truncated: z.boolean().optional(), question: z.string().max(200).optional(),
+    prs: prsSchema.optional(),
+    integratorDelivery: z.object({ deliveryId: z.string(), state: z.enum(["pending", "queued", "delivered", "uncertain", "failed"]), at: timestamp, integrator: integratorSchema.optional() }).strict().optional(),
+    stalledSince: timestamp.optional(), stallFor: z.number().nonnegative().optional(),
+    turn: z.string().regex(/^[a-f0-9]{16}$/).optional(), read: z.boolean(), notifiedAt: timestamp.optional(),
+    background: z.number().int().min(1).max(999).optional().describe("Background tasks the worker left running when it was counted done."),
+    waited: z.number().int().min(1).max(999).optional().describe("The most background tasks the worker waited on before it finished."),
+  }).strict().optional().describe("The latest return: the worker finished, needs the owner, failed, is blocked or is gone."),
+  approval: z.object({
+    actionId: z.string().min(1).max(200), tool: z.string().max(200), title: z.string().max(200).optional(), request: z.string().max(500).optional(),
+    requestKind: z.enum(["command", "tool", "edit", "question", "other"]).optional(), terminal: z.boolean().optional(),
+    conductor: z.object({ action: z.enum(["dispatch", "hand_off"]), project: z.string().max(200).optional(), computer: z.string().max(200).optional() }).strict().optional(),
+    expiresAt: z.string().max(40).optional(), at: timestamp, pushed: z.boolean().optional(),
+  }).strict().optional().describe("A permission request the worker is waiting on, forwarded by its Hook; answer it with dispatch_approve."),
+});
+export type Receipt = z.infer<typeof receiptSchema>;
+type Skipped = { computer: string; reason: string };
+
+/** Where a checkout usually sits when the store names none for this computer. */
+const CHECKOUT_ROOTS = ["Projects", "projects", "Sites", "Code", "code", "dev", "src", "repos"];
+
+async function directoryAt(source: string | undefined): Promise<string | undefined> {
+  if (typeof source !== "string" || !path.isAbsolute(source) || /[\x00-\x1f\x7f]/.test(source)) return undefined;
+  const directory = await realpath(source).catch(() => undefined);
+  return directory && (await stat(directory)).isDirectory() ? directory : undefined;
+}
+
+/**
+ * The project's folder on this computer. The store syncs between computers,
+ * so its shared `sourcePath` is often another machine's folder: this
+ * machine's `sourcePaths` entry wins, as everywhere else in phren. With
+ * neither here, a git checkout named after the project in a usual project
+ * root is taken (the owner's layout is `~/Projects/<name>` on every computer).
+ */
+export async function dispatchProjectDirectory(project: unknown, home = homeDir()): Promise<string> {
+  const name = projectName.parse(project);
+  const configured = await directoryAt(getProjectSourcePath(phrenStoreRoot(), name));
+  if (configured) return configured;
+  for (const root of [...(process.env.PROJECTS_DIR ? [process.env.PROJECTS_DIR] : []), ...CHECKOUT_ROOTS.map(folder => path.join(home, folder))]) {
+    const checkout = await directoryAt(path.join(root, name));
+    if (checkout && await stat(path.join(checkout, ".git")).catch(() => undefined)) return checkout;
+  }
+  throw new BridgeError(404, `Project ${name} is not on this computer: the store names no folder for ${getMachineName()} that exists here, and there is no ~/Projects/${name} checkout.`);
+}
+
+async function save(receipt: Receipt): Promise<void> {
+  const root = path.join(bridgeRoot(), "dispatches");
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  await atomic(path.join(root, `${receipt.id}.json`), receipt);
+}
+
+const IGNORED_MODE = "The receiving Hook is older and ignored permissionMode; the worker runs in that computer's default mode. Update its Hook.";
+const MAX_RECEIPT_BYTES = 65_536;
+let receiptUpdates: Promise<unknown> = Promise.resolve();
+
+/**
+ * Change one settled receipt: read it, let `change` edit it, and write it back
+ * when `change` returns true. Updates run one at a time in this process, and a
+ * receipt still being placed (launching or sending) is never touched.
+ */
+export function updateReceipt(receiptID: string, change: (receipt: Receipt) => boolean): Promise<Receipt | undefined> {
+  const run = receiptUpdates.then(async () => {
+    const file = path.join(bridgeRoot(), "dispatches", `${z.string().uuid().parse(receiptID)}.json`);
+    const info = await lstat(file).catch(() => undefined);
+    if (!info?.isFile() || info.isSymbolicLink() || info.size > MAX_RECEIPT_BYTES) return undefined;
+    const receipt = receiptSchema.parse(JSON.parse(await readFile(file, "utf8")));
+    if (["launching", "sending"].includes(receipt.state)) return undefined;
+    if (!change(receipt)) return receipt;
+    receipt.updatedAt = new Date().toISOString();
+    await atomic(file, receiptSchema.parse(receipt));
+    return receipt;
+  });
+  receiptUpdates = run.catch(() => undefined);
+  return run;
+}
+
+/** No ledger yet is normal; any other read failure is logged before it reads as empty. */
+async function receiptNames(root: string): Promise<string[]> {
+  try { return await readdir(root); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") logger.warn("dispatch", `Could not list dispatch receipts: ${failureReason(error)}`);
+    return [];
+  }
+}
+
+/** One bounded line for a log or a receipt: a Bridge message, an errno code, or the error's first line. */
+export function failureReason(error: unknown): string {
+  if (error instanceof z.ZodError) return "The remote Hook sent an unexpected reply (protocol mismatch).";
+  const code = (error as NodeJS.ErrnoException)?.code;
+  const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
+  return `${typeof code === "string" && !(error instanceof BridgeError) ? `${code}: ` : ""}${message}`.replace(/[\x00-\x1f\x7f]/g, " ").slice(0, 200);
+}
+
+export async function dispatchStatus(): Promise<Receipt[]> {
+  const root = path.join(bridgeRoot(), "dispatches");
+  const names = (await receiptNames(root)).filter(name => /^[a-f0-9-]{36}\.json$/.test(name)).slice(0, 1024);
+  const receipts: Receipt[] = [];
+  for (const name of names) {
+    try {
+      const file = path.join(root, name);
+      const info = await lstat(file);
+      if (!info.isFile() || info.isSymbolicLink() || info.size > MAX_RECEIPT_BYTES) continue;
+      const receipt = receiptSchema.parse(JSON.parse(await readFile(file, "utf8")));
+      // A service restart cannot prove whether an in-flight mutation arrived.
+      if (["launching", "sending"].includes(receipt.state)) receipt.state = "uncertain";
+      receipts.push(receipt);
+    } catch { /* Interrupted or old receipts do not become live dispatches. */ }
+  }
+  return receipts.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/** `caller` (a conductor's name and host key) asks a peer whether it links this computer back:
+ * `outside` is a peer in another set, which a conductor does not dispatch to. */
+type Room = { source: string; account?: string; leftPercent?: number; exhausted?: boolean; until?: string };
+async function capacity(host: DispatchHost, caller?: string): Promise<{ working: number; computerId: string; harnesses?: HarnessInventory["harnesses"]; usage?: Room[]; outside?: true }> {
+  const value = await host.request(caller && !host.local ? `/v1/dispatch/capacity?${caller}` : "/v1/dispatch/capacity");
+  const result = z.object({ product: z.literal("phren-hook"), protocol: z.literal(PROTOCOL), working: z.number().int().nonnegative(),
+    servers: z.array(z.string()), computer: z.object({ id: z.string().uuid() }).passthrough(),
+    // Missing from an older Hook, or when its inventory was not ready in time: unknown, not unavailable.
+    harnesses: z.array(z.object({ source: z.string(), installed: z.boolean(), usable: z.boolean(), reason: z.string().optional(),
+      accounts: z.array(z.object({ id: z.string(), usable: z.boolean(), reason: z.string().optional() }).passthrough()).optional() }).passthrough()).optional(),
+    // Missing from an older Hook or a slow read: that computer's quota is unknown, so it is never ruled out by it.
+    usage: z.array(z.object({ source: z.string(), account: z.string().optional(), leftPercent: z.number().min(0).max(100).optional(),
+      exhausted: z.boolean().optional(), until: z.string().max(40).optional() }).passthrough()).max(64).optional(),
+    knowsCaller: z.boolean().optional() }).parse(value);
+  // This computer places on whichever Herdr server its own Hook runs.
+  if (host.local && !result.servers.includes(host.server) && result.servers[0]) host.server = result.servers[0];
+  if (!result.servers.includes(host.server)) throw new BridgeError(503, "Herdr is not running on the selected computer. Headless dispatch is not installed yet.");
+  return { working: result.working, computerId: result.computer.id, ...(result.harnesses ? { harnesses: result.harnesses as HarnessInventory["harnesses"] } : {}),
+    ...(result.usage ? { usage: result.usage } : {}),
+    ...(caller && result.knowsCaller === false ? { outside: true as const } : {}) };
+}
+
+/** The account this dispatch would run under there, as its capacity probe reports it: Codex's one, or the named Claude home. */
+export function roomFor(data: { harness: string; account?: string }, usage: readonly Room[] | undefined): Room | undefined {
+  const account = data.account ?? "default";
+  return usage?.find(item => item.source === data.harness && (data.harness !== "claude" || (item.account ?? "default") === account));
+}
+
+/** Why `anywhere` must not pick a computer for quota: only an account with none left (at 100% or refusing requests).
+ *  Low quota is not a reason; the owner often wants it used before it resets. */
+export function outOfQuota(data: { harness: string; account?: string }, usage: readonly Room[] | undefined, now = Date.now()): string | undefined {
+  const room = roomFor(data, usage);
+  if (!room?.exhausted) return undefined;
+  const until = room.until ? Date.parse(room.until) : NaN;
+  const minutes = Number.isFinite(until) ? Math.max(1, Math.round((until - now) / 60_000)) : undefined;
+  const back = minutes === undefined ? "" : minutes >= 1440 ? ` for about ${Math.round(minutes / 1440)} more days` : minutes >= 60 ? ` for about ${Math.round(minutes / 60)} more hours` : ` for about ${minutes} more minutes`;
+  return `Its ${data.harness}${data.harness === "claude" ? ` account ${data.account ?? "default"}` : ""} has no quota left${back}.`;
+}
+
+/** Why a computer cannot run this dispatch's harness and account, or undefined when it can or cannot yet be told.
+ * `unknown` (no `harnesses`) only counts against a computer when a non-default account was asked for. */
+function unusable(data: { harness: string; account?: string }, harnesses: HarnessInventory["harnesses"] | undefined, strictUnknown: boolean): string | undefined {
+  if (!harnesses) return strictUnknown && data.account && data.account !== "default" ? "Its Hook does not report harnesses or accounts (update it)." : undefined;
+  const availability = hasUsable({ harnesses }, data.harness, data.account);
+  return availability.ok ? undefined : availability.reason;
+}
+
+/**
+ * A freshly started agent may not have written its session yet when the launch
+ * returns, so the launch carries no target. Ask the remote pane for a few
+ * seconds; the pane ids from the launch are enough to find it. Until its first
+ * prompt a new Codex or Claude has no conversation at all, only a starting
+ * binding, and that is the target its brief goes to (as the phone's first
+ * message does). `status` is the pane's last status when neither appeared.
+ */
+async function settledTarget(peer: DispatchHost, launched: Json, harness: string, intervalMs = 1_000): Promise<{ target?: Json; status?: string }> {
+  const workspace = launched.workspaceId, tab = launched.tabId, pane = launched.paneId;
+  if (typeof workspace !== "string" || typeof tab !== "string" || typeof pane !== "string") return {};
+  let status: string | undefined;
+  for (let attempt = 0; attempt < 15; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+    try {
+      const result = await peer.request(`/v1/workspaces/panes?server=${encodeURIComponent(peer.server)}&groupId=${encodeURIComponent(workspace)}&childId=${encodeURIComponent(tab)}`);
+      const found = (Array.isArray(result.panes) ? result.panes : []).find((p: Json) => p && typeof p === "object" && (p as Json).id === pane) as Json | undefined;
+      if (typeof found?.agentStatus === "string") status = found.agentStatus;
+      const binding = { server: peer.server, workspace, tab, pane, source: harness };
+      const session = found?.sessionId;
+      if (typeof session === "string" && session) return { target: { ...binding, session } };
+      if (found?.starting === true && typeof found.startingToken === "string") return { target: { ...binding, starting: true, startingToken: found.startingToken } };
+    } catch { /* The pane list can lag the launch; try again. */ }
+  }
+  return { status };
+}
+
+/** The new agent is holding a screen of its own before it takes any prompt:
+ * Claude's folder trust or a sign-in. Only the owner answers those. */
+class StartupScreen extends Error {
+  constructor(readonly status: string) { super(`The agent is ${status} on a startup screen.`); }
+}
+
+/**
+ * Sends the brief. A fresh agent can read `unknown` to Herdr for a while (long
+ * on a loaded machine), and the Hook refuses a prompt to such a pane before
+ * typing anything. So that refusal is retried while the pane is still
+ * unclassified; a pane that is blocked or waiting really needs its terminal,
+ * and that refusal stands.
+ */
+async function sendBrief(peer: DispatchHost, target: Json, text: string, deliveryId: string): Promise<Json> {
+  for (let attempt = 0; ; attempt++) {
+    // One delivery id for every attempt: the receiving Hook types it once.
+    try { return await peer.request("/v1/prompt", { target, text, deliveryId }); } catch (error) {
+      const unsettled = error instanceof BridgeError && error.status === 409 && /needs input in the terminal first/.test(error.message);
+      if (!unsettled || attempt >= 20) throw error;
+      const panes = await peer.request(`/v1/workspaces/panes?server=${encodeURIComponent(peer.server)}&groupId=${encodeURIComponent(String(target.workspace))}&childId=${encodeURIComponent(String(target.tab))}`).catch(() => undefined);
+      const pane = (Array.isArray(panes?.panes) ? panes.panes : []).find((p: Json) => p && typeof p === "object" && (p as Json).id === target.pane) as Json | undefined;
+      const status = pane?.agentStatus;
+      // Nothing was typed: the refusal came before any text reached the pane.
+      if (typeof status === "string" && ["blocked", "waiting"].includes(status)) throw new StartupScreen(status);
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+    }
+  }
+}
+
+/** The pane as the remote Hook lists it now, or undefined when it does not list it. */
+async function listedPane(peer: DispatchHost, place: { workspace: unknown; tab: unknown; pane: unknown }): Promise<Json | undefined> {
+  const panes = await peer.request(`/v1/workspaces/panes?server=${encodeURIComponent(peer.server)}&groupId=${encodeURIComponent(String(place.workspace))}&childId=${encodeURIComponent(String(place.tab))}`).catch(() => undefined);
+  return (Array.isArray(panes?.panes) ? panes.panes : []).find((p: Json) => p && typeof p === "object" && (p as Json).id === place.pane) as Json | undefined;
+}
+
+/** Tries of a brief typed into a starting pane before the dispatch fails. */
+const BRIEF_TRIES = 2;
+/** Looks, one settle interval apart, for a starting pane to read ready, and for a typed brief to show. */
+const READY_LOOKS = 15;
+const LANDED_LOOKS = 20;
+
+/**
+ * A starting agent's terminal takes typed text only once its prompt is drawn,
+ * which Herdr reads as idle: text typed while it is still `unknown` can be
+ * swallowed with nothing to show for it (Mini w4E, 2026-09-30). Waits for that,
+ * at most READY_LOOKS. A startup screen is the owner's to answer; a pane the
+ * Hook does not list is not waited on.
+ */
+async function readyForBrief(peer: DispatchHost, target: StartingTarget, intervalMs: number): Promise<void> {
+  for (let look = 0; look < READY_LOOKS; look++) {
+    const pane = await listedPane(peer, target);
+    const status = pane?.agentStatus;
+    if (!pane || ["idle", "done", "working"].includes(String(status))) return;
+    if (status === "blocked" || status === "waiting") throw new StartupScreen(String(status));
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+}
+
+/**
+ * Before a brief is typed again. The first try can reach the agent after its
+ * landed window (a loaded machine starts the turn late), and a second copy
+ * would hand the worker its task twice, so the pane is read first. It is typed
+ * again only into a pane that still sits idle on the same starting binding with
+ * no conversation. A conversation, or the agent working, blocked, waiting or
+ * done, means it took the first brief; a pane the Hook does not list, on
+ * another binding or never classified, cannot be told, and nothing is typed.
+ */
+async function readyForRetry(peer: DispatchHost, target: StartingTarget, intervalMs: number): Promise<{ state: "ready" | "unknown" } | { state: "arrived"; session?: string }> {
+  for (let look = 0; look < READY_LOOKS; look++) {
+    if (look) await new Promise(resolve => setTimeout(resolve, intervalMs));
+    const pane = await listedPane(peer, target);
+    if (!pane) return { state: "unknown" };
+    if (typeof pane.sessionId === "string" && pane.sessionId) return { state: "arrived", session: pane.sessionId };
+    if (pane.starting === true && pane.startingToken !== target.startingToken) return { state: "unknown" };
+    const status = String(pane.agentStatus);
+    if (status === "idle") return { state: "ready" };
+    if (["working", "blocked", "waiting", "done"].includes(status)) return { state: "arrived" };
+  }
+  return { state: "unknown" };
+}
+
+/**
+ * Whether a brief typed into a starting pane reached its agent: a conversation
+ * appeared, or the agent went to work. Lost when the pane still sits idle on
+ * the same starting binding after LANDED_LOOKS; unknown when the Hook does not
+ * list the pane, or it no longer holds that binding.
+ */
+async function briefLanded(peer: DispatchHost, target: StartingTarget, intervalMs: number): Promise<{ state: "arrived"; session?: string } | { state: "lost" | "unknown" }> {
+  for (let look = 0; look < LANDED_LOOKS; look++) {
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+    const pane = await listedPane(peer, target);
+    if (!pane) return { state: "unknown" };
+    if (typeof pane.sessionId === "string" && pane.sessionId) return { state: "arrived", session: pane.sessionId };
+    if (pane.starting === true && pane.startingToken !== target.startingToken) return { state: "unknown" };
+    if (["working", "blocked", "waiting"].includes(String(pane.agentStatus))) return { state: "arrived" };
+  }
+  return { state: "lost" };
+}
+
+/** What the worker's own hooks reported for a brief that went with its
+ * launch, or undefined when the receiving Hook has no such brief. */
+export async function arrivalOf(peer: Pick<DispatchHost, "request">, id: string): Promise<BriefArrival | undefined> {
+  const answer = await peer.request(`/v1/dispatch/arrival?id=${encodeURIComponent(id)}`);
+  const arrival = answer.arrival === null ? undefined : arrivalSchema.parse(answer.arrival);
+  return arrival;
+}
+
+/**
+ * A brief that went with the launch is the new agent's first prompt; its
+ * UserPromptSubmit hook echoes the dispatch id when the harness submits it.
+ * Waits for that echo, and returns the conversation it named.
+ */
+async function awaitArrival(peer: DispatchHost, id: string, intervalMs: number): Promise<BriefArrival> {
+  let last: BriefArrival = {};
+  for (let attempt = 0; attempt < ARRIVAL_ATTEMPTS; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+    last = await arrivalOf(peer, id).catch(() => undefined) ?? last;
+    if (last.accepted) break;
+  }
+  return last;
+}
+/** Claude and Codex take a few seconds to start, load their MCP servers and submit the prompt. */
+const ARRIVAL_ATTEMPTS = 30;
+
+/** The pane's status as the remote Hook lists it now. */
+async function paneStatus(peer: DispatchHost, launched: Json): Promise<string | undefined> {
+  const panes = await peer.request(`/v1/workspaces/panes?server=${encodeURIComponent(peer.server)}&groupId=${encodeURIComponent(String(launched.workspaceId))}&childId=${encodeURIComponent(String(launched.tabId))}`).catch(() => undefined);
+  const pane = (Array.isArray(panes?.panes) ? panes.panes : []).find((p: Json) => p && typeof p === "object" && (p as Json).id === launched.paneId) as Json | undefined;
+  return typeof pane?.agentStatus === "string" ? pane.agentStatus : undefined;
+}
+
+export interface DispatchIdentity {
+  computerID: string;
+  validateParentTarget: (target: Target) => Promise<unknown>;
+  /** The agent and terminal running in a local pane, or undefined when the pane has no agent. */
+  originAgent?: (pane: OriginPane) => Promise<{ agent: Provider; terminal: string } | undefined>;
+}
+
+export class DispatchService {
+  /** One placement at a time: choosing a computer, saving the receipt and the
+   * launch request. Confirming the brief afterwards (up to a minute and a half
+   * for a slow starting pane) runs outside it, so other dispatches are not
+   * refused meanwhile; `placing` counts those launches toward their
+   * computer's load for the next `anywhere` choice. */
+  private active = false;
+  private readonly placing = new Map<string, number>();
+  /** `local` is this computer as a dispatch destination (its own Hook's
+   * socket); tests replace it so they never reach a real Hook. */
+  constructor(private readonly identity?: DispatchIdentity, private readonly local: () => DispatchHost = () => localHost(),
+    private readonly settleIntervalMs = 1_000) {}
+  /** `originValue` is the local pane the request came from, as its agent's
+   * Herdr variables name it; a pane without a running agent is left out. */
+  async dispatch(input: unknown, originValue?: unknown): Promise<Json> {
+    const data = dispatchSchema.parse(input);
+    if (data.permissionMode && data.harness === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
+    if (this.active) throw new BridgeError(429, "A dispatch is already being placed. Try again after its receipt arrives.");
+    this.active = true;
+    let holding = true, placed: string | undefined;
+    const release = () => { if (holding) { holding = false; this.active = false; } };
+    try {
+      if (data.parent !== undefined || data.parentTarget !== undefined) {
+        if (!this.identity) throw new BridgeError(503, "This Hook cannot validate a dispatch parent.");
+        await validateDispatchParent(data, this.identity.computerID, this.identity.validateParentTarget);
+      }
+      if ((await receiptNames(path.join(bridgeRoot(), "dispatches"))).length >= 1024) throw new BridgeError(429, "Dispatch history is full. Archive old receipts before dispatching again.");
+      // This computer needs no hooks.yaml entry, so a missing file only
+      // matters when the dispatch names another computer.
+      const here = this.local();
+      // An alias or hostname (`Mac`, `Squids-Mac-mini.local`) names the same computer as its hooks.yaml name.
+      const named = data.computer === "anywhere" || isLocalComputer(data.computer, here.names) ? undefined : await linkedComputer(data.computer).catch(() => undefined);
+      const toLocal = data.computer !== "anywhere" && (isLocalComputer(data.computer, here.names) || (named !== undefined && "local" in named));
+      const peerName = named && "peer" in named ? named.peer : data.computer;
+      const enrolled = await hookPeers().catch(error => { if (toLocal || data.computer === "anywhere") return []; throw error; });
+      // A conductor dispatches only within its set: each peer says whether it links this computer back.
+      const caller = await this.conductorCaller(originValue);
+      const peers: DispatchHost[] = [...enrolled.map(candidate => peerHost(candidate)), here];
+      let peer: DispatchHost | undefined;
+      let remoteComputerID: string | undefined;
+      const skipped: Skipped[] = [];
+      let incapable = false, spentSeen = false;
+      if (data.computer === "anywhere") {
+        const available = await Promise.all(peers.map(async candidate => {
+          try { return { peer: candidate, ...await capacity(candidate, caller) }; } catch (error) {
+            // A peer that cannot report capacity sits out this placement, and the receipt says why.
+            skipped.push({ computer: candidate.name, reason: failureReason(error) });
+            return undefined;
+          }
+        }));
+        skipped.sort((a, b) => a.computer.localeCompare(b.computer));
+        const capable = available.filter((item): item is NonNullable<typeof item> => !!item).filter(item => {
+          if (item.outside) { skipped.push({ computer: item.peer.name, reason: oneWayHint(item.peer.name) }); return false; }
+          const reason = unusable(data, item.harnesses, true);
+          if (reason) incapable = true;
+          if (reason) skipped.push({ computer: item.peer.name, reason: reason.slice(0, 200) });
+          if (reason) return false;
+          // The one quota rule: never place a worker on an account with none left. Low quota still counts as room.
+          const spent = outOfQuota(data, item.usage);
+          if (spent) { spentSeen = true; skipped.push({ computer: item.peer.name, reason: spent }); }
+          return !spent;
+        });
+        skipped.sort((a, b) => a.computer.localeCompare(b.computer));
+        const selected = capable
+          .sort((a, b) => a.working + this.inFlight(a.peer.name) - b.working - this.inFlight(b.peer.name) || a.peer.name.localeCompare(b.peer.name))[0];
+        peer = selected?.peer;
+        remoteComputerID = selected?.computerId;
+        if (!peer && spentSeen) throw new BridgeError(503, `No connected computer has ${data.harness}${data.harness === "claude" ? ` account ${data.account ?? "default"}` : ""} quota left right now.`, { code: "out_of_quota", skipped });
+        if (!peer) throw new BridgeError(503, incapable ? `No enrolled computer with a running Herdr can run ${data.harness}${data.account ? ` account ${data.account}` : ""}.` : "No enrolled computer with a running Herdr is connected.", skipped.length ? { skipped } : undefined);
+      } else {
+        peer = toLocal ? peers.find(candidate => candidate.local) : peers.find(candidate => !candidate.local && candidate.name === peerName);
+        if (!peer) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
+        const reported = await capacity(peer, caller);
+        if (reported.outside) throw new BridgeError(409, `${peer.name} is not in this conductor's set. ${oneWayHint(peer.name)}`, { code: "outside_set" });
+        remoteComputerID = reported.computerId;
+        // A Hook that reports what it can run is believed. An older one that does not is left to answer the launch
+        // itself, except for a non-default account: it would ignore `account` and launch under its default login.
+        const reason = unusable(data, reported.harnesses, true);
+        if (reason) throw new BridgeError(409, `${peer.name} cannot run ${data.harness}${data.account ? ` account ${data.account}` : ""}: ${reason}`);
+      }
+      const grant = await findGrant({ action: "dispatch", project: data.project, computer: peer.name });
+      // An agent (a call that names its pane) may start a worker only up to its grant's
+      // permission ceiling; the owner, calling from the phone or the CLI without a pane, is not capped.
+      const agent = originPaneSchema.safeParse(originValue).success;
+      if (data.permissionMode && agent && !permissionModeAllowed(data.permissionMode, grant)) {
+        throw new BridgeError(403, `No standing grant lets an agent start a worker in ${data.permissionMode} on ${peer.name}. Add maxPermissionMode: ${data.permissionMode} to a grant in conductor.yaml, or dispatch it yourself.`);
+      }
+      // The owner's release authority policy binds an agent's dispatch (and may
+      // lower its mode); the owner's own dispatch only carries the policy's line.
+      const checked: AuthorityCheck | undefined = agent ? await checkAgentDispatch(data, grant?.maxPermissionMode ?? DEFAULT_MAX_PERMISSION_MODE) : undefined;
+      if (checked?.permissionMode) data.permissionMode = checked.permissionMode;
+      const authority = checked?.authority ?? await readAuthority().then(policy => projectAuthority(policy, data.project)).catch(() => undefined);
+      const origin = await this.origin(originValue);
+      // Prompts are sent over the pipe, never stored in the dispatch ledger.
+      const { prompt, ...metadata } = data;
+      const receipt: Receipt = { ...metadata, computer: peer.name, computerId: remoteComputerID!, id: randomUUID(),
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "launching",
+        ...(grant ? { granted: grantLabel(grant) } : {}), ...(authority?.listed ? { authority: authority.line.slice(0, 600) } : {}),
+        ...(checked?.confirmation ? { authorityConfirmed: checked.confirmation.confirmedAt } : {}),
+        ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}) };
+      await save(receipt);
+      try {
+        // The brief goes with the launch: a Hook that can start the harness
+        // with it says so, and any other types it below.
+        const launched = await peer.request(`/v1/workspaces/launch?server=${encodeURIComponent(peer.server)}`,
+          { project: data.project, kind: data.harness, ...(data.backend ? { backend: data.backend } : {}), model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ? { account: data.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), label: data.label, brief: { id: receipt.id, text: prompt } });
+        // Placed: the brief is confirmed outside the lock.
+        placed = peer.name; this.placing.set(placed, this.inFlight(placed) + 1);
+        release();
+        // An older Hook ignores the field and starts the worker in its own default mode.
+        const ignored = data.permissionMode && launched.permissionMode !== data.permissionMode ? IGNORED_MODE : undefined;
+        if (launched.briefLaunched === true) {
+          receipt.brief = "launch";
+          await this.confirmLaunched(peer, receipt, launched);
+          if (ignored) receipt.error = [receipt.error, ignored].filter(Boolean).join(" ").slice(0, 500);
+          receipt.updatedAt = new Date().toISOString(); await save(receipt);
+          return { ok: receipt.state === "accepted", ...receipt };
+        }
+        receipt.brief = "typed";
+        const settled: { target?: unknown; status?: string } = launched.target ? { target: launched.target } : await settledTarget(peer, launched, data.harness, this.settleIntervalMs);
+        if (!settled.target) {
+          if (["blocked", "waiting"].includes(String(settled.status ?? launched.agentStatus))) throw new StartupScreen(String(settled.status ?? launched.agentStatus));
+          throw new BridgeError(504, `${data.harness} started in the new "${data.label}" pane on ${peer.name} but never showed a conversation or a starting pane (last status ${settled.status ?? "unknown"}), so the brief was not sent. The pane is still open.`);
+        }
+        const target = remoteTarget.parse(settled.target);
+        if (target.source !== data.harness || target.server !== peer.server) throw new BridgeError(502, "The remote Hook returned a different launch target.");
+        receipt.target = target;
+        receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt);
+        if (!("starting" in target)) {
+          const result = await sendBrief(peer, target, prompt, `dispatch-${receipt.id}`);
+          receipt.state = result.ok === true && result.deliveryUncertain !== true ? "accepted" : "uncertain";
+        } else await this.typeIntoStarting(peer, receipt, target, prompt);
+        if (ignored) receipt.error = [receipt.error, ignored].filter(Boolean).join(" ").slice(0, 500);
+      } catch (error) {
+        if (error instanceof StartupScreen) {
+          // Known, not uncertain: the brief never reached the pane. Say where
+          // the owner answers, and let the returns loop tell the conductor once.
+          const question = `${data.harness} in "${data.label}" on ${peer.name} is waiting on a startup screen (folder trust or sign-in).`.slice(0, 200);
+          receipt.state = "failed";
+          receipt.error = `${question} The brief was not sent. Answer that screen in the pane (the phone can), then hand the brief off to the new session.`.slice(0, 500);
+          receipt.returned = { state: "needs-you", at: new Date().toISOString(), question, read: false };
+        } else {
+          receipt.state = receipt.state === "launching" && error instanceof BridgeError && [400, 404, 429, 504].includes(error.status) ? "failed" : "uncertain";
+          receipt.error = error instanceof BridgeError ? error.message.slice(0, 500) : "Remote delivery was not confirmed. Inspect this dispatch before retrying.";
+        }
+      }
+      receipt.updatedAt = new Date().toISOString(); await save(receipt);
+      return { ok: receipt.state === "accepted", ...receipt };
+    } finally {
+      release();
+      if (placed) { const left = this.inFlight(placed) - 1; if (left > 0) this.placing.set(placed, left); else this.placing.delete(placed); }
+    }
+  }
+
+  /** Launches placed on `computer` whose brief is still being confirmed. */
+  private inFlight(computer: string): number { return this.placing.get(computer) ?? 0; }
+
+  /**
+   * A brief typed into a pane that has no conversation yet: typed once the
+   * pane reads ready, then confirmed by the conversation it starts. A brief
+   * the pane swallowed (still idle on its starting binding) is typed again,
+   * under its own delivery id, but only after `readyForRetry` finds the pane
+   * still idle there: a first brief that landed late is never typed twice.
+   * After BRIEF_TRIES the receipt carries a failed return yet stays watched
+   * (uncertain), so a brief that lands later still brings the worker's return.
+   * A Claude prompt left typed but unsubmitted is not typed again.
+   */
+  private async typeIntoStarting(peer: DispatchHost, receipt: Receipt, target: StartingTarget, prompt: string): Promise<void> {
+    const arrived = (session?: string) => {
+      const full = session ? targetSchema.safeParse({ server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane, source: target.source, session }) : undefined;
+      if (full?.success) receipt.target = full.data;
+      receipt.state = "accepted";
+    };
+    for (let attempt = 1; ; attempt++) {
+      if (attempt === 1) await readyForBrief(peer, target, this.settleIntervalMs);
+      else {
+        const before = await readyForRetry(peer, target, this.settleIntervalMs);
+        if (before.state === "arrived") { arrived(before.session); return; }
+        if (before.state === "unknown") {
+          receipt.state = "uncertain";
+          receipt.error = `The brief typed into the new "${receipt.label}" pane on ${receipt.computer} did not show in time, and the pane can no longer be read as waiting for it, so it was not typed again. The Hook keeps watching the pane.`.slice(0, 500);
+          return;
+        }
+      }
+      const result = await sendBrief(peer, target, prompt, attempt === 1 ? `dispatch-${receipt.id}` : `dispatch-${receipt.id}-${attempt}`);
+      const sent = result.ok === true && result.deliveryUncertain !== true;
+      const landed = await briefLanded(peer, target, this.settleIntervalMs);
+      if (landed.state === "arrived") { arrived(landed.session); return; }
+      if (landed.state === "unknown" || result.unsubmitted === true) { receipt.state = sent ? "accepted" : "uncertain"; return; }
+      logger.info("dispatch", `The brief for ${receipt.computer} ${receipt.label} did not reach the starting pane (try ${attempt} of ${BRIEF_TRIES}).`);
+      if (attempt < BRIEF_TRIES) continue;
+      const error = `The brief typed into the new "${receipt.label}" pane on ${receipt.computer} never reached ${receipt.harness}: after ${BRIEF_TRIES} tries the pane still sits idle with no conversation. The pane is still open; hand the brief off to it or close it.`.slice(0, 500);
+      // Watched still: a brief that lands after all brings the worker's own return.
+      receipt.state = "uncertain"; receipt.error = error;
+      receipt.returned = { state: "failed", at: new Date().toISOString(), error, read: false };
+      return;
+    }
+  }
+
+  /**
+   * A brief that went with the launch: wait for the worker's hook to confirm
+   * it by dispatch id. A startup screen (folder trust, sign-in) holds the
+   * prompt until the owner answers it, and the harness then submits it by
+   * itself, so that is not a failure. Neither confirmed nor held reads
+   * uncertain, and the returns loop keeps asking.
+   */
+  private async confirmLaunched(peer: DispatchHost, receipt: Receipt, launched: Json): Promise<void> {
+    const known = remoteTarget.safeParse(launched.target);
+    if (known.success && known.data.source === receipt.harness && known.data.server === peer.server) receipt.target = known.data;
+    receipt.state = "sending"; receipt.updatedAt = new Date().toISOString(); await save(receipt);
+    const held = (status: unknown) => ["blocked", "waiting"].includes(String(status));
+    const arrival = held(launched.agentStatus) ? await arrivalOf(peer, receipt.id).catch(() => undefined) ?? {}
+      : await awaitArrival(peer, receipt.id, this.settleIntervalMs);
+    const named = arrival.accepted?.target ?? arrival.started?.target;
+    if (named && named.source === receipt.harness && named.server === peer.server) receipt.target = named;
+    if (arrival.accepted) { receipt.state = "accepted"; return; }
+    const status = held(launched.agentStatus) ? String(launched.agentStatus) : await paneStatus(peer, launched);
+    receipt.state = "uncertain";
+    if (held(status)) {
+      const question = `${receipt.harness} in "${receipt.label}" on ${receipt.computer} is waiting on a startup screen (folder trust or sign-in).`.slice(0, 200);
+      receipt.error = `${question} The brief is queued as its first prompt and starts once that screen is answered in the pane (the phone can).`.slice(0, 500);
+      receipt.returned = { state: "needs-you", at: new Date().toISOString(), question, read: false };
+      return;
+    }
+    receipt.error = `${receipt.harness} started with the brief on ${receipt.computer} but has not confirmed it yet (last status ${status ?? "unknown"}). The Hook keeps checking.`.slice(0, 500);
+  }
+
+  /** The query a conductor's dispatch sends with each capacity probe; undefined for any other caller. */
+  private async conductorCaller(value: unknown): Promise<string | undefined> {
+    const pane = originPaneSchema.safeParse(value);
+    if (!pane.success) return undefined;
+    const conductor = await recordedConductor().catch(() => undefined);
+    if (!conductor || conductor.server !== pane.data.server || conductor.pane !== pane.data.pane) return undefined;
+    const running = await this.identity?.originAgent?.(pane.data);
+    await requireConductorLease({ ...pane.data, terminal: running?.terminal, source: running?.agent });
+    return callerQuery(await localCaller());
+  }
+  private async origin(value: unknown): Promise<Receipt["origin"]> {
+    const pane = originPaneSchema.safeParse(value);
+    if (!pane.success || !this.identity?.originAgent) return undefined;
+    const running = await this.identity.originAgent(pane.data).catch(() => undefined);
+    return running ? { ...pane.data, ...running } : undefined;
+  }
+}

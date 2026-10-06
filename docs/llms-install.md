@@ -1,0 +1,366 @@
+# phren: LLM Installation Guide
+
+phren keeps project memory portable across sessions and machines. It runs as an MCP server and a set of lifecycle hooks. The server's default `core` profile exposes ten tools; the tables below list every tool by its full-profile name, and in `core` the folded ones are reached as `revise_finding` / `manage_task` / `session` / `phren_admin` with an `action` parameter (see `api-reference.md`).
+
+## Quick Start
+
+```bash
+npx @phren/cli init
+```
+
+No global install needed — `npx` runs it directly. On Windows, if `npx` isn't available, use `npm install -g @phren/cli && phren init`.
+
+Preview what init will do without making changes:
+
+```bash
+npx @phren/cli init --dry-run
+```
+
+This creates `~/.phren`, configures MCP for Claude Code (and any detected agents: VS Code, Cursor, Copilot CLI, Codex), and wires up lifecycle hooks.
+
+Project setup note:
+- `phren add` is the supported enrollment path for an existing repo.
+
+To update the installed package:
+
+```bash
+phren update
+```
+
+To update the installed package and refresh shipped starter globals in one flow:
+
+```bash
+phren update --refresh-starter
+```
+
+Use `phren init --apply-starter-update` when you only want to refresh starter assets without running the full update flow.
+
+To remove everything:
+
+```bash
+phren uninstall
+```
+
+## Team Stores
+
+Phren supports shared team stores for collaborative knowledge. A team store is a separate git repo that multiple people push to.
+
+Create a team store:
+
+```bash
+phren team init my-team --remote git@github.com:org/phren-team.git
+phren team add-project my-team my-project
+```
+
+Join an existing team store:
+
+```bash
+phren team join git@github.com:org/phren-team.git
+```
+
+List registered stores:
+
+```bash
+phren team list
+```
+
+Team stores sync independently via git. Findings, notes, and tasks in a team store are visible to all members through federated search. Notes remain opt-in search context and are not automatically injected.
+
+## Maintenance Safety
+
+Destructive maintenance commands (`prune` and `consolidate`) should be run with `--dry-run` first. On write paths that rewrite `FINDINGS.md`, phren creates/updates `FINDINGS.md.bak` and reports changed backup paths (for example, `Updated backups (1): <project>/FINDINGS.md.bak`). `--dry-run` previews changes without creating backups.
+
+## MCP Tools (76)
+
+### Search and Browse
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `search_knowledge` | `query`, `type?`, `limit?`, `project?`, `tag?`, `since?`, `status?`, `include_history?`, `synthesize?` | FTS5 full-text search across your project store. Supports AND, OR, NOT, phrase matching. Filter by tag, date, or lifecycle status. |
+| `get_memory_detail` | `id` | Fetch full content of a memory by id (e.g. `mem:project/filename`). |
+| `get_project_summary` | `name` | Returns a project's summary card, AGENTS.md path, and list of indexed files. |
+| `list_projects` | `page?`, `page_size?` | Lists all projects in the active profile with pagination. |
+| `get_findings` | `project`, `limit?`, `include_superseded?`, `include_history?`, `status?` | Read recent findings, filterable by lifecycle status. |
+
+### Daily Notes
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `get_notes` | `project`, `date?`, `limit?` | List lightweight daily notes newest-first. |
+| `add_note` | `project`, `text`, `date?` | Add Markdown text to `<project>/notes/YYYY-MM-DD.md`. |
+| `edit_note` | `project`, `note`, `text` | Replace a note by stable `nid` or unambiguous match. |
+| `remove_note` | `project`, `note` | Remove one note. |
+| `promote_note` | `project`, `note`, `findingType?` | Copy a note to findings and retain it with a promoted marker. |
+
+Notes are explicitly searchable but excluded from automatic hook context, finding lifecycle/review, and the fragment graph.
+
+### Task Management (`task` tools)
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `get_tasks` | `project?`, `id?`, `item?`, `status?`, `limit?`, `done_limit?`, `offset?`, `summary?` | Read tasks with pagination, summary mode, and section filtering. |
+| `add_task` | `project`, `item: string \| string[]` | Add one or more tasks to a project's Queue section. Pass a string or array. |
+| `complete_task` | `project`, `item: string \| string[]` | Move one or more tasks to Done by text match. Pass a string or array. |
+| `remove_task` | `project`, `item: string \| string[]` | Remove one or more tasks by matching text or ID. Pass a string or array. |
+| `update_task` | `project`, `item?`, `updates` | Update text, priority, context, section, GitHub metadata, pin, promote, or work_next. Item optional when work_next is true. |
+| `tidy_done_tasks` | `project`, `keep?`, `dry_run?` | Archive completed tasks to keep the list clean. |
+| `pin_task` | `project`, `item`, `unpin?` | Pin or unpin a task. Pinned tasks always appear in hook context regardless of priority. |
+| `claim_task` | `project`, `item`, `session?`, `release?`, `force?` | Claim a task for this computer (Active, with a `Claimed:` line) and push it, so unlinked conductors skip it. |
+
+### Finding Capture
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `add_finding` | `project`, `finding: string \| string[]`, `citation?`, `sessionId?`, `findingType?`, `scope?` | Append one or more insights. Pass a string or array. Citation, type tag, and scope apply to single-string mode. |
+| `supersede_finding` | `project`, `finding_text`, `superseded_by` | Mark a finding as superseded by a newer one. |
+| `retract_finding` | `project`, `finding_text`, `reason` | Retract a finding and store lifecycle reason metadata. |
+| `resolve_contradiction` | `project`, `finding_text`, `finding_text_other`, `resolution` | Resolve contradiction status between two findings (`keep_a`, `keep_b`, `keep_both`, `retract_both`). |
+| `get_contradictions` | `project?`, `finding_text?` | List unresolved contradicted findings across one project or all projects, optionally filtered by selector. |
+| `edit_finding` | `project`, `old_text`, `new_text` | Edit a finding in place while preserving inline metadata such as `fid` and citations. |
+| `remove_finding` | `project`, `finding: string \| string[]` | Remove one or more findings by text match. Pass a string or array. |
+| `push_changes` | `message?` | Commit and push all phren changes. Fetches and merges on push conflicts. |
+| `auto_extract_findings` | `project`, `text`, `model?`, `dryRun?` | Extract findings from text (max 10000 chars). |
+
+### Memory Quality
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `pin_memory` | `project`, `memory` | Write a truth into truths.md. Never decays, always prepended to context. |
+| `get_truths` | `project` | Read all pinned truths for a project. |
+| `memory_feedback` | `key`, `feedback` | Record whether an injected memory was `helpful`, a `reprompt`, or a `regression`. |
+
+### Data Management
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `add_project` | `path`, `profile?`, `ownership?` | Bootstrap a repo or working directory into phren and add it to the active profile. |
+| `export_project` | `project` | Export a project's data (findings, tasks, summary) as portable JSON. |
+| `import_project` | `data` | Import project data from a previously exported JSON payload. |
+| `manage_project` | `project`, `action` | Archive or unarchive a project. |
+
+### Fragment Graph
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `search_fragments` | `query`, `project?`, `limit?` | Find fragments and related docs by name. |
+| `get_related_docs` | `entity`, `project?`, `limit?` | Get docs linked to a named fragment. |
+| `read_graph` | `project?`, `limit?`, `offset?` | Read the fragment graph with pagination. |
+| `link_findings` | `project`, `finding_text`, `entity`, `relation?`, `entity_type?` | Manually link a finding to a fragment. |
+| `cross_project_fragments` | `entity`, `exclude_project?`, `limit?` | Find fragments shared across multiple projects. |
+
+### Session Management
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `session_start` | `project?`, `agentScope?`, `connectionId?` | Mark session start. Returns prior summary, recent findings, active tasks, checkpoint resume hints, and a `sessionId`. |
+| `session_end` | `summary?`, `sessionId?`, `connectionId?` | Mark session end and save summary for next session. Also writes task checkpoint snapshots and updates finding impact outcomes. |
+| `session_context` | `sessionId?`, `connectionId?` | Get current session state. Pass `sessionId` or a previously bound `connectionId`. |
+| `session_history` | `limit?`, `sessionId?`, `project?` | List past sessions or drill into a specific session to see its findings and tasks. |
+
+### Skills Management
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `list_skills` | `project?` | List all installed skills with metadata. |
+| `read_skill` | `name`, `project?` | Read full skill file content and parsed frontmatter. |
+| `write_skill` | `name`, `content`, `scope` | Create or update a skill (`scope`: `'global'` or project name). |
+| `remove_skill` | `name`, `project?` | Delete a skill file. |
+| `toggle_skill` | `name`, `enabled`, `project` | Enable or disable a skill without deleting its file. |
+
+Skill system behavior:
+- precedence: project-local skills override global skills with the same name
+- alias collisions: conflicting commands/aliases are marked unregistered in generated command output
+- visibility gating: disabled skills remain on disk but are excluded from active agent mirrors
+- generated artifacts: `.claude/skill-manifest.json` and `.claude/skill-commands.json`
+
+### Hooks Management
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `list_hooks` | `project?` | Show hook status for all tools + custom hooks + config paths, optionally including project overrides. |
+| `toggle_hooks` | `enabled`, `tool?`, `project?`, `event?` | Enable/disable hooks globally, per tool, or per tracked project/event. |
+| `add_custom_hook` | `event`, `command?`, `webhook?`, `secret?`, `timeout?` | Add a custom integration hook (command or webhook). |
+| `remove_custom_hook` | `event`, `command?` | Remove custom hooks by event/command match. |
+
+### Health and Review
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `health_check` | `include_consolidation?` | Run doctor checks and return health status including consolidation status for all projects. |
+| `list_hook_errors` | `limit?` | Show recent hook errors and failures. |
+| `get_review_queue` | `project?` | Read items waiting for review. The review queue is read-only. |
+| `manage_review_item` | `project`, `line`, `action`, `new_text?` | Manage a review queue item: approve (removes from queue), reject (removes from queue and FINDINGS.md), or edit (updates text in both; `new_text` required for edit). |
+| `doctor_fix` | `check_data?` | Run doctor self-heal checks and apply fixes automatically. |
+
+### Configuration
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `get_config` | `domain?`, `project?` | Read governance and policy config (proactivity, taskMode, findingSensitivity, retention, workflow, access, index, topic, or all). |
+| `set_config` | `domain`, `settings`, `project?` | Update config for a domain (proactivity, taskMode, findingSensitivity, retention, workflow, index, topic). |
+
+Maintenance tools are CLI-only. Use `phren config` and `phren maintain` commands.
+
+### Code Index, Conductor and Stores
+
+Parameters for these are in [api-reference.md](api-reference.md).
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `code_search` | see api-reference.md | Find functions, methods, types (classes, structs, enums, interfaces) and variables in a project's code index by name, signature or doc text. Use this instead of grep when you want a declaration rather than raw text: results are ranked exact name, then prefix, then full-text relevance, then how often it is used, and each hit carries its kind, signature, doc and path:line. Pass `kind` to narrow to function, method, class, struct, enum, interface, type or variable. |
+| `code_outline` | see api-reference.md | List a file's functions, types and variables in source order, methods nested under their class or container. Use this before reading a large file: it is far cheaper than opening the source and it shows the structure with each declaration's line, signature and doc. The path is the project-relative path the index uses. |
+| `code_definition` | see api-reference.md | Go to where a function, method, type or variable is defined, from a project's code index. Use this instead of grep: it accepts `Foo`, `Foo.bar` and `bar()` forms and returns the file and lines, signature, doc comment, the last change (a blame hash and date, never a name), a short source snippet and any Phren findings linked to it. When a common name matches several declarations it prefers an exported, non-variable one and reports how many candidates there were. |
+| `code_references` | see api-reference.md | Find every place a function, method, type or variable is used, from a project's code index, grouped by file. Use this instead of grep to answer who calls or uses it: it accepts `Foo`, `Foo.bar` and `bar()` forms and counts only uses the index could resolve to exactly one definition. Common-name ambiguity is reported as a candidate count. |
+| `code_usage` | see api-reference.md | Show a project's most used and least used functions and types, by how many places use them. Use this instead of grep to see what code is central and what is barely used: it returns the top and bottom N so rarely used code is visible too. Local variables are left out of the most-used list so a busy one-function local or a one-letter loop name cannot dominate it. |
+| `dispatch` | see api-reference.md | Send a worker brief to an enrolled computer through the local Phren Hook. Returns a launch receipt and remote target. The worker's finish, question or exit comes back later through dispatch_returns. Never automatically retry an uncertain delivery. |
+| `dispatch_returns` | see api-reference.md | List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), failed (the harness ended the turn on an error such as a usage limit, with the error), is blocked on terminal input, or its pane is gone. A blocked row with an `approval` is a permission request the worker is waiting on: answer it with dispatch_approve. Each row has the dispatch id, computer, project, label and the worker's target for hand_off. |
+| `dispatch_approve` | see api-reference.md | Answer the permission request a dispatched worker is waiting on, by dispatch id and the approval's actionId. Only the agent that dispatched the worker (or the owner's phone) can answer, never the worker itself. |
+| `hand_off` | see api-reference.md | Queue a prompt at a busy session; keep deliveryId, query status:true without text; uncertain input is never resent automatically. |
+| `dispatch_report` | `prs` | Turn-bound PR evidence in done returns, forwarded through the Hook to the integrator. |
+| `owner_inbox` | `action?`, `title?`, `project?`, `id?`, `resolution?`, `includeResolved?`, `computer?` | Add, list or resolve owner items across linked computers; resolving does not answer or approve a prompt. |
+| `live_sessions` | see api-reference.md | List the live agent sessions on this computer and every enrolled computer: computer, project, harness, status, idleFor (seconds since the tab last changed), role and the target hand_off takes. Computers that could not be reached are listed separately, and computers registered in the store but not linked in hooks.yaml come back in notLinked: their sessions are unknown, not absent. |
+| `account_usage` | see api-reference.md | Agent usage on this computer and every enrolled computer, merged by account: one row per Claude login, Codex, OpenCode, OpenCode Go, OpenRouter and GitHub Copilot, with its windows (percent used, percent left, reset time), leftPercent (the least room on any window), nearLimit (under 20% left: information, not a reason to avoid it), exhausted (a window at 100% or refusing requests, with availableIn), freshness (updatedAt, age, stale) and the computers where it is signed in, with the Claude account id dispatch takes there. Call it before dispatch: never send work to an exhausted account; a low one is fine, and one that resets soon is worth using before it does. Harnesses no computer reported are in noData; unreachable and unlinked computers are listed separately: their usage is unknown, not zero. |
+| `get_topic_summaries` | see api-reference.md | What each topic archive of a project amounts to: every reference/topics file with its bullet count, its current '## Now' text and whether that text is structural or prose. Pass `topic` to also get that topic's newest bullets, the raw material for writing its paragraph yourself (see /phren-summarize). |
+| `set_topic_summary` | see api-reference.md | Store the paragraph you wrote for a topic archive as its '## Now' block, and refresh the project's 'What phren knows' block. Refused if the paragraph names anything the topic's bullets do not (the invented names are returned): fix the paragraph rather than the check. |
+| `store_list` | see api-reference.md | List all registered phren stores and their sync status. Shows the primary store plus any team or readonly stores from the store registry. |
+
+## Lifecycle Hooks and Integrations
+
+Claude receives full native lifecycle hooks in `~/.claude/settings.json`.
+Copilot CLI, Cursor, and Codex receive generated hook config files plus session wrappers in `~/.local/bin` so start/stop lifecycle behavior still executes around each tool run.
+
+| Hook | Event | What it does |
+|------|-------|-------------|
+| `hook-session-start` | SessionStart | Fetches and merges latest phren changes, runs doctor self-heal, schedules daily maintenance. |
+| `hook-prompt` | UserPromptSubmit | Extracts keywords from the user's prompt, searches phren, injects relevant context snippets. Checks consolidation thresholds and fires a one-time notice per session. |
+| `hook-tool` | PostToolUse | Watches Claude tool results and queues compact review candidates from interesting file/command activity. |
+| `hook-stop` | Stop | Auto-commits and pushes `~/.phren` changes after every agent response. |
+| `hook-context` | SessionStart | Detects the current project from cwd and injects its AGENTS.md and summary. |
+
+Tool integration summary:
+- Claude: full lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `Stop`, `PostToolUse`) + MCP
+- Copilot/Cursor/Codex: MCP + wrapper-driven lifecycle + generated per-tool hook config
+
+Important:
+- Lifecycle hooks do retrieval and persistence, but they do not create `session_history` records on their own. Agents still need to call `session_start` / `session_end` when resumable session history, checkpoints, or provenance matter.
+
+## Modes
+
+Toggle MCP and hooks independently:
+
+```bash
+phren mcp-mode on|off|status
+phren hooks-mode on|off|status
+```
+
+When MCP is off but hooks are on, phren still injects context via hooks (no MCP tools available to the agent). When hooks are off, the hook commands exit immediately without doing work.
+
+## Memory Governance Pipeline
+
+phren includes a trust filtering system that scores and ages memory entries before injection.
+
+### Decay Curve
+
+Findings lose confidence as they age. The default decay multipliers:
+
+| Age | Multiplier | Effect |
+|-----|-----------|--------|
+| 0-30 days | 1.0 | Full confidence |
+| 30-60 days | 0.85 | Slightly reduced |
+| 60-90 days | 0.65 | Moderate reduction |
+| 90-120 days | 0.45 | Low confidence |
+| 120+ days | 0.0 | Expired (prunable) |
+
+These values are configurable via `phren config policy` or the `retention-policy.json` governance file.
+
+### Citation Validation
+
+Findings can include source citations (`file:line@commit`). The trust filter validates that cited files exist and optionally checks git history. Entries with invalid citations are flagged and queued for review.
+
+### Finding Lifecycle and Impact Scoring
+
+Finding lifecycle metadata is stored inline and updated by lifecycle tools (`supersede_finding`, `retract_finding`, `resolve_contradiction`).
+Impact scoring tracks which finding IDs were injected into context and marks successful outcomes when session tasks are completed, boosting retrieval priority for repeatedly useful findings.
+
+Lifecycle state also applies retrieval penalties so stale or invalid findings rank lower:
+- Superseded findings: 0.25× confidence multiplier
+- Retracted findings: 0.1× confidence multiplier
+- Contradicted (unresolved) findings: 0.4× confidence multiplier
+
+Inactive findings (superseded, retracted) are also stripped from the FTS index so they cannot appear in search results at all.
+
+### Decay Resistance
+
+Findings that have been repeatedly confirmed or injected into productive sessions accumulate a decay-resistance boost, causing them to decay 3× slower than the default curve.
+
+### Auto-Tagging
+
+Findings without an explicit type tag are auto-detected from content at write time:
+- "We decided..." → `[decision]`
+- "Watch out for..." or "gotcha:..." → `[pitfall]`
+- "Pattern:..." or "always ... before..." → `[pattern]`
+- "Bug in..." or "crashes when..." → `[bug]`
+- "Workaround:..." or "temporary fix" → `[workaround]`
+- "Currently..." or "as of..." → `[context]`
+
+Auto-tagged findings can be corrected by using `findingType` in `add_finding` or by manually editing the type prefix.
+
+### Session Context Diff
+
+On `session_start`, phren reports how many new findings were added since the previous session, giving the agent a quick summary of what changed between sessions without re-reading the full findings file.
+
+### Snippet Deduplication
+
+When the same bullet appears in both a project findings file and the global findings file, phren injects it only once to avoid redundant context.
+
+### Session Momentum
+
+Topics that are frequently queried within a session get up to 30% more of the token budget for context injection, keeping hot topics well-represented as work progresses.
+
+### Truth Locks
+
+Entries in `truths.md` are protected from pruning and decay. Use `pin_memory` to save high-value findings that should persist indefinitely.
+
+### Audit Trail
+
+All governance actions (scans, prunes, migrations, feedback) are logged to `.runtime/audit.log` with timestamps and actor information. The `PHREN_ACTOR` env var identifies who performed the action.
+
+### Identity and RBAC
+
+Access control is role-based (`admin`, `maintainer`, `contributor`, `viewer`):
+- shared policy: `.config/access-control.json`
+- local actor overrides: `.runtime/access-control.local.json`
+- actor identity source: `PHREN_ACTOR` (when trusted) or OS user identity
+
+### Quality Feedback Loop
+
+The hook-prompt system tracks which memories get injected and whether they correlate with productive sessions. The `memory_feedback` tool lets agents record explicit outcomes:
+
+- **helpful**: the memory contributed to the task
+- **reprompt**: the memory was injected again (indicates ongoing relevance)
+- **regression**: the memory caused confusion or incorrect behavior
+
+Feedback scores feed back into the trust multiplier for future injections.
+
+## Web UI Security
+
+`phren web-ui` binds loopback-only (`127.0.0.1`) and generates a per-run auth token.
+Mutating routes require both:
+- auth token (bearer/query/body)
+- CSRF token (single-use, TTL-bound)
+
+The server also sets CSP and anti-framing headers.
+
+## Telemetry (Opt-In)
+
+Telemetry is disabled by default. Enable with:
+
+```bash
+phren config telemetry on
+```
+
+Telemetry is local-only and stored in `.runtime/telemetry.json` (tool/command/session/error counters). No external reporting is sent by default.
+
+## Environment Variables
+
+See [docs/environment.md](environment.md) for the full reference.

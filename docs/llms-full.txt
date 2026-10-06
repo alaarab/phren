@@ -1,0 +1,340 @@
+phren - Long-term memory for your AI agents.
+npm package: @phren/cli
+
+Quick start:
+  phren init
+  This creates ~/.phren, registers MCP for detected agents, sets up lifecycle hooks, and registers your machine.
+  Open a prompt in your project directory. Context injection starts immediately.
+
+MCP Tools (76 across 16 catalog modules):
+
+  Search and browse:
+    search_knowledge(query, type?, limit?, project?, tag?, since?, status?, include_history?, synthesize?) - FTS5 search with synonym expansion, filterable by tag/date/lifecycle
+    get_memory_detail(id) - fetch full content of a memory by id (e.g. mem:project/filename)
+    get_project_summary(name) - project summary card and file list
+    list_projects(page?, page_size?) - all projects in active profile with pagination
+    get_findings(project, limit?, include_superseded?, include_history?, status?) - read recent findings without a search query
+
+  Daily notes (searchable, never automatically injected):
+    get_notes(project, date?, limit?) - list daily notes newest-first
+    add_note(project, text, date?) - add Markdown text to notes/YYYY-MM-DD.md
+    edit_note(project, note, text) - replace a note by stable nid or unambiguous match
+    remove_note(project, note) - remove one note
+    promote_note(project, note, findingType?) - copy a note into findings and retain its promoted source
+
+  Task management:
+    get_tasks(project?, id?, item?, status?, limit?, done_limit?, offset?, summary?) - read tasks with pagination, summary mode, and section filtering
+    add_task(project, item: string | string[]) - add one or more tasks to Queue section
+    complete_task(project, item: string | string[]) - match by text, move to Done
+    remove_task(project, item: string | string[]) - remove one or more tasks by matching text
+    update_task(project, item?, updates) - change text, priority, context, section, pin, promote, work_next, or linked GitHub issue. Item optional when work_next is true.
+    tidy_done_tasks(project, keep?, dry_run?) - archive completed tasks to keep the list clean
+
+  Finding capture:
+    add_finding(project, finding: string | string[], citation?, findingType?, sessionId?) - append one or more findings; citation/type apply to single-string mode
+      findingType: "decision" | "pitfall" | "pattern" | "bug"
+    supersede_finding(project, finding_text, superseded_by) - mark a finding as superseded
+    retract_finding(project, finding_text, reason) - retract a finding with reason metadata
+    resolve_contradiction(project, finding_text, finding_text_other, resolution) - resolve contradiction lifecycle state
+    get_contradictions(project?, finding_text?) - list unresolved contradicted findings
+    edit_finding(project, old_text, new_text) - edit a finding in place while preserving inline metadata
+    remove_finding(project, finding: string | string[]) - remove one or more findings by matching text
+    push_changes(message?) - commit and push all phren changes
+
+  Fragment graph:
+    search_fragments(query, project?, limit?) - find fragments and their related docs
+    get_related_docs(entity, project?, limit?) - get docs linked to a named fragment
+    read_graph(project?, limit?, offset?) - read the fragment graph with pagination
+    link_findings(project, finding_text, entity, relation?, entity_type?) - manually link a finding to a fragment
+    cross_project_fragments(entity, exclude_project?, limit?) - find fragments shared across multiple projects
+
+  Session management (for agents without hooks):
+    session_start(project?, connectionId?) - mark session start, retrieve prior session context + checkpoints, return sessionId
+    session_end(summary?, sessionId?, connectionId?) - end a session, save summary, write task checkpoint/impact outcomes
+    session_context(sessionId?, connectionId?) - get current session state by explicit identity
+    session_history(limit?, sessionId?, project?) - list past sessions or drill into a specific session
+
+  Memory quality:
+    pin_memory(project, memory) - write a truth into truths.md that bypasses decay
+    get_truths(project) - read all pinned truths for a project
+    memory_feedback(key, feedback) - record helpful/reprompt/regression outcomes
+
+  Data management:
+    add_project(path, profile?, ownership?) - bootstrap a repo or working directory into phren and add it to the active profile
+    export_project(project) - export project data as portable JSON
+    import_project(data) - import project from exported JSON
+    manage_project(project, action) - archive or unarchive a project
+
+  Skills management:
+    list_skills(project?) - list all installed skills with metadata
+    read_skill(name, project?) - read full skill file content and parsed frontmatter
+    write_skill(name, content, scope) - create or update a skill (scope: 'global' or project name)
+    remove_skill(name, project?) - delete a skill file
+    toggle_skill(name, enabled, project) - enable or disable a skill without deleting its file
+    resolution model:
+      precedence: project scope overrides global scope
+      alias collisions: conflicting commands/aliases are marked unregistered
+      visibility gating: disabled skills stay on disk but are hidden from active mirrors
+      generated artifacts: .claude/skill-manifest.json + .claude/skill-commands.json
+
+  Hooks management:
+    list_hooks(project?) - show hook status for all tools + custom hooks + config paths, optionally including project overrides
+    toggle_hooks(enabled, tool?, project?, event?) - enable/disable hooks globally, per tool, or per tracked project/event
+    add_custom_hook(event, command?, webhook?, secret?, timeout?) - add a custom integration hook (command or webhook)
+    remove_custom_hook(event, command?) - remove custom hooks by event/command match
+
+  Health and review:
+    health_check(include_consolidation?) - run doctor checks and return health status including consolidation status
+    list_hook_errors(limit?) - show recent hook errors and failures
+    get_review_queue(project?) - read items waiting for review
+    manage_review_item(project, line, action, new_text?) - approve, reject, or edit a review queue item
+    doctor_fix(check_data?) - run doctor self-heal checks and apply fixes automatically
+
+  Finding extraction:
+    auto_extract_findings(project, text, model?, dryRun?) - extract findings from text (max 10000 chars)
+
+  Configuration:
+    get_config(domain?, project?) - read governance and policy config (proactivity, taskMode, findingSensitivity, retention, workflow, access, index, topic, or all)
+    set_config(domain, settings, project?) - update config for a domain (proactivity, taskMode, findingSensitivity, retention, workflow, index, topic)
+
+CLI Commands:
+
+  Interactive:
+    phren                               - interactive shell (TTY default)
+    phren shell                         - explicit shell mode
+    phren quickstart                    - quick setup: init + project scaffold
+
+  Search and discovery:
+    phren search <query> [--project <n>] [--type <t>] [--limit <n>] - FTS5 search
+    phren search --history              - show recent searches
+    phren search --from-history <n>     - re-run search #n
+    phren search-fragments <query>      - search fragments (libraries/tools/concepts)
+    phren related-docs <entity>         - find docs linked to a fragment
+    phren graph [--project <n>] [--limit <n>] - show fragment knowledge graph
+    phren graph link <project> "finding" "fragment" - link finding to fragment
+
+  Finding management:
+    phren add-finding <project> "..."   - append a finding
+    phren pin <project> "..."           - pin a truth (canonical memory)
+    phren review [project]              - show review queue items
+    phren consolidation-status [project]- check if findings need consolidation
+    phren finding add <project> "<text>"         - add finding
+    phren finding remove <project> "<text>"      - remove finding
+    phren finding list <project>                 - list findings
+    phren finding supersede <project> "<text>" --by "<newer>" - mark superseded
+    phren finding retract <project> "<text>" --reason "<reason>" - retract
+    phren finding contradictions [project]       - list contradicted findings
+    phren finding resolve <project> "<a>" "<b>" <keep_a|keep_b|keep_both|retract_both> - resolve contradiction
+
+  Task management:
+    phren tasks                         - cross-project task view
+    phren task add <project> "<text>"   - add task
+    phren task complete <project> "<text>" - move task to done
+    phren task remove <project> "<text>"  - remove task
+    phren task next <project>           - pick highest-priority task
+    phren task promote <project> "<text>" [--active] - promote priority
+    phren task tidy <project> [--keep=<n>] [--dry-run] - archive completed
+    phren task link <project> "<text>" --issue <number> - link to GitHub issue
+    phren task link <project> "<text>" --unlink  - remove GitHub link
+    phren task create-issue <project> "<text>" [--repo <owner/name>] [--done] - create GitHub issue from task
+    phren task update <project> "<text>" [--priority=high|medium|low] [--section=Active|Queue|Done] - update metadata
+    phren task pin <project> "<text>"   - pin task to stay visible
+
+  Skills management:
+    phren skills list [--project <name>]  - list installed skills
+    phren skills show <name>              - show skill content
+    phren skills edit <name>              - edit skill in $EDITOR
+    phren skills add <project> <path>     - link/copy skill into project
+    phren skills enable <project|global> <name>  - enable disabled skill
+    phren skills disable <project|global> <name> - disable skill
+    phren skills remove <project> <name>  - remove project skill
+    phren skills resolve <project|global> - print resolved skill manifest
+    phren skills doctor <project|global>  - diagnose skill visibility
+    phren skills sync <project|global>    - regenerate resolved mirror
+    phren skill-list                      - alias for skills list
+    phren detect-skills [--import]        - find untracked skills
+
+  Hooks management:
+    phren hooks list [--project <name>]   - show hook status
+    phren hooks show <tool>               - show hook config
+    phren hooks edit <tool>               - edit hook config
+    phren hooks enable <tool>             - enable hooks for tool
+    phren hooks disable <tool>            - disable hooks for tool
+    phren hooks add-custom <event> <command> - add custom hook
+    phren hooks remove-custom <event> [<command>] - remove custom hooks
+    phren hooks errors [--limit <n>]      - show recent hook errors
+
+  Project management:
+    phren add [path] [--ownership <mode>] - add directory as project
+    phren projects list                   - list all projects
+    phren projects configure <name> [--ownership <mode>] [--hooks on|off] - update settings
+    phren projects remove <name>          - remove project
+    phren projects export <name>          - export project as JSON
+    phren projects import <data>          - import project from JSON
+    phren projects archive <name>         - archive project
+    phren projects unarchive <name>       - restore archived project
+
+  Configuration:
+    phren config policy get|set ...       - retention, TTL, decay, confidence
+    phren config workflow get|set ...     - approval workflow settings
+    phren config access get|set ...       - role-based permissions
+    phren config index get|set ...        - indexer include/exclude globs
+    phren config synonyms [list|add|remove] - manage learned synonyms
+    phren config project-ownership [mode] - default ownership for new projects
+    phren config telemetry [on|off]       - opt-in usage telemetry
+    phren config machines                 - registered machines
+    phren config profiles                 - profiles and projects
+    phren config pull-interval [seconds|off] - machine-local periodic MCP remote checks (default off; 30–86400 or 0/off)
+
+  Maintenance:
+    phren maintain govern [project]       - queue stale/conflicting memories
+    phren maintain prune [project]        - delete expired entries
+    phren maintain consolidate [project]  - deduplicate FINDINGS.md
+    phren maintain extract [project]      - mine git and GitHub signals
+
+  Debugging and status:
+    phren status                          - health, active project, stats
+    phren doctor [--fix] [--check-data] [--agents] [--parity] - health check
+    phren debug-injection --prompt "..."  - preview hook-prompt injection
+    phren inspect-index [--project <n>]   - inspect FTS index contents
+    phren sessions [session-id]           - session history; drill into session
+    phren session-context                 - show current session state
+    phren quality-feedback --key=<k> --type=helpful|reprompt|regression - record memory feedback
+    phren web-ui [--port=3499] [--no-open]- lightweight memory web UI
+    phren verify                          - post-init verification
+    phren update [--refresh-starter]      - update package
+    phren uninstall                       - remove phren config and hooks
+
+  Team stores:
+    phren team init <name> [--remote <url>] [--description <text>] - create a new team store
+    phren team join <git-url> [--name <name>]   - join an existing team store
+    phren team add-project <store> <project>    - add a project to a team store
+    phren team list                             - list team stores and sync status
+
+  Store management:
+    phren store list                      - list registered stores
+    phren store add <name> --remote <url> - add a team store
+    phren store remove <name>             - remove a store (local only)
+    phren store sync                      - pull all stores
+
+  Modes:
+    phren mcp-mode on|off|status          - toggle MCP integration
+    phren hooks-mode on|off|status        - toggle hook execution
+
+Environment Variables:
+
+  PHREN_PATH                    - override phren directory (default: ~/.phren)
+  PHREN_PROFILE                 - active profile name (filters indexed projects)
+  PHREN_PULL_INTERVAL_SECONDS   - overrides machine-local periodic MCP checks (default off; 30–86400 or 0/off)
+  PHREN_ACTOR                   - identity for access control and audit logging
+  PHREN_DEBUG                   - set to 1 for debug logging to ~/.phren/.runtime/debug.log
+  PHREN_CONTEXT_TOKEN_BUDGET    - max approx tokens injected by hook-prompt (default: 550)
+  PHREN_CONTEXT_SNIPPET_LINES   - max lines per injected snippet (default: 6)
+  PHREN_CONTEXT_SNIPPET_CHARS   - max chars per injected snippet (default: 520)
+  PHREN_FEATURE_AUTO_EXTRACT    - toggle git/GitHub mining in hook-prompt (default: on, set 0 to disable)
+  PHREN_FEATURE_DAILY_MAINTENANCE - toggle detached daily governance (default: on, set 0 to disable)
+  PHREN_FINDINGS_CAP            - max active findings before auto-archiving (default: 20)
+  PHREN_LLM_ENDPOINT            - OpenAI-compatible endpoint for semantic dedup/conflict
+  PHREN_LLM_KEY                 - API key for LLM endpoint (or OPENAI_API_KEY)
+  PHREN_LLM_MODEL               - model name for LLM endpoint
+  PHREN_EMBEDDING_MODEL          - embedding model (default: nomic-embed-text for Ollama, text-embedding-3-small for API)
+  PHREN_EMBEDDING_API_URL       - OpenAI-compatible /embeddings endpoint (e.g. https://api.openai.com/v1)
+  PHREN_EMBEDDING_API_KEY       - Bearer token for PHREN_EMBEDDING_API_URL
+  PHREN_FEATURE_SEMANTIC_DEDUP  - set 1 to enable LLM-based paraphrase dedup
+  PHREN_FEATURE_SEMANTIC_CONFLICT - set 1 to enable LLM-based contradiction detection
+  PHREN_FEATURE_AUTO_CAPTURE    - set 1 to extract insights from conversation transcripts at session end
+  PHREN_FEATURE_HYBRID_SEARCH   - TF-IDF cosine fallback (default: on, set 0 to disable)
+  PHREN_FEATURE_PROGRESSIVE_DISCLOSURE - compact memory index injection (set 1 to enable)
+  PHREN_FEATURE_GIT_CONTEXT_FILTER - git-context file relevance boost (set 'true' to enable)
+  PHREN_MAX_INJECT_TOKENS       - hard cap on total injected tokens (default: 2000)
+  PHREN_TASK_PRIORITY            - priorities to inject: high,medium,low (default: high,medium)
+  PHREN_MEMORY_TTL_DAYS          - override memory TTL for trust filtering
+  PHREN_OLLAMA_URL               - Ollama base URL (default: http://localhost:11434, set 'off' to disable)
+  PHREN_EMBEDDING_MODEL          - embedding model (default: nomic-embed-text)
+  PHREN_EXTRACT_MODEL            - Ollama model for extraction (default: llama3.2)
+  PHREN_CONSOLIDATION_CAP        - max total findings before forced consolidation (default: 150)
+  PHREN_HOOK_TIMEOUT_MS          - timeout for hook subprocess execution (default: 14000)
+  PHREN_SLOW_FS_WARN_MS          - warn when FS operations exceed threshold (default: 3000)
+  PHREN_FILE_LOCK_MAX_WAIT_MS    - max file lock wait time (default: 5000)
+  PHREN_AUTOCAPTURE_COOLDOWN_MS  - min ms between auto-capture runs (default: 30000)
+  PHREN_AUTOCAPTURE_SESSION_CAP  - max findings auto-captured per session (default: 10)
+  PHREN_GH_PR_LIMIT              - max PRs fetched per extraction (default: 40)
+  PHREN_GH_TIMEOUT_MS            - GitHub API timeout (default: 10000)
+  PHREN_MEMORY_EXTRACT_WINDOW_DAYS - look-back window for extraction (default: 30)
+
+Key File Locations:
+
+  ~/.phren/                          - phren root directory
+  ~/.phren/machines.yaml             - hostname-to-profile mapping
+  ~/.phren/profiles/                 - profile YAML files listing projects per profile
+  ~/.phren/<project>/summary.md      - five-line project summary card
+  ~/.phren/<project>/AGENTS.md       - full project context (architecture, commands, conventions)
+  ~/.phren/<project>/topic-config.json - project-owned archive topic definitions
+  ~/.phren/<project>/reference/      - deep reference docs and archived topic buckets
+  ~/.phren/<project>/reference/topics/ - machine-managed topic docs for archived findings
+  ~/.phren/<project>/FINDINGS.md     - bugs, patterns, decisions, things to avoid
+  ~/.phren/<project>/tasks.md        - task queue across sessions
+  ~/.phren/<project>/review.md               - items pending human review
+  ~/.phren/.runtime/                 - audit.log, search history, caches
+  ~/.phren/.runtime/access-control.local.json - local RBAC role augmentation
+  ~/.phren/.runtime/telemetry.json   - opt-in local telemetry counters
+  ~/.phren/.sessions/                - task checkpoint files for cross-session resume
+  ~/.phren/.config/                  - governance policy JSON: retention/workflow/index policy, access-control.json
+  ~/.phren/global/skills/            - personal workflow slash commands
+  ~/.phren/global/AGENTS.md          - user-level agent instructions
+
+Finding Tags:
+
+  Findings can be tagged with one of six types:
+    [decision]      architectural choice with rationale — never decays
+    [pattern]       reusable approach that works well
+    [pitfall]       bug or failure mode to avoid
+    [bug]           confirmed defect or failure
+    [workaround]    temporary fix or hack (auto-detected only — not an explicit findingType choice)
+    [context]       situational note about current state (auto-detected only — not an explicit findingType choice)
+  Use findingType param in add_finding (decision/pattern/pitfall/bug), or prefix manually: "- [pitfall] ..."
+  Tags are filterable in search_knowledge via the tag parameter (all six).
+  Auto-tagging: findings without an explicit tag are auto-detected from content
+    ("We decided..." → [decision], "Watch out for..." → [pitfall], etc.).
+
+Retrieval Behavior:
+
+  Lifecycle penalties: superseded findings 0.25×, retracted 0.1×, contradicted 0.4× confidence
+  Inactive findings (superseded/retracted) are stripped from the FTS index entirely
+  Decay resistance: confirmed findings decay 3× slower when repeatedly useful
+  Session context diff: session_start reports count of new findings since last session
+  Snippet dedup: findings appearing in both project and global files are injected once
+  Session momentum: hot topics get up to 30% more token budget as work progresses
+  Auto-tagging: findings without type tags are inferred from content at write time
+  Fragment expansion: related fragment docs are included when a finding links to a fragment
+
+Agent Support:
+
+  Claude Code    - full lifecycle hooks (SessionStart/UserPromptSubmit/Stop) + MCP
+  Cursor         - MCP + generated hooks config + session wrapper
+  VS Code Copilot- MCP integration (workspace or user depending mode)
+  Copilot CLI    - MCP + generated hooks config + session wrapper
+  Codex CLI      - MCP + generated hooks config + session wrapper
+  Windsurf       - manual MCP setup (see docs/ide-setup.md)
+
+Security and governance notes:
+  Web UI security: loopback-only bind, per-run auth token, CSRF on mutations, CSP headers
+  RBAC sources: .config/access-control.json + .runtime/access-control.local.json
+  Telemetry: opt-in only (`phren config telemetry on`), local storage only, no external reporting by default
+
+Docs: https://alaarab.github.io/phren/
+Source: https://github.com/alaarab/phren
+
+Conductor: hand_off queues busy workers durably; keep deliveryId, query status:true without text. Uncertain deliveries never retry automatically. PHREN_STALL_MS (300000, zero off) flags working sessions whose screen and transcript are unchanged; live_sessions and dispatch_returns expose stalled fields.
+
+dispatch_report(prs): record this worker's turn-bound PR evidence, each row
+{url,repo,branch,tests,notes?}; the done return carries it to the configured
+integrator through queued hand_off. phren dispatch report --prs <JSON>.
+owner_inbox(operation?,title?,project?,id?,resolution?,includeResolved?,computer?):
+list, add or resolve owner work across linked computers. Reading returns does
+not dismiss it; resolving does not approve or answer a prompt.
+phren owner-inbox list [--all] | add <title> [--project <slug>] [--id <uuid>] |
+resolve <id> [--computer <name>] [--resolution <text>].
+phren conductor integrator [--session <id> [--computer <name>] | --clear].
+dispatch accepts closeOnFinish:false (CLI --keep-open) to preserve a finished
+pane; otherwise it closes after the done return is read and revalidated.

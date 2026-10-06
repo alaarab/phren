@@ -1,0 +1,996 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { writeFile as write, makeTempDir, grantAdmin } from "../test-helpers.js";
+import * as fs from "fs";
+import * as path from "path";
+import * as http from "http";
+import * as os from "os";
+import * as querystring from "querystring";
+import { execFileSync } from "child_process";
+import { createWebUiServer } from "../ui/memory-ui.js";
+
+function seedProject(root: string): void {
+  write(
+    path.join(root, "demo", "FINDINGS.md"),
+    [
+      "# demo FINDINGS",
+      "",
+      "## 2026-03-01",
+      "",
+      "- [decision] Use WAL mode for SQLite",
+      "- [pitfall] Do not use synchronous writes in hooks",
+      "- [pattern] Always validate project names before path resolution",
+      "",
+    ].join("\n")
+  );
+  write(
+    path.join(root, "demo", "review.md"),
+    [
+      "# demo Review Queue",
+      "",
+      "## Review",
+      "",
+      "- [2026-03-05] Keep this memory [confidence 0.90]",
+      "- [2026-03-06] Another review item [confidence 0.80]",
+      "",
+      "## Stale",
+      "",
+      "- [2026-03-04] Remove stale memory [confidence 0.55]",
+      "",
+      "## Conflicts",
+      "",
+      "",
+    ].join("\n")
+  );
+}
+
+function seedSecondProject(root: string): void {
+  write(
+    path.join(root, "other", "FINDINGS.md"),
+    [
+      "# other FINDINGS",
+      "",
+      "## 2026-03-02",
+      "",
+      "- [pattern] Batch writes improve throughput",
+      "",
+    ].join("\n")
+  );
+}
+
+async function postForm(
+  port: number,
+  route: string,
+  body: Record<string, string>
+): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> {
+  const payload = querystring.stringify(body);
+  return await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        method: "POST",
+        host: "127.0.0.1",
+        port,
+        path: route,
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "content-length": Buffer.byteLength(payload),
+        },
+      },
+      (res) => {
+        let out = "";
+        res.on("data", (chunk) => { out += String(chunk); });
+        res.on("end", () => {
+          resolve({ status: res.statusCode || 0, body: out, headers: res.headers });
+        });
+      }
+    );
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+async function httpGet(port: number, path: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    http.get(`http://127.0.0.1:${port}${path}`, (res) => {
+      let out = "";
+      res.on("data", (chunk) => { out += String(chunk); });
+      res.on("end", () => resolve({ status: res.statusCode || 0, body: out }));
+    }).on("error", reject);
+  });
+}
+
+describe("web-ui auth token protection", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  let authToken: string;
+  const priorActor = process.env.PHREN_ACTOR;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-web-ui-auth-"));
+    seedProject(tmpRoot);
+    process.env.PHREN_ACTOR = "web-ui-admin";
+    grantAdmin(tmpRoot);
+    authToken = "test-auth-token-secret";
+    server = createWebUiServer(tmpRoot, { authToken });
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it.each([
+    "/",
+    "/api/csrf-token",
+    "/api/hooks",
+    "/api/review-queue",
+    "/api/review-activity",
+    "/api/project-content?project=demo&file=FINDINGS.md",
+  ])("GET %s returns 401 without auth token", async (endpoint) => {
+    const res = await httpGet(port, endpoint);
+    expect(res.status).toBe(401);
+    expect(res.body).toContain("Unauthorized");
+  });
+
+  it("GET / requires auth and only embeds token after successful auth", async () => {
+    const res = await httpGet(port, "/?_auth=" + encodeURIComponent(authToken));
+    expect(res.status).toBe(200);
+    expect(res.body).toContain(authToken);
+  });
+});
+
+describe("web-ui graph API", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  const priorActor = process.env.PHREN_ACTOR;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-web-ui-graph-"));
+    seedProject(tmpRoot);
+    seedSecondProject(tmpRoot);
+    process.env.PHREN_ACTOR = "web-ui-admin";
+    grantAdmin(tmpRoot);
+    server = createWebUiServer(tmpRoot);
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("graph nodes include project nodes and finding nodes", async () => {
+    const res = await httpGet(port, "/api/graph");
+    const data = JSON.parse(res.body);
+    const projectNodes = data.nodes.filter((n: any) => n.group === "project");
+    expect(projectNodes.length).toBeGreaterThanOrEqual(2);
+    const projectNames = projectNodes.map((n: any) => n.label);
+    expect(projectNames).toContain("demo");
+    expect(projectNames).toContain("other");
+  });
+
+  it("graph nodes have correct group types", async () => {
+    const res = await httpGet(port, "/api/graph");
+    const data = JSON.parse(res.body);
+    const groups = new Set(data.nodes.map((n: any) => n.group));
+    expect(groups.has("project")).toBe(true);
+    // Finding nodes now use dynamic topic classification: group is 'topic:<slug>'
+    const topicGroups = [...groups].filter((g: any) => typeof g === "string" && g.startsWith("topic:"));
+    expect(topicGroups.length).toBeGreaterThan(0);
+    // All non-structural groups should be topic-prefixed
+    const nonStructural = [...groups].filter((g: any) => g !== "project" && g !== "entity" && g !== "reference" && !g.startsWith("task-"));
+    expect(nonStructural.every((g: any) => g.startsWith("topic:"))).toBe(true);
+  });
+
+  it("graph nodes expose source metadata for richer filtering", async () => {
+    const res = await httpGet(port, "/api/graph");
+    const data = JSON.parse(res.body);
+    const demoProject = data.nodes.find((n: any) => n.id === "demo");
+    const demoFinding = data.nodes.find((n: any) => n.id !== "demo" && n.project === "demo");
+    expect(demoProject?.project).toBe("demo");
+    expect(demoProject?.tagged).toBe(false);
+    expect(demoFinding?.project).toBe("demo");
+    expect(typeof demoFinding?.tagged).toBe("boolean");
+    expect(typeof demoFinding?.fullLabel).toBe("string");
+  });
+
+  it("graph nodes carry project totals and finding dates", async () => {
+    const res = await httpGet(port, "/api/graph");
+    const data = JSON.parse(res.body);
+    const demoProject = data.nodes.find((n: any) => n.id === "demo");
+    expect(typeof demoProject?.findingCount).toBe("number");
+    expect(demoProject?.findingCount).toBe(3);
+    expect(typeof demoProject?.taskCount).toBe("number");
+    const demoFinding = data.nodes.find((n: any) => n.project === "demo" && String(n.group).startsWith("topic:"));
+    expect(demoFinding?.date).toBe("2026-03-01");
+  });
+
+  it("graph links connect project to its findings", async () => {
+    const res = await httpGet(port, "/api/graph");
+    const data = JSON.parse(res.body);
+    const demoLinks = data.links.filter((l: any) => l.source === "demo");
+    // demo has 3 tagged findings
+    expect(demoLinks.length).toBe(3);
+  });
+
+  it("graph truncates long finding labels to 60 chars", async () => {
+    // Add a very long finding
+    write(
+      path.join(tmpRoot, "demo", "FINDINGS.md"),
+      [
+        "# demo FINDINGS",
+        "",
+        "## 2026-03-01",
+        "",
+        `- [decision] ${"A".repeat(80)}`,
+        "",
+      ].join("\n")
+    );
+    const res = await httpGet(port, "/api/graph");
+    const data = JSON.parse(res.body);
+    const taggedNodes = data.nodes.filter((n: any) => n.tagged === true && n.project === "demo");
+    expect(taggedNodes.length).toBeGreaterThan(0);
+    for (const node of taggedNodes) {
+      expect(node.label.length).toBeLessThanOrEqual(60);
+      expect(node.fullLabel.length).toBeGreaterThanOrEqual(node.label.length);
+      expect(node.project).toBe("demo");
+      expect(node.tagged).toBe(true);
+    }
+  });
+
+  it("lifts graph caps for a focused project without changing the default graph", async () => {
+    const findings = [
+      "# demo FINDINGS",
+      "",
+      "## 2026-03-01",
+      "",
+      ...Array.from({ length: 205 }, (_, index) => `- [pattern] Focused tagged finding ${index + 1}`),
+      ...Array.from({ length: 105 }, (_, index) => `- Focused plain finding entry ${index + 1} with enough words`),
+      "",
+    ].join("\n");
+    write(path.join(tmpRoot, "demo", "FINDINGS.md"), findings);
+
+    const defaultRes = await httpGet(port, "/api/graph");
+    expect(defaultRes.status).toBe(200);
+    const defaultData = JSON.parse(defaultRes.body);
+    const defaultDemoFindings = defaultData.nodes.filter((n: any) => n.project === "demo" && String(n.group).startsWith("topic:"));
+    expect(defaultDemoFindings).toHaveLength(300);
+
+    const focusedRes = await httpGet(port, "/api/graph?project=demo");
+    expect(focusedRes.status).toBe(200);
+    const focusedData = JSON.parse(focusedRes.body);
+    const focusedDemoFindings = focusedData.nodes.filter((n: any) => n.project === "demo" && String(n.group).startsWith("topic:"));
+    expect(focusedDemoFindings).toHaveLength(310);
+  });
+});
+
+describe("web-ui profile scoping", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  const priorHome = process.env.HOME;
+  const priorUserProfile = process.env.USERPROFILE;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-web-ui-profile-"));
+    process.env.HOME = tmpRoot;
+    process.env.USERPROFILE = tmpRoot;
+    seedProject(tmpRoot);
+    seedSecondProject(tmpRoot);
+    write(path.join(tmpRoot, "profiles", "work.yaml"), "name: work\nprojects:\n  - demo\n");
+    server = createWebUiServer(tmpRoot, undefined, "work");
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorHome === undefined) delete process.env.HOME;
+    else process.env.HOME = priorHome;
+    if (priorUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = priorUserProfile;
+    tmpCleanup();
+  });
+
+  it("limits project and graph APIs to the active profile", async () => {
+    const projectsRes = await httpGet(port, "/api/projects");
+    expect(projectsRes.status).toBe(200);
+    expect(projectsRes.body).toContain("\"name\":\"demo\"");
+    expect(projectsRes.body).not.toContain("\"name\":\"other\"");
+
+    const graphRes = await httpGet(port, "/api/graph");
+    expect(graphRes.status).toBe(200);
+    expect(graphRes.body).toContain("\"id\":\"demo\"");
+    expect(graphRes.body).not.toContain("\"id\":\"other\"");
+  });
+});
+
+describe("web-ui HTML escaping", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  const priorActor = process.env.PHREN_ACTOR;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-web-ui-xss-"));
+    process.env.PHREN_ACTOR = "web-ui-admin";
+    grantAdmin(tmpRoot);
+    // Seed with XSS-like content in queue
+    write(
+      path.join(tmpRoot, "xss-test", "FINDINGS.md"),
+      "# xss-test FINDINGS\n"
+    );
+    write(
+      path.join(tmpRoot, "xss-test", "review.md"),
+      [
+        "# xss-test Review Queue",
+        "",
+        "## Review",
+        "",
+        '- [2026-03-05] <script>alert("xss")</script> [confidence 0.90]',
+        "",
+        "## Stale",
+        "",
+        "## Conflicts",
+        "",
+      ].join("\n")
+    );
+    server = createWebUiServer(tmpRoot);
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("HTML-escapes XSS payloads in queue items", async () => {
+    const res = await httpGet(port, "/");
+    expect(res.status).toBe(200);
+    // Queue items are now rendered client-side: raw <script> tags must not appear in the initial HTML
+    expect(res.body).not.toContain('<script>alert("xss")</script>');
+    // The /api/review-queue endpoint returns raw JSON (client-side esc() handles XSS on render)
+    const apiRes = await httpGet(port, "/api/review-queue");
+    expect(apiRes.status).toBe(200);
+    const items = JSON.parse(apiRes.body) as Array<{ text: string }>;
+    expect(items.length).toBeGreaterThan(0);
+    // JSON text field is raw (not HTML-escaped) — protection happens client-side
+    expect(items[0].text).toContain('<script>alert("xss")</script>');
+  });
+});
+
+describe("web-ui combined CSRF + auth", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  let csrfTokens: Map<string, number>;
+  let authToken: string;
+  const priorActor = process.env.PHREN_ACTOR;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-csrf-auth-"));
+    seedProject(tmpRoot);
+    process.env.PHREN_ACTOR = "web-ui-admin";
+    grantAdmin(tmpRoot);
+    csrfTokens = new Map<string, number>();
+    authToken = "combined-auth-token";
+    server = createWebUiServer(tmpRoot, { authToken, csrfTokens });
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("rejects when auth is correct but CSRF is missing", async () => {
+    const res = await postForm(port, "/api/hook-toggle", {
+      _auth: authToken,
+      tool: "claude",
+      enabled: "true",
+    });
+    expect(res.status).toBe(403);
+    expect(res.body).toContain("CSRF");
+  });
+});
+
+describe("web-ui skill-save auth protection (Q13)", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  let authToken: string;
+  let csrfTokens: Map<string, number>;
+  const priorActor = process.env.PHREN_ACTOR;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-skill-auth-"));
+    seedProject(tmpRoot);
+    process.env.PHREN_ACTOR = "web-ui-admin";
+    grantAdmin(tmpRoot);
+    authToken = "skill-auth-token";
+    csrfTokens = new Map<string, number>();
+    server = createWebUiServer(tmpRoot, { authToken, csrfTokens });
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("POST /api/skill-save returns 401 without auth token", async () => {
+    const skillPath = path.join(tmpRoot, "global", "skills", "test-skill.md");
+    const res = await postForm(port, "/api/skill-save", {
+      path: skillPath,
+      content: "# Test skill",
+    });
+    expect(res.status).toBe(401);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(false);
+    expect(data.error).toContain("Unauthorized");
+  });
+
+  it("POST /api/skill-save returns 401 with wrong auth token", async () => {
+    const skillPath = path.join(tmpRoot, "global", "skills", "test-skill.md");
+    const res = await postForm(port, "/api/skill-save", {
+      _auth: "wrong-token",
+      path: skillPath,
+      content: "# Test skill",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /api/skill-save succeeds with correct auth token", async () => {
+    const skillPath = path.join(tmpRoot, "global", "skills", "test-skill.md");
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(csrfRes.status).toBe(200);
+    const csrf = JSON.parse(csrfRes.body).token as string;
+    const res = await postForm(port, "/api/skill-save", {
+      _auth: authToken,
+      _csrf: csrf,
+      path: skillPath,
+      content: "# Test skill",
+    });
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+  });
+
+  it("POST /api/skill-toggle disables and re-enables a skill without deleting it", async () => {
+    const skillPath = path.join(tmpRoot, "global", "skills", "test-skill.md");
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, "---\nname: test-skill\ndescription: UI toggle\n---\nbody\n");
+
+    let skillsRes = await httpGet(port, "/api/skills?_auth=" + encodeURIComponent(authToken));
+    expect(skillsRes.status).toBe(200);
+    let skills = JSON.parse(skillsRes.body);
+    expect(skills.some((entry: any) => entry.name === "test-skill" && entry.enabled === true)).toBe(true);
+
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(csrfRes.status).toBe(200);
+    const csrf = JSON.parse(csrfRes.body).token as string;
+
+    const disableRes = await postForm(port, "/api/skill-toggle", {
+      _auth: authToken,
+      _csrf: csrf,
+      project: "global",
+      name: "test-skill",
+      enabled: "false",
+    });
+    expect(disableRes.status).toBe(200);
+    expect(JSON.parse(disableRes.body).ok).toBe(true);
+    expect(fs.existsSync(skillPath)).toBe(true);
+
+    skillsRes = await httpGet(port, "/api/skills?_auth=" + encodeURIComponent(authToken));
+    skills = JSON.parse(skillsRes.body);
+    expect(skills.some((entry: any) => entry.name === "test-skill" && entry.enabled === false)).toBe(true);
+
+    const secondCsrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(secondCsrfRes.status).toBe(200);
+    const secondCsrf = JSON.parse(secondCsrfRes.body).token as string;
+
+    const enableRes = await postForm(port, "/api/skill-toggle", {
+      _auth: authToken,
+      _csrf: secondCsrf,
+      project: "global",
+      name: "test-skill",
+      enabled: "true",
+    });
+    expect(enableRes.status).toBe(200);
+    expect(JSON.parse(enableRes.body).ok).toBe(true);
+
+    skillsRes = await httpGet(port, "/api/skills?_auth=" + encodeURIComponent(authToken));
+    skills = JSON.parse(skillsRes.body);
+    expect(skills.some((entry: any) => entry.name === "test-skill" && entry.enabled === true)).toBe(true);
+  });
+
+  it("GET /api/skill-content rejects invalid paths even with auth", async () => {
+    const res = await httpGet(port, "/api/skill-content?_auth=" + encodeURIComponent(authToken) + "&path=" + encodeURIComponent("/tmp/nope.md"));
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body).error).toContain("Invalid path");
+  });
+
+  it("GET /api/skill-content returns file contents for allowed paths", async () => {
+    const skillPath = path.join(tmpRoot, "global", "skills", "existing-skill.md");
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, "# Existing skill\n");
+    const res = await httpGet(
+      port,
+      "/api/skill-content?_auth=" + encodeURIComponent(authToken) + "&path=" + encodeURIComponent(skillPath)
+    );
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+    expect(data.content).toContain("Existing skill");
+  });
+
+  it("POST /api/skill-save rejects symlink traversal for new files", async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-skill-escape-"));
+    const linkRoot = path.join(tmpRoot, "global", "skills", "escape");
+    fs.mkdirSync(path.dirname(linkRoot), { recursive: true });
+    fs.symlinkSync(outsideDir, linkRoot, "dir");
+
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(csrfRes.status).toBe(200);
+    const csrf = JSON.parse(csrfRes.body).token as string;
+    const escapedPath = path.join(linkRoot, "pwned.md");
+
+    const res = await postForm(port, "/api/skill-save", {
+      _auth: authToken,
+      _csrf: csrf,
+      path: escapedPath,
+      content: "# should not write",
+    });
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(false);
+    expect(data.error).toContain("Invalid path");
+    expect(fs.existsSync(path.join(outsideDir, "pwned.md"))).toBe(false);
+  });
+});
+
+describe("web-ui project-content validation", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  let authToken: string;
+  const priorActor = process.env.PHREN_ACTOR;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-project-content-auth-"));
+    seedProject(tmpRoot);
+    process.env.PHREN_ACTOR = "web-ui-admin";
+    grantAdmin(tmpRoot);
+    authToken = "project-content-auth-token";
+    server = createWebUiServer(tmpRoot, { authToken });
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("GET /api/project-content rejects non-whitelisted files", async () => {
+    const res = await httpGet(
+      port,
+      "/api/project-content?_auth=" + encodeURIComponent(authToken) + "&project=demo&file=" + encodeURIComponent("review.md")
+    );
+    expect(res.status).toBe(400);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(false);
+    expect(data.error).toContain("File not allowed");
+  });
+
+  it("GET /api/project-content returns allowed file contents", async () => {
+    const res = await httpGet(
+      port,
+      "/api/project-content?_auth=" + encodeURIComponent(authToken) + "&project=demo&file=" + encodeURIComponent("FINDINGS.md")
+    );
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+    expect(data.content).toContain("Use WAL mode for SQLite");
+  });
+
+  it("GET /api/project-content rejects symlinked project dirs that resolve outside the phren store", async () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-project-content-escape-"));
+    try {
+      fs.writeFileSync(path.join(outsideDir, "FINDINGS.md"), "outside secret\n");
+      fs.symlinkSync(outsideDir, path.join(tmpRoot, "linked"), process.platform === "win32" ? "junction" : "dir");
+
+      const res = await httpGet(
+        port,
+        "/api/project-content?_auth=" + encodeURIComponent(authToken) + "&project=linked&file=" + encodeURIComponent("FINDINGS.md")
+      );
+      expect(res.status).toBe(400);
+      const data = JSON.parse(res.body);
+      expect(data.ok).toBe(false);
+      expect(data.error).toContain("Invalid project or file path");
+    } finally {
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("web-ui project topics and reference APIs", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  let authToken: string;
+  const priorActor = process.env.PHREN_ACTOR;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-project-topics-auth-"));
+    seedProject(tmpRoot);
+    write(
+      path.join(tmpRoot, "demo", "reference", "frontend.md"),
+      [
+        "# demo - frontend",
+        "",
+        "## Archived 2026-03-01",
+        "",
+        "- Shader compilation hitch on first frame",
+        "",
+      ].join("\n")
+    );
+    write(
+      path.join(tmpRoot, "demo", "reference", "rendering-notes.md"),
+      [
+        "# Rendering Notes",
+        "",
+        "This is hand-written prose and should not be migrated automatically.",
+      ].join("\n")
+    );
+    process.env.PHREN_ACTOR = "web-ui-admin";
+    grantAdmin(tmpRoot);
+    authToken = "project-topics-auth-token";
+    server = createWebUiServer(tmpRoot, { authToken });
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("GET /api/project-topics returns starter topics when no custom config exists", async () => {
+    const res = await httpGet(
+      port,
+      "/api/project-topics?_auth=" + encodeURIComponent(authToken) + "&project=demo"
+    );
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+    expect(data.source).toBe("default");
+    expect(data.topics.some((topic: any) => topic.slug === "general")).toBe(true);
+  });
+
+  it("POST /api/project-topics/save writes custom topics and creates managed topic docs", async () => {
+    const res = await postForm(port, "/api/project-topics/save", {
+      _auth: authToken,
+      project: "demo",
+      topics: JSON.stringify([
+        { slug: "rendering", label: "Rendering", description: "Graphics and frames", keywords: ["shader", "frame", "render"] },
+        { slug: "gameplay", label: "Gameplay", description: "Combat and gameplay state", keywords: ["combat", "state"] },
+        { slug: "general", label: "General", description: "Fallback", keywords: [] },
+      ]),
+    });
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+    expect(data.source).toBe("custom");
+    expect(fs.existsSync(path.join(tmpRoot, "demo", "topic-config.json"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpRoot, "demo", "reference", "topics", "rendering.md"))).toBe(true);
+    expect(fs.existsSync(path.join(tmpRoot, "demo", "reference", "topics", "gameplay.md"))).toBe(true);
+  });
+
+  it("GET /api/project-reference-list separates topic docs from other reference docs", async () => {
+    await postForm(port, "/api/project-topics/save", {
+      _auth: authToken,
+      project: "demo",
+      topics: JSON.stringify([
+        { slug: "rendering", label: "Rendering", description: "Graphics and frames", keywords: ["shader", "frame", "render"] },
+        { slug: "general", label: "General", description: "Fallback", keywords: [] },
+      ]),
+    });
+    const res = await httpGet(
+      port,
+      "/api/project-reference-list?_auth=" + encodeURIComponent(authToken) + "&project=demo"
+    );
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+    expect(data.topicDocs.some((doc: any) => doc.slug === "rendering")).toBe(true);
+    expect(data.otherDocs.some((doc: any) => doc.file === "reference/frontend.md")).toBe(true);
+  });
+
+  it("GET /api/project-reference-content rejects invalid paths and returns allowed reference docs", async () => {
+    await postForm(port, "/api/project-topics/save", {
+      _auth: authToken,
+      project: "demo",
+      topics: JSON.stringify([
+        { slug: "rendering", label: "Rendering", description: "Graphics and frames", keywords: ["shader", "frame", "render"] },
+        { slug: "general", label: "General", description: "Fallback", keywords: [] },
+      ]),
+    });
+    const denied = await httpGet(
+      port,
+      "/api/project-reference-content?_auth=" + encodeURIComponent(authToken) + "&project=demo&file=" + encodeURIComponent("../FINDINGS.md")
+    );
+    expect(denied.status).toBe(400);
+    expect(JSON.parse(denied.body).ok).toBe(false);
+
+    const allowed = await httpGet(
+      port,
+      "/api/project-reference-content?_auth=" + encodeURIComponent(authToken) + "&project=demo&file=" + encodeURIComponent("reference/topics/rendering.md")
+    );
+    expect(allowed.status).toBe(200);
+    const data = JSON.parse(allowed.body);
+    expect(data.ok).toBe(true);
+    expect(data.content).toContain("phren:auto-topic");
+  });
+
+  it("POST /api/project-topics/reclassify migrates eligible legacy topic docs and reports skips", async () => {
+    await postForm(port, "/api/project-topics/save", {
+      _auth: authToken,
+      project: "demo",
+      topics: JSON.stringify([
+        { slug: "rendering", label: "Rendering", description: "Graphics and frames", keywords: ["shader", "frame", "render"] },
+        { slug: "general", label: "General", description: "Fallback", keywords: [] },
+      ]),
+    });
+    const res = await postForm(port, "/api/project-topics/reclassify", {
+      _auth: authToken,
+      project: "demo",
+    });
+    expect(res.status).toBe(200);
+    const data = JSON.parse(res.body);
+    expect(data.ok).toBe(true);
+    expect(data.movedFiles).toBe(1);
+    expect(data.movedEntries).toBe(1);
+    expect(data.skipped.some((item: any) => item.file === "reference/rendering-notes.md")).toBe(true);
+    expect(fs.existsSync(path.join(tmpRoot, "demo", "reference", "frontend.md"))).toBe(false);
+    expect(fs.readFileSync(path.join(tmpRoot, "demo", "reference", "topics", "rendering.md"), "utf8")).toContain("Shader compilation hitch");
+  });
+});
+
+describe("web-ui JSON API auth and removed queue routes", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  let authToken: string;
+  let csrfTokens: Map<string, number>;
+  const priorActor = process.env.PHREN_ACTOR;
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-json-api-auth-"));
+    seedProject(tmpRoot);
+    process.env.PHREN_ACTOR = "web-ui-admin";
+    grantAdmin(tmpRoot);
+    authToken = "json-api-auth-token";
+    csrfTokens = new Map<string, number>();
+    server = createWebUiServer(tmpRoot, { authToken, csrfTokens });
+    await new Promise<void>((resolve) => {
+      server!.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it.each([
+    { route: "/api/approve", body: { project: "demo", line: "- [2026-03-05] Keep this memory [confidence 0.90]" } },
+    { route: "/api/reject", body: { project: "demo", line: "- [2026-03-04] Remove stale memory [confidence 0.55]" } },
+    { route: "/api/edit", body: { project: "demo", line: "- [2026-03-05] Keep this memory [confidence 0.90]", new_text: "updated text" } },
+  ])("POST $route requires auth", async ({ route, body }) => {
+    const res = await postForm(port, route, body);
+    expect(res.status).toBe(401);
+  });
+
+  it("JSON review queue edit route works with auth and CSRF", async () => {
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    expect(csrfRes.status).toBe(200);
+    const csrf = JSON.parse(csrfRes.body).token as string;
+    const res = await postForm(port, "/api/edit", {
+      _auth: authToken,
+      _csrf: csrf,
+      project: "demo",
+      line: "- [2026-03-05] Keep this memory [confidence 0.90]",
+      new_text: "Updated workflow-safe memory",
+    });
+    expect(res.status).toBe(200);
+    const review = fs.readFileSync(path.join(tmpRoot, "demo", "review.md"), "utf8");
+    expect(review).toContain("Updated workflow-safe memory");
+    expect(review).not.toContain("Keep this memory");
+  });
+});
+
+describe("web-ui /api/sync", () => {
+  let tmpRoot = "";
+  let tmpCleanup: () => void;
+  let server: http.Server | null = null;
+  let port = 0;
+  let authToken: string;
+  let csrfTokens: Map<string, number>;
+  const priorActor = process.env.PHREN_ACTOR;
+
+  function git(args: string[]): string {
+    return execFileSync("git", args, {
+      cwd: tmpRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "phren test",
+        GIT_AUTHOR_EMAIL: "test@example.com",
+        GIT_COMMITTER_NAME: "phren test",
+        GIT_COMMITTER_EMAIL: "test@example.com",
+      },
+    }).trim();
+  }
+
+  beforeEach(async () => {
+    ({ path: tmpRoot, cleanup: tmpCleanup } = makeTempDir("phren-ui-sync-"));
+    seedProject(tmpRoot);
+    process.env.PHREN_ACTOR = "web-ui-admin";
+    grantAdmin(tmpRoot);
+
+    // A store as `phren init` leaves it: .md, .json and .yaml, and a gitignored
+    // .runtime/*.jsonl. No tracked .yml, .jsonl or .txt anywhere — which is why
+    // one combined `git add` with six literal pathspecs always aborted.
+    write(path.join(tmpRoot, ".config", "retention-policy.json"), '{"ttlDays":120}\n');
+    write(path.join(tmpRoot, "machines.yaml"), "laptop: personal\n");
+    write(path.join(tmpRoot, ".gitignore"), ".runtime/\n");
+    write(path.join(tmpRoot, ".runtime", "lookup-events.jsonl"), '{"e":1}\n');
+    git(["init", "--initial-branch=main"]);
+    git(["config", "user.email", "test@example.com"]);
+    git(["config", "user.name", "phren test"]);
+    git(["add", "-A"]);
+    git(["commit", "-m", "init"]);
+    // Dirty the tree so sync has something to do.
+    write(path.join(tmpRoot, "demo", "FINDINGS.md"), "# demo FINDINGS\n\n## 2026-03-01\n\n- [decision] Changed\n");
+
+    authToken = "sync-token";
+    csrfTokens = new Map<string, number>();
+    server = createWebUiServer(tmpRoot, { authToken, csrfTokens });
+    await new Promise<void>((resolve) => { server!.listen(0, "127.0.0.1", () => resolve()); });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("failed to bind test server");
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    server = null;
+    if (priorActor === undefined) delete process.env.PHREN_ACTOR;
+    else process.env.PHREN_ACTOR = priorActor;
+    tmpCleanup();
+  });
+
+  it("commits a store that has no .yml, .jsonl or .txt files", async () => {
+    const csrfRes = await httpGet(port, "/api/csrf-token?_auth=" + encodeURIComponent(authToken));
+    const csrf = JSON.parse(csrfRes.body).token as string;
+
+    const res = await postForm(port, "/api/sync", { _auth: authToken, _csrf: csrf, message: "ui sync" });
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.ok, res.body).toBe(true);
+    expect(String(body.message)).not.toMatch(/did not match any files/);
+
+    // The commit actually landed, carrying the edited finding.
+    expect(git(["log", "-1", "--pretty=%s"])).toMatch(/^ui sync/);
+    expect(git(["show", "HEAD:demo/FINDINGS.md"])).toContain("Changed");
+  });
+});

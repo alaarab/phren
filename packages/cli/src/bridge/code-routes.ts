@@ -1,0 +1,431 @@
+import { rm } from "node:fs/promises";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { resolveAllStores } from "../store-registry.js";
+import { git } from "./projects.js";
+import { z } from "zod";
+import { getProjectDirs } from "../shared.js";
+import type { IndexResult, CodeStatus, OutlineEntry, ReferenceResult, SymbolDefinition, SymbolHit, UsageEntry } from "@phren/code";
+import { codePackageHint, loadCodePackage } from "../modules/code-package.js";
+const indexProject: typeof import("@phren/code").indexProject = async (store, ...args) => (await requireCodePackage(store)).indexProject(store, ...args);
+import { isValidProjectName } from "../utils-paths.js";
+import { errorMessage } from "../utils.js";
+import { logger } from "../logger.js";
+import { BridgeError, bridgeRoot } from "./protocol.js";
+import type { ChangedFile } from "./changes.js";
+
+export async function requireCodePackage(store?: string): Promise<typeof import("@phren/code")> {
+  const code = await loadCodePackage(store);
+  if (!code) throw new BridgeError(503, codePackageHint(store));
+  return code;
+}
+
+/** Resolve only registered stores. Phone IDs are repository names; no client
+ * path can select a filesystem location. Omitting the ID supports older phones. */
+export async function resolveCodeStore(base: string, value?: string | null, write = false): Promise<string> {
+  if (!value) return base;
+  const id = z.string().min(1).max(200).regex(/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)?$/).parse(value);
+  const stores = resolveAllStores(base).filter(store => store.available !== false);
+  const matches: typeof stores = [];
+  for (const store of stores) {
+    const remote = store.remote ?? (await git(store.path, "config", "--get", "remote.origin.url").catch(() => "")).trim();
+    const repo = /github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?$/.exec(remote)?.[1];
+    if (id === store.id || id === store.name || id.toLowerCase() === repo?.toLowerCase()) matches.push(store);
+  }
+  if (matches.length !== 1) throw new BridgeError(404, "That store is not uniquely registered on this computer.");
+  if (write && matches[0].role === "readonly") throw new BridgeError(403, "That store is read-only.");
+  return matches[0].path;
+}
+
+/**
+ * Read routes over the `code` module's local symbol index (stage 3).
+ *
+ * The phone's Code screen calls these over the Hook's HTTP pipe; each one is a
+ * thin JSON formatter over `code/query.ts`, so the CLI, the MCP tools and the
+ * phone all read the same index the same way. A project with no index is a 404
+ * with the command that builds one. `CodeReindexer` follows the git module's
+ * recorded change events and re-indexes the affected project after a short
+ * debounce; a branch switch (HEAD changed) forces a full re-index.
+ */
+
+const KIND_VALUES = ["function", "method", "class", "struct", "enum", "interface", "type", "variable", "types"] as const;
+
+const projectSchema = z.string().min(1).max(100).refine(value => isValidProjectName(value), "Choose a valid project name.");
+const querySchema = z.string().max(500);
+const symbolSchema = z.string().min(1).max(4600);
+const pathSchema = z.string().min(1).max(4096).refine(value => !value.includes("\0") && !value.split("/").includes(".."), "Choose a valid file path.");
+const relativePathSchema = pathSchema.refine(value => !path.isAbsolute(value) && !path.win32.isAbsolute(value)
+  && !value.includes("\\") && !value.split("/").some(part => part === "." || part === ""));
+const optionalPath = (value?: string | null) => value ? relativePathSchema.parse(value) : undefined;
+const offsetSchema = z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const kindSchema = z.enum(KIND_VALUES);
+const limitSchema = z.coerce.number().int().min(1).max(500);
+const topSchema = z.coerce.number().int().min(1).max(100);
+
+/** The 404 a route throws when the project has no index on this computer. */
+function noIndex(project: string): BridgeError {
+  return new BridgeError(404, `No code index for "${project}" on this computer. Build one with: phren code index ${project}`);
+}
+
+/** The phone names a project and an optional query; both are validated here. */
+export class CodeRoutes {
+  constructor(private readonly store: string) {}
+
+  /** A filename need not resemble a symbol declared inside it. Query the
+   * index's files table through @phren/code's existing public read API so
+   * installed optional packages need no new export to serve this route. */
+  async files(projectValue: string | null, nameValue: string | null, limitValue?: string | null) {
+    const project = projectSchema.parse(projectValue ?? "");
+    const name = relativePathSchema.refine(value => !/[\x00-\x1f\x7f]/.test(value)
+      && !value.split("/").includes(".git")).parse(nameValue ?? "");
+    const limit = limitValue ? topSchema.parse(limitValue) : 20;
+    const code = await requireCodePackage(this.store);
+    const database = await code.openCodeDatabase(this.store, project, false);
+    if (!database) throw noIndex(project);
+    try {
+      const suffix = "/" + name;
+      const rows = code.rowsOf(database.db,
+        `SELECT path, language FROM files WHERE path = ? OR substr(path, -?) = ?
+         ORDER BY CASE WHEN path = ? THEN 0 ELSE 1 END, length(path), path LIMIT ?`,
+        [name, [...suffix].length, suffix, name, limit + 1]);
+      return { project, name, files: rows.slice(0, limit).map(row => ({ path: code.stringAt(row, 0), language: code.stringAt(row, 1) })),
+        truncated: rows.length > limit };
+    } finally { database.close(); }
+  }
+
+  async status(projectValue: string | null): Promise<CodeStatus> {
+    const project = projectSchema.parse(projectValue ?? "");
+    const result = await (await requireCodePackage(this.store)).codeIndexStatus(this.store, project);
+    if (!result.available) throw noIndex(project);
+    return result;
+  }
+
+  async search(projectValue: string | null, queryValue: string | null, kindValue: string | null, limitValue: string | null, directoryValue?: string | null): Promise<{ project: string; query: string; symbols: SymbolHit[] }> {
+    const project = projectSchema.parse(projectValue ?? "");
+    const query = querySchema.parse(queryValue ?? "");
+    const kind = kindValue === null || kindValue === "" ? undefined : kindSchema.parse(kindValue);
+    const limit = limitValue === null || limitValue === "" ? undefined : limitSchema.parse(limitValue);
+    const result = await (await requireCodePackage(this.store)).search(this.store, project, query, kind, limit ?? 20, optionalPath(directoryValue));
+    if (!result.available) throw noIndex(project);
+    return { project, query, symbols: result.value };
+  }
+
+  async tree(projectValue: string | null, directoryValue?: string | null) {
+    const project = projectSchema.parse(projectValue ?? "");
+    const directory = optionalPath(directoryValue) ?? "";
+    const result = await (await requireCodePackage(this.store)).treeSummary(this.store, project, directory);
+    if (!result.available) throw noIndex(project);
+    return { project, directory, entries: result.value };
+  }
+
+  async usagePage(projectValue: string | null, values: { kind?: string | null; file?: string | null; directory?: string | null;
+    offset?: string | null; limit?: string | null; end?: string | null } = {}) {
+    const project = projectSchema.parse(projectValue ?? "");
+    const result = await (await requireCodePackage(this.store)).usagePage(this.store, project, {
+      kind: values.kind ? kindSchema.parse(values.kind) : undefined,
+      file: optionalPath(values.file), directory: optionalPath(values.directory),
+      offset: values.offset ? offsetSchema.parse(values.offset) : 0,
+      limit: values.limit ? topSchema.parse(values.limit) : 50,
+      end: values.end ? z.enum(["0", "1"]).parse(values.end) === "1" : false,
+    });
+    if (!result.available) throw noIndex(project);
+    return { project, ...result.value };
+  }
+
+  /** The checkout this computer indexes for `project`, or a 404 naming the project. */
+  private async checkout(project: string): Promise<string> {
+    try { return fs.realpathSync((await requireCodePackage(this.store)).resolveRepoRoot(this.store, project)); }
+    catch { throw new BridgeError(404, `${project} has no checkout on this computer.`); }
+  }
+
+  private async changedIn(project: string, added: Map<string, Set<number>>) {
+    const code = await requireCodePackage(this.store);
+    if (typeof code.changedDeclarations !== "function") throw new BridgeError(503, "Update @phren/code to see what changed.");
+    const result = await code.changedDeclarations(this.store, project,
+      new Map([...added].map(([file, lines]) => [file, [...lines].sort((a, b) => a - b)])));
+    if (!result.available) throw noIndex(project);
+    return result.value;
+  }
+
+  /**
+   * What changed: the functions, types and variables that today's agent
+   * sessions edited in this project's checkout, and its last 10 commits,
+   * grouped by file, most recent work first. Session edits carry the line
+   * numbers they had when made, so a later edit to the same file can shift one.
+   */
+  async whatChanged(projectValue: string | null, now = new Date()) {
+    const project = projectSchema.parse(projectValue ?? "");
+    const root = await this.checkout(project);
+    const code = await requireCodePackage(this.store);
+    const added = new Map<string, Set<number>>();
+    const take = (patch: string) => {
+      for (const [file, lines] of code.addedLinesByFile(patch)) {
+        const set = added.get(file) ?? new Set<number>();
+        for (const line of lines) set.add(line);
+        added.set(file, set);
+      }
+    };
+    const midnight = new Date(now); midnight.setHours(0, 0, 0, 0);
+    const dir = path.join(bridgeRoot(), "changes");
+    const logs = fs.existsSync(dir) ? fs.readdirSync(dir).filter(name => name.endsWith(".jsonl")) : [];
+    const today = logs.map(name => ({ file: path.join(dir, name), at: fs.statSync(path.join(dir, name)).mtimeMs }))
+      .filter(entry => entry.at >= midnight.getTime()).sort((a, b) => b.at - a.at);
+    for (const log of today) {
+      for (const line of fs.readFileSync(log.file, "utf8").split("\n")) {
+        if (!line.trim()) continue;
+        let record: { files?: Array<{ root?: string; patch?: string }> };
+        try { record = JSON.parse(line); } catch { continue; }
+        for (const file of record.files ?? []) {
+          if (typeof file.root !== "string" || typeof file.patch !== "string") continue;
+          let same = false;
+          try { same = fs.realpathSync(file.root) === root; } catch { same = false; }
+          if (same) take(file.patch);
+        }
+      }
+    }
+    // A repository's first commit adds every file; it is the import, not work.
+    try { take(await git(root, "-c", "log.showRoot=false", "log", "-10", "--format=", "-p", "-U0", "--no-color", "--no-ext-diff")); }
+    catch { /* A checkout without commits yet has only its session edits. */ }
+    const items = await this.changedIn(project, added);
+    const files: Array<{ path: string; items: typeof items }> = [];
+    for (const item of items) {
+      let group = files.find(entry => entry.path === item.file);
+      if (!group) { group = { path: item.file, items: [] }; files.push(group); }
+      group.items.push(item);
+    }
+    return { project, files };
+  }
+
+  /**
+   * Per-file counts for the Changes tree's chips: functions and types the
+   * working tree changes or adds (variables stay out to keep a chip short).
+   * An untracked file is new throughout.
+   */
+  async changeCounts(projectValue: string | null, pathsValue: string | null) {
+    const project = projectSchema.parse(projectValue ?? "");
+    let raw: unknown;
+    try { raw = JSON.parse(pathsValue ?? "[]"); }
+    catch { throw new BridgeError(400, "Choose valid paths."); }
+    const paths = [...new Set(z.array(relativePathSchema).min(1).max(200).parse(raw))];
+    const root = await this.checkout(project);
+    const code = await requireCodePackage(this.store);
+    const added = new Map<string, Set<number>>();
+    for (const [file, lines] of code.addedLinesByFile(await git(root, "diff", "HEAD", "-U0", "--no-color", "--no-ext-diff", "--", ...paths).catch(() => "")))
+      added.set(file, new Set(lines));
+    const untracked = (await git(root, "ls-files", "--others", "--exclude-standard", "--", ...paths).catch(() => "")).split("\n").filter(Boolean);
+    for (const file of untracked) {
+      let count = 0;
+      try { count = fs.readFileSync(path.join(root, file), "utf8").split("\n").length; } catch { continue; }
+      added.set(file, new Set(Array.from({ length: count }, (_, index) => index + 1)));
+    }
+    const items = await this.changedIn(project, added);
+    const entries = paths.map(file => {
+      const mine = items.filter(item => item.file === file || item.file.startsWith(file + "/"));
+      const tally = (family: "function" | "type") => ({
+        changed: mine.filter(item => item.family === family && !item.isNew).length,
+        added: mine.filter(item => item.family === family && item.isNew).length,
+      });
+      const first = mine.find(item => item.family !== "variable");
+      return { path: file, functions: tally("function"), types: tally("type"),
+        ...(first ? { first: `${first.file}::${first.parent ? first.parent + "." : ""}${first.name}` } : {}) };
+    });
+    return { project, entries };
+  }
+
+  /** Turns code intelligence off for a project: its index is deleted, and
+   * the reindexer follows only projects that have one, so nothing rebuilds it
+   * until the phone turns it on again. */
+  async disable(projectValue: string | null): Promise<{ project: string; disabled: true }> {
+    const project = projectSchema.parse(projectValue ?? "");
+    const { codeDatabasePath } = await requireCodePackage(this.store);
+    const file = codeDatabasePath(this.store, project);
+    await Promise.all([file, `${file}-journal`, `${file}-wal`, `${file}-shm`].map(path => rm(path, { force: true })));
+    return { project, disabled: true };
+  }
+
+  async reindex(projectValue: string | null) {
+    const project = projectSchema.parse(projectValue ?? "");
+    await indexProject(this.store, project);
+    return this.status(project);
+  }
+
+  async outline(projectValue: string | null, pathValue: string | null): Promise<{ project: string; path: string; entries: OutlineEntry[] }> {
+    const project = projectSchema.parse(projectValue ?? "");
+    const file = pathSchema.parse(pathValue ?? "");
+    const result = await (await requireCodePackage(this.store)).outline(this.store, project, file);
+    if (!result.available) throw noIndex(project);
+    return { project, path: file, entries: result.value };
+  }
+
+  /** Resolved uses made from one file, with the declaration each names, so the
+   * phone's code viewer can make those identifiers tappable. */
+  async fileReferences(projectValue: string | null, pathValue: string | null): Promise<{ project: string; path: string; references: import("@phren/code").FileReference[] }> {
+    const project = projectSchema.parse(projectValue ?? "");
+    const file = relativePathSchema.parse(pathValue ?? "");
+    const code = await requireCodePackage(this.store);
+    if (typeof code.fileReferences !== "function") throw new BridgeError(503, "Update @phren/code to make identifiers tappable.");
+    const result = await code.fileReferences(this.store, project, file);
+    if (!result.available) throw noIndex(project);
+    return { project, path: file, references: result.value };
+  }
+
+  async outlineSummary(projectValue: string | null, pathsValue: string | null) {
+    const project = projectSchema.parse(projectValue ?? "");
+    let raw: unknown;
+    try { raw = JSON.parse(pathsValue ?? "[]"); }
+    catch { throw new BridgeError(400, "Choose valid paths."); }
+    const paths = z.array(pathSchema.refine(value => !path.isAbsolute(value) && !path.win32.isAbsolute(value)
+      && !value.split(/[\\/]/).includes(".."))).min(1).max(200).parse(raw);
+    const result = await (await requireCodePackage(this.store)).outlineSummary(this.store, project, [...new Set(paths)]);
+    if (!result.available) throw noIndex(project);
+    return { project, entries: result.value };
+  }
+
+  async definition(projectValue: string | null, symbolValue: string | null): Promise<{ project: string; definition: SymbolDefinition & { findings: import("@phren/code").CitingFinding[] } }> {
+    const project = projectSchema.parse(projectValue ?? "");
+    const symbol = symbolSchema.parse(symbolValue ?? "");
+    const result = await (await requireCodePackage(this.store)).definition(this.store, project, symbol);
+    if (!result.available) throw noIndex(project);
+    if (!result.value) throw new BridgeError(404, `Nothing named "${symbol}" in ${project}.`);
+    return { project, definition: { ...result.value, findings: (await requireCodePackage(this.store)).findingsCitingSymbol(this.store, project, (await requireCodePackage(this.store)).citationSymbolName(result.value.symbol)) } };
+  }
+
+  async references(projectValue: string | null, symbolValue: string | null, limitValue: string | null): Promise<{ project: string; references: ReferenceResult }> {
+    const project = projectSchema.parse(projectValue ?? "");
+    const symbol = symbolSchema.parse(symbolValue ?? "");
+    const limit = limitValue === null || limitValue === "" ? undefined : limitSchema.parse(limitValue);
+    const result = await (await requireCodePackage(this.store)).references(this.store, project, symbol, limit ?? 200);
+    if (!result.available) throw noIndex(project);
+    if (!result.value) throw new BridgeError(404, `Nothing named "${symbol}" in ${project}.`);
+    return { project, references: result.value };
+  }
+
+  async usage(projectValue: string | null, topValue: string | null): Promise<{ project: string; usage: { hot: UsageEntry[]; cold: UsageEntry[] } }> {
+    const project = projectSchema.parse(projectValue ?? "");
+    const top = topValue === null || topValue === "" ? undefined : topSchema.parse(topValue);
+    const result = await (await requireCodePackage(this.store)).usage(this.store, project, top ?? 10);
+    if (!result.available) throw noIndex(project);
+    return { project, usage: { hot: result.value.top, cold: result.value.bottom } };
+  }
+}
+
+export interface CodeReindexOptions {
+  store: string;
+  /** Index function; injectable so tests do not need the real parser. */
+  index?: typeof indexProject;
+  /** Where the one-line-per-run report goes; defaults to the CLI logger. */
+  log?: (line: string) => void;
+  /** How long to wait for the writes to settle. */
+  debounceMs?: number;
+}
+
+/**
+ * Re-indexes a project when the git module's change capture records a file
+ * event inside it. The Hook only constructs this while the `code` module is on,
+ * and only projects that already have an index are followed. A branch switch
+ * (the repository's HEAD moved) upgrades the pending run to a full re-index.
+ */
+export class CodeReindexer {
+  private readonly store: string;
+  private readonly index: typeof indexProject;
+  private readonly log: (line: string) => void;
+  private readonly debounceMs: number;
+  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly pendingFull = new Set<string>();
+  private readonly running = new Set<string>();
+  private readonly rerun = new Set<string>();
+  private readonly heads = new Map<string, string>();
+  private closed = false;
+
+  constructor(options: CodeReindexOptions) {
+    this.store = options.store;
+    this.index = options.index ?? indexProject;
+    this.log = options.log ?? (line => logger.info("code", line));
+    this.debounceMs = options.debounceMs ?? 500;
+  }
+
+  /** One recorded change event; schedules an incremental re-index of the project it belongs to. */
+  record(files: ChangedFile[]): void {
+    if (this.closed || files.length === 0) return;
+    void this.recordAsync(files).catch(error => this.log(errorMessage(error)));
+  }
+
+  private async recordAsync(files: ChangedFile[]): Promise<void> {
+    const projects = await this.indexedProjects();
+    if (this.closed) return;
+    for (const root of new Set(files.map(file => file.root))) {
+      const project = projects.find(entry => entry.root === root);
+      if (!project) continue;
+      const head = readHead(root);
+      const previous = this.heads.get(root);
+      if (head !== undefined) this.heads.set(root, head);
+      this.schedule(project.project, previous !== undefined && head !== undefined && previous !== head);
+    }
+  }
+
+  close(): void {
+    this.closed = true;
+    for (const timer of this.timers.values()) clearTimeout(timer);
+    this.timers.clear();
+    this.rerun.clear();
+    this.pendingFull.clear();
+  }
+
+  private async indexedProjects(): Promise<Array<{ project: string; root: string }>> {
+    const { codeDatabasePath, resolveRepoRoot } = await requireCodePackage(this.store);
+    const result: Array<{ project: string; root: string }> = [];
+    for (const directory of getProjectDirs(this.store)) {
+      const project = path.basename(directory);
+      if (!fs.existsSync(codeDatabasePath(this.store, project))) continue;
+      try {
+        result.push({ project, root: fs.realpathSync(resolveRepoRoot(this.store, project)) });
+      } catch { /* No checkout for this project on this computer. */ }
+    }
+    return result;
+  }
+
+  private schedule(project: string, full: boolean): void {
+    if (this.closed) return;
+    if (full) this.pendingFull.add(project);
+    const existing = this.timers.get(project);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => { this.timers.delete(project); void this.run(project); }, this.debounceMs);
+    timer.unref?.();
+    this.timers.set(project, timer);
+  }
+
+  private async run(project: string): Promise<void> {
+    if (this.closed) return;
+    // A run already in flight: let it finish, then take the newest event.
+    if (this.running.has(project)) { this.rerun.add(project); return; }
+    const full = this.pendingFull.delete(project);
+    this.running.add(project);
+    try {
+      const result: IndexResult = await this.index(this.store, project, { full });
+      this.log(`re-indexed ${project}${full ? " (full)" : ""}: ${result.parsed} parsed, ${result.symbols} declarations, ${result.durationMs} ms`);
+    } catch (error) {
+      this.log(`re-index of ${project} failed: ${errorMessage(error)}`);
+    } finally {
+      this.running.delete(project);
+      if (this.rerun.delete(project)) this.schedule(project, false);
+    }
+  }
+}
+
+/** HEAD of the repository root, for branch-switch detection. A linked worktree's
+ * `.git` is a file that points at its real git directory. */
+function readHead(root: string): string | undefined {
+  try {
+    const dotGit = path.join(root, ".git");
+    const gitDirectory = fs.statSync(dotGit).isDirectory()
+      ? dotGit
+      : (() => {
+        const match = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, "utf8"));
+        return match ? path.resolve(root, match[1]) : undefined;
+      })();
+    if (!gitDirectory) return undefined;
+    return fs.readFileSync(path.join(gitDirectory, "HEAD"), "utf8").trim();
+  } catch {
+    return undefined;
+  }
+}

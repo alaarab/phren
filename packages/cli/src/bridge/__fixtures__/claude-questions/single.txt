@@ -1,0 +1,40 @@
+  Ran 1 shell command
+  ⎿  Interrupted · What should Claude do instead?
+
+✻ Brewed for 3s · done 9:40 PM
+
+❯ claude --model haiku --permission-mode auto 'Use AskUserQuestion once: question "Which tools?" header Tools multiSelect true options Vim, Emacs. Nothing else.'
+
+⏺ User answered Claude's questions:
+  ⎿  · Which tools? → Vim
+
+⏺ You selected: Vim
+
+✻ Crunched for 9s · done 9:42 PM
+
+❯ Use the AskUserQuestion tool exactly once, with three questions: 1) header Color, question "Which color should the new onboarding banner use for the dark theme?" options Red, Green,
+  Blue (single select); 2) header Tools, question "Which tools do you use?" options Vim, Emacs, VSCode (multiSelect true); 3) header Size, question "Which size?" options Small, Large
+  (single select). Do nothing else.
+
+⏺ User declined to answer questions
+  ⎿  · Which color should the new onboarding banner use for the dark theme? (Red / Green / Blue)
+     · Which tools do you use? (Vim / Emacs / VSCode)
+     · Which size? (Small / Large)
+
+✻ Brewed for 3s · done 9:43 PM
+
+❯ Use AskUserQuestion once with one question "Pick one?" header Choice options A, B (single select). Nothing else.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Choice
+
+Pick one?
+
+❯ 1. A
+     Option A
+  2. B
+     Option B
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

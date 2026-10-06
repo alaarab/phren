@@ -1,0 +1,665 @@
+import * as fs from "node:fs";
+import { Box, Static, Text, useApp, useInput, useStdin } from "ink";
+import { useCallback, useEffect, useState } from "react";
+import { COMMAND_NAMES } from "../../commands.js";
+import { renderMarkdown } from "../../multi/markdown.js";
+import type { PermissionMode } from "../../permissions/types.js";
+import { getPlan } from "../../tools/update-plan.js";
+import { isHelpKey } from "../help.js";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts.js";
+import { highlightMatches, useSearch } from "../hooks/useSearch.js";
+import type { Theme } from "../themes.js";
+import { type ApprovalInfo, ApprovalPanel } from "./ApprovalPanel.js";
+import { Banner } from "./Banner.js";
+import { type AgentTab, InputArea, PermissionsLine } from "./InputArea.js";
+import { ModelPicker, type ModelPickerState } from "./ModelPicker.js";
+import { ListPicker, type ListPickerState } from "./ListPicker.js";
+import { PlanReview } from "./PlanReview.js";
+import { ShortcutHelp } from "./ShortcutHelp.js";
+import { StatusBar } from "./StatusBar.js";
+import { SteerQueue } from "./SteerQueue.js";
+import { ThinkingIndicator } from "./ThinkingIndicator.js";
+import { ToolCall, type ToolCallProps } from "./ToolCall.js";
+import { ToolDetail, type ToolDetailState } from "./ToolDetail.js";
+import { ToolSpinner } from "./ToolSpinner.js";
+
+// ── Message types for Static history ─────────────────────────────────────────
+
+export interface BannerMsg {
+  id: string;
+  kind: "banner";
+}
+
+export interface UserMsg {
+  id: string;
+  kind: "user";
+  text: string;
+}
+
+export interface AssistantMsg {
+  id: string;
+  kind: "assistant";
+  text: string;
+  toolCalls?: ToolCallProps[];
+}
+
+export interface StatusMsg {
+  id: string;
+  kind: "status";
+  text: string;
+}
+
+export type CompletedMessage = UserMsg | AssistantMsg | StatusMsg;
+
+// ── App state and props ──────────────────────────────────────────────────────
+
+export interface AppState {
+  provider: string;
+  project: string | null;
+  turns: number;
+  cost: string;
+  permMode: PermissionMode;
+  agentCount: number;
+  version: string;
+  model?: string;
+  contextWindow?: number;
+  contextTokens?: number;
+  reasoningEffort?: string;
+  /** A quick chat (`--mode chat`): the banner leaves out the folder, the phren store. */
+  chat?: boolean;
+}
+
+export interface ActiveToolInfo {
+  name: string;
+  preview: string;
+}
+
+export interface AppProps {
+  state: AppState;
+  completedMessages: CompletedMessage[];
+  streamingText: string;
+  /** Live reasoning/thinking text for the current turn (rendered dim, tail only). */
+  reasoningText?: string;
+  completedToolCalls: ToolCallProps[];
+  activeTool: ActiveToolInfo | null;
+  thinking: boolean;
+  thinkStartTime: number;
+  thinkElapsed: string | null;
+  steerQueue: string[];
+  running: boolean;
+  showBanner: boolean;
+  inputHistory: string[];
+  verbose: boolean;
+  theme: Theme;
+  onSubmit: (input: string) => void;
+  onPermissionCycle: () => void;
+  onCancelTurn: () => void;
+  onExit: () => void;
+  onExpandTool?: () => void;
+  /** Agent tabs for multi-agent mode */
+  agents?: AgentTab[];
+  /** Currently selected agent ID (null = main orchestrator) */
+  selectedAgentId?: string | null;
+  /** Callback when user selects a different agent tab */
+  onSelectAgent?: (agentId: string | null) => void;
+  /** Callback when user presses Esc to cancel agent work */
+  onCancelAgent?: () => void;
+  /** Pending permission request to show as an approval panel. */
+  approval?: ApprovalInfo | null;
+  /** Open model picker overlay. */
+  modelPicker?: ModelPickerState | null;
+  onModelPickerMove?: (delta: number) => void;
+  onModelPickerReasoning?: (delta: number) => void;
+  onModelPickerSelect?: () => void;
+  onModelPickerCancel?: () => void;
+  listPicker?: ListPickerState | null;
+  onListPickerMove?: (delta: number) => void;
+  onListPickerSelect?: () => void;
+  onListPickerCancel?: () => void;
+  /** Ctrl+O with no current-turn tool opens the tool detail overlay. */
+  onInspectTool?: () => void;
+  toolDetail?: ToolDetailState | null;
+  onToolDetailMove?: (delta: number) => void;
+  onToolDetailClose?: () => void;
+  /** Plan text awaiting approve/revise while in plan mode. */
+  planReview?: string | null;
+}
+
+export function App({
+  state,
+  completedMessages,
+  streamingText,
+  reasoningText,
+  completedToolCalls,
+  activeTool,
+  thinking,
+  thinkStartTime,
+  thinkElapsed,
+  steerQueue,
+  running,
+  showBanner,
+  inputHistory,
+  verbose,
+  theme,
+  onSubmit,
+  onPermissionCycle,
+  onCancelTurn,
+  onExit,
+  onExpandTool,
+  agents,
+  selectedAgentId,
+  onSelectAgent,
+  onCancelAgent,
+  approval,
+  modelPicker,
+  onModelPickerMove,
+  onModelPickerReasoning,
+  onModelPickerSelect,
+  onModelPickerCancel,
+  listPicker,
+  onListPickerMove,
+  onListPickerSelect,
+  onListPickerCancel,
+  onInspectTool,
+  toolDetail,
+  onToolDetailMove,
+  onToolDetailClose,
+  planReview,
+}: AppProps) {
+  const { exit } = useApp();
+  const { stdin } = useStdin();
+  const [inputValue, setInputValue] = useState("");
+  const [bashMode, setBashMode] = useState(false);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [ctrlCCount, setCtrlCCount] = useState(0);
+  const [tabFocused, setTabFocused] = useState(false);
+  const [highlightedTabIndex, setHighlightedTabIndex] = useState(0);
+  const [showTaskList, setShowTaskList] = useState(false);
+  const [stashedInput, setStashedInput] = useState("");
+  const [historySearchMode, setHistorySearchMode] = useState(false);
+  const [historySearchQuery, setHistorySearchQuery] = useState("");
+  const [historySearchIndex, setHistorySearchIndex] = useState(0);
+  const [expandedTools, setExpandedTools] = useState<Set<number>>(new Set());
+  const [completionIndex, setCompletionIndex] = useState(0);
+  const [showHelp, setShowHelp] = useState(false);
+
+  // ── Ctrl+F content search ────────────────────────────────────────────────
+  const search = useSearch();
+
+  // Slash-command and @file completion candidates for the current input.
+  const completions = (() => {
+    if (inputValue.startsWith("/") && !/\s/.test(inputValue)) {
+      return COMMAND_NAMES.filter((name) => name.startsWith(inputValue) && name !== inputValue).slice(0, 8);
+    }
+    const match = inputValue.match(/(?:^|\s)@([^\s@]*)$/);
+    if (!match) return [];
+    const partial = match[1];
+    const tokenStart = inputValue.length - partial.length - 1;
+    try {
+      return fs.readdirSync(process.cwd())
+        .filter((entry) => entry.startsWith(partial))
+        .slice(0, 8)
+        .map((entry) => `${inputValue.slice(0, tokenStart)}@${entry}`);
+    } catch { return []; }
+  })();
+
+  useEffect(() => { setCompletionIndex(0); }, [inputValue]);
+
+  // When the query changes, recompute total match count across all completed messages
+  useEffect(() => {
+    if (!search.state.active || !search.state.query) {
+      search.setMatchInfo(0, 0);
+      return;
+    }
+    let total = 0;
+    for (const msg of completedMessages) {
+      if (msg.kind === "user" || msg.kind === "status") {
+        const { count } = highlightMatches(msg.text, search.state.query);
+        total += count;
+      } else if (msg.kind === "assistant") {
+        const { count } = highlightMatches(msg.text, search.state.query);
+        total += count;
+      }
+    }
+    search.setMatchInfo(total, 0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.state.query, search.state.active, completedMessages]);
+
+  // Handle keypresses while search mode is active
+  useInput((input, key) => {
+    if (!search.state.active) return;
+
+    // Escape: deactivate search
+    if (key.escape) {
+      search.deactivate();
+      return;
+    }
+
+    // Enter or n: next match
+    if (key.return || input === "n") {
+      search.nextMatch();
+      return;
+    }
+
+    // N (shift+n): previous match
+    if (input === "N") {
+      search.prevMatch();
+      return;
+    }
+
+    // Backspace: remove last char from query
+    if (key.backspace || key.delete) {
+      search.setQuery(search.state.query.slice(0, -1));
+      return;
+    }
+
+    // Skip ctrl/meta combinations
+    if (key.ctrl || key.meta) return;
+
+    // Regular character: append to query
+    if (input.length > 0 && !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow && !key.tab) {
+      search.setQuery(search.state.query + input);
+    }
+  }, { isActive: search.state.active });
+
+  // History search: compute matches from current query
+  const historyMatches = historySearchMode
+    ? inputHistory.filter((h) => h.toLowerCase().includes(historySearchQuery.toLowerCase()))
+    : [];
+  const currentMatch = historyMatches.length > 0
+    ? historyMatches[historySearchIndex % historyMatches.length]
+    : null;
+
+  // Handle keypresses while in history search mode
+  useInput((input, key) => {
+    if (!historySearchMode) return;
+
+    // Ctrl+R again: cycle to next match
+    if (key.ctrl && input === "r") {
+      if (historyMatches.length > 0) {
+        setHistorySearchIndex((i) => (i + 1) % historyMatches.length);
+      }
+      return;
+    }
+
+    // Enter: accept match
+    if (key.return) {
+      if (currentMatch) {
+        setInputValue(currentMatch);
+      }
+      setHistorySearchMode(false);
+      setHistorySearchQuery("");
+      setHistorySearchIndex(0);
+      return;
+    }
+
+    // Escape: cancel search
+    if (key.escape) {
+      setHistorySearchMode(false);
+      setHistorySearchQuery("");
+      setHistorySearchIndex(0);
+      return;
+    }
+
+    // Backspace: remove last char from query
+    if (key.backspace || key.delete) {
+      setHistorySearchQuery((q) => q.slice(0, -1));
+      setHistorySearchIndex(0);
+      return;
+    }
+
+    // Skip ctrl/meta combinations (except already handled)
+    if (key.ctrl || key.meta) return;
+
+    // Regular character: append to query
+    if (input.length > 0 && !key.upArrow && !key.downArrow && !key.leftArrow && !key.rightArrow && !key.tab) {
+      setHistorySearchQuery((q) => q + input);
+      setHistorySearchIndex(0);
+    }
+  }, { isActive: historySearchMode });
+
+  const handleSubmit = useCallback((value: string) => {
+    setInputValue("");
+    setHistoryIndex(-1);
+    if (value === "") return;
+
+    // ! at start of empty input toggles bash mode
+    if (value === "!" && !bashMode) {
+      setBashMode(true);
+      return;
+    }
+
+    onSubmit(bashMode ? `!${value}` : value);
+    setBashMode(false);
+  }, [bashMode, onSubmit]);
+
+  const isAnyModeActive = search.state.active || historySearchMode;
+  const helpEnabled = !isAnyModeActive && !modelPicker && !listPicker && !toolDetail && !approval;
+
+  useEffect(() => {
+    if (!helpEnabled) return;
+    const onData = (data: Buffer | string) => {
+      const input = data.toString();
+      if (input !== "?" && isHelpKey(input, inputValue)) setShowHelp(value => !value);
+    };
+    stdin.on("data", onData);
+    return () => { stdin.off("data", onData); };
+  }, [stdin, helpEnabled, inputValue]);
+
+  useInput((input, key) => {
+    if (showHelp) {
+      if (key.escape || input === "?" || isHelpKey(input, inputValue)) setShowHelp(false);
+    } else if (isHelpKey(input, inputValue)) {
+      setShowHelp(true);
+    }
+  }, { isActive: helpEnabled });
+
+  useKeyboardShortcuts({
+    isRunning: running,
+    inputValue,
+    bashMode,
+    inputHistory,
+    historyIndex,
+    ctrlCCount,
+    onSetInput: setInputValue,
+    onSetBashMode: setBashMode,
+    onSetHistoryIndex: setHistoryIndex,
+    onSetCtrlCCount: setCtrlCCount,
+    onExit: () => { onExit(); exit(); },
+    onCyclePermissions: onPermissionCycle,
+    onCancelTurn,
+    onEscCancelAgent: onCancelAgent,
+    onHistorySearch: () => {
+      setHistorySearchMode(true);
+      setHistorySearchQuery("");
+      setHistorySearchIndex(0);
+    },
+    onContentSearch: () => {
+      search.activate();
+    },
+    onExpandTool: () => {
+      if (completedToolCalls.length > 0) {
+        const lastIndex = completedToolCalls.length - 1;
+        setExpandedTools((prev) => {
+          const next = new Set(prev);
+          if (next.has(lastIndex)) {
+            next.delete(lastIndex);
+          } else {
+            next.add(lastIndex);
+          }
+          return next;
+        });
+        onExpandTool?.();
+        return;
+      }
+      onInspectTool?.();
+    },
+    onOpenEditor: () => {
+      // Write input to temp file, open $EDITOR, read back
+      const tmpFile = `/tmp/phren-input-${Date.now()}.md`;
+      try {
+        const fs = require("fs");
+        const { execSync } = require("child_process");
+        fs.writeFileSync(tmpFile, inputValue);
+        const editor = process.env.VISUAL || process.env.EDITOR || "vi";
+        execSync(`${editor} ${tmpFile}`, { stdio: "inherit" });
+        const result = fs.readFileSync(tmpFile, "utf-8");
+        fs.unlinkSync(tmpFile);
+        setInputValue(result.replace(/\n$/, ""));
+      } catch { /* editor cancelled or failed */ }
+    },
+    stashedInput,
+    onStash: (text: string) => { setStashedInput(text); },
+    onUnstash: () => { const s = stashedInput; setStashedInput(""); return s || null; },
+    tabFocused,
+    onEnterTabBar: agents && agents.length > 0 ? () => { setTabFocused(true); setHighlightedTabIndex(0); } : undefined,
+    onExitTabBar: () => { setTabFocused(false); },
+    onTabLeft: () => { setHighlightedTabIndex((p) => Math.max(0, p - 1)); },
+    onTabRight: () => { setHighlightedTabIndex((p) => Math.min((agents?.length ?? 1) - 1, p + 1)); },
+    onTabSelect: () => {
+      if (agents && agents[highlightedTabIndex]) {
+        const id = agents[highlightedTabIndex].id;
+        onSelectAgent?.(id === "__main__" ? null : id);
+      }
+    },
+    onCycleAgent: agents && agents.length > 0 ? () => {
+      const currentIdx = agents.findIndex(a => a.id === selectedAgentId || (selectedAgentId === null && a.id === "__main__"));
+      const nextIdx = (currentIdx + 1) % agents.length;
+      const nextId = agents[nextIdx].id;
+      onSelectAgent?.(nextId === "__main__" ? null : nextId);
+    } : undefined,
+    onToggleTaskList: () => setShowTaskList(v => !v),
+    enabled: !isAnyModeActive && !showHelp && !modelPicker && !listPicker && !toolDetail,
+    completionOpen: completions.length > 0,
+    completionCount: completions.length,
+    onCompletionMove: (delta) => setCompletionIndex((i) => (i + delta + completions.length) % completions.length),
+    onCompletionAccept: () => {
+      if (completions.length === 0) return;
+      setInputValue(completions[completionIndex % completions.length]);
+      setCompletionIndex(0);
+    },
+  });
+
+  // Helper: apply search highlighting to a text string (ANSI only works in
+  // non-Ink raw text mode). Since Ink's <Text> will escape ANSI we pass raw
+  // strings to renderMarkdown which outputs ANSI directly.
+  const applySearch = useCallback((text: string): string => {
+    if (!search.state.active || !search.state.query) return text;
+    return highlightMatches(text, search.state.query).highlighted;
+  }, [search.state.active, search.state.query]);
+
+  return (
+    <>
+      {/* Completed messages — rendered once via <Static>, scroll up permanently */}
+      <Static items={completedMessages}>
+        {(item) => {
+          if (item.kind === "user") {
+            return (
+              <Box key={item.id} flexDirection="column">
+                <Text bold={theme.user.bold ?? true} color={theme.user.color}>{theme.user.label} {applySearch((item as UserMsg).text)}</Text>
+              </Box>
+            );
+          }
+          if (item.kind === "assistant") {
+            const aMsg = item as AssistantMsg;
+            const renderedText = aMsg.text
+              ? applySearch(renderMarkdown(aMsg.text, theme.markdown))
+              : "";
+            return (
+              <Box key={item.id} flexDirection="column" marginTop={1}>
+                {aMsg.toolCalls?.map((tc, i) => (
+                  <ToolCall key={i} {...tc} verbose={verbose} theme={theme} />
+                ))}
+                {renderedText ? (
+                  <Box>
+                    <Box flexShrink={0}><Text color={theme.agent.color}>{theme.agent.label} </Text></Box>
+                    <Box flexGrow={1} flexShrink={1} minWidth={0}><Text wrap="wrap">{renderedText}</Text></Box>
+                  </Box>
+                ) : null}
+              </Box>
+            );
+          }
+          if (item.kind === "status") {
+            return <Text key={item.id} color={theme.system.color} dimColor>{applySearch((item as StatusMsg).text)}</Text>;
+          }
+          return null;
+        }}
+      </Static>
+
+      {/* Dynamic area — active turn + input (erased and repainted each frame) */}
+      <Box flexDirection="column">
+        {/* Banner shows in dynamic area when no messages yet */}
+        {showBanner && completedMessages.length === 0 && <Banner state={state} theme={theme} />}
+
+        {/* In-progress tool calls (current turn) */}
+      {completedToolCalls.map((tc, i) => (
+        <ToolCall key={`tc-${i}`} {...tc} verbose={verbose} theme={theme} expanded={expandedTools.has(i)} />
+      ))}
+
+      {/* Currently executing tool — animated spinner */}
+      {activeTool && (
+        <Box paddingLeft={2}>
+          <ToolSpinner theme={theme} />
+          <Text bold color={theme.tool.name}>{activeTool.name}</Text>
+          {activeTool.preview ? <Text color={theme.tool.preview ?? theme.separator}> {activeTool.preview}</Text> : null}
+        </Box>
+      )}
+
+      {/* Live reasoning — dim tail of the model's current thinking */}
+      {reasoningText ? (
+        <Box marginTop={1} paddingLeft={2}>
+          <Text dimColor italic wrap="wrap">
+            {"✴ "}
+            {reasoningText.length > 400 ? `…${reasoningText.slice(-400)}` : reasoningText}
+          </Text>
+        </Box>
+      ) : null}
+
+      {/* Active streaming text — render markdown live during streaming */}
+      {streamingText !== "" && (
+        <Box marginTop={1}>
+          <Box flexShrink={0}><Text color={theme.agent.color}>{theme.agent.label} </Text></Box>
+          <Box flexGrow={1} flexShrink={1} minWidth={0}><Text wrap="wrap">{renderMarkdown(streamingText, theme.markdown)}</Text></Box>
+        </Box>
+      )}
+
+      {/* Thinking animation */}
+      {thinking && <Box marginTop={1}><ThinkingIndicator startTime={thinkStartTime} theme={theme} /></Box>}
+
+      {/* "◈ verb for Xs" after turn completes */}
+      {thinkElapsed !== null && (
+        <Text color={theme.dim} dimColor>{"  "}{"\u25c8"} {thinkElapsed}</Text>
+      )}
+
+      {/* Ctrl+C warning */}
+      {ctrlCCount > 0 && !running && (
+        <Text dimColor>{"  "}Press Ctrl+C again to exit.</Text>
+      )}
+
+      {/* ── Bottom zone: status + input (CC: fk9.bottom) ── */}
+
+      {/* Steer queue display */}
+      <SteerQueue items={steerQueue} theme={theme} />
+
+        {/* Plan (ctrl+t) */}
+        {showTaskList && (() => {
+          const plan = getPlan();
+          return (
+            <Box flexDirection="column" marginTop={1}>
+              <Text dimColor>{"  "}Plan (ctrl+t to hide)</Text>
+              {plan.length === 0
+                ? <Text dimColor>{"  "}No plan yet.</Text>
+                : plan.map((item, i) => (
+                    <Text key={i} color={item.status === "completed" ? "green" : item.status === "in_progress" ? "yellow" : undefined} dimColor={item.status === "completed"}>
+                      {"  "}{item.status === "completed" ? "\u2713" : item.status === "in_progress" ? "\u25cf" : "\u25cb"} {item.content}
+                    </Text>
+                  ))}
+            </Box>
+          );
+        })()}
+
+        {/* Content search bar (Ctrl+F) */}
+        {search.state.active && (
+          <Box>
+            <Text color={theme.search?.prompt ?? "cyan"}>{"  "}find: {search.state.query}<Text inverse> </Text></Text>
+            {search.state.matchCount > 0
+              ? <Text dimColor color={theme.search?.match ?? undefined}> ({search.state.currentMatch + 1} of {search.state.matchCount})</Text>
+              : search.state.query.length > 0
+                ? <Text dimColor color={theme.search?.noMatch ?? "red"}> (no matches)</Text>
+                : <Text dimColor> (type to search)</Text>
+            }
+          </Box>
+        )}
+
+        {/* History search indicator */}
+        {historySearchMode && (
+          <Box>
+            <Text color={theme.search?.prompt ?? "cyan"}>{"  "}search: {historySearchQuery}<Text inverse> </Text></Text>
+            {historyMatches.length > 0
+              ? <Text dimColor color={theme.search?.match ?? undefined}> (match {(historySearchIndex % historyMatches.length) + 1} of {historyMatches.length})</Text>
+              : historySearchQuery.length > 0
+                ? <Text dimColor color={theme.search?.noMatch ?? "red"}> (no matches)</Text>
+                : <Text dimColor> (type to search history)</Text>
+            }
+          </Box>
+        )}
+        {historySearchMode && currentMatch && (
+          <Box>
+            <Text dimColor>{"  "}{"\u25b8"} {currentMatch}</Text>
+          </Box>
+        )}
+
+        {/* Input + permissions */}
+        {showHelp ? <ShortcutHelp theme={theme} /> : null}
+        {planReview !== null && planReview !== undefined ? <PlanReview text={planReview} theme={theme} /> : null}
+        {toolDetail ? (
+          <ToolDetail
+            detail={toolDetail}
+            theme={theme}
+            onMove={onToolDetailMove ?? (() => {})}
+            onClose={onToolDetailClose ?? (() => {})}
+          />
+        ) : null}
+        {modelPicker ? (
+          <ModelPicker
+            state={modelPicker}
+            theme={theme}
+            onMove={onModelPickerMove ?? (() => {})}
+            onReasoning={onModelPickerReasoning ?? (() => {})}
+            onSelect={onModelPickerSelect ?? (() => {})}
+            onCancel={onModelPickerCancel ?? (() => {})}
+          />
+        ) : null}
+        {listPicker ? (
+          <ListPicker
+            state={listPicker}
+            theme={theme}
+            onMove={onListPickerMove ?? (() => {})}
+            onSelect={onListPickerSelect ?? (() => {})}
+            onCancel={onListPickerCancel ?? (() => {})}
+          />
+        ) : null}
+        {completions.length > 0 && (
+          <Box flexDirection="column" paddingLeft={2}>
+            {completions.map((candidate, i) => (
+              <Text key={candidate} color={i === completionIndex ? theme.statusBar.accent : undefined} dimColor={i !== completionIndex}>
+                {i === completionIndex ? "\u25b8 " : "  "}{candidate}
+              </Text>
+            ))}
+          </Box>
+        )}
+        {approval ? <ApprovalPanel info={approval} theme={theme} /> : null}
+        <StatusBar
+          provider={state.provider}
+          model={state.model}
+          project={state.project}
+          turns={state.turns}
+          cost={state.cost}
+          contextTokens={state.contextTokens}
+          contextLimit={state.contextWindow}
+          reasoningEffort={state.reasoningEffort}
+          theme={theme}
+        />
+        <InputArea
+          value={inputValue}
+          onChange={setInputValue}
+          onSubmit={handleSubmit}
+          bashMode={bashMode}
+          focus={!isAnyModeActive && !showHelp && !modelPicker && !listPicker && !toolDetail}
+          completionOpen={completions.length > 0}
+          separatorColor={theme.separator}
+          theme={theme}
+        />
+        <PermissionsLine
+          mode={state.permMode}
+          theme={theme}
+          running={running}
+          agents={agents}
+          selectedAgentId={selectedAgentId}
+          highlightedTabId={agents?.[highlightedTabIndex]?.id ?? null}
+          tabFocused={tabFocused}
+        />
+      </Box>
+    </>
+  );
+}

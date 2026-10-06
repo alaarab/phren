@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "defaultResponsibility": "agent",
+  "taskIdentity": {"storeId":"11111111","project":"responsibility","stableId":"aaaaaaaa"},
+  "dependencyIdentity": {"storeId":"11111111","project":"accounts","stableId":"bbbbbbbb"},
+  "readiness": ["ready","waiting-on-human","waiting-on-task"],
+  "section": ["Queue","Active","Done"],
+  "sourceValidation": "Prepared source only; consolidated RC regression and native parity checks UNRUN."
+}

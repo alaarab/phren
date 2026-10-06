@@ -1,0 +1,510 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+import { makeTempDir, grantAdmin, writeFile } from "../test-helpers.js";
+import { register } from "../tools/data.js";
+import type { McpContext } from "../tools/types.js";
+
+type ToolHandler = (args: Record<string, unknown>) => Promise<{ content: { type: string; text: string }[] }>;
+
+function makeMockServer() {
+  const tools = new Map<string, ToolHandler>();
+  return {
+    registerTool(name: string, _meta: unknown, handler: ToolHandler) {
+      tools.set(name, handler);
+    },
+    call(name: string, args: Record<string, unknown>) {
+      const handler = tools.get(name);
+      if (!handler) throw new Error(`Tool "${name}" not registered`);
+      return handler(args);
+    },
+  };
+}
+
+function parseResult(res: { content: { type: string; text: string }[] }) {
+  return JSON.parse(res.content[0].text);
+}
+
+function makeCtx(phrenPath: string, overrides?: Partial<McpContext>): McpContext {
+  return {
+    phrenPath,
+    profile: "test",
+    db: () => { throw new Error("db not expected"); },
+    rebuildIndex: async () => {},
+    withWriteQueue: async <T>(fn: () => Promise<T>) => fn(),
+    ...overrides,
+  };
+}
+
+describe("mcp-data: export/import round-trip", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+
+  beforeEach(() => {
+    tmp = makeTempDir("mcp-data-");
+    grantAdmin(tmp.path);
+    server = makeMockServer();
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    tmp.cleanup();
+  });
+
+  it("exports a project with findings, task, and summary", async () => {
+    const projectDir = path.join(tmp.path, "test-proj");
+    fs.mkdirSync(projectDir, { recursive: true });
+
+    writeFile(path.join(projectDir, "summary.md"), "# test-proj\nA test project.");
+    writeFile(
+      path.join(projectDir, "FINDINGS.md"),
+      "# test-proj Findings\n\n## 2026-03-01\n\n- Always use WAL mode\n"
+    );
+    writeFile(
+      path.join(projectDir, "tasks.md"),
+      "# test-proj task\n\n## Active\n\n- [ ] Add caching\n\n## Queue\n\n## Done\n\n- [x] Setup CI\n"
+    );
+    writeFile(path.join(projectDir, "AGENTS.md"), "# Instructions\nUse vitest.");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const res = parseResult(await server.call("export_project", { project: "test-proj" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.project).toBe("test-proj");
+    expect(res.data.summary).toContain("A test project.");
+    expect(res.data.claudeMd).toContain("Use vitest");
+    expect(res.data.findingsRaw).toContain("Always use WAL mode");
+    expect(res.data.task.Active).toHaveLength(1);
+    expect(res.data.task.Done).toHaveLength(1);
+  });
+
+  it("import recreates project files from exported JSON", async () => {
+    // Create and export a project
+    const projectDir = path.join(tmp.path, "orig");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# orig\nOriginal project.");
+    writeFile(
+      path.join(projectDir, "FINDINGS.md"),
+      "# orig Findings\n\n## 2026-03-01\n\n- Finding alpha\n"
+    );
+    writeFile(
+      path.join(projectDir, "tasks.md"),
+      "# orig task\n\n## Active\n\n- [ ] Task one\n\n## Queue\n\n## Done\n"
+    );
+    writeFile(path.join(projectDir, "AGENTS.md"), "# Claude\nBe concise.");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const exportRes = parseResult(await server.call("export_project", { project: "orig" }));
+    expect(exportRes.ok).toBe(true);
+
+    // Import into a new project name
+    const importPayload = { ...exportRes.data, project: "imported" };
+    const importRes = parseResult(
+      await server.call("import_project", { data: JSON.stringify(importPayload) })
+    );
+    expect(importRes.ok).toBe(true);
+    expect(importRes.data.project).toBe("imported");
+    expect(importRes.data.files).toContain("summary.md");
+    expect(importRes.data.files).toContain("AGENTS.md");
+    expect(importRes.data.files).toContain("FINDINGS.md");
+
+    // Verify files on disk
+    const importedDir = path.join(tmp.path, "imported");
+    expect(fs.existsSync(importedDir)).toBe(true);
+    expect(fs.readFileSync(path.join(importedDir, "summary.md"), "utf8")).toContain("Original project.");
+    expect(fs.readFileSync(path.join(importedDir, "AGENTS.md"), "utf8")).toContain("Be concise.");
+    expect(fs.readFileSync(path.join(importedDir, "FINDINGS.md"), "utf8")).toContain("Finding alpha");
+  });
+
+  it("import rejects duplicate project without overwrite flag", async () => {
+    const projectDir = path.join(tmp.path, "dup");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# dup");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const payload = { project: "dup", summary: "new content" };
+    const res = parseResult(
+      await server.call("import_project", { data: JSON.stringify(payload) })
+    );
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("already exists");
+  });
+
+  it("import rejects case-insensitive duplicate project names", async () => {
+    const projectDir = path.join(tmp.path, "Phren");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# Phren");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const payload = { project: "phren", summary: "# lowercase" };
+    const res = parseResult(
+      await server.call("import_project", { data: JSON.stringify(payload) })
+    );
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("different casing");
+  });
+
+  it("import with overwrite replaces existing project", async () => {
+    const projectDir = path.join(tmp.path, "overme");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# old content");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const payload = { project: "overme", overwrite: true, summary: "# replaced content" };
+    const res = parseResult(
+      await server.call("import_project", { data: JSON.stringify(payload) })
+    );
+    expect(res.ok).toBe(true);
+    expect(fs.readFileSync(path.join(tmp.path, "overme", "summary.md"), "utf8")).toContain("replaced content");
+  });
+
+  it("export returns error for nonexistent project", async () => {
+    register(server as any, makeCtx(tmp.path));
+    const res = parseResult(await server.call("export_project", { project: "nope" }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("not found");
+  });
+
+  it("export rejects symlinked project dirs that resolve outside the phren store", async () => {
+    const outside = makeTempDir("mcp-data-export-outside-");
+    try {
+      writeFile(path.join(outside.path, "summary.md"), "# outside");
+      fs.symlinkSync(outside.path, path.join(tmp.path, "linked"), process.platform === "win32" ? "junction" : "dir");
+
+      register(server as any, makeCtx(tmp.path));
+      const res = parseResult(await server.call("export_project", { project: "linked" }));
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain("not found");
+    } finally {
+      outside.cleanup();
+    }
+  });
+
+  it("import rejects invalid JSON", async () => {
+    register(server as any, makeCtx(tmp.path));
+    const res = parseResult(await server.call("import_project", { data: "not json{" }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Invalid JSON");
+  });
+
+  it("import rejects invalid project name", async () => {
+    register(server as any, makeCtx(tmp.path));
+    const res = parseResult(
+      await server.call("import_project", { data: JSON.stringify({ project: "../escape" }) })
+    );
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Invalid project name");
+  });
+
+  it("import canonicalizes uppercase project names to lowercase", async () => {
+    register(server as any, makeCtx(tmp.path));
+    const res = parseResult(
+      await server.call("import_project", { data: JSON.stringify({ project: "Phren", summary: "# Phren" }) })
+    );
+    expect(res.ok).toBe(true);
+    expect(res.data.project).toBe("phren");
+    expect(fs.existsSync(path.join(tmp.path, "phren"))).toBe(true);
+  });
+
+  it("import builds task content from structured data", async () => {
+    register(server as any, makeCtx(tmp.path));
+
+    const payload = {
+      project: "task-test",
+      task: {
+        Active: [{ line: "Active task", checked: false, githubIssue: 14, githubUrl: "https://github.com/alaarab/phren/issues/14" }],
+        Queue: [{ line: "Queued task", checked: false }],
+        Done: [{ line: "Done task", checked: true }],
+      },
+    };
+    const res = parseResult(
+      await server.call("import_project", { data: JSON.stringify(payload) })
+    );
+    expect(res.ok).toBe(true);
+
+    const task = fs.readFileSync(path.join(tmp.path, "task-test", "tasks.md"), "utf8");
+    expect(task).toContain("- [ ] Active task");
+    expect(task).toContain("GitHub: #14 https://github.com/alaarab/phren/issues/14");
+    expect(task).toContain("- [ ] Queued task");
+    expect(task).toContain("- [x] Done task");
+  });
+
+  it("export includes structured GitHub issue linkage on task items", async () => {
+    const projectDir = path.join(tmp.path, "gh-task");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(
+      path.join(projectDir, "tasks.md"),
+      "# gh-task task\n\n## Active\n\n- [ ] Ship issue linking <!-- bid:deadbeef -->\n  GitHub: #14 https://github.com/alaarab/phren/issues/14\n\n## Queue\n\n## Done\n"
+    );
+
+    register(server as any, makeCtx(tmp.path));
+
+    const res = parseResult(await server.call("export_project", { project: "gh-task" }));
+    expect(res.ok).toBe(true);
+    expect(res.data.task.Active[0].githubIssue).toBe(14);
+    expect(res.data.task.Active[0].githubUrl).toBe("https://github.com/alaarab/phren/issues/14");
+  });
+
+  it("import builds findings content from learnings array", async () => {
+    register(server as any, makeCtx(tmp.path));
+
+    const payload = {
+      project: "learn-test",
+      learnings: [{ text: "Always close DB connections" }, { text: "Use WAL mode" }],
+    };
+    const res = parseResult(
+      await server.call("import_project", { data: JSON.stringify(payload) })
+    );
+    expect(res.ok).toBe(true);
+
+    const findings = fs.readFileSync(path.join(tmp.path, "learn-test", "FINDINGS.md"), "utf8");
+    expect(findings).toContain("Always close DB connections");
+    expect(findings).toContain("Use WAL mode");
+  });
+});
+
+describe("mcp-data: archive/unarchive", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+
+  beforeEach(() => {
+    tmp = makeTempDir("mcp-data-archive-");
+    grantAdmin(tmp.path);
+    server = makeMockServer();
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    tmp.cleanup();
+  });
+
+  it("archives a project by renaming to .archived suffix", async () => {
+    const projectDir = path.join(tmp.path, "myproj");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# myproj");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const res = parseResult(await server.call("manage_project", { project: "myproj", action: "archive" }));
+    expect(res.ok).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, "myproj.archived"))).toBe(true);
+    expect(fs.existsSync(projectDir)).toBe(false);
+  });
+
+  it("unarchives a project by restoring from .archived suffix", async () => {
+    const archivedDir = path.join(tmp.path, "myproj.archived");
+    fs.mkdirSync(archivedDir, { recursive: true });
+    writeFile(path.join(archivedDir, "summary.md"), "# myproj");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const res = parseResult(await server.call("manage_project", { project: "myproj", action: "unarchive" }));
+    expect(res.ok).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, "myproj"))).toBe(true);
+    expect(fs.existsSync(archivedDir)).toBe(false);
+  });
+
+  it("archives a project when the caller uses different casing", async () => {
+    const projectDir = path.join(tmp.path, "MyProj");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# MyProj");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const res = parseResult(await server.call("manage_project", { project: "myproj", action: "archive" }));
+    expect(res.ok).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, "MyProj.archived"))).toBe(true);
+    expect(fs.existsSync(projectDir)).toBe(false);
+  });
+
+  it("unarchives a project when the caller uses different casing", async () => {
+    const archivedDir = path.join(tmp.path, "MyProj.archived");
+    fs.mkdirSync(archivedDir, { recursive: true });
+    writeFile(path.join(archivedDir, "summary.md"), "# MyProj");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const res = parseResult(await server.call("manage_project", { project: "myproj", action: "unarchive" }));
+    expect(res.ok).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, "MyProj"))).toBe(true);
+    expect(fs.existsSync(archivedDir)).toBe(false);
+  });
+
+  it("archive then unarchive round-trip preserves data", async () => {
+    const projectDir = path.join(tmp.path, "roundtrip");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# roundtrip\nPersistent data.");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const archiveRes = parseResult(await server.call("manage_project", { project: "roundtrip", action: "archive" }));
+    expect(archiveRes.ok).toBe(true);
+
+    const unarchiveRes = parseResult(await server.call("manage_project", { project: "roundtrip", action: "unarchive" }));
+    expect(unarchiveRes.ok).toBe(true);
+
+    const content = fs.readFileSync(path.join(tmp.path, "roundtrip", "summary.md"), "utf8");
+    expect(content).toContain("Persistent data.");
+  });
+
+  it("archive fails for nonexistent project", async () => {
+    register(server as any, makeCtx(tmp.path));
+    const res = parseResult(await server.call("manage_project", { project: "nope", action: "archive" }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("not found");
+  });
+
+  it("unarchive fails when no archive exists", async () => {
+    register(server as any, makeCtx(tmp.path));
+    const res = parseResult(await server.call("manage_project", { project: "nope", action: "unarchive" }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("No archive found");
+  });
+
+  it("archive fails when .archived already exists", async () => {
+    fs.mkdirSync(path.join(tmp.path, "dup"), { recursive: true });
+    fs.mkdirSync(path.join(tmp.path, "dup.archived"), { recursive: true });
+
+    register(server as any, makeCtx(tmp.path));
+    const res = parseResult(await server.call("manage_project", { project: "dup", action: "archive" }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("already exists");
+  });
+
+  it("unarchive fails when active project already exists", async () => {
+    fs.mkdirSync(path.join(tmp.path, "conflict"), { recursive: true });
+    fs.mkdirSync(path.join(tmp.path, "conflict.archived"), { recursive: true });
+
+    register(server as any, makeCtx(tmp.path));
+    const res = parseResult(await server.call("manage_project", { project: "conflict", action: "unarchive" }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("already exists as an active project");
+  });
+});
+
+describe("mcp-data: import rollback on rebuildIndex failure", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+
+  beforeEach(() => {
+    tmp = makeTempDir("mcp-data-rollback-");
+    grantAdmin(tmp.path);
+    server = makeMockServer();
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    tmp.cleanup();
+  });
+
+  it("import returns a structured error when rebuildIndex throws, and rolls back for overwrite", async () => {
+    const failingCtx = makeCtx(tmp.path, {
+      rebuildIndex: async () => { throw new Error("index crash"); },
+    });
+
+    register(server as any, failingCtx);
+
+    const payload = { project: "crash-test", summary: "# crash-test\nSome data." };
+    // rebuildIndex failure is now caught and returned as a structured error response
+    const res = await server.call("import_project", { data: JSON.stringify(payload) });
+    const result = parseResult(res);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Index rebuild failed after import");
+    expect(result.errorCode).toBe("INTERNAL_ERROR");
+
+    // For a non-overwrite import, the orphaned project dir is removed on rollback
+    expect(fs.existsSync(path.join(tmp.path, "crash-test"))).toBe(false);
+  });
+
+  it("import rollback restores the backup created by the current run, not a stale backup", async () => {
+    const projectDir = path.join(tmp.path, "restore-me");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# current backup");
+    fs.mkdirSync(path.join(tmp.path, "restore-me.import-backup-stale"), { recursive: true });
+    writeFile(path.join(tmp.path, "restore-me.import-backup-stale", "summary.md"), "# stale backup");
+
+    register(server as any, makeCtx(tmp.path, {
+      rebuildIndex: async () => { throw new Error("index crash"); },
+    }));
+
+    const payload = { project: "restore-me", overwrite: true, summary: "# imported" };
+    const res = parseResult(await server.call("import_project", { data: JSON.stringify(payload) }));
+    expect(res.ok).toBe(false);
+    expect(fs.readFileSync(path.join(tmp.path, "restore-me", "summary.md"), "utf8")).toContain("current backup");
+    expect(fs.existsSync(path.join(tmp.path, "restore-me.import-backup-stale"))).toBe(true);
+  });
+
+  it("successful overwrite import only removes the backup created for that run", async () => {
+    const projectDir = path.join(tmp.path, "keep-stale");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# current");
+    fs.mkdirSync(path.join(tmp.path, "keep-stale.import-backup-stale"), { recursive: true });
+    writeFile(path.join(tmp.path, "keep-stale.import-backup-stale", "summary.md"), "# stale");
+
+    register(server as any, makeCtx(tmp.path));
+
+    const payload = { project: "keep-stale", overwrite: true, summary: "# imported" };
+    const res = parseResult(await server.call("import_project", { data: JSON.stringify(payload) }));
+    expect(res.ok).toBe(true);
+    expect(fs.readFileSync(path.join(tmp.path, "keep-stale", "summary.md"), "utf8")).toContain("imported");
+    expect(fs.existsSync(path.join(tmp.path, "keep-stale.import-backup-stale"))).toBe(true);
+  });
+});
+
+describe("mcp-data: manage_project rollback on rebuildIndex failure", () => {
+  let tmp: { path: string; cleanup: () => void };
+  let server: ReturnType<typeof makeMockServer>;
+
+  function makeFailCtx(phrenPath: string): McpContext {
+    return makeCtx(phrenPath, {
+      rebuildIndex: async () => { throw new Error("index crash"); },
+    });
+  }
+
+  beforeEach(() => {
+    tmp = makeTempDir("mcp-data-manage-rollback-");
+    grantAdmin(tmp.path);
+    server = makeMockServer();
+  });
+
+  afterEach(() => {
+    delete process.env.PHREN_ACTOR;
+    tmp.cleanup();
+  });
+
+  it("archive rolls back project dir when rebuildIndex throws", async () => {
+    const projectDir = path.join(tmp.path, "myproj");
+    fs.mkdirSync(projectDir, { recursive: true });
+    writeFile(path.join(projectDir, "summary.md"), "# myproj");
+
+    register(server as any, makeFailCtx(tmp.path));
+
+    const res = parseResult(await server.call("manage_project", { project: "myproj", action: "archive" }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Index rebuild failed");
+
+    // Project dir should be restored to its original location
+    expect(fs.existsSync(projectDir)).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, "myproj.archived"))).toBe(false);
+  });
+
+  it("unarchive rolls back archive dir when rebuildIndex throws", async () => {
+    const archivedDir = path.join(tmp.path, "myproj.archived");
+    fs.mkdirSync(archivedDir, { recursive: true });
+    writeFile(path.join(archivedDir, "summary.md"), "# myproj");
+
+    register(server as any, makeFailCtx(tmp.path));
+
+    const res = parseResult(await server.call("manage_project", { project: "myproj", action: "unarchive" }));
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Index rebuild failed");
+
+    // Archive dir should be restored; active project dir should not exist
+    expect(fs.existsSync(archivedDir)).toBe(true);
+    expect(fs.existsSync(path.join(tmp.path, "myproj"))).toBe(false);
+  });
+});
