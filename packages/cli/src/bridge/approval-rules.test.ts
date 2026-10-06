@@ -166,6 +166,10 @@ describe.skipIf(process.platform === "win32")("owner approval rules through HTTP
     vi.mocked(snapshot).mockResolvedValue({ panes: [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
       agent: "claude", terminal_id: "term-1", foreground_cwd: foreignCheckout }] });
     expect((await callback("npm test", { cwd: foreignCheckout })).data).toEqual({});
+    // Legitimate repositories may name an explicit worktree in config. It still
+    // cannot authorize npm scripts executed in an unrelated callback cwd.
+    execFileSync("git", ["-C", project, "config", "core.worktree", project]);
+    expect((await callback("npm test", { cwd: foreignCheckout })).data).toEqual({});
     expect(await audit()).toHaveLength(1);
   });
 
