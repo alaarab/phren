@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- When a model or settings switch can't type into the terminal, the Hook says why, with a `code`: unsent text (`terminal-draft`), an open menu (`terminal-menu`), or no input line it can read (`terminal-unreadable`). It used to answer "a draft or an unreadable prompt" for all three.
+
 ## [0.3.32] - 2026-10-06
 
 ### Added
