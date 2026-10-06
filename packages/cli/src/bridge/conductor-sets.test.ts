@@ -12,7 +12,7 @@ vi.mock("./herdr.js", async importOriginal => ({ ...await importOriginal<typeof 
 vi.mock("./peers.js", async importOriginal => ({ ...await importOriginal<typeof import("./peers.js")>(),
   hookPeers: async () => mocks.peers, optionalHookPeers: async () => ({ peers: mocks.peers }), peerRequest: mocks.request }));
 
-const hostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPKDk8cewh74xDIccwQz/N4V05hPT+bdp5fEii+pzf9B";
+const hostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg";
 const peer = (name: string) => ({ name, address: `${name.toLowerCase()}.example`, username: "sam", port: 22, server: "default", hostKey });
 const info = { computer: { id: "30000000-0000-4000-8000-000000000002", name: "Omarchy" } };
 

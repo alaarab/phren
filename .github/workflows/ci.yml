@@ -71,6 +71,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - name: No owner-private strings
+        run: pnpm run check-private-strings
       - name: Build typecheck dependencies
         run: pnpm build
       - name: Typecheck all packages

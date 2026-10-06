@@ -62,14 +62,14 @@ stores:
     name: arc-team
     path: ~/.phren-stores/arc-team
     role: team                   # Read-only in phase 1, write in phase 2
-    remote: git@github.com:qualus/phren-arc.git
+    remote: git@github.com:example-org/phren-arc.git
     sync: managed-git
 
   - id: "i9j0k1l2"
     name: company
     path: ~/.phren-stores/company
     role: readonly               # Always read-only
-    remote: git@github.com:qualus/phren-company.git
+    remote: git@github.com:example-org/phren-company.git
     sync: pull-only
 ```
 
@@ -123,7 +123,7 @@ search_knowledge(query, project?)
 ```bash
 # Join an existing team store (read-only access)
 npx @phren/cli store add arc-team \
-  --remote git@github.com:qualus/phren-arc.git
+  --remote git@github.com:example-org/phren-arc.git
 
 # List stores and their status
 npx @phren/cli store list
@@ -219,7 +219,7 @@ stores:
     name: arc-team
     path: ~/.phren-stores/arc-team
     role: team
-    remote: git@github.com:qualus/phren-arc.git
+    remote: git@github.com:example-org/phren-arc.git
     projects:               # Registry is the ONLY routing source
       - arc
       - arc-api
