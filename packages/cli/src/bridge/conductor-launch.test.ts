@@ -14,7 +14,7 @@ vi.mock("./herdr.js", async importOriginal => ({ ...await importOriginal<typeof 
 vi.mock("./peers.js", async importOriginal => ({ ...await importOriginal<typeof import("./peers.js")>(),
   optionalHookPeers: async () => ({ peers: mocks.peers }), peerRequest: mocks.answer }));
 
-const inventory = (): HarnessInventory => ({ harnesses: ["claude", "codex", "opencode"].map(source =>
+const inventory = (): HarnessInventory => ({ harnesses: ["claude", "codex", "opencode", "phren"].map(source =>
   ({ source, installed: true, usable: true, accounts: [{ id: "default", label: source, key: source, signedIn: true, usable: true }] })) }) as unknown as HarnessInventory;
 const session = (n: number) => `aaaaaaaa-1111-4111-8111-00000000000${n}`;
 const hostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg";
@@ -49,6 +49,10 @@ for (const mux of [{ kind: "Herdr", server: "default" }, { kind: "tmux", server:
         state.panes.push({ pane_id: `w${n}:p1`, tab_id: `w${n}:t1`, workspace_id: `w${n}`, terminal_id: `term-${n}` });
       },
       startAgent: async (_server: string, id: string, agent: AgentStart) => {
+        if (agent.kind === "phren" && agent.args?.includes("--append-system-prompt-file")) {
+          const file = agent.args[agent.args.indexOf("--append-system-prompt-file") + 1];
+          expect(readFileSync(file, "utf8")).toContain("# Conductor");
+        }
         const p = pane(id);
         Object.assign(p, { agent: agent.kind, agent_status: "idle", agent_session: { kind: "id", agent: agent.kind, value: session(++sessions) } });
         if (mux.kind === "tmux") p.agent_name = agent.name; else state.agents.push({ pane_id: id, agent: agent.kind, name: agent.name });
@@ -57,8 +61,8 @@ for (const mux of [{ kind: "Herdr", server: "default" }, { kind: "tmux", server:
   });
   afterEach(() => { restore(); setLaunchInventory(undefined); resetRoleState(); vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });
 
-  it("records a launched conductor and keeps the role through a restart in its pane", async () => {
-    const launched = await launchSession(mux.server, { cwd, label: "Conductor", kind: "claude", role: "conductor" });
+  it.each(["claude", "phren"])("records a launched %s conductor and keeps the role through a restart in its pane", async kind => {
+    const launched = await launchSession(mux.server, { cwd, label: "Conductor", kind, role: "conductor" });
     expect(launched).toMatchObject({ ok: true, role: "conductor", paneId: "w1:p1" });
     expect(saved().conductor).toMatchObject({ server: mux.server, pane: "w1:p1", terminal: "term-1", by: "launch", session: session(1) });
     restart("w1:p1");

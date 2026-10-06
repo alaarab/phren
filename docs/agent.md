@@ -242,7 +242,9 @@ phren agent --mcp-config ./mcp.json -i
 phren agent --mcp "npx -y @modelcontextprotocol/server-filesystem /tmp" -i   # one stdio server, repeatable
 ```
 
-Without flags the agent loads `~/.phren-agent/mcp.json`. A project's own
+Without flags the agent starts its bundled Phren MCP server with the core
+profile, then loads `~/.phren-agent/mcp.json` (a `phren` entry overrides the
+bundled server). A project's own
 `.mcp.json` (Claude Code's file) and `.phren-agent/mcp.json` start commands from
 whatever repository is checked out, so they load only once you trust the
 project: run with `--trust-project-mcp` once and it is remembered in
@@ -262,8 +264,13 @@ Transports are `stdio`, `http` (Streamable HTTP) and legacy `sse`. With
 stores the tokens in private files under `~/.phren/agent/mcp-auth`
 (`PHREN_MCP_AUTH_DIR` overrides it). `oauth` can also be an object with
 `clientId`, optional `clientSecret`, `scope` and `callbackPort` (default
-14557). The agent does not need phren's own MCP server: its memory tools are
-built in.
+14557). Basic memory tools are also built in; the core MCP server adds the
+complete task, administration and conductor operations.
+
+Phren-agent can be launched or made a [conductor](conductor.md). The Hook
+supplies its startup brief using `--append-system-prompt-file <path>` and
+refreshes the role context on every turn, including after resume or compaction.
+Approval requests use the Hook's phone/grant channel with terminal fallback.
 
 ---
 
@@ -500,6 +507,7 @@ it on the computer and it appears in the app.
 | `--max-output <n>` | Maximum output tokens per response |
 | `--context-window <n>` | Context window in tokens, overriding the catalogue |
 | `--price-in`, `--price-out`, `--price-cache <usd>` | Prices per million tokens, overriding the catalogue |
+| `--append-system-prompt-file <path>` | Append a UTF-8 system brief at startup |
 | `--mcp <command>` | Connect a stdio MCP server (repeatable) |
 | `--mcp-config <path>` | Load MCP servers from a JSON file |
 | `--trust-project-mcp` | Load this project's `.mcp.json` and `.phren-agent/mcp.json` (remembered) |

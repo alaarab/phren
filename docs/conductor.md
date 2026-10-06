@@ -46,7 +46,7 @@ already in the group, so each one reaches the whole group in one hop.
 
 The phone launch sheet offers an Agent or Conductor role, a harness, model and
 effort. `POST /v1/workspaces/launch` accepts `role: "conductor"` with Claude,
-Codex or OpenCode (not Copilot or phren's own agent, which are refused with 400), loads the shipped brief and gives Herdr an agent name
+Codex, OpenCode or phren-agent (Copilot is refused with 400), loads the shipped brief and gives Herdr an agent name
 starting with `conductor-`. Effort is `low`, `medium` or `high`.
 
 The Hook also restores a concise role reminder and the local brief path on
@@ -54,9 +54,20 @@ Claude and Codex `SessionStart` and `UserPromptSubmit`. This covers fresh and
 resumed sessions, compaction, and the next prompt after **Make conductor**;
 changing a model keeps the conversation's context. OpenCode's transcript plugin
 adds the reminder when building the current root conversation's system prompt.
+Phren-agent reads the same socket path before each turn, adding the reminder
+and brief to the system prompt outside compacted history. A quick chat made
+conductor is promoted to agent mode on its next turn.
 The Hook checks its current foreground process and conversation before replying.
 Worker callbacks, child sessions and reused terminal IDs receive no conductor
 instructions. A role change does not send a message or start work by itself.
+
+Phren-agent loads its bundled Phren MCP server in the core profile by default.
+Its `mcp_phren_phren_admin` tool reaches `dispatch`, `hand_off`, `live_sessions`
+and `dispatch_returns` when the conductor module is enabled. Explicit MCP
+configuration can replace that server; `--strict-mcp-config` disables defaults.
+Tool requests that require approval go through the Hook's existing grants and
+phone approval path, falling back to the terminal when the Hook is unavailable.
+Explicit deny rules still win, and the role grants no additional permissions.
 
 ### Skill discovery and worker setup
 

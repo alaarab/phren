@@ -118,6 +118,7 @@ async function prepareConductor(kind: (typeof launchKinds)[number], effort: Laun
     if (await readFile(file, "utf8").catch(() => undefined) !== definition) await atomic(file, definition, 0o644);
     return [...(model ? ["--model", model] : []), "--agent", "conductor", "--variant", effort];
   }
+  if (kind === "phren") return [...PHREN_AGENT_ARGS, ...(model ? phrenModelArgs(model) : []), "--append-system-prompt-file", briefFile, ...effortArgs(kind, effort)];
   throw new BridgeError(400, "The selected harness cannot run as a conductor.");
 }
 
@@ -168,8 +169,6 @@ async function requireNoConductor(server: string, before: Json, except?: string)
 /** The phone names the pane's workspace and tab too; the CLI may know only the pane. */
 const paneRequest = z.object({ workspaceId: id.optional(), tabId: id.optional(), paneId: id }).strict();
 
-const PHREN_NO_CONDUCTOR = "phren agent cannot run as a conductor: it takes no system brief at startup.";
-
 /** "Make conductor": the owner gives an agent already running in a pane on this computer the role. */
 export async function makeConductor(server: string, data: Json): Promise<Json> {
   const place = paneRequest.parse(data);
@@ -179,7 +178,6 @@ export async function makeConductor(server: string, data: Json): Promise<Json> {
   if (!pane) throw new BridgeError(409, "The pane changed.");
   if (!runsAgent(pane)) throw new BridgeError(409, "No agent is running in this pane.");
   if (pane.agent === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
-  if (pane.agent === "phren") throw new BridgeError(400, PHREN_NO_CONDUCTOR);
   const unchecked = await requireNoConductor(server, before, place.paneId);
   const target = await targetForPane(server, pane);
   await recordConductor(server, pane, "owner", typeof target?.session === "string" ? target.session : undefined);
@@ -318,7 +316,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   if (permissionMode && kind === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
   if (permissionMode && kind === "phren") throw new BridgeError(400, "phren agent takes its permissions from its own settings; permissionMode is for Claude, Codex and Copilot workers.");
   if (role === "conductor" && kind === "copilot") throw new BridgeError(400, "Copilot cannot run as a conductor.");
-  if (role === "conductor" && kind === "phren") throw new BridgeError(400, PHREN_NO_CONDUCTOR);
+  if (role === "conductor" && data.mode === "chat") throw new BridgeError(400, "A conductor needs agent mode with tools.");
   const phrenArgs = await phrenLaunchArgs(kind, data);
   // A dispatched worker's or scheduled run's first prompt. It rides on the
   // launch where the harness takes one; elsewhere the caller types it.
@@ -355,7 +353,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // conductor's name; it gets its own workspace instead.
   const conductorHere = role === "agent" && workspace ? await conductorPane(server, before) : undefined;
   if (conductorHere && conductorHere.workspace_id === workspace) workspace = undefined;
-  const args = role === "conductor" ? await prepareConductor(kind, effort, model)
+  const args = role === "conductor" ? [...await prepareConductor(kind, effort, model), ...(kind === "phren" ? phrenArgs : [])]
     : [...(kind === "phren" ? [...PHREN_AGENT_ARGS, ...phrenArgs] : []), ...(model && kind === "phren" ? phrenModelArgs(model) : model && modelFlag[kind] ? [modelFlag[kind], model] : []), ...(data.effort === undefined ? [] : effortArgs(kind, effort)),
       ...(permissionMode && kind === "claude" ? ["--permission-mode", CLAUDE_NAMES[permissionMode]] : []), ...(permissionMode && kind === "codex" ? codexModeFlags(permissionMode) : []), ...(permissionMode && kind === "copilot" ? copilotModeFlags(permissionMode) : [])];
   // A Codex worker runs on a Phren-owned app-server (codex-servers.ts): the
