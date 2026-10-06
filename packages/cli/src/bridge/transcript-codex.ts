@@ -417,9 +417,11 @@ function rememberProjectedCodeCall(callId: string): void {
   while (projectedCodeCalls.size > 4096) projectedCodeCalls.delete(projectedCodeCalls.values().next().value!);
 }
 function renameProjectedChanges(raw: Json, base: string): Json {
-  const changes = object(raw.phren_changes);
-  if (!Object.keys(changes).length) return raw;
-  return { ...raw, phren_changes: Object.fromEntries(Object.entries(changes).map(([key, value]) => [key === base ? `${base}:1` : key, value])) };
+  for (const field of ["phren_changes", "phren_change_errors"]) {
+    const changes = object(raw[field]);
+    if (Object.keys(changes).length) raw = { ...raw, [field]: Object.fromEntries(Object.entries(changes).map(([key, value]) => [key === base ? `${base}:1` : key, value])) };
+  }
+  return raw;
 }
 
 /** Expand one Codex row: a code-mode call becomes one ordinary call per

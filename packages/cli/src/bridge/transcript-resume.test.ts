@@ -2,6 +2,7 @@ import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { BridgeError } from "./protocol.js";
 import type { ChangeLookup } from "./changes.js";
 import { type Entry, TranscriptReader } from "./transcripts.js";
 
@@ -111,4 +112,16 @@ describe("a phone resuming the conductor's chat", () => {
     phone.receive(await new TranscriptReader(file, "claude", undefined, changes).readAfter(phone.afterLine));
     expect(phone.lines()).toEqual(new Set(await visibleLines()));
   });
+
+  it("keeps tool output visible when change capture fails and reports its error", async () => {
+    await writeFile(file, ["call", "result", "reply"].map((kind, at) => row(kind, at)).join("\n") + "\n");
+    const changes: ChangeLookup = { pending: () => false,
+      changes: async () => { throw new BridgeError(503, "Git failed.", { code: "git-capture-failed" }); } };
+    const page = await new TranscriptReader(file, "claude", undefined, changes).read();
+    expect(page.entries.map(entry => entry.line)).toEqual([0, 1, 2]);
+    expect(page.entries[1].raw).toMatchObject({ phren_change_errors: {
+      toolu_1: { error: "Git failed.", code: "git-capture-failed" },
+    } });
+  });
+
 });

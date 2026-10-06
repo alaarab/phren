@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { gitBranches, gitDiscard, gitLog, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
+import { repositoryDiff } from "./projects.js";
 import { BridgeError } from "./protocol.js";
 
 const execFileAsync = promisify(execFile);
@@ -20,12 +21,12 @@ const windows = process.platform === "win32";
 
 describe("git routes", () => {
   let created: string | undefined;
-  afterEach(async () => { if (created) await rm(created, { recursive: true, force: true }); created = undefined; });
+  afterEach(async () => { vi.unstubAllEnvs(); if (created) await rm(created, { recursive: true, force: true }); created = undefined; });
 
   /** A repository with one commit holding `root.txt`, a `folder/` file and an
    * ignore rule, ready for a test to dirty. */
   async function repository(): Promise<{ root: string; git: (...args: string[]) => Promise<string> }> {
-    const root = created = await mkdtemp(path.join(tmpdir(), "phren-git-"));
+    const root = created = await realpath(await mkdtemp(path.join(tmpdir(), "phren-git-")));
     const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: root,
       GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@x", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@x" };
     const git = async (...args: string[]) => (await execFileAsync("git", ["-C", root, ...args], { env })).stdout;
@@ -76,7 +77,7 @@ describe("git routes", () => {
     await writeFile(path.join(root, "root.txt"), "one\ntwo\n");
     await git("add", "root.txt");
     const dirty = (await gitLog(root, 5) as unknown as Log).uncommitted;
-    expect(dirty).toEqual({ files: 1, additions: 1, deletions: 0 });
+    expect(dirty).toMatchObject({ files: 1, additions: 1, deletions: 0, truncated: false, countsComplete: true });
   });
 
   it("lists the current branch and local branches", async () => {
@@ -246,10 +247,123 @@ describe("git routes", () => {
       await expect(gitUnstage(root, [bad])).rejects.toBeInstanceOf(BridgeError);
       await expect(gitDiscard(root, [bad])).rejects.toBeInstanceOf(BridgeError);
     }
-    await expect(gitStage(root, Array.from({ length: 65 }, (_, index) => `file-${index}`))).rejects.toBeInstanceOf(BridgeError);
+    await expect(gitStage(root, Array.from({ length: 501 }, (_, index) => `file-${index}`))).rejects.toBeInstanceOf(BridgeError);
     const plain = await mkdtemp(path.join(tmpdir(), "phren-not-git-"));
     try {
       await expect(gitStatus(plain)).rejects.toMatchObject({ status: 409 });
     } finally { await rm(plain, { recursive: true, force: true }); }
   });
+
+  // These fixtures protect the response contract against independent Git output.
+  // They intentionally run real repositories: mocks cannot prove ignore, binary,
+  // rename, lock or working-tree semantics. Execution is deferred to integrated RC.
+  it("collapses and expands untracked directories, retaining local and global ignores", async () => {
+    const { root, git } = await repository();
+    const excludes = path.join(root, ".git/global-excludes");
+    await writeFile(excludes, "*.cache\n");
+    const config = path.join(root, ".git/global-config");
+    await writeFile(config, `[core]\nexcludesFile = ${JSON.stringify(excludes)}\n`);
+    vi.stubEnv("GIT_CONFIG_GLOBAL", config);
+    await mkdir(path.join(root, "new/nested"), { recursive: true });
+    await mkdir(path.join(root, "ignored"));
+    await Promise.all([
+      writeFile(path.join(root, "new/readme.txt"), "hello\n"),
+      writeFile(path.join(root, "new/hidden.cache"), "ignored\n"),
+      writeFile(path.join(root, "new/nested/child.txt"), "child\n"),
+      writeFile(path.join(root, "ignored/local.txt"), "ignored\n"),
+      writeFile(path.join(root, "root.txt"), "edited\n"),
+    ]);
+    const status = await gitStatus(root);
+    expect(status.files.map(file => file.path).sort()).toEqual(
+      (await git("status", "--porcelain=v1", "-z", "--untracked-files=normal")).split("\0").filter(Boolean).map(row => row.slice(3)).sort());
+    expect(status.files.find(file => file.path === "new/")).toMatchObject({ status: "?", directory: true, additions: 0, deletions: 0, countsComplete: false });
+    expect(status).toMatchObject({ repository: root, totalFiles: 2, countsComplete: false, truncated: false });
+    expect(Number.isNaN(Date.parse(status.observedAt))).toBe(false);
+    const expanded = await gitStatus(root, "new/");
+    expect(expanded.files.map(file => file.path).sort()).toEqual(["new/nested/", "new/readme.txt"]);
+    expect(expanded).toMatchObject({ staged: 0, unstaged: 0, untracked: 2, totalFiles: 2 });
+    expect((await gitStatus(root, "new/nested/")).files).toEqual([
+      expect.objectContaining({ path: "new/nested/child.txt", additions: 1 }),
+    ]);
+    for (const invalid of ["../", "folder/", "ignored/", ".git/"]) await expect(gitStatus(root, invalid)).rejects.toBeInstanceOf(BridgeError);
+    await expect(gitStage(root, ["new/"])).rejects.toMatchObject({ status: 409 });
+    expect(await git("diff", "--cached", "--name-only")).toBe("");
+    await gitStage(root, ["new/"], true);
+    expect((await git("diff", "--cached", "--name-only")).trim().split("\n").sort()).toEqual(["new/nested/child.txt", "new/readme.txt"]);
+    await expect(gitStage(root, ["ignored/local.txt"], true)).rejects.toBeInstanceOf(BridgeError);
+  }, windows ? 60_000 : 15_000);
+
+  it("matches Git numstat for both sections, renames and binaries without counting binary lines", async () => {
+    const { root, git } = await repository();
+    await writeFile(path.join(root, "tracked.bin"), Buffer.from([0, 1, 10, 2]));
+    await writeFile(path.join(root, ".gitattributes"), "*.dat binary\n");
+    await git("add", "."); await git("commit", "-qm", "binary baseline");
+    await writeFile(path.join(root, "tracked.bin"), Buffer.from([0, 2, 10, 3, 10]));
+    await rename(path.join(root, "root.txt"), path.join(root, "renamed.txt"));
+    await writeFile(path.join(root, "folder/inner.txt"), "one\ntwo\n");
+    await git("add", "-A");
+    await writeFile(path.join(root, "folder/inner.txt"), "one\ntwo\nthree");
+    await writeFile(path.join(root, "new.bin"), Buffer.from([0, 10, 10]));
+    await writeFile(path.join(root, "text.dat"), "text marked binary\n");
+    const status = await gitStatus(root);
+    for (const staged of [true, false]) {
+      const rows = (await git("diff", ...(staged ? ["--cached"] : []), "--numstat")).trim().split("\n").filter(Boolean);
+      const counts = rows.reduce((sum, row) => {
+        const [a, d] = row.split("\t");
+        return { additions: sum.additions + (a === "-" ? 0 : Number(a)), deletions: sum.deletions + (d === "-" ? 0 : Number(d)) };
+      }, { additions: 0, deletions: 0 });
+      const files = status.files.filter(file => file.staged === staged && file.status !== "?");
+      expect(files.reduce((n, f) => n + f.additions, 0)).toBe(counts.additions);
+      expect(files.reduce((n, f) => n + f.deletions, 0)).toBe(counts.deletions);
+    }
+    expect(status.totalFiles).toBe(5);
+    expect(status.files.find(file => file.path === "renamed.txt")).toMatchObject({ status: "R", staged: true });
+    for (const name of ["tracked.bin", "new.bin", "text.dat"]) {
+      expect(status.files.find(file => file.path === name)).toMatchObject({ binary: true, additions: 0, deletions: 0, countsComplete: true });
+    }
+    for (const name of ["new.bin", "text.dat"]) {
+      await expect(gitStage(root, [name])).rejects.toMatchObject({ status: 409 });
+      await gitStage(root, [name], true);
+    }
+  }, windows ? 60_000 : 15_000);
+
+  it("marks capped status and diff as partial and requires confirmation above 100 selected paths", async () => {
+    const { root, git } = await repository();
+    const names = Array.from({ length: 510 }, (_, i) => `new-${String(i).padStart(3, "0")}.txt`);
+    await Promise.all(names.map(name => writeFile(path.join(root, name), "line\n")));
+    // Exercise the row cap without depending on 500 Git processes fitting the
+    // request deadline on every CI platform. Numstat counts the index in bulk.
+    await git("add", "--", ...names);
+    const status = await gitStatus(root);
+    expect(status).toMatchObject({ totalFiles: 510, staged: 510, truncated: true, countsComplete: false });
+    expect(status.files).toHaveLength(500);
+    expect((await git("status", "--porcelain=v1", "-z")).split("\0").filter(Boolean)).toHaveLength(status.totalFiles);
+    await git("reset", "--quiet", "HEAD", "--", ...names);
+    const diff = await repositoryDiff(root);
+    expect(diff).toMatchObject({ totalFiles: 510, truncated: true, repository: root });
+    expect(diff.files).toHaveLength(500);
+    await expect(gitStage(root, names.slice(0, 101))).rejects.toMatchObject({ status: 409 });
+    expect(await git("diff", "--cached", "--name-only")).toBe("");
+    await gitStage(root, names.slice(0, 101), true);
+    expect((await git("diff", "--cached", "--name-only")).trim().split("\n")).toHaveLength(101);
+  }, windows ? 120_000 : 30_000);
+
+  it("reports large-file uncertainty, patch truncation, index locks and corrupt indexes explicitly", async () => {
+    const { root, git } = await repository();
+    await writeFile(path.join(root, "large.txt"), "x".repeat(5_000_001));
+    expect((await gitStatus(root)).files.find(file => file.path === "large.txt")).toMatchObject({ countsComplete: false, additions: 0 });
+    await expect(gitStage(root, ["large.txt"])).rejects.toMatchObject({ status: 409 });
+    await writeFile(path.join(root, "root.txt"), "line\n".repeat(50_000));
+    const diff = await repositoryDiff(root) as { truncated: boolean; files: Array<{ path: string; sections: Array<{ patch: string; truncated: boolean }> }> };
+    expect(diff.truncated).toBe(true);
+    expect(diff.files.find(file => file.path === "root.txt")?.sections[0]).toMatchObject({ truncated: true });
+    await writeFile(path.join(root, ".git/index.lock"), "owned by another process");
+    await expect(gitStage(root, ["root.txt"])).rejects.toMatchObject({ status: 409, details: { code: "git-index-locked" } });
+    expect(await readFile(path.join(root, ".git/index.lock"), "utf8")).toBe("owned by another process");
+    expect(await git("diff", "--cached", "--name-only")).toBe("");
+    await rm(path.join(root, ".git/index.lock"));
+    await writeFile(path.join(root, ".git/index"), "corrupt index");
+    for (const read of [gitStatus, repositoryDiff]) await expect(read(root)).rejects.toMatchObject({ status: 503, details: { code: "git-failed" } });
+  }, windows ? 60_000 : 15_000);
+
 });
