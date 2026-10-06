@@ -14,7 +14,7 @@
 import { execFile } from "node:child_process";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
-import { hostname, userInfo } from "node:os";
+import { hostname, tmpdir, userInfo } from "node:os";
 import path from "node:path";
 import { BridgeError, objects, serverName, type Json } from "./protocol.js";
 import { harnessStatus } from "./harness-status.js";
@@ -462,13 +462,33 @@ export const tmuxTerminal: TerminalProvider = {
  * socket and every other socket in the user's tmux folders (`tmux -L work`
  * is "tmux-work"), the 16 most recently active. Sockets are ordered by
  * activity, so stale socket files from killed runs can't crowd out a live
- * server. The hidden server is not among them. */
+ * server. The hidden server is not among them, nor a test's private server
+ * (by its socket name, or its sessions all in a test's temp folder). */
 async function ownerServers(): Promise<string[]> {
-  const sockets = [...new Set(["default", ...await deps.sockets().catch(() => [] as string[])])].filter(socket => socket !== "phren");
+  const sockets = [...new Set(["default", ...await deps.sockets().catch(() => [] as string[])])]
+    .filter(socket => socket !== "phren" && !isTestName(socket));
   // Sockets arrive most recently active first, so the cap keeps live servers.
   const names = sockets.flatMap(socket => tmuxServerName(socket) ?? []).slice(0, 16);
-  const running = await Promise.all(names.map(name => tmuxTerminal.ping(name).then(() => true, () => false)));
+  const running = await Promise.all(names.map(name => tmux(name, ["list-sessions", "-F", "#{session_path}"], { timeoutMs: 3_000 })
+    .then(text => !isTestServer(text.split("\n").filter(Boolean)), () => false)));
   return names.filter((_, index) => running[index]);
+}
+
+/** A name a test gives its private server or temp folder: a "test", "tests"
+ * or "it" word (phren-test-123, phren-scroll-test-123, phren-tmux-it-Qc4LM8). */
+function isTestName(name: string): boolean {
+  return /(^|[-_.])(tests?|it)([-_.]|$)/i.test(name) || /^phren.*test/i.test(name);
+}
+
+/** A server every session of which starts in a test's temp folder (a temp
+ * folder named like a test, or phren's own `phren-*` scratch folders): what a
+ * killed test run leaves behind on a socket with an ordinary name. */
+function isTestServer(sessionPaths: string[]): boolean {
+  const roots = [...new Set([tmpdir(), "/tmp", "/var/tmp"].map(root => path.resolve(root)))];
+  return sessionPaths.length > 0 && sessionPaths.every(folder => roots.some(root => {
+    const rest = path.relative(root, path.resolve(folder));
+    return rest !== "" && !rest.startsWith("..") && !path.isAbsolute(rest) && rest.split(path.sep).some(part => isTestName(part) || part.startsWith("phren-"));
+  }));
 }
 
 /** The tmux servers the Hook drives, as `/v1/muxes` lists servers: the owner's

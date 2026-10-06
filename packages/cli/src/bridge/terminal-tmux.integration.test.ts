@@ -1,7 +1,7 @@
 // The tmux provider against a real tmux, on a private socket. Skipped when
 // this computer has no tmux.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { chmod, mkdir, mkdtemp, realpath, rm, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,14 +13,16 @@ import { objects } from "./protocol.js";
 import type { ApprovalPushService } from "./push.js";
 import { launchSession, localConductor, stopConductor } from "./server-launch.js";
 import { conductorPane } from "./conductor-role.js";
-import { resetTmuxBinary, tmuxBinary, tmuxHealth, tmuxPaneFromEnv, tmuxServers, tmuxSnapshot, tmuxSocketFolders, tmuxTerminal, toTmuxId } from "./terminal-tmux.js";
+import { resetTmuxBinary, tmuxBinary, tmuxHealth, tmuxPaneFromEnv, tmuxServers, tmuxSnapshot, tmuxTerminal, toTmuxId } from "./terminal-tmux.js";
+import { privateTmuxServer, testSocketName } from "./tmux-test-server.js";
 
 const saved = process.env.PHREN_TMUX;
 delete process.env.PHREN_TMUX;
 resetTmuxBinary();
 const binary = tmuxBinary();
 if (saved !== undefined) process.env.PHREN_TMUX = saved;
-const server = `tmux-phren-test-${process.pid}`;
+const socket = testSocketName();
+const server = `tmux-${socket}`;
 
 async function until<T>(read: () => Promise<T>, done: (value: T) => boolean, ms = 10_000): Promise<T> {
   const deadline = Date.now() + ms;
@@ -42,10 +44,13 @@ async function removeFolder(target: string): Promise<void> {
 
 describe.skipIf(!binary || process.platform === "win32")("tmux provider on a real tmux", () => {
   let folder: string;
+  let tmuxServer: { stop: () => void } | undefined;
   const env = { PHREN_TMUX: process.env.PHREN_TMUX, SHELL: process.env.SHELL, PATH: process.env.PATH, HOME: process.env.HOME,
     XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, XDG_DATA_HOME: process.env.XDG_DATA_HOME, HISTFILE: process.env.HISTFILE,
     PHREN_BRIDGE_HOME: process.env.PHREN_BRIDGE_HOME, PHREN_HERDR_HOME: process.env.PHREN_HERDR_HOME, PHREN_PATH: process.env.PHREN_PATH };
   beforeAll(async () => {
+    // Torn down even when a test fails, times out or the run is killed.
+    tmuxServer = privateTmuxServer(binary!, socket);
     delete process.env.PHREN_TMUX;
     resetTmuxBinary();
     folder = await realpath(await mkdtemp(path.join(tmpdir(), "phren-tmux-it-")));
@@ -86,11 +91,7 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
     process.env.PATH = `${folder}${path.delimiter}${process.env.PATH}`;
   });
   afterAll(async () => {
-    const socket = server.slice("tmux-".length);
-    try { execFileSync(binary!, ["-L", socket, "kill-server"], { stdio: "ignore" }); } catch { /* already gone */ }
-    // tmux can leave the socket file behind when the server is killed; remove
-    // it so a killed run does not seed the next one's stale-socket pile.
-    for (const dir of tmuxSocketFolders()) await unlink(path.join(dir, socket)).catch(() => undefined);
+    tmuxServer?.stop();
     for (const [name, value] of Object.entries(env)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
     resetTmuxBinary();
     await removeFolder(folder);
@@ -133,8 +134,8 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
     expect(objects(overview.groups).find(g => g.label === "phone launch")).toMatchObject({ children: [{ label: "phone launch", agent: "claude", agentStatus: "unknown" }] });
 
     // What Claude's hook process finds from the variables tmux gives it.
-    const socket = execFileSync(binary!, ["-L", server.slice("tmux-".length), "display-message", "-p", "-t", toTmuxId(place.pane, "p"), "#{socket_path}"]).toString().trim();
-    expect(await tmuxPaneFromEnv({ TMUX: `${socket},1,0`, TMUX_PANE: toTmuxId(place.pane, "p") })).toEqual(place);
+    const socketPath = execFileSync(binary!, ["-L", socket, "display-message", "-p", "-t", toTmuxId(place.pane, "p"), "#{socket_path}"]).toString().trim();
+    expect(await tmuxPaneFromEnv({ TMUX: `${socketPath},1,0`, TMUX_PANE: toTmuxId(place.pane, "p") })).toEqual(place);
 
     const hooks = new AgentHooks({ available: false, start: async () => {}, status: { configured: false } } as unknown as ApprovalPushService);
     await hooks.start();
@@ -180,7 +181,7 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
   it("keeps the conductor role on its pane when tmux loses the name and the agent restarts", async () => {
     const launched = await launchSession(server, { cwd: folder, label: "it conductor", kind: "claude", role: "conductor" });
     expect(launched).toMatchObject({ ok: true, role: "conductor" });
-    const pane = String(launched.paneId), socket = server.slice("tmux-".length);
+    const pane = String(launched.paneId);
     const role = async () => {
       const s = await snapshot(server);
       const recorded = await conductorPane(server, s);
@@ -203,12 +204,14 @@ describe.skipIf(!binary || process.platform === "win32")("tmux provider on a rea
     expect(await role()).toBeUndefined();
   }, 60_000);
 
-  it("finds this test's socket among the owner's servers and reports tmux's health", async () => {
-    expect((await tmuxServers()).map(entry => entry.session)).toContain(server);
+  it("keeps this test's running server out of the owner's servers and reports tmux's health", async () => {
+    // Running, with sessions: but a test's, so never on the phone.
+    await tmuxTerminal.ping(server);
+    expect((await tmuxServers()).map(entry => entry.session)).not.toContain(server);
     const health = await tmuxHealth();
     expect(health).toMatchObject({ state: "ok", launches: true, hidden: { running: expect.any(Boolean) } });
     expect(health.version).toMatch(/^\d+\.\d+/);
-    expect(health.servers).toContain(server);
+    expect(health.servers).not.toContain(server);
   }, 30_000);
 });
 

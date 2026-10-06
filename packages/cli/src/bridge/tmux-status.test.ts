@@ -35,7 +35,7 @@ const pane = (id: string, tty: string, command: string, title = "") => row({ ses
   window_id: `@${id}`, window_name: command, window_active: "1", pane_id: `%${id}`, pane_pid: `${id}00`, pane_tty: `/dev/${tty}`, pane_active: "1",
   pane_current_path: "/repo", pane_current_command: command, pane_title: title });
 
-function fakeTmux(options: { panes?: string; ps?: string; screens?: Record<string, string>; sockets?: string[]; answering?: string[] } = {}) {
+function fakeTmux(options: { panes?: string; ps?: string; screens?: Record<string, string>; sockets?: string[]; answering?: string[]; sessionPaths?: Record<string, string[]> } = {}) {
   const calls: { socket: string; args: string[] }[] = [];
   const restore = setTmuxDeps({
     binary: () => "/usr/bin/tmux",
@@ -50,7 +50,7 @@ function fakeTmux(options: { panes?: string; ps?: string; screens?: Record<strin
           const { BridgeError } = await import("./protocol.js");
           throw new BridgeError(503, "tmux is not running on this computer.", { code: "not_running" });
         }
-        return "$1\n";
+        return options.sessionPaths?.[socket] ? `${options.sessionPaths[socket].join("\n")}\n` : "$1\n";
       }
       if (args[0] === "list-panes") return options.panes ?? "";
       if (args[0] === "capture-pane") return options.screens?.[args[args.indexOf("-t") + 1]] ?? "";
@@ -301,6 +301,15 @@ describe("tmux sockets, the pane a process runs in, health and the canary", () =
   it("lists every socket that answers, not only default and phren", async () => {
     ({ restore } = fakeTmux({ sockets: ["default", "work", "phren", "stale"], answering: ["default", "work"] }));
     expect((await tmuxServers()).map(server => server.session)).toEqual(["tmux", "tmux-work", "tmux-phren"]);
+  });
+
+  it("never lists a test's private server, by its socket's name or its sessions in a test's temp folder", async () => {
+    const leaked = path.join(tmpdir(), "phren-deps-test-2026-10-04", "phren-tmux-it-Qc4LM8");
+    ({ restore } = fakeTmux({
+      sockets: ["phren-test-273881", "phren-scroll-test-3337436", "sugg-test", "leftover", "scratch", "work"],
+      sessionPaths: { leftover: [leaked, path.join("/tmp", "phren-tmux-scroll-x1")], scratch: [leaked, "/home/me/repo"], work: ["/home/me/work"] },
+    }));
+    expect((await tmuxServers()).map(server => server.session)).toEqual(["tmux", "tmux-scratch", "tmux-work", "tmux-phren"]);
   });
 
   // tmux runs on Unix only, and Windows refuses a Unix socket at a file path.
