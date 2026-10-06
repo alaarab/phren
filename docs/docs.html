@@ -2777,15 +2777,15 @@ phren init              # machine: bob-desktop, profile: fullstack
         <h3>Write Routing</h3>
         <p>When you add a finding or task, phren resolves which store receives the write:</p>
         <ol>
-          <li>If store-qualified (e.g. <code>arc-team/arc</code>), use the explicit store</li>
+          <li>If store-qualified (e.g. <code>forge-team/forge</code>), use the explicit store</li>
           <li>If a team store claims the project in its registry, route to that store</li>
           <li>Otherwise, use the primary (personal) store</li>
         </ol>
-        <pre><code># Finding goes to arc-team store (project claimed)
-phren add-finding arc "Always validate JWT expiry"
+        <pre><code># Finding goes to forge-team store (project claimed)
+phren add-finding forge "Always validate JWT expiry"
 
 # Explicit store target
-phren add-finding arc-team/arc "Always validate JWT expiry"
+phren add-finding forge-team/forge "Always validate JWT expiry"
 
 # Unclaimed project → personal store
 phren add-finding my-side-project "Use pnpm for this one"</code></pre>
@@ -2800,14 +2800,14 @@ phren add-finding my-side-project "Use pnpm for this one"</code></pre>
 
         <h3>Example: Setting Up a Team</h3>
         <pre><code># Alice creates the team store
-phren team init arc-team --remote git@github.com:example-org/phren-arc.git
-phren team add-project arc-team arc
-phren team add-project arc-team arc-api
+phren team init forge-team --remote git@github.com:example-org/phren-forge.git
+phren team add-project forge-team forge
+phren team add-project forge-team forge-api
 
 # Bob joins
-phren team join git@github.com:example-org/phren-arc.git
+phren team join git@github.com:example-org/phren-forge.git
 
-# Both now share findings for arc and arc-api
+# Both now share findings for forge and forge-api
 # Personal findings for other projects stay in ~/.phren</code></pre>
 
         <h3 id="project-ownership">Project Ownership</h3>

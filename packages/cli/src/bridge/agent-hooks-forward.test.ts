@@ -164,10 +164,10 @@ describe.skipIf(process.platform === "win32")("a dispatched worker's approval, f
     const pushing = { available: true, start: async () => {}, status: { configured: true }, notify } as unknown as ApprovalPushService;
     const dispatching = new AgentHooks(pushing);
     const answered = vi.fn(async (_decision: "approve" | "deny") => {});
-    dispatching.pushForwarded({ provider: "claude", computer: "Linuxbox", project: "phren", request: "Run: rm -rf build", requestKind: "command" }, answered);
+    dispatching.pushForwarded({ provider: "claude", computer: "Devbox", project: "phren", request: "Run: rm -rf build", requestKind: "command" }, answered);
     await vi.waitFor(() => expect(notify).toHaveBeenCalledTimes(1));
     const sent = notify.mock.calls[0][0];
-    expect(sent).toMatchObject({ provider: "claude", computer: "Linuxbox", project: "phren", request: "Run: rm -rf build" });
+    expect(sent).toMatchObject({ provider: "claude", computer: "Devbox", project: "phren", request: "Run: rm -rf build" });
     expect(dispatching.pushTarget(sent.binding)).toBeUndefined();
     await dispatching.answerPush(sent.binding, "deny");
     expect(answered).toHaveBeenCalledWith("deny");
@@ -176,7 +176,7 @@ describe.skipIf(process.platform === "win32")("a dispatched worker's approval, f
   });
 
   it("does not push a forwarded request when this Hook has no push", async () => {
-    hooks.pushForwarded({ provider: "claude", computer: "Linuxbox", request: "x" }, async () => {});
+    hooks.pushForwarded({ provider: "claude", computer: "Devbox", request: "x" }, async () => {});
     expect(notify).not.toHaveBeenCalled();
   });
 });

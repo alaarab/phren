@@ -68,9 +68,9 @@ describe("conductor grants", () => {
     const grants = [globalAny, projectAny, projectDesk, globalDesk];
 
     expect(matchGrant(grants, { action: "dispatch", project: "phren", computer: "Desk" }, now)).toBe(projectDesk);
-    expect(matchGrant(grants, { action: "dispatch", project: "phren", computer: "Linuxbox" }, now)).toBe(projectAny);
+    expect(matchGrant(grants, { action: "dispatch", project: "phren", computer: "Devbox" }, now)).toBe(projectAny);
     expect(matchGrant(grants, { action: "dispatch", project: "other", computer: "Desk" }, now)).toBe(globalDesk);
-    expect(matchGrant(grants, { action: "dispatch", project: "other", computer: "Linuxbox" }, now)).toBe(globalAny);
+    expect(matchGrant(grants, { action: "dispatch", project: "other", computer: "Devbox" }, now)).toBe(globalAny);
   });
 
   it("never covers an unresolved destination with a computers-restricted grant", () => {
@@ -78,7 +78,7 @@ describe("conductor grants", () => {
     expect(matchGrant([restricted], { action: "dispatch", computer: "Desk" }, now)).toBe(restricted);
     expect(matchGrant([restricted], { action: "dispatch", computer: "anywhere" }, now)).toBeUndefined();
     expect(matchGrant([restricted], { action: "dispatch" }, now)).toBeUndefined();
-    expect(matchGrant([restricted], { action: "dispatch", computer: "Linuxbox" }, now)).toBeUndefined();
+    expect(matchGrant([restricted], { action: "dispatch", computer: "Devbox" }, now)).toBeUndefined();
   });
 
   // conductor.yaml must be mode 0600; Windows files carry no POSIX mode bits.

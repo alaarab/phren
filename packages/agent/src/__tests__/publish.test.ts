@@ -12,7 +12,7 @@ import { createAgentPublisher } from "../multi/publish.js";
 import type { AgentEntry } from "../multi/types.js";
 
 const entry = (over: Partial<AgentEntry> = {}): AgentEntry => ({
-  id: "agent-1", task: "fix the login bug", cwd: "/repo/hub", status: "running", startedAt: Date.now(), ...over,
+  id: "agent-1", task: "fix the login bug", cwd: "/repo/harbor", status: "running", startedAt: Date.now(), ...over,
 });
 
 describe("createAgentPublisher", () => {
@@ -27,7 +27,7 @@ describe("createAgentPublisher", () => {
     p.publish([entry(), entry({ id: "agent-2", displayName: "explorer", status: "idle", cwd: "/repo/api" })]);
     const records = read(4242);
     expect(records).toEqual([
-      { id: "4242:agent-1", label: "fix the login bug", cwd: "/repo/hub", status: "working", kind: "phren-agent" },
+      { id: "4242:agent-1", label: "fix the login bug", cwd: "/repo/harbor", status: "working", kind: "phren-agent" },
       { id: "4242:agent-2", label: "explorer", cwd: "/repo/api", status: "idle", kind: "phren-agent" },
     ]);
     p.stop();

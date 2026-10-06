@@ -12,7 +12,7 @@ const exec = promisify(execFile);
 const bundle = path.resolve(process.env.PHREN_TEST_HOOK_BUNDLE || "packages/cli/dist/bridge-hook.mjs");
 const cli = path.resolve("packages/cli/dist/index.js");
 const machines = [
-  { name: "Linuxbox", hostname: "omarchy", id: "adb03b73-cc59-4e41-b4a2-3eb73b90ef2c" },
+  { name: "Devbox", hostname: "workstation", id: "adb03b73-cc59-4e41-b4a2-3eb73b90ef2c" },
   { name: "Mini", hostname: "Sams-Mac-mini.local", id: "5e1c9a52-6d0e-4b8a-9e27-c4d1a7b05e63" },
   { name: "MacBook", hostname: "MacBookPro", id: "42ceb0c6-283c-44a9-991f-08ceb110125e" },
 ];
@@ -104,7 +104,7 @@ socket.on("close", () => process.exit(0));\n`, { mode: 0o700 });
     ]);
     expect(sets[0].computers.filter(row => !row.local).every(row => row.link === "two-way" && row.reachable)).toBe(true);
     expect(sets[0].computers.some(row => row.hint)).toBe(false);
-    if (machine.name === "Linuxbox") {
+    if (machine.name === "Devbox") {
       const fixture = JSON.parse(await readFile(new URL("../../fixtures/conformance/sets-local-friendly-name.json", import.meta.url), "utf8"));
       expect(result).toEqual(fixture);
     }

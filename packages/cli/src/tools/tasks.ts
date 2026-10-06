@@ -270,7 +270,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput, item, scope }) => {
-      // Resolve store-qualified project names (e.g., "team/arc")
+      // Resolve store-qualified project names (e.g., "team/forge")
       let targetPhrenPath: string;
       let project: string;
       try {

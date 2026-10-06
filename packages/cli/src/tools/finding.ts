@@ -174,7 +174,7 @@ async function handleAddFinding(
     ? { ...citationRest, ...(citedName ?? citationRest.symbol ? { symbol: citedName ?? citationRest.symbol } : {}) }
     : undefined;
 
-  // Resolve store-qualified project names (e.g., "team/arc" → store path + "arc")
+  // Resolve store-qualified project names (e.g., "team/forge" → store path + "forge")
   let phrenPath: string;
   let project: string;
   try {

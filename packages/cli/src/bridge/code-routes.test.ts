@@ -258,10 +258,10 @@ stores:
     path: ${team}
     role: readonly
     sync: pull-only
-    remote: https://github.com/sam/brain.git
+    remote: https://github.com/sam/notes.git
 `);
-  expect(await resolveCodeStore(store, "sam/brain")).toBe(team);
-  await expect(resolveCodeStore(store, "sam/brain", true)).rejects.toMatchObject({ status: 403 });
+  expect(await resolveCodeStore(store, "sam/notes")).toBe(team);
+  await expect(resolveCodeStore(store, "sam/notes", true)).rejects.toMatchObject({ status: 403 });
   await expect(resolveCodeStore(store, "sam/missing")).rejects.toMatchObject({ status: 404 });
   await expect(resolveCodeStore(store, "../escape")).rejects.toThrow();
 });

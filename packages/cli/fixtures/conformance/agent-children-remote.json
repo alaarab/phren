@@ -9,7 +9,7 @@
       "state": "running",
       "computer": {
         "id": "c1000000-0000-0000-0000-000000000002",
-        "name": "Linuxbox"
+        "name": "Devbox"
       },
       "remote": {
         "target": {
@@ -30,7 +30,7 @@
           "state": "running",
           "computer": {
             "id": "c1000000-0000-0000-0000-000000000002",
-            "name": "Linuxbox"
+            "name": "Devbox"
           },
           "remote": {
             "target": {

@@ -15,17 +15,17 @@ vi.mock("./shared/index.js", () => ({ detectProject }));
 beforeEach(() => detectProject.mockReset());
 afterEach(() => vi.restoreAllMocks());
 
-const opts = { phrenPath: "/store", profile: "default", cwd: "/repo/hub" };
+const opts = { phrenPath: "/store", profile: "default", cwd: "/repo/harbor" };
 
 describe("parseShellArgs", () => {
   it("reads the space-separated form", () => {
-    expect(parseShellArgs(["--view", "tasks", "--project", "hub"]))
-      .toMatchObject({ view: "tasks", project: "hub" });
+    expect(parseShellArgs(["--view", "tasks", "--project", "harbor"]))
+      .toMatchObject({ view: "tasks", project: "harbor" });
   });
 
   it("reads the equals form", () => {
-    expect(parseShellArgs(["--view=review queue", "--project=hub"]))
-      .toMatchObject({ view: "review queue", project: "hub" });
+    expect(parseShellArgs(["--view=review queue", "--project=harbor"]))
+      .toMatchObject({ view: "review queue", project: "harbor" });
   });
 
   it("does not swallow the next flag as a value", () => {
@@ -58,17 +58,17 @@ describe("normalizeShellView", () => {
 
 describe("resolveShellStartup", () => {
   it("resolves --here through phren's own project detection", () => {
-    detectProject.mockReturnValue("hub");
+    detectProject.mockReturnValue("harbor");
     const { startup, warnings } = resolveShellStartup({ view: "tasks", here: true }, opts);
-    expect(detectProject).toHaveBeenCalledWith("/store", "/repo/hub", "default");
-    expect(startup).toMatchObject({ view: "Tasks", project: "hub" });
+    expect(detectProject).toHaveBeenCalledWith("/store", "/repo/harbor", "default");
+    expect(startup).toMatchObject({ view: "Tasks", project: "harbor" });
     expect(warnings).toEqual([]);
   });
 
   it("prefers an explicit --project over detection", () => {
-    const { startup } = resolveShellStartup({ project: "ogrid", here: true }, opts);
+    const { startup } = resolveShellStartup({ project: "datagrid", here: true }, opts);
     expect(detectProject).not.toHaveBeenCalled();
-    expect(startup.project).toBe("ogrid");
+    expect(startup.project).toBe("datagrid");
   });
 
   it("falls back to the project list when the directory is not a phren project", () => {
@@ -88,9 +88,9 @@ describe("resolveShellStartup", () => {
   });
 
   it("warns but still opens on an unknown view", () => {
-    const { startup, warnings } = resolveShellStartup({ view: "nope", project: "hub" }, opts);
+    const { startup, warnings } = resolveShellStartup({ view: "nope", project: "harbor" }, opts);
     expect(startup.view).toBeUndefined();
-    expect(startup.project).toBe("hub");
+    expect(startup.project).toBe("harbor");
     expect(warnings[0]).toContain("nope");
   });
 

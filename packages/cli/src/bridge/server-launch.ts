@@ -207,7 +207,7 @@ const SHELL_READY_MS = intervalFromEnv("PHREN_SHELL_READY_MS", 15_000);
 /** Herdr starts an agent only at an interactive shell prompt and refuses
  * with `agent_pane_busy` ("is not an available shell") before that. A pane
  * created a moment ago is busy only while its login shell starts, which a
- * loaded computer can stretch to seconds (three Linuxbox dispatches failed
+ * loaded computer can stretch to seconds (three Devbox dispatches failed
  * this way on 2026-09-27; the same pane took the agent by hand a minute
  * later). Nothing is typed on a refusal, so retry until the shell is up. */
 async function startWhenShellReady(server: string, pane: string, agent: AgentStart): Promise<void> {

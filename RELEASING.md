@@ -15,7 +15,7 @@ GitHub Actions with signed [provenance](https://docs.npmjs.com/generating-proven
 
 ## Publish whenever you want
 
-Unlike ogrid, phren's release is **gated on the version + changelog already
+Phren's release is **gated on the version + changelog already
 being committed**, so do these two edits first:
 
 1. **Bump the version** in `packages/cli/package.json` (e.g. `0.1.34`), and

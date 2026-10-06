@@ -21,28 +21,28 @@ describe("editTargetFor", () => {
   beforeEach(() => {
     tmp = makeTempDir("phren-edit-target-");
     grantAdmin(tmp.path);
-    writeFile(path.join(tmp.path, "hub", "AGENTS.md"), "# hub\n");
+    writeFile(path.join(tmp.path, "harbor", "AGENTS.md"), "# harbor\n");
   });
   afterEach(() => tmp.cleanup());
 
   it("edits a skill's own file, using the path the list carries", () => {
     const skillPath = path.join(tmp.path, "global", "skills", "phren-sync", "SKILL.md");
-    const target = editTargetFor(host(tmp.path, "Skills", "hub"), { name: "phren-sync", path: skillPath });
+    const target = editTargetFor(host(tmp.path, "Skills", "harbor"), { name: "phren-sync", path: skillPath });
     expect(target).toEqual({ path: skillPath, label: "phren-sync", kind: "skill" });
   });
 
   it("edits the store's AGENTS.md for a project, not a copy in the repo", () => {
-    const target = editTargetFor(host(tmp.path, "Projects"), { name: "hub" });
+    const target = editTargetFor(host(tmp.path, "Projects"), { name: "harbor" });
     expect(target?.kind).toBe("claude");
-    expect(target?.path).toBe(path.join(tmp.path, "hub", "AGENTS.md"));
-    expect(target?.label).toBe("hub/AGENTS.md");
+    expect(target?.path).toBe(path.join(tmp.path, "harbor", "AGENTS.md"));
+    expect(target?.label).toBe("harbor/AGENTS.md");
     // The store's copy is the real file the repo symlinks to.
     expect(fs.existsSync(target!.path)).toBe(true);
   });
 
   it("falls back to the active project when no row is selected", () => {
-    const target = editTargetFor(host(tmp.path, "Projects", "hub"), undefined);
-    expect(target?.path).toBe(path.join(tmp.path, "hub", "AGENTS.md"));
+    const target = editTargetFor(host(tmp.path, "Projects", "harbor"), undefined);
+    expect(target?.path).toBe(path.join(tmp.path, "harbor", "AGENTS.md"));
   });
 
   it("offers a path for an AGENTS.md that does not exist yet, so the editor can create it", () => {
@@ -54,8 +54,8 @@ describe("editTargetFor", () => {
   it("declines when there is nothing editable", () => {
     // A skill row with no resolved path is the case that used to be recovered
     // by splitting a display string, which broke on paths containing the separator.
-    expect(editTargetFor(host(tmp.path, "Skills", "hub"), { name: "x" })).toBeNull();
+    expect(editTargetFor(host(tmp.path, "Skills", "harbor"), { name: "x" })).toBeNull();
     expect(editTargetFor(host(tmp.path, "Projects"), undefined)).toBeNull();
-    expect(editTargetFor(host(tmp.path, "Tasks", "hub"), { name: "x" })).toBeNull();
+    expect(editTargetFor(host(tmp.path, "Tasks", "harbor"), { name: "x" })).toBeNull();
   });
 });
