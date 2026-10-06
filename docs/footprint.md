@@ -149,7 +149,8 @@ file and rename. `PHREN_PRETRUST=off` turns this off too.
 Before the Hook starts Claude, Codex or Copilot in a folder it chose itself, it marks
 that exact folder trusted so the agent does not stop on its folder-trust screen
 (Claude's defaults to "No, exit"). Those folders are a dispatched or scheduled
-project's resolved source folder, and a worktree the Hook just created under
+project's resolved source folder, an isolated general-agent folder the Hook
+creates under `<PHREN_PATH>/.runtime/agents/<date>-<slug>-<unique-suffix>`, and a worktree the Hook just created under
 `<repo>/.claude/worktrees/<name>`. A folder the phone names, a conductor's store
 folder, and any parent such as `$HOME` are never written. When the folder is
 reached through a symlink, both its given path and its real path get the entry.

@@ -144,7 +144,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -702,11 +702,14 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         if (url.pathname === "/v1/workspaces/launch") {
           result = await launches.run(async () => {
             if (data.role === "conductor" && !modules.has("conductor")) throw new BridgeError(404, disabledHint("conductor"));
+            if (data.agentFolder === true && (data.role === "conductor" || data.project !== undefined || (data.cwd !== undefined && data.cwd !== "") || data.worktree != null)) {
+              throw new BridgeError(400, "An agent folder is for a projectless agent without cwd or worktree.");
+            }
             if (data.project !== undefined && data.cwd !== undefined) throw new BridgeError(400, "Choose project or cwd, not both.");
             // A conductor belongs to no one project: without a folder it starts in
             // this computer's phren store and dispatches into any project from there.
             const storeRooted = data.role === "conductor" && data.project === undefined && (data.cwd === undefined || data.cwd === "");
-            const cwd = storeRooted ? await launchDirectory(defaultPhrenPath(), [], [defaultPhrenPath()])
+            const cwd = data.agentFolder === true ? undefined : storeRooted ? await launchDirectory(defaultPhrenPath(), [], [defaultPhrenPath()])
               : data.project !== undefined ? await dispatchProjectDirectory(data.project)
               : await launchDirectory(data.cwd, await journal.recent(), locatedDirectories);
             // A project the Hook resolved (a dispatch) is a folder it may trust; a folder the phone named is not.

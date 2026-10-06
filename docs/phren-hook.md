@@ -187,6 +187,22 @@ No extra request per iPhone row is needed.
 - Local project activity history, retained on the computer.
 
 From a project, the iPhone can open a new session on a computer:
+A general agent can start without a project or a folder. With
+`agentFolder: true` on `POST /v1/workspaces/launch`, the Hook creates a private
+directory under `<PHREN_PATH>/.runtime/agents/<UTC-date>-<label-slug>-<unique-suffix>`.
+It uses this computer's configured Phren directory, the same root used for a
+conductor launch, and returns the actual `cwd` with the pane identifiers.
+The runtime directory stays local and is excluded from project discovery and store sync.
+Separate launches get separate directories; retries with the same `launchId`
+reuse the first pane and directory. This also works with `kind: "phren",
+mode: "chat"`. Do not combine `agentFolder` with a project, a nonempty `cwd`,
+a worktree or the conductor role. An unavailable harness is refused before
+the directory is created. The Hook advertises `capabilities.agentFolder`;
+older Hooks require an explicit folder, so the phone labels its home-folder
+fallback. `capabilities.launchPermissionMode` advertises launch-time
+permissions using `supervised`, `auto-edits`, `auto` and `full-access` for
+Claude, Codex and Copilot workers.
+
 `POST /v1/workspaces/launch` creates a Herdr workspace (or a tab in one) in
 the project's directory and starts Codex, Claude Code, Copilot, OpenCode or
 phren's own agent (`kind: "phren"`) in its pane, returning once Herdr has
