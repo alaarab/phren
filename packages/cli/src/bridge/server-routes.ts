@@ -689,7 +689,7 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/projects/add") {
           // Enrolling a repository with phren from the phone: an existing
           // checkout, or a clone. Serialized like launches — one at a time.
-          result = await launches.run(async () => enrollProject(z.object({ directory: z.string().max(4096).optional(), cloneUrl: z.string().max(512).optional() }).parse(data)));
+          result = await launches.run(async () => enrollProject(z.object({ directory: z.string().max(4096).optional(), cloneUrl: z.string().max(512).optional(), project: z.string().max(100).optional(), store: z.string().max(200).optional() }).parse(data)));
         } else if (url.pathname === "/v1/simulators/action") {
           result = await simulatorAct(z.string().parse(data.udid), z.object({ action: z.string(), bundleId: z.string().optional(), url: z.string().optional(), x: z.number().optional(), y: z.number().optional(), text: z.string().optional(), submit: z.boolean().optional() }).parse(data) as unknown as SimulatorAction);
         } else {

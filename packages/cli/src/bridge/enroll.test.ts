@@ -75,6 +75,38 @@ describe("bridge enroll", () => {
     await expect(enrollProject({ cloneUrl: "https://example.test/o/delta.git" }, { ...env, GIT_CONFIG_GLOBAL: config })).rejects.toThrow("already exists");
   });
 
+  it("clones phone and registers it as mobile in the explicitly selected store", async () => {
+    const team = path.join(home, "team");
+    await initRepo(team);
+    await writeFile(path.join(home, "store/stores.yaml"), `version: 1
+stores:
+  - id: "11223344"
+    name: primary
+    path: ${env.PHREN_PATH}
+    role: primary
+    sync: managed-git
+  - id: aabbccdd
+    name: team
+    path: ${team}
+    role: team
+    sync: managed-git
+    remote: https://github.com/owner/notes.git
+`);
+    await mkdir(path.join(team, "mobile"), { recursive: true });
+    await writeFile(path.join(team, "mobile/summary.md"), "# Mobile\nExisting memory\n");
+    await initRepo(path.join(home, "upstream/phone.git"));
+    await mkdir(path.join(home, "work"), { recursive: true });
+    const config = path.join(home, ".gitconfig");
+    await writeFile(config, `[url "${path.join(home, "upstream/").replaceAll("\\", "/")}"]\n\tinsteadOf = https://example.test/o/\n`);
+    const result = await enrollProject({ cloneUrl: "https://example.test/o/phone.git", project: "mobile", store: "owner/notes" }, { ...env, GIT_CONFIG_GLOBAL: config });
+    expect(result).toMatchObject({ project: "mobile", directory: path.join(home, "work/phone"), cloned: true, target: { project: "mobile", store: "owner/notes" } });
+    expect(await readFile(path.join(team, "mobile/phren.project.yaml"), "utf8")).toContain(path.join(home, "work/phone"));
+    expect(await readFile(path.join(team, "mobile/summary.md"), "utf8")).toContain("Existing memory");
+    expect(git(team, "log", "-1", "--format=%s")).toContain("Add project mobile");
+    await expect(readFile(path.join(home, "store/phone/phren.project.yaml"))).rejects.toThrow();
+    await expect(readFile(path.join(team, "phone/phren.project.yaml"))).rejects.toThrow();
+  });
+
   it("rejects paths off this computer and non-repository URLs", async () => {
     await expect(enrollProject({ directory: "relative/path" }, env)).rejects.toThrow("full folder path");
     await expect(enrollProject({ directory: path.join(home, "missing") }, env)).rejects.toThrow("not on this computer");

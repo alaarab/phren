@@ -3,6 +3,7 @@ import { phrenErr, phrenOk, readRootManifest, type PhrenResult } from "../shared
 import { bootstrapFromExisting } from "./project-registry.js";
 import { resolveActiveProfile } from "../profile-store.js";
 import type { ProjectOwnershipMode } from "../project-config.js";
+import { isValidProjectName } from "../utils-paths.js";
 import { FINDINGS_FILENAME, TASKS_FILENAME } from "../filenames.js";
 
 interface AddedProjectData {
@@ -20,6 +21,7 @@ interface AddedProjectData {
 
 interface AddProjectFromPathOptions {
   writeToPath?: string;
+  projectName?: string;
 }
 
 export function addProjectFromPath(
@@ -31,6 +33,10 @@ export function addProjectFromPath(
 ): PhrenResult<AddedProjectData> {
   if (!targetPath) {
     return phrenErr("Path is required. Pass the current project directory explicitly to avoid adding the wrong working directory.");
+  }
+
+  if (options.projectName !== undefined && (!isValidProjectName(options.projectName) || options.projectName === "global")) {
+    return phrenErr("Choose a valid target project name.");
   }
 
   const activeProfile = resolveActiveProfile(phrenPath, requestedProfile);
@@ -51,6 +57,7 @@ export function addProjectFromPath(
     profile: selectedProfile,
     profilePhrenPath: phrenPath,
     ownership,
+    projectName: options.projectName,
   });
 
   return phrenOk({
