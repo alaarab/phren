@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -41,6 +41,51 @@ describe("launching phren's own agent", () => {
     expect(statSync(String(result.cwd)).isDirectory()).toBe(true);
     expect(placements[0].cwd).toBe(result.cwd);
     expect(starts[0].args).toEqual(["agent", "-i", "--mode", "chat"]);
+  });
+
+  it.skipIf(process.platform === "win32").each([".runtime", ".runtime/agents"])("refuses a symlink at %s before creating a pane or chat folder", async parent => {
+    vi.stubEnv("PHREN_PATH", cwd);
+    const outside = path.join(home, "outside");
+    mkdirSync(outside);
+    writeFileSync(path.join(outside, "keep.txt"), "owner's file");
+    const link = path.join(cwd, parent);
+    mkdirSync(path.dirname(link), { recursive: true });
+    symlinkSync(outside, link, "dir");
+
+    await expect(launchSession("default", { agentFolder: true, label: "New chat", kind: "phren" }))
+      .rejects.toMatchObject({ status: 403 });
+    expect(placements).toEqual([]);
+    expect(starts).toEqual([]);
+    expect(readdirSync(outside)).toEqual(["keep.txt"]);
+  });
+
+  it("removes only the new chat folder when pane creation fails, and allows retry", async () => {
+    vi.stubEnv("PHREN_PATH", cwd);
+    const agents = path.join(cwd, ".runtime", "agents");
+    const retained = path.join(agents, "retained-chat");
+    mkdirSync(retained, { recursive: true });
+    writeFileSync(path.join(retained, "keep.txt"), "earlier chat");
+    let failedCwd: string | undefined;
+    const restoreFailure = setTerminalProvider({
+      kind: "fake",
+      snapshot: async () => structuredClone(state),
+      create: async (_server: string, placement: PanePlacement) => {
+        failedCwd = placement.cwd;
+        expect(statSync(failedCwd!).isDirectory()).toBe(true);
+        throw new Error("Pane creation failed");
+      },
+    } as unknown as TerminalProvider);
+    const request = { agentFolder: true, label: "New chat", kind: "phren", launchId: "5a9a5e3c-7f4b-4a0c-9e63-4b8d0f2a9c35" };
+    try { await expect(launchSession("default", request)).rejects.toThrow("Pane creation failed"); }
+    finally { restoreFailure(); }
+    expect(failedCwd).toBeDefined();
+    expect(existsSync(failedCwd!)).toBe(false);
+    expect(readdirSync(agents)).toEqual(["retained-chat"]);
+    expect(starts).toEqual([]);
+    const retried = await launchSession("default", request);
+    expect(statSync(String(retried.cwd)).isDirectory()).toBe(true);
+    expect(existsSync(path.join(retained, "keep.txt"))).toBe(true);
+    expect(starts).toHaveLength(1);
   });
 
   it("starts one quick chat for one launchId: a double tap or a retry gets the same pane", async () => {
