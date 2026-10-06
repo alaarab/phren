@@ -78,3 +78,20 @@ it("claims only structured paths, never words of a command line", () => {
   expect(claimedPaths({ patch: "*** Begin Patch\n*** Update File: b.ts\n*** End Patch" }, "/work")).toEqual([path.resolve("/work", "b.ts")]);
   expect(claimedPaths({ path: "~/notes.md" }, "/work", "/home/sam")).toEqual([path.join("/home/sam", "notes.md")]);
 });
+
+
+it("surfaces a failed post-tool Git read instead of recording a clean result", async () => {
+  await changes.before("codex:a", "broken", repo, "format");
+  await writeFile(path.join(repo, ".git/index"), "corrupt index");
+  await expect(changes.after("codex:a", "broken")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
+  await expect(changes.view("codex:a").changes("broken")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
+});
+
+it("reports the capture file cap instead of returning an apparently complete subset", async () => {
+  await changes.close();
+  changes = new ToolChanges({ budgetMs: 60_000 });
+  await changes.before("codex:a", "many", repo, "generate");
+  await Promise.all(Array.from({ length: 41 }, (_, i) => writeFile(path.join(repo, `generated-${i}.txt`), "line\n")));
+  await expect(changes.after("codex:a", "many")).rejects.toMatchObject({ status: 413, details: { code: "git-output-limit" } });
+  await expect(changes.view("codex:a").changes("many")).rejects.toMatchObject({ details: { code: "git-output-limit" } });
+}, process.platform === "win32" ? 90_000 : 30_000);

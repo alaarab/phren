@@ -1,10 +1,10 @@
-import { nonInteractiveGitEnv } from "../utils-helpers.js";
+import { checkoutGitEnv } from "./projects.js";
 import { execFile } from "node:child_process";
 import { appendFile, copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, unlink, utimes } from "node:fs/promises";
 import { homeDir } from "../home-paths.js";
 import path from "node:path";
 import { promisify } from "node:util";
-import { bridgeRoot, object, type Json } from "./protocol.js";
+import { BridgeError, bridgeRoot, object, type Json } from "./protocol.js";
 import { z } from "zod";
 import { ProcessPool } from "./limits.js";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -16,7 +16,7 @@ const exec = promisify(execFile);
  * tree before the call and after it. `root` is the repository; `path` is
  * relative to it. */
 export const changedFileSchema = z.object({ root: z.string(), path: z.string(), status: z.string(), patch: z.string(),
-  added: z.number().int().nonnegative(), removed: z.number().int().nonnegative(), redacted: z.boolean().optional() });
+  added: z.number().int().nonnegative(), removed: z.number().int().nonnegative(), redacted: z.boolean().optional(), binary: z.boolean().optional(), truncated: z.boolean().optional() });
 export type ChangedFile = z.infer<typeof changedFileSchema>;
 const changeRowSchema = z.object({ toolUseId: z.string(), files: z.array(changedFileSchema) });
 export const secretName = (file: string): boolean => /^(?:\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx|keychain-db|tfstate)|id_rsa.*|id_ed25519.*|(?:.*\.)?credentials\.json|\.netrc|\.npmrc|\.pypirc)$/i.test(path.basename(file));
@@ -50,7 +50,7 @@ export function namedPaths(command: string, input: Json = {}): string[] {
 
 async function git(cwd: string, args: string[], extra: NodeJS.ProcessEnv = {}, signal?: AbortSignal): Promise<string> {
   return gitPool.run(signal, async () => (countGit("changes"), await exec("git", ["-C", cwd, "--no-pager", ...args], {
-    signal, timeout: 10_000, maxBuffer: 8_388_608, env: nonInteractiveGitEnv({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1", ...extra }),
+    signal, timeout: 10_000, maxBuffer: 8_388_608, env: { ...checkoutGitEnv(), ...extra },
   })).stdout);
 }
 
@@ -67,7 +67,11 @@ async function repositoryOf(target: string, cwd: string, home = homeDir(), signa
   home = await realpath(home);
   if (real !== home && !real.startsWith(home + path.sep)) return undefined;
   const dir = (await stat(real)).isDirectory() ? real : path.dirname(real);
-  try { return await realpath((await git(dir, ["rev-parse", "--show-toplevel"], {}, signal)).trim()); } catch { return undefined; }
+  try { return await realpath((await git(dir, ["rev-parse", "--show-toplevel"], {}, signal)).replace(/\r?\n$/, "")); }
+  catch (error) {
+    if (/not a git repository/.test(String((error as { stderr?: string }).stderr))) return undefined;
+    throw error;
+  }
 }
 
 interface Tree { hash: string; scratch: string; env: NodeJS.ProcessEnv }
@@ -89,10 +93,10 @@ async function treeHash(root: string, env: NodeJS.ProcessEnv, signal: AbortSigna
   const index = path.resolve(root, (await git(root, ["rev-parse", "--git-path", "index"], {}, signal)).trim());
   const temp = env.GIT_INDEX_FILE!;
   await unlink(temp).catch(() => undefined);
-  await copyFile(index, temp).catch(() => undefined);
+  await copyFile(index, temp).catch(error => { if (error.code !== "ENOENT") throw error; });
   // Force content checks for files rewritten to the same size in one instant.
   await utimes(temp, 1, 1).catch(() => undefined);
-  await git(root, ["add", "-A", "--ignore-errors", "--", "."], env, signal);
+  await git(root, ["add", "-A", "--", "."], env, signal);
   return (await git(root, ["write-tree"], env, signal)).trim();
 }
 
@@ -101,17 +105,20 @@ async function treeDiff(root: string, before: string, after: string, env: NodeJS
   if (before === after) return [];
   const records = (await git(root, [...NO_DIFF, "--name-status", "-z", before, after], env, signal)).split("\0");
   const files: ChangedFile[] = [];
-  for (let i = 0; i + 1 < records.length && files.length < 40; i += 2) {
+  for (let i = 0; i + 1 < records.length; i += 2) {
     const status = records[i].slice(0, 1), original = records[i + 1]; let file = original;
     if (/[RC]/.test(status)) file = records[++i + 1]; // the new name follows the old
     if (!file) continue;
-    const spec = `:(literal)${file}`;
-    const counts = (await git(root, [...NO_DIFF, "--numstat", before, after, "--", spec], env, signal)).split("\t");
-    const redacted = secretName(original) || secretName(file) || counts[0] === "-" || counts[1] === "-";
-    let patch = redacted ? "" : await git(root, [...NO_DIFF, before, after, "--", spec], env, signal);
-    if (patch.length > 200_000) patch = patch.slice(0, 200_000) + "\n… (truncated)\n";
+    if (files.length >= 40) throw new BridgeError(413, "This tool changed more than 40 files; open repository Changes for the full status.", { code: "git-output-limit" });
+    const specs = [...new Set([original, file])].map(name => `:(literal)${name}`);
+    const counts = (await git(root, [...NO_DIFF, "--numstat", before, after, "--", ...specs], env, signal)).split("\t");
+    const binary = counts[0] === "-" || counts[1] === "-";
+    const redacted = secretName(original) || secretName(file) || binary;
+    let patch = redacted ? "" : await git(root, [...NO_DIFF, before, after, "--", ...specs], env, signal);
+    const truncated = patch.length > 200_000;
+    if (truncated) patch = patch.slice(0, 200_000) + "\n… (truncated)\n";
     const added = Number(counts[0]) || 0, removed = Number(counts[1]) || 0;
-    files.push({ root, path: file, status, patch, added, removed, ...(redacted ? { redacted: true } : {}) });
+    files.push({ root, path: file, status, patch, added, removed, binary, truncated, ...(redacted ? { redacted: true } : {}) });
   }
   return files;
 }
@@ -186,6 +193,13 @@ export class ToolChanges {
   private results = new Map<string, CachedChanges>();
   private controllers = new Set<AbortController>();
   private claims: Claim[] = [];
+  private failures = new Map<string, Error>();
+  private failed(key: string, error: unknown): Error {
+    const failure = error instanceof BridgeError ? error : new BridgeError(503, "Git change capture failed or timed out. Refresh repository Changes for the current status.", { code: "git-capture-failed" });
+    if (this.failures.size >= 512) this.failures.delete(this.failures.keys().next().value!);
+    this.failures.set(key, failure);
+    return failure;
+  }
   /** A hook callback's wall-clock cap on Git work; past it the call records
    * no change. Tests about what is captured raise it, since a loaded Windows
    * runner's Git can take longer than a person's machine ever does. */
@@ -220,6 +234,7 @@ export class ToolChanges {
     this.snapshots.set(key, snapshot);
     try {
       await this.budget(async signal => {
+        await realpath(cwd); // A vanished checkout must not resolve to its parent repository.
         const roots = new Set<string>();
         for (const target of [cwd, phrenStoreRoot(), ...namedPaths(command, input)]) {
           signal.throwIfAborted();
@@ -227,8 +242,7 @@ export class ToolChanges {
           const root = await repositoryOf(target, cwd, homeDir(), signal); if (root) roots.add(root);
         }
         for (const root of roots) {
-          try { snapshot.trees.set(root, await scratchTree(root, signal)); }
-          catch { signal.throwIfAborted(); }
+          snapshot.trees.set(root, await scratchTree(root, signal));
         }
         signal.throwIfAborted();
       });
@@ -240,7 +254,7 @@ export class ToolChanges {
         if (!snapshot.result) { this.snapshots.delete(key); void this.discard(snapshot).catch(() => {}); }
       }, 30 * 60_000);
       snapshot.expiry.unref();
-    } catch { if (this.snapshots.get(key) === snapshot) this.snapshots.delete(key); await this.discard(snapshot); }
+    } catch (error) { this.failed(key, error); if (this.snapshots.get(key) === snapshot) this.snapshots.delete(key); await this.discard(snapshot); }
   }
 
   /** Forget the snapshot of a tool call whose PreToolUse callback gave up
@@ -271,7 +285,9 @@ export class ToolChanges {
     if (!snapshot) return;
     if (snapshot.taking) { this.drop(conversation, toolUseId); return; }
     snapshot.result ??= this.compute(snapshot);
-    const files = await snapshot.result;
+    let files: ChangedFile[];
+    try { files = await snapshot.result; }
+    catch (error) { this.snapshots.delete(key); throw this.failed(key, error); }
     if (this.snapshots.get(key) === snapshot) {
       this.snapshots.delete(key); await this.record(conversation, toolUseId, files);
     }
@@ -281,8 +297,7 @@ export class ToolChanges {
       return await this.budget(async signal => {
         const files: ChangedFile[] = [];
         for (const [root, before] of snapshot.trees) {
-          try { files.push(...await treeDiff(root, before.hash, await treeHash(root, before.env, signal), before.env, signal)); }
-          catch { signal.throwIfAborted(); }
+          files.push(...await treeDiff(root, before.hash, await treeHash(root, before.env, signal), before.env, signal));
         }
         // A file another agent's edit named during this call is its change,
         // not this call's, even though it landed inside the same window.
@@ -298,8 +313,7 @@ export class ToolChanges {
         }
         return kept;
       });
-    } catch { return []; }
-    finally { await this.discard(snapshot); }
+    } finally { await this.discard(snapshot); }
   }
   private cache(conversation: string): CachedChanges {
     const entry = this.results.get(conversation) ?? { files: new Map<string, ChangedFile[]>() };
@@ -346,6 +360,8 @@ export class ToolChanges {
         return !!snapshot && !snapshot.result && Date.now() - snapshot.at < PENDING_FOR;
       },
       changes: async toolUseId => {
+        const failure = this.failures.get(`${conversation}\0${toolUseId}`);
+        if (failure) throw failure;
         await this.after(conversation, toolUseId);
         const known = (await this.load(conversation)).files.get(toolUseId);
         return known?.length ? known : undefined;

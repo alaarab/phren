@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { BridgeError, type Json } from "./protocol.js";
-import { git, gitRoot } from "./projects.js";
+import { git, gitHead, gitRoot, withGitReadDeadline } from "./projects.js";
 
 const exec = promisify(execFile);
 
@@ -15,93 +15,95 @@ function statusLetter(code: string): string {
   return ["M", "A", "D", "R", "C", "U"].includes(letter) ? letter : "M";
 }
 
-/** `--name-status -z` records as path-to-status; a rename carries old then new. */
-function parseNameStatus(out: string): Map<string, string> {
-  const map = new Map<string, string>();
-  const tokens = out.split("\0");
-  for (let index = 0; index < tokens.length; index++) {
-    const code = tokens[index]; if (!code) continue;
-    if (code[0] === "R" || code[0] === "C") {
-      index++; const destination = tokens[++index];
-      if (destination) map.set(destination, code[0]);
-    } else {
-      const file = tokens[++index];
-      if (file) map.set(file, code[0]);
-    }
-  }
-  return map;
-}
-
-/** `--numstat -z` per-path line counts; a rename leaves the path empty and the
- * two names follow as their own tokens. */
-function parseNumstat(out: string): Map<string, { additions: number; deletions: number }> {
-  const map = new Map<string, { additions: number; deletions: number }>();
+interface Counts { additions: number; deletions: number; binary: boolean; countsComplete: boolean }
+/** NUL records preserve tabs/newlines in names and both sides of renames. */
+function parseNumstat(out: string): Map<string, Counts> {
+  const map = new Map<string, Counts>();
   const tokens = out.split("\0");
   for (let index = 0; index < tokens.length; index++) {
     const record = tokens[index]; if (!record) continue;
     const parts = record.split("\t");
-    if (parts.length < 2) continue;
-    const additions = parts[0] === "-" ? 0 : Number(parts[0]) || 0;
-    const deletions = parts[1] === "-" ? 0 : Number(parts[1]) || 0;
+    if (parts.length < 3) throw new BridgeError(503, "Git returned invalid line counts.", { code: "git-failed" });
+    const binary = parts[0] === "-" || parts[1] === "-";
     let file = parts.slice(2).join("\t");
-    if (!file) { index++; const destination = tokens[++index]; file = destination ?? ""; }
-    if (file) map.set(file, { additions, deletions });
+    if (!file) { index++; file = tokens[++index] ?? ""; }
+    const additions = binary ? 0 : Number(parts[0]), deletions = binary ? 0 : Number(parts[1]);
+    if (!file || !Number.isSafeInteger(additions) || additions < 0 || !Number.isSafeInteger(deletions) || deletions < 0) throw new BridgeError(503, "Git returned invalid line counts.", { code: "git-failed" });
+    map.set(file, { additions, deletions, binary, countsComplete: true });
   }
   return map;
 }
 
-/** A count of a text file's lines, for an untracked file whose diff has no base. */
-async function countLines(root: string, rel: string): Promise<number> {
-  try {
-    const abs = path.join(root, await repositoryPath(root, rel));
-    if ((await stat(abs)).size > 5_000_000) return 0;
-    const bytes = await readFile(abs);
-    if (!bytes.length || bytes.includes(0)) return 0;
-    let lines = 0;
-    for (const byte of bytes) if (byte === 10) lines++;
-    return bytes[bytes.length - 1] === 10 ? lines : lines + 1;
-  } catch { return 0; }
+const UNKNOWN_COUNTS = { additions: 0, deletions: 0, countsComplete: false };
+const NO_DIFF = ["diff", "--no-ext-diff", "--no-textconv", "--no-color"];
+const MAX_STATUS_ROWS = 500;
+
+/** Git owns text/binary classification (including attributes) and line counts.
+ * Oversized files are only probed; symlink contents are never followed. */
+async function untrackedCounts(root: string, rel: string): Promise<Partial<Counts> & typeof UNKNOWN_COUNTS> {
+  const abs = path.join(root, rel);
+  const info = await lstat(abs);
+  if (!info.isFile()) return { ...UNKNOWN_COUNTS };
+  await repositoryPath(root, rel);
+  if (info.size > 5_000_000) {
+    const handle = await open(abs, "r");
+    try {
+      const bytes = Buffer.alloc(8000);
+      const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+      return { ...UNKNOWN_COUNTS, ...(bytes.subarray(0, bytesRead).includes(0) ? { binary: true } : {}) };
+    } finally { await handle.close(); }
+  }
+  const out = await git(root, ...NO_DIFF, "--no-index", "--numstat", "-z", "--", "/dev/null", rel);
+  return [...parseNumstat(out).values()][0] ?? { additions: 0, deletions: 0, binary: false, countsComplete: true };
 }
 
-/** Everything `git status` reports, kept apart by section so `gitLog` and
- * `gitTree` can reuse it. */
+/** Status, rather than diff alone, owns membership (including conflicts and
+ * intent-to-add). Normal mode collapses wholly untracked directories. */
 async function collect(root: string) {
   const branch = (await git(root, "branch", "--show-current")).trim();
-  let upstream: string | undefined;
+  const upstream = branch ? (await git(root, "for-each-ref", "--format=%(upstream:short)", `refs/heads/${branch}`)).trim() || undefined : undefined;
   let ahead = 0, behind = 0;
-  try { upstream = (await git(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")).trim() || undefined; }
-  catch { upstream = undefined; }
   if (upstream) {
-    try {
-      const counts = (await git(root, "rev-list", "--left-right", "--count", `${upstream}...HEAD`)).trim().split(/\s+/);
-      behind = Number(counts[0]) || 0; ahead = Number(counts[1]) || 0;
-    } catch { ahead = 0; behind = 0; }
+    const counts = (await git(root, "rev-list", "--left-right", "--count", `${upstream}...HEAD`)).trim().split(/\s+/);
+    behind = Number(counts[0]); ahead = Number(counts[1]);
   }
-  const [stagedRaw, unstagedRaw, stagedCounts, unstagedCounts, untrackedRaw] = await Promise.all([
-    git(root, "diff", "--cached", "--name-status", "-z"),
-    git(root, "diff", "--name-status", "-z"),
-    git(root, "diff", "--cached", "--numstat", "-z"),
-    git(root, "diff", "--numstat", "-z"),
-    git(root, "ls-files", "--others", "--exclude-standard", "-z"),
+  const [raw, stagedCounts, unstagedCounts] = await Promise.all([
+    git(root, "status", "--porcelain=v1", "-z", "--untracked-files=normal"),
+    git(root, ...NO_DIFF, "--cached", "--numstat", "-z"),
+    git(root, ...NO_DIFF, "--numstat", "-z"),
   ]);
-  const staged = parseNameStatus(stagedRaw), unstaged = parseNameStatus(unstagedRaw);
-  const stagedStats = parseNumstat(stagedCounts), unstagedStats = parseNumstat(unstagedCounts);
-  const untracked = untrackedRaw.split("\0").filter(Boolean);
-  return { branch, upstream, ahead, behind, staged, unstaged, stagedStats, unstagedStats, untracked };
+  const staged = new Map<string, string>(), unstaged = new Map<string, string>(), untracked: string[] = [];
+  const tokens = raw.split("\0");
+  for (let i = 0; i < tokens.length; i++) {
+    const row = tokens[i]; if (!row) continue;
+    const xy = row.slice(0, 2), file = row.slice(3);
+    if (xy === "??") untracked.push(file);
+    else {
+      if (xy[0] !== " ") staged.set(file, xy[0]);
+      if (xy[1] !== " ") unstaged.set(file, xy[1]);
+      if (/[RC]/.test(xy)) i++;
+    }
+  }
+  return { branch, upstream, ahead, behind, staged, unstaged,
+    stagedStats: parseNumstat(stagedCounts), unstagedStats: parseNumstat(unstagedCounts), untracked };
 }
 
 /** The remote's default branch as its `HEAD` records it. With no recorded
  * `HEAD`, `main` and `master` are treated as default so the guard errs on the
  * side of asking. */
 export async function defaultBranch(root: string, remote = "origin"): Promise<string | null> {
-  const head = (await git(root, "symbolic-ref", "--quiet", "--short", `refs/remotes/${remote}/HEAD`).catch(() => "")).trim();
+  const head = (await git(root, "symbolic-ref", "--quiet", "--short", `refs/remotes/${remote}/HEAD`).catch(error => {
+    if (error instanceof BridgeError && error.details?.exitCode === "1") return "";
+    throw error;
+  })).trim();
   if (head.startsWith(remote + "/")) return head.slice(remote.length + 1);
-  const branches = new Set((await git(root, "for-each-ref", "--format=%(refname:short)", "refs/heads").catch(() => "")).split("\n").filter(Boolean));
+  const branches = new Set((await git(root, "for-each-ref", "--format=%(refname:short)", "refs/heads")).split("\n").filter(Boolean));
   return branches.has("main") ? "main" : branches.has("master") ? "master" : null;
 }
 
-export interface GitStatusFile { path: string; status: string; staged: boolean; additions: number; deletions: number }
+export interface GitStatusFile { path: string; status: string; staged: boolean; additions: number; deletions: number; binary?: boolean; directory?: boolean; countsComplete?: boolean }
 export interface GitStatus {
+  repository: string; observedAt: string; truncated: boolean; countsComplete: boolean; totalFiles: number;
   branch: string; upstream: string | null; ahead: number; behind: number;
   staged: number; unstaged: number; untracked: number; additions: number; deletions: number; files: GitStatusFile[];
   /** The branch a push guards: the upstream remote's `HEAD`, else `main`/`master`. */
@@ -110,38 +112,62 @@ export interface GitStatus {
 
 async function repository(cwd: string): Promise<string> {
   const root = await gitRoot(cwd);
-  if (!root) throw new BridgeError(409, "This pane is not in a Git repository.");
+  if (!root) throw new BridgeError(409, "This pane is not in a Git repository.", { code: "git-not-repository" });
   return root;
 }
 
 /** Working-tree status, one record per section: a file edited in both the index
  * and the working tree appears once with `staged: true` and once with `false`. */
-export async function gitStatus(cwd: string): Promise<GitStatus> {
+export function gitStatus(cwd: string, untrackedPath?: string): Promise<GitStatus> {
+  return withGitReadDeadline(() => readGitStatus(cwd, untrackedPath));
+}
+
+async function readGitStatus(cwd: string, untrackedPath?: string): Promise<GitStatus> {
   const root = await repository(cwd);
   treeCache.delete(root);
   const data = await collect(root);
   const fallback = await defaultBranch(root, data.upstream?.split("/")[0] || "origin");
+  if (untrackedPath !== undefined) {
+    const prefix = await repositoryPath(root, untrackedPath);
+    if (!data.untracked.some(file => file.endsWith("/") && (prefix + "/").startsWith(file))
+      || !(await lstat(path.join(root, prefix))).isDirectory()
+      || await gitRoot(path.join(root, prefix)) !== root) throw new BridgeError(409, "This is no longer an untracked directory in this repository.");
+    const ignored = await git(root, "check-ignore", "--", prefix).catch(error => {
+      if (error instanceof BridgeError && error.details?.exitCode === "1") return "";
+      throw error;
+    });
+    if (ignored) throw new BridgeError(409, "This directory is ignored by Git.");
+    data.untracked = (await git(path.join(root, prefix), "ls-files", "--others", "--exclude-standard", "--directory", "--no-empty-directory", "--full-name", "-z")).split("\0").filter(Boolean);
+    data.staged.clear(); data.unstaged.clear();
+  }
   const files: GitStatusFile[] = [];
   for (const [file, status] of data.staged) {
-    const counts = data.stagedStats.get(file) ?? { additions: 0, deletions: 0 };
-    files.push({ path: file, status: statusLetter(status), staged: true, ...counts });
+    if (files.length >= MAX_STATUS_ROWS) break;
+    files.push({ path: file, status: statusLetter(status), staged: true, ...(data.stagedStats.get(file) ?? UNKNOWN_COUNTS) });
   }
   for (const [file, status] of data.unstaged) {
-    const counts = data.unstagedStats.get(file) ?? { additions: 0, deletions: 0 };
-    files.push({ path: file, status: statusLetter(status), staged: false, ...counts });
+    if (files.length >= MAX_STATUS_ROWS) break;
+    files.push({ path: file, status: statusLetter(status), staged: false, ...(data.unstagedStats.get(file) ?? UNKNOWN_COUNTS) });
   }
-  for (const file of data.untracked) files.push({ path: file, status: "?", staged: false, additions: await countLines(root, file), deletions: 0 });
-  const additions = files.reduce((total, file) => total + file.additions, 0);
-  const deletions = files.reduce((total, file) => total + file.deletions, 0);
-  return { branch: data.branch, upstream: data.upstream ?? null, ahead: data.ahead, behind: data.behind,
-    staged: data.staged.size, unstaged: data.unstaged.size, untracked: data.untracked.length, additions, deletions, files,
+  for (const file of data.untracked) {
+    if (files.length >= MAX_STATUS_ROWS) break;
+    const directory = file.endsWith("/");
+    files.push({ path: file, status: "?", staged: false, ...(directory ? { ...UNKNOWN_COUNTS, directory: true } : await untrackedCounts(root, file)) });
+  }
+  const truncated = data.staged.size + data.unstaged.size + data.untracked.length > files.length;
+  return { repository: root, observedAt: new Date().toISOString(), truncated,
+    countsComplete: !truncated && files.every(file => file.countsComplete === true),
+    totalFiles: new Set([...data.staged.keys(), ...data.unstaged.keys(), ...data.untracked]).size,
+    branch: data.branch, upstream: data.upstream ?? null, ahead: data.ahead, behind: data.behind,
+    staged: data.staged.size, unstaged: data.unstaged.size, untracked: data.untracked.length,
+    additions: files.reduce((total, file) => total + file.additions, 0), deletions: files.reduce((total, file) => total + file.deletions, 0), files,
     defaultBranch: fallback };
 }
 
 /** The repository's remotes, so a branch ref can be told from a remote-tracking
  * one even when a local branch name contains a slash. */
 async function remotes(root: string): Promise<string[]> {
-  return (await git(root, "remote").catch(() => "")).split("\n").map(line => line.trim()).filter(Boolean);
+  return (await git(root, "remote")).split("\n").map(line => line.trim()).filter(Boolean);
 }
 
 function refEntries(spec: string, remotes: string[]): Json[] {
@@ -169,7 +195,7 @@ export async function gitLog(cwd: string, limit = 60, ref?: string): Promise<Jso
     try { revision = (await git(root, "rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`)).trim(); }
     catch { throw new BridgeError(400, "That branch ref does not name a commit."); }
   } else {
-    revision = (await git(root, "rev-parse", "--verify", "HEAD").catch(() => "")).trim();
+    revision = await gitHead(root);
   }
   const known = await remotes(root);
   const output = revision ? await git(root, "log", "--decorate=short", "--date=iso-strict", "--format=%H%x00%h%x00%s%x00%an%x00%cI%x00%D%x00%P", "-n", String(count), revision, "--") : "";
@@ -180,7 +206,7 @@ export async function gitLog(cwd: string, limit = 60, ref?: string): Promise<Jso
     commits.push({ sha, short, subject, author, date, refs: refEntries(spec ?? "", known), parents: (parents ?? "").split(" ").filter(Boolean) });
   }
   const status = await gitStatus(root);
-  const uncommitted = { files: new Set(status.files.map(file => file.path)).size, additions: status.additions, deletions: status.deletions };
+  const uncommitted = { files: status.totalFiles, additions: status.additions, deletions: status.deletions, truncated: status.truncated, countsComplete: status.countsComplete };
   return { commits, uncommitted };
 }
 
@@ -270,7 +296,7 @@ export async function gitPulls(cwd: string): Promise<Json> {
 async function repositoryPath(root: string, raw: unknown, allowRoot = false): Promise<string> {
   if (typeof raw !== "string" || raw.length > 4096 || raw.includes("\0") || path.isAbsolute(raw) || path.win32.isAbsolute(raw) || raw.startsWith("\\")) throw new BridgeError(400, "Invalid path.");
   const segments = raw.split(/[\\/]/);
-  if (segments.includes("..")) throw new BridgeError(400, "Invalid path.");
+  if (segments.includes("..") || segments.includes(".git")) throw new BridgeError(400, "Invalid path.");
   const clean = segments.filter(part => part && part !== ".").join("/");
   if ((!clean && !allowRoot) || clean.startsWith("-")) throw new BridgeError(400, "Invalid path.");
   const abs = path.resolve(root, clean);
@@ -322,7 +348,7 @@ async function treeSnapshot(root: string, head: string): Promise<TreeSnapshot> {
   levels.set("", new Map());
   for (const file of files) {
     const parts = file.split("/");
-    if (parts.includes("node_modules") || parts.includes(".git")) continue;
+    if (parts.includes(".git")) continue;
     let parent = "";
     for (let i = 0; i < parts.length; i++) {
       const name = parts[i], full = parent ? `${parent}/${name}` : name;
@@ -402,7 +428,7 @@ async function ignoredEntries(root: string, prefix: string, shown: TreeEntry[]):
 export async function gitTree(cwd: string, relPath: unknown = "", ignored = false): Promise<Json> {
   const root = await repository(cwd);
   const prefix = await repositoryPath(root, relPath, true);
-  const head = await git(root, "rev-parse", "HEAD").catch(() => "unborn");
+  const head = await gitHead(root) ?? "unborn";
   let cached = treeCache.get(root);
   if (!cached || cached.head !== head || cached.expires <= Date.now()) {
     if (treeCache.size >= 32) treeCache.delete(treeCache.keys().next().value!);
@@ -423,23 +449,36 @@ export async function gitTree(cwd: string, relPath: unknown = "", ignored = fals
 }
 
 /** The phone's paths are repo-relative, at most 64, and can never climb out. */
-async function repositoryPaths(root: string, raw: unknown): Promise<string[]> {
+async function repositoryPaths(root: string, raw: unknown, limit = 64): Promise<string[]> {
   const list = Array.isArray(raw) ? raw : [];
-  if (!list.length || list.length > 64) throw new BridgeError(400, "Choose between 1 and 64 paths.");
+  if (!list.length || list.length > limit) throw new BridgeError(400, `Choose between 1 and ${limit} paths.`);
   const paths: string[] = [];
   for (const entry of list) {
     const clean = await repositoryPath(root, entry);
     if (clean && !paths.includes(clean)) paths.push(clean);
   }
-  if (!paths.length) throw new BridgeError(400, "Choose between 1 and 64 paths.");
+  if (!paths.length) throw new BridgeError(400, `Choose between 1 and ${limit} paths.`);
   return paths;
 }
 
-export async function gitStage(cwd: string, paths: unknown): Promise<Json> {
+export async function gitStage(cwd: string, paths: unknown, confirmBulk = false): Promise<Json> {
   const root = await repository(cwd);
   treeCache.delete(root);
   try {
-    await git(root, "add", "--", ...(await repositoryPaths(root, paths)).map(file => `:(literal)${file}`));
+    const files = await repositoryPaths(root, paths, 500);
+    if (!confirmBulk) {
+      if (files.length > 100) throw new BridgeError(409, "Confirm staging more than 100 paths with confirmBulk=true.");
+      const untracked = new Set((await git(root, "ls-files", "--others", "--exclude-standard", "-z", "--", ...files.map(file => `:(literal)${file}`))).split("\0").filter(Boolean));
+      for (const file of files) {
+        const info = await lstat(path.join(root, file)).catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
+        if (info?.isDirectory()) throw new BridgeError(409, "Confirm staging this directory and its contents with confirmBulk=true.");
+        if (untracked.has(file)) {
+          const counts = await untrackedCounts(root, file);
+          if (counts.binary || !counts.countsComplete) throw new BridgeError(409, "Confirm staging this binary or uncounted untracked file with confirmBulk=true.");
+        }
+      }
+    }
+    await git(root, "add", "--", ...files.map(file => `:(literal)${file}`));
     return { ok: true };
   } finally { treeCache.delete(root); }
 }
@@ -449,7 +488,7 @@ export async function gitUnstage(cwd: string, paths: unknown): Promise<Json> {
   treeCache.delete(root);
   try {
     const files = (await repositoryPaths(root, paths)).map(file => `:(literal)${file}`);
-    const hasHead = await git(root, "rev-parse", "--verify", "HEAD").then(() => true, () => false);
+    const hasHead = await gitHead(root);
     if (hasHead) await git(root, "restore", "--staged", "--", ...files);
     else await git(root, "rm", "--force", "--cached", "--", ...files);
     return { ok: true };

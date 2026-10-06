@@ -180,7 +180,12 @@ No extra request per iPhone row is needed.
   real `codex` binary for this, skipping the session wrapper `phren init` can
   put at `~/.local/bin/codex`. On those other panes, synchronous questions and
   unsupported provider interactions open in Phren's terminal.
-- Git diffs, local HTTP app discovery, and SSH browser previews.
+- Git diffs, local HTTP app discovery, and SSH browser previews. Changes uses the
+  selected pane or worker checkout, collapses untracked directories with optional
+  expansion, and marks binaries and incomplete counts. Git failures and timeouts
+  are errors. Folder, untracked binary and large staging selections require
+  confirmation; ignored files are never force-added. See the
+  [status, diff and staging protocol](api-reference.md#repository-status-diff-and-staging).
 - The project's code index, when the `code` module is on and the project has
   been indexed: what changed, finding functions and types by name, file outlines,
   definitions, where each is used, and the most and least used.

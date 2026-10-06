@@ -3,12 +3,14 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fanoutWorktrees } from "./fanouts.js";
-import { gitStatus, gitTree } from "./git.js";
+import { gitStage, gitStatus, gitTree } from "./git.js";
 import { gitWorktrees, resolveWorktree, worktreeId } from "./git-worktrees.js";
 import { claudeChildCheckout } from "./transcript-claude.js";
 import { BridgeError } from "./protocol.js";
+import { repositoryDiff } from "./projects.js";
+import { trustedDirectory } from "./herdr.js";
 import { herdrWorktreeWorkers } from "./server-pane-routes.js";
 
 const execFileAsync = promisify(execFile);
@@ -18,7 +20,7 @@ type Worktree = { id: string; path: string; branch: string | null; head: string;
 
 describe("worker worktrees", () => {
   const created: string[] = [];
-  afterEach(async () => { for (const dir of created.splice(0)) await rm(dir, { recursive: true, force: true }); });
+  afterEach(async () => { vi.unstubAllEnvs(); for (const dir of created.splice(0)) await rm(dir, { recursive: true, force: true }); });
 
   /** A repository with one commit and two linked worktrees: one inside it
    * (`.claude/worktrees/agent-one`, one commit ahead, one uncommitted file)
@@ -86,11 +88,22 @@ describe("worker worktrees", () => {
   });
 
   it("resolves only listed worktree ids, and git routes read that checkout like the main tree", async () => {
-    const { root, inside } = await repository();
+    const { root, inside, git } = await repository();
     const resolved = await resolveWorktree(root, worktreeId(inside));
     expect(resolved).toBe(inside);
     const status = await gitStatus(resolved);
+    expect(status.repository).toBe(inside);
     expect(status.branch).toBe("worktree-agent-one");
+    // Hook can be launched from a Git process; its inherited repository and
+    // index must never redirect a phone request back into the primary checkout.
+    vi.stubEnv("GIT_DIR", path.join(root, ".git"));
+    vi.stubEnv("GIT_WORK_TREE", root);
+    vi.stubEnv("GIT_INDEX_FILE", path.join(root, ".git/index"));
+    const cwd = await trustedDirectory({ cwd: root, foreground_cwd: inside });
+    expect((await repositoryDiff(cwd)).repository).toBe(inside);
+    await gitStage(cwd, ["root.txt"]);
+    expect((await git(inside, "diff", "--cached", "--name-only")).trim()).toBe("root.txt");
+    expect(await git(root, "diff", "--cached", "--name-only")).toBe("");
     expect(status.files.map(file => file.path)).toEqual(["root.txt"]);
     await expect(resolveWorktree(root, worktreeId(path.join(root, "elsewhere")))).rejects.toMatchObject({ status: 404 });
     await expect(resolveWorktree(root, "../../etc")).rejects.toBeInstanceOf(BridgeError);
@@ -98,6 +111,8 @@ describe("worker worktrees", () => {
     // The pane's own checkout is not one of the other worktrees, but its id
     // still resolves; a removed worktree no longer does.
     await rm(path.join(root, ".claude"), { recursive: true, force: true });
+    await expect(trustedDirectory({ cwd: root, foreground_cwd: inside })).rejects.toMatchObject({ status: 409 });
+    await expect(gitStatus(inside)).rejects.toBeInstanceOf(BridgeError);
     await expect(resolveWorktree(root, worktreeId(inside))).rejects.toMatchObject({ status: 404 });
     expect((await gitWorktrees(root) as { worktrees: Worktree[] }).worktrees).toHaveLength(1);
   });
@@ -124,10 +139,10 @@ describe("worker worktrees", () => {
     const fromRows = path.join(folder, "agent-a2.jsonl");
     await writeFile(fromRows, JSON.stringify({ isSidechain: true, cwd: inside }) + "\n");
     expect(await claudeChildCheckout(fromRows)).toEqual({ cwd: inside, worktreeName: "agent-one" });
-    // A child in the main checkout (whose .git is a folder) has no worktree.
+    // A shared checkout retains its cwd without acquiring a worktree label.
     const shared = path.join(folder, "agent-a3.jsonl");
     await writeFile(shared, JSON.stringify({ isSidechain: true, cwd: path.join(base, "repo") }) + "\n");
-    expect(await claudeChildCheckout(shared)).toEqual({});
+    expect(await claudeChildCheckout(shared)).toEqual({ cwd: path.join(base, "repo") });
   });
 
   it("adds git-ignored folders and files to the tree only when asked, and lists inside an ignored folder", async () => {
