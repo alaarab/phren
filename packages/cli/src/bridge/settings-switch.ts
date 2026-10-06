@@ -1,12 +1,12 @@
 import { open, stat } from "node:fs/promises";
 import { z } from "zod";
 import { stripTerminal } from "../terminal-text.js";
-import { AgentHooks, visibleTerminalChoice } from "./agent-hooks.js";
+import { AgentHooks } from "./agent-hooks.js";
 import { claudeSuggestion } from "./claude-suggestion.js";
 import { type CodexNextTurn, codexServers } from "./codex-servers.js";
 import { validateTarget } from "./herdr.js";
 import { intervalFromEnv } from "./limits.js";
-import { emptyComposer } from "./model-switch.js";
+import { assertComposerReady } from "./model-switch.js";
 import { claudeFooterMode, type PermissionModeName, permissionModes } from "./permission-mode.js";
 import { BridgeError, type Json, object, PERMISSION_MODES, type PermissionMode, type Target } from "./protocol.js";
 import { terminalProvider } from "./terminal.js";
@@ -190,10 +190,7 @@ export class SettingsSwitcher {
     const slash = async (command: string) => {
       // Typing into a draft would corrupt both it and the command.
       const before = await this.hooks.paneLines(target, false);
-      const composer = before.split(/\r?\n/).reverse().find(line => /^\s*[›❯>]/.test(stripTerminal(line)));
-      if (!composer || !emptyComposer(composer) || visibleTerminalChoice(stripTerminal(before))) {
-        throw new BridgeError(409, "The terminal has a draft or an unreadable prompt. Open terminal before changing settings.");
-      }
+      assertComposerReady(before, "change settings");
       await validate();
       await terminalProvider().prompt(target.server, target.pane, command);
     };

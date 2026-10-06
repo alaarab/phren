@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentHooks } from "./agent-hooks.js";
 import { rpc, validateTarget } from "./herdr.js";
-import { codexModelStatus, MODEL_BUSY, ModelSwitcher, refuseWorkingSlash, SLASH_BUSY } from "./model-switch.js";
+import { assertComposerReady, codexModelStatus, MODEL_BUSY, ModelSwitcher, refuseWorkingSlash, SLASH_BUSY } from "./model-switch.js";
 import { codexModels, ModelCatalog } from "./models.js";
 import type { Target } from "./protocol.js";
 import { codexServers, type CodexServerEntry } from "./codex-servers.js";
@@ -125,7 +125,7 @@ describe("model switch route transaction", () => {
   });
   it("preserves an existing draft", async () => {
     draft = true;
-    await expect(switcher.switch(target, { model: astra.id })).rejects.toThrow("draft");
+    await expect(switcher.switch(target, { model: astra.id })).rejects.toThrow("unsent text");
     expect(sent()).toEqual([]);
   });
   it("sends Claude's alias once and verifies its confirmation", async () => {
@@ -183,4 +183,17 @@ it("does not mistake history, a prefix model, or a draft for the Codex status li
 it("distinguishes a dim placeholder from a colored draft", () => {
   expect(codexModelStatus("› \x1b[2mAsk Codex to do anything\x1b[0m\ngpt-6-astra medium", astra)).toBe(true);
   expect(codexModelStatus("› \x1b[38;2;80;80;80mA person's draft\x1b[0m\ngpt-6-astra medium", astra)).toBe(false);
+});
+
+describe("assertComposerReady", () => {
+  const code = (screen: string) => {
+    try { assertComposerReady(screen, "switch models"); return "ready"; }
+    catch (error) { return (error as { details?: { code?: string } }).details?.code; }
+  };
+  it("names why the terminal blocks a slash command, so the phone can say it", () => {
+    // Codex 0.160's empty composer: the placeholder is dim.
+    expect(code("history\n\x1b[1m›\x1b[0m \x1b[2mAsk Codex to do anything\x1b[0m\n  ? for shortcuts")).toBe("ready");
+    expect(code("history\n\x1b[1m›\x1b[0m fix the build please\n  ? for shortcuts")).toBe("terminal-draft");
+    expect(code("history with no prompt line")).toBe("terminal-unreadable");
+  });
 });
