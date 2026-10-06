@@ -717,13 +717,17 @@ existing agent permissions and phone approvals; load errors appear in Settings.
 Signed add, individual enable/disable and revoke mutations use
 `GET`, `POST` and `DELETE /v1/approval-rules`. Saving never answers a held request.
 
-Only Claude `PermissionRequest` is covered. Deny wins; always ask prevents a
-matching callback from being automatically answered by the Hook's conductor grant
-path and follows the ordinary phone/terminal approval flow. Native allowlists,
-auto-run and bypass/full-access modes can skip this callback. Rules cannot
-intercept those commands. Codex, Copilot, OpenCode, phren-agent and terminal
-dialogs have no rule enforcement. Health advertises version 2, effects
-`always-ask`/`deny`, Claude `PermissionRequest`, `preExecution: false`.
+Only Claude `PermissionRequest` for `Bash` inputs carrying a shell `command` is
+covered. Deny wins; always ask follows the ordinary phone/terminal approval flow.
+Conductor dispatch/hand-off, MCP and commandless tool calls are not covered;
+existing standing-grant answers continue unchanged. The Hook rejects creation of
+rules for those tools and the iOS editor offers only Bash shell-command rules.
+Native allowlists, auto-run and bypass/full-access modes can skip this callback.
+Rules cannot intercept those commands. Codex, Copilot, OpenCode, phren-agent and
+terminal dialogs have no rule enforcement. Health advertises version 2, effects
+`always-ask`/`deny`, Claude `PermissionRequest`, `tools: ["Bash"]`,
+`inputField: "command"`, `conductorTools: false`, `mcpTools: false`,
+`preExecution: false`.
 
 Signed envelopes retain base64 raw payload/signature/publicKey and domain
 `phren-approval-rules-v1`. Operations are `add` with a complete rule, `set-enabled`

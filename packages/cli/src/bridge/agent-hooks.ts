@@ -1374,13 +1374,16 @@ export class AgentHooks {
           } else await this.changes.after(conversation, id);
           res.end("{}"); return;
         }
-        // Only authoritative Claude PermissionRequest callbacks are covered in v1.
-        const ruleContext = body.event === "PermissionRequest" && target.source === "claude"
-          ? await approvalRuleContext(await trustedDirectory(pane).catch(() => ""), target.source, target.session) : undefined;
-        const requestContext = ruleContext && typeof body.cwd === "string" && path.isAbsolute(body.cwd)
-          ? await approvalRuleContext(body.cwd, target.source, target.session) : undefined;
-        const boundRuleContext = ruleContext && requestContext?.project === ruleContext.project ? requestContext : undefined;
-        const ruleEffect = await approvalRuleEffect(String(body.tool), body.input, boundRuleContext);
+        // Validate applicable shell restrictions before any directory/Git reads.
+        const ruleEffect = body.event === "PermissionRequest" && target.source === "claude"
+          ? await approvalRuleEffect(String(body.tool), body.input, async () => {
+            if (typeof body.cwd !== "string" || !path.isAbsolute(body.cwd)) return undefined;
+            const [paneContext, requestContext] = await Promise.all([
+              trustedDirectory(pane).then(cwd => approvalRuleContext(cwd, target.source, target.session)).catch(() => undefined),
+              approvalRuleContext(body.cwd, target.source, target.session),
+            ]);
+            return paneContext && requestContext?.project === paneContext.project ? requestContext : undefined;
+          }, undefined, { harness: target.source, session: target.session, computer: hostname() }) : undefined;
         if (ruleEffect === "deny") {
           res.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny", message: "Denied by an owner approval rule." } } }));
           return;
