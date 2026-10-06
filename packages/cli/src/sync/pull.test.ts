@@ -9,6 +9,7 @@ import { writeInstallPreferences } from "../init/preferences.js";
 import { runtimeFile } from "../phren-paths.js";
 import { getMachineName, storeCommitMessage } from "../machine-identity.js";
 import { initTestPhrenRoot, makeTempDir, writeFile } from "../test-helpers.js";
+import { storeAutoCommitBlocker } from "./git-state.js";
 import { describeAutoSave } from "./outcome.js";
 import { parsePullInterval, periodicPullEnabled, pollStore, readPollState, type RunGit, resolvePullInterval, runPollGit, startPullPolling } from "./pull.js";
 
@@ -233,6 +234,27 @@ describe("store polling with real Git repositories", () => {
       expect(tryFileLock(runtimeFile(reader, "git-op"))).toBeNull();
     } finally { release?.(); }
     expect((await pollStore(reader, 60, run, 220_000)).status).toBe("updated");
+  });
+
+  it("never auto-commits an unfinished merge or staged conflict markers", async () => {
+    const { reader, publish, commit } = fixture();
+    publish("from phone\n");
+    const localHead = commit(reader, "from mac\n");
+    git(reader, "fetch", "cloud");
+    expect(() => git(reader, "merge", "--no-edit", "cloud/knowledge")).toThrow();
+    // What session-stop asks before `git add -A`: staging now would mark the
+    // conflict resolved and its commit would conclude the merge with markers.
+    expect(await storeAutoCommitBlocker(reader)).toContain("git merge --abort");
+    git(reader, "merge", "--abort");
+    expect(await storeAutoCommitBlocker(reader)).toBeUndefined();
+
+    writeFile(path.join(reader, "project", "phren.project.yaml"),
+      "ownership: phren-managed\n<<<<<<< HEAD\nsourcePath: /home/sam/x\n=======\nsourcePath: /Users/sam/x\n>>>>>>> 3f90dc82\n");
+    const result = await pollStore(reader, 60, runPollGit, 100_000);
+    expect(result.detail).toContain("conflict markers");
+    expect(git(reader, "rev-parse", "HEAD")).toBe(localHead);
+    // A Markdown heading underline alone is not a conflict.
+    expect(await storeAutoCommitBlocker(reader, async () => ({ ok: true, output: "+Title\n+=======\n" }))).toBeUndefined();
   });
 
   it("backs off failed network checks and resets after recovery", async () => {

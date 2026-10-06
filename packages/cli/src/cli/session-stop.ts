@@ -51,6 +51,8 @@ import {
 import { spawnDetachedChild } from "../shared/process.js";
 import { resolveManagementCapabilities } from "../init/management-preset.js";
 import { aheadBehind, logSyncOutcome } from "../sync/outcome.js";
+import { storeAutoCommitBlocker } from "../sync/git-state.js";
+import { STAGED_DIFF } from "../sync/store-merge.js";
 import { storeCommitMessage } from "../machine-identity.js";
 import { finishUnmanagedClaude } from "./claude-unmanaged.js";
 
@@ -438,7 +440,10 @@ export async function handleHookStop() {
   // Stage all changes first, then unstage any sensitive files that slipped
   // through. Using pathspec exclusions with `git add -A` can fail when
   // excluded paths are also gitignored (git treats the pathspec as an error).
-  let add = await runBestEffortGit(["add", "--sparse", "-A"], phrenPath);
+  // Staging during an unfinished merge would mark its conflicts resolved and
+  // this commit would conclude it, markers and all.
+  const busy = await storeAutoCommitBlocker(phrenPath);
+  let add = busy ? { ok: false, error: busy } : await runBestEffortGit(["add", "--sparse", "-A"], phrenPath);
   if (add.ok) {
     // Belt-and-suspenders: unstage sensitive files that .gitignore should
     // already block. Failures here are non-fatal (files may not exist).
@@ -447,6 +452,8 @@ export async function handleHookStop() {
     // in .runtime/ (never staged by `-A`, since that directory is
     // gitignored), but this still protects a store from before that move.
     await runBestEffortGit(["reset", "HEAD", "--", ".env", "**/.env", "*.pem", "*.key", ".config/auth-profiles.json"], phrenPath);
+    const markers = await storeAutoCommitBlocker(phrenPath, () => runBestEffortGit(STAGED_DIFF, phrenPath));
+    if (markers) add = { ok: false, error: markers };
   }
   let commitMsg = "auto-save phren";
   if (add.ok) {

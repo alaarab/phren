@@ -37,3 +37,28 @@ export function gitOperationRecovery(operation: GitOperation): string {
   if (operation === "revert") return "git revert --abort";
   return "git status";
 }
+
+/**
+ * Why an automatic store commit must not happen now. `git add -A` during an
+ * unfinished merge marks every conflicted file resolved, markers and all, and
+ * the next commit concludes the merge with them: that is how a
+ * phren.project.yaml with `<<<<<<< HEAD` reached a store. Check before
+ * staging for the in-progress operation, and after staging for added marker
+ * pairs (a lone `=======` is a Markdown heading underline, so it needs both
+ * ends).
+ */
+export async function storeAutoCommitBlocker(
+  store: string,
+  stagedDiff?: () => Promise<{ ok: boolean; output?: string }>,
+): Promise<string | undefined> {
+  const operation = inProgressGitOperation(store);
+  if (operation) {
+    return `The store has a Git ${operation} in progress, so nothing was committed. Run '${gitOperationRecovery(operation)}' in the store, or finish it by hand.`;
+  }
+  if (!stagedDiff) return undefined;
+  const diff = await stagedDiff();
+  if (diff.ok && diff.output && /^\+<{7}(?: |$)/m.test(diff.output) && /^\+>{7}(?: |$)/m.test(diff.output)) {
+    return "Staged store changes contain merge conflict markers, so nothing was committed. Resolve them in the store first.";
+  }
+  return undefined;
+}
