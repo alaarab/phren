@@ -348,8 +348,7 @@ describe("task lifecycle", () => {
   });
 });
 
-// Auto-capture echoed the raw prompt onto the task and its `Context:` line. In real stores
-// 94% (arc), 100% (intranet2) and 68% (ogrid) of captured tasks were verbatim prompt echoes.
+// Auto-capture must not echo conversational prompts onto tasks and their `Context:` lines.
 describe("task auto-capture prompt gate", () => {
   let tmp: { path: string; cleanup: () => void };
   const project = "demo";
@@ -392,8 +391,8 @@ describe("task auto-capture prompt gate", () => {
     ["pasted GitHub page", "Skip to content example-org widgets Repository navigation Code Issues Pull requests Actions Projects Wiki Security Insights https://github.com/example-org/widgets"],
     ["pasted PowerShell banner", "Windows PowerShell Copyright (C) Microsoft Corporation. Install the latest PowerShell for new features and improvements! https://aka.ms/PSWindows PS C:\\Users\\me> git status"],
     ["single character", "3"],
-    ["chat reaction", "lol its barely morning I havent even opened the laptop yet"],
-    ["opinion commentary", "honestly two config files feels messy to me idk, kinda sloppy, look at the docs"],
+    ["chat reaction", "lol the demo has barely started and I havent opened the editor yet"],
+    ["opinion commentary", "honestly these config names feel confusing idk, kinda awkward, look at the docs"],
   ];
 
   for (const [label, prompt] of rejected) {
@@ -412,10 +411,9 @@ describe("task auto-capture prompt gate", () => {
     expect(tasks.ok && tasks.data.items.Queue).toHaveLength(1);
   });
 
-  // What the dispatcher session filed on 2026-09-19: replies from the phone
-  // (wrapped by the terminal), a message from another agent, questions.
+  // Synthetic phone replies (wrapped by the terminal), agent messages and questions.
   const conversational: Array<[string, string]> = [
-    ["a wrapped reply", '<pasted_content id="92a5">\nYep /herdr the phren agent is there\n</pasted_content id="92a5">'],
+    ["a wrapped reply", '<pasted_content id="92a5">\nYep /demo the sample agent is there\n</pasted_content id="92a5">'],
     ["a wrapped musing", '<pasted_content id="1b2c">\ncurious, I want you to look at /home/me/Projects/phren and tell me what changed\n</pasted_content id="1b2c">'],
     ["a cross-session message", '<cross-session-message from="uds:/run/user/1000/cc-socks/1.sock" from-name="c2">\nFix the sync worker retry and update the docs\n</cross-session-message>'],
     ["a delivery notice", "[Cross-session delivery notice] fix the sync worker: held for approval"],
@@ -435,19 +433,19 @@ describe("task auto-capture prompt gate", () => {
     ["pasted content", '<pasted_content id="7f01">\nFix the retry backoff in the sync worker\n</pasted_content id="7f01">'],
     ["a relayed conductor message", "From the conductor, a correction: the owner wants test runs in parallel, fix the runner"],
     ["a relayed agent message", "From tidy-phren: update the docs and fix the lint errors in src/index.ts"],
-    ["a computer and agent push report", "From macbook android-codex: parity slice 3 done, pushed as 42002c1"],
-    ["a computer and agent commit report", "From linuxbox claude: parser checks done, committed as abc1234"],
+    ["a computer and agent push report", "From laptop sample-codex: parser batch 2 done, pushed as abc1234"],
+    ["a computer and agent commit report", "From devbox claude: parser checks done, committed as abc1234"],
     ["a computer and agent PR report", "From desktop codex: release checklist PR #27 opened"],
-    ["a dispatch return notice", "Return: Linuxbox parser checks done, Parser checks passed. (dispatch 40000000-0000-4000-8000-000000000001). Call dispatch_returns."],
-    ["a dispatch returns notice", "Returns: 2 dispatches (Linuxbox parser checks done, Fix parser regression; Desk nav checks gone). Call dispatch_returns."],
-    ["a dispatch approval notice", "Return: Linuxbox parser checks needs approval, Run: rm -rf build (dispatch 40000000-0000-4000-8000-000000000001; answer with dispatch_approve). Call dispatch_returns."],
+    ["a dispatch return notice", "Return: Devbox parser checks done, Parser checks passed. (dispatch 40000000-0000-4000-8000-000000000001). Call dispatch_returns."],
+    ["a dispatch returns notice", "Returns: 2 dispatches (Devbox parser checks done, Fix parser regression; Desk nav checks gone). Call dispatch_returns."],
+    ["a dispatch approval notice", "Return: Devbox parser checks needs approval, Run: rm -rf build (dispatch 40000000-0000-4000-8000-000000000001; answer with dispatch_approve). Call dispatch_returns."],
     ["a bare commit report", "Parser checks complete, committed as 42002c1"],
-    ["a bare push report", "Parity slice 3 complete, pushed as 42002c1"],
+    ["a bare push report", "Parser batch 2 complete, pushed as abc1234"],
     ["a bare PR report", "Release checklist PR #27 opened"],
-    ["a longer sender with a handle", "From the Mini backlog runner (phren-f3): fix complete, pushed ce76826 on hook/retry; all checks passed"],
-    ["a longer relay containing a request", "From the Mini backlog runner (phren-f3): fix the retry backoff and update the docs"],
-    ["a mid-sentence push report", "Parser fix pushed ce76826 on hook/retry; all checks passed"],
-    ["a mid-sentence commit report", "Parser fix committed as ce76826, ready for review"],
+    ["a longer sender with a handle", "From the Desk sample runner (demo-b2): fix complete, pushed def5678 on hook/retry; all checks passed"],
+    ["a longer relay containing a request", "From the Desk sample runner (demo-b2): fix the retry backoff and update the docs"],
+    ["a mid-sentence push report", "Parser fix pushed def5678 on hook/retry; all checks passed"],
+    ["a mid-sentence commit report", "Parser fix committed as def5678, ready for review"],
     ["a pasted relay", '<pasted_content id="a1">\nFrom the conductor: fix the retry backoff in the sync worker\n</pasted_content id="a1">'],
   ];
   for (const [label, prompt] of relayed) {
@@ -471,7 +469,7 @@ describe("task auto-capture prompt gate", () => {
       ["session-settings", "From the settings page, add a toggle for sync notifications"],
       ["session-pr-request", "Investigate why PR #27 opened"],
       ["session-polite-pr-request", "Could someone investigate why PR #28 opened"],
-      ["session-push-request", "Investigate why the parser fix pushed ce76826 on hook/retry failed"],
+      ["session-push-request", "Investigate why the parser fix pushed def5678 on hook/retry failed"],
       ["session-path-request", "From the project settings page, add a sync toggle"],
     ]) expect(capture(prompt, session).noticeLines.join("\n")).toContain("Queued task");
     expect(taskCount()).toBe(5);

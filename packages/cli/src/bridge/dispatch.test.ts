@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,7 +29,7 @@ describe("dispatch receipts and selection", () => {
   let root: string;
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), "phren-dispatch-")); vi.stubEnv("PHREN_BRIDGE_HOME", root);
-    vi.mocked(hookPeers).mockResolvedValue(["Desk", "Linuxbox"].map(name => ({ name, address: "desk.example", username: "sam", port: 22, hostKey: "unused", server: "default" })));
+    vi.mocked(hookPeers).mockResolvedValue(["Desk", "Devbox"].map(name => ({ name, address: "desk.example", username: "sam", port: 22, hostKey: "unused", server: "default" })));
     vi.mocked(peerRequest).mockImplementation(async (peer, route) => route === "/v1/dispatch/capacity"
       ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: peer.name === "Desk" ? 3 : 1 }
       : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
@@ -42,7 +42,7 @@ describe("dispatch receipts and selection", () => {
 
   it("chooses the least busy connected peer and sends a project slug and bound first prompt", async () => {
     const result = await new DispatchService().dispatch(brief);
-    expect(result).toMatchObject({ ok: true, state: "accepted", computer: "Linuxbox", target });
+    expect(result).toMatchObject({ ok: true, state: "accepted", computer: "Devbox", target });
     const calls = vi.mocked(peerRequest).mock.calls;
     // The brief is offered with the launch; this Hook did not take it there, so it is typed, once per delivery id.
     expect(calls.find(call => call[1].startsWith("/v1/workspaces/launch"))?.[2]).toEqual({ project: "phren", kind: "codex", label: "Tests", model: undefined,
@@ -51,7 +51,7 @@ describe("dispatch receipts and selection", () => {
     expect(result.brief).toBe("typed");
     const stored = await readFile(path.join(root, `dispatches/${result.id}.json`), "utf8");
     expect(stored).not.toContain(brief.prompt);
-    expect((await dispatchStatus())[0]).toMatchObject({ state: "accepted", computer: "Linuxbox" });
+    expect((await dispatchStatus())[0]).toMatchObject({ state: "accepted", computer: "Devbox" });
   });
 
   it("keeps anywhere on the least busy computer whatever its quota, skipping only an account with none left", async () => {
@@ -64,18 +64,18 @@ describe("dispatch receipts and selection", () => {
         ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: working[peer.name] ?? 1, usage: usage[peer.name], harnesses }
         : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
     // Low quota is not avoided: Desk has 3% of its Codex week left and still wins the tie by name.
-    probe({ Desk: room({ leftPercent: 3 }), Linuxbox: room({ leftPercent: 90 }) });
+    probe({ Desk: room({ leftPercent: 3 }), Devbox: room({ leftPercent: 90 }) });
     expect(await new DispatchService().dispatch(brief)).toMatchObject({ computer: "Desk" });
     // An account with none left sits out, and the receipt says why.
     const until = new Date(Date.now() + 3 * 3_600_000).toISOString();
-    probe({ Desk: room({ leftPercent: 0, exhausted: true, until }), Linuxbox: room({ leftPercent: 90 }) }, { Linuxbox: 2 });
+    probe({ Desk: room({ leftPercent: 0, exhausted: true, until }), Devbox: room({ leftPercent: 90 }) }, { Devbox: 2 });
     const placed = await new DispatchService().dispatch(brief);
-    expect(placed).toMatchObject({ computer: "Linuxbox", skipped: [{ computer: "Desk", reason: "Its codex has no quota left for about 3 more hours." }] });
+    expect(placed).toMatchObject({ computer: "Devbox", skipped: [{ computer: "Desk", reason: "Its codex has no quota left for about 3 more hours." }] });
     // The Claude work account is judged on its own: Desk's exhausted Codex does not matter to it.
-    probe({ Desk: room({ leftPercent: 0, exhausted: true }), Linuxbox: room({ leftPercent: 90 }, { leftPercent: 0, exhausted: true }) });
+    probe({ Desk: room({ leftPercent: 0, exhausted: true }), Devbox: room({ leftPercent: 90 }, { leftPercent: 0, exhausted: true }) });
     expect(await new DispatchService().dispatch({ ...brief, harness: "claude", account: "work" })).toMatchObject({ computer: "Desk" });
     // Nowhere with quota, this computer included: refused with its own code, never placed.
-    probe({ Desk: room({ exhausted: true }), Linuxbox: room({ exhausted: true }) });
+    probe({ Desk: room({ exhausted: true }), Devbox: room({ exhausted: true }) });
     vi.mocked(hookRequest).mockImplementation(async route => route === "/v1/dispatch/capacity"
       ? { product: "phren-hook", protocol: 1, computer: { id: localID }, servers: ["default"], working: 9, usage: room({ exhausted: true }), harnesses } : { ok: true });
     await expect(new DispatchService().dispatch(brief)).rejects.toMatchObject({ status: 503, message: "No connected computer has codex quota left right now.", details: { code: "out_of_quota" } });
@@ -144,32 +144,35 @@ describe("dispatch receipts and selection", () => {
       await addGrant({ scope: "project:phren", actions: ["dispatch"], computers: ["Desk"], maxPermissionMode: "full-access" }, root);
       await expect(new DispatchService().dispatch({ ...brief, computer: "Desk", permissionMode: "full-access" }, agent)).resolves.toMatchObject({ state: "accepted" });
       // The owner (no pane) is never capped, grant or not.
-      await expect(new DispatchService().dispatch({ ...brief, computer: "Linuxbox", permissionMode: "full-access" })).resolves.toMatchObject({ state: "accepted" });
+      await expect(new DispatchService().dispatch({ ...brief, computer: "Devbox", permissionMode: "full-access" })).resolves.toMatchObject({ state: "accepted" });
     });
 
     // authority.yaml must be mode 0600, as conductor.yaml.
     it.skipIf(process.platform === "win32")("holds an agent to the release authority policy and leaves the owner's dispatch alone", async () => {
       const agent = { server: "default", workspace: "w9", tab: "w9:t1", pane: "w9:p1" };
-      const hub = { ...brief, computer: "Desk", project: "hub" };
+      const harbor = { ...brief, computer: "Desk", project: "harbor" };
       const launches = () => vi.mocked(peerRequest).mock.calls.filter(call => call[1].startsWith("/v1/workspaces/launch")).map(call => call[2] as Record<string, unknown>);
-      // hub is ask-first by default: an agent's worker starts at auto-edits, not the receiving default.
-      const started = await new DispatchService().dispatch(hub, agent);
-      expect(launches().at(-1)).toMatchObject({ project: "hub", permissionMode: "auto-edits" });
+      const policy = path.join(root, "authority.yaml");
+      await writeFile(policy, "projects:\n  harbor: { default: ask }\n", { mode: 0o600 });
+      await chmod(policy, 0o600);
+      // harbor is ask-first: an agent's worker starts at auto-edits, not the receiving default.
+      const started = await new DispatchService().dispatch(harbor, agent);
+      expect(launches().at(-1)).toMatchObject({ project: "harbor", permissionMode: "auto-edits" });
       expect(started).toMatchObject({ state: "accepted", permissionMode: "auto-edits", authority: expect.stringContaining("ask-first for merge") });
-      await expect(new DispatchService().dispatch({ ...hub, permissionMode: "auto" }, agent)).rejects.toMatchObject({ status: 403 });
+      await expect(new DispatchService().dispatch({ ...harbor, permissionMode: "auto" }, agent)).rejects.toMatchObject({ status: 403 });
       // An ask-first release is refused before any receipt or launch.
       const receipts = (await dispatchStatus()).length, launched = launches().length;
-      await expect(new DispatchService().dispatch({ ...hub, releaseActions: ["merge"] }, agent)).rejects.toMatchObject({ status: 403 });
+      await expect(new DispatchService().dispatch({ ...harbor, releaseActions: ["merge"] }, agent)).rejects.toMatchObject({ status: 403 });
       expect(await dispatchStatus()).toHaveLength(receipts);
       expect(launches()).toHaveLength(launched);
       // The owner's confirmation lets one through, and the receipt says so.
-      const confirmation = await confirmAuthority({ project: "hub", actions: ["merge"] }, "phone", root);
-      const confirmed = await new DispatchService().dispatch({ ...hub, releaseActions: ["merge"] }, agent);
+      const confirmation = await confirmAuthority({ project: "harbor", actions: ["merge"] }, "phone", root);
+      const confirmed = await new DispatchService().dispatch({ ...harbor, releaseActions: ["merge"] }, agent);
       expect(confirmed).toMatchObject({ state: "accepted", releaseActions: ["merge"], authorityConfirmed: confirmation.confirmedAt });
-      await expect(new DispatchService().dispatch({ ...hub, releaseActions: ["merge"] }, agent)).rejects.toMatchObject({ status: 403 });
+      await expect(new DispatchService().dispatch({ ...harbor, releaseActions: ["merge"] }, agent)).rejects.toMatchObject({ status: 403 });
       // The owner (no pane) is neither refused nor lowered, and still gets the line to read.
-      const owner = await new DispatchService().dispatch({ ...hub, releaseActions: ["merge", "deploy"] });
-      expect(owner).toMatchObject({ state: "accepted", authority: expect.stringContaining("hub") });
+      const owner = await new DispatchService().dispatch({ ...harbor, releaseActions: ["merge", "deploy"] });
+      expect(owner).toMatchObject({ state: "accepted", authority: expect.stringContaining("harbor") });
       expect(launches().at(-1)).not.toHaveProperty("permissionMode");
       // A project the policy does not name is untouched, and its receipt carries no line.
       const plain = await new DispatchService().dispatch({ ...brief, computer: "Desk", releaseActions: ["publish"] }, agent);
@@ -192,7 +195,7 @@ describe("dispatch receipts and selection", () => {
     it("anywhere skips computers without the account, lists why, and launches with the account", async () => {
       vi.mocked(peerRequest).mockImplementation(async (peer, route) => {
         if (route === "/v1/dispatch/capacity") {
-          // Desk is the least busy but has no work account; Linuxbox is older and reports nothing.
+          // Desk is the least busy but has no work account; Devbox is older and reports nothing.
           if (peer.name === "Desk") return capacityFor(inventory([{ id: "default", usable: true }]), 0);
           return capacityFor(undefined, 0);
         }
@@ -203,7 +206,7 @@ describe("dispatch receipts and selection", () => {
         : route.startsWith("/v1/workspaces/launch") ? { ok: true, target: { ...target, source: "claude" } } : { ok: true });
       const result = await new DispatchService().dispatch(claude);
       expect(result).toMatchObject({ computer: "Laptop", account: "work", state: "accepted" });
-      expect(result.skipped.map((item: { computer: string }) => item.computer)).toEqual(["Desk", "Linuxbox"]);
+      expect(result.skipped.map((item: { computer: string }) => item.computer)).toEqual(["Desk", "Devbox"]);
       expect(result.skipped[0].reason).toContain('No claude account "work"');
       expect(vi.mocked(hookRequest).mock.calls.find(call => call[0].startsWith("/v1/workspaces/launch"))?.[1]).toMatchObject({ kind: "claude", account: "work" });
       expect((await dispatchStatus())[0]).toMatchObject({ account: "work" });
@@ -244,24 +247,24 @@ describe("dispatch receipts and selection", () => {
       resetRoleState();
       await writeFile(path.join(root, "conductor-role.json"), JSON.stringify({ version: 1,
         conductor: { server: "default", pane: "w1:p1", workspace: "w1", tab: "w1:t1", since: "2026-09-29T10:00:00.000Z", by: "owner" } }));
-      // Linuxbox does not list this computer back.
+      // Devbox does not list this computer back.
       vi.mocked(peerRequest).mockImplementation(async (peer, route) => route.startsWith("/v1/dispatch/capacity")
         ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: peer.name === "Desk" ? 3 : 1,
-          ...(route.includes("?") ? { knowsCaller: peer.name !== "Linuxbox" } : {}) }
+          ...(route.includes("?") ? { knowsCaller: peer.name !== "Devbox" } : {}) }
         : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
     });
     afterEach(() => resetRoleState());
 
     it("places a conductor's work only on computers that link back", async () => {
       const result = await new DispatchService().dispatch(brief, origin);
-      expect(result).toMatchObject({ ok: true, computer: "Desk", skipped: [{ computer: "Linuxbox", reason: "Linuxbox does not link back. Run phren bridge link Linuxbox." }] });
+      expect(result).toMatchObject({ ok: true, computer: "Desk", skipped: [{ computer: "Devbox", reason: "Devbox does not link back. Run phren bridge link Devbox." }] });
       expect(vi.mocked(peerRequest).mock.calls.filter(call => call[1].startsWith("/v1/dispatch/capacity")).every(call => call[1].includes("?name="))).toBe(true);
-      await expect(new DispatchService().dispatch({ ...brief, computer: "Linuxbox" }, origin)).rejects.toMatchObject({ status: 409, details: { code: "outside_set" } });
+      await expect(new DispatchService().dispatch({ ...brief, computer: "Devbox" }, origin)).rejects.toMatchObject({ status: 409, details: { code: "outside_set" } });
     });
 
     it("leaves other sessions' dispatches as they were", async () => {
       const result = await new DispatchService().dispatch(brief, { ...origin, pane: "w2:p1" });
-      expect(result).toMatchObject({ ok: true, computer: "Linuxbox" });
+      expect(result).toMatchObject({ ok: true, computer: "Devbox" });
       expect(vi.mocked(peerRequest).mock.calls.some(call => call[1].includes("?name="))).toBe(false);
     });
   });
@@ -286,8 +289,8 @@ describe("dispatch receipts and selection", () => {
     expect(none).toBeInstanceOf(BridgeError);
     expect(none.message).toContain("No enrolled computer");
     // Every peer that sat out placement is named with its reason.
-    expect(none.details).toEqual({ skipped: [{ computer: "Desk", reason: "Key not enrolled" }, { computer: "Laptop", reason: "Local Hook not running" },
-      { computer: "Linuxbox", reason: "Key not enrolled" }] });
+    expect(none.details).toEqual({ skipped: [{ computer: "Desk", reason: "Key not enrolled" }, { computer: "Devbox", reason: "Key not enrolled" },
+      { computer: "Laptop", reason: "Local Hook not running" }] });
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
       ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 }
       : route.startsWith("/v1/workspaces/launch") ? { target } : { ok: true, deliveryUncertain: true });
@@ -301,7 +304,7 @@ describe("dispatch receipts and selection", () => {
         : route.startsWith("/v1/workspaces/launch") ? { target } : { ok: true };
     });
     const placed = await new DispatchService().dispatch(brief);
-    expect(placed).toMatchObject({ computer: "Linuxbox", state: "accepted", skipped: [{ computer: "Desk", reason: "Offline" }] });
+    expect(placed).toMatchObject({ computer: "Devbox", state: "accepted", skipped: [{ computer: "Desk", reason: "Offline" }] });
     expect((await dispatchStatus())[0].skipped).toEqual([{ computer: "Desk", reason: "Offline" }]);
     vi.mocked(peerRequest).mockResolvedValue({ product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: [], working: 0 });
     await expect(new DispatchService().dispatch({ ...brief, computer: "Desk" })).rejects.toThrow("Herdr is not running");
@@ -331,7 +334,7 @@ describe("dispatch receipts and selection", () => {
     expect(prompts()).toBe(2);
   }, 15_000);
 
-  // Seen 2026-09-27 on Linuxbox: a Claude worker in a folder it had not trusted
+  // Seen 2026-09-27 on Devbox: a Claude worker in a folder it had not trusted
   // held "Quick safety check: do you trust this folder" and the receipt said uncertain.
   it("reports a startup screen as needing the owner, with the brief unsent", async () => {
     const prompts = refusingWhileUnknown(["blocked"]);
@@ -453,8 +456,8 @@ describe("dispatch receipts and selection", () => {
     const service = new DispatchService(undefined, undefined, 1);
     const first = service.dispatch(brief);
     await vi.waitFor(() => expect(hold).toBeTypeOf("function"));
-    // Desk and Linuxbox are equally idle; Desk already has a launch in flight.
-    expect(await service.dispatch(brief)).toMatchObject({ ok: true, state: "accepted", computer: "Linuxbox" });
+    // Desk and Devbox are equally idle; Desk already has a launch in flight.
+    expect(await service.dispatch(brief)).toMatchObject({ ok: true, state: "accepted", computer: "Devbox" });
     hold();
     expect(await first).toMatchObject({ ok: true, state: "accepted", computer: "Desk" });
     // Nothing in flight: the tie goes back to Desk by name.
@@ -526,11 +529,11 @@ describe("dispatch receipts and selection", () => {
     const granted = await new DispatchService().dispatch({ ...brief, computer: "Desk" });
     expect(granted).toMatchObject({ ok: true, granted: "project:phren" });
     // A computers-restricted grant never covers a peer outside its list.
-    vi.mocked(hookPeers).mockResolvedValue(["Desk", "Linuxbox"].map(name => ({ name, address: "desk.example", username: "sam", port: 22, hostKey: "unused", server: "default" })));
+    vi.mocked(hookPeers).mockResolvedValue(["Desk", "Devbox"].map(name => ({ name, address: "desk.example", username: "sam", port: 22, hostKey: "unused", server: "default" })));
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
       ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 }
       : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
-    const other = await new DispatchService().dispatch({ ...brief, computer: "Linuxbox" });
+    const other = await new DispatchService().dispatch({ ...brief, computer: "Devbox" });
     expect(other.granted).toBeUndefined();
   });
 });
@@ -564,25 +567,25 @@ describe("dispatch to this computer", () => {
   });
 
   it("lets anywhere choose this computer when it is the least busy", async () => {
-    vi.mocked(hookPeers).mockResolvedValue([{ name: "Linuxbox", address: "linuxbox.example", username: "sam", port: 22, hostKey: "unused", server: "default" }]);
+    vi.mocked(hookPeers).mockResolvedValue([{ name: "Devbox", address: "devbox.example", username: "sam", port: 22, hostKey: "unused", server: "default" }]);
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
       ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 4 } : { ok: true });
     expect(await new DispatchService().dispatch(brief)).toMatchObject({ ok: true, computer: "Laptop" });
   });
 
   it("finds a named computer by an alias, the way grants do", async () => {
-    vi.mocked(hookPeers).mockResolvedValue([{ name: "Linuxbox", address: "linuxbox.example", username: "sam", port: 22, hostKey: "unused", server: "default" }]);
+    vi.mocked(hookPeers).mockResolvedValue([{ name: "Devbox", address: "devbox.example", username: "sam", port: 22, hostKey: "unused", server: "default" }]);
     vi.mocked(peerRequest).mockImplementation(async (_peer, route) => route === "/v1/dispatch/capacity"
       ? { product: "phren-hook", protocol: 1, computer: { id: remoteID }, servers: ["default"], working: 0 }
       : route.startsWith("/v1/workspaces/launch") ? { ok: true, target } : { ok: true });
-    expect(await new DispatchService().dispatch({ ...brief, computer: "linuxbox.example" })).toMatchObject({ computer: "Linuxbox", state: "accepted" });
+    expect(await new DispatchService().dispatch({ ...brief, computer: "devbox.example" })).toMatchObject({ computer: "Devbox", state: "accepted" });
     await expect(new DispatchService().dispatch({ ...brief, computer: "Studio" })).rejects.toThrow("Unknown computer");
   });
 
   it("matches this computer by any of its names, never another's", () => {
     const names = ["Mac.example.net", "Mac", "Sams-Mac"];
     for (const name of ["Mac", "mac.example.net", "MAC.example.net", "Sams-Mac.local", "local"]) expect(isLocalComputer(name, names)).toBe(true);
-    for (const name of ["Linuxbox", "Desk", "MacBookPro", ""]) expect(isLocalComputer(name, names)).toBe(false);
+    for (const name of ["Devbox", "Desk", "MacBookPro", ""]) expect(isLocalComputer(name, names)).toBe(false);
   });
 });
 
@@ -596,8 +599,8 @@ describe("the project folder a dispatch launches in", () => {
     await writeFile(path.join(root, "store", name, "phren.project.yaml"), config);
   };
 
-  // Seen 2026-09-27: Linuxbox refused project phren although the store named
-  // its folder under `sourcePaths: omarchy:`, because dispatch read only sourcePath.
+  // Seen 2026-09-27: Devbox refused project phren although the store named
+  // its folder under `sourcePaths: workstation:`, because dispatch read only sourcePath.
   it("takes this computer's sourcePaths entry over the shared sourcePath", async () => {
     const here = path.join(root, "linux", "phren");
     await mkdir(here, { recursive: true });

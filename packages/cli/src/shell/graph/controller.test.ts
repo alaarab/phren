@@ -18,20 +18,20 @@ function fixture(): GraphPayload {
   const stale = new Date(Date.now() - 200 * DAY).toISOString();
   return {
     nodes: [
-      { id: "hub", label: "hub", group: "project", project: "hub", findingCount: 2, taskCount: 1 },
+      { id: "harbor", label: "harbor", group: "project", project: "harbor", findingCount: 2, taskCount: 1 },
       { id: "api", label: "api", group: "project", project: "api", findingCount: 1, taskCount: 0 },
-      { id: "f1", label: "Retry uses jitter", fullLabel: "Retry uses jitter for backoff", group: "topic:architecture", project: "hub", topicSlug: "architecture", scoreKey: "k1" },
-      { id: "f2", label: "Old retry note", group: "topic:debugging", project: "hub", topicSlug: "debugging", scoreKey: "k2" },
+      { id: "f1", label: "Retry uses jitter", fullLabel: "Retry uses jitter for backoff", group: "topic:architecture", project: "harbor", topicSlug: "architecture", scoreKey: "k1" },
+      { id: "f2", label: "Old retry note", group: "topic:debugging", project: "harbor", topicSlug: "debugging", scoreKey: "k2" },
       { id: "f3", label: "Rate limit is 100/s", group: "topic:api", project: "api", topicSlug: "api" },
-      { id: "t1", label: "Ship retry docs", group: "task-active", project: "hub", section: "Active" },
-      { id: "e1", label: "PolicyRetry", group: "entity", entityType: "class", refCount: 3, refDocs: [{ doc: "hub/FINDINGS.md", project: "hub" }, { doc: "api/FINDINGS.md", project: "api" }] },
+      { id: "t1", label: "Ship retry docs", group: "task-active", project: "harbor", section: "Active" },
+      { id: "e1", label: "PolicyRetry", group: "entity", entityType: "class", refCount: 3, refDocs: [{ doc: "harbor/FINDINGS.md", project: "harbor" }, { doc: "api/FINDINGS.md", project: "api" }] },
     ],
     links: [
-      { source: "hub", target: "f1" },
-      { source: "hub", target: "f2" },
-      { source: "hub", target: "t1" },
+      { source: "harbor", target: "f1" },
+      { source: "harbor", target: "f2" },
+      { source: "harbor", target: "t1" },
       { source: "api", target: "f3" },
-      { source: "e1", target: "hub" },
+      { source: "e1", target: "harbor" },
       { source: "e1", target: "api" },
       { source: "f1", target: "f2", kind: "supersedes" },
     ],
@@ -147,8 +147,8 @@ describe("keys", () => {
   it("jumps to numbered neighbours and describes them", async () => {
     const c = await ready();
     const h = host();
-    c.select("hub");
-    const neighbours = c.neighborsOf("hub").map((n) => n.id);
+    c.select("harbor");
+    const neighbours = c.neighborsOf("harbor").map((n) => n.id);
     expect(neighbours).toContain("f1");
     expect(c.handleKey("1", h)).toBe(true);
     expect(c.selectedId).toBe(neighbours[0]);
@@ -160,7 +160,7 @@ describe("keys", () => {
   it("layers Escape: search, then selection, then project focus, then falls through", async () => {
     const c = await ready();
     const h = host();
-    c.focusProject("hub");
+    c.focusProject("harbor");
     c.applySearch("retry");
     expect(c.selectedId).toBe("f1");
     expect(c.handleKey("\x1b", h)).toBe(true);
@@ -206,7 +206,7 @@ describe("keys", () => {
     expect(c.visible.nodes.map((n) => n.id).sort()).toEqual(["api", "e1", "f3"]);
     expect(c.selectedId).toBe("api");
     c.handleKey("]", h);
-    expect(c.focusedProject).toBe("hub");
+    expect(c.focusedProject).toBe("harbor");
     c.handleKey("]", h);
     expect(c.focusedProject).toBeNull();
     expect(c.visible.nodes.length).toBe(7);
@@ -217,9 +217,9 @@ describe("keys", () => {
     const h = host();
     expect(c.handleKey("\r", h)).toBe(true);
     expect(c.selectedId).not.toBeNull();
-    c.select("hub");
+    c.select("harbor");
     c.handleKey("\r", h);
-    expect(c.focusedProject).toBe("hub");
+    expect(c.focusedProject).toBe("harbor");
     c.handleKey("\r", h);
     expect(c.focusedProject).toBeNull();
   });
@@ -345,7 +345,7 @@ describe("orbit", () => {
     }
     c.handleKey("v", h);
     expect(c.orbit).toBe(false);
-    expect(c.projectNode("hub")!.t).toBe(0);
+    expect(c.projectNode("harbor")!.t).toBe(0);
   });
 
   it("a drag turns the sphere, the wheel zooms, a click selects what is under it", async () => {
@@ -425,7 +425,7 @@ describe("watch mode", () => {
   }
 
   const lookup = (over: Partial<LookupEvent> = {}): LookupEvent => ({
-    at: new Date().toISOString(), query: "retry", project: "hub",
+    at: new Date().toISOString(), query: "retry", project: "harbor",
     filename: "FINDINGS.md", type: "findings", source: "search", ...over,
   });
 
@@ -541,8 +541,8 @@ describe("fitting the canvas", () => {
 
 describe("agents overlay", () => {
   const agent = (over: Partial<JoinedAgent> = {}): JoinedAgent => ({
-    id: "w1:p1", label: "hub greeting", cwd: "/repo/hub", status: "working",
-    project: "hub", focus: ["herdr", "agent", "focus", "w1:p1"], provider: "herdr", ...over,
+    id: "w1:p1", label: "harbor greeting", cwd: "/repo/harbor", status: "working",
+    project: "harbor", focus: ["herdr", "agent", "focus", "w1:p1"], provider: "herdr", ...over,
   });
 
   async function withAgents(list: JoinedAgent[]) {
@@ -566,7 +566,7 @@ describe("agents overlay", () => {
   it("polls on open and groups agents by the project they are working in", async () => {
     const { agents } = await withAgents([agent(), agent({ id: "w2:p1", project: "api", label: "api work" })]);
     expect(agents.agents).toHaveLength(2);
-    expect([...agents.byProject().keys()].sort()).toEqual(["api", "hub"]);
+    expect([...agents.byProject().keys()].sort()).toEqual(["api", "harbor"]);
   });
 
   it("tab cycles the highlight and flies to that agent's project", async () => {
@@ -593,7 +593,7 @@ describe("agents overlay", () => {
     controller.handleKey("\t", host);
     expect(controller.handleKey("\r", host)).toBe(true);
     expect(focused).toEqual([["herdr", "agent", "focus", "w1:p1"]]);
-    expect(host.messages.at(-1)).toContain("hub greeting");
+    expect(host.messages.at(-1)).toContain("harbor greeting");
   });
 
   it("enter still selects a node when no agent is highlighted", async () => {
@@ -605,11 +605,11 @@ describe("agents overlay", () => {
 
   it("escape releases the agent before it touches the selection", async () => {
     const { controller, agents, host } = await withAgents([agent()]);
-    controller.select("hub");
+    controller.select("harbor");
     controller.handleKey("\t", host);
     expect(controller.handleKey("\x1b", host)).toBe(true);
     expect(agents.current).toBeNull();
-    expect(controller.selectedId).toBe("hub");
+    expect(controller.selectedId).toBe("harbor");
   });
 
   it("a toggles the overlay off and back on", async () => {

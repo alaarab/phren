@@ -16,28 +16,28 @@ vi.mock("./peers.js", () => ({
     : { computer: { id: "book-id", name: "Sams-MacBook-Pro.local", aliases: [] } },
 }));
 
-// The owner's setup: one Mac mini (this computer), a MacBook and an Omarchy box
+// Synthetic setup: one Mac mini (this computer), a MacBook and a workstation
 // linked over SSH, and three computers registered but never linked.
 const owner: IdentityFacts = {
   local: { id: "mini-id", names: ["Mac.example.net", "Mac", "Sams-Mac-mini"] },
   peers: [
     { name: "MacBook", address: "sams-macbook-pro", id: "book-id", names: ["Sams-MacBook-Pro.local"], reachable: true },
-    { name: "Linuxbox", address: "omarchy", id: "arch-id", names: [], reachable: false },
+    { name: "Devbox", address: "workstation", id: "arch-id", names: [], reachable: false },
   ],
   machines: {
     Mac: "mac-mini", "Mac.example.net": "mac-mini", "Sams-Mac-mini.local": "mac-mini",
     MacBookPro: "macbook", "MacBookPro.example.net": "macbook", "Sams-MacBook-Pro.local": "macbook",
-    omarchy: "omarchy", pj: "personal", "WS-2K7M9QXR": "work-laptop", "WS-5H8D3WNT": "work",
+    workstation: "workstation", laptop2: "personal", "WS-2K7M9QXR": "work-laptop", "WS-5H8D3WNT": "work",
   },
 };
 
 describe("foldComputers", () => {
-  it("folds the owner's names into one row per computer", () => {
+  it("folds the configured names into one row per computer", () => {
     expect(foldComputers(owner)).toEqual([
       { id: "mini-id", name: "Mac", aliases: ["Mac.example.net", "Sams-Mac-mini", "Sams-Mac-mini.local"], profile: "mac-mini", local: true, linked: true, reachable: true },
-      { id: "arch-id", name: "Linuxbox", aliases: ["omarchy"], profile: "omarchy", local: false, linked: true, reachable: false },
+      { id: "arch-id", name: "Devbox", aliases: ["workstation"], profile: "workstation", local: false, linked: true, reachable: false },
       { id: "book-id", name: "MacBook", aliases: ["sams-macbook-pro", "Sams-MacBook-Pro.local", "MacBookPro", "MacBookPro.example.net"], profile: "macbook", local: false, linked: true, reachable: true },
-      { name: "pj", aliases: [], profile: "personal", local: false, linked: false },
+      { name: "laptop2", aliases: [], profile: "personal", local: false, linked: false },
       { name: "WS-2K7M9QXR", aliases: [], profile: "work-laptop", local: false, linked: false },
       { name: "WS-5H8D3WNT", aliases: [], profile: "work", local: false, linked: false },
     ]);
@@ -45,10 +45,10 @@ describe("foldComputers", () => {
 
   it("does not fold by a profile two computers claim", () => {
     const rows = foldComputers({
-      local: { names: ["Desk"] }, peers: [{ name: "Linuxbox", address: "linuxbox.example" }],
-      machines: { Desk: "home", Linuxbox: "home", Stranger: "home" },
+      local: { names: ["Desk"] }, peers: [{ name: "Devbox", address: "devbox.example" }],
+      machines: { Desk: "home", Devbox: "home", Stranger: "home" },
     });
-    expect(rows.map(row => [row.name, row.linked])).toEqual([["Desk", true], ["Linuxbox", true], ["Stranger", false]]);
+    expect(rows.map(row => [row.name, row.linked])).toEqual([["Desk", true], ["Devbox", true], ["Stranger", false]]);
     expect(rows[0].aliases).toEqual([]);
   });
 
@@ -72,8 +72,8 @@ describe("resolveComputer", () => {
   it("finds a computer by name or any alias, ignoring case and domain", () => {
     for (const name of ["Mac", "mac.example.net", "Sams-Mac-mini.local", "SAMS-MAC-MINI", "local", "localhost"]) expect(resolveComputer(computers, name)?.name).toBe("Mac");
     for (const name of ["MacBook", "macbookpro.example.net", "sams-macbook-pro.tailnet.ts.net"]) expect(resolveComputer(computers, name)?.name).toBe("MacBook");
-    expect(resolveComputer(computers, "omarchy")?.name).toBe("Linuxbox");
-    expect(resolveComputer(computers, "pj")).toMatchObject({ linked: false });
+    expect(resolveComputer(computers, "workstation")?.name).toBe("Devbox");
+    expect(resolveComputer(computers, "laptop2")).toMatchObject({ linked: false });
   });
   it("returns nothing for an unknown or empty name", () => {
     expect(resolveComputer(computers, "Nowhere")).toBeUndefined();

@@ -9,7 +9,7 @@ import type { LookupEvent } from "../../governance/activity.js";
 import { ACTIVITY_LIMIT, GraphWatch, HEAT_MS, formatAge, targetNodeId } from "./watch.js";
 
 function ev(over: Partial<LookupEvent> = {}): LookupEvent {
-  return { at: "2026-09-02T00:00:00.000Z", query: "retry", project: "hub", filename: "FINDINGS.md", type: "findings", source: "search", ...over };
+  return { at: "2026-09-02T00:00:00.000Z", query: "retry", project: "harbor", filename: "FINDINGS.md", type: "findings", source: "search", ...over };
 }
 
 function harness(opts: { events?: LookupEvent[][]; backfill?: LookupEvent[] } = {}) {
@@ -26,7 +26,7 @@ function harness(opts: { events?: LookupEvent[][]; backfill?: LookupEvent[] } = 
 describe("targetNodeId", () => {
   it("prefers the precomputed finding node, and falls back to the project", () => {
     expect(targetNodeId(ev({ nodeId: "finding:abc" }))).toBe("finding:abc");
-    expect(targetNodeId(ev())).toBe("hub");
+    expect(targetNodeId(ev())).toBe("harbor");
     expect(targetNodeId(ev({ project: "" }))).toBeUndefined();
   });
 });

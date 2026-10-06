@@ -196,8 +196,8 @@ describe("applyRelevanceFloor", () => {
   });
 
   it("never matches the path: every store path contains .phren", () => {
-    const doc = { ...makeDocRow("objectstudio", "FINDINGS.md", "findings", "- Delegation notes for the studio."),
-      path: "/home/sam/.phren/objectstudio/FINDINGS.md" };
+    const doc = { ...makeDocRow("designstudio", "FINDINGS.md", "findings", "- Delegation notes for the studio."),
+      path: "/home/sam/.phren/designstudio/FINDINGS.md" };
     expect(applyRelevanceFloor([doc], "phren delegation", null, null, undefined, new Map([["phren", 0.9], ["delegation", 0.9]]))).toHaveLength(0);
   });
 

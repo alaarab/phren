@@ -572,7 +572,7 @@ keeps that pane as `origin`. While that agent is idle, the Hook types one line
 into it through the ordinary hand-off path, for example:
 
 ```text
-Return: Linuxbox parser checks done, tests passed (dispatch <id>). Call dispatch_returns.
+Return: Devbox parser checks done, tests passed (dispatch <id>). Call dispatch_returns.
 ```
 
 Several waiting returns share one line. The Hook never types into a working

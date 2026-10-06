@@ -116,7 +116,7 @@ Per-project retention policies. Confidence decay curves. Access control. Audit l
 ### Store subscriptions
 Subscribe to specific projects in a team store; others stay hidden from search and context injection:
 ```bash
-phren store subscribe team-store arc intranet
+phren store subscribe team-store forge portal
 phren store unsubscribe team-store legacy-projects
 ```
 

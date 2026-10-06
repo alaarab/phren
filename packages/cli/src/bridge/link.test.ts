@@ -8,13 +8,13 @@ import { addHookPeer, hookPeers } from "./peers.js";
 it("probes only concrete ssh hosts, never patterns or Git hosting services", () => {
   const config = [
     "Host github.com github-work", "  HostName github.com", "  IdentityFile ~/.ssh/work",
-    "Host macbook sams-macbook-pro", "  HostName sams-macbook-pro # tailscale", "  User alaarab",
+    "Host macbook sams-macbook-pro", "  HostName sams-macbook-pro # tailscale", "  User octo",
     "# Host commented-out",
     "Host *.internal !bastion build-?", "  User deploy",
-    "Host=omarchy", "Match host staging", "  User ops",
+    "Host=workstation", "Match host staging", "  User ops",
     "Host gitlab.com",
   ].join("\n");
-  expect(sshConfigHosts(config)).toEqual(["macbook", "sams-macbook-pro", "omarchy"]);
+  expect(sshConfigHosts(config)).toEqual(["macbook", "sams-macbook-pro", "workstation"]);
 });
 
 let root: string;
@@ -35,7 +35,7 @@ it.skipIf(process.platform === "win32")("pins a linked computer in a private hoo
 
   await expect(addHookPeer({ ...mini, username: "someone" }, root)).rejects.toThrow("hooks.yaml already has Mini at sams-mac-mini");
   await expect(addHookPeer({ ...mini, name: "Desk" }, root)).rejects.toThrow("hooks.yaml already has Mini");
-  await addHookPeer({ ...mini, name: "Linuxbox", address: "omarchy", username: "alaarab" }, root);
-  expect((await hookPeers(root)).map(peer => peer.name)).toEqual(["Mini", "Linuxbox"]);
+  await addHookPeer({ ...mini, name: "Devbox", address: "workstation", username: "octo" }, root);
+  expect((await hookPeers(root)).map(peer => peer.name)).toEqual(["Mini", "Devbox"]);
   expect(await readFile(path.join(root, "hooks.yaml"), "utf8")).toMatch(/^version: 1\ncomputers:\n/);
 });

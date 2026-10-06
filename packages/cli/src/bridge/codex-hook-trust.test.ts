@@ -14,7 +14,7 @@ const HOOKS_PATH = "/home/alaarab/.codex/hooks.json";
 const phren = (timeout: number) => ({ hooks: [{ type: "command", command: PHREN, timeout }] });
 const other = (command: string, timeout?: number) => ({ hooks: [{ command, ...(timeout ? { timeout } : {}), type: "command" }] });
 
-/** Linuxbox's hooks.json with Phren's session callbacks at `timeout`. */
+/** Devbox's hooks.json with Phren's session callbacks at `timeout`. */
 function hooksJson(timeout: number): string {
   return JSON.stringify({ hooks: {
     PermissionRequest: [other(MOSHI), { hooks: [{ type: "command", command: PHREN, timeout: 60 }] }],
@@ -28,7 +28,7 @@ function hooksJson(timeout: number): string {
 
 const table = (key: string, hash: string, extra = "") => `[hooks.state."${HOOKS_PATH}:${key}"]\ntrusted_hash = "${hash}"\n${extra}\n`;
 
-/** Linuxbox's config.toml, trusted while Phren's session callbacks were at 3 s. */
+/** Devbox's config.toml, trusted while Phren's session callbacks were at 3 s. */
 const CONFIG = [
   'model = "gpt-5.5"\n\n[features]\nhooks = true\n\n[mcp_servers.phren]\ncommand = "node"\n\n[hooks.state]\n\n',
   table("session_start:0:0", "sha256:20ac17f15582f4f45b2622557b7cd34f3e0ff0d4f477b59d679b6621f9b5c936"),
@@ -60,7 +60,7 @@ describe("codex hook trust", () => {
   const temporary: string[] = [];
   afterEach(async () => { for (const dir of temporary.splice(0)) await rm(dir, { recursive: true, force: true }); });
 
-  it("hashes handlers exactly as Codex does (Linuxbox fixtures)", () => {
+  it("hashes handlers exactly as Codex does (synthetic hook fixtures)", () => {
     const run = (event: string, handler: Record<string, unknown>) => codexHookHash(event, {}, { type: "command", ...handler });
     expect(run("PreToolUse", { command: PHREN, timeout: 10 })).toBe("sha256:36ee15939a5c44633658074c2ab2e8b6fa7dd225abef3019efd8dca73d7f7eca");
     expect(run("PostToolUse", { command: PHREN, timeout: 10 })).toBe("sha256:469120aaf94242a1e71d220c19153d73d61868a05991de55600c2f27c36f3325");
@@ -83,7 +83,7 @@ describe("codex hook trust", () => {
     expect(untrusted(CONFIG, hooks)).toEqual([`${HOOKS_PATH}:session_start:2:0`, `${HOOKS_PATH}:stop:1:0`, `${HOOKS_PATH}:user_prompt_submit:1:0`]);
     const result = codexHookTrustText(CONFIG, hooks, PROGRAM, [HOOKS_PATH], hooksJson(3))!;
     expect(result.carried.sort()).toEqual([`${HOOKS_PATH}:session_start:2:0`, `${HOOKS_PATH}:stop:1:0`, `${HOOKS_PATH}:user_prompt_submit:1:0`]);
-    // All 11 handlers now match, as on Linuxbox before the rewrite.
+    // All 11 handlers now match, as on Devbox before the rewrite.
     expect(untrusted(result.text, hooks)).toEqual([]);
     const changed = result.text.split("\n").filter((line, i) => line !== CONFIG.split("\n")[i]);
     expect(changed).toHaveLength(3);

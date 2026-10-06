@@ -19,17 +19,17 @@ const HERDR_PAYLOAD = {
       {
         agent: "claude",
         agent_status: "working",
-        cwd: "/home/u/Projects/hub",
-        foreground_cwd: "/home/u/Projects/hub",
+        cwd: "/home/u/Projects/harbor",
+        foreground_cwd: "/home/u/Projects/harbor",
         focused: false,
         pane_id: "w1G:p1",
-        terminal_title: "◑ Hub dev greeting",
-        terminal_title_stripped: "Hub dev greeting",
+        terminal_title: "◑ Harbor dev greeting",
+        terminal_title_stripped: "Harbor dev greeting",
       },
       {
         agent: "claude",
         agent_status: "done",
-        cwd: "/home/u/Projects/safety",
+        cwd: "/home/u/Projects/beacon",
         focused: true,
         pane_id: "w1H:p1",
         terminal_title_stripped: "Claude harness upgrade",
@@ -71,8 +71,8 @@ describe("herdr provider", () => {
     expect(agents).toHaveLength(2);
     expect(agents[0]).toMatchObject({
       id: "w1G:p1",
-      label: "Hub dev greeting",
-      cwd: "/home/u/Projects/hub",
+      label: "Harbor dev greeting",
+      cwd: "/home/u/Projects/harbor",
       status: "working",
       kind: "claude",
       focused: false,
@@ -129,9 +129,9 @@ describe("collectAgents", () => {
 
 describe("joinAgents", () => {
   it("resolves each directory to a project and caches the lookup", () => {
-    const resolve = vi.fn((cwd: string) => (cwd.includes("hub") ? "hub" : null));
-    const joined = joinAgents([record({ id: "1", cwd: "/x/hub" }), record({ id: "2", cwd: "/x/hub" }), record({ id: "3", cwd: "/elsewhere" })], resolve);
-    expect(joined.map((a) => a.project)).toEqual(["hub", "hub", null]);
+    const resolve = vi.fn((cwd: string) => (cwd.includes("harbor") ? "harbor" : null));
+    const joined = joinAgents([record({ id: "1", cwd: "/x/harbor" }), record({ id: "2", cwd: "/x/harbor" }), record({ id: "3", cwd: "/elsewhere" })], resolve);
+    expect(joined.map((a) => a.project)).toEqual(["harbor", "harbor", null]);
     // Two agents in the same directory cost one lookup.
     expect(resolve).toHaveBeenCalledTimes(2);
   });

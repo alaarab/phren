@@ -40,7 +40,7 @@ const workerTarget = { server: "default", workspace: "w1P", tab: "w1P:t2", pane:
 const workingTarget = { server: "default", workspace: "w13", tab: "w13:t2", pane: "w13:p2", source: "claude" as const,
   session: "00000001-1111-4111-8111-111111111111" };
 const remoteID = "30000000-0000-4000-8000-000000000001";
-const brief = { computer: "Linuxbox", project: "phren", harness: "claude", prompt: "Run the parser checks", label: "parser checks" };
+const brief = { computer: "Devbox", project: "phren", harness: "claude", prompt: "Run the parser checks", label: "parser checks" };
 
 function readers(snapshot: () => Json, reply?: { completed: boolean; lastAssistant?: string; background?: number; awaited?: number }): WorkerReaders {
   return { snapshot: async () => snapshot(), identity: recordedIdentity, finalTurn: async () => reply };
@@ -48,7 +48,7 @@ function readers(snapshot: () => Json, reply?: { completed: boolean; lastAssista
 
 function receipt(overrides: Partial<Receipt> = {}): Receipt {
   const at = new Date(0).toISOString();
-  return { id: "40000000-0000-4000-8000-000000000001", computer: "Linuxbox", project: "phren", harness: "claude", label: "parser checks",
+  return { id: "40000000-0000-4000-8000-000000000001", computer: "Devbox", project: "phren", harness: "claude", label: "parser checks",
     createdAt: at, updatedAt: at, state: "accepted", target: workerTarget, ...overrides } as Receipt;
 }
 
@@ -294,10 +294,10 @@ describe("recording transitions", () => {
 
   it("writes one plain line per notice", () => {
     const done = receipt(); observe(done, { state: "working" }, 1); observe(done, { state: "done", completed: true, reply: "**Parser checks done**, tests passed.\nDetails follow." }, 2);
-    expect(noticeLine([done])).toBe(`Return: Linuxbox parser checks done, Parser checks done, tests passed. (dispatch ${done.id}). Call dispatch_returns.`);
+    expect(noticeLine([done])).toBe(`Return: Devbox parser checks done, Parser checks done, tests passed. (dispatch ${done.id}). Call dispatch_returns.`);
     const gone = receipt({ id: "40000000-0000-4000-8000-000000000002", computer: "Desk", label: "nav checks" }); observe(gone, { state: "gone" }, 3);
     const line = noticeLine([done, gone]);
-    expect(line).toMatch(/^Returns: 2 dispatches \(Linuxbox parser checks done, .*; Desk nav checks gone\)\. Call dispatch_returns\.$/);
+    expect(line).toMatch(/^Returns: 2 dispatches \(Devbox parser checks done, .*; Desk nav checks gone\)\. Call dispatch_returns\.$/);
     expect(line).not.toMatch(/[\x00-\x1f]/);
   });
 });
@@ -316,7 +316,7 @@ describe("the dispatching Hook's returns loop", () => {
     remote = herdrSnapshot({ "w1P:p2": "working" }); local = herdrSnapshot();
     finalTurn = undefined;
     deliver.mockClear();
-    vi.mocked(hookPeers).mockResolvedValue([{ name: "Linuxbox", address: "linuxbox.example", username: "sam", port: 22, hostKey: "unused", server: "default" }]);
+    vi.mocked(hookPeers).mockResolvedValue([{ name: "Devbox", address: "devbox.example", username: "sam", port: 22, hostKey: "unused", server: "default" }]);
     // The peer answers placement like dispatch.test.ts, and worker states with
     // the receiving Hook's own code over the recorded Herdr snapshot.
     vi.mocked(peerRequest).mockImplementation(async (_peer, route, data) => {
@@ -348,7 +348,7 @@ describe("the dispatching Hook's returns loop", () => {
     await returns.tick();
     const [saved] = await dispatchStatus();
     expect(saved.returned).toMatchObject({ state: "done", waited: 5 });
-    expect(deliver).toHaveBeenCalledWith(expect.anything(), `Return: Linuxbox parser checks done (after 5 background tasks finished), Gate passed. (dispatch ${placed.id}). Call dispatch_returns.`, expect.any(String));
+    expect(deliver).toHaveBeenCalledWith(expect.anything(), `Return: Devbox parser checks done (after 5 background tasks finished), Gate passed. (dispatch ${placed.id}). Call dispatch_returns.`, expect.any(String));
   });
 
   it("keeps the dispatching pane, follows the worker to done and tells an idle conductor once", async () => {
@@ -365,7 +365,7 @@ describe("the dispatching Hook's returns loop", () => {
     await returns.tick();
     expect(deliver).toHaveBeenCalledTimes(1);
     expect(deliver).toHaveBeenCalledWith({ ...conductorPane, source: "claude", session: "00000002-1111-4111-8111-111111111111" },
-      `Return: Linuxbox parser checks done, Parser checks done, tests passed. (dispatch ${placed.id}). Call dispatch_returns.`, expect.stringMatching(/^notice-[a-f0-9]{32}$/));
+      `Return: Devbox parser checks done, Parser checks done, tests passed. (dispatch ${placed.id}). Call dispatch_returns.`, expect.stringMatching(/^notice-[a-f0-9]{32}$/));
     expect((await dispatchStatus())[0].returned).toMatchObject({ state: "done", read: false, notifiedAt: expect.any(String) });
 
     clock += POLL_MS;
@@ -373,7 +373,7 @@ describe("the dispatching Hook's returns loop", () => {
     expect(deliver).toHaveBeenCalledTimes(1);
 
     const rows = await returns.take();
-    expect(rows).toEqual([{ id: placed.id, computer: "Linuxbox", project: "phren", label: "parser checks", harness: "claude",
+    expect(rows).toEqual([{ id: placed.id, computer: "Devbox", project: "phren", label: "parser checks", harness: "claude",
       state: "done", at: expect.any(String), reply: "Parser checks done, tests passed.", target: workerTarget }]);
     expect(await returns.take()).toEqual([]);
     const stored = await readFile(path.join(root, `dispatches/${placed.id}.json`), "utf8");
@@ -401,7 +401,7 @@ describe("the dispatching Hook's returns loop", () => {
     clock += NOTICE_MS;
     await returns.tick();
     expect(deliver).toHaveBeenCalledTimes(2);
-    expect(deliver).toHaveBeenLastCalledWith(expect.anything(), `Return: Linuxbox parser checks blocked (dispatch ${placed.id}). Call dispatch_returns.`, expect.any(String));
+    expect(deliver).toHaveBeenLastCalledWith(expect.anything(), `Return: Devbox parser checks blocked (dispatch ${placed.id}). Call dispatch_returns.`, expect.any(String));
     // The retry names the same notice, so a first attempt that did type is not typed again.
     const ids = (deliver.mock.calls as unknown as [unknown, string, string][]).map(call => call[2]);
     expect(ids.at(-1)).toBe(ids.at(-2));
@@ -487,10 +487,10 @@ describe("worker approvals", () => {
     const value = receipt();
     observe(value, withAsk({ terminal: true }), 1000);
     const line = noticeLine([value]);
-    expect(line).toBe(`Return: Linuxbox parser checks needs approval, Run: rm -rf build (dispatch ${value.id}; answer with dispatch_approve). Call dispatch_returns.`);
+    expect(line).toBe(`Return: Devbox parser checks needs approval, Run: rm -rf build (dispatch ${value.id}; answer with dispatch_approve). Call dispatch_returns.`);
     expect(line).toMatch(/^\s*returns?:\s+[^\n]+\bCall dispatch_returns\.\s*$/i);
     expect(noticeLine([value, receipt({ id: "40000000-0000-4000-8000-000000000002" })].map(item => { if (!item.returned) observe(item, { state: "gone" }, 2000); return item; })))
-      .toMatch(/^Returns: 2 dispatches \(Linuxbox parser checks needs approval, Run: rm -rf build; .*\)\. Call dispatch_returns\.$/);
+      .toMatch(/^Returns: 2 dispatches \(Devbox parser checks needs approval, Run: rm -rf build; .*\)\. Call dispatch_returns\.$/);
     expect(returnRow(value)).toMatchObject({ state: "blocked", approval: { actionId: "action-1", tool: "Bash", request: "Run: rm -rf build", terminal: true } });
     expect(returnRow(value).approval).not.toHaveProperty("expiresAt");
   });
@@ -501,7 +501,7 @@ describe("worker approvals", () => {
     let observed: Json;
     let owner: Record<string, unknown> | undefined;
     const answers: Json[] = [];
-    const peer = { name: "Linuxbox", address: "linuxbox.example", username: "sam", port: 22, hostKey: "unused", server: "default" };
+    const peer = { name: "Devbox", address: "devbox.example", username: "sam", port: 22, hostKey: "unused", server: "default" };
     const request = vi.fn(async (_peer: unknown, route: string, data?: Json) => {
       if (route === "/v1/dispatch/workers") return { workers: [observed] };
       if (route === "/v1/approvals/answer") { answers.push(data!); if (owner) throw owner; }
@@ -532,7 +532,7 @@ describe("worker approvals", () => {
       const returns = loop();
       await returns.poll();
       expect(onApproval).toHaveBeenCalledTimes(1);
-      expect(onApproval).toHaveBeenCalledWith(expect.objectContaining({ computer: "Linuxbox" }), expect.objectContaining({ actionId: "action-1" }));
+      expect(onApproval).toHaveBeenCalledWith(expect.objectContaining({ computer: "Devbox" }), expect.objectContaining({ actionId: "action-1" }));
       await returns.poll();
       expect(onApproval).toHaveBeenCalledTimes(1);
       const [saved] = await dispatchStatus();
@@ -554,11 +554,11 @@ describe("worker approvals", () => {
 
     it("answers a conductor call under a standing grant, and it never becomes a return", async () => {
       await seed();
-      const conductor = { action: "dispatch", project: "phren", computer: "Linuxbox" };
+      const conductor = { action: "dispatch", project: "phren", computer: "Devbox" };
       observed = { state: "blocked", session: workerTarget.session, hook: true, approval: { ...ask, tool: "mcp__phren__dispatch", conductor } };
       grants.mockResolvedValue({ scope: "global" });
       await loop().poll();
-      expect(grants).toHaveBeenCalledWith({ action: "dispatch", project: "phren", computer: "Linuxbox" });
+      expect(grants).toHaveBeenCalledWith({ action: "dispatch", project: "phren", computer: "Devbox" });
       expect(answers).toEqual([{ target: workerTarget, actionId: "action-1", decision: "approve" }]);
       expect(request.mock.calls.find(call => call[1] === "/v1/approvals/answer")![0]).toBe(peer);
       const [saved] = await dispatchStatus();
@@ -569,7 +569,7 @@ describe("worker approvals", () => {
 
     it("leaves a conductor call with no grant, or whose answer failed, for the owner", async () => {
       await seed();
-      const conductor = { action: "hand_off", computer: "Linuxbox" };
+      const conductor = { action: "hand_off", computer: "Devbox" };
       observed = { state: "blocked", session: workerTarget.session, hook: true, approval: { ...ask, conductor } };
       await loop().poll();
       expect(answers).toEqual([]);
@@ -609,7 +609,7 @@ describe("worker approvals", () => {
     it("lets only the dispatching agent answer, never the worker itself, and anyone with no pane", async () => {
       const origin = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", agent: "claude" as const, terminal: "term-1" };
       const value = await seed({ origin });
-      const returns = loop({ peers: async () => [], isLocal: (computer: string) => computer === "Linuxbox", localWorkers: async () => ({ workers: [observed] }), localAnswer: async (target: unknown, actionId: string, decision: string) => { answers.push({ target, actionId, decision } as never); } });
+      const returns = loop({ peers: async () => [], isLocal: (computer: string) => computer === "Devbox", localWorkers: async () => ({ workers: [observed] }), localAnswer: async (target: unknown, actionId: string, decision: string) => { answers.push({ target, actionId, decision } as never); } });
       await returns.poll();
       const pane = (over: object) => ({ server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", ...over });
       await expect(returns.answerApproval(value.id, "approve", "action-1", pane({ pane: "w9:p9" }))).rejects.toMatchObject({ status: 403 });
@@ -621,7 +621,7 @@ describe("worker approvals", () => {
 
     it("lets no agent pane answer a dispatch with no recorded origin, only the owner without a pane", async () => {
       const value = await seed();
-      const returns = loop({ peers: async () => [], isLocal: (computer: string) => computer === "Linuxbox", localWorkers: async () => ({ workers: [observed] }), localAnswer: async () => {} });
+      const returns = loop({ peers: async () => [], isLocal: (computer: string) => computer === "Devbox", localWorkers: async () => ({ workers: [observed] }), localAnswer: async () => {} });
       await returns.poll();
       await expect(returns.answerApproval(value.id, "approve", "action-1", { server: workerTarget.server, workspace: workerTarget.workspace, tab: workerTarget.tab, pane: workerTarget.pane })).rejects.toMatchObject({ status: 403 });
       await expect(returns.answerApproval(value.id, "approve", "action-1", { server: "default", workspace: "w3", tab: "w3:t1", pane: "w3:p1" })).rejects.toMatchObject({ status: 403 });

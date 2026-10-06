@@ -106,7 +106,7 @@ The dispatching Hook asks each enrolled computer about its open dispatches at
 most every 15 seconds, in one request per computer. Dispatches are followed
 for 24 hours or until the worker is gone. When the dispatching agent is idle,
 the Hook also types one line into it, at most once every two minutes, for
-example `Return: Linuxbox parser checks done, tests passed (dispatch <id>).
+example `Return: Devbox parser checks done, tests passed (dispatch <id>).
 Call dispatch_returns.` It never types into a working agent; a return waiting
 on a working agent is tried again every 5 seconds, under the same `deliveryId`.
 

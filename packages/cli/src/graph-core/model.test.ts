@@ -48,27 +48,27 @@ function filters(overrides: Partial<GraphFilters> = {}): GraphFilters {
 }
 
 const RAW: RawNode[] = [
-  { id: "p:hub", label: "hub", group: "project", project: "hub", refCount: 3 },
+  { id: "p:harbor", label: "harbor", group: "project", project: "harbor", refCount: 3 },
   { id: "p:api", label: "api", group: "project", project: "api" },
-  { id: "f:1", label: "Retry uses jitter", group: "topic:architecture", project: "hub", topicSlug: "architecture", scoreKey: "hub/1", tagged: true },
-  { id: "f:2", label: "Retries capped at 5", group: "topic:debugging", project: "hub", topicSlug: "debugging" },
-  { id: "t:1", label: "Ship retry docs", group: "task-active", project: "hub", section: "Active", priority: "high" },
-  { id: "e:1", label: "PolicyRetry", group: "entity", entityType: "class", refCount: 14, refDocs: [{ doc: "hub/FINDINGS.md", project: "hub" }, { doc: "api/FINDINGS.md", project: "api" }] },
+  { id: "f:1", label: "Retry uses jitter", group: "topic:architecture", project: "harbor", topicSlug: "architecture", scoreKey: "harbor/1", tagged: true },
+  { id: "f:2", label: "Retries capped at 5", group: "topic:debugging", project: "harbor", topicSlug: "debugging" },
+  { id: "t:1", label: "Ship retry docs", group: "task-active", project: "harbor", section: "Active", priority: "high" },
+  { id: "e:1", label: "PolicyRetry", group: "entity", entityType: "class", refCount: 14, refDocs: [{ doc: "harbor/FINDINGS.md", project: "harbor" }, { doc: "api/FINDINGS.md", project: "api" }] },
   { id: "r:1", label: "policies.md", group: "reference", project: "api", refDocs: [{ doc: "api/reference/retry-policy.md" }] },
 ];
 
 const LINKS: RawLink[] = [
-  { source: "p:hub", target: "f:1" },
-  { source: "p:hub", target: "f:2" },
-  { source: "p:hub", target: "t:1" },
-  { source: "e:1", target: "p:hub" },
+  { source: "p:harbor", target: "f:1" },
+  { source: "p:harbor", target: "f:2" },
+  { source: "p:harbor", target: "t:1" },
+  { source: "e:1", target: "p:harbor" },
   { source: "e:1", target: "p:api" },
   { source: "p:api", target: "r:1" },
-  { source: "p:hub", target: "ghost" },
+  { source: "p:harbor", target: "ghost" },
 ];
 
 function model(): GraphModel {
-  const scores = { "hub/1": { helpful: 3, impressions: 10, lastUsedAt: new Date(NOW - 2 * DAY).toISOString() } };
+  const scores = { "harbor/1": { helpful: 3, impressions: 10, lastUsedAt: new Date(NOW - 2 * DAY).toISOString() } };
   const rawNodes = RAW.map((node) => normalizeNode(node, scores, noStoreColor));
   const nodeById = new Map(rawNodes.map((node) => [node.id, node] as const));
   return {
@@ -93,7 +93,7 @@ describe("deriveKind + normalizeNode", () => {
     const byId = new Map(RAW.map((node) => [node.id, normalizeNode(node, {}, (s) => assigner.color(s))] as const));
     expect(byId.get("f:1")!.baseColor).toBe(TOPIC_COLORS.architecture);
     expect(byId.get("t:1")!.baseColor).toBe(KIND_COLORS["task-active"]);
-    expect(byId.get("p:hub")!.baseColor).toBe(KIND_COLORS.project);
+    expect(byId.get("p:harbor")!.baseColor).toBe(KIND_COLORS.project);
     const team = normalizeNode({ id: "p:t", label: "t", group: "project", store: "team" }, {}, (s) => assigner.color(s));
     expect(team.baseColor).toBe(STORE_COLORS[1]);
     expect(assigner.color("team")).toBe(STORE_COLORS[1]);
@@ -102,7 +102,7 @@ describe("deriveKind + normalizeNode", () => {
 
   it("forces labels on projects and heavily-referenced entities only", () => {
     const m = model();
-    expect(m.nodeById.get("p:hub")!.forceLabel).toBe(true);
+    expect(m.nodeById.get("p:harbor")!.forceLabel).toBe(true);
     expect(m.nodeById.get("e:1")!.forceLabel).toBe(true);
     expect(m.nodeById.get("f:1")!.forceLabel).toBe(false);
   });
@@ -126,15 +126,15 @@ describe("inferHealth", () => {
 describe("adjacency + detail", () => {
   it("ignores links to unknown ids and counts neighbours by kind", () => {
     const m = model();
-    expect(m.fullAdjacency.get("p:hub")!.has("ghost")).toBe(false);
-    expect(connectionCounts(m, "p:hub")).toEqual({ total: 4, projects: 0, findings: 2, tasks: 1, entities: 1, references: 0, topics: 0, notes: 0 });
+    expect(m.fullAdjacency.get("p:harbor")!.has("ghost")).toBe(false);
+    expect(connectionCounts(m, "p:harbor")).toEqual({ total: 4, projects: 0, findings: 2, tasks: 1, entities: 1, references: 0, topics: 0, notes: 0 });
     expect(connectionCounts(m, "e:1").projects).toBe(2);
   });
 
   it("assembles a detail record with quality from the score map", () => {
     const m = model();
     const detail = nodeDetail(m, "f:1")!;
-    expect(detail.projectName).toBe("hub");
+    expect(detail.projectName).toBe("harbor");
     expect(detail.qualityScore).toBe(1); // 0.55 + 0.3 + 0.2 clamps to 1
     expect(detail.health).toBe("healthy");
     expect(nodeDetail(m, "nope")).toBeNull();
@@ -142,8 +142,8 @@ describe("adjacency + detail", () => {
 });
 
 describe("topic and note kinds", () => {
-  const TOPIC: RawNode = { id: "tp:1", label: "Architecture", group: "topic", project: "hub", topicSlug: "architecture", topicLabel: "Architecture", refCount: 9 };
-  const NOTE: RawNode = { id: "n:1", label: "2026-09-28", group: "note", project: "hub", date: "2026-09-28" };
+  const TOPIC: RawNode = { id: "tp:1", label: "Architecture", group: "topic", project: "harbor", topicSlug: "architecture", topicLabel: "Architecture", refCount: 9 };
+  const NOTE: RawNode = { id: "n:1", label: "2026-09-28", group: "note", project: "harbor", date: "2026-09-28" };
 
   it("derives topic and note exactly, leaving topic:<slug> a finding", () => {
     expect(deriveKind(TOPIC)).toBe("topic");
@@ -163,8 +163,8 @@ describe("topic and note kinds", () => {
   });
 
   it("walk findings, then tasks, then notes, and back", () => {
-    const nodes: RawNode[] = [...RAW, NOTE, { id: "n:2", label: "older", group: "note", project: "hub", date: "2026-09-01" }];
-    const ranked = rankedProjectIds(nodes, "hub");
+    const nodes: RawNode[] = [...RAW, NOTE, { id: "n:2", label: "older", group: "note", project: "harbor", date: "2026-09-01" }];
+    const ranked = rankedProjectIds(nodes, "harbor");
     expect(ranked).toEqual(["f:1", "f:2", "t:1", "n:1", "n:2"]);
     expect(stepRanked(ranked, "t:1", 1)).toBe("n:1");
     expect(stepRanked(ranked, "n:1", 1)).toBe("n:2");
@@ -174,7 +174,7 @@ describe("topic and note kinds", () => {
 
   it("stay visible under the default filters", () => {
     const rawNodes = [TOPIC, NOTE].map((node) => normalizeNode(node, {}, noStoreColor));
-    const links = [{ source: "p:hub", target: "tp:1" }, { source: "p:hub", target: "n:1" }];
+    const links = [{ source: "p:harbor", target: "tp:1" }, { source: "p:harbor", target: "n:1" }];
     const m = model();
     m.rawNodes.push(...rawNodes);
     for (const node of rawNodes) m.nodeById.set(node.id, node);
@@ -182,7 +182,7 @@ describe("topic and note kinds", () => {
     const visible = m.rawNodes.filter((node) => nodeMatchesFilters(node, filters())).map((node) => node.id);
     expect(visible).toContain("tp:1");
     expect(visible).toContain("n:1");
-    expect(connectionCounts(m, "p:hub")).toMatchObject({ topics: 1, notes: 1 });
+    expect(connectionCounts(m, "p:harbor")).toMatchObject({ topics: 1, notes: 1 });
   });
 });
 
@@ -199,11 +199,11 @@ describe("filters + visibility", () => {
     const capped = filters({ nodeLimit: 2 });
     const visible = buildVisibleData(m, capped, "f:2");
     const ids = visible.nodes.map((node) => node.id);
-    expect(ids).toContain("p:hub");
+    expect(ids).toContain("p:harbor");
     expect(ids).toContain("p:api");
     expect(ids).toContain("f:2");
     expect(visible.links.every((link) => ids.includes(link.source) && ids.includes(link.target))).toBe(true);
-    expect(visible.visibleAdjacency.get("p:hub")!.has("f:2")).toBe(true);
+    expect(visible.visibleAdjacency.get("p:harbor")!.has("f:2")).toBe(true);
   });
 
   it("hides project nodes with no visible edges once projects are filtered out", () => {

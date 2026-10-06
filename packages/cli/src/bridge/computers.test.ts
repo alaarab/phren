@@ -34,12 +34,12 @@ describe("computer enrollment", () => {
     expect((await stat(file)).mode & 0o777).toBe(0o600);
     const other = await enrollComputer("Desk", path.join(root, "other"));
     await expect(acceptComputer("Desk", other, ssh)).rejects.toThrow("already enrolled differently");
-    await expect(acceptComputer("Linuxbox", line, ssh)).rejects.toThrow("already enrolled differently");
+    await expect(acceptComputer("Devbox", line, ssh)).rejects.toThrow("already enrolled differently");
     await expect(acceptComputer("Desk", line.replace("restrict,pty", "restrict,port-forwarding"), ssh)).rejects.toThrow("public key");
   });
 
   it("rejects malformed keys, names and symlink destinations", async () => {
-    for (const name of ["../Desk", "anywhere", "Desk\nLinuxbox"]) await expect(enrollComputer(name, root)).rejects.toThrow();
+    for (const name of ["../Desk", "anywhere", "Desk\nDevbox"]) await expect(enrollComputer(name, root)).rejects.toThrow();
     expect(() => publicComputerKey("ssh-ed25519 AAAA")).toThrow("Invalid");
     const line = await enrollComputer("Desk", root);
     const file = path.join(root, "keep"); await writeFile(file, "unchanged");
@@ -56,7 +56,7 @@ describe("computer enrollment", () => {
     const line = await enrollComputer("Desk", root);
     const key = line.slice(line.indexOf("ssh-ed25519"));
     const hostKey = publicComputerKey(key);
-    expect(computerKeyLine("Linuxbox", key)).toContain("phren-computer:Linuxbox");
+    expect(computerKeyLine("Devbox", key)).toContain("phren-computer:Devbox");
     const file = path.join(root, "hooks.yaml");
     await writeFile(file, JSON.stringify({ version: 1, computers: [{ name: "Desk", address: "desk.example", username: "sam", hostKey }] }), { mode: 0o600 });
     const [peer] = await hookPeers(root);

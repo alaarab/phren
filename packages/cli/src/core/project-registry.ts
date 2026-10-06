@@ -506,7 +506,7 @@ export function ensureProjectScaffold(
  *
  * 1. **Same source path.** Another project already points at this exact
  *    directory — unambiguous, reuse it whatever it is called.
- * 2. **Same canonical slug.** `max4liveplugins` vs `max4live-plugins`: the same
+ * 2. **Same canonical slug.** `audioplugins` vs `audio-plugins`: the same
  *    repo spelled two ways. Only reused when the existing project has no source
  *    path recorded, or records this one — if it points somewhere else it is a
  *    genuinely different project that merely slugs alike, and both are kept.

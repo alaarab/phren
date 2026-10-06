@@ -229,8 +229,7 @@ describe("task lifecycle task proactivity gating", () => {
     });
   }
 
-  // 2026-09-28: a worker launched with its brief as the first prompt filed that
-  // prompt as a task in the real store (bid:11114198). The dispatch tracks it.
+  // A launch brief is already tracked by its dispatch and must not become another task.
   it.each([
     "Read and follow the brief in /tmp/phren test/brief's.md",
     "Read and follow the brief in /home/me/.local/share/phren/bridge/briefs/3f0e9c2a-0000-4000-8000-000000000001/brief.md",
@@ -246,7 +245,7 @@ describe("task lifecycle task proactivity gating", () => {
   });
 
   it.each([
-    "Investigate ticket 43062 — Power Portal reports tile not loading",
+    "Investigate ticket 12345 — Demo Portal reports panel not loading",
     "Update the regex in src/utils.ts to handle empty input",
   ])("substance gate accepts a real prompt: %s", (prompt) => {
     process.env.PHREN_PROACTIVITY_TASKS = "high";

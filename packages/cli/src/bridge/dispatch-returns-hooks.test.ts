@@ -313,7 +313,7 @@ describe("the worker's Hook answering from turn events", () => {
   });
 
   it("returns a turn that ended announcing a next step, or with uncommitted work and no PR, as needs-you", async () => {
-    // hook-permission-mode (OpenCode, Linuxbox, 2026-09-30) returned done on
+    // hook-permission-mode (OpenCode, Devbox, 2026-09-30) returned done on
     // this reply with nothing run after it, and its pane was closed.
     record = turn(["UserPromptSubmit"], ["Stop", { reply: "The worktree lacks node_modules. Let me install dependencies." }]);
     const announced = await ask();
@@ -445,7 +445,7 @@ describe("the worker's Hook answering from turn events", () => {
 
 function receipt(overrides: Partial<Receipt> = {}): Receipt {
   const at = new Date(0).toISOString();
-  return { id: "40000000-0000-4000-8000-000000000001", computer: "Linuxbox", project: "phren", harness: "claude", label: "parser checks",
+  return { id: "40000000-0000-4000-8000-000000000001", computer: "Devbox", project: "phren", harness: "claude", label: "parser checks",
     createdAt: at, updatedAt: at, state: "accepted", target, ...overrides } as Receipt;
 }
 

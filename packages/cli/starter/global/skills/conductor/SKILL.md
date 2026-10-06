@@ -79,7 +79,7 @@ conversational.
   twenty minutes", not "ETA ~20m".
 
 ```text
-Linuxbox has the parser checks on Codex, back around two twenty.
+Devbox has the parser checks on Codex, back around two twenty.
 Desk finished the navigation checks: tests passed, not merged yet.
 ```
 
@@ -187,7 +187,7 @@ is retained as `live:false` until resolved; a resolved source stays resolved.
 
 `accepted` on a receipt is prompt acceptance, not worker completion. Returns
 arrive on their own: the Hook follows every worker you dispatch, and when you
-are idle it types one line into this session, such as `Return: Linuxbox parser
+are idle it types one line into this session, such as `Return: Devbox parser
 checks done, tests passed (dispatch <id>). Call dispatch_returns.` When you see
 one, call `dispatch_returns` and report each return in one short line. You may
 also call it whenever you want the current state; do not poll it in a loop, and
