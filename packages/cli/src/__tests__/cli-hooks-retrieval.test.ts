@@ -42,19 +42,19 @@ describe("rankResults", () => {
         "sampleatlas",
         "tasks.md",
         "task",
-        `# task\n- ${longTaskPrefix}\n- Route alerts to an external webhook instead of Discord for monitors`
+        `# task\n- ${longTaskPrefix}\n- Route alerts to an external webhook instead of Slack for monitors`
       ),
       makeDocRow(
         "sampleportal",
         "FINDINGS.md",
         "findings",
-        "## 2025-06-01\n- Discord notifications exist for project reports"
+        "## 2025-06-01\n- Slack notifications exist for project reports"
       ),
       makeDocRow(
         "sampleops",
-        "restart-ableton.md",
+        "restart-renderer.md",
         "skill",
-        "Restart Ableton when a monitoring session hangs"
+        "Restart the renderer when a preview session hangs"
       ),
     ];
 
@@ -66,7 +66,7 @@ describe("rankResults", () => {
       tmpPhren,
       null as any,
       undefined,
-      "alerts to external webhook instead of discord"
+      "alerts to external webhook instead of slack"
     );
 
     expect(ranked.some((row) => row.type === "task")).toBe(true);
@@ -148,7 +148,7 @@ describe("applyRelevanceFloor", () => {
     return { project, filename, type, content, path: `/tmp/${project}/${filename}` };
   }
 
-  const KEYWORDS = "webhook discord alerts monitor";
+  const KEYWORDS = "webhook slack alerts monitor";
 
   it("drops a doc with zero query overlap (priors-only ranking noise)", () => {
     const rows = [makeDocRow("zeta", "notes.md", "findings", "The quick brown fox jumps over the lazy dog")];
@@ -158,7 +158,7 @@ describe("applyRelevanceFloor", () => {
 
   it("keeps a doc whose text actually matches the prompt", () => {
     const rows = [
-      makeDocRow("zeta", "notes.md", "findings", "Route alerts to an external webhook instead of discord for monitors"),
+      makeDocRow("zeta", "notes.md", "findings", "Route alerts to an external webhook instead of slack for monitors"),
     ];
     const kept = applyRelevanceFloor(rows, KEYWORDS, null, null);
     expect(kept).toHaveLength(1);
@@ -174,16 +174,16 @@ describe("applyRelevanceFloor", () => {
   it("holds a canonical doc for the detected project to the same bar as any other", () => {
     const rows = [makeDocRow("myapp", "AGENTS.md", "canonical", "unrelated project overview text")];
     expect(applyRelevanceFloor(rows, KEYWORDS, null, "myapp")).toHaveLength(0);
-    const matching = [makeDocRow("myapp", "AGENTS.md", "canonical", "- Alerts go to the discord webhook.")];
+    const matching = [makeDocRow("myapp", "AGENTS.md", "canonical", "- Alerts go to the slack webhook.")];
     expect(applyRelevanceFloor(matching, KEYWORDS, null, "myapp")).toHaveLength(1);
   });
 
   it("needs two keywords in one bullet, not scattered across a file", () => {
     const archive = makeDocRow("other", "reference/topics/ops.md", "reference",
-      "- The webhook retries three times.\n- Discord rate limits bursts.\n- Alerts page the on-call.");
+      "- The webhook retries three times.\n- Slack rate limits bursts.\n- Alerts page the on-call.");
     expect(applyRelevanceFloor([archive], KEYWORDS, null, "myapp")).toHaveLength(0);
     const together = makeDocRow("other", "reference/topics/ops.md", "reference",
-      "- Unrelated bullet.\n- Discord alerts go through the webhook proxy.");
+      "- Unrelated bullet.\n- Slack alerts go through the webhook proxy.");
     expect(applyRelevanceFloor([together], KEYWORDS, null, "myapp")).toHaveLength(1);
   });
 

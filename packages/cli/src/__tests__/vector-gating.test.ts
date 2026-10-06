@@ -75,7 +75,7 @@ describe("searchDocumentsAsync vector gating", () => {
   ] as [string, DbRow[]][])("runs vector fallback when lexical retrieval is %s", async (_label, rows) => {
     const db = makeDb(rows);
 
-    await searchDocumentsAsync(db, "\"webhook\"", "external webhook alerts discord", "external webhook alerts discord", null, true, "/tmpphren");
+    await searchDocumentsAsync(db, "\"webhook\"", "external webhook alerts slack", "external webhook alerts slack", null, true, "/tmpphren");
 
     expect(vectorFallback).toHaveBeenCalledOnce();
   });

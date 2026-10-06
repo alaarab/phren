@@ -34,16 +34,16 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt relevance", () => {
   beforeAll(() => {
     tmp = makeTempDir("hook-prompt-relevance-");
     store = path.join(tmp.path, ".phren");
-    workRepo = path.join(tmp.path, "Projects", "AudioPlugins");
+    workRepo = path.join(tmp.path, "Projects", "MyProject");
     fs.mkdirSync(path.join(workRepo, ".git"), { recursive: true });
-    const projects = ["global", "phren", "toolbridge", "designstudio", "stockview", "audioplugins"];
+    const projects = ["global", "phren", "toolbridge", "designstudio", "stockview", "myproject"];
     write("profiles/personal.yaml", `name: personal\nprojects:\n${projects.map(name => `  - ${name}`).join("\n")}\n`);
     write("toolbridge/FINDINGS.md", "# toolbridge Findings\n\n- Each agent tool call in toolbridge records a sample event before execution.\n- The sample registry knows each agent by its session key.\n");
     write("designstudio/FINDINGS.md", "# designstudio Findings\n\n- The studio agent assigns sample render jobs to workers and reads their results.\n- Other studio agents know which sample render job is next.\n");
     write("phren/FINDINGS.md", "# phren Findings\n\n- The demo agent lists sessions from a sample registry before assigning jobs.\n");
     write("stockview/FINDINGS.md", "# stockview Findings\n\n- [pitfall] Deploying stockview.example.com: scripts/deploy.sh is the only deploy path; it checks, packages and uploads the demo.\n");
-    write("audioplugins/reference/topics/audio.md", "# audio\n\n" + Array.from({ length: 40 }, (_, i) =>
-      `- Audio device ${i}: push the buffer size on main thread before the next audio callback.`).join("\n") + "\n");
+    write("myproject/reference/topics/rendering.md", "# rendering\n\n" + Array.from({ length: 40 }, (_, i) =>
+      `- Render device ${i}: push the frame size on main thread before the next render callback.`).join("\n") + "\n");
     write("global/FINDINGS.md", "# global Findings\n\n- Push sample notes to main once both demo checks finish.\n");
     // A store's everyday words: agents, pushes, main, knowing, in note after
     // note, as in any real store. That is what makes them common.

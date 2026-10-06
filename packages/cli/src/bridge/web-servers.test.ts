@@ -65,7 +65,7 @@ describe("webServers", () => {
     const nonce = randomUUID();
     server = createServer((_req, res) => {
       res.setHeader("content-type", "text/html"); res.setHeader("x-test-nonce", nonce);
-      res.end("<html><title>Alastack &amp; Co</title></html>");
+      res.end("<html><title>Acme &amp; Co</title></html>");
     });
     // Only the ordering test needs a port below the ephemeral range; the others
     // take the OS's pick, which no other socket can already hold.
@@ -83,13 +83,13 @@ describe("webServers", () => {
   it("reads listeners from ss when lsof is not installed", async () => {
     answer({ ss: { stdout: `${ssLine(port, "bun", 42)}\n` } });
     const found = await webServers();
-    expect(found).toEqual([{ name: "Alastack & Co", port, origin: `http://127.0.0.1:${port}`, process: "bun", pid: 42 }]);
+    expect(found).toEqual([{ name: "Acme & Co", port, origin: `http://127.0.0.1:${port}`, process: "bun", pid: 42 }]);
   });
 
   it("falls back to lsof when ss is missing", async () => {
     answer({ lsof: { stdout: `p42\ncbun\nn*:${port}\n` } });
     const found = await webServers();
-    expect(found).toEqual([{ name: "Alastack & Co", port, origin: `http://127.0.0.1:${port}`, process: "bun", pid: 42 }]);
+    expect(found).toEqual([{ name: "Acme & Co", port, origin: `http://127.0.0.1:${port}`, process: "bun", pid: 42 }]);
   });
 
   it("probes well-known ports before ephemeral ones so a browser cannot crowd out a dev server", async () => {

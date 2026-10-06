@@ -190,13 +190,13 @@ describe("live reply previews", () => {
     expect(claudePanePreview("❯ Explain this\n⏺ Let me look.\n⏺ Bash(ls -la)\n  ⎿ file\n⏺ phren - search_knowledge (MCP)(query: \"x\")\n✻ Pondering… (3s)\n❯", "Explain this"))
       .toBe("Let me look.");
     // Collapsed tool groups and the titled rule above the input box are chrome.
-    expect(claudePanePreview("❯ Explain this\n⏺ Reading now.\n⏺ Calling phren, running 1 shell command…\n  ⎿  $ ls\n✽ Precipitating… (49s)\n───── Claude sesh in herdr ─\n❯\n─────", "Explain this"))
+    expect(claudePanePreview("❯ Explain this\n⏺ Reading now.\n⏺ Calling phren, running 1 shell command…\n  ⎿  $ ls\n✽ Precipitating… (49s)\n───── Docs refresh ─\n❯\n─────", "Explain this"))
       .toBe("Reading now.");
     // Claude's sub-agent group: a running line and its tree never reach the preview.
     expect(claudePanePreview("❯ Explain this\n⏺ Starting the first wave.\n⏺ Running 2 agents…\n   ├─ Plan 1.4: failures · 0 tool uses\n   └─ Plan 1.5: tests · 0 tool uses\n✻ Spinning… (54s)\n❯", "Explain this"))
       .toBe("Starting the first wave.");
     // A narrow pane: the titled rule keeps one dash, and a running call carries a suffix.
-    expect(claudePanePreview("❯ Explain this\n⏺ Filing it:\n⏺ Calling phren… (ctrl+o to expand)\n✢ Crunching… (26s)\n Claude sesh in herdr on pjren js not in co… ─\n❯\n─────", "Explain this"))
+    expect(claudePanePreview("❯ Explain this\n⏺ Filing it:\n⏺ Calling phren… (ctrl+o to expand)\n✢ Crunching… (26s)\n Docs refresh on the release branch not in co… ─\n❯\n─────", "Explain this"))
       .toBe("Filing it:");
     // A narrow pane wraps the next call's description; its command under
     // "⎿" wraps too. Neither is reply text (seen on the phone, 2026-09-24).

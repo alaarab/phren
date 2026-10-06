@@ -460,9 +460,9 @@ describe("Scheduler", () => {
 
 describe("a scheduled turn that finished", () => {
   const target = { workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p1" };
-  const report = "Reviewed the open SR requests.\n\n- Two need a reply\n- One is resolved";
+  const report = "Reviewed the open pull requests.\n\n- Two need a reply\n- One is resolved";
   const claudeLines = (reply: string) => [
-    JSON.stringify({ type: "user", message: { role: "user", content: "Review the SR requests." } }),
+    JSON.stringify({ type: "user", message: { role: "user", content: "Review the open pull requests." } }),
     JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }], stop_reason: "tool_use" } }),
     JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } }),
     JSON.stringify({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: reply }], stop_reason: null } }),
