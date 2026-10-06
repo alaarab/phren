@@ -864,10 +864,6 @@ Hook looks for it, per request, in this order:
 2. `~/.local/share/phren/bridge/elevenlabs.json`, `{"apiKey": "…"}`, mode 600.
    Like `apns.json`, it is machine config: it never goes into the synced store,
    and a file other users can read is ignored.
-3. Once, when that file doesn't exist: `elevenlabs_api_key` in
-   `~/.config/mina-trailer.json`, the old location. The Hook copies it into
-   `elevenlabs.json` with mode 600 and reads only the new file after that. The
-   old file is left as it is.
 
 The Hook runs as a LaunchAgent or systemd service and doesn't see your shell's
 environment, so store the key in the file:

@@ -26,12 +26,12 @@ from keeps its own copy.
 
 ```yaml
 projects:
-  hub:
+  example-project:
     default: ask                  # release actions not listed below
     maxPermissionMode: auto-edits # optional
-  mina:
+  my-app:
     actions: { app-store: go }
-    note: Owner authorized App Store work on 2026-09-29.
+    note: App Store work approved.
 updatedAt: 2026-09-29T17:00:00.000Z
 updatedBy: cli
 ```
@@ -41,9 +41,8 @@ Release-type actions are `merge`, `publish`, `deploy`, `app-store` and
 (`go` unless set) covers the actions it does not list. A project not in the file
 is `go` for everything: the policy restricts only what it names.
 
-Without a file, the Hook uses built-in defaults: `hub` and `safety` are
-ask-first for every release action, and `mina` is `go` for `app-store`. The
-first write saves those defaults to the file along with the change.
+Without a file, nothing is restricted: every project is `go` for every release
+action until the first write creates the file.
 
 **Ask-first ceiling.** A project with any `ask` action lowers the #236
 permission ceiling for workers an agent dispatches there: its own
@@ -86,17 +85,17 @@ session is not checked yet.
 
 ```sh
 phren authority list
-phren authority show hub
-phren authority set hub --default ask --max-permission-mode auto-edits
-phren authority set mina --go app-store --note "Owner authorized App Store work on 2026-09-29."
-phren authority clear hub
-phren authority confirm hub merge,deploy --minutes 30
+phren authority show example-project
+phren authority set example-project --default ask --max-permission-mode auto-edits
+phren authority set my-app --go app-store --note "App Store work approved."
+phren authority clear example-project
+phren authority confirm example-project merge,deploy --minutes 30
 ```
 
 `show` prints the project's entry as JSON; its `line` is the sentence a
 conductor quotes in a brief, for example:
 
-> Release authority for hub (owner policy): ask-first for merge, publish,
+> Release authority for example-project (owner policy): ask-first for merge, publish,
 > deploy, app-store, github-admin; dispatched workers start at most in
 > auto-edits.
 

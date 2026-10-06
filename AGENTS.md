@@ -83,7 +83,7 @@ Outside the pnpm workspace:
 | `packages/cli/src/bridge/computers.ts` | Computer enrollment: creates or reuses the ed25519 dispatch key and prints or accepts the `restrict,pty` `authorized_keys` line. |
 | `packages/cli/src/bridge/peers.ts` | The Hook's verified SSH peer directory (`hooks.yaml`, pinned host keys, at most 32 peers) and one bounded OpenSSH process per request through `phren-hook v1 pipe`. |
 | `packages/cli/src/bridge/codex-threads.ts` | Codex 0.155 thread-history compatibility: materializes `thread_history_1.sqlite` into a rollout-shaped JSONL so existing transcript readers keep working, and flags a working pane whose history stopped advancing (`threadHealth`). |
-| `packages/cli/src/bridge/speech.ts` | `POST /v1/speech` for the phone's talk mode: ElevenLabs streaming TTS with the key read from `~/.config/mina-trailer.json` and never returned; failures mapped to fixed coded errors. |
+| `packages/cli/src/bridge/speech.ts` | `POST /v1/speech` for the phone's talk mode: ElevenLabs streaming TTS with the key from `ELEVENLABS_API_KEY` or the Hook's `elevenlabs.json` (`speech-key.ts`), never returned; failures mapped to fixed coded errors. |
 | `packages/cli/src/bridge/resources.ts` | `GET /v1/resources` and the overview socket's `resources` frames: load against cores, memory, home-volume disk, battery, uptime, and heavy jobs (simulators, emulators, xcodebuild, Gradle, agent workers, anything holding half a core) attributed to their nearest heavy ancestor and the pane that started them; gauge `pressure`, `level` and warnings (disk < 10 GB, load > 2x cores). |
 | `packages/cli/src/computers/` | The memory-free surface over the Hook: `phren computers`, `phren usage` and the `phren computers mcp` stdio server (`list_computers`, `get_resources`, `pick_computer`, `get_usage`). Commands are `standalone` in the registry, so dispatch never finds or activates a store. |
 | `packages/cli/src/bridge/models.ts` | Harness model catalogues: Codex app-server, Claude Code's cached `/model` catalogue with client-version filtering and a built-in fallback, and `opencode models`, cached by `ModelCatalog`. |
@@ -135,3 +135,14 @@ Note: `reference/topics/` is a *runtime* location inside a user's `.phren/<proje
 ## Owner development and release workflow
 
 Feature PRs run builds, lint and docs only. Tests are deferred, never reported as passed. Consolidate the requested features, then dispatch CI on the exact release commit with `release_candidate=true` once. Publication requires that successful full RC run on the same commit and reuses its evidence. No per-feature tests or redundant manual native jobs. Preserve running workers and source pins.
+
+<!-- BEGIN:turborepo-agent-rules -->
+
+# This is NOT the Turborepo you know
+
+Turborepo configuration, task behavior, and CLI commands can vary between installed versions and may differ from your training data. Resolve the `turbo` package from this file's directory or relevant workspace; in monorepos, it may not be visible from the repository root. For example, run `node -p "require.resolve('turbo/package.json')"` from a workspace that depends on `turbo`.
+
+Read `docs/README.md` inside that installed package first, then read the relevant pages from its `docs/` directory before changing Turborepo configuration or commands. Heed deprecation notices. These bundled docs match the installed package version and are available without network access.
+
+This block is written and re-added by `turbo` before repository-scoped commands when an AI agent is detected. In the Turborepo source repository, its template is defined in `crates/turborepo-cli/src/cli/agent_guidance.rs`. Removing the managed block while updates are enabled means a later qualifying invocation will add it again. Set `"agentGuidance": false` in the root `turbo.json` or `turbo.jsonc` to opt out; this does not remove an existing block. Keep the block committed with your work to avoid an uncommitted change on the next agent invocation.
+<!-- END:turborepo-agent-rules -->

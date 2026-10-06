@@ -40,13 +40,8 @@ const fileSchema = z.object({
 }).strict();
 export type AuthorityFile = z.infer<typeof fileSchema>;
 
-/** Used until the owner first writes the policy: hub and safety are ask-first,
- * and Mina is go for App Store work (the owner's word, 2026-09-29). */
-export const DEFAULT_AUTHORITY: AuthorityFile = { projects: {
-  hub: { default: "ask" },
-  safety: { default: "ask" },
-  mina: { actions: { "app-store": "go" }, note: "Owner authorized App Store work on 2026-09-29." },
-} };
+/** Used until the owner first writes the policy: no project is restricted. */
+export const DEFAULT_AUTHORITY: AuthorityFile = { projects: {} };
 
 /** The permission ceiling of a project with any ask-first action that names none. */
 export const ASK_FIRST_PERMISSION_MODE: PermissionMode = "auto-edits";
