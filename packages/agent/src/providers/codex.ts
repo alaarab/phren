@@ -6,7 +6,7 @@ import type { LlmProvider, LlmMessage, AgentToolDef, LlmResponse, ContentBlock, 
 import { IncompleteStreamError, toolResultText } from "./types.js";
 import { getAccessToken } from "./codex-auth.js";
 import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
-import { wireReasoningEffort } from "./openai-compat.js";
+import { wireAdvertisedReasoningEffort } from "./openai-compat.js";
 import type { ReasoningEffort } from "../models.js";
 import { lookupContextWindow, lookupMaxOutputTokens, modelSupportsVision } from "../models.js";
 
@@ -24,10 +24,10 @@ export function toResponsesTools(tools: AgentToolDef[]) {
 }
 
 /** Convert our messages to Responses API input format. Exported for tests. */
-export function toResponsesInput(messages: LlmMessage[], vision = false) {
+export function toResponsesInput(messages: LlmMessage[], vision = false, providerName = PROVIDER_NAME) {
   const input: Record<string, unknown>[] = [];
 
-  for (const msg of stripForeignReasoning(messages, PROVIDER_NAME)) {
+  for (const msg of stripForeignReasoning(messages, providerName)) {
     if (msg.role === "user") {
       if (typeof msg.content === "string") {
         input.push({
@@ -140,7 +140,7 @@ function reasoningSummaryText(item: Record<string, unknown>): string {
 }
 
 /** Parse non-streaming Responses API output into our ContentBlock format. Exported for tests. */
-export function parseResponsesOutput(data: Record<string, unknown>): LlmResponse {
+export function parseResponsesOutput(data: Record<string, unknown>, providerName = PROVIDER_NAME): LlmResponse {
   debugLog("parseResponsesOutput input", data);
 
   // The Responses API may return output at top-level or nested under a "response" key.
@@ -186,7 +186,7 @@ export function parseResponsesOutput(data: Record<string, unknown>): LlmResponse
         content.push({
           type: "reasoning",
           text: reasoningSummaryText(item),
-          provider: PROVIDER_NAME,
+          provider: providerName,
           ...(typeof item.id === "string" ? { id: item.id } : {}),
           ...(typeof encrypted === "string" ? { encrypted_content: encrypted } : {}),
         });
@@ -239,7 +239,7 @@ export class CodexProvider implements LlmProvider {
       // cannot round-trip (chatStream already requested it; chat() didn't).
       include: ["reasoning.encrypted_content"],
     };
-    const effort = wireReasoningEffort(this.name, this.model, this.reasoningEffort);
+    const effort = wireAdvertisedReasoningEffort(this.name, this.model, this.reasoningEffort);
     if (effort) body.reasoning = { effort };
     if (tools.length > 0) {
       body.tools = toResponsesTools(tools);
@@ -259,7 +259,7 @@ export class CodexProvider implements LlmProvider {
       stream: true,
       include: ["reasoning.encrypted_content"],
     };
-    const effort = wireReasoningEffort(this.name, this.model, this.reasoningEffort);
+    const effort = wireAdvertisedReasoningEffort(this.name, this.model, this.reasoningEffort);
     if (effort) body.reasoning = { effort };
     if (tools.length > 0) {
       body.tools = toResponsesTools(tools);

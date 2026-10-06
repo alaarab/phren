@@ -283,7 +283,7 @@ also take an optional `permissionMode` (`supervised`, `auto-edits`, `auto` or
 sandbox settings, and OpenCode, Copilot, phren and conductors are refused with 400
 before any pane exists. `kind` is `codex`, `claude`, `copilot`, `opencode` or
 `phren` (phren's own agent, started as `phren agent -i`, with `model` as
-`--model` and `effort` as `--reasoning`, `minimal` as `low`; a dispatched brief
+`--model` and `effort` as `--reasoning`; a dispatched brief
 is typed after it starts, since its TUI takes no first prompt). For `phren`
 only, `mode: "chat"` starts a quick chat (`--mode chat`: no tools, its memory
 read into the prompt up front) and `resumeSession: "<session id>"` continues

@@ -1,0 +1,26 @@
+{
+  "data": [
+    {
+      "id": "claude-sonnet-5",
+      "display_name": "Claude Sonnet 5",
+      "context_window": 1000000,
+      "max_tokens": 32768,
+      "capabilities": {
+        "thinking": {
+          "types": {
+            "adaptive": { "supported": true }
+          }
+        },
+        "effort": {
+          "supported": true,
+          "low": { "supported": true },
+          "medium": { "supported": true },
+          "high": { "supported": true },
+          "xhigh": { "supported": true },
+          "max": { "supported": false }
+        }
+      }
+    }
+  ],
+  "has_more": false
+}

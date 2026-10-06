@@ -1,0 +1,8 @@
+{
+  "data": [
+    { "id": "gpt-6.1-sol", "owned_by": "openai" },
+    { "id": "text-embedding-3-small", "owned_by": "openai" },
+    { "id": "gpt-4o-transcribe", "owned_by": "openai" },
+    { "id": "gpt-image-1", "owned_by": "openai" }
+  ]
+}

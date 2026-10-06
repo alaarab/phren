@@ -1,3 +1,4 @@
+import { moveReasoning } from "../multi/picker-navigation.js";
 /**
  * Ink-based TUI entry point.
  * Bridges the agent loop (TurnHooks) to the React component tree.
@@ -18,7 +19,7 @@ import * as os from "os";
 import * as fs from "node:fs";
 import { execSync } from "node:child_process";
 import * as path from "node:path";
-import { loadInputMode, saveInputMode, savePermissionMode, loadTheme, saveTheme, loadInputHistory, saveInputHistory } from "../settings.js";
+import { loadInputMode, saveInputMode, savePermissionMode, loadTheme, saveTheme, loadInputHistory, saveInputHistory, saveModelSelection } from "../settings.js";
 import { contextTokens } from "../context/usage.js";
 import { READ_ONLY_TOOLS } from "../permissions/checker.js";
 import type { ApprovalInfo } from "./components/ApprovalPanel.js";
@@ -30,8 +31,7 @@ import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
 import { persistFork } from "../session/persist.js";
 import { getTheme, THEME_NAMES, type Theme } from "./themes.js";
-import { getAvailableModels, type PickerResult } from "../multi/model-picker.js";
-import { REASONING_LEVELS } from "../models.js";
+import { discoverAvailableModels, type PickerResult } from "../multi/model-picker.js";
 import type { ModelPickerState } from "./components/ModelPicker.js";
 import type { ListPickerState } from "./components/ListPicker.js";
 
@@ -323,15 +323,17 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     resolve?.(index);
   }
 
-  function openModelPicker(): Promise<PickerResult | null> {
+  async function openModelPicker(): Promise<PickerResult | null> {
     const providerName = config.provider.name;
     if (!providerName) return Promise.resolve(null);
     const currentModel = (config.provider as { model?: string }).model;
-    const models = getAvailableModels(providerName, currentModel);
+    const models = await discoverAvailableModels(providerName, currentModel);
     if (models.length === 0) return Promise.resolve(null);
-    let cursor = models.findIndex((m) => m.id === currentModel);
+    let cursor = models.findIndex((m) => m.provider === providerName && m.id === currentModel);
     if (cursor < 0) cursor = 0;
-    const reasoning = models.map((m) => m.id === currentModel ? (config.provider.reasoningEffort ?? m.reasoning) : m.reasoning);
+    const reasoning = models.map((m) => m.provider === providerName && m.id === currentModel && config.provider.reasoningEffort && m.reasoningRange.includes(config.provider.reasoningEffort)
+      ? config.provider.reasoningEffort
+      : m.reasoning);
     modelPicker = { models, cursor, reasoning };
     update();
     return new Promise((resolve) => { modelPickerResolve = resolve; });
@@ -356,15 +358,8 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
     if (!modelPicker) return;
     const model = modelPicker.models[modelPicker.cursor];
     if (model.reasoningRange.length === 0) return;
-    const current = modelPicker.reasoning[modelPicker.cursor];
-    const index = current ? REASONING_LEVELS.indexOf(current) : -1;
-    const rangeIndices = model.reasoningRange.map((level) => REASONING_LEVELS.indexOf(level!));
-    const candidate = delta > 0
-      ? rangeIndices.find((ri) => ri > index)
-      : [...rangeIndices].reverse().find((ri) => ri < index);
-    if (candidate === undefined) return;
     const reasoning = [...modelPicker.reasoning];
-    reasoning[modelPicker.cursor] = REASONING_LEVELS[candidate];
+    reasoning[modelPicker.cursor] = moveReasoning(model.reasoningRange, reasoning[modelPicker.cursor], delta);
     modelPicker = { ...modelPicker, reasoning };
     update();
   }
@@ -372,7 +367,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
   function selectModelPicker() {
     if (!modelPicker) return;
     const model = modelPicker.models[modelPicker.cursor];
-    const result: PickerResult = { model: model.id, reasoning: modelPicker.reasoning[modelPicker.cursor] };
+    const result: PickerResult = { provider: model.provider, model: model.id, reasoning: modelPicker.reasoning[modelPicker.cursor] };
     closeModelPicker(result);
   }
 
@@ -465,6 +460,7 @@ export async function startInkTui(config: AgentConfig, spawner?: AgentSpawner): 
         const { resolveProvider } = await import("../providers/resolve.js") as typeof import("../providers/resolve.js");
         const newProvider = resolveProvider(result.provider ?? config.provider.name, result.model || undefined, undefined, result.reasoning ?? undefined);
         config.provider = newProvider;
+        saveModelSelection({ provider: newProvider.name, model: (newProvider as { model?: string }).model, reasoning: newProvider.reasoningEffort }, process.cwd());
         config.costTracker?.reprice((newProvider as { model?: string }).model ?? newProvider.name, newProvider.name, newProvider.baseUrl);
         const { buildSystemPrompt } = await import("../system-prompt.js") as typeof import("../system-prompt.js");
         config.systemPrompt = config.rebuildSystemPrompt

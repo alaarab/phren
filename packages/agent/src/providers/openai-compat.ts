@@ -1,7 +1,7 @@
 /** Shared OpenAI-compatible message/tool conversion used by openrouter, codex, and openai providers. */
 import type { LlmMessage, AgentToolDef, LlmResponse, ContentBlock, StreamDelta, TokenUsage } from "./types.js";
 import { IncompleteStreamError, RetryableProviderError, withPartialUsage, type InvalidToolCall } from "./types.js";
-import type { ReasoningEffort } from "../models.js";
+import { getModelMetadata, type ReasoningEffort } from "../models.js";
 import { stripForeignReasoning, IMAGE_OMITTED_MARKER } from "./history.js";
 
 /** Convert Anthropic tool defs to OpenAI function format. */
@@ -33,10 +33,13 @@ export function replaysAllReasoning(providerName: string | undefined, model: str
  */
 const DEEPSEEK_EFFORT: Record<ReasoningEffort, string> = {
   none: "none",
+  minimal: "low",
   low: "low",
   medium: "high",
   high: "high",
   xhigh: "max",
+  max: "max",
+  ultra: "max",
 };
 
 /**
@@ -63,6 +66,27 @@ export function wireReasoningEffort(
   if (isDeepSeekRoute(providerName, model)) return DEEPSEEK_EFFORT[effort];
   if (effort === "none" && !acceptsNoReasoning(model)) return undefined;
   return effort;
+}
+
+/**
+ * A discovered catalogue may know that reasoning is supported without
+ * advertising every effort. In that case the picker offers none and the
+ * request must not invent a level. Built-in compatibility metadata retains
+ * the historical wire mapping for offline use.
+ */
+export function wireAdvertisedReasoningEffort(
+  providerName: string | undefined,
+  model: string | undefined,
+  effort: ReasoningEffort | undefined,
+): string | undefined {
+  if (!effort) return undefined;
+  const metadata = getModelMetadata(providerName, model ?? "");
+  if (metadata?.catalogSource && effort !== "none") {
+    if (metadata.reasoningRange.length === 0 || !metadata.reasoningRange.includes(effort)) return undefined;
+  } else if (metadata?.reasoningRange.length && effort !== "none" && !metadata.reasoningRange.includes(effort)) {
+    return undefined;
+  }
+  return wireReasoningEffort(providerName, model, effort);
 }
 
 /**

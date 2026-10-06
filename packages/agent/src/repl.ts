@@ -12,7 +12,7 @@ import { createSession, runTurn, type AgentSession } from "./agent-loop.js";
 import { handleCommand, resolveSkillGesture, resolveCustomCommand } from "./commands.js";
 import { isMcpPromptCommand, resolveMcpPromptCommand } from "./mcp-prompts.js";
 import { resolveProvider } from "./providers/resolve.js";
-import { loadInputMode } from "./settings.js";
+import { loadInputMode, saveModelSelection } from "./settings.js";
 
 const HISTORY_DIR = path.join(os.homedir(), ".phren-agent");
 const HISTORY_FILE = path.join(HISTORY_DIR, "repl-history.txt");
@@ -98,6 +98,7 @@ export async function startRepl(config: AgentConfig): Promise<AgentSession> {
     promote: config.promote,
     onModelChange: (result: import("./multi/model-picker.js").PickerResult) => {
       config.provider = resolveProvider(result.provider ?? config.provider.name, result.model || undefined, undefined, result.reasoning ?? undefined);
+      saveModelSelection({ provider: config.provider.name, model: (config.provider as { model?: string }).model, reasoning: config.provider.reasoningEffort }, process.cwd());
       config.costTracker?.reprice((config.provider as { model?: string }).model ?? config.provider.name, config.provider.name, config.provider.baseUrl);
       return config.provider;
     },
