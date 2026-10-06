@@ -1,0 +1,20 @@
+{
+  "fetched_at": "2026-10-06T12:00:00Z",
+  "models": [
+    {
+      "slug": "gpt-6.1-sol",
+      "display_name": "GPT-6.1 Sol",
+      "default_reasoning_level": "medium",
+      "supported_reasoning_levels": [
+        { "effort": "low" },
+        { "effort": "medium" },
+        { "effort": "high" },
+        { "effort": "xhigh" },
+        { "effort": "max" },
+        { "effort": "ultra" }
+      ],
+      "context_window": 1048576,
+      "input_modalities": ["text", "image"]
+    }
+  ]
+}

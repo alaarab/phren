@@ -5,7 +5,8 @@ import {
   parseOpenAiResponse,
   parseOpenAiStream,
   replaysAllReasoning,
-  wireReasoningEffort,
+  isDeepSeekRoute,
+  wireAdvertisedReasoningEffort,
 } from "./openai-compat.js";
 import type { ReasoningEffort } from "../models.js";
 import { lookupContextWindow, lookupMaxOutputTokens, modelSupportsVision } from "../models.js";
@@ -30,7 +31,8 @@ export class OpenRouterProvider implements LlmProvider {
 
   private applyReasoning(body: Record<string, unknown>): void {
     if (!this.reasoningEffort) return;
-    const effort = this.reasoningEffort === "xhigh" ? "high" : this.reasoningEffort;
+    const effort = wireAdvertisedReasoningEffort(this.name, this.model, this.reasoningEffort);
+    if (!effort) return;
     body.reasoning = { effort };
   }
 
@@ -146,8 +148,11 @@ export class OpenAiProvider implements LlmProvider {
       messages: this.toMessages(system, messages),
       max_tokens: this.maxOutputTokens,
     };
-    const effort = wireReasoningEffort(this.name, this.model, this.reasoningEffort);
-    if (effort) body.reasoning_effort = effort;
+    const effort = wireAdvertisedReasoningEffort(this.name, this.model, this.reasoningEffort);
+    if (effort) {
+      body.reasoning_effort = effort;
+      if (isDeepSeekRoute(this.name, this.model)) body.thinking = { type: effort === "none" ? "disabled" : "enabled" };
+    }
     if (tools.length > 0) body.tools = toOpenAiTools(tools);
 
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
@@ -173,8 +178,11 @@ export class OpenAiProvider implements LlmProvider {
       stream: true,
       stream_options: { include_usage: true },
     };
-    const effort = wireReasoningEffort(this.name, this.model, this.reasoningEffort);
-    if (effort) body.reasoning_effort = effort;
+    const effort = wireAdvertisedReasoningEffort(this.name, this.model, this.reasoningEffort);
+    if (effort) {
+      body.reasoning_effort = effort;
+      if (isDeepSeekRoute(this.name, this.model)) body.thinking = { type: effort === "none" ? "disabled" : "enabled" };
+    }
     if (tools.length > 0) body.tools = toOpenAiTools(tools);
 
     const res = await fetch(`${this.baseUrl}/chat/completions`, {

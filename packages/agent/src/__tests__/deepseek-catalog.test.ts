@@ -47,7 +47,7 @@ describe("DeepSeek V4.1 Flash catalog", () => {
     it(`${provider} ${model}: 1M context, 393,216 output, low/high/max, $0.15/$0.60 + $0.003 cache`, () => {
       expect(lookupContextWindow(model, provider)).toBe(1_000_000);
       expect(lookupMaxOutputTokens(model, provider)).toBe(393_216);
-      expect(getReasoningRange(provider, model)).toEqual(["low", "high", "xhigh"]);
+      expect(getReasoningRange(provider, model)).toEqual(["low", "high", "max"]);
       expect(lookupPricing(model, provider)).toEqual({
         pricing: { inputPer1M: 0.15, outputPer1M: 0.6, cacheReadPer1M: 0.003 },
         metered: true,
@@ -163,11 +163,11 @@ describe("--context-window and --price-* stay with their model", () => {
 });
 
 describe("DeepSeek reasoning effort mapping", () => {
-  it("normalizes max to xhigh and off/none to none", () => {
-    expect(normalizeReasoningEffort("max")).toBe("xhigh");
+  it("preserves max and normalizes off/none to none", () => {
+    expect(normalizeReasoningEffort("max")).toBe("max");
     expect(normalizeReasoningEffort("none")).toBe("none");
     expect(normalizeReasoningEffort("off")).toBe("none");
-    expect(parseArgs(["--reasoning", "max", "t"]).reasoning).toBe("xhigh");
+    expect(parseArgs(["--reasoning", "max", "t"]).reasoning).toBe("max");
     expect(parseArgs(["--reasoning", "none", "t"]).reasoning).toBe("none");
   });
 

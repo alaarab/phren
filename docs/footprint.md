@@ -281,3 +281,12 @@ Settings reports load failures. Rules only ask or deny and never automatically
 approve. No automatic approval audit file is written. Same-user storage is not
 rollback protected; tampering can remove restrictions only back to baseline.
 See [Approval rules](approval-rules.md).
+
+### Agent provider settings
+
+`phren-agent` reads optional connector overrides from
+`~/.phren-agent/providers.json` (`PHREN_AGENT_PROVIDERS_CONFIG` can relocate it).
+It writes model metadata only to `~/.phren-agent/model-catalog.json` and stores
+the last provider/model/effort per checkout in `~/.phren-agent/settings.json`.
+Existing Codex model cache and OpenCode API-key connections are read in place;
+no credentials are copied to the model cache. See [provider config](agent-providers.md).

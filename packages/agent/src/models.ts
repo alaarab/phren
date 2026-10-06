@@ -1,6 +1,6 @@
 export type ProviderId = "openrouter" | "anthropic" | "openai" | "openai-codex" | "deepseek" | "openai-compat" | "ollama";
-/** "none" turns thinking off where the provider supports that; "max" on the CLI is "xhigh". */
-export type ReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh";
+/** "none" turns thinking off where the provider supports that; max remains distinct from xhigh when advertised. */
+export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 
 export interface ModelPricing {
   inputPer1M: number;
@@ -13,22 +13,50 @@ export interface ModelCatalogEntry {
   id: string;
   provider: ProviderId;
   label: string;
-  contextWindow: number;
-  maxOutputTokens: number;
+  /** Undefined means the provider did not advertise this metadata. */
+  contextWindow?: number;
+  /** Undefined means the provider did not advertise this metadata. */
+  maxOutputTokens?: number;
   reasoningDefault: ReasoningEffort | null;
   reasoningRange: ReasoningEffort[];
+  reasoningMode?: "adaptive" | "budget";
   pricing?: ModelPricing;
   metered?: boolean;
   /** Accepts image input. Absent means text-only (fail closed on images). */
   vision?: boolean;
+  /** Whether this row came from a provider catalogue rather than the fallback table. */
+  catalogSource?: "live" | "cache" | "fallback";
 }
 
 /** Levels the pickers step through ("none" is CLI/env only). */
-export const REASONING_LEVELS: ReasoningEffort[] = ["low", "medium", "high", "xhigh"];
+export const REASONING_LEVELS: ReasoningEffort[] = ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+
+/** Provider-discovered rows are installed here by model-discovery.ts. */
+const discoveredModels = new Map<ProviderId, ModelCatalogEntry[]>();
+
+export function registerDiscoveredModels(provider: ProviderId, entries: ModelCatalogEntry[], source: "live" | "cache" | "fallback"): void {
+  const rows = entries.map((entry) => ({
+    ...entry,
+    provider,
+    catalogSource: source,
+    reasoningRange: [...entry.reasoningRange],
+    pricing: entry.pricing ? { ...entry.pricing } : undefined,
+  }));
+  discoveredModels.set(provider, rows);
+}
+
+export function getDiscoveredModels(provider: ProviderId): ModelCatalogEntry[] | undefined {
+  const rows = discoveredModels.get(provider);
+  return rows?.map((entry) => ({
+    ...entry,
+    reasoningRange: [...entry.reasoningRange],
+    pricing: entry.pricing ? { ...entry.pricing } : undefined,
+  }));
+}
 
 /**
  * DeepSeek V4.1 Flash, direct or through an OpenAI-compatible relay: 1M
- * context, 393,216 max output, effort low/high/max (picker "xhigh" = max).
+ * context, 393,216 max output, effort low/high/max.
  * Off-peak rates; DeepSeek bills 2x at peak (weekdays 01-04 and 06-10 UTC).
  * Checked against https://api-docs.deepseek.com/quick_start/pricing on
  * 2026-10-01: cache hit $0.003 / miss $0.15 / output $0.60 off-peak
@@ -39,7 +67,7 @@ const DEEPSEEK_FLASH = {
   contextWindow: 1_000_000,
   maxOutputTokens: 393_216,
   reasoningDefault: null,
-  reasoningRange: ["low", "high", "xhigh"],
+  reasoningRange: ["low", "high", "max"],
   pricing: { inputPer1M: 0.15, outputPer1M: 0.6, cacheReadPer1M: 0.003 },
 } satisfies Partial<ModelCatalogEntry>;
 
@@ -332,7 +360,7 @@ const BUILTIN_MODELS: Record<ProviderId, ModelCatalogEntry[]> = {
       contextWindow: 1_000_000,
       maxOutputTokens: 65_536,
       reasoningDefault: null,
-      reasoningRange: ["low", "high", "xhigh"],
+      reasoningRange: ["low", "high", "max"],
       pricing: { inputPer1M: 0.66, outputPer1M: 1.98, cacheReadPer1M: 0.022 },
     },
   ],
@@ -489,9 +517,9 @@ export function normalizeProviderId(provider: string | undefined): ProviderId | 
 export function normalizeReasoningEffort(raw: string | null | undefined): ReasoningEffort | undefined {
   if (!raw) return undefined;
   const value = raw.toLowerCase();
-  if (value === "max") return "xhigh";
+  if (value === "max") return "max";
   if (value === "off") return "none";
-  if (value === "none" || value === "low" || value === "medium" || value === "high" || value === "xhigh") return value;
+  if (value === "none" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh") return value;
   return undefined;
 }
 
@@ -504,7 +532,7 @@ export function isUnmeteredEndpoint(baseUrl: string | undefined): boolean {
 }
 
 export function getDefaultModel(provider: ProviderId): string {
-  return BUILTIN_MODELS[provider][0].id;
+  return discoveredModels.get(provider)?.[0]?.id ?? BUILTIN_MODELS[provider][0].id;
 }
 
 export function getBuiltinModels(provider: ProviderId): ModelCatalogEntry[] {
@@ -519,6 +547,8 @@ export function getModelMetadata(provider: string | undefined, model: string): M
   const normalizedProvider = normalizeProviderId(provider);
 
   if (normalizedProvider) {
+    const discovered = discoveredModels.get(normalizedProvider)?.find((entry) => entry.id === model);
+    if (discovered) return discovered;
     const direct = BUILTIN_MODELS[normalizedProvider].find((entry) => entry.id === model);
     if (direct) return direct;
   }
@@ -546,7 +576,7 @@ export function getReasoningRange(provider: string | undefined, model: string): 
 
 export function lookupMaxOutputTokens(model: string, provider?: string): number {
   const metadata = getModelMetadata(provider, model);
-  if (metadata) return metadata.maxOutputTokens;
+  if (metadata?.maxOutputTokens) return metadata.maxOutputTokens;
 
   const lower = model.toLowerCase();
   for (const [prefix, limit] of LEGACY_OUTPUT_LIMITS) {
@@ -557,7 +587,7 @@ export function lookupMaxOutputTokens(model: string, provider?: string): number 
 
 export function lookupContextWindow(model: string, provider?: string): number {
   const metadata = getModelMetadata(provider, model);
-  if (metadata) return metadata.contextWindow;
+  if (metadata?.contextWindow) return metadata.contextWindow;
 
   const lower = model.toLowerCase();
   for (const [prefix, limit] of LEGACY_CONTEXT_LIMITS) {

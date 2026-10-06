@@ -1,0 +1,28 @@
+{
+  "data": [
+    {
+      "id": "openai/gpt-6.1-sol",
+      "name": "OpenAI: GPT-6.1 Sol",
+      "context_length": 1050000,
+      "top_provider": { "max_completion_tokens": 128000 },
+      "architecture": { "input_modalities": ["file", "image", "text"], "output_modalities": ["text"] },
+      "pricing": { "prompt": "0.000001", "completion": "0.000005", "input_cache_read": "0.00000005" },
+      "supported_parameters": ["reasoning_effort", "tools", "tool_choice"]
+    },
+    {
+      "id": "openai/image-only",
+      "name": "OpenAI: Image Only",
+      "architecture": { "input_modalities": ["image"], "output_modalities": ["text"] },
+      "supported_parameters": ["reasoning_effort", "tools"]
+    },
+    {
+      "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "name": "NVIDIA: Nemotron 3 Ultra (free)",
+      "context_length": 1000000,
+      "top_provider": { "context_length": 1000000, "max_completion_tokens": 65536 },
+      "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+      "pricing": { "prompt": "0", "completion": "0" },
+      "supported_parameters": ["reasoning_effort", "tools", "tool_choice"]
+    }
+  ]
+}

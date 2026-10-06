@@ -1,0 +1,7 @@
+{
+  "data": [
+    { "model": "deepseek-chat", "owned_by": "deepseek" },
+    { "model": "deepseek-reasoner", "owned_by": "deepseek" },
+    { "model": "deepseek-v4", "owned_by": "deepseek" }
+  ]
+}
