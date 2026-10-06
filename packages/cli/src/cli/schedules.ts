@@ -49,6 +49,7 @@ async function list(store: string, projectName?: string): Promise<void> {
     for (const schedule of schedules) {
       count++;
       console.log(`${project}  ${schedule.id}  ${schedule.enabled ? "enabled " : "paused  "}  ${schedule.name}`);
+      if (schedule.projects) console.log(`  targets: ${schedule.projects.join(", ")}`);
       console.log(`  ${schedule.computer} · ${schedule.harness}${schedule.model ? `/${schedule.model}` : ""} · ${scheduleDescription(schedule)}`);
     }
   }
@@ -74,6 +75,7 @@ async function add(store: string, args: string[]): Promise<void> {
   const now = new Date().toISOString();
   const schedule: Schedule = {
     id: newScheduleId(file.schedules.map(item => item.id)), name, enabled: true, computer, harness,
+    ...(option(args, "--projects") ? { projects: option(args, "--projects")!.split(",").map(project => project.trim()) } : {}),
     ...(option(args, "--model") ? { model: option(args, "--model") } : {}),
     ...(option(args, "--account") ? { account: option(args, "--account") } : {}), every, prompt, createdAt: now, updatedAt: now,
     ...(option(args, "--at") ? { at: option(args, "--at") } : {}),
@@ -123,8 +125,9 @@ async function hookPost(route: string, data: Json): Promise<Json> {
 async function runNow(project: string | undefined, id: string | undefined): Promise<void> {
   if (!project || !id) throw new Error("Usage: phren schedule run <project> <id>");
   const result = await hookPost("/v1/schedules/run", { project, id });
-  const run = object(result.run);
-  console.log(`Launched schedule ${id} (${String(run.id ?? "run recorded")}).`);
+  const runs = Array.isArray(result.runs) ? result.runs.map(object) : [object(result.run)];
+  for (const run of runs) console.log(`${String(run.project)}: ${String(run.status ?? "launched")} (${String(run.id ?? "run recorded")})${run.reason ? ` — ${String(run.reason)}` : ""}`);
+  if (result.ok === false) throw new Error("Some schedule targets failed to launch; see the per-project results above.");
 }
 
 async function history(args: string[]): Promise<void> {

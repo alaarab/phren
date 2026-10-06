@@ -128,7 +128,7 @@ const PROJECTS_SUBCOMMANDS: Subcommand[] = [
 
 const SCHEDULE_SUBCOMMANDS: Subcommand[] = [
   { name: "list", usage: "phren schedule list [project]", summary: "List scheduled prompts" },
-  { name: "add", usage: "phren schedule add <project> --name <name> --harness <name> --computer <name> [--model <model>] [--account <id>] --every <kind> [timing] (--prompt <text>|--prompt-file <path>)", summary: "Add a scheduled prompt" },
+  { name: "add", usage: "phren schedule add <project> --name <name> --harness <name> --computer <name> [--model <model>] [--account <id>] [--projects <a,b>] --every <kind> [timing] (--prompt <text>|--prompt-file <path>)", summary: "Add a scheduled prompt" },
   { name: "remove", usage: "phren schedule remove <project> <id>", summary: "Remove a scheduled prompt" },
   { name: "enable", usage: "phren schedule enable <project> <id>", summary: "Resume a scheduled prompt" },
   { name: "disable", usage: "phren schedule disable <project> <id>", summary: "Pause a scheduled prompt" },

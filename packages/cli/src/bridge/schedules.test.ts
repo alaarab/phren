@@ -16,6 +16,8 @@ import {
   parseSchedule,
   resumeScheduleRun,
   readScheduleRuns,
+  readScheduleDocument,
+  type ScheduleLaunchContext,
   scheduleSessionRoute,
   watchHerdrRun,
   writeScheduleDocument,
@@ -254,7 +256,7 @@ describe("scheduled startup prompts", () => {
         report = context.blockedStartup!;
         return { launch: { mode: "herdr", server: "default", workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p1" }, completion };
       } });
-    const run = await scheduler.launchNow("demo", "7f3a2c1d");
+    const [run] = await scheduler.launchNow("demo", "7f3a2c1d");
     report("Allow external CLAUDE.md file imports?\n❯ 1. Yes, allow external imports");
     const blocked = await waitForStatus(scheduler, "blocked");
     expect(blocked.blockedStartupPrompt).toContain("Allow external CLAUDE.md file imports?");
@@ -392,15 +394,19 @@ describe("Scheduler", () => {
     expect((await scheduler.history())[0]).toMatchObject({ scheduleId: "7f3a2c1d", project: "demo" });
   });
 
-  it("keeps the newest 2000 history rows", async () => {
+  it("keeps the newest 2000 history rows and complete batches for older open runs", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "phren-schedule-runs-")); temporary.push(root);
     const file = path.join(root, "runs.jsonl");
     const runs = Array.from({ length: 2005 }, (_, index): ScheduleRun => ({ id: `run-${index}`, scheduleId: "7f3a2c1d", project: "demo",
       startedAt: new Date(index * 1000).toISOString(), status: "finished", launch: { mode: "headless" } }));
+    runs[0].status = "running";
+    runs[0].batchId = runs[1].batchId = "open-batch";
     await writeScheduleRuns(file, runs);
     const kept = await readScheduleRuns(file);
-    expect(kept).toHaveLength(2000);
-    expect(kept[0].id).toBe("run-5");
+    expect(kept).toHaveLength(2002);
+    expect(kept[0]).toMatchObject({ id: "run-0", status: "running" });
+    expect(kept[1].id).toBe("run-1");
+    expect(kept[2].id).toBe("run-5");
     expect(kept.at(-1)?.id).toBe("run-2004");
   });
 
@@ -412,7 +418,7 @@ describe("Scheduler", () => {
     const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00.000Z"), store: fixture.store, runsFile: fixture.runs,
       computer: "Desk", push: fakePush(pushes), launch: async () => ({ launch: { mode: "herdr", server: "default", workspaceId: "w1",
         tabId: "w1:t1", paneId: "w1:p1" }, completion }) });
-    const run = await scheduler.launchNow("demo", "7f3a2c1d");
+    const [run] = await scheduler.launchNow("demo", "7f3a2c1d");
     expect(pushes.map(push => push.kind)).toEqual(["scheduleStarted"]);
     expect(pushes[0].route).toBe(scheduleSessionRoute(schedule(), { mode: "herdr", server: "default", workspaceId: "w1",
       tabId: "w1:t1", paneId: "w1:p1" }));
@@ -452,7 +458,7 @@ describe("Scheduler", () => {
     const logs: string[] = [];
     const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00.000Z"), store: fixture.store, runsFile: fixture.runs,
       computer: "Desk", log: message => logs.push(message), launch: async () => ({ launch: { mode: "headless" } }) });
-    const run = await scheduler.launchNow("demo", "7f3a2c1d");
+    const [run] = await scheduler.launchNow("demo", "7f3a2c1d");
     expect(await scheduler.history()).toMatchObject([{ id: run.id, notified: false, notifyReason: "no push config" }]);
     expect(logs).toEqual([expect.stringContaining("no push config")]);
   });
@@ -656,4 +662,149 @@ describe("runs an earlier Hook process left open", () => {
       .toEqual({ status: "failed", reason: "Phren Hook restarted while this run was going, so its end was not observed." });
     expect(watched).toHaveLength(1);
   });
+});
+
+
+describe("multi-project schedules", () => {
+  async function targets(item = schedule({ projects: ["alpha", "beta"], notify: [] })) {
+    const fixture = await storeFixture(item);
+    for (const name of ["alpha", "beta"]) {
+      const directory = path.join(fixture.store, name), source = path.join(fixture.store, `.source-${name}`);
+      await mkdir(directory); await mkdir(source);
+      await writeFile(path.join(directory, "phren.project.yaml"), `sourcePath: ${JSON.stringify(source)}\n`);
+    }
+    return fixture;
+  }
+
+  it.each(["manual", "tick"])("%s launches each authoritative target once with all records durable first", async mode => {
+    process.env.TZ = "UTC";
+    const item = schedule({ projects: ["alpha", "beta"], notify: [], model: "chosen-model", account: "work",
+      every: "once", once: "2026-09-20T09:00:00" });
+    const fixture = await targets(item), calls: ScheduleLaunchContext[] = [];
+    let pending: ScheduleRun[] = [];
+    let reservation: Promise<ScheduleRun[]> | undefined;
+    const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", launch: async context => {
+        calls.push(context);
+        reservation ??= readScheduleRuns(fixture.runs);
+        pending = await reservation;
+        return { launch: { mode: "headless", jobDir: context.cwd } };
+      } });
+    if (mode === "manual") await scheduler.launchNow("demo", item.id); else await scheduler.tick();
+    expect(pending).toMatchObject([{ project: "alpha", scheduleProject: "demo", status: "launched" },
+      { project: "beta", scheduleProject: "demo", status: "launched" }]);
+    expect(new Set(pending.map(run => run.batchId)).size).toBe(1);
+    expect(pending[0].batchId).toBeTruthy();
+    expect(new Set(pending.map(run => run.id)).size).toBe(2);
+    expect(calls.map(call => [call.project, call.cwd, call.projectDir])).toEqual(["alpha", "beta"].map(name =>
+      [name, path.join(fixture.store, `.source-${name}`), path.join(fixture.store, name)]));
+    for (const call of calls) expect(call.schedule).toMatchObject({ prompt: "Run the tests.", model: "chosen-model", account: "work" });
+    expect((await readScheduleDocument(fixture.project)).schedules[0]).toMatchObject({ enabled: false, projects: ["alpha", "beta"] });
+    expect(await scheduler.history({ project: "demo" })).toHaveLength(2);
+    expect(await scheduler.history({ project: "alpha" })).toHaveLength(0);
+    expect((await scheduler.statuses()).schedules[0]).toMatchObject({ project: "demo", running: true, nextRun: null,
+      lastRun: { status: "running" }, lastRuns: [{ project: "alpha" }, { project: "beta" }] });
+    await scheduler.tick();
+    expect(calls).toHaveLength(2);
+  });
+
+  it("refuses an unsynced revision before launching the old owner-only schedule or consuming once", async () => {
+    const fixture = await storeFixture(schedule({ every: "once", once: "2026-09-20T09:00:00", notify: [] }));
+    let launches = 0;
+    const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", launch: async () => { launches++; return { launch: { mode: "headless" } }; } });
+    await expect(scheduler.launchNow("demo", "7f3a2c1d", false, "2026-09-20T09:59:00.125Z"))
+      .rejects.toMatchObject({ status: 409, message: expect.stringContaining("Wait for store sync") });
+    expect(launches).toBe(0);
+    expect(await scheduler.history()).toEqual([]);
+    expect((await readScheduleDocument(fixture.project)).schedules[0]).toMatchObject({ enabled: true,
+      updatedAt: "2026-03-07T16:00:00.000Z" });
+  });
+
+  it.each(["2026-03-07T16:00:00.125Z", "2026-03-07T16:00:00.125000Z", "2026-03-07T09:00:00.125-07:00"])(
+    "accepts the matching schedule instant %s and launches all targets", async expectedUpdatedAt => {
+      const fixture = await targets(schedule({ projects: ["alpha", "beta"], notify: [], updatedAt: "2026-03-07T16:00:00.125Z" }));
+      const launched: string[] = [];
+      const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00Z"), store: fixture.store, runsFile: fixture.runs,
+        computer: "Desk", launch: async context => { launched.push(context.project); return { launch: { mode: "headless" } }; } });
+      const runs = await scheduler.launchNow("demo", "7f3a2c1d", false, expectedUpdatedAt);
+      expect(launched).toEqual(["alpha", "beta"]);
+      expect(runs).toMatchObject([{ project: "alpha", status: "running" }, { project: "beta", status: "running" }]);
+    });
+
+  it("continues after a child fails and refuses overlap during dispatch and while a sibling runs", async () => {
+    const fixture = await targets();
+    let release!: () => void, entered!: () => void, finish!: (outcome: ScheduleRunOutcome) => void;
+    const completion = new Promise<ScheduleRunOutcome>(resolve => { finish = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", launch: async context => {
+        if (context.project === "alpha") { entered(); await gate; throw new Error("alpha cannot start"); }
+        return { launch: { mode: "headless" }, completion };
+      } });
+    const batch = scheduler.launchNow("demo", "7f3a2c1d");
+    await started;
+    await expect(scheduler.launchNow("demo", "7f3a2c1d")).rejects.toMatchObject({ status: 409 });
+    release();
+    expect(await batch).toMatchObject([{ project: "alpha", status: "failed", reason: "alpha cannot start" },
+      { project: "beta", status: "running" }]);
+    await expect(scheduler.launchNow("demo", "7f3a2c1d")).rejects.toMatchObject({ status: 409 });
+    expect((await scheduler.statuses()).schedules[0]).toMatchObject({ running: true, lastRun: { status: "running" } });
+    finish({ status: "finished" });
+    await expect.poll(async () => (await scheduler.statuses()).schedules[0]).toMatchObject({ running: false,
+      lastRun: { status: "failed", reason: "alpha cannot start", finishedAt: "2026-09-20T10:00:00.000Z" } });
+  });
+
+  it.each(["missing-project", "missing-source", "stale-source"])("rejects the whole batch on %s before consuming a once schedule", async failure => {
+    const fixture = await targets(schedule({ projects: ["alpha", "beta"], every: "once", once: "2026-09-20T09:00:00" }));
+    if (failure === "missing-project") await rm(path.join(fixture.store, "beta"), { recursive: true });
+    else if (failure === "missing-source") await rm(path.join(fixture.store, "beta/phren.project.yaml"));
+    else await rm(path.join(fixture.store, ".source-beta"), { recursive: true });
+    let launches = 0;
+    const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", launch: async () => { launches++; return { launch: { mode: "headless" } }; } });
+    await expect(scheduler.launchNow("demo", "7f3a2c1d")).rejects.toThrow();
+    expect(launches).toBe(0);
+    expect(await scheduler.history()).toEqual([]);
+    expect((await readScheduleDocument(fixture.project)).schedules[0].enabled).toBe(true);
+  });
+
+  it("recovers every pending child through the owner and never refires a consumed once occurrence", async () => {
+    const fixture = await targets(schedule({ projects: ["alpha", "beta"], notify: [], every: "once", once: "2026-09-20T09:00:00" }));
+    // Simulate a crash after the atomic reservation, before YAML disable and launch.
+    await writeScheduleRuns(fixture.runs, ["alpha", "beta"].map(project => ({ id: project, project,
+      scheduleProject: "demo", batchId: "batch", scheduleId: "7f3a2c1d", startedAt: "2026-09-20T09:00:00Z",
+      status: "launched", launch: { mode: "headless" } })));
+    const resumed: string[] = [];
+    let launches = 0;
+    const launch = Object.assign(async () => { launches++; return { launch: { mode: "headless" as const } }; }, {
+      resume: async (run: ScheduleRun, item: Schedule) => {
+        resumed.push(run.project);
+        expect(item.projects).toEqual(["alpha", "beta"]);
+        return { status: "failed" as const, reason: "Interrupted before launch" };
+      },
+    });
+    const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", launch });
+    await scheduler.tick();
+    await expect.poll(async () => (await scheduler.history()).map(run => run.status)).toEqual(["failed", "failed"]);
+    expect(resumed).toEqual(["alpha", "beta"]);
+    expect((await scheduler.statuses()).schedules[0]).toMatchObject({ nextRun: null, running: false, lastRun: { status: "failed" } });
+    await scheduler.tick();
+    expect(launches).toBe(0);
+  });
+
+  it("decodes old schedules unchanged and preserves explicit targets on a store edit", async () => {
+    const fixture = await storeFixture(schedule());
+    const legacy = await readScheduleDocument(fixture.project);
+    expect(legacy.schedules[0].projects).toBeUndefined();
+    await writeScheduleDocument(fixture.project, [{ ...legacy.schedules[0], projects: ["beta"], enabled: false }], legacy.document);
+    expect((await readScheduleDocument(fixture.project)).schedules[0]).toMatchObject({ projects: ["beta"], enabled: false });
+  });
+
+  it.each([[], ["alpha", "alpha"], ["../beta"], ["Bad Slug"], ["Alpha"], null, "alpha", Array.from({ length: 65 }, (_, i) => `p${i}`)].map(projects => ({ projects })))(
+    "rejects invalid target sets %#", ({ projects }) => {
+      expect(() => parseSchedule({ ...schedule(), projects })).toThrow();
+    });
 });
