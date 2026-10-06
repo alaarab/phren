@@ -80,6 +80,8 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       { agents: ["copilot"], events: ["SessionStart", "UserPromptSubmit"], handler: "bridge-hook.mjs hook copilot" },
     ],
     hookRoutes: [
+      ...routes("GET", ["/v1/approval-rules", "/v1/approval-rules/audit"]),
+      ...routes("POST", ["/v1/approval-rules"]), ...routes("DELETE", ["/v1/approval-rules"]),
       ...routes("GET", [
         "/v1/health", "/v1/health/details", "/v1/health/peers", "/v1/muxes", "/v1/activity", "/v1/metrics", "/v1/web-servers", "/v1/simulators",
         "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/files", "/v1/models", "/v1/harnesses", "/v1/projects/files",

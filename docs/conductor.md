@@ -708,3 +708,45 @@ remain open with `live:false` until resolved. Resolving does not approve or
 answer an agent, and the same source stays resolved on later polls; a new
 question creates a new item. The phone UI is a follow-up using the contract in
 [Phren Hook](phren-hook.md#owner-inbox-phone-contract).
+
+## Owner command approval rules (first slice)
+
+Command rules are separate from conductor dispatch/hand-off grants. The iOS
+Settings screen manages them through `GET`, `POST` and `DELETE /v1/approval-rules`;
+`GET /v1/approval-rules/audit` returns the last 256 automatic approval receipts.
+Only Claude PermissionRequest callbacks currently enforce these rules. Health
+advertises `approvalRules: { version: 1, harnesses: ["claude"] }`.
+
+Rules match the exact tool identifier and a complete command using exact,
+word-boundary prefix or anchored `*`/`?` glob matching. Project scope is the
+canonical main-repository directory (the parent of its Git common directory),
+shared by linked worktrees. Optional harness, session and hostname constraints
+intersect. Every matching `always-ask` overrides `allow`; expiry and revocation
+are checked on each request. Auto-allow supports `git status`, Git diff/log/show
+with both `--no-ext-diff --no-textconv`, and bare npm/pnpm/yarn test. Other
+commands, shell composition, changed sandbox inputs and uncertain context ask.
+Test commands trust the repository's current executable scripts. Rules do not
+change sandbox or conductor authority.
+
+Add/revoke bodies are signed envelopes: `payload` is base64 JSON, `signature`
+is an Ed25519 signature of those exact bytes, and `publicKey` is the base64 raw
+32-byte phone key. Payloads have domain `phren-approval-rules-v1`, `operation`,
+UUID `nonce`, ISO `at`, and either a complete `rule` or a revoked rule's UUID
+`id`. Add rules have `tool`, `command`, `match`, `effect`, `projectName`, `scope`
+(required `project`, optional `harness`, `session`, `computer`) and optional
+ISO `until`. Only existing restricted `phren-iphone` authorized_keys entries
+are accepted. Mutation timestamps must be within five minutes; reused nonces
+are rejected. Signed history is reverified on every load. There is no agent
+MCP mutation tool. The OS account, authorized_keys and Hook installation are
+trusted: unrestricted same-user agents can compromise those trust roots or
+roll back policy. Stronger host isolation is a separate security requirement.
+
+The phone offers “Always allow this in <project>” on eligible held Claude
+approvals, prefilled with an exact project/harness rule; the owner confirms
+biometrically and signs it. It does not answer the current request. A conductor
+can propose a draft in text, but the owner must confirm it on the phone.
+The full design and pending owner decisions live in the private apps repository:
+[approval rules](https://github.com/alaarab/phren-apps/blob/feat/approval-rules/docs/approval-rules.md).
+Risky commands remain manual; universal Face ID enforcement and other harness
+adapters require later coverage. The integrator pairs the app/Hook feature PRs
+in the next train, followed by Astra security review.
