@@ -272,13 +272,12 @@ Task writers preserve versioned `Task:` continuations in each project's `tasks.m
 
 ### Command approval policy
 
-`<bridge>/approval-rules.json` (0600) retains up to 2,048 signed owner add/revoke
-operations, at most 128 current rules. `<bridge>/approval-rules-audit.json` (0600)
-retains the last 256 automatic approval receipts (time, rule UUID, signing-key
-fingerprint, eligible command and project/harness/session/computer context).
-The Hook writes a receipt before returning an automatic allow; storage failure
-falls back to asking. These files stay local and contain no conversation prompt
-text or full tool input. Reading rules verifies their signatures against the
-existing restricted phren-iphone keys in `~/.ssh/authorized_keys`; rule management
-does not write or enroll keys. Revocations retain signed history. Expired rules
-remain visible for owner review and cannot authorize requests.
+`<bridge>/approval-rules.json` (0600) retains up to 2,048 signed owner add,
+set-enabled and revoke operations, at most 128 current rules. Every load verifies
+signatures against restricted phren-iphone keys in `~/.ssh/authorized_keys`;
+management does not enroll keys. Disabled/revoked/expired rules cannot restrict
+later requests. Missing or broken policy preserves the ordinary approval flow;
+Settings reports load failures. Rules only ask or deny and never automatically
+approve. No automatic approval audit file is written. Same-user storage is not
+rollback protected; tampering can remove restrictions only back to baseline.
+See [Approval rules](approval-rules.md).

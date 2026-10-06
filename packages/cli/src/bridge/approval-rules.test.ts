@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, randomUUID, sign } from "node:crypto";
+import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, request, type Server } from "node:http";
@@ -7,7 +7,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentHooks } from "./agent-hooks.js";
 import { localSocket } from "./agent-hook-stores.js";
-import { autoApproveByRule, approvalRuleContext, type ApprovalRuleDraft } from "./approval-rules.js";
+import { approvalRuleEffect, approvalRuleContext, type ApprovalRuleDraft } from "./approval-rules.js";
 import { createRouteHandler, type RouteContext } from "./server-routes.js";
 import { snapshot, rpc } from "./herdr.js";
 
@@ -35,7 +35,7 @@ describe.skipIf(process.platform === "win32")("owner approval rules through HTTP
   let previousBridge: string | undefined;
   const context = () => ({ project, harness: "claude" as const, session, computer: hostname() });
   const draft = (overrides: Partial<ApprovalRuleDraft> = {}): ApprovalRuleDraft => ({
-    tool: "Bash", command: "git status", match: "exact", effect: "allow", projectName: "app", scope: { project }, ...overrides,
+    tool: "Bash", command: "git status", match: "exact", effect: "deny", projectName: "app", scope: { project }, ...overrides,
   });
   function http(method: string, url = "/v1/approval-rules", body?: unknown, socket = false): Promise<{ status: number; data: any }> {
     return new Promise((resolve, reject) => {
@@ -48,7 +48,6 @@ describe.skipIf(process.platform === "win32")("owner approval rules through HTTP
   }
   const add = (rule: ApprovalRuleDraft) => http("POST", undefined, envelope({ operation: "add", rule }));
   const list = async () => (await http("GET")).data.rules;
-  const audit = async () => (await http("GET", "/v1/approval-rules/audit")).data.audit;
   const callback = (command: string, extra: object = {}) => http("POST", "/hook", { target, event: "PermissionRequest", cwd: project, tool: "Bash", input: { command }, ...extra }, true);
   beforeEach(async () => {
     home = await mkdtemp(path.join(tmpdir(), "approval-rules-")); state.home = home;
@@ -60,6 +59,7 @@ describe.skipIf(process.platform === "win32")("owner approval rules through HTTP
     previousBridge = process.env.PHREN_BRIDGE_HOME; process.env.PHREN_BRIDGE_HOME = root;
     vi.mocked(snapshot).mockReset().mockResolvedValue({ panes: [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab, agent: "claude", terminal_id: "term-1", foreground_cwd: project }] });
     vi.mocked(rpc).mockReset().mockImplementation(async (_server, method) => {
+      if (method === "session.snapshot") return { snapshot: await vi.mocked(snapshot)() };
       if (method === "pane.process_info") return { process_info: { foreground_processes: [{ pid: process.pid }] } };
       throw new Error(`Unexpected RPC ${method}`);
     });
@@ -73,12 +73,11 @@ describe.skipIf(process.platform === "win32")("owner approval rules through HTTP
     await rm(home, { recursive: true, force: true });
   });
 
-  it("auto-allows a signed rule on the callback and records the exact owner and rule", async () => {
+  it("denies a signed matching rule without creating a pending approval", async () => {
     expect((await add(draft())).status).toBe(200);
-    const [rule] = await list();
-    expect((await callback("git status")).data).toEqual({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } });
-    expect(await audit()).toEqual([expect.objectContaining({ ruleId: rule.id, tool: "Bash", command: "git status", context: context(),
-      owner: createHash("sha256").update(publicKey).digest("hex") })]);
+    expect((await callback("git status")).data).toEqual({ hookSpecificOutput: { hookEventName: "PermissionRequest",
+      decision: { behavior: "deny", message: "Denied by an owner approval rule." } } });
+    expect(hooks.approval(target)).toBeUndefined();
     const saved = JSON.parse(await readFile(path.join(root, "approval-rules.json"), "utf8"));
     expect(saved.operations[0]).toHaveProperty("signature");
   });
@@ -96,100 +95,135 @@ describe.skipIf(process.platform === "win32")("owner approval rules through HTTP
     expect(await list()).toHaveLength(1);
   });
 
-  it("intersects every scope and exact tool without accepting an unknown context", async () => {
+  it.each(["missing", "empty", "malformed", "missing operations", "forged", "insecure"])(
+    "preserves the ordinary phone PermissionRequest path with %s policy", async kind => {
+      const file = path.join(root, "approval-rules.json");
+      if (kind === "empty") await writeFile(file, '{"operations":[]}', { mode: 0o600 });
+      if (kind === "malformed") await writeFile(file, '{broken', { mode: 0o600 });
+      if (kind === "missing operations") await writeFile(file, '{}', { mode: 0o600 });
+      if (kind === "forged" || kind === "insecure") {
+        await add(draft());
+        if (kind === "insecure") await chmod(file, 0o644);
+        else {
+          const policy = JSON.parse(await readFile(file, "utf8"));
+          policy.operations[0].signature = Buffer.alloc(64).toString("base64");
+          await writeFile(file, JSON.stringify(policy));
+        }
+      }
+      const settings = await http("GET");
+      expect(settings.status).toBe(["missing", "empty"].includes(kind) ? 200 : 409);
+      // Without an active phone, preserve the legacy terminal fallback.
+      expect((await callback("git status")).data).toEqual({});
+      hooks.overview.renew("default");
+      let completed = false;
+      const held = callback("git status").then(reply => { completed = true; return reply; });
+      await vi.waitFor(() => expect(hooks.approval(target)?.toolName).toBe("Bash"));
+      expect(completed).toBe(false);
+      const approval = hooks.approval(target)!;
+      expect(approval.message).toContain("git status");
+      await hooks.answer(target, approval.actionId, "approve");
+      expect((await held).data).toEqual({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } });
+      expect(hooks.approval(target)).toBeUndefined();
+    });
+
+  it("rejects the removed allow effect, including signed legacy grants", async () => {
+    const legacy = { ...draft(), effect: "allow" };
+    expect((await http("POST", undefined, envelope({ operation: "add", rule: legacy }))).status).toBe(400);
+    await writeFile(path.join(root, "approval-rules.json"), JSON.stringify({ operations: [envelope({ operation: "add", rule: legacy })] }), { mode: 0o600 });
+    expect((await http("GET")).status).toBe(409);
+    expect((await callback("git status")).data).toEqual({});
+  });
+
+  it("intersects scopes and exact tools, and preserves baseline for unknown context", async () => {
     expect((await add(draft({ scope: context() }))).status).toBe(200);
-    expect(await autoApproveByRule("Bash", { command: "git status" }, context())).toBe(true);
+    expect(await approvalRuleEffect("Bash", { command: "git status" }, context())).toBe("deny");
     for (const changed of [{ project: other }, { harness: "codex" }, { session: "new" }, { computer: "other" }]) {
-      expect(await autoApproveByRule("Bash", { command: "git status" }, { ...context(), ...changed } as never)).toBe(false);
+      expect(await approvalRuleEffect("Bash", { command: "git status" }, { ...context(), ...changed } as never)).toBeUndefined();
     }
-    expect(await autoApproveByRule("shell", { command: "git status" }, context())).toBe(false);
-    expect(await autoApproveByRule("Bash", { command: "git status" }, undefined)).toBe(false);
-    expect(await audit()).toHaveLength(1);
+    expect(await approvalRuleEffect("shell", { command: "git status" }, context())).toBeUndefined();
+    expect(await approvalRuleEffect("Bash", { command: "git status" }, undefined)).toBeUndefined();
   });
 
   it("anchors exact, prefix and glob matches without interpreting regex syntax", async () => {
     for (const [match, command, expected] of [
-      ["exact", "git status", false], ["prefix", "git status", true],
-      ["glob", "git sta?us*", true], ["glob", "git [s]tatus*", false],
+      ["exact", "git status", undefined], ["prefix", "git status", "deny"],
+      ["glob", "git sta?us*", "deny"], ["glob", "git [s]tatus*", undefined],
     ] as const) {
       await add(draft({ match, command }));
-      expect(await autoApproveByRule("Bash", { command: "git status --short" }, context()), `${match} ${command}`).toBe(expected);
-      expect(await autoApproveByRule("Bash", { command: "npm test" }, context())).toBe(false);
+      expect(await approvalRuleEffect("Bash", { command: "git status --short" }, context()), `${match} ${command}`).toBe(expected);
+      expect(await approvalRuleEffect("Bash", { command: "npm test" }, context())).toBeUndefined();
       const [rule] = await list(); await http("DELETE", undefined, envelope({ operation: "revoke", id: rule.id }));
     }
-    expect(await audit()).toHaveLength(2);
   });
 
-  it("always-ask beats allow until the owner revokes that rule by stable ID", async () => {
-    await add(draft()); await add(draft({ effect: "always-ask", command: "git *", match: "glob" }));
-    expect((await callback("git status")).data).toEqual({}); expect(await audit()).toEqual([]);
-    const rules = await list(), ask = rules.find((rule: any) => rule.effect === "always-ask");
-    expect((await http("DELETE", undefined, envelope({ operation: "revoke", id: ask.id }))).status).toBe(200);
-    expect((await callback("git status")).data.hookSpecificOutput.decision.behavior).toBe("allow");
-    expect((await list()).map((rule: any) => rule.id)).toEqual([rules[0].id]);
-    await http("DELETE", undefined, envelope({ operation: "revoke", id: rules[0].id }));
-    expect((await callback("git status")).data).toEqual({});
-  });
-
-  it("checks expiry at enforcement time and preserves expired rules for review", async () => {
-    await add(draft({ until: "2000-01-01T00:00:00.000Z" }));
-    expect(await list()).toHaveLength(1); expect((await callback("git status")).data).toEqual({}); expect(await audit()).toEqual([]);
-  });
-
-  it("never lets a broad glob allow shell composition, risky commands, wrappers or sandbox widening", async () => {
-    await add(draft({ command: "*", match: "glob" }));
-    expect((await callback("git status")).data.hookSpecificOutput.decision.behavior).toBe("allow");
-    for (const command of ["rm -rf /tmp/x", "git push --force", "sudo npm test", "npm run deploy", "npm test && rm -rf x", "git status; sudo x", "git status\nrm x", "npm test | sh", "npm test > x", "$(npm test)", "bash -c npm", "env npm test", "git -c alias.x=!sh status", "git diff --output=x", "git status -C /other", "npm test --prefix /other"]) {
-      expect((await callback(command)).data, command).toEqual({});
+  it("lets the owner toggle and revoke individual rules, with deny preceding ask", async () => {
+    await add(draft({ effect: "always-ask" })); await add(draft());
+    const [ask, deny] = await list();
+    expect(ask.enabled).toBe(true); expect(deny.enabled).toBe(true);
+    expect(await approvalRuleEffect("Bash", { command: "git status" }, context())).toBe("deny");
+    for (const enabled of [false, true, false]) {
+      const change = { operation: "set-enabled", id: deny.id, enabled };
+      expect((await http("POST", undefined, envelope(change, foreign))).status).toBe(403);
+      expect((await http("POST", undefined, envelope(change))).status).toBe(200);
+      expect(await approvalRuleEffect("Bash", { command: "git status" }, context())).toBe(enabled ? "deny" : "always-ask");
+      expect((await list()).find((r: any) => r.id === ask.id).enabled).toBe(true);
     }
-    expect((await callback("npm test", { input: { command: "npm test", sandbox_permissions: "require_escalated" } })).data).toEqual({});
-    expect(await audit()).toHaveLength(1);
+    hooks.overview.renew("default");
+    const held = callback("git status");
+    await vi.waitFor(() => expect(hooks.approval(target)).toBeDefined());
+    await hooks.answer(target, hooks.approval(target)!.actionId, "deny");
+    expect((await held).data.hookSpecificOutput.decision.behavior).toBe("deny");
+    expect((await http("DELETE", undefined, envelope({ operation: "revoke", id: ask.id }))).status).toBe(200);
+    expect(await approvalRuleEffect("Bash", { command: "git status" }, context())).toBeUndefined();
   });
 
-  it("fails closed on policy forgery, insecure files and unwritable audit", async () => {
+  it("saving an ask rule leaves the existing request pending until a separate answer", async () => {
+    hooks.overview.renew("default");
+    const held = callback("git status");
+    await vi.waitFor(() => expect(hooks.approval(target)).toBeDefined());
+    const id = hooks.approval(target)!.actionId;
+    expect((await add(draft({ effect: "always-ask", command: "another command" }))).status).toBe(200);
+    expect(hooks.approval(target)?.actionId).toBe(id);
+    await hooks.answer(target, id, "deny");
+    expect((await held).data.hookSpecificOutput.decision.behavior).toBe("deny");
+  });
+
+  it("checks expiry at enforcement time and keeps expired rules visible", async () => {
+    await add(draft({ until: "2000-01-01T00:00:00.000Z" }));
+    expect(await list()).toHaveLength(1); expect((await callback("git status")).data).toEqual({});
+  });
+
+  it("applies deny to composed commands without an auto-allow eligibility grammar", async () => {
+    await add(draft({ command: "*", match: "glob" }));
+    for (const command of ["rm -rf /tmp/x", "npm test && rm -rf x", "git status; sudo x", "$(npm test)"]) {
+      expect((await callback(command)).data.hookSpecificOutput.decision.behavior, command).toBe("deny");
+    }
+  });
+
+  it("does not enforce rules on other harnesses or pre-execution callbacks", async () => {
     await add(draft());
-    const file = path.join(root, "approval-rules.json"), original = await readFile(file, "utf8");
-    const forged = JSON.parse(original); forged.operations[0].payload = envelope({ operation: "add", rule: draft({ command: "npm test" }) }).payload;
-    await writeFile(file, JSON.stringify(forged));
-    expect((await callback("npm test")).data).toEqual({});
-    await writeFile(file, original); await chmod(file, 0o644);
-    expect((await callback("git status")).data).toEqual({});
-    await chmod(file, 0o600); await mkdir(path.join(root, "approval-rules-audit.json"));
-    expect((await callback("git status")).data).toEqual({});
+    for (const source of ["codex", "copilot", "opencode", "phren"]) {
+      vi.mocked(snapshot).mockResolvedValue({ panes: [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
+        agent: source, terminal_id: "term-1", foreground_cwd: project }] });
+      expect((await callback("git status", { target: { ...target, source } })).data).toEqual({});
+    }
+    vi.mocked(snapshot).mockResolvedValue({ panes: [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
+      agent: "claude", terminal_id: "term-1", foreground_cwd: project }] });
+    expect((await callback("git status", { event: "PreToolUse" })).data).toEqual({});
   });
 
-  it("rejects a foreign checkout that forges a gitdir pointer to the granted repository", async () => {
-    await add(draft({ command: "npm test" }));
-    expect((await callback("npm test")).data.hookSpecificOutput.decision.behavior).toBe("allow");
+  it("rejects forged gitdir scope and shares legitimate linked-worktree scope", async () => {
+    await add(draft());
     const foreignCheckout = path.join(home, "foreign-checkout"); await mkdir(foreignCheckout);
     await writeFile(path.join(foreignCheckout, ".git"), `gitdir: ${path.join(project, ".git")}\n`);
-    vi.mocked(snapshot).mockResolvedValue({ panes: [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
-      agent: "claude", terminal_id: "term-1", foreground_cwd: foreignCheckout }] });
-    expect((await callback("npm test", { cwd: foreignCheckout })).data).toEqual({});
-    // Legitimate repositories may name an explicit worktree in config. It still
-    // cannot authorize npm scripts executed in an unrelated callback cwd.
+    expect(await approvalRuleContext(foreignCheckout, "claude", session)).toBeUndefined();
+    expect((await callback("git status", { cwd: foreignCheckout })).data).toEqual({});
     execFileSync("git", ["-C", project, "config", "core.worktree", project]);
-    expect((await callback("npm test", { cwd: foreignCheckout })).data).toEqual({});
-    expect(await audit()).toHaveLength(1);
-  });
-
-  it("offers the exact project-scoped rule on a held approval card without creating a grant", async () => {
-    hooks.overview.renew("default");
-    const held = callback("npm test");
-    for (let i = 0; i < 100 && !hooks.approval(target); i++) await new Promise(resolve => setTimeout(resolve, 10));
-    expect(hooks.approval(target)?.ruleSuggestion).toEqual({ tool: "Bash", command: "npm test", match: "exact", effect: "allow", projectName: "app", scope: { project, harness: "claude" } });
-    expect(await list()).toEqual([]);
-    hooks.close(); expect((await held).data).toEqual({});
-  });
-
-  it("binds callback project to the live pane, rejects changed cwd, and shares scope across linked worktrees", async () => {
-    await add(draft());
+    expect((await callback("git status", { cwd: foreignCheckout })).data).toEqual({});
     expect((await callback("git status", { cwd: other })).data).toEqual({});
-    expect((await callback("git status", { cwd: undefined })).data).toEqual({});
     execFileSync("git", ["-C", project, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "initial"]);
     const worktree = path.join(home, "worktree"); execFileSync("git", ["-C", project, "worktree", "add", "-qb", "test", worktree]);
-    expect(await approvalRuleContext("", "claude", session)).toBeUndefined();
     expect(await approvalRuleContext(worktree, "claude", session)).toEqual(context());
-    expect((await callback("git status", { cwd: worktree })).data.hookSpecificOutput.decision.behavior).toBe("allow");
+    expect((await callback("git status", { cwd: worktree })).data.hookSpecificOutput.decision.behavior).toBe("deny");
   });
 });

@@ -16,19 +16,19 @@ const scopeSchema = z.object({
 }).strict();
 export const approvalRuleDraftSchema = z.object({
   tool: text, command: text, match: z.enum(["exact", "prefix", "glob"]),
-  effect: z.enum(["allow", "always-ask"]), scope: scopeSchema,
+  effect: z.enum(["always-ask", "deny"]), scope: scopeSchema,
   projectName: z.string().min(1).max(100), until: z.string().datetime({ offset: true }).optional(),
 }).strict();
 export type ApprovalRuleDraft = z.infer<typeof approvalRuleDraftSchema>;
-export interface ApprovalRule extends ApprovalRuleDraft { id: string; createdAt: string; owner: string }
+export interface ApprovalRule extends ApprovalRuleDraft { id: string; createdAt: string; owner: string; enabled: boolean }
 const operationSchema = z.discriminatedUnion("operation", [
   z.object({ domain: z.literal("phren-approval-rules-v1"), operation: z.literal("add"), nonce: z.string().uuid(), at: z.string().datetime({ offset: true }), rule: approvalRuleDraftSchema }).strict(),
+  z.object({ domain: z.literal("phren-approval-rules-v1"), operation: z.literal("set-enabled"), nonce: z.string().uuid(), at: z.string().datetime({ offset: true }), id: z.string().uuid(), enabled: z.boolean() }).strict(),
   z.object({ domain: z.literal("phren-approval-rules-v1"), operation: z.literal("revoke"), nonce: z.string().uuid(), at: z.string().datetime({ offset: true }), id: z.string().uuid() }).strict(),
 ]);
 const envelopeSchema = z.object({ payload: z.string().min(1).max(16384), signature: z.string().min(1).max(128), publicKey: z.string().min(1).max(64) }).strict();
 const policySchema = z.object({ operations: z.array(envelopeSchema).max(2048) }).strict();
 const policyPath = (root: string) => path.join(root, "approval-rules.json");
-const auditPath = (root: string) => path.join(root, "approval-rules-audit.json");
 const forbidden = () => new BridgeError(403, "Confirm this change with the paired iPhone's signing key.");
 
 /** Restricted phone keys only; dispatch keys and arbitrary SSH keys cannot sign policy. */
@@ -55,7 +55,7 @@ function verified(envelope: z.infer<typeof envelopeSchema>, keys: Set<string>) {
 async function privateJSON(file: string, fallback: unknown, max = 2_097_152): Promise<unknown> {
   const info = await lstat(file).catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
   if (!info) return fallback;
-  if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077) || info.size > max) throw new BridgeError(409, "Approval policy and audit must be private regular files.");
+  if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077) || info.size > max) throw new BridgeError(409, "Approval policy must be a private regular file.");
   return JSON.parse(await readFile(file, "utf8"));
 }
 async function readPolicy(root: string) {
@@ -66,8 +66,9 @@ async function readPolicy(root: string) {
     const { operation, owner } = verified(envelope, keys);
     if (nonces.has(operation.nonce)) throw new BridgeError(409, "Repeated policy operation.");
     nonces.add(operation.nonce);
-    if (operation.operation === "add") rules.set(operation.nonce, { ...operation.rule, id: operation.nonce, createdAt: operation.at, owner });
-    else rules.delete(operation.id);
+    if (operation.operation === "add") rules.set(operation.nonce, { ...operation.rule, id: operation.nonce, createdAt: operation.at, owner, enabled: true });
+    else if (operation.operation === "revoke") rules.delete(operation.id);
+    else { const rule = rules.get(operation.id); if (rule) rule.enabled = operation.enabled; }
   }
   return { policy, rules, nonces };
 }
@@ -84,17 +85,18 @@ async function locked<T>(root: string, work: () => Promise<T>): Promise<T> {
   try { return await next; } finally { if (queues.get(key) === next) queues.delete(key); }
 }
 export async function listApprovalRules(root = bridgeRoot()): Promise<ApprovalRule[]> {
-  return [...(await readPolicy(root)).rules.values()];
+  try { return [...(await readPolicy(root)).rules.values()]; }
+  catch { throw new BridgeError(409, "Approval rules could not be loaded. Existing agent permissions and phone approvals continue unchanged."); }
 }
 /** The signed operations remain on disk and are verified again at every decision. */
-export async function changeApprovalRule(input: unknown, operation: "add" | "revoke", root = bridgeRoot()) {
+export async function changeApprovalRule(input: unknown, method: "POST" | "DELETE", root = bridgeRoot()) {
   const envelope = envelopeSchema.parse(input), proof = verified(envelope, await ownerKeys());
-  if (proof.operation.operation !== operation || !Number.isFinite(Date.parse(proof.operation.at)) || Math.abs(Date.now() - Date.parse(proof.operation.at)) > 300_000) throw forbidden();
+  if ((method === "DELETE" ? proof.operation.operation !== "revoke" : proof.operation.operation === "revoke") || !Number.isFinite(Date.parse(proof.operation.at)) || Math.abs(Date.now() - Date.parse(proof.operation.at)) > 300_000) throw forbidden();
   return locked(root, async () => {
     const { policy, rules, nonces } = await readPolicy(root);
     if (nonces.has(proof.operation.nonce)) throw new BridgeError(409, "This change has already been applied.");
-    if (operation === "add" && rules.size >= 128) throw new BridgeError(409, "Revoke a rule before adding another.");
-    if (proof.operation.operation === "revoke" && !rules.has(proof.operation.id)) throw new BridgeError(409, "This rule is no longer listed.");
+    if (proof.operation.operation === "add" && rules.size >= 128) throw new BridgeError(409, "Revoke a rule before adding another.");
+    if (proof.operation.operation !== "add" && !rules.has(proof.operation.id)) throw new BridgeError(409, "This rule is no longer listed.");
     if (policy.operations.length >= 2048) throw new BridgeError(409, "Approval policy history is full; owner maintenance is required.");
     policy.operations.push(envelope);
     const bytes = JSON.stringify(policy);
@@ -122,17 +124,6 @@ export async function approvalRuleContext(cwd: string, harness: string, session:
     return { project: path.dirname(common), harness: scopeSchema.shape.harness.unwrap().parse(harness), session, computer: hostname() };
   } catch { return undefined; }
 }
-/** Deliberately a small grammar, not a shell risk detector. Unsupported syntax always asks. */
-function eligible(tool: string, command: string): boolean {
-  if (!["Bash", "bash", "shell", "exec_command"].includes(tool) || command.length > 4096 || !/^[A-Za-z0-9_.\/@,:=+% -]+$/.test(command)) return false;
-  const words = command.split(" ");
-  if (words.some(word => !word) || words.some(word => /(?:deploy|sudo|force|delete|exec|output|prefix|directory|work-tree|git-dir|config)/i.test(word))) return false;
-  if (words[0] === "git" && ["status", "diff", "log", "show"].includes(words[1])) {
-    // No path options, config flags, external diff/textconv, or arbitrary revisions.
-    return (words[1] === "status" || (words.includes("--no-ext-diff") && words.includes("--no-textconv"))) && words.slice(2).every(word => /^--(?:short|porcelain(?:=v[12])?|branch|stat|name-only|name-status|oneline|cached|staged|no-ext-diff|no-textconv)$/.test(word));
-  }
-  return ["npm", "pnpm", "yarn"].includes(words[0]) && words[1] === "test" && words.length === 2;
-}
 function commandMatches(rule: ApprovalRuleDraft, command: string): boolean {
   if (rule.match === "exact") return command === rule.command;
   if (rule.match === "prefix") return command === rule.command || command.startsWith(rule.command + " ");
@@ -147,30 +138,16 @@ function commandMatches(rule: ApprovalRuleDraft, command: string): boolean {
   while (rule.command[i] === "*") i++;
   return i === rule.command.length;
 }
-const auditSchema = z.array(z.object({ at: z.string(), ruleId: z.string().uuid(), owner: z.string(), tool: z.string(), command: z.string(), context: scopeSchema })).max(256);
-export async function approvalRuleAudit(root = bridgeRoot()) { return auditSchema.parse(await privateJSON(auditPath(root), [], 4_194_304)); }
-/** Fail closed on unrecognized input fields: never implicitly grant changed sandbox policy. */
-export async function autoApproveByRule(tool: string, input: unknown, context: ApprovalRuleContext | undefined, root = bridgeRoot()): Promise<boolean> {
-  const data = object(input), command = data.command;
-  if (!context || typeof command !== "string" || !eligible(tool, command) || Object.keys(data).some(key => !["command", "description", "timeout"].includes(key))) return false;
+/** Rules can only restrict a request the harness has already raised. Invalid policy
+ * falls back to that ordinary approval path; Settings reports the load error. */
+export async function approvalRuleEffect(tool: string, input: unknown, context: ApprovalRuleContext | undefined, root = bridgeRoot()): Promise<"always-ask" | "deny" | undefined> {
+  const command = object(input).command;
+  if (!context || typeof command !== "string") return undefined;
   try {
-    return await locked(root, async () => {
-      const { rules } = await readPolicy(root), now = Date.now();
-      const matches = [...rules.values()].filter(rule => rule.tool === tool && (!rule.until || Date.parse(rule.until) > now)
-        && Object.entries(rule.scope).every(([key, value]) => context[key as keyof ApprovalRuleContext] === value) && commandMatches(rule, command));
-      if (matches.some(rule => rule.effect === "always-ask")) return false;
-      const rule = matches.find(rule => rule.effect === "allow");
-      if (!rule) return false;
-      const audit = await approvalRuleAudit(root);
-      audit.push({ at: new Date().toISOString(), ruleId: rule.id, owner: rule.owner, tool, command, context });
-      await atomic(auditPath(root), JSON.stringify(audit.slice(-256)));
-      return true;
-    });
-  } catch { return false; }
-}
-/** A card may save only the same authoritative, conservatively eligible request. */
-export function approvalRuleSuggestion(tool: string, input: unknown, context: ApprovalRuleContext | undefined): ApprovalRuleDraft | undefined {
-  const data = object(input);
-  if (!context || typeof data.command !== "string" || !eligible(tool, data.command) || Object.keys(data).some(key => !["command", "description", "timeout"].includes(key))) return undefined;
-  return { tool, command: data.command, match: "exact", effect: "allow", projectName: path.basename(context.project), scope: { project: context.project, harness: context.harness } };
+    const { rules } = await readPolicy(root), now = Date.now();
+    const matches = [...rules.values()].filter(rule => rule.enabled && rule.tool === tool && (!rule.until || Date.parse(rule.until) > now)
+      && Object.entries(rule.scope).every(([key, value]) => context[key as keyof ApprovalRuleContext] === value) && commandMatches(rule, command));
+    if (matches.some(rule => rule.effect === "deny")) return "deny";
+    return matches.some(rule => rule.effect === "always-ask") ? "always-ask" : undefined;
+  } catch { return undefined; }
 }
