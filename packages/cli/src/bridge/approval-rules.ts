@@ -108,8 +108,15 @@ export interface ApprovalRuleContext { project: string; harness: NonNullable<App
 export async function approvalRuleContext(cwd: string, harness: string, session: string): Promise<ApprovalRuleContext | undefined> {
   if (!path.isAbsolute(cwd)) return undefined;
   try {
-    const common = await realpath((await git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")).trim());
+    const directories = (await git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel")).trim().split("\n");
+    if (directories.length !== 2) return undefined;
+    const [common, checkout] = await Promise.all(directories.map(directory => realpath(directory)));
     if (path.basename(common) !== ".git") return undefined;
+    // A writable .git pointer alone is not proof that a folder belongs to this repository.
+    const listed = (await git(common, "worktree", "list", "--porcelain", "-z")).split("\0")
+      .filter(field => field.startsWith("worktree ")).map(field => field.slice("worktree ".length));
+    const registered = await Promise.all(listed.map(directory => realpath(directory).catch(() => undefined)));
+    if (!registered.includes(checkout)) return undefined;
     return { project: path.dirname(common), harness: scopeSchema.shape.harness.unwrap().parse(harness), session, computer: hostname() };
   } catch { return undefined; }
 }
