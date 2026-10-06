@@ -1,9 +1,10 @@
 import { markPaneClosed } from "./worker-close.js";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rmdir } from "node:fs/promises";
 import { phrenStoreRoot } from "./transcripts.js";
 import path from "node:path";
 import { z } from "zod";
 import { homeDir } from "../home-paths.js";
+import { defaultPhrenPath } from "../phren-paths.js";
 import { agentNames, findPane, isConductorName, paneChatState, paneIdentity, servers, snapshot } from "./herdr.js";
 import { type AgentStart, agentNotReady, terminalKind, terminalName, terminalProvider } from "./terminal.js";
 import { tmuxScroll } from "./terminal-tmux.js";
@@ -304,7 +305,12 @@ async function stillListed(server: string, result: Json): Promise<boolean> {
 
 async function startSession(server: string, data: Json, options: LaunchOptions): Promise<Json> {
   const role = z.enum(["agent", "conductor"]).default("agent").parse(data.role);
-  const projectDirectory = z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
+  const agentFolder = z.boolean().default(false).parse(data.agentFolder);
+  if (agentFolder && (role !== "agent" || data.project !== undefined || (data.cwd !== undefined && data.cwd !== "") || data.worktree != null)) {
+    throw new BridgeError(400, "An agent folder is for a projectless agent without cwd or worktree.");
+  }
+  const projectDirectory = agentFolder ? undefined
+    : z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
   const worktreeRequest = data.worktree === undefined || data.worktree === null ? undefined : launchWorktreeSchema.parse(data.worktree);
   if (worktreeRequest && role === "conductor") throw new BridgeError(400, "A conductor works across projects, so it cannot start in a worktree.");
   const label = plainText(200).parse(data.label);
@@ -376,14 +382,29 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const knownTabs = new Set(objects(before.tabs).map(t => t.tab_id));
   // Created last, once nothing else can refuse the launch, so a refusal
   // never leaves a worktree or branch behind.
-  const worktree: LaunchWorktree | undefined = worktreeRequest ? await createLaunchWorktree(projectDirectory, worktreeRequest) : undefined;
-  const cwd = worktree?.cwd ?? projectDirectory;
+  const worktree: LaunchWorktree | undefined = worktreeRequest ? await createLaunchWorktree(projectDirectory!, worktreeRequest) : undefined;
+  // The same root as the conductor, chosen by this computer's PHREN_PATH.
+  // mkdtemp keeps simultaneous chats with the same title isolated.
+  let scratch: string | undefined;
+  if (agentFolder) {
+    const store = await realpath(defaultPhrenPath());
+    // Runtime folders are excluded from project discovery and store sync.
+    const runtime = path.join(store, ".runtime");
+    await mkdir(runtime, { recursive: true, mode: 0o700 });
+    if (await realpath(runtime) !== runtime) throw new BridgeError(403, "The runtime folder must be inside the Phren directory.");
+    const agents = path.join(runtime, "agents");
+    await mkdir(agents, { recursive: true, mode: 0o700 });
+    // A pre-existing symlink must not redirect the new folder outside the store.
+    if (await realpath(agents) !== agents) throw new BridgeError(403, "The agents folder must be inside the Phren directory.");
+    scratch = await mkdtemp(path.join(agents, `${new Date().toISOString().slice(0, 10)}-${herdrAgentName(label)}-`));
+  }
+  const cwd = scratch ?? worktree?.cwd ?? projectDirectory!;
   // Claude's folder-trust screen defaults to "No, exit" and Codex's holds the
   // agent too; a folder the Hook picked or just created is trusted up front.
-  if (worktree || options.trustFolder) await pretrustFolder(kind, cwd, worktree ? `new worktree for ${worktree.branch}` : "project folder",
+  if (scratch || worktree || options.trustFolder) await pretrustFolder(kind, cwd, scratch ? "new agent folder" : worktree ? `new worktree for ${worktree.branch}` : "project folder",
     home ? { ...process.env, ...claudeLaunchEnv(home) } : process.env);
   try { await terminalProvider().create(server, { workspace, label, cwd, ...(env ? { env } : {}) }); }
-  catch (error) { await worktree?.discard(); throw error; }
+  catch (error) { await worktree?.discard(); if (scratch) await rmdir(scratch).catch(() => undefined); throw error; }
   let created: { workspaceId: string; tabId: string; paneId: string } | undefined;
   for (let attempt = 0; attempt < 25 && !created; attempt++) {
     const s = await snapshot(server);
@@ -472,7 +493,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     await new JobRegistry().register({ pane: { server, pane: created.paneId, ...(created.workspaceId ? { workspace: created.workspaceId } : {}), agent: kind, label },
       ...(sessionId ? { session: sessionId } : {}), agent: kind, label, command: kind }).catch(() => undefined);
   }
-  return { ok: true, ...created, agent: kind, agentStatus, role, sessionId, target, ...(account ? { account } : {}), ...(permissionMode ? { permissionMode } : {}), ...(unchecked.length ? { unchecked } : {}),
+  return { ok: true, ...created, cwd, agent: kind, agentStatus, role, sessionId, target, ...(account ? { account } : {}), ...(permissionMode ? { permissionMode } : {}), ...(unchecked.length ? { unchecked } : {}),
     // The caller types the brief itself unless it went with the launch.
     ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief,
       briefState: appServer ? briefTurn ?? "unconfirmed" : served ? (servedBrief?.delivered ? "sent" : "uncertain") : briefLaunch ? "sent" : "unconfirmed" } : {}),
