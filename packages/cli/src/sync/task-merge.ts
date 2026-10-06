@@ -80,22 +80,13 @@ function mergeContract(base: TaskEntry | undefined, ours: TaskEntry | undefined,
     return { raw: records[0], value: parseTaskMetadata(records[0].trim().slice(5).trim()) };
   };
   const b = read(base), o = read(ours), t = read(theirs);
-  if (o.raw === undefined && t.raw === undefined) return winner;
+  if (!o.raw && !t.raw) return winner;
   if (!b.value || !o.value || !t.value) return winner;
   const baseValue = b.value, ourValue = o.value, theirValue = t.value;
   const pick = (field: "responsibility" | "dependencies") => JSON.stringify(theirValue[field]) === JSON.stringify(baseValue[field]) ? ourValue[field] : theirValue[field];
-  const history = [...new Map([...o.value.history, ...t.value.history].map(h => [JSON.stringify(h), h] as const)).values()];
+  const history = [...new Map([...o.value.history, ...t.value.history].map((h: unknown) => [JSON.stringify(h), h] as const)).values()];
   const contract = { version: 1, responsibility: pick("responsibility"), dependencies: pick("dependencies"), history };
-  let lines = winner.lines.filter(line => !line.trimStart().startsWith("Task:"));
-  if (contract.responsibility === "human") {
-    lines = lines.filter(line => {
-      const claim = /^Claimed:\s+([A-Za-z0-9][A-Za-z0-9._-]{0,252})\s+(\d{4}-\d{2}-\d{2}T[0-9:.]+Z)(?:\s+session:[A-Za-z0-9._:-]{1,128})?$/.exec(line.trim());
-      if (!claim) return true;
-      history.push({ at: history.at(-1)?.at ?? claim[2], change: `released claim by ${claim[1]} during human responsibility merge` });
-      return false;
-    });
-  }
-  return { ...winner, lines: [...lines, `  Task: ${JSON.stringify(contract)}`] };
+  return { ...winner, lines: [...winner.lines.filter(line => !line.trimStart().startsWith("Task:")), `  Task: ${JSON.stringify(contract)}`] };
 }
 
 /**
@@ -108,19 +99,6 @@ export function mergeTasksByBid(base: string, ours: string, theirs: string): str
   const b = index(parse(base));
   const o = index(oursSections);
   const t = index(theirsSections);
-
-  // A duplicated identity cannot be reconciled by first-win indexing. Leave
-  // the sync conflict unresolved, retaining both original files for repair.
-  for (const sections of [parse(base), oursSections, theirsSections]) {
-    const seen = new Set<string>();
-    for (const section of sections) for (const row of section.rows) {
-      if (row.kind !== "task" || !row.entry.key.startsWith("bid:")) continue;
-      if (seen.has(row.entry.key) || [...row.entry.lines[0].matchAll(/<!--\s*bid:([a-f0-9]{8})\b[^>]*-->/g)].length !== 1) {
-        throw new Error("Task merge requires unique, unambiguous stable IDs; repair the conflicting records first.");
-      }
-      seen.add(row.entry.key);
-    }
-  }
 
   const chosen = new Map<string, TaskEntry>();
   for (const key of new Set([...b.keys(), ...o.keys(), ...t.keys()])) {

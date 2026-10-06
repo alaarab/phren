@@ -34,8 +34,6 @@ export interface TaskItem {
   id: string;
   /** Content-addressed stable ID embedded in the file as `<!-- bid:HASH -->`. Survives reordering and completions. */
   stableId?: string;
-  /** More than one bid comment on a record cannot identify one task safely. */
-  identityAmbiguous?: boolean;
   section: TaskSection;
   line: string;
   checked: boolean;
@@ -61,10 +59,6 @@ export interface TaskItem {
   /** Unknown/invalid contract content is retained and fails closed for selection. */
   taskContractRaw?: string;
   taskContractRecords?: string[];
-  /** Exact opaque Task continuations, including whitespace and duplicates. */
-  taskContractLines?: string[];
-  /** Preserve future continuations instead of hiding any later Task records. */
-  opaqueContinuationLines?: string[];
 }
 
 /**
@@ -166,15 +160,11 @@ function parseContinuation(lines: string[], idx: number): {
   contract?: { responsibility?: TaskResponsibility; dependencies?: TaskDependency[]; history?: TaskChange[] };
   taskContractRaw?: string;
   taskContractRecords?: string[];
-  taskContractLines?: string[];
-  opaqueContinuationLines?: string[];
   linesToSkip: number;
 } {
   let contract: ReturnType<typeof parseContinuation>["contract"];
   let taskContractRaw: string | undefined;
   const taskContractRecords: string[] = [];
-  const taskContractLines: string[] = [];
-  const opaqueContinuationLines: string[] = [];
   let context: string | undefined;
   let claim: TaskClaim | undefined;
   let githubIssue: number | undefined;
@@ -191,7 +181,6 @@ function parseContinuation(lines: string[], idx: number): {
     }
     if (trimmed.startsWith("Task:")) {
       taskContractRecords.push(trimmed.slice(5).trim());
-      taskContractLines.push(raw);
       linesToSkip++; continue;
     }
     if (trimmed.startsWith("Context:")) {
@@ -212,18 +201,14 @@ function parseContinuation(lines: string[], idx: number): {
       linesToSkip++;
       continue;
     }
-    opaqueContinuationLines.push(raw);
-    linesToSkip++;
+    break;
   }
 
   if (taskContractRecords.length === 1) {
     contract = parseTaskMetadata(taskContractRecords[0]);
     if (!contract) taskContractRaw = taskContractRecords[0];
   } else if (taskContractRecords.length > 1) taskContractRaw = taskContractRecords[0];
-  return { context, githubIssue, githubUrl, claim, contract, taskContractRaw,
-    ...(taskContractRaw !== undefined ? { taskContractLines } : {}),
-    ...(taskContractRecords.length > 1 ? { taskContractRecords } : {}),
-    ...(opaqueContinuationLines.length ? { opaqueContinuationLines } : {}), linesToSkip };
+  return { context, githubIssue, githubUrl, claim, contract, taskContractRaw, ...(taskContractRecords.length > 1 ? { taskContractRecords } : {}), linesToSkip };
 }
 
 /** Pattern that matches the task metadata comment embedded in task item lines.
@@ -357,7 +342,6 @@ export function parseTaskContent(project: string, taskPath: string, content: str
     items[section].push({
       id: `${sectionPrefix}${sectionCounters[section]}`,
       stableId: bid,
-      identityAmbiguous: [...line.matchAll(/<!--\s*bid:([a-f0-9]{8})\b[^>]*-->/g)].length > 1 || undefined,
       section,
       line: cleanBody,
       checked: parsed.checked || section === "Done",
@@ -380,8 +364,6 @@ export function parseTaskContent(project: string, taskPath: string, content: str
       history: continuation.contract?.history,
       taskContractRaw: continuation.taskContractRaw,
       taskContractRecords: continuation.taskContractRecords,
-      taskContractLines: continuation.taskContractLines,
-      opaqueContinuationLines: continuation.opaqueContinuationLines,
     });
     i += continuation.linesToSkip;
   }
@@ -406,15 +388,13 @@ function renderTask(doc: TaskDoc): string {
     out.push(`## ${section}`, "");
     for (const item of doc.items[section]) {
       out.push(normalizeTaskItemLine(item));
-      if (item.taskContractLines?.length) out.push(...item.taskContractLines);
-      else if (item.taskContractRecords?.length) out.push(...item.taskContractRecords.map(raw => `  Task: ${raw}`));
+      if (item.taskContractRecords?.length) out.push(...item.taskContractRecords.map(raw => `  Task: ${raw}`));
       else if (item.taskContractRaw !== undefined) out.push(`  Task: ${item.taskContractRaw}`);
       else if (item.responsibility !== undefined || item.dependencies?.length || item.history?.length) out.push(`  Task: ${JSON.stringify({ version: 1, responsibility: item.responsibility ?? "agent", dependencies: item.dependencies ?? [], history: item.history ?? [] })}`);
       if (item.context) out.push(`  Context: ${item.context}`);
       const githubRef = formatGitHubIssueReference(item);
       if (githubRef) out.push(`  GitHub: ${githubRef}`);
       if (item.claim) out.push(`  ${formatClaim(item.claim)}`);
-      if (item.opaqueContinuationLines?.length) out.push(...item.opaqueContinuationLines);
     }
     out.push("");
   }
@@ -427,13 +407,6 @@ function findItemByMatch(
 ): { match?: { section: TaskSection; index: number }; error?: string; errorCode?: PhrenErrorCode } {
   const needle = match.trim().toLowerCase();
   if (!needle) return { error: `${PhrenError.EMPTY_INPUT}: Please provide the item text or ID to match against.`, errorCode: PhrenError.EMPTY_INPUT };
-  const unique = (matched: { section: TaskSection; index: number }) => {
-    const item = doc.items[matched.section][matched.index];
-    const duplicates = item.stableId && TASK_SECTIONS.flatMap(section => doc.items[section]).filter(other => other.stableId === item.stableId).length > 1;
-    return item.identityAmbiguous || duplicates
-      ? { error: "Stable task identity is ambiguous; repair the conflicting records before editing.", errorCode: PhrenError.AMBIGUOUS_MATCH }
-      : { match: matched };
-  };
 
   // 1a) Stable ID match (bid:XXXX or just the 8-char hex).
   const bidNeedle = needle.replace(/^bid:/, "");
@@ -442,15 +415,14 @@ function findItemByMatch(
     for (const section of TASK_SECTIONS) doc.items[section].forEach((item, index) => {
       if (item.stableId === bidNeedle) stableMatches.push({ section, index });
     });
-    if (stableMatches.length === 1) return unique(stableMatches[0]);
+    if (stableMatches.length === 1) return { match: stableMatches[0] };
     if (stableMatches.length > 1) return { error: "Stable task ID is duplicated; repair the conflicting records before editing.", errorCode: PhrenError.AMBIGUOUS_MATCH };
-    return { error: `No task with stable ID ${bidNeedle}.`, errorCode: PhrenError.NOT_FOUND };
   }
 
   // 1b) Positional ID match (A1, Q2, D3).
   for (const section of TASK_SECTIONS) {
     const idx = doc.items[section].findIndex((item) => item.id.toLowerCase() === needle);
-    if (idx !== -1) return unique({ section, index: idx });
+    if (idx !== -1) return { match: { section, index: idx } };
   }
 
   // 2) Exact line match.
@@ -460,7 +432,7 @@ function findItemByMatch(
       if (item.line.trim().toLowerCase() === needle) exact.push({ section, index });
     });
   }
-  if (exact.length === 1) return unique(exact[0]);
+  if (exact.length === 1) return { match: exact[0] };
   if (exact.length > 1) {
     return { error: `${PhrenError.AMBIGUOUS_MATCH}: "${match}" is ambiguous (${exact.length} exact matches). Use item ID.`, errorCode: PhrenError.AMBIGUOUS_MATCH };
   }
@@ -472,7 +444,7 @@ function findItemByMatch(
       if (item.line.toLowerCase().includes(needle)) partial.push({ section, index });
     });
   }
-  if (partial.length === 1) return unique(partial[0]);
+  if (partial.length === 1) return { match: partial[0] };
   if (partial.length > 1) {
     return { error: `${PhrenError.AMBIGUOUS_MATCH}: "${match}" is ambiguous (${partial.length} partial matches). Use item ID.`, errorCode: PhrenError.AMBIGUOUS_MATCH };
   }
@@ -1022,7 +994,7 @@ export function claimTask(phrenPath: string, project: string, match: string, cla
   const preCheck = ensureProject(phrenPath, project);
   if (!preCheck.ok) return forwardErr(preCheck);
 
-  return withTaskGraphLock(opts.graphRoot ?? phrenPath, () => withSafeLock(bPath, () => {
+  return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
     const found = findItemByMatch(parsed.data, match);
@@ -1056,7 +1028,7 @@ export function claimTask(phrenPath: string, project: string, match: string, cla
     }
     writeTaskDoc(parsed.data);
     return phrenOk(item);
-  }));
+  });
 }
 
 export function workNextTask(phrenPath: string, project: string, graphRoot = phrenPath): PhrenResult<string> {
@@ -1065,7 +1037,7 @@ export function workNextTask(phrenPath: string, project: string, graphRoot = phr
   const preCheck = ensureProject(phrenPath, project);
   if (!preCheck.ok) return forwardErr(preCheck);
 
-  return withTaskGraphLock(graphRoot, () => withSafeLock(bPath, () => {
+  return withSafeLock(bPath, () => {
     const parsed = readTasks(phrenPath, project);
     if (!parsed.ok) return forwardErr(parsed);
     if (!parsed.data.items.Queue.length) {
@@ -1088,7 +1060,7 @@ export function workNextTask(phrenPath: string, project: string, graphRoot = phr
     parsed.data.items.Active.push(item);
     writeTaskDoc(parsed.data);
     return phrenOk(`Moved next queue item to Active in ${project}: ${item.line}`);
-  }));
+  });
 }
 
 export function tidyDoneTasks(phrenPath: string, project: string, keep: number = 30, dryRun?: boolean): PhrenResult<string> {

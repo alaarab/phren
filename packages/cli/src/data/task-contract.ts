@@ -2,9 +2,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { withSafeLock } from "../shared/data-utils.js";
 import type { PhrenResult } from "../shared.js";
-import { taskStores, taskStoreHasProject } from "./task-store-directory.js";
-import { isTaskDependency } from "./task-metadata.js";
-export { taskStores, taskStoreHasProject } from "./task-store-directory.js";
+import { resolveAllStores, registeredStoreIdentity, getStoreProjectDirs } from "../store-registry.js";
 import { readTasks, stripBid, parseTaskContent, type TaskDoc, type TaskItem } from "./tasks.js";
 
 export type TaskResponsibility = "human" | "agent";
@@ -27,12 +25,24 @@ export function withTaskGraphLock<T>(base: string, fn: () => PhrenResult<T>): Ph
 }
 const key = (ref: TaskDependency) => `${ref.storeId}/${ref.project}/${ref.stableId}`;
 
+/** Preserve local access roles/subscriptions while resolving portable IDs from
+ * each target store. Duplicate canonical IDs remain ambiguous, never first-win. */
+export function taskStores(base: string) {
+  return resolveAllStores(base).map(entry => {
+    // A synced registry may record another machine's primary checkout path.
+    const store = entry.role === "primary" ? { ...entry, path: path.resolve(base), available: true } : entry;
+    return { ...store, taskStoreId: store.available === false ? undefined : registeredStoreIdentity(store.path) };
+  });
+}
+
+export function taskStoreHasProject(store: ReturnType<typeof taskStores>[number], project: string): boolean {
+  return getStoreProjectDirs(store).some(dir => path.basename(dir) === project);
+}
+
 export function taskIdentity(phrenPath: string, doc: TaskDoc, item: TaskItem): TaskDependency | undefined {
   const stores = taskStores(phrenPath);
   const owner = stores.filter(s => path.resolve(s.path) === path.dirname(path.dirname(path.resolve(doc.path))));
-  const matches = [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done].filter(i => i.stableId === item.stableId);
-  if (owner.length !== 1 || !item.stableId || !/^[a-f0-9]{8}$/.test(item.stableId) || item.identityAmbiguous || matches.length !== 1
-    || !owner[0].taskStoreId || !taskStoreHasProject(owner[0], doc.project)) return undefined;
+  if (owner.length !== 1 || !item.stableId || !owner[0].taskStoreId || !taskStoreHasProject(owner[0], doc.project)) return undefined;
   const storeId = owner[0].taskStoreId;
   return stores.filter(s => s.taskStoreId === storeId).length === 1 ? { storeId, project: doc.project, stableId: item.stableId } : undefined;
 }
@@ -55,21 +65,18 @@ function resolver(phrenPath: string, current?: TaskDoc) {
       doc = cache.get(file);
     }
     const matches = doc ? [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done].filter(i => i.stableId === ref.stableId) : [];
-    if (matches.length === 1) return matches[0].identityAmbiguous ? undefined : matches[0];
+    if (matches.length === 1) return matches[0];
     if (matches.length > 1) return undefined;
     // Completed prerequisites remain satisfied after tidy archives their history.
     const archive = path.join(owners[0].path, ".config", "task-archive", `${ref.project}.md`);
     try {
-      const source = fs.readFileSync(archive, "utf8").replace(/\r\n/g, "\n").split("\n"), records: string[][] = [];
+      const source = fs.readFileSync(archive, "utf8").split("\n"), records: string[][] = [];
       for (let i = 0; i < source.length; i++) {
-        if (!source[i].startsWith("- ")) continue;
-        const comments = [...source[i].matchAll(/<!--\s*bid:([a-f0-9]{8})\b[^>]*-->/g)];
-        if (!comments.some(comment => comment[1] === ref.stableId)) continue;
-        if (comments.length !== 1) return undefined;
+        if (!/^- \[[xX]\]/.test(source[i])) continue;
         if (stripBid(source[i]).bid !== ref.stableId) continue;
         const lines = [source[i]]; while (source[i + 1]?.startsWith("  ")) lines.push(source[++i]); records.push(lines);
       }
-      if (records.length === 1 && /^- \[[xX]\]\s/.test(records[0][0])) return parseTaskContent(ref.project, archive, `# Archive\n\n## Done\n\n${records[0].join("\n")}`).items.Done[0];
+      if (records.length === 1) return parseTaskContent(ref.project, archive, `# Archive\n\n## Done\n\n${records[0].join("\n")}`).items.Done[0];
     } catch { /* An absent archive is not completion evidence. */ }
     return undefined;
   };
@@ -84,10 +91,9 @@ export function taskReadiness(phrenPath: string, doc: TaskDoc, item: TaskItem): 
   });
   const responsibility = item.responsibility ?? "agent";
   const waiting = prerequisites.filter(p => !p.completed);
-  const ambiguous = item.identityAmbiguous || (item.stableId && [...doc.items.Active, ...doc.items.Queue, ...doc.items.Done].filter(i => i.stableId === item.stableId).length !== 1);
   const invalid = item.dependencies?.length ? validateTaskDependencies(phrenPath, doc, item, item.dependencies) : undefined;
   const readiness = responsibility === "human" || waiting.some(p => p.responsibility === "human") ? "waiting-on-human"
-    : item.taskContractRaw !== undefined || ambiguous || invalid || waiting.length ? "waiting-on-task" : "ready";
+    : item.taskContractRaw !== undefined || invalid || waiting.length ? "waiting-on-task" : "ready";
   return { responsibility, readiness, prerequisites };
 }
 
@@ -96,7 +102,7 @@ export function taskView(phrenPath: string, doc: TaskDoc, item: TaskItem) {
 }
 
 export function validateTaskDependencies(phrenPath: string, doc: TaskDoc, item: TaskItem, refs: TaskDependency[]): string | undefined {
-  if (!Array.isArray(refs) || refs.length > 100 || refs.some(r => !isTaskDependency(r))) return "Dependencies require storeId, project and stableId (at most 100).";
+  if (!Array.isArray(refs) || refs.length > 100 || refs.some(r => !r || !/^[a-f0-9]{8}$/.test(r.storeId) || !/^[a-f0-9]{8}$/.test(r.stableId) || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/.test(r.project))) return "Dependencies require storeId, project and stableId (at most 100).";
   const own = taskIdentity(phrenPath, doc, item);
   if (!own) return "The task needs an unambiguous store identity and stable ID.";
   const resolve = resolver(phrenPath, doc);
@@ -111,7 +117,6 @@ export function validateTaskDependencies(phrenPath: string, doc: TaskDoc, item: 
     const target = resolve(ref);
     if (!target) return `Prerequisite ${id} is missing, unavailable or ambiguous.`;
     if (target.taskContractRaw !== undefined) return `Prerequisite ${id} has unsupported task metadata.`;
-    if (new Set((target.dependencies ?? []).map(key)).size !== (target.dependencies ?? []).length) return `Prerequisite ${id} has duplicate dependencies.`;
     visiting.add(id);
     for (const child of target.dependencies ?? []) { const error = visit(child); if (error) return error; }
     visiting.delete(id); complete.add(id);

@@ -44,4 +44,7 @@ describe("store conductor ownership", () => {
     await expect(read()).rejects.toThrow();
     await expect(conductorLeaseAuthority(store, { storeId: "11111111", operation: "claim", claim: claim("40000000-0000-4000-8000-000000000003") })).rejects.toThrow();
   });
-});
+  it("checks the complete old holder at the authority and permits only one reviewed takeover", async () => {
+    const held = (await conductorLeaseAuthority(store, { storeId: "11111111", operation: "claim", claim: claim("40000000-0000-4000-8000-000000000003") })).state;
+    const replacement = (claimId: string) => ({ ...claim(claimId), computerId: authority,
+      place: { server: "default", pane: "w2:p1", terminal: "terminal

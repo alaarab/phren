@@ -45,11 +45,7 @@ export function handleTaskView(profile: string, filter: TaskFilter = {}) {
         const github = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
         const ready = taskReadiness(getPhrenPath(), original, item);
         console.log(`    - ${item.line}${rankTag}${github} [${ready.responsibility} · ${ready.readiness}]`);
-        for (const prerequisite of ready.prerequisites) {
-          const responsibility = prerequisite.missing ? "Unknown responsibility" : prerequisite.responsibility === "human" ? "Human" : "Agent";
-          console.log(`      ${prerequisite.missing ? "Unavailable" : prerequisite.completed ? "✓" : "Waiting on"} [${responsibility}] ${prerequisite.title}`);
-          console.log(`        ${prerequisite.storeId}/${prerequisite.project}/${prerequisite.stableId}`);
-        }
+        for (const prerequisite of ready.prerequisites) console.log(`      ${prerequisite.completed ? "✓" : "Waiting on"} ${prerequisite.title}`);
       }
     }
     if (queueCount > 0) {
@@ -60,11 +56,7 @@ export function handleTaskView(profile: string, filter: TaskFilter = {}) {
         const github = item.githubIssue ? ` [gh:#${item.githubIssue}]` : item.githubUrl ? " [gh]" : "";
         const ready = taskReadiness(getPhrenPath(), original, item);
         console.log(`    - ${item.line}${rankTag}${github} [${ready.responsibility} · ${ready.readiness}]`);
-        for (const prerequisite of ready.prerequisites) {
-          const responsibility = prerequisite.missing ? "Unknown responsibility" : prerequisite.responsibility === "human" ? "Human" : "Agent";
-          console.log(`      ${prerequisite.missing ? "Unavailable" : prerequisite.completed ? "✓" : "Waiting on"} [${responsibility}] ${prerequisite.title}`);
-          console.log(`        ${prerequisite.storeId}/${prerequisite.project}/${prerequisite.stableId}`);
-        }
+        for (const prerequisite of ready.prerequisites) console.log(`      ${prerequisite.completed ? "✓" : "Waiting on"} ${prerequisite.title}`);
       }
     }
   }

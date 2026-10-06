@@ -950,26 +950,19 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       if (field === 'dependencies') {
         var choices = _allTasks.filter(function(t) { return t.identity && t !== task; });
         var selected = task.dependencies || [];
-        var retained = selected.filter(function(d) { return !choices.some(function(t) { return t.identity.storeId === d.storeId && t.identity.project === d.project && t.identity.stableId === d.stableId; }); });
         var panel = document.getElementById('task-prerequisites-' + index);
         if (!panel) return;
         if (value !== 'save') {
           panel.hidden = !panel.hidden;
-          var unavailableNotice = retained.length ? '<p role="note">Some prerequisites are not available in this picker and will be kept. This picker cannot remove them. Use the CLI or API to remove these links or clear the dependency list. If a retained target is unavailable to the server, saving other prerequisite changes will fail until it is restored or removed.</p>' + retained.map(function(d) {
-            var current = (task.prerequisites || []).find(function(p) { return p.storeId === d.storeId && p.project === d.project && p.stableId === d.stableId; });
-            var responsibility = !current || current.missing ? 'Unknown responsibility' : current.responsibility === 'human' ? 'Human' : 'Agent';
-            return '<div>' + esc(responsibility + ' · ' + (current ? current.title : 'Unavailable prerequisite')) + ' <code style="overflow-wrap:anywhere">' + esc(d.storeId + '/' + d.project + '/' + d.stableId) + '</code></div>';
-          }).join('') : '';
-          panel.innerHTML = unavailableNotice + choices.map(function(t, choice) {
+          panel.innerHTML = choices.map(function(t, choice) {
             var checked = selected.some(function(d) { return d.storeId === t.identity.storeId && d.project === t.identity.project && d.stableId === t.identity.stableId; });
-            var responsibility = t.responsibility === 'human' ? 'Human' : 'Agent';
-            return '<label><input type="checkbox" data-task-choice="' + choice + '"' + (checked ? ' checked' : '') + '> ' + esc(responsibility + ' · ' + t.line) + ' <code style="overflow-wrap:anywhere">' + esc(t.identity.storeId + '/' + t.identity.project + '/' + t.identity.stableId) + '</code></label><br>';
+            return '<label><input type="checkbox" data-task-choice="' + choice + '"' + (checked ? ' checked' : '') + '> ' + esc(t.project + ': ' + t.line) + '</label><br>';
           }).join('') + '<button data-ts-action="savePrerequisites" data-index="' + index + '">Save prerequisites</button>';
           panel._choices = choices;
           return;
         }
         // Retain unavailable prerequisites unless explicitly removed through CLI/API.
-        var dependencies = retained;
+        var dependencies = selected.filter(function(d) { return !choices.some(function(t) { return t.identity.storeId === d.storeId && t.identity.project === d.project && t.identity.stableId === d.stableId; }); });
         panel.querySelectorAll('input:checked').forEach(function(input) { dependencies.push(panel._choices[Number(input.getAttribute('data-task-choice'))].identity); });
         updates.dependencies = JSON.stringify(dependencies);
       } else updates[field] = value;
@@ -978,8 +971,7 @@ export function renderTasksAndSettingsScript(authToken: string): string {
         var body = new URLSearchParams(updates);
         if (csrf.token) body.set('_csrf', csrf.token);
         return fetch(_tsAuthToken ? tsAuthUrl('/api/tasks/update') : '/api/tasks/update', { method: 'POST', body: body });
-      }).then(function(r) { return r.json(); }).then(function(data) { if (data.ok) loadTasks(); else alert(data.error || 'Task update failed. Your selections have been kept.'); })
-        .catch(function(err) { alert('Task update could not be confirmed. Your selections have been kept; check the task before retrying. ' + String(err)); });
+      }).then(function(r) { return r.json(); }).then(function(data) { if (data.ok) loadTasks(); else alert(data.error || 'Task update failed'); });
     };
 
     window.completeTaskFromUi = function(project, item) {
@@ -1091,10 +1083,7 @@ export function renderTasksAndSettingsScript(authToken: string): string {
         html += '<div class="task-row-content">';
         html += '<span class="task-row-text">' + esc(t.line) + '</span>';
         html += '<div>' + esc((t.responsibility || 'agent') === 'human' ? 'Human' : 'Agent') + ' · ' + esc(t.readiness || 'ready') + '</div>';
-        (t.prerequisites || []).forEach(function(d) {
-          var responsibility = d.missing ? 'Unknown responsibility' : d.responsibility === 'human' ? 'Human' : 'Agent';
-          html += '<div>' + (d.missing ? 'Unavailable' : d.completed ? '✓' : 'Waiting on') + ' · ' + esc(responsibility + ' · ' + d.title) + '<br><code style="overflow-wrap:anywhere">' + esc(d.storeId + '/' + d.project + '/' + d.stableId) + '</code></div>';
-        });
+        (t.prerequisites || []).forEach(function(d) { html += '<div>' + (d.completed ? '✓ ' : 'Waiting on ') + esc(d.title) + '</div>'; });
         html += '<div id="task-prerequisites-' + index + '" hidden></div>';
         html += '</div>';
         html += '<div class="task-row-meta">';
@@ -1141,10 +1130,9 @@ export function renderTasksAndSettingsScript(authToken: string): string {
       // Add task input at top (only when a specific project is selected)
       if (projectFilter) {
         html += '<div class="task-add-bar">';
-        html += '<input id="task-add-input-' + esc(projectFilter) + '" type="text" class="task-add-input" placeholder="Add an Agent task to ' + esc(projectFilter) + '\u2026" data-ts-action="addTaskKeydown" data-project="' + esc(projectFilter) + '">';
-        html += '<button class="task-add-btn" data-ts-action="addTask" data-project="' + esc(projectFilter) + '"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Add Agent task</button>';
+        html += '<input id="task-add-input-' + esc(projectFilter) + '" type="text" class="task-add-input" placeholder="Add a task to ' + esc(projectFilter) + '\u2026" data-ts-action="addTaskKeydown" data-project="' + esc(projectFilter) + '">';
+        html += '<button class="task-add-btn" data-ts-action="addTask" data-project="' + esc(projectFilter) + '"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Add</button>';
         html += '</div>';
-        html += '<p role="note">New tasks are created as Agent work. Creating a Human task in one step is not supported here.</p>';
       }
 
       // Group by section: Active first, then Queue

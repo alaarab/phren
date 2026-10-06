@@ -1,4 +1,131 @@
-# Feature maturity, September 26
+# Feature maturity
+
+## Current source contract for owner task 250619d7
+
+The owner requested one conductor per store, phone-driven linking, and an
+explicit return when observation expires. The details below are conservative
+**conductor implementation judgment**, not verbatim owner decisions. The
+September 26 assessment below remains historical evidence, not the current
+implementation status. These source changes have not been exercised against
+live peers; new takeover/stop corrections and prepared regressions are UNRUN
+and unbuilt under the development policy.
+
+### Store lease
+
+Capability `conductorLease` belongs to the conductor module. The registered
+eight-hex store ID and one explicitly configured authority computer UUID live
+in synced `.config/conductor-authority.json`. The authority serializes its
+machine-local lease under a lock. A holder has no expiry: offline holders and
+unreachable authorities block new launches. Existing work is preserved. The
+configuration must be distributed to participating compatible Hooks before
+adoption; neither these routes nor a phone sync elects a replacement authority.
+
+- `GET /v1/conductor/lease` returns `{ok:true,config:null|Config,state:null|State}`.
+  Config is `{version:1,storeId,authorityComputerId}`. State adds `generation`
+  and `holder:null|Holder`. Holder is `{computerId,claimId,since,place?}`;
+  place is `{server,pane,terminal,source,session?}`. IDs for computers/claims are
+  UUIDs; `since` is an ISO datetime. An unavailable authority returns an error,
+  not an empty lease.
+- `POST /v1/conductor/lease/configure` accepts
+  `{authorityComputerId,confirm:true}` and returns
+  `{ok:true,config,distributionRequired:true}`. It verifies the existing local
+  or pinned-peer computer and refuses to replace an existing authority.
+- `POST /v1/conductor/lease/revoke` accepts
+  `{expectedGeneration,holder:<complete reviewed Holder>,confirm:true}` and
+  returns `{ok:true,state,existingWorkPreserved:true}`. Both holder and generation
+  must still match at the authority. No process is stopped.
+- `POST /v1/conductor/lease/takeover` runs on the replacement computer's
+  authenticated Hook and accepts:
+
+  ```json
+  {
+    "expectedGeneration": 3,
+    "holder": {
+      "computerId":"40000000-0000-4000-8000-000000000001",
+      "claimId":"40000000-0000-4000-8000-000000000002",
+      "since":"2026-10-03T00:00:00.000Z",
+      "place":{"server":"default","pane":"w1:p1","terminal":"terminal-1","source":"codex","session":"40000000-0000-4000-8000-000000000003"}
+    },
+    "newHolder": {
+      "computerId":"40000000-0000-4000-8000-000000000004",
+      "target":{"server":"default","workspace":"w2","tab":"w2:t1","pane":"w2:p1","source":"codex","session":"40000000-0000-4000-8000-000000000005"},
+      "terminal":"terminal-2"
+    },
+    "confirm":true
+  }
+  ```
+
+  These example identities must be replaced by the exact GET holder and live
+  replacement identity; omit `holder.place` only if GET omitted it. The UI must
+  show the complete old and new identities before confirmation.
+  The new target must be an already running local Claude, Codex or OpenCode
+  session, with matching workspace, tab, pane, terminal and session identity.
+  Starting tokens are insufficient. The authority atomically compares the
+  complete old holder and generation, replaces it with a new claim, and advances
+  the generation. Success returns
+  `{ok:true,state,previousHolder,existingWorkPreserved:true,launched:false}`.
+  The old worker stays alive but cannot dispatch under the revoked lease. A
+  lost response requires reading the lease and explicit review, never automatic
+  replay. A failure after transfer reports that transfer may need role repair;
+  it retains the lease and per-claim review evidence.
+
+All three mutation controls reject agent-origin calls and require existing
+`manage_config` authority. They add no dispatch or release grants. The private
+`/v1/conductor/lease/authority` coordination route is not a phone control.
+`POST /v1/conductor/stop` ends the local role and returns `leaseUnchanged:true`
+when configured; it does not implicitly revoke the reservation or assert that
+the authority currently has a holder. Read the lease for its actual state. CLI lease
+configure/revoke/takeover requires the owner's interactive terminal. Takeover
+uses `phren conductor lease takeover --review-file <request.json> --confirm
+'<oldClaimId>-><newComputerId>/<newSession>'` on the replacement computer.
+
+An irrecoverable authority remains an explicit recovery prerequisite. This
+implementation does not infer that an inaccessible computer has lost its state
+or authorize a second authority while the first might return.
+
+### Phone linking and repair
+
+Capability `computerEnrollment` exposes owner-only controls under existing
+`manage_config` authority. Both computers must already have authenticated phone
+connections; the phone relays public identity material, never credentials.
+
+1. `POST /v1/computers/enrollment/prepare` with
+   `{name,confirmKeyCreation:true}` explicitly creates/reuses the existing CLI
+   dispatch identity. Response is
+   `{ok:true,version:1,computerId,name,username,hostKey,publicKey,hostFingerprint,keyFingerprint}`.
+2. `POST /v1/computers/enrollment/review` with
+   `{peer:{computerId,name,address,username,port,server,hostKey,publicKey}}`
+   stores a ten-minute review without changing trust. `server` defaults to
+   `default`. Response includes `ok`, `version:1`, review `id`, `localComputerId`,
+   `peer`, `localHostFingerprint`, `hostFingerprint`, `keyFingerprint`,
+   `expiresAt`, and an instruction to compare both authenticated identities.
+3. `POST /v1/computers/enrollment/confirm` requires
+   `{reviewId,confirm:true,peerComputerId,hostFingerprint,keyFingerprint}`.
+   It rechecks the review, local host pin and existing enrollment, accepts only
+   the existing restricted CLI key format, and verifies pinned SSH plus the
+   exact remote computer UUID before saving a peer. Success reports
+   `state:"verified",linked:true`; partial acceptance reports
+   `state:"key-accepted-awaiting-verification",linked:false` and its reason.
+   Show partial state; do not report a completed link or automatically retry.
+4. `POST /v1/computers/enrollment/verify` with
+   `{name,computerId,hostFingerprint}` checks only an existing saved peer/pin
+   and exact remote UUID. It changes no keys, pins, identities or grants.
+   This is verification, not automatic one-way-link repair. Repair requiring
+   key acceptance uses the same explicit review/confirm flow above; mismatching
+   existing pins or enrolled keys require separate owner review and revocation.
+
+None of this authorizes new enrollment for the separate QL attached-Copilot
+scope. No live enrollment, credential collection or host-key probing occurred.
+
+### Expired observation
+
+After 24 hours an accepted or uncertain dispatch with no return produces
+`returned.state:"expired"`, `read:false`, and an explanation that completion
+was not verified. `worker.state` becomes `expired`. The worker may still run;
+expiry does not mark its task Done, close it, release a lease or grant failover.
+The native returns UI must preserve that distinction from Gone and Done.
+
+## Historical September 26 assessment
 
 Level 5 means a feature **works**, is **reliable** (errors, restarts and
 offline states are handled), is **visible** (the phone or CLI shows its real
@@ -38,4 +165,4 @@ read only. Measured on `origin/main` at 718d55eb plus this branch
   `com.phren.ios.notifications` App ID in the Developer portal, deploy the push
   relay, fill in the App Privacy questionnaire and the EU trader status, replace
   the demo-token placeholder, and run the physical-device checklist.
-- **Push-to-talk.** The PushToTalk entitlement request and background mode.
+-

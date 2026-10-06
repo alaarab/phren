@@ -33,11 +33,26 @@ The TUI offers `:lane human|agent|all` as an independent lane filter and display
 
 ## Hook and phone contract
 
-Capability `taskDependencies` is advertised only when the tasks module is enabled. Existing authenticated Hook transport and registered store access apply.
+Capabilities `taskDependencies: true` and `taskWriterSafety: true` are advertised only when the tasks module is enabled. The latter means the Hook supplies the writer-safety status below; it does not certify other writers. Existing authenticated Hook transport and registered store access apply.
 
-- `GET /v1/tasks/stores` returns `{ok:true,version:1,stores:[{id,name,role,primary,available,identityReady,ambiguous,metadataWritable,projects,repositoryIdentity?}]}`. `id` is the canonical eight-hex store ID or null; `projects` is the subscribed project-slug list. `repositoryIdentity`, when available, is the existing credential-stripped GitHub `{repository,branch}` identity. Only available, identity-ready, unambiguous stores may be selected. Native clients map the verified repository identity or the pinned computer’s exact primary store; they never hash or guess an ID. Readonly stores may supply prerequisites. No filesystem paths are returned.
-- `GET /v1/tasks?storeId=<immutable-id>&project=<slug>` also accepts optional `responsibility`/`readiness` query filters and returns `{ok, version:1, storeId, project, metadataWritable, counts, items:{Active:[],Queue:[],Done:[]}}`. Entries have the same enriched shape as MCP.
+- `GET /v1/tasks/stores` returns `{ok:true,version:1,stores:[{id,name,role,primary,available,identityReady,ambiguous,metadataWritable,writerSafety,projects,repositoryIdentity?}]}`. `id` is the canonical eight-hex store ID or null; `role` is `primary|team|readonly`; `projects` is the subscribed project-slug list. `repositoryIdentity`, when available, is the existing credential-stripped GitHub `{repository,branch}` identity. Only available, identity-ready, unambiguous stores may be selected. Native clients require a unique repository **and branch** match or the pinned computer's exact primary store; they never hash or guess an ID. `primary` refers to the serving Hook's primary store, not whichever store the phone currently displays. Readonly stores may supply prerequisites. No filesystem paths are returned. Unavailable rows have `projects:[]`, `metadataWritable:false` and `writerSafety:null`.
+- `GET /v1/tasks?storeId=<immutable-id>&project=<slug>` also accepts optional `responsibility`/`readiness` query filters and returns `{ok, version:1, storeId, project, metadataWritable, writerSafety, counts, items:{Active:[],Queue:[],Done:[]}}`. Entries have the same enriched shape as MCP. Top-level `storeId` is authoritative and agrees with each task's non-null `identity.storeId`.
 - `POST /v1/tasks/update` accepts `{storeId, project, stableId, updates:{responsibility?, dependencies?, section?}}`. Section uses `Active`, `Queue` or `Done`. The response is the refreshed project task document. The existing contributor/admin `update_task` policy applies; readonly stores refuse updates. No client path can select a store.
+
+Each available directory row and project GET/update response includes:
+
+```typescript
+writerSafety: {
+  version: 1;
+  metadataVersion: 1;
+  activation: "disabled" | "owner-acknowledged";
+  requiresCoordinatedAdoption: true;
+  legacyWritersFenced: false;
+  acknowledgedAt?: string; // Present only for a valid store-bound acknowledgement.
+}
+```
+
+Directory `metadataWritable` uses store-level access; the project GET applies the project override. These are mutation permissions under existing policy, not a new read-ACL system. Dependency targets are resolved against this same attached-store directory, including subscribed projects and readonly prerequisites. Duplicate immutable IDs, unknown IDs and unavailable stores cannot be selected by an update. Clients cannot supply arbitrary store paths.
 
 ## Deliberate compatible activation
 
@@ -45,6 +60,4 @@ Task metadata creation is disabled by default. After every CLI, MCP process, Hoo
 
 This acknowledgement cannot prevent an older binary from ignoring the activation file. Coordinated compatible-writer adoption is a real prerequisite, including existing long-lived MCP/sync processes. A serving Hook’s capability or a new app version alone is insufficient. No live activation or runtime upgrade has been performed in this source lane. Hook task responses expose `metadataWritable` using activation and existing access rights; a native client must retain drafts and explain unavailable edits when false. Per-project GET rights are authoritative for project-scoped access.
 
-Phones should preserve unknown metadata when writing older tasks, use stable identities for links, show prerequisite titles, and keep responsibility controls separate from section controls. Integrator owns native iOS implementation; the Android lead owns Android. This core change does not modify either app repository or installed Hooks.
-
-Development evidence: the CLI and agent build passed before the latest identity/directory/activation corrections; those corrections have static syntax/diff checks pending a fresh capacity-gated build. The regressions in `packages/cli/src/data/task-contract.test.ts` are prepared for the consolidated RC and have not been executed. Runtime validation, cross-machine sync and native app adoption remain release-candidate gates.
+The parser on public main `87fc768a` stops reading continuations at an unknown `Task:` line. Its whole-file renderer then omits that metadata and any subsequent context, claim or issue link. Moving `Task:` to the end would still lose ownership and dependencies. A compati

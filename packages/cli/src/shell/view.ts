@@ -451,16 +451,7 @@ function renderTaskView(ctx: ViewContext, cursor: number, height: number, subsec
       : truncateLine(row, cols);
     allLines.push(row);
 
-    for (const prerequisite of ready.prerequisites) {
-      const responsibility = prerequisite.missing ? "Unknown responsibility" : prerequisite.responsibility === "human" ? "Human" : "Agent";
-      allLines.push(truncateLine(`              ${prerequisite.missing ? "Unavailable" : prerequisite.completed ? "✓" : "Waiting on"} [${responsibility}] ${prerequisite.title}`, cols));
-      // Identity components are validated ASCII. Wrap rather than truncate so
-      // similarly titled cross-store tasks stay distinguishable in narrow panes.
-      const identity = `${prerequisite.storeId}/${prerequisite.project}/${prerequisite.stableId}`;
-      const indent = " ".repeat(Math.min(14, Math.max(0, cols - 1)));
-      const width = Math.max(1, cols - indent.length);
-      for (let start = 0; start < identity.length; start += width) allLines.push(indent + identity.slice(start, start + width));
-    }
+    for (const prerequisite of ready.prerequisites) allLines.push(truncateLine(`              ${prerequisite.completed ? "✓" : "Waiting on"} ${prerequisite.title}`, cols));
     if (item.context) {
       const ctxLine = `              ${style.dimItalic("→ " + item.context)}`;
       allLines.push(isSelected && !isDone ? formatSelectableLine(ctxLine, cols, true) : truncateLine(ctxLine, cols));
