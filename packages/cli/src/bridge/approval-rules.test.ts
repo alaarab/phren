@@ -158,6 +158,17 @@ describe.skipIf(process.platform === "win32")("owner approval rules through HTTP
     expect((await callback("git status")).data).toEqual({});
   });
 
+  it("rejects a foreign checkout that forges a gitdir pointer to the granted repository", async () => {
+    await add(draft({ command: "npm test" }));
+    expect((await callback("npm test")).data.hookSpecificOutput.decision.behavior).toBe("allow");
+    const foreignCheckout = path.join(home, "foreign-checkout"); await mkdir(foreignCheckout);
+    await writeFile(path.join(foreignCheckout, ".git"), `gitdir: ${path.join(project, ".git")}\n`);
+    vi.mocked(snapshot).mockResolvedValue({ panes: [{ pane_id: target.pane, workspace_id: target.workspace, tab_id: target.tab,
+      agent: "claude", terminal_id: "term-1", foreground_cwd: foreignCheckout }] });
+    expect((await callback("npm test", { cwd: foreignCheckout })).data).toEqual({});
+    expect(await audit()).toHaveLength(1);
+  });
+
   it("offers the exact project-scoped rule on a held approval card without creating a grant", async () => {
     hooks.overview.renew("default");
     const held = callback("npm test");

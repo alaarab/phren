@@ -720,7 +720,8 @@ advertises `approvalRules: { version: 1, harnesses: ["claude"] }`.
 Rules match the exact tool identifier and a complete command using exact,
 word-boundary prefix or anchored `*`/`?` glob matching. Project scope is the
 canonical main-repository directory (the parent of its Git common directory),
-shared by linked worktrees. Optional harness, session and hostname constraints
+shared by registered linked worktrees. A foreign folder that merely points its
+.git file at that repository is rejected. Optional harness, session and hostname constraints
 intersect. Every matching `always-ask` overrides `allow`; expiry and revocation
 are checked on each request. Auto-allow supports `git status`, Git diff/log/show
 with both `--no-ext-diff --no-textconv`, and bare npm/pnpm/yarn test. Other
