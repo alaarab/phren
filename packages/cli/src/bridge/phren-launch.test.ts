@@ -37,7 +37,7 @@ describe("launching phren's own agent", () => {
     // A nonstandard store: never derive its location from the SSH username or home.
     vi.stubEnv("PHREN_PATH", cwd);
     const result = await launchSession("default", { agentFolder: true, label: "Quick chat", kind: "phren", mode: "chat" });
-    expect(path.dirname(String(result.cwd))).toBe(path.join(cwd, "agents"));
+    expect(path.dirname(String(result.cwd))).toBe(path.join(cwd, ".runtime", "agents"));
     expect(statSync(String(result.cwd)).isDirectory()).toBe(true);
     expect(placements[0].cwd).toBe(result.cwd);
     expect(starts[0].args).toEqual(["agent", "-i", "--mode", "chat"]);

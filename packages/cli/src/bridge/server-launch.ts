@@ -390,7 +390,11 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   let scratch: string | undefined;
   if (agentFolder) {
     const store = await realpath(defaultPhrenPath());
-    const agents = path.join(store, "agents");
+    // Runtime folders are excluded from project discovery and store sync.
+    const runtime = path.join(store, ".runtime");
+    await mkdir(runtime, { recursive: true, mode: 0o700 });
+    if (await realpath(runtime) !== runtime) throw new BridgeError(403, "The runtime folder must be inside the Phren directory.");
+    const agents = path.join(runtime, "agents");
     await mkdir(agents, { recursive: true, mode: 0o700 });
     // A pre-existing symlink must not redirect the new folder outside the store.
     if (await realpath(agents) !== agents) throw new BridgeError(403, "The agents folder must be inside the Phren directory.");
