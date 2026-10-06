@@ -20,8 +20,13 @@ export interface LocatedFolder { directory: string; source: "activity" | "herdr"
 const PROJECT_NAME = /^[a-z0-9][a-z0-9-]*$/;
 const SEARCH_ROOTS = ["", "Sites", "Projects", "projects", "Code", "code", "dev", "src", "repos", "workspace"];
 
+function realHome(): string {
+  try { return realpathSync.native(homedir()); } catch { return path.resolve(homedir()); }
+}
+
 export async function locateProject(project: string, activity: Json[], env: NodeJS.ProcessEnv = process.env): Promise<LocatedFolder[]> {
   if (!PROJECT_NAME.test(project) || project.length > 100) throw new BridgeError(400, "Invalid project name.");
+  const home = realHome();
   const found: LocatedFolder[] = [];
   const seen = new Set<string>();
   const offer = async (directory: string, source: LocatedFolder["source"], lastSeen?: string) => {
@@ -32,6 +37,10 @@ export async function locateProject(project: string, activity: Json[], env: Node
       // the real path (native, so it carries the on-disk case) dedupes them.
       dir = realpathSync.native(dir);
     } catch { return; /* not on this computer */ }
+    // A folder that contains the home folder holds every project, so it is
+    // never one: a project named after the user ("sam") must not be offered
+    // /home/sam because every journal path runs through it.
+    if (dir === path.parse(dir).root || home === dir || home.startsWith(dir + path.sep)) return;
     if (seen.has(dir)) return;
     seen.add(dir);
     found.push({ directory: dir, source, ...(lastSeen ? { lastSeen } : {}) });
@@ -72,7 +81,6 @@ export async function locateProject(project: string, activity: Json[], env: Node
     if (match) await offer(match[1].trim().replace(/^['"]|['"]$/g, ""), "phren");
   } catch { /* unregistered */ }
   // 4. The roots phren's locator searches.
-  const home = homedir();
   for (const root of [...(env.PROJECTS_DIR ? [env.PROJECTS_DIR] : []), ...SEARCH_ROOTS.map(r => path.join(home, r))]) {
     await offer(path.join(root, project), "search");
   }
