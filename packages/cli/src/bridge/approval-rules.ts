@@ -126,7 +126,7 @@ export interface ApprovalRuleContext { project: string; harness: NonNullable<App
 export async function approvalRuleContext(cwd: string, harness: string, session: string): Promise<ApprovalRuleContext | undefined> {
   if (!path.isAbsolute(cwd)) return undefined;
   try {
-    const directories = (await git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel")).trim().split("\n");
+    const directories = (await git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel")).trim().split(/\r?\n/);
     if (directories.length !== 2) return undefined;
     const [common, checkout, directory] = await Promise.all([...directories, cwd].map(value => realpath(value)));
     const relative = path.relative(checkout, directory);
