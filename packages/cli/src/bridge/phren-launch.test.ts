@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,6 +32,16 @@ describe("launching phren's own agent", () => {
     } as unknown as TerminalProvider);
   });
   afterEach(() => { restore(); setLaunchInventory(undefined); resetLaunchIds(); vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });
+
+  it("starts a quick chat without cwd in the configured Phren directory", async () => {
+    // A nonstandard store: never derive its location from the SSH username or home.
+    vi.stubEnv("PHREN_PATH", cwd);
+    const result = await launchSession("default", { agentFolder: true, label: "Quick chat", kind: "phren", mode: "chat" });
+    expect(path.dirname(String(result.cwd))).toBe(path.join(cwd, "agents"));
+    expect(statSync(String(result.cwd)).isDirectory()).toBe(true);
+    expect(placements[0].cwd).toBe(result.cwd);
+    expect(starts[0].args).toEqual(["agent", "-i", "--mode", "chat"]);
+  });
 
   it("starts one quick chat for one launchId: a double tap or a retry gets the same pane", async () => {
     const launchId = "0b7e3c1a-5d2f-4e8a-9c41-2f6b8d0e7a13";
