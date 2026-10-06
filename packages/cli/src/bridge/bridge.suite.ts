@@ -2771,7 +2771,7 @@ schedules:
       const health = (await api("/v1/health")).data.computer;
       await writeFile(path.join(root, "bridge/hooks.yaml"), JSON.stringify({ version: 1, computers: [
         // An address no test machine is named: a peer never takes a name the local computer has.
-        { name: "Linuxbox", address: "linuxbox-peer.invalid", username: "sam", port: 22, server: "default", hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPKDk8cewh74xDIccwQz/N4V05hPT+bdp5fEii+pzf9B" },
+        { name: "Linuxbox", address: "linuxbox-peer.invalid", username: "sam", port: 22, server: "default", hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg" },
       ] }), { mode: 0o600 });
       const { status, data } = await api("/v1/computers");
       expect(status).toBe(200);

@@ -389,11 +389,11 @@ describe("task auto-capture prompt gate", () => {
   // Each sample carries a signal word or URL, so it clears the substance floor and only the
   // pasted-content / filler gates can stop it.
   const rejected: Array<[string, string]> = [
-    ["pasted GitHub page", "Skip to content admenergy arc Repository navigation Code Issues Pull requests Actions Projects Wiki Security Insights https://github.com/admenergy/arc"],
-    ["pasted PowerShell banner", "Windows PowerShell Copyright (C) Microsoft Corporation. Install the latest PowerShell for new features and improvements! https://aka.ms/PSWindows PS C:\\Users\\alaarab> git status"],
+    ["pasted GitHub page", "Skip to content example-org widgets Repository navigation Code Issues Pull requests Actions Projects Wiki Security Insights https://github.com/example-org/widgets"],
+    ["pasted PowerShell banner", "Windows PowerShell Copyright (C) Microsoft Corporation. Install the latest PowerShell for new features and improvements! https://aka.ms/PSWindows PS C:\\Users\\me> git status"],
     ["single character", "3"],
-    ["chat reaction", "Its literally just the start of the day LMAO I havent run anything yet"],
-    ["opinion commentary", "I dont like three sources of truth idk why you did that that was u basically i feel thats slop in a way, check the docs"],
+    ["chat reaction", "lol its barely morning I havent even opened the laptop yet"],
+    ["opinion commentary", "honestly two config files feels messy to me idk, kinda sloppy, look at the docs"],
   ];
 
   for (const [label, prompt] of rejected) {

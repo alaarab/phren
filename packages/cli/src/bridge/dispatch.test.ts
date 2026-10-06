@@ -581,7 +581,7 @@ describe("dispatch to this computer", () => {
 
   it("matches this computer by any of its names, never another's", () => {
     const names = ["Mac.example.net", "Mac", "Sams-Mac"];
-    for (const name of ["Mac", "mac.example.net", "MAC.attlocal.net", "Sams-Mac.local", "local"]) expect(isLocalComputer(name, names)).toBe(true);
+    for (const name of ["Mac", "mac.example.net", "MAC.example.net", "Sams-Mac.local", "local"]) expect(isLocalComputer(name, names)).toBe(true);
     for (const name of ["Linuxbox", "Desk", "MacBookPro", ""]) expect(isLocalComputer(name, names)).toBe(false);
   });
 });

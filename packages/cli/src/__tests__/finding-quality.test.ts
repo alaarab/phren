@@ -22,7 +22,7 @@ describe("findingQualityReason", () => {
 
   it("rejects transient shell/tool failure captures", () => {
     expect(findingQualityReason(
-      "[bug] command 'phren doctor --fix 2>&1 | tail' failed: EACCES: permission denied, mkdir '/home/alaarab/emv/.claude/skills'"
+      "[bug] command 'phren doctor --fix 2>&1 | tail' failed: EACCES: permission denied, mkdir '/home/me/emv/.claude/skills'"
     )).toBe("transient_tool_error");
     expect(findingQualityReason("[bug] command 'npm run build' failed: exit status 1")).toBe("transient_tool_error");
     expect(findingQualityReason("[bug] ENOENT: no such file or directory, open '/tmp/x.json'")).toBe("transient_tool_error");
@@ -72,7 +72,7 @@ describe("extractToolFindings quality gate", () => {
     const candidates = extractToolFindings(
       "Bash",
       { command: "phren doctor --fix 2>&1 | tail" },
-      "EACCES: permission denied, mkdir '/home/alaarab/emv/.claude/skills'",
+      "EACCES: permission denied, mkdir '/home/me/emv/.claude/skills'",
       { is_error: true },
     );
     expect(candidates).toEqual([]);

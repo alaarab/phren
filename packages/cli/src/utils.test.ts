@@ -88,7 +88,7 @@ describe("normalizeExecCommand", () => {
   it.each([
     ["keeps plain commands unchanged on POSIX", ["gh", "linux"], { command: "gh", shell: false }],
     ["prefers resolved .exe targets on Windows without shell mode", ["gh", "win32", "C:\\Program Files\\GitHub CLI\\gh.exe\r\n"], { command: "C:\\Program Files\\GitHub CLI\\gh.exe", shell: false }],
-    ["enables shell mode for resolved .cmd targets on Windows", ["gh", "win32", "C:\\Users\\ala\\AppData\\Roaming\\npm\\gh.cmd\r\n"], { command: "C:\\Users\\ala\\AppData\\Roaming\\npm\\gh.cmd", shell: true }],
+    ["enables shell mode for resolved .cmd targets on Windows", ["gh", "win32", "C:\\Users\\me\\AppData\\Roaming\\npm\\gh.cmd\r\n"], { command: "C:\\Users\\me\\AppData\\Roaming\\npm\\gh.cmd", shell: true }],
     ["preserves explicit wrapper paths on Windows", ["C:\\tools\\gh.cmd", "win32"], { command: "C:\\tools\\gh.cmd", shell: true }],
   ] as const)("%s", (_label, args, expected) => {
     expect(normalizeExecCommand(...(args as unknown as Parameters<typeof normalizeExecCommand>))).toEqual(expected);

@@ -6,9 +6,9 @@ import type { HookPeer } from "./peers.js";
 import { BridgeError, type Json } from "./protocol.js";
 
 const peer = (name: string): HookPeer => ({ name, address: `${name.toLowerCase()}.example`, username: "sam", port: 22, server: "default",
-  hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPKDk8cewh74xDIccwQz/N4V05hPT+bdp5fEii+pzf9B" });
+  hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg" });
 const target = { server: "default", workspace: "w9", tab: "w9:t1", pane: "w9:p1", source: "claude" };
-const caller = { name: "Omarchy", hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPKDk8cewh74xDIccwQz/N4V05hPT+bdp5fEii+pzf9B" };
+const caller = { name: "Omarchy", hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg" };
 const id = (n: number) => `30000000-0000-4000-8000-00000000000${n}`;
 
 describe("one conductor per set", () => {

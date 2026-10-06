@@ -388,7 +388,7 @@ unspecified computer or `anywhere` before a peer has been selected.
 
 `computers` accepts any name a computer answers to: its hooks.yaml name, its
 hostname or Bonjour name, a peer's address, or a name machines.yaml registers
-for it (see `GET /v1/computers` below). A grant for `Squids-Mac-mini.local`
+for it (see `GET /v1/computers` below). A grant for `Sams-Mac-mini.local`
 matches a dispatch to `Mac`, the same computer. Adding a grant stores each name
 as the computer's canonical one (the hooks.yaml name, or this computer's short
 hostname) and keeps names it cannot resolve as written; `grants list` and

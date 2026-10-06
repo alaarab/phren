@@ -13,7 +13,7 @@ const bundle = path.resolve(process.env.PHREN_TEST_HOOK_BUNDLE || "packages/cli/
 const cli = path.resolve("packages/cli/dist/index.js");
 const machines = [
   { name: "Linuxbox", hostname: "omarchy", id: "adb03b73-cc59-4e41-b4a2-3eb73b90ef2c" },
-  { name: "Mini", hostname: "Squids-Mac-mini.local", id: "5756fce7-b731-407a-9ddb-24f559888421" },
+  { name: "Mini", hostname: "Sams-Mac-mini.local", id: "5e1c9a52-6d0e-4b8a-9e27-c4d1a7b05e63" },
   { name: "MacBook", hostname: "MacBookPro", id: "42ceb0c6-283c-44a9-991f-08ceb110125e" },
 ];
 
@@ -35,7 +35,7 @@ describe.skipIf(process.platform === "win32")("sets across three real Hooks", ()
 require("node:module").syncBuiltinESMExports();\n`);
     let hostKey: string;
     try { hostKey = (await readFile("/etc/ssh/ssh_host_ed25519_key.pub", "utf8")).trim().split(/\s+/).slice(0, 2).join(" "); }
-    catch { hostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPKDk8cewh74xDIccwQz/N4V05hPT+bdp5fEii+pzf9B"; }
+    catch { hostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg"; }
     const routes = Object.fromEntries(machines.map(machine => [machine.hostname.split(".")[0].toLowerCase() + ".example", socket(machine.name)]));
     await writeFile(path.join(root, "bin/ssh"), `#!${process.execPath}
 const args = process.argv.slice(2);
