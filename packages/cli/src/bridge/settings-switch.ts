@@ -41,7 +41,7 @@ export function settingsCapabilities(source: string, codexServed: boolean, claud
 }
 
 const request = z.object({ permissionMode: z.enum(PERMISSION_MODES).optional(), plan: z.boolean().optional(), fast: z.boolean().optional() })
-  .refine(value => value.permissionMode !== undefined || value.plan !== undefined || value.fast !== undefined, "Choose a setting to change.");
+  .strict().refine(value => value.permissionMode !== undefined || value.plan !== undefined || value.fast !== undefined, "Choose a setting to change.");
 
 /** Claude's permission mode from the footer line its TUI draws under the
  * composer. The transcript lags it: a `permission-mode` row is written only
@@ -49,9 +49,9 @@ const request = z.object({ permissionMode: z.enum(PERMISSION_MODES).optional(), 
  * trail hints ("(shift+tab to cycle) · 1 agent"), so only its start counts. */
 export function claudeFooterMode(screen: string): string | undefined {
   for (const line of stripTerminal(screen).split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(-8).reverse()) {
-    if (/bypass permissions on/i.test(line)) return "bypassPermissions";
     const text = line.replace(/^[⏵⏸]+\s*/, "");
     if (text === line) continue;
+    if (/bypass permissions on/i.test(text)) return "bypassPermissions";
     if (/^manual mode on\b/i.test(text)) return "default";
     if (/^accept edits on\b/i.test(text)) return "acceptEdits";
     if (/^plan mode on\b/i.test(text)) return "plan";
@@ -72,7 +72,9 @@ export class ClaudeSettingsReader {
   async read(target: Target, terminal: unknown): Promise<{ state?: SettingsState; bypass: boolean }> {
     const key = `${target.server}:${target.pane}`;
     let entry = this.cache.get(key);
-    if (!entry || entry.terminal !== terminal) { entry = { terminal, at: 0, bypass: false }; this.cache.set(key, entry); }
+    if (!entry || entry.terminal !== terminal) entry = { terminal, at: 0, bypass: false };
+    // Re-set on every use so the Map's order is recency.
+    this.cache.delete(key); this.cache.set(key, entry);
     if (Date.now() - entry.at >= this.every) {
       entry.at = Date.now();
       entry.mode = await this.hooks.paneLines(target).then(claudeFooterMode, () => entry!.mode);
@@ -126,7 +128,9 @@ export class SettingsSwitcher {
 
   async switch(target: Target, data: Json): Promise<Json> {
     this.assertAvailable(target);
-    const change = request.parse(data);
+    // The route's own envelope is not a setting; anything else unknown is refused.
+    const { target: _target, deliveryId: _delivery, ...settings } = data;
+    const change = request.parse(settings);
     // A Codex pane on the Hook's own app-server takes the settings with its
     // next turn/start, whatever it is doing now, as with the model.
     const served = target.source === "codex" ? codexServers.forTarget(target) : undefined;
@@ -215,7 +219,7 @@ export class SettingsSwitcher {
     }
     let mode = await screenMode();
     if ((change.plan !== undefined || change.permissionMode) && !mode) throw new BridgeError(409, "Could not read Claude's permission mode from its screen. Open terminal to check.");
-    const started = mode ?? "default";
+    const started = mode ?? "default"; // Only used once a change needs the mode, and then the footer was read.
     if (change.plan === true) {
       if (started !== "plan") { await slash("/plan"); mode = await changed(started, this.wait); if (mode !== "plan") throw new BridgeError(409, "Claude did not enter plan mode. Open terminal to check."); }
     } else if (change.permissionMode || change.plan === false) {
@@ -231,8 +235,9 @@ export class SettingsSwitcher {
         mode = await changed(mode, this.wait);
       }
     }
-    const phone = CLAUDE_MODES[mode ?? started];
-    return { ok: true, ...(phone && phone !== "plan" ? { permissionMode: phone } : {}), plan: phone === "plan",
+    const phone = mode ? CLAUDE_MODES[mode] : undefined;
+    // Only what the footer showed is reported; a fast-only change with an unreadable one says nothing of the mode.
+    return { ok: true, ...(phone && phone !== "plan" ? { permissionMode: phone } : {}), ...(phone ? { plan: phone === "plan" } : {}),
       ...(change.fast !== undefined ? { fast: change.fast, verified: verified === true } : {}) };
   }
 }
