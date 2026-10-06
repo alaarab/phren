@@ -981,6 +981,8 @@ schedules:
       const launched = await api("/v1/schedules/run", { project: "demo", id: "7f3a2c1d" });
       expect(launched.status, JSON.stringify(launched.data)).toBe(200);
       expect(commands.filter(command => command.method === "agent.prompt" && command.params.text === "Run the test suite.")).toHaveLength(2);
+      expect(launched.data.runs).toEqual([launched.data.run]);
+      expect(launched.data.ok).toBe(true);
       expect(launched.data.run).toMatchObject({ scheduleId: "7f3a2c1d", project: "demo", status: "running",
         launch: { mode: "herdr" } });
       expect(commands.some(command => command.method === "agent.prompt" && command.params.text === "Run the test suite.")).toBe(true);

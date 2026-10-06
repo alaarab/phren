@@ -41,6 +41,15 @@ Times have no zone in the file. The Hook evaluates them in the assigned computer
 
 The `computer` value names a key in `machines.yaml`. Matching is case-insensitive and ignores a trailing `.local`, so `Desk`, `desk`, and `desk.local` identify the same computer. There is no `any` computer mode.
 
+`projects` optionally supplies the complete target set, for example `projects: [api, website]`.
+It accepts 1–64 unique project slugs (lowercase letters, digits, hyphens or
+underscores, starting with a letter or digit, at most 100 characters each); the owner need not be included. Keep
+one schedule definition in the owner's directory. Each target gets an independent
+agent with the same settings. Every explicit target must exist and resolve to an
+available source directory before any launch; missing or stale sources reject the
+whole firing. Without `projects`, the owner is the target, retaining the legacy
+store-directory fallback when no source is configured or discovered.
+
 ## CLI
 
 ```bash
@@ -54,13 +63,13 @@ phren schedule run acme 7f3a2c1d
 phren schedule history [project] [--id 7f3a2c1d] [--limit 100]
 ```
 
-`add` also accepts `--prompt-file <path>`. Weekly schedules use `--days mon,tue`; interval, once, and cron schedules use `--interval 6h`, `--once 2026-09-21T09:00:00`, and `--cron "0 7 * * 1-5"` respectively.
+`add` also accepts `--prompt-file <path>` and `--projects api,website`. Enable/disable edits preserve the targets. Weekly schedules use `--days mon,tue`; interval, once, and cron schedules use `--interval 6h`, `--once 2026-09-21T09:00:00`, and `--cron "0 7 * * 1-5"` respectively.
 
 `run` and `history` call the local Phren Hook. They report a clear error when the Hook is not running. The other commands edit the store file directly.
 
 ## Execution and local state
 
-The Hook checks schedules every 30 seconds. It records a run before launching, so a restart cannot launch the same due occurrence twice. A schedule with a `launched`, `running`, or `blocked` record cannot start again.
+The Hook checks schedules every 30 seconds. It atomically records all child runs before launching any of them, so a restart cannot launch the same due occurrence twice. A schedule with any `launched`, `running`, or `blocked` child cannot start again. Concurrent Run now calls are refused while a batch is dispatching. Each launch is attempted independently; one failure does not cancel the other targets. A once occurrence is consumed by the durable batch even if the Hook restarts before launching it.
 
 When Herdr is available, the Hook creates a workspace or tab in the project source directory, starts the selected harness, waits for it to accept input, and sends the prompt. Without Herdr, it starts the harness headlessly and writes a fanout manifest and JSON event log under the store's private runtime directory. Scheduled Codex jobs use workspace-write sandboxing.
 
@@ -72,7 +81,10 @@ A Hook restart or crash in the middle of a run (`phren bridge update`, a reboot)
 
 A Herdr run ends when its pane reports `idle` or `done` (Herdr shows a finished turn as `done` until someone looks at it). The Hook then reads the end of the run's transcript: when the turn finished (Claude's `end_turn` reply or `turn_duration` record, Codex's `task_complete`, opencode's `end_turn`, Copilot's `assistant.turn_end` after its `final_answer` reply) and its last reply ends by asking the owner something, a closing question or numbered options introduced as a choice, the run is recorded as `needs-you` with that question's first line as its reason and notified as a finish. A turn the harness ended on an error instead of a reply (Codex's `task_complete` carrying an `error`, such as its usage limit) is `failed` with that message as its reason. Otherwise it is `finished`. A pane that closes, or a status Herdr does not use for a live agent, is `failed`.
 
-Run history is local to the computer in the Hook runtime as `schedule-runs.jsonl`; it is never stored or synced with the project. Each line is one run, and only the newest 2000 runs are retained. A run records its schedule and project, timestamps, status (`launched`, `running`, `blocked`, `finished`, `needs-you`, `failed`, or `skipped`), reason when present, `blockedStartupPrompt` when it was recorded blocked at startup, `blockNotified` when that blocked alert was delivered, notification delivery result, and either its Herdr destination or headless job directory. If APNs is not configured, a requested notification records `notified: false` and `notifyReason: "no push config"`, writes the reason to the Hook service log, and never interrupts the run.
+Run history is local to the computer in the Hook runtime as `schedule-runs.jsonl`; it is never stored or synced with the project. Each line is one run, and the newest 2000 runs plus any older open runs are retained, along with every sibling in their batches. A run records its schedule and actual target `project`, owning `scheduleProject`, shared firing `batchId`, timestamps, status (`launched`, `running`, `blocked`, `finished`, `needs-you`, `failed`, or `skipped`), reason when present, `blockedStartupPrompt` when it was recorded blocked at startup, `blockNotified` when that blocked alert was delivered, notification delivery result, and either its Herdr destination or headless job directory. If APNs is not configured, a requested notification records `notified: false` and `notifyReason: "no push config"`, writes the reason to the Hook service log, and never interrupts the run.
+
+Old rows without `scheduleProject` use `project` as the owner. History filters and
+restart recovery use the owner, even when it is not a target.
 
 ## Hook routes
 
@@ -89,6 +101,23 @@ All schedule routes are JSON `POST` requests on the authenticated Hook connectio
 
 | Route | Result |
 | --- | --- |
-| `/v1/schedules` | All store schedules with project, local `nextRun`, latest local run, and running state. `nextRun` is null for schedules owned by another computer. |
-| `/v1/schedules/run` | Runs `{ project, id }` now. Returns 404 for an unknown schedule and 409 if it is already running or belongs to another computer. |
+| `/v1/schedules` | All store schedules with project, local `nextRun`, aggregated latest batch as `lastRun`, its child rows as `lastRuns`, and running state across all children. `nextRun` is null for schedules owned by another computer. |
+| `/v1/schedules/run` | Runs `{ project, id, expectedUpdatedAt? }` now. Returns `{ ok, run, runs }`, with `run` the first child for older clients and `runs` in target order. HTTP 200 with `ok: false` exposes partial or total launch failures through each child's `status` and `reason`. Returns 404 for an unknown owner/schedule/target and 409 for overlap, another computer, or unavailable sources. |
 | `/v1/schedules/history` | Returns newest-first local runs. Accepts optional `project`, `id`, and `limit` (default 50, maximum 500). Each row carries its status (including `needs-you` with the owner question as `reason`) and, when the run was recorded blocked at startup, the `blockedStartupPrompt` text the pane showed. |
+
+The Hook advertises `capabilities.scheduleProjects: true` when the schedules
+module is enabled. Clients should require this capability before offering
+multiple targets. The `project` in schedule rows, Run now requests and history
+filters is the owner. `lastRun` represents the latest batch with priority
+`blocked`, `running`, `launched`, `failed`, `needs-you`, `finished`, `skipped`;
+its finish time is the latest child finish, only when all children have ended.
+Use `lastRuns` for individual targets and their session destinations.
+
+After saving a schedule, clients can pass its `updatedAt` as `expectedUpdatedAt`
+in `/v1/schedules/run`. This optional ISO 8601 timestamp must include a time zone;
+fractional seconds and offsets are accepted. The Hook compares parsed instants
+inside schedule admission, before recording or launching any child. A mismatch
+returns HTTP 409 with a wait-for-store-sync message, leaving the schedule and run
+history unchanged. This prevents an immediate Run now from firing an older
+single-target definition while a multi-target edit is still syncing. Equivalent
+timestamp spellings match; omitting the field retains legacy behavior.

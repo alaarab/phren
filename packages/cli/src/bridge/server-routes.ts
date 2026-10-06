@@ -151,6 +151,7 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
   if (snapshot.has("hook")) result.approvalRules = { version: 2, effects: ["always-ask", "deny"], harnesses: ["claude"], events: ["PermissionRequest"], tools: ["Bash"], inputField: "command", conductorTools: false, mcpTools: false, preExecution: false };
+  if (snapshot.has("schedules")) result.scheduleProjects = true;
   if (snapshot.has("tasks")) { result.taskDependencies = true; result.taskWriterSafety = true; result.taskAtomicCreate = true; result.taskAtomicSave = true; result.taskBoundLaunch = true; }
   return result;
 }
@@ -613,8 +614,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/schedules") {
           result = await scheduler!.statuses();
         } else if (url.pathname === "/v1/schedules/run") {
-          const input = z.object({ project: z.string().min(1).max(200), id: z.string().regex(/^[a-f0-9]{8}$/) }).parse(data);
-          result = { ok: true, run: await scheduler!.launchNow(input.project, input.id) };
+          const input = z.object({ project: z.string().min(1).max(200), id: z.string().regex(/^[a-f0-9]{8}$/),
+            expectedUpdatedAt: z.string().datetime({ offset: true }).optional() }).parse(data);
+          const runs = await scheduler!.launchNow(input.project, input.id, false, input.expectedUpdatedAt);
+          result = { ok: runs.every(run => run.status !== "failed"), run: runs[0], runs };
         } else if (url.pathname === "/v1/schedules/history") {
           const input = z.object({ project: z.string().min(1).max(200).optional(), id: z.string().regex(/^[a-f0-9]{8}$/).optional(),
             limit: z.number().int().min(1).max(500).optional() }).parse(data);
