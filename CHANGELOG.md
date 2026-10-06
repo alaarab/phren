@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+
+- The Hook's release authority policy restricts nothing until you write one. It used to start from built-in defaults that named specific projects. If you relied on those defaults, write them with `phren authority set <project> --default ask` before upgrading.
+- The ElevenLabs key is read only from `ELEVENLABS_API_KEY` or the Hook's `elevenlabs.json`. The one-time copy from an older config file is gone.
+- Tests, fixtures, docs and examples use neutral computer, project, account and path names, and CI fails if one of a hashed list of private strings comes back (`pnpm run check-private-strings`, also in `scripts/pre-commit`).
+
 ## [0.3.31] - 2026-10-05
 
 ### Fixed
