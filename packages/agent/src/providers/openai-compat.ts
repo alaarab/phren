@@ -29,9 +29,9 @@ export function replaysAllReasoning(providerName: string | undefined, model: str
 
 /**
  * DeepSeek's reasoning_effort takes none, low, high and max; it has no medium
- * and treats xhigh as high, so map Phren's levels onto what it documents.
+ * so map Phren's medium/xhigh aliases onto high/max.
  */
-const DEEPSEEK_EFFORT: Record<ReasoningEffort, string> = {
+const DEEPSEEK_EFFORT: Record<ReasoningEffort, ReasoningEffort> = {
   none: "none",
   minimal: "low",
   low: "low",
@@ -81,9 +81,11 @@ export function wireAdvertisedReasoningEffort(
 ): string | undefined {
   if (!effort) return undefined;
   const metadata = getModelMetadata(providerName, model ?? "");
+  // Compare the provider's wire level: DeepSeek accepts high/max for medium/xhigh.
+  const advertised = isDeepSeekRoute(providerName, model) ? DEEPSEEK_EFFORT[effort] : effort;
   if (metadata?.catalogSource && effort !== "none") {
-    if (metadata.reasoningRange.length === 0 || !metadata.reasoningRange.includes(effort)) return undefined;
-  } else if (metadata?.reasoningRange.length && effort !== "none" && !metadata.reasoningRange.includes(effort)) {
+    if (metadata.reasoningRange.length === 0 || !metadata.reasoningRange.includes(advertised)) return undefined;
+  } else if (metadata?.reasoningRange.length && effort !== "none" && !metadata.reasoningRange.includes(advertised)) {
     return undefined;
   }
   return wireReasoningEffort(providerName, model, effort);

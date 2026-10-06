@@ -42,6 +42,8 @@ describe("git routes", () => {
 
   it("counts staged, unstaged and untracked work and shows both edits of one file", async () => {
     const { root, git } = await repository();
+    // Exercise Windows-style conversion warnings on every platform.
+    await git("config", "core.autocrlf", "true");
     await writeFile(path.join(root, "root.txt"), "one\ntwo\n");
     await writeFile(path.join(root, "staged.txt"), "one\ntwo\n"); await git("add", "staged.txt");
     await writeFile(path.join(root, "untracked.txt"), "a\nb\n");
@@ -106,7 +108,7 @@ describe("git routes", () => {
     expect((await gitBranches(root) as unknown as Branches).current).toBeNull();
     await git("checkout", "--orphan", "empty", "-q");
     await gitUnstage(root, ["root.txt"]);
-    expect(await readFile(path.join(root, "root.txt"), "utf8")).toBe("one\n");
+    expect((await readFile(path.join(root, "root.txt"), "utf8")).replace(/\r\n/g, "\n")).toBe("one\n");
     expect(await git("ls-files", "root.txt")).toBe("");
   });
 
@@ -138,7 +140,7 @@ describe("git routes", () => {
     await gitStage(root, ["folder/inner.txt"]);
     await gitUnstage(root, ["folder/inner.txt"]);
     await gitDiscard(root, ["folder/inner.txt"]);
-    expect(await readFile(path.join(root, "folder/inner.txt"), "utf8")).toBe("one\n");
+    expect((await readFile(path.join(root, "folder/inner.txt"), "utf8")).replace(/\r\n/g, "\n")).toBe("one\n");
     // Windows file names cannot contain "*", so the literal pathspec file is POSIX-only.
     if (process.platform !== "win32") {
       await writeFile(path.join(root, "*.txt"), "literal\n");
@@ -234,7 +236,7 @@ describe("git routes", () => {
     await writeFile(path.join(root, "root.txt"), "rewritten\n");
     await writeFile(path.join(root, "untracked.txt"), "new\n");
     await gitDiscard(root, ["root.txt", "untracked.txt"]);
-    expect(await readFile(path.join(root, "root.txt"), "utf8")).toBe("one\n");
+    expect((await readFile(path.join(root, "root.txt"), "utf8")).replace(/\r\n/g, "\n")).toBe("one\n");
     await expect(stat(path.join(root, "untracked.txt"))).rejects.toThrow();
     expect((await gitStatus(root)).files).toEqual([]);
   });

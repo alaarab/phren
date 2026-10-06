@@ -137,7 +137,13 @@ async function readGitStatus(cwd: string, untrackedPath?: string): Promise<GitSt
       throw error;
     });
     if (ignored) throw new BridgeError(409, "This directory is ignored by Git.");
-    data.untracked = (await git(path.join(root, prefix), "ls-files", "--others", "--exclude-standard", "--directory", "--no-empty-directory", "--full-name", "-z")).split("\0").filter(Boolean);
+    // --directory can collapse the requested folder itself, even with -C.
+    // Let Git filter ignores, then collapse descendants to immediate children.
+    const descendants = (await git(root, "ls-files", "--others", "--exclude-standard", "--full-name", "-z", "--", `:(literal)${prefix}/`)).split("\0").filter(Boolean);
+    data.untracked = [...new Set(descendants.map(file => {
+      const slash = file.indexOf("/", prefix.length + 1);
+      return slash < 0 ? file : file.slice(0, slash + 1);
+    }))];
     data.staged.clear(); data.unstaged.clear();
   }
   const files: GitStatusFile[] = [];
