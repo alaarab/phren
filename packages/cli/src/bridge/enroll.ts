@@ -14,6 +14,8 @@ import { projectSlugFromPath } from "../phren-paths.js";
 import { runBestEffortGit } from "../cli/session-git.js";
 import { mergeStoreUpstream, type RunStoreGit } from "../sync/store-merge.js";
 import { countGit } from "./metrics.js";
+import { resolveCodeStore } from "./code-routes.js";
+import { isValidProjectName } from "../utils-paths.js";
 import { storeCommitMessage } from "../machine-identity.js";
 
 /**
@@ -124,8 +126,8 @@ async function cloneRoot(env: NodeJS.ProcessEnv): Promise<string> {
   return fallback;
 }
 
-export interface EnrollInput { directory?: string; cloneUrl?: string }
-export interface Enrolled { ok: true; project: string; directory: string; cloned: boolean; store: "pushed" | "committed" | "unchanged" | "error"; storeDetail?: string }
+export interface EnrollInput { directory?: string; cloneUrl?: string; project?: string; store?: string }
+export interface Enrolled { ok: true; project: string; directory: string; cloned: boolean; store: "pushed" | "committed" | "unchanged" | "error"; storeDetail?: string; target?: { project: string; store: string } }
 
 /** Commit the store and push it when a remote exists, so the phone can pull
  * the new project. Best effort: enrollment already succeeded. */
@@ -147,8 +149,12 @@ async function publishStore(store: string, project: string): Promise<Pick<Enroll
 }
 
 export async function enrollProject(input: EnrollInput, env: NodeJS.ProcessEnv = process.env): Promise<Enrolled> {
-  const store = phrenStoreRoot(env);
-  try { if (!(await stat(path.join(store, ".config"))).isDirectory()) throw new Error(); } catch { throw new BridgeError(409, "phren is not set up on this computer. Run phren init there."); }
+  if (input.project !== undefined && (!isValidProjectName(input.project) || input.project === "global")) {
+    throw new BridgeError(400, "Choose a valid target project name.");
+  }
+  const baseStore = phrenStoreRoot(env);
+  const store = await resolveCodeStore(baseStore, input.store, true);
+  try { if (!(await stat(path.join(baseStore, ".config"))).isDirectory()) throw new Error(); } catch { throw new BridgeError(409, "phren is not set up on this computer. Run phren init there."); }
   let directory: string;
   let cloned = false;
   if (typeof input.cloneUrl === "string" && input.cloneUrl) {
@@ -173,7 +179,7 @@ export async function enrollProject(input: EnrollInput, env: NodeJS.ProcessEnv =
     try { directory = realpathSync.native(raw); if (!(await stat(directory)).isDirectory()) throw new Error(); } catch { throw new BridgeError(404, "That folder is not on this computer."); }
   } else throw new BridgeError(400, "Choose a folder or a repository URL.");
 
-  const added = addProjectFromPath(store, directory, env.PHREN_PROFILE || undefined, getProjectOwnershipDefault(store));
+  const added = addProjectFromPath(baseStore, directory, env.PHREN_PROFILE || undefined, getProjectOwnershipDefault(store), { writeToPath: store, projectName: input.project });
   if (!added.ok) throw new BridgeError(409, added.error);
-  return { ok: true, project: added.data.project, directory, cloned, ...(await publishStore(store, added.data.project)) };
+  return { ok: true, project: added.data.project, directory, cloned, ...(input.project && input.store ? { target: { project: added.data.project, store: input.store } } : {}), ...(await publishStore(store, added.data.project)) };
 }
