@@ -1,7 +1,6 @@
 # Conductor role and linked computer sets (design note)
 
-Status: implemented in the Hook and CLI. The phone screens are a follow-up
-(contract at the end).
+Status: implemented in the Hook and CLI. The phone contract is at the end.
 
 ## Problem
 
@@ -47,7 +46,7 @@ conductor, although the owner runs several separate groups of computers.
    list this computer back (`link: "one-way"`) is shown in its own set. A peer
    that cannot be reached, or whose Hook is too old to say, is treated as a
    member (`link: "unknown"`), as before. When a peer uses a friendly name
-   for this computer (for example, `Linuxbox` for hostname `omarchy`), the
+   for this computer (for example, `Devbox` for hostname `workstation`), the
    Hook resolves unresolved names through that peer's `/v1/computers`
    directory. A matching computer id folds the name into the `self` row,
    which displays the friendly name and never carries a link hint. Name
@@ -90,7 +89,7 @@ All under the `conductor` module.
     "name": "Home",
     "local": true,
     "computers": [
-      { "name": "Omarchy", "id": "...", "local": true, "reachable": true, "link": "self" },
+      { "name": "Workstation", "id": "...", "local": true, "reachable": true, "link": "self" },
       { "name": "Mini", "id": "...", "reachable": true, "link": "two-way", "conductor": { "target": { "server": "default", "workspace": "w1", "tab": "w1:t1", "pane": "w1:p1", "source": "claude", "session": "..." } } },
       { "name": "Desk", "reachable": false, "link": "unknown", "error": "..." },
       { "name": "Old", "reachable": true, "link": "unknown", "hint": "Its Hook cannot say whether it links back. Update it with phren bridge update." },
@@ -103,7 +102,7 @@ All under the `conductor` module.
     "local": false,
     "computers": [{ "name": "Laptop", "reachable": true, "link": "one-way", "hint": "Laptop does not link back. Run phren bridge link Laptop." }]
   }],
-  "unlinked": [{ "name": "alaarab.com", "aliases": [], "profile": "server" }]
+  "unlinked": [{ "name": "server.example.com", "aliases": [], "profile": "server" }]
 }
 ```
 
@@ -136,7 +135,7 @@ phren conductor sets [--json]     # every set, its computers, reachability and c
 phren conductor sets name "Home"    # or --clear
 ```
 
-## Phone contract (follow-up)
+## Phone contract
 
 - Feature check: `GET /v1/health` `capabilities.conductorSets === true`.
 - Computers screen: group rows by `GET /v1/sets`. Show the set name (or the

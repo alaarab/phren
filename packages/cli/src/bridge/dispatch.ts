@@ -426,7 +426,7 @@ export class DispatchService {
       // This computer needs no hooks.yaml entry, so a missing file only
       // matters when the dispatch names another computer.
       const here = this.local();
-      // An alias or hostname (`Mac`, `Squids-Mac-mini.local`) names the same computer as its hooks.yaml name.
+      // An alias or hostname (`Mac`, `Sams-Mac-mini.local`) names the same computer as its hooks.yaml name.
       const named = data.computer === "anywhere" || isLocalComputer(data.computer, here.names) ? undefined : await linkedComputer(data.computer).catch(() => undefined);
       const toLocal = data.computer !== "anywhere" && (isLocalComputer(data.computer, here.names) || (named !== undefined && "local" in named));
       const peerName = named && "peer" in named ? named.peer : data.computer;

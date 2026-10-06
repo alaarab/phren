@@ -1,8 +1,8 @@
 /**
  * Project slug determinism / collision regression tests.
  *
- * `/Users/u/Projects/Max4LivePlugins` was registered once as `max4liveplugins`
- * and later again as `max4live-plugins`, producing two project directories with
+ * A sample `/Users/u/Projects/MyProject` can be registered once as `myproject`
+ * and then again as `my-project`, producing two project directories with
  * disjoint findings. The second had no phren.project.yaml, no AGENTS.md and no
  * topic-config.json, so it looked half-created while holding real data.
  */
@@ -20,8 +20,8 @@ import { writeProjectConfig } from "../project-config.js";
 
 describe("projectSlugFromPath", () => {
   it("is deterministic for the same directory", () => {
-    expect(projectSlugFromPath("/Users/u/Projects/Max4LivePlugins")).toBe("max4liveplugins");
-    expect(projectSlugFromPath("/Users/u/Projects/Max4LivePlugins/")).toBe("max4liveplugins");
+    expect(projectSlugFromPath("/Users/u/Projects/MyProject")).toBe("myproject");
+    expect(projectSlugFromPath("/Users/u/Projects/MyProject/")).toBe("myproject");
   });
 
   it("collapses separator runs instead of emitting doubled hyphens", () => {
@@ -43,9 +43,9 @@ describe("projectSlugFromPath", () => {
 
 describe("canonicalProjectKey", () => {
   it("maps the two spellings of the same repo to one key", () => {
-    expect(canonicalProjectKey("max4liveplugins")).toBe("max4liveplugins");
-    expect(canonicalProjectKey("max4live-plugins")).toBe("max4liveplugins");
-    expect(canonicalProjectKey("Max4Live_Plugins")).toBe("max4liveplugins");
+    expect(canonicalProjectKey("myproject")).toBe("myproject");
+    expect(canonicalProjectKey("my-project")).toBe("myproject");
+    expect(canonicalProjectKey("My_Project")).toBe("myproject");
   });
 
   it("keeps genuinely different names apart", () => {
@@ -65,18 +65,18 @@ describe("findProjectNamesByCanonicalKey", () => {
   afterEach(() => tmp.cleanup());
 
   it("finds a hyphenated sibling of an unhyphenated project", () => {
-    fs.mkdirSync(path.join(phrenDir, "max4liveplugins"));
-    expect(findProjectNamesByCanonicalKey(phrenDir, "max4live-plugins")).toEqual(["max4liveplugins"]);
+    fs.mkdirSync(path.join(phrenDir, "myproject"));
+    expect(findProjectNamesByCanonicalKey(phrenDir, "my-project")).toEqual(["myproject"]);
   });
 
   it("returns the exact match first when both spellings exist", () => {
-    fs.mkdirSync(path.join(phrenDir, "max4liveplugins"));
-    fs.mkdirSync(path.join(phrenDir, "max4live-plugins"));
-    expect(findProjectNamesByCanonicalKey(phrenDir, "max4live-plugins")[0]).toBe("max4live-plugins");
+    fs.mkdirSync(path.join(phrenDir, "myproject"));
+    fs.mkdirSync(path.join(phrenDir, "my-project"));
+    expect(findProjectNamesByCanonicalKey(phrenDir, "my-project")[0]).toBe("my-project");
   });
 
   it("returns nothing for an unrelated name", () => {
-    fs.mkdirSync(path.join(phrenDir, "max4liveplugins"));
+    fs.mkdirSync(path.join(phrenDir, "myproject"));
     expect(findProjectNamesByCanonicalKey(phrenDir, "some-other-repo")).toEqual([]);
   });
 });
@@ -91,7 +91,7 @@ describe("bootstrapFromExisting — duplicate avoidance", () => {
     phrenDir = path.join(tmp.path, ".phren");
     fs.mkdirSync(phrenDir, { recursive: true });
     initTestPhrenRoot(phrenDir);
-    repo = path.join(tmp.path, "Max4LivePlugins");
+    repo = path.join(tmp.path, "MyProject");
     fs.mkdirSync(path.join(repo, ".git"), { recursive: true });
   });
   afterEach(() => tmp.cleanup());
@@ -103,28 +103,28 @@ describe("bootstrapFromExisting — duplicate avoidance", () => {
     const first = await bootstrap(repo);
     const second = await bootstrap(repo);
     expect(second.project).toBe(first.project);
-    expect(fs.readdirSync(phrenDir).filter((d) => d.toLowerCase().includes("max4live"))).toHaveLength(1);
+    expect(fs.readdirSync(phrenDir).filter((d) => d.toLowerCase().replace(/[-_]/g, "").includes("myproject"))).toHaveLength(1);
   });
 
   it("reuses a project registered under the other spelling of the same slug", async () => {
-    // Simulate the pre-existing `max4live-plugins` directory from the real
-    // store — created by a manual `add_project` call, with no sourcePath.
-    fs.mkdirSync(path.join(phrenDir, "max4live-plugins"), { recursive: true });
+    // Simulate the pre-existing `my-project` directory in a sample
+    // store, created by a manual `add_project` call, with no sourcePath.
+    fs.mkdirSync(path.join(phrenDir, "my-project"), { recursive: true });
 
     const result = await bootstrap(repo);
-    expect(result.project).toBe("max4live-plugins");
-    expect(fs.existsSync(path.join(phrenDir, "max4liveplugins"))).toBe(false);
+    expect(result.project).toBe("my-project");
+    expect(fs.existsSync(path.join(phrenDir, "myproject"))).toBe(false);
   });
 
   it("keeps two projects apart when they slug alike but point at different repos", async () => {
-    const other = path.join(tmp.path, "other", "max4live-plugins");
+    const other = path.join(tmp.path, "other", "my-project");
     fs.mkdirSync(path.join(other, ".git"), { recursive: true });
-    fs.mkdirSync(path.join(phrenDir, "max4live-plugins"), { recursive: true });
-    writeProjectConfig(phrenDir, "max4live-plugins", { sourcePath: other });
+    fs.mkdirSync(path.join(phrenDir, "my-project"), { recursive: true });
+    writeProjectConfig(phrenDir, "my-project", { sourcePath: other });
 
     const result = await bootstrap(repo);
-    expect(result.project).toBe("max4liveplugins");
-    expect(fs.existsSync(path.join(phrenDir, "max4live-plugins"))).toBe(true);
+    expect(result.project).toBe("myproject");
+    expect(fs.existsSync(path.join(phrenDir, "my-project"))).toBe(true);
   });
 
   // ── Worktrees ─────────────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ describe("bootstrapFromExisting — duplicate avoidance", () => {
     fs.mkdirSync(worktree, { recursive: true });
 
     const result = await bootstrap(worktree);
-    expect(result.project).toBe("max4liveplugins");
+    expect(result.project).toBe("myproject");
     expect(fs.existsSync(path.join(phrenDir, "gracious-napier-332a40"))).toBe(false);
   });
 });

@@ -541,7 +541,7 @@ async function handleSearchKnowledge(
 }
 
 async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string }) {
-  // Support store-qualified names (e.g., "team/arc")
+  // Support store-qualified names (e.g., "team/forge")
   const { parseStoreQualified } = await import("../store-routing.js");
   const { storeName, projectName } = parseStoreQualified(name);
   const lookupName = projectName;

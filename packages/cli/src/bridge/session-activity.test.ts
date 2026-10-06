@@ -58,7 +58,7 @@ describe("background work keeps a session working", () => {
   });
 
   it("never lets an old count keep a row working", () => {
-    // m4l-builder, 2026-09-29: 4 in background at Stop, idle at the prompt 7.5 hours later.
+    // plugin-builder, 2026-09-29: 4 in background at Stop, idle at the prompt 7.5 hours later.
     const stop = Date.parse("2026-09-29T08:30:00Z"), value = record(4, undefined, stop);
     expect(recordedBackground(value, [], stop + BACKGROUND_STALE_MS - 1)).toBe(4);
     expect(recordedBackground(value, [], stop + BACKGROUND_STALE_MS)).toBeUndefined();
@@ -106,7 +106,7 @@ describe("background work keeps a session working", () => {
 
 describe("session titles", () => {
   it("drops the spinner and status glyphs a harness spins around its terminal title", () => {
-    expect(plainTitle("\u2838 Respond to meeting | alaarab")).toBe("Respond to meeting | alaarab");
+    expect(plainTitle("\u2838 Respond to meeting | octo")).toBe("Respond to meeting | octo");
     expect(plainTitle("\u2733 Claude Code")).toBe("Claude Code");
     expect(plainTitle("\u25cf \u23f3 Build app \u2714")).toBe("Build app");
     expect(plainTitle("\u2807")).toBeUndefined();

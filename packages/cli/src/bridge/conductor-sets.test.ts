@@ -12,9 +12,9 @@ vi.mock("./herdr.js", async importOriginal => ({ ...await importOriginal<typeof 
 vi.mock("./peers.js", async importOriginal => ({ ...await importOriginal<typeof import("./peers.js")>(),
   hookPeers: async () => mocks.peers, optionalHookPeers: async () => ({ peers: mocks.peers }), peerRequest: mocks.request }));
 
-const hostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPKDk8cewh74xDIccwQz/N4V05hPT+bdp5fEii+pzf9B";
+const hostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg";
 const peer = (name: string) => ({ name, address: `${name.toLowerCase()}.example`, username: "sam", port: 22, server: "default", hostKey });
-const info = { computer: { id: "30000000-0000-4000-8000-000000000002", name: "Omarchy" } };
+const info = { computer: { id: "30000000-0000-4000-8000-000000000002", name: "Workstation" } };
 
 let root: string;
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "phren-conductor-sets-")); vi.stubEnv("PHREN_BRIDGE_HOME", root); resetRoleState(); mocks.request.mockReset(); });
@@ -34,14 +34,14 @@ describe("GET /v1/sets", () => {
   it("resolves a peer-reported local name by id through the existing phone identity contract", async () => {
     mocks.peers = [peer("Mini")];
     mocks.request.mockImplementation(async (_to: Json, route: string) => route === "/v1/computers"
-      ? { computers: [{ id: info.computer.id, name: "Linuxbox", aliases: ["Omarchy"], local: false, linked: true }] }
-      : { computer: { id: "30000000-0000-4000-8000-000000000001", name: "Mini" }, peers: ["Linuxbox"], knowsCaller: true });
+      ? { computers: [{ id: info.computer.id, name: "Devbox", aliases: ["Workstation"], local: false, linked: true }] }
+      : { computer: { id: "30000000-0000-4000-8000-000000000001", name: "Mini" }, peers: ["Devbox"], knowsCaller: true });
     const view = await readSets(info);
     expect(view).toMatchObject({ sets: [{ local: true, computers: [
-      { name: "Linuxbox", id: info.computer.id, local: true, reachable: true, link: "self" },
+      { name: "Devbox", id: info.computer.id, local: true, reachable: true, link: "self" },
       { name: "Mini", link: "two-way" },
     ] }] });
-    expect(formatSets(view)).toBe("Unnamed set (this computer)\n  Linuxbox: this computer\n  Mini: reachable, two-way link");
+    expect(formatSets(view)).toBe("Unnamed set (this computer)\n  Devbox: this computer\n  Mini: reachable, two-way link");
     expect(mocks.request.mock.calls.filter(call => call[1] === "/v1/computers")).toHaveLength(1);
   });
 
@@ -56,7 +56,7 @@ describe("GET /v1/sets", () => {
 
   it("does not probe identity directories when every reported name is already known", async () => {
     mocks.peers = [peer("Mini")];
-    mocks.request.mockResolvedValue({ computer: { name: "Mini" }, peers: ["Omarchy"], knowsCaller: true });
+    mocks.request.mockResolvedValue({ computer: { name: "Mini" }, peers: ["Workstation"], knowsCaller: true });
     await readSets(info);
     expect(mocks.request).toHaveBeenCalledTimes(1);
   });
@@ -91,22 +91,22 @@ describe("phren conductor sets", () => {
   it("prints each set's computers with reachability, link and conductor, then unlinked computers", () => {
     expect(formatSets({
       sets: [{ name: "Home", local: true, conductors: 1, computers: [
-        { name: "Omarchy", link: "self", reachable: true },
+        { name: "Workstation", link: "self", reachable: true },
         { name: "Mini", link: "two-way", reachable: true, conductor: { server: "default" } },
         { name: "Desk", link: "unknown", reachable: false, error: "Offline." },
         { name: "Server", link: "indirect", hint: "Link it with phren bridge link Server." },
       ] }, { local: false, conductors: 0, computers: [{ name: "Laptop", link: "one-way", reachable: true, hint: "Laptop does not link back. Run phren bridge link Laptop." }] }],
-      unlinked: [{ name: "alaarab.com" }],
+      unlinked: [{ name: "server.example.com" }],
     })).toBe([
       "Home (this computer)",
-      "  Omarchy: this computer",
+      "  Workstation: this computer",
       "  Mini: reachable, two-way link, conductor",
       "  Desk: unreachable, unknown link. Offline.",
       "  Server: not asked, indirect link. Link it with phren bridge link Server.",
       "Unnamed set",
       "  Laptop: reachable, one-way link. Laptop does not link back. Run phren bridge link Laptop.",
       "Not linked",
-      "  alaarab.com. Link it with phren bridge link alaarab.com.",
+      "  server.example.com. Link it with phren bridge link server.example.com.",
     ].join("\n"));
   });
 });

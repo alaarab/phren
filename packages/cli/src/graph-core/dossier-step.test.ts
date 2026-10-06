@@ -10,13 +10,13 @@ import { dossierPosition, normalizeNode, state, stepDossier } from "../../browse
 import type { RawNode } from "./types.js";
 
 const RAW: RawNode[] = [
-  { id: "p:hub", label: "hub", group: "project", project: "hub" },
-  { id: "tp:1", label: "Architecture", group: "topic", project: "hub", topicSlug: "architecture", refCount: 2 },
-  { id: "f:1", label: "First", group: "topic:architecture", project: "hub", topicSlug: "architecture", date: "2026-09-02" },
-  { id: "f:2", label: "Second", group: "topic:architecture", project: "hub", topicSlug: "architecture", date: "2026-09-01" },
-  { id: "t:1", label: "Ship it", group: "task-active", project: "hub", section: "Active" },
-  { id: "n:1", label: "2026-09-28", group: "note", project: "hub", date: "2026-09-28" },
-  { id: "n:2", label: "2026-09-27", group: "note", project: "hub", date: "2026-09-27" },
+  { id: "p:harbor", label: "harbor", group: "project", project: "harbor" },
+  { id: "tp:1", label: "Architecture", group: "topic", project: "harbor", topicSlug: "architecture", refCount: 2 },
+  { id: "f:1", label: "First", group: "topic:architecture", project: "harbor", topicSlug: "architecture", date: "2026-09-02" },
+  { id: "f:2", label: "Second", group: "topic:architecture", project: "harbor", topicSlug: "architecture", date: "2026-09-01" },
+  { id: "t:1", label: "Ship it", group: "task-active", project: "harbor", section: "Active" },
+  { id: "n:1", label: "2026-09-28", group: "note", project: "harbor", date: "2026-09-28" },
+  { id: "n:2", label: "2026-09-27", group: "note", project: "harbor", date: "2026-09-27" },
 ];
 
 afterEach(() => {
@@ -38,8 +38,8 @@ describe("dossier stepping over findings, tasks and notes", () => {
       expect(dossierPosition(id)).toEqual({ index, total: 5 });
     });
 
-    expect(stepDossier("p:hub", 1)).toBeNull();
-    expect(dossierPosition("p:hub")).toBeNull();
+    expect(stepDossier("p:harbor", 1)).toBeNull();
+    expect(dossierPosition("p:harbor")).toBeNull();
     expect(stepDossier("tp:1", 1)).toBeNull();
     expect(dossierPosition("tp:1")).toBeNull();
   });

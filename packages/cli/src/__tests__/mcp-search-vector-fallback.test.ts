@@ -77,12 +77,12 @@ describe("mcp-search vector fallback", () => {
         project: "proj",
         filename: "summary.md",
         type: "summary",
-        content: "Webhook delivery for monitor alerts can post to an external URL instead of Discord.",
+        content: "Webhook delivery for monitor alerts can post to an external URL instead of Slack.",
         path: `${tmp.path}/proj/summary.md`,
       },
     ]);
 
-    const res = parseResult(await server.call("search_knowledge", { query: "alerts to external webhook instead of discord" }));
+    const res = parseResult(await server.call("search_knowledge", { query: "alerts to external webhook instead of slack" }));
     expect(res.ok).toBe(true);
     expect(vectorFallback).toHaveBeenCalledOnce();
     expect(res.data.results).toHaveLength(1);

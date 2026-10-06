@@ -22,23 +22,23 @@ describe("account usage merged by account", () => {
   it("merges one login across computers, keeps the freshest whole report, and names the account id per computer", () => {
     const reports: ComputerUsage[] = [
       { computer: "Desk", accounts: [claude("claude:48e1529451f8", "default", at(10), 40)] },
-      { computer: "Linuxbox", accounts: [claude("claude:48e1529451f8", "work", at(2), 55)] },
+      { computer: "Devbox", accounts: [claude("claude:48e1529451f8", "work", at(2), 55)] },
     ];
     const { accounts } = mergeAccountUsage(reports, now);
     expect(accounts).toHaveLength(1);
-    expect(accounts[0]).toMatchObject({ id: "claude|claude:48e1529451f8", harness: "claude", account: "sam@example.com", from: "Linuxbox", age: "2m", stale: false,
-      leftPercent: 45, nearLimit: false, computers: [{ name: "Desk", account: "default" }, { name: "Linuxbox", account: "work" }] });
+    expect(accounts[0]).toMatchObject({ id: "claude|claude:48e1529451f8", harness: "claude", account: "sam@example.com", from: "Devbox", age: "2m", stale: false,
+      leftPercent: 45, nearLimit: false, computers: [{ name: "Desk", account: "default" }, { name: "Devbox", account: "work" }] });
     expect(accounts[0].windows.map(w => [w.id, w.usedPercent, w.leftPercent])).toEqual([["five_hour", 10, 90], ["seven_day", 55, 45]]);
   });
 
   it("keeps two Claude logins with no identity apart, one per computer", () => {
     const reports: ComputerUsage[] = [
       { computer: "Desk", accounts: [claude("claude:home:default", "default", at(1), 20)] },
-      { computer: "Linuxbox", accounts: [claude("claude:home:default", "default", at(1), 70)] },
+      { computer: "Devbox", accounts: [claude("claude:home:default", "default", at(1), 70)] },
     ];
     const { accounts } = mergeAccountUsage(reports, now);
     expect(accounts.map(row => [row.id, row.from, row.leftPercent])).toEqual([
-      ["claude|claude:home:default@Desk", "Desk", 80], ["claude|claude:home:default@Linuxbox", "Linuxbox", 30]]);
+      ["claude|claude:home:default@Desk", "Desk", 80], ["claude|claude:home:default@Devbox", "Devbox", 30]]);
     expect(accountIdentity(codex(5), "Desk")).toBe("codex");
   });
 
@@ -80,21 +80,21 @@ describe("account usage merged by account", () => {
     const router = (accountId: string, amountUSD: number, updatedAt: string): AccountUsage => ({ source: "openrouter", windows: [], accountId, updatedAt, spend: { amountUSD, period: "calendar_week" } });
     const { accounts } = mergeAccountUsage([
       { computer: "Desk", accounts: [{ source: "opencode", windows: [], updatedAt: at(1), spend: spend(1.25) }, router("a".repeat(64), 3, at(5))] },
-      { computer: "Linuxbox", accounts: [{ source: "opencode", windows: [], updatedAt: at(2), spend: spend(2.5) }, router("a".repeat(64), 4, at(1))] },
+      { computer: "Devbox", accounts: [{ source: "opencode", windows: [], updatedAt: at(2), spend: spend(2.5) }, router("a".repeat(64), 4, at(1))] },
     ], now);
     expect(accounts.find(row => row.harness === "opencode")?.spend).toEqual({ amountUSD: 3.75, period: "rolling_7_days" });
     expect(accounts.find(row => row.harness === "openrouter")?.spend).toEqual({ amountUSD: 4, period: "calendar_week" });
-    expect(accounts.find(row => row.harness === "opencode")?.computers).toEqual([{ name: "Desk" }, { name: "Linuxbox" }]);
+    expect(accounts.find(row => row.harness === "opencode")?.computers).toEqual([{ name: "Desk" }, { name: "Devbox" }]);
   });
 
   it("lists harnesses no computer reported numbers for apart, with what the Hook said", () => {
     const empty: AccountUsage = { source: "copilot", windows: [], message: "GitHub CLI is not signed in." };
     const { accounts, noData } = mergeAccountUsage([
-      { computer: "Desk", accounts: [codex(10), empty] }, { computer: "Linuxbox", accounts: [{ ...codex(0), windows: [] }, empty] }], now);
+      { computer: "Desk", accounts: [codex(10), empty] }, { computer: "Devbox", accounts: [{ ...codex(0), windows: [] }, empty] }], now);
     expect(accounts.map(row => row.harness)).toEqual(["codex"]);
     // Codex is signed in only where it reported numbers.
     expect(accounts[0].computers).toEqual([{ name: "Desk" }]);
-    expect(noData).toEqual([{ harness: "copilot", name: "GitHub Copilot", computers: ["Desk", "Linuxbox"], message: "GitHub CLI is not signed in." }]);
+    expect(noData).toEqual([{ harness: "copilot", name: "GitHub Copilot", computers: ["Desk", "Devbox"], message: "GitHub CLI is not signed in." }]);
   });
 
   it("reports low accounts as usable, names exhausted ones, and warns only when every account is out of quota", () => {
@@ -123,24 +123,24 @@ describe("reading every Hook's usage", () => {
     const root = await mkdtemp(path.join(tmpdir(), "phren-account-usage-")), store = path.join(root, "store");
     try {
       await mkdir(store);
-      await writeFile(path.join(store, "machines.yaml"), "Desk: home\nLinuxbox.local: home\nStudio: home\nLaptop: work\n");
+      await writeFile(path.join(store, "machines.yaml"), "Desk: home\nDevbox.local: home\nStudio: home\nLaptop: work\n");
       const peer = (name: string) => ({ name, address: `${name.toLowerCase()}.example`, username: "sam", port: 22, hostKey: "unused", server: "default" });
       const asked: string[] = [];
       const view = await readAccountUsage({ store, now,
         hook: async route => { asked.push(route); return route === "/v1/health" ? { computer: { name: "Desk" } } : { accounts: [codex(30), claude("claude:48e1529451f8", "default", at(5), 20)] }; },
-        peers: async () => ({ peers: [peer("Linuxbox"), peer("Studio")] }),
+        peers: async () => ({ peers: [peer("Devbox"), peer("Studio")] }),
         peer: async (target, route) => {
           if (target.name === "Studio") throw new BridgeError(503, "ssh: connect to host studio.example port 22: Connection timed out", { code: "peer-offline" });
-          return route === "/v1/health" ? { computer: { name: "Linuxbox.local", aliases: ["linuxbox"] } }
+          return route === "/v1/health" ? { computer: { name: "Devbox.local", aliases: ["devbox"] } }
             : { accounts: [codex(35, at(3)), claude("claude:48e1529451f8", "default", at(1), 25), { source: "opencode", windows: [], message: "OpenCode is not installed on this computer." }] };
         } });
       expect(asked).toEqual(["/v1/health", "/v1/usage?sources=claude%2Ccodex%2Ccopilot%2Copencode%2Copencode-go%2Copenrouter&goPlan=1&accounts=all"]);
-      expect(view.computers).toEqual(["Desk", "Linuxbox"]);
+      expect(view.computers).toEqual(["Desk", "Devbox"]);
       expect(view.accounts.map(row => [row.id, row.from, row.computers.map(c => c.name)])).toEqual([
-        ["claude|claude:48e1529451f8", "Linuxbox", ["Desk", "Linuxbox"]], ["codex", "Desk", ["Desk", "Linuxbox"]]]);
-      expect(view.noData).toEqual([{ harness: "opencode", name: expect.stringContaining("OpenCode"), computers: ["Linuxbox"], message: "OpenCode is not installed on this computer." }]);
+        ["claude|claude:48e1529451f8", "Devbox", ["Desk", "Devbox"]], ["codex", "Desk", ["Desk", "Devbox"]]]);
+      expect(view.noData).toEqual([{ harness: "opencode", name: expect.stringContaining("OpenCode"), computers: ["Devbox"], message: "OpenCode is not installed on this computer." }]);
       expect(view.unreachable).toEqual([{ computer: "Studio", error: expect.stringContaining("Connection timed out"), code: "peer-offline" }]);
-      // Linuxbox.local answers as Linuxbox's Hook, so only Laptop is unlinked.
+      // Devbox.local answers as Devbox's Hook, so only Laptop is unlinked.
       expect(view.notLinked).toEqual([{ name: "Laptop" }]);
       expect(view.enrolled).toBe(2);
     } finally { await rm(root, { recursive: true, force: true }); }

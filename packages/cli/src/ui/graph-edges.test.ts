@@ -17,9 +17,9 @@ describe("buildGraph enrichment edges", () => {
     tmp = makeTempDir("phren-graph-edges-");
     grantAdmin(tmp.path);
     writeFile(
-      path.join(tmp.path, "hub", "FINDINGS.md"),
+      path.join(tmp.path, "harbor", "FINDINGS.md"),
       [
-        "# hub FINDINGS",
+        "# harbor FINDINGS",
         "",
         "## 2026-08-01",
         "",
@@ -35,9 +35,9 @@ describe("buildGraph enrichment edges", () => {
       ["# billing FINDINGS", "", "## 2026-08-02", "", "- [api] Webhook retries are idempotent by invoice id", ""].join("\n"),
     );
     const manualLinks = [
-      { entity: "RetryPolicy", entityType: "class", sourceDoc: "hub/FINDINGS.md", relType: "mentions" },
+      { entity: "RetryPolicy", entityType: "class", sourceDoc: "harbor/FINDINGS.md", relType: "mentions" },
       { entity: "RetryPolicy", entityType: "class", sourceDoc: "billing/FINDINGS.md", relType: "mentions" },
-      { entity: "WebhookClient", entityType: "class", sourceDoc: "hub/FINDINGS.md", relType: "mentions" },
+      { entity: "WebhookClient", entityType: "class", sourceDoc: "harbor/FINDINGS.md", relType: "mentions" },
       { entity: "WebhookClient", entityType: "class", sourceDoc: "billing/FINDINGS.md", relType: "mentions" },
       { entity: "InvoiceStore", entityType: "class", sourceDoc: "billing/FINDINGS.md", relType: "mentions" },
     ];
@@ -62,7 +62,7 @@ describe("buildGraph enrichment edges", () => {
     expect(graph.links).toContainEqual({ source: newer, target: older, kind: "supersedes" });
     expect(graph.links).toContainEqual({ source: storm, target: older, kind: "contradicts" });
     // The plain spokes are still there alongside the typed edges.
-    expect(graph.links).toContainEqual({ source: "hub", target: older });
+    expect(graph.links).toContainEqual({ source: "harbor", target: older });
     expect(graph.links.filter((link) => link.kind === "supersedes")).toHaveLength(1);
   });
 
@@ -75,6 +75,6 @@ describe("buildGraph enrichment edges", () => {
     expect(pair(entity("WebhookClient"), entity("InvoiceStore"))).toBe(true);
     expect(fragmentEdges.every((link) => link.source !== link.target)).toBe(true);
     // Entity→project spokes are untouched.
-    expect(graph.links).toContainEqual({ source: entity("RetryPolicy"), target: "hub" });
+    expect(graph.links).toContainEqual({ source: entity("RetryPolicy"), target: "harbor" });
   });
 });

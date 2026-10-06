@@ -2,9 +2,8 @@
  * Worktree attribution regression tests.
  *
  * A Claude Code worktree at `<repo>/.claude/worktrees/gracious-napier-332a40`
- * was registered as its own top-level phren project and accumulated 14 commits
- * over two months under an auto-generated codename that looked like junk while
- * actually holding real `intranet2` data.
+ * must resolve to its parent project instead of collecting findings under
+ * an auto-generated codename separate from the sample `portal2` project.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
@@ -18,7 +17,7 @@ describe("resolveWorktreeParent", () => {
 
   beforeEach(() => {
     tmp = makeTempDir("git-worktree-");
-    repo = path.join(tmp.path, "intranet2");
+    repo = path.join(tmp.path, "portal2");
     fs.mkdirSync(path.join(repo, ".git"), { recursive: true });
   });
 
@@ -60,7 +59,7 @@ describe("resolveWorktreeParent", () => {
   // ── Linked git worktrees (`git worktree add`) ─────────────────────────────
 
   it("attributes a linked worktree via its .git file", () => {
-    const worktree = path.join(tmp.path, "intranet2-feature");
+    const worktree = path.join(tmp.path, "portal2-feature");
     fs.mkdirSync(worktree, { recursive: true });
     fs.writeFileSync(
       path.join(worktree, ".git"),

@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Pre-commit hook: lint staged TypeScript files only.
+# Pre-commit hook: block owner-private strings, lint staged TypeScript files.
 # Install: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 # Or run: npm run install-hooks
 
 set -euo pipefail
+
+# Owner-private strings (hostnames, home paths, emails, keys) in any tracked file.
+node scripts/check-private-strings.mjs >/dev/null
 
 # Get staged .ts files (excluding deletions and test files)
 STAGED_TS=$(git diff --cached --name-only --diff-filter=d -- '*.ts' | grep -v '\.test\.ts$' || true)

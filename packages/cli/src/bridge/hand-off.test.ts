@@ -33,9 +33,9 @@ it("resolves an existing session and delivers one prompt through its live target
 it("names the target by its project folder, from the overview it already read", async () => {
   const target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude",
     session: "aaaaaaaa-1111-4111-8111-111111111111" };
-  vi.mocked(hookRequest).mockResolvedValueOnce({ groups: [{ label: "Studio", children: [{ target, cwd: "/home/sam/ObjectStudio" }] }] })
+  vi.mocked(hookRequest).mockResolvedValueOnce({ groups: [{ label: "Studio", children: [{ target, cwd: "/home/sam/DesignStudio" }] }] })
     .mockResolvedValueOnce({ ok: true, delivered: true });
-  expect(await handOff({ session: target.session, text: "Rebase first" })).toEqual({ ok: true, delivered: true, target, label: "ObjectStudio" });
+  expect(await handOff({ session: target.session, text: "Rebase first" })).toEqual({ ok: true, delivered: true, target, label: "DesignStudio" });
   expect(vi.mocked(hookRequest).mock.calls).toHaveLength(2);
 });
 
@@ -76,7 +76,7 @@ it("lists registered computers that are not linked and how long each session has
   try {
     await writeFile(path.join(root, "hooks.yaml"), "version: 1\ncomputers: []\n", { mode: 0o600 });
     await mkdir(store);
-    await writeFile(path.join(store, "machines.yaml"), "Desk.local: personal\nLinuxbox: work\n");
+    await writeFile(path.join(store, "machines.yaml"), "Desk.local: personal\nDevbox: work\n");
     const target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude", session: "aaaaaaaa-1111-4111-8111-111111111111" };
     vi.mocked(hookRequest).mockResolvedValueOnce({ computer: { name: "Desk" } }).mockResolvedValueOnce({ groups: [{ label: "phren",
       children: [{ agent: "claude", agentStatus: "idle", cwd: "/home/sam/phren", target, lastChangedAt: "2026-09-22T11:55:00.000Z" },
@@ -84,7 +84,7 @@ it("lists registered computers that are not linked and how long each session has
     const live = await listLiveSessions({ store });
     expect(live.sessions).toMatchObject([{ computer: "Desk", project: "phren", status: "idle", idleFor: 300 }, { status: "working", backgroundTasks: 5 }]);
     expect(live.sessions[0]).not.toHaveProperty("backgroundTasks");
-    expect(live.notLinked).toEqual([{ name: "Linuxbox" }]);
+    expect(live.notLinked).toEqual([{ name: "Devbox" }]);
     expect(live.enrolled).toBe(0);
   } finally { vi.useRealTimers(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); }
 });
@@ -107,26 +107,26 @@ it("names workers in the conductor's workspace by their own tab, never as the co
 it("counts a computer linked under any of its names: hostname label, Bonjour name or a peer's address", async () => {
   const store = await mkdtemp(path.join(tmpdir(), "phren-names-"));
   try {
-    await writeFile(path.join(store, "machines.yaml"), "Desk.example.net: home\nDesk: home\nlinuxbox-host: home\nWork-Laptop: work\n");
-    expect(notLinkedComputers(store, "Desk.example.net", ["Linuxbox", "linuxbox-host"])).toEqual([{ name: "Work-Laptop" }]);
+    await writeFile(path.join(store, "machines.yaml"), "Desk.example.net: home\nDesk: home\ndevbox-host: home\nWork-Laptop: work\n");
+    expect(notLinkedComputers(store, "Desk.example.net", ["Devbox", "devbox-host"])).toEqual([{ name: "Work-Laptop" }]);
   } finally { await rm(store, { recursive: true, force: true }); }
 });
 
 it("matches registered names by first label, whatever domain DHCP or Bonjour added", async () => {
   const store = await mkdtemp(path.join(tmpdir(), "phren-names-"));
   try {
-    await writeFile(path.join(store, "machines.yaml"), "Desk: home\nDesk.local: home\ndesk.lan: home\nLinuxbox.example.net: home\nLAPTOP.local: work\n");
-    // Desk is this computer (its local names) under three names; Linuxbox is a peer known by its bare name.
-    expect(notLinkedComputers(store, "Desk-Mini", ["linuxbox"])).toEqual([{ name: "LAPTOP.local" }]);
+    await writeFile(path.join(store, "machines.yaml"), "Desk: home\nDesk.local: home\ndesk.lan: home\nDevbox.example.net: home\nLAPTOP.local: work\n");
+    // Desk is this computer (its local names) under three names; Devbox is a peer known by its bare name.
+    expect(notLinkedComputers(store, "Desk-Mini", ["devbox"])).toEqual([{ name: "LAPTOP.local" }]);
   } finally { await rm(store, { recursive: true, force: true }); }
 });
 
 it("collapses one unlinked computer registered under several names into one entry with its aliases", async () => {
   const store = await mkdtemp(path.join(tmpdir(), "phren-names-"));
   try {
-    await writeFile(path.join(store, "machines.yaml"), "Linuxbox.example.net: home\nLinuxbox: home\nlinuxbox.local: home\nWork-Laptop: work\n");
+    await writeFile(path.join(store, "machines.yaml"), "Devbox.example.net: home\nDevbox: home\ndevbox.local: home\nWork-Laptop: work\n");
     expect(notLinkedComputers(store, "Desk", [])).toEqual([
-      { name: "Linuxbox", aliases: ["linuxbox.local", "Linuxbox.example.net"] },
+      { name: "Devbox", aliases: ["devbox.local", "Devbox.example.net"] },
       { name: "Work-Laptop" },
     ]);
   } finally { await rm(store, { recursive: true, force: true }); }
@@ -135,8 +135,8 @@ it("collapses one unlinked computer registered under several names into one entr
 it("counts a peer as linked through any name or alias its Hook reports", async () => {
   const store = await mkdtemp(path.join(tmpdir(), "phren-names-"));
   try {
-    await writeFile(path.join(store, "machines.yaml"), "Linuxbox.local: home\nlinuxbox-host.example.net: home\n");
-    expect(notLinkedComputers(store, "Desk", ["Build", "10.0.0.8", "Linuxbox", "LINUXBOX-HOST"])).toEqual([]);
+    await writeFile(path.join(store, "machines.yaml"), "Devbox.local: home\ndevbox-host.example.net: home\n");
+    expect(notLinkedComputers(store, "Desk", ["Build", "10.0.0.8", "Devbox", "DEVBOX-HOST"])).toEqual([]);
   } finally { await rm(store, { recursive: true, force: true }); }
 });
 
@@ -155,12 +155,12 @@ it("hands off by session only to a session of the requested account, counting a 
 
 it("hands off to a computer named by an alias, and to this computer by its own name", async () => {
   const target = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "codex", session: "00000001-1111-4111-8111-111111111111" };
-  const linuxbox = { name: "Linuxbox", address: "linuxbox.example", username: "sam", port: 22, hostKey: "unused", server: "default" };
-  vi.mocked(hookPeers).mockResolvedValue([linuxbox]);
-  vi.mocked(optionalHookPeers).mockResolvedValue({ peers: [linuxbox] });
+  const devbox = { name: "Devbox", address: "devbox.example", username: "sam", port: 22, hostKey: "unused", server: "default" };
+  vi.mocked(hookPeers).mockResolvedValue([devbox]);
+  vi.mocked(optionalHookPeers).mockResolvedValue({ peers: [devbox] });
   vi.mocked(peerRequest).mockResolvedValueOnce({ groups: [{ children: [{ target }] }] }).mockResolvedValueOnce({ ok: true, delivered: true });
-  expect(await handOff({ computer: "linuxbox.example", session: target.session, text: "hi" })).toMatchObject({ delivered: true });
-  expect(vi.mocked(peerRequest).mock.calls.map(call => call[0].name)).toEqual(["Linuxbox", "Linuxbox"]);
+  expect(await handOff({ computer: "devbox.example", session: target.session, text: "hi" })).toMatchObject({ delivered: true });
+  expect(vi.mocked(peerRequest).mock.calls.map(call => call[0].name)).toEqual(["Devbox", "Devbox"]);
   vi.mocked(hookRequest).mockResolvedValueOnce({ groups: [{ children: [{ target }] }] }).mockResolvedValueOnce({ ok: true, delivered: true });
   expect(await handOff({ computer: "Desk.local", session: target.session, text: "hi" })).toMatchObject({ delivered: true });
   expect(vi.mocked(hookRequest).mock.calls.map(call => call[0])).toContain("/v1/hand-off");
@@ -173,7 +173,7 @@ it("hands off to this computer by its own name when no computer is enrolled", as
   vi.mocked(optionalHookPeers).mockResolvedValue({ peers: [] });
   vi.mocked(hookRequest).mockResolvedValueOnce({ groups: [{ children: [{ target }] }] }).mockResolvedValueOnce({ ok: true, delivered: true });
   expect(await handOff({ computer: "Desk.local", session: target.session, text: "hi" })).toMatchObject({ delivered: true });
-  await expect(handOff({ computer: "Linuxbox", session: target.session, text: "hi" })).rejects.toThrow("hooks.yaml first");
+  await expect(handOff({ computer: "Devbox", session: target.session, text: "hi" })).rejects.toThrow("hooks.yaml first");
 });
 
 vi.mock("./terminal.js", async original => ({ ...await original<object>(), terminalPaneFromEnv: async () => undefined }));

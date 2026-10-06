@@ -17,7 +17,7 @@ vi.mock("./peers.js", async importOriginal => ({ ...await importOriginal<typeof 
 const inventory = (): HarnessInventory => ({ harnesses: ["claude", "codex", "opencode"].map(source =>
   ({ source, installed: true, usable: true, accounts: [{ id: "default", label: source, key: source, signedIn: true, usable: true }] })) }) as unknown as HarnessInventory;
 const session = (n: number) => `aaaaaaaa-1111-4111-8111-00000000000${n}`;
-const hostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPKDk8cewh74xDIccwQz/N4V05hPT+bdp5fEii+pzf9B";
+const hostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg";
 
 /** Herdr keeps an agent's name in `agents`; tmux reports its `@phren_agent` as the pane's `agent_name`. */
 for (const mux of [{ kind: "Herdr", server: "default" }, { kind: "tmux", server: "tmux" }]) describe(`the conductor role on ${mux.kind}`, () => {
@@ -103,7 +103,7 @@ for (const mux of [{ kind: "Herdr", server: "default" }, { kind: "tmux", server:
     const peer = { name: "Mini", address: "mini.example", username: "sam", port: 22, server: "default", hostKey };
     mocks.peers = [peer];
     const remote = { server: "default", target: { server: "default", workspace: "w5", tab: "w5:t1", pane: "w5:p1", source: "codex" } };
-    mocks.answer.mockResolvedValue({ computer: { id: "30000000-0000-4000-8000-000000000001", name: "Mini" }, conductor: remote, peers: ["Omarchy"], knowsCaller: true });
+    mocks.answer.mockResolvedValue({ computer: { id: "30000000-0000-4000-8000-000000000001", name: "Mini" }, conductor: remote, peers: ["Workstation"], knowsCaller: true });
     await expect(launchSession(mux.server, { cwd, label: "Conductor", kind: "claude", role: "conductor" })).rejects.toMatchObject({ status: 409, details: { computer: "Mini" } });
     expect(mocks.answer.mock.calls[0][1]).toMatch(/^\/v1\/conductor\?name=/);
     mocks.answer.mockResolvedValue({ computer: { id: "30000000-0000-4000-8000-000000000001", name: "Mini" }, conductor: remote, peers: [], knowsCaller: false });

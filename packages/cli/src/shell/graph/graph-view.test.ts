@@ -13,7 +13,7 @@ import { renderGraphView, wrapText } from "./graph-view.js";
 function payload(): GraphPayload {
   const nodes: GraphPayload["nodes"] = [];
   const links: GraphPayload["links"] = [];
-  for (const project of ["hub", "api", "billing"]) {
+  for (const project of ["harbor", "api", "billing"]) {
     nodes.push({ id: project, label: project, group: "project", project, findingCount: 6, taskCount: 1 });
     for (let i = 0; i < 6; i++) {
       const id = `${project}:f${i}`;
@@ -23,8 +23,8 @@ function payload(): GraphPayload {
     nodes.push({ id: `${project}:t`, label: `${project} task`, group: "task-active", project, section: "Active" });
     links.push({ source: project, target: `${project}:t` });
   }
-  nodes.push({ id: "e", label: "RetryPolicy", group: "entity", entityType: "class", refCount: 3, refDocs: [{ doc: "hub/FINDINGS.md", project: "hub" }] });
-  links.push({ source: "e", target: "hub" }, { source: "e", target: "api" }, { source: "hub:f0", target: "hub:f1", kind: "supersedes" }, { source: "hub:f2", target: "hub:f3", kind: "contradicts" });
+  nodes.push({ id: "e", label: "RetryPolicy", group: "entity", entityType: "class", refCount: 3, refDocs: [{ doc: "harbor/FINDINGS.md", project: "harbor" }] });
+  links.push({ source: "e", target: "harbor" }, { source: "e", target: "api" }, { source: "harbor:f0", target: "harbor:f1", kind: "supersedes" }, { source: "harbor:f2", target: "harbor:f3", kind: "contradicts" });
   return { nodes, links, scores: {} };
 }
 
@@ -49,10 +49,10 @@ describe("renderGraphView", () => {
     const c = await ready();
     for (const [w, h] of [[140, 38], [80, 24], [60, 20]] as const) {
       check(renderGraphView(c, w, h), w, h);
-      c.select("hub");
+      c.select("harbor");
       const plain = check(renderGraphView(c, w, h), w, h);
       expect(plain.join("\n")).toContain("◆");
-      expect(plain.join("\n")).toContain("hub");
+      expect(plain.join("\n")).toContain("harbor");
       c.select(null);
     }
   });
@@ -63,12 +63,12 @@ describe("renderGraphView", () => {
     expect(overview).toContain("knowledge graph");
     expect(overview).toContain("filter   all");
     expect(overview).toContain("◉ billing");
-    c.select("hub:f0");
+    c.select("harbor:f0");
     const detail = renderGraphView(c, 140, 38).map(stripAnsi).join("\n");
     expect(detail).toContain("finding");
-    expect(detail).toContain("project  hub");
+    expect(detail).toContain("project  harbor");
     expect(detail).toContain("neighbours");
-    expect(detail).toMatch(/1 ◉ hub/);
+    expect(detail).toMatch(/1 ◉ harbor/);
   });
 
   it("uses a bottom strip instead of a pane on narrow terminals", async () => {
@@ -209,13 +209,13 @@ describe("what phren knows in the pane", () => {
     const path = await import("path");
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-knows-"));
     try {
-      fs.mkdirSync(path.join(dir, "hub"), { recursive: true });
-      fs.writeFileSync(path.join(dir, "hub", "summary.md"), "# hub\n\n<!-- phren:knows:start at=x -->\n## What phren knows\n\n- 4 active findings, 120 archived across 3 topics, 2 open tasks.\n- **auth** — 60 findings, archived between 2026-03-01 and 2026-08-01: 20 patterns.\n<!-- phren:knows:end -->\n");
+      fs.mkdirSync(path.join(dir, "harbor"), { recursive: true });
+      fs.writeFileSync(path.join(dir, "harbor", "summary.md"), "# harbor\n\n<!-- phren:knows:start at=x -->\n## What phren knows\n\n- 4 active findings, 120 archived across 3 topics, 2 open tasks.\n- **auth** — 60 findings, archived between 2026-03-01 and 2026-08-01: 20 patterns.\n<!-- phren:knows:end -->\n");
       const c = new GraphController(dir, "", { builder: async () => payload(), tokenOf: () => "t" });
       await c.ensureData();
       c.setViewport(2 * 85, 4 * 30);
-      const hub = c.projects.find((p) => p.project === "hub")!;
-      c.select(hub.id);
+      const harbor = c.projects.find((p) => p.project === "harbor")!;
+      c.select(harbor.id);
       const pane = stripAnsi(renderGraphView(c, 120, 32).join("\n"));
       expect(pane).toContain("what phren knows");
       expect(pane).toContain("4 active findings, 120 archived");

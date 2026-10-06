@@ -20,7 +20,7 @@ const remoteTarget = (session = "bbbbbbbb-2222-4222-8222-222222222222", pane = "
 function receipt(overrides: Partial<DispatchTreeReceipt> = {}): DispatchTreeReceipt {
   return {
     id: "20000000-0000-4000-8000-000000000001",
-    computer: "Linuxbox",
+    computer: "Devbox",
     computerId: "30000000-0000-4000-8000-000000000001",
     label: "Parser checks",
     model: "configured-model",

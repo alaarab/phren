@@ -16,7 +16,7 @@ Phren is currently single-store. One `~/.phren` per user. Federation exists but 
 Users want:
 
 1. **Personal + team stores** — personal findings stay private, team findings are shared
-2. **Multiple team stores** — e.g., one for "arc team", one for "company-wide"
+2. **Multiple team stores** — e.g., one for "forge team", one for "company-wide"
 3. **Multi-user attribution** — who added what, when, from which machine
 4. **Shared git repo** — team members push/pull the same store
 5. **Project routing** — a project's findings go to the right store automatically
@@ -59,17 +59,17 @@ stores:
     sync: managed-git
 
   - id: "e5f6g7h8"
-    name: arc-team
-    path: ~/.phren-stores/arc-team
+    name: forge-team
+    path: ~/.phren-stores/forge-team
     role: team                   # Read-only in phase 1, write in phase 2
-    remote: git@github.com:qualus/phren-arc.git
+    remote: git@github.com:example-org/phren-forge.git
     sync: managed-git
 
   - id: "i9j0k1l2"
     name: company
     path: ~/.phren-stores/company
     role: readonly               # Always read-only
-    remote: git@github.com:qualus/phren-company.git
+    remote: git@github.com:example-org/phren-company.git
     sync: pull-only
 ```
 
@@ -87,19 +87,19 @@ All tools switch from bare `project` to `store/project`:
 
 ```
 # Before (ambiguous with multi-store)
-get_findings(project: "arc")
+get_findings(project: "forge")
 
 # After (unambiguous)
-get_findings(project: "arc")           # Resolves via registry (single match → use it)
-get_findings(project: "arc-team/arc")  # Explicit store-qualified
+get_findings(project: "forge")           # Resolves via registry (single match → use it)
+get_findings(project: "forge-team/forge")  # Explicit store-qualified
 ```
 
 Resolution when bare `project` is used:
 1. Search all readable stores for a project named `project`
 2. If exactly one match → use it
-3. If multiple matches → return error listing stores: "arc exists in personal, arc-team. Use store/project to disambiguate."
+3. If multiple matches → return error listing stores: "forge exists in personal, forge-team. Use store/project to disambiguate."
 
-Internal IDs use immutable store ID: `e5f6g7h8/arc` (not store name).
+Internal IDs use immutable store ID: `e5f6g7h8/forge` (not store name).
 
 ### Search Across Stores
 
@@ -122,14 +122,14 @@ search_knowledge(query, project?)
 
 ```bash
 # Join an existing team store (read-only access)
-npx @phren/cli store add arc-team \
-  --remote git@github.com:qualus/phren-arc.git
+npx @phren/cli store add forge-team \
+  --remote git@github.com:example-org/phren-forge.git
 
 # List stores and their status
 npx @phren/cli store list
 
 # Remove a store (local only)
-npx @phren/cli store remove arc-team
+npx @phren/cli store remove forge-team
 
 # Pull all stores, then push writable ones
 npx @phren/cli store sync
@@ -160,8 +160,8 @@ Team stores include a bootstrap file committed to their repo:
 
 ```yaml
 # .phren-team.yaml (in the team store repo root)
-name: arc-team
-description: "Arc platform team knowledge"
+name: forge-team
+description: "Forge platform team knowledge"
 default_role: team
 ```
 
@@ -173,16 +173,16 @@ When `phren store add --remote <url>` clones, it reads this file to populate the
 
 ```bash
 # Promote a finding from personal to team store
-phren promote "finding text..." --to arc-team
+phren promote "finding text..." --to forge-team
 
 # Add finding directly to team store
-phren finding add arc-team/arc "Always validate JWT expiry..."
+phren finding add forge-team/forge "Always validate JWT expiry..."
 ```
 
 MCP tool:
 ```
-add_finding(project: "arc-team/arc", finding: "...")  # Explicit store target
-add_finding(project: "arc", finding: "...")            # Goes to primary (default)
+add_finding(project: "forge-team/forge", finding: "...")  # Explicit store target
+add_finding(project: "forge", finding: "...")            # Goes to primary (default)
 ```
 
 ### Append-Only Journal for Team Stores
@@ -190,13 +190,13 @@ add_finding(project: "arc", finding: "...")            # Goes to primary (defaul
 Team stores do NOT use monolithic `FINDINGS.md` for writes. Instead:
 
 ```
-arc-team/
-├── arc/
+forge-team/
+├── forge/
 │   ├── FINDINGS.md              # Materialized view (generated, read-only)
 │   ├── journal/                 # Append-only entries (one file per actor/day)
-│   │   ├── 2026-03-24-ala.md
+│   │   ├── 2026-03-24-sam.md
 │   │   ├── 2026-03-24-edward.md
-│   │   └── 2026-03-25-ala.md
+│   │   └── 2026-03-25-sam.md
 │   └── tasks.md                 # Keep as-is (lower contention)
 ```
 
@@ -216,21 +216,21 @@ Single source of truth: **the store registry** owns project→store mapping.
 # ~/.phren/.runtime/attached-stores.yaml (this machine only)
 stores:
   - id: "e5f6g7h8"
-    name: arc-team
-    path: ~/.phren-stores/arc-team
+    name: forge-team
+    path: ~/.phren-stores/forge-team
     role: team
-    remote: git@github.com:qualus/phren-arc.git
+    remote: git@github.com:example-org/phren-forge.git
     projects:               # Registry is the ONLY routing source
-      - arc
-      - arc-api
-      - arc-ui
+      - forge
+      - forge-api
+      - forge-ui
 ```
 
 No `store:` field in `phren.project.yaml` — avoids dual-source drift.
 
 ```typescript
 function resolveWriteStore(project: string): StoreEntry {
-  // 1. If store-qualified ("arc-team/arc"), use explicit store
+  // 1. If store-qualified ("forge-team/forge"), use explicit store
   const [storeName, projectName] = parseStoreQualified(project);
   if (storeName) return registry.get(storeName);
 

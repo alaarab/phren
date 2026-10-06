@@ -79,14 +79,14 @@ stores:
     role: primary
     sync: managed-git
   - id: "def67890"
-    name: team-arc
+    name: team-forge
     path: "${teamDir.replace(/\\/g, "/")}"
     role: team
     sync: managed-git
     remote: "git@github.com:test/repo.git"
     projects:
-      - arc
-      - arc-api
+      - forge
+      - forge-api
 `;
       fs.mkdirSync(teamDir, { recursive: true });
       fs.writeFileSync(storesFilePath(phrenDir), yaml);
@@ -97,9 +97,9 @@ stores:
       expect(registry!.stores).toHaveLength(2);
       expect(registry!.stores[0].name).toBe("personal");
       expect(registry!.stores[0].role).toBe("primary");
-      expect(registry!.stores[1].name).toBe("team-arc");
+      expect(registry!.stores[1].name).toBe("team-forge");
       expect(registry!.stores[1].remote).toBe("git@github.com:test/repo.git");
-      expect(registry!.stores[1].projects).toEqual(["arc", "arc-api"]);
+      expect(registry!.stores[1].projects).toEqual(["forge", "forge-api"]);
     });
 
     it("returns null when a store entry is missing required fields", () => {
@@ -238,13 +238,13 @@ stores:
         version: 1,
         stores: [
           { id: "aaa11111", name: "personal", path: phrenDir, role: "primary", sync: "managed-git" },
-          { id: "ccc33333", name: "absent", path: path.join(tmp.path, "absent"), role: "team", sync: "managed-git", projects: ["arc"] },
+          { id: "ccc33333", name: "absent", path: path.join(tmp.path, "absent"), role: "team", sync: "managed-git", projects: ["forge"] },
         ],
       });
 
       const stores = resolveAllStores(phrenDir);
       expect(stores).toHaveLength(2);
-      expect(stores.find((s) => s.name === "absent")!.projects).toEqual(["arc"]);
+      expect(stores.find((s) => s.name === "absent")!.projects).toEqual(["forge"]);
     });
   });
 
@@ -333,7 +333,7 @@ stores:
     it("creates stores.yaml with implicit primary + new entry", () => {
       const entry: StoreEntry = {
         id: "ccc33333",
-        name: "team-arc",
+        name: "team-forge",
         path: path.join(tmp.path, "team"),
         role: "team",
         sync: "managed-git",
@@ -346,7 +346,7 @@ stores:
       expect(registry).not.toBeNull();
       expect(registry!.stores).toHaveLength(2);
       expect(registry!.stores[0].role).toBe("primary");
-      expect(registry!.stores[1].name).toBe("team-arc");
+      expect(registry!.stores[1].name).toBe("team-forge");
     });
 
     it("appends to existing registry", () => {
@@ -643,11 +643,11 @@ stores:
     });
 
     it("reads a valid bootstrap file", () => {
-      fs.writeFileSync(path.join(phrenDir, ".phren-team.yaml"), "name: arc-team\ndescription: Arc platform team\ndefault_role: team\n");
+      fs.writeFileSync(path.join(phrenDir, ".phren-team.yaml"), "name: forge-team\ndescription: Forge platform team\ndefault_role: team\n");
       const bootstrap = readTeamBootstrap(phrenDir);
       expect(bootstrap).not.toBeNull();
-      expect(bootstrap!.name).toBe("arc-team");
-      expect(bootstrap!.description).toBe("Arc platform team");
+      expect(bootstrap!.name).toBe("forge-team");
+      expect(bootstrap!.description).toBe("Forge platform team");
       expect(bootstrap!.default_role).toBe("team");
     });
   });

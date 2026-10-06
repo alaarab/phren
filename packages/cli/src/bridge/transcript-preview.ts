@@ -30,7 +30,7 @@ export function claudePanePreview(rendered: string, prompt: string, previous = "
   // below reads the plain line.
   const marked = screen.map(line => claudeBoldMarkdown(line).replace(/[\u2500-\u257f]/g, "").trimEnd());
   // The rule above the input box can carry the session title
-  // ("───── Claude sesh ─"); it ends the reply, it is never part of it.
+  // ("───── Docs refresh ─"); it ends the reply, it is never part of it.
   // A narrow pane leaves the titled rule a single dash ("…title… ─"), so a
   // line that ends in a rule dash right above the input prompt ends it too.
   const lines = raw.map((line, index) => (/[─━═]{3,}/.test(line) && !/^\s*[│┃║]/.test(line))
