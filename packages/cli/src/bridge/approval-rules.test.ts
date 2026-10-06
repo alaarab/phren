@@ -287,6 +287,70 @@ describe.skipIf(process.platform === "win32")("owner approval rules through HTTP
     expect((await callback("git status", { event: "PreToolUse" })).data).toEqual({});
   });
 
+  it.each(["missing", "empty", "malformed"])("VERIFY: %s policy avoids the prior delayed-Git regression", async kind => {
+    if (kind !== "missing") await writeFile(path.join(root, "approval-rules.json"), kind === "empty" ? '{"operations":[]}' : '{broken', { mode: 0o600 });
+    const bin = path.join(home, "bin"), log = path.join(home, "git-probe.log");
+    await mkdir(bin);
+    // Log BEFORE sleeping so a timeout cannot hide an attempted subprocess.
+    await writeFile(path.join(bin, "git"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\n/usr/bin/sleep 0.15\nexec /usr/bin/git "$@"\n`, { mode: 0o755 });
+    const oldPath = process.env.PATH;
+    const ordinary: number[] = [], delayed: number[] = [];
+    try {
+      await callback("git status");
+      state.spawns = [];
+      for (let i = 0; i < 10; i++) {
+        process.env.PATH = oldPath;
+        let start = performance.now();
+        expect((await callback("git status")).data).toEqual({});
+        ordinary.push(performance.now() - start);
+        process.env.PATH = `${bin}:${oldPath}`;
+        start = performance.now();
+        expect((await callback("git status")).data).toEqual({});
+        delayed.push(performance.now() - start);
+      }
+      expect(state.spawns).toEqual([]);
+      expect(await readFile(log, "utf8").catch(error => { if (error.code === "ENOENT") return ""; throw error; })).toBe("");
+      expect(Math.max(...delayed)).toBeLessThan(150);
+      const median = (values: number[]) => [...values].sort((a, b) => a - b)[5].toFixed(2);
+      console.log(`VERIFY ${kind}: 0 subprocesses; median ordinary=${median(ordinary)}ms delayed=${median(delayed)}ms; delayed max=${Math.max(...delayed).toFixed(2)}ms`);
+    } finally { process.env.PATH = oldPath; }
+  });
+
+  it("VERIFY: an enrolled agent cannot forge phone attribution or overwrite its creator with metadata", async () => {
+    const foreignRaw = foreign.publicKey.export({ type: "spki", format: "der" }).subarray(-32);
+    await writeFile(path.join(home, ".ssh", "authorized_keys"),
+      `restrict,pty,command="sh ~/.local/share/phren/bridge/dispatch" ssh-ed25519 ${sshKey()} phren-iphone\n` +
+      `restrict,pty,command="sh ~/.local/share/phren/bridge/dispatch" ssh-ed25519 ${sshKey(foreignRaw)} phren-iphone\n`);
+    const forged = envelope({ operation: "add", rule: draft() }, foreign);
+    forged.publicKey = publicKey.toString("base64");
+    expect((await http("POST", undefined, forged)).status).toBe(403);
+    for (const fields of [{ owner: createHash("sha256").update(publicKey).digest("hex") }, { matchesPairedKey: true }, { signerFingerprint: "phone" }]) {
+      expect((await http("POST", undefined, envelope({ operation: "add", rule: { ...draft(), ...fields } }, foreign))).status).toBe(400);
+    }
+    expect((await http("POST", undefined, envelope({ operation: "add", rule: draft() }, foreign))).status).toBe(200);
+    const readForPhone = () => http("GET", "/v1/approval-rules?pairedKey=" + encodeURIComponent(publicKey.toString("base64")));
+    const [agent] = (await readForPhone()).data.rules;
+    expect(agent.matchesPairedKey).toBe(false);
+    // An agent's own GET query affects only that response, never the phone's later GET.
+    await http("GET", "/v1/approval-rules?pairedKey=" + encodeURIComponent(foreignRaw.toString("base64")));
+    expect((await readForPhone()).data.rules[0].matchesPairedKey).toBe(false);
+    expect((await http("POST", undefined, envelope({ operation: "set-enabled", id: agent.id, enabled: true }))).status).toBe(200);
+    expect((await readForPhone()).data.rules[0]).toMatchObject({ matchesPairedKey: false, signerFingerprint: agent.signerFingerprint });
+  });
+
+  it.each(["always-ask", "deny"] as const)("VERIFY: saving a matching %s rule never answers the held request", async effect => {
+    hooks.overview.renew("default");
+    let completed = false;
+    const held = callback("git status").then(result => { completed = true; return result; });
+    await vi.waitFor(() => expect(hooks.approval(target)).toBeDefined());
+    const id = hooks.approval(target)!.actionId;
+    expect((await add(draft({ effect }))).status).toBe(200);
+    expect(hooks.approval(target)?.actionId).toBe(id);
+    expect(completed).toBe(false);
+    await hooks.answer(target, id, "deny");
+    expect((await held).data.hookSpecificOutput.decision.behavior).toBe("deny");
+  });
+
   it("rejects forged gitdir scope and shares legitimate linked-worktree scope", async () => {
     await add(draft());
     const foreignCheckout = path.join(home, "foreign-checkout"); await mkdir(foreignCheckout);
