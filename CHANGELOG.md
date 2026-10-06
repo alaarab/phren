@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- `phren bridge install` writes `~/.local/share/phren/bridge/enroll`, which adds one phone's restricted key to `authorized_keys` (the same line `phren pair` writes) and prints one JSON line. The phone runs it once over an SSH session the user signed into with a password, then connects with the key. It is never the phone key's forced command, so a phone key cannot add more keys.
+
 ### Changed
 
 - The Hook's release authority policy restricts nothing until you write one. It used to start from built-in defaults that named specific projects. If you relied on those defaults, write them with `phren authority set <project> --default ask` before upgrading.
