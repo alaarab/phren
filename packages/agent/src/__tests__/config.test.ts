@@ -81,8 +81,8 @@ describe("parseArgs", () => {
     expect(parseArgs(["--reasoning", "high"]).reasoning).toBe("high");
   });
 
-  it("maps legacy max reasoning to xhigh", () => {
-    expect(parseArgs(["--reasoning", "max"]).reasoning).toBe("xhigh");
+  it("preserves max as a distinct model-supported level", () => {
+    expect(parseArgs(["--reasoning", "max"]).reasoning).toBe("max");
   });
 
   it("parses --project", () => {

@@ -10,8 +10,10 @@
  *
  * Up/Down to navigate, Left/Right to adjust reasoning, Enter to select, Esc to cancel.
  */
+import { pickerRows, pickerWindow, movePicker, moveReasoning } from "./picker-navigation.js";
 import * as readline from "node:readline";
-import { getBuiltinModels, normalizeProviderId, REASONING_LEVELS, type ProviderId, type ReasoningEffort } from "../models.js";
+import { getBuiltinModels, getDiscoveredModels, normalizeProviderId, REASONING_LEVELS, type ProviderId, type ReasoningEffort } from "../models.js";
+import { catalogStatusFor, discoverAllProviders, discoverProvider, type CatalogStatus } from "../model-discovery.js";
 
 const ESC = "\x1b[";
 const s = {
@@ -34,20 +36,27 @@ export interface ModelEntry {
   label: string;
   reasoning: ReasoningLevel;       // current reasoning level
   reasoningRange: ReasoningLevel[]; // available levels (empty = no reasoning control)
-  contextWindow: number;
+  contextWindow?: number;
+  catalogStatus?: CatalogStatus;
 }
 
 /** Models available per provider. Extend as needed. */
 export function getAvailableModels(provider: string, currentModel?: string): ModelEntry[] {
-  const normalizedProvider = normalizeProviderId(provider) ?? "openrouter";
-  const models: ModelEntry[] = getBuiltinModels(normalizedProvider).map((model) => ({
-    id: model.id,
-    provider: model.provider,
-    label: model.label,
-    reasoning: model.reasoningDefault,
-    reasoningRange: [...model.reasoningRange],
-    contextWindow: model.contextWindow,
-  }));
+  const providers: ProviderId[] = provider === "*"
+    ? ["openai-codex", "openai", "openrouter", "anthropic", "deepseek", "openai-compat", "ollama"]
+    : [normalizeProviderId(provider) ?? "openrouter"];
+  const models: ModelEntry[] = providers.flatMap((normalizedProvider) => {
+    const entries = getDiscoveredModels(normalizedProvider) ?? getBuiltinModels(normalizedProvider);
+    return entries.map((model) => ({
+      id: model.id,
+      provider: model.provider,
+      label: provider === "*" ? `${model.provider}/${model.label}` : model.label,
+      reasoning: model.reasoningDefault,
+      reasoningRange: [...model.reasoningRange],
+      contextWindow: model.contextWindow,
+      catalogStatus: model.catalogSource === "fallback" ? "offline" : catalogStatusFor(normalizedProvider),
+    }));
+  });
 
   // If user has a custom model not in the list, add it
   if (currentModel && !models.some((m) => m.id === currentModel)) {
@@ -62,6 +71,26 @@ export function getAvailableModels(provider: string, currentModel?: string): Mod
   }
 
   return models;
+}
+
+/** Fetches all configured provider catalogues, then returns the same rows the picker uses. */
+export async function discoverAvailableModels(currentProvider: string, currentModel?: string): Promise<ModelEntry[]> {
+  const provider = normalizeProviderId(currentProvider);
+  const catalogs = await discoverAllProviders();
+  if (provider && !catalogs.some((catalog) => catalog.provider === provider)) catalogs.push(await discoverProvider(provider));
+  const rows: ModelEntry[] = catalogs.flatMap((catalog) => catalog.models.map((model) => ({
+    id: model.id,
+    provider: model.provider,
+    label: `${model.provider}/${model.label}`,
+    reasoning: model.reasoningDefault,
+    reasoningRange: [...model.reasoningRange],
+    contextWindow: model.contextWindow,
+    catalogStatus: catalog.status,
+  })));
+  if (currentModel && provider && !rows.some((model) => model.provider === provider && model.id === currentModel)) {
+    rows.unshift({ id: currentModel, provider, label: `${provider}/${currentModel}`, reasoning: null, reasoningRange: [], contextWindow: undefined, catalogStatus: "offline" });
+  }
+  return rows;
 }
 
 // ── Reasoning meter rendering ───────────────────────────────────────────────
@@ -97,48 +126,47 @@ export interface PickerResult {
  * Show interactive model picker. Returns selected model + reasoning, or null on cancel.
  * Works in raw mode — caller must be in raw mode already (TUI) or we'll set it.
  */
-export function showModelPicker(
+export async function showModelPicker(
   provider: string,
   currentModel: string | undefined,
   currentReasoning: ReasoningLevel | undefined,
   w: NodeJS.WriteStream,
 ): Promise<PickerResult | null> {
-  const models = getAvailableModels(provider, currentModel);
+  const models = await discoverAvailableModels(provider, currentModel);
   if (models.length === 0) {
     w.write(s.dim("  No models available for this provider.\n"));
     return Promise.resolve(null);
   }
 
-  let cursor = models.findIndex((m) => m.id === currentModel);
+  const currentProvider = normalizeProviderId(provider);
+  let cursor = models.findIndex((m) => m.provider === currentProvider && m.id === currentModel);
   if (cursor < 0) cursor = 0;
 
   // Clone reasoning levels so we can adjust them
-  const reasoningState = models.map((m) => m.id === currentModel ? currentReasoning ?? m.reasoning : m.reasoning);
+  const reasoningState = models.map((m) => m.provider === currentProvider && m.id === currentModel && !!currentReasoning && m.reasoningRange.includes(currentReasoning)
+    ? currentReasoning
+    : m.reasoning);
 
+  let query = "";
+  let renderedLines = 0;
   function render() {
-    // Clear previous render (move up by model count + header + footer + blank)
-    const totalLines = models.length + 4;
-    w.write(`${ESC}${totalLines}A${ESC}J`);
+    if (renderedLines) w.write(`${ESC}${renderedLines}A${ESC}J`);
     drawPicker();
   }
-
   function drawPicker() {
-    const maxLabel = Math.max(...models.map((m) => m.label.length));
-
-    w.write(`\n  ${s.bold("Select model")} ${s.dim("(↑↓ navigate, ←→ reasoning, enter select, esc cancel)")}\n\n`);
-
-    for (let i = 0; i < models.length; i++) {
+    const rows = pickerRows(models, query);
+    const visible = pickerWindow(rows, cursor, Math.max(3, Math.min(12, (w.rows || 24) - 6)));
+    const width = Math.max(12, (w.columns || 100) - 35);
+    w.write(`  ${s.bold("Select model")} ${s.dim("↑↓ move · ←→ effort · enter select · esc cancel")}\n`);
+    w.write(`  Search: ${query || "type to filter"} (${rows.length} models)\n`);
+    for (const i of visible) {
       const m = models[i];
-      const selected = i === cursor;
-      const arrow = selected ? s.cyan("▸") : " ";
-      const padded = m.label + " ".repeat(maxLabel - m.label.length);
-      const labelStr = selected ? s.bold(padded) : s.dim(padded);
-      const meter = renderReasoningMeter(reasoningState[i], m.reasoningRange);
-      const ctx = s.dim(`${(m.contextWindow / 1000).toFixed(0)}k`);
-      w.write(`  ${arrow} ${labelStr}  ${meter}  ${ctx}\n`);
+      const name = m.label.length > width ? m.label.slice(0, width - 1) + "…" : m.label;
+      const text = name.padEnd(width);
+      w.write(`  ${i === cursor ? s.cyan("▸") : " "} ${i === cursor ? s.bold(text) : s.dim(text)}  ${renderReasoningMeter(reasoningState[i], m.reasoningRange)}\n`);
     }
-
-    w.write(`\n`);
+    if (!visible.length) w.write("  No matching models.\n");
+    renderedLines = Math.max(1, visible.length) + 2;
   }
 
   // Initial draw
@@ -154,21 +182,23 @@ export function showModelPicker(
         return;
       }
 
+      const rows = pickerRows(models, query);
       if (key.name === "return") {
+        if (!rows.length) return;
         const m = models[cursor];
         cleanup();
-        resolve({ model: m.id, reasoning: reasoningState[cursor] });
+        resolve({ model: m.id, provider: m.provider, reasoning: reasoningState[cursor] });
         return;
       }
 
       if (key.name === "up") {
-        cursor = (cursor - 1 + models.length) % models.length;
+        cursor = movePicker(rows, cursor, -1);
         render();
         return;
       }
 
       if (key.name === "down") {
-        cursor = (cursor + 1) % models.length;
+        cursor = movePicker(rows, cursor, 1);
         render();
         return;
       }
@@ -178,22 +208,16 @@ export function showModelPicker(
         const m = models[cursor];
         if (m.reasoningRange.length === 0) return; // no reasoning for this model
 
-        const current = reasoningState[cursor];
-        const idx = current ? REASONING_LEVELS.indexOf(current) : -1;
-        const rangeIndices = m.reasoningRange.map((r) => REASONING_LEVELS.indexOf(r!));
-
-        if (key.name === "right") {
-          // Go higher
-          const next = rangeIndices.find((ri) => ri > idx);
-          if (next !== undefined) reasoningState[cursor] = REASONING_LEVELS[next];
-        } else {
-          // Go lower
-          const prev = [...rangeIndices].reverse().find((ri) => ri < idx);
-          if (prev !== undefined) reasoningState[cursor] = REASONING_LEVELS[prev];
-        }
+        reasoningState[cursor] = moveReasoning(m.reasoningRange, reasoningState[cursor], key.name === "right" ? 1 : -1);
 
         render();
         return;
+      }
+      if (key.name === "backspace" || (_ch && !key.ctrl && !key.meta && !/[\x00-\x1f\x7f]/.test(_ch))) {
+        query = key.name === "backspace" ? query.slice(0, -1) : (query + _ch).slice(0, 100);
+        const matches = pickerRows(models, query);
+        if (matches.length && !matches.includes(cursor)) cursor = matches[0];
+        render();
       }
     }
 

@@ -82,10 +82,12 @@ describe("launching phren's own agent", () => {
     expect(starts[0]).toMatchObject({ name: "phren-plain", kind: "phren", args: ["agent", "-i"] });
     await launchSession("default", { cwd, label: "Phren tuned", kind: "phren", model: "openai-codex/gpt-6-sol", effort: "high" });
     expect(starts[1].args).toEqual(["agent", "-i", "--model", "openai-codex/gpt-6-sol", "--reasoning", "high"]);
+    await launchSession("default", { cwd, label: "Custom", kind: "phren", model: "openai-compat/vendor/model" });
+    expect(starts[2].args).toEqual(["agent", "-i", "--provider", "openai-compat", "--model", "vendor/model"]);
   });
 
-  it("maps the phone's efforts onto phren-agent's low to xhigh", async () => {
-    const wanted: Record<string, string> = { minimal: "low", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" };
+  it("preserves the phone's model-supported efforts", async () => {
+    const wanted: Record<string, string> = { minimal: "minimal", low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" };
     for (const [effort, reasoning] of Object.entries(wanted)) {
       await launchSession("default", { cwd, label: `Phren ${effort}`, kind: "phren", effort });
       expect(starts.at(-1)!.args).toEqual(["agent", "-i", "--reasoning", reasoning]);

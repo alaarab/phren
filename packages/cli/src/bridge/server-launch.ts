@@ -43,7 +43,7 @@ function effortArgs(kind: (typeof launchKinds)[number], effort: LaunchEffort): s
   if (kind === "opencode") return ["--variant", effort];
   if (kind === "copilot") return ["--reasoning-effort", effort];
   // phren-agent takes low to xhigh, and max as xhigh.
-  if (kind === "phren") return ["--reasoning", effort === "minimal" ? "low" : effort];
+  if (kind === "phren") return ["--reasoning", effort];
   return [];
 }
 
@@ -99,7 +99,7 @@ export async function sessionUsedTools(session: string, store = phrenStoreRoot()
  * `--model` itself; the rest name their provider with `--provider`. Any other
  * model (an OpenRouter id typed by hand) passes through as it is. */
 export function phrenModelArgs(model: string): string[] {
-  const match = /^(anthropic|deepseek|ollama|openrouter)\/(.+)$/.exec(model);
+  const match = /^(anthropic|deepseek|ollama|openrouter|openai-compat)\/(.+)$/.exec(model);
   return match ? ["--provider", match[1], "--model", match[2]] : ["--model", model];
 }
 

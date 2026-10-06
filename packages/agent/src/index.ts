@@ -13,7 +13,7 @@ import { createShellTool, taskOutputTool, taskStopTool } from "./tools/shell.js"
 import { globTool } from "./tools/glob.js";
 import { grepTool } from "./tools/grep.js";
 import { createReadImageTool } from "./tools/read-image.js";
-import { modelSupportsVision } from "./models.js";
+import { modelSupportsVision, normalizeProviderId } from "./models.js";
 import { createWebFetchTool } from "./tools/web-fetch.js";
 import { createWebSearchTool } from "./tools/web-search.js";
 import { createPhrenAddTaskTool } from "./tools/phren-add-task.js";
@@ -46,13 +46,16 @@ import { codexLogin, codexLogout } from "./providers/codex-auth.js";
 import { createCheckpoint } from "./checkpoint.js";
 import { detectLintCommand, detectTypecheckCommand, detectTestCommand } from "./tools/lint-test.js";
 import { connectMcpServers, loadDefaultMcpConfig, loadMcpConfig, parseMcpInline, type McpConfigEntry } from "./mcp-client.js";
-import { isMcpProjectTrusted, trustMcpProject } from "./settings.js";
+import { isMcpProjectTrusted, trustMcpProject, loadModelSelection, saveModelSelection } from "./settings.js";
+import { discoverProvider, refreshModelCatalogs } from "./model-discovery.js";
+import { printModels } from "./models-list.js";
+import { providerAuthStatuses } from "./provider-connectors.js";
+import { restoreModelSelection } from "./settings.js";
 import * as os from "os";
 import * as path from "path";
 import { VERSION } from "./package-metadata.js";
 import {
   authProfilesPath,
-  getAuthStatusEntries,
   removeApiKeyProfile,
   upsertApiKeyProfile,
   type ApiKeyProvider,
@@ -75,15 +78,9 @@ function envVarForApiProvider(provider: ApiKeyProvider): string {
 }
 
 function printAuthStatus(): void {
-  const entries = getAuthStatusEntries();
-  console.log("phren auth");
-  console.log(`store: ${authProfilesPath()}`);
-  console.log("");
-  for (const entry of entries) {
-    const status = entry.configured ? "configured" : "not configured";
-    const source = entry.source === "none" ? "" : ` via ${entry.source}`;
-    const account = entry.accountId ? ` account=${entry.accountId}` : "";
-    console.log(`- ${entry.provider}: ${status}${source}${account}`);
+  console.log(`Provider connections (${authProfilesPath()} and ~/.phren-agent/providers.json)`);
+  for (const entry of providerAuthStatuses()) {
+    console.log(`- ${entry.provider}: ${entry.configured ? "configured" : "not configured"} via ${entry.authSource}`);
   }
 }
 
@@ -148,10 +145,19 @@ export async function runAgentCli(raw: string[]) {
 
   if (args.help) { printHelp(); process.exit(0); }
   if (args.version) { console.log(`phren-agent v${VERSION}`); process.exit(0); }
-  // Model switches resolve the provider again; they read the endpoint from
-  // the environment. The window and prices stay with the model they were
-  // given for (scopeModelOverrides, below).
-  if (args.baseUrl) process.env.PHREN_AGENT_BASE_URL = args.baseUrl;
+  // Restore fields independently: changing effort keeps the saved model,
+  // while choosing another provider never imports the old provider's model.
+  Object.assign(args, restoreModelSelection(args, loadModelSelection(process.cwd()), process.env));
+  if (args.baseUrl && normalizeProviderId(args.provider) === "openai-compat") {
+    process.env.PHREN_AGENT_BASE_URL = args.baseUrl;
+  }
+  if (args.refreshModels) {
+    const selected = normalizeProviderId(args.provider);
+    if (selected) await discoverProvider(selected, { force: true, baseUrl: args.baseUrl });
+    else await refreshModelCatalogs(true);
+    printModels(["--json"]);
+    return;
+  }
 
   if (args.listSessions) {
     // Without a phren store, sessions live in ~/.phren-agent, listed for this directory.
@@ -219,6 +225,11 @@ export async function runAgentCli(raw: string[]) {
   // Resolve LLM provider
   let provider;
   try {
+    if (!process.env.PHREN_AGENT_REPLAY) {
+      const selected = normalizeProviderId(args.provider);
+      if (selected) await discoverProvider(selected, { baseUrl: args.baseUrl });
+      else await refreshModelCatalogs();
+    }
     provider = resolveProvider(args.provider, args.model, args.maxOutput, args.reasoning, { baseUrl: args.baseUrl, contextWindow: args.contextWindow });
   } catch (err: unknown) {
     console.error(err instanceof Error ? err.message : String(err));
@@ -226,6 +237,11 @@ export async function runAgentCli(raw: string[]) {
   }
 
   keepSessionEndpoint(provider);
+  if (!process.env.PHREN_AGENT_REPLAY && !args.dryRun) saveModelSelection({
+    provider: provider.name,
+    model: (provider as { model?: string }).model,
+    reasoning: provider.reasoningEffort,
+  }, process.cwd());
   scopeModelOverrides((provider as { model?: string }).model ?? args.model ?? provider.name, {
     contextWindow: args.contextWindow,
     priceIn: args.priceIn,

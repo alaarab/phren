@@ -6,7 +6,7 @@ import { listPresets, loadPreset, savePreset, deletePreset, formatPreset } from 
 import { showModelPicker } from "../multi/model-picker.js";
 import type { PickerResult } from "../multi/model-picker.js";
 import { formatProviderList, formatModelAddHelp, addCustomModel, removeCustomModel, type ReasoningLevel } from "../multi/provider-manager.js";
-import { normalizeReasoningEffort } from "../models.js";
+import { getReasoningRange, normalizeReasoningEffort } from "../models.js";
 
 const DIM = "\x1b[2m";
 const GREEN = "\x1b[32m";
@@ -68,8 +68,7 @@ export function modelCommand(parts: string[], ctx: CommandContext): boolean | Pr
   if (ctx.pickModel) {
     return ctx.pickModel().then(applyResult);
   }
-  showModelPicker(ctx.providerName, ctx.currentModel, ctx.currentReasoning, process.stdout).then(applyResult);
-  return true;
+  return showModelPicker(ctx.providerName, ctx.currentModel, ctx.currentReasoning, process.stdout).then(applyResult);
 }
 
 /**
@@ -103,12 +102,12 @@ export async function switchModel(ctx: CommandContext, result: PickerResult): Pr
 export function reasoningCommand(parts: string[], ctx: CommandContext): boolean | Promise<boolean> {
   const arg = parts[1];
   if (!arg) {
-    process.stderr.write(`${DIM}Reasoning: ${ctx.currentReasoning ?? "model default"}. Set it with /reasoning none|low|medium|high|xhigh.${RESET}\n`);
+    process.stderr.write(`${DIM}Reasoning: ${ctx.currentReasoning ?? "model default"}. Supported: ${getReasoningRange(ctx.providerName, ctx.currentModel ?? "").join(", ") || "model default"}.${RESET}\n`);
     return true;
   }
   const level = normalizeReasoningEffort(arg);
   if (!level) {
-    process.stderr.write(`${RED}Unknown reasoning level "${arg}". Use none, low, medium, high or xhigh.${RESET}\n`);
+    process.stderr.write(`${RED}Unknown reasoning level "${arg}". Use low, medium, high or a supported extra: none, minimal, xhigh, max.${RESET}\n`);
     return true;
   }
   return switchModel(ctx, { model: ctx.currentModel ?? "", reasoning: level });
