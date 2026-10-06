@@ -1,5 +1,5 @@
 import { resolveStoreConflicts } from "./conflict-resolve.js";
-import { gitOperationRecovery, inProgressGitOperation } from "./git-state.js";
+import { gitOperationRecovery, inProgressGitOperation, storeAutoCommitBlocker } from "./git-state.js";
 import { storeCommitMessage } from "../machine-identity.js";
 
 export interface GitResult { ok: boolean; output: string; error?: string }
@@ -22,6 +22,9 @@ export interface StoreMergeOptions {
   commitMessage?: string;
 }
 
+/** The staged diff, added lines only, for `storeAutoCommitBlocker`. */
+export const STAGED_DIFF = ["diff", "--cached", "--no-color", "--no-ext-diff", "-U0"];
+
 const SENSITIVE_STORE_PATHSPECS = [".env", "**/.env", "*.pem", "*.key", ".config/auth-profiles.json"];
 
 async function commitLocalStoreWrites(cwd: string, git: RunStoreGit, message: string): Promise<{ committed: boolean; error?: string }> {
@@ -31,6 +34,8 @@ async function commitLocalStoreWrites(cwd: string, git: RunStoreGit, message: st
   const staged = await git(cwd, ["diff", "--cached", "--name-only"]);
   if (!staged.ok) return { committed: false, error: staged.error || "git diff failed" };
   if (!staged.output) return { committed: false };
+  const blocked = await storeAutoCommitBlocker(cwd, () => git(cwd, STAGED_DIFF));
+  if (blocked) return { committed: false, error: blocked };
   const commit = await git(cwd, ["-c", "commit.gpgsign=false", "commit", "-m", storeCommitMessage(message)]);
   return commit.ok ? { committed: true } : { committed: false, error: commit.error || "git commit failed" };
 }
