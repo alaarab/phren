@@ -5,6 +5,8 @@ import { getProjectDirs } from "../shared.js";
 import { parseSkillFrontmatter } from "../link/skills.js";
 import { readSkillEnabledState, type SkillEnabledResolver } from "./state.js";
 import { safeProjectPath } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
+import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
 
 export interface SkillEntry {
   name: string;
@@ -141,7 +143,8 @@ function getGlobalSkills(phrenPath: string, isEnabled: SkillEnabledResolver): Sk
 
 function getProjectLocalSkills(phrenPath: string, project: string, isEnabled: SkillEnabledResolver): SkillEntry[] {
   const seen = new Set<string>();
-  const projectDir = path.join(phrenPath, project);
+  // A project that lives in a team store keeps its skills there.
+  const projectDir = storeAwareProjectPath(phrenPath, project) ?? path.join(phrenPath, project);
   return collectSkills(isEnabled, path.join(projectDir, "skills"), project, "project", "canonical", seen);
 }
 
@@ -281,8 +284,12 @@ export function getAllSkills(phrenPath: string, profile: string): SkillEntry[] {
   const skillState = readSkillEnabledState(phrenPath);
   const isEnabled = (scope: string, name: string) => skillState(scope, name) && skillEnabled(phrenPath, name, profile || undefined);
   const all = getGlobalSkills(phrenPath, isEnabled);
-  for (const dir of getProjectDirs(phrenPath, profile)) {
-    const source = path.basename(dir);
+  const projects = new Set(getProjectDirs(phrenPath, profile).map((dir) => path.basename(dir)));
+  for (const store of getNonPrimaryStores(phrenPath)) {
+    if (!fs.existsSync(store.path)) continue;
+    for (const dir of getStoreProjectDirs(store)) projects.add(path.basename(dir));
+  }
+  for (const source of projects) {
     if (source === "global") continue;
     all.push(...getProjectLocalSkills(phrenPath, source, isEnabled));
   }

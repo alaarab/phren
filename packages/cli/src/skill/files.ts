@@ -7,6 +7,7 @@ import { setSkillEnabled } from "./state.js";
 import { errorMessage } from "../utils.js";
 import { isManagedSymlink } from "../link/skills.js";
 import { logger } from "../logger.js";
+import { getNonPrimaryStores } from "../store-registry.js";
 
 function normalizeSkillRemovalTarget(skillPath: string): string {
   if (!skillPath) return skillPath;
@@ -16,14 +17,23 @@ function normalizeSkillRemovalTarget(skillPath: string): string {
   return skillPath;
 }
 
-function symlinkManagedSkill(src: string, dest: string, managedRoot: string): void {
+/** Every store root whose skills phren links, so a link into a team store counts as phren's own. */
+function managedSkillRoots(phrenPath: string): string[] {
+  return [phrenPath, ...getNonPrimaryStores(phrenPath).map((store) => store.path)];
+}
+
+function isManagedSkillLink(dest: string, managedRoots: string[]): boolean {
+  return managedRoots.some((root) => isManagedSymlink(dest, root));
+}
+
+function symlinkManagedSkill(src: string, dest: string, managedRoots: string[]): void {
   try {
     const stat = fs.lstatSync(dest);
     if (stat.isSymbolicLink()) {
       const currentTarget = fs.readlinkSync(dest);
       const resolvedTarget = path.resolve(path.dirname(dest), currentTarget);
       if (resolvedTarget === path.resolve(src)) return;
-      if (!isManagedSymlink(dest, managedRoot)) return;
+      if (!isManagedSkillLink(dest, managedRoots)) return;
       fs.unlinkSync(dest);
     } else {
       return;
@@ -36,9 +46,9 @@ function symlinkManagedSkill(src: string, dest: string, managedRoot: string): vo
   fs.symlinkSync(src, dest);
 }
 
-function removeManagedSkillLink(dest: string, managedRoot: string): void {
+function removeManagedSkillLink(dest: string, managedRoots: string[]): void {
   try {
-    if (!isManagedSymlink(dest, managedRoot)) return;
+    if (!isManagedSkillLink(dest, managedRoots)) return;
     fs.unlinkSync(dest);
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") logger.debug("skill-files", `removeManagedSkillLink: ${errorMessage(err)}`);
@@ -64,22 +74,23 @@ function writeSkillArtifacts(destDir: string, manifest: SkillManifest): void {
 export function syncScopeSkillsToDir(phrenPath: string, scope: string, destDir: string): SkillManifest {
   const manifest = buildSkillManifest(phrenPath, "", scope, destDir);
   const expectedNames = new Set<string>();
+  const managedRoots = managedSkillRoots(phrenPath);
   fs.mkdirSync(destDir, { recursive: true });
 
   for (const skill of manifest.skills) {
     const destName = skill.format === "folder" ? skill.name : path.basename(skill.path);
     const destPath = path.join(destDir, destName);
     if (!skill.visibleToAgents) {
-      removeManagedSkillLink(destPath, phrenPath);
+      removeManagedSkillLink(destPath, managedRoots);
       continue;
     }
     expectedNames.add(destName);
-    symlinkManagedSkill(skill.root, destPath, phrenPath);
+    symlinkManagedSkill(skill.root, destPath, managedRoots);
   }
 
   for (const entry of fs.readdirSync(destDir)) {
     if (expectedNames.has(entry)) continue;
-    removeManagedSkillLink(path.join(destDir, entry), phrenPath);
+    removeManagedSkillLink(path.join(destDir, entry), managedRoots);
   }
 
   writeSkillArtifacts(destDir, manifest);

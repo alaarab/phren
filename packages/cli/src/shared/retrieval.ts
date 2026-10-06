@@ -752,7 +752,7 @@ export async function searchFederatedStores(
   options: Omit<SearchKnowledgeRowsOptions, "phrenPath">,
 ): Promise<FederatedDocRow[]> {
   // Registered non-primary stores are already included in the main FTS index
-  // by buildIndex (via refreshStoreProjectDirs). Only search unregistered
+  // by buildIndex (via getAllStoreProjectDirs). Only search unregistered
   // federation paths from PHREN_FEDERATION_PATHS to avoid double indexing.
   let registeredStorePaths: Set<string>;
   try {
