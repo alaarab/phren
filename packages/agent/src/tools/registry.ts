@@ -18,6 +18,8 @@ export class ToolRegistry {
   private tools = new Map<string, AgentTool>();
   /** Override the default permission prompt (e.g. for Ink TUI). */
   askUser: AskUserFn = defaultAskUser;
+  /** Root harness approval channel; unavailable responses fall back to askUser. */
+  externalApproval?: (name: string, input: Record<string, unknown>, signal?: AbortSignal) => Promise<boolean | undefined>;
   permissionConfig: PermissionConfig = {
     mode: "suggest",
     projectRoot: process.cwd(),
@@ -77,7 +79,9 @@ export class ToolRegistry {
       return { output: `Permission denied: ${rule.reason}`, is_error: true, permissionDenied: true };
     }
     if (rule.verdict === "ask") {
-      const allowed = await this.askUser(name, input, rule.reason);
+      const external = await this.externalApproval?.(name, input, signal);
+      if (signal?.aborted) return { output: "Cancelled by user.", is_error: true };
+      const allowed = external ?? await this.askUser(name, input, rule.reason);
       if (!allowed) {
         return { output: "User denied permission.", is_error: true, permissionDenied: true };
       }

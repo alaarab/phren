@@ -21,6 +21,8 @@ export interface CliArgs {
   model?: string;
   reasoning?: ReasoningEffort;
   project?: string;
+  /** Additional system instructions, read once at startup. */
+  appendSystemPromptFile?: string;
   permissions: PermissionMode;
   permissionsExplicit: boolean;
   /** --allowedTools / --disallowedTools rules (permissions/rules.ts). */
@@ -132,6 +134,7 @@ Options:
   --strict-mcp-config  Use only --mcp-config and --mcp servers, no default config files
   --team <name>        Start in team mode with named team coordination
   --multi              Start in multi-agent TUI mode
+  --append-system-prompt-file <path>  Append a UTF-8 system brief
   --dry-run            Show system prompt and exit
   --verbose            Show tool calls as they execute
   --version            Show version
@@ -245,6 +248,10 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (arg === "--lint-cmd" && argv[i + 1]) { args.lintCmd = argv[++i]; }
     else if (arg === "--test-cmd" && argv[i + 1]) { args.testCmd = argv[++i]; }
     else if (arg === "--typecheck-cmd" && argv[i + 1]) { args.typecheckCmd = argv[++i]; }
+    else if (arg === "--append-system-prompt-file") {
+      if (!argv[i + 1] || argv[i + 1].startsWith("--")) throw new Error("--append-system-prompt-file needs a path.");
+      args.appendSystemPromptFile = argv[++i];
+    }
     else if (arg === "--mcp" && argv[i + 1]) { args.mcp.push(argv[++i]); }
     else if (arg === "--mcp-config" && argv[i + 1]) { args.mcpConfig = argv[++i]; }
     else if (arg === "--trust-project-mcp") { args.trustProjectMcp = true; }

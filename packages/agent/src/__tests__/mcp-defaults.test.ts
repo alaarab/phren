@@ -28,18 +28,20 @@ describe("default MCP config", () => {
   it("loads the user's servers always, and the project's only when it is trusted", () => {
     const { home, project } = setup();
     const untrusted = loadDefaultMcpConfig(project, { home, trusted: false });
-    expect(Object.keys(untrusted.servers)).toEqual(["docs"]);
+    expect(Object.keys(untrusted.servers)).toEqual(["phren", "docs"]);
     expect(untrusted.untrusted.map((u) => [path.basename(u.file), u.names])).toEqual([[".mcp.json", ["db"]], ["mcp.json", ["web"]]]);
 
     const trusted = loadDefaultMcpConfig(project, { home, trusted: true });
-    expect(Object.keys(trusted.servers).sort()).toEqual(["db", "docs", "web"]);
+    expect(Object.keys(trusted.servers).sort()).toEqual(["db", "docs", "phren", "web"]);
     expect(trusted.servers.db).toMatchObject({ command: "db-server", args: ["--ro"] });
     expect(trusted.untrusted).toEqual([]);
   });
 
-  it("finds nothing where there is nothing", () => {
+  it("loads the bundled core Phren server without a user configuration", () => {
     const empty = loadDefaultMcpConfig(tmp("mcp-empty-"), { home: tmp("mcp-nohome-"), trusted: false });
-    expect(empty).toEqual({ servers: {}, untrusted: [] });
+    expect(empty.untrusted).toEqual([]);
+    expect(empty.servers.phren).toMatchObject({ command: process.execPath, env: { PHREN_MCP_PROFILE: "core" } });
+    expect(empty.servers.phren.args?.at(-1)).toBe("mcp");
   });
 
   it("parses the flags", () => {
