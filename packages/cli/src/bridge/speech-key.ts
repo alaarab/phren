@@ -1,6 +1,5 @@
 import { mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { homeDir } from "../home-paths.js";
 import { atomic, bridgeRoot } from "./protocol.js";
 
 /** The ElevenLabs key for spoken replies and Scribe dictation. It is machine
@@ -15,12 +14,6 @@ export type SpeechKeySource = "environment" | "file";
 
 export function speechKeyFile(): string {
   return path.join(bridgeRoot(), "elevenlabs.json");
-}
-
-/** Where the key lived before phren kept its own: the mina trailer config. It
- * is read once to migrate and never written or deleted. */
-export function legacySpeechKeyFile(env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(homeDir(env), ".config", "mina-trailer.json");
 }
 
 function clean(value: unknown): string | undefined {
@@ -41,12 +34,6 @@ async function readStored(file: string): Promise<Stored> {
   } catch { return { state: "invalid" }; }
 }
 
-async function readLegacy(file: string): Promise<string | undefined> {
-  try {
-    return clean((JSON.parse(await readFile(file, "utf8")) as { elevenlabs_api_key?: unknown }).elevenlabs_api_key);
-  } catch { return undefined; }
-}
-
 export async function writeSpeechKey(key: string, file = speechKeyFile()): Promise<void> {
   const value = clean(key);
   if (!value) throw new Error("The ElevenLabs key is empty.");
@@ -54,23 +41,15 @@ export async function writeSpeechKey(key: string, file = speechKeyFile()): Promi
   await atomic(file, JSON.stringify({ apiKey: value }) + "\n", 0o600);
 }
 
-export interface SpeechKeyPaths { env?: NodeJS.ProcessEnv; file?: string; legacy?: string }
+export interface SpeechKeyPaths { env?: NodeJS.ProcessEnv; file?: string }
 
-/** ELEVENLABS_API_KEY, else the stored key. When nothing is stored yet and the
- * mina trailer config has a key, it is copied here once and read from here
- * after. */
+/** ELEVENLABS_API_KEY, else the stored key. */
 export async function resolveSpeechKey(paths: SpeechKeyPaths = {}): Promise<{ key: string; source: SpeechKeySource } | undefined> {
   const env = paths.env ?? process.env;
   const fromEnv = clean(env[SPEECH_KEY_ENV]);
   if (fromEnv) return { key: fromEnv, source: "environment" };
-  const file = paths.file ?? speechKeyFile();
-  const stored = await readStored(file);
-  if (stored.state === "ok") return { key: stored.key, source: "file" };
-  if (stored.state !== "missing") return undefined;
-  const legacy = await readLegacy(paths.legacy ?? legacySpeechKeyFile(env));
-  if (!legacy) return undefined;
-  try { await writeSpeechKey(legacy, file); } catch { /* use it this once; the next call tries again */ }
-  return { key: legacy, source: "file" };
+  const stored = await readStored(paths.file ?? speechKeyFile());
+  return stored.state === "ok" ? { key: stored.key, source: "file" } : undefined;
 }
 
 export async function readSpeechKey(): Promise<string | undefined> {
@@ -79,8 +58,7 @@ export async function readSpeechKey(): Promise<string | undefined> {
 
 export interface SpeechKeyStatus { configured: boolean; detail: string; problem?: boolean }
 
-/** Whether this computer has a key, for doctor. Never the key itself, and it
- * doesn't migrate: a read-only check. */
+/** Whether this computer has a key, for doctor. Never the key itself. */
 export async function speechKeyStatus(paths: SpeechKeyPaths = {}): Promise<SpeechKeyStatus> {
   const env = paths.env ?? process.env;
   const file = paths.file ?? speechKeyFile();
@@ -95,10 +73,6 @@ export async function speechKeyStatus(paths: SpeechKeyPaths = {}): Promise<Speec
     case "ok": return { configured: true, detail: `stored in ${file}` };
     case "unsafe": return { configured: false, problem: true, detail: `${file} is readable by other users; run chmod 600 on it` };
     case "invalid": return { configured: false, problem: true, detail: `${file} has no apiKey; ${setup}` };
-  }
-  const legacy = paths.legacy ?? legacySpeechKeyFile(env);
-  if (await readLegacy(legacy)) {
-    return { configured: true, detail: `not stored yet; the Hook copies it from ${legacy} on first use` };
   }
   return { configured: false, detail: `no ElevenLabs key, so spoken replies and Scribe dictation are off; ${setup}` };
 }

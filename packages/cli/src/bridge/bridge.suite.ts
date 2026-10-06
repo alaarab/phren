@@ -147,7 +147,7 @@ describe("Phren Hook boundaries", () => {
   });
 
   it("normalizes MCP arguments and only resolves choices for the matching permission", () => {
-    const input = { action: "read_skill", name: "m4l-improve" };
+    const input = { action: "read_skill", name: "lint-fix" };
     const sentence = "Allow the phren MCP server to run tool phren_admin?";
     const options = "\n› 1. Allow  Run the tool and continue.\n2. Allow for this session  Keep it until the session ends.\n3. Deny";
     const prompt = permissionPrompt("mcp__phren__phren_admin", input, sentence + options);
@@ -770,7 +770,7 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
     const line = await enrollComputer("Desk", path.join(root, "bridge"));
     const hostKey = publicComputerKey(line.slice(line.indexOf("ssh-ed25519")));
     await writeFile(path.join(root, "bridge/hooks.yaml"), JSON.stringify({ version: 1, computers: [
-      { name: "Linuxbox", address: "desk.example", username: "sam", hostKey },
+      { name: "Devbox", address: "desk.example", username: "sam", hostKey },
     ] }), { mode: 0o600 });
     // The fake SSH executable preserves the byte-pipe boundary; the receiver
     // is a second real Hook with its own store and runtime identity.
@@ -1132,7 +1132,7 @@ schedules:
       expect(commands.find(c => c.method === "agent.start")?.params).toMatchObject({ name: "codex-here", pane_id: "w1:p2", timeout_ms: 3_001 });
     });
 
-    // Seen 2026-09-27 on Linuxbox: three launches in a row failed because the
+    // Seen 2026-09-27 on Devbox: three launches in a row failed because the
     // new pane's login shell had not reached its prompt when agent.start ran.
     it("starts the agent once a new pane's shell reaches its prompt", async () => {
       busyAgentStarts = 2;
@@ -2247,7 +2247,7 @@ schedules:
       const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
       await once(socket, "open");
       await waitFor(() => frames.length, 1_500);
-      const input = { action: "read_skill", name: "m4l-improve" };
+      const input = { action: "read_skill", name: "lint-fix" };
       const reply = new Promise<any>((resolve, reject) => {
         const payload = JSON.stringify({ target, event: "PermissionRequest", tool: "mcp__phren__phren_admin", input });
         const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
@@ -2767,30 +2767,30 @@ schedules:
     it("reads the release authority policy for anyone and takes changes only without an agent pane", async () => {
       const listed = await api("/v1/authority");
       expect(listed.status).toBe(200);
-      expect(listed.data).toMatchObject({ source: "defaults", confirmations: [] });
-      expect(listed.data.projects.map((row: { project: string }) => row.project)).toEqual(["hub", "mina", "safety"]);
+      expect(listed.data).toMatchObject({ source: "defaults", confirmations: [], projects: [] });
+      await api("/v1/authority", { project: "beacon", default: "ask" });
       expect((await api("/v1/authority?project=phren")).data.authority).toMatchObject({ listed: false, ask: [] });
       const agent = { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1" };
-      expect((await api("/v1/authority", { project: "hub", origin: agent })).status).toBe(403);
-      expect((await api("/v1/authority/confirm", { project: "hub", actions: ["merge"], origin: agent })).status).toBe(403);
-      expect((await api("/v1/authority", { project: "hub", origin: agent }, "DELETE")).status).toBe(403);
-      const set = await api("/v1/authority", { project: "hub", default: "ask", actions: { merge: "go" } });
+      expect((await api("/v1/authority", { project: "harbor", origin: agent })).status).toBe(403);
+      expect((await api("/v1/authority/confirm", { project: "harbor", actions: ["merge"], origin: agent })).status).toBe(403);
+      expect((await api("/v1/authority", { project: "harbor", origin: agent }, "DELETE")).status).toBe(403);
+      const set = await api("/v1/authority", { project: "harbor", default: "ask", actions: { merge: "go" } });
       expect(set.status).toBe(200);
       expect(set.data.authority).toMatchObject({ go: ["merge"], maxPermissionMode: "auto-edits" });
       expect((await api("/v1/authority")).data).toMatchObject({ source: "file", updatedBy: "phone" });
-      expect((await api("/v1/authority", { project: "hub", default: "maybe" })).status).toBe(400);
-      const confirmed = await api("/v1/authority/confirm", { project: "hub", actions: ["deploy"], minutes: 5 });
-      expect(confirmed.data.confirmation).toMatchObject({ project: "hub", actions: ["deploy"], by: "phone" });
+      expect((await api("/v1/authority", { project: "harbor", default: "maybe" })).status).toBe(400);
+      const confirmed = await api("/v1/authority/confirm", { project: "harbor", actions: ["deploy"], minutes: 5 });
+      expect(confirmed.data.confirmation).toMatchObject({ project: "harbor", actions: ["deploy"], by: "phone" });
       expect((await api("/v1/authority")).data.confirmations).toHaveLength(1);
-      expect((await api("/v1/authority", { project: "safety" }, "DELETE")).data.authority).toMatchObject({ listed: false });
-      expect((await api("/v1/authority", { project: "safety" }, "DELETE")).status).toBe(404);
+      expect((await api("/v1/authority", { project: "beacon" }, "DELETE")).data.authority).toMatchObject({ listed: false });
+      expect((await api("/v1/authority", { project: "beacon" }, "DELETE")).status).toBe(404);
     });
 
     it("lists one row per computer on GET /v1/computers, this computer first and an unreachable peer marked", async () => {
       const health = (await api("/v1/health")).data.computer;
       await writeFile(path.join(root, "bridge/hooks.yaml"), JSON.stringify({ version: 1, computers: [
         // An address no test machine is named: a peer never takes a name the local computer has.
-        { name: "Linuxbox", address: "linuxbox-peer.invalid", username: "sam", port: 22, server: "default", hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPKDk8cewh74xDIccwQz/N4V05hPT+bdp5fEii+pzf9B" },
+        { name: "Devbox", address: "devbox-peer.invalid", username: "sam", port: 22, server: "default", hostKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg" },
       ] }), { mode: 0o600 });
       const { status, data } = await api("/v1/computers");
       expect(status).toBe(200);
@@ -2798,7 +2798,7 @@ schedules:
       expect(data.computers[0]).toMatchObject({ id: health.id, local: true, linked: true, reachable: true });
       expect(data.computers[0].name).toBe(health.aliases.find((name: string) => !name.includes(".")) ?? health.aliases[0]);
       // No dispatch key is enrolled in the fixture, so the peer cannot answer.
-      expect(data.computers[1]).toEqual({ name: "Linuxbox", aliases: ["linuxbox-peer.invalid"], local: false, linked: true, reachable: false });
+      expect(data.computers[1]).toEqual({ name: "Devbox", aliases: ["devbox-peer.invalid"], local: false, linked: true, reachable: false });
     });
 
     it("rejects DELETE on a path that is not the grants route", async () => {
@@ -2839,10 +2839,10 @@ schedules:
     });
 
     it("gives a second launch with the same label its own agent name", async () => {
-      await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "SR requests", kind: "claude" });
-      const second = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "SR requests", kind: "claude" });
+      await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Docs review", kind: "claude" });
+      const second = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Docs review", kind: "claude" });
       expect(second.status, JSON.stringify(second.data)).toBe(200);
-      expect(commands.filter(c => c.method === "agent.start").map(c => c.params.name)).toEqual(["sr-requests", "sr-requests-2"]);
+      expect(commands.filter(c => c.method === "agent.start").map(c => c.params.name)).toEqual(["docs-review", "docs-review-2"]);
     });
 
     it("starts an agent with the chosen model and effort", async () => {
@@ -2891,7 +2891,7 @@ schedules:
 
     it("dispatches through a fake SSH pipe to a second Hook and its registered project", async () => {
       await dispatchFixture();
-      const sending = api("/v1/dispatch", { computer: "Linuxbox", project: "phren", harness: "codex", model: "test-model", label: "Worker", prompt: "Run the assigned checks" });
+      const sending = api("/v1/dispatch", { computer: "Devbox", project: "phren", harness: "codex", model: "test-model", label: "Worker", prompt: "Run the assigned checks" });
       // The receiving Hook writes the brief and starts Codex with it as the first prompt.
       const briefs = path.join(root, "remote/briefs");
       await waitFor(async () => (await readdir(briefs).catch(() => [])).length > 0, 10_000);
@@ -2903,7 +2903,7 @@ schedules:
       await writeFile(path.join(briefs, id, "arrival.json"), JSON.stringify({ accepted: { at: new Date().toISOString(), target: worker } }));
       const sent = await sending;
       expect(sent.status, JSON.stringify(sent.data)).toBe(200);
-      expect(sent.data).toMatchObject({ ok: true, id, computer: "Linuxbox", state: "accepted", brief: "launch", target: worker });
+      expect(sent.data).toMatchObject({ ok: true, id, computer: "Devbox", state: "accepted", brief: "launch", target: worker });
       // The remote Hook resolves the checkout through realpath; on macOS /tmp is a symlink.
       expect(commands.find(c => c.method === "workspace.create")?.params).toMatchObject({ cwd: await realpathAsync(path.join(root, "checkout")), env: { PHREN_DISPATCH_ID: id } });
       expect(commands.find(c => c.method === "agent.start")?.params.args).toEqual(["--model", "test-model", `Read and follow the brief in ${file}`]);
@@ -2935,14 +2935,14 @@ schedules:
       let view: Awaited<ReturnType<typeof readAccountUsage>>;
       try { view = await readAccountUsage({ store, hook: route => api(route).then(answer => answer.data) }); }
       finally { process.env.PHREN_BRIDGE_HOME = saved.bridge; process.env.PATH = saved.path; if (saved.bridge === undefined) delete process.env.PHREN_BRIDGE_HOME; }
-      expect(view.computers).toEqual([hostname(), "Linuxbox"]);
+      expect(view.computers).toEqual([hostname(), "Devbox"]);
       expect(view.unreachable).toEqual([]);
       expect(view.notLinked).toEqual([{ name: "Studio" }]);
       const claude = view.accounts.filter(row => row.harness === "claude");
       expect(claude, JSON.stringify(view.accounts)).toHaveLength(1);
       // The remote's report is the only timed one, so it stands whole; the passed window says reset.
-      expect(claude[0]).toMatchObject({ id: expect.stringMatching(/^claude\|claude:[0-9a-f]{12}$/), account: "sam@example.com", from: "Linuxbox",
-        computers: [{ name: hostname(), account: "default" }, { name: "Linuxbox", account: "default" }], leftPercent: 15, nearLimit: true, exhausted: false, stale: true });
+      expect(claude[0]).toMatchObject({ id: expect.stringMatching(/^claude\|claude:[0-9a-f]{12}$/), account: "sam@example.com", from: "Devbox",
+        computers: [{ name: hostname(), account: "default" }, { name: "Devbox", account: "default" }], leftPercent: 15, nearLimit: true, exhausted: false, stale: true });
       expect(claude[0].windows).toEqual([{ id: "five_hour", name: "5-hour limit", reset: true },
         expect.objectContaining({ id: "seven_day", usedPercent: 85, leftPercent: 15, resetsIn: expect.any(String) })]);
       // The capacity probe carries each account's room for anywhere's tie-break.
@@ -2960,14 +2960,14 @@ schedules:
       expect(details.data.versions.map((item: { tool: string }) => item.tool)).toEqual(["hook", "herdr", "claude", "codex", "copilot", "opencode"]);
       expect(details.data.versions[0]).toMatchObject({ tool: "hook", status: "ok" });
       expect(Array.isArray(details.data.stores)).toBe(true);
-      expect(details.data.peers).toMatchObject({ configured: true, computers: [{ name: "Linuxbox", reachable: true, listsBack: false }] });
+      expect(details.data.peers).toMatchObject({ configured: true, computers: [{ name: "Devbox", reachable: true, listsBack: false }] });
       // Once the peer's hooks.yaml names this computer, the link is two-way.
       const line = await enrollComputer("Back", path.join(root, "remote"));
       const hostKey = publicComputerKey(line.slice(line.indexOf("ssh-ed25519")));
       await writeFile(path.join(root, "remote/hooks.yaml"), JSON.stringify({ version: 1, computers: [
         { name: hostname().split(".")[0].replace(/[^A-Za-z0-9_.-]/g, "-"), address: "back.example", username: "sam", hostKey },
       ] }), { mode: 0o600 });
-      expect((await api("/v1/health/details")).data.peers.computers[0]).toMatchObject({ name: "Linuxbox", reachable: true, listsBack: true });
+      expect((await api("/v1/health/details")).data.peers.computers[0]).toMatchObject({ name: "Devbox", reachable: true, listsBack: true });
     });
 
     it("advertises speech and transcribe, and voices /v1/speech with only bridge/elevenlabs.json as the key, in the stored region", async () => {
@@ -3040,7 +3040,7 @@ schedules:
 
     it("does not launch when the remote project is absent or the request is invalid", async () => {
       await dispatchFixture();
-      const brief = { computer: "Linuxbox", project: "missing", harness: "codex", label: "Worker", prompt: "Brief" };
+      const brief = { computer: "Devbox", project: "missing", harness: "codex", label: "Worker", prompt: "Brief" };
       expect((await api("/v1/dispatch", brief)).data).toMatchObject({ ok: false, state: "failed" });
       expect((await api("/v1/dispatch", { ...brief, project: "../phren" })).status).toBe(400);
       expect((await api("/v1/dispatch", { ...brief, cwd: root })).status).toBe(400);

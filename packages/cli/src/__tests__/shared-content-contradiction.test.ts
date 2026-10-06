@@ -79,14 +79,14 @@ describe("extractDynamicEntities", () => {
   });
 
   it("does not include tokens appearing in only 1 bullet", () => {
-    writeFindings(tmp.path, "music", [
-      "Ableton latency is configurable via ASIO driver",
-      "Use JUCE for cross-platform audio plugins",
+    writeFindings(tmp.path, "design", [
+      "Photoshop latency is configurable via the GPU driver",
+      "Use Figma for shared mockups",
     ]);
-    const entities = extractDynamicEntities(tmp.path, "music");
+    const entities = extractDynamicEntities(tmp.path, "design");
     // Each token only appears once — should not be included
-    expect(entities.has("ableton")).toBe(false);
-    expect(entities.has("juce")).toBe(false);
+    expect(entities.has("photoshop")).toBe(false);
+    expect(entities.has("figma")).toBe(false);
   });
 
   it("extracts all-caps acronyms that appear in 2+ bullets", () => {

@@ -823,7 +823,7 @@ export async function fetchProjects(client: PhrenClient): Promise<{ name: string
     if (name.includes(":") || name.includes("/") || name.includes("\\")) continue;
     if (name === "global" || name === "scripts" || name === "templates" || name === "profiles") continue;
     // Filter known stale/non-profile projects (should be fixed at MCP level long-term)
-    if (name === "dendron" || name === "phren-framework") continue;
+    if (name === "phren-framework") continue;
     // Deduplicate: same project name can appear across multiple stores — take first occurrence
     if (seen.has(name)) continue;
     seen.add(name);

@@ -68,10 +68,10 @@ describe("saveEditedFile", () => {
   });
 
   it("writes an AGENTS.md without demanding frontmatter", () => {
-    const claude = path.join(tmp.path, "hub", "AGENTS.md");
+    const claude = path.join(tmp.path, "harbor", "AGENTS.md");
     fs.mkdirSync(path.dirname(claude), { recursive: true });
-    fs.writeFileSync(claude, "# hub\n");
-    const result = saveEditedFile(claude, "# hub\n\nNow with guidance.\n", "claude");
+    fs.writeFileSync(claude, "# harbor\n");
+    const result = saveEditedFile(claude, "# harbor\n\nNow with guidance.\n", "claude");
     expect(result.ok).toBe(true);
     expect(fs.readFileSync(claude, "utf8")).toContain("Now with guidance.");
   });

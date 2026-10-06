@@ -13,8 +13,8 @@ deep link into the shell instead of dropping the user on the landing screen:
 
 ```bash
 phren shell --view tasks --here            # this directory's project, task list
-phren shell --view "review queue" --project hub
-phren shell --project hub                  # project context, landing screen
+phren shell --view "review queue" --project harbor
+phren shell --project harbor                  # project context, landing screen
 ```
 
 | Flag | Description |
@@ -100,7 +100,7 @@ The knowledge graph — the same picture the 3D memory viewer draws (`phren web-
 
 ```bash
 phren shell --view graph          # straight into the graph
-phren shell --view graph --project hub
+phren shell --view graph --project harbor
 ```
 
 | Key | Action |

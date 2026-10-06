@@ -44,7 +44,7 @@ describe("resolveStoreForProject — missing team store", () => {
           role: "team",
           sync: "managed-git",
           remote: "git@github.com:acme/work-shared.git",
-          projects: ["arc", "emv"],
+          projects: ["forge", "emv"],
         },
       ],
     };
@@ -72,10 +72,10 @@ describe("resolveStoreForProject — missing team store", () => {
     declareTeamStore({ createDir: false });
     const ctx = makeCtx(phrenDir);
 
-    expect(() => resolveStoreForProject(ctx, "arc")).toThrow(StoreUnavailableError);
+    expect(() => resolveStoreForProject(ctx, "forge")).toThrow(StoreUnavailableError);
     // The specific guarantee: no code path returns the primary store here.
     try {
-      resolveStoreForProject(ctx, "arc");
+      resolveStoreForProject(ctx, "forge");
       throw new Error("expected resolveStoreForProject to throw");
     } catch (err) {
       expect(err).toBeInstanceOf(StoreUnavailableError);
@@ -89,7 +89,7 @@ describe("resolveStoreForProject — missing team store", () => {
 
     let message = "";
     try {
-      resolveStoreForProject(ctx, "arc");
+      resolveStoreForProject(ctx, "forge");
     } catch (err) {
       message = (err as Error).message;
     }
@@ -97,13 +97,13 @@ describe("resolveStoreForProject — missing team store", () => {
     expect(message).toContain("work-shared");
     expect(message).toContain(teamDir);
     expect(message).toContain("git@github.com:acme/work-shared.git");
-    expect(message).toContain("arc");
+    expect(message).toContain("forge");
   });
 
   it("fails for a store-qualified write naming the missing store", () => {
     declareTeamStore({ createDir: false });
     const ctx = makeCtx(phrenDir);
-    expect(() => resolveStoreForProject(ctx, "work-shared/arc")).toThrow(StoreUnavailableError);
+    expect(() => resolveStoreForProject(ctx, "work-shared/forge")).toThrow(StoreUnavailableError);
   });
 
   // ── Reads degrade instead ─────────────────────────────────────────────────
@@ -112,17 +112,17 @@ describe("resolveStoreForProject — missing team store", () => {
     declareTeamStore({ createDir: false });
     const ctx = makeCtx(phrenDir);
 
-    const resolved = resolveStoreForProject(ctx, "arc", "read");
+    const resolved = resolveStoreForProject(ctx, "forge", "read");
     expect(resolved.phrenPath).toBe(phrenDir);
     expect(resolved.storeRole).toBe("primary");
-    expect(resolved.project).toBe("arc");
+    expect(resolved.project).toBe("forge");
   });
 
   it("still fails a read that explicitly names the missing store", () => {
     declareTeamStore({ createDir: false });
     const ctx = makeCtx(phrenDir);
     // Nothing to degrade to — the caller asked for that store by name.
-    expect(() => resolveStoreForProject(ctx, "work-shared/arc", "read")).toThrow(StoreUnavailableError);
+    expect(() => resolveStoreForProject(ctx, "work-shared/forge", "read")).toThrow(StoreUnavailableError);
   });
 
   // ── Happy paths are unchanged ─────────────────────────────────────────────
@@ -131,7 +131,7 @@ describe("resolveStoreForProject — missing team store", () => {
     declareTeamStore({ createDir: true });
     const ctx = makeCtx(phrenDir);
 
-    const resolved = resolveStoreForProject(ctx, "arc");
+    const resolved = resolveStoreForProject(ctx, "forge");
     expect(resolved.phrenPath).toBe(teamDir);
     expect(resolved.storeRole).toBe("team");
   });
@@ -147,7 +147,7 @@ describe("resolveStoreForProject — missing team store", () => {
 
   it("routes to the primary store when no stores.yaml exists at all", () => {
     const ctx = makeCtx(phrenDir);
-    const resolved = resolveStoreForProject(ctx, "arc");
+    const resolved = resolveStoreForProject(ctx, "forge");
     expect(resolved.phrenPath).toBe(phrenDir);
     expect(resolved.storeRole).toBe("primary");
   });
@@ -155,6 +155,6 @@ describe("resolveStoreForProject — missing team store", () => {
   it("keeps rejecting unknown and read-only stores", () => {
     declareTeamStore({ createDir: true });
     const ctx = makeCtx(phrenDir);
-    expect(() => resolveStoreForProject(ctx, "nope/arc")).toThrow(/not found/);
+    expect(() => resolveStoreForProject(ctx, "nope/forge")).toThrow(/not found/);
   });
 });

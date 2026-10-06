@@ -49,7 +49,7 @@ describe("buildRelaxedFtsQuery", () => {
 
 describe("buildFtsQueryVariants", () => {
   it("returns strict query first and appends a distinct relaxed fallback", () => {
-    const variants = buildFtsQueryVariants("alerts to external webhook instead of discord");
+    const variants = buildFtsQueryVariants("alerts to external webhook instead of slack");
     expect(variants.length).toBeGreaterThan(1);
     expect(variants[0]).toContain("\"alerts\"");
     expect(variants[1]).toContain(" OR ");

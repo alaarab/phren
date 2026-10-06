@@ -303,7 +303,7 @@ Session Start
 During Session
   ├─ Reads: search across all readable stores
   ├─ Writes: routed by registry project claims
-  │   ├─ store-qualified ("arc-team/arc") → explicit store
+  │   ├─ store-qualified ("forge-team/forge") → explicit store
   │   ├─ registry claim match → claimed store
   │   └─ no match → primary store
   └─ Team writes use append-only journal (one file per actor/day)

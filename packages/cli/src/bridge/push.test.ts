@@ -12,14 +12,14 @@ describe("approval push payload", () => {
   it("sends the redacted request and its location with the existing binding", () => {
     const value = approvalPushPayload({
       binding: "6fd8c056-032d-4219-97d7-a506d672ccf2", provider: "codex", question: false,
-      expiresAt: "2026-09-19T20:00:55.000Z", project: "phren", computer: "Omarchy",
+      expiresAt: "2026-09-19T20:00:55.000Z", project: "phren", computer: "Workstation",
       request: "Run: curl --token abc https://me:pass@example.com/api?key=secret", requestKind: "command",
     }, "73d445d1-4b31-43fc-9185-65b60c6f7125");
     expect(value).toEqual({
-      aps: { alert: { title: "Codex · phren on Omarchy", body: "Run: curl --token … https://example.com/api" }, sound: "default",
+      aps: { alert: { title: "Codex · phren on Workstation", body: "Run: curl --token … https://example.com/api" }, sound: "default",
         category: "PHREN_AGENT_APPROVAL", "interruption-level": "time-sensitive" },
       phren: { version: 1, binding: "6fd8c056-032d-4219-97d7-a506d672ccf2", expiresAt: "2026-09-19T20:00:55.000Z",
-        host: "73d445d1-4b31-43fc-9185-65b60c6f7125", agent: "codex", project: "phren", computer: "Omarchy",
+        host: "73d445d1-4b31-43fc-9185-65b60c6f7125", agent: "codex", project: "phren", computer: "Workstation",
         request: "Run: curl --token … https://example.com/api", requestKind: "command" },
     });
     const encoded = JSON.stringify(value);

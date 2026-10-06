@@ -36,13 +36,13 @@ describe("store-routing", () => {
 
   describe("parseStoreQualified", () => {
     it("parses bare project name", () => {
-      expect(parseStoreQualified("arc")).toEqual({ projectName: "arc" });
+      expect(parseStoreQualified("forge")).toEqual({ projectName: "forge" });
     });
 
     it("parses store-qualified name", () => {
-      expect(parseStoreQualified("arc-team/arc")).toEqual({
-        storeName: "arc-team",
-        projectName: "arc",
+      expect(parseStoreQualified("forge-team/forge")).toEqual({
+        storeName: "forge-team",
+        projectName: "forge",
       });
     });
 
@@ -71,12 +71,12 @@ describe("store-routing", () => {
 
   describe("resolveProject", () => {
     it("resolves a bare project in single-store mode (no stores.yaml)", () => {
-      createProject(phrenDir, "arc");
+      createProject(phrenDir, "forge");
 
-      const result = resolveProject(phrenDir, "arc");
-      expect(result.projectName).toBe("arc");
+      const result = resolveProject(phrenDir, "forge");
+      expect(result.projectName).toBe("forge");
       expect(result.store.role).toBe("primary");
-      expect(result.projectDir).toBe(path.join(phrenDir, "arc"));
+      expect(result.projectDir).toBe(path.join(phrenDir, "forge"));
     });
 
     it("resolves a store-qualified project", () => {
@@ -89,34 +89,34 @@ describe("store-routing", () => {
         version: 1,
         stores: [
           { id: "aaa11111", name: "personal", path: phrenDir, role: "primary", sync: "managed-git" },
-          { id: "bbb22222", name: "arc-team", path: teamDir, role: "team", sync: "managed-git" },
+          { id: "bbb22222", name: "forge-team", path: teamDir, role: "team", sync: "managed-git" },
         ],
       };
       writeStoreRegistry(phrenDir, registry);
 
-      const result = resolveProject(phrenDir, "arc-team/team-project");
-      expect(result.store.name).toBe("arc-team");
+      const result = resolveProject(phrenDir, "forge-team/team-project");
+      expect(result.store.name).toBe("forge-team");
       expect(result.projectName).toBe("team-project");
     });
 
     it("throws for ambiguous bare project across stores", () => {
       const teamDir = path.join(tmp.path, "team-store");
       fs.mkdirSync(teamDir, { recursive: true });
-      createProject(phrenDir, "arc");
-      createProject(teamDir, "arc");
+      createProject(phrenDir, "forge");
+      createProject(teamDir, "forge");
 
       const registry: StoreRegistry = {
         version: 1,
         stores: [
           { id: "aaa11111", name: "personal", path: phrenDir, role: "primary", sync: "managed-git" },
-          { id: "bbb22222", name: "arc-team", path: teamDir, role: "team", sync: "managed-git" },
+          { id: "bbb22222", name: "forge-team", path: teamDir, role: "team", sync: "managed-git" },
         ],
       };
       writeStoreRegistry(phrenDir, registry);
 
-      expect(() => resolveProject(phrenDir, "arc")).toThrow(/multiple stores/);
-      expect(() => resolveProject(phrenDir, "arc")).toThrow(/personal\/arc/);
-      expect(() => resolveProject(phrenDir, "arc")).toThrow(/arc-team\/arc/);
+      expect(() => resolveProject(phrenDir, "forge")).toThrow(/multiple stores/);
+      expect(() => resolveProject(phrenDir, "forge")).toThrow(/personal\/forge/);
+      expect(() => resolveProject(phrenDir, "forge")).toThrow(/forge-team\/forge/);
     });
 
     it("throws for project not found", () => {
@@ -124,7 +124,7 @@ describe("store-routing", () => {
     });
 
     it("throws for unknown store in qualified ref", () => {
-      expect(() => resolveProject(phrenDir, "fake-store/arc")).toThrow(/Store "fake-store" not found/);
+      expect(() => resolveProject(phrenDir, "fake-store/forge")).toThrow(/Store "fake-store" not found/);
     });
 
     it("throws for invalid project name", () => {
@@ -145,7 +145,7 @@ describe("store-routing", () => {
         version: 1,
         stores: [
           { id: "aaa11111", name: "personal", path: phrenDir, role: "primary", sync: "managed-git" },
-          { id: "bbb22222", name: "arc-team", path: teamDir, role: "team", sync: "managed-git" },
+          { id: "bbb22222", name: "forge-team", path: teamDir, role: "team", sync: "managed-git" },
         ],
       };
       writeStoreRegistry(phrenDir, registry);
@@ -155,7 +155,7 @@ describe("store-routing", () => {
       expect(r1.store.name).toBe("personal");
 
       const r2 = resolveProject(phrenDir, "team-only");
-      expect(r2.store.name).toBe("arc-team");
+      expect(r2.store.name).toBe("forge-team");
     });
   });
 
@@ -163,12 +163,12 @@ describe("store-routing", () => {
 
   describe("listAllProjects", () => {
     it("lists projects from single store", () => {
-      createProject(phrenDir, "arc");
+      createProject(phrenDir, "forge");
       createProject(phrenDir, "emv");
 
       const projects = listAllProjects(phrenDir);
       const names = projects.map((p) => p.projectName);
-      expect(names).toContain("arc");
+      expect(names).toContain("forge");
       expect(names).toContain("emv");
     });
 

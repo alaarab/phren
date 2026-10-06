@@ -63,7 +63,7 @@ describe("approval summaries", () => {
   });
 
   it.each([
-    ["codex", "phren", "Omarchy", "Codex · phren on Omarchy"],
+    ["codex", "phren", "Workstation", "Codex · phren on Workstation"],
     ["claude", "phren", undefined, "Claude · phren"],
     ["opencode", undefined, "Desk", "opencode on Desk"],
     ["copilot", undefined, undefined, "Copilot"],

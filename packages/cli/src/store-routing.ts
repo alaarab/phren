@@ -23,8 +23,8 @@ export interface ParsedProjectRef {
 /**
  * Parse a project reference that may be store-qualified.
  *
- * "arc"          → { projectName: "arc" }
- * "arc-team/arc" → { storeName: "arc-team", projectName: "arc" }
+ * "forge"          → { projectName: "forge" }
+ * "forge-team/forge" → { storeName: "forge-team", projectName: "forge" }
  */
 export function parseStoreQualified(input: string): ParsedProjectRef {
   const trimmed = input.trim();

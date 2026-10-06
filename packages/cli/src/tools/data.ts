@@ -48,7 +48,7 @@ export function register(server: McpServer, ctx: McpContext): void {
       }),
     },
     async ({ project: projectInput }) => {
-      // Resolve store-qualified project names (e.g. "qualus-shared/arc")
+      // Resolve store-qualified project names (e.g. "team-shared/web")
       let resolvedPhrenPath: string;
       let project: string;
       try {

@@ -7,8 +7,8 @@ import { FINDING_SENSITIVITY_CONFIG } from "../cli/config.js";
 import { makeTempDir } from "../test-helpers.js";
 
 /** The prompt hook end to end, as Claude Code runs it: {prompt, cwd,
- * session_id} on stdin, the injected context on stdout. The owner's real
- * prompts that used to inject noise must inject nothing; a real question
+ * session_id} on stdin, the injected context on stdout. Synthetic conversational
+ * prompts must inject nothing; a specific question
  * must still find its finding. Relevance comes from scoring (two keywords
  * in one bullet, weighed by rarity), never a list of skipped words. */
 const cli = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../dist/index.js");
@@ -34,17 +34,17 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt relevance", () => {
   beforeAll(() => {
     tmp = makeTempDir("hook-prompt-relevance-");
     store = path.join(tmp.path, ".phren");
-    workRepo = path.join(tmp.path, "Projects", "Max4LivePlugins");
+    workRepo = path.join(tmp.path, "Projects", "MyProject");
     fs.mkdirSync(path.join(workRepo, ".git"), { recursive: true });
-    const projects = ["global", "phren", "livemcp", "objectstudio", "alphalens", "max4liveplugins"];
+    const projects = ["global", "phren", "toolbridge", "designstudio", "stockview", "myproject"];
     write("profiles/personal.yaml", `name: personal\nprojects:\n${projects.map(name => `  - ${name}`).join("\n")}\n`);
-    write("livemcp/FINDINGS.md", "# livemcp Findings\n\n- QA pass: every agent tool call in the livemcp harness is logged before it runs.\n- The phren MCP server knows each agent by session id.\n");
-    write("objectstudio/FINDINGS.md", "# objectstudio Findings\n\n- Delegation: the studio agent hands work to workers and reviews their diffs.\n- Other agents in the studio know the render queue.\n");
-    write("phren/FINDINGS.md", "# phren Findings\n\n- The conductor lists live sessions across computers with live_sessions.\n");
-    write("alphalens/FINDINGS.md", "# alphalens Findings\n\n- [pitfall] Deploying alphalens.net: apps/bot/deploy.sh is the only deploy path; it pulls, builds and restarts the bot.\n");
-    write("max4liveplugins/reference/topics/audio.md", "# audio\n\n" + Array.from({ length: 40 }, (_, i) =>
-      `- Audio device ${i}: push the buffer size on main thread before the next audio callback.`).join("\n") + "\n");
-    write("global/FINDINGS.md", "# global Findings\n\n- Push to main only after the full suite passes on both machines.\n");
+    write("toolbridge/FINDINGS.md", "# toolbridge Findings\n\n- Each agent tool call in toolbridge records a sample event before execution.\n- The sample registry knows each agent by its session key.\n");
+    write("designstudio/FINDINGS.md", "# designstudio Findings\n\n- The studio agent assigns sample render jobs to workers and reads their results.\n- Other studio agents know which sample render job is next.\n");
+    write("phren/FINDINGS.md", "# phren Findings\n\n- The demo agent lists sessions from a sample registry before assigning jobs.\n");
+    write("stockview/FINDINGS.md", "# stockview Findings\n\n- [pitfall] Deploying stockview.example.com: scripts/deploy.sh is the only deploy path; it checks, packages and uploads the demo.\n");
+    write("myproject/reference/topics/rendering.md", "# rendering\n\n" + Array.from({ length: 40 }, (_, i) =>
+      `- Render device ${i}: push the frame size on main thread before the next render callback.`).join("\n") + "\n");
+    write("global/FINDINGS.md", "# global Findings\n\n- Push sample notes to main once both demo checks finish.\n");
     // A store's everyday words: agents, pushes, main, knowing, in note after
     // note, as in any real store. That is what makes them common.
     const everyday = ["the agent should push the change to main", "each agent needs to know its session",
@@ -57,11 +57,11 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt relevance", () => {
   afterAll(() => tmp?.cleanup());
 
   it("injects nothing for the conductor's question about its agents", () => {
-    expect(injected(run("Do all those agents know about each other those Phren agent", store))).toEqual([]);
+    expect(injected(run("Do these agents know about the other agents", store))).toEqual([]);
   });
 
-  it("injects nothing for 'Push to main on both' in a project", () => {
-    expect(injected(run("Push to main on both", workRepo))).toEqual([]);
+  it("injects nothing for 'Push these notes to main' in a project", () => {
+    expect(injected(run("Push these notes to main", workRepo))).toEqual([]);
   });
 
   it("injects nothing for 'Yes'", () => {
@@ -69,8 +69,8 @@ describe.skipIf(!fs.existsSync(cli))("hook-prompt relevance", () => {
   });
 
   it("still finds the deploy finding for a real question", () => {
-    const output = run("how do I deploy alphalens", store);
-    expect(injected(output)).toContain("alphalens/FINDINGS.md");
+    const output = run("how do I deploy stockview", store);
+    expect(injected(output)).toContain("stockview/FINDINGS.md");
     expect(output).toContain("deploy.sh is the only deploy path");
     expect(output).toContain(`[phren finding-sensitivity=balanced] ${FINDING_SENSITIVITY_CONFIG.balanced.agentInstruction}`);
   });

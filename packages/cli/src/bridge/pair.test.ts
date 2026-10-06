@@ -20,12 +20,12 @@ it("authorizes the phone's key once it proves the code, and proves the host back
   const session = await startPairing({ code, user: "me", sshPort: 22, fingerprint, name: "box", port: 0, sshDirectory: path.join(root, ".ssh") });
   const wrong = await post(session.port, { v: 1, publicKey, proof: pairingProof("ZZZ999", "phone", publicKey) });
   expect(wrong.status).toBe(403);
-  const ok = await post(session.port, { v: 1, publicKey, proof: pairingProof("abc-234", "phone", publicKey), name: "Ala's iPhone" });
+  const ok = await post(session.port, { v: 1, publicKey, proof: pairingProof("abc-234", "phone", publicKey), name: "Sam's iPhone" });
   expect(ok.status).toBe(200);
   const answer = await ok.json() as { proof: string; fingerprint: string; user: string };
   expect(answer).toMatchObject({ user: "me", fingerprint });
   expect(answer.proof).toBe(pairingProof(code, "computer", fingerprint, publicKey));
-  await expect(session.done).resolves.toMatchObject({ device: "ios", name: "Ala's iPhone" });
+  await expect(session.done).resolves.toMatchObject({ device: "ios", name: "Sam's iPhone" });
   const keys = await readFile(path.join(root, ".ssh", "authorized_keys"), "utf8");
   expect(keys).toBe(`restrict,pty,command="sh ~/.local/share/phren/bridge/dispatch" ${publicKey} phren-iphone\n`);
 });

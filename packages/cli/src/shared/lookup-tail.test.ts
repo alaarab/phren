@@ -15,7 +15,7 @@ describe("LookupTail", () => {
   let tmp: { path: string; cleanup: () => void };
   let logPath: string;
   const append = (line: string) => fs.appendFileSync(logPath, line);
-  const event = (query: string) => JSON.stringify({ at: new Date().toISOString(), query, project: "hub", filename: "FINDINGS.md", type: "findings", source: "search" });
+  const event = (query: string) => JSON.stringify({ at: new Date().toISOString(), query, project: "harbor", filename: "FINDINGS.md", type: "findings", source: "search" });
 
   beforeEach(() => {
     tmp = makeTempDir("phren-lookup-tail-");

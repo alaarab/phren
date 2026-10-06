@@ -36,9 +36,9 @@ describe("conductor grants", () => {
   });
 
   it("matches a grant naming any alias of the destination computer", () => {
-    const computers = foldComputers({ local: { names: ["Mac.attlocal.net", "Mac", "Squids-Mac-mini"] }, machines: { "Squids-Mac-mini.local": "mac-mini", MacBookPro: "macbook", "Alas-MacBook-Pro.local": "macbook" },
-      peers: [{ name: "MacBook", address: "alas-macbook-pro", names: ["Alas-MacBook-Pro.local"] }] });
-    const owner = grant({ computers: ["Squids-Mac-mini.local"] });
+    const computers = foldComputers({ local: { names: ["Mac.example.net", "Mac", "Sams-Mac-mini"] }, machines: { "Sams-Mac-mini.local": "mac-mini", MacBookPro: "macbook", "Sams-MacBook-Pro.local": "macbook" },
+      peers: [{ name: "MacBook", address: "sams-macbook-pro", names: ["Sams-MacBook-Pro.local"] }] });
+    const owner = grant({ computers: ["Sams-Mac-mini.local"] });
     expect(matchGrant([owner], { action: "dispatch", computer: "Mac" }, now)).toBeUndefined();
     expect(matchGrant([owner], { action: "dispatch", computer: "Mac", computers }, now)).toBe(owner);
     expect(matchGrant([owner], { action: "dispatch", computer: "MacBook", computers }, now)).toBeUndefined();
@@ -50,12 +50,12 @@ describe("conductor grants", () => {
 
   it.skipIf(process.platform === "win32")("stores canonical computer names and lists them, keeping unknown names", async () => {
     vi.stubEnv("PHREN_PATH", "");
-    await writeFile(path.join(root, "hooks.yaml"), `version: 1\ncomputers:\n  - name: MacBook\n    address: alas-macbook-pro\n    username: sam\n    hostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPKDk8cewh74xDIccwQz/N4V05hPT+bdp5fEii+pzf9B\n`, { mode: 0o600 });
-    const added = await addGrant({ scope: "global", actions: ["dispatch"], computers: ["Alas-MacBook-Pro", "alas-macbook-pro", "Unknown"] }, root);
+    await writeFile(path.join(root, "hooks.yaml"), `version: 1\ncomputers:\n  - name: MacBook\n    address: sams-macbook-pro\n    username: sam\n    hostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg\n`, { mode: 0o600 });
+    const added = await addGrant({ scope: "global", actions: ["dispatch"], computers: ["Sams-MacBook-Pro", "sams-macbook-pro", "Unknown"] }, root);
     expect(added.computers).toEqual(["MacBook", "Unknown"]);
     expect((await listGrants(root))[0].computers).toEqual(["MacBook", "Unknown"]);
-    await expect(addGrant({ scope: "global", actions: ["dispatch"], computers: ["alas-macbook-pro", "Unknown"] }, root)).rejects.toMatchObject({ status: 409 });
-    await removeGrant({ scope: "global", computers: ["alas-macbook-pro", "Unknown"] }, root);
+    await expect(addGrant({ scope: "global", actions: ["dispatch"], computers: ["sams-macbook-pro", "Unknown"] }, root)).rejects.toMatchObject({ status: 409 });
+    await removeGrant({ scope: "global", computers: ["sams-macbook-pro", "Unknown"] }, root);
     expect(await listGrants(root)).toEqual([]);
     vi.unstubAllEnvs();
   });
@@ -68,9 +68,9 @@ describe("conductor grants", () => {
     const grants = [globalAny, projectAny, projectDesk, globalDesk];
 
     expect(matchGrant(grants, { action: "dispatch", project: "phren", computer: "Desk" }, now)).toBe(projectDesk);
-    expect(matchGrant(grants, { action: "dispatch", project: "phren", computer: "Linuxbox" }, now)).toBe(projectAny);
+    expect(matchGrant(grants, { action: "dispatch", project: "phren", computer: "Devbox" }, now)).toBe(projectAny);
     expect(matchGrant(grants, { action: "dispatch", project: "other", computer: "Desk" }, now)).toBe(globalDesk);
-    expect(matchGrant(grants, { action: "dispatch", project: "other", computer: "Linuxbox" }, now)).toBe(globalAny);
+    expect(matchGrant(grants, { action: "dispatch", project: "other", computer: "Devbox" }, now)).toBe(globalAny);
   });
 
   it("never covers an unresolved destination with a computers-restricted grant", () => {
@@ -78,7 +78,7 @@ describe("conductor grants", () => {
     expect(matchGrant([restricted], { action: "dispatch", computer: "Desk" }, now)).toBe(restricted);
     expect(matchGrant([restricted], { action: "dispatch", computer: "anywhere" }, now)).toBeUndefined();
     expect(matchGrant([restricted], { action: "dispatch" }, now)).toBeUndefined();
-    expect(matchGrant([restricted], { action: "dispatch", computer: "Linuxbox" }, now)).toBeUndefined();
+    expect(matchGrant([restricted], { action: "dispatch", computer: "Devbox" }, now)).toBeUndefined();
   });
 
   // conductor.yaml must be mode 0600; Windows files carry no POSIX mode bits.

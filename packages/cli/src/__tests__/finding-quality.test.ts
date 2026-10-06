@@ -2,18 +2,18 @@ import { describe, expect, it } from "vitest";
 import { findingQualityReason, isLowValueFinding } from "../content/quality.js";
 import { extractToolFindings } from "../cli/session-tool-hook.js";
 
-// Every rejected sample below was captured verbatim in a real store's review.md.
+// Synthetic samples cover the shapes of low-value review entries.
 
 describe("findingQualityReason", () => {
   it("keeps real findings", () => {
     const keepers = [
-      "Socket reconnect workaround avoids duplicate token refresh",
-      "[pitfall] Order matters: buildIndex must run before queryRows or the FTS table is empty",
-      "[decision] Use a per-file lock instead of a global mutex — concurrent writers only ever collide per document",
-      'Set the retry budget to 3; the API returns "429" until the window rolls over',
-      "Race condition in the connection pool causes an intermittent deadlock under load",
-      "Must avoid `mkdir -p` on the skills dir: EACCES on managed installs, use the runtime dir instead",
-      "Prefer attempt-based retries over a fixed sleep; the template renderer needs the awaited value",
+      "Socket retry workaround avoids duplicate sample delivery",
+      "[pitfall] Order matters: loadSamples must run before querySamples or the sample table is empty",
+      "[decision] Use a per-record lock instead of a shared mutex — concurrent writers only collide on one sample",
+      'Set the retry budget to 4; the demo API returns "429" until the sample window expires',
+      "Race condition in the sample queue causes an intermittent deadlock during replay",
+      "Must avoid `mkdir -p` on the sample dir: EACCES on read-only fixtures, use the cache dir instead",
+      "Prefer bounded retries over a fixed sleep; the sample loader needs the resolved result",
     ];
     for (const text of keepers) {
       expect(findingQualityReason(text), text).toBeNull();
@@ -22,7 +22,7 @@ describe("findingQualityReason", () => {
 
   it("rejects transient shell/tool failure captures", () => {
     expect(findingQualityReason(
-      "[bug] command 'phren doctor --fix 2>&1 | tail' failed: EACCES: permission denied, mkdir '/home/alaarab/emv/.claude/skills'"
+      "[bug] command 'npm run check 2>&1 | tail' failed: EACCES: permission denied, mkdir '/home/me/demo/.cache/widgets'"
     )).toBe("transient_tool_error");
     expect(findingQualityReason("[bug] command 'npm run build' failed: exit status 1")).toBe("transient_tool_error");
     expect(findingQualityReason("[bug] ENOENT: no such file or directory, open '/tmp/x.json'")).toBe("transient_tool_error");
@@ -30,10 +30,10 @@ describe("findingQualityReason", () => {
 
   it("rejects machine-generated diff-scrape templates", () => {
     expect(findingQualityReason(
-      '[pitfall] memory-ui-graph-app.ts: error handling added near "const finalize = () => {"'
+      '[pitfall] demo-panel.ts: error handling added near "const finish = () => {"'
     )).toBe("diff_scrape_template");
     expect(findingQualityReason(
-      '[pattern] policy.ts: validation added near "export function appendReviewQueue("'
+      '[pattern] demo-policy.ts: validation added near "export function enqueueSample("'
     )).toBe("diff_scrape_template");
   });
 
@@ -48,8 +48,8 @@ describe("findingQualityReason", () => {
   it("rejects non-prose fragments and unbalanced snippets", () => {
     expect(findingQualityReason('[pattern] ");')).toBe("too_short");
     expect(findingQualityReason("[pattern] ${insight}`, {")).toBe("non_prose_fragment");
-    expect(findingQualityReason("[pattern] const finalize = (rows) => {")).toBe("non_prose_fragment");
-    expect(findingQualityReason("[bug] appendReviewQueue(getPhrenPath(), project,")).toBe("non_prose_fragment");
+    expect(findingQualityReason("[pattern] const finish = (rows) => {")).toBe("non_prose_fragment");
+    expect(findingQualityReason("[bug] enqueueSample(getDemoPath(), project,")).toBe("non_prose_fragment");
   });
 
   it("still rejects the original low-value placeholders", () => {
@@ -62,7 +62,7 @@ describe("findingQualityReason", () => {
   it("ignores bullet, date, and confidence decoration", () => {
     expect(findingQualityReason("- [2026-05-18] [confidence 0.55] [bug] command 'x' failed: boom"))
       .toBe("transient_tool_error");
-    expect(findingQualityReason("- [2026-05-18] Socket reconnect workaround avoids duplicate token refresh"))
+    expect(findingQualityReason("- [2026-05-18] Socket retry workaround avoids duplicate sample delivery"))
       .toBeNull();
   });
 });
@@ -71,8 +71,8 @@ describe("extractToolFindings quality gate", () => {
   it("drops a transient Bash failure instead of queueing it", () => {
     const candidates = extractToolFindings(
       "Bash",
-      { command: "phren doctor --fix 2>&1 | tail" },
-      "EACCES: permission denied, mkdir '/home/alaarab/emv/.claude/skills'",
+      { command: "npm run check 2>&1 | tail" },
+      "EACCES: permission denied, mkdir '/home/me/demo/.cache/widgets'",
       { is_error: true },
     );
     expect(candidates).toEqual([]);
@@ -90,10 +90,10 @@ describe("extractToolFindings quality gate", () => {
   it("keeps a genuine explicit finding", () => {
     const candidates = extractToolFindings(
       "Write",
-      { file_path: "src/cli/extract.ts", content: "// [pitfall] appendReviewQueue dedups on text, so a drifting confidence prefix defeats it\n" },
+      { file_path: "src/cli/extract.ts", content: "// [pitfall] enqueueSample dedups on text, so a changing label prefix defeats it\n" },
       "",
     );
     expect(candidates).toHaveLength(1);
-    expect(candidates[0].text).toContain("appendReviewQueue dedups on text");
+    expect(candidates[0].text).toContain("enqueueSample dedups on text");
   });
 });

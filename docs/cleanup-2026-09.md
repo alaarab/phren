@@ -47,12 +47,7 @@ estimates.
    (42.7 s) and `cli.test.ts` (32.8 s) both start real processes per test.
    Share one Hook process per file for the read-only cases and one
    initialized store for the CLI cases.
-6. **The four biggest SwiftUI views hold their whole screen's state.**
-   `AgentChatView` (1,572 lines, 53 `@State`), `LiveSessionsView` (1,227,
-   30), `ProjectsView` (838, 17), `TasksView` (792, 20). Each should split
-   into a model object plus subviews the way `AgentChatModel` already began;
-   the compiler-timeout incidents today all came from these files.
-7. **`shared/index.ts` (2,088 lines)** mixes the FTS indexer, file
+6. **`shared/index.ts` (2,088 lines)** mixes the FTS indexer, file
    classification, `@import` resolution and project detection. Split by
    concern; `detectProject` in particular is imported by the Hook for one
    call.
@@ -66,6 +61,6 @@ estimates.
 ## Order
 
 Findings 3 and 5 are safe and mechanical: first. Finding 1 is the biggest
-win and needs the esbuild metafile as its gate. Findings 2, 6 and 7 are
+win and needs the esbuild metafile as its gate. Findings 2 and 6 are
 larger refactors; one worker each, one file family each, tests as the gate.
 Finding 4 needs the floor-version decision from the owner first.

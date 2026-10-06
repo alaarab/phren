@@ -75,7 +75,7 @@ describe("session rows on a computer with background work and dispatched workers
   });
 
   it("does not keep a session working for shells left over from earlier exchanges", async () => {
-    // m4l-builder on the Mini, 2026-09-29: 6 shells running, the turn done, nobody waiting.
+    // plugin-builder on the Mini, 2026-09-29: 6 shells running, the turn done, nobody waiting.
     const snapshot = structuredClone(recorded);
     const pane = objects(snapshot.panes).find(p => p.pane_id === "w13:p2")!;
     pane.agent_status = "idle";

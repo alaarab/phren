@@ -30,7 +30,7 @@ describe("decodeKeys", () => {
     ["a single key unchanged", ARROW_DOWN, [ARROW_DOWN], ""],
     // Holding an arrow key delivers several presses in a single stdin chunk.
     ["keys that autorepeat coalesced into one read", ARROW_DOWN.repeat(3), [ARROW_DOWN, ARROW_DOWN, ARROW_DOWN], undefined],
-    ["fast typing", "hub", ["h", "u", "b"], undefined],
+    ["fast typing", "harbor", ["h", "a", "r", "b", "o", "r"], undefined],
     ["a mix of text and escape sequences", `ab${ARROW_UP}c`, ["a", "b", ARROW_UP, "c"], undefined],
     ["CSI sequences with parameters", "\x1b[5~\x1b[6~", ["\x1b[5~", "\x1b[6~"], undefined],
     ["SS3 sequences (application cursor mode arrows)", "\x1bOA\x1bOB", ["\x1bOA", "\x1bOB"], undefined],
@@ -85,8 +85,8 @@ describe("PhrenShell key handling via the decoder", () => {
   it("accepts every character of a fast-typed or pasted run", async () => {
     const shell = shellFor();
     shell.startInput("filter", "");
-    await feed(shell, "hub");
-    expect(shell.inputBuffer).toBe("hub");
+    await feed(shell, "harbor");
+    expect(shell.inputBuffer).toBe("harbor");
   });
 
   it("accepts astral characters in the input buffer", async () => {

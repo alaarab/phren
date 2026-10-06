@@ -1320,7 +1320,7 @@ describe("detectTaskIntent", () => {
   });
 
   it("does not treat filesystem or URL paths as skill intent", () => {
-    expect(detectTaskIntent("inspect /home/alaarab/phren/mcp/src/shared-retrieval.ts")).toBe("general");
+    expect(detectTaskIntent("inspect /home/me/phren/mcp/src/shared-retrieval.ts")).toBe("general");
     expect(detectTaskIntent("call /api/health and inspect the response")).toBe("general");
   });
 });
