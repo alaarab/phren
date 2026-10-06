@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { agentUserDir, parseArgs, printHelp, resolveStartupPermissions } from "./config.js";
 import { randomUUID } from "crypto";
+import * as fs from "node:fs";
 import { loadPersistentAllowlist } from "./permissions/allowlist.js";
 import { loadPermissionRules } from "./permissions/rules.js";
 import { keepSessionEndpoint, resolveProvider } from "./providers/resolve.js";
@@ -28,7 +29,7 @@ import { buildPhrenContext, buildContextSnippet, buildProjectInstructions } from
 import { buildChatMemory, buildChatSystemPrompt } from "./memory/chat.js";
 import { livePreview, previewPath, removeStalePreviews } from "./session/preview.js";
 import { startSession, endSession, getPriorSummary, saveSessionMessages, loadLastSessionSnapshot, writeSessionNote } from "./memory/session.js";
-import { emitHerdrHook, setHerdrHookSession } from "./herdr-hooks.js";
+import { emitHerdrHook, setHerdrHookSession, readConductorContext, askHerdrPermission } from "./herdr-hooks.js";
 import { loadProjectContext, evolveProjectContext } from "./memory/project-context.js";
 import { buildSystemPrompt, buildEnvironmentBlock } from "./system-prompt.js";
 import { loadHooksConfig, runLifecycleHooks } from "./user-hooks.js";
@@ -301,6 +302,9 @@ export async function runAgentCli(raw: string[]) {
   // across rebuilds (provider prompt caching).
   const environment = buildEnvironmentBlock(process.cwd());
   let promptContext = contextSnippet;
+  if (args.appendSystemPromptFile) {
+    promptContext += `\n\n${fs.readFileSync(args.appendSystemPromptFile, "utf8")}`;
+  }
   let promptSummary = priorSummary;
   const mcpServerNames: string[] = [];
   // Built from the tools registered right now: call again after registering more.
@@ -313,6 +317,7 @@ export async function runAgentCli(raw: string[]) {
 
   // Register tools
   const registry = new ToolRegistry();
+  registry.externalApproval = askHerdrPermission;
   registry.hookConfig = loadHooksConfig(process.cwd());
   // SessionStart hooks: what they print joins the system prompt's context.
   if (registry.hookConfig && !args.dryRun) {
@@ -516,6 +521,8 @@ export async function runAgentCli(raw: string[]) {
   };
 
   const resumedLog = args.resume ? makeResumedLog() : undefined;
+  setHerdrHookSession(logSessionId);
+  if (!phrenCtx) emitHerdrHook("SessionStart");
 
   /** Spawner tools, once an interactive session has a spawner. */
   let registerSpawnerTools: (() => void) | undefined;
@@ -523,6 +530,11 @@ export async function runAgentCli(raw: string[]) {
     provider,
     registry,
     systemPrompt,
+    turnContext: async id => {
+      const context = await readConductorContext(id);
+      if (context && agentConfig.mode === "chat") await agentConfig.promote?.();
+      return context;
+    },
     maxTurns: args.maxTurns,
     verbose: args.verbose,
     phrenCtx,

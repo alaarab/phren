@@ -102,8 +102,8 @@ describe.skipIf(process.platform === "win32")("a Codex callback run inside the a
     expect(await post({ target: origin, event: "SessionStart" })).toBe("{}");
   });
 
-  it("restores OpenCode context only for the current foreground process and root conversation", async () => {
-    const pane = { ...originPane, agent: "opencode" };
+  it.each(["opencode", "phren"])("restores %s context only for the current foreground process and root conversation", async agent => {
+    const pane = { ...originPane, agent };
     vi.mocked(snapshot).mockResolvedValue({ panes: [pane] });
     vi.mocked(paneIdentity).mockResolvedValue("ses_root");
     await recordConductor("default", pane, "owner");

@@ -300,8 +300,8 @@ Health advertises `capabilities.quickChat`. Any launch may carry a
 pane with `reused: true` while that tab is listed, instead of starting a second
 agent. A double tap or a retry after a lost reply opens one pane. The reply repeats `permissionMode` when it was applied,
 so a caller can tell an older Hook that ignored it. A
-conductor launch supports Claude, Codex and OpenCode (Copilot and phren are
-refused with 400: phren-agent takes no system brief at startup), attaches the shipped
+conductor launch supports Claude, Codex, OpenCode and phren-agent (Copilot is
+refused with 400), attaches the shipped
 conductor brief, prefixes the Herdr agent name with `conductor-`, records the
 pane as this computer's conductor and returns `role: "conductor"`. Workspace
 overview tabs report that role. A second running conductor in this computer's

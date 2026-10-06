@@ -159,9 +159,11 @@ describe("opencode file approvals", () => {
 });
 
 it("recognizes conductor tool names without splitting hand_off", () => {
-  for (const tool of ["hand_off", "phren.hand_off", "mcp__phren__hand_off"]) {
+  for (const tool of ["hand_off", "phren.hand_off", "mcp__phren__hand_off", "mcp_phren_hand_off"]) {
     expect(conductorCall(tool, { project: "demo" })).toEqual({ action: "hand_off", project: "demo" });
   }
-  expect(conductorCall("mcp__phren__phren_admin", { action: "dispatch", project: "demo" }))
-    .toEqual({ action: "dispatch", project: "demo" });
+  for (const tool of ["mcp__phren__phren_admin", "mcp_phren_phren_admin"]) {
+    expect(conductorCall(tool, { action: "dispatch", project: "demo" }))
+      .toEqual({ action: "dispatch", project: "demo" });
+  }
 });

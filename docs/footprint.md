@@ -106,8 +106,8 @@ not conversation text. See [Phren Hook](phren-hook.md).
 
 The Hook keeps the shipped conductor instructions at
 `<bridge>/conductor/brief.md` (0600). Its agent-only socket returns a bounded
-role reminder for the recorded conductor's turn; OpenCode asks through
-`POST /conductor-context` on that same private socket, with its PID and root
+role reminder for the recorded conductor's turn; OpenCode and phren-agent ask through
+`POST /conductor-context` on that same private socket, with their PID and root
 conversation checked against the live pane. This path starts no turns.
 
 The installer adds `~/Library/LaunchAgents/com.phren.hook.plist` on macOS, or
