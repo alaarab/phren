@@ -336,6 +336,25 @@ describe("Phren Hook boundaries", () => {
     expect(visibleEvent(context, "codex")).toEqual({ type: "turn_context", timestamp: "2026-09-12T05:24:16.986Z", payload: { model: "gpt-6-astra", approval_policy: "never" } });
     expect(visibleEvent({ type: "turn_context", payload: { cwd: "/private/work" } }, "codex")).toBeUndefined();
   });
+  it("never offers the home folder for a project named after the user", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "phren-locate-home-"));
+    const sam = path.join(root, "sam");
+    await mkdir(path.join(sam, "Projects/hub"), { recursive: true });
+    await mkdir(path.join(sam, "Projects/sam"), { recursive: true });
+    const previous = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    process.env.HOME = sam; process.env.USERPROFILE = sam;
+    try {
+      // Every journal path under home contains the segment "sam"; trimming
+      // /home/sam/Projects/hub to it used to offer /home/sam itself.
+      const found = await locateProject("sam", [{ at: "2026-10-06T00:00:00Z", directory: path.join(sam, "Projects/hub") }],
+        { ...process.env, PHREN_PATH: path.join(root, "store") });
+      expect(found.map(f => [f.source, f.directory])).toEqual([["search", realpathSync.native(path.join(sam, "Projects/sam"))]]);
+    } finally {
+      for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("locates a project on this computer from activity, Herdr state, registration and search roots", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "phren-locate-"));
     await mkdir(path.join(home, "Projects/phren/apps"), { recursive: true });
