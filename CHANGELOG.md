@@ -5,8 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.32] - 2026-10-06
+
+### Added
+
+- Approval rules: from the phone, add signed "always ask" or "deny" rules for shell commands, per project, harness, session or computer, and switch them off or revoke them. With no rules set nothing changes. Rules can only make approvals stricter; nothing is ever approved automatically. Only Claude permission requests that carry a shell command are covered today, and rules signed by a key other than the paired phone are flagged on the phone.
+- An agent started without a project gets its own folder under the Phren directory (`.runtime/agents`), kept out of project discovery and store sync.
+- `/v1/projects/add` takes a target project name, so a project whose name differs from its repository clones onto another computer under the right project.
+- Schedules can launch one agent per target project, with per-project launch history kept in compatible storage.
+- phren-agent can run as a conductor, and its model picker discovers each provider's models and sends the reasoning level it shows.
+
 ### Fixed
 
+- A store auto-save never commits an unfinished merge or conflict markers.
+- Locating a project never offers the home folder or its parents, so sessions under home are no longer all labelled with the account's name.
+- Integration tests tear down their private tmux servers, so leftover test sessions no longer show on the phone.
 - Git status and repository diffs report the checkout they read, partial results and Git failures. Untracked folders stay collapsed until expanded, binary files retain their classification, and risky staging selections require confirmation. A child with no known checkout no longer silently uses its parent repository.
 
 ### Changed
