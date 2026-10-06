@@ -101,8 +101,6 @@ describe("launching phren's own agent", () => {
 
   it("refuses a conductor, a permission mode, an account, and a computer without the agent, before any pane exists", async () => {
     const refusal = (data: Json) => launchSession("default", { cwd, label: "Phren", kind: "phren", ...data }).catch(error => error as BridgeError);
-    const conductor = await refusal({ role: "conductor" });
-    expect(conductor).toMatchObject({ status: 400, message: expect.stringMatching(/phren agent cannot run as a conductor/) });
     expect(await refusal({ permissionMode: "full-access" })).toMatchObject({ status: 400, message: expect.stringMatching(/phren agent takes its permissions/) });
     expect(await refusal({ account: "work" })).toMatchObject({ status: 409, details: { code: "account_unavailable" } });
     setLaunchInventory(async () => ({ harnesses: [...inventory(["claude"]).harnesses, { source: "phren", installed: false, usable: false, reason: "Not installed" }] }) as HarnessInventory);
@@ -164,8 +162,8 @@ describe("launching phren's own agent", () => {
     expect(starts[2].args).toEqual(["agent", "-i", "--model", "openai-codex/gpt-6-sol"]);
   });
 
-  it("will not make a running phren agent the conductor", async () => {
+  it("makes a running phren agent the conductor", async () => {
     state.panes.push({ pane_id: "w9:p1", tab_id: "w9:t1", workspace_id: "w9", agent: "phren", agent_status: "idle" });
-    await expect(makeConductor("default", { paneId: "w9:p1" })).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/phren agent cannot run as a conductor/) });
+    await expect(makeConductor("default", { paneId: "w9:p1" })).resolves.toMatchObject({ ok: true, conductor: { server: "default" } });
   });
 });

@@ -1,6 +1,6 @@
 import { approvalRuleContext, approvalRuleEffect } from "./approval-rules.js";
 import { recordedConductor } from "./conductor-role.js";
-import { conductorContext } from "./conductor-context.js";
+import { conductorBrief, conductorContext } from "./conductor-context.js";
 import { defaultPhrenPath } from "../shared.js";
 import { disabledHint } from "../modules/registry.js";
 import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
@@ -133,7 +133,7 @@ const DISPATCH_LEASE_MS = 45_000;
 export function conductorCall(tool: string, input: unknown): Pending["conductor"] | undefined {
   // MCP tool names vary by harness: `dispatch`, `phren.dispatch`,
   // `mcp__phren__dispatch`; phren_admin carries the action in its fields.
-  const tail = /(?:^|[.:/]|__)(dispatch|hand_off|phren_admin)$/.exec(tool)?.[1];
+  const tail = /(?:^|[.:/]|__)(dispatch|hand_off|phren_admin)$/.exec(tool.replace(/^mcp_phren_/, ""))?.[1];
   const fields = object(input);
   let action: "dispatch" | "hand_off" | undefined;
   if (tail === "dispatch") action = "dispatch";
@@ -1277,7 +1277,7 @@ export class AgentHooks {
         let size = 0; const chunks: Buffer[] = [];
         for await (const bytes of req) { size += bytes.length; if (size > 1_048_576) throw new Error("Oversized hook"); chunks.push(bytes); }
         const body = object(JSON.parse(Buffer.concat(chunks).toString()));
-        // OpenCode asks when building the root session's system prompt. Resolve
+        // OpenCode and phren-agent ask when building the root session's system prompt. Resolve
         // its process against the current conductor; no inherited pane env or
         // plugin callback may create a session binding or a turn record here.
         if (req.url === "/conductor-context") {
@@ -1287,13 +1287,13 @@ export class AgentHooks {
           if (!role) { res.end("{}"); return; }
           const s = await snapshot(role.server);
           const pane = objects(s.panes).find(p => p.pane_id === role.pane);
-          if (!pane || pane.agent !== "opencode" || (role.terminal && pane.terminal_id !== role.terminal)) { res.end("{}"); return; }
+          if (!pane || !["opencode", "phren"].includes(String(pane.agent)) || (role.terminal && pane.terminal_id !== role.terminal)) { res.end("{}"); return; }
           const pids = (await terminalProvider().processes(role.server, role.pane)).foregroundPids;
           if (!pids.includes(Number(body.pid)) || await paneIdentity(role.server, pane, true) !== body.session) { res.end("{}"); return; }
           const target = targetSchema.parse({ server: role.server, workspace: pane.workspace_id, tab: pane.tab_id,
-            pane: role.pane, source: "opencode", session: body.session });
+            pane: role.pane, source: pane.agent, session: body.session });
           const context = await conductorContext(target, s);
-          res.end(JSON.stringify(context ? { context } : {})); return;
+          res.end(JSON.stringify(context ? { context: pane.agent === "phren" ? `${context}\n\n${await conductorBrief()}` : context } : {})); return;
         }
         let target = targetSchema.parse(body.target);
         if (this.modules?.has("git") === false && ["PreToolUse", "PostToolUse"].includes(String(body.event))) {

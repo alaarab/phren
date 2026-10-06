@@ -11,6 +11,7 @@ import { type ChildProcess, spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
+import { fileURLToPath } from "node:url";
 import { type McpOAuthOptions, McpOAuthProvider } from "./mcp-oauth.js";
 import { VERSION } from "./package-metadata.js";
 import { scrubEnv } from "./permissions/shell-safety.js";
@@ -604,7 +605,10 @@ export interface DefaultMcpConfig {
  * in `untrusted`.
  */
 export function loadDefaultMcpConfig(cwd: string, opts: { home: string; trusted: boolean }): DefaultMcpConfig {
-  const servers: Record<string, McpConfigEntry> = { ...loadMcpConfig(path.join(opts.home, ".phren-agent", "mcp.json")) };
+  const servers: Record<string, McpConfigEntry> = {
+    phren: { command: process.execPath, args: [fileURLToPath(import.meta.resolve("@phren/cli")), "mcp"], env: { PHREN_MCP_PROFILE: "core" } },
+    ...loadMcpConfig(path.join(opts.home, ".phren-agent", "mcp.json")),
+  };
   const untrusted: DefaultMcpConfig["untrusted"] = [];
   for (const file of [path.join(cwd, ".mcp.json"), path.join(cwd, ".phren-agent", "mcp.json")]) {
     const found = loadMcpConfig(file);

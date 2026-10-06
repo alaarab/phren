@@ -65,7 +65,9 @@ export async function runTurn(
   hooks?: TurnHooks,
 ): Promise<TurnResult> {
   const { provider, registry, maxTurns, verbose, costTracker } = config;
+  const turnContext = await config.turnContext?.(session.log.header.sessionId);
   let systemPrompt = config.systemPrompt;
+  if (turnContext) systemPrompt += `\n\n${turnContext}`;
   const toolDefs = registry.getDefinitions();
   // While a plan is pending the model may look but not touch.
   const planToolDefs = toolDefs.filter((d) => READ_ONLY_TOOLS.has(d.name));

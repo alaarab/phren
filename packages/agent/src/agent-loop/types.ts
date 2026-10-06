@@ -11,6 +11,8 @@ export interface AgentConfig {
   provider: LlmProvider;
   registry: ToolRegistry;
   systemPrompt: string;
+  /** Fresh, non-persisted context for this root session; children do not inherit it. */
+  turnContext?: (sessionId: string) => Promise<string | undefined>;
   maxTurns: number;
   verbose: boolean;
   phrenCtx?: PhrenContext | null;
