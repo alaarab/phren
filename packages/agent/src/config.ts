@@ -145,7 +145,7 @@ Providers (auto-detected from env, or use --provider):
                        (no API key needed, flat rate via your subscription)
                        Setup: phren-agent auth login
                        Legacy alias: codex
-  openai               OPENAI_API_KEY — OpenAI direct (defaults to gpt-5.4)
+  openai               OPENAI_API_KEY — OpenAI direct (discovered model catalog)
   openrouter           OPENROUTER_API_KEY — routes to any model
   anthropic            ANTHROPIC_API_KEY — Claude direct
   deepseek             DEEPSEEK_API_KEY — DeepSeek's own API (api.deepseek.com)
@@ -171,7 +171,7 @@ Environment:
 Examples:
   phren-agent "fix the login bug"
   phren-agent --provider openai-codex "add input validation"
-  phren-agent --model openai-codex/gpt-5.4 --reasoning high "add input validation"
+  phren-agent --model openai-codex/gpt-6.1-sol --reasoning high "add input validation"
   phren-agent --provider anthropic --verbose "refactor the database layer"
 `.trim();
 

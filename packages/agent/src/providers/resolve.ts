@@ -216,14 +216,14 @@ function resolveCatalogProvider(
       .withName("deepseek", overrideMaxOutput ?? lookupMaxOutputTokens(model, "deepseek"));
   }
 
+  if (!explicit && resolveConnector("openai-compat").configured) {
+    return resolveCatalogProvider("openai-compat", normalizedModel, overrideMaxOutput, overrideReasoning, options);
+  }
+
   const local = resolveConnector("ollama");
   if (explicit === "ollama" || (!explicit && local.configured)) {
     const model = normalizedModel ?? local.model ?? getDefaultModel("ollama");
     return new OllamaProvider(model, local.baseUrl, resolveLimit("ollama", model));
-  }
-
-  if (!explicit && resolveConnector("openai-compat").configured) {
-    return resolveCatalogProvider("openai-compat", normalizedModel, overrideMaxOutput, overrideReasoning, options);
   }
 
   // Last resort: try Ollama at default URL
