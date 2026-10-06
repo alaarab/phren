@@ -743,7 +743,8 @@ roll back policy. Stronger host isolation is a separate security requirement.
 
 The phone offers “Always allow this in <project>” on eligible held Claude
 approvals, prefilled with an exact project/harness rule; the owner confirms
-biometrically and signs it. It does not answer the current request. A conductor
+biometrically and signs it, then the phone approves that same held request if
+it is still current. A conductor
 can propose a draft in text, but the owner must confirm it on the phone.
 The full design and pending owner decisions live in the private apps repository:
 [approval rules](https://github.com/alaarab/phren-apps/blob/feat/approval-rules/docs/approval-rules.md).
