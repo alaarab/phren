@@ -25,8 +25,9 @@ describe("provider model catalogue parsers", () => {
       maxOutputTokens: 128000,
       vision: true,
       reasoningRange: ["low", "medium", "high"],
-      pricing: { inputPer1M: 1, outputPer1M: 5, cacheReadPer1M: 0.05 },
+      pricing: { inputPer1M: 1, outputPer1M: 5 },
     });
+    expect(model.pricing?.cacheReadPer1M).toBeCloseTo(0.05, 12);
     expect(parseOpenRouterModels(load("openrouter"))).toHaveLength(2);
     expect(parseOpenRouterModels(load("openrouter")).map((model) => model.id)).toContain("nvidia/nemotron-3-ultra-550b-a55b:free");
   });

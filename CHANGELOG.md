@@ -20,6 +20,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - A store auto-save never commits an unfinished merge or conflict markers.
 - Locating a project never offers the home folder or its parents, so sessions under home are no longer all labelled with the account's name.
 - Integration tests tear down their private tmux servers, so leftover test sessions no longer show on the phone.
+- Git status accepts line-ending conversion warnings, expands untracked folders across platforms, and keeps the Git module ownership of the status route. DeepSeek reasoning aliases are mapped before checking advertised levels.
 - Git status and repository diffs report the checkout they read, partial results and Git failures. Untracked folders stay collapsed until expanded, binary files retain their classification, and risky staging selections require confirmation. A child with no known checkout no longer silently uses its parent repository.
 
 ### Changed

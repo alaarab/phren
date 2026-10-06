@@ -54,7 +54,7 @@ vi.mock("../mcp-client.js", async (importOriginal) => ({
   connectMcpServers: async () => { throw new Error("MCP server failed to start"); },
 }));
 
-vi.mock("../herdr-hooks.js", () => ({ emitHerdrHook: () => {}, setHerdrHookSession: () => {} }));
+vi.mock("../herdr-hooks.js", () => ({ emitHerdrHook: () => {}, setHerdrHookSession: () => {}, askHerdrPermission: async () => undefined, readConductorContext: async () => undefined }));
 vi.mock("../checkpoint.js", () => ({ createCheckpoint: () => null }));
 
 describe("quick chat", () => {
@@ -97,13 +97,13 @@ describe("quick chat", () => {
 
   it("parses --mode, refusing anything but agent or chat", () => {
     expect(parseArgs([]).mode).toBe("agent");
-    expect(parseArgs(["--mode", "chat", "-i"]).mode).toBe("chat");
+    expect(parseArgs(["--strict-mcp-config", "--mode", "chat", "-i"]).mode).toBe("chat");
     expect(() => parseArgs(["--mode", "turbo"])).toThrow(/Unknown --mode/);
   });
 
   it("offers no tools, puts phren memory in the system prompt, and resolves the provider as the agent does", async () => {
     const { runAgentCli } = await import("../index.js");
-    const flags = ["--provider", "openai-codex", "--model", "openai-codex/gpt-5.4", "--reasoning", "high", "--output-format", "stream-json"];
+    const flags = ["--strict-mcp-config", "--provider", "openai-codex", "--model", "openai-codex/gpt-5.4", "--reasoning", "high", "--output-format", "stream-json"];
     await runAgentCli(["--mode", "chat", ...flags, "What is 6 x 7?"]);
 
     expect(calls).toHaveLength(1);
@@ -132,7 +132,7 @@ describe("quick chat", () => {
   it("streams the reply to the sidecar, and /promote continues the same conversation with tools", async () => {
     const { runAgentCli } = await import("../index.js");
     const { createSession, runTurn } = await import("../agent-loop.js");
-    await runAgentCli(["--mode", "chat", "-i"]);
+    await runAgentCli(["--strict-mcp-config", "--mode", "chat", "-i"]);
     const config = captured!;
     expect(config.mode).toBe("chat");
     expect(config.registry.toolNames()).toEqual([]);
@@ -164,7 +164,7 @@ describe("quick chat", () => {
 
   it("/promote that fails leaves a working chat: no tools, chat prompt, and it can be tried again", async () => {
     const { runAgentCli } = await import("../index.js");
-    await runAgentCli(["--mode", "chat", "-i", "--mcp", "broken-server --flag"]);
+    await runAgentCli(["--strict-mcp-config", "--mode", "chat", "-i", "--mcp", "broken-server --flag"]);
     const config = captured!;
     const prompt = config.systemPrompt;
     const rebuild = config.rebuildSystemPrompt;

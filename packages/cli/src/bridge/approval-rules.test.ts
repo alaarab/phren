@@ -1,6 +1,6 @@
 import { createHash, generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer, request, type Server } from "node:http";
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
@@ -60,7 +60,7 @@ describe.skipIf(process.platform === "win32")("owner approval rules through HTTP
   const list = async () => (await http("GET")).data.rules;
   const callback = (command: string, extra: object = {}) => http("POST", "/hook", { target, event: "PermissionRequest", cwd: project, tool: "Bash", input: { command }, ...extra }, true);
   beforeEach(async () => {
-    home = await mkdtemp(path.join(tmpdir(), "approval-rules-")); state.home = home;
+    home = await realpath(await mkdtemp(path.join(tmpdir(), "approval-rules-"))); state.home = home;
     root = path.join(home, "bridge"); project = path.join(home, "app"); other = path.join(home, "other");
     await mkdir(root, { recursive: true, mode: 0o700 });
     await mkdir(path.join(home, ".ssh"), { recursive: true });
@@ -131,12 +131,14 @@ describe.skipIf(process.platform === "win32")("owner approval rules through HTTP
       const held = callback("git status").then(reply => { completed = true; return reply; });
       await vi.waitFor(() => expect(hooks.approval(target)?.toolName).toBe("Bash"));
       expect(completed).toBe(false);
+      // Policy evaluation must add no subprocesses. Answering still validates
+      // the live conversation (lsof on macOS), as it did before approval rules.
+      expect(state.spawns).toEqual([]);
       const approval = hooks.approval(target)!;
       expect(approval.message).toContain("git status");
       await hooks.answer(target, approval.actionId, "approve");
       expect((await held).data).toEqual({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } });
       expect(hooks.approval(target)).toBeUndefined();
-      expect(state.spawns).toEqual([]);
     });
 
   it("rejects commandless and MCP tool rule creation, leaving conductor grants independent", async () => {

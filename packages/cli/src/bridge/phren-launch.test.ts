@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +13,7 @@ const inventory = (sources = ["claude", "codex", "opencode", "copilot", "phren"]
 describe("launching phren's own agent", () => {
   let home: string, cwd: string, restore: () => void, placements: PanePlacement[], starts: AgentStart[], state: Json;
   beforeEach(() => {
-    home = mkdtempSync(path.join(tmpdir(), "phren-launch-phren-"));
+    home = realpathSync(mkdtempSync(path.join(tmpdir(), "phren-launch-phren-")));
     cwd = path.join(home, "project"); mkdirSync(cwd);
     vi.stubEnv("HOME", home); vi.stubEnv("CLAUDE_CONFIG_DIR", ""); vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
     setLaunchInventory(async () => inventory());
