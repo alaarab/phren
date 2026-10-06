@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A Mac's Hook recognises its own schedules by every name the Mac goes by, including the Sharing name ("Sam’s Mac mini") and the Bonjour name, ignoring punctuation. It used to compare only the network hostname, so on a Mac whose hostname reads "Mac" its schedules showed no next run, never fired, and Run now answered "owns this schedule; run it from that computer."
+- Each schedule status says whether this computer owns it (`owned`), and the computer a Mac's Hook names for its schedules is its Sharing name, which stays put, not the network hostname. A schedule may also name the Hook's computer id.
+
 ### Changed
 
 - When a model or settings switch can't type into the terminal, the Hook says why, with a `code`: unsent text (`terminal-draft`), an open menu (`terminal-menu`), or no input line it can read (`terminal-unreadable`). It used to answer "a draft or an unreadable prompt" for all three.
