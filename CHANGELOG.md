@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.33] - 2026-10-06
+
 ### Fixed
 
 - A Mac's Hook recognises its own schedules by every name the Mac goes by, including the Sharing name ("Sam’s Mac mini") and the Bonjour name, ignoring punctuation. It used to compare only the network hostname, so on a Mac whose hostname reads "Mac" its schedules showed no next run, never fired, and Run now answered "owns this schedule; run it from that computer."
