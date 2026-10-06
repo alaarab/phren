@@ -103,6 +103,8 @@ export interface ScheduleStatus extends Schedule {
   lastRun: Omit<ScheduleRun, "id" | "scheduleId" | "project"> | null;
   lastRuns: ScheduleRun[];
   running: boolean;
+  /** Whether this computer owns the schedule: it runs it and answers Run now. */
+  owned: boolean;
 }
 
 interface ScheduleDocument {
@@ -201,8 +203,16 @@ export function canonicalComputer(value: string): string {
   return normalized.endsWith(".local") ? normalized.slice(0, -".local".length) : normalized;
 }
 
+/** One computer's names differ only in punctuation across macOS ("Sam’s Mac mini",
+ * "Sams-Mac-mini"), so letters and digits alone also match. */
+function foldedComputer(value: string): string {
+  return canonicalComputer(value).replace(/[^\p{L}\p{N}]/gu, "");
+}
+
 export function computerMatches(wanted: string, current: string): boolean {
-  return canonicalComputer(wanted) === canonicalComputer(current);
+  if (canonicalComputer(wanted) === canonicalComputer(current)) return true;
+  const folded = foldedComputer(wanted);
+  return folded !== "" && folded === foldedComputer(current);
 }
 
 export function scheduleNotifications(schedule: Schedule): Set<ScheduleNotify> {
