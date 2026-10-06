@@ -24,6 +24,7 @@ import { type DispatchService, dispatchProjectDirectory, dispatchStatus, originP
 import { type DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { remoteChildren } from "./dispatch-tree.js";
 import { briefArrival, briefId } from "./launch-brief.js";
+import { listApprovalRules, changeApprovalRule } from "./approval-rules.js";
 import { addGrant, listNamedGrants, removeGrant } from "./grants.js";
 import { clearProjectAuthority, confirmAuthority, listConfirmations, projectAuthority, readAuthority, setProjectAuthority } from "./authority.js";
 import { readComputers } from "./computer-identity.js";
@@ -149,6 +150,7 @@ export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string,
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
   const result: Record<string, unknown> = Object.fromEntries(Object.entries(capabilities).filter(([name]) => allowed.has(name)));
   for (const name of ["memory", "tasks", "hook", "git", "schedules"]) if (snapshot.has(name)) result[name] = true;
+  if (snapshot.has("hook")) result.approvalRules = { version: 2, effects: ["always-ask", "deny"], harnesses: ["claude"], events: ["PermissionRequest"], tools: ["Bash"], inputField: "command", conductorTools: false, mcpTools: false, preExecution: false };
   if (snapshot.has("tasks")) { result.taskDependencies = true; result.taskWriterSafety = true; result.taskAtomicCreate = true; result.taskAtomicSave = true; result.taskBoundLaunch = true; }
   return result;
 }
@@ -368,6 +370,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
           // Receiving side of a launched brief: what the worker's hooks reported for it.
           case "/v1/dispatch/arrival": result = { arrival: await briefArrival(briefId.parse(url.searchParams.get("id"))) ?? null }; break;
+          case "/v1/approval-rules": result = { rules: await listApprovalRules(undefined,
+            z.string().regex(/^[A-Za-z0-9+/]{43}=$/).optional().parse(url.searchParams.get("pairedKey") ?? undefined)) }; break;
           case "/v1/conductor/grants": result = { grants: await listNamedGrants() }; break;
           // The owner's release authority policy, which conductors read and quote in briefs.
           case "/v1/authority": {
@@ -645,6 +649,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         } else if (url.pathname === "/v1/dispatch/approve") {
           const body = z.object({ id: z.string().uuid(), decision: z.enum(approvalDecisions), actionId: z.string().min(1).max(200), origin: originPaneSchema.optional() }).strict().parse(data);
           await ctx.returns!.answerApproval(body.id, body.decision, body.actionId, body.origin); result = { ok: true };
+        } else if (url.pathname === "/v1/approval-rules") {
+          result = await changeApprovalRule(data, "POST");
         } else if (url.pathname === "/v1/conductor/grants") {
           result = { ok: true, grant: await addGrant(data) };
         } else if (url.pathname === "/v1/authority" || url.pathname === "/v1/authority/confirm") {
@@ -716,9 +722,11 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
         }
       }
       } else if (request.method === "DELETE") {
-        if (url.pathname !== "/v1/conductor/grants" && url.pathname !== "/v1/authority") throw new BridgeError(404, "Unknown Phren Hook route.");
+        if (url.pathname !== "/v1/conductor/grants" && url.pathname !== "/v1/authority" && url.pathname !== "/v1/approval-rules") throw new BridgeError(404, "Unknown Phren Hook route.");
         const data = await body(request);
-        if (url.pathname === "/v1/authority") {
+        if (url.pathname === "/v1/approval-rules") {
+          result = await changeApprovalRule(data, "DELETE");
+        } else if (url.pathname === "/v1/authority") {
           if (data.origin !== undefined) throw new BridgeError(403, "Only the owner changes the release authority policy, from the phone or `phren authority` in their own terminal.");
           result = { ok: true, authority: await clearProjectAuthority(data, "phone") };
         } else result = { ok: true, grant: await removeGrant(data) };

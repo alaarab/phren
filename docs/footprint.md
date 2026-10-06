@@ -269,3 +269,15 @@ whose lease has passed. The file is private and does not sync either.
 ## Task responsibility metadata
 
 Task writers preserve versioned `Task:` continuations in each project's `tasks.md` and archived task records in `.config/task-archive/<project>.md`. Explicit owner activation writes `.config/task-format.json`; it stays disabled until compatible writers are adopted. Canonical identity registration writes the primary entry in synced `stores.yaml`. Task graph mutations lock `.runtime/task-dependencies` in the writable participating stores before locking the task document. Task-bound launch writes a durable Active claim and history to `tasks.md` before invoking the ordinary launcher; its brief uses the existing Hook brief directory. Failed or uncertain launch keeps the claim for explicit review. Revision tokens are derived on read, with no extra state file. Directory discovery does not create identities or migrate attachments. See [Task responsibility](task-responsibility.md).
+
+### Command approval policy
+
+`<bridge>/approval-rules.json` (0600) retains up to 2,048 signed owner add,
+set-enabled and revoke operations, at most 128 current rules. Every load verifies
+signatures against restricted phren-iphone keys in `~/.ssh/authorized_keys`;
+management does not enroll keys. Disabled/revoked/expired rules cannot restrict
+later requests. Missing or broken policy preserves the ordinary approval flow;
+Settings reports load failures. Rules only ask or deny and never automatically
+approve. No automatic approval audit file is written. Same-user storage is not
+rollback protected; tampering can remove restrictions only back to baseline.
+See [Approval rules](approval-rules.md).

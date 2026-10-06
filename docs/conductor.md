@@ -708,3 +708,38 @@ remain open with `live:false` until resolved. Resolving does not approve or
 answer an agent, and the same source stays resolved on later polls; a new
 question creates a new item. The phone UI is a follow-up using the contract in
 [Phren Hook](phren-hook.md#owner-inbox-phone-contract).
+
+## Owner command approval rules (stricter-only slice)
+
+Owner decision, 2026-10-06: rules are opt-in restrictions, with only `always-ask`
+and `deny`. No rule can grant execution. Empty, missing or broken policy preserves
+existing agent permissions and phone approvals; load errors appear in Settings.
+Signed add, individual enable/disable and revoke mutations use
+`GET`, `POST` and `DELETE /v1/approval-rules`. Saving never answers a held request.
+
+Only Claude `PermissionRequest` for `Bash` inputs carrying a shell `command` is
+covered. Deny wins; always ask follows the ordinary phone/terminal approval flow.
+Conductor dispatch/hand-off, MCP and commandless tool calls are not covered;
+existing standing-grant answers continue unchanged. The Hook rejects creation of
+rules for those tools and the iOS editor offers only Bash shell-command rules.
+Native allowlists, auto-run and bypass/full-access modes can skip this callback.
+Rules cannot intercept those commands. Codex, Copilot, OpenCode, phren-agent and
+terminal dialogs have no rule enforcement. Health advertises version 2, effects
+`always-ask`/`deny`, Claude `PermissionRequest`, `tools: ["Bash"]`,
+`inputField: "command"`, `conductorTools: false`, `mcpTools: false`,
+`preExecution: false`.
+
+Signed envelopes retain base64 raw payload/signature/publicKey and domain
+`phren-approval-rules-v1`. Operations are `add` with a complete rule, `set-enabled`
+with `id`/boolean `enabled`, or `revoke` with `id`; each has UUID `nonce` and ISO
+`at`. Strict schemas, paired restricted phone keys, five-minute timestamps and
+nonce replay checks remain. Rule effects are `always-ask`/`deny`; tool, command,
+match, scope, projectName and optional until retain their format. Project scope
+binds registered worktrees; optional scope fields intersect; expiry is checked
+at enforcement time. Disabled/revoked rules have no effect.
+
+Astra's review found same-user self-enrollment, policy rollback, arbitrary code
+behind allowed commands, coverage gaps and erasable audit. Auto-allow is deferred
+until a protected OS user enforces rollback-protected policy and durable audit.
+Tampering can remove restrictions back to today's behavior, never grant beyond it.
+See [Approval rules](approval-rules.md) for coverage and the linked Astra findings.
