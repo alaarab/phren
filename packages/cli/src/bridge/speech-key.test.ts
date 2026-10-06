@@ -10,13 +10,10 @@ const OTHER = "sk_test_env_do_not_leak_9876543210";
 
 let home: string;
 let file: string;
-let legacy: string;
 beforeEach(async () => {
   home = await mkdtemp(path.join(os.tmpdir(), "phren-speech-key-"));
   vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
   file = speechKeyFile();
-  legacy = path.join(home, ".config", "mina-trailer.json");
-  await mkdir(path.dirname(legacy), { recursive: true });
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -28,7 +25,7 @@ async function store(value: unknown, mode = 0o600): Promise<void> {
   await writeFile(file, JSON.stringify(value), { mode });
   await chmod(file, mode);
 }
-const resolve = (env: NodeJS.ProcessEnv = {}) => resolveSpeechKey({ env: { HOME: home, ...env }, file, legacy });
+const resolve = (env: NodeJS.ProcessEnv = {}) => resolveSpeechKey({ env: { HOME: home, ...env }, file });
 
 describe("ElevenLabs key resolution", () => {
   it("prefers ELEVENLABS_API_KEY, then elevenlabs.json {apiKey} in the Hook's directory", async () => {
@@ -39,26 +36,15 @@ describe("ElevenLabs key resolution", () => {
     expect(await resolve({ ELEVENLABS_API_KEY: OTHER })).toEqual({ key: OTHER, source: "environment" });
   });
 
-  it.skipIf(process.platform === "win32")("refuses a stored key other users can read, and doesn't migrate over it", async () => {
+  it.skipIf(process.platform === "win32")("refuses a stored key other users can read", async () => {
     await store({ apiKey: KEY }, 0o644);
-    await writeFile(legacy, JSON.stringify({ elevenlabs_api_key: OTHER }));
     expect(await resolve()).toBeUndefined();
     expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ apiKey: KEY });
   });
 
-  it("copies the mina-trailer key once with mode 600, then reads only the new file and leaves the old one", async () => {
+  it("has no key until one is stored or set", async () => {
     expect(await resolve()).toBeUndefined();
     await expect(stat(file)).rejects.toThrow();
-
-    const original = JSON.stringify({ gemini_api_key: "other", elevenlabs_api_key: ` ${KEY} ` });
-    await writeFile(legacy, original);
-    expect(await resolve()).toEqual({ key: KEY, source: "file" });
-    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ apiKey: KEY });
-    if (process.platform !== "win32") expect((await stat(file)).mode & 0o777).toBe(0o600);
-    expect(await readFile(legacy, "utf8")).toBe(original);
-
-    await writeFile(legacy, JSON.stringify({ elevenlabs_api_key: OTHER }));
-    expect(await resolve()).toEqual({ key: KEY, source: "file" });
   });
 });
 
@@ -77,9 +63,6 @@ describe("doctor's speech-key check", () => {
     };
 
     expect(await check()).toMatchObject({ ok: true, detail: expect.stringMatching(/^not configured: .*phren bridge speech-key set/) });
-    await writeFile(legacy, JSON.stringify({ elevenlabs_api_key: KEY }));
-    expect(await check()).toMatchObject({ ok: true, detail: expect.stringMatching(/^configured: not stored yet; .*mina-trailer\.json/) });
-    await expect(stat(file)).rejects.toThrow();
     await store({ apiKey: KEY });
     expect(await check()).toMatchObject({ ok: true, detail: `configured: stored in ${file}` });
     if (process.platform !== "win32") {

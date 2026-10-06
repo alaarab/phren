@@ -8,8 +8,9 @@
 // A hash is the SHA-256 of the lowercased token. Add one with:
 //   node scripts/check-private-strings.mjs --hash 'Some-Hostname'
 // Tokens are emails, `users/<name>` and `home/<name>` path pairs (either
-// slash, so Windows paths count), IPv4 addresses, SSH key blobs, and words of
-// letters, digits and hyphens.
+// slash, so Windows paths count), IPv4 addresses, SSH key blobs, words of
+// letters, digits and hyphens, and each adjacent `name.tld` pair in a dotted
+// name, so a personal domain can be listed.
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -31,6 +32,7 @@ for (const line of readFileSync(path.join(root, LIST), "utf8").split("\n")) {
   if (/^[0-9a-f]{64}$/.test(hash ?? "")) guarded.set(hash, allowed);
 }
 
+const DOTTED = /[a-z0-9-]+(?:\.[a-z0-9-]+)+/g;
 const TOKEN = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|\b(?:users|home)[\\/]+[a-z0-9_.-]+|\b\d{1,3}(?:\.\d{1,3}){3}\b|aaaa[a-z0-9+/]{40,}={0,2}|[a-z0-9]+(?:-[a-z0-9]+)*/g;
 const files = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8", maxBuffer: 64 << 20 })
   .split("\0").filter(file => file && file !== LIST);
@@ -43,6 +45,10 @@ for (const file of files) {
   const lines = text.toString("utf8").toLowerCase().split("\n");
   lines.forEach((line, index) => {
     const seen = new Set(line.match(TOKEN));
+    for (const name of line.match(DOTTED) ?? []) {
+      const labels = name.split(".");
+      for (let i = 1; i < labels.length; i++) seen.add(`${labels[i - 1]}.${labels[i]}`);
+    }
     for (const token of seen) {
       const allowed = guarded.get(sha(token.replace(/[\\/]+/g, "/")));
       if (allowed && !allowed.some(prefix => file.startsWith(prefix))) hits.push(`${file}:${index + 1}`);
