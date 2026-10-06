@@ -226,4 +226,52 @@ describe.skipIf(process.platform === "win32")("owner approval rules through HTTP
     expect(await approvalRuleContext(worktree, "claude", session)).toEqual(context());
     expect((await callback("git status", { cwd: worktree })).data.hookSpecificOutput.decision.behavior).toBe("deny");
   });
+  it("SECURITY: agent self-enrollment creates an effective deny-all without the owner's signature", async () => {
+    const raw = foreign.publicKey.export({ type: "spki", format: "der" }).subarray(-32);
+    const wire = Buffer.concat([Buffer.from("0000000b7373682d6564323535313900000020", "hex"), raw]).toString("base64");
+    const keysFile = path.join(home, ".ssh", "authorized_keys");
+    await writeFile(keysFile, (await readFile(keysFile, "utf8")) + `restrict,pty,command="sh ~/.local/share/phren/bridge/dispatch" ssh-ed25519 ${wire} phren-iphone\n`);
+    const response = await http("POST", undefined, envelope({ operation: "add", rule: draft({ command: "*", match: "glob" }) }, foreign));
+    expect(response.status).toBe(200);
+    expect((await callback("echo owner-action")).data.hookSpecificOutput.decision.behavior).toBe("deny");
+  });
+
+  it.each(["missing", "empty", "malformed"])("SECURITY: %s policy still awaits four slow Git processes", async kind => {
+    if (kind !== "missing") await writeFile(path.join(root, "approval-rules.json"), kind === "empty" ? '{"operations":[]}' : '{broken', { mode: 0o600 });
+    const bin = path.join(home, "bin"), log = path.join(home, "git-probe.log");
+    await mkdir(bin);
+    await writeFile(path.join(bin, "git"), `#!/bin/sh\ncase "$*" in *rev-parse*|*worktree*) /usr/bin/sleep 0.15; printf '%s\\n' "$*" >> '${log}';; esac\nexec /usr/bin/git "$@"\n`, { mode: 0o755 });
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${bin}:${oldPath}`;
+    try {
+      const start = performance.now();
+      expect((await callback("git status")).data).toEqual({});
+      const elapsed = performance.now() - start;
+      const calls = (await readFile(log, "utf8")).trim().split("\n");
+      expect(calls).toHaveLength(4);
+      expect(elapsed).toBeGreaterThan(550);
+      console.log(`SECURITY ${kind}: ${calls.length} extra Git calls, ${elapsed.toFixed(0)}ms`);
+    } finally { process.env.PATH = oldPath; }
+  });
+
+  it.each(["always-ask", "deny"] as const)("SECURITY: %s never matches normal conductor input and the standing grant allows it", async effect => {
+    await writeFile(path.join(root, "conductor.yaml"), 'grants:\n  - scope: global\n    actions: [dispatch]\n', { mode: 0o600 });
+    expect((await add(draft({ tool: "mcp__phren__dispatch", match: "glob", command: "*", effect }))).status).toBe(200);
+    const response = await callback("unused", { tool: "mcp__phren__dispatch", input: { project: "app", computer: "local", prompt: "do work" } });
+    expect(response.data.hookSpecificOutput.decision.behavior).toBe("allow");
+    expect(hooks.approval(target)).toBeUndefined();
+  });
+
+  it.each(["missing policy", "signed policy"])("SECURITY: startup and older-phone answer still work without a signing key and %s", async kind => {
+    if (kind === "signed policy") await add(draft());
+    await rm(path.join(home, ".ssh", "authorized_keys"));
+    hooks.close(); hooks = new AgentHooks(); await hooks.start();
+    expect((await callback("git status")).data).toEqual({});
+    hooks.overview.renew("default");
+    const held = callback("git status");
+    await vi.waitFor(() => expect(hooks.approval(target)).toBeDefined());
+    await hooks.answer(target, hooks.approval(target)!.actionId, "approve");
+    expect((await held).data.hookSpecificOutput.decision.behavior).toBe("allow");
+  });
+
 });
