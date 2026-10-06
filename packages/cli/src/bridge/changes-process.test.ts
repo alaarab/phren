@@ -22,6 +22,6 @@ it("passes an AbortSignal to running Git and cancels it at the hook budget", asy
     await vi.advanceTimersByTimeAsync(2500); await pending;
     expect(signal!.aborted).toBe(true);
     expect(changes.view("c").pending("t")).toBe(false);
-    expect(state.exec).toHaveBeenCalledTimes(1);
+    await expect(changes.view("c").changes("t")).rejects.toMatchObject({ details: { code: "git-capture-failed" } });
   } finally { await changes.close(); await rm(home, { recursive: true, force: true }); }
 });

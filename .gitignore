@@ -31,6 +31,7 @@ temp/
 video/
 
 # Agent / tool generated
+/.core-review-artifacts/
 .claude/
 AGENTS.md
 LEARNINGS.md

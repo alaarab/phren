@@ -17,7 +17,7 @@ import { refuseWorkingSlash, type ModelSwitcher } from "./model-switch.js";
 import { PERMISSION_MODE_VALUES, refuseAgentOrigin, type PermissionModeSwitcher } from "./permission-mode.js";
 import type { SettingsSwitcher } from "./settings-switch.js";
 import { sessionWebServers } from "./session-servers.js";
-import { repositoryDiff } from "./projects.js";
+import { gitRoot, repositoryDiff, withGitReadDeadline } from "./projects.js";
 import { BridgeError, type Json, MAX_FRAME, object, objects, startingTargetSchema, type Target, targetSchema } from "./protocol.js";
 import type { CodexQuestions } from "./questions.js";
 import { childAgent, childAgentTree, conversationNamedPaths, targetTranscriptPath, type ChildAgentRelation } from "./transcripts.js";
@@ -61,7 +61,8 @@ export async function gitRepository(pane: Json, target: Target, child: unknown, 
   if (id !== undefined) {
     const relation = childAgent(await childAgentTree(target.source, target.session), id);
     if (!relation) throw new BridgeError(404, "That agent is not part of this conversation.");
-    return relation.cwd ?? await trustedDirectory(pane);
+    if (!relation.cwd) throw new BridgeError(409, "This agent has no recorded checkout. Its parent repository cannot be substituted.");
+    return trustedDirectory({ cwd: relation.cwd });
   }
   return trustedDirectory(pane);
 }
@@ -252,6 +253,9 @@ function deliveryReply(agentHooks: AgentHooks, id: string, target: Json, text: s
 }
 
 export async function paneRoute(ctx: PaneRouteContext, url: URL, data: Json, response: ServerResponse): Promise<unknown> {
+  if (["/v1/diff", "/v1/git/status", "/v1/git/worktrees"].includes(url.pathname)) {
+    return withGitReadDeadline(() => paneRouteOnce(ctx, url, data, response, () => {}));
+  }
   if (url.pathname !== "/v1/prompt") return paneRouteOnce(ctx, url, data, response, () => {});
   // A retried send carries its first attempt's id; the Hook answers it with
   // that attempt's reply instead of typing the message a second time.
@@ -540,11 +544,7 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
       // Another worktree of the pane's repository: the whole checkout.
       result = await repositoryDiff(await gitRepository(pane, target, data.child, data.worktree), [], []);
     } else if (child !== undefined) {
-      // A spawned agent: its own worktree for a fan-out, otherwise the
-      // parent's checkout. The whole repository, no phone-named paths.
-      const relation = childAgent(await childAgentTree(target.source, target.session), child);
-      if (!relation) throw new BridgeError(404, "That agent is not part of this conversation.");
-      result = await repositoryDiff(relation.cwd ?? await trustedDirectory(pane), [], []);
+      result = await repositoryDiff(await gitRepository(pane, target, child), [], []);
     } else {
       const cwd = await trustedDirectory(pane), paths = z.array(z.string().max(4096)).max(24).optional().parse(data.paths) ?? [];
       const abort = new AbortController();
@@ -560,14 +560,21 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
   else if (url.pathname.startsWith("/v1/git/")) {
     // Git routes read the pane's repository, or a spawned child's own
     // worktree, exactly as /v1/diff resolves it.
-    const cwd = await gitRepository(pane, target, data.child, data.worktree);
-    if (url.pathname === "/v1/git/status") result = await gitStatus(cwd);
+    let cwd = await gitRepository(pane, target, data.child, data.worktree);
+    if (["stage", "unstage", "discard", "commit", "push", "pr"].some(action => url.pathname === `/v1/git/${action}`)
+      && data.expectedRepository !== undefined) {
+      const expected = z.string().min(1).max(4096).refine(value => path.isAbsolute(value) && !value.includes("\0"), "Expected an absolute repository path.").parse(data.expectedRepository);
+      const root = await gitRoot(cwd);
+      if (root !== expected) throw new BridgeError(409, "This pane's checkout changed. Refresh Changes before writing.", { code: "git-checkout-changed" });
+      cwd = root; // Execute in the validated root, never a path selected by the client.
+    }
+    if (url.pathname === "/v1/git/status") result = await gitStatus(cwd, z.string().min(1).max(4096).optional().parse(data.untrackedPath));
     else if (url.pathname === "/v1/git/worktrees") result = await gitWorktrees(cwd, await worktreeWorkers(target));
     else if (url.pathname === "/v1/git/log") result = await gitLog(cwd, z.coerce.number().int().min(1).max(200).optional().parse(data.limit) ?? 60, z.string().min(1).max(512).optional().parse(data.ref));
     else if (url.pathname === "/v1/git/branches") result = await gitBranches(cwd);
     else if (url.pathname === "/v1/git/pulls") result = await gitPulls(cwd);
     else if (url.pathname === "/v1/git/tree") result = await gitTree(cwd, z.string().max(4096).optional().parse(data.path) ?? "", z.boolean().optional().parse(data.ignored) ?? false);
-    else if (url.pathname === "/v1/git/stage") result = await gitStage(cwd, data.paths);
+    else if (url.pathname === "/v1/git/stage") result = await gitStage(cwd, data.paths, z.boolean().optional().parse(data.confirmBulk) ?? false);
     else if (url.pathname === "/v1/git/unstage") result = await gitUnstage(cwd, data.paths);
     else if (url.pathname === "/v1/git/discard") result = await gitDiscard(cwd, data.paths);
     else if (url.pathname === "/v1/git/commit") result = await gitCommit(cwd, data.message);

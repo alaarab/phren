@@ -1445,10 +1445,89 @@ resolved only against that listing. The bounded repository cache is keyed by HEA
 it expires after two seconds and is invalidated by status refresh and mutations.
 Opening a directory does not collect diff statistics or upstream history.
 
+### Repository status, diff and staging
+
+`GET /v1/git/status` takes the full session target in the query; the existing
+`POST /v1/git/status` takes it in the body. Both accept optional `child` or
+`worktree`, and optional `untrackedPath`. All Git operations resolve the current
+pane directory or the selected worker checkout. Missing worker checkout data,
+a removed folder, or a Git failure is an error; the parent checkout is never
+substituted. Inherited `GIT_DIR`, `GIT_WORK_TREE` and index/object overrides do
+not redirect these reads or stage operations.
+
+Status retains its existing fields and adds:
+
+| Field | Meaning |
+| --- | --- |
+| `repository` | Actual, canonical Git top-level directory of the selected checkout. |
+| `observedAt` | ISO 8601 time when collection finished; not an atomic Git snapshot. |
+| `totalFiles` | Full known number of unique status paths before the response cap. A path appearing in both staged and unstaged sections counts once; a collapsed directory counts once. |
+| `truncated` | More than 500 section rows exist; only the first 500 are returned. |
+| `countsComplete` | False when rows were capped, directories remain collapsed, or a file could not be counted. Line totals then cover only the counted, returned rows. |
+
+Files add optional `binary`, `directory` and `countsComplete`. Binary files have
+zero additions/deletions and `binary: true`; those zeros are not text line
+counts. A wholly untracked directory is one row with a trailing `/`, `status:
+"?"`, `directory: true`, zero counts and `countsComplete: false`. This follows
+Git's normal untracked mode. `.gitignore`, repository excludes and the user's
+global excludes remain in effect. Oversized untracked files (over 5 MB) and
+symlinks have incomplete counts; the Hook never reads through a symlink.
+
+`untrackedPath: "new/"` expands one level of that untracked directory. It returns
+the same status shape with only untracked files and collapsed child directories;
+tracked/staged rows are absent. Paths remain repository-relative. Each request
+revalidates the directory against current untracked state, rejects traversal,
+`.git`, escaping symlinks and nested repositories, and applies the same 500-row
+cap. Section counters (`staged`, `unstaged`, `untracked`) describe the full
+selection before capping. Clients must not present partial line totals as exact.
+
+`POST /v1/git/stage` takes `paths` (1–500 repository-relative paths) and optional
+`confirmBulk: true`. Without confirmation, directories, untracked binary files,
+untracked files with unavailable counts, and more than 100 unique paths receive
+a descriptive 409 before any staging. Confirmation never force-adds ignored
+files. Stage All clients must disable that action on incomplete/truncated status,
+omit collapsed directories and untracked binaries by default, and label skipped
+items. Explicit row actions can confirm the selection. Unstage and discard keep
+their 64-path limit; discard does not recursively remove untracked directories.
+
+All six write routes (`stage`, `unstage`, `discard`, `commit`, `push`, `pr`)
+accept optional `expectedRepository`: the last observed status `repository`, an
+absolute string of at most 4096 characters without NUL. After resolving the
+current pane/child/worktree, Hook compares its canonical Git root with that
+value. A mismatch returns 409 `git-checkout-changed` before any write; refresh
+Changes before retrying. This field is a precondition, never a selector for the
+checkout. Older callers may omit it. It detects a move between checkouts, not
+concurrent edits or a branch switch inside the same checkout.
+
+`POST /v1/diff` adds `repository`, `observedAt`, `totalFiles` and `truncated`.
+Each repository listing is capped at 500 paths and one million patch characters;
+sections cap patches at 200,000 characters and add `truncated`. A section omitted
+by the aggregate patch budget has an empty patch with `truncated: true`; it is
+not an empty diff. Related repositories carry their own totals and truncation.
+The log's `uncommitted` summary uses the full status path count and also reports
+`truncated` and `countsComplete`.
+
+Git errors never produce a clean/empty success response. Error bodies include
+`error` and a stable `code`: `git-failed` (503), `git-timeout` (504), `git-output-limit` (413, 4 MiB command output), `git-index-locked` (409),
+or `git-not-repository` (409). Status, repository diff (including related
+repositories), and worktree status collection each share a ten-second Git read
+deadline across their nested commands. Every subprocess gets only the remaining
+budget; expiry aborts active Git processes and stops further commands with
+`git-timeout`, never a clean result. Other Git commands retain their per-process
+limits; write operations are not retried or covered by this read deadline.
+A no-index diff's exit 1 is accepted only without diagnostics or a termination
+signal; a disappeared/unreadable file is an error. The Hook never deletes
+`index.lock`. Tool-call change capture also exposes failed or timed-out collection (`git-capture-failed`)
+instead of recording an empty success. Transcript tool results remain visible
+and carry `phren_change_errors: {toolUseId: {error, code}}` when capture fails;
+clients can show that message beside the result. Its patch rows add `binary` and
+`truncated`, and more than 40 changed files is an explicit output-limit error.
+
 ### Commit, push and pull request
 
-Each takes the session's full target and optional `child` or `worktree`, like
-the other `/v1/git/*` routes, and answers `{ok: true, ...}` or, when Git or gh
+Each takes the session's full target, optional `child` or `worktree`, and the
+optional `expectedRepository` precondition described above, like the other
+`/v1/git/*` write routes, and answers `{ok: true, ...}` or, when Git or gh
 refused, `{ok: false, output}` with the output exactly as printed (stdout and
 stderr interleaved, at most 64 KiB). Input errors are ordinary 400/409 errors.
 

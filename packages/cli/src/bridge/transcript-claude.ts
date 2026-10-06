@@ -56,9 +56,9 @@ async function claudeChildModel(file: string): Promise<string | undefined> {
 
 /** The checkout a Claude sub-agent edits in. Claude Code writes the isolated
  * worktree into the child's `.meta.json`; an older child falls back to the
- * `cwd` its own first rows record when that folder is a linked worktree (its
- * `.git` is a file). A child working in the parent's checkout gets nothing,
- * and a worktree already removed is not offered. */
+ * `cwd` its own first rows record. Preserve shared and missing checkout paths
+ * too: Git routes must fail explicitly when a checkout disappears, never
+ * substitute the parent repository. */
 export async function claudeChildCheckout(file: string): Promise<Pick<ChildAgentRelation, "cwd" | "worktreeName" | "branch">> {
   const meta = await readFile(file.slice(0, -".jsonl".length) + ".meta.json", "utf8").then(v => object(JSON.parse(v))).catch(() => ({} as Json));
   let cwd = typeof meta.worktreePath === "string" && path.isAbsolute(meta.worktreePath) ? meta.worktreePath : undefined;
@@ -70,7 +70,7 @@ export async function claudeChildCheckout(file: string): Promise<Pick<ChildAgent
       try {
         const value = object(JSON.parse(line)).cwd;
         if (typeof value === "string" && path.isAbsolute(value)) {
-          if ((await stat(path.join(value, ".git")).catch(() => undefined))?.isFile()) cwd = value;
+          cwd = value;
           break;
         }
       } catch { /* Keep looking past a malformed row. */ }
@@ -79,8 +79,9 @@ export async function claudeChildCheckout(file: string): Promise<Pick<ChildAgent
     input.close();
     branch = undefined;
   }
-  if (!cwd || !(await stat(cwd).catch(() => undefined))?.isDirectory()) return {};
-  return { cwd, worktreeName: path.basename(cwd).slice(0, 200), ...(branch ? { branch } : {}) };
+  if (!cwd) return {};
+  const linked = typeof meta.worktreePath === "string" || (await stat(path.join(cwd, ".git")).catch(() => undefined))?.isFile();
+  return { cwd, ...(linked ? { worktreeName: path.basename(cwd).slice(0, 200) } : {}), ...(branch ? { branch } : {}) };
 }
 
 async function withClaudeChildModels(relations: ChildAgentRelation[]): Promise<ChildAgentRelation[]> {
