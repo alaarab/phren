@@ -1,4 +1,4 @@
-import { approvalRuleContext, autoApproveByRule, approvalRuleSuggestion, type ApprovalRuleDraft } from "./approval-rules.js";
+import { approvalRuleContext, approvalRuleEffect } from "./approval-rules.js";
 import { recordedConductor } from "./conductor-role.js";
 import { conductorContext } from "./conductor-context.js";
 import { defaultPhrenPath } from "../shared.js";
@@ -84,7 +84,7 @@ export function watchHangUp(res: ServerResponse): () => boolean {
 }
 
 interface HeldReply { end(body: string): unknown; readonly destroyed: boolean }
-interface Pending { ruleSuggestion?: ApprovalRuleDraft; target: Target; response: HeldReply; tool: string; input: unknown; message: string; request: string; requestKind: RequestKind; title?: string; choice?: TerminalChoice; expiresAt: string; timer?: NodeJS.Timeout; conductor?: { action: "dispatch" | "hand_off"; project?: string; computer?: string };
+interface Pending { target: Target; response: HeldReply; tool: string; input: unknown; message: string; request: string; requestKind: RequestKind; title?: string; choice?: TerminalChoice; expiresAt: string; timer?: NodeJS.Timeout; conductor?: { action: "dispatch" | "hand_off"; project?: string; computer?: string };
   /** A server request of the Hook's own Codex app-server: answered over RPC, never held on a timer. */
   appServer?: { requestId: AppServerRequestId; answer: (result: Json) => void } }
 
@@ -835,7 +835,7 @@ export class AgentHooks {
   }
   approval(target: Target): Json | undefined {
     const pending = [...this.pending.entries()].find(([, p]) => JSON.stringify(p.target) === JSON.stringify(target));
-    if (pending) return { ruleSuggestion: pending[1].ruleSuggestion, actionId: pending[0], toolName: pending[1].tool, title: pending[1].choice?.title ?? pending[1].title, message: pending[1].message,
+    if (pending) return { actionId: pending[0], toolName: pending[1].tool, title: pending[1].choice?.title ?? pending[1].title, message: pending[1].message,
       request: pending[1].request,
       details: pending[1].message, terminalOnly: target.source === "codex" && !pending[1].choice && !pending[1].appServer,
       ...(pending[1].choice ? { choice: pending[1].choice } : {}),
@@ -1380,12 +1380,13 @@ export class AgentHooks {
         const requestContext = ruleContext && typeof body.cwd === "string" && path.isAbsolute(body.cwd)
           ? await approvalRuleContext(body.cwd, target.source, target.session) : undefined;
         const boundRuleContext = ruleContext && requestContext?.project === ruleContext.project ? requestContext : undefined;
-        if (boundRuleContext && await autoApproveByRule(String(body.tool), body.input, boundRuleContext)) {
-          res.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "allow" } } }));
+        const ruleEffect = await approvalRuleEffect(String(body.tool), body.input, boundRuleContext);
+        if (ruleEffect === "deny") {
+          res.end(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: { behavior: "deny", message: "Denied by an owner approval rule." } } }));
           return;
         }
         if (body.event === "PermissionRequest") this.terminalPrompts.delete(JSON.stringify(target));
-        if (body.event === "PermissionRequest") {
+        if (body.event === "PermissionRequest" && ruleEffect !== "always-ask") {
           const conductor = conductorCall(String(body.tool || "action"), body.input);
           if (conductor) {
             // A standing grant answers the call before it becomes an approval card.
@@ -1429,7 +1430,7 @@ export class AgentHooks {
         const expiresAt = new Date(Date.now() + APPROVAL_HOLD_MS).toISOString();
         const { choice, title } = permissionPrompt(String(body.tool || "action"), body.input);
         const summary = approvalSummary({ tool: String(body.tool || "action"), input: body.input, cwd, question: body.tool === "AskUserQuestion" });
-        this.pending.set(action, { ruleSuggestion: approvalRuleSuggestion(String(body.tool), body.input, boundRuleContext), target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input, title,
+        this.pending.set(action, { target, response: res, tool: String(body.tool || "action").slice(0, 200), input: body.input, title,
           message: JSON.stringify(body.input || {}, null, 2).slice(0, 32_768), ...summary, ...(choice ? { choice } : {}), expiresAt, timer,
           ...(conductor ? { conductor } : {}) });
         res.on("close", () => { clearTimeout(timer); this.pending.delete(action); this.pushedHolds.delete(action); if (!released) this.dropPushBindings(action); });
