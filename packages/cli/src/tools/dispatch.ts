@@ -42,7 +42,7 @@ export function register(server: McpServer): void {
   });
   server.registerTool("owner_inbox", {
     title: "◆ phren · owner inbox",
-    description: "One owner inbox on this conductor's Hook: list open needs-you returns, blocked prompts and manual items; add a title and optional project; resolve an id with an optional resolution. Reading returns does not resolve inbox items. Resolving an inbox item does not answer or approve a worker prompt. Use operation add, list or resolve (also through phren_admin action owner_inbox). includeResolved lists history. Keep an id on retried adds.",
+    description: "One owner inbox on this conductor's Hook: list open needs-you returns, blocked prompts and manual items; add a title and optional project; resolve an id with an optional resolution. Automatic items are deduplicated by pane, session and question, and resolve when their source stops waiting or disappears; only verified live automatic items are listed. Manual items remain until resolved. Reading returns does not resolve inbox items. Resolving an inbox item does not answer or approve a worker prompt. Use operation add, list or resolve (also through phren_admin action owner_inbox). includeResolved lists history. Keep an id on retried adds.",
     inputSchema: ownerInboxSchema.omit({ action: true }).extend({ operation: ownerInboxSchema.shape.action }),
   }, async input => {
     try {

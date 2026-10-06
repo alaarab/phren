@@ -17,12 +17,26 @@ export async function ownerInboxView(inbox: OwnerInbox, input: unknown, localOnl
   }
   const result = await inbox.run(local);
   if (data.action !== "list" || localOnly) return result;
-  const items = objects(result.items).map(item => ({ ...item, inboxComputer: "local" })), unreachable: Json[] = [];
+  const items: Json[] = objects(result.items).map(item => ({ ...item, inboxComputer: "local" })), unreachable: Json[] = [];
   await Promise.all(peers.map(async peer => {
     try {
       const view = await peerRequest(peer, `/v1/owner-inbox?local=1${data.includeResolved ? "&includeResolved=true" : ""}`);
       items.push(...objects(view.items).map(item => ({ ...item, inboxComputer: peer.name })));
     } catch (error) { unreachable.push({ computer: peer.name, error: error instanceof Error ? error.message : "Unreachable." }); }
   }));
-  return { ok: true, items, unreachable };
+  // Older peers can still send stale automatic rows during a rolling upgrade.
+  // A dispatching Hook and the worker's Hook may also describe the same ask.
+  const seen = new Set<string>();
+  const current = items.filter(item => {
+    if (data.includeResolved || item.kind === "manual") return true;
+    if (item.live !== true || item.state !== "open") return false;
+    const t = item.target as Json | undefined;
+    if (!t) return true;
+    const computer = String(item.computer ?? item.inboxComputer);
+    const key = JSON.stringify([isLocalComputer(computer) ? "local" : computer, t.server, t.workspace, t.tab, t.pane,
+      t.source, t.session ?? t.startingToken, item.actionId ?? "waiting"]);
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+  return { ok: true, items: current, unreachable };
 }

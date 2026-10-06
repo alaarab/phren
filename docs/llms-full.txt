@@ -334,7 +334,11 @@ dispatch_report(prs): record this worker's turn-bound PR evidence, each row
 integrator through queued hand_off. phren dispatch report --prs <JSON>.
 owner_inbox(operation?,title?,project?,id?,resolution?,includeResolved?,computer?):
 list, add or resolve owner work across linked computers. Reading returns does
-not dismiss it; resolving does not approve or answer a prompt.
+not dismiss it; resolving does not approve or answer a prompt. Automatic items
+are deduplicated by pane/session/question and resolve when answered or gone
+(on reads or the five-second tick). Only verified live automatic items are
+listed; manual items remain until resolved. Upgrade cleanup records
+"stale: source gone"; --all includes history.
 phren owner-inbox list [--all] | add <title> [--project <slug>] [--id <uuid>] |
 resolve <id> [--computer <name>] [--resolution <text>].
 phren conductor integrator [--session <id> [--computer <name>] | --clear].

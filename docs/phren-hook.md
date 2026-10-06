@@ -968,6 +968,10 @@ identical add or resolve is idempotent. Resolve changes only inbox state.
 The follow-up phone screen should show one open list with source, project,
 computer, question and a link to `target`; show unreachable computers as
 unknown. A Done action sends resolve to `inboxComputer`, with optional notes.
-Keep permission and question answers on their existing routes. Keep items with
-`live:false` visible until resolved, show history on demand, retain ids across
-retries, and refresh after actions. No phone UI changes are included here.
+Keep permission and question answers on their existing routes. Automatic items appear only while verified live; answered questions and ended
+or closed sources resolve on reads or within the five-second activity tick.
+Repeated observations update the same item per pane, session and question.
+Manual items remain until explicitly resolved. Show history on demand, retain
+ids across retries, and refresh after actions. On upgrade, stale automatic
+items resolve with `stale: source gone`; an unreachable worker is hidden as
+unverified rather than resolved. No phone UI changes are included here.
