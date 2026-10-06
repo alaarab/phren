@@ -15,6 +15,9 @@ import {
   removeTask,
 } from "./data/tasks.js";
 import { addFinding, readFindings, removeFinding, readReviewQueue } from "./data/access.js";
+import { detectProject } from "./shared/index.js";
+import { teamStoreProjectCheckouts } from "./link/refresh.js";
+import { syncScopeSkillsToDir } from "./skill/files.js";
 
 const TASKS_FIXTURE = `# team-proj tasks
 
@@ -245,6 +248,26 @@ describe("multi-store data layer", () => {
         expect(result.data).toHaveLength(1);
         expect(result.data[0].text).toContain("Candidate finding from capture");
       }
+    });
+  });
+  describe("team-store project in a repo checkout", () => {
+    it("is detected from its folder and links its skills into the repo", () => {
+      const repo = path.join(tmp.path, "Projects", "team-proj");
+      fs.mkdirSync(repo, { recursive: true });
+      fs.writeFileSync(path.join(teamDir, "team-proj", "phren.project.yaml"), `ownership: phren-managed\nsourcePath: ${repo}\n`);
+      fs.mkdirSync(path.join(teamDir, "team-proj", "skills"), { recursive: true });
+      fs.writeFileSync(path.join(teamDir, "team-proj", "skills", "ql.md"), "---\nname: ql\ndescription: QL workflow\n---\nBody\n");
+      // The machine's profile lists the primary store's projects only.
+      fs.mkdirSync(path.join(phrenDir, "profiles"), { recursive: true });
+      fs.writeFileSync(path.join(phrenDir, "profiles", "laptop.yaml"), "name: laptop\nprojects:\n  - personal-proj\n");
+
+      expect(detectProject(phrenDir, path.join(repo, "src"), "laptop")).toBe("team-proj");
+
+      const checkouts = teamStoreProjectCheckouts(phrenDir);
+      expect(checkouts).toEqual([{ project: "team-proj", target: repo, skills: true }]);
+      syncScopeSkillsToDir(phrenDir, "team-proj", path.join(repo, ".claude", "skills"));
+      expect(fs.realpathSync(path.join(repo, ".claude", "skills", "ql.md")))
+        .toBe(fs.realpathSync(path.join(teamDir, "team-proj", "skills", "ql.md")));
     });
   });
 });

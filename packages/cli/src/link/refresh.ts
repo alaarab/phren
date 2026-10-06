@@ -7,6 +7,32 @@ import { readProjectConfig, getProjectSourcePath, getProjectOwnershipMode } from
 import { findProjectDir } from "../project-locator.js";
 import { resolveManagementCapabilities } from "../init/management-preset.js";
 import { syncScopeSkillsToDir } from "../skill/files.js";
+import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
+
+/**
+ * Projects from attached team stores whose checkout is on this machine. Profiles
+ * list only the primary store's projects, so link and refresh reach these here;
+ * a project the primary store also has is left to the primary.
+ */
+export function teamStoreProjectCheckouts(phrenPath: string): Array<{ project: string; target: string; skills: boolean }> {
+  const found: Array<{ project: string; target: string; skills: boolean }> = [];
+  const seen = new Set<string>();
+  for (const store of getNonPrimaryStores(phrenPath)) {
+    if (!fs.existsSync(store.path)) continue;
+    for (const dir of getStoreProjectDirs(store)) {
+      const project = path.basename(dir);
+      if (project === "global" || seen.has(project) || fs.existsSync(path.join(phrenPath, project))) continue;
+      seen.add(project);
+      const config = readProjectConfig(store.path, project);
+      if (getProjectOwnershipMode(store.path, project, config) !== "phren-managed") continue;
+      // The store is shared between computers, so its sourcePath may be another machine's.
+      const configured = getProjectSourcePath(store.path, project, config);
+      const target = configured && fs.existsSync(configured) ? configured : findProjectDir(project);
+      if (target && fs.existsSync(target)) found.push({ project, target, skills: config.skills !== false });
+    }
+  }
+  return found;
+}
 
 export function refreshLinkedContext(phrenPath: string, profile: string): void {
   const caps = resolveManagementCapabilities(phrenPath);
@@ -38,5 +64,10 @@ export function refreshLinkedContext(phrenPath: string, profile: string): void {
     if (!fs.readFileSync(agentsPath, "utf8").includes("<!-- phren:generated-agents -->")) continue;
     fs.unlinkSync(agentsPath);
     fs.symlinkSync(claudePath, agentsPath);
+  }
+  for (const { project, target, skills } of teamStoreProjectCheckouts(phrenPath)) {
+    if (skills && fs.existsSync(path.join(target, ".claude", "skill-manifest.json"))) {
+      syncScopeSkillsToDir(phrenPath, project, path.join(target, ".claude", "skills"));
+    }
   }
 }
