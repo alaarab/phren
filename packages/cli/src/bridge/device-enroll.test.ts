@@ -54,7 +54,7 @@ it("prints one JSON line and exits non-zero on failure", async () => {
   const lines: string[] = [];
   vi.spyOn(console, "log").mockImplementation((value: string) => { lines.push(value); });
   const stdin = async function* (value: string) { yield Buffer.from(value); };
-  expect(await runEnrollDevice(["--device", "ios", "--name", "Ala's iPhone"], "1.2.3", stdin(publicKey), { sshDirectory: ssh(), root })).toBe(0);
+  expect(await runEnrollDevice(["--device", "ios", "--name", "Test phone"], "1.2.3", stdin(publicKey), { sshDirectory: ssh(), root })).toBe(0);
   expect(JSON.parse(lines[0])).toMatchObject({ ok: true, added: true });
   expect(await runEnrollDevice(["--bogus"], "1.2.3", stdin(publicKey))).toBe(1);
   expect(JSON.parse(lines[1])).toMatchObject({ ok: false, code: "usage" });
