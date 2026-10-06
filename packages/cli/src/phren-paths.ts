@@ -531,8 +531,8 @@ export function projectSlugFromPath(sourcePath: string): string {
 
 /**
  * Collapse a project name to the key used for duplicate detection: lowercase
- * with every separator removed. `AudioPlugins`, `audioplugins` and
- * `audio-plugins` all map to `audioplugins`, so the second spelling of a
+ * with every separator removed. `MyProject`, `myproject` and
+ * `my-project` all map to `myproject`, so the second spelling of a
  * repo can be recognized as the project that already exists.
  */
 export function canonicalProjectKey(name: string): string {

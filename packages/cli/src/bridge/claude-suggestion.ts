@@ -9,7 +9,7 @@ import { stripTerminal } from "../terminal-text.js";
 const MAX_SUGGESTION = 500;
 
 // The input box sits between two rules; the upper one can carry the session
-// title ("───── Claude sesh ─").
+// title ("───── Docs refresh ─").
 const rule = (line: string) => /^[─━═]{3,}/.test(line.trim());
 
 // Dim text Claude also draws in the empty input that is not a prediction: the

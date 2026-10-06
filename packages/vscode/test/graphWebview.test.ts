@@ -197,7 +197,6 @@ describe("fetchProjects", () => {
           { name: "scripts" },
           { name: "templates" },
           { name: "profiles" },
-          { name: "dendron" },
           { name: "phren-framework" },
           { name: "app", brief: "second occurrence, should be dropped" },
           { name: "other", brief: "ok", store: "team" },

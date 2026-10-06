@@ -1,7 +1,6 @@
 # Conductor role and linked computer sets (design note)
 
-Status: implemented in the Hook and CLI. The phone screens are a follow-up
-(contract at the end).
+Status: implemented in the Hook and CLI. The phone contract is at the end.
 
 ## Problem
 
@@ -136,7 +135,7 @@ phren conductor sets [--json]     # every set, its computers, reachability and c
 phren conductor sets name "Home"    # or --clear
 ```
 
-## Phone contract (follow-up)
+## Phone contract
 
 - Feature check: `GET /v1/health` `capabilities.conductorSets === true`.
 - Computers screen: group rows by `GET /v1/sets`. Show the set name (or the

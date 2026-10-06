@@ -147,7 +147,7 @@ describe("Phren Hook boundaries", () => {
   });
 
   it("normalizes MCP arguments and only resolves choices for the matching permission", () => {
-    const input = { action: "read_skill", name: "m4l-improve" };
+    const input = { action: "read_skill", name: "lint-fix" };
     const sentence = "Allow the phren MCP server to run tool phren_admin?";
     const options = "\n› 1. Allow  Run the tool and continue.\n2. Allow for this session  Keep it until the session ends.\n3. Deny";
     const prompt = permissionPrompt("mcp__phren__phren_admin", input, sentence + options);
@@ -2228,7 +2228,7 @@ schedules:
       const frames: any[] = []; socket.on("message", bytes => frames.push(JSON.parse(bytes.toString())));
       await once(socket, "open");
       await waitFor(() => frames.length, 1_500);
-      const input = { action: "read_skill", name: "m4l-improve" };
+      const input = { action: "read_skill", name: "lint-fix" };
       const reply = new Promise<any>((resolve, reject) => {
         const payload = JSON.stringify({ target, event: "PermissionRequest", tool: "mcp__phren__phren_admin", input });
         const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/hook", method: "POST",
@@ -2820,10 +2820,10 @@ schedules:
     });
 
     it("gives a second launch with the same label its own agent name", async () => {
-      await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "SR requests", kind: "claude" });
-      const second = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "SR requests", kind: "claude" });
+      await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Docs review", kind: "claude" });
+      const second = await api("/v1/workspaces/launch?mux=herdr:default", { cwd: root, label: "Docs review", kind: "claude" });
       expect(second.status, JSON.stringify(second.data)).toBe(200);
-      expect(commands.filter(c => c.method === "agent.start").map(c => c.params.name)).toEqual(["sr-requests", "sr-requests-2"]);
+      expect(commands.filter(c => c.method === "agent.start").map(c => c.params.name)).toEqual(["docs-review", "docs-review-2"]);
     });
 
     it("starts an agent with the chosen model and effort", async () => {

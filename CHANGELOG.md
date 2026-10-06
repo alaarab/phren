@@ -579,7 +579,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Hook: a conductor is recognized by the name Herdr keeps in its `agents` list as well as on the pane, so it pins to the top of Agents again and a second conductor is refused.
 - Hook: a Claude conductor reads its brief with `--append-system-prompt-file` (Herdr refuses a multi-line argument for zsh); the Claude live preview also skips collapsed tool groups (a `⏺` line followed by `⎿`) and stops at the input box's titled rule.
 - Hook: the Claude live preview skips tool-call lines and reads Claude's spinner verb, sent beside transcript frames as `activityVerb` (older phones ignore it).
-- Hook: a launch whose label matches a live agent gets its own Herdr name (`sr-requests-2`) instead of colliding; a scheduled run waits for the agent to finish starting before it sends the prompt; Herdr's own error text reaches the phone.
+- Hook: a launch whose label matches a live agent gets its own Herdr name (`docs-review-2`) instead of colliding; a scheduled run waits for the agent to finish starting before it sends the prompt; Herdr's own error text reaches the phone.
 - Hook: an agent that Herdr reports as held at a first-run screen (Claude's folder trust, for one) counts as launched, so its pane comes back to the phone to answer instead of failing and stranding the workspace.
 - Hook: agent launches take `effort` too (`--effort`, `model_reasoning_effort` or `--variant`), with minimal, xhigh and max accepted; `/v1/models` gives Claude models their `--effort` levels and default from Claude Code's catalogue.
 - Hook: `/v1/workspaces/launch` with `role: "conductor"` and no `cwd` or `project` starts the conductor in this computer's phren store.
