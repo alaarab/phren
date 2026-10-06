@@ -13,7 +13,7 @@ const inventory = (sources = ["claude", "codex", "opencode", "copilot", "phren"]
 describe("launching phren's own agent", () => {
   let home: string, cwd: string, restore: () => void, placements: PanePlacement[], starts: AgentStart[], state: Json;
   beforeEach(() => {
-    home = realpathSync(mkdtempSync(path.join(tmpdir(), "phren-launch-phren-")));
+    home = realpathSync.native(mkdtempSync(path.join(tmpdir(), "phren-launch-phren-")));
     cwd = path.join(home, "project"); mkdirSync(cwd);
     vi.stubEnv("HOME", home); vi.stubEnv("CLAUDE_CONFIG_DIR", ""); vi.stubEnv("PHREN_BRIDGE_HOME", path.join(home, "bridge"));
     setLaunchInventory(async () => inventory());
@@ -37,7 +37,8 @@ describe("launching phren's own agent", () => {
     // A nonstandard store: never derive its location from the SSH username or home.
     vi.stubEnv("PHREN_PATH", cwd);
     const result = await launchSession("default", { agentFolder: true, label: "Quick chat", kind: "phren", mode: "chat" });
-    expect(path.dirname(String(result.cwd))).toBe(path.join(cwd, ".runtime", "agents"));
+    // Windows can return a short 8.3 path from the JS realpath implementation.
+    expect(realpathSync.native(path.dirname(String(result.cwd)))).toBe(realpathSync.native(path.join(cwd, ".runtime", "agents")));
     expect(statSync(String(result.cwd)).isDirectory()).toBe(true);
     expect(placements[0].cwd).toBe(result.cwd);
     expect(starts[0].args).toEqual(["agent", "-i", "--mode", "chat"]);
