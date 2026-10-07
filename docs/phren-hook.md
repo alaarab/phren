@@ -120,6 +120,95 @@ worktree it created, before starting Claude or Codex there (see
 `PHREN_PRETRUST=off` turns that off. Scheduled headless Codex runs also pass
 `--skip-git-repo-check` (see [schedules](schedules.md)).
 
+### Gitboy read-only memory
+
+Gitboy, a self-hosted Git server, can show a read-only Phren tab per
+repository: that project's findings, truths and tasks. Phren stays the source
+of truth; gitboy stores nothing. Gitboy's server reaches the Hook over SSH with
+its own key, scoped to one route.
+
+**Pair gitboy.** Gitboy generates an ed25519 key and shows its public half. On
+the computer that holds the store:
+
+```sh
+phren pair --scope gitboy-read --key gitboy.pub   # or: ... --key - < gitboy.pub
+```
+
+This adds one line to `~/.ssh/authorized_keys`:
+
+```
+restrict,command="sh ~/.local/share/phren/bridge/dispatch-scoped gitboy-read" ssh-ed25519 AAAA… phren-gitboy
+```
+
+and prints the SSH user, this computer's host key fingerprint (pin it in gitboy)
+and its addresses. Options on the supplied line are discarded and rebuilt. It
+installs or updates the Hook first if `dispatch-scoped` is missing
+(`--no-install` refuses instead). Revoke by deleting the `phren-gitboy` line.
+
+The key has no PTY and no forwarding. Its forced command always runs the node
+gateway, never the raw socket pipe. The gateway accepts only the SSH command
+`phren-hook v1 pipe`, reads one HTTP request head, and admits only
+`GET /v1/projects/<project>/memory` (`<project>` matching
+`[a-z0-9][a-z0-9_-]{0,99}`, no query string, no body). It then sends the Hook a
+request it builds itself, so client headers, bodies and pipelined requests never
+reach the Hook. Dispatch, store writes, sudo, terminals, shells, web previews
+and every other route are refused: other SSH commands exit non-zero, other
+requests get an HTTP 403 (or 400 for a malformed request, a body or extra bytes)
+with `{"error": "...", "code": "scope-refused"}` written by the gateway. A
+stopped Hook answers 503 with `"code": "hook-unavailable"`.
+
+**Connect.** One SSH exec channel per request, as the phone does:
+
+```sh
+printf 'GET /v1/projects/my-app/memory HTTP/1.1\r\nHost: phren.local\r\nConnection: close\r\n\r\n' \
+  | ssh -i gitboy_ed25519 -o IdentitiesOnly=yes -T me@my-computer 'phren-hook v1 pipe'
+```
+
+With the `ssh2` npm library: `conn.exec("phren-hook v1 pipe", …)` without a PTY,
+write the request head above (ending the write side afterwards is fine), and read until
+the channel closes. The bytes are one HTTP/1.1 response (`Content-Length` set,
+`Connection: close`): split at the first `\r\n\r\n`, check the status line, and
+parse the body as JSON. Send no body and no second request on the channel.
+
+**Response** (`200`, `Content-Type: application/json`):
+
+```
+{ "project": string, "store_id": string|null, "remote": string|null, "truncated": boolean,
+  "findings": [{ "id": string, "text": string, "type": string|null,
+                 "status": "active"|"superseded"|"contradicted"|"retracted"|"stale"|"invalid_citation",
+                 "created": string|null,
+                 "citation": { "file": string|null, "line": number|null, "commit": string|null, "name": string|null } | null }],
+  "truths": [{ "text": string }],
+  "tasks": { "active": [T], "queue": [T], "done": [T] } }
+T = { "id": string, "text": string, "created": string|null, "context": string|null }
+```
+
+- Findings come newest first and are capped at 500; Active and Queue at 200
+  each; Done at the 50 most recent. `truncated` is true when any list was cut.
+- `id` is `fid:<8 hex>` / `bid:<8 hex>` when the entry has a stable id, else a
+  positional id (`L3`, `A1`) that can change between reads.
+- `type` is the finding's leading tag (`decision`, `pitfall`, `pattern`, `bug`,
+  `workaround`, `context`), removed from `text`; `null` when untagged.
+- `created` is a `YYYY-MM-DD` date. `citation` carries the file, line, commit
+  and the cited function or type (`name`); the local checkout path never leaves.
+- `store_id` is the store's 8-hex task-store id when it has one.
+- Text that trips phren's credential detector is withheld whole and replaced
+  with `[redacted: withheld, contained <kind>]`.
+- Tasks are empty when the `tasks` module is off. The route needs the `memory`
+  module (`404` otherwise); an unknown project is `404`, an invalid name `400`.
+  `/v1/health` advertises `projectMemory: true`.
+
+**Matching a repository.** Add an optional `remote:` with the repository's clone
+URL from any host to `<store>/<project>/phren.project.yaml`:
+
+```yaml
+remote: ssh://git@gitboy.lan/me/my-app.git
+```
+
+The route returns it as `remote`. `https://`, `http://`, `ssh://`, `git://` and
+scp-style `user@host:path` URLs are accepted; passwords (and http(s) user names)
+are removed, and local paths, `file:` URLs and URLs with a query read as `null`.
+
 ## What connects
 
 Workspace snapshots optionally include `contextUsedPercent` for a tab with one

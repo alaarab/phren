@@ -9,7 +9,8 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { appendAuthorizedKey, publicComputerKey } from "./computers.js";
 import { localHostKeyLine } from "./host-key.js";
-import { forcedCommand, install } from "./install.js";
+import { forcedCommand, install, scopedForcedCommand, scopedGatewayPath } from "./install.js";
+import { type GatewayScope, isGatewayScope, SCOPE_KEY_COMMENT } from "./scoped-gateway.js";
 import { BridgeError, bridgeRoot } from "./protocol.js";
 
 // `phren pair` connects a phone in one scan. The QR code carries where to
@@ -179,9 +180,57 @@ function sshHint(): string {
     : "Start the SSH server, for example: sudo systemctl enable --now sshd";
 }
 
-export const PAIR_USAGE = "phren pair [--minutes <1-30>] [--port <n>] [--no-install]";
+export const PAIR_USAGE = "phren pair [--minutes <1-30>] [--port <n>] [--no-install] | phren pair --scope gitboy-read --key <public-key-file|-> [--no-install]";
+
+/** The authorized_keys line for a scoped key: no PTY, no forwarding, its own forced command. */
+export function scopedKeyLine(scope: GatewayScope, publicKey: string): string {
+  return `restrict,${scopedForcedCommand(scope)} ${publicComputerKey(publicKey)} ${SCOPE_KEY_COMMENT[scope]}`;
+}
+
+/** Authorize a server's key for one scope. Options on the supplied line are discarded and rebuilt. */
+export async function acceptScopedKey(scope: GatewayScope, input: string, sshDirectory?: string): Promise<string> {
+  const raw = input.trim().split("\n").map(line => line.trim()).filter(Boolean);
+  if (raw.length !== 1) throw new BridgeError(400, "Supply one ed25519 public key.");
+  const at = raw[0].indexOf("ssh-ed25519 ");
+  if (at === -1) throw new BridgeError(400, "Supply one ed25519 public key.");
+  const line = scopedKeyLine(scope, raw[0].slice(at));
+  const encoded = line.split(" ").at(-2)!;
+  await appendAuthorizedKey(line, existing => existing.split(/\s+/).includes(encoded),
+    "This key is already authorized with different options. Remove its line from authorized_keys first.", sshDirectory);
+  return line;
+}
+
+async function runScopedPair(args: string[], version: string): Promise<number> {
+  let scope: string | undefined, key: string | undefined, installHook = true;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--scope" && args[i + 1]) scope = args[++i];
+    else if (args[i] === "--key" && args[i + 1]) key = args[++i];
+    else if (args[i] === "--no-install") installHook = false;
+    else { console.error(`Usage: ${PAIR_USAGE}`); return 1; }
+  }
+  if (!scope || !isGatewayScope(scope)) { console.error(`Unknown scope${scope ? ` "${scope}"` : ""}. Supported: gitboy-read.`); return 1; }
+  if (!key) { console.error(`Usage: ${PAIR_USAGE}`); return 1; }
+  if (!["darwin", "linux"].includes(process.platform)) { console.error("Scoped keys support macOS and Linux."); return 1; }
+  if (!await lstat(scopedGatewayPath()).catch(() => undefined)) {
+    if (!installHook) { console.error("This Phren Hook has no scoped gateway yet. Run phren bridge update first."); return 1; }
+    console.log("Installing Phren Hook with the scoped gateway…");
+    await install(version);
+  }
+  let text: string;
+  if (key === "-") { const chunks: Buffer[] = []; for await (const chunk of process.stdin) chunks.push(chunk as Buffer); text = Buffer.concat(chunks).toString("utf8"); }
+  else text = await readFile(key, "utf8");
+  const line = await acceptScopedKey(scope, text);
+  const fingerprint = await hostFingerprint();
+  console.log(`Authorized ${SCOPE_KEY_COMMENT[scope]} for ${scope}: GET /v1/projects/<project>/memory only.`);
+  console.log(`  ${line}`);
+  console.log(`  SSH user: ${userInfo().username}   host key: ${fingerprint ?? "unknown (no /etc/ssh/ssh_host_ed25519_key.pub)"}`);
+  console.log(`  Addresses: ${(await pairingHosts()).join(", ") || "none found"}`);
+  console.log(`  Revoke: remove the ${SCOPE_KEY_COMMENT[scope]} line from ${path.join(homedir(), ".ssh/authorized_keys")}.`);
+  return 0;
+}
 
 export async function runPair(args: string[], version: string): Promise<number> {
+  if (args.includes("--scope")) return runScopedPair(args, version);
   let minutes = 5, port: number | undefined, installHook = true;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--minutes" && args[i + 1]) minutes = Number(args[++i]);

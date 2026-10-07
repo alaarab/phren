@@ -916,6 +916,34 @@ socket.on('close', () => process.exit(0));
       expect(sample.ms).toBeGreaterThanOrEqual(0);
     });
 
+    it("serves only project memory through a gitboy-read scoped key", async () => {
+      const scoped = async (request: string, command = "phren-hook v1 pipe") => {
+        const child = spawn(process.execPath, [hookBundle, "ssh-scoped", "gitboy-read"], {
+          env: { ...process.env, PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"),
+            PHREN_PATH: path.join(root, ".phren"), SSH_ORIGINAL_COMMAND: command },
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        const chunks: Buffer[] = []; child.stdout.on("data", bytes => chunks.push(bytes));
+        child.stdin.write(request);
+        const [code] = await once(child, "exit");
+        child.stdin.destroy();
+        return { code, reply: Buffer.concat(chunks).toString() };
+      };
+      // This fixture's Hook runs with memory off, so the route itself answers
+      // that (an unrouted path would say "Unknown Phren Hook route").
+      const memory = await scoped("GET /v1/projects/gitboy-demo/memory HTTP/1.1\r\nHost: phren.local\r\nConnection: close\r\n\r\n");
+      expect(memory.code).toBe(0);
+      expect(memory.reply).toMatch(/^HTTP\/1\.1 404 /);
+      expect(memory.reply).toMatch(/X-Phren-Protocol: 1/i);
+      expect(memory.reply).toContain("module memory is disabled");
+      const refused = await scoped("POST /v1/dispatch HTTP/1.1\r\nHost: phren.local\r\nContent-Length: 0\r\n\r\n");
+      expect(refused.reply).toMatch(/^HTTP\/1\.1 403 /);
+      expect(refused.reply).not.toMatch(/X-Phren-Protocol/i);
+      const health = await scoped("GET /v1/health HTTP/1.1\r\nHost: phren.local\r\n\r\n");
+      expect(health.reply).toMatch(/^HTTP\/1\.1 403 /);
+      expect((await scoped("", "phren-hook v1 terminal main")).code).not.toBe(0);
+    });
+
     it.each([false, true])("returns an intact upload reply through the SSH gateway (stdin EOF: %s)", async endInput => {
       const child = spawn(process.execPath, [hookBundle, "ssh"], {
         env: { ...process.env, PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"),
