@@ -15,9 +15,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Clanker mode, a compact keyword-first way to retrieve memory. With `phren config clanker on` (or `phren config set clanker on`, `phren init --clanker on`, `PHREN_CLANKER=on`), the prompt hook, `search_knowledge`, `get_tasks` and `get_findings` return one row per hit: an id, a title, a few keywords and, for searches, a 0–1 score. The agent fetches the full text by id with `get_memory_detail`, which now takes a finding's `fid:` or a task's `bid:` and returns just that entry instead of the file it lives in. On a copy of a real store this cut the prompt hook's injection by 49%, `search_knowledge` by 84% (60% counting one entry opened per search), and project task and finding lists by 80–90%. New installs start with it on; existing installs keep their current output until switched. It replaces `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE`, which still works as an alias.
-- Gitboy integration: `phren pair --scope gitboy-read --key <file|->` authorizes a `phren-gitboy` SSH key whose forced command (`dispatch-scoped`) admits only `GET /v1/projects/<project>/memory`; every other SSH command and route is refused by the gateway before it reaches the Hook.
+- Gitboy integration: `phren pair --scope gitboy-read --key <file|->` authorizes a `phren-gitboy` SSH key whose forced command (`dispatch-scoped`) admits only gitboy's read routes; every other SSH command and route is refused by the gateway, which rebuilds each admitted request (canonical query, re-serialized body) before it reaches the Hook.
 - Phren Hook `GET /v1/projects/:project/memory`: a project's findings (status, type, citation), truths and tasks in a fixed read-only JSON contract, capped (500 findings, 200 Active/Queue, 50 Done) with `truncated`; `/v1/health` advertises `projectMemory`.
-- `phren.project.yaml` takes an optional `remote:` clone URL from any host, returned by that route (credentials stripped) so a Git server can match a repository to its project.
+- `GET /v1/projects/:project/memory/files?path=…` (up to 500 paths): findings citing those files, or citing a function, type or variable the code index places in them (`match: "file" | "symbol"`). `@phren/code` gains `resolveSymbolFiles`; the Hook accepts request heads up to 256 KiB for this.
+- `GET /v1/projects/:project/memory/search?q=&limit=`: the project's findings and truths ranked against an error excerpt with the retrieval tokenizer and chunk matcher, with a 0 to 1 `score`.
+- `GET /v1/projects/:project/tasks?branch=`: open tasks naming the branch or the issue number in it.
+- `phren pair --scope gitboy-write` authorizes a separate `phren-gitboy-write` key for `POST /v1/projects/:project/findings` (JSON body up to 8 KiB, validated in the gateway), saved through the `add_finding` path with provenance `tool:gitboy`.
+- `phren.project.yaml` takes an optional `remote:` clone URL from any host, returned by the memory route (credentials stripped) so a Git server can match a repository to its project.
 
 ### Fixed
 

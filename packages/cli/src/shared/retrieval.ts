@@ -209,7 +209,7 @@ function normalizeToken(token: string): string {
   return normalized;
 }
 
-function tokenizeForOverlap(text: string, maxTokens = 24): string[] {
+export function tokenizeForOverlap(text: string, maxTokens = 24): string[] {
   const tokens = text
     .toLowerCase()
     .replace(/[^a-z0-9_\-\s]/g, " ")

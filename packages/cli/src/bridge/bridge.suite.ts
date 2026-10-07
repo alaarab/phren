@@ -916,9 +916,9 @@ socket.on('close', () => process.exit(0));
       expect(sample.ms).toBeGreaterThanOrEqual(0);
     });
 
-    it("serves only project memory through a gitboy-read scoped key", async () => {
-      const scoped = async (request: string, command = "phren-hook v1 pipe") => {
-        const child = spawn(process.execPath, [hookBundle, "ssh-scoped", "gitboy-read"], {
+    it("serves only their own routes through gitboy-read and gitboy-write scoped keys", async () => {
+      const scoped = async (request: string, command = "phren-hook v1 pipe", scope = "gitboy-read") => {
+        const child = spawn(process.execPath, [hookBundle, "ssh-scoped", scope], {
           env: { ...process.env, PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"),
             PHREN_PATH: path.join(root, ".phren"), SSH_ORIGINAL_COMMAND: command },
           stdio: ["pipe", "pipe", "pipe"],
@@ -942,6 +942,16 @@ socket.on('close', () => process.exit(0));
       const health = await scoped("GET /v1/health HTTP/1.1\r\nHost: phren.local\r\n\r\n");
       expect(health.reply).toMatch(/^HTTP\/1\.1 403 /);
       expect((await scoped("", "phren-hook v1 terminal main")).code).not.toBe(0);
+      const search = await scoped("GET /v1/projects/gitboy-demo/memory/search?q=boom HTTP/1.1\r\nHost: phren.local\r\n\r\n");
+      expect(search.reply).toMatch(/X-Phren-Protocol: 1/i);
+      // The write key reaches only its own route; the read key never reaches it.
+      const body = JSON.stringify({ text: "Save this fix" });
+      const save = `POST /v1/projects/gitboy-demo/findings HTTP/1.1\r\nHost: phren.local\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\n\r\n${body}`;
+      const written = await scoped(save, "phren-hook v1 pipe", "gitboy-write");
+      expect(written.reply).toMatch(/X-Phren-Protocol: 1/i);
+      expect(written.reply).toContain("module memory is disabled");
+      expect((await scoped(save)).reply).toMatch(/^HTTP\/1\.1 403 /);
+      expect((await scoped("GET /v1/projects/gitboy-demo/memory HTTP/1.1\r\nHost: phren.local\r\n\r\n", "phren-hook v1 pipe", "gitboy-write")).reply).toMatch(/^HTTP\/1\.1 403 /);
     });
 
     it.each([false, true])("returns an intact upload reply through the SSH gateway (stdin EOF: %s)", async endInput => {

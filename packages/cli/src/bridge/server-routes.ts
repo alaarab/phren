@@ -34,7 +34,7 @@ import { browseFiles } from "./files.js";
 import { MAX_FILE_RANGE, rangeInteger, readFileRange } from "./file-range.js";
 import { resolveFilePath } from "./file-resolve.js";
 import { storeRoute } from "./memory-store.js";
-import { PROJECT_MEMORY_ROUTE, projectMemory } from "./project-memory.js";
+import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch } from "./project-memory.js";
 import { liveBackground, markBackground, paneRecord, recordTitle } from "./session-activity.js";
 import { paneAccountField, paneChatState, panes, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
@@ -354,9 +354,15 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
       let result: unknown;
       const memoryRoute = PROJECT_MEMORY_ROUTE.exec(url.pathname);
       if (memoryRoute) {
-        if (request.method !== "GET") throw new BridgeError(405, "Unsupported request method.");
+        const [, project, route] = memoryRoute;
+        if (request.method !== (route === "findings" ? "POST" : "GET")) throw new BridgeError(405, "Unsupported request method.");
         if (!modules.has("memory")) throw new BridgeError(404, disabledHint("memory"));
-        result = projectMemory(modules.store, memoryRoute[1]);
+        if (route === "tasks" && !modules.has("tasks")) throw new BridgeError(404, disabledHint("tasks"));
+        if (route === "memory") result = projectMemory(modules.store, project);
+        else if (route === "memory/files") result = await memoryForFiles(modules.store, project, url.searchParams.getAll("path"));
+        else if (route === "memory/search") result = memorySearch(modules.store, project, url.searchParams.get("q") ?? "", Number(url.searchParams.get("limit") ?? "5"));
+        else if (route === "tasks") result = tasksForBranch(modules.store, project, url.searchParams.get("branch") ?? "");
+        else result = await saveFinding(modules.store, project, await body(request));
       } else if (url.pathname.startsWith("/v1/store/")) {
         result = await storeRoute(modules.store, request.method ?? "", url, request.method === "POST" ? await body(request) : undefined);
       } else if (request.method === "GET") {

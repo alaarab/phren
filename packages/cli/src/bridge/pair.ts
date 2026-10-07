@@ -180,7 +180,7 @@ function sshHint(): string {
     : "Start the SSH server, for example: sudo systemctl enable --now sshd";
 }
 
-export const PAIR_USAGE = "phren pair [--minutes <1-30>] [--port <n>] [--no-install] | phren pair --scope gitboy-read --key <public-key-file|-> [--no-install]";
+export const PAIR_USAGE = "phren pair [--minutes <1-30>] [--port <n>] [--no-install] | phren pair --scope gitboy-read|gitboy-write --key <public-key-file|-> [--no-install]";
 
 /** The authorized_keys line for a scoped key: no PTY, no forwarding, its own forced command. */
 export function scopedKeyLine(scope: GatewayScope, publicKey: string): string {
@@ -208,7 +208,7 @@ async function runScopedPair(args: string[], version: string): Promise<number> {
     else if (args[i] === "--no-install") installHook = false;
     else { console.error(`Usage: ${PAIR_USAGE}`); return 1; }
   }
-  if (!scope || !isGatewayScope(scope)) { console.error(`Unknown scope${scope ? ` "${scope}"` : ""}. Supported: gitboy-read.`); return 1; }
+  if (!scope || !isGatewayScope(scope)) { console.error(`Unknown scope${scope ? ` "${scope}"` : ""}. Supported: gitboy-read, gitboy-write.`); return 1; }
   if (!key) { console.error(`Usage: ${PAIR_USAGE}`); return 1; }
   if (!["darwin", "linux"].includes(process.platform)) { console.error("Scoped keys support macOS and Linux."); return 1; }
   if (!await lstat(scopedGatewayPath()).catch(() => undefined)) {
@@ -221,7 +221,7 @@ async function runScopedPair(args: string[], version: string): Promise<number> {
   else text = await readFile(key, "utf8");
   const line = await acceptScopedKey(scope, text);
   const fingerprint = await hostFingerprint();
-  console.log(`Authorized ${SCOPE_KEY_COMMENT[scope]} for ${scope}: GET /v1/projects/<project>/memory only.`);
+  console.log(`Authorized ${SCOPE_KEY_COMMENT[scope]} for ${scope}: ${scope === "gitboy-write" ? "POST /v1/projects/<project>/findings only" : "GET /v1/projects/<project>/memory, memory/files, memory/search and tasks only"}.`);
   console.log(`  ${line}`);
   console.log(`  SSH user: ${userInfo().username}   host key: ${fingerprint ?? "unknown (no /etc/ssh/ssh_host_ed25519_key.pub)"}`);
   console.log(`  Addresses: ${(await pairingHosts()).join(", ") || "none found"}`);

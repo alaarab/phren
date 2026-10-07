@@ -122,81 +122,193 @@ worktree it created, before starting Claude or Codex there (see
 
 ### Gitboy read-only memory
 
-Gitboy, a self-hosted Git server, can show a read-only Phren tab per
-repository: that project's findings, truths and tasks. Phren stays the source
-of truth; gitboy stores nothing. Gitboy's server reaches the Hook over SSH with
-its own key, scoped to one route.
+Gitboy, a self-hosted Git server, shows a read-only Phren tab per repository
+(that project's findings, truths and tasks), marks files and PRs Phren has
+findings about, looks up CI failures it has seen before, prints task tips on
+`git push`, and can save a fix as a finding. Phren stays the source of truth;
+gitboy stores nothing. Gitboy's server reaches the Hook over SSH with keys
+scoped to these routes:
 
-**Pair gitboy.** Gitboy generates an ed25519 key and shows its public half. On
-the computer that holds the store:
+| Scope | Key comment | Routes |
+|---|---|---|
+| `gitboy-read` | `phren-gitboy` | `GET /v1/projects/:project/memory`, `/memory/files`, `/memory/search`, `/tasks` |
+| `gitboy-write` | `phren-gitboy-write` | `POST /v1/projects/:project/findings` |
+
+Each scope is its own key with its own forced command, so a read key can never
+write and the write key reads nothing.
+
+**Pair gitboy.** Gitboy generates one ed25519 key per scope and shows the public
+halves. On the computer that holds the store:
 
 ```sh
-phren pair --scope gitboy-read --key gitboy.pub   # or: ... --key - < gitboy.pub
+phren pair --scope gitboy-read  --key gitboy-read.pub    # or: --key - < file
+phren pair --scope gitboy-write --key gitboy-write.pub   # only if gitboy should save findings
 ```
 
-This adds one line to `~/.ssh/authorized_keys`:
+Each adds one line to `~/.ssh/authorized_keys`:
 
 ```
 restrict,command="sh ~/.local/share/phren/bridge/dispatch-scoped gitboy-read" ssh-ed25519 AAAA… phren-gitboy
+restrict,command="sh ~/.local/share/phren/bridge/dispatch-scoped gitboy-write" ssh-ed25519 AAAA… phren-gitboy-write
 ```
 
 and prints the SSH user, this computer's host key fingerprint (pin it in gitboy)
-and its addresses. Options on the supplied line are discarded and rebuilt. It
-installs or updates the Hook first if `dispatch-scoped` is missing
-(`--no-install` refuses instead). Revoke by deleting the `phren-gitboy` line.
+and its addresses. Options on the supplied line are discarded and rebuilt; a key
+already authorized for anything else is refused, so each scope needs its own
+key. Pairing installs or updates the Hook first if `dispatch-scoped` is missing
+(`--no-install` refuses instead). Revoke by deleting the key's line.
 
-The key has no PTY and no forwarding. Its forced command always runs the node
-gateway, never the raw socket pipe. The gateway accepts only the SSH command
-`phren-hook v1 pipe`, reads one HTTP request head, and admits only
-`GET /v1/projects/<project>/memory` (`<project>` matching
-`[a-z0-9][a-z0-9_-]{0,99}`, no query string, no body). It then sends the Hook a
-request it builds itself, so client headers, bodies and pipelined requests never
-reach the Hook. Dispatch, store writes, sudo, terminals, shells, web previews
-and every other route are refused: other SSH commands exit non-zero, other
-requests get an HTTP 403 (or 400 for a malformed request, a body or extra bytes)
-with `{"error": "...", "code": "scope-refused"}` written by the gateway. A
+**What the gateway enforces.** The keys have no PTY and no forwarding. Their
+forced command always runs the node gateway, never the raw socket pipe. It
+accepts only the SSH command `phren-hook v1 pipe` and reads one HTTP/1.1
+request (head up to 256 KiB, at most 32 headers of 8 KiB). It admits only the
+scope's routes, each with a strict grammar:
+
+- `<project>` matches `[a-z0-9][a-z0-9_-]{0,99}`.
+- Query keys are exactly the route's; unknown, repeated (except `path`) or
+  missing keys are refused. Values must be percent-encoded (`+` reads as a
+  space) and are checked after decoding.
+- A repository path is `/`-separated segments of letters, digits, space and
+  `._@+~,=()[]{}#!$&'-`, with no empty, `.` or `..` segment and no leading `/`,
+  at most 1024 characters.
+- A branch is `[A-Za-z0-9._/+-]{1,200}`, with no `..`, `//`, leading `-` or
+  `/`, trailing `/`, `.` or `.lock`, or segment starting with `.`.
+- Read routes take no body. The write route needs `Content-Type:
+  application/json` and a `Content-Length` body of 1 to 8192 bytes, with
+  nothing after it; `Transfer-Encoding`, `Upgrade` and `Expect` are refused.
+
+It then sends the Hook a request it builds itself from the validated values
+(a canonical query string, and for the write route a re-serialized JSON body
+holding only the schema's fields), so client headers, unknown fields, bodies
+and pipelined requests never reach the Hook. Dispatch, store writes, sudo,
+terminals, shells, web previews and every other route are refused: other SSH
+commands exit non-zero; other requests get a gateway-written HTTP error with
+`{"error": "...", "code": "scope-refused"}`: 403 for a route outside the scope,
+400 for a malformed request, query or body, 413 for an oversized body, 415 for
+a body that is not JSON, 408 when the request does not arrive within 10 s. A
 stopped Hook answers 503 with `"code": "hook-unavailable"`.
 
 **Connect.** One SSH exec channel per request, as the phone does:
 
 ```sh
 printf 'GET /v1/projects/my-app/memory HTTP/1.1\r\nHost: phren.local\r\nConnection: close\r\n\r\n' \
-  | ssh -i gitboy_ed25519 -o IdentitiesOnly=yes -T me@my-computer 'phren-hook v1 pipe'
+  | ssh -i gitboy-read -o IdentitiesOnly=yes -T me@my-computer 'phren-hook v1 pipe'
 ```
 
 With the `ssh2` npm library: `conn.exec("phren-hook v1 pipe", …)` without a PTY,
-write the request head above (ending the write side afterwards is fine), and read until
-the channel closes. The bytes are one HTTP/1.1 response (`Content-Length` set,
-`Connection: close`): split at the first `\r\n\r\n`, check the status line, and
-parse the body as JSON. Send no body and no second request on the channel.
+write the request (head, then the body for the write route; ending the write
+side afterwards is fine), and read until the channel closes. The bytes are one
+HTTP/1.1 response (`Content-Length` set, `Connection: close`): split at the
+first `\r\n\r\n`, check the status line, and parse the body as JSON. Send no
+second request on the channel.
 
-**Response** (`200`, `Content-Type: application/json`):
+**Shared shapes.**
 
 ```
-{ "project": string, "store_id": string|null, "remote": string|null, "truncated": boolean,
-  "findings": [{ "id": string, "text": string, "type": string|null,
-                 "status": "active"|"superseded"|"contradicted"|"retracted"|"stale"|"invalid_citation",
-                 "created": string|null,
-                 "citation": { "file": string|null, "line": number|null, "commit": string|null, "name": string|null } | null }],
-  "truths": [{ "text": string }],
-  "tasks": { "active": [T], "queue": [T], "done": [T] } }
+F = { "id": string, "text": string, "type": string|null,
+      "status": "active"|"superseded"|"contradicted"|"retracted"|"stale"|"invalid_citation",
+      "created": string|null,
+      "citation": { "file": string|null, "line": number|null, "commit": string|null, "name": string|null } | null }
 T = { "id": string, "text": string, "created": string|null, "context": string|null }
 ```
 
-- Findings come newest first and are capped at 500; Active and Queue at 200
-  each; Done at the 50 most recent. `truncated` is true when any list was cut.
 - `id` is `fid:<8 hex>` / `bid:<8 hex>` when the entry has a stable id, else a
   positional id (`L3`, `A1`) that can change between reads.
 - `type` is the finding's leading tag (`decision`, `pitfall`, `pattern`, `bug`,
   `workaround`, `context`), removed from `text`; `null` when untagged.
 - `created` is a `YYYY-MM-DD` date. `citation` carries the file, line, commit
   and the cited function or type (`name`); the local checkout path never leaves.
-- `store_id` is the store's 8-hex task-store id when it has one.
 - Text that trips phren's credential detector is withheld whole and replaced
   with `[redacted: withheld, contained <kind>]`.
-- Tasks are empty when the `tasks` module is off. The route needs the `memory`
-  module (`404` otherwise); an unknown project is `404`, an invalid name `400`.
-  `/v1/health` advertises `projectMemory: true`.
+- Every route needs the `memory` module (`404` otherwise; `/tasks` also needs
+  `tasks`). An unknown project is `404`, an invalid name `400`, a wrong method
+  `405`. `/v1/health` advertises `projectMemory: true`.
+
+**`GET /v1/projects/:project/memory`** returns the whole project:
+
+```
+{ "project": string, "store_id": string|null, "remote": string|null, "truncated": boolean,
+  "findings": [F], "truths": [{ "text": string }],
+  "tasks": { "active": [T], "queue": [T], "done": [T] } }
+```
+
+Findings come newest first and are capped at 500; Active and Queue at 200
+each; Done at the 50 most recent. `truncated` is true when any list was cut.
+`store_id` is the store's 8-hex task-store id when it has one. Tasks are empty
+when the `tasks` module is off.
+
+**`GET /v1/projects/:project/memory/files?path=<p>&path=<p>…`** (1 to 500
+paths) returns the findings about those files, for PR annotations and gutter
+markers:
+
+```
+{ "project": string, "store_id": string|null, "symbols": "indexed"|"unavailable", "truncated": boolean,
+  "findings": [F & { "match": "file"|"symbol" }] }
+```
+
+`file`: the finding's `citation.file` is one of the paths. `symbol`: its
+`citation.name` is a function, type or variable the project's code index places
+in one of the paths (resolved as a citation resolves it). `symbols` says
+whether the code index was used (`code` module on, index built, `@phren/code`
+new enough); when `unavailable`, only file matches are returned. Newest first,
+at most 500. Up to 500 paths fit the 256 KiB request head, which the Hook
+accepts too.
+
+**`GET /v1/projects/:project/memory/search?q=<text>&limit=<1-20>`** (`limit`
+defaults to 5; `q` up to 1000 characters, tabs and newlines allowed) ranks the
+project's findings and truths against `q`, for "Seen this before" on a CI
+failure:
+
+```
+{ "project": string, "query": string,
+  "results": [{ "kind": "finding"|"truth", "score": number, "matched": number, "text": string, "finding": F|null }] }
+```
+
+It uses phren's retrieval tokenizer and best-chunk matcher (the hook's
+relevance floor), weighting each query token by how rare it is across this
+project's findings and truths (the normalised IDF the hook uses), so the common
+words of a stack trace count for little. `score` is the matched share of that
+weight, 0 to 1, halved for findings that are no longer active; `matched` is how
+many distinct tokens matched. An entry must match at least two of the tokens
+the project knows (one, if it knows only one). It reads only this project's
+files; it does not open the store-wide search index.
+
+**`GET /v1/projects/:project/tasks?branch=<name>`** returns open tasks (Active
+and Queue) for a `git push` tip:
+
+```
+{ "project": string, "branch": string, "truncated": boolean,
+  "tasks": [T & { "section": "active"|"queue", "match": "branch"|"issue" }] }
+```
+
+`branch`: the task's text or context contains the branch name, or its last
+`/` segment when that is 4 characters or more (case-insensitive). `issue`: the
+branch carries an issue number (`fix/123-login`, `issue-123`, `gh-123`) and the
+task is linked to that issue or mentions `#123`, `/issues/123` or `/pull/123`.
+One read of `tasks.md`; at most 50.
+
+**`POST /v1/projects/:project/findings`** (`gitboy-write` only) saves a finding,
+for "save this fix as a finding". Body, at most 8192 bytes:
+
+```
+{ "text": string, "type"?: "decision"|"pitfall"|"pattern"|"bug",
+  "citation"?: { "file"?: string, "line"?: number, "commit"?: string, "name"?: string } }
+```
+
+`text` is 1 to 5000 characters; whitespace runs (newlines included) collapse to
+single spaces and other control characters are refused. `citation.file` is a
+repository path, `line` 1 to 10,000,000, `commit` 7 to 64 hex digits, `name` up
+to 200 characters. No other fields are accepted. The Hook saves it through the
+`add_finding` path: the project's write permission, the secret scan (a finding
+carrying a credential is refused with 400), duplicate detection, conflict
+annotations, and validation of `citation.name` against the code index. It is
+recorded with provenance `tool:gitboy`. Reply (`200`):
+
+```
+{ "project": string, "status": "saved"|"duplicate", "finding": F|null }
+```
+
+`duplicate` means an equivalent finding already exists and nothing was written.
 
 **Matching a repository.** Add an optional `remote:` with the repository's clone
 URL from any host to `<store>/<project>/phren.project.yaml`:
@@ -205,9 +317,16 @@ URL from any host to `<store>/<project>/phren.project.yaml`:
 remote: ssh://git@gitboy.lan/me/my-app.git
 ```
 
-The route returns it as `remote`. `https://`, `http://`, `ssh://`, `git://` and
-scp-style `user@host:path` URLs are accepted; passwords (and http(s) user names)
-are removed, and local paths, `file:` URLs and URLs with a query read as `null`.
+The `/memory` route returns it as `remote`. `https://`, `http://`, `ssh://`,
+`git://` and scp-style `user@host:path` URLs are accepted; passwords (and
+http(s) user names) are removed, and local paths, `file:` URLs and URLs with a
+query read as `null`.
+
+**No notifications.** There is no gitboy scope for pushing notices to the
+owner's phones. Phones register for named notification kinds (approvals and
+schedule events) and the app renders each kind; a gitboy kind would need an app
+release to register for it and to open its link. Sending gitboy notices under
+the approval kind would present them as approvals.
 
 ## What connects
 
