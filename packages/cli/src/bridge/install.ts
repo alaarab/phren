@@ -360,7 +360,7 @@ export async function uninstall() {
   await applyOpencodePlugin(true);
   await removeAskpass();
   // Preserve journal, settings, uploaded images, rollback version and SSH backups.
-  console.log("Phren Hook stopped and its background service removed. Remove phren-iphone, phren-android, phren-computer and phren-gitboy keys from authorized_keys to revoke device access. Local data remains in " + bridgeRoot());
+  console.log("Phren Hook stopped and its background service removed. Remove phren-iphone, phren-android, phren-computer, phren-gitboy and phren-gitboy-write keys from authorized_keys to revoke device access. Local data remains in " + bridgeRoot());
 }
 
 interface SettingsEdit { file: string; before?: string; after: string }
