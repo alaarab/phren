@@ -109,6 +109,7 @@ so a client can show it. See
 | `PHREN_FILE_LOCK_MAX_WAIT_MS` | integer | `5000` | Maximum time to wait for a file lock before giving up. |
 | `PHREN_FILE_LOCK_POLL_MS` | integer | `100` | How often to poll for lock availability. |
 | `PHREN_FILE_LOCK_STALE_MS` | integer | `30000` | Age after which a lock file is considered stale and auto-recovered. |
+| `PHREN_INDEX_BUSY_WAIT_MS` | integer | `5000` | How long an MCP search waits for another process's index rebuild before answering from the last good index (max 30000, `0` skips the wait). |
 
 ## GitHub Integration (extract-memories)
 

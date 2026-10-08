@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- MCP tool calls no longer fail with "Could not refresh the local index; retry shortly." while another process rebuilds the index. With many agents writing at once, every other session's server and every hook's background reindex kept re-taking the shared rebuild lock, and any call that found it held failed at once, including tools that never read the index (`account_usage`, `live_sessions`, `manage_task`). Now only tools that answer from the index (search, summaries, findings lists, the fragment graph) refresh it; they wait up to 5 seconds for the other rebuild (`PHREN_INDEX_BUSY_WAIT_MS`), sharing one wait per server, and then answer from the last good index. A rebuild lock left by a process that died mid-rebuild is cleared at once instead of blocking for 30 seconds.
+
 ## [0.3.30] - 2026-10-03
 
 ### Added

@@ -27,7 +27,7 @@ it("refreshes a single live MCP after uncommitted profile and document changes w
   const env = Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
   Object.assign(env, {
     PHREN_PATH: store, PHREN_PROFILE: "test", PHREN_PULL_INTERVAL_SECONDS: "0", PHREN_AUTOSAVE: "off",
-    PHREN_EMBEDDING: "off", PHREN_FEATURE_NATIVE_MEMORY: "off", GIT_TRACE: trace.replaceAll("\\", "/"),
+    PHREN_EMBEDDING: "off", PHREN_FEATURE_NATIVE_MEMORY: "off", PHREN_INDEX_BUSY_WAIT_MS: "300", GIT_TRACE: trace.replaceAll("\\", "/"),
   });
   client = new Client({ name: "local-discovery-test", version: "1" });
   await client.connect(new StdioClientTransport({ command: process.execPath, args: [process.env.PHREN_TEST_CLI || CLI_PATH, store], env, stderr: "ignore" }));
@@ -82,7 +82,16 @@ it("refreshes a single live MCP after uncommitted profile and document changes w
   const lock = path.join(store, ".runtime", "index-rebuild.lock");
   writeFile(lock, `${process.pid}\n`);
   await tick();
-  expect((await call("nas-media"))).toMatchObject({ ok: false, error: expect.stringContaining("retry") });
+  // Another live writer holds the rebuild lock past the wait budget: the call
+  // is answered from the last good index instead of failing, and tools that
+  // never read the index do not wait on the lock at all.
+  const stale = await call("nas-media");
+  expect(stale.ok).toBe(true);
+  expect(stale.data.summary).toContain("Updated local summary.");
+  const started = Date.now();
+  const tasks = await client!.callTool({ name: "get_tasks", arguments: { project: "nas-media" } });
+  expect(JSON.parse((tasks.content as Array<{ text: string }>)[0].text).ok).toBe(true);
+  expect(Date.now() - started).toBeLessThan(250);
   fs.unlinkSync(lock);
   await tick();
   expect((await call("nas-media")).data.summary).toBeNull();

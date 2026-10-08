@@ -821,6 +821,9 @@ async function handleStoreList(ctx: McpContext) {
 
 // ── Registration ─────────────────────────────────────────────────────────────
 
+/** These tools answer from the FTS index; the MCP server refreshes it before each call. */
+export const readsIndex = true;
+
 export function register(server: McpServer, ctx: McpContext): void {
   server.registerTool(
     "get_memory_detail",
