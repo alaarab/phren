@@ -50,3 +50,28 @@ it("refuses to seal a stale fallback during another writer's rebuild", async () 
   const current = await buildIndex(tmp.path, undefined, { force: true, requireFresh: true });
   current.close();
 });
+
+it("recovers a rebuild lock left behind by a process that died mid-rebuild", async () => {
+  tmp = makeTempDir("mcp-inputs-dead-");
+  writeFile(path.join(tmp.path, "demo", "summary.md"), "# Demo\nSummary.\n");
+  const lock = path.join(tmp.path, ".runtime", "index-rebuild.lock");
+  // A fresh lock (well inside the 30 s stale window) whose owner is gone.
+  const { spawnSync } = await import("node:child_process");
+  const dead = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" });
+  writeFile(lock, `${dead.stdout}\n${Date.now()}`);
+  const db = await buildIndex(tmp.path, undefined, { force: true, requireFresh: true });
+  try { expect(fs.existsSync(lock)).toBe(false); }
+  finally { db.close(); }
+});
+
+it("reports a live owner's lock as a typed busy error", async () => {
+  tmp = makeTempDir("mcp-inputs-live-");
+  writeFile(path.join(tmp.path, "demo", "summary.md"), "# Demo\nSummary.\n");
+  const lock = path.join(tmp.path, ".runtime", "index-rebuild.lock");
+  writeFile(lock, `${process.pid}\n${Date.now()}`);
+  const { isIndexBusyError } = await import("../shared/index.js");
+  try {
+    const error = await buildIndex(tmp.path, undefined, { force: true, requireFresh: true }).then(() => null, (e: unknown) => e);
+    expect(isIndexBusyError(error)).toBe(true);
+  } finally { fs.unlinkSync(lock); }
+});
