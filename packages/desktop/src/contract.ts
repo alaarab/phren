@@ -77,8 +77,8 @@ export interface MergedOverview { computers: ComputerOverview[] }
  * and return the local computer first, then each peer. Missing file: local only. */
 export type LoadComputers = () => Promise<Computer[]>;
 /** OpenSSH argv (without the leading "ssh") to run `remoteCommand` on `c`:
- * ControlMaster=auto, ControlPersist=10m, ControlPath under the bridge dir
- * (short path, e.g. `<bridge>/desktop-cm/%C`), a temp known_hosts file holding
+ * ControlMaster=auto, ControlPersist=10m, ControlPath in a short private dir
+ * (`/tmp/phren-desktop-<uid>/%C`; macOS caps socket paths at 104 bytes), a temp known_hosts file holding
  * only c.hostKey, StrictHostKeyChecking=yes, HostKeyAlgorithms=ssh-ed25519,
  * IdentityFile=<bridge>/id_ed25519_dispatch, IdentitiesOnly=yes, BatchMode=yes,
  * ForwardAgent=no, ClearAllForwardings=yes, ConnectTimeout=10, -p port,
