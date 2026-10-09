@@ -7,7 +7,6 @@ import type {
   CreateOverviewHub,
   HookOverview,
   MergedOverview,
-  OverviewHub,
 } from "./contract.js";
 
 const OVERVIEW_PATH = "/v1/overview?watchApprovals=1";
