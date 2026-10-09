@@ -8,7 +8,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
-import type { Computer, MergedOverview, StartServer, TerminalSession } from "./contract.js";
+import type { MergedOverview, StartServer, TerminalSession } from "./contract.js";
 
 const require = createRequire(import.meta.url);
 // The compiled file lives in dist/src/, so the UI folder is two levels up.
