@@ -173,7 +173,7 @@ export type EnrollDesktop = () => Promise<{ publicKey: string; line: string; com
 /** Link one computer over the owner's own ssh login to `host` (an ssh config
  * alias or user@host): resolve address, user and port with `ssh -G`; over
  * `ssh -o BatchMode=yes host` install the line in ~/.ssh/authorized_keys
- * (idempotent) and read /etc/ssh/ssh_host_ed25519_key.pub; refuse when the
+ * (idempotent) and read sshd's ssh_host_ed25519_key.pub (/etc/ssh, /usr/etc/ssh, …); refuse when the
  * Hook is not installed there; write the computer to desktop.yaml; then
  * verify with GET /v1/health over the new key. Returns the linked Computer. */
 export type LinkComputer = (host: string, options?: LinkOptions) => Promise<Computer>;

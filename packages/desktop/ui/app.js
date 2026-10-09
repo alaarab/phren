@@ -47,6 +47,42 @@ function updateCount(merged) {
   countEl.textContent = `${computers.length} computers \u00b7 ${online} online`;
 }
 
+// The Electron shell exposes window.phrenDesktop; in a browser it is absent.
+const shell = window.phrenDesktop;
+if (shell) document.documentElement.classList.add("electron", `platform-${shell.platform}`);
+
+/** Rows that need the owner: blocked or waiting agents and pending approvals. */
+function needsYou(merged) {
+  const rows = [];
+  for (const c of merged?.computers ?? []) {
+    for (const g of c.overview?.groups ?? []) {
+      for (const child of g.children ?? []) {
+        if (child.target && (child.agentStatus === "blocked" || child.agentStatus === "waiting" || child.approvalPending)) {
+          rows.push({ key: `${c.computer}/${child.id}`, computer: c.computer, child });
+        }
+      }
+    }
+  }
+  return rows;
+}
+
+let notified = null; // keys already announced; null until the first frame
+function announce(merged) {
+  const rows = needsYou(merged);
+  shell?.setBadge(rows.length);
+  document.title = rows.length ? `(${rows.length}) Phren` : "Phren";
+  const keys = new Set(rows.map((r) => r.key));
+  if (notified && shell) {
+    for (const r of rows) {
+      if (!notified.has(r.key)) {
+        const project = (r.child.cwd ?? r.child.label ?? "").split("/").filter(Boolean).pop() ?? r.child.label;
+        shell.notify(`${project} needs you`, `${r.child.title ?? r.child.label} · ${r.computer}`);
+      }
+    }
+  }
+  notified = keys;
+}
+
 let retry = 1000;
 
 function connect() {
@@ -61,6 +97,7 @@ function connect() {
     if (msg.type === "overview") {
       renderSidebar(sidebarEl, msg.merged, handlers);
       updateCount(msg.merged);
+      announce(msg.merged);
     }
   });
   ws.addEventListener("close", () => {

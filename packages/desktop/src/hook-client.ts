@@ -104,7 +104,9 @@ export const hookWebSocket: HookWebSocket = async (c, requestPath) => {
     headers: { Host: "phren.local" },
   });
   return new Promise((resolve, reject) => {
-    socket.once("open", () => resolve(socket));
+    // The Hook can send its first frame in the same chunk as the handshake, before
+    // the caller attaches a listener; hold frames until the caller's .then has run.
+    socket.once("open", () => { socket.pause(); resolve(socket); setImmediate(() => socket.resume()); });
     socket.once("error", reject);
     socket.once("unexpected-response", (req, response) => {
       req.destroy();
