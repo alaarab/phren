@@ -15,7 +15,7 @@ const require = createRequire(import.meta.url);
 const UI_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../ui");
 const MAX_BODY = 12 * 1024 * 1024;
 const COOKIE = "phren_desktop";
-const VENDOR_PREFIXES = ["/vendor/xterm/", "/vendor/addon-fit/", "/vendor/addon-webgl/"];
+const VENDOR_PREFIXES = ["/vendor/xterm/", "/vendor/addon-fit/", "/vendor/addon-webgl/", "/vendor/monaco/"];
 
 function tokenEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -52,7 +52,15 @@ function packageDir(pkg: string): string | null {
   try {
     return dirname(require.resolve(`${pkg}/package.json`));
   } catch {
-    return null;
+    // Packages whose "exports" hide package.json (monaco-editor): resolve the
+    // entry point and walk up to the package folder.
+    try {
+      let dir = dirname(require.resolve(pkg));
+      while (dir !== dirname(dir) && !existsSync(join(dir, "package.json"))) dir = dirname(dir);
+      return existsSync(join(dir, "package.json")) ? dir : null;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -60,6 +68,11 @@ function vendorDirs(prefix: string): string[] {
   if (prefix === "/vendor/xterm/") {
     const dir = packageDir("@xterm/xterm");
     return dir ? [join(dir, "lib"), join(dir, "css")] : [];
+  }
+  if (prefix === "/vendor/monaco/") {
+    // Monaco's prebuilt browser bundle (AMD loader, editor, workers, codicon font).
+    const dir = packageDir("monaco-editor");
+    return dir ? [join(dir, "min")] : [];
   }
   const pkg = prefix === "/vendor/addon-fit/" ? "@xterm/addon-fit" : "@xterm/addon-webgl";
   const dir = packageDir(pkg);
@@ -90,6 +103,8 @@ function contentType(file: string): string {
     case ".md": return "text/markdown; charset=utf-8";
     case ".json":
     case ".map": return "application/json; charset=utf-8";
+    case ".ttf": return "font/ttf";
+    case ".svg": return "image/svg+xml";
     default: return "application/octet-stream";
   }
 }

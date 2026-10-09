@@ -1429,6 +1429,18 @@ is `{path, size, contentType, version}`, with a repository-relative path that
 can be passed to `/v1/files/range` with the same target/worktree. No file bytes
 or absolute server paths are returned. Hook advertises `fileResolution`.
 
+`POST /v1/files/write` saves one text file in the session's repository for the
+desktop editor. It takes the full session target, optional `child` or `worktree`
+(as the Git routes), a repository-relative `path`, the file's UTF-8 `content`
+(at most 4 MiB) and the `version` that `/v1/files/range` returned when the
+editor read it. The write goes through a temp file and a rename in the same
+folder and keeps the file's mode. A `version` that no longer matches answers
+409 with `code: "file-changed"` and leaves the file alone. Leaving `version`
+out creates a new file, refused with `code: "file-exists"` when one is there.
+Absolute paths, `..`, `.git`, symbolic links on the way and missing folders
+are refused. The reply is `{path, version, size, created}`. Hook advertises
+`fileWrite`; it is part of the `git` module.
+
 `POST /v1/git/tree` takes the session's full target, optional `child` or
 `worktree`, relative `path` and optional `ignored: true`. It returns one directory
 with descendant file counts and a snapshot version; with `ignored`, the level's
