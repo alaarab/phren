@@ -83,7 +83,8 @@ computer (`phren bridge enroll-computer` and `phren bridge link`). A station
 is a third thing that should look like a computer: it runs on a computer,
 it reaches many Hooks, and it never needs the phone's pairing UX.
 
-Proposed: `phren station enroll` creates `<bridge>/id_ed25519_station` and
+Decided (owner, 2026-10-09): a separate station key, enrolled on each
+computer like a peer and revocable on its own. `phren station enroll` creates `<bridge>/id_ed25519_station` and
 prints the restricted line with comment `phren-station:<computer>`; `phren
 station link <host>` installs it on each computer over the owner's own SSH
 login and pins the host key, exactly as `phren bridge link` does today
@@ -95,7 +96,10 @@ with the same schema as `hooks.yaml`. The forced command stays the existing
 Why a separate key and not the dispatch key already in `hooks.yaml`: the
 dispatch key means "this Hook, acting for a conductor or a schedule";
 revocation, audit and the conductor-set rules read it that way. A station
-key means "the owner, at a keyboard". They should be revocable separately.
+key means "the owner, at a keyboard". They are revocable separately:
+removing the `phren-station:<computer>` line from a computer's
+`authorized_keys` (a `phren station revoke <computer>` command) cuts that
+station off without touching conductor dispatch, schedules or the phone.
 For the first spike, a flag can reuse the dispatch key and `hooks.yaml` so
 the fleet is reachable on day one (the Mini already links the MacBook,
 Omarchy and the NAS).
@@ -518,8 +522,9 @@ conductor grants and authority views, simulators, settle and snooze.
 1. **Shell**: decided 2026-10-09: Electron over the station daemon, for
    consistent Chromium rendering of xterm.js and WebGL on Linux. The
    daemon-served UI still opens in a browser.
-2. **Identity**: a separate station key enrolled per computer
-   (recommended), or reuse each computer's dispatch key and `hooks.yaml`.
+2. **Identity**: decided 2026-10-09: a separate station key, enrolled on
+   each computer like a peer and revocable on its own; the dispatch key
+   and `hooks.yaml` are reused only by the phase 0 spike.
 3. **Editor scope**: decided 2026-10-09: a light built-in editor that feels
    like the owner's own VS Code (Monaco, explorer, tabs, quick open, find
    in files, code-index navigation, diff, terminal), with a new Hook write
