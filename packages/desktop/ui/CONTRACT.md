@@ -59,3 +59,69 @@ in --accent, branch in monospace --muted, computer name, age ("2m"), title below
 a 3 px left accent bar for working (--working) and needs-input (--waiting).
 Sections in small caps with counts: "NEEDS YOU · 1", "WORKING · 2", "IDLE · 3", then "COMPUTERS"
 listing each computer with a state dot (online --done, connecting --muted, offline --danger).
+
+# Changes and editor (phase 1b)
+
+Owner direction 2026-10-09: "look at Codex and VS Code, mixed, but based more on
+Phren." So: Phren's phone Changes and Code screens are the base (looks, words,
+row shapes); VS Code supplies the desktop layout (file tree, editor tabs, side by
+side diff, ⌘P, ⌘S, dirty dots); Codex supplies review beside the conversation
+(comment on a line, send it to the agent working there).
+
+## Workbench (owned by the shell, app.js)
+
+The right panel `#side` is the workbench: a segment control at its top with
+**Changes · Files · Terminal** (pill segments, raised background, selected
+segment in --accent text on --card). Opening a session's chat also scopes the
+workbench to that session. A drag handle on its left edge resizes it (280 px to
+75 % of the window), and a maximize button lets it cover the chat.
+
+Each pane module gets a container element and a context:
+
+```js
+ctx = {
+  computer,          // the Computer name
+  child,             // OverviewChild; child.target is the session target
+  openFile(path, { line, diff }),  // switch to Files and open path (diff: true opens the diff view)
+  showChanges(),     // switch to Changes
+  ask(text),         // put text in that session's chat composer (Codex-style review)
+}
+```
+
+`ui/api.js` (exists): `hookPost(computer, route, body)`, `hookGet(computer, route, query)`,
+`targetQuery(target)`, `readRepoFile(computer, target, path) → {text, version, total}`.
+Errors are `Error` with `.status`, `.code` and `.body` (the Hook's JSON).
+
+## Hook routes these panes use (all take the session `target`)
+
+- `POST /v1/git/status {target}` → `{branch, upstream, ahead, behind, staged, unstaged, untracked,
+  additions, deletions, totalFiles, files:[{path, status:"M"|"A"|"D"|"R"|"?", staged, additions, deletions, binary}], repository}`.
+  A file staged and also changed again appears twice (staged true and false).
+- `POST /v1/diff {target, paths:[]}` → `{files:[{path, status, sections:[{id, kind:"staged"|"unstaged", binary, patch, truncated}]}]}`
+  (`patch` is unified diff text; untracked files have no sections; read them whole).
+- `POST /v1/git/stage|unstage|discard {target, paths:[...], expectedRepository}`; stage also takes `confirmBulk`.
+- `POST /v1/git/commit {target, message, expectedRepository}`; `POST /v1/git/push {target, expectedRepository}`
+  (a 409 whose `error.body.defaultBranch` is set means pushing the default branch: ask with a Phren dialog, then resend with `confirmDefault: true`).
+- `POST /v1/git/log {target, limit}` → `{commits:[{sha, short, subject, author, date, refs, parents}]}` (History).
+- `POST /v1/git/tree {target, path}` → `{path, entries:[{name, path, kind:"dir"|"file", fileCount?}]}` one directory.
+- `GET /v1/files/range` via `readRepoFile`.
+- `POST /v1/files/write {target, path, content, version}` → `{path, version, size}`; 409 code
+  "file-changed" when the file moved since `version`; omit `version` only to create a new file
+  (409 code "file-exists" if it exists). Only Hooks advertising `capabilities.fileWrite` have it;
+  others answer 404: show "Update Phren on <computer> to save files here."
+
+## Look additions (Phren phone Changes screen)
+
+- Title row: "Uncommitted changes" (or History, Branches) with a ▾ that opens the section menu,
+  and a quiet line under it in mono --muted: "main · 3 files +12 −3".
+- Section headers: small caps `STAGED` / `CHANGES` followed by a count pill (raised, radius 999, 11 px).
+- File row (40 px): a 24 px status tile (radius 6, tinted background: M and A green rgba(138,200,172,.16)
+  with --done letter, D rgba(239,152,152,.16) --danger, ? --muted on raised, R --link), file name in mono
+  --text, its folder below in --muted 12 px, then `+n` in --done and `−n` in --danger, right aligned.
+  Hover reveals row actions as small icon buttons: open file, stage (+) or unstage (−), discard (↺).
+- Diff rows: mono 12.5 px, line-number gutter in --dim, added rows rgba(138,200,172,.14) with the changed
+  words rgba(138,200,172,.32), removed rows rgba(239,152,152,.14) / .32, hunk header `@@ -2,3 +2,3 @@`
+  in --accent on a hairline rule. Syntax colour is not required in the list diff.
+- Footer: commit message field (sunken, radius 12) + "✓ Commit" button (--accent-solid at 0.35 when
+  disabled, full when enabled) + "↑ Push N" pill when ahead > 0. "Stage all" replaces Commit when nothing is staged.
+- Words: "Changes", "Files", "Uncommitted changes", "Working tree clean", never "symbol" or "SCM".
