@@ -1,4 +1,4 @@
-# Phren Station: research notes
+# Phren desktop: research notes
 
 Compiled 2026-10-07 for [DESIGN.md](DESIGN.md). Five surveys were run in parallel
 (Moshi, T3 Code, other references, the Phren Hook, the phren-apps repo) and
@@ -11,8 +11,8 @@ Sections: [Moshi](#1-moshi-and-moshi-hook), [T3 Code](#2-t3-code),
 [Codex app](#3-codex-app-and-app-server), [cmux](#4-cmux), [Herdr](#5-herdr),
 [VS Code remote and code-server](#6-vs-code-remote-code-server-openvscode-server),
 [Zed and ACP](#7-zed-remote-and-acp), [other fleet products](#8-other-2026-fleet-products),
-[the Phren Hook](#9-the-phren-hook-what-a-station-reuses),
-[the phone apps](#10-the-phone-apps-what-a-station-shares),
+[the Phren Hook](#9-the-phren-hook-what-a-desktop-reuses),
+[the phone apps](#10-the-phone-apps-what-a-desktop-shares),
 [Phren's design language](#11-phrens-design-language), [cross-cutting takeaways](#12-cross-cutting-takeaways).
 
 ## 1. Moshi and moshi-hook
@@ -60,7 +60,7 @@ session/window, panes lazily) with `agentStatus` working|blocked|done|idle|unkno
 rebuilds every 5 s at rest and every 1 s for 3 s after a hook event; the
 agent watch ticks at 250 ms; every `/events` frame is a partial merge.
 
-**Multi-host desktop pattern** (the one most relevant to a station):
+**Multi-host desktop pattern** (the one most relevant to a desktop):
 `/hosts/<name>/*` on the web listener reverse-proxies HTTP and WS to
 `127.0.0.1:24543` on `<name>` through `ssh -W` with `ControlMaster=auto`,
 `ControlPersist=10m`, `BatchMode=yes`. `GET /v1/pty?mux=…&host=<name>` runs
@@ -247,7 +247,7 @@ Phren's `integrations/herdr/` is one.
 **Copy**: five-state status with reports beating heuristics, the machine
 profile shape and per-machine reconnect independence, `agent_session` as the
 resume handle, the observe/control bridges as a per-pane transport.
-**Avoid**: expecting a web client; opening Herdr sockets from the station
+**Avoid**: expecting a web client; opening Herdr sockets from the desktop
 (the Hook already fronts Herdr).
 
 ## 6. VS Code remote, code-server, openvscode-server
@@ -263,7 +263,7 @@ only, `/proxy/<port>/` for dev-server previews, one instance per user.
 URL (`?tkn=`), designed for browsers. Embedding Microsoft's own VS Code Server
 is not licensed.
 
-**Copy**: the UI-vs-workspace split as the mental model for station vs Hook;
+**Copy**: the UI-vs-workspace split as the mental model for desktop vs Hook;
 connection-token-in-URL for a tailnet-only service; port proxies for
 previews. **Avoid**: building a full editor; depend on Microsoft tunnels.
 
@@ -315,7 +315,7 @@ complements the Hook's pane model rather than replacing it.
 - **Vibe Kanban**: Rust server + web UI, issues → workspaces → sessions,
   remote projects, an MCP server.
 
-## 9. The Phren Hook: what a station reuses
+## 9. The Phren Hook: what a desktop reuses
 
 Verified in `packages/cli/src/bridge/` at 0.3.33 (line numbers in the Hook
 survey; key facts only here).
@@ -379,13 +379,13 @@ session ids, `approvalDecisions`, `OfflineCode`, `PERMISSION_MODES`),
 and 44 conformance fixtures under `fixtures/conformance/`. No OpenAPI, no
 generated client.
 
-**Gaps for a station**: (a) no live terminal stream per pane, (b) no write
+**Gaps for a desktop**: (a) no live terminal stream per pane, (b) no write
 route for checkout files (only store CAS writes and git actions), (c) no
 LSP (the code index gives definitions, references and outlines), (d) no
 server-side overview aggregation across Hooks, (e) no desktop identity beyond
 SSH keys, and the 16-socket cap is shared with the phone.
 
-## 10. The phone apps: what a station shares
+## 10. The phone apps: what a desktop shares
 
 Two fully native apps, no cross-platform framework, no codegen: iOS SwiftUI
 (about 107k lines across the app, `PhrenKit` and `PhrenLive`) and Android
@@ -441,7 +441,7 @@ loopback preview proxy.
 
 **No shared-contract or codegen plan exists.** The repo's stated model is to
 ship the same JS rather than a transcription (the graph). The natural shared
-layer for a station is the TypeScript already in `packages/cli`; anything
+layer for a desktop is the TypeScript already in `packages/cli`; anything
 Swift and Kotlin only (chat timeline, tool cards, offline policy, usage
 merging, delivery reconciliation) would be a third port unless lifted into a
 shared package first.
@@ -495,7 +495,7 @@ From `apps/ios/DESIGN.md`, `design/controls.md`, `design/sessions.md`,
 
 1. Every serious product has a per-machine daemon with a pid, lock and
    settings trio, a version-named binary and an attach or proxy mode. The
-   Hook already is this. The station's job is the client side and one
+   Hook already is this. The desktop's job is the client side and one
    pairing story.
 2. Two protocol shapes dominate: JSON-RPC with server-initiated approval
    requests (Codex, ACP) and newline-JSON method sockets (Herdr, cmux). The
@@ -513,5 +513,5 @@ From `apps/ios/DESIGN.md`, `design/controls.md`, `design/sessions.md`,
 6. Worktree-per-task is table stakes but must stay optional for Phren,
    whose sessions routinely share a checkout.
 7. Phones all go through a vendor relay with QR pairing. Phren's phones
-   already reach the Hook over Tailscale; the station is the desktop peer of
+   already reach the Hook over Tailscale; the desktop is the desktop peer of
    that model, not a new relay.
