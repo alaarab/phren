@@ -1,0 +1,150 @@
+// Shared contract for the Phren desktop phase 0 spike.
+// Design: docs/desktop/DESIGN.md (PR #367). Every module in src/ implements
+// exactly the exports declared for it here and imports types only from here.
+// Do not change this file; ask the orchestrator.
+
+import type { Duplex } from "node:stream";
+
+/** One computer this desktop can reach. `local` means this machine: talk to
+ * its Hook over the Unix socket, never over SSH. */
+export interface Computer {
+  /** Stable display name: hooks.yaml `name`, or "This computer" for local. */
+  name: string;
+  local: boolean;
+  /** SSH fields, absent when local. */
+  address?: string;
+  username?: string;
+  port?: number;
+  /** Pinned host key, "ssh-ed25519 AAAA…" (hooks.yaml `hostKey`). */
+  hostKey?: string;
+  /** Default Herdr or tmux server name on that computer (hooks.yaml `server`, default "default"). */
+  server: string;
+}
+
+/** A Hook pane target, exactly the Hook's `targetSchema` (protocol.ts). */
+export interface Target {
+  server: string;
+  workspace: string;
+  tab: string;
+  pane: string;
+  source: "codex" | "claude" | "copilot" | "phren" | "opencode";
+  session: string;
+}
+
+/** One session row from a Hook overview: `groups[].children[]` of
+ * `GET /v1/workspaces` or a `{type:"overview"}` frame of `WS /v1/overview`. */
+export interface OverviewChild {
+  id: string;
+  label: string;
+  title?: string;
+  agent?: string;
+  /** "working" | "idle" | "blocked" | "waiting" | "done" | "unknown" */
+  agentStatus?: string;
+  cwd?: string;
+  lastChangedAt?: string;
+  branch?: string;
+  model?: string;
+  approvalPending?: boolean;
+  target?: Target;
+  [key: string]: unknown;
+}
+export interface OverviewGroup { id: string; label: string; children: OverviewChild[] }
+export interface HookOverview {
+  kind?: string;
+  groups: OverviewGroup[];
+  mux?: { id: string; kind: string; session: string };
+  phren?: { computer?: { id: string; name: string }; version?: string; capabilities?: Record<string, unknown> };
+  [key: string]: unknown;
+}
+
+/** Per-computer connection state, the phone's vocabulary. */
+export type ComputerState = "connecting" | "online" | "offline" | "verify";
+export interface ComputerOverview {
+  computer: string;            // Computer.name
+  state: ComputerState;
+  /** Hook error `code` or a short message when offline. */
+  error?: string;
+  /** Last overview received; kept (stale) while offline. */
+  overview?: HookOverview;
+  updatedAt?: string;          // ISO time of the last overview frame
+}
+
+/** The merged view the UI renders. */
+export interface MergedOverview { computers: ComputerOverview[] }
+
+// ---------------------------------------------------------------- hosts.ts
+/** Read `<bridge>/hooks.yaml` (PHREN_BRIDGE_HOME or ~/.local/share/phren/bridge)
+ * and return the local computer first, then each peer. Missing file: local only. */
+export type LoadComputers = () => Promise<Computer[]>;
+/** OpenSSH argv (without the leading "ssh") to run `remoteCommand` on `c`:
+ * ControlMaster=auto, ControlPersist=10m, ControlPath under the bridge dir
+ * (short path, e.g. `<bridge>/desktop-cm/%C`), a temp known_hosts file holding
+ * only c.hostKey, StrictHostKeyChecking=yes, HostKeyAlgorithms=ssh-ed25519,
+ * IdentityFile=<bridge>/id_ed25519_dispatch, IdentitiesOnly=yes, BatchMode=yes,
+ * ForwardAgent=no, ClearAllForwardings=yes, ConnectTimeout=10, -p port,
+ * user@address. `tty` adds "-tt". */
+export type SshArgs = (c: Computer, remoteCommand: string, opts?: { tty?: boolean }) => string[];
+
+// ---------------------------------------------------------------- hook-client.ts
+/** Open a raw byte pipe to computer c's Hook: local = net.connect(hook.sock);
+ * remote = spawn("ssh", sshArgs(c, "phren-hook v1 pipe")) with stdio as a Duplex.
+ * One pipe carries exactly one HTTP request or one WebSocket. */
+export type OpenHookPipe = (c: Computer) => Promise<Duplex>;
+export interface HookResponse { status: number; headers: Record<string, string>; body: Buffer }
+/** One HTTP/1.1 request over a fresh pipe: Host: phren.local, Connection: close,
+ * Content-Type application/json when body is set. 60 s timeout. */
+export type HookRequest = (c: Computer, method: string, path: string, body?: unknown) => Promise<HookResponse>;
+/** A `ws` WebSocket client over a fresh pipe (use the `createConnection` option
+ * to return the pipe; url `ws://phren.local<path>`, perMessageDeflate:false). */
+export type HookWebSocket = (c: Computer, path: string) => Promise<import("ws").WebSocket>;
+
+// ---------------------------------------------------------------- overview.ts
+/** Holds one `WS /v1/overview` per computer, reconnecting with jittered backoff
+ * (1 s doubling to 60 s), and merges them. Emits "change" with MergedOverview. */
+export interface OverviewHub {
+  start(): void;
+  stop(): void;
+  current(): MergedOverview;
+  on(event: "change", listener: (merged: MergedOverview) => void): void;
+}
+export type CreateOverviewHub = (computers: Computer[], ws: HookWebSocket) => OverviewHub;
+
+// ---------------------------------------------------------------- pty-bridge.ts
+/** A live terminal. Mirrors node-pty's IPty surface the server needs. */
+export interface TerminalSession {
+  write(data: string): void;
+  resize(cols: number, rows: number): void;
+  onData(listener: (data: string) => void): void;
+  onExit(listener: (code: number) => void): void;
+  kill(): void;
+}
+/** Attach a terminal to multiplexer `server` on computer c.
+ * Remote: node-pty spawn "ssh" with sshArgs(c, `phren-hook v1 terminal ${server}`, {tty:true}).
+ * Local: herdr → `herdr session attach <server>`; a server named `tmux` → `tmux attach`;
+ * `tmux-<name>` → `tmux -L <name> attach`. TERM=xterm-256color. */
+export type AttachTerminal = (c: Computer, server: string, cols: number, rows: number) => TerminalSession;
+
+// ---------------------------------------------------------------- server.ts
+/** HTTP + WS server bound to 127.0.0.1:<port> (0 = any free port). Every request
+ * needs the token: `?token=` on the first page load (then an HttpOnly cookie
+ * `phren_desktop`), or the cookie. Routes:
+ *   GET  /                      → ui/index.html (static files from ../ui and
+ *                                  /vendor/xterm/* from node_modules/@xterm/*)
+ *   GET  /api/computers         → Computer[] without hostKey
+ *   GET  /api/overview          → MergedOverview
+ *   WS   /api/overview          → pushes {type:"overview", merged} on every change
+ *   ANY  /hosts/<name>/v1/...   → proxied with hookRequest (method, path+query, JSON body)
+ *   WS   /hosts/<name>/v1/...   → proxied with hookWebSocket, frames passed both ways
+ *   WS   /pty?computer=&server=&cols=&rows= → attachTerminal; client→server text
+ *        frames are input except JSON {"type":"resize","cols","rows"}; server→client
+ *        frames are terminal output text. */
+export interface DesktopServerOptions {
+  port: number;
+  token: string;
+  computers: Computer[];
+  hub: OverviewHub;
+  hookRequest: HookRequest;
+  hookWebSocket: HookWebSocket;
+  attachTerminal: AttachTerminal;
+}
+export type StartServer = (o: DesktopServerOptions) => Promise<{ url: string; close(): Promise<void> }>;
