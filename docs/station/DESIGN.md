@@ -28,12 +28,15 @@ relay, and it does not try to be VS Code.
 Build a **station daemon in TypeScript** (`phren station`, a new workspace
 package `@phren/station`, lazily loaded by the CLI like `@phren/agent` and
 `@phren/code`) plus a **web UI it serves on loopback**, and wrap that UI in a
-**Tauri 2 shell** for the app feel. Ship the daemon first; the shell is a
-packaging step.
+**Electron shell** for the app feel (owner decision, 2026-10-09). The
+Electron main process starts or attaches to the daemon and loads its UI; it
+does not bundle the Hook client logic itself. Ship the daemon first; the
+shell is a packaging step. The daemon-served web UI still opens in any
+browser too.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  Station app (Tauri shell, or any browser on this computer)             │
+│  Station app (Electron shell, or any browser on this computer)          │
 │  web UI: sessions · chat · terminals · changes · editor · memory · …    │
 └───────────────▲─────────────────────────────────────────────────────────┘
                 │ http://127.0.0.1:<port>  (per-run token, same-origin WS)
@@ -56,15 +59,15 @@ packaging step.
 | Option | Verdict | Reasons |
 | --- | --- | --- |
 | **Web UI served by each Hook over Tailscale** | No, not as the base | The Hook listens on a Unix socket only and its whole trust model is SSH. A browser cannot speak SSH, so this needs a TCP listener, a token layer and a PTY WebSocket in every Hook before anything works, and it changes the security story the phone depends on. It also leaves fan-in to the browser. Keep it as a later option for the station daemon itself (section 3.4). |
-| **Electron app** | Fallback | One runtime and everyone knows it, but 150 MB installers, a bundled Node that drifts from the CLI's, and no browser reach. T3's own research note: the renderer needs nothing from Electron except SSH launching, which the daemon does anyway. |
-| **Tauri shell over the station daemon** | Recommended | 10 MB shell, native menus and notifications, WKWebView on macOS and webkit2gtk on Linux (Omarchy). Node is already required on every Phren computer (22.19+), so the daemon runs on the installed Node, same as the Hook. The same UI works in a plain browser tab, which is how "a station on every Tailscale computer" also covers an iPad or a borrowed laptop. Moshi ships exactly this shape. |
+| **Electron shell over the station daemon** | **Chosen** (owner, 2026-10-09) | Chromium everywhere. On Linux (Omarchy, Wayland) Tauri would render with WebKitGTK, where xterm.js's WebGL renderer and general WebGL behaviour are inconsistent; Electron gives the same Chromium engine on macOS and Linux, so terminals, the 3D memory graph and CodeMirror behave identically on every computer. Native menus, notifications, dock badge and tray come with it. Costs accepted: a 100 to 150 MB installer and an Electron release train. Keep the shell thin: the daemon (on the installed Node, 22.19+, same as the Hook) owns SSH, PTYs and Hook clients, and the shell only starts it and loads its UI, so the same UI still works in a plain browser tab (an iPad or a borrowed laptop on the tailnet). This is T3's own split: its renderer is an ordinary remote client of its server. |
+| **Tauri shell over the station daemon** | Not chosen | 10 MB shell, but WKWebView on macOS and WebKitGTK on Linux, so the Linux rendering path differs from the Mac one exactly where the station is heaviest (xterm.js with WebGL, the graph). Moshi ships this shape. |
 | **Native SwiftUI Mac app** | No | A third native port of the phone's state machines with no Linux story. |
 | **VS Code extension** | No | The existing extension is memory-only over MCP; a fleet UI inside VS Code's sidebar does not fit terminals, chats and multi-pane layouts, and ties the station to one editor. |
 
 Rendering choices inside the UI: **xterm.js** with the WebGL addon and the
 canvas fallback (Moshi's choice; T3's libghostty wasm is faster but a
 heavier dependency to carry); **CodeMirror 6** for the editor (MIT, light,
-good in WebKit); **`@pierre/diffs`** or the phone's diff rules ported to
+works the same in every browser); **`@pierre/diffs`** or the phone's diff rules ported to
 HTML for diffs; the existing `packages/cli/browser/graph/` bundle for the
 memory graph; plain TypeScript components with the Phren tokens as CSS
 variables (section 8). Framework: whatever the first builder is fastest in,
@@ -379,8 +382,9 @@ Everything the phone's Agents tab does, at a desk:
 - Memory and Tasks read views (the graph, findings, tasks) and task status
   updates over the store CAS routes.
 - Native notifications for approvals and dispatch returns.
-- Tauri shell with menus, dock badge and a tray count; `phren station`
-  also opens the browser when the shell is absent.
+- Electron shell with menus, dock badge and a tray count, starting or
+  attaching to the daemon; `phren station` also opens the browser when the
+  shell is absent.
 
 Not in the MVP: file writes, per-pane PTYs, talk, schedules editing,
 conductor grants and authority views, simulators, settle and snooze.
@@ -425,8 +429,10 @@ conductor grants and authority views, simulators, settle and snooze.
   gateway; `gatewayMs` in health reports it. ControlMaster removes the SSH
   handshake but not the fork. A busy station may want a long-lived pipe
   variant (`phren-hook v1 stream`) later; not needed to start.
-- **webkit2gtk performance** for xterm.js with WebGL on Linux. The canvas
-  renderer is the fallback; Electron is the escape hatch if it is not enough.
+- **Electron weight and drift**: installer size and Chromium security
+  updates are an ongoing cost. Keep all logic in the daemon so the shell
+  stays a thin, replaceable loader, and keep the browser path working as
+  the fallback.
 - **Herdr's control bridge** is documented but unverified here; the tmux
   linked-session approach is well understood. Prove both in the Phase 2
   spike before committing to the route shape.
@@ -439,8 +445,9 @@ conductor grants and authority views, simulators, settle and snooze.
 
 ## 12. Decisions needed from the owner
 
-1. **Shell**: Tauri 2 over the station daemon (recommended), Electron, or
-   browser-only for the first release.
+1. **Shell**: decided 2026-10-09: Electron over the station daemon, for
+   consistent Chromium rendering of xterm.js and WebGL on Linux. The
+   daemon-served UI still opens in a browser.
 2. **Identity**: a separate station key enrolled per computer
    (recommended), or reuse each computer's dispatch key and `hooks.yaml`.
 3. **Editor scope**: a light CodeMirror editor with a new Hook write route
