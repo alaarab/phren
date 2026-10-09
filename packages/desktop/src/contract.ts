@@ -19,6 +19,10 @@ export interface Computer {
   hostKey?: string;
   /** Default Herdr or tmux server name on that computer (hooks.yaml `server`, default "default"). */
   server: string;
+  /** Private key ssh uses for this computer: `<bridge>/id_ed25519_desktop` for
+   * computers in desktop.yaml, `<bridge>/id_ed25519_dispatch` for the hooks.yaml
+   * fallback. Absent when local. */
+  keyFile?: string;
 }
 
 /** A Hook pane target, exactly the Hook's `targetSchema` (protocol.ts). */
@@ -73,14 +77,16 @@ export interface ComputerOverview {
 export interface MergedOverview { computers: ComputerOverview[] }
 
 // ---------------------------------------------------------------- hosts.ts
-/** Read `<bridge>/hooks.yaml` (PHREN_BRIDGE_HOME or ~/.local/share/phren/bridge)
- * and return the local computer first, then each peer. Missing file: local only. */
+/** Return the local computer first, then each linked computer from
+ * `<bridge>/desktop.yaml` (keyFile = the desktop key). When desktop.yaml does
+ * not exist, fall back to `<bridge>/hooks.yaml` with the dispatch key (phase 0
+ * spike). Neither file: local only. */
 export type LoadComputers = () => Promise<Computer[]>;
 /** OpenSSH argv (without the leading "ssh") to run `remoteCommand` on `c`:
  * ControlMaster=auto, ControlPersist=10m, ControlPath in a short private dir
  * (`/tmp/phren-desktop-<uid>/%C`; macOS caps socket paths at 104 bytes), a temp known_hosts file holding
  * only c.hostKey, StrictHostKeyChecking=yes, HostKeyAlgorithms=ssh-ed25519,
- * IdentityFile=<bridge>/id_ed25519_dispatch, IdentitiesOnly=yes, BatchMode=yes,
+ * IdentityFile=c.keyFile, IdentitiesOnly=yes, BatchMode=yes,
  * ForwardAgent=no, ClearAllForwardings=yes, ConnectTimeout=10, -p port,
  * user@address. `tty` adds "-tt". */
 export type SshArgs = (c: Computer, remoteCommand: string, opts?: { tty?: boolean }) => string[];
@@ -148,3 +154,30 @@ export interface DesktopServerOptions {
   attachTerminal: AttachTerminal;
 }
 export type StartServer = (o: DesktopServerOptions) => Promise<{ url: string; close(): Promise<void> }>;
+
+// ---------------------------------------------------------------- keys.ts
+/** The desktop's own identity: `<bridge>/id_ed25519_desktop`, comment
+ * `phren-desktop:<this computer>`, enrolled on each computer like a peer and
+ * revocable on its own. desktop.yaml has the hooks.yaml schema:
+ * `{version: 1, computers: [{name, address, username, port, hostKey, server}]}`, mode 0600. */
+export interface LinkOptions {
+  /** What this desktop calls the computer (default: the ssh host argument). Must match /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$/. */
+  name?: string;
+  /** Multiplexer server to attach by default (default "default"). */
+  server?: string;
+}
+/** Create the key if missing (ssh-keygen -t ed25519 -N ""), return the public
+ * key and the restricted authorized_keys line:
+ * `restrict,pty,command="sh ~/.local/share/phren/bridge/dispatch" ssh-ed25519 AAAA… phren-desktop:<this computer>`. */
+export type EnrollDesktop = () => Promise<{ publicKey: string; line: string; comment: string }>;
+/** Link one computer over the owner's own ssh login to `host` (an ssh config
+ * alias or user@host): resolve address, user and port with `ssh -G`; over
+ * `ssh -o BatchMode=yes host` install the line in ~/.ssh/authorized_keys
+ * (idempotent) and read /etc/ssh/ssh_host_ed25519_key.pub; refuse when the
+ * Hook is not installed there; write the computer to desktop.yaml; then
+ * verify with GET /v1/health over the new key. Returns the linked Computer. */
+export type LinkComputer = (host: string, options?: LinkOptions) => Promise<Computer>;
+/** Remove this desktop's line from that computer's authorized_keys over the
+ * owner's ssh login, drop it from desktop.yaml, delete its pinned known_hosts.
+ * `{remote: false}` when the computer could not be reached (local entry still removed). */
+export type RevokeComputer = (name: string) => Promise<{ remote: boolean }>;

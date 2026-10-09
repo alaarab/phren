@@ -12,67 +12,75 @@ export function bridgeRoot(): string {
 
 const LOCAL: Computer = { name: "This computer", local: true, server: "default" };
 
-/** Read hooks.yaml and return this computer, then each verifiable peer. */
+/** This computer, then desktop.yaml's computers (desktop key), else the
+ * hooks.yaml peers with the dispatch key (phase 0 fallback). */
 export const loadComputers: LoadComputers = async () => {
-  const file = path.join(bridgeRoot(), "hooks.yaml");
+  const root = bridgeRoot();
+  const desktop = await readPeers(path.join(root, "desktop.yaml"));
+  if (desktop) return [LOCAL, ...parseComputers(desktop.doc, desktop.file, desktopKeyPath())];
+  const hooks = await readPeers(path.join(root, "hooks.yaml"));
+  return hooks ? [LOCAL, ...parseComputers(hooks.doc, hooks.file, path.join(root, "id_ed25519_dispatch"))] : [LOCAL];
+};
+
+export const desktopKeyPath = (): string => path.join(bridgeRoot(), "id_ed25519_desktop");
+
+async function readPeers(file: string): Promise<{ doc: unknown; file: string } | undefined> {
   let text: string;
   try {
     text = await readFile(file, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [LOCAL];
-    throw new Error(`hooks.yaml could not be read (${(error as NodeJS.ErrnoException).code ?? "unknown error"}).`);
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw new Error(`${path.basename(file)} could not be read (${(error as NodeJS.ErrnoException).code ?? "unknown error"}).`);
   }
-  let doc: unknown;
   try {
-    doc = load(text);
+    return { doc: load(text), file: path.basename(file) };
   } catch (error) {
-    throw new Error(`hooks.yaml is invalid: ${(error as Error).message}`);
+    throw new Error(`${path.basename(file)} is invalid: ${(error as Error).message}`);
   }
-  return [LOCAL, ...parseComputers(doc)];
-};
+}
 
-function parseComputers(doc: unknown): Computer[] {
+function parseComputers(doc: unknown, file: string, keyFile: string): Computer[] {
   const computers = doc && typeof doc === "object" ? (doc as { computers?: unknown }).computers : undefined;
-  if (!Array.isArray(computers)) throw new Error("hooks.yaml is invalid: expected a `computers` list.");
+  if (!Array.isArray(computers)) throw new Error(`${file} is invalid: expected a \`computers\` list.`);
   return computers.map((entry, i) => {
     const where = `computers[${i}]`;
-    if (!entry || typeof entry !== "object") throw new Error(`hooks.yaml is invalid at ${where}.`);
+    if (!entry || typeof entry !== "object") throw new Error(`${file} is invalid at ${where}.`);
     const row = entry as Record<string, unknown>;
     const str = (key: string): string => {
       const value = row[key];
-      if (typeof value !== "string" || value.length === 0) throw new Error(`hooks.yaml is invalid at ${where}.${key}.`);
+      if (typeof value !== "string" || value.length === 0) throw new Error(`${file} is invalid at ${where}.${key}.`);
       return value;
     };
-    const port = row.port === undefined ? 22 : number(row.port, `${where}.port`);
+    const port = row.port === undefined ? 22 : number(row.port, `${file} ${where}.port`);
     const server = row.server === undefined ? "default" : str("server");
-    return { name: str("name"), local: false, address: str("address"), username: str("username"), port, hostKey: str("hostKey"), server };
+    return { name: str("name"), local: false, address: str("address"), username: str("username"), port, hostKey: str("hostKey"), server, keyFile };
   });
 }
 
 function number(value: unknown, where: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 65535)
-    throw new Error(`hooks.yaml is invalid at ${where}.`);
+    throw new Error(`Invalid at ${where}.`);
   return value;
 }
 
-const written = new Set<string>();
+const written = new Map<string, string>();
 
 /** OpenSSH argv (no leading "ssh") to run a remote command under a pinned key. */
 export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
   if (c.local) throw new Error("sshArgs cannot run on the local computer; use the Hook socket.");
-  if (!c.address || !c.username || !c.hostKey) throw new Error(`Computer ${c.name} is missing SSH details.`);
+  if (!c.address || !c.username || !c.hostKey || !c.keyFile) throw new Error(`Computer ${c.name} is missing SSH details.`);
   const root = bridgeRoot();
   const port = c.port ?? 22;
   const controlDir = path.join(root, "desktop-cm");
-  const knownHosts = path.join(controlDir, `known_hosts-${safeName(c.name)}`);
+  const knownHosts = knownHostsPath(c.name);
   // The master socket and pinned known_hosts live together; %C hashes the connection tuple.
   mkdirSync(controlDir, { recursive: true, mode: 0o700 });
-  if (!written.has(c.name)) {
+  if (written.get(c.name) !== c.hostKey) {
     const lines = [`${c.address} ${c.hostKey}`];
     if (port !== 22) lines.push(`[${c.address}]:${port} ${c.hostKey}`);
     writeFileSync(knownHosts, `${lines.join("\n")}\n`, { mode: 0o600 });
     chmodSync(knownHosts, 0o600);
-    written.add(c.name);
+    written.set(c.name, c.hostKey);
   }
   return [
     "-F", "/dev/null",
@@ -84,7 +92,7 @@ export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
     "-o", "StrictHostKeyChecking=yes",
     "-o", "HostKeyAlgorithms=ssh-ed25519",
     "-o", "UpdateHostKeys=no",
-    "-i", path.join(root, "id_ed25519_dispatch"),
+    "-i", c.keyFile,
     "-o", "IdentitiesOnly=yes",
     "-o", "BatchMode=yes",
     "-o", "ForwardAgent=no",
@@ -112,4 +120,9 @@ function controlSocketDir(): string {
 /** A filesystem-safe fragment of a display name. */
 function safeName(name: string): string {
   return name.replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 100) || "computer";
+}
+
+/** Where this computer's pinned known_hosts lives (removed on revoke). */
+export function knownHostsPath(name: string): string {
+  return path.join(bridgeRoot(), "desktop-cm", `known_hosts-${safeName(name)}`);
 }
