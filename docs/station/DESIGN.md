@@ -59,16 +59,16 @@ browser too.
 | Option | Verdict | Reasons |
 | --- | --- | --- |
 | **Web UI served by each Hook over Tailscale** | No, not as the base | The Hook listens on a Unix socket only and its whole trust model is SSH. A browser cannot speak SSH, so this needs a TCP listener, a token layer and a PTY WebSocket in every Hook before anything works, and it changes the security story the phone depends on. It also leaves fan-in to the browser. Keep it as a later option for the station daemon itself (section 3.4). |
-| **Electron shell over the station daemon** | **Chosen** (owner, 2026-10-09) | Chromium everywhere. On Linux (Omarchy, Wayland) Tauri would render with WebKitGTK, where xterm.js's WebGL renderer and general WebGL behaviour are inconsistent; Electron gives the same Chromium engine on macOS and Linux, so terminals, the 3D memory graph and CodeMirror behave identically on every computer. Native menus, notifications, dock badge and tray come with it. Costs accepted: a 100 to 150 MB installer and an Electron release train. Keep the shell thin: the daemon (on the installed Node, 22.19+, same as the Hook) owns SSH, PTYs and Hook clients, and the shell only starts it and loads its UI, so the same UI still works in a plain browser tab (an iPad or a borrowed laptop on the tailnet). This is T3's own split: its renderer is an ordinary remote client of its server. |
+| **Electron shell over the station daemon** | **Chosen** (owner, 2026-10-09) | Chromium everywhere. On Linux (Omarchy, Wayland) Tauri would render with WebKitGTK, where xterm.js's WebGL renderer and general WebGL behaviour are inconsistent; Electron gives the same Chromium engine on macOS and Linux, so terminals, the 3D memory graph and the editor behave identically on every computer. Native menus, notifications, dock badge and tray come with it. Costs accepted: a 100 to 150 MB installer and an Electron release train. Keep the shell thin: the daemon (on the installed Node, 22.19+, same as the Hook) owns SSH, PTYs and Hook clients, and the shell only starts it and loads its UI, so the same UI still works in a plain browser tab (an iPad or a borrowed laptop on the tailnet). This is T3's own split: its renderer is an ordinary remote client of its server. |
 | **Tauri shell over the station daemon** | Not chosen | 10 MB shell, but WKWebView on macOS and WebKitGTK on Linux, so the Linux rendering path differs from the Mac one exactly where the station is heaviest (xterm.js with WebGL, the graph). Moshi ships this shape. |
 | **Native SwiftUI Mac app** | No | A third native port of the phone's state machines with no Linux story. |
 | **VS Code extension** | No | The existing extension is memory-only over MCP; a fleet UI inside VS Code's sidebar does not fit terminals, chats and multi-pane layouts, and ties the station to one editor. |
 
 Rendering choices inside the UI: **xterm.js** with the WebGL addon and the
 canvas fallback (Moshi's choice; T3's libghostty wasm is faster but a
-heavier dependency to carry); **CodeMirror 6** for the editor (MIT, light,
-works the same in every browser); **`@pierre/diffs`** or the phone's diff rules ported to
-HTML for diffs; the existing `packages/cli/browser/graph/` bundle for the
+heavier dependency to carry); **Monaco** for the editor and file diffs
+(section 5); **`@pierre/diffs`** or the phone's diff rules ported to HTML for
+the chat's inline diffs; the existing `packages/cli/browser/graph/` bundle for the
 memory graph; plain TypeScript components with the Phren tokens as CSS
 variables (section 8). Framework: whatever the first builder is fastest in,
 with the constraint that state lives in a small store that the UI tests can
@@ -168,7 +168,7 @@ existing routes; "new" means a route or component to build.
 | Chat | Transcript, tool cards, approvals, questions, model and effort, permission mode, uploads, worker tree, live preview | Same, in a center pane, several chats in tabs or splits | `WS /v1/transcripts`, `WS /v1/status`, `/v1/prompt` with `deliveryId`, `/v1/keys`, `/v1/upload`, `/v1/approvals/answer`, `/v1/questions/answer`, `/v1/model`, `/v1/settings`, `/v1/agents/permission-mode`, `/v1/subagents` | A TypeScript transcript reducer and tool-card presenter (the phone's are Swift and Kotlin), tested against `fixtures/conformance` |
 | Terminals and panes | One PTY at a time, phone key bar | Any number of xterm.js panes; attach a whole Herdr session or tmux server (MVP); attach one pane (phase 2) | `phren-hook v1 terminal`, `v1 shell`; `/v1/workspaces/{create,focus,rename,close,scroll}` | Local PTY bridge (daemon); per-pane `WS /v1/pty` in the Hook (section 6) |
 | Changes and Git | Status, log, branches, PRs, tree, worktrees, stage, discard, commit, push, PR; per-file diffs | Same, as a right pane; diff with line comments that become a prompt (T3, Codex app) | `/v1/git/*`, `/v1/diff`, `/v1/files/range`, `/v1/files/resolve` | Comment-to-prompt composer context |
-| Code and editor | Read-only viewer, code index dossiers | Section 5 | `/v1/projects/files`, `/v1/files/range`, `/v1/code/*` | `PUT` file write with CAS; editor |
+| Code and editor | Read-only viewer, code index dossiers | A built-in VS Code-like editor (section 5) | `/v1/projects/files`, `/v1/files/range`, `/v1/code/*`, `/v1/git/*` | File write with CAS, find in files, Monaco editor |
 | Schedules | Store `schedules.yaml` plus Hook run state | Same, with a calendar-ish list per computer | `/v1/schedules`, `/v1/schedules/run`, `/v1/schedules/history`, `/v1/store/file` CAS | — |
 | Projects | Grid, add, knobs, skills, launch on a computer | Same, plus "open in editor pane" | `/v1/projects/*`, `/v1/workspaces/launch`, `/v1/harnesses`, `/v1/models` | — |
 | Tasks | Store file plus the Hook task contract | Same, with bulk keyboard actions | `/v1/tasks/*`, store CAS | — |
@@ -178,42 +178,107 @@ existing routes; "new" means a route or component to build.
 | Computers | Health, resources, web servers, simulators, files, Hook health | Same, plus Hook configuration (the phone explicitly skips this) | `/v1/health/details`, `/v1/web-servers`, `/v1/simulators/*`, `/v1/files` | A settings surface over existing CLI commands |
 | Notifications | Live Activities, local, APNs, relay | Native desktop notifications from the open overview sockets; an unread ring on the sidebar row and "jump to latest" (cmux) | Overview `approvalPending`, dispatch returns | — |
 
-## 5. Code editing
+## 5. Code editing: a light, built-in "own VS Code"
 
-Keep it light, the way every reference product does, and link out for the
-rest.
+Owner decision, 2026-10-09: a light built-in editor that feels like the
+owner's own VS Code, not a link-out and not an embedded VS Code server. Light
+means no extension host, no marketplace and no settings sprawl. VS Code-like
+means the editor itself, the layout and the keys feel familiar, and it works
+on any computer's checkout as if it were local.
 
-- **File tree**: `/v1/projects/files` (read-only browser, 500 entries, 2 MiB
-  files) and `/v1/code/tree` when the index is on. Recent and changed files
-  first (`/v1/code/changed`, `/v1/git/status`).
-- **Editor**: CodeMirror 6 with the Phren theme, language modes for the
-  stack's languages, search, multiple cursors, and a diff gutter against
-  HEAD from `/v1/diff`.
-- **Writes**: a new Hook route, **`PUT /v1/projects/files`** (or
-  `POST /v1/files/write`), body `{project | target, path, content, version}`
-  where `version` is the stat token `/v1/files/range` already returns
-  (`file-range.ts`), 409 when it moved. Bounded like uploads, scoped to a
-  located project or the pane's repository, never through a symlink, with
-  the same "ignored files are never force-added" rule the staging route has.
-  Recorded edits trigger the code index's 500 ms refresh, so definitions and
-  references stay current. **This is the one new write surface in the Hook
-  and must be reviewed as such.**
-- **Navigation**: definitions, references, outlines and "what changed" from
-  the code index (`/v1/code/definition`, `/v1/code/references`,
-  `/v1/code/outline`), which the phone already uses. No diagnostics,
-  completion or rename.
-- **LSP**: not in the first three phases. If wanted later, the honest shape
-  is a Hook route that spawns a language server per project and proxies its
-  stdio over a WebSocket (Zed and VS Code both run the server on the remote).
-  It is a **big build** with process lifetime, per-language installs and
-  resource questions. Until then, "Open in VS Code" (`vscode://vscode-remote/ssh-remote+<host><path>`),
-  "Open in Zed" and "Open in Cursor" are one URI each, and optionally an
-  openvscode-server per computer on the tailnet with a connection token,
-  embedded in a pane.
-- **Review**: line comments on a diff or file that become typed composer
-  context ("review this hunk"), routed to the session that owns the pane.
-  Phren's `POST /v1/code/note` already saves a line note as a finding and
-  delivers it to a session; reuse that shape.
+**Editor component: Monaco** (MIT, the editor inside VS Code). The earlier
+draft picked CodeMirror 6 partly for WebKit; with Electron that reason is
+gone, and Monaco gives VS Code's keybindings, multi-cursor, minimap,
+find/replace, folding, bracket matching and a built-in side-by-side and
+inline **diff editor** for free. It also has a clear path to language
+servers later (`monaco-languageclient`). Cost: a few MB in the bundle and its
+worker setup, acceptable in Electron. The Phren theme maps onto Monaco's
+theme tokens from the shared design tokens.
+
+**Fork VS Code, or build our own?** Build our own around Monaco. A fork
+(the Cursor and Windsurf route, or code-server) means rebasing a very large,
+fast-moving codebase every month. Forks cannot use Microsoft's extension
+marketplace and live on Open VSX. VS Code's workbench is also built around
+one workspace on one machine per window, while the station's center is a
+fleet: sessions, chats and terminals across computers. Fitting that into a
+fork's workbench would fight it at every step. Monaco is the same editor
+core VS Code uses, so the typing, keys and diff feel come along for a small
+fraction of the cost. A fork only wins on extensions: language packs,
+debuggers, linters. If those ever matter more than the fleet, revisit by
+embedding an openvscode-server tile per project rather than forking.
+
+**What the editor area does**
+
+```
+┌ Explorer ─────────┬ app.ts ● ─ Theme.swift ─ README.md ──────────┬ Outline ──┐
+│ ▾ Mac mini        │  1 export function add(a: number, b: …      │ ƒ add     │
+│   ▾ phren  main   │  2   return a + b;                          │ ◇ Point   │
+│     ▸ packages    │  3 }                                        │   ƒ length│
+│     ▸ docs   M    │  4                                          │ ◇ Axis    │
+│ ▸ MacBook         │  5 export class Point {                     │           │
+│ ▸ Omarchy         │  …                                          │           │
+├ Source control ───┤──────────────────────────────────────────────┤           │
+│ M App.swift +2 −2 │ Terminal · Mac mini · phren                  │           │
+│ [Stage] [Commit]  │ $ pnpm test                                  │           │
+└───────────────────┴──────────────────────────────────────────────┴───────────┘
+ ⌘P quick open · ⇧⌘F find in files · ⌘⇧O symbol · F12 definition · ⇧F12 references
+```
+
+- **Explorer**: computer → project → tree, from `/v1/projects/files` and
+  `/v1/code/tree`, with git decorations from `/v1/git/status` and the code
+  index's change chips. Projects come from `/v1/projects/locate` and the
+  sessions already open, so every agent's checkout is one click away.
+- **Tabs and splits**: editor tabs with dirty dots, split right and down,
+  preview tabs on single click, reopen closed tab, all inside the station's
+  tiled layout so a file, its agent's chat and its terminal sit together.
+- **Quick open (⌘P)**: fuzzy file names from `/v1/code/files` when the
+  index is on, else a new bounded file list route. **Go to symbol (⌘⇧O,
+  ⌘T)**: `/v1/code/outline` and `/v1/code/search`.
+- **Find in files (⇧⌘F)**: a new Hook route running ripgrep in the
+  repository, bounded in results, time and bytes, respecting `.gitignore`.
+  Replace across files applies through the write route, one CAS write per
+  file.
+- **Definitions and references (F12, ⇧F12)**: Monaco definition and
+  reference providers backed by `/v1/code/definition` and
+  `/v1/code/references`; hover shows the dossier's linked findings, which no
+  other editor can do.
+- **Source control panel**: the existing git routes (status, stage, unstage,
+  discard, commit, push, PR); clicking a changed file opens Monaco's diff
+  editor against HEAD with hunk stage and revert.
+- **Integrated terminal**: the station's terminal tile opened in the
+  project's folder on that computer (`phren-hook v1 shell <folder>`) or the
+  pane where its agent runs.
+- **Agent hand-off**: "Ask agent" on a selection, a diff hunk or a line
+  sends it as typed composer context to the session working in that
+  checkout; "Remember this" saves a finding through `POST /v1/code/note`.
+  An agent's edits show up live in an open file (reload when unchanged,
+  a conflict banner when both changed).
+- **Preview**: Markdown preview, images, and dev servers through the
+  existing `phren-hook v1 web` relay.
+
+**Hook routes this needs**
+
+- **File write with compare-and-swap**: `PUT /v1/projects/files`, body
+  `{project | target, path, content, version}` where `version` is the stat
+  token `/v1/files/range` already returns (`file-range.ts`); 409 when the
+  file moved on disk. Create, rename and delete as explicit operations.
+  Bounded like uploads, scoped to a located project or the pane's
+  repository, never through a symlink, never inside `.git`. Recorded edits
+  trigger the code index's 500 ms refresh. **This is the Hook's first
+  checkout write surface and must be reviewed as such.**
+- **Find in files**: `POST /v1/projects/search` (ripgrep, bounded).
+- **File list for quick open** when the code index is off.
+- **Change notifications** for open files: start by piggybacking on the
+  overview tick and `/v1/git/status`; a file-watch stream only if that is
+  too slow.
+
+**Not in scope**: extensions, debugging, notebooks, settings sync, remote
+containers. **LSP** (diagnostics, completion, rename) is phase 3 at the
+earliest: a Hook WebSocket that runs a language server per project and
+proxies its stdio, consumed by `monaco-languageclient`. It is a **big
+build** (process lifetime, per-language installs, memory). "Open in VS
+Code / Zed / Cursor" (`vscode://vscode-remote/ssh-remote+<host><path>`)
+stays as an escape hatch; the embedded openvscode-server option is dropped.
 
 ## 6. Multi-machine terminal multiplexing
 
@@ -377,7 +442,10 @@ Everything the phone's Agents tab does, at a desk:
 - Terminals: whole-server attach tiles, shells and agents in a folder, web
   preview ports.
 - Changes: status, diff, stage, discard, commit, push, PR; worktrees list.
-- Read-only files and code index views; "Open in VS Code / Zed / Cursor".
+- The editor, first cut: explorer, tabs, quick open, go to symbol,
+  definitions and references from the code index, Monaco diff for changed
+  files, and saving through the new CAS write route. Find in files and
+  replace follow in phase 2.
 - Computers: health, resources, usage rings, web servers.
 - Memory and Tasks read views (the graph, findings, tasks) and task status
   updates over the store CAS routes.
@@ -386,13 +454,14 @@ Everything the phone's Agents tab does, at a desk:
   attaching to the daemon; `phren station` also opens the browser when the
   shell is absent.
 
-Not in the MVP: file writes, per-pane PTYs, talk, schedules editing,
+Not in the MVP: find in files, per-pane PTYs, talk, schedules editing,
 conductor grants and authority views, simulators, settle and snooze.
 
 ### Phase 2, editor and panes
 
-- `PUT /v1/projects/files` with CAS in the Hook; CodeMirror editor tile with
-  diff gutter; save, revert, format-on-save off by default.
+- Editor, second cut: find in files and replace (`POST /v1/projects/search`),
+  splits, create, rename and delete, Markdown preview, "Ask agent" on a
+  selection, live reload of agent edits with a conflict banner.
 - `WS /v1/pty` per pane in the Hook (Herdr control bridge, tmux linked
   session); per-pane terminal tiles; saved layouts per set.
 - Line comments to prompt; schedules editor; conductor Fleet and Inbox
@@ -406,8 +475,8 @@ conductor grants and authority views, simulators, settle and snooze.
 - Talk mode in the browser with the Hook's ElevenLabs routes.
 - Station reachable from other tailnet devices (Tailscale identity plus
   token).
-- Optional: openvscode-server per computer; LSP proxy route if the editor
-  earns it.
+- Optional: an LSP proxy route for diagnostics, completion and rename
+  through `monaco-languageclient`, if the editor earns it.
 
 ### Big builds, flagged
 
@@ -416,7 +485,8 @@ conductor grants and authority views, simulators, settle and snooze.
 | Station daemon and proxy | New package, SSH process management, PTY bridge, caches | Phase 0 to 1 |
 | TypeScript chat reducer and tool cards | The phone's largest feature, exists only in Swift and Kotlin | Phase 1 |
 | Per-pane `WS /v1/pty` | New provider method on Herdr and tmux, lifetime and resize semantics, tests | Phase 2 |
-| File write route | The Hook's first checkout write surface; needs the same care as staging | Phase 2 |
+| File write route | The Hook's first checkout write surface; needs the same care as staging | Phase 1 |
+| Built-in editor | Explorer, tabs, quick open, Monaco providers over the code index, diff, conflicts with agent edits | Phase 1 to 2 |
 | `@phren/kit` extraction | Touches the CLI, the station and the apps' parity process | Phase 3 |
 | LSP proxy | Process lifetime per project and language on the remote | Later, if at all |
 
@@ -450,6 +520,7 @@ conductor grants and authority views, simulators, settle and snooze.
    daemon-served UI still opens in a browser.
 2. **Identity**: a separate station key enrolled per computer
    (recommended), or reuse each computer's dispatch key and `hooks.yaml`.
-3. **Editor scope**: a light CodeMirror editor with a new Hook write route
-   (recommended, phase 2), link-out only, or an embedded openvscode-server
-   per computer.
+3. **Editor scope**: decided 2026-10-09: a light built-in editor that feels
+   like the owner's own VS Code (Monaco, explorer, tabs, quick open, find
+   in files, code-index navigation, diff, terminal), with a new Hook write
+   route; link-out stays as an escape hatch.
