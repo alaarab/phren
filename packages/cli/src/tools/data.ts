@@ -90,7 +90,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         exported.claudeMd = instructions; // Deprecated export alias for older clients.
       }
 
-      return mcpResponse({ ok: true, message: `Exported project "${project}".`, data: exported });
+      // An export is only useful whole, so it is exempt from the response cap.
+      return mcpResponse({ ok: true, message: `Exported project "${project}".`, data: exported }, { unbounded: true });
     }
   );
 
