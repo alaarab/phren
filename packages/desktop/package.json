@@ -4,11 +4,14 @@
   "private": true,
   "description": "Phren desktop: a client of every computer's Phren Hook (phase 0 spike)",
   "type": "module",
-  "bin": { "phren-desktop": "./dist/src/main.js" },
+  "bin": {
+    "phren-desktop": "./dist/src/main.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/main.js",
-    "lint": "biome lint --config-path ../../biome.json src/"
+    "lint": "biome lint --config-path ../../biome.json src/",
+    "app": "electron electron/main.js"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
@@ -20,7 +23,9 @@
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.1",
+    "electron": "^44.7.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "main": "electron/main.js"
 }

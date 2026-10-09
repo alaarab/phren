@@ -16,6 +16,7 @@ const MAX_BACKOFF_MS = 60_000;
 const STABLE_MS = 60_000; // a socket open this long resets the backoff
 const SILENCE_MS = 45_000; // no frame this long terminates and reconnects
 const CHANGE_THROTTLE_MS = 200; // coalesce "change" bursts
+const CONNECT_TIMEOUT_MS = 20_000; // a connect that never opens counts as a failure
 
 interface Supervisor {
   computer: Computer;
@@ -174,13 +175,25 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
     if (sup.stopped || sup.state === "verify") return;
     sup.state = "connecting";
     scheduleChange();
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      fail(sup, new Error("Timed out connecting to the Hook."));
+    }, CONNECT_TIMEOUT_MS);
+    const settle = (run: () => void): void => {
+      clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      run();
+    };
     try {
       ws(sup.computer, OVERVIEW_PATH).then(
-        (socket) => attach(sup, socket),
-        (err: unknown) => fail(sup, err),
+        (socket) => { if (settled) socket.terminate(); else settle(() => attach(sup, socket)); },
+        (err: unknown) => settle(() => fail(sup, err)),
       );
     } catch (err) {
-      fail(sup, err);
+      settle(() => fail(sup, err));
     }
   }
 

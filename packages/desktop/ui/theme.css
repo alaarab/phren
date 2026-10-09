@@ -46,7 +46,7 @@ body {
 
 .topbar {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
   height: 48px;
   padding: 0 16px;
@@ -138,3 +138,8 @@ body {
 }
 
 [hidden] { display: none !important; }
+
+/* Electron: the bar is the window's drag handle; leave room for macOS's window buttons. */
+.electron .topbar { -webkit-app-region: drag; user-select: none; }
+.electron .topbar button, .electron .topbar a { -webkit-app-region: no-drag; }
+.electron.platform-darwin .topbar { padding-left: 84px; }

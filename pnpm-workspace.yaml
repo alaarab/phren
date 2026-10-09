@@ -4,6 +4,7 @@ packages:
 # Install scripts needed by the workspace build and extension packaging.
 allowBuilds:
   '@vscode/vsce-sign': true
+  electron: true
   esbuild: true
   node-pty: true
 
