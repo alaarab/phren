@@ -6,6 +6,7 @@ const PROVIDERS = { claude: "Claude", codex: "Codex", copilot: "Copilot", phren:
 
 const CSS = `
 .chat-pane { display:flex; flex-direction:column; gap:12px; height:100%; min-height:0; }
+.chat-actions { margin-left:auto; display:flex; gap:8px; }
 .chat-header { display:flex; gap:12px; align-items:center; padding:12px 16px; background:var(--card); border:1px solid var(--border); border-radius:10px; }
 .chat-ring { flex:0 0 auto; width:32px; height:32px; border-radius:999px; border:2px solid var(--muted); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600; }
 .chat-headings { min-width:0; display:flex; flex-direction:column; gap:2px; }
@@ -184,7 +185,7 @@ function rowsFromRaw(raw) {
  * @param {{title?:string,label?:string,cwd?:string,branch?:string,agentStatus?:string,target?:object}} child overview row
  * @returns {{close: () => void}}
  */
-export function openChat(el, computerName, child) {
+export function openChat(el, computerName, child, opts = {}) {
   ensureStyle();
 
   const target = child && child.target ? child.target : {};
@@ -211,6 +212,15 @@ export function openChat(el, computerName, child) {
   headings.append(title, sub);
   const header = h("div", "chat-header");
   header.append(ring, headings);
+  // Header actions open the session's workbench panes (the shell supplies them).
+  const actions = h("div", "chat-actions");
+  for (const [label, key] of [["Changes", "onChanges"], ["Files", "onFiles"], ["Terminal", "onTerminal"]]) {
+    if (typeof opts[key] !== "function") continue;
+    const button = h("button", "pill-button", label);
+    button.addEventListener("click", () => opts[key]());
+    actions.append(button);
+  }
+  header.append(actions);
 
   const transcript = h("div", "chat-transcript");
   const statusArea = h("div", "chat-status");
@@ -369,6 +379,14 @@ export function openChat(el, computerName, child) {
   };
 
   return {
+    /** Append review text (a diff line, a selection) to the draft and focus it, without sending. */
+    insert(text) {
+      const gap = input.value && !input.value.endsWith("\n") ? "\n" : "";
+      input.value = input.value + gap + text;
+      input.dispatchEvent(new Event("input"));
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    },
     close() {
       try { transcriptWs.close(); } catch { /* already closing */ }
       try { statusWs.close(); } catch { /* already closing */ }
