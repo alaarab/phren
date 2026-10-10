@@ -90,7 +90,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
         "/v1/subagents", "/v1/subagents/transcript", "/v1/subagents/messages",
       ]),
       ...routes("POST", [
-        "/v1/push/register", "/v1/push/answer", "/v1/push/target", "/v1/files", "/v1/files/delete", "/v1/projects/add", "/v1/simulators/action",
+        "/v1/push/register", "/v1/push/answer", "/v1/push/target", "/v1/push/presence", "/v1/files", "/v1/files/delete", "/v1/projects/add", "/v1/simulators/action",
         "/v1/workspaces/launch", "/v1/workspaces/create", "/v1/workspaces/focus", "/v1/workspaces/rename",
         "/v1/workspaces/close", "/v1/sessions/rename", "/v1/prompt", "/v1/prompt/status", "/v1/model", "/v1/settings", "/v1/agents/permission-mode", "/v1/side-question/dismiss", "/v1/keys", "/v1/secret", "/v1/upload",
         "/v1/approvals/answer", "/v1/questions/answer", "/v1/subagents/resume", "/v1/subagents/archive-finished", "/v1/canary",
@@ -99,7 +99,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ...routes("WS", ["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe", "/v1/speech/live"]),
     ],
     capabilities: [
-      "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "paneTerminal", "herdr",
+      "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "paneTerminal", "deskPresence", "herdr",
       "webServers", "webPreview", "activity", "approvals", "questions", "accountUsage", "providers",
       "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "deliveryFrames", "resources", "sessionRename", "sudo", "sudoOutcome", "previewDeltas", "quickChat", "agentFolder", "launchPermissionMode",
     ],
