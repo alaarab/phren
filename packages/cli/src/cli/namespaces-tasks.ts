@@ -1,12 +1,15 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { getPhrenPath } from "../shared.js";
-import { enableTaskFormat, taskFormatStatus, taskFormatMigrationHint } from "../data/task-format.js";
+import { enableTaskFormat, taskFormatStatus, taskFormatMigrationHint, taskFormatCurrentWriters } from "../data/task-format.js";
+import { resolveAllStores, type StoreEntry } from "../store-registry.js";
 import { addTask, completeTask, updateTask, reorderTask, pinTask, removeTask, workNextTask, tidyDoneTasks, linkTaskIssue, promoteTask, resolveTaskItem } from "../data/tasks.js";
 import { buildTaskIssueBody, createGithubIssueForTask, parseGithubIssueUrl, resolveProjectGithubRepo } from "../task/github.js";
 
 function printTaskUsage() {
   console.log("Usage:");
   console.log('  phren task list [profile] [--responsibility=human|agent] [--readiness=ready|waiting-on-human|waiting-on-task]');
-  console.log('  phren task format [enable --all-writers-compatible]');
+  console.log('  phren task format [--json | enable --all-writers-compatible]');
   console.log('  phren task add <project> "<text>"');
   console.log('  phren task complete <project> "<text>"');
   console.log('  phren task remove <project> "<text>"');
@@ -19,6 +22,18 @@ function printTaskUsage() {
   console.log('  phren task update <project> "<text>" [--priority=high|medium|low] [--section=Active|Queue|Done] [--context="..."] [--responsibility=human|agent] [--dependencies=JSON]');
   console.log('  phren task pin <project> "<text>"');
   console.log('  phren task reorder <project> "<text>" --rank=<n>');
+}
+
+/** The store whose folder holds the working directory, else the primary store. */
+function taskFormatStore(phrenPath: string): Pick<StoreEntry, "name" | "path" | "role"> {
+  const real = (p: string) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const cwd = real(process.cwd());
+  const stores = resolveAllStores(phrenPath).filter(s => s.available !== false);
+  const inside = stores
+    .map(s => ({ store: s, root: real(s.path) }))
+    .filter(({ root }) => cwd === root || cwd.startsWith(root + path.sep))
+    .sort((a, b) => b.root.length - a.root.length)[0]?.store;
+  return inside ?? stores.find(s => s.role === "primary") ?? { name: "primary", path: phrenPath, role: "primary" };
 }
 
 export async function handleTaskNamespace(args: string[]) {
@@ -34,14 +49,32 @@ export async function handleTaskNamespace(args: string[]) {
   }
 
   if (subcommand === "format") {
-    const base = getPhrenPath();
-    if (args.length === 1) { console.log(JSON.stringify(taskFormatStatus(base))); return; }
+    const store = taskFormatStore(getPhrenPath());
+    const label = `${store.name} (${store.path})`;
+    if (args.length === 1 || (args.length === 2 && args[1] === "--json")) {
+      const status = taskFormatStatus(store.path);
+      if (args[1] === "--json") { console.log(JSON.stringify({ ...status, store: store.name, path: store.path })); return; }
+      console.log(`Store: ${label}`);
+      console.log(`Task metadata: ${status.enabled ? `on${status.acknowledgedAt ? ` since ${status.acknowledgedAt.slice(0, 10)}` : ""}` : "off"}`);
+      console.log("");
+      console.log("Task metadata records who a task is for (you or an agent) and which tasks it waits on.");
+      if (status.enabled) return;
+      console.log("It is off because an older app or tool could drop it when it rewrites a task.");
+      console.log(`These versions and later keep it: ${taskFormatCurrentWriters}.`);
+      console.log("Once every computer and phone that writes this store is current, turn it on:");
+      console.log("  phren task format enable --all-writers-compatible");
+      return;
+    }
     if (args.length !== 3 || args[1] !== "enable" || args[2] !== "--all-writers-compatible") {
       console.error(taskFormatMigrationHint); process.exitCode = 1; return;
     }
+    if (store.role === "readonly") {
+      console.error(`Store ${label} is read-only on this computer. Turn task metadata on from a computer that writes it.`);
+      process.exitCode = 1; return;
+    }
     try {
-      enableTaskFormat(base, true);
-      console.log("Task metadata enabled for this store. Your acknowledgement covers every CLI, MCP, Hook, sync and app writer; old binaries must no longer write this store.");
+      enableTaskFormat(store.path, true);
+      console.log(`Task metadata is on for store ${label}. Apps and tools older than ${taskFormatCurrentWriters} must no longer write it.`);
     } catch (error) { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; }
     return;
   }
