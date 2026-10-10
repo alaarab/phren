@@ -2,6 +2,7 @@ import type { SqlJsDatabase } from "../shared/index.js";
 import { parseStoreQualified } from "../store-routing.js";
 import { describeUnavailableStore, resolveAllStores, type StoreEntry } from "../store-registry.js";
 import { logger } from "../logger.js";
+import { MCP_RESPONSE_MAX_CHARS, clipText } from "../response-budget.js";
 
 export interface McpContext {
   phrenPath: string;
@@ -124,7 +125,21 @@ interface McpToolResult {
 /**
  * Convert an McpToolResult into the MCP SDK response format.
  * Single shared implementation — replaces the per-file jsonResponse() duplicates.
+ * Responses over MCP_RESPONSE_MAX_CHARS are replaced by a shortened message;
+ * `unbounded` opts out for payloads that only make sense whole (exports).
  */
-export function mcpResponse(payload: McpToolResult) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
+export function mcpResponse(payload: McpToolResult, opts: { unbounded?: boolean } = {}) {
+  const text = JSON.stringify(payload, null, 2);
+  if (opts.unbounded || text.length <= MCP_RESPONSE_MAX_CHARS) return { content: [{ type: "text" as const, text }] };
+  // Last resort: a client rejects an oversized result outright, so send a
+  // shortened message and say how to narrow the call instead.
+  const note = `[Response cut: ${text.length} characters is over the ${MCP_RESPONSE_MAX_CHARS}-character limit. Narrow the request (limit, offset, project, summary) or fetch a single item.]`;
+  const shortened: McpToolResult = {
+    ok: payload.ok,
+    ...(payload.error !== undefined ? { error: clipText(payload.error, 2000) } : {}),
+    ...(payload.errorCode !== undefined ? { errorCode: payload.errorCode } : {}),
+    message: `${clipText(payload.message ?? "", Math.floor(MCP_RESPONSE_MAX_CHARS / 3))}\n\n${note}`,
+    data: { truncated: true, originalChars: text.length },
+  };
+  return { content: [{ type: "text" as const, text: JSON.stringify(shortened, null, 2) }] };
 }

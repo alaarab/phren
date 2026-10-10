@@ -31,6 +31,7 @@ import {
   queryFragmentLinks,
   logFragmentMiss,
   extractSnippet,
+  getDocSourceKey,
   queryDocBySourceKey,
   normalizeMemoryId,
 } from "../shared/index.js";
@@ -42,6 +43,7 @@ import { rankResults, searchKnowledgeRows, applyTrustFilter, searchFederatedStor
 import { formatActorAttribution, parseScopeComment, parseSourceComment, collectSymbolCitations } from "../content/citation.js";
 import { resolveActiveSessionScope } from "./session.js";
 import { logger } from "../logger.js";
+import { DETAIL_PAGE_CHARS, LIST_TEXT_MAX_CHARS, SUMMARY_MAX_CHARS, SUMMARY_MAX_TRUTHS, clipText, shrinkToBudget, snippetBudget } from "../response-budget.js";
 
 /**
  * Q30: Log zero-result queries to .runtime/search-misses.jsonl.
@@ -152,7 +154,7 @@ function filterTaskContentByScope(content: string, activeScope: string): string 
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-async function handleGetMemoryDetail(ctx: McpContext, { id: rawId }: { id: string }) {
+async function handleGetMemoryDetail(ctx: McpContext, { id: rawId, offset }: { id: string; offset?: number }) {
   const { phrenPath } = ctx;
   // Normalize ID: decode URL encoding and normalize path separators
   let id: string;
@@ -195,15 +197,28 @@ async function handleGetMemoryDetail(ctx: McpContext, { id: rawId }: { id: strin
   const scoreKey = entryScoreKey(doc.project, doc.filename, doc.content);
   const qualityMultiplier = getQualityMultiplier(phrenPath, scoreKey);
 
+  // Large documents come back a page at a time; next_offset continues the read.
+  const total = doc.content.length;
+  const start = Math.min(offset ?? 0, total);
+  const end = Math.min(total, start + DETAIL_PAGE_CHARS);
+  const content = doc.content.slice(start, end);
+  const nextOffset = end < total ? end : null;
+  const pageNote = start > 0 || nextOffset !== null
+    ? `\n\n[Characters ${start}–${end} of ${total}.${nextOffset !== null ? ` Call again with offset=${nextOffset} for more.` : ""}]`
+    : "";
+
   return mcpResponse({
     ok: true,
-    message: `[${id.slice(4)}] (${doc.type})\n\n${doc.content}`,
+    message: `[${id.slice(4)}] (${doc.type})\n\n${content}${pageNote}`,
     data: {
       id,
       project: doc.project,
       filename: doc.filename,
       type: doc.type,
-      content: doc.content,
+      content,
+      offset: start,
+      total_chars: total,
+      next_offset: nextOffset,
       path: doc.path,
       created_at: createdAt,
       updated_at: updatedAt,
@@ -422,16 +437,22 @@ async function handleSearchKnowledge(
       rows = rows.slice(0, maxResults);
     }
 
+    // Snippets share one character budget so a response stays well under the
+    // client's tool-result limit however long the matched lines are.
+    const perResultChars = snippetBudget(rows.length);
     const results = rows.map((row) => {
-      const snippet = extractSnippet(row.content, query);
+      const snippet = extractSnippet(row.content, query, 5, perResultChars);
       const lifecycle = row.type === "findings" ? lifecycleByRowKey.get(findingRowKey(row)) : undefined;
       const federationSource = "federationSource" in row ? (row as FederatedDocRow).federationSource : undefined;
       const symbols = row.type === "findings" ? collectSymbolCitations(row.content) : [];
       return {
+        // Federated rows live in another store's index, which get_memory_detail cannot read.
+        ...(federationSource ? {} : { id: `mem:${getDocSourceKey(row, phrenPath)}` }),
         project: row.project,
         filename: row.filename,
         type: row.type,
         snippet,
+        truncated: snippet.length < row.content.length,
         path: row.path,
         status: lifecycle?.primaryStatus,
         statuses: lifecycle?.statuses,
@@ -487,7 +508,8 @@ async function handleSearchKnowledge(
 
     const formatted = results.map((r) => {
       const fedNote = r.federation_source ? ` [from: ${r.federation_source}]` : "";
-      return `### ${r.project}/${r.filename} (${r.type})${fedNote}\n${r.snippet}\n\n\`${r.path}\``;
+      const more = r.truncated && r.id ? ` · excerpt; full text: get_memory_detail id="${r.id}"` : "";
+      return `### ${r.project}/${r.filename} (${r.type})${fedNote}\n${r.snippet}\n\n\`${r.path}\`${more}`;
     });
 
     // Memory synthesis: generate a concise paragraph from top results when requested
@@ -577,9 +599,13 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
   const canonicalDoc = docs.find(doc => doc.type === "canonical");
   const indexedFiles = docs.map(doc => ({ filename: doc.filename, type: doc.type, path: doc.path }));
 
+  const detailHint = (doc: { project: string; filename: string; path: string }) => `get_memory_detail id="mem:${getDocSourceKey(doc, ctx.phrenPath)}"`;
+  const summary = summaryDoc ? clipText(summaryDoc.content, SUMMARY_MAX_CHARS) : null;
+  const summaryTruncated = summaryDoc ? summary !== summaryDoc.content : false;
+
   const parts: string[] = [`# ${name}`];
   if (summaryDoc) {
-    parts.push(`\n## Summary\n${summaryDoc.content}`);
+    parts.push(`\n## Summary\n${summary}${summaryTruncated ? `\n\n[Summary cut at ${SUMMARY_MAX_CHARS} characters; full text: ${detailHint(summaryDoc)}]` : ""}`);
   } else {
     parts.push("\n*No summary.md found for this project.*");
   }
@@ -590,7 +616,10 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
   if (canonicalDoc) {
     const truthLines = canonicalDoc.content.split("\n").filter((l: string) => l.startsWith("- "));
     if (truthLines.length > 0) {
-      parts.push(`\n## Truths (${truthLines.length})\n${truthLines.join("\n")}`);
+      const shown = truthLines.slice(0, SUMMARY_MAX_TRUTHS).map((line: string) => clipText(line, LIST_TEXT_MAX_CHARS));
+      const clipped = truthLines.length > shown.length || shown.some((line: string, i: number) => line !== truthLines[i]);
+      const more = clipped ? `\n[Truths shortened; full text: ${detailHint(canonicalDoc)}]` : "";
+      parts.push(`\n## Truths (${truthLines.length})\n${shown.join("\n")}${more}`);
     }
   }
   const fileList = indexedFiles.map((f) => `- ${f.filename} (${f.type})`).join("\n");
@@ -601,7 +630,8 @@ async function handleGetProjectSummary(ctx: McpContext, { name }: { name: string
     message: parts.join("\n"),
     data: {
       name,
-      summary: summaryDoc?.content ?? null,
+      summary,
+      summaryTruncated,
       // What the project holds, counted the way every graph counts it.
       counts: projectMemoryCounts(storeName ? (resolveAllStores(ctx.phrenPath).find((s) => s.name === storeName)?.path ?? ctx.phrenPath) : ctx.phrenPath, lookupName),
       agentsMdPath: claudeDoc?.path ?? null,
@@ -711,9 +741,10 @@ async function handleListProjects(ctx: McpContext, { page, page_size }: { page?:
 
 async function handleGetFindings(
   ctx: McpContext,
-  { project, limit, include_superseded, include_history, status }: {
+  { project, limit, offset, include_superseded, include_history, status }: {
     project: string;
     limit?: number;
+    offset?: number;
     include_superseded?: boolean;
     include_history?: boolean;
     status?: FindingLifecycleStatus;
@@ -746,37 +777,47 @@ async function handleGetFindings(
       : `No findings found for "${project}".`;
     return mcpResponse({ ok: true, message: msg, data: { project, findings: [], total: 0, status: status ?? null, include_history: includeHistory, historyCount } });
   }
-  const capped = filteredItems.slice(0, limit ?? 50).map(entry => ({
-    ...entry,
-    symbol: entry.citationData?.symbol,
-    lifecycle: {
-      status: entry.status,
-      status_updated: entry.status_updated,
-      status_reason: entry.status_reason,
-      status_ref: entry.status_ref,
-    },
-  }));
-  const lines = capped.map((entry) => {
-    const metadata: string[] = [];
-    metadata.push(`status=${entry.status}`);
-    if (entry.taskItem) metadata.push(`task=${entry.taskItem}`);
-    if (entry.scope) metadata.push(`scope=${entry.scope}`);
-    if (entry.symbol) metadata.push(`name=${entry.symbol}`);
-    if (entry.supersedes) metadata.push(`supersedes="${entry.supersedes.slice(0, 30)}"`);
-    if (entry.supersededBy) metadata.push(`superseded_by="${entry.supersededBy.slice(0, 30)}"`);
-    if (entry.contradicts?.length) metadata.push(`contradicts=${entry.contradicts.length}`);
-    if (entry.tier === "archived") metadata.push("tier=archived");
-    const idLabel = entry.stableId ? `${entry.id}|fid:${entry.stableId}` : entry.id;
-    const attribution = formatActorAttribution(entry.actor, entry.machine);
-    return `- [${idLabel}] ${entry.date}: ${entry.text}${attribution ? ` ${attribution}` : ""}${entry.confidence !== undefined ? ` [confidence ${entry.confidence.toFixed(2)}]` : ""}${metadata.length > 0 ? ` [${metadata.join(" ")}]` : ""}${entry.citation ? ` (${entry.citation})` : ""}`;
-  });
+  const from = offset ?? 0;
+  const requested = limit ?? 50;
   const hiddenHistoryCount = includeHistory ? 0 : historyCount;
   const historyNote = hiddenHistoryCount > 0 ? ` (${hiddenHistoryCount} historical hidden)` : "";
-  return mcpResponse({
-    ok: true,
-    message: `Findings for ${project} (${capped.length}/${filteredItems.length})${historyNote}:\n` + lines.join("\n"),
-    data: { project, findings: capped, total: filteredItems.length, status: status ?? null, include_history: includeHistory, historyCount: hiddenHistoryCount },
-  });
+  const buildPage = (size: number) => {
+    const capped = filteredItems.slice(from, from + size).map(entry => ({
+      ...entry,
+      symbol: entry.citationData?.symbol,
+      lifecycle: {
+        status: entry.status,
+        status_updated: entry.status_updated,
+        status_reason: entry.status_reason,
+        status_ref: entry.status_ref,
+      },
+    }));
+    const lines = capped.map((entry) => {
+      const metadata: string[] = [];
+      metadata.push(`status=${entry.status}`);
+      if (entry.taskItem) metadata.push(`task=${entry.taskItem}`);
+      if (entry.scope) metadata.push(`scope=${entry.scope}`);
+      if (entry.symbol) metadata.push(`name=${entry.symbol}`);
+      if (entry.supersedes) metadata.push(`supersedes="${entry.supersedes.slice(0, 30)}"`);
+      if (entry.supersededBy) metadata.push(`superseded_by="${entry.supersededBy.slice(0, 30)}"`);
+      if (entry.contradicts?.length) metadata.push(`contradicts=${entry.contradicts.length}`);
+      if (entry.tier === "archived") metadata.push("tier=archived");
+      const idLabel = entry.stableId ? `${entry.id}|fid:${entry.stableId}` : entry.id;
+      const attribution = formatActorAttribution(entry.actor, entry.machine);
+      return `- [${idLabel}] ${entry.date}: ${entry.text}${attribution ? ` ${attribution}` : ""}${entry.confidence !== undefined ? ` [confidence ${entry.confidence.toFixed(2)}]` : ""}${metadata.length > 0 ? ` [${metadata.join(" ")}]` : ""}${entry.citation ? ` (${entry.citation})` : ""}`;
+    });
+    const nextOffset = from + capped.length < filteredItems.length ? from + capped.length : null;
+    const pageNote = size < requested && nextOffset !== null
+      ? `\n\n[Cut to ${capped.length} rows to fit the response budget. Continue with offset=${nextOffset}.]`
+      : "";
+    const range = from > 0 ? `${from + 1}–${from + capped.length} of ${filteredItems.length}` : `${capped.length}/${filteredItems.length}`;
+    return {
+      ok: true,
+      message: `Findings for ${project} (${range})${historyNote}:\n` + lines.join("\n") + pageNote,
+      data: { project, findings: capped, total: filteredItems.length, offset: from, next_offset: nextOffset, status: status ?? null, include_history: includeHistory, historyCount: hiddenHistoryCount },
+    };
+  };
+  return mcpResponse(shrinkToBudget(requested, buildPage).payload);
 }
 
 async function handleStoreList(ctx: McpContext) {
@@ -827,13 +868,16 @@ export function register(server: McpServer, ctx: McpContext): void {
     {
       title: "◆ phren · memory detail",
       description:
-        "Fetch the full content of a specific memory entry by its ID. Use this after receiving a compact " +
-        "memory index from the hook-prompt (when PHREN_FEATURE_PROGRESSIVE_DISCLOSURE is enabled). " +
+        "Fetch the full content of a specific memory entry by its ID. Use this to expand a search_knowledge " +
+        "excerpt or an entry from the hook-prompt compact memory index. Long documents are paged by offset. " +
         "The id format is `mem:project/path/to/file.md` as shown in the memory index.",
       inputSchema: z.object({
         id: z.string().describe(
           "Memory ID in the format `mem:project/path/to/file.md` (e.g. `mem:my-app/reference/api/auth.md`). " +
-          "Returned by the hook-prompt compact index when PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1."
+          "Returned by search_knowledge results and the hook-prompt compact index."
+        ),
+        offset: z.number().int().min(0).optional().describe(
+          `Character offset to start reading from. Documents longer than ${DETAIL_PAGE_CHARS} characters are returned in pages; pass the previous response's next_offset.`
         ),
       }),
     },
@@ -901,7 +945,8 @@ export function register(server: McpServer, ctx: McpContext): void {
       description: "List recent findings for a project without requiring a search query.",
       inputSchema: z.object({
         project: z.string().describe("Project name."),
-        limit: z.number().int().min(1).max(200).optional().describe("Max rows to return (default 50)."),
+        limit: z.number().int().min(1).max(200).optional().describe("Max rows to return (default 50). Fewer come back if the rows would not fit the response budget."),
+        offset: z.number().int().min(0).optional().describe("Skip the first N rows. Use with limit to page."),
         include_superseded: z.boolean().optional().describe("If true, include findings that have been superseded by a newer finding (hidden by default)."),
         include_history: z.boolean().optional().describe("When true, include historical findings (superseded/retracted). Default false."),
         status: z.enum(FINDING_LIFECYCLE_STATUSES).optional().describe("Filter findings by lifecycle status."),

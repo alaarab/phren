@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `search_knowledge` no longer returns results too large for the client. Snippets were five lines, but task Context lines and consolidated reference lines run to several KB, so a `limit: 6` search could come back at 85 KB and Claude Code rejected it. Each snippet is now an excerpt around the match within a shared budget (about 6,000 characters per response), and each result carries an `id` and `truncated` flag for `get_memory_detail`. `phren search` uses the same budget.
+- `get_tasks` lists show the latest 300 characters of each task's Context and shrink their page size to fit one response; across all projects, a list that cannot fit becomes the summary view. `get_tasks` with no project was over 1.7 MB on a large store.
+- `get_memory_detail` pages documents over 16,000 characters (`offset`, `next_offset`), `get_findings` shrinks its page to fit and takes `offset`, and `get_project_summary` cuts a long summary and truths list.
+- Any MCP response over 60,000 characters is replaced by a shortened message saying how to narrow the call, so a tool call no longer fails outright on size. `export_project` is exempt.
+
 ## [0.3.33] - 2026-10-06
 
 ### Fixed
