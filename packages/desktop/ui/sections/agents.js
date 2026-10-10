@@ -7,7 +7,7 @@ import { renderSidebar } from "../sidebar.js";
 import { openChat } from "../chat.js";
 import { openTerminal } from "../terminal.js";
 import { openChanges } from "../changes.js";
-import { openFiles } from "../editor.js";
+import { openFileTree, openEditorDoc } from "../editor.js";
 import { openSearch } from "../search.js";
 import { setActiveSession } from "../keys.js";
 import { store, projectOf } from "../shell/store.js";
@@ -132,11 +132,66 @@ export function mountAgents(root) {
     handle.addEventListener("pointerup", up);
   });
 
+  // Centre-tab file/diff documents, keyed by the tab id the editor handle owns.
+  const fileHandles = new Map();
+
+  function basename(p) { const i = p.lastIndexOf("/"); return i < 0 ? p : p.slice(i + 1); }
+
+  function docSubtitle(path, child) {
+    const i = path.lastIndexOf("/");
+    const dir = i < 0 ? "" : path.slice(0, i);
+    return [dir, projectOf(child)].filter(Boolean).join(" · ");
+  }
+
+  function fileDoc(id, computer, child, path, options = {}) {
+    const diff = !!options.diff;
+    const title = basename(path);
+    const subtitle = docSubtitle(path, child);
+    return {
+      id,
+      kind: diff ? "diff" : "file",
+      computer,
+      child,
+      path,
+      title,
+      subtitle,
+      persist: { computer, id: child.id, path, diff },
+      mount: (el) => {
+        const handle = openEditorDoc(el, {
+          computer, child, path,
+          line: options.line,
+          diff,
+          openFile: (p, o) => openFileDoc(computer, child, p, o),
+          ask: (text) => askSession(computer, child, text),
+          onDirty: (dirty) => tabs.setTitle(id, (dirty ? "\u25cf " : "") + title, subtitle),
+          onCloseRequest: () => tabs.close(id),
+        });
+        fileHandles.set(id, handle);
+        return handle;
+      },
+    };
+  }
+
+  /** Open or activate a file/diff as a centre-tab document; reveal `line`. */
+  function openFileDoc(computer, child, path, options = {}) {
+    const diff = !!options.diff;
+    const id = `${diff ? "diff" : "file"}:${computer}/${child.id}/${path}`;
+    const handle = tabs.open(fileDoc(id, computer, child, path, options));
+    if (options.line != null) handle?.reveal?.(options.line);
+    return handle;
+  }
+
+  /** Put review text in that session's chat, opening and focusing it. */
+  function askSession(computer, child, text) {
+    openSession(computer, child);
+    tabs.activeHandle()?.insert?.(text);
+  }
+
   function benchContext() {
     return {
       computer: session.computer,
       child: session.child,
-      openFile(path, options = {}) { showPane("files"); bench.handles.files?.openFile(path, options); },
+      openFile(path, options = {}) { openFileDoc(session.computer, session.child, path, options); },
       showChanges() { showPane("changes"); },
       ask(text) { tabs.activeHandle()?.insert?.(text); },
     };
@@ -168,7 +223,7 @@ export function mountAgents(root) {
     const el = body(key);
     el.hidden = false;
     if (!session?.child?.target) { el.textContent = "Open a session to see its changes and files."; return; }
-    const open = { changes: openChanges, files: openFiles, search: openSearch }[key];
+    const open = { changes: openChanges, files: openFileTree, search: openSearch }[key];
     if (!bench.handles[key]) bench.handles[key] = open(el, benchContext());
     else if (key === "changes") bench.handles.changes.refresh?.();
     if (key === "search") bench.handles.search.focus?.();
@@ -272,7 +327,33 @@ export function mountAgents(root) {
       closeTerminal();
       emptyEl.hidden = false;
     },
+    onClose(doc) { fileHandles.delete(doc.id); },
   });
+
+  // A file/diff tab closes through its handle so a dirty doc can prompt first:
+  // intercept the tab's close button and middle-click before createTabs closes it.
+  const docBar = root.querySelector(".doc-bar");
+  const interceptClose = (ev) => {
+    const target = ev.target instanceof Element ? ev.target : null;
+    const id = target?.closest(".doc-tab")?.dataset.doc;
+    const handle = id && fileHandles.get(id);
+    if (!handle?.tryClose) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    handle.tryClose();
+  };
+  docBar.addEventListener("click", (ev) => {
+    if (ev.target instanceof Element && ev.target.closest(".doc-tab-close")) interceptClose(ev);
+  }, true);
+  docBar.addEventListener("auxclick", (ev) => { if (ev.button === 1) interceptClose(ev); }, true);
+
+  /** Close the active tab, prompting first when it is a dirty file. */
+  function closeActiveTab() {
+    const doc = tabs.active();
+    const handle = doc && fileHandles.get(doc.id);
+    if (handle?.tryClose) return handle.tryClose();
+    tabs.close();
+  }
 
   function chatDoc(computer, child) {
     return {
@@ -296,7 +377,7 @@ export function mountAgents(root) {
     onOpenTerminal: (computer, server) => showPane("terminal", { computer, server }),
   };
 
-  // Reopen last run's chat tabs once their sessions show up in the overview.
+  // Reopen last run's chat, file and diff tabs once their sessions show up.
   let restore = tabs.saved();
   store.subscribe((merged) => {
     renderSidebar(sidebarEl, merged, handlers);
@@ -310,14 +391,17 @@ export function mountAgents(root) {
     if (session) setActiveSession(session.computer, session.child);
     if (restore) {
       const pending = [];
+      const online = (name) => merged.computers?.some((c) => c.computer === name && c.state === "online");
       for (const item of restore.list) {
-        const row = item.kind === "chat" ? store.find(item.computer, item.id) : null;
-        if (row) openSession(row.computer, row.child, { background: true });
-        else if (item.kind === "chat" && !merged.computers?.some((c) => c.computer === item.computer && c.state === "online")) pending.push(item);
+        const row = store.find(item.computer, item.id);
+        if (row) {
+          if (item.kind === "chat") openSession(row.computer, row.child, { background: true });
+          else if (item.kind === "file" || item.kind === "diff") openFileDoc(row.computer, row.child, item.path, { diff: item.kind === "diff" });
+        } else if (!online(item.computer)) pending.push(item);
       }
       const activeId = restore.active;
       if (activeId && tabs.has(activeId)) tabs.activate(activeId);
-      else if (!tabs.active() && tabs.list().length) tabs.activate(`chat:${tabs.list()[0].computer}/${tabs.list()[0].child.id}`);
+      else if (!tabs.active()) { const first = tabs.list()[0]; if (first) tabs.activate(first.id); }
       // Computers still connecting get another chance on later frames.
       restore = pending.length ? { list: pending, active: activeId } : null;
     }
@@ -336,7 +420,7 @@ export function mountAgents(root) {
     openSession,
     showPane,
     closePanel,
-    closeTab: () => tabs.close(),
+    closeTab: closeActiveTab,
     nextTab: () => tabs.step(1),
     previousTab: () => tabs.step(-1),
     toggleZoom() { if (sideEl.hidden) showPane(bench.pane ?? "changes"); document.body.classList.toggle("bench-max"); },

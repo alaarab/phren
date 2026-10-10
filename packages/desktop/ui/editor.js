@@ -1,6 +1,8 @@
-// Files workbench: lazy tree, quick open, editor tabs, save and diff for the
-// desktop spike. Talks to a session's Hook through ./api.js; reverse-applies
-// patches through ./patch.js.
+// The editor, split in two: the right panel's file tree (openFileTree) and one
+// centre-tab document per file or diff (openEditorDoc). Both share one Monaco /
+// VS Code editor host (a page-wide singleton) and one workspace per session.
+// Talks to a session's Hook through ./api.js; reverse-applies patches through
+// ./patch.js.
 
 import { hookPost, readRepoFile } from "./api.js";
 import { reverseApply } from "./patch.js";
@@ -12,40 +14,42 @@ const THEME = "phren";
 
 let monacoPromise = null;
 
-// Provider setup is process-wide. modelOwners lets a provider find the pane
-// (and its index) that owns the model it was invoked on.
+// Provider setup is process-wide. modelOwners lets a provider find the
+// workspace (and its index) that owns the model it was invoked on.
 let providersRegistered = false;
 const modelOwners = new Map(); // model uri string -> { path, index, uriFor, pathFromUri }
-let activeOpenFile = null; // { openFile, pathFromUri } of the pane handling opens right now
+let activeOpenFile = null; // the doc handling editor-opened files right now
+let activeDoc = null; // the shown doc, for the save command and key handler
+
+let usingHost = false;
 
 function injectStyle() {
   if (document.getElementById("editor-style")) return;
   const style = document.createElement("style");
   style.id = "editor-style";
   style.textContent = `
-.ed-root{position:relative;display:flex;height:100%;min-height:0;background:var(--bg);color:var(--text-2);font-family:system-ui;}
-.ed-root *{box-sizing:border-box;}
-.ed-files{width:220px;flex:none;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--border);background:var(--bg);}
+.ed-tree-root{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--bg);color:var(--text-2);font-family:system-ui;}
+.ed-tree-root *{box-sizing:border-box;}
 .ed-files-header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);}
 .ed-qp{border:1px solid var(--border);background:var(--surface);color:var(--muted);border-radius:6px;font-family:${MONO};font-size:11px;padding:1px 6px;cursor:pointer;}
 .ed-qp:hover{color:var(--text);border-color:var(--border-strong);}
 .ed-tree{flex:1;min-height:0;overflow:auto;padding-bottom:8px;}
 .ed-children{margin-left:14px;}
-.ed-node{display:flex;align-items:center;gap:4px;height:26px;padding:0 10px;font-family:${MONO};font-size:12.5px;color:var(--muted);white-space:nowrap;cursor:pointer;}
+.ed-node{display:flex;align-items:center;gap:4px;height:24px;padding:0 10px;font-family:${MONO};font-size:12.5px;color:var(--muted);white-space:nowrap;cursor:pointer;}
 .ed-node:hover{background:var(--surface);}
-.ed-node.active{color:var(--text);background:var(--card);}
 .ed-disc{width:12px;flex:none;color:var(--dim);}
 .ed-name{overflow:hidden;text-overflow:ellipsis;}
 .ed-count{margin-left:auto;color:var(--dim);font-size:11px;}
-.ed-main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;}
-.ed-tabs{flex:none;display:flex;align-items:stretch;height:36px;background:var(--bg);border-bottom:1px solid var(--border);overflow-x:auto;}
-.ed-tab{display:flex;align-items:center;gap:6px;padding:0 10px;font-family:${MONO};font-size:12.5px;color:var(--muted);border-right:1px solid var(--border);cursor:pointer;white-space:nowrap;}
-.ed-tab.active{color:var(--text);background:var(--card);box-shadow:inset 0 2px 0 var(--accent);}
-.ed-tab .dot{width:8px;color:var(--accent);font-size:10px;}
-.ed-tab .x{color:var(--dim);opacity:0;transition:opacity .18s ease;}
-.ed-tab:hover .x{opacity:1;}
-.ed-confirm{display:flex;align-items:center;gap:6px;padding:0 10px;font-size:12px;color:var(--waiting);white-space:nowrap;}
-.ed-crumbs{flex:none;display:flex;align-items:center;gap:2px;height:28px;padding:0 12px;font-family:${MONO};font-size:12px;color:var(--muted);border-bottom:1px solid var(--border);overflow:hidden;}
+.ed-quick{position:absolute;inset:0;z-index:30;display:none;align-items:flex-start;justify-content:center;background:rgba(0,0,0,.35);}
+.ed-quick.open{display:flex;}
+.ed-quick-box{margin-top:72px;width:min(620px,80%);background:var(--raised);border:1px solid var(--border-strong);border-radius:12px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.4);}
+.ed-quick-input{width:100%;border:0;border-bottom:1px solid var(--border);background:var(--sunken);color:var(--text);font-family:${MONO};font-size:13px;padding:10px 12px;outline:none;}
+.ed-quick-list{max-height:320px;overflow:auto;}
+.ed-quick-item{padding:7px 12px;font-family:${MONO};font-size:12.5px;color:var(--muted);cursor:pointer;}
+.ed-quick-item.sel{background:var(--card);color:var(--text);}
+.ed-doc{position:relative;display:flex;flex-direction:column;height:100%;min-height:0;background:var(--bg);color:var(--text-2);font-family:system-ui;}
+.ed-doc *{box-sizing:border-box;}
+.ed-crumbs{flex:none;display:flex;align-items:center;gap:2px;height:28px;padding:0 12px;font-family:${MONO};font-size:12px;color:var(--muted);border-bottom:1px solid var(--border);overflow:hidden;white-space:nowrap;}
 .ed-crumbs .sep{color:var(--dim);}
 .ed-crumb-note{margin-left:auto;color:var(--dim);}
 .ed-banner{flex:none;display:none;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;font-size:12.5px;}
@@ -56,13 +60,12 @@ function injectStyle() {
 .ed-btn:hover{color:var(--text);border-color:var(--accent);}
 .ed-editors{position:relative;flex:1;min-height:0;}
 .ed-editors>div{position:absolute;inset:0;}
-.ed-quick{position:absolute;inset:0;z-index:30;display:none;align-items:flex-start;justify-content:center;background:rgba(0,0,0,.35);}
-.ed-quick.open{display:flex;}
-.ed-quick-box{margin-top:72px;width:min(620px,80%);background:var(--raised);border:1px solid var(--border-strong);border-radius:12px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.4);}
-.ed-quick-input{width:100%;border:0;border-bottom:1px solid var(--border);background:var(--sunken);color:var(--text);font-family:${MONO};font-size:13px;padding:10px 12px;outline:none;}
-.ed-quick-list{max-height:320px;overflow:auto;}
-.ed-quick-item{padding:7px 12px;font-family:${MONO};font-size:12.5px;color:var(--muted);cursor:pointer;}
-.ed-quick-item.sel{background:var(--card);color:var(--text);}
+.ed-close-ask{position:absolute;inset:0;z-index:40;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.4);}
+.ed-close-ask.open{display:flex;}
+.ed-close-card{background:var(--raised);border:1px solid var(--border-strong);border-radius:12px;padding:16px 18px;min-width:280px;max-width:380px;box-shadow:0 16px 40px rgba(0,0,0,.5);}
+.ed-close-msg{color:var(--text);font-size:13px;margin-bottom:14px;}
+.ed-close-actions{display:flex;gap:8px;justify-content:flex-end;}
+.ed-close-actions .ed-save{border-color:var(--accent-solid);background:var(--accent-solid);color:var(--text);}
 `;
   document.head.appendChild(style);
 }
@@ -70,7 +73,6 @@ function injectStyle() {
 /** The editor: VS Code's own (monaco-vscode-api, ui/editor-host/) with its
  * themes, grammars and extensions when that bundle is built, else Monaco's
  * standalone AMD build with the Phren theme defined here. */
-let usingHost = false;
 function loadMonaco() {
   if (monacoPromise) return monacoPromise;
   monacoPromise = import("/editor-host/editor-host.js")
@@ -192,11 +194,10 @@ function languageFor(monaco, path) {
 
 /** A Monaco location in another file. Monaco only navigates to a URI that has
  * a model, so leave an empty placeholder; the editor opener then loads the
- * real file into it (openFile fills a placeholder in place). The owning pane's
- * uriFor chooses the URI scheme for this computer. */
+ * real file into it. The owning workspace's uriFor chooses the URI. */
 function location(monaco, owner, file, line) {
   const uri = owner.uriFor(file);
-  if (uri.scheme === "phren") window.PhrenEditorHost?.registerPhrenFile?.(file);
+  if (uri.scheme === "phren") window.PhrenEditorHost?.registerPhrenFile?.(uri.path.replace(/^\//, ""));
   if (!monaco.editor.getModel(uri)) monaco.editor.createModel("", languageFor(monaco, file), uri);
   return { uri, range: new monaco.Range(line, 1, line, 1) };
 }
@@ -225,7 +226,7 @@ function toSymbol(monaco, entry) {
 }
 
 /** Register the phren: / vscode-remote language providers once; they resolve
- * the owning pane through modelOwners, so they keep working across panes. */
+ * the owning workspace through modelOwners, so they keep working across docs. */
 function ensureProviders(monaco) {
   if (providersRegistered) return;
   providersRegistered = true;
@@ -326,133 +327,162 @@ function ensureProviders(monaco) {
   });
 }
 
-export function openFiles(el, ctx) {
-  injectStyle();
+// ------------------------------------------------------------- workspaces
+// One workspace per session, resolved once and shared by every file/diff doc
+// and the tree. It owns the URI mapping, the code index and the capabilities.
 
-  const computer = ctx.computer;
-  const target = ctx.child && ctx.child.target;
-  const tabs = [];
-  const knownPaths = new Set();
+const workspaces = new Map(); // session key -> Promise<workspace>
+let wsSeq = 0;
+let saveOverrideInstalled = false;
 
-  let monaco = null;
-  let editor = null;
-  let diffEditor = null;
-  let active = null;
-  let pendingClose = null;
-  let hovered = false;
+function workspaceFor(computer, child) {
+  const key = `${computer}/${child?.id ?? ""}`;
+  let ws = workspaces.get(key);
+  // Each session gets its own phren: root token, so two sessions' files at the
+  // same relative path stay distinct models.
+  if (!ws) { ws = createWorkspace(computer, child, `w${++wsSeq}`); workspaces.set(key, ws); }
+  return ws;
+}
 
-  let index = null;
-  let project = null;
-  let indexAvailable = false;
-  // Declared by the Hook's /v1/health; default true so a control gates only
-  // once the answer is in.
-  let canWrite = true;
-  let canList = true;
+// The Hook's phren: reader is process-wide; route each virtual path back to the
+// session that owns it, so several sessions' files stay distinct.
+const phrenRoots = new Map(); // root token -> { computer, target }
+let phrenReaderInstalled = false;
+function installPhrenReader() {
+  if (phrenReaderInstalled) return;
+  phrenReaderInstalled = true;
+  window.PhrenEditorHost?.setPhrenReader?.((virtualPath) => {
+    const cut = virtualPath.indexOf("/");
+    const root = cut < 0 ? virtualPath : virtualPath.slice(0, cut);
+    const path = cut < 0 ? "" : virtualPath.slice(cut + 1);
+    const owner = phrenRoots.get(root);
+    if (!owner) throw new Error("No session is open for this file.");
+    return readRepoFile(owner.computer, owner.target, path).then((file) => file.text);
+  });
+}
 
-  // ------------------------------------------------------- remote file URIs
-  // When this computer runs a Node extension host, its languages servers only
-  // read real paths, so files open under vscode-remote; other computers stay
-  // on the phren: scheme. repoRoot is resolved once from the Changes status.
+async function createWorkspace(computer, child, root) {
+  const target = child && child.target;
+  const monaco = await loadMonaco();
+  installPhrenReader();
+  phrenRoots.set(root, { computer, target });
+
+  // The Hook's own flags decide save and quick-open, not a 404.
+  const caps = await store.capabilities(computer);
+  const canWrite = caps.fileWrite === true;
+  const canList = caps.fileSearch === true;
+
+  // One save path: with the VS Code host up, its own save command would write
+  // vscode-remote files through the REH filesystem, bypassing the Hook's
+  // compare-and-swap. Override it once to call the active doc's save.
+  if (usingHost && !saveOverrideInstalled) {
+    saveOverrideInstalled = true;
+    try { window.PhrenEditorHost?.vscode?.commands?.registerCommand?.("workbench.action.files.save", () => activeDoc?.save?.()); }
+    catch { /* the document key handler still saves */ }
+  }
+
+  // repoRoot is resolved once; a computer without a repository keeps phren:.
   let repoRoot = null;
-  let useRemote = false;
-  let contextReady = null;
+  try {
+    const status = await hookPost(computer, "/v1/git/status", { target });
+    repoRoot = status.repository || null;
+  } catch { /* no repository */ }
+  const useRemote = !!(window.PhrenEditorHost?.remote) && computer === "This computer" && !!repoRoot;
 
   function uriFor(path) {
-    return useRemote
-      ? monaco.Uri.parse(window.PhrenEditorHost.remoteUri(repoRoot + "/" + path))
-      : monaco.Uri.parse("phren:/" + path);
+    if (useRemote) {
+      const remote = window.PhrenEditorHost.remoteUri(repoRoot + "/" + path);
+      if (remote) return monaco.Uri.parse(remote);
+    }
+    return monaco.Uri.parse(`phren:/${root}/${path}`);
   }
 
   function pathFromUri(uri) {
-    if (uri.scheme === "phren") return uri.path.replace(/^\//, "");
+    if (uri.scheme === "phren") {
+      const prefix = root + "/";
+      const path = uri.path.replace(/^\//, "");
+      return path.startsWith(prefix) ? path.slice(prefix.length) : null;
+    }
     if (uri.scheme === "vscode-remote" && repoRoot && uri.path.startsWith(repoRoot + "/")) {
       return uri.path.slice(repoRoot.length + 1);
     }
     return null;
   }
 
-  function ownerFor(tab) {
-    return { path: tab.path, index, uriFor, pathFromUri };
+  const resolved = await resolveProject(computer, target);
+  const index = resolved.available && resolved.project ? makeIndex(computer, resolved.project) : null;
+  if (index) ensureProviders(monaco);
+
+  return {
+    computer, child, target, monaco, canWrite, canList, repoRoot, useRemote,
+    uriFor, pathFromUri, index, project: resolved.project, indexAvailable: resolved.available,
+  };
+}
+
+function ownerFor(ws, path) {
+  return { path, index: ws.index, uriFor: ws.uriFor, pathFromUri: ws.pathFromUri };
+}
+
+// One model per workspace+path, reference-counted so a file tab and its diff
+// tab share edits and neither disposes the other's model.
+const models = new Map(); // uri string -> { model, refs }
+
+function acquireModel(ws, path, text, language) {
+  const uri = ws.uriFor(path);
+  if (uri.scheme === "phren") window.PhrenEditorHost?.registerPhrenFile?.(uri.path.replace(/^\//, ""));
+  const key = uri.toString();
+  let entry = models.get(key);
+  if (!entry) {
+    let model = ws.monaco.editor.getModel(uri);
+    if (model) {
+      ws.monaco.editor.setModelLanguage(model, language);
+      if (!model.getValue() && text) model.setValue(text);
+    } else {
+      model = ws.monaco.editor.createModel(text, language, uri);
+    }
+    entry = { model, refs: 0 };
+    models.set(key, entry);
   }
+  entry.refs++;
+  modelOwners.set(key, ownerFor(ws, path));
+  return entry.model;
+}
 
-  const pane = { openFile, uriFor, pathFromUri };
+function releaseModel(model) {
+  const key = model.uri.toString();
+  const entry = models.get(key);
+  if (!entry) return;
+  entry.refs--;
+  if (entry.refs <= 0) { models.delete(key); modelOwners.delete(key); model.dispose(); }
+}
 
-  // Runs once: loads Monaco, resolves the repo root, wires the shared providers.
-  function ensureContext() {
-    if (contextReady) return contextReady;
-    contextReady = loadMonaco()
-      .then(async (m) => {
-        monaco = m;
-        // The Hook's own flags decide save and quick-open, not a 404.
-        const caps = await store.capabilities(computer);
-        canWrite = caps.fileWrite === true;
-        canList = caps.fileSearch === true;
-        window.PhrenEditorHost?.setPhrenReader?.((path) => readRepoFile(computer, target, path).then((file) => file.text));
-        // One save path: with the VS Code host up, its own save command would
-        // write vscode-remote files through the REH filesystem, bypassing the
-        // Hook's compare-and-swap. Override it to call the same doSave as the
-        // phren: scheme; the onKey handler below is the fallback when a host
-        // will not let its command be replaced.
-        if (usingHost) {
-          try { window.PhrenEditorHost?.vscode?.commands?.registerCommand?.("workbench.action.files.save", () => doSave(active)); }
-          catch { /* fallback: the document keydown handler still saves */ }
-        }
-        try {
-          const status = await hookPost(computer, "/v1/git/status", { target });
-          repoRoot = status.repository || null;
-        } catch { /* no repository: keep the phren: scheme */ }
-        useRemote = !!(window.PhrenEditorHost?.remote) && computer === "This computer" && !!repoRoot;
-        const resolved = await resolveProject(computer, target);
-        project = resolved.project;
-        indexAvailable = resolved.available;
-        if (indexAvailable) {
-          index = makeIndex(computer, project);
-          ensureProviders(m);
-          activeOpenFile = pane;
-          for (const tab of tabs) modelOwners.set(tab.model.uri.toString(), ownerFor(tab));
-        }
-        renderCrumb();
-      })
-      .catch(() => {});
-    return contextReady;
-  }
+// ------------------------------------------------------------- file tree
+/** The right panel's Files segment: a lazy tree and ⌘P quick open. Choosing a
+ * path opens it as a centre-tab document through ctx.openFile. */
+export function openFileTree(el, ctx) {
+  injectStyle();
 
-  // ------------------------------------------------------------- DOM
+  const computer = ctx.computer;
+  const child = ctx.child;
+  const target = child && child.target;
+  const knownPaths = new Set();
+  let canList = true;
+  store.capabilities(computer).then((caps) => { canList = caps.fileSearch === true; }).catch(() => {});
+
   const root = document.createElement("div");
-  root.className = "ed-root";
-
-  const filesCol = document.createElement("div");
-  filesCol.className = "ed-files";
-  const filesHeader = document.createElement("div");
-  filesHeader.className = "ed-files-header";
-  const filesTitle = document.createElement("span");
-  filesTitle.textContent = "Files";
+  root.className = "ed-tree-root";
+  const header = document.createElement("div");
+  header.className = "ed-files-header";
+  const title = document.createElement("span");
+  title.textContent = "Files";
   const quickButton = document.createElement("button");
   quickButton.className = "ed-qp";
   quickButton.textContent = "⌘P";
-  quickButton.addEventListener("click", () => openQuick("file"));
-  filesHeader.append(filesTitle, quickButton);
+  quickButton.addEventListener("click", () => openQuick());
+  header.append(title, quickButton);
   const tree = document.createElement("div");
   tree.className = "ed-tree";
-  filesCol.append(filesHeader, tree);
-
-  const main = document.createElement("div");
-  main.className = "ed-main";
-  const tabStrip = document.createElement("div");
-  tabStrip.className = "ed-tabs";
-  const crumbs = document.createElement("div");
-  crumbs.className = "ed-crumbs";
-  const banner = document.createElement("div");
-  banner.className = "ed-banner";
-  const editors = document.createElement("div");
-  editors.className = "ed-editors";
-  const editorContainer = document.createElement("div");
-  const diffContainer = document.createElement("div");
-  diffContainer.style.display = "none";
-  editors.append(editorContainer, diffContainer);
-  main.append(tabStrip, crumbs, banner, editors);
-
-  root.append(filesCol, main);
+  root.append(header, tree);
 
   const quick = document.createElement("div");
   quick.className = "ed-quick";
@@ -467,369 +497,10 @@ export function openFiles(el, ctx) {
   quick.appendChild(quickBox);
   quick.addEventListener("mousedown", (e) => { if (e.target === quick) closeQuick(); });
   root.appendChild(quick);
-
   el.appendChild(root);
 
-  // ------------------------------------------------------------- editor plumbing
-  const options = () => ({
-    ...(usingHost ? {} : { theme: THEME }),
-    fontFamily: MONO,
-    fontSize: 13,
-    minimap: { enabled: false },
-    automaticLayout: true,
-    scrollBeyondLastLine: false,
-    renderLineHighlight: "line",
-    breadcrumbs: { enabled: true },
-    padding: { top: 8 },
-  });
+  const openFile = (path, options) => ctx.openFile(path, options);
 
-  function askAction() {
-    return {
-      id: "phren.ask",
-      label: "Ask the agent about this",
-      contextMenuGroupId: "9_cutcopypaste",
-      contextMenuOrder: 1,
-      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyA],
-      run: askSelection,
-    };
-  }
-
-  function ensureEditor() {
-    if (editor || !monaco) return;
-    editor = monaco.editor.create(editorContainer, options());
-    editor.addAction(askAction());
-  }
-
-  function ensureDiffEditor() {
-    if (diffEditor || !monaco) return;
-    diffEditor = monaco.editor.createDiffEditor(diffContainer, { ...options(), renderSideBySide: true, originalEditable: false });
-    diffEditor.getModifiedEditor().addAction(askAction());
-  }
-
-  function askSelection(ed) {
-    const model = ed.getModel();
-    const sel = ed.getSelection();
-    if (!active || !model || !sel) return;
-    const text = model.getValueInRange(sel);
-    ctx.ask(`${active.path}:${sel.startLineNumber}-${sel.endLineNumber}\n\`\`\`\n${text}\n\`\`\`\n`);
-  }
-
-  // ------------------------------------------------------------- banner
-  function showBanner(kind, text, actions) {
-    banner.className = "ed-banner " + kind;
-    banner.innerHTML = "";
-    const msg = document.createElement("span");
-    msg.textContent = text;
-    banner.appendChild(msg);
-    for (const [label, onClick] of actions || []) banner.appendChild(mkButton(label, onClick));
-    banner.style.display = "flex";
-  }
-  function clearBanner() {
-    banner.style.display = "none";
-    banner.innerHTML = "";
-  }
-  // The read-only gate: Saving needs a Hook that declares fileWrite.
-  function showGate(feature) {
-    if (!needsNewer(banner, computer, feature)) return false;
-    banner.className = "ed-banner waiting";
-    banner.style.display = "flex";
-    return true;
-  }
-
-  // ------------------------------------------------------------- tabs
-  function renderTabs() {
-    tabStrip.innerHTML = "";
-    for (const tab of tabs) {
-      const node = document.createElement("div");
-      node.className = "ed-tab" + (tab === active ? " active" : "");
-      const dot = document.createElement("span");
-      dot.className = "dot";
-      dot.textContent = tab.dirty ? "●" : "";
-      const name = document.createElement("span");
-      name.textContent = baseName(tab.path);
-      const close = document.createElement("span");
-      close.className = "x";
-      close.textContent = "×";
-      node.append(dot, name, close);
-      node.addEventListener("click", () => setActive(tab));
-      node.addEventListener("auxclick", (e) => { if (e.button === 1) { e.preventDefault(); requestClose(tab); } });
-      close.addEventListener("click", (e) => { e.stopPropagation(); requestClose(tab); });
-      tabStrip.appendChild(node);
-    }
-    if (pendingClose) {
-      const tab = pendingClose;
-      const confirm = document.createElement("div");
-      confirm.className = "ed-confirm";
-      const label = document.createElement("span");
-      label.textContent = "Unsaved:";
-      confirm.append(
-        label,
-        mkButton("Save", async () => { await doSave(tab); if (!tab.dirty) closeTab(tab); }),
-        mkButton("Discard", () => closeTab(tab)),
-        mkButton("Cancel", () => { pendingClose = null; renderTabs(); }),
-      );
-      tabStrip.appendChild(confirm);
-    }
-  }
-
-  function requestClose(tab) {
-    if (tab.dirty) { pendingClose = tab; renderTabs(); }
-    else closeTab(tab);
-  }
-
-  function closeTab(tab) {
-    const i = tabs.indexOf(tab);
-    if (i < 0) return;
-    if (editor && editor.getModel() === tab.model) editor.setModel(null);
-    tabs.splice(i, 1);
-    modelOwners.delete(tab.model.uri.toString());
-    if (tab.originalModel) tab.originalModel.dispose();
-    tab.model.dispose();
-    if (active === tab) active = tabs[Math.min(i, tabs.length - 1)] || null;
-    pendingClose = null;
-    renderTabs();
-    renderCrumb();
-    if (active) showTab(active);
-    else hideEditors();
-  }
-
-  function refreshDirty(tab) {
-    const dirty = tab.model.getValue() !== tab.savedText;
-    if (dirty !== tab.dirty) { tab.dirty = dirty; renderTabs(); }
-  }
-
-  // ------------------------------------------------------------- view
-  function setActive(tab) {
-    if (active === tab) { showTab(tab); return; }
-    if (active && active.mode === "file" && editor && editor.getModel() === active.model) {
-      active.viewState = editor.saveViewState();
-    }
-    active = tab;
-    pendingClose = null;
-    renderTabs();
-    renderCrumb();
-    showTab(tab);
-  }
-
-  function showTab(tab) {
-    if (tab.mode === "diff") {
-      ensureDiffEditor();
-      editorContainer.style.display = "none";
-      diffContainer.style.display = "block";
-      diffEditor.setModel({ original: tab.originalModel, modified: tab.model });
-      diffEditor.updateOptions({ renderSideBySide: tab.sideBySide });
-    } else {
-      ensureEditor();
-      diffContainer.style.display = "none";
-      editorContainer.style.display = "block";
-      // Read-only follows the shown tab, since one editor instance is reused.
-      editor.updateOptions({ readOnly: !!tab.binary || !canWrite });
-      if (editor.getModel() !== tab.model) {
-        editor.setModel(tab.model);
-        if (tab.viewState) editor.restoreViewState(tab.viewState);
-      }
-    }
-    clearBanner();
-    if (tab.binary) showBanner("waiting", "This file is not UTF-8 text, so it opens read-only.");
-    else if (tab.note) showBanner("muted", tab.note);
-    else if (!canWrite) showGate("fileWrite");
-    markActive(tab.path);
-  }
-
-  function hideEditors() {
-    editorContainer.style.display = "none";
-    diffContainer.style.display = "none";
-    clearBanner();
-    markActive(null);
-  }
-
-  function markActive(path) {
-    for (const node of root.querySelectorAll(".ed-node")) {
-      node.classList.toggle("active", node.dataset.path === path);
-    }
-  }
-
-  function renderCrumb() {
-    crumbs.innerHTML = "";
-    if (active) {
-      const parts = active.path.split("/");
-      parts.forEach((part, i) => {
-        if (i) {
-          const sep = document.createElement("span");
-          sep.className = "sep";
-          sep.textContent = " › ";
-          crumbs.appendChild(sep);
-        }
-        const seg = document.createElement("span");
-        seg.textContent = part;
-        crumbs.appendChild(seg);
-      });
-      if (active.mode === "diff") {
-        const spacer = document.createElement("span");
-        spacer.style.marginLeft = "auto";
-        crumbs.appendChild(spacer);
-        crumbs.append(
-          mkButton(active.sideBySide ? "Side by side" : "Inline", () => {
-            active.sideBySide = !active.sideBySide;
-            if (diffEditor) diffEditor.updateOptions({ renderSideBySide: active.sideBySide });
-            renderCrumb();
-          }),
-          mkButton("Back to file", () => {
-            active.mode = "file";
-            active.note = null;
-            showTab(active);
-            renderCrumb();
-          }),
-        );
-      }
-    }
-    if (!indexAvailable && project) {
-      const note = document.createElement("span");
-      note.className = "ed-crumb-note";
-      note.textContent = `No code index for ${project}`;
-      crumbs.appendChild(note);
-    }
-  }
-
-  function revealLine(line) {
-    const ed = active.mode === "diff" && diffEditor ? diffEditor.getModifiedEditor() : editor;
-    if (!ed) return;
-    ed.revealLineInCenter(line);
-    ed.setPosition({ lineNumber: line, column: 1 });
-  }
-
-  // ------------------------------------------------------------- open / diff
-  async function openFile(path, opts = {}) {
-    await ensureContext();
-    if (!monaco) monaco = await loadMonaco();
-    let tab = tabs.find((t) => t.path === path);
-    if (!tab) {
-      let file;
-      try { file = await readRepoFile(computer, target, path); }
-      catch (err) { showBanner("danger", err.message || "Could not open the file."); return; }
-      const uri = uriFor(path);
-      if (uri.scheme === "phren") window.PhrenEditorHost?.registerPhrenFile?.(path);
-      // A binary file has no text to show, so it opens as an empty placeholder.
-      const text = file.binary ? "" : file.text;
-      // A peek list may have left an empty placeholder under this URI.
-      let model = monaco.editor.getModel(uri);
-      if (model) {
-        monaco.editor.setModelLanguage(model, languageFor(monaco, path));
-        if (model.getValue() !== text) model.setValue(text);
-      } else {
-        model = monaco.editor.createModel(text, languageFor(monaco, path), uri);
-      }
-      tab = {
-        path, model, version: file.version, savedText: text, dirty: false,
-        mode: "file", sideBySide: true, originalModel: null, viewState: null, note: null,
-        bom: file.bom, binary: file.binary,
-      };
-      model.onDidChangeContent(() => refreshDirty(tab));
-      tabs.push(tab);
-      knownPaths.add(path);
-    }
-    if (index) modelOwners.set(tab.model.uri.toString(), ownerFor(tab));
-    setActive(tab);
-    if (opts.diff) await openRepoDiff(tab);
-    if (opts.line) revealLine(opts.line);
-    return tab;
-  }
-
-  async function openRepoDiff(tab) {
-    let file;
-    try {
-      const res = await hookPost(computer, "/v1/diff", { target, paths: [tab.path] });
-      file = (res.files || []).find((f) => f.path === tab.path);
-    } catch (err) { showBanner("danger", err.message || "Diff failed."); return; }
-    const sections = ((file && file.sections) || []).filter((s) => s.patch && !s.binary);
-    sections.sort((a, b) => (a.kind === "unstaged" ? 0 : 1) - (b.kind === "unstaged" ? 0 : 1));
-    const patch = sections.map((s) => s.patch).join("\n");
-    let original;
-    if (file && file.status === "?") original = "";
-    else if (patch) {
-      try { original = reverseApply(tab.model.getValue(), patch); }
-      catch { tab.mode = "file"; tab.note = "Diff unavailable for this file."; showTab(tab); renderCrumb(); renderTabs(); return; }
-    } else original = tab.model.getValue();
-    openDiff(tab, original);
-  }
-
-  function openDiff(tab, originalText) {
-    if (tab.originalModel) tab.originalModel.dispose();
-    tab.originalModel = monaco.editor.createModel(originalText, tab.model.getLanguageId());
-    tab.mode = "diff";
-    tab.sideBySide = true;
-    tab.note = null;
-    showTab(tab);
-    renderCrumb();
-    renderTabs();
-  }
-
-  // ------------------------------------------------------------- save
-  // One save path for every scheme. The Cmd/Ctrl+S handler (onKey, capture
-  // phase below) and, when the VS Code host is up, an override of its
-  // workbench.action.files.save command both call doSave. It maps the model's
-  // URI back to the repo-relative path with pathFromUri and always posts
-  // /v1/files/write with the version, so the Hook's compare-and-swap stays
-  // authoritative even for vscode-remote models, whose REH filesystem would
-  // otherwise write to disk itself on save.
-  async function doSave(tab) {
-    // One keypress can reach both the host command and the document handler;
-    // the guard drops the duplicate so only one write carries the version.
-    if (!tab || tab.binary || tab.saving) return;
-    if (!canWrite) { showGate("fileWrite"); return; }
-    tab.saving = true;
-    const path = pathFromUri(tab.model.uri) || tab.path;
-    const content = (tab.bom ? "\uFEFF" : "") + tab.model.getValue();
-    try {
-      const res = await hookPost(computer, "/v1/files/write", {
-        target, path, content, version: tab.version,
-      });
-      tab.version = res.version;
-      tab.savedText = tab.model.getValue();
-      tab.dirty = false;
-      if (index) index.invalidate(tab.path);
-      if (tab === active) clearBanner();
-      renderTabs();
-    } catch (err) {
-      if (err.status === 409) showChanged(tab);
-      else showBanner("danger", err.message || "Save failed.");
-    } finally {
-      tab.saving = false;
-    }
-  }
-
-  function showChanged(tab) {
-    showBanner("waiting", `${baseName(tab.path)} changed on ${computer} since you opened it.`, [
-      ["Reload", async () => {
-        const file = await readRepoFile(computer, target, tab.path);
-        const text = file.binary ? "" : file.text;
-        tab.version = file.version;
-        tab.bom = file.bom;
-        tab.binary = file.binary;
-        tab.savedText = text;
-        tab.model.setValue(text);
-        tab.dirty = false;
-        if (tab.originalModel) { tab.originalModel.dispose(); tab.originalModel = null; }
-        tab.mode = "file";
-        clearBanner();
-        showTab(tab);
-        renderCrumb();
-        renderTabs();
-      }],
-      ["Overwrite", async () => {
-        const { version } = await readRepoFile(computer, target, tab.path);
-        tab.version = version;
-        await doSave(tab);
-      }],
-      ["Compare", async () => {
-        const { text } = await readRepoFile(computer, target, tab.path);
-        clearBanner();
-        openDiff(tab, text);
-      }],
-    ]);
-  }
-
-  // ------------------------------------------------------------- tree
   async function loadDir(dirPath, container) {
     let entries;
     try { ({ entries } = await hookPost(computer, "/v1/git/tree", { target, path: dirPath })); }
@@ -879,7 +550,7 @@ export function openFiles(el, ctx) {
     name.className = "ed-name";
     name.textContent = entry.name;
     node.append(disc, name);
-    node.addEventListener("click", () => { openFile(entry.path); });
+    node.addEventListener("click", () => openFile(entry.path));
     container.appendChild(node);
   }
 
@@ -903,34 +574,23 @@ export function openFiles(el, ctx) {
     return [...paths];
   }
 
-  function openQuick(mode = "file") {
-    if (mode === "search" && !index) return;
+  function openQuick() {
     quick.classList.add("open");
     quickInput.value = "";
-    quickInput.placeholder = mode === "search" ? "Go to function or type…" : "Search files by name";
     quickList.innerHTML = "";
     let items = [];
     let pool = [];
     let sel = 0;
-    let timer = null;
 
-    const label = (item) => typeof item === "string"
-      ? item
-      : `${item.name}  ${item.kind} · ${item.file}:${item.line}`;
-
-    const activate = (item) => {
-      closeQuick();
-      if (typeof item === "string") openFile(item);
-      else openFile(item.file, { line: item.line });
-    };
+    const activate = (path) => { closeQuick(); openFile(path); };
 
     const render = () => {
       quickList.innerHTML = "";
-      items.forEach((item, i) => {
+      items.forEach((path, i) => {
         const row = document.createElement("div");
         row.className = "ed-quick-item" + (i === sel ? " sel" : "");
-        row.textContent = label(item);
-        row.addEventListener("mousedown", (e) => { e.preventDefault(); activate(item); });
+        row.textContent = path;
+        row.addEventListener("mousedown", (e) => { e.preventDefault(); activate(path); });
         quickList.appendChild(row);
       });
     };
@@ -941,17 +601,7 @@ export function openFiles(el, ctx) {
       render();
     };
 
-    const runSearch = () => {
-      clearTimeout(timer);
-      timer = setTimeout(async () => {
-        try { items = (await index.search(quickInput.value.trim())).symbols || []; }
-        catch { items = []; }
-        if (sel >= items.length) sel = 0;
-        render();
-      }, 150);
-    };
-
-    quickInput.oninput = mode === "search" ? runSearch : filterFiles;
+    quickInput.oninput = filterFiles;
     quickInput.onkeydown = (e) => {
       if (e.key === "Escape") closeQuick();
       else if (e.key === "Enter") { if (items[sel]) activate(items[sel]); }
@@ -959,8 +609,7 @@ export function openFiles(el, ctx) {
       else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(sel - 1, 0); render(); }
     };
     quickInput.focus();
-    if (mode === "search") runSearch();
-    else quickPaths().then((paths) => { pool = paths; filterFiles(); });
+    quickPaths().then((paths) => { pool = paths; filterFiles(); });
   }
 
   function closeQuick() {
@@ -968,44 +617,337 @@ export function openFiles(el, ctx) {
     quickInput.blur();
   }
 
-  // ------------------------------------------------------------- keys / teardown
-  function ownsFocus() {
-    const focused = document.activeElement;
-    return hovered || (focused && el.contains(focused));
-  }
-
-  // Capture phase with stopPropagation so the VS Code host never sees Cmd/Ctrl+S
-  // and cannot write a vscode-remote file to disk behind the Hook's back.
-  function onKey(e) {
-    if (!ownsFocus() || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
-    const key = e.key.toLowerCase();
-    if (key === "p") { e.preventDefault(); e.stopPropagation(); openQuick("file"); }
-    else if (key === "s") { e.preventDefault(); e.stopPropagation(); doSave(active); }
-    else if (key === "t") { e.preventDefault(); e.stopPropagation(); openQuick("search"); }
-  }
-
-  document.addEventListener("keydown", onKey, true);
-  root.addEventListener("pointerenter", () => { hovered = true; });
-  root.addEventListener("pointerleave", () => { hovered = false; });
-
-  ensureContext();
   loadDir("", tree);
 
-  function close() {
-    document.removeEventListener("keydown", onKey, true);
-    if (editor) { editor.setModel(null); editor.dispose(); editor = null; }
-    if (diffEditor) { diffEditor.dispose(); diffEditor = null; }
-    for (const tab of tabs) {
-      modelOwners.delete(tab.model.uri.toString());
-      if (tab.originalModel) tab.originalModel.dispose();
-      tab.model.dispose();
-    }
-    tabs.length = 0;
-    if (activeOpenFile === pane) activeOpenFile = null;
-    el.innerHTML = "";
+  return { close() { el.replaceChildren(); } };
+}
+
+// ------------------------------------------------------------- editor document
+/** One centre-tab document: a Monaco / VS Code editor for one file or diff.
+ * Returns { close, focus, show, hide, reveal(line), isDirty, tryClose, save }. */
+export function openEditorDoc(el, opts) {
+  injectStyle();
+
+  const computer = opts.computer;
+  const child = opts.child;
+  const target = child && child.target;
+  const isDiff = !!opts.diff;
+
+  let ws = null;
+  let monaco = null;
+  let editor = null;
+  let diffEditor = null;
+  let originalModel = null;
+  let model = null;
+  let changeSub = null;
+  let version = null;
+  let savedText = "";
+  let dirty = false;
+  let binary = false;
+  let bom = false;
+  let saving = false;
+  let ready = false;
+  let sideBySide = true;
+  let pendingLine = opts.line != null ? opts.line : null;
+
+  // ------------------------------------------------------------- DOM
+  const root = document.createElement("div");
+  root.className = "ed-doc";
+  const crumbs = document.createElement("div");
+  crumbs.className = "ed-crumbs";
+  const banner = document.createElement("div");
+  banner.className = "ed-banner";
+  const editors = document.createElement("div");
+  editors.className = "ed-editors";
+  const editorHost = document.createElement("div");
+  const diffHost = document.createElement("div");
+  diffHost.style.display = "none";
+  editors.append(editorHost, diffHost);
+  root.append(crumbs, banner, editors);
+
+  const closeAsk = document.createElement("div");
+  closeAsk.className = "ed-close-ask";
+  const closeCard = document.createElement("div");
+  closeCard.className = "ed-close-card";
+  const closeMsg = document.createElement("div");
+  closeMsg.className = "ed-close-msg";
+  const closeActions = document.createElement("div");
+  closeActions.className = "ed-close-actions";
+  const saveBtn = mkButton("Save", () => {});
+  saveBtn.classList.add("ed-save");
+  closeActions.append(
+    saveBtn,
+    mkButton("Don't save", () => { hideCloseAsk(); opts.onCloseRequest?.(); }),
+    mkButton("Cancel", () => hideCloseAsk()),
+  );
+  closeCard.append(closeMsg, closeActions);
+  closeAsk.appendChild(closeCard);
+  root.appendChild(closeAsk);
+  el.appendChild(root);
+
+  // ------------------------------------------------------------- helpers
+  const options = () => ({
+    ...(usingHost ? {} : { theme: THEME }),
+    fontFamily: MONO,
+    fontSize: 13,
+    minimap: { enabled: false },
+    automaticLayout: true,
+    scrollBeyondLastLine: false,
+    renderLineHighlight: "line",
+    breadcrumbs: { enabled: true },
+    padding: { top: 8 },
+  });
+
+  function askAction(ed) {
+    return {
+      id: "phren.ask",
+      label: "Ask the agent about this",
+      contextMenuGroupId: "9_cutcopypaste",
+      contextMenuOrder: 1,
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyA],
+      run: () => {
+        const m = ed.getModel();
+        const sel = ed.getSelection();
+        if (!m || !sel) return;
+        const text = m.getValueInRange(sel);
+        opts.ask?.(`${opts.path}:${sel.startLineNumber}-${sel.endLineNumber}\n\`\`\`\n${text}\n\`\`\`\n`);
+      },
+    };
   }
 
-  return { openFile, close };
+  function showBanner(kind, text, actions) {
+    banner.className = "ed-banner " + kind;
+    banner.innerHTML = "";
+    const msg = document.createElement("span");
+    msg.textContent = text;
+    banner.appendChild(msg);
+    for (const [label, onClick] of actions || []) banner.appendChild(mkButton(label, onClick));
+    banner.style.display = "flex";
+  }
+  function clearBanner() {
+    banner.style.display = "none";
+    banner.innerHTML = "";
+  }
+  function showGate() {
+    if (!needsNewer(banner, computer, "fileWrite")) return;
+    banner.className = "ed-banner waiting";
+    banner.style.display = "flex";
+  }
+
+  function renderCrumb() {
+    crumbs.innerHTML = "";
+    const parts = opts.path.split("/");
+    parts.forEach((part, i) => {
+      if (i) {
+        const sep = document.createElement("span");
+        sep.className = "sep";
+        sep.textContent = " › ";
+        crumbs.appendChild(sep);
+      }
+      const seg = document.createElement("span");
+      seg.textContent = part;
+      crumbs.appendChild(seg);
+    });
+    if (isDiff) {
+      const spacer = document.createElement("span");
+      spacer.style.marginLeft = "auto";
+      crumbs.appendChild(spacer);
+      crumbs.append(mkButton("Side by side", () => {
+        if (!diffEditor) return;
+        sideBySide = !sideBySide;
+        diffEditor.updateOptions({ renderSideBySide: sideBySide });
+      }));
+    }
+    if (ws && !ws.indexAvailable && ws.project) {
+      const note = document.createElement("span");
+      note.className = "ed-crumb-note";
+      note.textContent = `No code index for ${ws.project}`;
+      crumbs.appendChild(note);
+    }
+  }
+
+  function applyPendingLine() {
+    if (pendingLine == null) return;
+    const ed = isDiff && diffEditor ? diffEditor.getModifiedEditor() : editor;
+    if (!ed) return;
+    ed.revealLineInCenter(pendingLine);
+    ed.setPosition({ lineNumber: pendingLine, column: 1 });
+    pendingLine = null;
+  }
+
+  // ------------------------------------------------------------- load
+  function onModelChange() {
+    if (!model) return;
+    const nowDirty = model.getValue() !== savedText;
+    if (nowDirty !== dirty) { dirty = nowDirty; opts.onDirty?.(dirty); }
+  }
+
+  async function load() {
+    let file;
+    try { file = await readRepoFile(computer, target, opts.path); }
+    catch (err) { ready = true; showBanner("danger", err.message || "Could not open the file."); return; }
+    binary = file.binary;
+    bom = file.bom;
+    version = file.version;
+    const text = file.binary ? "" : file.text;
+    savedText = text;
+    model = acquireModel(ws, opts.path, text, languageFor(monaco, opts.path));
+    if (isDiff) await setUpDiff();
+    else setUpEditor();
+    ready = true;
+    renderCrumb();
+    applyPendingLine();
+  }
+
+  function setUpEditor() {
+    editorHost.style.display = "block";
+    diffHost.style.display = "none";
+    editor = monaco.editor.create(editorHost, options());
+    editor.addAction(askAction(editor));
+    editor.updateOptions({ readOnly: binary || !ws.canWrite });
+    editor.setModel(model);
+    changeSub = model.onDidChangeContent(onModelChange);
+    if (binary) showBanner("waiting", "This file is not UTF-8 text, so it opens read-only.");
+    else if (!ws.canWrite) showGate();
+  }
+
+  async function setUpDiff() {
+    editorHost.style.display = "none";
+    diffHost.style.display = "block";
+    let file;
+    try {
+      const res = await hookPost(computer, "/v1/diff", { target, paths: [opts.path] });
+      file = (res.files || []).find((f) => f.path === opts.path);
+    } catch (err) { showBanner("danger", err.message || "Diff failed."); return; }
+    const sections = ((file && file.sections) || []).filter((s) => s.patch && !s.binary);
+    sections.sort((a, b) => (a.kind === "unstaged" ? 0 : 1) - (b.kind === "unstaged" ? 0 : 1));
+    const patch = sections.map((s) => s.patch).join("\n");
+    let originalText;
+    if (file && file.status === "?") originalText = "";
+    else if (patch) {
+      try { originalText = reverseApply(model.getValue(), patch); }
+      catch { originalText = model.getValue(); showBanner("muted", "Diff unavailable for this file."); }
+    } else originalText = model.getValue();
+    originalModel = monaco.editor.createModel(originalText, model.getLanguageId());
+    diffEditor = monaco.editor.createDiffEditor(diffHost, { ...options(), renderSideBySide: sideBySide, originalEditable: false });
+    diffEditor.setModel({ original: originalModel, modified: model });
+    // Review only: the modified side stays read-only so a diff never owns edits.
+    const modified = diffEditor.getModifiedEditor();
+    modified.updateOptions({ readOnly: true });
+    modified.addAction(askAction(modified));
+  }
+
+  workspaceFor(computer, child)
+    .then((w) => { ws = w; monaco = w.monaco; return load(); })
+    .catch(() => { ready = true; showBanner("danger", "Could not open the editor."); });
+
+  // ------------------------------------------------------------- save
+  async function save() {
+    if (!model || binary || saving) return;
+    if (!ws?.canWrite) { showGate(); return; }
+    saving = true;
+    const path = ws.pathFromUri(model.uri) || opts.path;
+    const content = (bom ? "\uFEFF" : "") + model.getValue();
+    try {
+      const res = await hookPost(computer, "/v1/files/write", { target, path, content, version });
+      version = res.version;
+      savedText = model.getValue();
+      if (dirty) { dirty = false; opts.onDirty?.(false); }
+      if (ws.index) ws.index.invalidate(path);
+      clearBanner();
+    } catch (err) {
+      if (err.status === 409) showChanged();
+      else showBanner("danger", err.message || "Save failed.");
+    } finally {
+      saving = false;
+    }
+  }
+
+  function showChanged() {
+    showBanner("waiting", `${baseName(opts.path)} changed on ${computer} since you opened it.`, [
+      ["Reload", async () => {
+        const file = await readRepoFile(computer, target, opts.path);
+        const text = file.binary ? "" : file.text;
+        version = file.version; bom = file.bom; binary = file.binary; savedText = text;
+        model.setValue(text);
+        if (dirty) { dirty = false; opts.onDirty?.(false); }
+        clearBanner();
+      }],
+      ["Overwrite", async () => {
+        const { version: current } = await readRepoFile(computer, target, opts.path);
+        version = current;
+        await save();
+      }],
+      ["Open diff", () => opts.openFile?.(opts.path, { diff: true })],
+    ]);
+  }
+
+  // ------------------------------------------------------------- close prompt
+  function showCloseAsk() {
+    closeMsg.textContent = `Save changes to ${baseName(opts.path)}?`;
+    closeAsk.classList.add("open");
+  }
+  function hideCloseAsk() { closeAsk.classList.remove("open"); }
+  saveBtn.addEventListener("click", async () => {
+    await save();
+    hideCloseAsk();
+    if (!dirty) opts.onCloseRequest?.();
+  });
+
+  function tryClose() {
+    if (dirty) { showCloseAsk(); return; }
+    opts.onCloseRequest?.();
+  }
+
+  // Capture phase so the VS Code host never writes a vscode-remote file to disk
+  // behind the Hook's compare-and-swap.
+  function onKey(e) {
+    if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
+    if (e.key.toLowerCase() !== "s") return;
+    e.preventDefault();
+    e.stopPropagation();
+    save();
+  }
+  el.addEventListener("keydown", onKey, true);
+
+  // ------------------------------------------------------------- handle
+  const pane = {
+    openFile: (path, o) => opts.openFile?.(path, o),
+    pathFromUri: (uri) => (ws ? ws.pathFromUri(uri) : null),
+  };
+
+  const handle = {
+    save,
+    isDirty: () => dirty,
+    tryClose,
+    reveal(line) {
+      if (line != null) pendingLine = line;
+      if (ready) applyPendingLine();
+    },
+    focus() {
+      const active = isDiff && diffEditor ? diffEditor.getModifiedEditor() : editor;
+      active?.focus();
+    },
+    show() {
+      activeDoc = handle;
+      activeOpenFile = pane;
+      if (editor) editor.layout();
+      if (diffEditor) diffEditor.layout();
+    },
+    hide() { hideCloseAsk(); },
+    close() {
+      el.removeEventListener("keydown", onKey, true);
+      if (changeSub) { changeSub.dispose(); changeSub = null; }
+      if (editor) { editor.dispose(); editor = null; }
+      if (diffEditor) { diffEditor.dispose(); diffEditor = null; }
+      if (originalModel) { originalModel.dispose(); originalModel = null; }
+      if (model) { releaseModel(model); model = null; }
+      if (activeDoc === handle) activeDoc = null;
+      if (activeOpenFile === pane) activeOpenFile = null;
+      el.replaceChildren();
+    },
+  };
+  return handle;
 }
 
 // ------------------------------------------------------------- capability gate

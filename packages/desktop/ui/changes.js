@@ -276,7 +276,12 @@ export function openChanges(el, ctx) {
 
   function renderFileRow(f) {
     const row = div("chg-row");
-    row.onclick = () => toggleDiff(f);
+    // Modified and renamed files open their diff as a centre tab; untracked and
+    // deleted files have nothing to read, so they expand inline.
+    row.onclick = () => {
+      if (f.status === "?" || f.status === "D") toggleDiff(f);
+      else ctx.openFile(f.path, { diff: true });
+    };
     row.appendChild(div("chg-tile " + tileClass(f.status), f.status === "?" ? "?" : f.status));
     const main = div("chg-main");
     main.appendChild(div("chg-name", basename(f.path)));
