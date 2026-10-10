@@ -72,6 +72,8 @@ installKeys({
   toggleZoom: () => agents().toggleZoom(),
   closePanel: () => agents().closePanel(),
   closeTab: () => agents().closeTab(),
+  get tiles() { return agents().tiles; },
+  toggleConsole: () => agents().toggleConsole(),
   nextTab: () => agents().nextTab(),
   previousTab: () => agents().previousTab(),
   currentSession: () => agents().currentSession(),

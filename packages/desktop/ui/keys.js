@@ -13,7 +13,15 @@ let hintEl = null;
 const PREFIX_WINDOW_MS = 2500;
 
 // ------------------------------------------------------------ key strings
-const NAMED = { minus: "-", comma: ",", plus: "+", backtick: "`", ampersand: "&", space: " ", slash: "/" };
+const NAMED = { minus: "-", comma: ",", plus: "+", backtick: "`", ampersand: "&", space: " ", slash: "/", backslash: "\\" };
+// Physical keys, for presses whose character a modifier changes (⌥H types "˙", ⇧\\ types "|").
+const CODE_KEYS = { Minus: "-", Equal: "=", Backslash: "\\", Slash: "/", Comma: ",", Period: ".", Backquote: "`", BracketLeft: "[", BracketRight: "]", Semicolon: ";", Quote: "'" };
+function codeKey(ev) {
+  const code = ev.code || "";
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3).toLowerCase();
+  if (/^Digit\d$/.test(code)) return code.slice(5);
+  return CODE_KEYS[code] ?? null;
+}
 const EVENT_NAMES = { arrowup: "up", arrowdown: "down", arrowleft: "left", arrowright: "right", escape: "esc", enter: "enter", tab: "tab", " ": " " };
 const SYMBOLS = { ctrl: "⌃", alt: "⌥", shift: "⇧", cmd: "⌘", super: "⌘" };
 // "cmd" in a binding means Command on macOS and Control everywhere else.
@@ -51,10 +59,12 @@ export function matches(spec, ev) {
   // Letters and named keys care about shift; "?" or "&" already imply it.
   if ((letter || spec.key.length > 1) && spec.shift !== ev.shiftKey) return false;
   if (spec.range) {
-    const n = Number(key);
+    const n = Number(/^\d$/.test(key) ? key : codeKey(ev));
     return Number.isInteger(n) && n >= spec.range[0] && n <= spec.range[1] ? n : false;
   }
-  return key === spec.key;
+  if (key === spec.key) return true;
+  // The character differs from the key's own (⌥ or ⇧ changed it): match the physical key, shift exactly.
+  return codeKey(ev) === spec.key && spec.shift === ev.shiftKey;
 }
 
 /** How a binding reads on the shortcut sheet: "⌃B  ⇧T". */
@@ -180,11 +190,31 @@ function run(action, arg) {
     case "rename_tab": return renameSession();
     case "toggle_sidebar":
     case "sidebar": return document.body.classList.toggle("sidebar-hidden");
-    case "focus_pane_left": return focusColumn(-1);
-    case "focus_pane_right": return focusColumn(1);
+    case "focus_pane_left": return app.tiles?.focusDir("left") || focusColumn(-1);
+    case "focus_pane_right": return app.tiles?.focusDir("right") || focusColumn(1);
+    case "focus_pane_up": return app.tiles?.focusDir("up");
+    case "focus_pane_down": return app.tiles?.focusDir("down");
+    case "split_vertical":
+    case "split_right": return app.tiles?.split("right");
+    case "split_horizontal":
+    case "split_down": return app.tiles?.split("down");
+    case "resize_pane_left": return app.tiles?.resize("left");
+    case "resize_pane_right": return app.tiles?.resize("right");
+    case "resize_pane_up": return app.tiles?.resize("up");
+    case "resize_pane_down": return app.tiles?.resize("down");
+    case "move_pane_left": return app.tiles?.moveDir("left");
+    case "move_pane_right": return app.tiles?.moveDir("right");
+    case "move_pane_up": return app.tiles?.moveDir("up");
+    case "move_pane_down": return app.tiles?.moveDir("down");
+    case "swap_pane_left": return app.tiles?.swapDir("left");
+    case "swap_pane_right": return app.tiles?.swapDir("right");
+    case "swap_pane_up": return app.tiles?.swapDir("up");
+    case "swap_pane_down": return app.tiles?.swapDir("down");
+    case "toggle_console":
+    case "console": return app.toggleConsole?.();
     case "cycle_pane_next": return focusColumn(1, true);
-    case "zoom": return app.toggleZoom();
-    case "close_pane": return app.closePanel();
+    case "zoom": return app.tiles && app.tiles.tileCount() > 1 ? app.tiles.zoom() : app.toggleZoom();
+    case "close_pane": return app.closeTab ? app.closeTab() : app.closePanel();
     case "close_tab": return app.closeTab ? app.closeTab() : app.closePanel();
     case "new_tab":
     case "terminal": return app.showPane("terminal");
