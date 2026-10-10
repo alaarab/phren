@@ -157,3 +157,45 @@ Errors: 400 code "search-invalid-regex", 413 code "search-too-broad". Hooks with
 `capabilities.fileSearch` answer 404: show "Update Phren on <computer> to search here."
 - `POST /v1/files/list {target}` → `{files: [path…], total, truncated}`: every tracked and untracked
   (not ignored) file, for ⌘P. Same `fileSearch` capability; on 404 fall back to the paths already loaded.
+
+# VS Code extensions (phase 1d)
+
+Owner decision 2026-10-09: VS Code extensions through monaco-vscode-api, keeping
+Phren's own UI. The editor host (`packages/desktop-editor`, built by Vite to
+`ui/editor-host/`) runs VS Code's editor services and a web-worker extension host.
+
+What runs: declarative contributions of any extension (themes, icon themes,
+grammars, language configurations, snippets) and the code of **web extensions**
+(manifest `browser` entry). Extensions with only a Node `main` contribute their
+declarative parts; their code needs a Node extension host, which is not built yet.
+
+## Daemon (src/extensions.ts, routes in src/server.ts)
+
+Installed extensions live in `<config>/phren/desktop-extensions/<publisher>.<name>/`
+(`<config>` = `$XDG_CONFIG_HOME` or `~/.config`), holding the unzipped `extension/`
+folder of the VSIX plus `phren.json` `{id, version, installedAt, enabled, source: "open-vsx"}`.
+
+- `GET /api/extensions` → `{extensions:[{id, version, displayName, description, publisher, enabled, kind:"web"|"declarative"|"node", icon?: url, manifest, files:[relative paths]}]}`
+  `kind`: "web" when the manifest has `browser`; "node" when it has `main` but no `browser`;
+  else "declarative". `files` lists every file under `extension/` (posix, relative, max 5000).
+  `icon` is `/extension-files/<id>/<manifest.icon>` when set.
+- `GET /api/extensions/search?q=<text>` → proxies `https://open-vsx.org/api/-/search?query=<q>&size=30`
+  and returns `{extensions:[{namespace, name, version, displayName, description, downloadCount, icon}]}`.
+- `POST /api/extensions/install {namespace, name}` → fetch `https://open-vsx.org/api/<ns>/<name>/latest`,
+  download `files.download` (max 60 MB), verify it against `files.sha256` (hex in the body),
+  unzip with fflate, keep only `extension/**` (reject absolute paths, `..`, symlinks), write to a temp
+  dir and rename into place (replacing an older version). Returns the installed entry.
+- `DELETE /api/extensions/<id>`; `POST /api/extensions/<id>/enable {enabled}`.
+- `GET /extension-files/<id>/<path>` → a file from that extension's `extension/` folder (no traversal).
+Ids match `/^[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9-]*$/`.
+
+## UI (ui/extensions.js)
+
+`openExtensions(el, ctx)` → `{ close() }`, the workbench's Extensions segment, Phren style:
+a search field ("Search Open VSX"), INSTALLED and RESULTS sections. A row: 32 px icon (or a
+letter tile), display name in --text, publisher in --muted, description one line, a kind chip
+("Runs here" for web in --done, "Themes and grammars" for declarative in --muted, "Needs a Node host" for node
+in --waiting), and Install / Uninstall / Enable / Disable buttons. After any change call
+`window.PhrenEditorHost?.reloadExtensions?.()` if present and show "Reload the window to finish" when it returns false.
+A "Color theme" select at the top lists every contributed theme from installed + built-in
+(`PhrenEditorHost.themes()` → [{id, label}]) and applies it with `PhrenEditorHost.setTheme(id)`.
