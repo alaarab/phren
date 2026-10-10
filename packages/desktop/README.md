@@ -56,7 +56,19 @@ Installs land in `~/.config/phren/desktop-extensions/` (or
 
 - **Declarative parts always load:** themes, icon themes, grammars, language configurations, snippets.
 - **Web extensions' code runs:** any manifest with `browser`, in VS Code's worker extension host.
-- **Node-only extensions don't run yet:** they contribute their declarative parts, but their code needs a Node extension host.
+- **Node extensions run in a Node extension host** on this computer: VS Code's own
+  remote extension host (MIT), built from the exact commit the editor uses:
+
+  ```sh
+  packages/desktop-editor/scripts/build-reh.sh          # this computer's platform
+  ```
+
+  The daemon unpacks it into `~/.config/phren/desktop-reh/` and starts it on
+  127.0.0.1 with a secret connection token, which the page gets only through the
+  cookie-protected `/api/reh`. Node-only extensions install into it. Files of this
+  computer's sessions open as `vscode-remote://` with their real path, so language
+  servers read them from disk. Sessions on other computers keep web extensions
+  until their Hook can start a server of its own.
 
 Extension code runs in a frame on its own `{{uuid}}.localhost` origin. It never
 gets the desktop's cookie and cannot call the daemon or any Hook. That is why the

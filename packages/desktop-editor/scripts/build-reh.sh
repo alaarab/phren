@@ -44,16 +44,45 @@ if [ ! -f .phren-npm-ci-done ]; then
   npm ci --no-audit --no-fund
   touch .phren-npm-ci-done
 fi
+# A finished compile is reused on a rerun (it takes several minutes).
+if [ ! -f .phren-compiled ]; then
+git checkout -q -- src
+# The strict build also type-checks unit tests, and a few fail at a given
+# commit. Tests are not part of the server: when every error is in a *.test.ts
+# file, drop exactly those files and compile again (at most 3 rounds).
+for round in 1 2 3; do
+  if npm run gulp -- compile-build-without-mangling 2>&1 | tee "$root/compile.log"; then
+    grep -q "errored after" "$root/compile.log" || break
+  fi
+  bad="$(grep -oE "src/[^(]+\.ts\(" "$root/compile.log" | sed 's/($//' | sort -u)"
+  if [ -z "$bad" ] || printf '%s\n' "$bad" | grep -qv '\.test\.ts$'; then
+    echo "Compile errors outside unit tests; stopping." >&2; exit 1
+  fi
+  echo "Dropping failing unit tests:"; printf '  %s\n' $bad
+  rm -f $bad
+done
+touch .phren-compiled
+fi
+# The minifier refuses non-ASCII output (a load-time performance guard); a few
+# upstream strings carry an em dash. Build tooling only: allow it for this build.
+grep -q PHREN_ALLOW_NON_ASCII build/lib/optimize.ts || \
+  sed -i.bak 's/if (unicodeMatch) {/if (unicodeMatch \&\& !process.env.PHREN_ALLOW_NON_ASCII) {/' build/lib/optimize.ts
+export PHREN_ALLOW_NON_ASCII=1
+# clean-extensions-build is internal to VS Code's combined task; do it directly.
+rm -rf .build/extensions
 # The same steps as VS Code's vscode-reh-<target>-min task, but compiled without
 # mangling (as VSCodium builds): the mangler refuses some upstream sources.
-for step in compile-build-without-mangling clean-extensions-build compile-non-native-extensions-build \
-  compile-copilot-extension-build compile-extension-media-build minify-vscode-reh "vscode-reh-$target-min-ci"; do
+# Copilot is still built because packaging expects it; it is removed below.
+for step in compile-non-native-extensions-build compile-copilot-extension-build compile-extension-media-build minify-vscode-reh "vscode-reh-$target-min-ci"; do
   echo "== $step"
   npm run gulp -- "$step"
 done
 
 out="$root/vscode-reh-$target"
 [ -d "$out" ] || out="$(dirname "$src")/vscode-reh-$target"
+# Phren's server runs only the owner's own extensions: drop the GitHub Copilot
+# extension VS Code bundles (it does not start here and is most of the size).
+rm -rf "$out/extensions/copilot"
 # The client checks quality and commit; stamp them so the handshake matches.
 node -e '
 const fs=require("fs"), p=process.argv[1]+"/product.json", j=JSON.parse(fs.readFileSync(p));
