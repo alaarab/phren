@@ -163,13 +163,14 @@ export function mountConductor(root) {
     const card = el("div", "conductor-run");
     card.append(el("span", "conductor-dot working"));
     const main = el("div", "conductor-run-main");
-    main.append(el("div", "conductor-run-title", child.title || child.label || "Conductor"));
+    main.append(el("div", "conductor-run-title", "Conductor"));
     const meta = el("div", "conductor-run-meta");
+    const named = child.title || child.label;
+    if (named && named !== "Conductor") meta.append(el("span", "conductor-session", named));
     meta.append(el("span", "conductor-host", computer));
     const live = child.agentStatus === "working" ? "working"
       : child.agentStatus === "blocked" || child.approvalPending ? "waiting" : child.agentStatus || "idle";
     meta.append(el("span", `conductor-state ${live}`, live));
-    if (child.role) meta.append(el("span", "conductor-role", "conductor"));
     main.append(meta);
     card.append(main);
     const actions = el("div", "conductor-run-actions");
@@ -547,7 +548,7 @@ export function mountConductor(root) {
     const row = el("div", "conductor-set-row");
     if (computer.conductor) row.classList.add("is-conductor");
     const name = el("span", "conductor-set-name", computer.name);
-    if (computer.conductor) name.append(el("span", "conductor-chip conductor", "conductor"));
+    if (computer.conductor) name.append(el("span", "conductor-chip lead", "conductor"));
     row.append(name);
     const meta = el("div", "conductor-set-meta");
     const link = LINK_BADGE[computer.link] ?? "";

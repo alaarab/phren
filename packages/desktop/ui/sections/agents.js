@@ -406,6 +406,19 @@ export function mountAgents(root) {
     let consoleHandle = null;
     let mode = "chat";
 
+    /** In chat the switch sits in the chat's own header row; over a console it floats top right. */
+    function placeBar() {
+      const trailing = chatEl.querySelector(".chat-header .chat-trailing");
+      if (mode === "chat" && trailing) {
+        trailing.prepend(bar);
+        bar.classList.add("in-header");
+      } else {
+        el.append(bar);
+        bar.classList.remove("in-header");
+      }
+    }
+    placeBar();
+
     /** Why this session has no single-pane console, or "" when it has one. */
     async function consoleBlocked() {
       const server = child.target.server;
@@ -432,6 +445,7 @@ export function mountAgents(root) {
         consoleEl.replaceChildren();
       }
       mode = next;
+      placeBar();
       chatEl.hidden = mode !== "chat";
       consoleEl.hidden = mode !== "console";
       chatBtn.classList.toggle("selected", mode === "chat");

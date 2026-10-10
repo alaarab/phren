@@ -274,7 +274,7 @@ export function mountMemory(root) {
       row.append(el("span", "mem-project-name", project.name));
       const counts = el("span", "mem-project-counts");
       if (project.findings) counts.append(el("span", "mem-count", String(project.findings)));
-      if (project.review) counts.append(el("span", "mem-count review", String(project.review)));
+      if (project.review) counts.append(el("span", "mem-count pending", String(project.review)));
       row.append(counts);
       row.addEventListener("click", () => {
         state.project = project.name;

@@ -26,6 +26,7 @@
 .conductor-run-main { flex: 1; min-width: 0; }
 .conductor-run-title { color: var(--text); font: 600 14px system-ui; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .conductor-run-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 3px; color: var(--muted); font-size: 12px; }
+.conductor-session { color: var(--text-2); }
 .conductor-run-actions { flex: none; display: flex; align-items: center; gap: 8px; }
 .conductor-state { color: var(--muted); }
 .conductor-state.working { color: var(--working); }
@@ -84,7 +85,7 @@
 .conductor-chip.gone { background: var(--raised); color: var(--dim); }
 .conductor-chip.action { color: var(--text-2); background: rgba(255,255,255,0.06); }
 .conductor-chip.host { color: var(--muted); background: rgba(255,255,255,0.04); }
-.conductor-chip.conductor, .conductor-chip.local { color: var(--accent); }
+.conductor-chip.lead, .conductor-chip.local { color: var(--accent); }
 
 .conductor-empty { padding: 12px; color: var(--muted); font-size: 12.5px; }
 .conductor-note { padding: 8px 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
@@ -115,3 +116,9 @@
 
 @media (prefers-reduced-motion: reduce) { .conductor-tab, .conductor-btn { transition: none; } }
 .conductor-panel > * { flex: none; }
+
+/* One centred column like Home and Schedules; panels keep their scrollbar at the window edge. */
+.conductor { --conductor-gutter: max(20px, calc((100% - 1040px) / 2)); }
+.conductor-head, .conductor-panel { padding-left: var(--conductor-gutter); padding-right: var(--conductor-gutter); }
+.conductor-tabs, .conductor-error { margin-left: var(--conductor-gutter); margin-right: var(--conductor-gutter); }
+.conductor-error { align-self: stretch; }

@@ -5,7 +5,7 @@ import { hookPost, readRepoFile } from "./api.js";
 import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
 
 // The phone's Changes tabs, minus Working tree (the Files pane owns that here).
-const VIEWS = [["changes", "Changes"], ["history", "History"], ["branches", "Branches"], ["pulls", "PRs"], ["worktrees", "Worktrees"]];
+const VIEWS = [["changes", "Uncommitted"], ["history", "History"], ["branches", "Branches"], ["pulls", "PRs"], ["worktrees", "Worktrees"]];
 
 const CSS = `
 .chg{display:flex;flex-direction:column;height:100%;min-height:0;color:var(--text-2);font:13px/1.45 system-ui,sans-serif}

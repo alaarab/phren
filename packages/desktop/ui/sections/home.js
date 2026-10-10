@@ -3,10 +3,11 @@
 // returns from dispatched workers, and how every computer is doing.
 import { hookGet, hookPost, targetQuery } from "../api.js";
 import { needsYou, projectOf, sessions, store } from "../shell/store.js";
+import { showSection } from "../shell/sections.js";
 
 // Receipts drive both the conductor's latest line and the recent-returns list.
 const RETURN_POLL_MS = 30_000;
-const MAX_RETURNS = 12;
+const MAX_RETURNS = 5;
 const RETURN_STATE = { "done": "done", "needs-you": "needs you", "failed": "failed", "blocked": "blocked", "gone": "gone", "stalled": "stalled" };
 
 function el(tag, cls, text) {
@@ -121,6 +122,7 @@ export function mountHome(root, { openSession } = {}) {
     fill("needs", rows.map((row, index) => sessionRow(row, {
       tone: "waiting", selected: index === selected, sub: needsSub(row),
     })), "Nothing needs you.");
+    block("needs").querySelector(".home-keys").hidden = !rows.length;
     syncWatchers(rows);
   }
 
@@ -173,6 +175,12 @@ export function mountHome(root, { openSession } = {}) {
     for (const list of receipts.values()) for (const entry of list) if (entry.receipt?.returned) rows.push(entry);
     rows.sort((a, b) => String(b.receipt.returned.at).localeCompare(String(a.receipt.returned.at)));
     fill("returns", rows.slice(0, MAX_RETURNS).map(returnRow), "No returns yet.");
+    block("returns").querySelector(".count").textContent = rows.length ? String(rows.length) : "";
+    if (rows.length > MAX_RETURNS) {
+      const more = el("button", "home-more", `All ${rows.length} in Review`);
+      more.addEventListener("click", () => showSection("review"));
+      block("returns").querySelector(".home-list").append(more);
+    }
   }
 
   // ---- computers ------------------------------------------------------
@@ -245,7 +253,10 @@ export function mountHome(root, { openSession } = {}) {
     if (found) {
       const card = el("div", "home-conductor");
       const head = el("div", "home-conductor-head");
-      head.append(el("span", "home-conductor-title", found.child.title || found.child.label || "Conductor"));
+      head.append(el("span", "home-conductor-title", "Conductor"));
+      // The session's own title ("Agent status") is the harness's, not the role.
+      const named = found.child.title || found.child.label;
+      if (named && named !== "Conductor") head.append(el("span", "home-conductor-session", named));
       const meta = el("span", "home-conductor-meta");
       const live = found.child.agentStatus === "working" ? "working" : found.child.agentStatus === "blocked" || found.child.approvalPending ? "waiting" : found.child.agentStatus || "idle";
       meta.append(el("span", "home-host", found.computer), el("span", `home-conductor-state ${live === "waiting" ? "waiting" : ""}`, live));
