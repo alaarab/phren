@@ -196,7 +196,7 @@ describe("blocks after a union merge", () => {
   // The store merges markdown with git's union driver: two computers that both
   // rewrote a block leave both start lines behind.
   const merged = [
-    "# alphalens", "",
+    "# example-project", "",
     "<!-- phren:now:start at=2026-10-07T04:11:45.917Z hash=c550b8faedff -->",
     "<!-- phren:now:start at=2026-10-08T05:49:15.386Z hash=c550b8faedff -->",
     "## Now", "", "3 findings, archived between 2026-09-06 and 2026-10-06.",
