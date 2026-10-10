@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A shell tool card no longer shows "Changes unavailable: Git change capture failed or timed out" in a large repository on a busy machine. Each capture made Git rehash every tracked file, about 3 s for 6,000 files under load, past the 2.5 s hook budget; it now rechecks only the files Git itself would (about 100 ms).
+
 ## [0.3.34] - 2026-10-09
 
 ### Fixed
