@@ -40,8 +40,10 @@ describe("planPublish", () => {
     expect(planPublish(status(), current).pull).toEqual({ existing: 7, url: "https://x/7", checks: "passing" });
   });
 
-  it("is empty for a clean tracking branch", () => {
-    expect(planPublish(status(), null).isEmpty).toBe(true);
+  it("is empty for a clean, pushed default branch", () => {
+    expect(planPublish(status({ branch: "main", upstream: "origin/main" }), null).isEmpty).toBe(true);
+    // A clean, pushed feature branch still offers to open a pull request.
+    expect(planPublish(status(), null).isEmpty).toBe(false);
   });
 });
 
