@@ -5,6 +5,7 @@ import { connectStore, store } from "./shell/store.js";
 import { installSections, registerSection, sectionHandle, setSectionBadge, showSection } from "./shell/sections.js";
 import { mountAgents } from "./sections/agents.js";
 import { mountHome } from "./sections/home.js";
+import { mountProjects } from "./sections/projects.js";
 import { initTheme } from "./shell/theme.js";
 import { mountSettings, notifyEnabled, badgeEnabled } from "./sections/settings.js";
 import { mountUsageRings } from "./shell/usage-rings.js";
@@ -23,6 +24,7 @@ registerSection("home", { label: "Home", order: 10, badge: true, mount: (el) => 
   openSession(computer, child) { showSection("agents"); agents().openSession(computer, child); },
 }) });
 registerSection("agents", { label: "Agents", order: 20, mount: (el) => mountAgents(el) });
+registerSection("projects", { label: "Projects", order: 30, mount: (el) => mountProjects(el) });
 registerSection("settings", { label: "Settings", order: 90, mount: (el) => mountSettings(el) });
 
 installSections(document.getElementById("section-pills"), document.getElementById("sections"));
@@ -62,10 +64,11 @@ store.subscribe(() => {
 });
 
 connectStore();
-// Open Agents first (keys.js binds to its sidebar), then the section the URL names.
+// Mount Agents first (keys.js binds to its sidebar), then open the section the
+// URL names, else Home: the window opens on what needs you.
 showSection("agents");
-const initial = location.hash.replace(/^#\/?/, "");
-if (initial && initial !== "agents") showSection(initial);
+const initial = location.hash.replace(/^#\/?/, "") || "home";
+if (initial !== "agents") showSection(initial);
 
 installKeys({
   showPane: (key) => { showSection("agents"); agents().showPane(key); },

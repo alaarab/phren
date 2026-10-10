@@ -231,7 +231,10 @@ export function openChat(el, computerName, child, opts = {}) {
     const id = String(frame.deliveryId || "");
     if (!id) return;
     const state = String(frame.state || "unknown");
-    const echo = echoes.get(id) || chatPendingEcho(id, "", [], { submittedAt: new Date().toISOString() });
+    // Only messages this composer sent have a bubble; the Hook also reports
+    // deliveries from the phone and from before this chat opened.
+    const echo = echoes.get(id);
+    if (!echo) return;
     echo.deliveryState = state;
     echoes.set(id, echo);
     if (state === "delivered") scheduleEchoRemoval(id);

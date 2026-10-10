@@ -243,3 +243,13 @@ test("tiles split, move and swap like Herdr panes; a session switches to its con
   await page.locator(".tile").nth(1).locator(".doc-tab-close").click({ force: true });
   await expect(page.locator(".tile")).toHaveCount(1);
 });
+
+test("projects section renders", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator(".section-pill", { hasText: "Projects" }).click();
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: test.info().outputPath("projects.png") });
+  expect(errors).toEqual([]);
+});
