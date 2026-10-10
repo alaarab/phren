@@ -107,8 +107,8 @@ describe("GET /v1/projects/:project/memory", () => {
 describe("phren.project.yaml remote", () => {
   const remote = (value: string) => getProjectRemote(store, "app", { remote: value });
   it("keeps clone URLs from any host and drops credentials and local paths", () => {
-    expect(remote("git@gitboy.lan:alice/app.git")).toBe("git@gitboy.lan:alice/app.git");
-    expect(remote("ssh://git@gitboy.lan:2222/alice/app.git")).toBe("ssh://git@gitboy.lan:2222/alice/app.git");
+    expect(remote("git@gitboy.example:alice/app.git")).toBe("git@gitboy.example:alice/app.git");
+    expect(remote("ssh://git@gitboy.example:2222/alice/app.git")).toBe("ssh://git@gitboy.example:2222/alice/app.git");
     expect(remote("https://token@github.com/alice/app")).toBe("https://github.com/alice/app");
     expect(remote("/home/alice/app")).toBeNull();
     expect(remote("file:///home/alice/app")).toBeNull();
