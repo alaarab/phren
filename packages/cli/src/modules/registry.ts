@@ -43,8 +43,8 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       { agents: ["claude", "codex", "copilot", "cursor"], events: ["Stop"], handler: "phren hook-stop" },
       { agents: ["claude"], events: ["PostToolUse"], handler: "phren hook-tool" },
     ],
-    hookRoutes: [...routes("GET", ["/v1/store/head", "/v1/store/tree", "/v1/store/blob"]), ...routes("POST", ["/v1/store/file", "/v1/store/delete"])],
-    capabilities: ["memory", "memoryStore"],
+    hookRoutes: [...routes("GET", ["/v1/store/head", "/v1/store/tree", "/v1/store/blob"]), ...routes("POST", ["/v1/store/blobs", "/v1/store/file", "/v1/store/delete"])],
+    capabilities: ["memory", "memoryStore", "memoryStoreBatch"],
     storeFiles: [
       "phren.root.yaml", "machines.yaml", "profiles/*.yaml", ".config/modules.yaml", ".config/*.json",
       "<project>/AGENTS.md", "<project>/summary.md", "<project>/FINDINGS.md", "<project>/truths.md",
@@ -86,11 +86,11 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
         "/v1/health", "/v1/health/details", "/v1/health/peers", "/v1/muxes", "/v1/activity", "/v1/metrics", "/v1/web-servers", "/v1/simulators",
         "/v1/simulators/screenshot", "/v1/simulators/apps", "/v1/files", "/v1/models", "/v1/harnesses", "/v1/projects/files",
         "/v1/uploads/image", "/v1/files/range", "/v1/files/resolve", "/v1/usage", "/v1/resources", "/v1/speech/voices", "/v1/push/status", "/v1/projects/locate", "/v1/projects/repos",
-        "/v1/workspaces", "/v1/workspaces/panes", "/v1/transcripts/blob", "/v1/transcripts/history", "/v1/sudo",
+        "/v1/workspaces", "/v1/workspaces/panes", "/v1/workspaces/layout", "/v1/transcripts/blob", "/v1/transcripts/history", "/v1/sudo",
         "/v1/subagents", "/v1/subagents/transcript", "/v1/subagents/messages",
       ]),
       ...routes("POST", [
-        "/v1/push/register", "/v1/push/answer", "/v1/push/target", "/v1/files", "/v1/files/delete", "/v1/projects/add", "/v1/simulators/action",
+        "/v1/push/register", "/v1/push/answer", "/v1/push/target", "/v1/push/presence", "/v1/files", "/v1/files/delete", "/v1/projects/add", "/v1/simulators/action",
         "/v1/workspaces/launch", "/v1/workspaces/create", "/v1/workspaces/focus", "/v1/workspaces/rename",
         "/v1/workspaces/close", "/v1/sessions/rename", "/v1/prompt", "/v1/prompt/status", "/v1/model", "/v1/settings", "/v1/agents/permission-mode", "/v1/side-question/dismiss", "/v1/keys", "/v1/secret", "/v1/upload",
         "/v1/approvals/answer", "/v1/questions/answer", "/v1/subagents/resume", "/v1/subagents/archive-finished", "/v1/canary",
@@ -99,7 +99,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ...routes("WS", ["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe", "/v1/speech/live"]),
     ],
     capabilities: [
-      "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "herdr",
+      "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "paneTerminal", "paneLayout", "deskPresence", "herdr",
       "webServers", "webPreview", "activity", "approvals", "questions", "accountUsage", "providers",
       "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "deliveryFrames", "resources", "sessionRename", "sudo", "sudoOutcome", "previewDeltas", "quickChat", "agentFolder", "launchPermissionMode",
     ],
@@ -118,9 +118,9 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     hookRoutes: [...routes("GET", ["/v1/git/status"]), ...routes("POST", [
       "/v1/diff", "/v1/web-servers/session", "/v1/git/status", "/v1/git/log", "/v1/git/branches", "/v1/git/pulls",
       "/v1/git/tree", "/v1/git/worktrees", "/v1/git/stage", "/v1/git/unstage", "/v1/git/discard",
-      "/v1/git/commit", "/v1/git/push", "/v1/git/pr",
+      "/v1/git/commit", "/v1/git/push", "/v1/git/pr", "/v1/files/write", "/v1/files/search", "/v1/files/list",
     ])],
-    capabilities: ["git", "diff"], storeFiles: [], localFiles: ["<bridge>/changes/**", "<bridge>/changes-scratch/**"],
+    capabilities: ["git", "diff", "fileWrite", "fileSearch"], storeFiles: [], localFiles: ["<bridge>/changes/**", "<bridge>/changes-scratch/**"],
     phoneScreens: [{ screen: "AgentChangesView", capability: "git" }], skills: [],
   },
   {

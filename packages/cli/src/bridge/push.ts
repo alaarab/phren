@@ -263,7 +263,39 @@ export class ApprovalPushService {
     }
     return this.sender && device.token ? this.sender.send(device, payload, headers) : false;
   }
+  /** Until when the owner is at Phren desktop (ms epoch): approval pushes wait for the desk to go quiet. */
+  private deskUntil = 0;
+  private held = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Whether an approval is still unanswered; AgentHooks sets it. Unset means "assume pending". */
+  stillPending?: (binding: string) => boolean;
+  /** Phren desktop saw the owner's keyboard or mouse: hold phone alerts for `activeForMs` (at most 2 min). */
+  markDesk(activeForMs: number) {
+    const span = Math.min(Math.max(Number.isFinite(activeForMs) ? activeForMs : 0, 0), 120_000);
+    this.deskUntil = Math.max(this.deskUntil, Date.now() + span);
+  }
+  get deskActive() { return Date.now() < this.deskUntil; }
+  /**
+   * Desk first: while the owner is at the desktop, the desktop shows the
+   * approval and the phone stays quiet. Once the desk has been idle past its
+   * window and the approval is still pending, the phone gets the alert.
+   */
   async notify(value: ApprovalPush): Promise<boolean> {
+    if (!this.deskActive) return this.notifyNow(value);
+    if (!this.held.has(value.binding)) this.holdForDesk(value);
+    return true;
+  }
+  private holdForDesk(value: ApprovalPush) {
+    const timer = setTimeout(() => {
+      this.held.delete(value.binding);
+      if (this.stillPending && !this.stillPending(value.binding)) return;
+      if (Date.parse(value.expiresAt) <= Date.now()) return;
+      if (this.deskActive) { this.holdForDesk(value); return; }
+      void this.notifyNow(value).catch(() => {});
+    }, Math.max(this.deskUntil - Date.now(), 0) + 250);
+    timer.unref?.();
+    this.held.set(value.binding, timer);
+  }
+  protected async notifyNow(value: ApprovalPush): Promise<boolean> {
     const devices = this.reachable.filter(device => device.kinds.includes("approval"));
     if (!devices.length) return false;
     return (await Promise.all(devices.map(device => this.send(device, approvalPushPayload(value, device.hostID), {

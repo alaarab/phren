@@ -198,19 +198,58 @@ function block(start: string, end: string, heading: string, body: string, stamp:
 
 /** Fingerprint of everything in a topic file except its own Now block. */
 export function contentFingerprint(content: string, start: string, end: string): string {
-  const s = content.indexOf(start.replace("-->", ""));
-  const e = content.indexOf(end);
-  const rest = s !== -1 && e !== -1 && e > s ? content.slice(0, s) + content.slice(e + end.length) : content;
+  const span = blockSpan(content, start, end);
+  const rest = span ? content.slice(0, span.start) + content.slice(span.end) : content;
   return createHash("sha1").update(rest.replace(/\s+/g, " ").trim()).digest("hex").slice(0, 12);
+}
+
+/**
+ * Where a marked block sits: from its first start marker to its last end
+ * marker, and where its body begins (after the last start marker line). The
+ * store syncs with git's union merge for markdown, so two computers that both
+ * rewrote a block leave both start lines (and possibly both bodies); reading
+ * past every marker and replacing the whole span heals the file on the next write.
+ */
+export function blockSpan(content: string, start: string, end: string): { start: number; end: number; pick: number; body: number; bodyEnd: number } | null {
+  const prefix = start.replace("-->", "");
+  const s = content.indexOf(prefix);
+  const e = content.lastIndexOf(end);
+  if (s === -1 || e === -1 || e <= s) return null;
+  // Every start marker inside the span; the body to read is the newest one's
+  // (highest at= stamp), up to the next start marker or the end marker.
+  const starts: number[] = [];
+  for (let i = s; i !== -1 && i < e; i = content.indexOf(prefix, i + prefix.length)) starts.push(i);
+  const stampOf = (at: number) => /at=([^ ]+)/.exec(content.slice(at, content.indexOf("-->", at)))?.[1] ?? "";
+  let pick = starts[0];
+  for (const at of starts) if (stampOf(at) > stampOf(pick)) pick = at;
+  const next = starts.find((at) => at > pick) ?? e;
+  const newline = content.indexOf("\n", pick);
+  const body = newline === -1 || newline >= next ? next : newline + 1;
+  return { start: s, end: e + end.length, pick, body, bodyEnd: next };
+}
+
+/** The block rebuilt as one copy: the newest start marker, its body and the end marker. */
+export function cleanBlock(content: string, start: string, end: string): { rest: string; block: string } | null {
+  const span = blockSpan(content, start, end);
+  if (!span) return null;
+  const marker = content.slice(span.pick, span.body).replace(/\n$/, "");
+  const body = content.slice(span.body, span.bodyEnd).replace(/\n+$/, "");
+  const after = content.slice(span.end).replace(/^\n+/, "");
+  return { rest: content.slice(0, span.start) + after, block: `${marker}\n${body}\n${end}` };
+}
+
+/** A block's text without its markers and heading line ("## Now"). */
+export function blockBody(content: string, start: string, end: string): string | null {
+  const span = blockSpan(content, start, end);
+  if (!span) return null;
+  return content.slice(span.body, span.bodyEnd).replace(/^## [^\n]*\n/, "").trim();
 }
 
 /** Insert or replace a marked block. Topic files: before the first section; summary: at the end. */
 export function upsertBlock(content: string, start: string, end: string, rendered: string, where: "top" | "bottom"): string {
-  const startRe = new RegExp(`${start.replace("-->", "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^\\n]*-->`);
-  const s = content.search(startRe);
-  const e = content.indexOf(end);
-  if (s !== -1 && e !== -1 && e > s) {
-    return `${content.slice(0, s)}${rendered}${content.slice(e + end.length)}`;
+  const span = blockSpan(content, start, end);
+  if (span) {
+    return `${content.slice(0, span.start)}${rendered}${content.slice(span.end)}`;
   }
   if (where === "top") {
     const firstSection = content.search(/^## /m);
@@ -286,8 +325,7 @@ export async function summarizeTopicFile(filePath: string, slug: string, opts: S
   // The block carries a fingerprint of the rest of the file; unchanged bullets
   // mean an unchanged summary, whatever the clock says.
   if (!opts.force && prev?.hash === fingerprint && !split) {
-    const existing = content.slice(content.indexOf(NOW_START.replace("-->", "")), content.indexOf(NOW_END));
-    return { slug, file: filePath, bullets: bullets.length, updated: false, now: existing.split("\n").slice(2).join("\n").trim() };
+    return { slug, file: filePath, bullets: bullets.length, updated: false, now: blockBody(content, NOW_START, NOW_END) ?? "" };
   }
   let now = "";
   if (opts.llm) now = await proseNow(digest, bullets, AbortSignal.timeout(150_000));
@@ -425,10 +463,8 @@ export function listTopicFiles(phrenPath: string, project: string): TopicFile[] 
 
 /** The current Now text of a topic file and whether it is structural or prose. */
 export function readNowBlock(content: string): { text: string; structural: boolean } | null {
-  const s = content.indexOf(NOW_START.replace("-->", ""));
-  const e = content.indexOf(NOW_END);
-  if (s === -1 || e === -1 || e <= s) return null;
-  const text = content.slice(s, e).split("\n").slice(2).join("\n").trim();
+  const text = blockBody(content, NOW_START, NOW_END);
+  if (text === null) return null;
   return { text, structural: /^\d+ findings?\b|^Nothing archived/.test(text) };
 }
 
@@ -456,9 +492,8 @@ export function readKnowsBlock(phrenPath: string, project: string): { path: stri
   const summaryPath = storeAwareProjectPath(phrenPath, project, "summary.md");
   if (!summaryPath || !fs.existsSync(summaryPath)) return null;
   const content = fs.readFileSync(summaryPath, "utf8");
-  const s = content.indexOf(KNOWS_START.replace("-->", ""));
-  const e = content.indexOf(KNOWS_END);
-  if (s === -1 || e === -1) return null;
-  const inner = content.slice(s, e).split("\n").slice(1).join("\n").trim();
+  const span = blockSpan(content, KNOWS_START, KNOWS_END);
+  if (!span) return null;
+  const inner = content.slice(span.body, span.bodyEnd).trim();
   return inner ? { path: summaryPath, text: inner } : null;
 }

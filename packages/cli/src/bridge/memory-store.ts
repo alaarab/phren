@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -113,6 +113,68 @@ export async function storeBlob(store: string, sha: string): Promise<Json> {
   return { sha, encoding: "base64", content: stdout.toString("base64") };
 }
 
+/** At most this many blobs and this much content (before base64) per batch answer. */
+const BATCH_COUNT = 256;
+const BATCH_BYTES = 9 * 1024 * 1024;
+
+/**
+ * Many blobs in one answer (Phren desktop's store mirror): one
+ * `git cat-file --batch` for the whole request instead of three git processes
+ * per blob. Blobs past the byte budget, over the 4 MiB file limit or unknown
+ * come back as `{ sha, error }` for the client to fetch one by one or skip.
+ */
+export async function storeBlobs(store: string, data: Json): Promise<Json> {
+  const shas = z.array(z.string().regex(SHA)).min(1).max(BATCH_COUNT).parse(data.shas);
+  const unique = [...new Set(shas)];
+  // Sizes first (no content), so the budget is applied before anything is read.
+  const sizes = new Map<string, { type: string; size: number }>();
+  for (const line of (await catFile(store, "--batch-check", unique)).toString("utf8").split("\n")) {
+    const [sha, type, size] = line.split(" ");
+    if (sha && type && type !== "missing") sizes.set(sha, { type, size: Number(size) });
+  }
+  const blobs: Json[] = [];
+  const wanted: string[] = [];
+  let budget = BATCH_BYTES;
+  for (const sha of unique) {
+    const info = sizes.get(sha);
+    if (!info || info.type !== "blob") { blobs.push({ sha, error: "unknown" }); continue; }
+    if (info.size > MAX_FILE) { blobs.push({ sha, error: "too-large", size: info.size }); continue; }
+    if (info.size > budget) { blobs.push({ sha, error: "later" }); continue; }
+    budget -= info.size;
+    wanted.push(sha);
+  }
+  if (wanted.length) {
+    const out = await catFile(store, "--batch", wanted);
+    let offset = 0;
+    for (const sha of wanted) {
+      const newline = out.indexOf(10, offset);
+      if (newline < 0) { blobs.push({ sha, error: "later" }); continue; }
+      const size = Number(out.subarray(offset, newline).toString("utf8").split(" ")[2]);
+      offset = newline + 1;
+      blobs.push({ sha, encoding: "base64", content: out.subarray(offset, offset + size).toString("base64") });
+      offset += size + 1;
+    }
+  }
+  return { blobs };
+}
+
+/** Run one `git cat-file --batch[-check]` over these ids; output capped near the batch budget. */
+function catFile(store: string, mode: "--batch" | "--batch-check", shas: string[]): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", ["-C", store, "cat-file", mode], { stdio: ["pipe", "pipe", "ignore"] });
+    const chunks: Buffer[] = [];
+    let total = 0;
+    child.stdout.on("data", (chunk: Buffer) => {
+      total += chunk.length;
+      if (total > BATCH_BYTES + BATCH_COUNT * 128) { child.kill(); reject(new BridgeError(413, "The batch is too large.")); return; }
+      chunks.push(chunk);
+    });
+    child.on("error", reject);
+    child.on("close", () => resolve(Buffer.concat(chunks)));
+    child.stdin.end(shas.map(sha => `${sha}\n`).join(""));
+  });
+}
+
 /** Resolve a store-relative path, refusing escapes, .git and symlinked parents. */
 export async function storeFile(store: string, relative: string): Promise<string> {
   const normalized = path.posix.normalize(relative);
@@ -168,12 +230,13 @@ export function deleteStoreFile(store: string, data: Json): Promise<Json> {
   });
 }
 
-export const STORE_ROUTES = { head: "/v1/store/head", tree: "/v1/store/tree", blob: "/v1/store/blob", file: "/v1/store/file", delete: "/v1/store/delete" } as const;
+export const STORE_ROUTES = { head: "/v1/store/head", tree: "/v1/store/tree", blob: "/v1/store/blob", blobs: "/v1/store/blobs", file: "/v1/store/file", delete: "/v1/store/delete" } as const;
 
 export async function storeRoute(store: string, method: string, url: URL, data?: Json): Promise<Json> {
   if (method === "GET" && url.pathname === STORE_ROUTES.head) return storeHead(store);
   if (method === "GET" && url.pathname === STORE_ROUTES.tree) return storeTree(store, url.searchParams.get("sha") ?? "");
   if (method === "GET" && url.pathname === STORE_ROUTES.blob) return storeBlob(store, url.searchParams.get("sha") ?? "");
+  if (method === "POST" && url.pathname === STORE_ROUTES.blobs) return storeBlobs(store, data ?? {});
   if (method === "POST" && url.pathname === STORE_ROUTES.file) return putStoreFile(store, data ?? {});
   if (method === "POST" && url.pathname === STORE_ROUTES.delete) return deleteStoreFile(store, data ?? {});
   throw new BridgeError(404, "Unknown Phren Hook route.");
