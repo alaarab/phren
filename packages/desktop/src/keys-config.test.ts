@@ -39,7 +39,7 @@ describe("loadKeyConfig", () => {
   });
 
   it("layers Herdr's [keys] then desktop.toml, ignores Herdr-only actions, and unbinds with an empty string", async () => {
-    await writeFile(process.env.HERDR_CONFIG!, `[keys]\nprefix = "ctrl+a"\ngoto = ["prefix+g", "ctrl+alt+g"]\nsplit_vertical = "prefix+v"\nzoom = "prefix+m"\n`);
+    await writeFile(process.env.HERDR_CONFIG!, `[keys]\nprefix = "ctrl+a"\ngoto = ["prefix+g", "ctrl+alt+g"]\nsplit_vertical = "prefix+bar"\nremove_worktree = "prefix+shift+w"\nzoom = "prefix+m"\n`);
     await writeFile(process.env.PHREN_DESKTOP_CONFIG!, `[keys]\nzoom = "prefix+shift+z"\nclose_pane = ""\n`);
     const { bindings, sources } = await loadKeyConfig();
     expect(bindings.prefix).toEqual(["ctrl+a"]);
@@ -47,6 +47,7 @@ describe("loadKeyConfig", () => {
     expect(bindings.zoom).toEqual(["prefix+shift+z"]);
     expect(bindings.close_pane).toEqual([]);
     expect(bindings).not.toHaveProperty("remove_worktree");
+    expect(bindings.split_vertical).toEqual(["prefix+bar"]);
     expect(sources).toMatchObject({ prefix: "herdr", goto: "herdr", zoom: "desktop", close_pane: "desktop", help: "default" });
   });
 
