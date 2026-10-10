@@ -8,22 +8,14 @@ try {
   // webgl unavailable; the terminal falls back to its canvas renderer
 }
 
+// Renders the xterm host inside `el` (the caller owns the header and the
+// bottom panel chrome) and streams it to the session's server over /pty.
 export function openTerminal(el, computerName, server) {
   el.innerHTML = "";
 
-  const header = document.createElement("div");
-  header.className = "term-header";
-  const label = document.createElement("span");
-  label.className = "term-label";
-  label.textContent = `${computerName} \u00b7 ${server}`;
-  const closeBtn = document.createElement("button");
-  closeBtn.className = "pill-button";
-  closeBtn.textContent = "Close";
-  header.append(label, closeBtn);
-
   const host = document.createElement("div");
   host.className = "term-host";
-  el.append(header, host);
+  el.append(host);
 
   const term = new Terminal({
     fontFamily: "JetBrains Mono, ui-monospace, Menlo, monospace",
@@ -63,7 +55,9 @@ export function openTerminal(el, computerName, server) {
   ws.addEventListener("message", (ev) => term.write(ev.data));
   ws.addEventListener("close", () => term.write("\r\n[disconnected]\r\n"));
 
+  // Refit and tell the server the new size whenever the container resizes.
   function resize() {
+    if (!el.clientWidth || !el.clientHeight) return; // hidden: fit would be wrong
     fit.fit();
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
@@ -80,10 +74,7 @@ export function openTerminal(el, computerName, server) {
     ws.close();
     term.dispose();
     el.innerHTML = "";
-    el.hidden = true;
   }
-
-  closeBtn.addEventListener("click", close);
 
   return { close };
 }

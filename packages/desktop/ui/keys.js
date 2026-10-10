@@ -4,6 +4,7 @@
 // is a real Herdr or tmux client, so keys typed there are never intercepted.
 
 import { hookPost } from "./api.js";
+import { closePalette, isPaletteOpen, openPalette, registerCommand } from "./shell/palette.js";
 
 let config = null; // { bindings, sources, files, errors, actions }
 let app = null; // actions supplied by app.js
@@ -119,6 +120,8 @@ function showHint(on) {
 
 function onKeyDown(ev) {
   if (!config || ev.isComposing) return;
+  // While the palette is open its input owns the keyboard.
+  if (isPaletteOpen()) return;
   if (ev.key === "Shift" || ev.key === "Control" || ev.key === "Alt" || ev.key === "Meta") return;
   // Direct Cmd/Ctrl shortcuts come first, so they work even inside a terminal.
   const appHit = findAppAction(ev);
@@ -166,7 +169,7 @@ function step(delta) {
 function run(action, arg) {
   switch (action) {
     case "help": return showSheet();
-    case "reload_config": return load().then(() => flash("Key settings reloaded."));
+    case "reload_config": return load().then(() => { registerBuiltins(); flash("Key settings reloaded."); });
     case "goto": return showGoto();
     case "workspace_picker": return navigate();
     case "next_tab": return step(1);
@@ -185,7 +188,7 @@ function run(action, arg) {
     case "close_tab": return app.closeTab ? app.closeTab() : app.closePanel();
     case "new_tab":
     case "terminal": return app.showPane("terminal");
-    case "palette": return showGoto();
+    case "palette": return isPaletteOpen() ? closePalette() : openPalette();
     case "open_file": return openQuickFile();
     case "show_changes": return app.showPane("changes");
     case "show_files": return app.showPane("files");
@@ -415,6 +418,26 @@ function flash(text) {
   setTimeout(() => note.remove(), 1800);
 }
 
+// ------------------------------------------------------------ palette commands
+// The existing key actions as concise palette commands, showing their shortcuts.
+const BUILTINS = [
+  ["show_changes", "Show Changes"],
+  ["show_files", "Show Files"],
+  ["show_search", "Show Search"],
+  ["terminal", "Show Terminal"],
+  ["close_tab", "Close Tab"],
+  ["next_tab", "Next Tab"],
+  ["zoom", "Toggle Zoom"],
+  ["toggle_sidebar", "Toggle Sidebar"],
+];
+
+function registerBuiltins() {
+  for (const [action, title] of BUILTINS) {
+    const binds = config.bindings[action] ?? config.appBindings?.[action] ?? [];
+    registerCommand({ id: `keys.${action}`, title, group: "Commands", keys: binds.map(keycaps).join("  "), run: () => run(action) });
+  }
+}
+
 // ------------------------------------------------------------ setup
 async function load() {
   const response = await fetch("/api/keys", { cache: "no-store" });
@@ -464,6 +487,7 @@ export async function installKeys(actions) {
   style.textContent = STYLE;
   document.head.append(style);
   await load();
+  registerBuiltins();
   // Capture phase, so Monaco and inputs do not swallow the prefix first.
   window.addEventListener("keydown", onKeyDown, true);
   document.getElementById("sidebar").addEventListener("keydown", onSidebarKey);

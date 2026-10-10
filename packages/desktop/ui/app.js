@@ -6,6 +6,8 @@ import { installSections, registerSection, sectionHandle, setSectionBadge, showS
 import { mountAgents } from "./sections/agents.js";
 import { mountHome } from "./sections/home.js";
 import { initTheme } from "./shell/theme.js";
+import { mountSettings, notifyEnabled, badgeEnabled } from "./sections/settings.js";
+import { mountUsageRings } from "./shell/usage-rings.js";
 
 // The Electron shell exposes window.phrenDesktop; in a browser it is absent.
 const shell = window.phrenDesktop;
@@ -21,8 +23,10 @@ registerSection("home", { label: "Home", order: 10, badge: true, mount: (el) => 
   openSession(computer, child) { showSection("agents"); agents().openSession(computer, child); },
 }) });
 registerSection("agents", { label: "Agents", order: 20, mount: (el) => mountAgents(el) });
+registerSection("settings", { label: "Settings", order: 90, mount: (el) => mountSettings(el) });
 
 installSections(document.getElementById("section-pills"), document.getElementById("sections"));
+mountUsageRings(document.getElementById("usage-rings"));
 
 // Titlebar status: computers online and the needs-you count.
 store.subscribe((merged) => {
@@ -44,10 +48,10 @@ needsEl.addEventListener("click", () => {
 let notified = null; // keys already announced; null until the first frame
 store.subscribe(() => {
   const rows = store.needsYou();
-  shell?.setBadge(rows.length);
+  shell?.setBadge(badgeEnabled() ? rows.length : 0);
   document.title = rows.length ? `(${rows.length}) Phren` : "Phren";
   const keys = new Set(rows.map((r) => r.key));
-  if (notified && shell) {
+  if (notified && shell && notifyEnabled()) {
     for (const r of rows) {
       if (notified.has(r.key)) continue;
       const project = (r.child.cwd ?? r.child.label ?? "").split("/").filter(Boolean).pop() ?? r.child.label;

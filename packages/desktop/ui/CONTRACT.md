@@ -64,6 +64,22 @@ Agents' handle (via `sectionHandle("agents")`): `openSession(computer, child)`,
 `showPane(key)`, `closePanel()`, `closeTab()`, `nextTab()`, `previousTab()`,
 `toggleZoom()`, `currentSession()`.
 
+## Agents layout
+
+`#sidebar` (left, collapses to 64 px below 1440 px wide, toggle in the doc bar)
+· `#main` = `.doc-bar` (centre tabs) + `.doc-body` + the bottom terminal panel
+(hidden by default, ⌘J / `showPane("terminal")`, follows the active tab's
+session, height remembered) · `#side`, the right tool panel with exactly
+Changes · Files · Search (360 px default, 300 px to 50 %, remembered; overlays
+the centre below 1200 px). Extensions live in Settings.
+
+## Other shell modules
+
+- `shell/theme.js`: `initTheme()`, `applyTheme(id)`, `currentTheme()`, `themes()`; the phone's five token sets in `tokens.json`. Extension themes colour the editor and terminal only.
+- `shell/palette.js`: `openPalette()`, `registerCommand({ id, title, keys?, run })`, `fuzzyScore(query, text)`. ⌘K.
+- `shell/usage-rings.js`: `mountUsageRings(el)` over the daemon's `GET /api/usage` (merged across computers with the CLI's `mergeAccountUsage`).
+- `sections/settings.js`: Computers (link and revoke via `POST /api/computers/link|revoke`), Keys, Extensions, Appearance, Notifications; `notifyEnabled()`, `badgeEnabled()`.
+
 ## Writes
 
 Every non-GET request to the daemon sends `Content-Type: application/json` and
