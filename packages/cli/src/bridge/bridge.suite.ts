@@ -24,7 +24,7 @@ import { herdrAgentName, streamCloseReason } from "./server.js";
 import { historicalImage, phrenStoreRoot, TranscriptReader, transcriptPath, visibleEvent } from "./transcripts.js";
 import { readDeltaPreview, TranscriptPreviewStream } from "./transcript-preview.js";
 import { dispatch } from "./transport.js";
-import { askpassScript } from "./sudo.js";
+import { askpassScript, newDelivery } from "./sudo.js";
 import { enrollComputer, publicComputerKey } from "./computers.js";
 import { FakeClaude } from "./__fixtures__/claude-questions/fake-claude.js";
 
@@ -2597,17 +2597,20 @@ schedules:
       expect(Date.parse(asked.expiresAt) - Date.parse(asked.askedAt)).toBe(120_000);
       expect((await api("/v1/sudo")).data).toEqual({ requests: [asked] });
       // Another process that names the waiting askpass's pid gets nothing. On
-      // Linux the Hook writes the password into the asker's own stdout instead,
-      // so there is no connection to check.
-      if (process.platform !== "linux") {
+      // Linux it names its own listener as the delivery socket, which the
+      // asker does not hold.
+      {
         const [askerPid] = (await promisify(execFile)("pgrep", ["-f", `${hookBundle} askpass`])).stdout.trim().split("\n").map(Number);
+        const mine = newDelivery(), decoy = process.platform === "linux" ? createNetServer() : undefined;
+        if (decoy) await new Promise<void>(resolve => decoy.listen({ path: `\0${mine.socket}` }, resolve));
         const spoof = await new Promise<{ status: number; body: string }>((resolve, reject) => {
-          const payload = JSON.stringify({ pid: askerPid });
+          const payload = JSON.stringify({ pid: askerPid, ...(decoy ? { delivery: mine } : {}) });
           const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/sudo", method: "POST", headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
             let body = ""; res.on("data", b => body += b); res.on("end", () => resolve({ status: res.statusCode!, body }));
           });
           req.on("error", reject); req.end(payload);
         });
+        decoy?.close();
         expect(spoof).toEqual({ status: 400, body: JSON.stringify({ error: "Only askpass itself may ask for its password." }) });
         expect((await api("/v1/sudo")).data).toEqual({ requests: [asked] });
       }
