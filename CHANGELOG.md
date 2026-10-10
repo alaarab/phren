@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.37] - 2026-10-10
+
 ### Added
 
 - Claude account choice at launch, and an opt-in to continue on another signed-in account. A Claude launch, dispatch or schedule that names no account, on a computer with more than one signed-in Claude account, runs under the one with the most room: the most left on the 5-hour window, then on the weekly window. A named account always wins. The Hook logs the choice and why, and a dispatch receipt carries it as `accountChoice`. A dispatched Claude worker that stops at its usage limit now returns failed with that limit as its error (Claude Code's `rate_limit` error row is read like Codex's). With `phren config account-failover on` (or `PHREN_ACCOUNT_FAILOVER=on`), off by default, the dispatching Hook then continues it on another signed-in account with room, on the same computer first, else on another connected computer. The new worker gets a brief with the original brief, the stopped worker's last reply and its checkout and branch. The stopped return comes back in `dispatch_returns` with `continued` and "Continued on account X". The login that reached its limit is not chosen again, on any computer, until its window resets. Every account runs only the official Claude Code, signed in through its own /login in its own home. Phren reads, stores and forwards no token, and runs no proxy.
