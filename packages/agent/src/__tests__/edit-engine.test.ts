@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { applyEdit, applyEdits, describeNotFound } from "../tools/edit-engine.js";
+import { applyEdit, applyEdits, closestRegion, describeNotFound } from "../tools/edit-engine.js";
 import { editFileTool, multiEditTool } from "../tools/edit-file.js";
 import { modelVisibleOutput } from "../agent-loop/stream.js";
 import { DIFF_MARKER } from "../multi/diff-renderer.js";
@@ -92,12 +92,22 @@ describe("applyEdit matching", () => {
     expect(e).toContain("Re-read the file");
   });
 
-  it("stays fast on a large file with no match", () => {
-    const big = Array.from({ length: 50_000 }, (_, i) => `const v${i} = ${i};`).join("\n");
-    const started = Date.now();
-    const msg = describeNotFound(big, "something entirely different\nand another line");
-    expect(Date.now() - started).toBeLessThan(2_000);
-    expect(msg).toContain("not found");
+  it("bounds the closest-match search on a large file", () => {
+    // Every line looks like the needle's, so no window can be skipped. Count
+    // the lines read instead of timing it: a clock flakes under load.
+    const lines = Array.from({ length: 50_000 }, (_, i) => `const v${i} = ${i};`);
+    const needle = lines.slice(30_000, 30_060).map((l, i) => (i === 30 ? "const changed = 0;" : l));
+    let reads = 0;
+    const counted = new Proxy(lines, {
+      get(target, key, receiver) {
+        if (typeof key === "string" && /^\d+$/.test(key)) reads++;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const region = closestRegion(counted, needle);
+    expect(region?.start).toBe(30_000);
+    expect(reads).toBeLessThan(lines.length + 100_000);
+    expect(describeNotFound(lines.join("\n"), needle.join("\n"))).toContain("Closest match: lines 30001-30060");
   });
 });
 
