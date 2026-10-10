@@ -25,7 +25,7 @@ export interface InstallPreferences {
   clanker?: boolean;
   /**
    * Whether a dispatched Claude worker that hits its usage limit continues on
-   * another signed-in account. On when unset; PHREN_ACCOUNT_FAILOVER
+   * another signed-in account. Off when unset; PHREN_ACCOUNT_FAILOVER
    * overrides it. See bridge/account-choice.ts.
    */
   accountFailover?: boolean;
