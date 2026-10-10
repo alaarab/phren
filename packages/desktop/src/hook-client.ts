@@ -8,6 +8,7 @@ import path from "node:path";
 import { Duplex } from "node:stream";
 import { WebSocket } from "ws";
 import type { Computer, HookRequest, HookResponse, HookWebSocket, OpenHookPipe } from "./contract.js";
+import { channelPool } from "./channel-pool.js";
 import { bridgeRoot, sshArgs } from "./hosts.js";
 
 const MAX_BODY = 16 * 1024 * 1024;
@@ -23,9 +24,22 @@ function localPipe(): Promise<Duplex> {
   });
 }
 
-function remotePipe(c: Computer): Promise<Duplex> {
+async function remotePipe(c: Computer): Promise<Duplex> {
+  // One master slot per pipe: the pool spreads the desktop's concurrent
+  // channels over up to 4 connections so sshd's per-connection MaxSessions
+  // (10) is never exceeded.
+  const channel = await channelPool.acquire(c.name);
+  let released = false;
+  const release = (): void => { if (released) return; released = true; channel.release(); };
   return new Promise((resolve, reject) => {
-    const child = spawn("ssh", sshArgs(c, "phren-hook v1 pipe"), { stdio: ["pipe", "pipe", "pipe"] });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn("ssh", sshArgs(c, "phren-hook v1 pipe", { slot: channel.slot }), { stdio: ["pipe", "pipe", "pipe"] });
+    } catch (error) {
+      release();
+      reject(error);
+      return;
+    }
     const stdout = child.stdout!;
     const stdin = child.stdin!;
     let diagnostic = "";
@@ -37,16 +51,17 @@ function remotePipe(c: Computer): Promise<Duplex> {
       read() { stdout.resume(); },
       write(chunk, encoding, callback) { stdin.write(chunk, encoding, callback); },
       final(callback) { stdin.end(callback); },
-      destroy(error, callback) { child.kill(); callback(error); },
+      destroy(error, callback) { child.kill(); release(); callback(error); },
     });
     stdout.on("data", chunk => { sawData = true; if (!pipe.push(chunk)) stdout.pause(); });
     stdout.on("end", () => pipe.push(null));
     stdout.on("error", error => pipe.destroy(error));
     stdin.on("error", error => pipe.destroy(error));
-    child.on("error", error => { if (!settled) { settled = true; reject(error); } else pipe.destroy(error); });
+    child.on("error", error => { if (!settled) { settled = true; release(); reject(error); } else pipe.destroy(error); });
     child.on("spawn", () => { if (!settled) { settled = true; resolve(pipe); } });
     // SSH exiting before the first byte means the pipe never connected.
     child.on("exit", code => {
+      release();
       if (code === 0 || sawData) return;
       const error = new Error(stderrLine(diagnostic) || `ssh exited with code ${code ?? "unknown"}.`);
       if (!settled) { settled = true; reject(error); } else pipe.destroy(error);
@@ -69,6 +84,7 @@ export const hookRequest: HookRequest = async (c, method, requestPath, body) => 
       headers: {
         Host: "phren.local",
         Connection: "close",
+        "X-Phren-Client": "desktop",
         ...(payload === undefined ? {} : { "Content-Type": "application/json", "Content-Length": payload.byteLength }),
       },
     }, response => {
@@ -101,7 +117,7 @@ export const hookWebSocket: HookWebSocket = async (c, requestPath) => {
   const socket = new WebSocket(`ws://phren.local${requestPath}`, {
     createConnection: () => pipe,
     perMessageDeflate: false,
-    headers: { Host: "phren.local" },
+    headers: { Host: "phren.local", "X-Phren-Client": "desktop" },
   });
   return new Promise((resolve, reject) => {
     // The Hook can send its first frame in the same chunk as the handshake, before

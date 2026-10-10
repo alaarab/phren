@@ -10,7 +10,7 @@ function ensureStyle() {
   const style = document.createElement("style");
   style.id = STYLE_ID;
   style.textContent = `
-.ext { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.ext { display: flex; flex-direction: column; height: 100%; min-height: 0; position: relative; }
 .ext-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--border); }
 .ext-search { flex: 1; min-width: 0; height: 34px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--sunken); color: var(--text); font: inherit; outline: none; }
 .ext-search::placeholder { color: var(--dim); }
@@ -32,6 +32,7 @@ function ensureStyle() {
 .ext-kind.web { color: var(--done); }
 .ext-kind.declarative { color: var(--muted); }
 .ext-kind.node { color: var(--waiting); }
+.ext-kind.verified { color: var(--done); }
 .ext-actions { flex: none; display: flex; gap: 6px; }
 .ext-btn { height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--raised); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; transition: color .18s ease, background .18s ease; }
 .ext-btn:hover { color: var(--accent-hover); }
@@ -40,14 +41,22 @@ function ensureStyle() {
 .ext-error { color: var(--danger); font-size: 12px; margin-top: 4px; }
 .ext-note { color: var(--muted); font-size: 12px; }
 .ext-empty { color: var(--muted); font-size: 12px; padding: 8px 0; }
-.ext-reload { color: var(--waiting); padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; margin: 8px 0; background: var(--sunken); }
+.ext-reload { color: var(--waiting); padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; margin: 8px 0; background: var(--sunken); display: flex; align-items: center; gap: 10px; }
+.ext-consent { position: absolute; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; padding: 24px; z-index: 5; }
+.ext-consent-card { width: 100%; max-width: 420px; background: var(--raised); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: 0 12px 40px rgba(0,0,0,.4); }
+.ext-consent-title { margin: 0 0 10px; font-size: 15px; font-weight: 600; color: var(--text); }
+.ext-consent-text { margin: 0 0 18px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.ext-consent-actions { display: flex; justify-content: flex-end; gap: 8px; }
 `;
   document.head.append(style);
 }
 
 /** Same-origin JSON call; throws Error with .status/.body on non-2xx. */
-async function api(path, options) {
-  const res = await fetch(path, options);
+async function api(path, options = {}) {
+  const method = (options.method || "GET").toUpperCase();
+  const headers = { "X-Phren-Desktop": "1", ...(options.headers || {}) };
+  if (method !== "GET") headers["Content-Type"] = "application/json";
+  const res = await fetch(path, { ...options, headers });
   const text = await res.text();
   let body = {};
   try { body = text ? JSON.parse(text) : {}; } catch { body = { error: text.slice(0, 300) }; }
@@ -58,6 +67,16 @@ async function api(path, options) {
     throw error;
   }
   return body;
+}
+
+const CONSENT_KEY = "phren.extensions.consented";
+
+function hasConsented() {
+  try { return localStorage.getItem(CONSENT_KEY) === "1"; } catch { return false; }
+}
+
+function rememberConsent() {
+  try { localStorage.setItem(CONSENT_KEY, "1"); } catch { /* private window: this session only */ }
 }
 
 const json = (method, body) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -114,10 +133,14 @@ function icon(item) {
   return letterTile(item);
 }
 
-function kindChip(kind) {
+function kindChip(kind, rehAvailable) {
   const chip = document.createElement("span");
   chip.className = `ext-kind ${kind || "declarative"}`;
-  chip.textContent = kind === "web" ? "Runs here" : kind === "node" ? "Needs a Node host" : "Themes and grammars";
+  chip.textContent = kind === "web"
+    ? "Runs here"
+    : kind === "node"
+      ? (rehAvailable ? "Runs in the Node host" : "Needs a Node host")
+      : "Themes and grammars";
   return chip;
 }
 
@@ -173,7 +196,7 @@ export function openExtensions(el, ctx) {
   let closed = false;
   let searchTimer = 0;
   let searchSeq = 0;
-  const state = { installed: [], results: [], query: "" };
+  const state = { installed: [], results: [], query: "", rehAvailable: false };
 
   const root = document.createElement("div");
   root.className = "ext";
@@ -200,6 +223,14 @@ export function openExtensions(el, ctx) {
   reloadNote.className = "ext-note ext-reload";
   reloadNote.textContent = "Reload the window to finish";
   reloadNote.hidden = true;
+  const restartNote = document.createElement("div");
+  restartNote.className = "ext-note ext-reload";
+  restartNote.hidden = true;
+  const restartLabel = document.createElement("span");
+  restartLabel.textContent = "Restart the extension host to apply";
+  const restartBtn = button("Restart");
+  restartBtn.addEventListener("click", () => withBusy(restartBtn, "Restarting\u2026", reloadHost));
+  restartNote.append(restartLabel, restartBtn);
 
   const makeSection = (label) => {
     const section = document.createElement("section");
@@ -214,7 +245,7 @@ export function openExtensions(el, ctx) {
   };
   const installed = makeSection("INSTALLED");
   const results = makeSection("RESULTS");
-  body.append(reloadNote, installed.section, results.section);
+  body.append(reloadNote, restartNote, installed.section, results.section);
   root.append(head, body);
   el.replaceChildren(root);
 
@@ -225,6 +256,39 @@ export function openExtensions(el, ctx) {
     let ok;
     try { ok = await host.reloadExtensions(); } catch { ok = false; }
     if (ok === false && !closed) reloadNote.hidden = false;
+  }
+
+  /** Inline consent sheet shown before the first install ever. */
+  function askConsent() {
+    return new Promise((resolve) => {
+      const sheet = document.createElement("div");
+      sheet.className = "ext-consent";
+      const card = document.createElement("div");
+      card.className = "ext-consent-card";
+      const title = document.createElement("h2");
+      title.className = "ext-consent-title";
+      title.textContent = "Extensions run as you";
+      const text = document.createElement("p");
+      text.className = "ext-consent-text";
+      text.textContent = "An extension can read and change files on this computer and can use this desktop's key to reach every linked computer. Install only extensions you trust.";
+      const actions = document.createElement("div");
+      actions.className = "ext-consent-actions";
+      const cancel = button("Cancel");
+      const install = button("Install");
+      const finish = (ok) => { sheet.remove(); resolve(ok); };
+      cancel.addEventListener("click", () => finish(false));
+      install.addEventListener("click", () => { rememberConsent(); finish(true); });
+      actions.append(cancel, install);
+      card.append(title, text, actions);
+      sheet.append(card);
+      root.append(sheet);
+      install.focus();
+    });
+  }
+
+  async function ensureConsent() {
+    if (hasConsented()) return true;
+    return askConsent();
   }
 
   function renderInstalled() {
@@ -241,14 +305,21 @@ export function openExtensions(el, ctx) {
     meta.className = "ext-meta";
     meta.textContent = `${ext.publisher || ext.id} · v${ext.version || "?"}`;
     main.prepend(meta);
-    row.append(kindChip(ext.kind));
+    row.append(kindChip(ext.kind, state.rehAvailable));
+    if (ext.publisherVerified) {
+      const verified = document.createElement("span");
+      verified.className = "ext-kind verified";
+      verified.textContent = "Verified publisher";
+      row.append(verified);
+    }
     const actions = document.createElement("div");
     actions.className = "ext-actions";
     const enabled = ext.enabled !== false;
     const toggle = button(enabled ? "Disable" : "Enable");
     toggle.addEventListener("click", () => withBusy(toggle, enabled ? "Disabling…" : "Enabling…", async () => {
       try {
-        await api(`/api/extensions/${encodeURIComponent(ext.id)}/enable`, json("POST", { enabled: !enabled }));
+        const result = await api(`/api/extensions/${encodeURIComponent(ext.id)}/enable`, json("POST", { enabled: !enabled }));
+        restartNote.hidden = !(result && result.restartRequired);
         await refreshInstalled();
         await reloadHost();
       } catch (err) { showError(main, err.message); }
@@ -295,9 +366,11 @@ export function openExtensions(el, ctx) {
       const install = button("Install");
       install.addEventListener("click", () => withBusy(install, "Installing…", async () => {
         try {
+          if (!(await ensureConsent())) return;
           await api("/api/extensions/install", json("POST", { namespace: item.namespace, name: item.name }));
           reloadNote.hidden = true;
           await refreshInstalled();
+          await refreshReh();
           await reloadHost();
         } catch (err) { showError(main, err.message); }
       }));
@@ -317,6 +390,19 @@ export function openExtensions(el, ctx) {
       if (closed) return;
       installed.rows.replaceChildren(noteLine(err.message, true));
     }
+  }
+
+  /** Re-check the Node host so a stale "Needs a Node host" badge clears. */
+  async function refreshReh() {
+    try {
+      const data = await api("/api/reh");
+      if (closed) return;
+      state.rehAvailable = !!data.available;
+    } catch {
+      if (closed) return;
+      state.rehAvailable = false;
+    }
+    renderInstalled();
   }
 
   async function runSearch(q, token) {
@@ -363,6 +449,7 @@ export function openExtensions(el, ctx) {
 
   setupThemes();
   refreshInstalled();
+  refreshReh();
 
   return {
     close() {

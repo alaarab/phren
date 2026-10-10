@@ -1,7 +1,7 @@
 // Changes workbench pane: uncommitted changes, inline diffs, history, branches.
 // Owns its own CSS (injected once) and re-renders fully from module state.
 import { hookPost, readRepoFile } from "./api.js";
-import { parsePatch, wordSegments } from "./patch.js";
+import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
 
 const TITLE = { changes: "Uncommitted changes", history: "History", branches: "Branches" };
 
@@ -21,8 +21,12 @@ const CSS = `
 .chg-sec{margin-top:12px}
 .chg-sec-h{display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .chg-pill{background:var(--raised);border-radius:999px;padding:1px 8px;font-size:11px;color:var(--text-2)}
-.chg-row{display:flex;align-items:center;gap:10px;min-height:40px;padding:4px 6px;border-radius:10px;cursor:pointer}
+.chg-row{display:flex;align-items:center;gap:10px;min-height:40px;padding:4px 6px;border-radius:10px;cursor:pointer;position:relative}
 .chg-row:hover{background:var(--surface)}
+.chg-row-menu{position:absolute;top:36px;right:6px;z-index:7;min-width:140px;background:var(--card);border:1px solid var(--border-strong);border-radius:12px;padding:6px;box-shadow:0 16px 40px rgba(0,0,0,.5)}
+.chg-row-item{display:block;width:100%;text-align:left;border:none;background:none;color:var(--text-2);font:13px system-ui,sans-serif;padding:8px 10px;border-radius:9px;cursor:pointer}
+.chg-row-item:hover{background:var(--raised)}
+.chg-row-item.danger{color:var(--danger)}
 .chg-tile{flex:none;width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:12px}
 .chg-tile.M,.chg-tile.A{background:rgba(138,200,172,.16);color:var(--done)}
 .chg-tile.D{background:rgba(239,152,152,.16);color:var(--danger)}
@@ -55,7 +59,6 @@ const CSS = `
 .chg-word.new-changed{background:rgba(138,200,172,.32);border-radius:2px}
 .chg-ask{position:absolute;top:1px;right:6px;opacity:0;border:none;border-radius:6px;background:var(--card);color:var(--accent);font:600 10.5px system-ui,sans-serif;padding:2px 7px;cursor:pointer}
 .chg-line:hover .chg-ask{opacity:1}
-.chg-newfile{display:flex;align-items:center;gap:10px;padding:8px 10px;font-size:12.5px;color:var(--muted)}
 .chg-footer{position:sticky;bottom:0;flex:none;display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:var(--bg);border-top:1px solid var(--border)}
 .chg-error{color:var(--danger);font-size:12px}
 .chg-confirm{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;font-size:12.5px;color:var(--text-2)}
@@ -83,8 +86,8 @@ export function openChanges(el, ctx) {
   const computer = ctx.computer;
   const target = ctx.child && ctx.child.target;
   const state = {
-    view: "changes", menuOpen: false, status: null, expanded: null, diffs: {}, untracked: {},
-    draft: "", confirm: null, error: "", log: null, branches: null,
+    view: "changes", menuOpen: false, status: null, expanded: null, diffs: {}, addedText: {},
+    draft: "", confirm: null, error: "", log: null, branches: null, rowMenu: null,
   };
   let timer = null;
   let commitBtn = null;
@@ -131,15 +134,16 @@ export function openChanges(el, ctx) {
   }
 
   async function loadDiff(f) {
-    if (f.status === "?") {
-      try {
-        const file = await readRepoFile(computer, target, f.path);
-        const text = file.text || "";
-        state.untracked[f.path] = { lines: text.length ? text.replace(/\n$/, "").split("\n").length : 0 };
-      } catch { /* the count is cosmetic; keep going */ }
-    }
     const res = await hookPost(computer, "/v1/diff", { target, paths: [f.path] });
-    state.diffs[f.path] = (res.files || []).find((x) => x.path === f.path) || (res.files || [])[0];
+    const data = (res.files || []).find((x) => x.path === f.path) || (res.files || [])[0];
+    state.diffs[f.path] = data;
+    // A new file has no diff hunks until it is staged; read its content instead.
+    const added = f.status === "?" || f.status === "A";
+    const hasHunks = ((data && data.sections) || []).some((s) => !s.binary && parsePatch(s.patch || "").length > 0);
+    if (added && !hasHunks) {
+      try { state.addedText[f.path] = (await readRepoFile(computer, target, f.path)).text || ""; }
+      catch { state.addedText[f.path] = null; }
+    }
   }
 
   // Run a write, then refresh; a failure becomes the one error line and never refetches.
@@ -190,6 +194,7 @@ export function openChanges(el, ctx) {
   }
 
   async function toggleDiff(f) {
+    state.rowMenu = null;
     const same = state.expanded && state.expanded.path === f.path && state.expanded.staged === !!f.staged;
     if (same) { state.expanded = null; render(); return; }
     state.expanded = { path: f.path, staged: !!f.staged };
@@ -288,10 +293,18 @@ export function openChanges(el, ctx) {
     if (f.staged) actions.appendChild(icon("−", "Unstage", () => doUnstage(f)));
     else {
       actions.appendChild(icon("+", "Stage", () => doStage(f)));
-      actions.appendChild(icon("↺", "Discard changes", () => { state.confirm = { kind: "discard", path: f.path }; render(); }));
+      actions.appendChild(icon("⋯", "More actions", () => { state.rowMenu = state.rowMenu === f.path ? null : f.path; render(); }));
     }
     row.appendChild(actions);
+    if (state.rowMenu === f.path) row.appendChild(renderRowMenu(f));
     return row;
+  }
+
+  function renderRowMenu(f) {
+    const menu = div("chg-row-menu");
+    menu.onclick = (e) => e.stopPropagation();
+    menu.appendChild(button("Discard", "chg-row-item danger", () => { state.rowMenu = null; state.confirm = { kind: "discard", path: f.path }; render(); }));
+    return menu;
   }
 
   function renderDiscardConfirm(f) {
@@ -306,16 +319,21 @@ export function openChanges(el, ctx) {
   function renderDiff(f) {
     const wrap = div("chg-diff");
     const data = state.diffs[f.path];
-    if (f.status === "?" && (!data || !(data.sections || []).length)) {
-      const info = state.untracked[f.path];
-      const row = div("chg-newfile");
-      row.appendChild(span("", info ? `New file, ${info.lines} line${info.lines === 1 ? "" : "s"}` : "New file"));
-      row.appendChild(button("Open", "chg-btn stage", () => ctx.openFile(f.path)));
-      wrap.appendChild(row);
+    const sections = (data && data.sections) || [];
+    const hasHunks = sections.some((s) => !s.binary && parsePatch(s.patch || "").length > 0);
+    // Added or untracked file with no diff hunks: show its content as additions.
+    if ((f.status === "?" || f.status === "A") && !hasHunks) {
+      const text = state.addedText[f.path];
+      if (text == null) { wrap.appendChild(div("chg-diff-label", "Loading file…")); return wrap; }
+      const { hunks, truncated } = additionHunks(text);
+      const box = div("chg-diff-sec");
+      if (!hunks.length) box.appendChild(div("chg-diff-label", "Empty file."));
+      else renderHunks(box, hunks, f.path);
+      if (truncated) box.appendChild(div("chg-diff-label", `Showing the first ${ADDED_FILE_MAX_LINES} lines`));
+      wrap.appendChild(box);
       return wrap;
     }
     if (!data) { wrap.appendChild(div("chg-diff-label", "Loading diff…")); return wrap; }
-    const sections = data.sections || [];
     if (!sections.length) { wrap.appendChild(div("chg-diff-label", "No changes to show.")); return wrap; }
     const multi = sections.length > 1;
     for (const sec of sections) {
@@ -331,7 +349,10 @@ export function openChanges(el, ctx) {
 
   function renderPatch(box, patch, path) {
     const parsed = parsePatch(patch);
-    const hunks = Array.isArray(parsed) ? parsed : (parsed && parsed.hunks) || [];
+    renderHunks(box, Array.isArray(parsed) ? parsed : (parsed && parsed.hunks) || [], path);
+  }
+
+  function renderHunks(box, hunks, path) {
     for (const hunk of hunks) {
       const header = hunkHeader(hunk);
       if (header) box.appendChild(div("chg-hunk", header));

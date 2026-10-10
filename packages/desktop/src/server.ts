@@ -27,7 +27,82 @@ const require = createRequire(import.meta.url);
 const UI_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../ui");
 const MAX_BODY = 12 * 1024 * 1024;
 const COOKIE = "phren_desktop";
+const HEARTBEAT_MS = 20_000;
 const VENDOR_PREFIXES = ["/vendor/xterm/", "/vendor/addon-fit/", "/vendor/addon-webgl/", "/vendor/monaco/"];
+
+/** Requests may only name the bound loopback authority; the editor and
+ * extension frames additionally use `<uuid>.localhost` on public GET routes. */
+function hostAllowed(host: string, port: number, allowSubdomain: boolean): boolean {
+  if (host === `localhost:${port}` || host === `127.0.0.1:${port}`) return true;
+  return allowSubdomain && new RegExp(`^[a-z0-9-]+\\.localhost:${port}$`).test(host);
+}
+
+/** Whether a non-GET/HEAD request may write: JSON body (or an empty DELETE),
+ * the desktop header, and a same-origin hint. Exported for tests. */
+export function writeAllowed(req: IncomingMessage, port: number): boolean {
+  const method = (req.method ?? "GET").toUpperCase();
+  if (method === "GET" || method === "HEAD") return true;
+  const headers = req.headers;
+  const contentType = typeof headers["content-type"] === "string" ? headers["content-type"].toLowerCase() : "";
+  const hasBody =
+    (typeof headers["content-length"] === "string" && headers["content-length"] !== "0") ||
+    headers["transfer-encoding"] !== undefined;
+  const json = contentType.startsWith("application/json");
+  if (contentType && !json) return false;
+  if (!json && !(method === "DELETE" && !hasBody)) return false;
+  if (headers["x-phren-desktop"] !== "1") return false;
+  if (headers["sec-fetch-site"] === "same-origin") return true;
+  const origin = headers["origin"];
+  return origin === `http://localhost:${port}` || origin === `http://127.0.0.1:${port}`;
+}
+
+/** The Origin to echo on the public routes, when it is the app or a subdomain. */
+function publicCorsOrigin(req: IncomingMessage, port: number): string | null {
+  const origin = req.headers.origin;
+  if (typeof origin !== "string") return null;
+  if (origin === `http://localhost:${port}` || origin === `http://127.0.0.1:${port}`) return origin;
+  return new RegExp(`^http://[a-z0-9-]+\\.localhost:${port}$`).test(origin) ? origin : null;
+}
+
+function corsHeaders(req: IncomingMessage, port: number, allowNull = false): Record<string, string> {
+  const headers: Record<string, string> = { Vary: "Origin" };
+  // VS Code's extension host fetches extension files from a sandboxed frame,
+  // whose Origin is "null"; those files are public Open VSX content.
+  const origin = allowNull && req.headers.origin === "null" ? "null" : publicCorsOrigin(req, port);
+  if (origin) headers["Access-Control-Allow-Origin"] = origin;
+  return headers;
+}
+
+function rawToBuffer(data: WebSocket.RawData): Buffer {
+  if (Buffer.isBuffer(data)) return data;
+  if (Array.isArray(data)) return Buffer.concat(data);
+  return Buffer.from(data);
+}
+
+/** Ping a socket and terminate it after two missed pongs; returns a stopper. */
+function startHeartbeat(socket: WebSocket): () => void {
+  let missed = 0;
+  const onPong = () => {
+    missed = 0;
+  };
+  socket.on("pong", onPong);
+  const timer = setInterval(() => {
+    if (missed >= 2) {
+      socket.terminate();
+      return;
+    }
+    missed += 1;
+    try {
+      socket.ping();
+    } catch {
+      // Socket is already closing.
+    }
+  }, HEARTBEAT_MS);
+  return () => {
+    clearInterval(timer);
+    socket.off("pong", onPong);
+  };
+}
 
 function tokenEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -224,31 +299,54 @@ export const startServer: StartServer = async (o) => {
       ws.close(1008, "unknown computer");
       return;
     }
-    let hook: WebSocket;
+    // Attach the browser listeners before the Hook connects, buffering frames
+    // so nothing typed during the handshake is lost.
+    const buffered: Array<{ data: WebSocket.RawData; isBinary: boolean }> = [];
+    const stopBrowserPing = startHeartbeat(ws);
+    let hook: WebSocket | null = null;
+    let browserClosed = false;
+
+    ws.on("message", (data, isBinary) => {
+      if (hook && hook.readyState === WebSocket.OPEN) hook.send(data, { binary: isBinary });
+      else if (buffered.length < 256) buffered.push({ data, isBinary });
+    });
+    ws.on("close", () => {
+      browserClosed = true;
+      stopBrowserPing();
+      if (hook) {
+        openHooks.delete(hook);
+        hook.close();
+      }
+    });
+
     try {
       hook = await o.hookWebSocket(computer, parsed.hookPath + search);
     } catch (err) {
       ws.close(1011, shortMessage(err));
       return;
     }
-    openHooks.add(hook);
-    hook.on("message", (data, isBinary) => {
+    const hookSocket = hook;
+    if (browserClosed || ws.readyState !== WebSocket.OPEN) {
+      hookSocket.close();
+      return;
+    }
+    openHooks.add(hookSocket);
+    const stopHookPing = startHeartbeat(hookSocket);
+    hookSocket.on("message", (data, isBinary) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(data, { binary: isBinary });
     });
-    hook.on("close", () => {
-      openHooks.delete(hook);
+    hookSocket.on("close", () => {
+      openHooks.delete(hookSocket);
+      stopHookPing();
       if (ws.readyState === WebSocket.OPEN) ws.close();
     });
-    hook.on("error", (err) => {
+    hookSocket.on("error", (err) => {
+      openHooks.delete(hookSocket);
+      stopHookPing();
       if (ws.readyState === WebSocket.OPEN) ws.close(1011, shortMessage(err));
     });
-    ws.on("message", (data, isBinary) => {
-      if (hook.readyState === WebSocket.OPEN) hook.send(data, { binary: isBinary });
-    });
-    ws.on("close", () => {
-      openHooks.delete(hook);
-      hook.close();
-    });
+    for (const frame of buffered) hookSocket.send(frame.data, { binary: frame.isBinary });
+    buffered.length = 0;
   };
 
   const attachPty = (ws: WebSocket, url: URL) => {
@@ -275,19 +373,20 @@ export const startServer: StartServer = async (o) => {
       if (ws.readyState === WebSocket.OPEN) ws.close(1000);
     });
     ws.on("message", (data, isBinary) => {
-      const text = data.toString();
-      if (!isBinary && text.startsWith("{")) {
-        try {
-          const msg = JSON.parse(text) as { type?: string; cols?: number; rows?: number };
-          if (msg.type === "resize") {
-            term.resize(intParam(String(msg.cols), cols), intParam(String(msg.rows), rows));
-            return;
-          }
-        } catch {
-          // not JSON: fall through and treat it as terminal input
-        }
+      // Binary frames are always input; text frames are control JSON only and
+      // are never written to the terminal.
+      if (isBinary) {
+        term.write(rawToBuffer(data).toString("utf8"));
+        return;
       }
-      term.write(text);
+      try {
+        const msg = JSON.parse(rawToBuffer(data).toString("utf8")) as { type?: string; cols?: number; rows?: number };
+        if (msg.type === "resize") {
+          term.resize(intParam(String(msg.cols), cols), intParam(String(msg.rows), rows));
+        }
+      } catch {
+        // Ignore malformed control frames.
+      }
     });
     ws.on("close", () => {
       terminals.delete(ws);
@@ -298,6 +397,12 @@ export const startServer: StartServer = async (o) => {
   const handleHttp = async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://127.0.0.1:${boundPort}`);
     const pathname = url.pathname;
+    const publicGet = req.method === "GET" && (pathname.startsWith("/editor-host/") || pathname.startsWith("/extension-files/"));
+    if (!hostAllowed(req.headers.host ?? "", boundPort, publicGet)) {
+      res.writeHead(421, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("misdirected");
+      return;
+    }
 
     const queryToken = url.searchParams.get("token");
     if (queryToken && tokenEqual(queryToken, o.token)) {
@@ -313,11 +418,11 @@ export const startServer: StartServer = async (o) => {
     if (req.method === "GET" && pathname.startsWith("/editor-host/")) {
       const file = resolveStatic(pathname);
       if (!file || !existsSync(file)) {
-        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" });
+        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", ...corsHeaders(req, boundPort) });
         res.end("not found");
         return;
       }
-      res.writeHead(200, { "Content-Type": contentType(file), "Access-Control-Allow-Origin": "*", "Cross-Origin-Resource-Policy": "cross-origin" });
+      res.writeHead(200, { "Content-Type": contentType(file), "Cross-Origin-Resource-Policy": "cross-origin", ...corsHeaders(req, boundPort) });
       createReadStream(file).on("error", () => res.destroy()).pipe(res);
       return;
     }
@@ -330,17 +435,21 @@ export const startServer: StartServer = async (o) => {
       let file: string | null = null;
       try { file = slash < 0 ? null : extensionFilePath(decodeURIComponent(rest.slice(0, slash)), decodeURIComponent(rest.slice(slash + 1))); } catch { file = null; }
       if (!file || !existsSync(file)) {
-        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" });
+        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", ...corsHeaders(req, boundPort, true) });
         res.end("not found");
         return;
       }
-      res.writeHead(200, { "Content-Type": contentType(file), "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
+      res.writeHead(200, { "Content-Type": contentType(file), "Cache-Control": "no-store", ...corsHeaders(req, boundPort, true) });
       createReadStream(file).on("error", () => res.destroy()).pipe(res);
       return;
     }
     const cookie = readCookie(req, COOKIE);
     if (!cookie || !tokenEqual(cookie, o.token)) {
       unauthorized(res);
+      return;
+    }
+    if (!writeAllowed(req, boundPort)) {
+      sendJson(res, { error: "forbidden" }, 403);
       return;
     }
 
@@ -383,8 +492,7 @@ export const startServer: StartServer = async (o) => {
 
     if (
       pathname === "/api/extensions" ||
-      pathname.startsWith("/api/extensions/") ||
-      pathname.startsWith("/extension-files/")
+      pathname.startsWith("/api/extensions/")
     ) {
       try {
         if (pathname === "/api/extensions" && (req.method ?? "GET") === "GET") {
@@ -414,21 +522,6 @@ export const startServer: StartServer = async (o) => {
         if (remove && req.method === "DELETE") {
           await uninstall(decodeURIComponent(remove[1]));
           sendJson(res, { ok: true });
-          return;
-        }
-        if (pathname.startsWith("/extension-files/")) {
-          const rest = pathname.slice("/extension-files/".length);
-          const slash = rest.indexOf("/");
-          const id = slash < 0 ? rest : rest.slice(0, slash);
-          const rel = slash < 0 ? "" : rest.slice(slash + 1);
-          const file = extensionFilePath(decodeURIComponent(id), decodeURIComponent(rel));
-          if (!file || !existsSync(file)) {
-            res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-            res.end("not found");
-            return;
-          }
-          res.writeHead(200, { "Content-Type": contentType(file), "Cache-Control": "no-store" });
-          createReadStream(file).on("error", () => res.destroy()).pipe(res);
           return;
         }
         res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
@@ -498,6 +591,10 @@ export const startServer: StartServer = async (o) => {
   });
 
   server.on("upgrade", (req, socket, head) => {
+    if (!hostAllowed(req.headers.host ?? "", boundPort, false)) {
+      rejectUpgrade(socket, 421, "Misdirected");
+      return;
+    }
     // The UI is served as localhost (VS Code's extension frame policy allows
     // localhost workers); 127.0.0.1 stays accepted for older links.
     if (req.headers.origin !== `http://localhost:${boundPort}` && req.headers.origin !== `http://127.0.0.1:${boundPort}`) {

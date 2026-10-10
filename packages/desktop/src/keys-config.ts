@@ -12,7 +12,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { parse } from "smol-toml";
 
-export interface KeyAction { action: string; group: string; label: string; herdr: boolean }
+export interface KeyAction { action: string; group: string; label: string; herdr: boolean; app?: boolean }
 
 /** Every action the desktop understands, in the order the shortcut sheet shows them. */
 export const ACTIONS: KeyAction[] = [
@@ -35,7 +35,16 @@ export const ACTIONS: KeyAction[] = [
   { action: "show_changes", group: "Panel", label: "Open Changes", herdr: false },
   { action: "show_files", group: "Panel", label: "Open Files", herdr: false },
   { action: "show_search", group: "Panel", label: "Open Search", herdr: false },
+  { action: "palette", group: "Direct", label: "Open the command palette", herdr: false, app: true },
+  { action: "open_file", group: "Direct", label: "Quick open a file", herdr: false, app: true },
+  { action: "terminal", group: "Direct", label: "Show the terminal pane", herdr: false, app: true },
+  { action: "sidebar", group: "Direct", label: "Show or hide the sidebar", herdr: false, app: true },
+  { action: "next_needs_you", group: "Direct", label: "Go to the next session that needs you", herdr: false, app: true },
+  { action: "close_tab", group: "Direct", label: "Close the current panel", herdr: false, app: true },
 ];
+for (let n = 1; n <= 9; n++) {
+  ACTIONS.push({ action: `session_${n}`, group: "Direct", label: `Open session ${n}`, herdr: false, app: true });
+}
 
 /** Herdr's own defaults (herdr --default-config, 0.9.x) for the shared actions,
  * and Phren's for the desktop-only ones. */
@@ -50,10 +59,22 @@ export const DEFAULTS: Record<string, string[]> = {
   new_tab: ["prefix+c"], show_changes: ["prefix+d"], show_files: ["prefix+f"], show_search: ["prefix+/"],
 };
 
+/** Direct (prefix-free) bindings under [keys.app]. "cmd" is Command on macOS and
+ * Control elsewhere; the UI resolves that when it matches presses. */
+export const DEFAULTS_APP: Record<string, string[]> = {
+  palette: ["cmd+k"], open_file: ["cmd+p"],
+  terminal: ["cmd+j"], sidebar: ["cmd+b"],
+  next_needs_you: ["cmd+shift+a"], close_tab: ["cmd+w"],
+};
+for (let n = 1; n <= 9; n++) DEFAULTS_APP[`session_${n}`] = [`cmd+${n}`];
+
 export interface KeyConfig {
   bindings: Record<string, string[]>;
+  /** Direct (no prefix) bindings from [keys.app]. */
+  appBindings: Record<string, string[]>;
   /** Which file set each action, for the shortcut sheet ("default" otherwise). */
   sources: Record<string, string>;
+  appSources: Record<string, string>;
   files: { herdr: string; desktop: string };
   errors: string[];
 }
@@ -65,25 +86,42 @@ export const desktopConfigPath = (): string =>
 
 const KEY = /^[a-z0-9+?/.,;:'"`\-=\[\]\\_&*()!@#$%^~<>|{}]+$/i;
 
-/** Normalise one table's [keys] into action → bindings, skipping what the desktop does not know. */
-export function keysFromToml(text: string, file: string, errors: string[]): Record<string, string[]> {
-  let doc: Record<string, unknown>;
-  try { doc = parse(text) as Record<string, unknown>; }
-  catch (error) { errors.push(`${file}: ${(error as Error).message.split("\n")[0]}`); return {}; }
-  const keys = doc.keys;
-  if (!keys || typeof keys !== "object") return {};
-  const known = new Set(["prefix", ...ACTIONS.map(a => a.action)]);
+const KNOWN_KEYS = new Set(["prefix", ...ACTIONS.filter(a => !a.app).map(a => a.action)]);
+const KNOWN_APP = new Set(ACTIONS.filter(a => a.app).map(a => a.action));
+
+/** Normalise one table ("[keys]" or "[keys.app]") into action → bindings, skipping unknown actions. */
+function normaliseKeys(keys: Record<string, unknown>, known: Set<string>, label: string, file: string, errors: string[]): Record<string, string[]> {
   const out: Record<string, string[]> = {};
-  for (const [action, value] of Object.entries(keys as Record<string, unknown>)) {
+  for (const [action, value] of Object.entries(keys)) {
     if (!known.has(action)) continue; // Herdr-only actions (split_vertical, …) and custom commands
     const list = typeof value === "string" ? [value] : Array.isArray(value) ? value : undefined;
-    if (!list || !list.every(v => typeof v === "string")) { errors.push(`${file}: keys.${action} must be a string or a list of strings.`); continue; }
+    if (!list || !list.every(v => typeof v === "string")) { errors.push(`${file}: ${label}.${action} must be a string or a list of strings.`); continue; }
     const bindings = (list as string[]).map(v => v.trim().toLowerCase()).filter(Boolean);
     const bad = bindings.find(b => !KEY.test(b));
-    if (bad) { errors.push(`${file}: keys.${action} has an unreadable key "${bad}".`); continue; }
+    if (bad) { errors.push(`${file}: ${label}.${action} has an unreadable key "${bad}".`); continue; }
     out[action] = bindings; // [] (from "") unbinds
   }
   return out;
+}
+
+/** Both key tables of one config file: [keys] and the direct [keys.app]. */
+export function tablesFromToml(text: string, file: string, errors: string[]): { bindings: Record<string, string[]>; appBindings: Record<string, string[]> } {
+  let doc: Record<string, unknown>;
+  try { doc = parse(text) as Record<string, unknown>; }
+  catch (error) { errors.push(`${file}: ${(error as Error).message.split("\n")[0]}`); return { bindings: {}, appBindings: {} }; }
+  const keys = doc.keys;
+  if (!keys || typeof keys !== "object") return { bindings: {}, appBindings: {} };
+  const { app, ...rest } = keys as Record<string, unknown>;
+  const bindings = normaliseKeys(rest, KNOWN_KEYS, "keys", file, errors);
+  const appBindings = app && typeof app === "object"
+    ? normaliseKeys(app as Record<string, unknown>, KNOWN_APP, "keys.app", file, errors)
+    : {};
+  return { bindings, appBindings };
+}
+
+/** Normalise one file's [keys] table into action → bindings. */
+export function keysFromToml(text: string, file: string, errors: string[]): Record<string, string[]> {
+  return tablesFromToml(text, file, errors).bindings;
 }
 
 async function readText(file: string): Promise<string | undefined> {
@@ -96,15 +134,22 @@ export async function loadKeyConfig(): Promise<KeyConfig> {
   const files = { herdr: herdrConfigPath(), desktop: desktopConfigPath() };
   const errors: string[] = [];
   const bindings: Record<string, string[]> = structuredClone(DEFAULTS);
+  const appBindings: Record<string, string[]> = structuredClone(DEFAULTS_APP);
   const sources: Record<string, string> = Object.fromEntries(Object.keys(DEFAULTS).map(k => [k, "default"]));
+  const appSources: Record<string, string> = Object.fromEntries(Object.keys(DEFAULTS_APP).map(k => [k, "default"]));
   for (const [source, file] of [["herdr", files.herdr], ["desktop", files.desktop]] as const) {
     const text = await readText(file).catch(error => { errors.push(`${file}: ${(error as Error).message}`); return undefined; });
     if (text === undefined) continue;
-    for (const [action, list] of Object.entries(keysFromToml(text, file, errors))) {
+    const tables = tablesFromToml(text, file, errors);
+    for (const [action, list] of Object.entries(tables.bindings)) {
       bindings[action] = list;
       sources[action] = source;
     }
+    for (const [action, list] of Object.entries(tables.appBindings)) {
+      appBindings[action] = list;
+      appSources[action] = source;
+    }
   }
   if (!bindings.prefix?.length) bindings.prefix = DEFAULTS.prefix;
-  return { bindings, sources, files, errors };
+  return { bindings, appBindings, sources, appSources, files, errors };
 }

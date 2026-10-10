@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { dump, load } from "js-yaml";
 import type { Computer, EnrollDesktop, LinkComputer, RevokeComputer } from "./contract.js";
 import { hookRequest } from "./hook-client.js";
-import { bridgeRoot, desktopKeyPath, knownHostsPath, loadComputers } from "./hosts.js";
+import { bridgeRoot, closeMasters, desktopKeyPath, knownHostsPath, loadComputers } from "./hosts.js";
 
 const exec = promisify(execFile);
 const forcedCommand = 'command="sh ~/.local/share/phren/bridge/dispatch"';
@@ -146,6 +146,9 @@ export const revokeComputer: RevokeComputer = async name => {
 
   await updateDesktopYaml(doc => removePeer(doc, name));
   await rm(knownHostsPath(name), { force: true });
+  // Drop any ControlMaster still holding the revoked key, so the connection
+  // dies even when the remote authorized_keys step failed.
+  await closeMasters(target);
   return { remote };
 };
 

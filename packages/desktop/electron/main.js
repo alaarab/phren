@@ -57,6 +57,29 @@ function showOnReady(win) {
   return win;
 }
 
+function sameOrigin(candidate, origin) {
+  try {
+    return new URL(candidate).origin === origin;
+  } catch {
+    return false;
+  }
+}
+
+/** Subframes may only navigate within the app's localhost family or to about:blank. */
+function allowedSubframe(target, port) {
+  if (target === "about:blank") return true;
+  try {
+    const parsed = new URL(target);
+    return (
+      parsed.protocol === "http:" &&
+      parsed.port === port &&
+      (parsed.hostname === "localhost" || parsed.hostname.endsWith(".localhost"))
+    );
+  } catch {
+    return false;
+  }
+}
+
 function createWindow(url) {
   const win = new BrowserWindow({
     ...baseWindowOptions(),
@@ -68,15 +91,22 @@ function createWindow(url) {
     },
   });
   const origin = new URL(url).origin;
-  win.webContents.on("will-navigate", (event, target) => {
-    try {
-      if (new URL(target).origin !== origin) event.preventDefault();
-    } catch {
-      event.preventDefault();
+  const port = new URL(url).port;
+  win.webContents.on("will-navigate", (details) => {
+    if (!sameOrigin(details.url, origin)) details.preventDefault();
+  });
+  win.webContents.on("will-frame-navigate", (details) => {
+    if (details.isMainFrame) {
+      if (!sameOrigin(details.url, origin)) details.preventDefault();
+    } else if (!sameOrigin(details.url, origin) && !allowedSubframe(details.url, port)) {
+      details.preventDefault();
     }
   });
-  win.webContents.setWindowOpenHandler(({ url: target }) => {
-    if (/^https?:\/\//.test(target)) shell.openExternal(target);
+  win.webContents.setWindowOpenHandler((details) => {
+    const referrer = details.referrer && details.referrer.url;
+    if (/^https?:\/\//.test(details.url) && referrer && sameOrigin(referrer, origin)) {
+      shell.openExternal(details.url);
+    }
     return { action: "deny" };
   });
   win.loadURL(url);
@@ -134,10 +164,18 @@ function spawnDaemon(nodePath) {
   return new Promise((resolve, reject) => {
     const token = randomBytes(24).toString("hex");
     const child = spawn(nodePath, [daemonPath], {
-      env: { ...process.env, PATH: daemonPath_(nodePath), PHREN_DESKTOP_PORT: "0", PHREN_DESKTOP_TOKEN: token },
-      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        PATH: daemonPath_(nodePath),
+        PHREN_DESKTOP_PORT: "0",
+        // The token goes over fd 3 (pipe), never the environment, so a child
+        // process cannot read it by dumping env.
+        PHREN_DESKTOP_TOKEN_FD: "3",
+      },
+      stdio: ["ignore", "pipe", "pipe", "pipe"],
     });
     daemon = child;
+    child.stdio[3]?.end(token);
     daemonStderr = "";
     let settled = false;
     let buffer = "";
@@ -226,17 +264,41 @@ function registerIpc() {
   });
 }
 
-async function start() {
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(permission === "notifications" || permission === "clipboard-sanitized-write");
+/** Only the app's own loopback origin (localhost or 127.0.0.1 at its port) is
+ * trusted for permissions; every *.localhost subdomain is not. */
+function isAppPermissionOrigin(candidate, port) {
+  try {
+    const parsed = new URL(candidate);
+    return (
+      parsed.protocol === "http:" &&
+      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") &&
+      parsed.port === port
+    );
+  } catch {
+    return false;
+  }
+}
+
+function registerPermissions(port) {
+  const granted = (permission) => permission === "notifications" || permission === "clipboard-sanitized-write";
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    callback(granted(permission) && isAppPermissionOrigin(details?.requestingUrl ?? "", port));
   });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission, requestingOrigin) => {
+    return granted(permission) && isAppPermissionOrigin(requestingOrigin, port);
+  });
+}
+
+async function start() {
   const nodePath = await findNode();
   if (!nodePath) {
     createErrorWindow("Node.js was not found. Install Node or set PHREN_NODE.", "");
     return;
   }
   try {
-    createWindow(await spawnDaemon(nodePath));
+    const url = await spawnDaemon(nodePath);
+    registerPermissions(new URL(url).port);
+    createWindow(url);
   } catch (err) {
     createErrorWindow(err.message, daemonStderr);
     daemon = null;

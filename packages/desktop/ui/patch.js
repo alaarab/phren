@@ -55,6 +55,20 @@ function splitLines(text) {
   return { lines, hasFinal };
 }
 
+export const ADDED_FILE_MAX_LINES = 2000;
+
+/** Build addition-only hunks from a whole file, so a new file shows its lines
+ * with numbers even when git has no diff for it yet. */
+export function additionHunks(text, maxLines = ADDED_FILE_MAX_LINES) {
+  const { lines } = splitLines(text);
+  const shown = lines.slice(0, maxLines);
+  const hunkLines = shown.map((line, i) => ({ kind: "add", text: line, oldLine: null, newLine: i + 1, noNewline: false }));
+  const hunks = hunkLines.length
+    ? [{ header: "", oldStart: 0, oldCount: 0, newStart: 1, newCount: hunkLines.length, lines: hunkLines }]
+    : [];
+  return { hunks, truncated: lines.length > maxLines, total: lines.length };
+}
+
 /** Rebuild the old file from the new text and the patch that produced it. */
 export function reverseApply(newText, patch) {
   const hunks = parsePatch(patch);

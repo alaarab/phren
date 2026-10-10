@@ -2,7 +2,7 @@
 // Installed at <config>/phren/desktop-extensions/<publisher>.<name>/ as the
 // unzipped extension/ folder plus a phren.json record.
 import { createHash } from "node:crypto";
-import { installIntoReh, rehExtensionsDir, uninstallFromReh } from "./reh.js";
+import { installIntoReh, isRehRunning, rehExtensionsDir, uninstallFromReh } from "./reh.js";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -13,6 +13,8 @@ const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9-]*$/;
 const OPEN_VSX = "https://open-vsx.org/api";
 const MAX_VSIX = 60 * 1024 * 1024;
+const MAX_ENTRY = 50 * 1024 * 1024;
+const MAX_TOTAL = 200 * 1024 * 1024;
 const MAX_FILES = 5000;
 
 export type ExtensionKind = "web" | "declarative" | "node";
@@ -38,6 +40,7 @@ export interface InstalledExtension {
   enabled: boolean;
   kind: ExtensionKind;
   icon?: string;
+  publisherVerified: boolean;
   manifest: ExtensionManifest;
   files: string[];
 }
@@ -65,8 +68,10 @@ export class ExtensionError extends Error {
 interface ExtensionRecord {
   id: string;
   version: string;
+  sha256?: string;
   installedAt: string;
   enabled: boolean;
+  publisherVerified?: boolean;
   source: "open-vsx";
 }
 
@@ -149,6 +154,7 @@ async function readExtension(id: string): Promise<InstalledExtension | null> {
     enabled: record.enabled,
     kind: classify(manifest),
     icon,
+    publisherVerified: record.publisherVerified === true,
     manifest,
     files: await listFiles(join(dir, "extension")),
   };
@@ -205,11 +211,13 @@ export async function installFromOpenVsx(
   const id = `${namespace}.${name}`;
   const meta = await fetchJson(`${OPEN_VSX}/${namespace}/${name}/latest`, fetchImpl, "Open VSX") as {
     version?: string;
+    verified?: unknown;
     files?: { download?: string; sha256?: string };
   };
   const download = meta.files?.download;
   const sha256Url = meta.files?.sha256;
   if (!download || !sha256Url) throw new ExtensionError(502, "Open VSX returned no download for this extension.");
+  const publisherVerified = meta.verified === true;
   // files.sha256 is a link to a text file whose first token is the hex digest.
   let expected: string;
   try {
@@ -229,8 +237,7 @@ export async function installFromOpenVsx(
     throw new ExtensionError(502, "The extension download failed.");
   }
   if (!res.ok) throw new ExtensionError(502, `The extension download failed (${res.status}).`);
-  const bytes = Buffer.from(await res.arrayBuffer());
-  if (bytes.length > MAX_VSIX) throw new ExtensionError(502, "The extension is larger than 60 MB.");
+  const bytes = await readCappedBody(res, MAX_VSIX);
   const actual = createHash("sha256").update(bytes).digest("hex");
   if (actual !== expected.toLowerCase()) {
     throw new ExtensionError(502, "The extension's checksum does not match Open VSX.");
@@ -239,7 +246,7 @@ export async function installFromOpenVsx(
   const files = extractExtensionFolder(bytes);
   if (!files.has("package.json")) throw new ExtensionError(502, "The extension has no package.json.");
 
-  await writeExtension(id, meta.version || "0.0.0", files);
+  await writeExtension(id, meta.version || "0.0.0", files, { sha256: actual.toLowerCase(), publisherVerified });
   // Keep the verified package beside it: a Node-only extension's code runs in
   // the Node extension host, which installs from the VSIX.
   await writeFile(join(extensionDir(id), "package.vsix"), bytes, { mode: 0o600 });
@@ -249,17 +256,39 @@ export async function installFromOpenVsx(
   return ext;
 }
 
-/** Put every installed Node-only extension into the Node extension host
- * (those installed before it was built). Returns the ids it added. */
+/** Bring the Node extension host in line with the store: put every installed
+ * and enabled Node-only extension in, and take every other one out (the REH
+ * scans its whole extensions folder, so a disabled one would keep running).
+ * Returns the ids it added. */
 export async function syncNodeExtensions(): Promise<string[]> {
-  const present = existsSync(rehExtensionsDir()) ? (await readdir(rehExtensionsDir())).map(n => n.toLowerCase()) : [];
+  const installed = await listExtensions();
+  const byId = new Map(installed.map((ext) => [ext.id.toLowerCase(), ext]));
+  const wantedIds = [...byId.keys()].sort((a, b) => b.length - a.length);
+  const dir = rehExtensionsDir();
+  let presentNames: string[] = [];
+  try {
+    presentNames = existsSync(dir)
+      ? (await readdir(dir, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+      : [];
+  } catch {
+    presentNames = [];
+  }
+  const present = presentNames.map((n) => n.toLowerCase());
   const added: string[] = [];
-  for (const ext of await listExtensions()) {
+  for (const ext of installed) {
     if (ext.kind !== "node" || !ext.enabled) continue;
-    if (present.some(n => n.startsWith(`${ext.id.toLowerCase()}-`))) continue;
+    if (present.some((n) => n.startsWith(`${ext.id.toLowerCase()}-`))) continue;
     const vsix = join(extensionDir(ext.id), "package.vsix");
     if (!existsSync(vsix)) continue;
     if (await installIntoReh(vsix).catch(() => false)) added.push(ext.id);
+  }
+  for (const name of presentNames) {
+    const folder = name.toLowerCase();
+    const owner = wantedIds.find((id) => folder.startsWith(`${id}-`));
+    const ext = owner ? byId.get(owner) : undefined;
+    if (ext && ext.kind === "node" && ext.enabled) continue;
+    if (owner) await uninstallFromReh(owner);
+    else await rm(join(dir, name), { recursive: true, force: true });
   }
   return added;
 }
@@ -271,7 +300,7 @@ export async function uninstall(id: string): Promise<void> {
   await rm(dir, { recursive: true, force: true });
 }
 
-export async function setEnabled(id: string, enabled: boolean): Promise<InstalledExtension> {
+export async function setEnabled(id: string, enabled: boolean): Promise<InstalledExtension & { restartRequired?: boolean }> {
   const dir = extensionDir(id);
   const record = (await readJsonFile(join(dir, "phren.json"))) as ExtensionRecord | undefined;
   if (!record || record.source !== "open-vsx") throw new ExtensionError(404, `Unknown extension ${id}.`);
@@ -279,7 +308,17 @@ export async function setEnabled(id: string, enabled: boolean): Promise<Installe
   await writeFile(join(dir, "phren.json"), JSON.stringify(record, null, 2));
   const ext = await readExtension(id);
   if (!ext) throw new ExtensionError(404, `Unknown extension ${id}.`);
-  return ext;
+  let restartRequired = false;
+  if (ext.kind === "node") {
+    if (enabled) {
+      const vsix = join(dir, "package.vsix");
+      if (existsSync(vsix)) await installIntoReh(vsix).catch(() => false);
+    } else {
+      await uninstallFromReh(id);
+    }
+    restartRequired = isRehRunning();
+  }
+  return restartRequired ? { ...ext, restartRequired: true } : ext;
 }
 
 /** Absolute path of a file under an extension's extension/ folder, or null when
@@ -289,6 +328,34 @@ export function extensionFilePath(id: string, rel: string): string | null {
   const base = join(extensionsRoot(), id, "extension");
   const full = resolve(base, rel);
   return full === base || full.startsWith(base + sep) ? full : null;
+}
+
+/** Read a response body, refusing one past `limit` bytes: the declared
+ * Content-Length first, then a running total as the body streams in. */
+async function readCappedBody(res: Response, limit: number): Promise<Uint8Array> {
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > limit) {
+    throw new ExtensionError(502, "The extension is larger than 60 MB.");
+  }
+  if (!res.body) {
+    const all = new Uint8Array(await res.arrayBuffer());
+    if (all.length > limit) throw new ExtensionError(502, "The extension is larger than 60 MB.");
+    return all;
+  }
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) {
+      await reader.cancel().catch(() => {});
+      throw new ExtensionError(502, "The extension is larger than 60 MB.");
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks, total);
 }
 
 async function fetchJson(url: string, fetchImpl: typeof fetch, what: string): Promise<unknown> {
@@ -311,13 +378,41 @@ function unsafeRel(rel: string): boolean {
   return rel.split("/").some((part) => part === "..");
 }
 
+export interface UnzipEntryInfo {
+  name: string;
+  originalSize: number;
+}
+
+/** A running check over a VSIX's central-directory sizes: refuses a single
+ * entry over 50 MB or a total over 200 MB. Used as fflate's unzipSync filter
+ * so an oversized archive is rejected before its contents are decompressed. */
+export function unzipSizeGuard(): (entry: UnzipEntryInfo) => void {
+  let total = 0;
+  return (entry) => {
+    if (entry.originalSize > MAX_ENTRY) {
+      throw new ExtensionError(413, `The VSIX entry ${entry.name} is larger than 50 MB.`);
+    }
+    total += entry.originalSize;
+    if (total > MAX_TOTAL) {
+      throw new ExtensionError(413, "The VSIX expands to more than 200 MB.");
+    }
+  };
+}
+
 /** Unzip a VSIX and keep only extension/** as rel path → bytes. fflate drops
  * unix modes, so a zip symlink lands here as an ordinary file (never a link). */
 function extractExtensionFolder(vsix: Uint8Array): Map<string, Uint8Array> {
+  const check = unzipSizeGuard();
   let entries: Record<string, Uint8Array>;
   try {
-    entries = unzipSync(vsix);
-  } catch {
+    entries = unzipSync(vsix, {
+      filter: (file) => {
+        check(file);
+        return true;
+      },
+    });
+  } catch (err) {
+    if (err instanceof ExtensionError) throw err;
     throw new ExtensionError(502, "The VSIX could not be read.");
   }
   const out = new Map<string, Uint8Array>();
@@ -334,7 +429,12 @@ function extractExtensionFolder(vsix: Uint8Array): Map<string, Uint8Array> {
 
 // Write fully to a temp sibling, swap the old version aside, then rename into
 // place so a half-written extension is never live.
-async function writeExtension(id: string, version: string, files: Map<string, Uint8Array>): Promise<void> {
+async function writeExtension(
+  id: string,
+  version: string,
+  files: Map<string, Uint8Array>,
+  provenance: { sha256: string; publisherVerified: boolean },
+): Promise<void> {
   const root = extensionsRoot();
   await mkdir(root, { recursive: true });
   const target = join(root, id);
@@ -349,8 +449,10 @@ async function writeExtension(id: string, version: string, files: Map<string, Ui
     const record: ExtensionRecord = {
       id,
       version,
+      sha256: provenance.sha256,
       installedAt: new Date().toISOString(),
       enabled: previous?.enabled ?? true,
+      publisherVerified: provenance.publisherVerified,
       source: "open-vsx",
     };
     await writeFile(join(tmp, "phren.json"), JSON.stringify(record, null, 2));

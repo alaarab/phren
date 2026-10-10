@@ -83,13 +83,15 @@ export interface MergedOverview { computers: ComputerOverview[] }
  * spike). Neither file: local only. */
 export type LoadComputers = () => Promise<Computer[]>;
 /** OpenSSH argv (without the leading "ssh") to run `remoteCommand` on `c`:
- * ControlMaster=auto, ControlPersist=10m, ControlPath in a short private dir
- * (`/tmp/phren-desktop-<uid>/%C`; macOS caps socket paths at 104 bytes), a temp known_hosts file holding
- * only c.hostKey, StrictHostKeyChecking=yes, HostKeyAlgorithms=ssh-ed25519,
+ * ControlMaster=auto, ControlPersist=60, ControlPath in a short private dir
+ * (`/tmp/phren-desktop-<uid>/<keyHash8>-<slot>-%C`; macOS caps socket paths at
+ * 104 bytes), a temp known_hosts file holding only c.hostKey,
+ * StrictHostKeyChecking=yes, HostKeyAlgorithms=ssh-ed25519,
  * IdentityFile=c.keyFile, IdentitiesOnly=yes, BatchMode=yes,
- * ForwardAgent=no, ClearAllForwardings=yes, ConnectTimeout=10, -p port,
- * user@address. `tty` adds "-tt". */
-export type SshArgs = (c: Computer, remoteCommand: string, opts?: { tty?: boolean }) => string[];
+ * ForwardAgent=no, ClearAllForwardings=yes, ConnectTimeout=10,
+ * ServerAliveInterval=15, ServerAliveCountMax=3, -p port, user@address.
+ * `tty` adds "-tt"; `slot` picks one of the pool's master sockets (default 0). */
+export type SshArgs = (c: Computer, remoteCommand: string, opts?: { tty?: boolean; slot?: number }) => string[];
 
 // ---------------------------------------------------------------- hook-client.ts
 /** Open a raw byte pipe to computer c's Hook: local = net.connect(hook.sock);
@@ -111,6 +113,10 @@ export interface OverviewHub {
   start(): void;
   stop(): void;
   current(): MergedOverview;
+  /** Reconcile to a new computer list: drop supervisors for removed computers,
+   * add new ones, and restart any whose SSH identity changed (so a computer in
+   * the "verify" state retries after a relink). */
+  setComputers(computers: Computer[]): void;
   on(event: "change", listener: (merged: MergedOverview) => void): void;
 }
 export type CreateOverviewHub = (computers: Computer[], ws: HookWebSocket) => OverviewHub;

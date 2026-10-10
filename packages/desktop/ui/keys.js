@@ -15,6 +15,9 @@ const PREFIX_WINDOW_MS = 2500;
 const NAMED = { minus: "-", comma: ",", plus: "+", backtick: "`", ampersand: "&", space: " ", slash: "/" };
 const EVENT_NAMES = { arrowup: "up", arrowdown: "down", arrowleft: "left", arrowright: "right", escape: "esc", enter: "enter", tab: "tab", " ": " " };
 const SYMBOLS = { ctrl: "⌃", alt: "⌥", shift: "⇧", cmd: "⌘", super: "⌘" };
+// "cmd" in a binding means Command on macOS and Control everywhere else.
+const IS_MAC = (typeof navigator !== "undefined" && /mac/i.test(navigator.userAgent || navigator.platform || ""))
+  || (typeof document !== "undefined" && document.documentElement.classList.contains("platform-darwin"));
 
 /** "prefix+shift+t" → { prefix, ctrl, alt, shift, cmd, key, range? } */
 export function parseBinding(text) {
@@ -57,7 +60,8 @@ export function matches(spec, ev) {
 function keycaps(binding) {
   return binding.split(/\s+/).map((text) => {
     const spec = parseBinding(text);
-    const mods = ["ctrl", "alt", "shift", "cmd"].filter((m) => spec[m]).map((m) => SYMBOLS[m]).join("");
+    const mods = ["ctrl", "alt", "shift", "cmd"].filter((m) => spec[m])
+      .map((m) => (m === "cmd" && !IS_MAC ? SYMBOLS.ctrl : SYMBOLS[m])).join("");
     const key = spec.range ? `${spec.range[0]}…${spec.range[1]}` : (spec.key.length === 1 ? spec.key.toUpperCase() : spec.key);
     const own = mods + key;
     if (!spec.prefix) return own;
@@ -87,6 +91,22 @@ function findAction(ev, withPrefix) {
   return null;
 }
 
+/** Direct [keys.app] bindings: on macOS "cmd" is Command, elsewhere Control. */
+function matchesApp(spec, ev) {
+  const local = !IS_MAC && spec.cmd ? { ...spec, cmd: false, ctrl: true } : spec;
+  return matches(local, ev);
+}
+
+function findAppAction(ev) {
+  for (const [action, list] of Object.entries(config.appBindings || {})) {
+    for (const text of list) {
+      const hit = matchesApp(parseBinding(text), ev);
+      if (hit !== false) return { action, arg: typeof hit === "number" ? hit : undefined };
+    }
+  }
+  return null;
+}
+
 function showHint(on) {
   if (!hintEl) {
     hintEl = document.createElement("div");
@@ -98,8 +118,12 @@ function showHint(on) {
 }
 
 function onKeyDown(ev) {
-  if (!config || inTerminal(ev.target) || ev.isComposing) return;
+  if (!config || ev.isComposing) return;
   if (ev.key === "Shift" || ev.key === "Control" || ev.key === "Alt" || ev.key === "Meta") return;
+  // Direct Cmd/Ctrl shortcuts come first, so they work even inside a terminal.
+  const appHit = findAppAction(ev);
+  if (appHit) { ev.preventDefault(); ev.stopPropagation(); run(appHit.action, appHit.arg); return; }
+  if (inTerminal(ev.target)) return;
   const now = Date.now();
   if (now < prefixUntil) {
     prefixUntil = 0; showHint(false);
@@ -148,24 +172,41 @@ function run(action, arg) {
     case "next_tab": return step(1);
     case "previous_tab": return step(-1);
     case "switch_tab": return openRow(rows()[(arg ?? 1) - 1]);
-    case "next_agent": {
-      const needing = rows().filter((r) => r.querySelector(".sb-bar.needs"));
-      if (!needing.length) return flash("No session needs you.");
-      const at = needing.indexOf(activeRow());
-      return openRow(needing[(at + 1) % needing.length]);
-    }
+    case "next_agent":
+    case "next_needs_you": return nextNeedsYou();
     case "rename_tab": return renameSession();
-    case "toggle_sidebar": return document.body.classList.toggle("sidebar-hidden");
+    case "toggle_sidebar":
+    case "sidebar": return document.body.classList.toggle("sidebar-hidden");
     case "focus_pane_left": return focusColumn(-1);
     case "focus_pane_right": return focusColumn(1);
     case "cycle_pane_next": return focusColumn(1, true);
     case "zoom": return app.toggleZoom();
-    case "close_pane": return app.closePanel();
-    case "new_tab": return app.showPane("terminal");
+    case "close_pane":
+    case "close_tab": return app.closePanel();
+    case "new_tab":
+    case "terminal": return app.showPane("terminal");
+    case "palette": return showGoto();
+    case "open_file": return openQuickFile();
     case "show_changes": return app.showPane("changes");
     case "show_files": return app.showPane("files");
     case "show_search": return app.showPane("search");
+    default:
+      if (/^session_[1-9]$/.test(action)) return openRow(rows()[Number(action.slice(8)) - 1]);
   }
+}
+
+/** next_agent / next_needs_you: open the next sidebar row waiting on the owner. */
+function nextNeedsYou() {
+  const needing = rows().filter((r) => r.querySelector(".sb-bar.needs, .sb-ring.needs"));
+  if (!needing.length) return flash("No session needs you.");
+  const at = needing.indexOf(activeRow());
+  return openRow(needing[(at + 1) % needing.length]);
+}
+
+/** open_file: the Files pane's own quick open (its ⌘P control). */
+function openQuickFile() {
+  app.showPane("files");
+  document.querySelector(".ed-qp")?.click();
 }
 
 // The three columns, left to right; hidden ones are skipped.
@@ -245,10 +286,10 @@ function showSheet() {
       const row = el("div", "keys-row");
       row.append(el("span", "keys-label", a.label));
       const caps = el("span", "keys-caps");
-      const list = config.bindings[a.action] ?? [];
+      const list = (a.app ? config.appBindings?.[a.action] : config.bindings[a.action]) ?? [];
       if (!list.length) caps.append(el("span", "keys-unbound", "unbound"));
       for (const b of list) caps.append(el("kbd", "", keycaps(b)));
-      const source = config.sources[a.action];
+      const source = (a.app ? config.appSources : config.sources)[a.action];
       if (source && source !== "default") caps.append(el("span", "keys-source", source === "herdr" ? "Herdr" : "desktop.toml"));
       row.append(caps);
       box.append(row);
@@ -257,7 +298,7 @@ function showSheet() {
   }
   card.append(grid);
   const foot = el("div", "keys-foot");
-  foot.append(el("div", "", `Change them in ${config.files.desktop} under [keys], same names and syntax as Herdr's config. Your Herdr keys in ${config.files.herdr} apply too; the desktop file wins. "" unbinds.`));
+  foot.append(el("div", "", `Change them in ${config.files.desktop} under [keys] or [keys.app], same names and syntax as Herdr's config. Your Herdr keys in ${config.files.herdr} apply too; the desktop file wins. "" unbinds.`));
   for (const error of config.errors) foot.append(el("div", "keys-error", error));
   card.append(foot);
   card.tabIndex = -1; card.focus();
@@ -272,13 +313,16 @@ function showGoto() {
   card.append(input, list);
   let items = [];
   let selected = 0;
-  const label = (row) => row.textContent.replace(/>_\s*$/, "").replace(/\s+/g, " ").trim();
   const render = () => {
-    const q = input.value.trim().toLowerCase();
-    items = rows().filter((r) => !q || q.split(/\s+/).every((w) => label(r).toLowerCase().includes(w)));
+    const words = input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    items = rows().filter((r) => words.every((w) => sessionLabel(r).toLowerCase().includes(w)));
     selected = Math.min(selected, Math.max(0, items.length - 1));
     list.replaceChildren(...items.slice(0, 50).map((r, i) => {
-      const item = el("div", `keys-item${i === selected ? " on" : ""}`, label(r));
+      const item = el("div", `keys-item${i === selected ? " on" : ""}`);
+      const f = rowFields(r);
+      item.append(highlightLine("keys-item-title", f.title || f.project || "", words));
+      const meta = [f.project, f.computer, f.branch].filter(Boolean);
+      if (meta.length) item.append(highlightLine("keys-item-meta", meta.join(" · "), words));
       item.addEventListener("click", () => { closeOverlay(); openRow(r); });
       return item;
     }));
@@ -293,6 +337,50 @@ function showGoto() {
   });
   render();
   input.focus();
+}
+
+function textOf(node, selector) {
+  const child = node.querySelector(selector);
+  return child ? child.textContent.trim() : "";
+}
+function rowFields(row) {
+  return {
+    title: textOf(row, ".sb-title"),
+    project: textOf(row, ".sb-project"),
+    computer: textOf(row, ".sb-computer"),
+    branch: textOf(row, ".sb-branch"),
+  };
+}
+function sessionLabel(row) {
+  const f = rowFields(row);
+  return [f.title, f.project, f.computer, f.branch].filter(Boolean).join(" ");
+}
+
+/** One picker line with every query-word match wrapped in <mark>, built as DOM. */
+function highlightLine(className, text, words) {
+  const line = el("div", className);
+  line.textContent = text;
+  if (!words.length || !text) return line;
+  const lower = text.toLowerCase();
+  const ranges = [];
+  for (const w of words) {
+    let at = lower.indexOf(w);
+    while (at !== -1) { ranges.push([at, at + w.length]); at = lower.indexOf(w, at + w.length); }
+  }
+  ranges.sort((a, b) => a[0] - b[0]);
+  const out = document.createDocumentFragment();
+  let cursor = 0;
+  for (const [start, end] of ranges) {
+    if (start < cursor) continue;
+    if (start > cursor) out.append(document.createTextNode(text.slice(cursor, start)));
+    const mark = document.createElement("mark");
+    mark.textContent = text.slice(start, end);
+    out.append(mark);
+    cursor = end;
+  }
+  if (cursor < text.length) out.append(document.createTextNode(text.slice(cursor)));
+  line.replaceChildren(out);
+  return line;
 }
 
 /** rename_tab: rename the open session (pane label and the harness's own title). */
@@ -356,8 +444,12 @@ const STYLE = `
 .keys-input { width: 100%; box-sizing: border-box; background: var(--sunken); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; color: var(--text); font: 14px system-ui; outline: none; }
 .keys-input:focus { border-color: var(--accent); }
 .keys-list { margin-top: 8px; max-height: 50vh; overflow: auto; }
-.keys-item { padding: 8px 12px; border-radius: 10px; font: 13px system-ui; color: var(--text-2); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.keys-item.on, .keys-item:hover { background: var(--raised); color: var(--text); }
+.keys-item { padding: 8px 12px; border-radius: 10px; cursor: pointer; }
+.keys-item.on, .keys-item:hover { background: var(--raised); }
+.keys-item-title { font: 13px system-ui; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.keys-item.on .keys-item-title, .keys-item:hover .keys-item-title { color: var(--text); }
+.keys-item-meta { margin-top: 2px; font: 12px "JetBrains Mono", ui-monospace, monospace; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.keys-item mark { background: transparent; color: var(--accent); font-weight: 600; }
 .keys-empty { padding: 8px 12px; color: var(--muted); font: 13px system-ui; }
 #sidebar .sb-row.sb-active { background: var(--surface); }
 body.sidebar-hidden #sidebar { display: none; }

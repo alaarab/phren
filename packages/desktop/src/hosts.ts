@@ -1,9 +1,14 @@
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, lstatSync, mkdirSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { load } from "js-yaml";
 import type { Computer, LoadComputers, SshArgs } from "./contract.js";
+
+const exec = promisify(execFile);
 
 /** The bridge directory every wiring path hangs off (matches the Hook). */
 export function bridgeRoot(): string {
@@ -85,8 +90,8 @@ export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
   return [
     "-F", "/dev/null",
     "-o", "ControlMaster=auto",
-    "-o", "ControlPersist=10m",
-    "-o", `ControlPath=${path.join(controlSocketDir(), "%C")}`,
+    "-o", "ControlPersist=60",
+    "-o", `ControlPath=${controlPath(c, opts?.slot ?? 0)}`,
     "-o", `UserKnownHostsFile=${knownHosts}`,
     "-o", "GlobalKnownHostsFile=/dev/null",
     "-o", "StrictHostKeyChecking=yes",
@@ -98,12 +103,47 @@ export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
     "-o", "ForwardAgent=no",
     "-o", "ClearAllForwardings=yes",
     "-o", "ConnectTimeout=10",
+    "-o", "ServerAliveInterval=15",
+    "-o", "ServerAliveCountMax=3",
     ...(opts?.tty ? ["-tt"] : []),
     "-p", String(port),
     `${c.username}@${c.address}`,
     remoteCommand,
   ];
 };
+
+/** The OpenSSH argv to tear down the ControlMaster listening on `slot`: the
+ * same pinned path/port/address, then `-O exit`. No remote command runs. */
+export function masterExitArgs(c: Computer, slot: number): string[] {
+  if (c.local) throw new Error("masterExitArgs cannot run on the local computer.");
+  if (!c.address || !c.username) throw new Error(`Computer ${c.name} is missing SSH details.`);
+  return [
+    "-F", "/dev/null",
+    "-o", `ControlPath=${controlPath(c, slot)}`,
+    "-p", String(c.port ?? 22),
+    `${c.username}@${c.address}`,
+    "-O", "exit",
+  ];
+}
+
+/** Best-effort teardown of every master slot for `c`; failures are ignored. */
+export async function closeMasters(c: Computer): Promise<void> {
+  if (c.local) return;
+  try {
+    await Promise.all([0, 1, 2, 3].map(slot =>
+      exec("ssh", masterExitArgs(c, slot), { timeout: 5_000 }).then(() => undefined, () => undefined)));
+  } catch {
+    // A missing address or ssh must never fail teardown.
+  }
+}
+
+/** The ControlMaster socket path for one slot. A hash of the key file path
+ * keeps computers that share a name but not a key apart; the slot index lets
+ * the channel pool spread concurrent channels over several connections. */
+function controlPath(c: Computer, slot: number): string {
+  const tag = createHash("sha256").update(c.keyFile ?? "").digest("hex").slice(0, 8);
+  return path.join(controlSocketDir(), `${tag}-${slot}-%C`);
+}
 
 /** Unix socket paths are capped at 104 bytes on macOS, and ssh appends a
  * 40-character %C hash plus a 17-character temp suffix, so the masters live

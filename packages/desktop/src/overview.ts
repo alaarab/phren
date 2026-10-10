@@ -43,6 +43,12 @@ function isHostKeyError(message?: string): boolean {
   return !!message && /host key|REMOTE HOST IDENTIFICATION/i.test(message);
 }
 
+/** True when the SSH identity changed enough that the current supervisor is
+ * pointing at the wrong machine (a relink after a "verify" state, say). */
+function sshChanged(a: Computer, b: Computer): boolean {
+  return a.address !== b.address || a.port !== b.port || a.hostKey !== b.hostKey || a.keyFile !== b.keyFile;
+}
+
 function frameText(data: RawData): string {
   if (Buffer.isBuffer(data)) return data.toString("utf8");
   if (Array.isArray(data)) return Buffer.concat(data).toString("utf8");
@@ -95,6 +101,14 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
     if (sup.silenceTimer) clearTimeout(sup.silenceTimer);
     if (sup.stableTimer) clearTimeout(sup.stableTimer);
     sup.retryTimer = sup.silenceTimer = sup.stableTimer = undefined;
+  }
+
+  function stopSupervisor(sup: Supervisor): void {
+    sup.stopped = true;
+    clearTimers(sup);
+    const socket = sup.socket;
+    sup.socket = undefined;
+    if (socket) socket.terminate();
   }
 
   function touch(sup: Supervisor): void {
@@ -210,13 +224,7 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
       for (const sup of supervisors) connect(sup);
     },
     stop(): void {
-      for (const sup of supervisors) {
-        sup.stopped = true;
-        clearTimers(sup);
-        const socket = sup.socket;
-        sup.socket = undefined;
-        if (socket) socket.terminate();
-      }
+      for (const sup of supervisors) stopSupervisor(sup);
       if (trailing) {
         clearTimeout(trailing);
         trailing = undefined;
@@ -224,6 +232,41 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
       emitter.removeAllListeners();
     },
     current: build,
+    setComputers(computers: Computer[]): void {
+      const incoming = new Map(computers.map(computer => [computer.name, computer]));
+      for (let i = supervisors.length - 1; i >= 0; i--) {
+        if (!incoming.has(supervisors[i].computer.name)) {
+          stopSupervisor(supervisors[i]);
+          supervisors.splice(i, 1);
+        }
+      }
+      const byName = new Map(supervisors.map(sup => [sup.computer.name, sup]));
+      for (const computer of computers) {
+        const sup = byName.get(computer.name);
+        if (!sup) {
+          const fresh: Supervisor = { computer, state: "connecting", backoffMs: BASE_BACKOFF_MS, stopped: false };
+          supervisors.push(fresh);
+          if (started) connect(fresh);
+          continue;
+        }
+        if (sshChanged(sup.computer, computer)) {
+          // A different SSH identity: drop the old socket and retry from scratch
+          // (this is how a "verify" state clears after a relink).
+          stopSupervisor(sup);
+          sup.computer = computer;
+          sup.state = "connecting";
+          sup.error = undefined;
+          sup.overview = undefined;
+          sup.updatedAt = undefined;
+          sup.backoffMs = BASE_BACKOFF_MS;
+          sup.stopped = false;
+          if (started) connect(sup);
+        } else {
+          sup.computer = computer;
+        }
+      }
+      scheduleChange();
+    },
     on(event, listener): void {
       emitter.on(event, listener);
     },

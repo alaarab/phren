@@ -139,7 +139,8 @@ const handlers = {
       onSearch: () => showPane("search"),
       onTerminal: () => showPane("terminal"),
     });
-    if (!sideEl.hidden) showPane("changes");
+    // The chat header no longer carries panel buttons, so the panel opens with the session.
+    showPane(bench.pane && bench.pane !== "extensions" ? bench.pane : "changes");
     setActiveSession(computer, child);
   },
   onOpenTerminal(computer, server) {
