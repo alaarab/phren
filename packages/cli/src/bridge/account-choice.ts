@@ -175,8 +175,8 @@ export async function pickClaudeAccount(what: string, computer = "this computer"
 
 const TRUE = new Set(["1", "true", "on", "yes"]), FALSE = new Set(["0", "false", "off", "no"]);
 
-/** Whether a Claude worker that hits its usage limit is continued on another account. On unless
- *  `phren config account-failover off` or PHREN_ACCOUNT_FAILOVER=off. */
+/** Whether a dispatched Claude worker stopped at its usage limit continues on another signed-in account.
+ *  Off unless the owner opts in with `phren config account-failover on` or PHREN_ACCOUNT_FAILOVER=on. */
 export function resolveAccountFailover(env: NodeJS.ProcessEnv = process.env, store: string | null = findPhrenPath()): { on: boolean; source: string } {
   const raw = env.PHREN_ACCOUNT_FAILOVER?.trim().toLowerCase();
   if (raw && TRUE.has(raw)) return { on: true, source: "PHREN_ACCOUNT_FAILOVER" };
@@ -185,5 +185,5 @@ export function resolveAccountFailover(env: NodeJS.ProcessEnv = process.env, sto
     const value = store ? readInstallPreferences(store).accountFailover : undefined;
     if (typeof value === "boolean") return { on: value, source: "install preferences" };
   } catch { /* No preferences yet: the default applies. */ }
-  return { on: true, source: "default" };
+  return { on: false, source: "default" };
 }

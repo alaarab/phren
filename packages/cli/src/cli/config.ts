@@ -197,8 +197,8 @@ Subcommands:
   phren config clanker [on|off]         Compact keyword-first retrieval: hook, search and
                                         lists return id/title/keyword rows; full text by id
   phren config account-failover [on|off]
-                                        Continue a dispatched Claude worker that hits its
-                                        usage limit on another signed-in account (default: on)
+                                        Continue on another signed-in account when a dispatched
+                                        Claude worker stops at its usage limit (default: off)
   phren config pull-interval [seconds|off]
                                         Periodic MCP remote checks (default: off)
   phren config telemetry [on|off|reset] Local usage stats (opt-in, no external reporting)`);
@@ -316,8 +316,8 @@ function handleConfigAccountFailover(args: string[]) {
   const { on, source } = resolveAccountFailover(process.env, phrenPath);
   console.log(`Account failover: ${on ? "on" : "off"} (${source})`);
   console.log(on
-    ? "A dispatched Claude worker stopped by its usage limit continues on the account with the most room left, on its computer or another; never on the same login before its window resets."
-    : "A dispatched Claude worker stopped by its usage limit returns failed and stays stopped.");
+    ? "A dispatched Claude worker that stops at its usage limit continues on another of your signed-in accounts with room, on its computer or another; never on the same login before its window resets."
+    : "A dispatched Claude worker that stops at its usage limit returns failed and stays stopped. `phren config account-failover on` continues it on another signed-in account.");
 }
 
 function handleConfigTelemetry(args: string[]) {
