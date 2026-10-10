@@ -2,7 +2,8 @@
 // overview store. Sections live in ./sections, shared plumbing in ./shell.
 import { installKeys } from "./keys.js";
 import { connectStore, store } from "./shell/store.js";
-import { installSections, registerSection, sectionHandle, setSectionBadge, showSection } from "./shell/sections.js";
+import { canGoBack, canGoForward, goBack, goForward, installSections, onTrailChange, registerSection, sectionHandle, setSectionBadge, showSection } from "./shell/sections.js";
+import { openLaunchSheet } from "./shell/launch.js";
 import { mountAgents } from "./sections/agents.js";
 import { mountHome } from "./sections/home.js";
 import { mountProjects } from "./sections/projects.js";
@@ -111,6 +112,25 @@ window.addEventListener("keydown", (ev) => {
     showSection("agents");
     agents().showPane("search");
   }
+});
+
+// The empty centre tile's New agent button.
+document.addEventListener("phren:new-agent", () => openLaunchSheet({ computer: agents().currentSession()?.computer }));
+
+// Back and forward through visited sections: the titlebar arrows and ⌘[ / ⌘].
+const backBtn = document.getElementById("nav-back");
+const forwardBtn = document.getElementById("nav-forward");
+function syncArrows() { backBtn.disabled = !canGoBack(); forwardBtn.disabled = !canGoForward(); }
+backBtn.addEventListener("click", goBack);
+forwardBtn.addEventListener("click", goForward);
+onTrailChange(syncArrows);
+syncArrows();
+window.addEventListener("keydown", (ev) => {
+  if (!(ev.metaKey || ev.ctrlKey) || ev.shiftKey || ev.altKey || (ev.key !== "[" && ev.key !== "]")) return;
+  // Editors and terminals keep ⌘[ / ⌘] (outdent and indent).
+  if (ev.target instanceof Element && ev.target.closest("input, textarea, [contenteditable], .monaco-editor, .xterm, iframe")) return;
+  ev.preventDefault();
+  if (ev.key === "[") goBack(); else goForward();
 });
 
 // Desk first: while the owner types or moves the mouse here, approval alerts

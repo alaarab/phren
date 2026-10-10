@@ -318,3 +318,17 @@ test("Home and Conductor agree on the running conductor", async ({ page }) => {
   await expect(page.locator(".conductor-run-title")).toHaveText("Conductor");
   await expect(page.getByText("No conductor is running")).toHaveCount(0);
 });
+
+test("back and forward walk the visited sections", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await expect(page.locator("#nav-back")).toBeDisabled();
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await page.locator('.section-pill[data-section="review"]').click();
+  await page.locator("#nav-back").click();
+  await expect(page).toHaveURL(/#\/agents$/);
+  await page.locator("#nav-back").click();
+  await expect(page).toHaveURL(/#\/home$/);
+  await expect(page.locator("#nav-back")).toBeDisabled();
+  await page.locator("#nav-forward").click();
+  await expect(page).toHaveURL(/#\/agents$/);
+});

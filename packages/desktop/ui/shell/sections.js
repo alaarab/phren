@@ -20,6 +20,34 @@ const lastInGroup = new Map(); // group -> section id
 
 const groupOf = (id) => sections.get(id)?.group ?? id;
 
+// Back and forward through the sections you visited, like a browser.
+const trail = [];
+let trailAt = -1;
+let walking = false;
+const trailListeners = new Set();
+
+export function canGoBack() { return trailAt > 0; }
+export function canGoForward() { return trailAt < trail.length - 1; }
+export function goBack() { if (canGoBack()) walk(trailAt - 1); }
+export function goForward() { if (canGoForward()) walk(trailAt + 1); }
+export function onTrailChange(fn) { trailListeners.add(fn); return () => trailListeners.delete(fn); }
+
+function walk(index) {
+  trailAt = index;
+  walking = true;
+  try { showSection(trail[index]); } finally { walking = false; }
+  for (const fn of trailListeners) fn();
+}
+
+function remember(id) {
+  if (walking || trail[trailAt] === id) return;
+  trail.splice(trailAt + 1);
+  trail.push(id);
+  if (trail.length > 50) trail.shift();
+  trailAt = trail.length - 1;
+  for (const fn of trailListeners) fn();
+}
+
 export function registerSection(id, def) {
   sections.set(id, { id, order: 100, ...def, el: null, handle: null });
   if (pillsEl) renderPills();
@@ -59,6 +87,7 @@ export function showSection(id, ctx = {}) {
   current = id;
   if (location.hash !== `#/${id}`) history.replaceState(null, "", `#/${id}`);
   lastInGroup.set(groupOf(id), id);
+  remember(id);
   markSelected();
   for (const fn of changeListeners) fn(id);
   return def.handle;
