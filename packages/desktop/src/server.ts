@@ -14,6 +14,7 @@ import { linkComputer, revokeComputer } from "./keys.js";
 import { rehStatus, stopReh } from "./reh.js";
 import { collectUsage } from "./usage.js";
 import { closeAllPreviews, closePreview, listPreviews, openPreview } from "./web-preview.js";
+import { MemoryHttpError, createMemoryService, type ReviewActionBody } from "./memory.js";
 import {
   ExtensionError,
   extensionFilePath,
@@ -417,6 +418,10 @@ export const startServer: StartServer = async (o) => {
     });
   };
 
+  // One mirror per computer, shared by every Memory-section request so the 10 s
+  // sync throttle and the blob-sha map survive across polls.
+  const memory = createMemoryService({ hookRequest: o.hookRequest, computers: o.computers });
+
   const handleHttp = async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://127.0.0.1:${boundPort}`);
     const pathname = url.pathname;
@@ -546,6 +551,59 @@ export const startServer: StartServer = async (o) => {
         sendJson(res, await collectUsage(o.computers, o.hookRequest));
       } catch (err) {
         sendError(res, err);
+      }
+      return;
+    }
+
+    // The Memory section and the graph read one computer's store through the
+    // CLI's own parsers; a remote computer is a synced mirror, and a review
+    // mutation uploads only the files it changed.
+    const memoryError = (err: unknown) => {
+      if (err instanceof MemoryHttpError) sendJson(res, { error: err.message }, err.status);
+      else sendError(res, err);
+    };
+
+    if (pathname.startsWith("/api/memory/")) {
+      try {
+        const rest = pathname.slice("/api/memory/".length);
+        const slash = rest.indexOf("/");
+        if (slash <= 0) throw new MemoryHttpError(404, "not found");
+        const name = decodeURIComponent(rest.slice(0, slash));
+        const sub = rest.slice(slash + 1);
+        const computer = o.computers.find((c) => c.name === name);
+        if (!computer) throw new MemoryHttpError(404, "unknown computer");
+        const project = url.searchParams.get("project");
+        if (sub === "review" && req.method === "POST") {
+          sendJson(res, await memory.reviewAction(computer, (await readJson(req)) as ReviewActionBody));
+        } else if (sub === "projects") {
+          sendJson(res, await memory.projects(computer));
+        } else if (sub === "findings") {
+          sendJson(res, await memory.findings(computer, project));
+        } else if (sub === "review") {
+          sendJson(res, await memory.review(computer, project));
+        } else if (sub === "notes") {
+          sendJson(res, await memory.notes(computer, project));
+        } else if (sub === "topics") {
+          sendJson(res, await memory.topics(computer, project));
+        } else if (sub === "truths") {
+          sendJson(res, await memory.truths(computer, project));
+        } else {
+          throw new MemoryHttpError(404, "not found");
+        }
+      } catch (err) {
+        memoryError(err);
+      }
+      return;
+    }
+
+    if (pathname.startsWith("/api/graph/")) {
+      try {
+        const name = decodeURIComponent(pathname.slice("/api/graph/".length));
+        const computer = o.computers.find((c) => c.name === name);
+        if (!computer) throw new MemoryHttpError(404, "unknown computer");
+        sendJson(res, await memory.graph(computer, url.searchParams.get("project")));
+      } catch (err) {
+        memoryError(err);
       }
       return;
     }
