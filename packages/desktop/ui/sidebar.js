@@ -3,6 +3,7 @@
 // the `.sb-row` / data-session="<computer>/<childId>" shape keys.js relies on.
 import { showSection } from "./shell/sections.js";
 import { hookPost, targetQuery } from "./api.js";
+import { store } from "./shell/store.js";
 
 // answerApproval is written in a parallel change under ui/chat/. Import it
 // lazily so a missing module never takes the whole sidebar down; the fallback
@@ -24,7 +25,9 @@ const GLYPHS = {
 const BADGE = { needs: "!", working: "\u25CF", done: "\u2713", idle: "\u00B7" };
 
 // Six Phren-palette hues for the stable per-computer colour.
-const HOST_HUES = ["#B994F4", "#E0BC7F", "#8AC8AC", "#F0A06E", "#7FB6F0", "#EF9898"];
+// Not the accent purple (projects) or the status colours; by link order, so
+// the first few computers never share a colour.
+const HOST_HUES = ["#7FB6F0", "#F0A06E", "#6FD0D8", "#E79BD0", "#C8C27A", "#A5B4FC"];
 
 // The phone's OfflineReason wording (docs/phren-hook.md "Offline reasons").
 const OFFLINE_LABELS = {
@@ -63,6 +66,8 @@ function kindOf(child) {
 }
 
 function hostColor(name) {
+  const index = (store.merged?.computers ?? []).findIndex((c) => c.computer === name);
+  if (index >= 0) return HOST_HUES[index % HOST_HUES.length];
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
   return HOST_HUES[hash % HOST_HUES.length];
@@ -269,7 +274,7 @@ function updateComputer(node, desc) {
   node.tabIndex = mux ? 0 : -1;
   node.setAttribute("role", mux ? "button" : "listitem");
   const count = desc.sessions.length;
-  let state = count ? `${count} session${count === 1 ? "" : "s"}` : "Online";
+  let state = count ? `${count} session${count === 1 ? "" : "s"}` : "No sessions";
   if (co.state === "connecting") state = "Connecting\u2026";
   else if (co.state === "offline" || co.state === "verify") {
     const seen = relativeAge(co.updatedAt);

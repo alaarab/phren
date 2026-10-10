@@ -4,7 +4,7 @@
 // the Hook's task routes. This is the phone's Tasks screen, drawn with the
 // desktop shell's CSS.
 import { hookGet, hookPost } from "../api.js";
-import { store } from "../shell/store.js";
+import { projectOf, sessions, store } from "../shell/store.js";
 import { sectionHandle } from "../shell/sections.js";
 
 const CSS_ID = "tasks-css";
@@ -174,6 +174,15 @@ export function mountTasks(root) {
     state.docs = new Map(entries.filter(([, doc]) => doc));
     state.loading = false;
     if (state.selectedProject && !source.projects.includes(state.selectedProject)) state.selectedProject = null;
+    // Open on something: the project an agent is working in, else the busiest.
+    if (!state.selectedProject) {
+      const live = sessions().filter((r) => r.child.agentStatus === "working").map((r) => projectOf(r.child));
+      const busiest = [...state.docs.entries()].sort(([, a], [, b]) => {
+        const ca = projectCounts(a), cb = projectCounts(b);
+        return (cb.active + cb.queue) - (ca.active + ca.queue);
+      })[0]?.[0];
+      state.selectedProject = live.find((p) => source.projects.includes(p)) ?? busiest ?? null;
+    }
     renderProjects();
     renderMain();
   }

@@ -311,11 +311,10 @@ function computerCard(initial, meta, rerender) {
   const metaLine = el("div", "settings-row-meta");
   const version = el("span", "settings-version", "");
   const stateText = el("span", "", "");
-  const capsText = el("span", "", "");
   const addrText = el("span", "", "");
-  metaLine.append(version, stateText, capsText, addrText);
+  metaLine.append(stateText, version, addrText);
   main.append(title, metaLine);
-  const chevron = el("span", "comp-chevron", "\u25B8");
+  const chevron = el("span", "comp-chevron", "\u203A");
   toggle.append(dot, main, chevron);
 
   const actions = el("div", "settings-actions");
@@ -363,10 +362,10 @@ function computerCard(initial, meta, rerender) {
     const v = store.version(c.computer);
     version.textContent = v ? `v${v}` : "";
     version.hidden = !v;
-    addrText.textContent = info.address ? `${info.username ? info.username + "@" : ""}${info.address}${info.port ? ":" + info.port : ""}` : (info.local ? "Local socket" : "");
+    addrText.textContent = info.address ? `${info.username ? info.username + "@" : ""}${info.address}${info.port && Number(info.port) !== 22 ? ":" + info.port : ""}` : (info.local ? "local socket" : "");
     store.capabilities(c.computer).then((caps) => {
       const n = Object.values(caps ?? {}).filter(Boolean).length;
-      capsText.textContent = n ? `${n} capabilities` : "";
+      toggle.title = n ? `${n} Hook capabilities` : "";
     });
     if (c.resources) state.resources = c.resources;
     if (state.expanded) renderResources();

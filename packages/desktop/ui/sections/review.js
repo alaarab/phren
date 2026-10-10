@@ -187,9 +187,7 @@ export function mountReview(root) {
 
   function filesLabel(item) {
     const diff = state.diffs.get(item.key);
-    if (!diff) return "…";
-    if (diff.error) return "";
-    if (diff.loading) return "…";
+    if (!diff || diff.error || diff.loading) return "";
     const n = diff.files.length;
     return n ? `${n} file${n === 1 ? "" : "s"}` : "no changes";
   }
@@ -224,9 +222,11 @@ export function mountReview(root) {
       const rows = shown.filter((i) => i.group === id);
       if (!rows.length) continue;
       any = true;
+      const total = state.items.filter((i) => i.group === id).length;
       const head = el("div", "review-group");
-      head.append(el("span", "review-group-label", label), el("span", "review-group-count", String(rows.length)));
+      head.append(el("span", "review-group-label", label), el("span", "review-group-count", String(total)));
       queueEl.append(head, ...rows.map(queueRow));
+      if (total > rows.length) queueEl.append(el("div", "review-more", `${total - rows.length} older not shown`));
     }
     if (!any) queueEl.append(el("div", "review-empty", state.receipts.size ? "Nothing to review." : "No computer online."));
   }
@@ -437,7 +437,9 @@ export function mountReview(root) {
     diffBox.append(diffHead);
 
     if (!diff || diff.loading) diffBox.append(el("div", "review-note", "Loading diff…"));
-    else if (diff.error) diffBox.append(el("div", "review-note", `Could not read the diff: ${diff.error}`));
+    else if (diff.error) diffBox.append(el("div", "review-note", /conversation changed/i.test(diff.error)
+      ? "The worker's pane has moved on to another conversation, so this return's diff is no longer available."
+      : `Could not read the diff: ${diff.error}`));
     else if (!diff.files.length) diffBox.append(el("div", "review-note", "No uncommitted changes."));
     else {
       const fileList = el("div", "review-files-list");
@@ -450,9 +452,11 @@ export function mountReview(root) {
       });
       diffBox.append(fileList);
       const view = { files: [] };
-      diff.files.forEach((file) => {
+      diff.files.forEach((file, index) => {
         const rendered = renderFileDiff(file);
-        diffBox.append(rendered.wrap);
+        // A file or folder with nothing to show stays in the list only.
+        if (rendered.empty) fileList.children[index]?.classList.add("empty");
+        else diffBox.append(rendered.wrap);
         view.files.push({ path: file.path, el: rendered.wrap, lines: rendered.lines });
       });
       state.diffView = view;
@@ -481,6 +485,7 @@ export function mountReview(root) {
     }
     if (binary && !hunks.length) body.append(el("div", "review-note", "Binary file."));
     else if (!hunks.length) body.append(el("div", "review-note", "No diff for this file."));
+    const empty = !binary && !hunks.length;
     for (const hunk of hunks) {
       if (hunk.oldStart !== undefined) body.append(el("div", "review-hunk", `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@${hunk.header ?? ""}`));
       for (const line of hunk.lines) {
@@ -501,7 +506,7 @@ export function mountReview(root) {
       }
     }
     wrap.append(body);
-    return { wrap, lines };
+    return { wrap, lines, empty };
   }
 
   function focusFile(index) {

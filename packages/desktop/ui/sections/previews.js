@@ -79,8 +79,8 @@ export function mountPreviews(root) {
             <button class="pv-icon" data-pv-forward title="Forward" aria-label="Forward" disabled>›</button>
             <span class="pv-url" data-pv-url>No preview open</span>
             <span class="pv-spacer"></span>
-            <button class="pv-btn small" data-pv-reload title="Reload">Reload</button>
-            <button class="pv-btn small" data-pv-open title="Open in your browser">Open</button>
+            <button class="pv-btn small" data-pv-reload title="Reload" disabled>Reload</button>
+            <button class="pv-btn small" data-pv-open title="Open in your browser" disabled>Open</button>
             <button class="pv-btn small" data-pv-close title="Close preview" disabled>Close</button>
           </div>
           <div class="pv-frame-wrap">
@@ -174,6 +174,8 @@ export function mountPreviews(root) {
     frame.src = url;
     urlEl.textContent = url;
     closeBtn.disabled = false;
+    openBtn.disabled = false;
+    reloadBtn.disabled = false;
     backBtn.disabled = false;
     forwardBtn.disabled = false;
   }
@@ -186,6 +188,8 @@ export function mountPreviews(root) {
     emptyEl.hidden = false;
     urlEl.textContent = "No preview open";
     closeBtn.disabled = true;
+    openBtn.disabled = true;
+    reloadBtn.disabled = true;
     backBtn.disabled = true;
     forwardBtn.disabled = true;
     render();
@@ -247,22 +251,29 @@ export function mountPreviews(root) {
         continue;
       }
       if (!servers.length) { serversEl.append(el("div", "pv-empty-row", "No web servers running")); continue; }
-      for (const server of servers) serversEl.append(serverRow(computer, server));
+      const sorted = [...servers].sort((a, b) => Number(!serverName(a)) - Number(!serverName(b)) || a.port - b.port);
+      for (const server of sorted) serversEl.append(serverRow(computer, server));
     }
     serversCount.textContent = total ? String(total) : "";
   }
 
+  /** The page's own title, or "" when the Hook only knows a placeholder or an error page. */
+  function serverName(server) {
+    const name = String(server.name ?? "").trim();
+    if (!name || /^Web server on port \d+$/i.test(name) || /^(Error response|404 Not Found|Not Found)$/i.test(name)) return "";
+    return name;
+  }
+
   function serverRow(computer, server) {
-    const row = el("div", "pv-row");
-    row.append(el("span", "pv-glyph", "▤"));
+    const row = el("button", "pv-row");
+    row.type = "button";
     const main = el("div", "pv-row-main");
-    main.append(el("div", "pv-row-title", server.name || `Port ${server.port}`));
-    const detail = [server.process, `127.0.0.1:${server.port}`].filter(Boolean).join(" · ");
+    const name = serverName(server);
+    main.append(el("div", "pv-row-title", name || server.process || `Port ${server.port}`));
+    const detail = [name ? server.process : "", `:${server.port}`].filter(Boolean).join(" · ");
     main.append(el("div", "pv-row-sub", detail));
-    row.append(main);
-    const open = el("button", "pv-btn small", "Open");
-    open.addEventListener("click", () => { void openPreview(computer, server.port); });
-    row.append(open);
+    row.append(main, el("span", "pv-row-open", "Open"));
+    row.addEventListener("click", () => { void openPreview(computer, server.port); });
     return row;
   }
 

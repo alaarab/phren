@@ -321,6 +321,12 @@ export function mountSchedules(root) {
   function computers() { return store.merged?.computers ?? []; }
 
   function ownerName(schedule) { return schedule.computer; }
+  /** The desktop's own name for a schedule's computer ("omarchy" shows as "Linuxbox"). */
+  function displayName(name) {
+    const want = canonical(name);
+    const match = computers().find((c) => [c.computer, c.overview?.phren?.computer?.name].filter(Boolean).map(canonical).includes(want));
+    return match ? match.computer : name;
+  }
 
   function setStatus(text) { statusEl.textContent = text; }
 
@@ -420,7 +426,7 @@ export function mountSchedules(root) {
       const card = el("div", "sch-tonight-card");
       card.append(el("div", "sch-tonight-time", timeText(at.getHours(), at.getMinutes())));
       card.append(el("div", "sch-tonight-name", entry.schedule.name));
-      card.append(el("div", "sch-tonight-host", `${entry.project} · ${entry.schedule.computer}`));
+      card.append(el("div", "sch-tonight-host", `${entry.project} · ${displayName(entry.schedule.computer)}`));
       return card;
     }));
   }
@@ -443,7 +449,7 @@ export function mountSchedules(root) {
     }
     const byComputer = new Map();
     for (const entry of state.entries.values()) {
-      const computer = ownerName(entry.schedule);
+      const computer = displayName(ownerName(entry.schedule));
       if (!byComputer.has(computer)) byComputer.set(computer, new Map());
       const projects = byComputer.get(computer);
       if (!projects.has(entry.project)) projects.set(entry.project, []);
@@ -486,7 +492,7 @@ export function mountSchedules(root) {
 
   function nextText(entry) {
     if (!entry.known) return { text: "unknown computer", offline: false };
-    if (!entry.ownerOnline) return { text: `${entry.schedule.computer} offline`, offline: true };
+    if (!entry.ownerOnline) return { text: `${displayName(entry.schedule.computer)} offline`, offline: true };
     if (!entry.schedule.enabled) return { text: "paused", offline: false };
     const at = effectiveNext(entry);
     if (entry.schedule.every === "once" && entry.runtime?.lastRun && !at) return { text: "done", offline: false };

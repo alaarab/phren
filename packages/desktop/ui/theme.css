@@ -459,8 +459,8 @@ button.home-row:hover { background: var(--card); }
 .sb-project { flex: 0 1 auto; min-width: 72px; color: var(--accent); font-family: var(--mono); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-computer { flex: 0 1000 auto; min-width: 36px; max-width: 120px; padding: 0 7px; border-radius: 999px; background: color-mix(in srgb, var(--host-color, var(--muted)) 20%, transparent); color: var(--host-color, var(--muted)); font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-age { margin-left: auto; flex: none; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
-.sb-title { flex: 1; min-width: 0; color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sb-branch { flex: 0 1 auto; min-width: 0; color: var(--muted); font-family: var(--mono); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-title { flex: 1 1 auto; min-width: 0; color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-branch { flex: 0 1000 auto; min-width: 44px; max-width: 50%; color: var(--muted); font-family: var(--mono); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-pr { flex: none; padding: 0 6px; border-radius: 999px; background: rgba(127,182,240,.16); color: var(--path); font: 11px var(--mono); }
 .sb-term { display: none; }
 .sb-actions { flex: none; display: none; align-items: center; gap: 4px; }
@@ -500,7 +500,11 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
    activity lines, recent returns and computer load. Appended at the end. */
 .home-conductor { display: grid; gap: 10px; padding: 14px; border-radius: 10px; background: var(--surface); box-shadow: inset 3px 0 0 var(--accent); }
 .home-conductor-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.home-conductor-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font: 600 14px system-ui; }
+.home-conductor-title { flex: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font: 600 14px system-ui; }
+.home-conductor-session { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 13px; }
+.home-more { justify-self: start; margin-top: 2px; padding: 4px 2px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12.5px; cursor: pointer; }
+.home-more:hover { color: var(--accent-hover); }
+.home-keys[hidden] { display: none; }
 .home-conductor-meta { flex: none; margin-left: auto; display: inline-flex; gap: 8px; color: var(--muted); font-size: 12px; }
 .home-conductor-state { color: var(--working); }
 .home-conductor-state.waiting { color: var(--waiting); }
@@ -575,6 +579,8 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .session-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .session-console { background: var(--tool); padding: 6px; }
 .session-switch { position: absolute; top: 8px; right: 12px; z-index: 4; transform: scale(.92); transform-origin: top right; }
+.session-switch.in-header { position: static; transform: none; }
+.session-switch.in-header .segment { height: 26px; padding: 0 12px; font-size: 12px; }
 
 /* Settings > Computers: one expandable health card per computer, and the
    "Pause all agents" confirm. Appended at the end. */
@@ -584,7 +590,8 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .comp-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 6px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background .18s ease; }
 .comp-toggle:hover { background: rgba(255,255,255,0.03); }
 .comp-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.comp-chevron { flex: none; color: var(--muted); font-size: 12px; }
+.comp-chevron { flex: none; width: 16px; color: var(--muted); font-size: 18px; line-height: 1; text-align: center; transition: transform .18s ease; }
+.comp-toggle[aria-expanded="true"] .comp-chevron { transform: rotate(90deg); }
 .comp-body { display: grid; gap: 14px; padding: 4px 12px 14px; border-top: 1px solid var(--border); }
 .comp-section { display: grid; gap: 6px; }
 .comp-section-label { font: 600 11px system-ui; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
@@ -675,10 +682,11 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .pause-btn:disabled { opacity: .5; cursor: default; }
 
 /* The session's Chat/Console switch moves left of an open "Phren knows" drawer. */
-.session-doc:has(.knows-open) .session-switch { right: 356px; }
+.session-doc:has(.knows-open) .session-switch:not(.in-header) { right: 356px; }
 
 /* Home: long return text and activity lines never widen the column. */
 .home { grid-template-columns: minmax(0, 1fr); width: 100%; }
 .home-list, .home-block { min-width: 0; }
 .home-row { min-width: 0; }
 .home-row-sub { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.comp-head .settings-actions { min-width: 150px; justify-content: flex-end; }

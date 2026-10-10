@@ -237,3 +237,6 @@
   color: var(--muted);
   font-family: var(--mono);
 }
+
+/* Lines scroll out under a soft edge instead of a hard cut below the header. */
+.chat-timeline { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px); mask-image: linear-gradient(to bottom, transparent 0, #000 18px); }
