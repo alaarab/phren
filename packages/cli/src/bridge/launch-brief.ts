@@ -32,6 +32,12 @@ export type LaunchBrief = z.infer<typeof launchBriefSchema>;
 /** The variable a launched agent's hooks read its brief id from. */
 export const DISPATCH_ID_ENV = "PHREN_DISPATCH_ID";
 
+/** The dispatch this process's agent was launched for, when its environment names a valid one. */
+export function dispatchIdFromEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const id = env[DISPATCH_ID_ENV];
+  return id && briefId.safeParse(id).success ? id : undefined;
+}
+
 /** Briefs older than this are removed when the next one is written; a worker
  * may re-read its brief after a compaction, so it is not removed on arrival. */
 const KEEP_MS = 7 * 24 * 60 * 60 * 1000;

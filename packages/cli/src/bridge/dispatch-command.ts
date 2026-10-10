@@ -5,6 +5,7 @@ import { hookRequest } from "./client.js";
 import { dispatchSchema } from "./dispatch.js";
 import { handOff } from "./hand-off.js";
 import { terminalPaneFromEnv } from "./terminal.js";
+import { dispatchIdFromEnv } from "./launch-brief.js";
 import { addGrant, grantSchema, listNamedGrants, removeGrant } from "./grants.js";
 import { sessionId, type Json } from "./protocol.js";
 
@@ -13,7 +14,8 @@ export async function runDispatch(args: string[]): Promise<number> {
     const { values } = parseArgs({ args: args.slice(1), options: { prs: { type: "string" } } });
     const origin = await terminalPaneFromEnv();
     if (!origin || !values.prs) throw new Error("Usage inside a worker pane: phren dispatch report --prs <JSON array>");
-    console.log(JSON.stringify(await hookRequest("/v1/dispatch/report", { origin, prs: prsSchema.parse(JSON.parse(values.prs)) }), null, 2)); return 0;
+    const dispatch = dispatchIdFromEnv();
+    console.log(JSON.stringify(await hookRequest("/v1/dispatch/report", { origin, prs: prsSchema.parse(JSON.parse(values.prs)), ...(dispatch ? { dispatch } : {}) }), null, 2)); return 0;
   }
   if (args.length === 1 && args[0] === "status") {
     console.log(JSON.stringify(await hookRequest("/v1/dispatch"), null, 2)); return 0;

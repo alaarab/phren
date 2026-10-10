@@ -684,7 +684,9 @@ Before ending its turn, a worker calls `dispatch_report(prs)` or
 `phren dispatch report --prs '<JSON array>'`. Each entry has `url` (HTTPS),
 `repo` (`owner/name`), `branch`, `tests` (summary) and optional `notes`.
 At most 16 PRs and 24000 UTF-8 bytes are accepted. The report belongs to that
-submitted turn and terminal. It is evidence supplied by the worker, not a
+submitted turn and terminal. If the Hook lost the turn record (a nested
+`claude -p` run in the worker's pane replaces it), a worker whose brief arrived
+in that pane still reports, and the report belongs to its current turn. It is evidence supplied by the worker, not a
 verification by the Hook.
 
 Configure the default integrator on the dispatching Hook with
