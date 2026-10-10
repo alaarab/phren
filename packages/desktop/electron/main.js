@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const daemonPath = path.resolve(here, "../dist/src/main.js");
-const urlPattern = /^Phren desktop: (http:\/\/127\.0\.0\.1:\d+\/\?token=[0-9a-f]+)$/;
+const urlPattern = /^Phren desktop: (http:\/\/(?:localhost|127\.0\.0\.1):\d+\/\?token=[0-9a-f]+)$/;
 
 let mainWindow = null;
 let daemon = null;

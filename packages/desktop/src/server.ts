@@ -10,6 +10,15 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
 import type { MergedOverview, StartServer, TerminalSession } from "./contract.js";
 import { ACTIONS, loadKeyConfig } from "./keys-config.js";
+import {
+  ExtensionError,
+  extensionFilePath,
+  installFromOpenVsx,
+  listExtensions,
+  searchOpenVsx,
+  setEnabled,
+  uninstall,
+} from "./extensions.js";
 
 const require = createRequire(import.meta.url);
 // The compiled file lives in dist/src/, so the UI folder is two levels up.
@@ -163,6 +172,26 @@ export const startServer: StartServer = async (o) => {
     res.end("unauthorized");
   };
 
+  const sendJson = (res: ServerResponse, body: unknown, status = 200) => {
+    res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(JSON.stringify(body));
+  };
+
+  const sendError = (res: ServerResponse, err: unknown) => {
+    sendJson(res, { error: shortMessage(err) }, err instanceof ExtensionError ? err.status : 500);
+  };
+
+  const readJson = async (req: IncomingMessage): Promise<unknown> => {
+    const buf = await readBody(req);
+    if (buf === null) throw new ExtensionError(413, "payload too large");
+    if (buf.length === 0) return {};
+    try {
+      return JSON.parse(buf.toString("utf8"));
+    } catch {
+      throw new ExtensionError(400, "invalid JSON");
+    }
+  };
+
   const sendOverview = (ws: WebSocket, merged: MergedOverview) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "overview", merged }));
   };
@@ -277,6 +306,36 @@ export const startServer: StartServer = async (o) => {
       res.end();
       return;
     }
+    // The editor bundle is public code. The extension host frame loads it from
+    // its own {{uuid}}.localhost origin, which carries no cookie.
+    if (req.method === "GET" && pathname.startsWith("/editor-host/")) {
+      const file = resolveStatic(pathname);
+      if (!file || !existsSync(file)) {
+        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" });
+        res.end("not found");
+        return;
+      }
+      res.writeHead(200, { "Content-Type": contentType(file), "Access-Control-Allow-Origin": "*", "Cross-Origin-Resource-Policy": "cross-origin" });
+      createReadStream(file).on("error", () => res.destroy()).pipe(res);
+      return;
+    }
+    // Installed extensions' files are public Open VSX content. VS Code's
+    // extension host fetches them from a sandboxed frame that has no origin and
+    // sends no cookie, so they are served read-only without the token.
+    if (req.method === "GET" && pathname.startsWith("/extension-files/")) {
+      const rest = pathname.slice("/extension-files/".length);
+      const slash = rest.indexOf("/");
+      let file: string | null = null;
+      try { file = slash < 0 ? null : extensionFilePath(decodeURIComponent(rest.slice(0, slash)), decodeURIComponent(rest.slice(slash + 1))); } catch { file = null; }
+      if (!file || !existsSync(file)) {
+        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" });
+        res.end("not found");
+        return;
+      }
+      res.writeHead(200, { "Content-Type": contentType(file), "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" });
+      createReadStream(file).on("error", () => res.destroy()).pipe(res);
+      return;
+    }
     const cookie = readCookie(req, COOKIE);
     if (!cookie || !tokenEqual(cookie, o.token)) {
       unauthorized(res);
@@ -308,6 +367,64 @@ export const startServer: StartServer = async (o) => {
       const config = await loadKeyConfig();
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
       res.end(JSON.stringify({ ...config, actions: ACTIONS }));
+      return;
+    }
+
+    if (
+      pathname === "/api/extensions" ||
+      pathname.startsWith("/api/extensions/") ||
+      pathname.startsWith("/extension-files/")
+    ) {
+      try {
+        if (pathname === "/api/extensions" && (req.method ?? "GET") === "GET") {
+          sendJson(res, { extensions: await listExtensions() });
+          return;
+        }
+        if (pathname === "/api/extensions/search" && (req.method ?? "GET") === "GET") {
+          sendJson(res, { extensions: await searchOpenVsx(url.searchParams.get("q") ?? "") });
+          return;
+        }
+        if (pathname === "/api/extensions/install" && req.method === "POST") {
+          const body = (await readJson(req)) as { namespace?: unknown; name?: unknown };
+          if (typeof body.namespace !== "string" || typeof body.name !== "string") {
+            throw new ExtensionError(400, "namespace and name are required.");
+          }
+          sendJson(res, await installFromOpenVsx(body.namespace, body.name));
+          return;
+        }
+        const enable = /^\/api\/extensions\/([^/]+)\/enable$/.exec(pathname);
+        if (enable && req.method === "POST") {
+          const body = (await readJson(req)) as { enabled?: unknown };
+          if (typeof body.enabled !== "boolean") throw new ExtensionError(400, "enabled must be a boolean.");
+          sendJson(res, await setEnabled(decodeURIComponent(enable[1]), body.enabled));
+          return;
+        }
+        const remove = /^\/api\/extensions\/([^/]+)$/.exec(pathname);
+        if (remove && req.method === "DELETE") {
+          await uninstall(decodeURIComponent(remove[1]));
+          sendJson(res, { ok: true });
+          return;
+        }
+        if (pathname.startsWith("/extension-files/")) {
+          const rest = pathname.slice("/extension-files/".length);
+          const slash = rest.indexOf("/");
+          const id = slash < 0 ? rest : rest.slice(0, slash);
+          const rel = slash < 0 ? "" : rest.slice(slash + 1);
+          const file = extensionFilePath(decodeURIComponent(id), decodeURIComponent(rel));
+          if (!file || !existsSync(file)) {
+            res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+            res.end("not found");
+            return;
+          }
+          res.writeHead(200, { "Content-Type": contentType(file), "Cache-Control": "no-store" });
+          createReadStream(file).on("error", () => res.destroy()).pipe(res);
+          return;
+        }
+        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("not found");
+      } catch (err) {
+        sendError(res, err);
+      }
       return;
     }
 
@@ -370,7 +487,9 @@ export const startServer: StartServer = async (o) => {
   });
 
   server.on("upgrade", (req, socket, head) => {
-    if (req.headers.origin !== `http://127.0.0.1:${boundPort}`) {
+    // The UI is served as localhost (VS Code's extension frame policy allows
+    // localhost workers); 127.0.0.1 stays accepted for older links.
+    if (req.headers.origin !== `http://localhost:${boundPort}` && req.headers.origin !== `http://127.0.0.1:${boundPort}`) {
       rejectUpgrade(socket, 403, "Forbidden");
       return;
     }
@@ -398,7 +517,9 @@ export const startServer: StartServer = async (o) => {
 
   await new Promise<void>((done) => server.listen(o.port, "127.0.0.1", done));
   boundPort = (server.address() as AddressInfo).port;
-  const url = `http://127.0.0.1:${boundPort}/?token=${encodeURIComponent(o.token)}`;
+  // Bound to loopback only; named localhost so the editor's extension frame
+  // (on {{uuid}}.localhost) may load its worker from this origin.
+  const url = `http://localhost:${boundPort}/?token=${encodeURIComponent(o.token)}`;
 
   const close = async () => {
     for (const ws of liveSockets) ws.terminate();

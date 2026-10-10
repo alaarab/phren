@@ -17,6 +17,9 @@ import "@codingame/monaco-vscode-all-language-default-extensions";
 import * as monaco from "monaco-editor";
 import * as vscode from "vscode";
 import { phrenThemeExtension } from "./theme.js";
+import { installPhrenFiles, registerPhrenFile, setPhrenReader } from "./phrenFiles.js";
+import getQuickAccessServiceOverride from "@codingame/monaco-vscode-quickaccess-service-override";
+import { currentTheme, loadInstalledExtensions, reloadExtensions, savedTheme, setTheme, themes } from "./extensions.js";
 
 import { Worker } from "./fakeWorker.js";
 
@@ -41,7 +44,10 @@ const DEFAULT_SETTINGS = {
 };
 
 async function boot() {
-  await initUserConfiguration(JSON.stringify(DEFAULT_SETTINGS));
+  // A theme picked earlier wins over the default (an extension theme applies once it loads).
+  await initUserConfiguration(JSON.stringify({ ...DEFAULT_SETTINGS, ...(savedTheme() ? { "workbench.colorTheme": savedTheme() } : {}) }));
+  // Custom file systems must be registered before the services start.
+  installPhrenFiles();
   await initialize({
     ...getLogServiceOverride(),
     ...getConfigurationServiceOverride(),
@@ -51,13 +57,18 @@ async function boot() {
     ...getLanguagesServiceOverride(),
     ...getTextmateServiceOverride(),
     ...getThemeServiceOverride(),
-    ...getExtensionServiceOverride({ enableWorkerExtensionHost: true }),
+    // Extension code runs in a frame on its own origin ({{uuid}}.localhost), so
+    // it never shares the desktop's cookie and cannot call the Hook through it.
+    ...getExtensionServiceOverride({ enableWorkerExtensionHost: true, iframeAlternateDomain: `${location.protocol}//{{uuid}}.localhost:${location.port}` }),
+    ...getQuickAccessServiceOverride({ isKeybindingConfigurationVisible: () => false, shouldUseGlobalPicker: () => false }),
   }, undefined, { developmentOptions: { logLevel: LogLevel.Warning } });
   await phrenThemeExtension();
+  await loadInstalledExtensions();
 }
 
 const ready = boot();
 
 (window as unknown as Record<string, unknown>).PhrenEditorHost = {
   ready, monaco, vscode, registerExtension, ExtensionHostKind, registerCustomProvider, updateUserConfiguration,
+  reloadExtensions, themes, setTheme, currentTheme, setPhrenReader, registerPhrenFile,
 };

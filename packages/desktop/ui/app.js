@@ -4,6 +4,7 @@ import { openTerminal } from "./terminal.js";
 import { openChanges } from "./changes.js";
 import { openFiles } from "./editor.js";
 import { openSearch } from "./search.js";
+import { openExtensions } from "./extensions.js";
 import { installKeys, setActiveSession } from "./keys.js";
 
 const sidebarEl = document.getElementById("sidebar");
@@ -21,7 +22,7 @@ let session = null; // { computer, child } the chat and workbench are scoped to
 // ---------------------------------------------------------------- workbench
 // The right panel: Changes · Files · Terminal for the open session. Panes stay
 // mounted while the session is open so tabs, scroll and drafts survive switching.
-const PANES = [["changes", "Changes"], ["files", "Files"], ["search", "Search"], ["terminal", "Terminal"]];
+const PANES = [["changes", "Changes"], ["files", "Files"], ["search", "Search"], ["terminal", "Terminal"], ["extensions", "Extensions"]];
 const bench = { pane: null, handles: {}, bodies: {}, terminalServer: null, terminalComputer: null };
 
 const benchBar = document.createElement("div");
@@ -115,8 +116,8 @@ function showPane(key, terminalTarget) {
     }
     return;
   }
-  if (!session?.child?.target) { el.textContent = "Open a session to see its changes and files."; return; }
-  const open = { changes: openChanges, files: openFiles, search: openSearch }[key];
+  if (key !== "extensions" && !session?.child?.target) { el.textContent = "Open a session to see its changes and files."; return; }
+  const open = { changes: openChanges, files: openFiles, search: openSearch, extensions: openExtensions }[key];
   if (!bench.handles[key]) bench.handles[key] = open(el, benchContext());
   else if (key === "changes") bench.handles.changes.refresh?.();
   if (key === "search") bench.handles.search.focus?.();

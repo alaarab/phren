@@ -199,3 +199,11 @@ in --waiting), and Install / Uninstall / Enable / Disable buttons. After any cha
 `window.PhrenEditorHost?.reloadExtensions?.()` if present and show "Reload the window to finish" when it returns false.
 A "Color theme" select at the top lists every contributed theme from installed + built-in
 (`PhrenEditorHost.themes()` → [{id, label}]) and applies it with `PhrenEditorHost.setTheme(id)`.
+
+Implementation notes (verified 2026-10-09): `registerCustomProvider` must run before
+`initialize`; the worker URLs use the literal `new Worker(new URL(...))` pattern with
+a stand-in Worker class so Vite bundles them; `files.sha256` from Open VSX is a URL to
+the digest file; the extension host frame runs on `{{uuid}}.localhost` and loads its
+worker from the page origin, so the UI is served as `localhost` (its CSP allows
+`http://localhost:*`, not 127.0.0.1); `/editor-host/*` and `/extension-files/*` are
+public, read-only and served without the cookie.

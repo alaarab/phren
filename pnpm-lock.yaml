@@ -387,6 +387,9 @@ importers:
       '@codingame/monaco-vscode-model-service-override':
         specifier: 37.3.11
         version: 37.3.11
+      '@codingame/monaco-vscode-quickaccess-service-override':
+        specifier: 37.3.11
+        version: 37.3.11
       '@codingame/monaco-vscode-textmate-service-override':
         specifier: 37.3.11
         version: 37.3.11
