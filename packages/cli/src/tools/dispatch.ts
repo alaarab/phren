@@ -7,6 +7,7 @@ import { dispatchSchema } from "../bridge/dispatch.js";
 import { handOff, handOffSchema, listLiveSessions } from "../bridge/hand-off.js";
 import { readAccountUsage, usageSummary } from "../bridge/account-usage.js";
 import { terminalPaneFromEnv } from "../bridge/terminal.js";
+import { dispatchIdFromEnv } from "../bridge/launch-brief.js";
 import { approvalDecisions } from "../bridge/protocol.js";
 import { mcpResponse } from "./types.js";
 
@@ -33,7 +34,9 @@ export function register(server: McpServer): void {
     try {
       const origin = await terminalPaneFromEnv();
       if (!origin) throw new Error("Run dispatch_report inside the worker's terminal pane.");
-      const result = await hookRequest("/v1/dispatch/report", { ...input, origin });
+      // The launch's dispatch id lets the Hook accept a report whose turn it did not record (worker-reports.ts).
+      const dispatch = dispatchIdFromEnv();
+      const result = await hookRequest("/v1/dispatch/report", { ...input, origin, ...(dispatch ? { dispatch } : {}) });
       return mcpResponse({ ok: result.ok === true, data: result, message: "PR evidence recorded for this turn's done return." });
     } catch (error) { return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not report PR evidence." }); }
   });
