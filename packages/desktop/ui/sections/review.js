@@ -13,6 +13,9 @@ const CSS_ID = "review-css";
 const POLL_MS = 15_000;
 const MAX_ITEMS = 100;
 const PREFETCH = 3;
+const RECENT_MS = 3 * 86_400_000;
+// A reply that names a pull request ("PR #17", ".../pull/17").
+const PR_RE = /\bPR\s*#\d+|\/pull\/\d+/i;
 const REVIEWED_KEY = "phren.desktop.review.reviewed";
 
 /** Add this section's stylesheet once (index.html does not load it). */
@@ -149,10 +152,28 @@ export function mountReview(root) {
 
   // ---- queue ----------------------------------------------------------
 
+  // Only returns worth a look count: a worker waiting on you, or recent work
+  // that left uncommitted changes or a pull request. A plain "done" with
+  // nothing to look at goes straight to Done. Older returns are Done too: a
+  // pane's working tree has moved on by then, so its diff says nothing.
   function groupOf(item) {
     if (state.reviewed.has(item.key)) return "done";
-    const s = String(item.receipt.returned?.state ?? "");
-    return s === "failed" || s === "gone" ? "failed" : "review";
+    const returned = item.receipt.returned ?? {};
+    const s = String(returned.state ?? "");
+    if (s === "failed" || s === "gone") return "failed";
+    if (s !== "done" || returned.question) return "review";
+    if (!isRecent(item)) return "done";
+    if (PR_RE.test(String(returned.reply ?? ""))) return "review";
+    const diff = state.diffs.get(item.key);
+    return diff && !diff.loading && diff.files.some(isRealChange) ? "review" : "done";
+  }
+
+  const isRecent = (item) => Date.now() - stamp(item.receipt) < RECENT_MS;
+  /** A changed file, not an untracked folder such as .worktrees/. */
+  const isRealChange = (file) => !String(file.path ?? "").endsWith("/");
+
+  function regroup() {
+    for (const item of state.items) item.group = groupOf(item);
   }
 
   function buildItems() {
@@ -284,15 +305,20 @@ export function mountReview(root) {
       } catch (err) { entry.error = err?.message || String(err); }
       entry.loading = false;
     }
+    regroup();
     renderQueue();
+    updateSub();
     if (state.selected === item.key) { state.detailSig = ""; renderDetail(); }
+    prefetch();
     return entry;
   }
 
   function prefetch() {
     const loading = [...state.diffs.values()].filter((d) => d.loading).length;
     const slots = Math.max(0, PREFETCH - loading);
-    const pending = state.items.filter((i) => i.group === "review" && !state.diffs.has(i.key)).slice(0, slots);
+    // Recent "done" returns need their diff before they can be placed.
+    const pending = state.items.filter((i) => (i.group === "review" || (i.group === "done" && isRecent(i) && !state.reviewed.has(i.key)))
+      && !state.diffs.has(i.key)).slice(0, slots);
     for (const item of pending) void loadDiff(item);
   }
 
@@ -319,10 +345,11 @@ export function mountReview(root) {
     state.items = buildItems();
     if (state.selected && !state.items.some((i) => i.key === state.selected)) state.selected = null;
     if (!state.selected && state.items.length) {
-      state.selected = state.items[0].key;
+      const first = state.items.find((i) => i.group === "review") ?? state.items[0];
+      state.selected = first.key;
       state.detailSig = "";
       state.cursor = { file: 0, line: 0 };
-      void loadDiff(state.items[0]);
+      void loadDiff(first);
     }
     renderQueue();
     const item = selectedItem();
