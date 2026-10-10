@@ -2,7 +2,9 @@ import { intentionallyClosed } from "./worker-close.js";
 import { workerPrs, readIntegrator } from "./worker-reports.js";
 import { prsSchema, type PullRequest } from "./return-contract.js";
 import { sessionStalls } from "./stalls.js";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { promisify } from "node:util";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { arrivalOf, dispatchStatus, updateReceipt, type OriginPane, type Receipt, type WorkerState } from "./dispatch.js";
@@ -14,7 +16,7 @@ import { handOff } from "./hand-off.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { BridgeError, objects, startingTargetSchema, targetSchema, type ApprovalDecision, type Json, type Provider, type Target } from "./protocol.js";
-import { ownerQuestion, readFinalTurn, type FinalTurn } from "./schedule-watch.js";
+import { isClaudeUsageLimit, ownerQuestion, readFinalTurn, type FinalTurn } from "./schedule-watch.js";
 import { liveWork, runningTasks } from "./session-activity.js";
 import { terminalProvider } from "./terminal.js";
 import { childAgentTree, runningChildAgents } from "./transcripts.js";
@@ -89,6 +91,8 @@ export interface WorkerObservation {
   /** The worker's checkout could not be read in time: the turn may be done,
    * but it is not closed on that (worker-close.ts). */
   unchecked?: true;
+  /** Where a worker that hit its Claude usage limit was working, for the dispatch that continues it. */
+  checkout?: { path: string; branch?: string };
 }
 
 export interface WorkerReaders {
@@ -111,6 +115,22 @@ export interface WorkerReaders {
   uncommitted?: (directory: string) => Promise<Uncommitted>;
   /** Whether other panes' folders share the worker's checkout, whose changes then are not only its own. */
   shared?: (directory: string, folders: readonly unknown[]) => Promise<boolean>;
+  /** The branch checked out in a folder. */
+  branch?: (directory: string) => Promise<string | undefined>;
+}
+
+const run = promisify(execFile);
+async function checkedOutBranch(directory: string): Promise<string | undefined> {
+  const { stdout } = await run("git", ["-C", directory, "rev-parse", "--abbrev-ref", "HEAD"], { timeout: 3_000 });
+  const branch = stdout.trim();
+  return branch && branch !== "HEAD" ? branch.slice(0, 256) : undefined;
+}
+
+/** A worker stopped by its Claude usage limit: where it was working, so another account can pick it up there. */
+async function limitCheckout(seen: WorkerObservation, directory: unknown, readers: WorkerReaders): Promise<Pick<WorkerObservation, "checkout">> {
+  if (!isClaudeUsageLimit(seen.error) || typeof directory !== "string" || !directory) return {};
+  const branch = await (readers.branch ?? checkedOutBranch)(directory).catch(() => undefined);
+  return { checkout: { path: directory.slice(0, 4096), ...(branch ? { branch } : {}) } };
 }
 
 export async function paneTurn(server: string, pane: Json, source: Provider): Promise<TurnRecord | undefined> {
@@ -130,6 +150,7 @@ const defaultReaders: WorkerReaders = {
   lost: (server, pane, session) => codexServers.lostTurn(server, pane, session),
   uncommitted: directory => recentUncommitted(directory),
   shared: sharedCheckout,
+  branch: checkedOutBranch,
 };
 
 /** The default readers with the approval reader of the Hook that runs the workers. */
@@ -266,7 +287,8 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
       const seen = await fromTurn(own, own.session, status, target.source, readers);
       const full = targetSchema.safeParse({ ...target, session: seen.session });
       const prs = full.success && seen.state === "done" ? await workerPrs(full.data, own) : undefined;
-      return { ...seen, ...(prs ? { prs } : {}), ...await unfinished(seen, own.stop?.cwd ?? paneDirectory(pane), readers, s, pane, prs), ...(full.success && seen.state === "working" ? await readers.stall?.(full.data, { ...pane, agent_status: "working" }, liveReader(own, target.source, own.session, readers)) : {}) };
+      return { ...seen, ...(prs ? { prs } : {}), ...await unfinished(seen, own.stop?.cwd ?? paneDirectory(pane), readers, s, pane, prs),
+        ...await limitCheckout(seen, own.stop?.cwd ?? paneDirectory(pane), readers), ...(full.success && seen.state === "working" ? await readers.stall?.(full.data, { ...pane, agent_status: "working" }, liveReader(own, target.source, own.session, readers)) : {}) };
     }
     const session = expected ?? current;
     const state = (["working", "idle", "done", "blocked"] as const).find(value => value === status) ?? "unknown";
@@ -287,7 +309,7 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     }
     const seen: WorkerObservation = { state, session, completed: turn?.completed === true, ...(end?.background ? { background: end.background } : {}), ...(turn?.error ? { error: turn.error } : {}),
       ...(turn?.interrupted ? { interrupted: true as const } : {}), ...replyFields(turn?.lastAssistant) };
-    return { ...seen, ...await unfinished(seen, paneDirectory(pane), readers, s, pane) };
+    return { ...seen, ...await unfinished(seen, paneDirectory(pane), readers, s, pane), ...await limitCheckout(seen, paneDirectory(pane), readers) };
   }));
   // Only a conversation this dispatch named can be answered; a starting target has no session yet.
   return { workers: workers.map((seen, index) => {
@@ -307,6 +329,7 @@ const observationSchema = z.object({
   prs: prsSchema.optional(),
   stalled: z.boolean().optional(), stalledSince: z.string().datetime().optional(), stallFor: z.number().nonnegative().optional(),
   interrupted: z.boolean().optional(), approval: z.unknown().optional(), unfinished: z.string().max(200).optional(), unchecked: z.boolean().optional(),
+  checkout: z.object({ path: z.string().max(4096), branch: z.string().max(256).optional() }).strict().optional(),
 }).passthrough();
 
 /** A worker's forwarded permission request as its Hook sent it; an invalid one is ignored, not a reason to drop the state. */
@@ -426,7 +449,9 @@ function observeState(receipt: Receipt, parsed: z.infer<typeof observationSchema
     ...(next === "working" && waitingSince ? { waitingSince } : {}) };
   if (next !== "working") {
     receipt.returned = { state: next, at, read: false,
-      ...(seen.reply && (next === "done" || next === "needs-you") ? { reply: seen.reply, ...(seen.truncated ? { truncated: true } : {}) } : {}),
+      // A worker stopped by its usage limit keeps its last reply: the dispatch that continues it hands it over.
+      ...(seen.reply && (next === "done" || next === "needs-you" || next === "failed" && isClaudeUsageLimit(failed)) ? { reply: seen.reply, ...(seen.truncated ? { truncated: true } : {}) } : {}),
+      ...(next === "failed" && seen.checkout ? { checkout: seen.checkout } : {}),
       ...(next === "done" && seen.prs ? { prs: seen.prs } : {}),
       ...(next === "stalled" ? { stalledSince: seen.stalledSince, stallFor: seen.stallFor } : {}),
       ...(failed ? { error: failed } : {}), ...(question ? { question } : {}), ...(turn ? { turn } : {}),
@@ -473,6 +498,8 @@ export function returnRow(receipt: Receipt): Json {
     ...(receipt.approval && returned.state === "blocked" ? { approval: { actionId: receipt.approval.actionId, tool: receipt.approval.tool,
       ...(receipt.approval.request ? { request: receipt.approval.request } : {}), ...(receipt.approval.title ? { title: receipt.approval.title } : {}),
       ...(receipt.approval.terminal ? { terminal: true } : {}) } } : {}),
+    ...(receipt.account ? { account: receipt.account } : {}), ...(receipt.accountChoice ? { accountChoice: receipt.accountChoice } : {}),
+    ...(receipt.continued ? { continued: receipt.continued } : {}), ...(receipt.continues ? { continues: receipt.continues } : {}),
     ...(receipt.target ? { target: receipt.target } : {}) };
 }
 
@@ -497,6 +524,8 @@ export interface DispatchReturnsOptions {
   /** A worker's new forwarded request was recorded. Returns true when this Hook pushed it to its phone. */
   onApproval?: (receipt: Receipt, approval: NonNullable<Receipt["approval"]>) => boolean | void;
   close?: (receipt: Receipt) => Promise<Json>;
+  /** Continues Claude workers stopped by their usage limit on another account, after each poll (account-failover.ts). */
+  failover?: { run: () => Promise<void> };
   now?: () => number;
 }
 
@@ -522,6 +551,7 @@ export class DispatchReturns {
   private readonly localAnswer?: DispatchReturnsOptions["localAnswer"];
   private readonly onApproval?: DispatchReturnsOptions["onApproval"];
   private readonly close?: DispatchReturnsOptions["close"];
+  private readonly failover?: DispatchReturnsOptions["failover"];
   private lastPoll = -Infinity;
   private readonly lastNotice = new Map<string, number>();
   /** A return is waiting for a dispatching agent that was busy: try again on
@@ -531,6 +561,7 @@ export class DispatchReturns {
 
   constructor(options: DispatchReturnsOptions = {}) {
     this.close = options.close;
+    this.failover = options.failover;
     this.peers = options.peers ?? hookPeers;
     this.request = options.request ?? peerRequest;
     this.localWorkers = options.localWorkers ?? (input => workerStates(input));
@@ -587,7 +618,10 @@ export class DispatchReturns {
     const poll = this.now() - this.lastPoll >= POLL_MS;
     if (!poll && !this.noticesDue) return Promise.resolve();
     if (poll) this.lastPoll = this.now();
-    this.running = (async () => { if (poll) await this.poll(); await this.forwardPrs(); await this.cleanup(); await this.notify(); })()
+    this.running = (async () => {
+      if (poll) { await this.poll(); await this.failover?.run().catch(error => logger.warn("dispatch", `Account failover: ${error instanceof Error ? error.message : String(error)}`)); }
+      await this.forwardPrs(); await this.cleanup(); await this.notify();
+    })()
       .catch(() => {}).finally(() => { this.running = undefined; });
     return this.running;
   }

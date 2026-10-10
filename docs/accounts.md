@@ -85,6 +85,21 @@ A Claude row in `GET /v1/workspaces`, `WS /v1/overview` and `GET /v1/workspaces/
 - `hand_off` takes `account?`. When it resolves a session by project, it only picks sessions of that account.
 - Schedules take `account?`. The headless runner passes the same environment.
 
+### Choosing an account, and failover
+
+A Claude launch that names no account (`POST /v1/workspaces/launch`, a dispatch, a schedule's Herdr or headless run) on a computer with more than one usable Claude account runs under the account with the most room. Accounts are ranked by percent left on the 5-hour window, then on the weekly window, then `default` first, then by id. A window whose reset has passed counts as full. An account with no report ranks below every reported one. Signed-out accounts, accounts with an exhausted window, and logins in the limit ledger are never chosen. A named account always wins. With one account, or when usage cannot be read in 2.5 seconds, the launch runs as before under `default`. The launch answer carries `account` and `accountChoice` (the reason), and the Hook logs both.
+
+`GET /v1/dispatch/capacity` usage rows for Claude add `fiveHour` and `week` (`{ leftPercent, resetsAt }`). `anywhere` with no account rules a computer out for quota only when all of its Claude accounts are exhausted.
+
+When a dispatched Claude worker's turn ends on Claude Code's usage-limit row (`isApiErrorMessage`, `error: "rate_limit"`), the worker's Hook reports it as failed with an error starting `Claude usage limit:`, plus its last reply and its checkout (folder and branch). The dispatching Hook then, after its returns poll:
+
+1. Records the login in `<bridge>/account-limits.json` until its window resets. It uses the exhausted window's reset time when usage reports one, else holds the login for 5 hours. Logins are matched by `key`, so the same subscription is held back on every computer.
+2. Picks the account with the most room on the worker's computer. If none has room, it picks the best account on any other connected computer.
+3. Dispatches a new worker under that account, with the same project, model, effort, permission mode, integrator and dispatching pane. Its brief names the stopped dispatch, the limit, the checkout and branch, and the last reply, then gives the original brief (read from the worker's computer through `GET /v1/dispatch/brief?id=`). The new receipt carries `continues`.
+4. Marks the stopped receipt `continued: { id, computer, account, at }`, or `{ at, error }` when nothing has room, and returns it unread. The error then begins "Continued on account X on Y (dispatch …)".
+
+Each stopped dispatch is continued at most once. A continuation that also hits its limit is continued in turn, while some account still has room. The stopped pane stays open. `phren config account-failover on|off` (install preferences) and `PHREN_ACCOUNT_FAILOVER` switch this; it is on by default.
+
 ### Models
 
 `GET /v1/models?source=claude&account=<id>` reads that home's model catalogue cache. The cache is keyed by source and account. Without `account` it uses `default`, as now.

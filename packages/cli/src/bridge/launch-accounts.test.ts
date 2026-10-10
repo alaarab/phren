@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAccountCaches } from "./claude-accounts.js";
+import { setChoiceReaders } from "./account-choice.js";
+import type { AccountUsage } from "./usage.js";
 import type { HarnessInventory } from "./harnesses.js";
 import { paneAccount, paneAccountKey } from "./pane-accounts.js";
 import type { Json } from "./protocol.js";
@@ -52,6 +54,19 @@ describe("launching under a Claude account", () => {
     expect(starts[0].env).toEqual({ CLAUDE_CONFIG_DIR: dir });
     expect(readFileSync(path.join(dir, ".claude.json"), "utf8")).toContain("hasTrustDialogAccepted");
     expect(paneAccount(paneAccountKey("default", "w1:p1"), "term-1")).toMatchObject({ id: "work" });
+  });
+
+  it("runs a launch that names no account under the one with the most room, and never overrides a named one", async () => {
+    const usage = (id: string, used: number): AccountUsage => ({ source: "claude", account: { id, label: id, key: id }, windows: [{ id: "five_hour", name: "5-hour", usedPercent: used, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }] });
+    setChoiceReaders({ usage: async () => [usage("default", 95), usage("work", 20)], inventory: async () => inventory() });
+    try {
+      const chosen = await launchSession("default", { cwd, label: "A", kind: "claude" });
+      expect(chosen).toMatchObject({ account: "work", accountChoice: expect.stringContaining("most headroom: work (80% 5-hour left") });
+      expect(placements[0].env).toEqual({ CLAUDE_CONFIG_DIR: path.join(home, ".claude-work") });
+      const pinned = await launchSession("default", { cwd, label: "B", kind: "claude", account: "default" });
+      expect(pinned).toMatchObject({ account: "default" });
+      expect(pinned).not.toHaveProperty("accountChoice");
+    } finally { setChoiceReaders({}); }
   });
 
   it("launches unchanged without an account, and for the default account", async () => {
