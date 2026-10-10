@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Automatic Claude account choice and failover. A Claude launch, dispatch or schedule that names no account, on a computer with more than one signed-in Claude account, runs under the one with the most room: the most left on the 5-hour window, then on the weekly window. A named account always wins. The Hook logs the choice and why, and a dispatch receipt carries it as `accountChoice`. When a dispatched Claude worker stops on its usage limit (Claude Code's `rate_limit` error row is now read as the turn's error, like Codex's), the dispatching Hook continues it on the account with the most room, on the same computer first, else on another connected computer. The new worker gets a brief with the original brief, the stopped worker's last reply and its checkout and branch. The stopped return comes back in `dispatch_returns` with `continued` and "Continued on account X". The login that hit its limit is not chosen again, on any computer, until its window resets. `phren config account-failover off` (or `PHREN_ACCOUNT_FAILOVER=off`) turns failover off; it is on by default. Every account still runs only official Claude Code in its own home; no token or request crosses accounts.
+- `account_usage` lists each Claude account's 5-hour and weekly room with its reset time. `live_sessions` adds `quota` to each Claude session and `claudeAccounts` for every signed-in account per computer.
+
 ## [0.3.36] - 2026-10-10
 
 ### Added

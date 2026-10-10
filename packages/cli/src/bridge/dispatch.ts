@@ -20,6 +20,7 @@ import { atomic, BridgeError, bridgeRoot, id, launchEfforts, PERMISSION_MODES, P
 import { phrenStoreRoot } from "./transcripts.js";
 import { isAccountSlug } from "./claude-accounts.js";
 import { hasUsable, type HarnessInventory } from "./harnesses.js";
+import type { AccountRoom, WindowRoom } from "./account-choice.js";
 import { arrivalSchema, type BriefArrival } from "./launch-brief.js";
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !!value.trim() && !/[\x00-\x1f\x7f]/.test(value));
@@ -33,7 +34,7 @@ export const dispatchSchema = z.object({
   model: text(200).optional().describe("Explicit model, otherwise the remote harness default."),
   effort: z.enum(launchEfforts).optional().describe("Reasoning effort for the worker (minimal, low, medium, high, xhigh, max), otherwise the harness default."),
   account: z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").optional()
-    .describe("Claude account id to run the worker under (default, or a slug from `phren bridge accounts`). anywhere only picks computers where that account is signed in; a named computer without it fails."),
+    .describe("Claude account id to run the worker under (default, or a slug from `phren bridge accounts`). anywhere only picks computers where that account is signed in; a named computer without it fails. Without it, a computer with several signed-in Claude accounts picks the one with the most 5-hour room, then weekly; the receipt's accountChoice says why."),
   permissionMode: z.enum(PERMISSION_MODES).optional().describe("Permission mode the worker starts in: supervised, auto-edits, auto or full-access (Claude, Codex and Copilot; not OpenCode); otherwise the receiving computer's own default."),
   releaseActions: z.array(releaseAction).min(1).max(RELEASE_ACTIONS.length).optional()
     .describe("Release-type actions the brief asks the worker to do (merge, publish, deploy, app-store, github-admin). Ask-first projects refuse them from an agent unless the owner confirmed."),
@@ -59,6 +60,11 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   target: remoteTarget.optional(), error: z.string().max(500).optional(),
   brief: z.enum(["launch", "typed"]).optional()
     .describe("How the brief reached the worker: as its first prompt at launch (confirmed by the worker's hook), or typed into its pane."),
+  accountChoice: z.string().max(400).optional().describe("Why the receiving Hook ran the worker under `account` when the dispatch named none."),
+  continued: z.object({ id: z.string().uuid().optional(), computer: z.string().max(200).optional(), account: z.string().max(64).optional(),
+    at: timestamp, error: z.string().max(500).optional() }).strict().optional()
+    .describe("The worker hit its Claude usage limit: the dispatch that continues it on another account, or why none could."),
+  continues: z.string().uuid().optional().describe("The dispatch this one continues after its worker hit its usage limit."),
   granted: z.string().max(200).optional().describe("Scope of the conductor grant that allowed this call."),
   authority: z.string().max(600).optional().describe("The release authority policy's line for this project, as a conductor quotes it."),
   authorityConfirmed: z.string().datetime().optional().describe("When the owner confirmed the ask-first release actions this agent dispatch used."),
@@ -75,6 +81,8 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
   returned: z.object({
     state: z.enum(["done", "needs-you", "failed", "blocked", "stalled", "gone"]), at: timestamp,
     reply: z.string().max(4000).optional(), error: z.string().max(500).optional(), truncated: z.boolean().optional(), question: z.string().max(200).optional(),
+    checkout: z.object({ path: z.string().max(4096), branch: z.string().max(256).optional() }).strict().optional()
+      .describe("Where a worker that failed was working, for the dispatch that continues it."),
     prs: prsSchema.optional(),
     integratorDelivery: z.object({ deliveryId: z.string(), state: z.enum(["pending", "queued", "delivered", "uncertain", "failed"]), at: timestamp, integrator: integratorSchema.optional() }).strict().optional(),
     stalledSince: timestamp.optional(), stallFor: z.number().nonnegative().optional(),
@@ -186,7 +194,8 @@ export async function dispatchStatus(): Promise<Receipt[]> {
 
 /** `caller` (a conductor's name and host key) asks a peer whether it links this computer back:
  * `outside` is a peer in another set, which a conductor does not dispatch to. */
-type Room = { source: string; account?: string; leftPercent?: number; exhausted?: boolean; until?: string };
+type Room = { source: string; account?: string; leftPercent?: number; exhausted?: boolean; until?: string; fiveHour?: WindowRoom; week?: WindowRoom };
+const windowRoom = z.object({ leftPercent: z.number().min(0).max(100).optional(), resetsAt: z.string().max(40).optional() }).passthrough().optional();
 async function capacity(host: DispatchHost, caller?: string): Promise<{ working: number; computerId: string; harnesses?: HarnessInventory["harnesses"]; usage?: Room[]; outside?: true }> {
   const value = await host.request(caller && !host.local ? `/v1/dispatch/capacity?${caller}` : "/v1/dispatch/capacity");
   const result = z.object({ product: z.literal("phren-hook"), protocol: z.literal(PROTOCOL), working: z.number().int().nonnegative(),
@@ -196,7 +205,7 @@ async function capacity(host: DispatchHost, caller?: string): Promise<{ working:
       accounts: z.array(z.object({ id: z.string(), usable: z.boolean(), reason: z.string().optional() }).passthrough()).optional() }).passthrough()).optional(),
     // Missing from an older Hook or a slow read: that computer's quota is unknown, so it is never ruled out by it.
     usage: z.array(z.object({ source: z.string(), account: z.string().optional(), leftPercent: z.number().min(0).max(100).optional(),
-      exhausted: z.boolean().optional(), until: z.string().max(40).optional() }).passthrough()).max(64).optional(),
+      exhausted: z.boolean().optional(), until: z.string().max(40).optional(), fiveHour: windowRoom, week: windowRoom }).passthrough()).max(64).optional(),
     knowsCaller: z.boolean().optional() }).parse(value);
   // This computer places on whichever Herdr server its own Hook runs.
   if (host.local && !result.servers.includes(host.server) && result.servers[0]) host.server = result.servers[0];
@@ -212,21 +221,47 @@ export function roomFor(data: { harness: string; account?: string }, usage: read
   return usage?.find(item => item.source === data.harness && (data.harness !== "claude" || (item.account ?? "default") === account));
 }
 
+/** " for about 3 more hours" until `until`, or nothing when it is unknown. */
+function backIn(until: string | undefined, now: number): string {
+  const at = until ? Date.parse(until) : NaN;
+  const minutes = Number.isFinite(at) ? Math.max(1, Math.round((at - now) / 60_000)) : undefined;
+  return minutes === undefined ? "" : minutes >= 1440 ? ` for about ${Math.round(minutes / 1440)} more days` : minutes >= 60 ? ` for about ${Math.round(minutes / 60)} more hours` : ` for about ${minutes} more minutes`;
+}
+
 /** Why `anywhere` must not pick a computer for quota: only an account with none left (at 100% or refusing requests).
- *  Low quota is not a reason; the owner often wants it used before it resets. */
+ *  Low quota is not a reason; the owner often wants it used before it resets. A Claude dispatch that names no
+ *  account runs under whichever has room there, so with several accounts that computer is out only when all are. */
 export function outOfQuota(data: { harness: string; account?: string }, usage: readonly Room[] | undefined, now = Date.now()): string | undefined {
+  const claude = usage?.filter(item => item.source === "claude") ?? [];
+  if (data.harness === "claude" && !data.account && claude.length > 1) {
+    if (claude.some(item => !item.exhausted)) return undefined;
+    return `Its claude accounts all have no quota left${backIn(claude.map(item => item.until).filter((value): value is string => Boolean(value)).sort()[0], now)}.`;
+  }
   const room = roomFor(data, usage);
   if (!room?.exhausted) return undefined;
-  const until = room.until ? Date.parse(room.until) : NaN;
-  const minutes = Number.isFinite(until) ? Math.max(1, Math.round((until - now) / 60_000)) : undefined;
-  const back = minutes === undefined ? "" : minutes >= 1440 ? ` for about ${Math.round(minutes / 1440)} more days` : minutes >= 60 ? ` for about ${Math.round(minutes / 60)} more hours` : ` for about ${minutes} more minutes`;
-  return `Its ${data.harness}${data.harness === "claude" ? ` account ${data.account ?? "default"}` : ""} has no quota left${back}.`;
+  return `Its ${data.harness}${data.harness === "claude" ? ` account ${data.account ?? "default"}` : ""} has no quota left${backIn(room.until, now)}.`;
+}
+
+/** A computer's signed-in Claude accounts with their room, from its capacity probe. */
+export function capacityClaudeRooms(harnesses: HarnessInventory["harnesses"] | undefined, usage: readonly Room[] | undefined): AccountRoom[] {
+  const accounts = harnesses?.find(entry => entry.source === "claude")?.accounts ?? [];
+  return accounts.map(account => {
+    const room = usage?.find(item => item.source === "claude" && (item.account ?? "default") === account.id);
+    return { account: account.id, ...(account.key ? { key: account.key } : {}), usable: account.usable,
+      ...(room?.fiveHour ? { fiveHour: room.fiveHour } : {}), ...(room?.week ? { week: room.week } : {}),
+      ...(room?.exhausted ? { exhausted: true, ...(room.until ? { until: room.until } : {}) } : {}) };
+  });
 }
 
 /** Why a computer cannot run this dispatch's harness and account, or undefined when it can or cannot yet be told.
  * `unknown` (no `harnesses`) only counts against a computer when a non-default account was asked for. */
 function unusable(data: { harness: string; account?: string }, harnesses: HarnessInventory["harnesses"] | undefined, strictUnknown: boolean): string | undefined {
   if (!harnesses) return strictUnknown && data.account && data.account !== "default" ? "Its Hook does not report harnesses or accounts (update it)." : undefined;
+  // No account named: any signed-in Claude account there will do (the launch picks one).
+  if (data.harness === "claude" && !data.account) {
+    const usable = harnesses.find(entry => entry.source === "claude")?.accounts?.find(account => account.usable);
+    if (usable) return unusable({ harness: "claude", account: usable.id }, harnesses, strictUnknown);
+  }
   const availability = hasUsable({ harnesses }, data.harness, data.account);
   return availability.ok ? undefined : availability.reason;
 }
@@ -409,8 +444,9 @@ export class DispatchService {
   constructor(private readonly identity?: DispatchIdentity, private readonly local: () => DispatchHost = () => localHost(),
     private readonly settleIntervalMs = 1_000) {}
   /** `originValue` is the local pane the request came from, as its agent's
-   * Herdr variables name it; a pane without a running agent is left out. */
-  async dispatch(input: unknown, originValue?: unknown): Promise<Json> {
+   * Herdr variables name it; a pane without a running agent is left out.
+   * `continues` names the dispatch whose worker hit its usage limit (account-failover.ts). */
+  async dispatch(input: unknown, originValue?: unknown, continues?: string): Promise<Json> {
     const data = dispatchSchema.parse(input);
     if (data.permissionMode && data.harness === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
     if (this.active) throw new BridgeError(429, "A dispatch is already being placed. Try again after its receipt arrives.");
@@ -495,7 +531,7 @@ export class DispatchService {
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), state: "launching",
         ...(grant ? { granted: grantLabel(grant) } : {}), ...(authority?.listed ? { authority: authority.line.slice(0, 600) } : {}),
         ...(checked?.confirmation ? { authorityConfirmed: checked.confirmation.confirmedAt } : {}),
-        ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}) };
+        ...(skipped.length ? { skipped } : {}), ...(origin ? { origin } : {}), ...(continues ? { continues } : {}) };
       await save(receipt);
       try {
         // The brief goes with the launch: a Hook that can start the harness
@@ -504,6 +540,12 @@ export class DispatchService {
           { project: data.project, kind: data.harness, model: data.model, ...(data.effort ? { effort: data.effort } : {}), ...(data.account ? { account: data.account } : {}), ...(data.permissionMode ? { permissionMode: data.permissionMode } : {}), label: data.label, brief: { id: receipt.id, text: prompt } });
         // Placed: the brief is confirmed outside the lock.
         placed = peer.name; this.placing.set(placed, this.inFlight(placed) + 1);
+        // The receiving Hook chose the Claude account (the one with the most room) when none was named.
+        if (!data.account && typeof launched.account === "string" && isAccountSlug(launched.account)) {
+          receipt.account = launched.account;
+          if (typeof launched.accountChoice === "string") receipt.accountChoice = launched.accountChoice.slice(0, 400);
+          logger.info("dispatch", `${receipt.label} on ${peer.name} runs under Claude account ${launched.account}${receipt.accountChoice ? `: ${receipt.accountChoice}` : ""}.`);
+        }
         release();
         // An older Hook ignores the field and starts the worker in its own default mode.
         const ignored = data.permissionMode && launched.permissionMode !== data.permissionMode ? IGNORED_MODE : undefined;
@@ -621,6 +663,20 @@ export class DispatchService {
       return;
     }
     receipt.error = `${receipt.harness} started with the brief on ${receipt.computer} but has not confirmed it yet (last status ${status ?? "unknown"}). The Hook keeps checking.`.slice(0, 500);
+  }
+
+  /** Every connected computer's signed-in Claude accounts and their room, this computer first:
+   * where a worker that hit its usage limit can continue (account-failover.ts). */
+  async claudeRooms(): Promise<Array<{ computer: string; local: boolean; rooms: AccountRoom[] }>> {
+    const here = this.local();
+    const hosts = [here, ...(await hookPeers().catch(() => [])).map(candidate => peerHost(candidate))];
+    const found = await Promise.all(hosts.map(async host => {
+      try {
+        const reported = await capacity(host);
+        return { computer: host.name, local: host.local, rooms: capacityClaudeRooms(reported.harnesses, reported.usage) };
+      } catch { return undefined; }
+    }));
+    return found.filter((item): item is NonNullable<typeof item> => !!item);
   }
 
   /** The query a conductor's dispatch sends with each capacity probe; undefined for any other caller. */

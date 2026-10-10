@@ -11,6 +11,7 @@ import { stripTerminal } from "../terminal-text.js";
 import { codexExecutable } from "./codex-binary.js";
 import { readSpeechKey } from "./speech-key.js";
 import { resolveSpeechRegion, SPEECH_REGIONS } from "./speech-voice.js";
+import { accountWindows } from "./account-choice.js";
 import { CODEX_ACCOUNT, claudeAccountSubscription, claudeAccountEmail, claudeAccountRef, claudeHomeOfEnv, claudeHomes, type AccountRef, type ClaudeHome } from "./claude-accounts.js";
 
 import { planName, subscriptionDate, type Subscription } from "./subscription.js";
@@ -645,14 +646,15 @@ export function windowLeft(window: UsageWindow, now: number): number | undefined
 }
 
 /** What a capacity probe says about room: each Codex and Claude account's least room left, and whether it has none
- *  (`exhausted`, with `until` the last reset that frees it). */
-export function capacityRoom(accounts: readonly AccountUsage[], now: number): Array<{ source: string; account?: string; leftPercent?: number; exhausted?: true; until?: string }> {
+ *  (`exhausted`, with `until` the last reset that frees it). Claude rows add their 5-hour and weekly rooms, which
+ *  launch and failover rank accounts by (account-choice.ts). */
+export function capacityRoom(accounts: readonly AccountUsage[], now: number): Array<{ source: string; account?: string; leftPercent?: number; exhausted?: true; until?: string } & ReturnType<typeof accountWindows>> {
   return accounts.map(usage => {
     const left = usage.windows.map(window => windowLeft(window, now)).filter((value): value is number => value !== undefined);
     const out = usage.windows.filter(window => windowExhausted(window, now));
     const until = out.map(window => window.resetsAt).filter((value): value is string => Boolean(value)).sort().at(-1);
     return { source: usage.source, ...(usage.account?.id ? { account: usage.account.id } : {}), ...(left.length ? { leftPercent: Math.min(...left) } : {}),
-      ...(out.length ? { exhausted: true as const, ...(until ? { until } : {}) } : {}) };
+      ...(out.length ? { exhausted: true as const, ...(until ? { until } : {}) } : {}), ...(usage.source === "claude" ? accountWindows(usage, now) : {}) };
   });
 }
 

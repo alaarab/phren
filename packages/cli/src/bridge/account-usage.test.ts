@@ -152,7 +152,9 @@ describe("usage as a dispatch tie-break", () => {
     const reset = { ...codex(0), windows: [{ id: "codex:primary", name: "5-hour", usedPercent: 100, resetsAt: at(1) }] };
     expect(capacityRoom([codex(83), claude("claude:1", "work", at(1), 100), reset], now)).toEqual([
       { source: "codex", account: "default", leftPercent: 17 },
-      { source: "claude", account: "work", leftPercent: 0, exhausted: true, until: later(72) },
+      // Claude rows also carry the 5-hour and weekly rooms launch and failover rank accounts by.
+      { source: "claude", account: "work", leftPercent: 0, exhausted: true, until: later(72),
+        fiveHour: { leftPercent: 90, resetsAt: later(2) }, week: { leftPercent: 0, resetsAt: later(72) } },
       { source: "codex", account: "default" }]);
   });
 
@@ -160,8 +162,12 @@ describe("usage as a dispatch tie-break", () => {
     const usage = [{ source: "codex", account: "default", leftPercent: 3 }, { source: "claude", account: "default", leftPercent: 0, exhausted: true, until: later(5) },
       { source: "claude", account: "work", leftPercent: 60 }];
     expect(outOfQuota({ harness: "codex" }, usage, now)).toBeUndefined();
-    expect(outOfQuota({ harness: "claude" }, usage, now)).toBe("Its claude account default has no quota left for about 5 more hours.");
+    expect(outOfQuota({ harness: "claude", account: "default" }, usage, now)).toBe("Its claude account default has no quota left for about 5 more hours.");
     expect(outOfQuota({ harness: "claude", account: "work" }, usage, now)).toBeUndefined();
+    // Naming no account lets that computer's launch pick work, so it is out only once every Claude account is.
+    expect(outOfQuota({ harness: "claude" }, usage, now)).toBeUndefined();
+    const allOut = usage.map(item => item.source === "claude" ? { ...item, leftPercent: 0, exhausted: true, until: item.until ?? later(30) } : item);
+    expect(outOfQuota({ harness: "claude" }, allOut, now)).toBe("Its claude accounts all have no quota left for about 5 more hours.");
     expect(outOfQuota({ harness: "opencode" }, usage, now)).toBeUndefined();
     expect(outOfQuota({ harness: "codex" }, undefined, now)).toBeUndefined();
     expect(roomFor({ harness: "claude", account: "work" }, usage)).toEqual({ source: "claude", account: "work", leftPercent: 60 });

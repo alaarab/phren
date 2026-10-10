@@ -5,6 +5,7 @@ import path from "node:path";
 import { finished as streamFinished } from "node:stream/promises";
 import { askpassEnv } from "./sudo.js";
 import { claudeHome, claudeLaunchEnv } from "./claude-accounts.js";
+import { pickClaudeAccount } from "./account-choice.js";
 import { fanoutRoot } from "./fanouts.js";
 import { pretrustFolder } from "./folder-trust.js";
 import { findPane, paneIdentity, servers, snapshot } from "./herdr.js";
@@ -103,7 +104,10 @@ export function headlessEnv(schedule: Schedule, env: NodeJS.ProcessEnv = process
 }
 
 async function launchHeadless(context: ScheduleLaunchContext, store: string, started: (child: ChildProcess) => void): Promise<ScheduleLaunchResult> {
-  const env = headlessEnv(context.schedule);
+  // A Claude schedule that names no account runs under the one with the most room, as a Herdr launch does.
+  const choice = context.schedule.harness === "claude" && !context.schedule.account
+    ? await pickClaudeAccount(`Schedule "${context.schedule.name}"`).catch(() => undefined) : undefined;
+  const env = headlessEnv(choice ? { ...context.schedule, account: choice.account } : context.schedule);
   const root = fanoutRoot({ ...process.env, PHREN_PATH: store }), jobDir = path.join(root, context.runId);
   await mkdir(jobDir, { recursive: true, mode: 0o700 });
   const eventLog = "events.jsonl", now = new Date().toISOString();

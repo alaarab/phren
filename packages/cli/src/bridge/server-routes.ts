@@ -23,7 +23,7 @@ import type { WorkspaceContextUsage } from "./context.js";
 import { type DispatchService, dispatchProjectDirectory, dispatchStatus, originPaneSchema } from "./dispatch.js";
 import { type DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { remoteChildren } from "./dispatch-tree.js";
-import { briefArrival, briefId } from "./launch-brief.js";
+import { briefArrival, briefId, readLaunchBrief } from "./launch-brief.js";
 import { listApprovalRules, changeApprovalRule } from "./approval-rules.js";
 import { addGrant, listNamedGrants, removeGrant } from "./grants.js";
 import { clearProjectAuthority, confirmAuthority, listConfirmations, projectAuthority, readAuthority, setProjectAuthority } from "./authority.js";
@@ -372,6 +372,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
           // Receiving side of a launched brief: what the worker's hooks reported for it.
           case "/v1/dispatch/arrival": result = { arrival: await briefArrival(briefId.parse(url.searchParams.get("id"))) ?? null }; break;
+          // Asked by the dispatching Hook when this computer's worker hit its usage limit and continues on another account.
+          case "/v1/dispatch/brief": result = { text: await readLaunchBrief(briefId.parse(url.searchParams.get("id"))) ?? null }; break;
           case "/v1/approval-rules": result = { rules: await listApprovalRules(undefined,
             z.string().regex(/^[A-Za-z0-9+/]{43}=$/).optional().parse(url.searchParams.get("pairedKey") ?? undefined)) }; break;
           case "/v1/conductor/grants": result = { grants: await listNamedGrants() }; break;
