@@ -151,9 +151,15 @@ export function mountTasks(root) {
     if (state.activeKey) await loadDocs();
   }
 
+  // Each store switch starts a new generation; a slower answer from the store
+  // that was selected before must never land in the current one.
+  let generation = 0;
+
   async function loadDocs() {
     const source = activeSource();
     if (!source) return;
+    const mine = ++generation;
+    const key = state.activeKey;
     state.loading = true;
     renderProjects();
     const entries = await Promise.all(source.projects.map(async (project) => {
@@ -164,6 +170,7 @@ export function mountTasks(root) {
         return [project, null];
       }
     }));
+    if (mine !== generation || state.activeKey !== key) return;
     state.docs = new Map(entries.filter(([, doc]) => doc));
     state.loading = false;
     if (state.selectedProject && !source.projects.includes(state.selectedProject)) state.selectedProject = null;
@@ -174,8 +181,11 @@ export function mountTasks(root) {
   async function reloadProject(project) {
     const source = activeSource();
     if (!source || !project) return;
+    const key = state.activeKey;
     try {
-      state.docs.set(project, await hookGet(source.computer, "/v1/tasks", { storeId: source.id, project }));
+      const doc = await hookGet(source.computer, "/v1/tasks", { storeId: source.id, project });
+      if (state.activeKey !== key) return; // the owner switched stores meanwhile
+      state.docs.set(project, doc);
     } catch { /* keep the last good copy */ }
     renderProjects();
     renderMain();
@@ -203,6 +213,7 @@ export function mountTasks(root) {
     }
     select.addEventListener("change", () => {
       state.activeKey = select.value;
+      state.docs = new Map(); // never show (or act on) the previous store's tasks
       state.selectedProject = null;
       state.selectedId = null;
       state.docs.clear();

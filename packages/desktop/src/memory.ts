@@ -4,6 +4,7 @@
 // paths, so the daemon can use the CLI's own parsers and mutators on it and
 // upload back only the files a mutation changed.
 import { createHash } from "node:crypto";
+import { parseSchedule, readScheduleDocument, writeScheduleDocument, type Schedule } from "@phren/cli/client/schedule-format";
 import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -43,6 +44,7 @@ const MEMORY_PATTERNS = [
   /^[^/]+\/(?:FINDINGS|tasks|review|summary|truths)\.md$/,
   /^[^/]+\/(?:notes|reference|journal)\//,
   /^[^/]+\/phren\.project\.yaml$/,
+  /^[^/]+\/schedules\.yaml$/,
   /^phren\.root\.yaml$/,
   /^stores\.yaml$/,
   /^global\//,
@@ -144,6 +146,7 @@ export interface MemoryService {
   findings(computer: Computer, project: string | null): Promise<{ items: unknown[] }>;
   review(computer: Computer, project: string | null): Promise<{ items: Array<QueueItem | ProjectQueueItem> }>;
   addFinding(computer: Computer, body: { project?: unknown; text?: unknown }): Promise<{ ok: true; uploaded?: unknown }>;
+  saveSchedule(computer: Computer, body: { project?: unknown; id?: unknown; schedule?: unknown; original?: unknown }): Promise<{ ok: true; uploaded?: unknown }>;
   notes(computer: Computer, project: string | null): Promise<{ items: unknown[] }>;
   topics(computer: Computer, project: string | null): Promise<{ topics: unknown[] }>;
   truths(computer: Computer, project: string | null): Promise<{ items: string[] }>;
@@ -460,6 +463,39 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
       // The CLI's own writer: stable id, duplicate check, the file's conventions.
       const result = addFinding(dir, project, text);
       if (!result.ok) throw new MemoryHttpError(400, result.error);
+      if (computer.local) return { ok: true };
+      return { ok: true, uploaded: await uploadChanges(computer, dir) };
+    },
+
+    /**
+     * Add, replace or remove one schedule in <project>/schedules.yaml with the CLI's
+     * own reader and writer. `original` is the entry as the editor opened it: when
+     * the file's entry no longer matches, someone changed it meanwhile (409).
+     */
+    async saveSchedule(computer, body) {
+      const project = typeof body.project === "string" ? body.project.trim() : "";
+      const id = typeof body.id === "string" ? body.id.trim() : "";
+      if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(project) || !id) throw new MemoryHttpError(400, "project and id are required.");
+      const dir = await storeDir(computer);
+      const projectDir = path.join(dir, project);
+      const { document, schedules } = await readScheduleDocument(projectDir);
+      const index = schedules.findIndex((item) => item.id === id);
+      // The Hook's listing adds runtime fields (ScheduleStatus) that are not part of the file.
+      const fileFields = (value: unknown): Record<string, unknown> => {
+        const { project: _p, nextRun: _n, lastRun: _l, lastRuns: _r, running: _u, owned: _o, ...rest } = (value ?? {}) as Record<string, unknown>;
+        return rest;
+      };
+      const normal = (value: unknown) => JSON.stringify(parseSchedule(fileFields(value)));
+      if (body.original != null) {
+        if (index < 0 || normal(schedules[index]) !== normal(body.original)) throw new MemoryHttpError(409, "This schedule changed on another computer. Reopen it to edit.");
+      } else if (index >= 0 && body.schedule != null) {
+        throw new MemoryHttpError(409, "A schedule with this id already exists.");
+      }
+      const next: Schedule[] = schedules.slice();
+      if (body.schedule == null) { if (index >= 0) next.splice(index, 1); }
+      else if (index >= 0) next[index] = parseSchedule(fileFields(body.schedule));
+      else next.push(parseSchedule(fileFields(body.schedule)));
+      await writeScheduleDocument(projectDir, next, document);
       if (computer.local) return { ok: true };
       return { ok: true, uploaded: await uploadChanges(computer, dir) };
     },

@@ -273,165 +273,6 @@ function validateSchedule(schedule) {
   return null;
 }
 
-// ---- the small schedules.yaml surface (SchedulesFile.swift) ----------------
-
-const RESERVED = new Set(["true", "false", "null", "yes", "no", "on", "off", "~"]);
-
-function quoted(value) {
-  const escaped = String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t");
-  return `"${escaped}"`;
-}
-
-function yamlScalar(value) {
-  const safe = /^[A-Za-z0-9][A-Za-z0-9._/@ -]*$/.test(value)
-    && !RESERVED.has(value.toLowerCase()) && !/^[0-9]+$/.test(value);
-  return safe ? value : quoted(value);
-}
-
-function indentOf(line) {
-  const match = /^[ \t]*/.exec(line);
-  return match ? match[0].length : 0;
-}
-
-function topLevelKey(line) {
-  if (indentOf(line) !== 0) return null;
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith("#")) return null;
-  const colon = trimmed.indexOf(":");
-  return colon < 0 ? null : trimmed.slice(0, colon).trim();
-}
-
-function mapping(line) {
-  const colon = line.indexOf(":");
-  if (colon < 0) return null;
-  const key = line.slice(0, colon).trim();
-  return key ? { key, value: line.slice(colon + 1).trim() } : null;
-}
-
-/** The `schedules:` block: its header line and the first top-level line after it. */
-function schedulesRange(lines) {
-  const start = lines.findIndex((line) => topLevelKey(line) === "schedules");
-  if (start < 0) return null;
-  let end = start + 1;
-  while (end < lines.length) {
-    const trimmed = lines[end].trim();
-    if (trimmed && !trimmed.startsWith("#") && indentOf(lines[end]) === 0) break;
-    end++;
-  }
-  return { start, end };
-}
-
-/** Each entry's line range and its id (on the "- " line or a following "id:"). */
-function entryRanges(lines, range) {
-  const starts = [];
-  for (let i = range.start + 1; i < range.end; i++) {
-    const trimmed = lines[i].trim();
-    if (trimmed && !trimmed.startsWith("#") && indentOf(lines[i]) > 0 && trimmed.startsWith("- ")) starts.push(i);
-  }
-  return starts.map((start, index) => {
-    const end = index + 1 < starts.length ? starts[index + 1] : range.end;
-    let id = null;
-    for (let i = start; i < end; i++) {
-      const trimmed = lines[i].trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const content = trimmed.startsWith("- ") ? trimmed.slice(2) : trimmed;
-      const pair = mapping(content);
-      if (pair && pair.key === "id") { id = pair.value.replace(/^["']|["']$/g, ""); break; }
-    }
-    return { start, end, id };
-  });
-}
-
-function hasTopLevelKey(key, lines) {
-  return lines.some((line) => topLevelKey(line) === key);
-}
-
-function appendPrompt(prompt, lines) {
-  const trailing = (prompt.match(/\n*$/) ?? [""])[0].length;
-  lines.push(`    prompt: ${trailing === 0 ? "|-" : trailing === 1 ? "|" : "|+"}`);
-  const body = prompt.split("\n");
-  if (prompt.endsWith("\n")) body.pop();
-  for (const line of body) lines.push(`      ${line}`);
-}
-
-function renderEntry(schedule) {
-  const lines = [
-    `  - id: ${yamlScalar(schedule.id)}`,
-    `    name: ${yamlScalar(schedule.name)}`,
-    `    enabled: ${schedule.enabled ? "true" : "false"}`,
-    `    computer: ${yamlScalar(schedule.computer)}`,
-    `    harness: ${schedule.harness}`,
-  ];
-  if (schedule.model) lines.push(`    model: ${yamlScalar(schedule.model)}`);
-  if (schedule.account) lines.push(`    account: ${yamlScalar(schedule.account)}`);
-  if (Array.isArray(schedule.projects) && schedule.projects.length) {
-    lines.push(`    projects: [${schedule.projects.map(yamlScalar).join(", ")}]`);
-  }
-  const notify = schedule.notify ?? ["finish", "failure"];
-  lines.push(`    notify: [${["start", "finish", "failure"].filter((kind) => notify.includes(kind)).join(", ")}]`);
-  lines.push(`    every: ${schedule.every}`);
-  if (schedule.every === "interval") lines.push(`    interval: ${schedule.interval}`);
-  else if (schedule.every === "daily") lines.push(`    at: ${quoted(schedule.at)}`);
-  else if (schedule.every === "weekly") {
-    lines.push(`    at: ${quoted(schedule.at)}`);
-    lines.push(`    days: [${DAY_ORDER.filter((day) => (schedule.days ?? []).includes(day)).join(", ")}]`);
-  } else if (schedule.every === "once") lines.push(`    once: ${yamlScalar(schedule.once)}`);
-  else if (schedule.every === "cron") lines.push(`    cron: ${quoted(schedule.cron)}`);
-  appendPrompt(schedule.prompt, lines);
-  lines.push(`    createdAt: ${yamlScalar(schedule.createdAt)}`);
-  lines.push(`    updatedAt: ${yamlScalar(schedule.updatedAt)}`);
-  return lines;
-}
-
-function renderScheduleText(schedules) {
-  if (!schedules.length) return ["schedules: []"];
-  return ["schedules:", ...schedules.flatMap((schedule) => renderEntry(schedule))];
-}
-
-function splitDocument(original) {
-  const lines = (original ?? "").split("\n");
-  if (lines.length && lines[lines.length - 1] === "") lines.pop();
-  return lines;
-}
-
-/** Replace one entry's block, leaving every other entry and comment in place.
- *  `schedule` is null to remove the entry with `id`. */
-function editEntryText(original, id, schedule) {
-  const lines = splitDocument(original);
-  const range = schedulesRange(lines);
-  if (!range) {
-    if (!schedule) return original;
-    if (!hasTopLevelKey("version", lines)) lines.unshift("version: 1");
-    while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
-    if (lines.length) lines.push("");
-    lines.push(...renderScheduleText([schedule]));
-    return lines.join("\n") + "\n";
-  }
-  const entries = entryRanges(lines, range);
-  const existing = entries.find((entry) => entry.id === id);
-  if (!schedule) {
-    if (!existing) return original;
-    lines.splice(existing.start, existing.end - existing.start);
-    const after = schedulesRange(lines);
-    if (after && !entryRanges(lines, after).length) lines.splice(after.start, after.end - after.start, "schedules: []");
-    return lines.join("\n") + "\n";
-  }
-  if (existing) {
-    let end = existing.end;
-    const trailing = [];
-    while (end > existing.start && lines[end - 1].trim() === "") { trailing.unshift(lines[end - 1]); end--; }
-    lines.splice(existing.start, end - existing.start, ...renderEntry(schedule), ...trailing);
-  } else if (lines[range.start].replace(/\s+/g, " ").trim() === "schedules: []") {
-    lines.splice(range.start, range.end - range.start, ...renderScheduleText([schedule]));
-  } else {
-    lines.splice(range.end, 0, ...renderEntry(schedule));
-  }
-  return lines.join("\n") + "\n";
-}
-
-// ---- mount ----------------------------------------------------------------
-
 const POLL_MS = 30_000;
 const TONIGHT_HOURS = 24;
 const TONIGHT_COUNT = 6;
@@ -727,20 +568,10 @@ export function mountSchedules(root) {
 
   async function toggleEnabled(entry) {
     const next = { ...entry.schedule, enabled: !entry.schedule.enabled, updatedAt: new Date().toISOString() };
-    if (await persistSchedule(entry.project, entry.id, next, ownerName(entry.schedule))) await loadAll();
+    if (await persistSchedule(entry.project, entry.id, next, ownerName(entry.schedule), entry.schedule)) await loadAll();
   }
 
-  function decodeBase64(content) {
-    return new TextDecoder().decode(Uint8Array.from(atob(content), (c) => c.charCodeAt(0)));
-  }
-
-  function encodeBase64(text) {
-    const bytes = new TextEncoder().encode(text);
-    let binary = "";
-    for (const byte of bytes) binary += String.fromCharCode(byte);
-    return btoa(binary);
-  }
-
+  /** The computer to edit a project's store through: the preferred one when online. */
   function storeComputer(preferred) {
     const online = state.online;
     if (preferred) {
@@ -750,29 +581,29 @@ export function mountSchedules(root) {
     return online[0] ?? null;
   }
 
-  /** Read the project's schedules.yaml from a computer's store, with its blob sha. */
-  async function readScheduleFile(computer, project) {
-    const path = `${project}/schedules.yaml`;
-    const head = await hookGet(computer, "/v1/store/head");
-    const tree = await hookGet(computer, "/v1/store/tree", { sha: head.sha });
-    const item = (tree.tree ?? []).find((entry) => entry.path === path);
-    if (!item) return { path, text: null, sha: null };
-    const blob = await hookGet(computer, "/v1/store/blob", { sha: item.sha });
-    return { path, text: decodeBase64(blob.content), sha: item.sha };
-  }
-
-  /** Write one schedule entry (or remove it) with compare-and-swap. */
-  async function persistSchedule(project, id, schedule, preferred) {
+  /**
+   * Write one schedule entry (or remove it). The daemon edits schedules.yaml with
+   * the CLI's own reader and writer and refuses when the entry changed since it
+   * was opened (`original`), then uploads with the file's previous sha.
+   */
+  async function persistSchedule(project, id, schedule, preferred, original = null) {
     const computer = storeComputer(preferred);
     if (!computer) { setError("No computer is online to save schedules."); return false; }
     setError("");
     try {
-      const file = await readScheduleFile(computer, project);
-      const text = editEntryText(file.text, id, schedule);
-      await hookPost(computer, "/v1/store/file", { path: file.path, content: encodeBase64(text), sha: file.sha });
+      const res = await fetch(`/api/memory/${encodeURIComponent(computer)}/schedules`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Phren-Desktop": "1" },
+        body: JSON.stringify({ project, id, schedule, original }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.error || `Saving failed (${res.status}).`);
+        return false;
+      }
       return true;
     } catch (err) {
-      setError(err?.status === 409 ? "Schedules changed on another computer. Reopen to edit." : (err?.message ?? String(err)));
+      setError(err?.message ?? String(err));
       return false;
     }
   }
@@ -969,6 +800,8 @@ export function mountSchedules(root) {
 
   function openEditor(entry) {
     form = defaultForm(entry);
+    // The entry as opened: the daemon refuses the save if the file's copy changed since.
+    form.original = entry ? JSON.parse(JSON.stringify(entry.schedule)) : null;
     const editing = Boolean(entry);
     const overlay = el("div", "sch-overlay sheet");
     const sheet = el("div", "sch-sheet");
@@ -1126,13 +959,13 @@ export function mountSchedules(root) {
       const invalid = validateSchedule(schedule);
       if (invalid) { error.hidden = false; error.textContent = invalid; return; }
       void (async () => {
-        if (await persistSchedule(form.project, schedule.id, schedule, form.computer)) { close(); await loadAll(); }
+        if (await persistSchedule(form.project, schedule.id, schedule, form.computer, form.original)) { close(); await loadAll(); }
       })();
     });
 
     async function deleteSchedule() {
       save.disabled = true;
-      if (await persistSchedule(form.project, form.id, null, form.computer)) { close(); await loadAll(); }
+      if (await persistSchedule(form.project, form.id, null, form.computer, form.original)) { close(); await loadAll(); }
       else save.disabled = false;
     }
 

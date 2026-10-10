@@ -13,6 +13,7 @@ import { bridgeRoot, sshArgs } from "./hosts.js";
 
 const MAX_BODY = 16 * 1024 * 1024;
 const REQUEST_TIMEOUT = 60_000;
+const HANDSHAKE_TIMEOUT = 20_000;
 
 export const openHookPipe: OpenHookPipe = c => c.local ? localPipe() : remotePipe(c);
 
@@ -120,6 +121,16 @@ export const hookWebSocket: HookWebSocket = async (c, requestPath) => {
     headers: { Host: "phren.local", "X-Phren-Client": "desktop" },
   });
   return new Promise((resolve, reject) => {
+    // A Hook that accepts the connection but never answers the upgrade must not
+    // hold an SSH channel (and its pool slot) forever.
+    const deadline = setTimeout(() => {
+      socket.terminate();
+      pipe.destroy();
+      reject(new Error("The Hook did not answer the WebSocket handshake in 20 s."));
+    }, HANDSHAKE_TIMEOUT);
+    socket.once("open", () => clearTimeout(deadline));
+    socket.once("error", () => clearTimeout(deadline));
+    socket.once("close", () => clearTimeout(deadline));
     // The Hook can send its first frame in the same chunk as the handshake, before
     // the caller attaches a listener; hold frames until the caller's .then has run.
     socket.once("open", () => { socket.pause(); resolve(socket); setImmediate(() => socket.resume()); });
