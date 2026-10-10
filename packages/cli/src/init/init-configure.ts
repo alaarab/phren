@@ -17,6 +17,7 @@ import {
 } from "../shared.js";
 import { STORE_SECRET_GITIGNORE_LINES } from "./store-gitignore.js";
 import { errorMessage } from "../utils.js";
+import { initializeTaskFormat } from "../data/task-format.js";
 import { configureAllHooks, installPhrenCliWrapper, ensureLocalBinOnWindowsPath } from "../hooks.js";
 import { updateWorkflowPolicy } from "../shared/governance.js";
 import {
@@ -336,6 +337,15 @@ export async function warmSemanticSearch(phrenPath: string, profile?: string): P
   }
 }
 
+/** A new store has no old writers, so task metadata starts on. Init still succeeds without it. */
+export function enableTaskMetadataForNewStore(phrenPath: string): void {
+  try {
+    initializeTaskFormat(phrenPath);
+  } catch (e: unknown) {
+    log(`  Task metadata left off: ${errorMessage(e)}. Turn it on later with phren task format enable --all-writers-compatible.`);
+  }
+}
+
 export async function runProjectLocalInit(opts: InitOptions = {}): Promise<void> {
   const detectedRoot = detectProjectDir(process.cwd(), path.join(process.cwd(), ".phren")) || process.cwd();
   const hasWorkspaceMarker =
@@ -383,6 +393,7 @@ export async function runProjectLocalInit(opts: InitOptions = {}): Promise<void>
     primaryProject: projectName,
   });
   ensureGovernanceFiles(phrenPath);
+  if (!existingManifest) enableTaskMetadataForNewStore(phrenPath);
   repairPreexistingInstall(phrenPath);
   fs.mkdirSync(path.join(phrenPath, "global", "skills"), { recursive: true });
   ensurePrivateDir(path.join(phrenPath, ".runtime"));

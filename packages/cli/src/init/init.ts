@@ -91,6 +91,7 @@ import {
   applyProjectStorageBindings,
   warmSemanticSearch,
   runProjectLocalInit,
+  enableTaskMetadataForNewStore,
 } from "./init-configure.js";
 import { runWalkthrough, createWalkthroughPrompts, createWalkthroughStyle } from "./init-walkthrough.js";
 import { assertNoGlobalWiringConflict } from "./guard-globals.js";
@@ -790,6 +791,7 @@ export async function runInit(opts: InitOptions = {}) {
   persistMachineName(effectiveMachine);
   updateMachinesYaml(phrenPath, effectiveMachine, opts.profile);
   ensureGovernanceFiles(phrenPath);
+  enableTaskMetadataForNewStore(phrenPath);
   setManagementPresetPreference(phrenPath, managementPreset);
   const repaired = repairPreexistingInstall(phrenPath, { caps: managementCaps, preset: managementPreset });
   applyOnboardingPreferences(phrenPath, opts);
