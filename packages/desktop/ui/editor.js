@@ -66,10 +66,28 @@ function injectStyle() {
   document.head.appendChild(style);
 }
 
-/** Load Monaco's AMD bundle once; resolves after the phren theme is defined. */
+/** The editor: VS Code's own (monaco-vscode-api, ui/editor-host/) with its
+ * themes, grammars and extensions when that bundle is built, else Monaco's
+ * standalone AMD build with the Phren theme defined here. */
+let usingHost = false;
 function loadMonaco() {
   if (monacoPromise) return monacoPromise;
-  monacoPromise = new Promise((resolve, reject) => {
+  monacoPromise = import("/editor-host/editor-host.js")
+    .then(async () => {
+      const host = window.PhrenEditorHost;
+      await host.ready;
+      usingHost = true;
+      return host.monaco;
+    })
+    .catch((error) => {
+      console.warn("VS Code editor host unavailable; using standalone Monaco.", error);
+      return loadStandaloneMonaco();
+    });
+  return monacoPromise;
+}
+
+function loadStandaloneMonaco() {
+  return new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.src = "/vendor/monaco/vs/loader.js";
     script.onload = () => {
@@ -120,7 +138,6 @@ function loadMonaco() {
     });
     return monaco;
   });
-  return monacoPromise;
 }
 
 const baseName = (path) => path.slice(path.lastIndexOf("/") + 1);
@@ -177,6 +194,7 @@ function languageFor(monaco, path) {
  * real file into it (openFile fills a placeholder in place). */
 function location(monaco, file, line) {
   const uri = monaco.Uri.parse("phren:/" + file);
+  window.PhrenEditorHost?.registerPhrenFile?.(file);
   if (!monaco.editor.getModel(uri)) monaco.editor.createModel("", languageFor(monaco, file), uri);
   return { uri, range: new monaco.Range(line, 1, line, 1) };
 }
@@ -375,7 +393,7 @@ export function openFiles(el, ctx) {
 
   // ------------------------------------------------------------- editor plumbing
   const options = () => ({
-    theme: THEME,
+    ...(usingHost ? {} : { theme: THEME }),
     fontFamily: MONO,
     fontSize: 13,
     minimap: { enabled: false },
@@ -599,6 +617,7 @@ export function openFiles(el, ctx) {
       try { file = await readRepoFile(computer, target, path); }
       catch (err) { showBanner("danger", err.message || "Could not open the file."); return; }
       const uri = monaco.Uri.parse("phren:/" + path);
+      window.PhrenEditorHost?.registerPhrenFile?.(path);
       // A peek list may have left an empty placeholder under this URI.
       let model = monaco.editor.getModel(uri);
       if (model) {
@@ -856,6 +875,9 @@ export function openFiles(el, ctx) {
 
   loadMonaco()
     .then(async (m) => {
+      // VS Code's own services read phren: files through the host's file
+      // system; give it this session's reader.
+      window.PhrenEditorHost?.setPhrenReader?.((path) => readRepoFile(computer, target, path).then((file) => file.text));
       const resolved = await resolveProject(computer, target);
       project = resolved.project;
       indexAvailable = resolved.available;

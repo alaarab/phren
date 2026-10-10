@@ -37,3 +37,28 @@ Actions: `help`, `reload_config`, `goto`, `workspace_picker`, `next_tab`,
 `zoom`, `close_pane`, `new_tab` (the session's terminal), and the desktop's own
 `show_changes`, `show_files`, `show_search`. Herdr-only actions in your Herdr
 config (splits, resize) are ignored. `prefix+shift+r` reloads after an edit.
+
+## VS Code extensions
+
+The editor is VS Code's own (monaco-vscode-api), built from
+`packages/desktop-editor` into `ui/editor-host/`:
+
+```sh
+pnpm --filter @phren/desktop-editor build
+```
+
+Without that bundle the editor falls back to standalone Monaco and extensions
+are off.
+
+Install extensions from the panel's Extensions tab, which searches Open VSX.
+Installs land in `~/.config/phren/desktop-extensions/` (or
+`$PHREN_DESKTOP_EXTENSIONS`), checked against Open VSX's sha256.
+
+- **Declarative parts always load:** themes, icon themes, grammars, language configurations, snippets.
+- **Web extensions' code runs:** any manifest with `browser`, in VS Code's worker extension host.
+- **Node-only extensions don't run yet:** they contribute their declarative parts, but their code needs a Node extension host.
+
+Extension code runs in a frame on its own `{{uuid}}.localhost` origin. It never
+gets the desktop's cookie and cannot call the daemon or any Hook. That is why the
+UI is served as `http://localhost:<port>`: the frame's policy allows workers
+from localhost, and the daemon itself stays bound to 127.0.0.1.

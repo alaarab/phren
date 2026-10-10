@@ -4,23 +4,29 @@
   "private": true,
   "description": "VS Code's editor and extension host (monaco-vscode-api) bundled for Phren desktop",
   "type": "module",
-  "scripts": { "build": "vite build" },
+  "scripts": {
+    "build": "vite build"
+  },
   "dependencies": {
+    "@codingame/monaco-vscode-all-language-default-extensions": "37.3.11",
     "@codingame/monaco-vscode-api": "37.3.11",
-    "monaco-editor": "npm:@codingame/monaco-vscode-editor-api@37.3.11",
-    "vscode": "npm:@codingame/monaco-vscode-extension-api@37.3.11",
     "@codingame/monaco-vscode-configuration-service-override": "37.3.11",
     "@codingame/monaco-vscode-extensions-service-override": "37.3.11",
     "@codingame/monaco-vscode-files-service-override": "37.3.11",
     "@codingame/monaco-vscode-keybindings-service-override": "37.3.11",
     "@codingame/monaco-vscode-languages-service-override": "37.3.11",
-    "@codingame/monaco-vscode-model-service-override": "37.3.11",
-    "@codingame/monaco-vscode-textmate-service-override": "37.3.11",
-    "@codingame/monaco-vscode-theme-service-override": "37.3.11",
     "@codingame/monaco-vscode-log-service-override": "37.3.11",
+    "@codingame/monaco-vscode-model-service-override": "37.3.11",
+    "@codingame/monaco-vscode-quickaccess-service-override": "37.3.11",
+    "@codingame/monaco-vscode-textmate-service-override": "37.3.11",
     "@codingame/monaco-vscode-theme-defaults-default-extension": "37.3.11",
-    "@codingame/monaco-vscode-all-language-default-extensions": "37.3.11"
+    "@codingame/monaco-vscode-theme-service-override": "37.3.11",
+    "monaco-editor": "npm:@codingame/monaco-vscode-editor-api@37.3.11",
+    "vscode": "npm:@codingame/monaco-vscode-extension-api@37.3.11"
   },
-  "devDependencies": { "vite": "^8.3.2", "typescript": "^7.0.2" },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2"
+  },
   "license": "MIT"
 }
