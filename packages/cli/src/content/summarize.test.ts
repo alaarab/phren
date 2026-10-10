@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { inventedIdentifiers, KNOWS_START, NOW_END, NOW_START, digestTopic, mostMentioned, parseTopicBullets, readKnowsBlock, splitTopicFile, structuralNow, summarizeProject, summarizeTopicFile, upsertBlock } from "./summarize.js";
+import { blockBody, inventedIdentifiers, KNOWS_END, KNOWS_START, NOW_END, NOW_START, digestTopic, mostMentioned, parseTopicBullets, readKnowsBlock, splitTopicFile, structuralNow, summarizeProject, summarizeTopicFile, upsertBlock } from "./summarize.js";
 import { writeRootManifest } from "../shared.js";
 
 const dirs: string[] = [];
@@ -191,3 +191,45 @@ describe("inventedIdentifiers", () => {
     expect(inventedIdentifiers("The CLI is built on the `argparse` library and uses FastAPI.", bullets)).toEqual(["argparse", "FastAPI"]);
   });
 });
+
+describe("blocks after a union merge", () => {
+  // The store merges markdown with git's union driver: two computers that both
+  // rewrote a block leave both start lines behind.
+  const merged = [
+    "# alphalens", "",
+    "<!-- phren:now:start at=2026-10-07T04:11:45.917Z hash=c550b8faedff -->",
+    "<!-- phren:now:start at=2026-10-08T05:49:15.386Z hash=c550b8faedff -->",
+    "## Now", "", "3 findings, archived between 2026-09-06 and 2026-10-06.",
+    "<!-- phren:now:end -->", "", "## 2026-10-06", "- a finding", "",
+  ].join("\n");
+
+  it("reads the body without markers or the heading", () => {
+    expect(blockBody(merged, NOW_START, NOW_END)).toBe("3 findings, archived between 2026-09-06 and 2026-10-06.");
+  });
+
+  it("heals the duplicate on the next write", () => {
+    const next = upsertBlock(merged, NOW_START, NOW_END, `${NOW_START.replace("-->", "at=3 -->")}\n## Now\n\nfresh\n${NOW_END}`, "top");
+    expect(next.match(/phren:now:start/g)).toHaveLength(1);
+    expect(next).toContain("- a finding");
+  });
+
+  it("injects only the newest What phren knows block", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "phren-knows-merge-"));
+    fs.mkdirSync(path.join(dir, "proj"), { recursive: true });
+    writeRootManifest(dir, { version: 1, installMode: "shared", syncMode: "managed-git" });
+    fs.writeFileSync(path.join(dir, "proj", "summary.md"), [
+      "# proj", "",
+      KNOWS_START.replace("-->", "at=2026-10-10T03:41:30.192Z -->"), "## What phren knows", "", "- 20 active findings.",
+      KNOWS_START.replace("-->", "at=2026-10-10T00:59:58.834Z -->"), "## What phren knows", "", "- 20 active findings, 62 open tasks.",
+      KNOWS_END, "",
+    ].join("\n"));
+    const knows = readKnowsBlock(dir, "proj");
+    expect(knows?.text).not.toContain("phren:knows:start");
+    // The newest block (03:41) wins even though union merge left it above the older one.
+    expect(knows?.text).toContain("- 20 active findings.");
+    expect(knows?.text).not.toContain("62 open tasks");
+    expect(knows?.text.startsWith("## What phren knows")).toBe(true);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+

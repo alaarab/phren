@@ -1,6 +1,6 @@
 {
   "name": "@phren/cli",
-  "version": "0.3.37",
+  "version": "0.3.38",
   "description": "Knowledge layer for AI agents - CLI, MCP server, and data layer",
   "type": "module",
   "bin": {
@@ -132,6 +132,62 @@
     "./code-host/content/summarize": {
       "types": "./dist/content/summarize.d.ts",
       "default": "./dist/content/summarize.js"
+    },
+    "./client/graph-core": {
+      "types": "./dist/graph-core/index.d.ts",
+      "default": "./dist/graph-core/index.js"
+    },
+    "./client/graph-data": {
+      "types": "./dist/ui/data.d.ts",
+      "default": "./dist/ui/data.js"
+    },
+    "./client/schedule-format": {
+      "types": "./dist/bridge/schedule-format.d.ts",
+      "default": "./dist/bridge/schedule-format.js"
+    },
+    "./client/account-usage": {
+      "types": "./dist/bridge/account-usage.d.ts",
+      "default": "./dist/bridge/account-usage.js"
+    },
+    "./client/owner-inbox-view": {
+      "types": "./dist/bridge/owner-inbox-view.d.ts",
+      "default": "./dist/bridge/owner-inbox-view.js"
+    },
+    "./client/approval-summary": {
+      "types": "./dist/bridge/approval-summary.d.ts",
+      "default": "./dist/bridge/approval-summary.js"
+    },
+    "./client/steps": {
+      "types": "./dist/bridge/steps.d.ts",
+      "default": "./dist/bridge/steps.js"
+    },
+    "./client/metadata": {
+      "types": "./dist/content/metadata.d.ts",
+      "default": "./dist/content/metadata.js"
+    },
+    "./client/citation": {
+      "types": "./dist/content/citation.d.ts",
+      "default": "./dist/content/citation.js"
+    },
+    "./client/lifecycle": {
+      "types": "./dist/finding/lifecycle.d.ts",
+      "default": "./dist/finding/lifecycle.js"
+    },
+    "./client/project-config": {
+      "types": "./dist/project-config.d.ts",
+      "default": "./dist/project-config.js"
+    },
+    "./client/task-contract": {
+      "types": "./dist/data/task-contract.d.ts",
+      "default": "./dist/data/task-contract.js"
+    },
+    "./client/store-registry": {
+      "types": "./dist/store-registry.d.ts",
+      "default": "./dist/store-registry.js"
+    },
+    "./client/project-topics": {
+      "types": "./dist/project-topics.d.ts",
+      "default": "./dist/project-topics.js"
     }
   },
   "files": [

@@ -107,8 +107,25 @@ export async function dispatch(command: string): Promise<void> {
     await attach(file, args, { cwd, env: shellEnvironment() }, shell[2] === "phren" ? "phren agent exited." : shell[2] ? `${shell[2]} exited.` : "The shell exited.");
     return;
   }
+  // One agent pane's own terminal (the desktop's console view): Herdr streams a
+  // single terminal by its id, which the Hook resolves from the pane so the
+  // client never names a terminal it was not shown.
+  const pane = /^phren-hook v1 pane ([A-Za-z0-9_.-]{1,100}) ([A-Za-z0-9_:%.-]{1,100})$/.exec(command);
+  if (pane && pane[0] === command) {
+    requireHook();
+    const server = serverName.parse(pane[1]);
+    if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Request an SSH terminal first.");
+    if (terminalKind(server) !== "herdr") throw new BridgeError(501, "A single pane's console needs Herdr; open the whole tmux terminal instead.");
+    const snapshot = object(await terminalProvider().snapshot(server));
+    const panes = Array.isArray(snapshot.panes) ? snapshot.panes : [];
+    const found = panes.map(entry => object(entry)).find(entry => entry.pane_id === pane[2]);
+    const terminalID = typeof found?.terminal_id === "string" && /^[A-Za-z0-9_-]{1,100}$/.test(found.terminal_id) ? found.terminal_id : undefined;
+    if (!terminalID) throw new BridgeError(404, "That pane is not open anymore.");
+    await attach("herdr", ["--session", server, "terminal", "attach", terminalID], { env: shellEnvironment() }, "The pane's terminal disconnected.");
+    return;
+  }
   const terminal = /^phren-hook v1 terminal ([A-Za-z0-9_.-]{1,100})$/.exec(command);
-  if (!terminal || terminal[0] !== command) throw new BridgeError(403, "This SSH key only permits Phren Hook, loopback web previews, project shells, and existing Herdr or tmux terminals.");
+  if (!terminal || terminal[0] !== command) throw new BridgeError(403, "This SSH key only permits Phren Hook, loopback web previews, project shells, and existing Herdr or tmux terminals and panes.");
   requireHook();
   const server = serverName.parse(terminal[1]);
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Request an SSH terminal first.");

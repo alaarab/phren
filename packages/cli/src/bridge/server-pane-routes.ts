@@ -23,6 +23,8 @@ import type { CodexQuestions } from "./questions.js";
 import { childAgent, childAgentTree, conversationNamedPaths, targetTranscriptPath, type ChildAgentRelation } from "./transcripts.js";
 import { sideQuestionText, type SideQuestions } from "./side-questions.js";
 import { saveUpload } from "./uploads.js";
+import { writeRepoFile } from "./file-write.js";
+import { fileSearchSchema, listRepositoryFiles, searchRepository } from "./file-search.js";
 import { deliveryIdSchema, PromptOnce, promptScope } from "./prompt-once.js";
 import { promptWithStartupRetry } from "./prompt-startup.js";
 import { sendServedPrompt, servedPane } from "./opencode-panes.js";
@@ -556,6 +558,28 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
       }
       result = await repositoryDiff(cwd, paths, allowed);
     }
+  }
+  else if (url.pathname === "/v1/files/write") {
+    // The desktop editor's save, inside the pane's repository (or a child's worktree).
+    const cwd = await gitRepository(pane, target, data.child, data.worktree);
+    const repository = await gitRoot(cwd);
+    if (!repository) throw new BridgeError(409, "This pane is not in a project repository.");
+    result = await writeRepoFile(repository, z.string().max(4096).parse(data.path), z.string().parse(data.content),
+      data.version === undefined ? undefined : z.string().max(200).parse(data.version));
+  }
+  else if (url.pathname === "/v1/files/list") {
+    // Every file path in the repository, for the desktop editor's quick open.
+    const repository = await gitRoot(await gitRepository(pane, target, data.child, data.worktree));
+    if (!repository) throw new BridgeError(409, "This pane is not in a project repository.");
+    result = await listRepositoryFiles(repository);
+  }
+  else if (url.pathname === "/v1/files/search") {
+    // The desktop editor's find in files, over the same repository.
+    const repository = await gitRoot(await gitRepository(pane, target, data.child, data.worktree));
+    if (!repository) throw new BridgeError(409, "This pane is not in a project repository.");
+    result = await searchRepository(repository, fileSearchSchema.parse({
+      query: data.query, regex: data.regex, caseSensitive: data.caseSensitive, wholeWord: data.wholeWord, include: data.include, limit: data.limit,
+    }));
   }
   else if (url.pathname.startsWith("/v1/git/")) {
     // Git routes read the pane's repository, or a spawned child's own
