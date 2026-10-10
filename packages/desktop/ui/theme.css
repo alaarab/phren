@@ -23,6 +23,7 @@
   --border-strong: rgba(255, 255, 255, 0.14);
 
   --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --prose: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
 
   /* Density: the phone's Row/Radius/Space constants. Colours above are the
      Charcoal defaults; shell/theme.js overwrites both from tokens.json. */
