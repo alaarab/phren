@@ -27,6 +27,7 @@ tectonic docs/whitepaper.tex --outdir docs
 - `docs/conductor.md`: Conductor launch, verified computers, dispatch, hand-off, standing grants and Siri controls.
 - `docs/fanout.md`: Worker selection, manifests, permission failures, phone visibility and archive retention.
 - `docs/schedules.md`: Scheduled prompts, run history and local reminders.
+- `docs/desktop.md`: Phren desktop (owner-only, unreleased): linking computers, sections, tiles and keys, desk-first approvals, trust model, what needs the next CLI release.
 - `docs/api-reference.md`: MCP tools and Hook routes, including Code notes, model catalogues, file reads and live previews.
 - `docs/footprint.md`: Files phren writes and external files Hook reads, including Claude Code's cached model catalogue.
 - `docs/agent.md`: phren's coding agent (`@phren/agent`, run with `phren agent`): install, providers, MCP servers, permissions, memory, headless runs and the phone app.
