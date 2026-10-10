@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { homePath } from "../shared.js";
 import { findProjectDir } from "../project-locator.js";
-import { buildSkillManifest, type SkillManifest } from "./registry.js";
+import { buildSkillManifest, skillMirrorPath, type SkillManifest } from "./registry.js";
 import { setSkillEnabled } from "./state.js";
 import { errorMessage } from "../utils.js";
 import { isManagedSymlink } from "../link/skills.js";
@@ -46,8 +46,24 @@ function symlinkManagedSkill(src: string, dest: string, managedRoots: string[]):
   fs.symlinkSync(src, dest);
 }
 
+/** A folder phren made for a flat skill: it holds only a managed SKILL.md link. */
+function isManagedSkillFolder(dest: string, managedRoots: string[]): boolean {
+  try {
+    if (!fs.lstatSync(dest).isDirectory()) return false;
+    const entries = fs.readdirSync(dest);
+    return entries.length === 1 && entries[0] === "SKILL.md" && isManagedSkillLink(path.join(dest, "SKILL.md"), managedRoots);
+  } catch {
+    return false;
+  }
+}
+
 function removeManagedSkillLink(dest: string, managedRoots: string[]): void {
   try {
+    if (isManagedSkillFolder(dest, managedRoots)) {
+      fs.unlinkSync(path.join(dest, "SKILL.md"));
+      fs.rmdirSync(dest);
+      return;
+    }
     if (!isManagedSkillLink(dest, managedRoots)) return;
     fs.unlinkSync(dest);
   } catch (err: unknown) {
@@ -78,14 +94,17 @@ export function syncScopeSkillsToDir(phrenPath: string, scope: string, destDir: 
   fs.mkdirSync(destDir, { recursive: true });
 
   for (const skill of manifest.skills) {
-    const destName = skill.format === "folder" ? skill.name : path.basename(skill.path);
-    const destPath = path.join(destDir, destName);
+    const entryPath = path.join(destDir, skill.name);
     if (!skill.visibleToAgents) {
-      removeManagedSkillLink(destPath, managedRoots);
+      removeManagedSkillLink(entryPath, managedRoots);
       continue;
     }
-    expectedNames.add(destName);
-    symlinkManagedSkill(skill.root, destPath, managedRoots);
+    expectedNames.add(skill.name);
+    // A skill that switched between flat and folder leaves the other shape behind.
+    if (skill.format === "folder" ? isManagedSkillFolder(entryPath, managedRoots) : isManagedSkillLink(entryPath, managedRoots)) {
+      removeManagedSkillLink(entryPath, managedRoots);
+    }
+    symlinkManagedSkill(skill.root, skillMirrorPath(destDir, skill), managedRoots);
   }
 
   for (const entry of fs.readdirSync(destDir)) {

@@ -32,12 +32,12 @@ describe("synced skill preferences", () => {
     for (const project of ["demo", "other"]) writeFile(path.join(root, project, "skills/audit.md"), "# Audit");
     const dest = path.join(root, "mirror/skills");
     syncScopeSkillsToDir(root, "demo", dest);
-    expect(fs.existsSync(path.join(dest, "audit.md"))).toBe(true);
+    expect(fs.existsSync(path.join(dest, "audit", "SKILL.md"))).toBe(true);
     writeFile(path.join(root, SKILL_PREFERENCES_PATH), JSON.stringify({ schemaVersion: 1, enabledSkills: { "demo:audit": false, "global:shared": false } }));
     const manifest = syncScopeSkillsToDir(root, "demo", dest);
     expect(manifest.skills.every((s) => !s.visibleToAgents)).toBe(true);
-    expect(fs.existsSync(path.join(dest, "audit.md"))).toBe(false);
-    expect(fs.existsSync(path.join(dest, "shared.md"))).toBe(false);
+    expect(fs.existsSync(path.join(dest, "audit"))).toBe(false);
+    expect(fs.existsSync(path.join(dest, "shared"))).toBe(false);
     expect(fs.existsSync(path.join(root, "demo/skills/audit.md"))).toBe(true);
     expect(buildSkillManifest(root, "", "other").skills.find((s) => s.name === "audit")?.enabled).toBe(true);
   });

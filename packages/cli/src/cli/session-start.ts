@@ -34,6 +34,7 @@ import { TASKS_FILENAME } from "../data/tasks.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 import { readInstallPreferences } from "../init/preferences.js";
 import { resolveManagementCapabilities } from "../init/management-preset.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import { logger } from "../logger.js";
 import {
   type SessionState,
@@ -50,7 +51,8 @@ const SESSION_START_ONBOARDING_MARKER = "session-start-onboarding-v1";
 const SYNC_WARN_MARKER = "sync-broken-warned-v1";
 
 function projectHasBootstrapSignals(phrenPath: string, project: string): boolean {
-  const projectDir = path.join(phrenPath, project);
+  // A team-store project keeps its findings and tasks in that store.
+  const projectDir = storeAwareProjectPath(phrenPath, project) ?? path.join(phrenPath, project);
   const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
   if (fs.existsSync(findingsPath)) {
     const findings = fs.readFileSync(findingsPath, "utf8");

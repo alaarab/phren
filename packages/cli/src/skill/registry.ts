@@ -50,6 +50,15 @@ interface SkillManifestProblem {
   skillIds?: string[];
 }
 
+/**
+ * Where a skill appears in an agent's skills folder. Claude Code only loads
+ * `<name>/SKILL.md`, so a flat `name.md` skill gets a folder of its own holding
+ * a SKILL.md link to the file; a folder skill is linked whole.
+ */
+export function skillMirrorPath(destDir: string, skill: Pick<SkillEntry, "name" | "format">): string {
+  return skill.format === "folder" ? path.join(destDir, skill.name) : path.join(destDir, skill.name, "SKILL.md");
+}
+
 export interface SkillManifest {
   scope: string;
   project?: string;
@@ -184,7 +193,6 @@ function buildResolvedSkills(raw: SkillEntry[], mirrorDir?: string): SkillManife
         path: candidate.path,
         sourceKind: candidate.sourceKind,
       }));
-    const destName = chosen.format === "folder" ? chosen.name : path.basename(chosen.path);
     skills.push({
       path: chosen.path,
       format: chosen.format,
@@ -200,7 +208,7 @@ function buildResolvedSkills(raw: SkillEntry[], mirrorDir?: string): SkillManife
       visibleToAgents: chosen.enabled,
       commandRegistered: true,
       overrides,
-      mirrorTargets: mirrorDir ? [path.join(mirrorDir, destName)] : [],
+      mirrorTargets: mirrorDir ? [skillMirrorPath(mirrorDir, chosen)] : [],
     });
     grouped.delete(key);
   }
