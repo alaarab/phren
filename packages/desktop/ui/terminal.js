@@ -56,8 +56,9 @@ export function openTerminal(el, computerName, server) {
     `&cols=${term.cols}&rows=${term.rows}`;
   const ws = new WebSocket(url);
 
+  const encoder = new TextEncoder();
   term.onData((data) => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    if (ws.readyState === WebSocket.OPEN) ws.send(encoder.encode(data));
   });
   ws.addEventListener("message", (ev) => term.write(ev.data));
   ws.addEventListener("close", () => term.write("\r\n[disconnected]\r\n"));

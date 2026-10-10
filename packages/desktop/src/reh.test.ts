@@ -7,6 +7,7 @@ import { findTarball, rehRoot, rehStatus, stopReh } from "./reh.js";
 
 const ORIGINAL_REH = process.env.PHREN_DESKTOP_REH;
 const ORIGINAL_TARBALL = process.env.PHREN_REH_TARBALL;
+const ORIGINAL_TIMEOUT = process.env.PHREN_REH_START_TIMEOUT_MS;
 
 let work: string;
 let runsLog: string;
@@ -21,6 +22,7 @@ afterEach(() => {
   stopReh();
   restore("PHREN_DESKTOP_REH", ORIGINAL_REH);
   restore("PHREN_REH_TARBALL", ORIGINAL_TARBALL);
+  restore("PHREN_REH_START_TIMEOUT_MS", ORIGINAL_TIMEOUT);
   rmSync(work, { recursive: true, force: true });
 });
 
@@ -97,5 +99,23 @@ describe("rehStatus", () => {
     expect(status.available).toBe(false);
     expect(status.reason).toMatch(/exited/i);
     expect(status.reason).toContain("3");
+  });
+
+  it("kills a server that never reports listening after the start timeout", async () => {
+    process.env.PHREN_REH_START_TIMEOUT_MS = "600";
+    const body = `trap 'echo term >> "${runsLog}"' TERM\necho run >> "${runsLog}"\nwhile true; do sleep 0.5; done`;
+    process.env.PHREN_REH_TARBALL = buildTarball("vscode-reh-test-any-1.0.0.tar.gz", body);
+
+    const status = await rehStatus();
+    expect(status.available).toBe(false);
+    expect(status.reason).toMatch(/did not start/i);
+
+    let log = "";
+    for (let i = 0; i < 60; i++) {
+      try { log = readFileSync(runsLog, "utf8"); } catch { log = ""; }
+      if (log.includes("term")) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(log).toContain("term");
   });
 });

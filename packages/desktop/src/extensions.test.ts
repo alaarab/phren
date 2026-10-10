@@ -3,8 +3,17 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zipSync } from "fflate";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { classify, installFromOpenVsx, listExtensions, uninstall } from "./extensions.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const reh = vi.hoisted(() => ({
+  installIntoReh: vi.fn(async () => true),
+  uninstallFromReh: vi.fn(async () => {}),
+  rehExtensionsDir: vi.fn(() => ""),
+  isRehRunning: vi.fn(() => false),
+}));
+vi.mock("./reh.js", () => reh);
+
+import { ExtensionError, classify, installFromOpenVsx, listExtensions, setEnabled, uninstall, unzipSizeGuard } from "./extensions.js";
 
 let dir: string;
 const saved = process.env.PHREN_DESKTOP_EXTENSIONS;
@@ -12,6 +21,9 @@ const saved = process.env.PHREN_DESKTOP_EXTENSIONS;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "desktop-ext-"));
   process.env.PHREN_DESKTOP_EXTENSIONS = dir;
+  reh.installIntoReh.mockClear();
+  reh.uninstallFromReh.mockClear();
+  reh.isRehRunning.mockReturnValue(false);
 });
 afterEach(async () => {
   process.env.PHREN_DESKTOP_EXTENSIONS = saved;
@@ -112,5 +124,52 @@ describe("installFromOpenVsx", () => {
 
   it("rejects a bad namespace", async () => {
     await expect(installFromOpenVsx("../etc", "theme", fakeFetch({}))).rejects.toThrow(/Invalid/);
+  });
+});
+
+describe("unzipSizeGuard", () => {
+  it("refuses an entry larger than 50 MB with a 413", () => {
+    const check = unzipSizeGuard();
+    try {
+      check({ name: "big.bin", originalSize: 51 * 1024 * 1024 });
+      throw new Error("expected the guard to throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ExtensionError);
+      expect((err as ExtensionError).status).toBe(413);
+      expect((err as Error).message).toMatch(/50 MB/);
+    }
+  });
+
+  it("refuses a running total larger than 200 MB", () => {
+    const check = unzipSizeGuard();
+    for (let i = 0; i < 4; i++) check({ name: `f${i}`, originalSize: 45 * 1024 * 1024 });
+    expect(() => check({ name: "f4", originalSize: 45 * 1024 * 1024 })).toThrow(/200 MB/);
+  });
+});
+
+describe("Node extensions and the REH", () => {
+  it("installs a Node extension into the host and removes it when disabled", async () => {
+    const packageJson = JSON.stringify({ name: "lsp", publisher: "acme", version: "1.0.0", main: "./out/extension.js" });
+    const files = { "extension/package.json": packageJson };
+    const vsix = makeVsix(files);
+    const fetchImpl = fakeFetch({
+      "https://open-vsx.org/api/acme/lsp/latest": { json: { version: "1.0.0", verified: true, files: {
+        download: "https://open-vsx.org/api/acme/lsp/download",
+        sha256: "https://open-vsx.org/api/acme/lsp/file/acme.lsp-1.0.0.sha256",
+      } } },
+      "https://open-vsx.org/api/acme/lsp/download": { bytes: vsix.bytes },
+      "https://open-vsx.org/api/acme/lsp/file/acme.lsp-1.0.0.sha256": { bytes: new TextEncoder().encode(`${vsix.sha256}  acme.lsp.vsix\n`) },
+    });
+
+    const ext = await installFromOpenVsx("acme", "lsp", fetchImpl);
+    expect(ext.kind).toBe("node");
+    expect(ext.publisherVerified).toBe(true);
+    expect(reh.installIntoReh).toHaveBeenCalledTimes(1);
+
+    reh.isRehRunning.mockReturnValue(true);
+    const updated = await setEnabled("acme.lsp", false);
+    expect(reh.uninstallFromReh).toHaveBeenCalledWith("acme.lsp");
+    expect(updated.enabled).toBe(false);
+    expect(updated.restartRequired).toBe(true);
   });
 });

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULTS, loadKeyConfig } from "./keys-config.js";
+import { DEFAULTS, DEFAULTS_APP, loadKeyConfig } from "./keys-config.js";
 // @ts-expect-error plain browser module without types
 import { matches, parseBinding } from "../ui/keys.js";
 
@@ -27,6 +27,17 @@ describe("loadKeyConfig", () => {
     expect(config.errors).toEqual([]);
   });
 
+  it("gives the direct [keys.app] shortcuts their defaults", async () => {
+    const config = await loadKeyConfig();
+    expect(config.appBindings).toEqual(DEFAULTS_APP);
+    expect(config.appBindings.palette).toEqual(["cmd+k"]);
+    expect(config.appBindings.open_file).toEqual(["cmd+p"]);
+    expect(config.appBindings.session_1).toEqual(["cmd+1"]);
+    expect(config.appBindings.session_9).toEqual(["cmd+9"]);
+    expect(config.appBindings.sidebar).toEqual(["cmd+b"]);
+    expect(config.appSources.palette).toBe("default");
+  });
+
   it("layers Herdr's [keys] then desktop.toml, ignores Herdr-only actions, and unbinds with an empty string", async () => {
     await writeFile(process.env.HERDR_CONFIG!, `[keys]\nprefix = "ctrl+a"\ngoto = ["prefix+g", "ctrl+alt+g"]\nsplit_vertical = "prefix+v"\nzoom = "prefix+m"\n`);
     await writeFile(process.env.PHREN_DESKTOP_CONFIG!, `[keys]\nzoom = "prefix+shift+z"\nclose_pane = ""\n`);
@@ -37,6 +48,16 @@ describe("loadKeyConfig", () => {
     expect(bindings.close_pane).toEqual([]);
     expect(bindings).not.toHaveProperty("split_vertical");
     expect(sources).toMatchObject({ prefix: "herdr", goto: "herdr", zoom: "desktop", close_pane: "desktop", help: "default" });
+  });
+
+  it("layers [keys.app], Herdr first then desktop.toml, and unbinds with an empty string", async () => {
+    await writeFile(process.env.HERDR_CONFIG!, `[keys.app]\npalette = "cmd+shift+p"\nterminal = "cmd+t"\n`);
+    await writeFile(process.env.PHREN_DESKTOP_CONFIG!, `[keys.app]\nterminal = ""\n`);
+    const { appBindings, appSources } = await loadKeyConfig();
+    expect(appBindings.palette).toEqual(["cmd+shift+p"]);
+    expect(appBindings.terminal).toEqual([]);
+    expect(appBindings.sidebar).toEqual(["cmd+b"]);
+    expect(appSources).toMatchObject({ palette: "herdr", terminal: "desktop", sidebar: "default" });
   });
 
   it("reports broken files and wrong values without losing the defaults", async () => {

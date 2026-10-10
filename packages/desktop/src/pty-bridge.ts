@@ -7,7 +7,8 @@ import * as pty from "node-pty";
 import { sshArgs } from "./hosts.js";
 import type { AttachTerminal, Computer, TerminalSession } from "./contract.js";
 
-const SERVER_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$/;
+// No leading dot or dash: the name is an argv entry for tmux or herdr.
+const SERVER_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
 const require = createRequire(import.meta.url);
 let helperChecked = false;
 
@@ -29,9 +30,12 @@ function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.floor(n)));
 }
 
-/** Child env: always TERM, optionally stripped of nesting hints for local attaches. */
+/** Child env: always TERM, the desktop's own control variables stripped. */
 function childEnv(local: boolean): { [key: string]: string | undefined } {
   const env: { [key: string]: string | undefined } = { ...process.env, TERM: "xterm-256color" };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("PHREN_DESKTOP_")) delete env[key];
+  }
   if (!local) return env;
   for (const key of Object.keys(env)) {
     if (key === "TMUX" || key === "TMUX_PANE" || key.startsWith("HERDR_")) delete env[key];
@@ -77,8 +81,8 @@ function wrap(p: pty.IPty): TerminalSession {
 }
 
 export const attachTerminal: AttachTerminal = (c: Computer, server: string, cols: number, rows: number): TerminalSession => {
+  if (!SERVER_RE.test(server)) throw new Error(`invalid server name: ${server}`);
   if (!c.local) {
-    if (!SERVER_RE.test(server)) throw new Error(`invalid server name: ${server}`);
     return wrap(spawnPty("ssh", sshArgs(c, `phren-hook v1 terminal ${server}`, { tty: true }), cols, rows, false));
   }
   const { file, args } = localCommand(server);

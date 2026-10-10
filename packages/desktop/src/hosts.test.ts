@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadComputers, sshArgs } from "./hosts.js";
+import { loadComputers, masterExitArgs, sshArgs } from "./hosts.js";
 
 const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOk6rp5mZR9NnYyyPgxvdi6cGYXJqjcnO5YtupyDMgcQ";
 let root: string;
@@ -37,6 +37,14 @@ describe("loadComputers", () => {
   });
 });
 
+const CONTROL_PATH = /^ControlPath=\/tmp\/phren-desktop-\d+\/[0-9a-f]{8}-(\d)-%C$/;
+
+function controlPath(args: string[]): string {
+  const option = args.find(arg => arg.startsWith("ControlPath="));
+  if (!option) throw new Error("no ControlPath in args");
+  return option;
+}
+
 describe("sshArgs", () => {
   it("pins the host key, uses the computer's key and passes the command as one argument", async () => {
     await writeFile(path.join(root, "desktop.yaml"), peers("Desk"));
@@ -45,13 +53,46 @@ describe("sshArgs", () => {
     expect(args).toContain("StrictHostKeyChecking=yes");
     expect(args).toContain("BatchMode=yes");
     expect(args).toContain("ClearAllForwardings=yes");
+    expect(args).toContain("ControlPersist=60");
+    expect(args).toContain("ServerAliveInterval=15");
+    expect(args).toContain("ServerAliveCountMax=3");
     expect(args.slice(args.indexOf("-i"), args.indexOf("-i") + 2)).toEqual(["-i", path.join(root, "id_ed25519_desktop")]);
     expect(args.slice(-2)).toEqual(["me@box", "phren-hook v1 pipe"]);
     expect(args).not.toContain("-tt");
     expect(sshArgs(desk, "x", { tty: true })).toContain("-tt");
   });
 
+  it("keys the master socket by key file hash and slot", async () => {
+    await writeFile(path.join(root, "desktop.yaml"), peers("Desk"));
+    const [, desk] = await loadComputers();
+    expect(controlPath(sshArgs(desk, "x"))).toMatch(CONTROL_PATH);
+    expect(controlPath(sshArgs(desk, "x"))).toMatch(/-0-%C$/);
+    const slot2 = controlPath(sshArgs(desk, "x", { slot: 2 }));
+    expect(slot2).toMatch(/-2-%C$/);
+    // Same key, same slot: stable path.
+    expect(slot2).toBe(controlPath(sshArgs(desk, "x", { slot: 2 })));
+    expect(slot2).not.toBe(controlPath(sshArgs(desk, "x")));
+  });
+
   it("refuses the local computer", () => {
     expect(() => sshArgs({ name: "This computer", local: true, server: "default" }, "x")).toThrow(/local/);
+  });
+});
+
+describe("masterExitArgs", () => {
+  it("targets one slot's ControlMaster", async () => {
+    await writeFile(path.join(root, "desktop.yaml"), peers("Desk"));
+    const [, desk] = await loadComputers();
+    const args = masterExitArgs(desk, 3);
+    expect(args).toContain("-F");
+    expect(args).toContain("/dev/null");
+    expect(controlPath(args)).toMatch(/-3-%C$/);
+    expect(args.slice(args.indexOf("-p"), args.indexOf("-p") + 2)).toEqual(["-p", "2222"]);
+    expect(args).toContain("me@box");
+    expect(args.slice(-2)).toEqual(["-O", "exit"]);
+  });
+
+  it("refuses the local computer", () => {
+    expect(() => masterExitArgs({ name: "This computer", local: true, server: "default" }, 0)).toThrow(/local/);
   });
 });

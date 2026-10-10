@@ -1,0 +1,13 @@
+[
+  { "raw": { "type": "user", "message": { "content": "Fix the login flow" } } },
+  {
+    "raw": {
+      "type": "assistant",
+      "message": {
+        "content": [
+          { "type": "text", "text": "On it. The session token is dropped before the guard runs." }
+        ]
+      }
+    }
+  }
+]

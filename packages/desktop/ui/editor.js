@@ -379,6 +379,15 @@ export function openFiles(el, ctx) {
       .then(async (m) => {
         monaco = m;
         window.PhrenEditorHost?.setPhrenReader?.((path) => readRepoFile(computer, target, path).then((file) => file.text));
+        // One save path: with the VS Code host up, its own save command would
+        // write vscode-remote files through the REH filesystem, bypassing the
+        // Hook's compare-and-swap. Override it to call the same doSave as the
+        // phren: scheme; the onKey handler below is the fallback when a host
+        // will not let its command be replaced.
+        if (usingHost) {
+          try { window.PhrenEditorHost?.vscode?.commands?.registerCommand?.("workbench.action.files.save", () => doSave(active)); }
+          catch { /* fallback: the document keydown handler still saves */ }
+        }
         try {
           const status = await hookPost(computer, "/v1/git/status", { target });
           repoRoot = status.repository || null;
@@ -597,13 +606,16 @@ export function openFiles(el, ctx) {
       ensureEditor();
       diffContainer.style.display = "none";
       editorContainer.style.display = "block";
+      // Read-only follows the shown tab, since one editor instance is reused.
+      editor.updateOptions({ readOnly: !!tab.binary });
       if (editor.getModel() !== tab.model) {
         editor.setModel(tab.model);
         if (tab.viewState) editor.restoreViewState(tab.viewState);
       }
     }
     clearBanner();
-    if (tab.note) showBanner("muted", tab.note);
+    if (tab.binary) showBanner("waiting", "This file is not UTF-8 text, so it opens read-only.");
+    else if (tab.note) showBanner("muted", tab.note);
     markActive(tab.path);
   }
 
@@ -680,17 +692,20 @@ export function openFiles(el, ctx) {
       catch (err) { showBanner("danger", err.message || "Could not open the file."); return; }
       const uri = uriFor(path);
       if (uri.scheme === "phren") window.PhrenEditorHost?.registerPhrenFile?.(path);
+      // A binary file has no text to show, so it opens as an empty placeholder.
+      const text = file.binary ? "" : file.text;
       // A peek list may have left an empty placeholder under this URI.
       let model = monaco.editor.getModel(uri);
       if (model) {
         monaco.editor.setModelLanguage(model, languageFor(monaco, path));
-        if (model.getValue() !== file.text) model.setValue(file.text);
+        if (model.getValue() !== text) model.setValue(text);
       } else {
-        model = monaco.editor.createModel(file.text, languageFor(monaco, path), uri);
+        model = monaco.editor.createModel(text, languageFor(monaco, path), uri);
       }
       tab = {
-        path, model, version: file.version, savedText: file.text, dirty: false,
+        path, model, version: file.version, savedText: text, dirty: false,
         mode: "file", sideBySide: true, originalModel: null, viewState: null, note: null,
+        bom: file.bom, binary: file.binary,
       };
       model.onDidChangeContent(() => refreshDirty(tab));
       tabs.push(tab);
@@ -733,11 +748,23 @@ export function openFiles(el, ctx) {
   }
 
   // ------------------------------------------------------------- save
+  // One save path for every scheme. The Cmd/Ctrl+S handler (onKey, capture
+  // phase below) and, when the VS Code host is up, an override of its
+  // workbench.action.files.save command both call doSave. It maps the model's
+  // URI back to the repo-relative path with pathFromUri and always posts
+  // /v1/files/write with the version, so the Hook's compare-and-swap stays
+  // authoritative even for vscode-remote models, whose REH filesystem would
+  // otherwise write to disk itself on save.
   async function doSave(tab) {
-    if (!tab) return;
+    // One keypress can reach both the host command and the document handler;
+    // the guard drops the duplicate so only one write carries the version.
+    if (!tab || tab.binary || tab.saving) return;
+    tab.saving = true;
+    const path = pathFromUri(tab.model.uri) || tab.path;
+    const content = (tab.bom ? "\uFEFF" : "") + tab.model.getValue();
     try {
       const res = await hookPost(computer, "/v1/files/write", {
-        target, path: tab.path, content: tab.model.getValue(), version: tab.version,
+        target, path, content, version: tab.version,
       });
       tab.version = res.version;
       tab.savedText = tab.model.getValue();
@@ -747,16 +774,22 @@ export function openFiles(el, ctx) {
       renderTabs();
     } catch (err) {
       if (err.status === 409) showChanged(tab);
+      // TODO(capabilities): replace this 404 probe with the Hook's file-write capability flag once the capabilities phase lands.
       else if (err.status === 404) showBanner("muted", `Update Phren on ${computer} to save files here.`);
       else showBanner("danger", err.message || "Save failed.");
+    } finally {
+      tab.saving = false;
     }
   }
 
   function showChanged(tab) {
     showBanner("waiting", `${baseName(tab.path)} changed on ${computer} since you opened it.`, [
       ["Reload", async () => {
-        const { text, version } = await readRepoFile(computer, target, tab.path);
-        tab.version = version;
+        const file = await readRepoFile(computer, target, tab.path);
+        const text = file.binary ? "" : file.text;
+        tab.version = file.version;
+        tab.bom = file.bom;
+        tab.binary = file.binary;
         tab.savedText = text;
         tab.model.setValue(text);
         tab.dirty = false;
@@ -923,15 +956,17 @@ export function openFiles(el, ctx) {
     return hovered || (focused && el.contains(focused));
   }
 
+  // Capture phase with stopPropagation so the VS Code host never sees Cmd/Ctrl+S
+  // and cannot write a vscode-remote file to disk behind the Hook's back.
   function onKey(e) {
     if (!ownsFocus() || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
     const key = e.key.toLowerCase();
-    if (key === "p") { e.preventDefault(); openQuick("file"); }
-    else if (key === "s") { e.preventDefault(); doSave(active); }
-    else if (key === "t") { e.preventDefault(); openQuick("search"); }
+    if (key === "p") { e.preventDefault(); e.stopPropagation(); openQuick("file"); }
+    else if (key === "s") { e.preventDefault(); e.stopPropagation(); doSave(active); }
+    else if (key === "t") { e.preventDefault(); e.stopPropagation(); openQuick("search"); }
   }
 
-  document.addEventListener("keydown", onKey);
+  document.addEventListener("keydown", onKey, true);
   root.addEventListener("pointerenter", () => { hovered = true; });
   root.addEventListener("pointerleave", () => { hovered = false; });
 
@@ -939,7 +974,7 @@ export function openFiles(el, ctx) {
   loadDir("", tree);
 
   function close() {
-    document.removeEventListener("keydown", onKey);
+    document.removeEventListener("keydown", onKey, true);
     if (editor) { editor.setModel(null); editor.dispose(); editor = null; }
     if (diffEditor) { diffEditor.dispose(); diffEditor = null; }
     for (const tab of tabs) {

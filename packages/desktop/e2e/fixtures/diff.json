@@ -1,0 +1,25 @@
+{
+  "branch": "main",
+  "root": "/Users/you/phren",
+  "repository": "/Users/you/phren",
+  "observedAt": "2026-10-10T12:00:00.000Z",
+  "launchPath": "/Users/you/phren",
+  "truncated": false,
+  "totalFiles": 2,
+  "files": [
+    {
+      "path": "src/app.ts",
+      "status": "M",
+      "sections": [
+        {
+          "id": "unstaged:src/app.ts",
+          "kind": "unstaged",
+          "loadState": "loaded",
+          "patch": "@@ -1,1 +1,3 @@\n-export const app = \"old\";\n+export const app = \"new\";\n+export const ready = true;",
+          "truncated": false
+        }
+      ]
+    },
+    { "path": "README.md", "status": "?", "sections": [] }
+  ]
+}

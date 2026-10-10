@@ -1,5 +1,5 @@
 // @ts-expect-error patch.js is plain JavaScript without type declarations
-import { parsePatch, reverseApply, wordSegments } from "../ui/patch.js";
+import { additionHunks, parsePatch, reverseApply, wordSegments } from "../ui/patch.js";
 import { describe, expect, it } from "vitest";
 
 const OLD = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\n";
@@ -66,6 +66,30 @@ describe("reverseApply", () => {
 
   it("throws when the new text does not match", () => {
     expect(() => reverseApply("x\ny\n", TWO_HUNK)).toThrow("The patch does not match the file.");
+  });
+});
+
+describe("additionHunks", () => {
+  it("numbers every line of a new file as an addition", () => {
+    const { hunks, truncated, total } = additionHunks("one\ntwo\nthree\n");
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0].lines.map((l) => [l.kind, l.newLine, l.text])).toEqual([
+      ["add", 1, "one"], ["add", 2, "two"], ["add", 3, "three"],
+    ]);
+    expect(truncated).toBe(false);
+    expect(total).toBe(3);
+  });
+
+  it("caps the lines and flags truncation", () => {
+    const text = Array.from({ length: 5 }, (_, i) => "line" + i).join("\n");
+    const { hunks, truncated, total } = additionHunks(text, 2);
+    expect(hunks[0].lines).toHaveLength(2);
+    expect(truncated).toBe(true);
+    expect(total).toBe(5);
+  });
+
+  it("returns no hunks for an empty file", () => {
+    expect(additionHunks("").hunks).toEqual([]);
   });
 });
 

@@ -87,6 +87,22 @@ let child: ChildProcess | null = null;
 let starting: Promise<RehStatus> | null = null;
 let current: RehStatus | null = null;
 
+/** The REH's environment: process.env minus the desktop's own secrets, which a
+ *  Node extension running in the host could otherwise read. */
+function rehEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("PHREN_DESKTOP_")) delete env[key];
+  }
+  env.VSCODE_AGENT_FOLDER = path.join(rehRoot(), "data");
+  return env;
+}
+
+/** True while the Node extension host process is alive. */
+export function isRehRunning(): boolean {
+  return !!child && child.exitCode === null;
+}
+
 /** Start the server once (lazily) and report how the editor reaches it. */
 export function rehStatus(): Promise<RehStatus> {
   if (current?.available && child && child.exitCode === null) return Promise.resolve(current);
@@ -110,10 +126,18 @@ async function start(): Promise<RehStatus> {
       "--connection-token-file", file,
       "--extensions-dir", rehExtensionsDir(),
       "--accept-server-license-terms", "--disable-telemetry",
-    ], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, VSCODE_AGENT_FOLDER: path.join(rehRoot(), "data") } });
-    child = proc;
+    ], { stdio: ["ignore", "pipe", "pipe"], env: rehEnv() });
+    const thisProc = proc;
+    child = thisProc;
     let output = "";
-    const timer = setTimeout(() => finish({ available: false, reason: "The Node extension host did not start within 30 s." }), 30_000);
+    const configured = Number(process.env.PHREN_REH_START_TIMEOUT_MS);
+    const timeoutMs = Number.isFinite(configured) && configured > 0 ? configured : 30_000;
+    const timer = setTimeout(() => {
+      try { thisProc.kill("SIGTERM"); } catch { /* already gone */ }
+      const force = setTimeout(() => { try { thisProc.kill("SIGKILL"); } catch { /* already gone */ } }, 2000);
+      force.unref?.();
+      finish({ available: false, reason: "The Node extension host did not start within 30 s." });
+    }, timeoutMs);
     function finish(status: RehStatus) {
       clearTimeout(timer);
       current = status;
@@ -127,6 +151,7 @@ async function start(): Promise<RehStatus> {
     proc.stdout?.on("data", onData);
     proc.stderr?.on("data", onData);
     proc.on("exit", (code) => {
+      if (child !== thisProc) return; // a newer host owns the state
       child = null;
       if (current?.available) current = null; // restart lazily on the next request
       else finish({ available: false, reason: `The Node extension host exited (${code ?? "signal"}): ${output.split("\n").filter(Boolean).pop() ?? ""}` });
@@ -147,7 +172,7 @@ export async function installIntoReh(vsix: string): Promise<boolean> {
   const dir = await ensureInstalled(tarball);
   await mkdir(rehExtensionsDir(), { recursive: true, mode: 0o700 });
   await exec(launcher(dir), ["--install-extension", vsix, "--force", "--extensions-dir", rehExtensionsDir(), "--accept-server-license-terms"],
-    { timeout: 120_000, env: { ...process.env, VSCODE_AGENT_FOLDER: path.join(rehRoot(), "data") } });
+    { timeout: 120_000, env: rehEnv() });
   return true;
 }
 
@@ -156,5 +181,5 @@ export async function uninstallFromReh(id: string): Promise<void> {
   if (!tarball) return;
   const dir = await ensureInstalled(tarball);
   await exec(launcher(dir), ["--uninstall-extension", id, "--extensions-dir", rehExtensionsDir(), "--accept-server-license-terms"],
-    { timeout: 60_000, env: { ...process.env, VSCODE_AGENT_FOLDER: path.join(rehRoot(), "data") } }).catch(() => {});
+    { timeout: 60_000, env: rehEnv() }).catch(() => {});
 }
