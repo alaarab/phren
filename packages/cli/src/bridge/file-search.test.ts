@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fileSearchSchema, searchRepository } from "./file-search.js";
+import { fileSearchSchema, listRepositoryFiles, searchRepository } from "./file-search.js";
 
 const exec = promisify(execFile);
 let root: string;
@@ -53,5 +53,13 @@ describe("searchRepository", () => {
     for (const bad of [{ query: "a", include: [":(top)x"] }, { query: "a", include: ["../x"] }, { query: "a\nb" }, { query: "" }]) {
       expect(() => fileSearchSchema.parse(bad)).toThrow();
     }
+  });
+});
+
+describe("listRepositoryFiles", () => {
+  it("lists tracked and untracked files but not ignored ones", async () => {
+    const { files, truncated } = await listRepositoryFiles(root);
+    expect(files.sort()).toEqual([".gitignore", "image.bin", "notes.md", "src/app.ts", "src/deep/more.ts"]);
+    expect(truncated).toBe(false);
   });
 });

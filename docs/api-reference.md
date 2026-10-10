@@ -1441,6 +1441,19 @@ Absolute paths, `..`, `.git`, symbolic links on the way and missing folders
 are refused. The reply is `{path, version, size, created}`. Hook advertises
 `fileWrite`; it is part of the `git` module.
 
+`POST /v1/files/search` is find in files for the desktop editor. It takes the
+full session target (optional `child` or `worktree`), a one-line `query` (at most
+200 characters), optional `regex` (extended), `caseSensitive`, `wholeWord`, up to
+eight `include` path patterns (a bare `*.ts` matches in every folder) and `limit`
+(1 to 1000, default 300). It runs `git grep` over tracked and untracked text files,
+so ignored and binary files are skipped. The reply is
+`{matches: [{file, lines: [{line, column, text, offset?}]}], files, total, truncated}`
+with at most 50 matches per file; `text` is at most 300 characters starting at
+`offset`. An invalid expression answers 400 `search-invalid-regex`, output past
+4 MiB 413 `search-too-broad`. Hook advertises `fileSearch`. `POST /v1/files/list`
+(same target) returns `{files, total, truncated}`: every tracked and untracked,
+not ignored, file path in the repository (at most 20,000), for quick open.
+
 `POST /v1/git/tree` takes the session's full target, optional `child` or
 `worktree`, relative `path` and optional `ignored: true`. It returns one directory
 with descendant file counts and a snapshot version; with `ignored`, the level's

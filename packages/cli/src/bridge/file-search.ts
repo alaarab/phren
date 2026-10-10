@@ -73,3 +73,12 @@ export async function searchRepository(root: string, input: FileSearch) {
     files: groups.size, total, truncated,
   };
 }
+
+const MAX_LISTED = 20_000;
+
+/** Every tracked and untracked (not ignored) file path, for the editor's quick open. */
+export async function listRepositoryFiles(root: string) {
+  const output = await git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--full-name");
+  const all = [...new Set(output.split("\0").filter(Boolean))];
+  return { files: all.slice(0, MAX_LISTED), total: all.length, truncated: all.length > MAX_LISTED };
+}
