@@ -407,9 +407,14 @@ export function mountHome(root, { openSession } = {}) {
     else if (event.key.toLowerCase() === "o") { open(row.computer, row.child); event.preventDefault(); }
   }
 
+  // Poll as soon as the set of online computers changes (the first poll at mount
+  // usually runs before the overview has arrived and finds no computers).
+  let polledFor = "";
   const unsubscribe = store.subscribe((value) => {
     merged = value;
     render();
+    const online = (value?.computers ?? []).filter((c) => c.state === "online").map((c) => c.computer).sort().join("\n");
+    if (visible && online && online !== polledFor) { polledFor = online; void pollReceipts(); }
   });
   document.addEventListener("keydown", onKeydown);
   visible = true;
