@@ -10,7 +10,8 @@ try {
 
 // Renders the xterm host inside `el` (the caller owns the header and the
 // bottom panel chrome) and streams it to the session's server over /pty.
-export function openTerminal(el, computerName, server) {
+/** A whole Herdr/tmux server, or with `options.pane` one agent pane's own terminal (the console view). */
+export function openTerminal(el, computerName, server, options = {}) {
   el.innerHTML = "";
 
   const host = document.createElement("div");
@@ -45,6 +46,7 @@ export function openTerminal(el, computerName, server) {
     `${proto}://${location.host}/pty` +
     `?computer=${encodeURIComponent(computerName)}` +
     `&server=${encodeURIComponent(server)}` +
+    (options.pane ? `&pane=${encodeURIComponent(options.pane)}` : "") +
     `&cols=${term.cols}&rows=${term.rows}`;
   const ws = new WebSocket(url);
 
