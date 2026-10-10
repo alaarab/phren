@@ -104,7 +104,23 @@ export function isRehRunning(): boolean {
 }
 
 /** Start the server once (lazily) and report how the editor reaches it. */
+/**
+ * Node extensions run as the owner: they can read this desktop's key and reach
+ * every linked computer's Hook. Until they run isolated, the Node extension
+ * host starts only when the owner turns it on (Settings › Extensions).
+ */
+// The extensions folder (as extensions.ts computes it; not imported, to avoid an import cycle).
+const extensionsRoot = () => process.env.PHREN_DESKTOP_EXTENSIONS
+  || path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"), "phren", "desktop-extensions");
+const nodeFlagFile = () => path.join(extensionsRoot(), "node-extensions-enabled");
+export function nodeExtensionsEnabled(): boolean { return existsSync(nodeFlagFile()); }
+export async function setNodeExtensionsEnabled(enabled: boolean): Promise<void> {
+  if (enabled) { await mkdir(extensionsRoot(), { recursive: true, mode: 0o700 }); await writeFile(nodeFlagFile(), "on\n", { mode: 0o600 }); }
+  else { await rm(nodeFlagFile(), { force: true }); stopReh(); }
+}
+
 export function rehStatus(): Promise<RehStatus> {
+  if (!nodeExtensionsEnabled()) return Promise.resolve({ available: false, reason: "Node extensions are off. They run as you and can reach every linked computer; turn them on in Settings › Extensions." });
   if (current?.available && child && child.exitCode === null) return Promise.resolve(current);
   if (starting) return starting;
   starting = start().finally(() => { starting = null; });

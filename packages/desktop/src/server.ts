@@ -12,7 +12,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { MergedOverview, StartServer, TerminalSession } from "./contract.js";
 import { ACTIONS, loadKeyConfig } from "./keys-config.js";
 import { linkComputer, revokeComputer } from "./keys.js";
-import { rehStatus, stopReh } from "./reh.js";
+import { nodeExtensionsEnabled, rehStatus, setNodeExtensionsEnabled, stopReh } from "./reh.js";
 import { collectUsage } from "./usage.js";
 import { closeAllPreviews, closePreview, listPreviews, openPreview } from "./web-preview.js";
 import { MemoryHttpError, createMemoryService, type ReviewActionBody } from "./memory.js";
@@ -434,6 +434,13 @@ export const startServer: StartServer = async (o) => {
     }
 
     const queryToken = url.searchParams.get("token");
+    // The app lives on localhost only: web previews are served on 127.0.0.1, so its
+    // host-only cookie must never be set for 127.0.0.1 (cookies ignore ports).
+    if (queryToken && (req.headers.host ?? "").startsWith("127.0.0.1:")) {
+      res.writeHead(302, { Location: `http://localhost:${boundPort}/?token=${encodeURIComponent(queryToken)}` });
+      res.end();
+      return;
+    }
     if (queryToken && tokenEqual(queryToken, o.token)) {
       res.writeHead(302, {
         "Set-Cookie": `${COOKIE}=${o.token}; HttpOnly; SameSite=Strict; Path=/`,
@@ -662,6 +669,16 @@ export const startServer: StartServer = async (o) => {
       try {
         if (pathname === "/api/extensions" && (req.method ?? "GET") === "GET") {
           sendJson(res, { extensions: await listExtensions() });
+          return;
+        }
+        if (pathname === "/api/extensions/node") {
+          // The Node extension host is opt-in: Node extensions run as the owner.
+          if (req.method === "POST") {
+            const body = (await readJson(req)) as { enabled?: unknown };
+            if (typeof body.enabled !== "boolean") throw new ExtensionError(400, "enabled must be a boolean.");
+            await setNodeExtensionsEnabled(body.enabled);
+          }
+          sendJson(res, { enabled: nodeExtensionsEnabled() });
           return;
         }
         if (pathname === "/api/extensions/search" && (req.method ?? "GET") === "GET") {

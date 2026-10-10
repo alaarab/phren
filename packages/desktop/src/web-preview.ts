@@ -102,7 +102,9 @@ class Relay {
       computer: this.computer.name,
       port: this.port,
       localPort,
-      url: `http://localhost:${localPort}/`,
+      // 127.0.0.1, never localhost: the daemon's cookie is host-only on localhost and
+      // cookies are not port-scoped, so a preview must not share that host name.
+      url: `http://127.0.0.1:${localPort}/`,
       openedAt: new Date(this.openedAt).toISOString(),
       lastActiveAt: new Date(this.lastActiveAt).toISOString(),
     };

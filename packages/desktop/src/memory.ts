@@ -49,6 +49,9 @@ const MEMORY_PATTERNS = [
 ];
 
 /** The sha git gives these bytes as a blob; the Hook reports the same one. */
+/** A git blob id: 40 (sha1) or 64 (sha256) lowercase hex characters. */
+const BLOB_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
 export function blobSha(content: Buffer): string {
   return createHash("sha1").update(`blob ${content.length}\0`).update(content).digest("hex");
 }
@@ -210,6 +213,8 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
     for (const raw of entries) {
       const entry = raw as { path?: unknown; sha?: unknown; type?: unknown };
       if (typeof entry.path !== "string" || typeof entry.sha !== "string" || entry.type !== "blob") continue;
+      // A blob id names a cache file: only a canonical git sha (hex) may.
+      if (!BLOB_SHA.test(entry.sha)) continue;
       let rel: string;
       try { rel = safeStorePath(entry.path); } catch { continue; }
       if (!isMemoryPath(rel)) continue;
@@ -219,6 +224,11 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
     // per-computer pool carries far more than that.
     await mkdir(blobsDir, { recursive: true });
     const missing = [...new Set(next.values())].filter((blobSha) => !existsSync(path.join(blobsDir, blobSha)));
+    /** Keep a downloaded blob only when its content hashes to the id asked for. */
+    const storeBlobFile = async (id: string, content: Buffer) => {
+      if (!BLOB_SHA.test(id) || (id.length === 40 && blobSha(content) !== id)) return;
+      await writeFile(path.join(blobsDir, id), content);
+    };
     // A Hook with memoryStoreBatch answers up to 256 blobs per request; older
     // Hooks get one request per blob.
     const single: string[] = [];
@@ -228,12 +238,14 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
       const chunk = queue.slice(0, 200);
       const res = await opts.hookRequest(computer, "POST", "/v1/store/blobs", { shas: chunk });
       if (res.status === 404 || res.status === 405) { batch = false; state.batch = false; break; }
+      // A batch the Hook refuses as too large goes one by one instead.
+      if (res.status === 413) { single.push(...chunk); queue = queue.slice(chunk.length); continue; }
       if (res.status !== 200) throw new MemoryHttpError(502, `This computer's Hook returned ${res.status}.`);
       const answer = JSON.parse(res.body.toString("utf8")) as { blobs?: Array<{ sha?: string; content?: string; error?: string }> };
       const later: string[] = [];
       for (const blob of answer.blobs ?? []) {
         if (typeof blob.sha !== "string" || !chunk.includes(blob.sha)) continue;
-        if (typeof blob.content === "string") await writeFile(path.join(blobsDir, blob.sha), Buffer.from(blob.content, "base64"));
+        if (typeof blob.content === "string") await storeBlobFile(blob.sha, Buffer.from(blob.content, "base64"));
         else if (blob.error === "later") later.push(blob.sha);
       }
       queue = [...later, ...queue.slice(chunk.length)];
@@ -244,9 +256,12 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
     const worker = async () => {
       while (cursor < single.length) {
         const blobSha = single[cursor++];
-        const blob = await hookJson(computer, `/v1/store/blob?sha=${blobSha}`);
-        const content = Buffer.from(typeof blob.content === "string" ? blob.content : "", "base64");
-        await writeFile(path.join(blobsDir, blobSha), content);
+        const res = await opts.hookRequest(computer, "GET", `/v1/store/blob?sha=${blobSha}`);
+        // Over the 4 MiB limit (413) or gone (404): leave that file out of the mirror.
+        if (res.status === 413 || res.status === 404) continue;
+        if (res.status !== 200) throw new MemoryHttpError(502, `This computer's Hook returned ${res.status}.`);
+        const blob = JSON.parse(res.body.toString("utf8")) as { content?: unknown };
+        await storeBlobFile(blobSha, Buffer.from(typeof blob.content === "string" ? blob.content : "", "base64"));
       }
     };
     await Promise.all(Array.from({ length: Math.min(8, single.length) }, worker));

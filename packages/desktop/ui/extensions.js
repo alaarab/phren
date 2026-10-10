@@ -218,6 +218,25 @@ export function openExtensions(el, ctx = {}) {
   themeWrap.append(themeCaption, themeSelect);
   head.append(input, themeWrap);
 
+  // Node extensions are opt-in: they run as you, outside the browser sandbox.
+  const nodeRow = document.createElement("label");
+  nodeRow.className = "ext-node-toggle";
+  const nodeBox = document.createElement("input");
+  nodeBox.type = "checkbox";
+  const nodeText = document.createElement("span");
+  nodeText.textContent = "Run Node extensions. They run as you and can read this desktop's key, which reaches every linked computer. Leave this off unless you trust every installed extension.";
+  nodeRow.append(nodeBox, nodeText);
+  head.append(nodeRow);
+  api("/api/extensions/node").then((d) => { nodeBox.checked = !!d.enabled; }).catch(() => { nodeRow.hidden = true; });
+  nodeBox.addEventListener("change", async () => {
+    nodeBox.disabled = true;
+    try {
+      const d = await api("/api/extensions/node", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: nodeBox.checked }) });
+      nodeBox.checked = !!d.enabled;
+    } catch { nodeBox.checked = !nodeBox.checked; }
+    nodeBox.disabled = false;
+  });
+
   const body = document.createElement("div");
   body.className = "ext-body";
   const reloadNote = document.createElement("div");
@@ -460,3 +479,7 @@ export function openExtensions(el, ctx = {}) {
     },
   };
 }
+
+const nodeToggleStyle = document.createElement("style");
+nodeToggleStyle.textContent = ".ext-node-toggle{display:flex;gap:8px;align-items:flex-start;margin-top:8px;color:var(--muted);font-size:12px;line-height:1.4}.ext-node-toggle input{margin-top:2px}";
+document.head.append(nodeToggleStyle);

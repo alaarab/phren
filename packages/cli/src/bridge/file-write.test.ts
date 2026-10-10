@@ -55,3 +55,14 @@ describe("writeRepoFile", () => {
     expect(await code(writeRepoFile(root, "src/big.txt", "x".repeat(4 * 1024 * 1024 + 1)))).toBe("413:");
   });
 });
+
+it("lets only one of two concurrent saves of the same version succeed", async () => {
+  const first = await writeRepoFile(root, "src/race.ts", "a\n");
+  const results = await Promise.allSettled([
+    writeRepoFile(root, "src/race.ts", "b\n", first.version),
+    writeRepoFile(root, "src/race.ts", "c\n", first.version),
+  ]);
+  expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+  expect(results.filter(r => r.status === "rejected")).toHaveLength(1);
+});
+
