@@ -1,4 +1,5 @@
-import { OwnerInbox, inboxTargetSchema } from "./owner-inbox.js";
+import { ownerInboxSources } from "./owner-inbox-sources.js";
+import { OwnerInbox } from "./owner-inbox.js";
 import { closeFinishedWorker } from "./worker-close.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { hookPeers, peerRequest } from "./peers.js";
@@ -104,27 +105,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   if ("approvalPush" in activeCapabilities) {
     Object.defineProperty(activeCapabilities, "approvalPush", { enumerable: true, get: () => approvalPushCapability(agentHooks.push.status) });
   }
-  const inbox = dispatches ? new OwnerInbox(async () => {
-    const items = [];
-    for (const server of await recentServers()) {
-      const name = String(server.session), state = await sharedSnapshot(name, 4000);
-      for (const pane of objects(state.panes)) {
-        const chat = await paneChatState(name, pane, { tokenWhenIdentified: false }).catch(() => ({} as Record<string, unknown>));
-        const parsed = inboxTargetSchema.safeParse({ server: name, workspace: pane.workspace_id, tab: pane.tab_id, pane: pane.pane_id, source: pane.agent,
-          ...(chat.sessionId ? { session: chat.sessionId } : { starting: true, startingToken: chat.startingToken }) });
-        if (!parsed.success) continue;
-        const target = parsed.data, approval = "session" in target ? agentHooks.workerApproval(target) : undefined,
-          question = "session" in target ? agentHooks.servedQuestion(target) : undefined, terminal = "session" in target ? agentHooks.terminalPrompt(target) : undefined;
-        const request = approval?.request ?? (question ? "The worker has a question for the owner." : undefined) ?? terminal?.message
-          ?? (["blocked", "waiting"].includes(String(pane.agent_status)) ? `${pane.agent} needs terminal input.` : undefined);
-        if (!request) continue;
-        const source = `prompt:${JSON.stringify(target)}:${approval?.actionId ?? JSON.stringify(question ?? terminal)}`;
-        items.push({ source, kind: "blocked" as const, title: String(request).replace(/[\x00-\x1f\x7f]+/g, " ").slice(0, 500), target,
-          ...(approval?.actionId ? { actionId: approval.actionId } : {}) });
-      }
-    }
-    return items;
-  }) : undefined;
+  const inbox = dispatches ? new OwnerInbox(() => ownerInboxSources(agentHooks)) : undefined;
   const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
   const settingsSwitcher = new SettingsSwitcher(agentHooks);

@@ -258,7 +258,8 @@ synced into the memory store.
 Conductor finish supervision also writes `<bridge>/worker-reports/*.json`
 (PR evidence bound to turns), `<bridge>/closed-workers/*.json` (intentional
 closure tombstones), `<bridge>/integrator.json` (the chosen session target), and
-`<bridge>/owner-inbox.json` (open and resolved owner items). These private,
+`<bridge>/owner-inbox.json` (open and resolved owner items, with a transient
+`.lock` file and temporary file for locked atomic updates). These private,
 local files do not sync into the memory store.
 
 Dispatched and scheduled workers are tracked in `<bridge>/jobs.json`: one

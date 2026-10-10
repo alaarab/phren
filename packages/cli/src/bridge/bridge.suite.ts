@@ -2716,6 +2716,26 @@ schedules:
       expect((await api("/v1/owner-inbox?local=1&includeResolved=true")).data.items).toMatchObject([{ id, resolution: "Restarted" }]);
     });
 
+    it("reconciles the phone inbox with live panes on both GET and POST list routes", async () => {
+      await api("/v1/owner-inbox", { action: "add", title: "Manual owner decision" });
+      agentStatus = "blocked";
+      const first = await api("/v1/owner-inbox?local=1");
+      expect(first.status, JSON.stringify(first.data)).toBe(200);
+      expect(first.data.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "blocked", live: true, target })]));
+      agentStatus = "working";
+      const answered = await api("/v1/owner-inbox", { action: "list" });
+      expect(answered.data.items).toEqual([expect.objectContaining({ kind: "manual" })]);
+      agentStatus = "blocked";
+      expect((await api("/v1/owner-inbox?local=1")).data.items).toHaveLength(2);
+      mainClosed = true;
+      expect((await api("/v1/owner-inbox?local=1")).data.items).toEqual([expect.objectContaining({ kind: "manual" })]);
+      const history = await api("/v1/owner-inbox?local=1&includeResolved=true");
+      expect(history.data.items.filter((item: any) => item.kind === "blocked")).toEqual([
+        expect.objectContaining({ state: "resolved", live: false, resolution: "stale: source gone" }),
+        expect.objectContaining({ state: "resolved", live: false, resolution: "stale: source gone" }),
+      ]);
+    });
+
     it("reports PRs, queues the integrator, closes after a read and suppresses gone in a real Hook", async () => {
       const workerId = "70000000-0000-4000-8000-000000000002";
       const hookEvent = (event: string, extra: object = {}) => new Promise<void>((resolve, reject) => {
