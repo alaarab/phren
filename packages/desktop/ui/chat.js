@@ -1,182 +1,57 @@
-// Chat pane for the Phren desktop phase 0 spike. Plain browser ES module.
-// Owns one chat view inside `el`; talks to the Hook through the desktop proxy.
+// The chat pane: the phone's chat on the desktop. Plain browser ES module.
+// Reads the transcript through @phren/desktop-kit (every harness), keeps
+// history and older pages, draws interaction cards and the phone's composer.
+//
+//   openChat(el, computerName, child, opts) -> { close(), focus(), insert(text) }
+//   opts: { onConsole?() }   // the session tile's switch to its console
 
-const MONO = '"JetBrains Mono", ui-monospace, Menlo, monospace';
+import {
+  readTranscriptFrame, AgentChatHistory, ChatTranscriptPreparation, chatActivityContext, chatPendingEcho, ElapsedTime,
+} from "/vendor/kit/index.js";
+import { hookPost, hookGet } from "./api.js";
+import { createTimelineView } from "./chat/timeline-view.js";
+import { createComposer, contextPercent } from "./chat/composer.js";
+import { renderInteractions, renderSideAnswer, renderSudoRequests } from "./chat/cards.js";
+
 const PROVIDERS = { claude: "Claude", codex: "Codex", copilot: "Copilot", phren: "Phren", opencode: "OpenCode" };
-
-const CSS = `
-.chat-pane { display:flex; flex-direction:column; gap:12px; height:100%; min-height:0; }
-.chat-headings { min-width:0; flex:1; }
-.chat-sub, .chat-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.chat-header { display:flex; gap:12px; align-items:center; min-width:0; padding:12px 16px; background:var(--card); border:1px solid var(--border); border-radius:10px; }
-.chat-ring { flex:0 0 auto; width:32px; height:32px; border-radius:999px; border:2px solid var(--muted); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600; }
-.chat-headings { min-width:0; display:flex; flex-direction:column; gap:2px; }
-.chat-title { color:var(--text); font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.chat-sub { display:flex; gap:8px; align-items:baseline; min-width:0; font-size:12px; }
-.chat-project { color:var(--accent); white-space:nowrap; }
-.chat-branch { color:var(--muted); font-family:${MONO}; white-space:nowrap; }
-.chat-computer { color:var(--muted); white-space:nowrap; }
-.chat-transcript { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:4px; }
-.chat-user { align-self:flex-end; max-width:80%; padding:8px 12px; background:rgba(255,255,255,0.08); border-radius:12px; color:var(--text); font-size:13px; white-space:pre-wrap; overflow-wrap:anywhere; }
-.chat-assistant { align-self:stretch; color:var(--text); font-family:${MONO}; font-size:13px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
-.chat-assistant code, .chat-assistant .code { color:var(--path); font-family:inherit; }
-.chat-preview { color:var(--dim); font-style:italic; font-family:${MONO}; font-size:12px; white-space:pre-wrap; overflow-wrap:anywhere; }
-.tool { display:flex; gap:8px; align-items:baseline; min-width:0; padding:6px 10px; background:var(--tool); border-radius:10px; font-size:12px; }
-.tool-name { flex:0 0 auto; color:var(--text-2); font-weight:600; white-space:nowrap; }
-.tool-sum { min-width:0; color:var(--muted); font-family:${MONO}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.chat-status { display:flex; flex-direction:column; gap:8px; min-height:18px; padding:0 4px; font-size:13px; }
-.chat-status-text.working { color:var(--working); }
-.chat-status-text.waiting { color:var(--waiting); }
-.chat-approval { display:flex; flex-direction:column; gap:8px; padding:12px; background:var(--surface); border:1px solid var(--border-strong); border-radius:10px; }
-.chat-approval-title { color:var(--text); font-size:13px; font-weight:600; }
-.chat-approval-detail { color:var(--text-2); font-family:${MONO}; font-size:12px; white-space:pre-wrap; overflow-wrap:anywhere; }
-.chat-approval-detail code { color:var(--path); font-family:inherit; }
-.chat-approval-actions { display:flex; gap:8px; }
-.chat-pill { padding:6px 16px; border:none; border-radius:999px; font-size:12px; cursor:pointer; }
-.chat-approve { background:var(--accent-solid); color:#fff; }
-.chat-approve:hover { background:var(--accent); }
-.chat-deny { background:var(--raised); color:var(--text-2); }
-.chat-deny:hover { background:var(--card); }
-.chat-composer-wrap { display:flex; flex-direction:column; gap:4px; }
-.chat-composer { display:flex; gap:8px; align-items:flex-end; padding:8px; background:var(--sunken); border-radius:12px; }
-.chat-input { flex:1; min-height:36px; max-height:160px; resize:none; border:none; outline:none; background:transparent; color:var(--text); font-family:${MONO}; font-size:13px; line-height:1.5; }
-.chat-input::placeholder { color:var(--dim); }
-.chat-send { flex:0 0 auto; width:36px; height:36px; border:none; border-radius:999px; background:var(--accent-solid); color:#fff; font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; }
-.chat-send:hover { background:var(--accent); }
-.chat-stop { flex:0 0 auto; height:36px; padding:0 14px; border:1px solid var(--border-strong); border-radius:999px; background:var(--raised); color:var(--text-2); cursor:pointer; }
-.chat-stop:hover { border-color:var(--danger); color:var(--danger); }
-.chat-error { color:var(--danger); font-size:12px; padding:0 4px; }
-.chat-error:empty { display:none; }
-`;
-
-function ensureStyle() {
-  if (document.getElementById("chat-style")) return;
-  const style = document.createElement("style");
-  style.id = "chat-style";
-  style.textContent = CSS;
-  document.head.appendChild(style);
-}
-
-function h(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text != null) node.textContent = text;
-  return node;
-}
 
 function providerName(source) {
   return PROVIDERS[String(source || "").toLowerCase()] || "Agent";
 }
-
+function providerLetter(source) {
+  return providerName(source).charAt(0).toUpperCase();
+}
 function basename(p) {
   const parts = String(p || "").split(/[\\/]/).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : "";
 }
-
 // Status ring colour: working lavender, blocked/waiting amber, else muted.
 function statusColor(status) {
   const s = String(status || "").toLowerCase();
   if (s === "working") return "var(--working)";
   if (s === "blocked" || s === "waiting") return "var(--waiting)";
-  return "var(--muted)";
+  return "var(--done)";
 }
-
-function toolName(name) {
-  const raw = String(name || "Tool");
-  const n = raw.toLowerCase();
-  if (n === "bash" || n === "shell" || n === "execute" || n === "run") return "Shell";
-  if (n === "read") return "Read";
-  if (n === "edit" || n === "write" || n === "apply_patch" || n === "patch") return "Edit";
-  return raw;
+function node(tag, className, text) {
+  const n = document.createElement(tag);
+  if (className) n.className = className;
+  if (text != null) n.textContent = text;
+  return n;
 }
-
-function oneLine(value) {
-  return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+function firstLine(text) {
+  const line = String(text || "").split("\n")[0];
+  return line.length > 80 ? `${line.slice(0, 79)}\u2026` : line;
 }
-
-// Prefer a meaningful field of a tool input over a raw JSON dump.
-function summarizeInput(input) {
-  if (input == null) return "";
-  if (typeof input === "string") return oneLine(input);
-  if (typeof input !== "object") return oneLine(input);
-  for (const key of ["command", "file_path", "path", "pattern", "query", "url"]) {
-    if (typeof input[key] === "string") return oneLine(input[key]);
-  }
-  try { return oneLine(JSON.stringify(input)); } catch { return ""; }
+function normalizeText(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
 }
-
-// Minimal inline **bold** and `code`, built as DOM so text is never HTML-parsed.
-function renderMarkup(text) {
-  const frag = document.createDocumentFragment();
-  const re = /(\*\*[^*]+\*\*|`[^`]+`)/g;
-  let last = 0;
-  let match;
-  while ((match = re.exec(text))) {
-    if (match.index > last) frag.append(document.createTextNode(text.slice(last, match.index)));
-    const token = match[1];
-    if (token.startsWith("**")) {
-      frag.append(h("strong", null, token.slice(2, -2)));
-    } else {
-      frag.append(h("code", "code", token.slice(1, -1)));
-    }
-    last = match.index + token.length;
-  }
-  if (last < text.length) frag.append(document.createTextNode(text.slice(last)));
-  return frag;
-}
-
-function userBubble(text) {
-  return h("div", "chat-user", text);
-}
-
-function assistantText(text) {
-  const node = h("div", "chat-assistant");
-  node.append(renderMarkup(text));
-  return node;
-}
-
-function toolCard(name, input) {
-  const card = h("div", "tool");
-  card.append(h("span", "tool-name", toolName(name)));
-  card.append(h("span", "tool-sum", summarizeInput(input)));
-  return card;
-}
-
-// Turn one harness JSONL row into zero or more rendered nodes. Unknown shapes skip.
-function rowsFromRaw(raw) {
-  if (!raw || typeof raw !== "object") return [];
-  const nodes = [];
-
-  // Claude: raw.type "user" | "assistant", raw.message.content.
-  if (raw.type === "user" || raw.type === "assistant") {
-    const content = raw.message ? raw.message.content : undefined;
-    const parts = typeof content === "string" ? [{ type: "text", text: content }] : Array.isArray(content) ? content : [];
-    for (const part of parts) {
-      if (!part || typeof part !== "object") continue;
-      if (part.type === "text" && typeof part.text === "string" && part.text.trim()) {
-        nodes.push(raw.type === "user" ? userBubble(part.text) : assistantText(part.text));
-      } else if (part.type === "tool_use") {
-        nodes.push(toolCard(part.name, part.input));
-      }
-      // text with no value and tool_result are hidden.
-    }
-    return nodes;
-  }
-
-  // Codex: raw.type "response_item", raw.payload a role-tagged message.
-  if (raw.type === "response_item") {
-    const payload = raw.payload;
-    if (!payload || payload.type !== "message" || !Array.isArray(payload.content)) return [];
-    const role = payload.role === "user" ? "user" : payload.role === "assistant" ? "assistant" : "";
-    if (!role) return [];
-    for (const part of payload.content) {
-      if (!part || typeof part !== "object" || typeof part.text !== "string" || !part.text.trim()) continue;
-      nodes.push(role === "user" ? userBubble(part.text) : assistantText(part.text));
-    }
-    return nodes;
-  }
-
-  return [];
+function ensureStyle() {
+  if (document.getElementById("chat-style")) return;
+  const link = document.createElement("link");
+  link.id = "chat-style";
+  link.rel = "stylesheet";
+  link.href = new URL("./chat/chat.css", import.meta.url).href;
+  document.head.appendChild(link);
 }
 
 /**
@@ -184,204 +59,542 @@ function rowsFromRaw(raw) {
  * @param {HTMLElement} el container to fill and own
  * @param {string} computerName Hook computer name
  * @param {{title?:string,label?:string,cwd?:string,branch?:string,agentStatus?:string,target?:object}} child overview row
- * @returns {{close: () => void}}
+ * @param {{onConsole?:Function}} opts
+ * @returns {{close:()=>void, focus:()=>void, insert:(text:string)=>void}}
  */
 export function openChat(el, computerName, child, opts = {}) {
   ensureStyle();
-
-  const target = child && child.target ? child.target : {};
-  const source = target.source;
+  const target = (child && child.target) || {};
+  const source = String(target.source || "").toLowerCase();
   const provider = providerName(source);
-  const params = new URLSearchParams(target).toString();
-  const host = `/hosts/${encodeURIComponent(computerName)}`;
-  const socketUrl = (path) => `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${host}${path}`;
-  const post = (path, body) =>
-    fetch(host + path, { method: "POST", headers: { "Content-Type": "application/json", "X-Phren-Desktop": "1" }, body: JSON.stringify(body) });
+  const qs = new URLSearchParams(target).toString();
 
   el.classList.add("chat-pane");
   el.replaceChildren();
 
-  const ring = h("div", "chat-ring", provider.charAt(0).toUpperCase());
-  ring.style.borderColor = statusColor(child && child.agentStatus);
-  ring.style.color = ring.style.borderColor;
-  const title = h("div", "chat-title", (child && (child.title || child.label)) || provider);
-  const sub = h("div", "chat-sub");
-  sub.append(h("span", "chat-project", basename(child && child.cwd)));
-  sub.append(h("span", "chat-branch", (child && child.branch) || ""));
-  sub.append(h("span", "chat-computer", computerName));
-  const headings = h("div", "chat-headings");
+  // ---- header ----
+  const ring = node("div", "chat-ring", provider.charAt(0).toUpperCase());
+  const title = node("div", "chat-title", (child && (child.title || child.label)) || provider);
+  title.title = "Double-click to rename";
+  title.addEventListener("dblclick", startRename);
+  const sub = node("div", "chat-sub");
+  sub.append(node("span", "chat-project", basename(child && child.cwd)));
+  sub.append(node("span", "chat-branch", (child && child.branch) || ""));
+  sub.append(node("span", "chat-computer", computerName));
+  const headings = node("div", "chat-headings");
   headings.append(title, sub);
-  const header = h("div", "chat-header");
-  header.append(ring, headings);
 
-  const transcript = h("div", "chat-transcript");
-  const statusArea = h("div", "chat-status");
-  const statusText = h("div", "chat-status-text");
-  statusArea.append(statusText);
+  const dot = node("div", "chat-status-dot");
+  const contextRing = node("div", "chat-context-ring");
+  const trailing = node("div", "chat-trailing");
+  trailing.append(contextRing, dot);
+  const header = node("div", "chat-header");
+  header.append(ring, headings, trailing);
 
-  const input = h("textarea", "chat-input");
-  input.placeholder = `Message ${provider}\u2026`;
-  input.rows = 1;
-  const stopBtn = h("button", "chat-stop", "Stop");
-  stopBtn.hidden = true;
-  const sendBtn = h("button", "chat-send", "\u2191");
-  sendBtn.title = "Send";
-  const composer = h("div", "chat-composer");
-  composer.append(input, stopBtn, sendBtn);
-  const error = h("div", "chat-error");
-  const composerWrap = h("div", "chat-composer-wrap");
-  composerWrap.append(composer, error);
+  const notice = node("div", "chat-notice");
 
-  // Order: header card, scrolling transcript, status line, composer at the bottom.
-  el.append(header, transcript, statusArea, composerWrap);
+  // ---- interaction cards ----
+  const sideArea = node("div", "chat-side");
+  const cardsArea = node("div", "chat-cards");
+  const sudoArea = node("div", "chat-sudo");
+  const interactions = node("div", "chat-interactions");
+  interactions.append(sideArea, cardsArea, sudoArea);
 
-  let previewEl = null;
-  let working = false;
-  let approvalEl = null;
-  let approvalActionId = null;
+  // ---- composer ----
+  const composer = createComposer({
+    computer: computerName, target, provider: source,
+    onConsole: typeof opts.onConsole === "function" ? opts.onConsole : undefined,
+    onAgents: () => openWork("agents"),
+    onWorkers: () => openWork("workers"),
+  });
+  const composerHost = node("div", "chat-composer");
+  composerHost.append(composer.el);
 
-  const isAtBottom = () => transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
-  const scrollToBottom = () => { transcript.scrollTop = transcript.scrollHeight; };
+  // ---- timeline ----
+  const timelineEl = node("div", "chat-timeline");
+  const timeline = createTimelineView(timelineEl, {
+    computer: computerName, target, source,
+    openFile: typeof opts.openFile === "function" ? opts.openFile : undefined,
+    openSubagent: (id) => openSubagent(id),
+    insert: (text) => composer.insert(text),
+  });
 
-  function setPreview(text) {
-    const stick = isAtBottom();
-    if (!text) {
-      if (previewEl) { previewEl.remove(); previewEl = null; }
-    } else {
-      if (!previewEl) {
-        previewEl = h("div", "chat-preview");
-        transcript.append(previewEl);
-      }
-      previewEl.textContent = text;
-    }
-    if (stick) scrollToBottom();
+  const error = node("div", "chat-error");
+  el.append(header, notice, timelineEl, interactions, composerHost, error);
+
+  // ---- state ----
+  const history = new AgentChatHistory();
+  const preparation = new ChatTranscriptPreparation();
+  const echoes = new Map();
+  let preview = null;
+  let agentStatus = {};
+  let harnessVerb = null;
+  let agentsTree = [];
+  let cardsHandle = null;
+  let sideHandle = null;
+  let sudoHandle = null;
+  let workPopover = null;
+  let loadingOlder = false;
+  let lastSubagentsAt = 0;
+  let lastSudoAt = 0;
+  let closed = false;
+
+  composer.onDelivery(onComposerDelivery);
+
+  // ---- colour from the overview row until a status frame arrives ----
+  applyStatusColor((child && child.agentStatus) || "");
+
+  // ---- rendering ----
+  function activityContext() {
+    const status = String(agentStatus.status || "").toLowerCase();
+    const waiting = status === "blocked" || status === "waiting" || !!agentStatus.pendingApproval
+      || (Array.isArray(agentStatus.pendingQuestions) && agentStatus.pendingQuestions.length > 0)
+      || !!agentStatus.passwordPrompt || !!agentStatus.terminalPrompt;
+    return chatActivityContext({
+      busy: status === "working",
+      waiting,
+      harnessVerb,
+      workingDirectory: (child && child.cwd) || null,
+      pendingEchoes: [...echoes.values()],
+    });
   }
 
-  function appendEntry(entry) {
-    if (!entry || !entry.raw) return;
-    for (const node of rowsFromRaw(entry.raw)) transcript.insertBefore(node, previewEl);
+  function composerJobs() {
+    return preparation.jobs.map((job) => ({
+      id: job.id,
+      label: job.title,
+      state: job.state && job.state.kind === "running" ? "running" : "finished",
+      detail: job.worker ? `via ${job.worker}` : firstLine(job.command),
+    }));
+  }
+
+  function render() {
+    if (closed) return;
+    const stick = timeline.isAtBottom();
+    preparation.update(history.messages, activityContext());
+    timeline.render(preparation, preview);
+    composer.setBackground(composerJobs());
+    if (stick) timeline.scrollToBottom();
+  }
+
+  function setNotice(text) {
+    notice.textContent = text || "";
+  }
+
+  // ---- transcript frames ----
+  // The Hook's own frames always name their source and line; the test fake and
+  // older Hooks may omit them, so fill them in before the kit reads the frame.
+  function normalizeFrame(frame) {
+    if (!frame || typeof frame !== "object") return frame;
+    const out = { ...frame };
+    if (out.source === undefined) out.source = source;
+    if (Array.isArray(out.entries)) {
+      let missing = false;
+      for (const entry of out.entries) if (entry && typeof entry === "object" && entry.line === undefined) { missing = true; break; }
+      if (missing) out.entries = out.entries.map((entry, index) =>
+        entry && typeof entry === "object" && entry.line === undefined ? { ...entry, line: index } : entry);
+    }
+    return out;
+  }
+
+  function readFrame(frame) {
+    try { return readTranscriptFrame(normalizeFrame(frame), String((frame && frame.source) || source)); }
+    catch { return null; }
   }
 
   function onTranscript(frame) {
     const type = frame && frame.type;
-    if (type === "backlog" || type === "append") {
-      const stick = isAtBottom();
-      if (type === "backlog") {
-        transcript.replaceChildren();
-        previewEl = null;
+    if (type === "side-answer") { renderSide(frame); return; }
+    if (type === "delivery") { applyDeliveryFrame(frame); return; }
+    const read = readFrame(frame);
+    if (!read) return;
+    if (read.activityVerb) harnessVerb = read.activityVerb;
+    if (read.kind === "preview") { preview = read.preview; render(); return; }
+    history.receive(read);
+    reconcileEchoes();
+    render();
+  }
+
+  // ---- deliveries as pending echoes ----
+  function onComposerDelivery({ deliveryId, text, state } = {}) {
+    if (!deliveryId) return;
+    const echo = echoes.get(deliveryId)
+      || chatPendingEcho(deliveryId, text || "", [], { submittedAt: new Date().toISOString() });
+    if (text) echo.text = text;
+    echo.deliveryState = state || echo.deliveryState;
+    echoes.set(deliveryId, echo);
+    if (state === "delivered") scheduleEchoRemoval(deliveryId);
+    render();
+  }
+
+  function applyDeliveryFrame(frame) {
+    const id = String(frame.deliveryId || "");
+    if (!id) return;
+    const state = String(frame.state || "unknown");
+    const echo = echoes.get(id) || chatPendingEcho(id, "", [], { submittedAt: new Date().toISOString() });
+    echo.deliveryState = state;
+    echoes.set(id, echo);
+    if (state === "delivered") scheduleEchoRemoval(id);
+    render();
+  }
+
+  function scheduleEchoRemoval(id) {
+    const echo = echoes.get(id);
+    if (!echo || echo.timer) return;
+    echo.timer = setTimeout(() => { echoes.delete(id); render(); }, 1200);
+  }
+
+  // A real user row retires its echo, whatever the delivery state said.
+  function reconcileEchoes() {
+    if (echoes.size === 0) return;
+    const users = history.messages
+      .filter((message) => message.role === "user" && message.localCommand === null)
+      .map((message) => normalizeText(message.text));
+    for (const [id, echo] of [...echoes]) {
+      const text = normalizeText(echo.text);
+      if (text && users.some((user) => user.includes(text))) {
+        if (echo.timer) clearTimeout(echo.timer);
+        echoes.delete(id);
       }
-      for (const entry of Array.isArray(frame.entries) ? frame.entries : []) appendEntry(entry);
-      if (type === "backlog" || stick) scrollToBottom();
-    } else if (type === "preview") {
-      setPreview(typeof frame.text === "string" ? frame.text : "");
     }
-    // "older" and unknown frames are ignored.
   }
 
-  function clearApproval() {
-    if (approvalEl) { approvalEl.remove(); approvalEl = null; approvalActionId = null; }
-  }
-
-  function showApproval(approval) {
-    const actionId = String(approval.actionId);
-    if (approvalEl && approvalActionId === actionId) return;
-    clearApproval();
-    approvalActionId = actionId;
-    const detail = approval.title || approval.command || approval.reason || "Approval required";
-    approvalEl = h("div", "chat-approval");
-    approvalEl.append(h("div", "chat-approval-title", `${provider} asks`));
-    const detailEl = h("div", "chat-approval-detail");
-    detailEl.append(h("code", null, String(detail)));
-    approvalEl.append(detailEl);
-    const actions = h("div", "chat-approval-actions");
-    const approve = h("button", "chat-pill chat-approve", "Approve");
-    const deny = h("button", "chat-pill chat-deny", "Deny");
-    approve.addEventListener("click", () => answerApproval(actionId, "approve"));
-    deny.addEventListener("click", () => answerApproval(actionId, "deny"));
-    actions.append(approve, deny);
-    approvalEl.append(actions);
-    statusArea.append(approvalEl);
-  }
-
-  async function answerApproval(actionId, decision) {
-    try {
-      const res = await post("/v1/approvals/answer", { target, actionId, decision });
-      if (res.ok) clearApproval();
-    } catch { /* leave the card up; the status socket will refresh it */ }
-  }
-
-  function setStatus(text, kind) {
-    statusText.textContent = text;
-    statusText.className = kind ? `chat-status-text ${kind}` : "chat-status-text";
-  }
-
+  // ---- status ----
   function onStatus(frame) {
-    if (!frame || frame.type !== "agentStatus") return;
-    const status = String(frame.status || "").toLowerCase();
-    working = status === "working";
-    stopBtn.hidden = !working;
-    if (working) setStatus("Working\u2026", "working");
-    else if (status === "blocked" || status === "waiting") setStatus("Needs you", "waiting");
-    else setStatus("", null);
-    ring.style.borderColor = ring.style.color = statusColor(status);
-    if (frame.pendingApproval && frame.pendingApproval.actionId) showApproval(frame.pendingApproval);
-    else clearApproval();
+    const next = frame && frame.agentStatus ? frame.agentStatus
+      : frame && frame.type === "agentStatus" ? frame : null;
+    if (!next) return;
+    agentStatus = next;
+    applyStatusColor(next.status);
+    composer.setStatus(agentStatus);
+    updateContextRing();
+    renderCards();
+    maybeFetchSudo();
+    maybeFetchSubagents();
+    render();
   }
 
-  function setError(text) {
-    error.textContent = text || "";
+  function applyStatusColor(status) {
+    const color = statusColor(status);
+    ring.style.borderColor = color;
+    ring.style.color = color;
+    dot.style.background = color;
   }
 
-  async function send() {
-    const text = input.value.trim();
-    if (!text) return;
-    setError("");
-    try {
-      const res = await post("/v1/prompt", { target, text, deliveryId: crypto.randomUUID() });
-      if (!res.ok) {
-        setError((await res.text()) || `Send failed (${res.status})`);
+  function updateContextRing() {
+    const percent = contextPercent(agentStatus);
+    contextRing.replaceChildren();
+    contextRing.hidden = percent === null;
+    if (percent === null) return;
+    contextRing.title = `${Math.round(percent)}% of context used`;
+    contextRing.append(buildRing(percent));
+  }
+
+  function buildRing(percent) {
+    const NS = "http://www.w3.org/2000/svg";
+    const radius = 9, circ = 2 * Math.PI * radius;
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("width", "20"); svg.setAttribute("height", "20"); svg.setAttribute("viewBox", "0 0 24 24");
+    for (const [stroke, dash] of [["var(--border-strong)", null], ["var(--accent)", circ * (1 - percent / 100)]]) {
+      const circle = document.createElementNS(NS, "circle");
+      circle.setAttribute("cx", "12"); circle.setAttribute("cy", "12"); circle.setAttribute("r", String(radius));
+      circle.setAttribute("fill", "none"); circle.setAttribute("stroke", stroke); circle.setAttribute("stroke-width", "2");
+      if (dash !== null) {
+        circle.setAttribute("stroke-dasharray", String(circ));
+        circle.setAttribute("stroke-dashoffset", String(dash));
+        circle.setAttribute("transform", "rotate(-90 12 12)");
+      }
+      svg.append(circle);
+    }
+    return svg;
+  }
+
+  // ---- interaction cards ----
+  function updateInteractionsFrame() {
+    const has = cardsArea.childElementCount > 0 || sideArea.childElementCount > 0 || sudoArea.childElementCount > 0;
+    interactions.classList.toggle("has-cards", has);
+  }
+
+  function renderCards() {
+    cardsHandle?.destroy?.();
+    cardsHandle = renderInteractions(cardsArea, agentStatus, {
+      computer: computerName, target, onAnswered: () => maybeFetchSudo(true),
+    });
+    updateInteractionsFrame();
+  }
+
+  function renderSide(frame) {
+    sideHandle?.destroy?.();
+    sideHandle = renderSideAnswer(sideArea, frame, { computer: computerName, target });
+    updateInteractionsFrame();
+  }
+
+  function renderSudo(requests) {
+    sudoHandle?.destroy?.();
+    sudoHandle = renderSudoRequests(sudoArea, requests, { computer: computerName, onAnswered: () => maybeFetchSudo(true) });
+    updateInteractionsFrame();
+  }
+
+  function maybeFetchSudo(force = false) {
+    const status = String(agentStatus.status || "").toLowerCase();
+    const pending = !!agentStatus.pendingApproval || !!agentStatus.passwordPrompt
+      || status === "waiting" || status === "blocked";
+    if (!force && (!pending || Date.now() - lastSudoAt < 3000)) return;
+    lastSudoAt = Date.now();
+    hookGet(computerName, "/v1/sudo").then((res) => {
+      renderSudo(Array.isArray(res && res.requests) ? res.requests : []);
+    }).catch(() => {});
+  }
+
+  // ---- subagents and workers ----
+  function flattenWork(nodes, depth = 0, out = []) {
+    for (const agent of Array.isArray(nodes) ? nodes : []) {
+      if (!agent || typeof agent !== "object") continue;
+      out.push({ agent, depth });
+      if (Array.isArray(agent.children) && agent.children.length) flattenWork(agent.children, depth + 1, out);
+    }
+    return out;
+  }
+  function isWorker(agent) {
+    return !!agent.fanout || !!agent.computer || String(agent.callId || "").startsWith("fanout:");
+  }
+  function workMembers(nodes, worker) {
+    return flattenWork(nodes).filter(({ agent }) => isWorker(agent) === worker);
+  }
+  function countWork(nodes) {
+    let agents = 0, workers = 0;
+    for (const { agent } of flattenWork(nodes)) { if (isWorker(agent)) workers++; else agents++; }
+    return { agents, workers };
+  }
+  function workTitle(agent) {
+    const raw = agent.worktreeName || agent.path || agent.model || "Agent";
+    return String(raw).includes("/") ? basename(raw) : String(raw);
+  }
+  function workStateClass(agent) {
+    if (agent.failed) return "failed";
+    const state = String(agent.state || "").toLowerCase();
+    return state === "running" || state === "completed" ? state : "muted";
+  }
+  function workStateText(agent) {
+    return agent.failed ? "failed" : String(agent.state || "unavailable");
+  }
+  function workElapsed(agent) {
+    const start = agent.startedAt ? Date.parse(agent.startedAt) : NaN;
+    if (Number.isNaN(start)) return "";
+    const end = agent.finishedAt ? Date.parse(agent.finishedAt) : Date.now();
+    if (Number.isNaN(end)) return "";
+    return ` \u00b7 ${ElapsedTime.text((end - start) / 1000)}`;
+  }
+
+  function maybeFetchSubagents(force = false) {
+    if (!force && Date.now() - lastSubagentsAt < 3000) return;
+    lastSubagentsAt = Date.now();
+    hookGet(computerName, "/v1/subagents", target).then((res) => {
+      agentsTree = Array.isArray(res && res.agents) ? res.agents : [];
+      composer.setCounts(countWork(agentsTree));
+      if (workPopover && !workPopover.childId) drawWork(workPopover.kind, workPopover.el);
+    }).catch(() => {});
+  }
+
+  function openWork(kind) {
+    closeWork();
+    const pop = node("div", "chat-popover");
+    pop.style.position = "fixed";
+    document.body.append(pop);
+    workPopover = { el: pop, kind };
+    drawWork(kind, pop);
+    positionPopover(pop, composer.el);
+    maybeFetchSubagents(true);
+    setTimeout(() => document.addEventListener("pointerdown", onWorkOutside, true), 0);
+  }
+
+  function positionPopover(pop, anchor) {
+    const rect = anchor.getBoundingClientRect();
+    const width = pop.offsetWidth || 280;
+    pop.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+    pop.style.top = `${Math.max(8, rect.top - pop.offsetHeight - 6)}px`;
+  }
+
+  function closeWork() {
+    if (!workPopover) return;
+    workPopover.el.remove();
+    workPopover = null;
+    document.removeEventListener("pointerdown", onWorkOutside, true);
+  }
+  function onWorkOutside(event) {
+    if (workPopover && !workPopover.el.contains(event.target)) closeWork();
+  }
+
+  function drawWork(kind, pop, childId) {
+    if (!pop) return;
+    if (workPopover && workPopover.el === pop) workPopover.childId = childId || null;
+    pop.replaceChildren();
+    if (childId) {
+      const head = node("div", "chat-pop-head");
+      const back = node("button", "chat-pop-back", "\u2190 Back");
+      back.addEventListener("click", () => drawWork(kind, pop));
+      head.append(back, node("span", null, "Transcript"));
+      pop.append(head);
+      const body = node("div", "chat-work-transcript");
+      body.append(node("div", "chat-work-badge", "Loading\u2026"));
+      pop.append(body);
+      loadChildTranscript(childId, body);
+      return;
+    }
+    const members = workMembers(agentsTree, kind === "workers");
+    const head = node("div", "chat-pop-head");
+    head.append(node("span", null, kind === "workers" ? "Workers" : "Subagents"), node("span", null, String(members.length)));
+    pop.append(head);
+    const list = node("div", "chat-pop-list");
+    if (members.length === 0) {
+      list.append(node("div", "chat-work-empty", kind === "workers" ? "No workers running" : "No subagents running"));
+    } else {
+      for (const member of members) list.append(workRow(member, kind, pop));
+    }
+    pop.append(list);
+  }
+
+  function workRow({ agent, depth }, kind, pop) {
+    const row = node("div", "chat-work-row");
+    row.style.paddingLeft = `${12 + depth * 14}px`;
+    const main = node("div", "chat-work-main");
+    main.append(node("div", "chat-work-title", workTitle(agent)));
+    const meta = [providerName(agent.provider), agent.branch, agent.computer && agent.computer.name].filter(Boolean).join(" \u00b7 ");
+    if (meta) main.append(node("div", "chat-work-sub", meta));
+    row.append(node("div", "chat-work-glyph", providerLetter(agent.provider)), main);
+    row.append(node("div", `chat-work-state ${workStateClass(agent)}`, `${workStateText(agent)}${workElapsed(agent)}`));
+    row.addEventListener("click", () => drawWork(kind, pop, agent.id));
+    return row;
+  }
+
+  function loadChildTranscript(childId, body) {
+    hookGet(computerName, "/v1/subagents/transcript", { ...target, child: childId }).then((frame) => {
+      const read = readFrame(frame);
+      body.replaceChildren();
+      if (!read || read.messages.length === 0) {
+        body.append(node("div", "chat-work-empty", "Nothing to show yet."));
         return;
       }
-      input.value = "";
-    } catch (err) {
-      setError(err && err.message ? err.message : "Send failed");
-    }
+      for (const message of read.messages) {
+        const line = node("div", `chat-work-line ${message.role}`);
+        line.textContent = message.text || (message.imageBlocks.length ? "[image]" : "");
+        body.append(line);
+      }
+    }).catch(() => {
+      body.replaceChildren(node("div", "chat-work-empty", "Could not read this transcript."));
+    });
   }
 
-  function stop() {
-    post("/v1/keys", { target, keys: ["Escape"] }).catch(() => {});
+  function openSubagent(id) {
+    if (!id) return;
+    const worker = flattenWork(agentsTree).some(({ agent }) => agent.id === id && isWorker(agent));
+    openWork(worker ? "workers" : "agents");
+    if (workPopover) drawWork(workPopover.kind, workPopover.el, id);
   }
 
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      send();
-    }
+  // ---- older pages ----
+  timeline.onScrollTop?.(() => {
+    if (loadingOlder || !history.hasMore || history.startLine === null) return;
+    loadingOlder = true;
+    hookGet(computerName, "/v1/transcripts/history", { ...target, beforeLine: String(history.startLine) })
+      .then((frame) => {
+        const read = readFrame(frame);
+        if (read) { history.receive(read); render(); }
+      })
+      .catch(() => {})
+      .finally(() => { loadingOlder = false; });
   });
-  sendBtn.addEventListener("click", send);
-  stopBtn.addEventListener("click", stop);
 
-  const transcriptWs = new WebSocket(socketUrl(`/v1/transcripts?${params}`));
-  transcriptWs.onmessage = (event) => {
-    try { onTranscript(JSON.parse(event.data)); } catch { /* ignore malformed frames */ }
-  };
-  const statusWs = new WebSocket(socketUrl(`/v1/status?${params}`));
-  statusWs.onmessage = (event) => {
-    try { onStatus(JSON.parse(event.data)); } catch { /* ignore malformed frames */ }
-  };
+  // ---- rename ----
+  function startRename() {
+    if (title.dataset.editing) return;
+    title.dataset.editing = "1";
+    const input = node("input", "chat-rename");
+    input.type = "text";
+    input.value = title.textContent;
+    title.replaceWith(input);
+    input.focus();
+    input.select();
+    const finish = async (save) => {
+      input.removeEventListener("keydown", onKey);
+      input.removeEventListener("blur", onBlur);
+      delete title.dataset.editing;
+      const value = input.value.trim();
+      input.replaceWith(title);
+      if (!save || !value || value === title.textContent) return;
+      const previous = title.textContent;
+      title.textContent = value;
+      try {
+        await hookPost(computerName, "/v1/sessions/rename", {
+          workspaceId: target.workspace, tabId: target.tab,
+          ...(target.pane !== undefined ? { paneId: target.pane } : {}),
+          label: value,
+        });
+        setNotice("");
+      } catch (err) {
+        title.textContent = previous;
+        setNotice(`Rename failed: ${(err && err.message) || "the Hook refused it."}`);
+      }
+    };
+    const onKey = (event) => {
+      if (event.key === "Enter") { event.preventDefault(); finish(true); }
+      else if (event.key === "Escape") { event.preventDefault(); finish(false); }
+    };
+    const onBlur = () => finish(true);
+    input.addEventListener("keydown", onKey);
+    input.addEventListener("blur", onBlur);
+  }
+
+  // ---- sockets, reconnecting with backoff ----
+  function connectSocket(path, onFrame, onOpen) {
+    let backoff = 500, timer = null, ws = null, stopped = false;
+    const url = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/hosts/${encodeURIComponent(computerName)}${path}`;
+    const open = () => {
+      if (stopped) return;
+      ws = new WebSocket(url);
+      ws.onopen = () => { backoff = 500; if (onOpen) onOpen(); };
+      ws.onmessage = (event) => { let frame; try { frame = JSON.parse(event.data); } catch { return; } onFrame(frame); };
+      ws.onclose = () => {
+        if (stopped) return;
+        timer = setTimeout(open, backoff);
+        backoff = Math.min(backoff * 2, 5000);
+      };
+      ws.onerror = () => { try { ws.close(); } catch { /* already closing */ } };
+    };
+    open();
+    return {
+      close() { stopped = true; if (timer) clearTimeout(timer); try { ws && ws.close(); } catch { /* already closing */ } },
+    };
+  }
+
+  const transcriptSocket = connectSocket(`/v1/transcripts?${qs}&sideAnswers=1&deliveries=1`, onTranscript, () => {
+    preview = null;
+    maybeFetchSubagents(true);
+  });
+  const statusSocket = connectSocket(`/v1/status?${qs}`, onStatus, () => {
+    maybeFetchSubagents(true);
+    maybeFetchSudo(true);
+  });
+
+  composer.setCounts({ agents: 0, workers: 0 });
+  render();
 
   return {
     /** Append review text (a diff line, a selection) to the draft and focus it, without sending. */
-    insert(text) {
-      const gap = input.value && !input.value.endsWith("\n") ? "\n" : "";
-      input.value = input.value + gap + text;
-      input.dispatchEvent(new Event("input"));
-      input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
-    },
+    insert(text) { composer.insert(text); },
+    focus() { composer.focus(); },
     close() {
-      try { transcriptWs.close(); } catch { /* already closing */ }
-      try { statusWs.close(); } catch { /* already closing */ }
+      closed = true;
+      transcriptSocket.close();
+      statusSocket.close();
+      closeWork();
+      cardsHandle?.destroy?.();
+      sideHandle?.destroy?.();
+      sudoHandle?.destroy?.();
+      timeline.destroy?.();
+      composer.destroy?.();
+      for (const echo of echoes.values()) if (echo.timer) clearTimeout(echo.timer);
+      echoes.clear();
       el.replaceChildren();
       el.classList.remove("chat-pane");
     },
