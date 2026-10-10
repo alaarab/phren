@@ -308,3 +308,11 @@ test("the window opens on Home", async ({ page }) => {
   await expect(page.locator(".section-pill.selected")).toHaveAttribute("data-section", "home");
   await expect(page).toHaveURL(/#\/home$/);
 });
+
+test("Home and Conductor agree on the running conductor", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".home-conductor-title")).toHaveText("Conductor");
+  await page.locator('.section-pill[data-section="conductor"]').click();
+  await expect(page.locator(".conductor-run-title")).toHaveText("Conductor");
+  await expect(page.getByText("No conductor is running")).toHaveCount(0);
+});

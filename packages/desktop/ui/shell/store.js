@@ -57,12 +57,12 @@ export const store = {
   version(computer) { return capabilities.get(computer)?.version; },
 };
 
-export function needsYou(m) {
+export function needsYou(m = merged) {
   return sessions(m).filter(({ child }) =>
     child.agentStatus === "blocked" || child.agentStatus === "waiting" || child.approvalPending);
 }
 
-export function sessions(m) {
+export function sessions(m = merged) {
   const rows = [];
   for (const c of m?.computers ?? []) {
     for (const g of c.overview?.groups ?? []) {
