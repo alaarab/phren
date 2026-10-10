@@ -259,3 +259,13 @@ test("the graph renderer is served", async ({ page }) => {
   const ok = await page.evaluate(async () => (await fetch("/vendor/phren-graph.js")).ok);
   expect(ok).toBe(true);
 });
+
+test("using the desktop reports desk presence to the Hooks", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.bringToFront();
+  await page.locator(".section-pill", { hasText: "Home" }).click();
+  await page.keyboard.press("Shift");
+  await expect.poll(() => hook.calls.filter((c) => c.path === "/v1/push/presence").length).toBeGreaterThan(0);
+  const call = hook.calls.find((c) => c.path === "/v1/push/presence");
+  expect(call?.method).toBe("POST");
+});

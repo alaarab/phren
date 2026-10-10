@@ -255,6 +255,7 @@ export const startServer: StartServer = async (o) => {
   const liveSockets = new Set<WebSocket>();
   const openHooks = new Set<WebSocket>();
   const terminals = new Map<WebSocket, TerminalSession>();
+  const presence = new Map<string, { sentAt: number; unsupportedUntil: number }>();
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
   let boundPort = o.port;
 
@@ -510,6 +511,23 @@ export const startServer: StartServer = async (o) => {
       } catch (err) {
         sendError(res, err);
       }
+      return;
+    }
+
+    if (pathname === "/api/presence" && req.method === "POST") {
+      // The owner is using the desktop: tell each online Hook to hold approval
+      // alerts to the phone (desk first). At most every 20 s per computer.
+      const now = Date.now();
+      for (const c of o.computers) {
+        const state = presence.get(c.name) ?? { sentAt: 0, unsupportedUntil: 0 };
+        presence.set(c.name, state);
+        if (now - state.sentAt < 20_000 || now < state.unsupportedUntil) continue;
+        state.sentAt = now;
+        void o.hookRequest(c, "POST", "/v1/push/presence", { activeForMs: 60_000 })
+          .then((r) => { if (r.status === 404 || r.status === 400) state.unsupportedUntil = now + 10 * 60_000; })
+          .catch(() => {});
+      }
+      sendJson(res, { ok: true });
       return;
     }
 
