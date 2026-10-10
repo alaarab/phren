@@ -196,3 +196,19 @@ test("the kit loads in the browser", async ({ page }) => {
   const names = await page.evaluate(async () => Object.keys(await import("/vendor/kit/index.js")).length);
   expect(names).toBeGreaterThan(10);
 });
+
+test("a changed file opens as a centre diff tab", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("response", (r) => { if (r.status() >= 400) errors.push(`${r.status()} ${r.url()}`); });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => localStorage.clear());
+  await page.locator(".sb-row", { hasText: "Fix login" }).click();
+  await page.locator(".chg-name", { hasText: "app.ts" }).click();
+  await expect(page.locator(".doc-tab", { hasText: "app.ts" })).toBeVisible();
+  await expect(page.locator(".doc-tab")).toHaveCount(2);
+  await page.locator(".doc-diff .monaco-editor, .doc-diff .monaco-diff-editor").first().waitFor({ timeout: 15000 }).catch(() => {});
+  await expect(page.locator(".doc-diff .ed-banner")).toBeHidden();
+  await page.screenshot({ path: test.info().outputPath("diff-tab.png") });
+});

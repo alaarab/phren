@@ -126,7 +126,7 @@ function defaultDiff() {
           id: `unstaged:${APP_PATH}`,
           kind: "unstaged",
           loadState: "loaded",
-          patch: "@@ -1,1 +1,3 @@\n-export const app = \"old\";\n+export const app = \"new\";\n+export const ready = true;",
+          patch: "@@ -1,1 +1,2 @@\n-export const app = \"old\";\n+export const app = \"new\";\n+export const ready = true;",
           truncated: false,
         }],
       },
@@ -169,7 +169,7 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
 
   // One text file the editor can read and save; version bumps on every write.
   const files = new Map<string, { content: string; version: string }>([
-    [APP_PATH, { content: "export const app = \"hello\";\n", version: "v1" }],
+    [APP_PATH, { content: "export const app = \"new\";\nexport const ready = true;\n", version: "v1" }],
   ]);
 
   const defaults: Record<string, FakeHookHandler> = {
