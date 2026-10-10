@@ -190,3 +190,9 @@ test("composer matches the phone's bar", async ({ page }) => {
   await page.waitForTimeout(300);
   await page.locator("#composer-probe").screenshot({ path: test.info().outputPath("composer.png") });
 });
+
+test("the kit loads in the browser", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  const names = await page.evaluate(async () => Object.keys(await import("/vendor/kit/index.js")).length);
+  expect(names).toBeGreaterThan(10);
+});
