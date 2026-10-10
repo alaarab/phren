@@ -55,8 +55,11 @@ Herdr's explicit session ID only (`ses_` plus a base62 token), which requires
 
 Descriptor-based identities are cached for about two seconds per server, pane,
 terminal ID, provider, and PID set; concurrent lookups share the same work.
-Sending checks bypass the cache. At most 16 WebSocket clients remain connected;
-a seventeenth closes the oldest client.
+Sending checks bypass the cache. WebSocket clients are pooled by kind: Phren
+desktop sends `X-Phren-Client: desktop` and gets its own pool, and every other
+client shares the default pool. At most 16 clients stay connected per pool; a
+seventeenth closes that pool's oldest client, so the desktop never evicts the
+phone's sockets.
 
 The receiving agent's UserPromptSubmit hook confirms a prompt as
 `{ "ok": true, "delivered": true }`. The Hook waits up to 1.5 s for it, and

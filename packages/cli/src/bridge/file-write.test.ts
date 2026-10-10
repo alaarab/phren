@@ -42,7 +42,7 @@ describe("writeRepoFile", () => {
     await symlink(tmpdir(), path.join(root, "link"));
     await writeFile(path.join(tmpdir(), `outside-${process.pid}.txt`), "keep");
     await symlink(path.join(tmpdir(), `outside-${process.pid}.txt`), path.join(root, "src/file-link"));
-    for (const bad of ["../x", "/etc/passwd", ".git/config", "src/../../x", "link/x", "src//a", "a\\b", "a\nb"]) {
+    for (const bad of ["../x", "/etc/passwd", ".git/config", ".GIT/config", ".Git/hooks/pre-commit", "src/../../x", "link/x", "src//a", "a\\b", "a\nb"]) {
       expect(await code(writeRepoFile(root, bad, "x")), bad).toMatch(/^40[03]:/);
     }
     expect(await code(writeRepoFile(root, "src/file-link", "x", "v"))).toBe("403:");
