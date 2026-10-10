@@ -99,7 +99,7 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
       ...routes("WS", ["/v1/transcripts", "/v1/status", "/v1/overview", "/v1/speech/transcribe", "/v1/speech/live"]),
     ],
     capabilities: [
-      "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "herdr",
+      "hook", "transcript", "progress", "images", "prompt", "stop", "terminal", "shell", "paneTerminal", "herdr",
       "webServers", "webPreview", "activity", "approvals", "questions", "accountUsage", "providers",
       "files", "repositoryFiles", "fileResolution", "subagents", "sideQuestions", "approvalPush", "simulators", "overviewStream", "speech", "speechTimestamps", "speechTimestampStream", "speechLive", "speechVoices", "speechFormats", "transcribe", "promptOnce", "promptStatus", "deliveryFrames", "resources", "sessionRename", "sudo", "sudoOutcome", "previewDeltas", "quickChat", "agentFolder", "launchPermissionMode",
     ],

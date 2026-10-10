@@ -17,6 +17,9 @@ Generic SSH forwarding is disabled. The dispatcher accepts only:
 
 - `phren-hook v1 pipe`: byte relay to `hook.sock`.
 - `phren-hook v1 terminal <server>`: an existing Herdr terminal through SSH PTY.
+- `phren-hook v1 pane <server> <pane>`: one Herdr pane's own terminal through
+  SSH PTY (`herdr terminal attach` on the terminal the Hook resolves from the
+  pane), for Phren desktop's console view. Herdr only; capability `paneTerminal`.
 - `phren-hook v1 shell <base64url folder> [codex|claude|copilot|opencode]`: a
   login shell, or one agent, started directly on the SSH PTY in that folder.
   This needs no Herdr. The folder must decode to a canonical absolute path and

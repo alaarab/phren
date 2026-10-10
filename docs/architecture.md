@@ -323,7 +323,8 @@ Projects are claimed by stores in the registry. Bare project names resolve unamb
 `packages/cli/src/bridge/` implements the independent local agent helper. The
 build produces a self-contained `bridge-hook.mjs`. The iPhone's `PhrenLive`
 package opens a pinned SSH session and executes only `phren-hook v1 pipe`,
-`phren-hook v1 terminal <Herdr server>`, or `phren-hook v1 shell <folder> [agent]`
+`phren-hook v1 terminal <Herdr server>`, `phren-hook v1 pane <server> <pane>` (one
+pane's own terminal), or `phren-hook v1 shell <folder> [agent]`
 (agent `codex`, `claude`, `copilot`, `opencode` or `phren`, which runs `phren agent -i`).
 HTTP/WebSocket requests travel over a private Unix socket; terminals use an SSH
 PTY attached to the existing Herdr server, or, when Herdr is not running, a
