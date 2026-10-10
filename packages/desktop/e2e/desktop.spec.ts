@@ -96,6 +96,8 @@ test("sidebar, chat and changes render against the fake Hook", async ({ page }) 
   await session.click();
 
   await expect(page.locator(".chat-title")).toHaveText("Fix login");
+  await expect(page.locator(".ct-column")).toContainText("Fix the login flow");
+  await expect(page.locator(".ct-column")).toContainText("On it. The session token is dropped before the guard runs.");
 
   await page.locator("#side .segments .segment", { hasText: "Changes" }).click();
 

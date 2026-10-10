@@ -250,7 +250,11 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
         const entry = { ws, session: url.searchParams.get("session") ?? "" };
         transcriptSockets.add(entry);
         ws.on("close", () => transcriptSockets.delete(entry));
-        send(ws, { type: "backlog", entries: transcriptFrames });
+        // The real Hook's backlog shape (packages/cli/src/bridge/transcripts.ts): numbered
+        // entries, the harness source and the session, so clients parse it as they do live.
+        const source = url.searchParams.get("source") ?? "claude";
+        const entries = (transcriptFrames as Array<{ line?: number; raw: unknown }>).map((entry, index) => ({ line: entry.line ?? index + 1, raw: entry.raw }));
+        send(ws, { type: "backlog", source, session: url.searchParams.get("session") ?? "", entries, totalLines: entries.length, startLine: 1, hasMore: false, reset: true });
       } else if (url.pathname === "/v1/status") {
         statusSockets.add(ws);
         ws.on("close", () => statusSockets.delete(ws));

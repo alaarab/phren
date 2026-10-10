@@ -27,7 +27,7 @@
   color: var(--text); font-family: var(--mono); overflow-wrap: anywhere;
 }
 .ct-user-bubble .ct-md > * + * { margin-top: 8px; }
-.ct-assistant-row { display: block; }
+.ct-assistant-row { display: block; font-family: var(--mono); font-size: var(--transcript-size, 13px); }
 .ct-assistant { font-family: var(--mono); color: var(--text); }
 .ct-queued { margin-top: 6px; color: var(--dim); font-size: 11px; }
 .ct-pending { opacity: .5; }
