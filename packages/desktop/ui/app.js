@@ -113,3 +113,15 @@ function reportPresence() {
   fetch("/api/presence", { method: "POST", headers: { "Content-Type": "application/json", "X-Phren-Desktop": "1" }, body: "{}" }).catch(() => {});
 }
 for (const type of ["keydown", "pointerdown", "pointermove", "wheel"]) window.addEventListener(type, reportPresence, { passive: true, capture: true });
+
+// Push-to-talk (hold F5) speaks to the conductor from anywhere in the app.
+import("./chat/talk.js").then(({ installPushToTalk }) => installPushToTalk({
+  conductor() {
+    const row = store.sessions().find(({ child }) => child.role === "conductor");
+    return row ? { computer: row.computer, target: row.child.target } : null;
+  },
+  send: (computer, target, text) => fetch(`/hosts/${encodeURIComponent(computer)}/v1/prompt`, {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Phren-Desktop": "1" },
+    body: JSON.stringify({ target, text, deliveryId: crypto.randomUUID() }),
+  }),
+})).catch(() => {});
