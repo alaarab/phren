@@ -13,6 +13,7 @@ import { ACTIONS, loadKeyConfig } from "./keys-config.js";
 import { linkComputer, revokeComputer } from "./keys.js";
 import { rehStatus, stopReh } from "./reh.js";
 import { collectUsage } from "./usage.js";
+import { closeAllPreviews, closePreview, listPreviews, openPreview } from "./web-preview.js";
 import {
   ExtensionError,
   extensionFilePath,
@@ -230,6 +231,7 @@ function parseHostPath(pathname: string): { name: string; hookPath: string } | n
   if (slash <= 0) return null;
   return { name: decodeURIComponent(rest.slice(0, slash)), hookPath: rest.slice(slash) };
 }
+
 
 // Buffer the request body, discarding it past the cap instead of growing memory.
 async function readBody(req: IncomingMessage): Promise<Buffer | null> {
@@ -607,6 +609,42 @@ export const startServer: StartServer = async (o) => {
       return;
     }
 
+    if (pathname === "/api/previews" || pathname.startsWith("/api/previews/")) {
+      try {
+        const remove = /^\/api\/previews\/([^/]+)$/.exec(pathname);
+        if (remove && req.method === "DELETE") {
+          sendJson(res, { ok: closePreview(decodeURIComponent(remove[1])) });
+          return;
+        }
+        if (pathname !== "/api/previews") {
+          res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+          res.end("not found");
+          return;
+        }
+        if ((req.method ?? "GET") === "GET") {
+          sendJson(res, { previews: listPreviews() });
+          return;
+        }
+        if (req.method === "POST") {
+          const body = (await readJson(req)) as { computer?: unknown; port?: unknown };
+          if (typeof body.computer !== "string" || !body.computer.trim()) throw new ExtensionError(400, "A computer is required.");
+          const computer = o.computers.find((c) => c.name === body.computer);
+          if (!computer) throw new ExtensionError(404, "Unknown computer.");
+          if (typeof body.port !== "number" || !Number.isInteger(body.port) || body.port < 1 || body.port > 65535) {
+            throw new ExtensionError(400, "A port is required.");
+          }
+          sendJson(res, await openPreview(computer, body.port));
+          return;
+        }
+        res.writeHead(405, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("method not allowed");
+      } catch (err) {
+        sendError(res, err);
+      }
+      return;
+    }
+
+
     if (pathname.startsWith("/hosts/")) {
       const parsed = parseHostPath(pathname);
       const computer = parsed && o.computers.find((c) => c.name === parsed.name);
@@ -712,6 +750,7 @@ export const startServer: StartServer = async (o) => {
     openHooks.clear();
     for (const term of terminals.values()) term.kill();
     terminals.clear();
+    closeAllPreviews();
     stopReh();
     await new Promise<void>((done) => wss.close(() => done()));
     await new Promise<void>((done) => {
