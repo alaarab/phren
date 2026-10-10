@@ -193,16 +193,20 @@ export function removeGitExcludes(projectDir: string, entries: string[]): void {
  */
 export function sweepProjectMirrors(phrenPath: string): void {
   const resolvedPhren = path.resolve(phrenPath);
+  // realpathSync resolves symlinks in the store's own path too (macOS /var ->
+  // /private/var), so compare a link's real target with the store's real path.
+  let realPhren = resolvedPhren;
+  try { realPhren = fs.realpathSync(phrenPath); } catch { /* store missing: keep the resolved path */ }
+  const inStore = (p: string, root: string) => p.startsWith(root + path.sep) || p === root;
   const resolvesIntoStore = (p: string): boolean => {
     try {
-      const target = fs.realpathSync(p);
-      return target.startsWith(resolvedPhren + path.sep) || target === resolvedPhren;
+      return inStore(fs.realpathSync(p), realPhren);
     } catch {
       // Broken symlink — check its raw (unresolved) target.
       try {
         const raw = fs.readlinkSync(p);
         const resolved = path.resolve(path.dirname(p), raw);
-        return resolved.startsWith(resolvedPhren + path.sep) || resolved === resolvedPhren;
+        return inStore(resolved, resolvedPhren) || inStore(resolved, realPhren);
       } catch {
         return false;
       }

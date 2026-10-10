@@ -21,6 +21,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - SessionStart no longer says a team-store project's memory is empty when its findings and tasks are in the team store.
 - Team-store commits reach the remote without `push_changes`. The session-start pull commits a team store's local writes, and nothing then pushed them, so a store could sit dozens of commits ahead. Background sync now pushes every team store that is dirty or ahead, and session start schedules it when a team store is ahead. `push_changes` also pushes a team store whose tree is clean but ahead.
 
+- `phren uninstall` removes the links it made in a project repository (AGENTS.md, CLAUDE.md, skills) when the store sits behind a symlink (on macOS, any store under /var or /tmp). It compared each link's resolved target with the store's unresolved path, so it kept them.
+
 ## [0.3.35] - 2026-10-10
 
 ### Fixed
