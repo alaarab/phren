@@ -1,0 +1,92 @@
+/* Tasks section: the store/project rail, the task list and its row controls.
+   Phren Charcoal tokens only (theme.css). */
+.tasks { display: flex; height: 100%; min-height: 0; }
+.tasks-empty { padding: 10px 12px; color: var(--muted); font-size: 12.5px; }
+
+/* Left rail: store picker and project list with counts. */
+.tasks-rail { flex: none; width: 224px; min-height: 0; overflow-y: auto; padding: 12px 8px; background: var(--sunken); border-right: 1px solid var(--border); }
+.tasks-store { margin: 0 4px 12px; }
+.tasks-store-name { color: var(--text); font-size: 13px; }
+.tasks-store-host { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.tasks-store-select { width: 100%; box-sizing: border-box; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 7px 10px; color: var(--text); font: 13px system-ui; }
+.tasks-store-select:focus { outline: none; border-color: var(--accent); }
+.tasks-rail-head { display: flex; align-items: center; justify-content: space-between; padding: 0 6px 6px; }
+.tasks-rail-count:not(:empty) { padding: 0 7px; border-radius: 999px; background: var(--raised); color: var(--text-2); font-size: 11px; }
+.tasks-projects { display: grid; gap: 2px; }
+.tasks-project { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 32px; padding: 5px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--text-2); font: 13px system-ui; text-align: left; cursor: pointer; transition: background .18s ease, color .18s ease; }
+.tasks-project:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+.tasks-project.selected { background: var(--card); color: var(--accent); }
+.tasks-project-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tasks-project-counts { flex: none; display: flex; gap: 5px; }
+.tasks-count { padding: 0 6px; border-radius: 999px; font-size: 11px; font-variant-numeric: tabular-nums; background: var(--raised); color: var(--muted); }
+.tasks-count.active { background: rgba(138,200,172,0.16); color: var(--done); }
+.tasks-count.queue { background: rgba(255,255,255,0.06); color: var(--muted); }
+.tasks-count.done { color: var(--dim); }
+.tasks-rail-note { margin: 10px 6px 0; color: var(--waiting); font-size: 12px; line-height: 1.4; }
+
+/* Right pane: header, composer and the task sections. */
+.tasks-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.tasks-main-head { flex: none; padding: 16px 20px 10px; }
+.tasks-main-title { margin: 0; color: var(--text); font: 600 16px system-ui; }
+.tasks-main-sub { margin-top: 3px; color: var(--muted); font: 12px var(--mono); }
+.tasks-create { flex: none; padding: 0 20px 12px; display: flex; align-items: center; gap: 8px; }
+.tasks-create-input { flex: 1; box-sizing: border-box; background: var(--sunken); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; color: var(--text); font: 14px system-ui; outline: none; transition: border-color .18s ease; }
+.tasks-create-input:focus { border-color: var(--accent); }
+.tasks-create-input:disabled { color: var(--dim); }
+.tasks-create-hint { flex: none; color: var(--muted); font-size: 12px; }
+.tasks-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 20px 28px; }
+.tasks-section { margin-bottom: 18px; }
+.tasks-section-head { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.tasks-section-label { text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-size: 11px; }
+.tasks-section-count { padding: 0 7px; border-radius: 999px; background: var(--raised); color: var(--text-2); font-size: 11px; }
+.tasks-done-toggle { margin-left: auto; border: 0; background: transparent; color: var(--accent); font: 12px system-ui; cursor: pointer; padding: 2px 6px; border-radius: 8px; }
+.tasks-done-toggle:hover { color: var(--accent-hover); }
+
+/* Rows: 44 px, checkbox, wrapping text and chips. */
+.tasks-list { display: grid; gap: 4px; }
+.tasks-row { position: relative; display: flex; align-items: flex-start; gap: 10px; min-height: 44px; padding: 7px 10px; background: var(--surface); border-radius: 10px; cursor: default; }
+.tasks-row.selected { box-shadow: inset 0 0 0 1px var(--accent); }
+.tasks-check { flex: none; width: 18px; height: 18px; margin-top: 2px; border: 1.5px solid var(--dim); border-radius: 999px; background: transparent; cursor: pointer; }
+.tasks-check:hover:not(:disabled) { border-color: var(--accent); }
+.tasks-check.on { border-color: var(--done); background: var(--done); }
+.tasks-check:disabled { opacity: .5; cursor: default; }
+.tasks-row-main { flex: 1; min-width: 0; }
+.tasks-text { color: var(--text); font: 13.5px system-ui; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tasks-text.done { color: var(--muted); text-decoration: line-through; }
+.tasks-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+.tasks-chip { padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--raised); color: var(--muted); }
+.tasks-chip.priority.high { background: rgba(239,152,152,0.16); color: var(--danger); }
+.tasks-chip.priority.medium { background: rgba(224,188,127,0.16); color: var(--waiting); }
+.tasks-chip.priority.low { color: var(--dim); }
+.tasks-chip.pinned { color: var(--waiting); }
+.tasks-chip.readiness.ready { background: rgba(138,200,172,0.16); color: var(--done); }
+.tasks-chip.readiness.human { background: rgba(224,188,127,0.16); color: var(--waiting); }
+.tasks-chip.readiness.task { color: var(--dim); }
+.tasks-chip.human { color: var(--accent); }
+.tasks-chip.warn { color: var(--waiting); }
+.tasks-row-menu { flex: none; width: 26px; height: 26px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }
+.tasks-row-menu:hover { background: var(--raised); color: var(--text); }
+.tasks-edit-input { width: 100%; box-sizing: border-box; background: var(--sunken); border: 1px solid var(--accent); border-radius: 8px; padding: 6px 8px; color: var(--text); font: 13.5px system-ui; outline: none; }
+
+/* Row menu and the launch picker. */
+.tasks-menu { position: absolute; right: 8px; top: 34px; z-index: 20; min-width: 190px; padding: 5px; background: var(--card); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 18px 40px rgba(0,0,0,.5); display: flex; flex-direction: column; gap: 1px; }
+.tasks-menu-item { border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font: 13px system-ui; text-align: left; padding: 7px 10px; cursor: pointer; transition: background .18s ease, color .18s ease; }
+.tasks-menu-item:hover:not(:disabled) { background: var(--raised); color: var(--text); }
+.tasks-menu-item:disabled { color: var(--dim); cursor: default; }
+.tasks-menu-item.danger { color: var(--danger); }
+.tasks-menu-confirm { display: flex; flex-direction: column; gap: 4px; padding: 2px; }
+.tasks-menu-ask { padding: 4px 8px; color: var(--text-2); font: 12.5px system-ui; }
+.tasks-launch { min-width: 220px; gap: 4px; }
+.tasks-launch-title { padding: 4px 8px 2px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.tasks-launch-field { padding: 2px 8px 0; color: var(--muted); font-size: 11px; }
+.tasks-launch-select { width: 100%; box-sizing: border-box; background: var(--sunken); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; color: var(--text); font: 13px system-ui; }
+.tasks-launch-go { margin-top: 6px; background: var(--accent-solid); color: var(--text); text-align: center; }
+.tasks-launch-go:hover:not(:disabled) { background: var(--accent); color: #1E1E1E; }
+
+/* Transient notices. */
+.tasks-toasts { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 90; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.tasks-toast { padding: 8px 16px; border-radius: 999px; background: var(--raised); border: 1px solid var(--border-strong); color: var(--text); font: 13px system-ui; box-shadow: 0 12px 30px rgba(0,0,0,.4); }
+.tasks-toast.warn { color: var(--waiting); }
+.tasks-toast.error { color: var(--danger); }
+
+@media (prefers-reduced-motion: reduce) { .tasks-project, .tasks-create-input, .tasks-menu-item { transition: none; } }
