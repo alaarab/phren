@@ -280,7 +280,9 @@ function isAppPermissionOrigin(candidate, port) {
 }
 
 function registerPermissions(port) {
-  const granted = (permission) => permission === "notifications" || permission === "clipboard-sanitized-write";
+  // The app itself may notify, write the clipboard and use the microphone (talk mode);
+  // extension frames on *.localhost get none of these.
+  const granted = (permission) => permission === "notifications" || permission === "clipboard-sanitized-write" || permission === "media";
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
     callback(granted(permission) && isAppPermissionOrigin(details?.requestingUrl ?? "", port));
   });

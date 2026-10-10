@@ -531,13 +531,17 @@ function accountRoom(usage) {
 }
 
 function firstUsable(ui, computer) {
-  const harnesses = ui.state.profiles.get(computer)?.harnesses;
+  const profile = ui.state.profiles.get(computer);
+  const harnesses = profile?.harnesses;
   const kinds = ui.state.role === "conductor" ? HARNESS_ORDER.filter((kind) => kind !== "phren") : HARNESS_ORDER;
+  // Prefer a harness whose account still has quota on that computer.
+  const exhausted = new Set((profile?.capacity?.usage ?? []).filter((row) => row?.exhausted).map((row) => String(row.source)));
   if (harnesses) {
+    for (const kind of kinds) if (harnessUsable(harnesses, kind) && !exhausted.has(kind)) return kind;
     for (const kind of kinds) if (harnessUsable(harnesses, kind)) return kind;
     return "";
   }
-  return "codex";
+  return kinds.find((kind) => !exhausted.has(kind)) ?? "codex";
 }
 
 function someUsable(harnesses) {
