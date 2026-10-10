@@ -46,7 +46,7 @@ describe("loadKeyConfig", () => {
     expect(bindings.goto).toEqual(["prefix+g", "ctrl+alt+g"]);
     expect(bindings.zoom).toEqual(["prefix+shift+z"]);
     expect(bindings.close_pane).toEqual([]);
-    expect(bindings).not.toHaveProperty("split_vertical");
+    expect(bindings).not.toHaveProperty("remove_worktree");
     expect(sources).toMatchObject({ prefix: "herdr", goto: "herdr", zoom: "desktop", close_pane: "desktop", help: "default" });
   });
 
