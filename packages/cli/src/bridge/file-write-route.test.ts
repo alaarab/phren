@@ -37,3 +37,15 @@ it("saves into the pane's repository with the version it read, then refuses a st
   await expect(save({ path: "src/new.ts", content: "new\n" })).resolves.toMatchObject({ created: true });
   expect(await readFile(path.join(root, "src/app.ts"), "utf8")).toBe("again\n");
 });
+
+it("finds in files inside the pane's repository", async () => {
+  base = await realpath(await mkdtemp(path.join(tmpdir(), "phren-file-search-")));
+  const root = path.join(base, "repo");
+  await exec("git", ["init", "-q", "-b", "main", root]);
+  await writeFile(path.join(root, "a.ts"), "let accent = green\n");
+  pane.cwd = pane.foreground_cwd = root;
+  const find = (data: Record<string, unknown>) => paneRoute({} as PaneRouteContext,
+    new URL("http://localhost/v1/files/search"), { target, ...data }, {} as ServerResponse);
+  await expect(find({ query: "accent" })).resolves.toEqual({ matches: [{ file: "a.ts", lines: [{ line: 1, column: 5, text: "let accent = green" }] }], files: 1, total: 1, truncated: false });
+  await expect(find({ query: "a", include: [":(top)x"] })).rejects.toThrow();
+});

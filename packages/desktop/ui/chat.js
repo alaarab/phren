@@ -6,7 +6,9 @@ const PROVIDERS = { claude: "Claude", codex: "Codex", copilot: "Copilot", phren:
 
 const CSS = `
 .chat-pane { display:flex; flex-direction:column; gap:12px; height:100%; min-height:0; }
-.chat-actions { margin-left:auto; display:flex; gap:8px; }
+.chat-actions { margin-left:auto; display:flex; gap:8px; flex:none; }
+.chat-headings { min-width:0; flex:1; }
+.chat-sub, .chat-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .chat-header { display:flex; gap:12px; align-items:center; padding:12px 16px; background:var(--card); border:1px solid var(--border); border-radius:10px; }
 .chat-ring { flex:0 0 auto; width:32px; height:32px; border-radius:999px; border:2px solid var(--muted); display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600; }
 .chat-headings { min-width:0; display:flex; flex-direction:column; gap:2px; }
@@ -214,7 +216,7 @@ export function openChat(el, computerName, child, opts = {}) {
   header.append(ring, headings);
   // Header actions open the session's workbench panes (the shell supplies them).
   const actions = h("div", "chat-actions");
-  for (const [label, key] of [["Changes", "onChanges"], ["Files", "onFiles"], ["Terminal", "onTerminal"]]) {
+  for (const [label, key] of [["Changes", "onChanges"], ["Files", "onFiles"], ["Search", "onSearch"], ["Terminal", "onTerminal"]]) {
     if (typeof opts[key] !== "function") continue;
     const button = h("button", "pill-button", label);
     button.addEventListener("click", () => opts[key]());

@@ -155,3 +155,5 @@ Words in the UI: function, type, variable, method, class; never "symbol".
 `column` is 1-based in the full line; `text` is at most 300 chars starting at `offset` (0 when absent).
 Errors: 400 code "search-invalid-regex", 413 code "search-too-broad". Hooks without
 `capabilities.fileSearch` answer 404: show "Update Phren on <computer> to search here."
+- `POST /v1/files/list {target}` → `{files: [path…], total, truncated}`: every tracked and untracked
+  (not ignored) file, for ⌘P. Same `fileSearch` capability; on 404 fall back to the paths already loaded.

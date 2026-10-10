@@ -3,6 +3,7 @@ import { openChat } from "./chat.js";
 import { openTerminal } from "./terminal.js";
 import { openChanges } from "./changes.js";
 import { openFiles } from "./editor.js";
+import { openSearch } from "./search.js";
 
 const sidebarEl = document.getElementById("sidebar");
 const mainEl = document.getElementById("main");
@@ -19,7 +20,7 @@ let session = null; // { computer, child } the chat and workbench are scoped to
 // ---------------------------------------------------------------- workbench
 // The right panel: Changes · Files · Terminal for the open session. Panes stay
 // mounted while the session is open so tabs, scroll and drafts survive switching.
-const PANES = [["changes", "Changes"], ["files", "Files"], ["terminal", "Terminal"]];
+const PANES = [["changes", "Changes"], ["files", "Files"], ["search", "Search"], ["terminal", "Terminal"]];
 const bench = { pane: null, handles: {}, bodies: {}, terminalServer: null, terminalComputer: null };
 
 const benchBar = document.createElement("div");
@@ -114,8 +115,10 @@ function showPane(key, terminalTarget) {
     return;
   }
   if (!session?.child?.target) { el.textContent = "Open a session to see its changes and files."; return; }
-  if (!bench.handles[key]) bench.handles[key] = key === "changes" ? openChanges(el, benchContext()) : openFiles(el, benchContext());
+  const open = { changes: openChanges, files: openFiles, search: openSearch }[key];
+  if (!bench.handles[key]) bench.handles[key] = open(el, benchContext());
   else if (key === "changes") bench.handles.changes.refresh?.();
+  if (key === "search") bench.handles.search.focus?.();
 }
 
 // ---------------------------------------------------------------- sessions
@@ -131,6 +134,7 @@ const handlers = {
     chat = openChat(mainEl, computer, child, {
       onChanges: () => showPane("changes"),
       onFiles: () => showPane("files"),
+      onSearch: () => showPane("search"),
       onTerminal: () => showPane("terminal"),
     });
     if (!sideEl.hidden) showPane("changes");
@@ -199,3 +203,11 @@ function connect() {
 
 setEmpty();
 connect();
+
+// ⇧⌘F opens Search for the open session, as in VS Code.
+window.addEventListener("keydown", (ev) => {
+  if ((ev.metaKey || ev.ctrlKey) && ev.shiftKey && ev.key.toLowerCase() === "f" && session) {
+    ev.preventDefault();
+    showPane("search");
+  }
+});

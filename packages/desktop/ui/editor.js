@@ -4,11 +4,18 @@
 
 import { hookPost, readRepoFile } from "./api.js";
 import { reverseApply } from "./patch.js";
+import { resolveProject, makeIndex } from "./codeindex.js";
 
 const MONO = '"JetBrains Mono", ui-monospace, Menlo, monospace';
 const THEME = "phren";
 
 let monacoPromise = null;
+
+// Provider setup is process-wide. modelOwners lets a provider find the pane
+// (and its index) that owns the model it was invoked on.
+let providersRegistered = false;
+const modelOwners = new Map(); // model uri string -> { path, index }
+let activeOpenFile = null; // the pane that handles phren:/ opens right now
 
 function injectStyle() {
   if (document.getElementById("editor-style")) return;
@@ -39,6 +46,7 @@ function injectStyle() {
 .ed-confirm{display:flex;align-items:center;gap:6px;padding:0 10px;font-size:12px;color:var(--waiting);white-space:nowrap;}
 .ed-crumbs{flex:none;display:flex;align-items:center;gap:2px;height:28px;padding:0 12px;font-family:${MONO};font-size:12px;color:var(--muted);border-bottom:1px solid var(--border);overflow:hidden;}
 .ed-crumbs .sep{color:var(--dim);}
+.ed-crumb-note{margin-left:auto;color:var(--dim);}
 .ed-banner{flex:none;display:none;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;font-size:12.5px;}
 .ed-banner.waiting{background:rgba(224,188,127,.14);color:var(--waiting);}
 .ed-banner.muted{background:var(--sunken);color:var(--muted);}
@@ -75,6 +83,15 @@ function loadMonaco() {
     // TypeScript checker would underline every import. Keep syntax errors only.
     for (const defaults of [monaco.languages.typescript?.typescriptDefaults, monaco.languages.typescript?.javascriptDefaults]) {
       defaults?.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: false });
+      // Phren's code index answers definitions, references and outlines for the
+      // whole project; the one-file worker would add a second, local answer and
+      // turn every F12 into a peek list. Keep its completions and hovers.
+      defaults?.setModeConfiguration?.({
+        completionItems: true, hovers: true, signatureHelp: true, documentHighlights: true,
+        definitions: false, references: false, documentSymbols: false, rename: false,
+        diagnostics: true, documentRangeFormattingEdits: true, onTypeFormattingEdits: true,
+        codeActions: false, inlayHints: false,
+      });
     }
     monaco.editor.defineTheme(THEME, {
       base: "vs-dark",
@@ -118,12 +135,170 @@ function fuzzy(query, text) {
   return i === q.length;
 }
 
+/** Rank quick-open matches: exact file name, then name prefix, then name
+ * contains, then a match only in the folder; shorter paths first within each. */
+function rankPaths(query, paths) {
+  const q = query.toLowerCase();
+  const tier = (p) => {
+    const name = baseName(p).toLowerCase();
+    if (!q) return 3;
+    if (name === q) return 0;
+    if (name.startsWith(q)) return 1;
+    if (name.includes(q)) return 2;
+    return fuzzy(q, name) ? 3 : 4;
+  };
+  return paths.filter((p) => fuzzy(q, p))
+    .map((p) => [tier(p), p])
+    .sort((a, b) => a[0] - b[0] || a[1].length - b[1].length || a[1].localeCompare(b[1]))
+    .map(([, p]) => p);
+}
+
 function mkButton(label, onClick) {
   const b = document.createElement("button");
   b.className = "ed-btn";
   b.textContent = label;
   b.addEventListener("click", onClick);
   return b;
+}
+
+function languageFor(monaco, path) {
+  const name = baseName(path);
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return "plaintext";
+  const ext = name.slice(dot).toLowerCase();
+  for (const lang of monaco.languages.getLanguages()) {
+    if (lang.extensions && lang.extensions.some((e) => e.toLowerCase() === ext)) return lang.id;
+  }
+  return "plaintext";
+}
+
+/** A Monaco location in another file. Monaco only navigates to a URI that has
+ * a model, so leave an empty placeholder; the editor opener then loads the
+ * real file into it (openFile fills a placeholder in place). */
+function location(monaco, file, line) {
+  const uri = monaco.Uri.parse("phren:/" + file);
+  if (!monaco.editor.getModel(uri)) monaco.editor.createModel("", languageFor(monaco, file), uri);
+  return { uri, range: new monaco.Range(line, 1, line, 1) };
+}
+
+function findingText(f) {
+  if (typeof f === "string") return f;
+  return (f && (f.text || f.finding || f.summary)) || "";
+}
+
+const KIND_WORDS = {
+  function: "Function", method: "Method", class: "Class", interface: "Interface",
+  type: "Struct", enum: "Enum", variable: "Variable", struct: "Struct",
+};
+
+function toSymbol(monaco, entry) {
+  const line = entry.line || 1;
+  const end = entry.endLine || line;
+  return {
+    name: entry.name,
+    detail: entry.signature || "",
+    kind: monaco.languages.SymbolKind[KIND_WORDS[String(entry.kind || "").toLowerCase()] || "Object"],
+    range: new monaco.Range(line, 1, end, 1),
+    selectionRange: new monaco.Range(line, 1, line, 1),
+    children: (entry.children || []).map((child) => toSymbol(monaco, child)),
+  };
+}
+
+/** Register the phren:/ language providers once; they resolve the owning pane
+ * through modelOwners, so they keep working across panes. */
+function ensureProviders(monaco) {
+  if (providersRegistered) return;
+  providersRegistered = true;
+
+  monaco.editor.registerEditorOpener({
+    openCodeEditor(source, resource, selectionOrPosition) {
+      if (resource.scheme !== "phren" || !activeOpenFile) return false;
+      const line = selectionOrPosition && (selectionOrPosition.startLineNumber || selectionOrPosition.lineNumber);
+      activeOpenFile(resource.path.replace(/^\//, ""), { line });
+      return true;
+    },
+  });
+
+  monaco.languages.registerDefinitionProvider({ scheme: "phren" }, {
+    async provideDefinition(model, position) {
+      const owner = modelOwners.get(model.uri.toString());
+      const word = model.getWordAtPosition(position);
+      if (!owner || !word) return null;
+      try {
+        const refs = await owner.index.fileReferences(owner.path);
+        const row = (refs.references || []).find((r) => r.line === position.lineNumber && r.name === word.word);
+        let target = row ? { file: row.file, line: row.targetLine } : null;
+        if (!target) {
+          const def = await owner.index.definition(word.word);
+          const sym = def.definition && def.definition.symbol;
+          if (sym) target = { file: sym.file, line: sym.line };
+        }
+        return target && target.file ? location(monaco, target.file, target.line) : null;
+      } catch { return null; }
+    },
+  });
+
+  monaco.languages.registerReferenceProvider({ scheme: "phren" }, {
+    async provideReferences(model, position) {
+      const owner = modelOwners.get(model.uri.toString());
+      const word = model.getWordAtPosition(position);
+      if (!owner || !word) return null;
+      try {
+        const refs = await owner.index.fileReferences(owner.path);
+        const row = (refs.references || []).find((r) => r.line === position.lineNumber && r.name === word.word);
+        const data = await owner.index.references(row && row.symbol ? row.symbol : word.word);
+        const locations = [];
+        for (const group of (data.references && data.references.groups) || []) {
+          const uri = monaco.Uri.parse("phren:/" + group.file);
+          // Empty model gives the peek list a label without loading the file.
+          if (!monaco.editor.getModel(uri)) monaco.editor.createModel("", languageFor(monaco, group.file), uri);
+          for (const ref of group.references || []) {
+            locations.push({ uri, range: new monaco.Range(ref.line, 1, ref.line, 1) });
+          }
+        }
+        return locations;
+      } catch { return null; }
+    },
+  });
+
+  monaco.languages.registerHoverProvider({ scheme: "phren" }, {
+    async provideHover(model, position) {
+      const owner = modelOwners.get(model.uri.toString());
+      const word = model.getWordAtPosition(position);
+      if (!owner || !word) return null;
+      try {
+        const refs = await owner.index.fileReferences(owner.path);
+        const row = (refs.references || []).find((r) => r.line === position.lineNumber && r.name === word.word);
+        const def = await owner.index.definition(row && row.symbol ? row.symbol : word.word);
+        const symbol = def.definition && def.definition.symbol;
+        if (!symbol) return null;
+        const md = [];
+        if (symbol.signature) md.push("```" + languageFor(monaco, symbol.file || owner.path) + "\n" + symbol.signature + "\n```");
+        if (symbol.doc) md.push(symbol.doc);
+        md.push(`**${symbol.kind}** · used in ${symbol.uses || 0} places`);
+        const findings = (def.definition && def.definition.findings) || [];
+        if (findings.length) {
+          md.push("**What Phren knows**");
+          for (const f of findings.slice(0, 3)) md.push("- " + findingText(f).slice(0, 200));
+        }
+        return {
+          contents: [{ value: md.join("\n\n") }],
+          range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
+        };
+      } catch { return null; }
+    },
+  });
+
+  monaco.languages.registerDocumentSymbolProvider({ scheme: "phren" }, {
+    async provideDocumentSymbols(model) {
+      const owner = modelOwners.get(model.uri.toString());
+      if (!owner) return [];
+      try {
+        const data = await owner.index.outline(owner.path);
+        return (data.entries || []).map((entry) => toSymbol(monaco, entry));
+      } catch { return []; }
+    },
+  });
 }
 
 export function openFiles(el, ctx) {
@@ -141,6 +316,10 @@ export function openFiles(el, ctx) {
   let pendingClose = null;
   let hovered = false;
 
+  let index = null;
+  let project = null;
+  let indexAvailable = false;
+
   // ------------------------------------------------------------- DOM
   const root = document.createElement("div");
   root.className = "ed-root";
@@ -154,7 +333,7 @@ export function openFiles(el, ctx) {
   const quickButton = document.createElement("button");
   quickButton.className = "ed-qp";
   quickButton.textContent = "⌘P";
-  quickButton.addEventListener("click", openQuick);
+  quickButton.addEventListener("click", () => openQuick("file"));
   filesHeader.append(filesTitle, quickButton);
   const tree = document.createElement("div");
   tree.className = "ed-tree";
@@ -203,6 +382,7 @@ export function openFiles(el, ctx) {
     automaticLayout: true,
     scrollBeyondLastLine: false,
     renderLineHighlight: "line",
+    breadcrumbs: { enabled: true },
     padding: { top: 8 },
   });
 
@@ -235,17 +415,6 @@ export function openFiles(el, ctx) {
     if (!active || !model || !sel) return;
     const text = model.getValueInRange(sel);
     ctx.ask(`${active.path}:${sel.startLineNumber}-${sel.endLineNumber}\n\`\`\`\n${text}\n\`\`\`\n`);
-  }
-
-  function languageFor(path) {
-    const name = baseName(path);
-    const dot = name.lastIndexOf(".");
-    if (dot < 0) return "plaintext";
-    const ext = name.slice(dot).toLowerCase();
-    for (const lang of monaco.languages.getLanguages()) {
-      if (lang.extensions && lang.extensions.some((e) => e.toLowerCase() === ext)) return lang.id;
-    }
-    return "plaintext";
   }
 
   // ------------------------------------------------------------- banner
@@ -309,6 +478,7 @@ export function openFiles(el, ctx) {
     if (i < 0) return;
     if (editor && editor.getModel() === tab.model) editor.setModel(null);
     tabs.splice(i, 1);
+    modelOwners.delete(tab.model.uri.toString());
     if (tab.originalModel) tab.originalModel.dispose();
     tab.model.dispose();
     if (active === tab) active = tabs[Math.min(i, tabs.length - 1)] || null;
@@ -373,36 +543,43 @@ export function openFiles(el, ctx) {
 
   function renderCrumb() {
     crumbs.innerHTML = "";
-    if (!active) return;
-    const parts = active.path.split("/");
-    parts.forEach((part, i) => {
-      if (i) {
-        const sep = document.createElement("span");
-        sep.className = "sep";
-        sep.textContent = " › ";
-        crumbs.appendChild(sep);
+    if (active) {
+      const parts = active.path.split("/");
+      parts.forEach((part, i) => {
+        if (i) {
+          const sep = document.createElement("span");
+          sep.className = "sep";
+          sep.textContent = " › ";
+          crumbs.appendChild(sep);
+        }
+        const seg = document.createElement("span");
+        seg.textContent = part;
+        crumbs.appendChild(seg);
+      });
+      if (active.mode === "diff") {
+        const spacer = document.createElement("span");
+        spacer.style.marginLeft = "auto";
+        crumbs.appendChild(spacer);
+        crumbs.append(
+          mkButton(active.sideBySide ? "Side by side" : "Inline", () => {
+            active.sideBySide = !active.sideBySide;
+            if (diffEditor) diffEditor.updateOptions({ renderSideBySide: active.sideBySide });
+            renderCrumb();
+          }),
+          mkButton("Back to file", () => {
+            active.mode = "file";
+            active.note = null;
+            showTab(active);
+            renderCrumb();
+          }),
+        );
       }
-      const seg = document.createElement("span");
-      seg.textContent = part;
-      crumbs.appendChild(seg);
-    });
-    if (active.mode === "diff") {
-      const spacer = document.createElement("span");
-      spacer.style.marginLeft = "auto";
-      crumbs.appendChild(spacer);
-      crumbs.append(
-        mkButton(active.sideBySide ? "Side by side" : "Inline", () => {
-          active.sideBySide = !active.sideBySide;
-          if (diffEditor) diffEditor.updateOptions({ renderSideBySide: active.sideBySide });
-          renderCrumb();
-        }),
-        mkButton("Back to file", () => {
-          active.mode = "file";
-          active.note = null;
-          showTab(active);
-          renderCrumb();
-        }),
-      );
+    }
+    if (!indexAvailable && project) {
+      const note = document.createElement("span");
+      note.className = "ed-crumb-note";
+      note.textContent = `No code index for ${project}`;
+      crumbs.appendChild(note);
     }
   }
 
@@ -421,7 +598,15 @@ export function openFiles(el, ctx) {
       let file;
       try { file = await readRepoFile(computer, target, path); }
       catch (err) { showBanner("danger", err.message || "Could not open the file."); return; }
-      const model = monaco.editor.createModel(file.text, languageFor(path));
+      const uri = monaco.Uri.parse("phren:/" + path);
+      // A peek list may have left an empty placeholder under this URI.
+      let model = monaco.editor.getModel(uri);
+      if (model) {
+        monaco.editor.setModelLanguage(model, languageFor(monaco, path));
+        if (model.getValue() !== file.text) model.setValue(file.text);
+      } else {
+        model = monaco.editor.createModel(file.text, languageFor(monaco, path), uri);
+      }
       tab = {
         path, model, version: file.version, savedText: file.text, dirty: false,
         mode: "file", sideBySide: true, originalModel: null, viewState: null, note: null,
@@ -430,6 +615,7 @@ export function openFiles(el, ctx) {
       tabs.push(tab);
       knownPaths.add(path);
     }
+    if (index) modelOwners.set(tab.model.uri.toString(), { path, index });
     setActive(tab);
     if (opts.diff) await openRepoDiff(tab);
     if (opts.line) revealLine(opts.line);
@@ -475,6 +661,7 @@ export function openFiles(el, ctx) {
       tab.version = res.version;
       tab.savedText = tab.model.getValue();
       tab.dirty = false;
+      if (index) index.invalidate(tab.path);
       if (tab === active) clearBanner();
       renderTabs();
     } catch (err) {
@@ -567,8 +754,16 @@ export function openFiles(el, ctx) {
   }
 
   // ------------------------------------------------------------- quick open
+  let listed = null; // { at, files } from /v1/files/list, reused for 30 s
   async function quickPaths() {
     const paths = new Set(knownPaths);
+    try {
+      if (!listed || Date.now() - listed.at > 30_000) {
+        const reply = await hookPost(computer, "/v1/files/list", { target });
+        listed = { at: Date.now(), files: reply.files || [] };
+      }
+      for (const f of listed.files) paths.add(f);
+    } catch { /* an older Hook has no file list: tree and changed paths still work */ }
     try {
       const status = await hookPost(computer, "/v1/git/status", { target });
       for (const f of status.files || []) paths.add(f.path);
@@ -576,39 +771,64 @@ export function openFiles(el, ctx) {
     return [...paths];
   }
 
-  function openQuick() {
+  function openQuick(mode = "file") {
+    if (mode === "search" && !index) return;
     quick.classList.add("open");
     quickInput.value = "";
+    quickInput.placeholder = mode === "search" ? "Go to function or type…" : "Search files by name";
     quickList.innerHTML = "";
-    const all = [];
-    let shown = [];
+    let items = [];
+    let pool = [];
     let sel = 0;
+    let timer = null;
+
+    const label = (item) => typeof item === "string"
+      ? item
+      : `${item.name}  ${item.kind} · ${item.file}:${item.line}`;
+
+    const activate = (item) => {
+      closeQuick();
+      if (typeof item === "string") openFile(item);
+      else openFile(item.file, { line: item.line });
+    };
+
     const render = () => {
-      shown = all.filter((p) => fuzzy(quickInput.value.trim(), p)).slice(0, 200);
-      if (sel >= shown.length) sel = 0;
       quickList.innerHTML = "";
-      shown.forEach((p, i) => {
+      items.forEach((item, i) => {
         const row = document.createElement("div");
         row.className = "ed-quick-item" + (i === sel ? " sel" : "");
-        row.textContent = p;
-        row.addEventListener("mousedown", (e) => { e.preventDefault(); openFromQuick(p); });
+        row.textContent = label(item);
+        row.addEventListener("mousedown", (e) => { e.preventDefault(); activate(item); });
         quickList.appendChild(row);
       });
     };
-    quickInput.oninput = render;
+
+    const filterFiles = () => {
+      items = rankPaths(quickInput.value.trim(), pool).slice(0, 200);
+      if (sel >= items.length) sel = 0;
+      render();
+    };
+
+    const runSearch = () => {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        try { items = (await index.search(quickInput.value.trim())).symbols || []; }
+        catch { items = []; }
+        if (sel >= items.length) sel = 0;
+        render();
+      }, 150);
+    };
+
+    quickInput.oninput = mode === "search" ? runSearch : filterFiles;
     quickInput.onkeydown = (e) => {
       if (e.key === "Escape") closeQuick();
-      else if (e.key === "Enter") { if (shown[sel]) openFromQuick(shown[sel]); }
-      else if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(sel + 1, shown.length - 1); render(); }
+      else if (e.key === "Enter") { if (items[sel]) activate(items[sel]); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(sel + 1, items.length - 1); render(); }
       else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(sel - 1, 0); render(); }
     };
     quickInput.focus();
-    quickPaths().then((paths) => { all.push(...paths); render(); });
-  }
-
-  function openFromQuick(path) {
-    closeQuick();
-    openFile(path);
+    if (mode === "search") runSearch();
+    else quickPaths().then((paths) => { pool = paths; filterFiles(); });
   }
 
   function closeQuick() {
@@ -625,15 +845,29 @@ export function openFiles(el, ctx) {
   function onKey(e) {
     if (!ownsFocus() || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
     const key = e.key.toLowerCase();
-    if (key === "p") { e.preventDefault(); openQuick(); }
+    if (key === "p") { e.preventDefault(); openQuick("file"); }
     else if (key === "s") { e.preventDefault(); doSave(active); }
+    else if (key === "t") { e.preventDefault(); openQuick("search"); }
   }
 
   document.addEventListener("keydown", onKey);
   root.addEventListener("pointerenter", () => { hovered = true; });
   root.addEventListener("pointerleave", () => { hovered = false; });
 
-  loadMonaco().catch(() => {});
+  loadMonaco()
+    .then(async (m) => {
+      const resolved = await resolveProject(computer, target);
+      project = resolved.project;
+      indexAvailable = resolved.available;
+      if (indexAvailable) {
+        index = makeIndex(computer, project);
+        ensureProviders(m);
+        activeOpenFile = openFile;
+        for (const tab of tabs) modelOwners.set(tab.model.uri.toString(), { path: tab.path, index });
+      }
+      renderCrumb();
+    })
+    .catch(() => {});
   loadDir("", tree);
 
   function close() {
@@ -641,10 +875,12 @@ export function openFiles(el, ctx) {
     if (editor) { editor.setModel(null); editor.dispose(); editor = null; }
     if (diffEditor) { diffEditor.dispose(); diffEditor = null; }
     for (const tab of tabs) {
+      modelOwners.delete(tab.model.uri.toString());
       if (tab.originalModel) tab.originalModel.dispose();
       tab.model.dispose();
     }
     tabs.length = 0;
+    if (activeOpenFile === openFile) activeOpenFile = null;
     el.innerHTML = "";
   }
 
