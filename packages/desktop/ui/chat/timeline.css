@@ -10,6 +10,22 @@
 }
 .ct-empty { display: none; }
 
+/* The fold over older turns: one quiet line at the top of the column. */
+.ct-fold {
+  padding: 4px 0;
+  margin-bottom: 10px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font: 500 12.5px var(--prose);
+  text-align: left;
+  cursor: pointer;
+  transition: color .18s ease;
+}
+.ct-fold:hover { color: var(--text-2); }
+.ct-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .ct-jump {
   position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
   padding: 6px 14px; border: 1px solid var(--border-strong); border-radius: 999px;

@@ -75,8 +75,9 @@ export function openChat(el, computerName, child, opts = {}) {
   el.classList.add("chat-pane");
   el.replaceChildren();
 
-  // ---- header ----
-  const ring = node("div", "chat-ring", provider.charAt(0).toUpperCase());
+  // ---- header: one calm line, like the Codex app ----
+  const ring = node("div", "chat-ring"); // hidden; keeps the status colour wiring
+  const dot = node("div", "chat-status-dot");
   const title = node("div", "chat-title", (child && (child.title || child.label)) || provider);
   title.title = "Double-click to rename";
   title.addEventListener("dblclick", startRename);
@@ -84,18 +85,18 @@ export function openChat(el, computerName, child, opts = {}) {
   sub.append(node("span", "chat-project", basename(child && child.cwd)));
   sub.append(node("span", "chat-branch", (child && child.branch) || ""));
   sub.append(node("span", "chat-computer", computerName));
-  const headings = node("div", "chat-headings");
-  headings.append(title, sub);
-
-  const dot = node("div", "chat-status-dot");
+  const more = node("button", "chat-more", "⋯");
+  more.type = "button";
+  more.title = "Rename";
+  more.addEventListener("click", () => startRename());
   const contextRing = node("div", "chat-context-ring");
   const knowsBtn = node("button", "chat-knows-btn", "Phren knows");
   knowsBtn.type = "button";
   knowsBtn.addEventListener("click", () => toggleKnows());
   const trailing = node("div", "chat-trailing");
-  trailing.append(knowsBtn, contextRing, dot);
+  trailing.append(knowsBtn, contextRing);
   const header = node("div", "chat-header");
-  header.append(ring, headings, trailing);
+  header.append(ring, dot, title, sub, more, trailing);
 
   const notice = node("div", "chat-notice");
 
@@ -108,7 +109,7 @@ export function openChat(el, computerName, child, opts = {}) {
 
   // ---- composer ----
   const composer = createComposer({
-    computer: computerName, target, provider: source,
+    computer: computerName, target, provider: source, branch: child && child.branch,
     onConsole: typeof opts.onConsole === "function" ? opts.onConsole : undefined,
     onAgents: () => openWork("agents"),
     onWorkers: () => openWork("workers"),
@@ -132,7 +133,7 @@ export function openChat(el, computerName, child, opts = {}) {
     if (talk) { talk.stop(); talk = null; return; }
     talkReplyLine = lastAssistantLine();
     talk = createTalkMode({
-      computer: computerName, target, provider: source,
+      computer: computerName, target, provider: source, branch: child && child.branch,
       send: (text) => hookPost(computerName, "/v1/prompt", { target, text, deliveryId: crypto.randomUUID() }),
       onState: (state) => { if (state === "off") talk = null; },
     });

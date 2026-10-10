@@ -12,39 +12,29 @@
 
 /* Header ------------------------------------------------------------------ */
 
+/* One calm line, like the Codex app: status, title, sub, actions, trailing. */
 .chat-header {
   display: flex;
-  gap: 12px;
   align-items: center;
+  gap: 8px;
   min-width: 0;
-  padding: 10px 14px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  padding: 6px 4px 8px;
+  border-bottom: 1px solid var(--border);
 }
-.chat-ring {
+.chat-ring { display: none; }
+.chat-status-dot {
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
-  border: 2px solid var(--muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  font-weight: 600;
-}
-.chat-headings {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  background: var(--muted);
+  transition: background .18s ease;
 }
 .chat-title {
+  flex: 0 1 auto;
+  min-width: 0;
   color: var(--text);
-  font-size: 15px;
-  font-weight: 600;
+  font: 600 14px var(--prose);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -53,28 +43,56 @@
 .chat-title:hover { color: var(--text-2); }
 .chat-sub {
   display: flex;
-  gap: 8px;
   align-items: baseline;
+  flex: 0 1 auto;
   min-width: 0;
-  font-size: 12px;
+  color: var(--muted);
+  font: 400 12.5px var(--prose);
+  white-space: nowrap;
   overflow: hidden;
 }
-.chat-project { color: var(--accent); white-space: nowrap; }
+.chat-project { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-branch { color: var(--muted); font-family: var(--mono); white-space: nowrap; }
 .chat-computer { color: var(--muted); white-space: nowrap; }
+.chat-sub > span:empty { display: none; }
+.chat-branch::before,
+.chat-computer::before { content: "\00a0·\00a0"; }
+.chat-more {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: 600 14px var(--prose);
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease;
+}
+.chat-more:hover { background: var(--raised); color: var(--text-2); }
+.chat-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .chat-trailing {
   display: flex;
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
+  margin-left: auto;
 }
-.chat-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--muted);
-  transition: background .18s ease;
+/* A quiet text button inside the one-line header (overrides knows.css). */
+.chat-header .chat-knows-btn {
+  padding: 2px 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: 500 12.5px var(--prose);
 }
+.chat-header .chat-knows-btn:hover { background: transparent; color: var(--text); }
+.chat-header .chat-knows-btn.on { background: transparent; color: var(--accent); }
 .chat-context-ring { display: block; flex: 0 0 auto; }
 
 .chat-rename {

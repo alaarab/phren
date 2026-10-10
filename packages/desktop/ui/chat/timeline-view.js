@@ -78,6 +78,34 @@ function entryKey(entry) {
   return parts.join("\n");
 }
 
+/** Entries split into turns, each starting at a user message. Entries before
+ *  the first user message ride along with that first turn. */
+function groupTurns(entries) {
+  const turns = [];
+  let leading = [];
+  for (const entry of entries) {
+    const first = entry.messages && entry.messages[0];
+    const startsTurn = !entry.pendingEcho && !!first && first.role === "user";
+    if (startsTurn) { turns.push([...leading, entry]); leading = []; }
+    else if (turns.length) turns[turns.length - 1].push(entry);
+    else leading.push(entry);
+  }
+  if (leading.length) turns.push(leading);
+  return turns;
+}
+
+/** Whether buildMessage would draw this entry as a user bubble or assistant
+ *  text; tool rows and the other special rows do not count. */
+function countsAsMessage(entry) {
+  if (entry.turnActivity || entry.pendingEcho || entry.turnChanges) return false;
+  if (entry.phren || entry.card || entry.isReadRun || entry.isActivity) return false;
+  const message = entry.messages && entry.messages[0];
+  if (!message) return false;
+  if (message.isHookContext || message.isNarration || message.isScheduled || message.isCompaction) return false;
+  if (message.localCommand) return false;
+  return message.role === "user" || message.role === "assistant";
+}
+
 /**
  * The timeline view.
  * @param {HTMLElement} container element to fill and own
@@ -105,6 +133,10 @@ export function createTimelineView(container, ctx = {}) {
   let atBottom = true;
   let reachTopFired = false;
   const onTop = [];
+  let expandedAll = false;    // the fold is open, every turn drawn
+  let foldHidden = false;     // this render hid turns behind the fold
+  let lastPreparation = null; // re-render arguments for the fold's click
+  let lastPreview = null;
 
   const distanceFromBottom = () => scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight;
   const isAtBottom = () => distanceFromBottom() < 40;
@@ -117,6 +149,8 @@ export function createTimelineView(container, ctx = {}) {
 
   scroll.addEventListener("scroll", () => {
     updateJump();
+    // Collapsed, the fold is the top: nothing hidden above it to load.
+    if (foldHidden) { reachTopFired = false; return; }
     if (scroll.scrollTop <= 24) {
       if (!reachTopFired) { reachTopFired = true; for (const fn of onTop) fn(); }
     } else {
@@ -136,6 +170,8 @@ export function createTimelineView(container, ctx = {}) {
   }
 
   function render(preparation, preview) {
+    lastPreparation = preparation;
+    lastPreview = preview;
     const entries = (preparation && preparation.entries) || [];
     const jobs = (preparation && preparation.jobs) || [];
     const stick = isAtBottom();
@@ -146,12 +182,27 @@ export function createTimelineView(container, ctx = {}) {
     jobsEl = updateJobs(jobsEl, jobs);
     if (jobsEl) ordered.push(jobsEl);
 
+    const ids = entries.map((entry, index) => entry.id || entry.placeholderIdentifier || `row:${index}`);
+    const turns = groupTurns(entries);
+    foldHidden = turns.length > 2 && !expandedAll;
+    const hidden = new Set();
+    if (turns.length > 2) {
+      let count = 0;
+      const hiddenTurns = expandedAll ? [] : turns.slice(0, turns.length - 2);
+      for (const turn of hiddenTurns) for (const entry of turn) {
+        hidden.add(entry);
+        if (countsAsMessage(entry)) count += 1;
+      }
+      ordered.push(buildFold(count));
+    }
+
     const live = [];
     const seen = new Set();
-    for (const entry of entries) {
-      const id = entry.id || entry.placeholderIdentifier || `row:${ordered.length}`;
+    entries.forEach((entry, index) => {
+      const id = ids[index];
+      seen.add(id); // hidden rows keep their cache so expanding is instant
+      if (hidden.has(entry)) return;
       const key = entryKey(entry);
-      seen.add(id);
       let row = rows.get(id);
       if (!row || row.key !== key) {
         const built = buildEntry(entry);
@@ -161,7 +212,7 @@ export function createTimelineView(container, ctx = {}) {
       }
       if (row.live) live.push(row.live);
       ordered.push(row.el);
-    }
+    });
     for (const [id, row] of [...rows]) if (!seen.has(id)) { row.el.remove(); rows.delete(id); }
 
     if (previewRow) { previewRow.remove(); previewRow = null; }
@@ -178,6 +229,20 @@ export function createTimelineView(container, ctx = {}) {
       scroll.scrollTop = beforeTop + (scroll.scrollHeight - beforeHeight);
     }
     updateJump();
+  }
+
+  /** The fold row at the top of the column: N previous messages, or hide earlier. */
+  function buildFold(count) {
+    const button = h("button", "ct-fold");
+    button.type = "button";
+    button.textContent = expandedAll
+      ? "Hide earlier messages ‹"
+      : `${count} previous message${count === 1 ? "" : "s"} ›`;
+    button.addEventListener("click", () => {
+      expandedAll = !expandedAll;
+      render(lastPreparation, lastPreview);
+    });
+    return button;
   }
 
   /** Rendered markdown, cut to a bounded preview with a Show more toggle. */

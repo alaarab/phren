@@ -125,3 +125,34 @@
 .pc-bg-label { color: var(--text); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pc-bg-detail { color: var(--muted); font-size: 11.5px; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pc-bg-state { flex: 0 0 auto; color: var(--muted); font-size: 11.5px; }
+
+/* Worded footer selectors (Permission, Model, Effort) and the ring button. */
+.pc-select {
+  display: inline-flex; align-items: center; gap: 2px; border: none; background: transparent;
+  color: var(--muted); font: 500 12px var(--prose); padding: 4px 8px; border-radius: 6px; cursor: pointer;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+.pc-select:hover { background: var(--raised); color: var(--text-2); }
+.pc-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pc-select-label { color: var(--muted); transition: color 0.18s ease; }
+.pc-select:hover .pc-select-label { color: var(--text-2); }
+.pc-select-label.warn, .pc-select:hover .pc-select-label.warn { color: var(--waiting); }
+.pc-select-chevron { display: flex; color: inherit; opacity: 0.7; }
+.pc-select-chevron svg { width: 12px; height: 12px; }
+.pc-select-plain { color: var(--muted); font: 500 12px var(--prose); padding: 4px 8px; }
+.pc-ring-btn {
+  width: 28px; height: 28px; padding: 0; border: none; border-radius: 8px; background: transparent;
+  color: var(--text-2); cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.pc-ring-btn:hover { background: var(--raised); }
+.pc-ring-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pc-ring-btn svg { width: 16px; height: 16px; }
+
+/* Where-it-runs line under the composer card. */
+.pc-where {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding: 6px 14px 0; font: 12px var(--prose); color: var(--dim);
+}
+.pc-where-computer, .pc-where-branch { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
+.pc-where-icon { color: var(--muted); }
+.pc-where-branch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

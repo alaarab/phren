@@ -3,7 +3,7 @@
 // the `.sb-row` / data-session="<computer>/<childId>" shape keys.js relies on.
 import { showSection } from "./shell/sections.js";
 import { hookPost, targetQuery } from "./api.js";
-import { store } from "./shell/store.js";
+import { store, projectOf } from "./shell/store.js";
 
 // answerApproval is written in a parallel change under ui/chat/. Import it
 // lazily so a missing module never takes the whole sidebar down; the fallback
@@ -13,6 +13,11 @@ import("./chat/answers.js").then((m) => { answerApproval = m.answerApproval; }).
 
 const GROUP_KEY = "phren.desktop.sidebar.group";
 const PULL_TTL_MS = 60_000;
+const SEEN_KEY = "phren.desktop.sidebar.seen";
+const PINNED_KEY = "phren.desktop.sidebar.pinned";
+const ROWS_KEY = "phren.desktop.sidebarRows";
+const SEEN_CAP = 500;
+const DAY_MS = 86_400_000;
 
 // Provider glyphs (inline SVG), one per Hook target source.
 const GLYPHS = {
@@ -23,6 +28,9 @@ const GLYPHS = {
   phren: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="5" r="2.1"/><circle cx="5" cy="17.5" r="2.1"/><circle cx="19" cy="17.5" r="2.1"/><path d="M10.7 6.9L6.3 15.5M13.3 6.9l4.4 8.6M7.1 17.5h9.8"/></svg>',
 };
 const BADGE = { needs: "!", working: "\u25CF", done: "\u2713", idle: "\u00B7" };
+
+// Compact project-group header glyph.
+const FOLDER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2.5h7A1.5 1.5 0 0 1 19 9v8.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5z"/></svg>';
 
 // Six Phren-palette hues for the stable per-computer colour.
 // Not the accent purple (projects) or the status colours; by link order, so
@@ -117,10 +125,79 @@ function readMode() {
 }
 function writeMode(mode) { try { localStorage.setItem(GROUP_KEY, mode); } catch { /* storage unavailable */ } }
 
+// Row style: today's two-line row ("detailed") or the one-line Codex-like row.
+function readRows() {
+  try { return localStorage.getItem(ROWS_KEY) === "compact" ? "compact" : "detailed"; } catch { return "detailed"; }
+}
+
+function readJSON(key, fallback) {
+  try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; } catch { return fallback; }
+}
+function writeJSON(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable */ } }
+function readSeen() {
+  const value = readJSON(SEEN_KEY, {});
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function readPinned() {
+  const value = readJSON(PINNED_KEY, []);
+  return Array.isArray(value) ? value.filter((k) => typeof k === "string") : [];
+}
+
+function isPinned(sb, key) { return sb.pinned.includes(key); }
+
+// Done/idle rows changed since last opened. A never-opened session only counts
+// while its change is fresh, so a first run does not light up the whole list.
+function isUnread(sb, computer, child, kind) {
+  if (kind !== "done" && kind !== "idle") return false;
+  const changed = Date.parse(child.lastChangedAt);
+  if (Number.isNaN(changed)) return false;
+  const seen = sb.seen[keyOf(computer, child)];
+  if (seen == null) return Date.now() - changed < DAY_MS;
+  const at = Date.parse(seen);
+  return Number.isNaN(at) ? true : changed > at;
+}
+
+function markSeen(sb, computer, child) {
+  if (!child.lastChangedAt) return;
+  const key = keyOf(computer, child);
+  if (sb.seen[key] === child.lastChangedAt) return;
+  sb.seen[key] = child.lastChangedAt;
+  const entries = Object.entries(sb.seen).sort((a, b) => (Date.parse(a[1]) || 0) - (Date.parse(b[1]) || 0));
+  for (const [old] of entries.slice(0, Math.max(0, entries.length - SEEN_CAP))) delete sb.seen[old];
+  writeJSON(SEEN_KEY, sb.seen);
+}
+
+function togglePin(sb, desc) {
+  const key = keyOf(desc.computer, desc.child);
+  const at = sb.pinned.indexOf(key);
+  if (at >= 0) sb.pinned.splice(at, 1); else sb.pinned.push(key);
+  writeJSON(PINNED_KEY, sb.pinned);
+}
+
+// Compact-row age: "3h", not the detailed "3h ago".
+function shortAge(iso) {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const seconds = Math.max(0, (Date.now() - t) / 1000);
+  if (!Number.isFinite(seconds) || seconds < 10) return "now";
+  if (seconds < 60) return Math.floor(seconds) + "s";
+  if (seconds < 3600) return Math.floor(seconds / 60) + "m";
+  if (seconds < 86400) return Math.floor(seconds / 3600) + "h";
+  return Math.floor(seconds / 86400) + "d";
+}
+
+function folderGlyph() {
+  const wrap = el("span", "sb-folder");
+  wrap.innerHTML = FOLDER_SVG;
+  return wrap;
+}
+
 function stateOf(el) {
   if (!el.__sb) {
     el.__sb = {
-      el, mode: readMode(), merged: null, handlers: {},
+      el, mode: readMode(), rows: readRows(), pinned: [], seen: {},
+      merged: null, handlers: {}, rowsListener: null,
       nodes: new Map(), prCache: new Map(), prInflight: new Set(),
       approvals: new Map(), approvalSockets: new Map(),
     };
@@ -170,9 +247,20 @@ function buildModel(sb) {
     return desired;
   }
 
+  if (sb.rows === "compact") return buildCompactModel(sb, rows);
+
   const groups = { needs: [], working: [], idle: [], done: [] };
-  for (const row of rows) groups[kindOf(row.child)].push(row);
+  const pinned = [];
+  for (const row of rows) {
+    if (isPinned(sb, keyOf(row.computer, row.child))) pinned.push(row);
+    else groups[kindOf(row.child)].push(row);
+  }
+  pinned.sort(newestFirst);
   for (const list of Object.values(groups)) list.sort(newestFirst);
+  if (pinned.length) {
+    desired.push(header("pinned", "Pinned", pinned.length));
+    for (const row of pinned) desired.push(rowDesc(sb, row));
+  }
   const titles = { needs: "Needs you", working: "Working", idle: "Idle", done: "Done" };
   for (const kind of ["needs", "working", "idle", "done"]) {
     if (!groups[kind].length) continue;
@@ -184,6 +272,46 @@ function buildModel(sb) {
     desired.push(header("computers", "Computers"));
     for (const co of computers) desired.push(computerDesc(co, rows.filter((r) => r.computer === co.computer)));
     desired.push({ id: "add", kind: "add" });
+  }
+  return desired;
+}
+
+// Compact grouping: Pinned, Needs you, Working, then the remaining sessions by
+// project, the projects ordered by their most recent session.
+function newest(list) {
+  return list.reduce((max, row) => Math.max(max, Date.parse(row.child.lastChangedAt) || 0), 0);
+}
+function buildCompactModel(sb, rows) {
+  const desired = [];
+  const pinned = [];
+  const rest = [];
+  for (const row of rows) {
+    if (isPinned(sb, keyOf(row.computer, row.child))) pinned.push(row);
+    else rest.push(row);
+  }
+  pinned.sort(newestFirst);
+  if (pinned.length) {
+    desired.push(header("pinned", "Pinned", pinned.length));
+    for (const row of pinned) desired.push(rowDesc(sb, row));
+  }
+  for (const kind of ["needs", "working"]) {
+    const list = rest.filter((r) => kindOf(r.child) === kind).sort(newestFirst);
+    if (!list.length) continue;
+    desired.push(header(kind, kind === "needs" ? "Needs you" : "Working", list.length));
+    for (const row of list) desired.push(rowDesc(sb, row));
+  }
+  const remaining = rest.filter((r) => kindOf(r.child) !== "needs" && kindOf(r.child) !== "working");
+  const projects = new Map();
+  for (const row of remaining) {
+    const name = projectOf(row.child) || row.child.label || "Sessions";
+    if (!projects.has(name)) projects.set(name, []);
+    projects.get(name).push(row);
+  }
+  const ordered = [...projects.entries()].sort((a, b) => newest(b[1]) - newest(a[1]));
+  for (const [name, list] of ordered) {
+    list.sort(newestFirst);
+    desired.push({ id: `proj:${name}`, kind: "project", text: name });
+    for (const row of list) desired.push(rowDesc(sb, row));
   }
   return desired;
 }
@@ -222,6 +350,11 @@ function makeNode(sb, desc) {
     return node;
   }
   if (desc.kind === "subhead") return el("div", "sb-subhead");
+  if (desc.kind === "project") {
+    const node = el("div", "sb-project-head");
+    node.append(folderGlyph(), el("span", "sb-project-name"));
+    return node;
+  }
   if (desc.kind === "add") {
     const node = el("div", "sb-computer-row sb-add");
     node.setAttribute("role", "button");
@@ -262,6 +395,10 @@ function updateNode(sb, node, desc) {
     if (node.__sig !== desc.text) { node.__sig = desc.text; node.textContent = desc.text; }
     return;
   }
+  if (desc.kind === "project") {
+    if (node.__sig !== desc.text) { node.__sig = desc.text; node.lastChild.textContent = desc.text; }
+    return;
+  }
   if (desc.kind === "computer") { updateComputer(node, desc); return; }
   if (desc.kind === "add") return;
   updateRow(sb, node, desc);
@@ -293,21 +430,23 @@ function updateComputer(node, desc) {
 }
 
 // ---------------------------------------------------------------- rows
+function openRow(sb, node) {
+  const row = node.__row;
+  if (!row) return;
+  markSeen(sb, row.computer, row.child);
+  sb.handlers.onOpenChat?.(row.computer, row.child);
+  requestRender(sb);
+}
+
 function makeRow(sb, desc) {
   const node = el("div", "sb-row");
   node.setAttribute("role", "button");
   node.tabIndex = 0;
-  node.addEventListener("click", () => {
-    const row = node.__row;
-    if (row) sb.handlers.onOpenChat?.(row.computer, row.child);
-  });
+  const open = () => openRow(sb, node);
+  node.addEventListener("click", open);
   node.addEventListener("keydown", (event) => {
     if (event.target !== node) return;
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      const row = node.__row;
-      if (row) sb.handlers.onOpenChat?.(row.computer, row.child);
-    }
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
   });
   node.addEventListener("contextmenu", (event) => { event.preventDefault(); showMenu(node); });
   return node;
@@ -317,7 +456,9 @@ function rowSig(sb, desc) {
   const c = desc.child;
   const approval = sb.approvals.get(keyOf(desc.computer, c));
   return [desc.computer, c.id, kindOf(c), c.title, c.cwd, c.branch, c.lastChangedAt,
-    c.approvalPending === true, desc.pr, approval?.actionId || ""].join("|");
+    c.approvalPending === true, desc.pr, approval?.actionId || "", sb.rows,
+    isPinned(sb, keyOf(desc.computer, c)) ? "p" : "",
+    isUnread(sb, desc.computer, c, kindOf(c)) ? "u" : ""].join("|");
 }
 
 function updateRow(sb, node, desc) {
@@ -330,8 +471,11 @@ function updateRow(sb, node, desc) {
 }
 
 function rowContent(sb, node, desc) {
+  if (sb.rows === "compact") return compactRowContent(sb, node, desc);
+
   const { computer, child } = desc;
   const kind = kindOf(child);
+  const unread = isUnread(sb, computer, child, kind);
   const out = [];
   if (kind === "needs" || kind === "working") out.push(el("span", "sb-bar " + kind));
 
@@ -345,14 +489,45 @@ function rowContent(sb, node, desc) {
   const chip = el("span", "sb-computer", computer);
   chip.style.setProperty("--host-color", hostColor(computer));
   top.append(chip, el("span", "sb-age", relativeAge(child.lastChangedAt)));
+  if (unread) top.append(el("span", "sb-unread"));
   main.append(top);
 
   const bottom = el("span", "sb-line");
-  bottom.append(el("span", "sb-title", child.title || ""));
+  bottom.append(el("span", unread ? "sb-title unread" : "sb-title", child.title || ""));
   if (child.branch) bottom.append(el("span", "sb-branch", child.branch));
   if (desc.pr != null) bottom.append(el("span", "sb-pr", "#" + desc.pr));
   main.append(bottom);
   out.push(main);
+
+  // Hidden terminal trigger: keys.js's 't' clicks `.sb-term`.
+  const term = el("span", "sb-term");
+  term.setAttribute("role", "button");
+  term.tabIndex = 0;
+  const openTerm = (event) => { event.stopPropagation(); sb.handlers.onOpenTerminal?.(computer, child.target.server); };
+  term.addEventListener("click", openTerm);
+  term.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openTerm(event); } });
+  out.push(term);
+
+  out.push(rowActions(sb, node, desc), rowMenu(sb, desc));
+  return out;
+}
+
+// One-line Codex-style row: host dot, title, then the status mark or age.
+function compactRowContent(sb, node, desc) {
+  const { computer, child } = desc;
+  const kind = kindOf(child);
+  const unread = isUnread(sb, computer, child, kind);
+  const out = [];
+  // Hidden bars keep keys.js's needs/working queries working in compact mode.
+  if (kind === "needs" || kind === "working") out.push(el("span", "sb-bar " + kind));
+
+  const dot = el("span", "sb-cdot");
+  dot.style.setProperty("--host-color", hostColor(computer));
+  out.push(dot, el("span", unread ? "sb-title unread" : "sb-title", child.title || ""));
+  if (kind === "working") out.push(el("span", "sb-cspin"));
+  else if (kind === "needs") out.push(el("span", "sb-cmark", BADGE.needs));
+  else out.push(el("span", "sb-cage", shortAge(child.lastChangedAt)));
+  if (unread) out.push(el("span", "sb-unread"));
 
   // Hidden terminal trigger: keys.js's 't' clicks `.sb-term`.
   const term = el("span", "sb-term");
@@ -416,7 +591,16 @@ function rowMenu(sb, desc) {
     input.focus();
     input.select();
   });
-  menu.append(openTerminal, rename, input);
+  const pinned = isPinned(sb, keyOf(desc.computer, desc.child));
+  const pin = el("button", null, pinned ? "Unpin" : "Pin");
+  pin.type = "button";
+  pin.addEventListener("click", (event) => {
+    event.stopPropagation();
+    hideMenus();
+    togglePin(sb, desc);
+    requestRender(sb);
+  });
+  menu.append(openTerminal, pin, rename, input);
   return menu;
 }
 
@@ -509,7 +693,15 @@ export function renderSidebar(element, merged, handlers = {}) {
   const sb = stateOf(element);
   sb.merged = merged;
   sb.handlers = handlers;
+  sb.rows = readRows();
+  sb.pinned = readPinned();
+  sb.seen = readSeen();
   element.classList.add("sb-root");
+  element.classList.toggle("rows-compact", sb.rows === "compact");
+  if (!sb.rowsListener) {
+    sb.rowsListener = () => { sb.rows = readRows(); requestRender(sb); };
+    document.addEventListener("phren:sidebar-rows", sb.rowsListener);
+  }
 
   let mode = element.querySelector(":scope > .sb-mode");
   if (!mode) {
