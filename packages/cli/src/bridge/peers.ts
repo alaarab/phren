@@ -6,8 +6,10 @@ import { dump, load } from "js-yaml";
 import { z } from "zod";
 import { logger } from "../logger.js";
 import { hookRequest } from "./client.js";
-import { computerName, dispatchKeyPath, publicComputerKey } from "./computers.js";
-import { atomic, BridgeError, bridgeRoot, serverName, withErrorCode, type Json } from "./protocol.js";
+import { dispatchKeyPath, publicComputerKey } from "./computers.js";
+// computerName comes from protocol.js, where it is defined: through computers.js it can still be
+// undefined when an import cycle (usage -> account-choice -> health -> peers) loads this file first.
+import { atomic, BridgeError, bridgeRoot, computerName, serverName, withErrorCode, type Json } from "./protocol.js";
 
 const peerSchema = z.object({
   name: computerName,
