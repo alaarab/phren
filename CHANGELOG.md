@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Shell tool cards show "Changes unavailable" less often when several agents run shell commands at once. All of the Hook's change captures shared two Git slots, one Git process at a time, so under load every waiting capture finished late and all of them overran the 2.5 s budget together (16 at once: all 16 failed). Each capture now holds one slot for all of its Git work, so captures finish in turn and only those at the end of a long queue miss the budget.
+- The phren repository ignores `.worktrees/`. Leftover folders there that aren't Git worktrees were rehashed by every change capture before and after each shell call, about 2 s of the 2.5 s budget on a busy machine.
+
 ## [0.3.35] - 2026-10-10
 
 ### Fixed
