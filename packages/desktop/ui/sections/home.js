@@ -8,6 +8,16 @@ import { showSection } from "../shell/sections.js";
 // Receipts drive both the conductor's latest line and the recent-returns list.
 const RETURN_POLL_MS = 30_000;
 const MAX_RETURNS = 5;
+const SEEN_KEY = "phren.desktop.home.seen";
+const RUN_STATE = { finished: "done", "needs-you": "needs you", failed: "failed", blocked: "blocked", skipped: "skipped" };
+
+// Returns and scheduled runs stay unread (an accent dot) until opened here.
+function loadSeen() {
+  try { return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) ?? "[]")); } catch { return new Set(); }
+}
+function saveSeen(seen) {
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify([...seen].slice(-1000))); } catch { /* private window */ }
+}
 const RETURN_STATE = { "done": "done", "needs-you": "needs you", "failed": "failed", "blocked": "blocked", "gone": "gone", "stalled": "stalled" };
 
 function el(tag, cls, text) {
@@ -74,6 +84,10 @@ export function mountHome(root, { openSession } = {}) {
   const approvals = new Map(); // row.key -> { actionId, summary }
   const watchers = new Map(); // row.key -> WebSocket
   const receipts = new Map(); // computer -> [{ receipt, computer }]
+  const runs = new Map(); // computer -> finished scheduled runs
+  const seen = loadSeen();
+  // On the first launch everything already there counts as read.
+  let seedSeen = (() => { try { return localStorage.getItem(SEEN_KEY) === null; } catch { return false; } })();
 
   /** The shared row shape: a title/sub column on the left, caller-added meta right. */
   function rowShell({ tone, sub, selected: on }) {
@@ -149,6 +163,38 @@ export function mountHome(root, { openSession } = {}) {
     return null;
   }
 
+  /** A finished scheduled run: an inbox line like a worker's return. */
+  function runRow(entry) {
+    const { run, schedule } = entry;
+    const state = String(run.status);
+    const chip = state === "failed" ? "failed" : state === "finished" ? "done" : state === "skipped" ? "gone" : "needs";
+    const shell = rowShell({ tone: chip === "needs" ? "waiting" : undefined, sub: run.reason ? el("span", "home-row-sub", String(run.reason).slice(0, 160)) : undefined });
+    shell.title.textContent = schedule.name || "Scheduled prompt";
+    const meta = el("span", "home-row-meta");
+    if (!seen.has(entry.id)) meta.append(el("span", "home-unread"));
+    meta.append(el("span", "home-tag", "Scheduled"));
+    meta.append(el("span", `home-chip ${chip}`, RUN_STATE[state] ?? state));
+    if (run.project) meta.append(el("span", "home-project", run.project));
+    meta.append(el("span", "home-host", entry.computer));
+    meta.append(el("span", "home-age", age(entry.at)));
+    shell.button.append(meta);
+    const launch = run.launch ?? {};
+    const match = sessions(merged).find((row) => row.computer === entry.computer && launch.paneId
+      && row.child.target?.pane === launch.paneId && (!launch.server || row.child.target?.server === launch.server));
+    shell.button.addEventListener("click", () => {
+      markSeen(entry.id);
+      if (match) open(match.computer, match.child); else showSection("schedules");
+    });
+    return shell.button;
+  }
+
+  function markSeen(id) {
+    if (seen.has(id)) return;
+    seen.add(id);
+    saveSeen(seen);
+    renderReturns();
+  }
+
   function returnRow(entry) {
     const r = entry.receipt;
     const state = String(r.returned.state);
@@ -159,22 +205,28 @@ export function mountHome(root, { openSession } = {}) {
     const shell = rowShell({ tone, sub });
     shell.title.textContent = r.label || r.project || "Worker";
     const meta = el("span", "home-row-meta");
+    const id = `return:${r.id}:${r.returned.at}`;
+    if (!seen.has(id)) meta.append(el("span", "home-unread"));
     meta.append(el("span", `home-chip ${chip}`, RETURN_STATE[state] ?? state));
     if (r.project) meta.append(el("span", "home-project", r.project));
     meta.append(el("span", "home-host", entry.computer));
     meta.append(el("span", "home-age", age(r.returned.at)));
     shell.button.append(meta);
     const match = overviewChild(r.target);
-    if (match) shell.button.addEventListener("click", () => open(match.computer, match.child));
-    else { shell.button.disabled = true; shell.button.style.cursor = "default"; }
+    // A return whose session has closed opens in Review, which keeps its report.
+    shell.button.addEventListener("click", () => {
+      markSeen(id);
+      if (match) open(match.computer, match.child); else showSection("review");
+    });
     return shell.button;
   }
 
   function renderReturns() {
     const rows = [];
-    for (const list of receipts.values()) for (const entry of list) if (entry.receipt?.returned) rows.push(entry);
-    rows.sort((a, b) => String(b.receipt.returned.at).localeCompare(String(a.receipt.returned.at)));
-    fill("returns", rows.slice(0, MAX_RETURNS).map(returnRow), "No returns yet.");
+    for (const list of receipts.values()) for (const entry of list) if (entry.receipt?.returned) rows.push({ kind: "return", at: String(entry.receipt.returned.at), entry });
+    for (const list of runs.values()) for (const entry of list) rows.push({ kind: "run", at: entry.at, entry });
+    rows.sort((a, b) => b.at.localeCompare(a.at));
+    fill("returns", rows.slice(0, MAX_RETURNS).map((row) => row.kind === "run" ? runRow(row.entry) : returnRow(row.entry)), "No returns yet.");
     block("returns").querySelector(".count").textContent = rows.length ? String(rows.length) : "";
     if (rows.length > MAX_RETURNS) {
       const more = el("button", "home-more", `All ${rows.length} in Review`);
@@ -371,6 +423,31 @@ export function mountHome(root, { openSession } = {}) {
     }));
     receipts.clear();
     for (const [computer, list] of answers) receipts.set(computer, list);
+    // Finished runs of the schedules each computer owns.
+    const scheduled = await Promise.all(online.map(async (c) => {
+      try {
+        const body = await hookPost(c.computer, "/v1/schedules", {});
+        const out = [];
+        for (const schedule of Array.isArray(body.schedules) ? body.schedules : []) {
+          if (schedule.owned === false) continue;
+          for (const run of Array.isArray(schedule.lastRuns) ? schedule.lastRuns : []) {
+            if (run.status === "launched" || run.status === "running") continue;
+            out.push({ id: `run:${run.id}`, at: String(run.finishedAt ?? run.startedAt ?? ""), run, schedule, computer: c.computer });
+          }
+        }
+        return [c.computer, out];
+      } catch {
+        return [c.computer, []];
+      }
+    }));
+    runs.clear();
+    for (const [computer, list] of scheduled) runs.set(computer, list);
+    if (seedSeen && online.length) {
+      seedSeen = false;
+      for (const list of receipts.values()) for (const e of list) if (e.receipt?.returned) seen.add(`return:${e.receipt.id}:${e.receipt.returned.at}`);
+      for (const list of runs.values()) for (const e of list) seen.add(e.id);
+      saveSeen(seen);
+    }
     renderReturns();
     renderConductor();
   }

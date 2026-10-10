@@ -701,3 +701,13 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .section-icons { display: inline-flex; margin-left: 8px; }
 .section-pill.icon { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; }
 .section-pill.icon.selected { background: var(--raised); }
+
+/* Titlebar back / forward. */
+.nav-arrows { display: inline-flex; gap: 2px; margin-left: 8px; }
+.nav-arrow { width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: 18px/1 var(--prose); cursor: pointer; transition: background .18s ease, color .18s ease; }
+.nav-arrow:hover:not(:disabled) { background: var(--raised); color: var(--text); }
+.nav-arrow:disabled { opacity: .35; cursor: default; }
+
+/* Home inbox: unread dot and the Scheduled tag. */
+.home-unread { flex: none; width: 7px; height: 7px; border-radius: 999px; background: var(--accent); align-self: center; }
+.home-tag { flex: none; padding: 0 7px; border-radius: 999px; background: var(--raised); color: var(--text-2); font-size: 11px; }
