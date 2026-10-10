@@ -54,6 +54,7 @@ test.beforeAll(async () => {
     routes: {
       "POST /v1/git/status": () => ({ status: 200, json: gitStatus }),
       "POST /v1/diff": () => ({ status: 200, json: diff }),
+      "GET /v1/transcripts/blob": () => ({ status: 200, body: TINY_PNG, contentType: "application/octet-stream" }),
     },
   });
 
@@ -76,6 +77,8 @@ test.beforeAll(async () => {
   url = server.url;
   closeServer = server.close;
 });
+
+const TINY_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGPYOeXLfxBmgDEAcq4NAdKXL0AAAAAASUVORK5CYII=", "base64");
 
 test.afterAll(async () => {
   hub?.stop();
@@ -331,4 +334,16 @@ test("back and forward walk the visited sections", async ({ page }) => {
   await expect(page.locator("#nav-back")).toBeDisabled();
   await page.locator("#nav-forward").click();
   await expect(page).toHaveURL(/#\/agents$/);
+});
+
+test("an image in a transcript shows as a thumbnail that opens full size", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await page.locator(".sb-row", { hasText: "Fix login" }).first().click();
+  const thumb = page.locator(".ct-image.loaded img");
+  await expect(thumb).toBeVisible();
+  await thumb.click();
+  await expect(page.locator(".ct-lightbox img")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".ct-lightbox")).toHaveCount(0);
 });

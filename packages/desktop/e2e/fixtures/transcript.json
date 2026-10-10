@@ -118,5 +118,29 @@
         ]
       }
     }
+  },
+  {
+    "raw": {
+      "type": "user",
+      "uuid": "u9",
+      "timestamp": "2026-10-10T12:00:30.000Z",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "This is what the login page shows now"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "media_type": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGPYOeXLfxBmgDEAcq4NAdKXL0AAAAAASUVORK5CYII="
+            }
+          }
+        ]
+      }
+    }
   }
 ]

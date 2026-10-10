@@ -121,6 +121,9 @@ export interface OverviewHub {
    * add new ones, and restart any whose SSH identity changed (so a computer in
    * the "verify" state retries after a relink). */
   setComputers(computers: Computer[]): void;
+  /** Drop and reopen every computer's overview socket (a trace recording
+   * starts with each session list this way). */
+  reconnectAll(): void;
   on(event: "change", listener: (merged: MergedOverview) => void): void;
 }
 export type CreateOverviewHub = (computers: Computer[], ws: HookWebSocket) => OverviewHub;

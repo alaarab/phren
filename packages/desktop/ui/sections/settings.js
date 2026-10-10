@@ -6,7 +6,7 @@ import { store } from "../shell/store.js";
 import { openExtensions } from "../extensions.js";
 import { applyTheme, currentTheme, themes as themeList } from "../shell/theme.js";
 import { registerPauseCommand } from "../shell/pause-all.js";
-import { hookGet } from "../api.js";
+import { hookGet, hookPost } from "../api.js";
 
 // The "Pause all agents" palette command is app-wide: register it once, at
 // import, so it is there before the Computers page is ever opened.
@@ -118,6 +118,7 @@ const PAGES = [
   { id: "extensions", label: "Extensions" },
   { id: "appearance", label: "Appearance" },
   { id: "notifications", label: "Notifications" },
+  { id: "diagnostics", label: "Diagnostics" },
 ];
 
 export function mountSettings(root) {
@@ -172,6 +173,7 @@ const BUILDERS = {
   extensions: buildExtensions,
   appearance: buildAppearance,
   notifications: buildNotifications,
+  diagnostics: buildDiagnostics,
 };
 
 // ------------------------------------------------------------ page: Computers
@@ -305,6 +307,85 @@ function healthChecks(health) {
   return rows;
 }
 
+/** The files the phone keeps on a computer, outside any session (the phone's
+ * Files tab): list, send one from this desk, delete with an inline confirm. */
+function mountSharedFiles(root, computer) {
+  const list = el("div", "comp-shared");
+  const input = el("input");
+  input.type = "file";
+  input.hidden = true;
+  const send = button("Send a file\u2026");
+  send.addEventListener("click", () => input.click());
+  const head = el("div", "comp-shared-head");
+  head.append(el("div", "comp-section-label", "Shared files"), send, input);
+  root.append(head, list);
+
+  async function load() {
+    list.replaceChildren(el("div", "settings-inline-note", "Loading\u2026"));
+    try {
+      const body = await hookGet(computer, "/v1/files");
+      render(Array.isArray(body.files) ? body.files : []);
+    } catch (err) {
+      list.replaceChildren(el("div", "settings-inline-note", err.status === 404 ? `Needs a newer Phren on ${computer}.` : err.message));
+      send.disabled = err.status === 404;
+    }
+  }
+
+  function render(files) {
+    list.replaceChildren();
+    if (!files.length) { list.append(el("div", "settings-inline-note", "No files. Files sent from the phone or from here show up here.")); return; }
+    for (const file of files.sort((a, b) => String(b.modified).localeCompare(String(a.modified)))) {
+      const row = el("div", "comp-shared-row");
+      row.append(el("span", "comp-shared-name", file.name), el("span", "comp-shared-size", formatBytes(file.size)));
+      const actions = el("span", "settings-actions");
+      const del = button("Delete", "danger");
+      del.addEventListener("click", () => {
+        const yes = button("Delete", "danger");
+        const no = button("Cancel");
+        actions.replaceChildren(el("span", "settings-inline-note", `Delete ${file.name}?`), yes, no);
+        no.addEventListener("click", () => actions.replaceChildren(del));
+        yes.addEventListener("click", async () => {
+          yes.disabled = true;
+          try { await hookPost(computer, "/v1/files/delete", { path: file.path }); await load(); }
+          catch (err) { actions.replaceChildren(el("span", "settings-error", err.message), del); }
+        });
+      });
+      actions.append(del);
+      row.append(actions);
+      list.append(row);
+    }
+  }
+
+  input.addEventListener("change", async () => {
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    // The Hook takes safe names only: letters, digits and _ .()- or spaces.
+    const name = file.name.replace(/[^A-Za-z0-9_ .()-]/g, "_").replace(/^[^A-Za-z0-9_]+/, "").slice(0, 200) || "file";
+    send.disabled = true;
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      await hookPost(computer, "/v1/files", { name, data: btoa(binary) });
+      await load();
+    } catch (err) {
+      list.prepend(el("div", "settings-error", err.message));
+    } finally {
+      send.disabled = false;
+    }
+  });
+
+  return { load };
+}
+
+function formatBytes(n) {
+  const value = Number(n) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1048576) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1048576).toFixed(1)} MB`;
+}
+
 function computerCard(initial, meta, rerender) {
   const card = el("div", "comp-card");
   const head = el("div", "comp-head");
@@ -349,8 +430,9 @@ function computerCard(initial, meta, rerender) {
   const resources = el("div", "comp-section");
   const peers = el("div", "comp-section");
   const activity = el("div", "comp-section");
+  const shared = el("div", "comp-section");
   const files = el("div", "comp-section");
-  body.append(checks, resources, peers, activity, files);
+  body.append(checks, resources, peers, activity, shared, files);
   card.append(head, body);
 
   const state = {
@@ -360,6 +442,7 @@ function computerCard(initial, meta, rerender) {
     resources: undefined, resourcesError: null, resourcesLoaded: false,
   };
   const filesBrowser = mountFileBrowser(files, initial.computer);
+  const sharedFiles = mountSharedFiles(shared, initial.computer);
 
   function update(c) {
     const info = meta.get(c.computer) ?? {};
@@ -402,19 +485,18 @@ function computerCard(initial, meta, rerender) {
     state.expanded = true;
     body.hidden = false;
     toggle.setAttribute("aria-expanded", "true");
-    chevron.textContent = "\u25BE";
     renderChecks(); renderPeers(); renderActivity(); renderResources();
     if (!state.healthLoaded) loadHealth(false);
     if (!state.activityLoaded) { state.activityLoaded = true; loadActivity(); }
     if (!state.resources) loadResources(false);
     filesBrowser.load();
+    sharedFiles.load();
   }
 
   function collapse() {
     state.expanded = false;
     body.hidden = true;
     toggle.setAttribute("aria-expanded", "false");
-    chevron.textContent = "\u25B8";
   }
 
   toggle.addEventListener("click", () => (state.expanded ? collapse() : expand()));
@@ -911,4 +993,144 @@ function buildNotifications(page) {
   list.append(toggleRow("Show the needs-you count on the dock icon", badgeEnabled(), (on) => writeFlag(BADGE_KEY, on)));
   page.append(head, list);
   return null;
+}
+
+// ------------------------------------------------------------ page: Diagnostics
+function formatSize(bytes) {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+  return `${unit === 0 ? value : value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+function formatElapsed(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  return minutes ? `${minutes}:${String(total % 60).padStart(2, "0")}` : `${total}s`;
+}
+
+function formatWhen(iso) {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+}
+
+function buildDiagnostics(page) {
+  const [head, count] = heading("Diagnostics");
+  const intro = el("div", "settings-note", "Records every Hook request and reply, with secrets removed, so a bug can be replayed as a test.");
+  const toolbar = el("div", "settings-toolbar");
+  const recordBtn = button("Start recording", "accent");
+  const state = el("div", "settings-inline-note", "");
+  toolbar.append(el("div", "settings-note", "Computers to record"), recordBtn);
+  const computers = el("div", "settings-list");
+  const notice = noticeLine();
+  const list = el("div", "settings-list");
+  page.append(head, intro, toolbar, computers, state, notice, list);
+
+  const deselected = new Set();
+  let recording = false;
+  let ticker = null;
+
+  const names = () => (store.merged?.computers ?? []).map((c) => c.computer);
+  const selected = () => names().filter((name) => !deselected.has(name));
+
+  function updateRecordButton() {
+    if (recording) {
+      recordBtn.textContent = "Stop recording";
+      recordBtn.className = "settings-btn danger";
+      recordBtn.disabled = false;
+    } else {
+      recordBtn.textContent = "Start recording";
+      recordBtn.className = "settings-btn accent";
+      recordBtn.disabled = selected().length === 0;
+    }
+  }
+
+  function renderComputers() {
+    const all = names();
+    if (!all.length) {
+      computers.replaceChildren(el("div", "settings-empty", "No computers yet."));
+      return;
+    }
+    computers.replaceChildren(...all.map((name) => toggleRow(name, !deselected.has(name), (on) => {
+      if (on) deselected.delete(name); else deselected.add(name);
+      updateRecordButton();
+    })));
+    updateRecordButton();
+  }
+
+  function setState(status) {
+    state.textContent = status && status.recording
+      ? `${formatElapsed(status.elapsedMs)} · ${formatSize(status.bytes)}`
+      : "";
+  }
+
+  function renderTraces(traces) {
+    count.textContent = traces.length ? String(traces.length) : "";
+    if (!traces.length) {
+      list.replaceChildren(el("div", "settings-empty", "No recordings yet."));
+      return;
+    }
+    list.replaceChildren(...traces.map((trace) => {
+      const row = el("div", "settings-row");
+      const main = el("div", "settings-row-main");
+      main.append(el("div", "settings-row-title", trace.name));
+      const meta = el("div", "settings-row-meta");
+      meta.append(el("span", null, formatSize(trace.size)));
+      meta.append(el("span", null, formatWhen(trace.modifiedAt)));
+      meta.append(el("span", "settings-config-path", trace.file));
+      main.append(meta);
+      const copy = button("Copy");
+      copy.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(trace.file); showNotice(notice, "Path copied.", false); }
+        catch { showNotice(notice, trace.file, false); }
+      });
+      const actions = el("div", "settings-actions");
+      actions.append(copy);
+      row.append(main, actions);
+      return row;
+    }));
+  }
+
+  function startTicker() {
+    ticker = setInterval(async () => {
+      try { setState((await api("/api/trace")).status); }
+      catch { /* a dropped poll retries on the next tick */ }
+    }, 1000);
+  }
+
+  async function refresh() {
+    renderComputers();
+    try {
+      const data = await api("/api/trace");
+      recording = !!data.status?.recording;
+      setState(data.status);
+      renderTraces(data.traces ?? []);
+      if (recording && !ticker) startTicker();
+      if (!recording && ticker) { clearInterval(ticker); ticker = null; }
+      updateRecordButton();
+    } catch (err) {
+      list.replaceChildren(el("div", "settings-error", err.message));
+    }
+  }
+
+  recordBtn.addEventListener("click", async () => {
+    recordBtn.disabled = true;
+    try {
+      if (!recording) {
+        const started = await post("/api/trace/start", { computers: selected() });
+        showNotice(notice, `Recording to ${started.file}`, false);
+      } else {
+        const stopped = await post("/api/trace/stop", {});
+        showNotice(notice, `Saved ${stopped.file}`, false);
+      }
+    } catch (err) {
+      showNotice(notice, err.message, true);
+    }
+    await refresh();
+  });
+
+  refresh();
+  return refresh;
 }

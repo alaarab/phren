@@ -14,6 +14,7 @@ import { createComposer, contextPercent } from "./chat/composer.js";
 import { renderInteractions, renderSideAnswer, renderSudoRequests } from "./chat/cards.js";
 import { startDictation, createTalkMode } from "./chat/talk.js";
 import { openKnowsDrawer, installRememberSelection } from "./chat/knows.js";
+import { renderMarkdownInto } from "./chat/markdown.js";
 import { projectOf } from "./shell/store.js";
 
 const PROVIDERS = { claude: "Claude", codex: "Codex", copilot: "Copilot", phren: "Phren", opencode: "OpenCode" };
@@ -193,6 +194,9 @@ export function openChat(el, computerName, child, opts = {}) {
   let sideHandle = null;
   let sudoHandle = null;
   let workPopover = null;
+  let workNeedsNewer = false;
+  let workMessagesTimer = null;
+  let workMessagesLoad = null;
   let loadingOlder = false;
   let lastSubagentsAt = 0;
   let lastSudoAt = 0;
@@ -450,13 +454,148 @@ export function openChat(el, computerName, child, opts = {}) {
     return ` \u00b7 ${ElapsedTime.text((end - start) / 1000)}`;
   }
 
+  // ---- message controls: send into a resumable worker ----------------------
+  function newerReason() { return `Needs a newer Phren on ${computerName}`; }
+  // A 404 from resume / messages / archive-finished means the Hook predates
+  // them; disable the controls with a reason rather than fail again.
+  function flagNewer() {
+    if (workNeedsNewer) return;
+    workNeedsNewer = true;
+    if (workPopover && workPopover.el) drawWork(workPopover.kind, workPopover.el, workPopover.childId);
+  }
+  function canMessage(agent) {
+    return !!agent && agent.fanout?.resumable === true && !workNeedsNewer;
+  }
+  function messageReason(agent) {
+    if (workNeedsNewer) return newerReason();
+    if (!agent) return "This agent can't be messaged.";
+    if (agent.computer) return "This worker runs on another computer.";
+    if (!(agent.fanout && agent.fanout.resumable)) return "This agent isn't a resumable worker.";
+    return "";
+  }
+  // Local fan-out workers whose turn finished: the ones archive-finished moves.
+  function isFinishedWorker(agent) {
+    return isWorker(agent) && !agent.computer && !agent.failed && String(agent.state || "").toLowerCase() === "completed";
+  }
+  function finishedWorkerCount() {
+    return flattenWork(agentsTree).filter(({ agent }) => isFinishedWorker(agent)).length;
+  }
+  function workAgent(id) {
+    const member = flattenWork(agentsTree).find(({ agent }) => agent.id === id);
+    return member && member.agent;
+  }
+  function deliveryLabel(status) {
+    if (status === "queued") return "Queued for this worker";
+    if (status === "completed") return "Worker finished";
+    if (status === "failed") return "Worker continuation failed";
+    return "Sent to this worker";
+  }
+  function messageStatusText(status) {
+    if (status === "queued") return "Queued until this worker finishes";
+    if (status === "running") return "Continuing this worker";
+    if (status === "completed") return "Worker finished";
+    if (status === "failed") return "Worker continuation failed";
+    return "";
+  }
+  function messageStatusClass(status) {
+    return ["queued", "running", "completed", "failed"].includes(status) ? status : "muted";
+  }
+
+  function sendBox(agent, onSend) {
+    const box = node("div", "chat-work-send");
+    const row = node("div", "chat-work-send-row");
+    const input = node("input", "chat-work-input");
+    input.type = "text";
+    input.placeholder = `Send to ${agent ? workTitle(agent) : "agent"}`;
+    input.maxLength = 32768;
+    const button = node("button", "chat-work-send-btn", "Send");
+    button.type = "button";
+    const note = node("div", "chat-work-note");
+    input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); submit(); } });
+    // Typing must not open the transcript behind the box.
+    box.addEventListener("click", (event) => event.stopPropagation());
+    const setDisabled = () => {
+      const off = !canMessage(agent);
+      input.disabled = off; button.disabled = off;
+      if (off) { const reason = messageReason(agent); input.title = reason; button.title = reason; if (!note.textContent) note.textContent = reason; }
+    };
+    const submit = () => {
+      const text = input.value.trim();
+      if (!text || button.disabled) return;
+      button.disabled = true; input.disabled = true;
+      note.className = "chat-work-note"; note.textContent = "Sending\u2026";
+      onSend(text, (state, message) => {
+        note.className = state === "failed" ? "chat-work-note danger" : "chat-work-note";
+        note.textContent = message;
+        if (state === "sent") input.value = "";
+        setDisabled();
+      });
+    };
+    button.addEventListener("click", submit);
+    row.append(input, button);
+    box.append(row, note);
+    setDisabled();
+    return box;
+  }
+
+  function sendToChild(agent, text, done) {
+    hookPost(computerName, "/v1/subagents/resume", { target, child: agent.id, text }).then((res) => {
+      const status = String((res && res.message && res.message.status) || "running").toLowerCase();
+      done("sent", deliveryLabel(status));
+      if (workMessagesLoad) workMessagesLoad();
+    }).catch((err) => {
+      if (err && err.status === 404) { done("failed", newerReason()); flagNewer(); return; }
+      const reason = (err && err.body && err.body.error) || (err && err.message) || "the Hook refused it.";
+      done("failed", `Failed: ${reason}`);
+    });
+  }
+
+  function startMessagesPoll(childId, list) {
+    const load = () => hookGet(computerName, "/v1/subagents/messages", { ...target, child: childId }).then((res) => {
+      renderMessages(list, Array.isArray(res && res.messages) ? res.messages : []);
+    }).catch((err) => {
+      if (err && err.status === 404) flagNewer();
+      // Keep the last thread through a transient read failure.
+    });
+    workMessagesLoad = load;
+    load();
+    workMessagesTimer = setInterval(load, 5000);
+  }
+  function stopMessagesPoll() {
+    if (workMessagesTimer) { clearInterval(workMessagesTimer); workMessagesTimer = null; }
+    workMessagesLoad = null;
+  }
+  function renderMessages(list, messages) {
+    list.replaceChildren();
+    if (messages.length === 0) { list.append(node("div", "chat-work-empty", "No messages yet.")); return; }
+    for (const message of messages) {
+      const row = node("div", "chat-work-message");
+      const text = node("div", "chat-work-message-text");
+      renderMarkdownInto(text, String(message.text || ""));
+      row.append(text, node("div", `chat-work-message-state ${messageStatusClass(message.status)}`, messageStatusText(message.status)));
+      list.append(row);
+    }
+  }
+
   function maybeFetchSubagents(force = false) {
     if (!force && Date.now() - lastSubagentsAt < 3000) return;
     lastSubagentsAt = Date.now();
     hookGet(computerName, "/v1/subagents", target).then((res) => {
       agentsTree = Array.isArray(res && res.agents) ? res.agents : [];
       composer.setCounts(countWork(agentsTree));
-      if (workPopover && !workPopover.childId) drawWork(workPopover.kind, workPopover.el);
+      // Keep a redraw from wiping a message the reader is typing.
+      const active = document.activeElement;
+      const typing = !!(active && workPopover && workPopover.el.contains(active) && active.tagName === "INPUT");
+      if (workPopover && workPopover.childId) {
+        // The timeline can open a child before the tree arrives; fill the view
+        // in once the child resolves.
+        if (!workPopover.childReady && workAgent(workPopover.childId)) {
+          workPopover.childReady = true;
+          drawWork(workPopover.kind, workPopover.el, workPopover.childId);
+        }
+      } else if (workPopover && !typing) {
+        drawWork(workPopover.kind, workPopover.el);
+      }
     }).catch(() => {});
   }
 
@@ -470,7 +609,11 @@ export function openChat(el, computerName, child, opts = {}) {
     positionPopover(pop, composer.el);
     maybeFetchSubagents(true);
     setTimeout(() => document.addEventListener("pointerdown", onWorkOutside, true), 0);
+    // Leaving the section or pressing Escape closes it too: it floats on the body.
+    window.addEventListener("hashchange", closeWork);
+    document.addEventListener("keydown", onWorkKey, true);
   }
+  function onWorkKey(event) { if (event.key === "Escape" && workPopover) { event.stopPropagation(); closeWork(); } }
 
   function positionPopover(pop, anchor) {
     const rect = anchor.getBoundingClientRect();
@@ -480,10 +623,13 @@ export function openChat(el, computerName, child, opts = {}) {
   }
 
   function closeWork() {
+    stopMessagesPoll();
     if (!workPopover) return;
     workPopover.el.remove();
     workPopover = null;
     document.removeEventListener("pointerdown", onWorkOutside, true);
+    window.removeEventListener("hashchange", closeWork);
+    document.removeEventListener("keydown", onWorkKey, true);
   }
   function onWorkOutside(event) {
     if (workPopover && !workPopover.el.contains(event.target)) closeWork();
@@ -491,23 +637,17 @@ export function openChat(el, computerName, child, opts = {}) {
 
   function drawWork(kind, pop, childId) {
     if (!pop) return;
-    if (workPopover && workPopover.el === pop) workPopover.childId = childId || null;
+    if (workPopover && workPopover.el === pop) { workPopover.childId = childId || null; workPopover.childReady = !childId; }
+    stopMessagesPoll();
     pop.replaceChildren();
-    if (childId) {
-      const head = node("div", "chat-pop-head");
-      const back = node("button", "chat-pop-back", "\u2190 Back");
-      back.addEventListener("click", () => drawWork(kind, pop));
-      head.append(back, node("span", null, "Transcript"));
-      pop.append(head);
-      const body = node("div", "chat-work-transcript");
-      body.append(node("div", "chat-work-badge", "Loading\u2026"));
-      pop.append(body);
-      loadChildTranscript(childId, body);
-      return;
-    }
+    if (childId) { drawChildView(kind, pop, childId); return; }
     const members = workMembers(agentsTree, kind === "workers");
     const head = node("div", "chat-pop-head");
-    head.append(node("span", null, kind === "workers" ? "Workers" : "Subagents"), node("span", null, String(members.length)));
+    const title = node("div", "chat-pop-title");
+    title.append(node("span", null, kind === "workers" ? "Workers" : "Subagents"), node("span", "chat-pop-count", String(members.length)));
+    head.append(title);
+    const finished = finishedWorkerCount();
+    if (finished > 0) head.append(clearControl(finished));
     pop.append(head);
     const list = node("div", "chat-pop-list");
     if (members.length === 0) {
@@ -518,34 +658,95 @@ export function openChat(el, computerName, child, opts = {}) {
     pop.append(list);
   }
 
+  // "Clear finished" behind an inline confirm; archive-finished then re-reads
+  // the tree, which drops the archived rows.
+  function clearControl(count) {
+    const slot = node("div", "chat-pop-clear");
+    const action = (label, cls, onClick) => {
+      const button = node("button", cls, label);
+      button.type = "button";
+      button.addEventListener("click", onClick);
+      return button;
+    };
+    const showConfirm = () => {
+      const row = node("div", "chat-work-confirm");
+      row.append(node("span", null, `Clear ${count} finished?`), action("Clear", "chat-work-clear", run), action("Cancel", "chat-work-cancel", showIdle));
+      slot.replaceChildren(row);
+    };
+    const showIdle = () => {
+      const idle = action("Clear finished", "chat-work-clear", showConfirm);
+      if (workNeedsNewer) { idle.disabled = true; idle.title = newerReason(); }
+      slot.replaceChildren(idle);
+    };
+    const run = () => {
+      slot.replaceChildren(node("span", "chat-work-note", "Clearing\u2026"));
+      hookPost(computerName, "/v1/subagents/archive-finished", { target }).then(() => maybeFetchSubagents(true)).catch((err) => {
+        if (err && err.status === 404) { flagNewer(); return; }
+        const reason = (err && err.body && err.body.error) || (err && err.message) || "the Hook refused it.";
+        slot.replaceChildren(node("span", "chat-work-note danger", `Clear failed: ${reason}`), action("Clear finished", "chat-work-clear", showConfirm));
+      });
+    };
+    showIdle();
+    return slot;
+  }
+
+  function drawChildView(kind, pop, childId) {
+    const member = flattenWork(agentsTree).find(({ agent }) => agent.id === childId);
+    const agent = member && member.agent;
+    if (workPopover) workPopover.childReady = !!agent;
+    const head = node("div", "chat-pop-head");
+    const back = node("button", "chat-pop-back", "\u2190 Back");
+    back.type = "button";
+    back.addEventListener("click", () => drawWork(kind, pop));
+    head.append(back, node("span", null, "Transcript"));
+    pop.append(head);
+
+    const body = node("div", "chat-work-transcript");
+    const lines = node("div", "chat-work-lines");
+    lines.append(node("div", "chat-work-badge", "Loading\u2026"));
+    body.append(lines);
+    const messages = node("div", "chat-work-messages");
+    messages.append(node("div", "chat-work-section", "Messages"));
+    const messageList = node("div", "chat-work-message-list");
+    messageList.append(node("div", "chat-work-empty", canMessage(agent) ? "No messages yet." : messageReason(agent)));
+    messages.append(messageList);
+    body.append(messages);
+    pop.append(body);
+    loadChildTranscript(childId, lines);
+    if (canMessage(agent)) startMessagesPoll(childId, messageList);
+    pop.append(sendBox(agent, (text, done) => sendToChild(agent, text, done)));
+  }
+
   function workRow({ agent, depth }, kind, pop) {
     const row = node("div", "chat-work-row");
     row.style.paddingLeft = `${12 + depth * 14}px`;
+    const top = node("div", "chat-work-top");
     const main = node("div", "chat-work-main");
     main.append(node("div", "chat-work-title", workTitle(agent)));
     const meta = [providerName(agent.provider), agent.branch, agent.computer && agent.computer.name].filter(Boolean).join(" \u00b7 ");
     if (meta) main.append(node("div", "chat-work-sub", meta));
-    row.append(node("div", "chat-work-glyph", providerLetter(agent.provider)), main);
-    row.append(node("div", `chat-work-state ${workStateClass(agent)}`, `${workStateText(agent)}${workElapsed(agent)}`));
-    row.addEventListener("click", () => drawWork(kind, pop, agent.id));
+    top.append(node("div", "chat-work-glyph", providerLetter(agent.provider)), main);
+    top.append(node("div", `chat-work-state ${workStateClass(agent)}`, `${workStateText(agent)}${workElapsed(agent)}`));
+    top.addEventListener("click", () => drawWork(kind, pop, agent.id));
+    row.append(top, sendBox(agent, (text, done) => sendToChild(agent, text, done)));
     return row;
   }
 
-  function loadChildTranscript(childId, body) {
+  function loadChildTranscript(childId, lines) {
     hookGet(computerName, "/v1/subagents/transcript", { ...target, child: childId }).then((frame) => {
       const read = readFrame(frame);
-      body.replaceChildren();
+      lines.replaceChildren();
       if (!read || read.messages.length === 0) {
-        body.append(node("div", "chat-work-empty", "Nothing to show yet."));
+        lines.append(node("div", "chat-work-empty", "Nothing to show yet."));
         return;
       }
       for (const message of read.messages) {
         const line = node("div", `chat-work-line ${message.role}`);
         line.textContent = message.text || (message.imageBlocks.length ? "[image]" : "");
-        body.append(line);
+        lines.append(line);
       }
     }).catch(() => {
-      body.replaceChildren(node("div", "chat-work-empty", "Could not read this transcript."));
+      lines.replaceChildren(node("div", "chat-work-empty", "Could not read this transcript."));
     });
   }
 

@@ -606,6 +606,42 @@ export function mountMemory(root) {
     toast("Copied");
   }
 
+  /** A row's Delete… control with an inline confirm. `file` and `sha` both come
+   * from the daemon's listing, so the delete can compare-and-swap. */
+  function memoryDelete(item, ask, remove) {
+    const actions = el("div", "mem-row-actions");
+    const del = el("button", "mem-btn danger", "Delete\u2026");
+    del.type = "button";
+    del.addEventListener("click", () => {
+      const confirm = el("div", "mem-del-confirm");
+      confirm.append(el("span", "mem-del-ask", ask));
+      const go = el("button", "mem-btn danger", "Delete");
+      go.type = "button";
+      go.addEventListener("click", () => void deleteMemoryFile(item, actions, remove));
+      const cancel = el("button", "mem-btn", "Cancel");
+      cancel.type = "button";
+      cancel.addEventListener("click", () => actions.replaceChildren(del));
+      confirm.append(go, cancel);
+      actions.replaceChildren(confirm);
+    });
+    actions.append(del);
+    return actions;
+  }
+
+  async function deleteMemoryFile(item, actions, remove) {
+    const go = actions.querySelector(".mem-btn.danger");
+    if (go) { go.disabled = true; go.textContent = "Deleting\u2026"; }
+    try {
+      if (remove) await remove();
+      else await apiPost(state.computer, "/delete", { path: item.file, sha: item.sha });
+      toast("Deleted");
+    } catch (error) {
+      if (error.status === 409) toast("This file changed; reloaded.");
+      else toast(error.message || "The delete failed.");
+    }
+    void loadSegment();
+  }
+
   // ── Notes, truths, topics ──────────────────────────────────────────────
   const asItem = (item) => (typeof item === "string" ? { text: item } : (item ?? {}));
 
@@ -630,6 +666,7 @@ export function mountMemory(root) {
         meta.append(chip);
       }
       row.append(meta);
+      if (item.stableId) row.append(memoryDelete(item, "Delete this note?", () => apiPost(state.computer, "/notes/remove", { project: item.project ?? state.project, id: item.stableId })));
       list.append(row);
     }
     inner.append(list);
@@ -672,6 +709,7 @@ export function mountMemory(root) {
       const date = String(item.date ?? "").trim();
       if (date) meta.append(el("span", "mem-date", date));
       row.append(meta);
+      if (item.file && item.sha) row.append(memoryDelete(item, "Delete this topic?"));
       list.append(row);
     }
     inner.append(list);

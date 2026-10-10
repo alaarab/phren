@@ -189,6 +189,9 @@
   text-transform: uppercase;
   color: var(--muted);
 }
+.chat-pop-title { display: flex; align-items: center; gap: 6px; }
+.chat-pop-count { color: var(--dim); }
+.chat-pop-clear { display: flex; align-items: center; text-transform: none; letter-spacing: normal; }
 .chat-pop-back {
   border: none;
   background: none;
@@ -200,15 +203,20 @@
 .chat-pop-list { overflow-y: auto; }
 .chat-work-row {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 36px;
+  flex-direction: column;
+  gap: 6px;
   padding: 6px 12px;
-  cursor: pointer;
   border-bottom: 1px solid var(--border);
 }
 .chat-work-row:last-child { border-bottom: none; }
 .chat-work-row:hover { background: var(--card); }
+.chat-work-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+  cursor: pointer;
+}
 .chat-work-glyph {
   flex: 0 0 auto;
   width: 22px;
@@ -232,13 +240,14 @@
 .chat-work-empty { padding: 12px; color: var(--muted); font-size: 12px; }
 .chat-work-transcript {
   overflow-y: auto;
-  max-height: 52vh;
+  max-height: 44vh;
   padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   background: var(--bg);
 }
+.chat-work-lines { display: flex; flex-direction: column; gap: 8px; }
 .chat-work-line {
   font-family: var(--mono);
   font-size: 12.5px;
@@ -256,5 +265,65 @@
   font-family: var(--mono);
 }
 
+/* Sending into a child ----------------------------------------------------- */
+
+.chat-work-send { display: flex; flex-direction: column; gap: 4px; }
+.chat-work-send-row { display: flex; gap: 6px; }
+.chat-work-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 4px 8px;
+  transition: border-color .18s ease;
+}
+.chat-work-input::placeholder { color: var(--dim); }
+.chat-work-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chat-work-input:disabled { opacity: .55; }
+.chat-work-send-btn {
+  flex: 0 0 auto;
+  background: var(--accent-solid);
+  color: var(--text);
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background .18s ease;
+}
+.chat-work-send-btn:not(:disabled):hover { background: var(--accent); }
+.chat-work-send-btn:disabled { opacity: .4; cursor: default; }
+.chat-work-send-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chat-work-note { font-size: 11px; color: var(--muted); }
+.chat-work-note.danger { color: var(--danger); }
+
+/* The parent <-> child message thread -------------------------------------- */
+
+.chat-work-messages { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+.chat-work-section { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.chat-work-message-list { display: flex; flex-direction: column; gap: 6px; }
+.chat-work-message { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; background: var(--card); border-radius: 6px; }
+.chat-work-message-text { color: var(--text-2); font-size: 12.5px; overflow-wrap: anywhere; }
+.chat-work-message-state { font-size: 11px; color: var(--muted); }
+.chat-work-message-state.running { color: var(--working); }
+.chat-work-message-state.completed { color: var(--done); }
+.chat-work-message-state.failed { color: var(--danger); }
+
+/* Clear finished, with its inline confirm ---------------------------------- */
+
+.chat-work-clear, .chat-work-cancel { border: none; background: none; font-size: 11px; font-weight: 500; cursor: pointer; padding: 2px 6px; }
+.chat-work-clear { color: var(--accent); }
+.chat-work-clear:disabled { opacity: .5; cursor: default; }
+.chat-work-cancel { color: var(--muted); }
+.chat-work-confirm { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+
 /* Lines scroll out under a soft edge instead of a hard cut below the header. */
 .chat-timeline { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px); mask-image: linear-gradient(to bottom, transparent 0, #000 18px); }
+
+/* A worker row's message box appears on hover or focus, not on every row at once. */
+.chat-work-row .chat-work-send { display: none; }
+.chat-work-row:hover .chat-work-send, .chat-work-row:focus-within .chat-work-send { display: flex; }

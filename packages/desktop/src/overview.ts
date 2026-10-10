@@ -241,6 +241,10 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
       emitter.removeAllListeners();
     },
     current: build,
+    reconnectAll(): void {
+      if (!started) return;
+      for (const sup of supervisors) if (!sup.stopped) reconnect(sup);
+    },
     setComputers(computers: Computer[]): void {
       const incoming = new Map(computers.map(computer => [computer.name, computer]));
       for (let i = supervisors.length - 1; i >= 0; i--) {
