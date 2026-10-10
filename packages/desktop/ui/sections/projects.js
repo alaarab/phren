@@ -3,6 +3,7 @@
 // sessions, skills, knobs). Add a repository to a computer, or launch an agent
 // straight into a project. The store routes read a computer's phren store;
 // the phone's Projects screen is the base, drawn with the desktop's variables.
+import { extractKnowsBlock } from "../chat/knows.js";
 import { hookGet, hookPost } from "../api.js";
 import { projectOf, sessions as allSessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
@@ -110,10 +111,10 @@ function parseFrontmatter(raw) {
 /** The summary.md "What phren knows" block: its prose and the counts it carries. */
 function parseKnows(summary) {
   if (!summary) return null;
-  const start = summary.indexOf("<!-- phren:knows:start");
-  const end = summary.indexOf("<!-- phren:knows:end -->");
-  if (start < 0 || end < 0 || end < start) return null;
-  const inner = summary.slice(start, end).split("\n");
+  // The newest copy when a union merge left several start markers.
+  const block = extractKnowsBlock(summary);
+  if (!block) return null;
+  const inner = ["", ...block.split("\n")];
   const bullets = inner.filter((line) => line.startsWith("- "));
   const counts = { findings: 0, archived: 0, tasks: null };
   for (const line of bullets) {
