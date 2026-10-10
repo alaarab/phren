@@ -73,6 +73,7 @@ async function refreshStoreProjectDirs(phrenPath: string, profile?: string): Pro
   }
 }
 import { getIndexPolicy, withFileLock } from "./governance.js";
+import { tryFileLock } from "../governance/locks.js";
 import { stripTaskDoneSection } from "./content.js";
 import { isInactiveFindingLine } from "../finding/lifecycle.js";
 import { invalidateDfCache } from "./search-fallback.js";
@@ -1753,17 +1754,52 @@ function createEmptyIndexDb(SQL: SqlJsStatic): SqlJsDatabase {
   return db;
 }
 
-function isRebuildLockHeld(phrenPath: string): boolean {
-  const lockTarget = runtimeFile(phrenPath, "index-rebuild");
-  const lockPath = lockTarget + ".lock";
+/** Thrown by a `requireFresh` build while another process holds the rebuild lock. */
+export class IndexBusyError extends Error {
+  readonly code = "PHREN_INDEX_BUSY";
+  constructor(message = "Index rebuild is busy; retry shortly.") { super(message); this.name = "IndexBusyError"; }
+}
+
+export function isIndexBusyError(error: unknown): boolean {
+  return error instanceof IndexBusyError
+    || (error as { code?: unknown } | null)?.code === "PHREN_INDEX_BUSY";
+}
+
+/**
+ * Whether another process is rebuilding right now. A lock younger than the
+ * stale threshold still counts as free when the pid written into it is gone:
+ * a rebuild killed mid-way (a hook timed out, a detached reindex OOM-killed)
+ * never unlinks its lock, and without the pid check every fresh-required
+ * refresh in every MCP server failed for up to 30 s after it.
+ */
+export function isRebuildLockHeld(phrenPath: string): boolean {
+  const lockPath = runtimeFile(phrenPath, "index-rebuild") + ".lock";
+  let contents: string;
+  let mtimeMs: number;
   try {
-    const stat = fs.statSync(lockPath);
-    const staleThreshold = Number.parseInt((process.env.PHREN_FILE_LOCK_STALE_MS) || "30000", 10) || 30000;
-    return Date.now() - stat.mtimeMs <= staleThreshold;
-  } catch (err: unknown) {
-    logger.debug("isRebuildLockHeld stat", errorMessage(err));
-    return false;
+    mtimeMs = fs.statSync(lockPath).mtimeMs;
+    contents = fs.readFileSync(lockPath, "utf8");
+  } catch {
+    return false; // absent is the normal case
   }
+  const staleThreshold = Number.parseInt((process.env.PHREN_FILE_LOCK_STALE_MS) || "30000", 10) || 30000;
+  if (Date.now() - mtimeMs > staleThreshold) return false;
+  const pid = Number.parseInt(contents.split("\n")[0], 10);
+  // Empty or unparseable: the owner may be between create and write. Trust age.
+  if (!(pid > 0)) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== "ESRCH") return true; // EPERM: alive, not ours
+  }
+  try {
+    if (fs.readFileSync(lockPath, "utf8") === contents) fs.unlinkSync(lockPath);
+    debugLog(`Removed rebuild lock left by dead pid ${pid}`);
+  } catch {
+    // Someone else already replaced or removed it.
+  }
+  return false;
 }
 
 async function loadIndexSnapshotOrEmpty(
@@ -2061,26 +2097,38 @@ export async function loadIndexForHook(phrenPath: string, profile?: string): Pro
 async function _buildIndexGuarded(phrenPath: string, profile?: string, requireFresh = false): Promise<SqlJsDatabase> {
   const lockTarget = runtimeFile(phrenPath, "index-rebuild");
   if (isRebuildLockHeld(phrenPath)) {
-    if (requireFresh) throw new Error("Index rebuild is busy; retry shortly.");
+    if (requireFresh) throw new IndexBusyError();
     return loadIndexSnapshotOrEmpty(phrenPath, profile);
   }
 
-  try {
-    return await withFileLock(lockTarget, async () => {
-      let timer: ReturnType<typeof setTimeout>;
-      const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("buildIndex timed out after 30s")), 30000);
-      });
-      try {
-        return await Promise.race([buildIndexImpl(phrenPath, profile), timeout]);
-      } finally {
-        clearTimeout(timer!);
-      }
+  const timedBuild = async () => {
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("buildIndex timed out after 30s")), 30000);
     });
+    try {
+      return await Promise.race([buildIndexImpl(phrenPath, profile), timeout]);
+    } finally {
+      clearTimeout(timer!);
+    }
+  };
+
+  if (requireFresh) {
+    // A caller that must not settle for a snapshot (the MCP server) waits
+    // asynchronously in its own bounded retry instead of withFileLock's
+    // synchronous spin, which would freeze the server's event loop for up to
+    // 5 s while another process finishes its rebuild.
+    const release = tryFileLock(lockTarget);
+    if (!release) throw new IndexBusyError();
+    try { return await timedBuild(); }
+    finally { release(); }
+  }
+
+  try {
+    return await withFileLock(lockTarget, timedBuild);
   } catch (err: unknown) {
     const message = errorMessage(err);
     if (message.includes("could not acquire lock")) {
-      if (requireFresh) throw err;
       debugLog(`FTS rebuild skipped because another process holds the rebuild lock: ${message}`);
       return loadIndexSnapshotOrEmpty(phrenPath, profile);
     }
