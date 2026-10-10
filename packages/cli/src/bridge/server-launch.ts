@@ -19,6 +19,7 @@ import { clearConductor, conductorPane, noteConductorSession, readRoleState, rec
 import { localNames } from "./computer-names.js";
 import { pretrustFolder } from "./folder-trust.js";
 import { claudeHome, claudeLaunchEnv, isAccountSlug, DEFAULT_ACCOUNT } from "./claude-accounts.js";
+import { pickClaudeAccount } from "./account-choice.js";
 import { harnessInventoryWithin, hasUsable, launchCheckOff, type HarnessInventory } from "./harnesses.js";
 import { paneAccountKey, recordPaneAccount } from "./pane-accounts.js";
 import { optionalHookPeers } from "./peers.js";
@@ -316,7 +317,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const label = plainText(200).parse(data.label);
   const kind = z.enum(launchKinds).parse(data.kind);
   const effort = z.enum(launchEfforts).default("medium").parse(data.effort);
-  const account = data.account === undefined || data.account === null ? undefined : z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(data.account);
+  const named = data.account === undefined || data.account === null ? undefined : z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").parse(data.account);
   const permissionMode = z.enum(PERMISSION_MODES).optional().parse(data.permissionMode ?? undefined);
   if (permissionMode && role === "conductor") throw new BridgeError(400, "A conductor starts with its own permissions; permissionMode is for workers.");
   if (permissionMode && kind === "opencode") throw new BridgeError(400, "OpenCode takes its permissions from its own config; permissionMode is for Claude, Codex and Copilot workers.");
@@ -344,6 +345,9 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // Herdr 0.9.1 refuses a start timeout of 3000 ms or less (invalid_agent_timeout).
   const timeout = Math.min(120_000, Math.max(3_001, data.timeoutMs === undefined ? 45_000 : z.number().int().parse(data.timeoutMs)));
   // Checked before anything is created, so a refusal leaves no pane, worktree or brief file behind.
+  // A Claude launch that names no account runs under the signed-in one with the most room left.
+  const choice = kind === "claude" && named === undefined ? await pickClaudeAccount(`Launch "${label}"`).catch(() => undefined) : undefined;
+  const account = named ?? choice?.account;
   await requireAvailable(kind, account);
   const home = kind === "claude" && account && account !== DEFAULT_ACCOUNT ? claudeHome(account) : undefined;
   if (kind === "claude" && account && account !== DEFAULT_ACCOUNT && !home) throw new BridgeError(409, `No claude account "${account}"`, { code: "account_unavailable" });
@@ -493,7 +497,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     await new JobRegistry().register({ pane: { server, pane: created.paneId, ...(created.workspaceId ? { workspace: created.workspaceId } : {}), agent: kind, label },
       ...(sessionId ? { session: sessionId } : {}), agent: kind, label, command: kind }).catch(() => undefined);
   }
-  return { ok: true, ...created, cwd, agent: kind, agentStatus, role, sessionId, target, ...(account ? { account } : {}), ...(permissionMode ? { permissionMode } : {}), ...(unchecked.length ? { unchecked } : {}),
+  return { ok: true, ...created, cwd, agent: kind, agentStatus, role, sessionId, target, ...(account ? { account } : {}), ...(choice ? { accountChoice: choice.reason } : {}), ...(permissionMode ? { permissionMode } : {}), ...(unchecked.length ? { unchecked } : {}),
     // The caller types the brief itself unless it went with the launch.
     ...(brief ? { briefLaunched: appServer ? briefTurn !== undefined : !!briefLaunch || !!servedBrief,
       briefState: appServer ? briefTurn ?? "unconfirmed" : served ? (servedBrief?.delivered ? "sent" : "uncertain") : briefLaunch ? "sent" : "unconfirmed" } : {}),
