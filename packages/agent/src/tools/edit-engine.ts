@@ -58,14 +58,15 @@ function leadingWs(line: string): string {
 export function similarity(a: string, b: string): number {
   if (a === b) return 1;
   if (a.length < 2 || b.length < 2) return 0;
-  const grams = new Map<string, number>();
+  // A bigram as one number: two UTF-16 code units.
+  const grams = new Map<number, number>();
   for (let i = 0; i < a.length - 1; i++) {
-    const g = a.slice(i, i + 2);
+    const g = a.charCodeAt(i) * 65536 + a.charCodeAt(i + 1);
     grams.set(g, (grams.get(g) ?? 0) + 1);
   }
   let hits = 0;
   for (let i = 0; i < b.length - 1; i++) {
-    const g = b.slice(i, i + 2);
+    const g = b.charCodeAt(i) * 65536 + b.charCodeAt(i + 1);
     const n = grams.get(g) ?? 0;
     if (n > 0) {
       hits++;
@@ -74,6 +75,8 @@ export function similarity(a: string, b: string): number {
   }
   return (2 * hits) / (a.length - 1 + (b.length - 1));
 }
+
+const REGION_BUDGET = 100_000;
 
 /**
  * The file region most similar to `needleLines`, for failure messages.
@@ -89,11 +92,22 @@ export function closestRegion(
   const firstReal = needle.findIndex((l) => l.length > 0);
   if (firstReal === -1) return null;
   const last = Math.max(0, fileLines.length - n);
-  const exhaustive = (last + 1) * n <= 400_000;
+  // Score at most REGION_BUDGET line pairs. On a big file, rank the windows by how
+  // close their anchor line is and score the closest first.
+  let starts: number[];
+  if ((last + 1) * n <= REGION_BUDGET) {
+    starts = Array.from({ length: last + 1 }, (_, i) => i);
+  } else {
+    const anchored: { start: number; score: number }[] = [];
+    for (let start = 0; start <= last; start++) {
+      const score = similarity(fileLines[start + firstReal]?.trim() ?? "", needle[firstReal]);
+      if (score >= 0.5) anchored.push({ start, score });
+    }
+    anchored.sort((a, b) => b.score - a.score || a.start - b.start);
+    starts = anchored.slice(0, Math.floor(REGION_BUDGET / n)).map((a) => a.start);
+  }
   let best: { start: number; score: number } | null = null;
-  for (let start = 0; start <= last; start++) {
-    // On big files only score windows whose anchor line is already close.
-    if (!exhaustive && similarity(fileLines[start + firstReal]?.trim() ?? "", needle[firstReal]) < 0.5) continue;
+  for (const start of starts) {
     let total = 0;
     let counted = 0;
     for (let j = 0; j < n; j++) {
@@ -104,7 +118,7 @@ export function closestRegion(
       counted++;
     }
     const score = counted > 0 ? total / counted : 0;
-    if (!best || score > best.score) best = { start, score };
+    if (!best || score > best.score || (score === best.score && start < best.start)) best = { start, score };
   }
   return best;
 }

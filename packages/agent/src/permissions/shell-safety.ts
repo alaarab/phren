@@ -8,30 +8,43 @@ interface DangerousPattern {
   pattern: RegExp;
   reason: string;
   severity: "block" | "warn";
+  /** Test the command with quoted arguments blanked (see `unquoted`). */
+  commandOnly?: boolean;
+}
+
+// A command position: the start of the line or of a chained, piped or
+// substituted command, after any wrapper such as sudo or xargs. Matching a
+// word only here keeps `grep -rn setsid src` and `npx mkfs-tool` runnable.
+const CMD = String.raw`(?:^|[\n;&|({\`]|\$\()\s*(?:(?:sudo|exec|command|nice|time|env|xargs)\s+(?:-\S+\s+)*)*`;
+// The end of a word as the shell splits it.
+const END = String.raw`(?=$|[\s;&|)])`;
+// rm with a recursive flag anywhere in the same command (-r, -rf, -fR, --recursive).
+const RM_RECURSIVE = String.raw`\brm\b(?=[^;&|]*\s-(?:[a-zA-Z]*[rR]|-recursive))[^;&|]*?\s["']?`;
+
+function blocked(source: string, reason: string, commandOnly = true): DangerousPattern {
+  return { pattern: new RegExp(source, "i"), reason, severity: "block", commandOnly };
 }
 
 const DANGEROUS_PATTERNS: DangerousPattern[] = [
-  // Block: destructive/irreversible (no $ anchors — catch chained commands like `rm -rf /; echo done`)
-  { pattern: /rm\s+-[a-z]*r[a-z]*f?\s+\/\s*/i, reason: "Recursive delete of root filesystem", severity: "block" },
-  { pattern: /rm\s+-[a-z]*r[a-z]*f?\s+\/[^\/\s]*/i, reason: "Recursive delete of top-level directory", severity: "block" },
-  { pattern: /curl\s+.*\|\s*(?:ba)?sh/i, reason: "Piping remote script to shell", severity: "block" },
-  { pattern: /wget\s+.*\|\s*(?:ba)?sh/i, reason: "Piping remote script to shell", severity: "block" },
-  { pattern: /\bmkfs\b/i, reason: "Filesystem format command", severity: "block" },
-  { pattern: /\bdd\b.*\bof=\/dev\//i, reason: "Direct device write with dd", severity: "block" },
-  { pattern: />\s*\/dev\/[sh]d[a-z]/i, reason: "Direct write to block device", severity: "block" },
-  { pattern: /:(){ :\|:& };:/i, reason: "Fork bomb", severity: "block" },
-  { pattern: /\bnohup\b/i, reason: "Detached process may outlive session", severity: "block" },
-  { pattern: /\bdisown\b/i, reason: "Detached process may outlive session", severity: "block" },
-  { pattern: /\bsetsid\b/i, reason: "Detached process may outlive session", severity: "block" },
+  // Block: destructive/irreversible. rm targets are matched in the raw
+  // command so quoting (`rm -rf "/"`) does not hide them; only `/`, `/*` and a
+  // top-level directory such as `/etc` count, not a path under one.
+  blocked(String.raw`${RM_RECURSIVE}\/\*?["']?${END}`, "Recursive delete of root filesystem", false),
+  blocked(String.raw`${RM_RECURSIVE}\/[^\/\s"';&|*]+\/?\*?["']?${END}`, "Recursive delete of top-level directory", false),
+  blocked(String.raw`${CMD}(?:curl|wget)\b.*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh${END}`, "Piping remote script to shell"),
+  blocked(String.raw`${CMD}mkfs(?:\.\w+)?${END}`, "Filesystem format command"),
+  blocked(String.raw`${CMD}dd\b.*\bof=\/dev\/(?!null\b|zero\b|std(?:out|err)\b|fd\/)`, "Direct device write with dd"),
+  blocked(String.raw`>\s*\/dev\/[sh]d[a-z]`, "Direct write to block device"),
+  blocked(String.raw`:\(\)\s*\{\s*:\|:&\s*\};:`, "Fork bomb", false),
+  blocked(String.raw`${CMD}(?:nohup|disown|setsid)${END}`, "Detached process may outlive session"),
 
   // Block: Windows-specific destructive commands
-  { pattern: /\bformat\s+[a-z]:/i, reason: "Disk format command", severity: "block" },
-  { pattern: /\bdel\s+\/[sq]/i, reason: "Recursive or quiet delete", severity: "block" },
-  { pattern: /\brd\s+\/s/i, reason: "Recursive directory removal", severity: "block" },
-  { pattern: /\brmdir\s+\/s/i, reason: "Recursive directory removal", severity: "block" },
-  { pattern: /\breg\s+delete\b/i, reason: "Registry deletion", severity: "block" },
-  { pattern: /\bpowershell\b.*\b-enc\b/i, reason: "Encoded PowerShell command (obfuscation)", severity: "block" },
-  { pattern: /\bcmd\b.*\/c.*\bdel\s+\/[sq]/i, reason: "Recursive or quiet delete via cmd", severity: "block" },
+  blocked(String.raw`${CMD}format\s+[a-z]:`, "Disk format command"),
+  blocked(String.raw`${CMD}del\s+\/[sq]`, "Recursive or quiet delete"),
+  blocked(String.raw`${CMD}(?:rd|rmdir)\s+\/s`, "Recursive directory removal"),
+  blocked(String.raw`${CMD}reg\s+delete\b`, "Registry deletion"),
+  blocked(String.raw`${CMD}(?:powershell|pwsh)\b.*\s-enc`, "Encoded PowerShell command (obfuscation)"),
+  blocked(String.raw`${CMD}cmd\b.*\/c.*\bdel\s+\/[sq]`, "Recursive or quiet delete via cmd"),
 
   // Warn: potentially dangerous
   { pattern: /\beval\b/i, reason: "Dynamic code execution via eval", severity: "warn" },
@@ -67,11 +80,23 @@ const SECRET_SUFFIX_PATTERNS = ["_URI", "_DSN"];
 const SECRET_SUFFIXES = ["_SECRET", "_TOKEN", "_PASSWORD", "_KEY"];
 
 /**
+ * The command with quoted arguments blanked, so a word that is only text
+ * (`git commit -m 'drop nohup'`) is not read as a command. Quoted text after
+ * `-c` or `eval` is itself run, so it stays, fenced as its own command line.
+ */
+function unquoted(command: string): string {
+  return command.replace(/(-c\s+|\beval\s+)?('[^']*'|"(?:[^"\\]|\\.)*")/g, (_m, run: string | undefined, quoted: string) =>
+    run ? `${run};${quoted.slice(1, -1)};` : "''",
+  );
+}
+
+/**
  * Check a shell command for dangerous patterns.
  */
 export function checkShellSafety(command: string): ShellSafetyResult {
+  const commands = unquoted(command);
   for (const dp of DANGEROUS_PATTERNS) {
-    if (dp.pattern.test(command)) {
+    if (dp.pattern.test(dp.commandOnly ? commands : command)) {
       return { safe: false, reason: dp.reason, severity: dp.severity };
     }
   }
