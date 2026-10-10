@@ -9,7 +9,7 @@ import type {
   MergedOverview,
 } from "./contract.js";
 
-const OVERVIEW_PATH = "/v1/overview?watchApprovals=1";
+const OVERVIEW_PATH = "/v1/overview?watchApprovals=1&resources=1";
 const BASE_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 60_000;
 const STABLE_MS = 60_000; // a socket open this long resets the backoff
@@ -23,6 +23,7 @@ interface Supervisor {
   error?: string;
   overview?: HookOverview;
   updatedAt?: string;
+  resources?: unknown;
   socket?: WebSocket;
   backoffMs: number;
   retryTimer?: NodeJS.Timeout;
@@ -75,6 +76,7 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
         if (s.error !== undefined) row.error = s.error;
         if (s.overview !== undefined) row.overview = s.overview;
         if (s.updatedAt !== undefined) row.updatedAt = s.updatedAt;
+        if (s.resources !== undefined) row.resources = s.resources;
         return row;
       }),
     };
@@ -127,7 +129,14 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
     }
     if (typeof frame !== "object" || frame === null) return;
     const rec = frame as Record<string, unknown>;
-    if (rec.type !== "overview") return; // heartbeat/resources: liveness only
+    if (rec.type === "resources") {
+      // The Hook's `resources=1` frame: its live load, memory and disk. Kept
+      // per computer and re-emitted so Home redraws the Computers block.
+      sup.resources = rec.resources;
+      scheduleChange();
+      return;
+    }
+    if (rec.type !== "overview") return; // heartbeat: liveness only
     const overview = { ...rec };
     delete overview.type;
     sup.overview = overview as HookOverview;
@@ -258,6 +267,7 @@ export const createOverviewHub: CreateOverviewHub = (computers, ws) => {
           sup.error = undefined;
           sup.overview = undefined;
           sup.updatedAt = undefined;
+          sup.resources = undefined;
           sup.backoffMs = BASE_BACKOFF_MS;
           sup.stopped = false;
           if (started) connect(sup);

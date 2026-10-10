@@ -496,3 +496,49 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 /* Collapsed sidebar: status rings only. */
 .sidebar.compact .sb-mode, .sidebar.compact .sb-subhead { display: none; }
 .sidebar.compact .sb-actions, .sidebar.compact .sb-menu { display: none !important; }
+/* Home cockpit (Milestone 1): conductor card, needs-you keyboard, working
+   activity lines, recent returns and computer load. Appended at the end. */
+.home-conductor { display: grid; gap: 10px; padding: 14px; border-radius: 10px; background: var(--surface); box-shadow: inset 3px 0 0 var(--accent); }
+.home-conductor-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.home-conductor-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font: 600 14px system-ui; }
+.home-conductor-meta { flex: none; margin-left: auto; color: var(--muted); font-size: 12px; }
+.home-conductor-state { color: var(--working); }
+.home-conductor-state.waiting { color: var(--waiting); }
+.home-conductor-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 12.5px; }
+.home-conductor-line.muted { color: var(--muted); }
+.home-conductor-actions { display: flex; align-items: center; gap: 8px; }
+.home-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.home-field-label { color: var(--muted); font-size: 12px; }
+.home-select { height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--sunken); color: var(--text); font: 12.5px system-ui; }
+.home-btn { height: 32px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--accent-solid); color: var(--text); font: 600 12.5px system-ui; cursor: pointer; transition: background .18s ease; }
+.home-btn:hover { background: var(--accent); color: #1E1E1E; }
+.home-btn:disabled { background: rgba(116,80,167,0.35); color: var(--muted); cursor: default; }
+.home-btn.ghost { background: var(--raised); color: var(--text-2); }
+.home-keys { margin: 0 0 8px; color: var(--dim); font-size: 11.5px; }
+.home-keys kbd { padding: 1px 5px; border-radius: 5px; background: var(--raised); color: var(--text-2); font: 11px "JetBrains Mono", ui-monospace, monospace; }
+
+.home-row { align-items: flex-start; }
+.home-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.home-row-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+.home-row-sub.activity { color: var(--text-2); font-family: "JetBrains Mono", ui-monospace, monospace; }
+.home-row.selected { background: var(--card); box-shadow: inset 3px 0 0 var(--accent), 0 0 0 1px var(--accent); }
+.home-age { color: var(--dim); font-family: "JetBrains Mono", ui-monospace, monospace; }
+
+.home-chip { flex: none; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--raised); color: var(--muted); }
+.home-chip.done { background: rgba(138,200,172,0.16); color: var(--done); }
+.home-chip.needs { background: rgba(224,188,127,0.16); color: var(--waiting); }
+.home-chip.failed { background: rgba(239,152,152,0.16); color: var(--danger); }
+.home-chip.gone { background: var(--raised); color: var(--dim); }
+
+.home-computer { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name state" "load load"; gap: 6px 12px; }
+.home-computer-name { grid-area: name; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.home-computer-meta { grid-area: state; display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; }
+.home-load { grid-area: load; display: flex; align-items: center; gap: 8px; }
+.home-load-bar { flex: 1 1 auto; height: 5px; border-radius: 999px; background: var(--sunken); overflow: hidden; }
+.home-load-fill { display: block; height: 100%; border-radius: 999px; background: var(--done); transition: width .18s ease; }
+.home-load-fill.busy { background: var(--waiting); }
+.home-load-fill.stressed { background: var(--danger); }
+.home-load-text { flex: none; color: var(--muted); font-size: 11.5px; font-family: "JetBrains Mono", ui-monospace, monospace; }
+.home-error { color: var(--danger); font-size: 12px; }
+.home-start-note { color: var(--muted); font-size: 12px; }
+
