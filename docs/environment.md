@@ -43,6 +43,7 @@ selection is not labeled assumed. `PHREN_QUIET=1` suppresses the warning.
 | Variable | Values | Default | Effect |
 |----------|--------|---------|--------|
 | `PHREN_MCP_PROFILE` | `core`, `full` | `core` (or whatever `phren config mcp-profile` set) | `core` exposes ten tools with everything else behind `phren_admin`; `full` exposes every tool by name. See `api-reference.md`. |
+| `PHREN_CLANKER` | `on`, `off` | what `phren config clanker` set; on for installs made since clanker mode shipped, off otherwise | Clanker mode: the prompt hook, `search_knowledge`, `get_tasks` and `get_findings` return id, title, keyword and score rows, and `get_memory_detail` fetches the text by id. `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE` is read as an alias when this is unset. The VS Code extension sets it to `off` for its own server. |
 
 ## Core
 

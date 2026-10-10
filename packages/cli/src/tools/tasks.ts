@@ -42,6 +42,7 @@ import { normalizeMemoryScope } from "../shared.js";
 import { permissionDeniedError } from "../governance/rbac.js";
 import { getMachineName } from "../machine-identity.js";
 import { claimTaskSynced } from "../sync/task-claim.js";
+import { CLANKER_FETCH_HINT, clankerEnabled, rowKeywords, rowTitle } from "../clanker.js";
 import { LIST_RESPONSE_MAX_CHARS, LIST_TEXT_MAX_CHARS, clipTail, shrinkToBudget } from "../response-budget.js";
 
 type TaskStatus = "all" | "active" | "queue" | "done" | "active+queue";
@@ -136,6 +137,22 @@ function buildTaskSummary(doc: TaskDoc, includedSections: TaskSection[], base: s
   return lines.join("\n");
 }
 
+/** Clanker mode: one line per task (id, title, keywords, priority, claim). */
+function buildClankerTaskRows(doc: TaskDoc, includedSections: TaskSection[]): string[] {
+  const lines: string[] = [`## ${doc.project}`];
+  for (const section of includedSections) {
+    const items = doc.items[section];
+    if (!items.length) continue;
+    lines.push(`${section}:`);
+    for (const item of items) {
+      const id = item.stableId ? `bid:${item.stableId}` : item.id;
+      const tags = [item.priority, item.claim ? `claimed: ${item.claim.computer}` : undefined].filter(Boolean);
+      lines.push(`${id} ${rowTitle(item.line)} [${rowKeywords(item.line).join(", ")}]${tags.length ? ` (${tags.join("; ")})` : ""}`);
+    }
+  }
+  return lines;
+}
+
 export function register(server: McpServer, ctx: McpContext): void {
   const { phrenPath, profile, updateFileInIndex } = ctx;
   const withWriteQueue = (fn: () => Promise<ReturnType<typeof mcpResponse>>) => ctx.withWriteQueue(async () => {
@@ -227,6 +244,18 @@ export function register(server: McpServer, ctx: McpContext): void {
         }
         const requested = limit ?? DEFAULT_TASK_LIMIT;
         const counts = taskCounts(phrenPath, doc);
+        if (clankerEnabled(phrenPath)) {
+          const buildRows = (size: number) => {
+            const page = size < requested ? buildTaskView(filtered, status, size, Math.min(done_limit ?? DEFAULT_DONE_LIMIT, size), offset) : view;
+            const more = page.truncated ? `\nMore: offset=${(offset ?? 0) + size}` : "";
+            return {
+              ok: true,
+              message: `${buildClankerTaskRows(page.doc, page.includedSections).join("\n")}${more}\n${CLANKER_FETCH_HINT}`,
+              data: { project, counts, includedSections: page.includedSections, totalItems: page.totalItems, totalUnpaged: page.totalUnpaged, offset: offset ?? 0, truncated: page.truncated },
+            };
+          };
+          return mcpResponse(shrinkToBudget(requested, buildRows).payload, { compact: true });
+        }
         const buildPage = (size: number) => {
           const page = size < requested ? buildTaskView(filtered, status, size, Math.min(done_limit ?? DEFAULT_DONE_LIMIT, size), offset) : view;
           const sectionCounts = page.includedSections
@@ -275,6 +304,22 @@ export function register(server: McpServer, ctx: McpContext): void {
         return { ok: true, message: parts.join("\n\n") + truncationNote + note, data: { projects: projectData, summary: asSummary } };
       };
       if (summary) return mcpResponse(buildPage(requested, true));
+      if (clankerEnabled(phrenPath)) {
+        const buildRows = (size: number) => {
+          const built = filteredDocs.map(({ doc, filtered }) => {
+            const view = buildTaskView(filtered, status, size, Math.min(done_limit ?? DEFAULT_DONE_LIMIT, size), offset);
+            return { project: doc.project, view, lines: buildClankerTaskRows(view.doc, view.includedSections) };
+          });
+          const anyTruncated = built.some(({ view }) => view.truncated);
+          return {
+            ok: true,
+            message: `${built.map(({ lines }) => lines.join("\n")).join("\n\n")}${anyTruncated ? "\nSome lists are capped; pass project, limit or offset for more." : ""}\n${CLANKER_FETCH_HINT}`,
+            data: { projects: built.map(({ project, view }) => ({ project, includedSections: view.includedSections, totalItems: view.totalItems, truncated: view.truncated })) },
+          };
+        };
+        // Every project at once is an overview: keep it smaller than one project's list.
+        return mcpResponse(shrinkToBudget(requested, buildRows, LIST_RESPONSE_MAX_CHARS / 4).payload, { compact: true });
+      }
       const fitted = shrinkToBudget(requested, (size) => buildPage(size, false));
       if (JSON.stringify(fitted.payload, null, 2).length <= LIST_RESPONSE_MAX_CHARS) return mcpResponse(fitted.payload);
       // Too many projects to list in full: fall back to per-project summaries.
