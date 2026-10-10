@@ -23,6 +23,22 @@
   --border-strong: rgba(255, 255, 255, 0.14);
 
   --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  /* Density: the phone's Row/Radius/Space constants. Colours above are the
+     Charcoal defaults; shell/theme.js overwrites both from tokens.json. */
+  --row-h: 44px;
+  --tree-row-h: 24px;
+  --control-h: 28px;
+  --radius: 10px;
+  --font-ui: 13px;
+  --font-meta: 12px;
+  --font-mono: 13px;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-group: 20px;
+  --space-section: 24px;
 }
 
 * { box-sizing: border-box; }
