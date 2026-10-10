@@ -10,6 +10,7 @@ import getKeybindingsServiceOverride from "@codingame/monaco-vscode-keybindings-
 import getLanguagesServiceOverride from "@codingame/monaco-vscode-languages-service-override";
 import getLogServiceOverride from "@codingame/monaco-vscode-log-service-override";
 import getModelServiceOverride from "@codingame/monaco-vscode-model-service-override";
+import getRemoteAgentServiceOverride from "@codingame/monaco-vscode-remote-agent-service-override";
 import getTextmateServiceOverride from "@codingame/monaco-vscode-textmate-service-override";
 import getThemeServiceOverride from "@codingame/monaco-vscode-theme-service-override";
 import "@codingame/monaco-vscode-theme-defaults-default-extension";
@@ -19,7 +20,7 @@ import * as vscode from "vscode";
 import { phrenThemeExtension } from "./theme.js";
 import { installPhrenFiles, registerPhrenFile, setPhrenReader } from "./phrenFiles.js";
 import getQuickAccessServiceOverride from "@codingame/monaco-vscode-quickaccess-service-override";
-import { currentTheme, loadInstalledExtensions, reloadExtensions, savedTheme, setTheme, themes } from "./extensions.js";
+import { currentTheme, extensionsStatus, loadInstalledExtensions, reloadExtensions, savedTheme, setTheme, themes } from "./extensions.js";
 
 import { Worker } from "./fakeWorker.js";
 
@@ -32,6 +33,36 @@ const workers: Record<string, Worker> = {
   getWorkerUrl: (_: string, label: string) => workers[label]?.url.toString(),
   getWorkerOptions: (_: string, label: string) => workers[label]?.options,
 };
+
+// The daemon's Node extension host (REH) for this computer. Fetched before the
+// editor starts: it decides whether VS Code joins a remote authority and lets
+// the REH load the Node extensions the web worker host cannot.
+interface RehInfo {
+  available: boolean;
+  authority?: string;
+  connectionToken?: string;
+  version?: string;
+  reason?: string;
+}
+
+async function fetchReh(): Promise<RehInfo> {
+  try {
+    const reply = await fetch("/api/reh", { cache: "no-store" });
+    if (!reply.ok) return { available: false };
+    return (await reply.json()) as RehInfo;
+  } catch {
+    return { available: false };
+  }
+}
+
+const reh = await fetchReh();
+const remote = reh.available && reh.authority ? { authority: reh.authority, version: reh.version } : null;
+
+/** A repository-absolute path as a "vscode-remote://" URI, or null without a REH. */
+function remoteUri(absolutePath: string): string | null {
+  if (!remote || !absolutePath.startsWith("/") || absolutePath.includes("\0")) return null;
+  return `vscode-remote://${remote.authority}${absolutePath}`;
+}
 
 const DEFAULT_SETTINGS = {
   "workbench.colorTheme": "Phren Charcoal",
@@ -61,14 +92,20 @@ async function boot() {
     // it never shares the desktop's cookie and cannot call the Hook through it.
     ...getExtensionServiceOverride({ enableWorkerExtensionHost: true, iframeAlternateDomain: `${location.protocol}//{{uuid}}.localhost:${location.port}` }),
     ...getQuickAccessServiceOverride({ isKeybindingConfigurationVisible: () => false, shouldUseGlobalPicker: () => false }),
-  }, undefined, { developmentOptions: { logLevel: LogLevel.Warning } });
+    // A reachable REH serves the Node extensions itself via scanRemoteExtensions.
+    ...(reh.available ? getRemoteAgentServiceOverride({ scanRemoteExtensions: true }) : {}),
+  }, undefined, {
+    developmentOptions: { logLevel: LogLevel.Warning },
+    ...(remote ? { remoteAuthority: remote.authority, connectionToken: reh.connectionToken } : {}),
+  });
   await phrenThemeExtension();
-  await loadInstalledExtensions();
+  await loadInstalledExtensions(reh.available);
 }
 
 const ready = boot();
 
 (window as unknown as Record<string, unknown>).PhrenEditorHost = {
   ready, monaco, vscode, registerExtension, ExtensionHostKind, registerCustomProvider, updateUserConfiguration,
-  reloadExtensions, themes, setTheme, currentTheme, setPhrenReader, registerPhrenFile,
+  reloadExtensions, themes, setTheme, currentTheme, extensionsStatus, setPhrenReader, registerPhrenFile,
+  remote, remoteUri,
 };

@@ -14,8 +14,8 @@ let monacoPromise = null;
 // Provider setup is process-wide. modelOwners lets a provider find the pane
 // (and its index) that owns the model it was invoked on.
 let providersRegistered = false;
-const modelOwners = new Map(); // model uri string -> { path, index }
-let activeOpenFile = null; // the pane that handles phren:/ opens right now
+const modelOwners = new Map(); // model uri string -> { path, index, uriFor, pathFromUri }
+let activeOpenFile = null; // { openFile, pathFromUri } of the pane handling opens right now
 
 function injectStyle() {
   if (document.getElementById("editor-style")) return;
@@ -191,10 +191,11 @@ function languageFor(monaco, path) {
 
 /** A Monaco location in another file. Monaco only navigates to a URI that has
  * a model, so leave an empty placeholder; the editor opener then loads the
- * real file into it (openFile fills a placeholder in place). */
-function location(monaco, file, line) {
-  const uri = monaco.Uri.parse("phren:/" + file);
-  window.PhrenEditorHost?.registerPhrenFile?.(file);
+ * real file into it (openFile fills a placeholder in place). The owning pane's
+ * uriFor chooses the URI scheme for this computer. */
+function location(monaco, owner, file, line) {
+  const uri = owner.uriFor(file);
+  if (uri.scheme === "phren") window.PhrenEditorHost?.registerPhrenFile?.(file);
   if (!monaco.editor.getModel(uri)) monaco.editor.createModel("", languageFor(monaco, file), uri);
   return { uri, range: new monaco.Range(line, 1, line, 1) };
 }
@@ -222,22 +223,27 @@ function toSymbol(monaco, entry) {
   };
 }
 
-/** Register the phren:/ language providers once; they resolve the owning pane
- * through modelOwners, so they keep working across panes. */
+/** Register the phren: / vscode-remote language providers once; they resolve
+ * the owning pane through modelOwners, so they keep working across panes. */
 function ensureProviders(monaco) {
   if (providersRegistered) return;
   providersRegistered = true;
 
+  const PHREN_SELECTOR = [{ scheme: "phren" }, { scheme: "vscode-remote" }];
+
   monaco.editor.registerEditorOpener({
     openCodeEditor(source, resource, selectionOrPosition) {
-      if (resource.scheme !== "phren" || !activeOpenFile) return false;
+      const pane = activeOpenFile;
+      if (!pane) return false;
+      const path = pane.pathFromUri(resource);
+      if (path == null) return false;
       const line = selectionOrPosition && (selectionOrPosition.startLineNumber || selectionOrPosition.lineNumber);
-      activeOpenFile(resource.path.replace(/^\//, ""), { line });
+      pane.openFile(path, { line });
       return true;
     },
   });
 
-  monaco.languages.registerDefinitionProvider({ scheme: "phren" }, {
+  monaco.languages.registerDefinitionProvider(PHREN_SELECTOR, {
     async provideDefinition(model, position) {
       const owner = modelOwners.get(model.uri.toString());
       const word = model.getWordAtPosition(position);
@@ -251,12 +257,12 @@ function ensureProviders(monaco) {
           const sym = def.definition && def.definition.symbol;
           if (sym) target = { file: sym.file, line: sym.line };
         }
-        return target && target.file ? location(monaco, target.file, target.line) : null;
+        return target && target.file ? location(monaco, owner, target.file, target.line) : null;
       } catch { return null; }
     },
   });
 
-  monaco.languages.registerReferenceProvider({ scheme: "phren" }, {
+  monaco.languages.registerReferenceProvider(PHREN_SELECTOR, {
     async provideReferences(model, position) {
       const owner = modelOwners.get(model.uri.toString());
       const word = model.getWordAtPosition(position);
@@ -267,7 +273,7 @@ function ensureProviders(monaco) {
         const data = await owner.index.references(row && row.symbol ? row.symbol : word.word);
         const locations = [];
         for (const group of (data.references && data.references.groups) || []) {
-          const uri = monaco.Uri.parse("phren:/" + group.file);
+          const uri = owner.uriFor(group.file);
           // Empty model gives the peek list a label without loading the file.
           if (!monaco.editor.getModel(uri)) monaco.editor.createModel("", languageFor(monaco, group.file), uri);
           for (const ref of group.references || []) {
@@ -279,7 +285,7 @@ function ensureProviders(monaco) {
     },
   });
 
-  monaco.languages.registerHoverProvider({ scheme: "phren" }, {
+  monaco.languages.registerHoverProvider(PHREN_SELECTOR, {
     async provideHover(model, position) {
       const owner = modelOwners.get(model.uri.toString());
       const word = model.getWordAtPosition(position);
@@ -307,7 +313,7 @@ function ensureProviders(monaco) {
     },
   });
 
-  monaco.languages.registerDocumentSymbolProvider({ scheme: "phren" }, {
+  monaco.languages.registerDocumentSymbolProvider(PHREN_SELECTOR, {
     async provideDocumentSymbols(model) {
       const owner = modelOwners.get(model.uri.toString());
       if (!owner) return [];
@@ -337,6 +343,61 @@ export function openFiles(el, ctx) {
   let index = null;
   let project = null;
   let indexAvailable = false;
+
+  // ------------------------------------------------------- remote file URIs
+  // When this computer runs a Node extension host, its languages servers only
+  // read real paths, so files open under vscode-remote; other computers stay
+  // on the phren: scheme. repoRoot is resolved once from the Changes status.
+  let repoRoot = null;
+  let useRemote = false;
+  let contextReady = null;
+
+  function uriFor(path) {
+    return useRemote
+      ? monaco.Uri.parse(window.PhrenEditorHost.remoteUri(repoRoot + "/" + path))
+      : monaco.Uri.parse("phren:/" + path);
+  }
+
+  function pathFromUri(uri) {
+    if (uri.scheme === "phren") return uri.path.replace(/^\//, "");
+    if (uri.scheme === "vscode-remote" && repoRoot && uri.path.startsWith(repoRoot + "/")) {
+      return uri.path.slice(repoRoot.length + 1);
+    }
+    return null;
+  }
+
+  function ownerFor(tab) {
+    return { path: tab.path, index, uriFor, pathFromUri };
+  }
+
+  const pane = { openFile, uriFor, pathFromUri };
+
+  // Runs once: loads Monaco, resolves the repo root, wires the shared providers.
+  function ensureContext() {
+    if (contextReady) return contextReady;
+    contextReady = loadMonaco()
+      .then(async (m) => {
+        monaco = m;
+        window.PhrenEditorHost?.setPhrenReader?.((path) => readRepoFile(computer, target, path).then((file) => file.text));
+        try {
+          const status = await hookPost(computer, "/v1/git/status", { target });
+          repoRoot = status.repository || null;
+        } catch { /* no repository: keep the phren: scheme */ }
+        useRemote = !!(window.PhrenEditorHost?.remote) && computer === "This computer" && !!repoRoot;
+        const resolved = await resolveProject(computer, target);
+        project = resolved.project;
+        indexAvailable = resolved.available;
+        if (indexAvailable) {
+          index = makeIndex(computer, project);
+          ensureProviders(m);
+          activeOpenFile = pane;
+          for (const tab of tabs) modelOwners.set(tab.model.uri.toString(), ownerFor(tab));
+        }
+        renderCrumb();
+      })
+      .catch(() => {});
+    return contextReady;
+  }
 
   // ------------------------------------------------------------- DOM
   const root = document.createElement("div");
@@ -610,14 +671,15 @@ export function openFiles(el, ctx) {
 
   // ------------------------------------------------------------- open / diff
   async function openFile(path, opts = {}) {
+    await ensureContext();
     if (!monaco) monaco = await loadMonaco();
     let tab = tabs.find((t) => t.path === path);
     if (!tab) {
       let file;
       try { file = await readRepoFile(computer, target, path); }
       catch (err) { showBanner("danger", err.message || "Could not open the file."); return; }
-      const uri = monaco.Uri.parse("phren:/" + path);
-      window.PhrenEditorHost?.registerPhrenFile?.(path);
+      const uri = uriFor(path);
+      if (uri.scheme === "phren") window.PhrenEditorHost?.registerPhrenFile?.(path);
       // A peek list may have left an empty placeholder under this URI.
       let model = monaco.editor.getModel(uri);
       if (model) {
@@ -634,7 +696,7 @@ export function openFiles(el, ctx) {
       tabs.push(tab);
       knownPaths.add(path);
     }
-    if (index) modelOwners.set(tab.model.uri.toString(), { path, index });
+    if (index) modelOwners.set(tab.model.uri.toString(), ownerFor(tab));
     setActive(tab);
     if (opts.diff) await openRepoDiff(tab);
     if (opts.line) revealLine(opts.line);
@@ -873,23 +935,7 @@ export function openFiles(el, ctx) {
   root.addEventListener("pointerenter", () => { hovered = true; });
   root.addEventListener("pointerleave", () => { hovered = false; });
 
-  loadMonaco()
-    .then(async (m) => {
-      // VS Code's own services read phren: files through the host's file
-      // system; give it this session's reader.
-      window.PhrenEditorHost?.setPhrenReader?.((path) => readRepoFile(computer, target, path).then((file) => file.text));
-      const resolved = await resolveProject(computer, target);
-      project = resolved.project;
-      indexAvailable = resolved.available;
-      if (indexAvailable) {
-        index = makeIndex(computer, project);
-        ensureProviders(m);
-        activeOpenFile = openFile;
-        for (const tab of tabs) modelOwners.set(tab.model.uri.toString(), { path: tab.path, index });
-      }
-      renderCrumb();
-    })
-    .catch(() => {});
+  ensureContext();
   loadDir("", tree);
 
   function close() {
@@ -902,7 +948,7 @@ export function openFiles(el, ctx) {
       tab.model.dispose();
     }
     tabs.length = 0;
-    if (activeOpenFile === openFile) activeOpenFile = null;
+    if (activeOpenFile === pane) activeOpenFile = null;
     el.innerHTML = "";
   }
 

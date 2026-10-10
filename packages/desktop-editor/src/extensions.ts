@@ -1,8 +1,8 @@
 // Installed VS Code extensions, from the desktop daemon's store, registered
 // with VS Code's extension service. Web extensions run in the worker extension
 // host; Node-only ones contribute their themes, grammars and snippets but not
-// their code (no Node extension host yet).
-import { getService, IWorkbenchThemeService } from "@codingame/monaco-vscode-api";
+// their code, unless a Node extension host (REH) is up to run them.
+import { getService, IExtensionService, IWorkbenchThemeService } from "@codingame/monaco-vscode-api";
 import { ExtensionHostKind, registerExtension } from "@codingame/monaco-vscode-api/extensions";
 import { updateUserConfiguration } from "@codingame/monaco-vscode-configuration-service-override";
 
@@ -12,9 +12,13 @@ interface InstalledExtension {
 }
 
 const registered = new Map<string, { dispose(): Promise<void> }>();
+// Set by the first load; reloadExtensions reuses it to keep the same policy.
+let hasRemoteHost = false;
 
-/** Register every enabled installed extension; returns the ids it loaded. */
-export async function loadInstalledExtensions(): Promise<string[]> {
+/** Register every enabled installed extension; returns the ids it loaded. With a
+ * Node host up, Node extensions are left to the REH's own scan. */
+export async function loadInstalledExtensions(remoteActive: boolean): Promise<string[]> {
+  hasRemoteHost = remoteActive;
   let list: InstalledExtension[] = [];
   try {
     const reply = await fetch("/api/extensions", { cache: "no-store" });
@@ -23,6 +27,8 @@ export async function loadInstalledExtensions(): Promise<string[]> {
   const loaded: string[] = [];
   for (const ext of list) {
     if (!ext.enabled || registered.has(ext.id)) continue;
+    // The REH scans and runs Node extensions itself.
+    if (hasRemoteHost && ext.kind === "node") continue;
     // A Node-only extension keeps its declarative parts; its code cannot run here.
     const manifest = { ...ext.manifest } as Record<string, unknown>;
     if (ext.kind === "node") { delete manifest.main; delete manifest.activationEvents; }
@@ -59,7 +65,7 @@ export async function reloadExtensions(): Promise<boolean> {
     try { await handle.dispose(); } catch { clean = false; }
     registered.delete(id);
   }
-  await loadInstalledExtensions();
+  await loadInstalledExtensions(hasRemoteHost);
   return clean;
 }
 
@@ -86,4 +92,16 @@ export async function currentTheme(): Promise<string> {
   const service = await getService(IWorkbenchThemeService);
   const theme = service.getColorTheme();
   return theme.settingsId ?? theme.label;
+}
+
+/** What each loaded extension is doing: where it runs and whether it started. */
+export async function extensionsStatus(): Promise<Array<{ id: string; host: string; activated: boolean; error?: string }>> {
+  const service = await getService(IExtensionService);
+  const status = service.getExtensionsStatus();
+  return service.extensions.map(ext => {
+    const id = ext.identifier.value;
+    const entry = status[id];
+    const messages = entry?.messages?.map(m => m.message).filter(Boolean) ?? [];
+    return { id, host: ext.extensionLocation.scheme, activated: !!entry?.activationTimes, ...(messages.length ? { error: messages.join("; ").slice(0, 300) } : {}) };
+  });
 }

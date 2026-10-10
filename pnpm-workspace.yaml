@@ -101,6 +101,7 @@ minimumReleaseAgeExclude:
   - "@codingame/monaco-vscode-vb-default-extension@37.3.11"
   - "@codingame/monaco-vscode-xml-default-extension@37.3.11"
   - "@codingame/monaco-vscode-yaml-default-extension@37.3.11"
+  - "@codingame/monaco-vscode-remote-agent-service-override@37.3.11"
 
 # Transitive-dependency pins, mostly security floors for packages we do not
 # depend on directly.
