@@ -68,8 +68,8 @@ describe("the ledger of accounts that hit their limit", () => {
 });
 
 describe("the account-failover switch", () => {
-  it("is on by default and follows PHREN_ACCOUNT_FAILOVER", () => {
-    expect(resolveAccountFailover({}, null)).toEqual({ on: true, source: "default" });
-    expect(resolveAccountFailover({ PHREN_ACCOUNT_FAILOVER: "off" }, null)).toEqual({ on: false, source: "PHREN_ACCOUNT_FAILOVER" });
+  it("is off until the owner opts in, and follows PHREN_ACCOUNT_FAILOVER", () => {
+    expect(resolveAccountFailover({}, null)).toEqual({ on: false, source: "default" });
+    expect(resolveAccountFailover({ PHREN_ACCOUNT_FAILOVER: "on" }, null)).toEqual({ on: true, source: "PHREN_ACCOUNT_FAILOVER" });
   });
 });

@@ -85,7 +85,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const agentHooks = new AgentHooks(undefined, modules, path.join(bridgeRoot(), "deliveries.json"));
   // Follows what dispatched workers do and tells the dispatching agent.
   const returns: DispatchReturns | undefined = dispatches ? new DispatchReturns({
-    // A Claude worker stopped by its usage limit continues on another account (on unless `phren config account-failover off`).
+    // Continue on another signed-in account when a Claude worker stops at its usage limit: opt-in, `phren config account-failover on`.
     failover: new AccountFailover({ rooms: () => dispatches.claudeRooms(), dispatch: (input, origin, continues) => dispatches.dispatch(input, origin, continues) }),
     localWorkers: hookWorkers(agentHooks),
     close: async receipt => {

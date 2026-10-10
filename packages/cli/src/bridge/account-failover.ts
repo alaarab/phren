@@ -1,8 +1,11 @@
-// A dispatched Claude worker that hits its usage limit continues on another
-// signed-in account: on the same computer when one there has room, else on
-// another computer that has one. The new worker is an ordinary dispatch,
-// started by official Claude Code in that account's own home, with a brief
-// that hands over the stopped worker's state. See docs/accounts.md.
+// Continue on another signed-in account: when the owner has opted in, a
+// dispatched Claude worker stopped at its usage limit is continued on another
+// of the owner's own signed-in accounts, on the same computer when one there
+// has room, else on another computer that has one. The new worker is an
+// ordinary dispatch, started by official Claude Code in that account's own
+// home (signed in through Claude Code's /login), with a brief that hands over
+// the stopped worker's state. No token is read or forwarded. Off by default.
+// See docs/accounts.md.
 import { logger } from "../logger.js";
 import { chooseAccount, limitedBy, limitKey, noteAccountLimit, readAccountLimits, resolveAccountFailover,
   type AccountChoice, type AccountLimit, type AccountRoom } from "./account-choice.js";
