@@ -14,6 +14,7 @@ import { store, projectOf } from "../shell/store.js";
 import { createTiles } from "../shell/tiles.js";
 import { openLaunchSheet } from "../shell/launch.js";
 import { layoutTree } from "../shell/herdr-layout.js";
+import { showSection } from "../shell/sections.js";
 
 const PANES = [["changes", "Changes"], ["files", "Files"], ["search", "Search"]];
 
@@ -606,6 +607,8 @@ export function mountAgents(root) {
     previousTab: () => tabs.step(-1),
     toggleZoom() { if (sideEl.hidden) showPane(bench.pane ?? "changes"); document.body.classList.toggle("bench-max"); },
     currentSession: () => session,
+    /** Open a file of any session's repository as a centre tab, at a line when given. */
+    openFileFor: (computer, child, path, options = {}) => { showSection("agents"); return openFileDoc(computer, child, path, options); },
   };
 }
 
