@@ -71,6 +71,10 @@ export interface ComputerOverview {
   /** Last overview received; kept (stale) while offline. */
   overview?: HookOverview;
   updatedAt?: string;          // ISO time of the last overview frame
+  /** This computer's live resources, from the Hook's `resources` frame on the
+   * overview socket (`GET /v1/resources` shape); absent until the first one,
+   * and kept (stale) while offline. */
+  resources?: unknown;
 }
 
 /** The merged view the UI renders. */
