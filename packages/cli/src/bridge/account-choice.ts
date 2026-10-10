@@ -9,7 +9,7 @@ import { z } from "zod";
 import { readInstallPreferences } from "../init/preferences.js";
 import { logger } from "../logger.js";
 import { findPhrenPath } from "../phren-paths.js";
-import { DEFAULT_ACCOUNT } from "./claude-accounts.js";
+import { claudeHomes, DEFAULT_ACCOUNT } from "./claude-accounts.js";
 import { harnessInventoryWithin, type HarnessInventory } from "./harnesses.js";
 import { atomic, bridgeRoot } from "./protocol.js";
 import type { AccountUsage, UsageWindow } from "./usage.js";
@@ -160,6 +160,10 @@ async function within<T>(ms: number, value: Promise<T>): Promise<T | undefined> 
  */
 export async function pickClaudeAccount(what: string, computer = "this computer", now = Date.now()): Promise<AccountChoice | undefined> {
   if (!usageReader) return undefined;
+  // One Claude home means nothing to choose. Checking the folders first keeps a
+  // launch from running `claude auth status` against the config it is about to
+  // pretrust: that process can write .claude.json back over the new trust entry.
+  if (!inventoryReader && claudeHomes().length < 2) return undefined;
   const inventory = await within(2_500, (inventoryReader ?? (() => harnessInventoryWithin(2_500)))());
   const rooms = claudeRooms(inventory, [], now);
   if (rooms.filter(room => room.usable !== false).length < 2) return undefined;
