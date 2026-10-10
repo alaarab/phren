@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `phren bridge link` now works with an Asustor NAS. It used to read the host key only from /etc/ssh; it now asks `sshd -T` for the host keys and falls back to /etc/ssh, /usr/etc/ssh, /usr/local/etc/ssh and /opt/etc/ssh, and says plainly when a computer has no ed25519 host key. Remote commands also find an Entware phren in /opt/bin.
+
 ## [0.3.35] - 2026-10-10
 
 ### Fixed
