@@ -12,6 +12,7 @@ import { mountPreviews } from "./sections/previews.js";
 import { mountMemory } from "./sections/memory.js";
 import { mountConductor } from "./sections/conductor.js";
 import { mountReview } from "./sections/review.js";
+import { mountCode } from "./sections/code.js";
 import "./shell/launch.js"; // registers "Launch an agent…" in the palette
 import { registerPauseCommand } from "./shell/pause-all.js";
 registerPauseCommand();
@@ -38,6 +39,7 @@ registerSection("conductor", { label: "Conductor", order: 25, mount: (el) => mou
 registerSection("projects", { label: "Projects", order: 30, mount: (el) => mountProjects(el) });
 registerSection("tasks", { label: "Tasks", order: 40, mount: (el) => mountTasks(el) });
 registerSection("memory", { label: "Memory", order: 45, mount: (el) => mountMemory(el) });
+registerSection("code", { label: "Code", order: 47, mount: (el) => mountCode(el) });
 registerSection("schedules", { label: "Schedules", order: 50, mount: (el) => mountSchedules(el) });
 registerSection("previews", { label: "Previews", order: 60, mount: (el) => mountPreviews(el) });
 registerSection("settings", { label: "Settings", order: 90, mount: (el) => mountSettings(el) });
