@@ -1394,6 +1394,24 @@ schedules:
       expect((await status()).compacting).toBe(false);
     });
 
+    it("keeps the desktop's sockets in their own pool so they never evict the phone's", async () => {
+      const open = async (desktop: boolean) => {
+        const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/overview`,
+          desktop ? { headers: { "X-Phren-Client": "desktop" } } : {});
+        socket.on("error", () => undefined);
+        await once(socket, "open");
+        return socket;
+      };
+      const phone = await open(false);
+      const desktop: WebSocket[] = [];
+      for (let i = 0; i < 17; i += 1) desktop.push(await open(true));
+      // The 17th desktop socket evicts the oldest desktop socket, not the phone's.
+      await waitFor(() => desktop[0].readyState === WebSocket.CLOSED, 2_000);
+      expect(phone.readyState).toBe(WebSocket.OPEN);
+      expect(desktop[16].readyState).toBe(WebSocket.OPEN);
+      for (const socket of [phone, ...desktop]) socket.terminate();
+    });
+
     it("presses keys for a prompt the Hook remembered even when Herdr reads the pane as working", async () => {
       agentStatus = "working";
       const callback = JSON.stringify({ target, event: "PermissionRequest", tool: "Bash", input: { command: "python3 tools/fetch_sdk.py" } });
