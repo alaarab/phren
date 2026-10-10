@@ -12,6 +12,7 @@ import { hookPost, hookGet } from "./api.js";
 import { createTimelineView } from "./chat/timeline-view.js";
 import { createComposer, contextPercent } from "./chat/composer.js";
 import { renderInteractions, renderSideAnswer, renderSudoRequests } from "./chat/cards.js";
+import { startDictation, createTalkMode } from "./chat/talk.js";
 
 const PROVIDERS = { claude: "Claude", codex: "Codex", copilot: "Copilot", phren: "Phren", opencode: "OpenCode" };
 
@@ -106,7 +107,44 @@ export function openChat(el, computerName, child, opts = {}) {
     onConsole: typeof opts.onConsole === "function" ? opts.onConsole : undefined,
     onAgents: () => openWork("agents"),
     onWorkers: () => openWork("workers"),
+    onDictate: () => toggleDictation(),
+    onTalk: () => toggleTalk(),
   });
+
+  // ---- voice: dictation into the composer, and talk mode with spoken replies ----
+  let dictation = null;
+  function toggleDictation() {
+    if (dictation) { dictation.stop(); dictation = null; return; }
+    dictation = startDictation({
+      computer: computerName,
+      onText: (_partial, final) => { if (final) composer.insert(`${final} `); },
+      onEnd: () => { dictation = null; },
+    });
+  }
+  let talk = null;
+  let talkReplyLine = -1;
+  function toggleTalk() {
+    if (talk) { talk.stop(); talk = null; return; }
+    talkReplyLine = lastAssistantLine();
+    talk = createTalkMode({
+      computer: computerName, target, provider: source,
+      send: (text) => hookPost(computerName, "/v1/prompt", { target, text, deliveryId: crypto.randomUUID() }),
+      onState: (state) => { if (state === "off") talk = null; },
+    });
+    talk.start();
+  }
+  function lastAssistantLine() {
+    for (let i = history.messages.length - 1; i >= 0; i--) if (history.messages[i].role === "assistant") return history.messages[i].line;
+    return -1;
+  }
+  /** When a turn ends in talk mode, speak the reply the agent wrote since the last one. */
+  function feedTalkReply() {
+    if (!talk) return;
+    const replies = history.messages.filter((m) => m.role === "assistant" && !m.isNarration && m.line > talkReplyLine);
+    if (!replies.length) return;
+    talkReplyLine = replies[replies.length - 1].line;
+    talk.feedReply(replies.map((m) => m.text).join("\n\n"));
+  }
   const composerHost = node("div", "chat-composer");
   composerHost.append(composer.el);
 
@@ -267,7 +305,9 @@ export function openChat(el, computerName, child, opts = {}) {
     const next = frame && frame.agentStatus ? frame.agentStatus
       : frame && frame.type === "agentStatus" ? frame : null;
     if (!next) return;
+    const finished = agentStatus.status === "working" && next.status !== "working";
     agentStatus = next;
+    if (finished) feedTalkReply();
     applyStatusColor(next.status);
     composer.setStatus(agentStatus);
     updateContextRing();
@@ -588,6 +628,7 @@ export function openChat(el, computerName, child, opts = {}) {
     focus() { composer.focus(); },
     close() {
       closed = true;
+      dictation?.stop(); talk?.stop();
       transcriptSocket.close();
       statusSocket.close();
       closeWork();
