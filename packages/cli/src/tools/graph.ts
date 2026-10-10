@@ -12,6 +12,9 @@ import { logger } from "../logger.js";
 // Compatibility decision (2026-09): fragments keep the established entity /
 // entity_type wire keys and manual-links.json fields. See docs/api-reference.md.
 
+/** These tools answer from the FTS index; the MCP server refreshes it before each call. */
+export const readsIndex = true;
+
 export function register(server: McpServer, ctx: McpContext): void {
 
   // ── search_fragments ──────────────────────────────────────────────────

@@ -91,7 +91,7 @@ async function main() {
   const [
     { McpServer },
     { StdioServerTransport },
-    { buildIndex, captureIndexInputs, flushEmbeddingQueue, updateFileInIndex: updateFileInIndexFn },
+    { buildIndex, captureIndexInputs, flushEmbeddingQueue, isIndexBusyError, updateFileInIndex: updateFileInIndexFn },
     { runCustomHooks },
     { mcpResponse },
     { startEmbeddingWarmup },
@@ -125,7 +125,11 @@ async function main() {
   let db: Awaited<ReturnType<typeof buildIndex>> | null = null;
   // The first call also verifies startup's possibly stale lock-contention fallback.
   let localInputs: (() => boolean) | undefined;
-  const { localIndexRefresh, indexReaders } = await import("./mcp/local-index.js");
+  const { localIndexRefresh, indexReaders, retryWhileBusy, indexBusyWaitMs } = await import("./mcp/local-index.js");
+  // Another process (a hook's detached reindex, another session's server)
+  // holding the rebuild lock is waited out for this long before a call falls
+  // back to the last good index. A store rebuild takes ~1.5 s idle, ~4 s p90.
+  const busyWait = { isBusy: isIndexBusyError, maxWaitMs: indexBusyWaitMs() };
   const readers = indexReaders(() => {
     if (!db) throw new Error("Index unavailable - check phren setup");
     return db;
@@ -213,14 +217,24 @@ async function main() {
 
   const runIndexExclusive = (fn: () => Promise<void>): Promise<unknown> => {
     const run = writeQueue.then(fn);
-    writeQueue = run.catch((error: unknown) => { logger.warn("index-refresh", errorMessage(error)); });
+    writeQueue = run.catch((error: unknown) => {
+      // Busy is expected under concurrent writers and retried by the caller.
+      if (isIndexBusyError(error)) debugLog(`index-refresh: ${errorMessage(error)}`);
+      else logger.warn("index-refresh", errorMessage(error));
+    });
     return run;
   };
   const localIndex = localIndexRefresh({
     isFresh: () => localInputs?.() ?? false,
     refresh: () => rebuildIndex(true),
     runExclusive: runIndexExclusive,
+    busyWait,
   });
+  // Tools registered by a module that exports `readsIndex = true` answer from
+  // the FTS index and refresh it first. Everything else (tasks, findings,
+  // sessions, account usage, live sessions, dispatch...) reads and writes the
+  // store's files directly and must not wait on, or fail because of, a rebuild.
+  let registeringIndexModule = false;
 
   const server = new McpServer({
     name: "phren-mcp",
@@ -247,44 +261,52 @@ async function main() {
     modules: enabledModules,
     alwaysLoad: ALWAYS_LOAD_TOOLS,
     register: (name, config, handler) => origRegisterTool(name as RegisterToolArgs[0], config as RegisterToolArgs[1], handler as unknown as RegisterToolArgs[2]),
-    wrap: (registeredName, handler) => async (...args: unknown[]) => {
-      if (shuttingDown) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              ok: false,
-              error: "phren-mcp server is shutting down; retry in a new session",
-            }, null, 2),
-          }],
-        };
-      }
-      try { await localIndex.ensureFresh(); }
-      catch (error: unknown) {
-        logger.warn("local-index", errorMessage(error));
-        return mcpResponse({ ok: false, error: "Could not refresh the local index; retry shortly." });
-      }
-      if (!indexReady || !db) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              ok: false,
-              error: "Index unavailable - check phren setup",
-            }, null, 2),
-          }],
-        };
-      }
-      const owner = toolOwner(registeredName);
-      if (owner && owner.name !== "memory") {
-        const input = args[0] as Record<string, unknown>;
-        const store = typeof input?.project === "string" ? resolveStoreForProject(ctx, input.project).phrenPath : phrenPath;
-        if (!snapshots.get(store)?.has(owner.name)) return mcpResponse({ ok: false, error: disabledHint(owner.name), errorCode: "UNAVAILABLE" });
-      }
-      try { trackToolCall(phrenPath, registeredName); } catch (err: unknown) {
-        logger.warn("trackToolCall", errorMessage(err));
-      }
-      return readers.run(() => (handler as (...a: unknown[]) => unknown)(...args));
+    wrap: (registeredName, handler) => {
+      const readsIndex = registeringIndexModule;
+      return async (...args: unknown[]) => {
+        if (shuttingDown) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: false,
+                error: "phren-mcp server is shutting down; retry in a new session",
+              }, null, 2),
+            }],
+          };
+        }
+        if (readsIndex) {
+          try { await localIndex.ensureFresh(); }
+          catch (error: unknown) {
+            // Serve the last good index rather than failing the call: it lags
+            // the newest write at most, the same trade the prompt hook makes.
+            // The baseline is not advanced, so the next call refreshes again.
+            logger.warn("local-index", `${errorMessage(error)}${db ? " (serving last good index)" : ""}`);
+            if (!db) return mcpResponse({ ok: false, error: "Could not refresh the local index; retry shortly." });
+          }
+        }
+        if (!indexReady || !db) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: false,
+                error: "Index unavailable - check phren setup",
+              }, null, 2),
+            }],
+          };
+        }
+        const owner = toolOwner(registeredName);
+        if (owner && owner.name !== "memory") {
+          const input = args[0] as Record<string, unknown>;
+          const store = typeof input?.project === "string" ? resolveStoreForProject(ctx, input.project).phrenPath : phrenPath;
+          if (!snapshots.get(store)?.has(owner.name)) return mcpResponse({ ok: false, error: disabledHint(owner.name), errorCode: "UNAVAILABLE" });
+        }
+        try { trackToolCall(phrenPath, registeredName); } catch (err: unknown) {
+          logger.warn("trackToolCall", errorMessage(err));
+        }
+        return readers.run(() => (handler as (...a: unknown[]) => unknown)(...args));
+      };
     },
   });
   server.registerTool = gate.registerTool as unknown as typeof server.registerTool;
@@ -294,7 +316,7 @@ async function main() {
     phrenPath,
     get profile() { return profile; },
     db: () => readers.get(),
-    rebuildIndex,
+    rebuildIndex: () => retryWhileBusy(() => rebuildIndex(), busyWait),
     withWriteQueue,
     updateFileInIndex: (filePath: string) => {
       if (!db) throw new Error("Index unavailable - check phren setup");
@@ -323,7 +345,11 @@ async function main() {
     ...(codeAvailable ? [import("./tools/code.js")] : []),
     ...(hasModule("conductor") ? [import("./tools/dispatch.js")] : []),
   ]);
-  for (const mod of toolModules) mod.register(server, ctx);
+  for (const mod of toolModules) {
+    registeringIndexModule = "readsIndex" in mod && mod.readsIndex === true;
+    try { mod.register(server, ctx); }
+    finally { registeringIndexModule = false; }
+  }
   gate.finish();
 
   const transport = new StdioServerTransport();
