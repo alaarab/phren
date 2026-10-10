@@ -924,9 +924,12 @@ With the conductor module enabled, health capabilities `queuedHandOff`,
 `workerReports` and `ownerInbox` are true. Older Hooks omit them. The phone must
 check the relevant capability before offering the new surface.
 
-- `POST /v1/dispatch/report`: `{origin:{server,workspace,tab,pane},prs:[{url,repo,branch,tests,notes?}]}`.
+- `POST /v1/dispatch/report`: `{origin:{server,workspace,tab,pane},prs:[{url,repo,branch,tests,notes?}],dispatch?}`.
   The Hook resolves the live conversation, requires its submitted turn record,
-  and returns `{ok:true,target,prs}`. A missing or changed binding is a 409.
+  and returns `{ok:true,target,prs}`. Without that record, `dispatch` (the
+  worker's `PHREN_DISPATCH_ID`, sent by the tool and CLI) is enough when this
+  Hook saw that brief arrive in the same pane and conversation; the report then
+  belongs to the current turn. A missing or changed binding is a 409.
   Done worker observations and returns include `prs`. The evidence is limited
   to 16 entries and 24000 UTF-8 bytes total.
 - `GET /v1/conductor/integrator`: `{integrator:{computer?,target}|null}`.
