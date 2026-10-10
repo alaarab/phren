@@ -847,12 +847,14 @@ export function openEditorDoc(el, opts) {
     if (!ws?.canWrite) { showGate(); return; }
     saving = true;
     const path = ws.pathFromUri(model.uri) || opts.path;
-    const content = (bom ? "\uFEFF" : "") + model.getValue();
+    const submitted = model.getValue();
+    const content = (bom ? "\uFEFF" : "") + submitted;
     try {
       const res = await hookPost(computer, "/v1/files/write", { target, path, content, version });
       version = res.version;
-      savedText = model.getValue();
-      if (dirty) { dirty = false; opts.onDirty?.(false); }
+      // The baseline is what was sent: edits typed while the save was in flight stay dirty.
+      savedText = submitted;
+      onModelChange();
       if (ws.index) ws.index.invalidate(path);
       clearBanner();
     } catch (err) {

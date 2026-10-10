@@ -406,17 +406,22 @@ export function mountAgents(root) {
     let consoleHandle = null;
     let mode = "chat";
 
-    function consoleAllowed() {
-      if (computer === "This computer") return true;
-      return store.can(computer, "paneTerminal") !== false;
+    /** Why this session has no single-pane console, or "" when it has one. */
+    async function consoleBlocked() {
+      const server = child.target.server;
+      if (server === "tmux" || server.startsWith("tmux-")) return "A single pane's console needs Herdr. Open the whole tmux terminal from the sidebar instead.";
+      if (computer === "This computer") return "";
+      const caps = await store.capabilities(computer);
+      return caps.paneTerminal ? "" : `The console needs a newer Phren on ${computer}.`;
     }
 
-    function setMode(next) {
+    async function setMode(next) {
       if (next === mode) return;
       if (next === "console") {
         if (!child.target?.pane || !child.target?.server) return;
-        if (!consoleAllowed()) {
-          consoleEl.textContent = `The console needs a newer Phren on ${computer}.`;
+        const blocked = await consoleBlocked();
+        if (blocked) {
+          consoleEl.textContent = blocked;
         } else if (!consoleHandle) {
           consoleHandle = openTerminal(consoleEl, computer, child.target.server, { pane: child.target.pane });
         }

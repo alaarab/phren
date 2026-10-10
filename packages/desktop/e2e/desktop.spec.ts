@@ -269,3 +269,24 @@ test("using the desktop reports desk presence to the Hooks", async ({ page }) =>
   const call = hook.calls.find((c) => c.path === "/v1/push/presence");
   expect(call?.method).toBe("POST");
 });
+
+test("Enter on a focused Deny denies (it never approves)", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  const decisions: string[] = [];
+  await page.route("**/v1/approvals/answer", async (route) => {
+    decisions.push(JSON.parse(route.request().postData() ?? "{}").decision);
+    await route.fulfill({ status: 200, contentType: "application/json", body: "{\"ok\":true}" });
+  });
+  await page.evaluate(async () => {
+    const { renderInteractions } = await import("/chat/cards.js");
+    const host = document.createElement("div");
+    host.id = "card-probe";
+    document.body.append(host);
+    renderInteractions(host, { status: "blocked", pendingApproval: { actionId: "a1", toolName: "Bash", title: "Bash", summary: "rm -rf build" } },
+      { computer: "This computer", target: { server: "default", workspace: "1", tab: "1", pane: "1", source: "claude", session: "s" }, onAnswered() {} });
+  });
+  const deny = page.locator("#card-probe button", { hasText: /^Deny$/ });
+  await deny.focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(() => decisions).toEqual(["deny"]);
+});

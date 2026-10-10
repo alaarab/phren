@@ -1,3 +1,4 @@
+import { dump, load } from "js-yaml";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -135,6 +136,27 @@ describe("remote mirror", () => {
     expect(store.calls.blob).toBe(1); // only the real blob was requested
     expect(existsSync(path.join(dir, "cache", evil))).toBe(false);
     expect(existsSync(path.resolve(dir, "cache", "blobs", evil))).toBe(false);
+  });
+
+  it("edits one schedule with the CLI's format, keeps list prompts intact, and refuses a stale edit", async () => {
+    const sched = { id: "a1b2c3d4", name: "Nightly", enabled: true, computer: "Linuxbox", harness: "claude", every: "daily", at: "02:00",
+      prompt: "Do this:\n- first\n- second", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" };
+    const yamlText = dump({ version: 1, schedules: [sched, { ...sched, id: "e5f6a7b8", name: "Other" }] });
+    const store = fakeStore({ "proj-a/FINDINGS.md": "# Findings\n", "proj-a/schedules.yaml": yamlText });
+    const svc = service(store);
+    const listed = { ...sched, project: "proj-a", nextRun: "2026-10-11T02:00:00.000Z", lastRun: null, lastRuns: [], running: false, owned: true };
+
+    await svc.saveSchedule(B, { project: "proj-a", id: sched.id, original: listed, schedule: { ...listed, name: "Nightly audit" } });
+    const post = store.posts.find((p) => p.path === "proj-a/schedules.yaml")!;
+    expect(post.sha).toBe(blobSha(Buffer.from(yamlText)));
+    const saved = load(Buffer.from(post.content, "base64").toString("utf8")) as { schedules: Array<Record<string, unknown>> };
+    expect(saved.schedules.map((x) => x.name)).toEqual(["Nightly audit", "Other"]);
+    expect(saved.schedules[0].prompt).toBe("Do this:\n- first\n- second");
+    expect(saved.schedules[0]).not.toHaveProperty("nextRun");
+
+    // The editor still holds the old copy: the file's entry changed, so the save is refused.
+    await expect(svc.saveSchedule(B, { project: "proj-a", id: sched.id, original: listed, schedule: { ...listed, name: "Stale" } }))
+      .rejects.toMatchObject({ status: 409 });
   });
 
   it("fetches blobs in one batch when the Hook offers it", async () => {

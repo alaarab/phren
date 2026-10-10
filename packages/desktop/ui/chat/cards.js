@@ -209,6 +209,8 @@ function buildApprovalCard(approval, ctx) {
   card.append(actions);
   card.addEventListener("keydown", (event) => {
     if (/^(INPUT|TEXTAREA)$/.test(event.target?.tagName ?? "")) return;
+    // A focused button keeps its own Enter and Space: Enter on a focused Deny denies.
+    if (event.target instanceof HTMLElement && event.target.closest("button, a, select, [role=button]")) return;
     const project = definitions.findIndex((definition) => definition.scope === "project");
     const deny = definitions.findIndex((definition) => definition.decision === "deny");
     if (event.key === "Enter" && buttons[0]) { event.preventDefault(); buttons[0].click(); }
@@ -256,6 +258,7 @@ function buildPlanCard(approval, ctx) {
   actions.append(keep, approve);
   card.append(actions);
   card.addEventListener("keydown", (event) => {
+    if (event.target instanceof HTMLElement && event.target.closest("button, a, select, [role=button]")) return;
     if (event.key === "Enter") { event.preventDefault(); approve.click(); }
   });
   return card;
@@ -370,6 +373,8 @@ function buildQuestionCard({ title, questions, allowsTyping, receipt, run, ctx }
         choose(index, optionIndex);
       }
     } else if (event.key === "Enter") {
+      // A focused option or button keeps its own Enter.
+      if (event.target instanceof HTMLElement && event.target.closest("button, a, select, [role=button]")) return;
       event.preventDefault();
       if (!send.disabled) send.click();
     }
