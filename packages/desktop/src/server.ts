@@ -10,6 +10,7 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
 import type { MergedOverview, StartServer, TerminalSession } from "./contract.js";
 import { ACTIONS, loadKeyConfig } from "./keys-config.js";
+import { rehStatus, stopReh } from "./reh.js";
 import {
   ExtensionError,
   extensionFilePath,
@@ -17,6 +18,7 @@ import {
   listExtensions,
   searchOpenVsx,
   setEnabled,
+  syncNodeExtensions,
   uninstall,
 } from "./extensions.js";
 
@@ -362,6 +364,15 @@ export const startServer: StartServer = async (o) => {
       return;
     }
 
+    if (pathname === "/api/reh") {
+      // The Node extension host: started lazily, address and token for the editor.
+      try { await syncNodeExtensions(); } catch { /* still start it */ }
+      const status = await rehStatus();
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+      res.end(JSON.stringify(status));
+      return;
+    }
+
     if (pathname === "/api/keys") {
       // Read on every request so "reload key settings" picks up edits.
       const config = await loadKeyConfig();
@@ -529,6 +540,7 @@ export const startServer: StartServer = async (o) => {
     openHooks.clear();
     for (const term of terminals.values()) term.kill();
     terminals.clear();
+    stopReh();
     await new Promise<void>((done) => wss.close(() => done()));
     await new Promise<void>((done) => {
       server.close(() => done());

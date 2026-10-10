@@ -390,6 +390,9 @@ importers:
       '@codingame/monaco-vscode-quickaccess-service-override':
         specifier: 37.3.11
         version: 37.3.11
+      '@codingame/monaco-vscode-remote-agent-service-override':
+        specifier: 37.3.11
+        version: 37.3.11
       '@codingame/monaco-vscode-textmate-service-override':
         specifier: 37.3.11
         version: 37.3.11
@@ -744,6 +747,9 @@ packages:
 
   '@codingame/monaco-vscode-razor-default-extension@37.3.11':
     resolution: {integrity: sha512-L+rO3D79lYSZLpbxFdFVikoXjhN0mGRPmlEa/kBuvn73gnlPsAbqodWqTXH8rOa4cO7DyxPfNmE4icqQWTQ0Zw==}
+
+  '@codingame/monaco-vscode-remote-agent-service-override@37.3.11':
+    resolution: {integrity: sha512-aaKWFkSNXFqMRb0QUK7R9xPcW+y7GQGFUhwZyt+DpMIRwQ2ZZ7a3dF6i3AJJkis74672TZizrKdWyt6EsD7tbg==}
 
   '@codingame/monaco-vscode-restructuredtext-default-extension@37.3.11':
     resolution: {integrity: sha512-jQjbp11N7YRo5qEdhSdsl8JZoJu5vFDeHmdkj0ZjMw2dqR1LfG5gdWO+BeKieJ0hbslVDxkhVfKsNEggwJo9rA==}
@@ -3376,6 +3382,11 @@ snapshots:
   '@codingame/monaco-vscode-razor-default-extension@37.3.11':
     dependencies:
       '@codingame/monaco-vscode-api': 37.3.11
+
+  '@codingame/monaco-vscode-remote-agent-service-override@37.3.11':
+    dependencies:
+      '@codingame/monaco-vscode-api': 37.3.11
+      '@codingame/monaco-vscode-environment-service-override': 37.3.11
 
   '@codingame/monaco-vscode-restructuredtext-default-extension@37.3.11':
     dependencies:
