@@ -64,7 +64,8 @@ These are re-created every SessionStart under `managed` (self-heal). Under
 ### Project repos (managed only: and only for `phren-managed` ownership)
 - `<repo>/AGENTS.md`, `<repo>/REFERENCE.md`, `<repo>/FINDINGS.md`,
   `<repo>/CLAUDE.md` (Claude compatibility), and `<repo>/CLAUDE-*.md`, symlinks/managed files.
-- `<repo>/.claude/skills/*`, project skill symlinks.
+- `<repo>/.claude/skills/*`, project skill symlinks. A single-file skill (`skills/ql.md`)
+  gets a folder holding a `SKILL.md` link to it, the only shape Claude Code loads.
 - `<repo>/.git/info/exclude`, phren-managed mirror filenames, under a
   `# phren-managed` marker.
 

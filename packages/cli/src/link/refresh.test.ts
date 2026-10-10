@@ -30,13 +30,14 @@ describe("refreshing existing instruction and skill destinations", () => {
     const oldSkill = path.join(store, "demo", "skills", "old.md");
     writeFile(oldSkill, "---\nname: old\ndescription: obsolete\n---\nold\n");
     syncScopeSkillsToDir(store, "demo", skillsDir);
+    expect(fs.existsSync(path.join(skillsDir, "old", "SKILL.md"))).toBe(true);
     fs.unlinkSync(oldSkill);
     writeFile(path.join(store, "global", "skills", "review", "SKILL.md"), "---\nname: review\ndescription: Review changes\n---\nUse the checklist.\n");
     writeFile(path.join(store, "global", "skills", "review", "checklist.md"), "Check tests.\n");
     refreshLinkedContext(store, "dev");
     expect(fs.lstatSync(path.join(repo, "AGENTS.md")).isSymbolicLink()).toBe(true);
     expect(fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8")).toBe("# Updated project instructions\n");
-    expect(fs.existsSync(path.join(skillsDir, "old.md"))).toBe(false);
+    expect(fs.existsSync(path.join(skillsDir, "old"))).toBe(false);
     expect(fs.readFileSync(path.join(skillsDir, "review", "checklist.md"), "utf8")).toBe("Check tests.\n");
   });
 
@@ -53,9 +54,10 @@ describe("refreshing existing instruction and skill destinations", () => {
     writeFile(path.join(store, "demo", "skills", "audit.md"), "# Audit\n");
     const skillsDir = path.join(repo, ".claude", "skills");
     syncScopeSkillsToDir(store, "demo", skillsDir);
+    expect(fs.existsSync(path.join(skillsDir, "audit", "SKILL.md"))).toBe(true);
     writeFile(path.join(store, ".config", "skill-preferences.json"), JSON.stringify({ schemaVersion: 1, enabledSkills: { "demo:audit": false } }));
     refreshLinkedContext(store, "dev");
-    expect(fs.existsSync(path.join(skillsDir, "audit.md"))).toBe(false);
+    expect(fs.existsSync(path.join(skillsDir, "audit"))).toBe(false);
     expect(fs.existsSync(path.join(store, "demo", "skills", "audit.md"))).toBe(true);
   });
 
