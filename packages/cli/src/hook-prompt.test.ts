@@ -138,7 +138,7 @@ describe("buildHookOutput", () => {
   });
 
   it("uses project-relative memory ids in compact index output", () => {
-    process.env.PHREN_FEATURE_PROGRESSIVE_DISCLOSURE = "1";
+    process.env.PHREN_CLANKER = "on";
     const selected: SelectedSnippet[] = [
       {
         doc: {
@@ -178,10 +178,30 @@ describe("buildHookOutput", () => {
 
     try {
       const parts = buildHookOutput(selected, 100, "general", null, null, stage, 550, phrenDir);
-      expect(parts.some((p) => p.includes("[mem:alpha/reference/api/auth.md]"))).toBe(true);
-      expect(parts.some((p) => p.includes("[mem:alpha/reference/runbooks/auth.md]"))).toBe(true);
+      expect(parts.some((p) => p.startsWith("mem:alpha/reference/api/auth.md fb:k1"))).toBe(true);
+      expect(parts.some((p) => p.startsWith("mem:alpha/reference/runbooks/auth.md fb:k2"))).toBe(true);
     } finally {
-      delete process.env.PHREN_FEATURE_PROGRESSIVE_DISCLOSURE;
+      delete process.env.PHREN_CLANKER;
+    }
+  });
+
+  it("gives a finding cut short of its id comment that finding's fid in the compact index", () => {
+    process.env.PHREN_CLANKER = "on";
+    const bullet = `- Hook change capture: never set the scratch index mtime to epoch ${"detail ".repeat(80)}`;
+    const content = `# alpha Findings\n\n${bullet}<!-- fid:abcd1234 -->\n- Another finding <!-- fid:ffff0000 -->\n`;
+    const selected: SelectedSnippet[] = [{
+      doc: { project: "alpha", filename: "FINDINGS.md", type: "findings", content, path: path.join(phrenDir, "alpha", "FINDINGS.md") },
+      // The snippet budget cut the bullet before its trailing id comment.
+      snippet: `${bullet.slice(0, 200)}\u2026`,
+      key: "k1",
+    }];
+    const stage = { indexMs: 0, searchMs: 0, trustMs: 0, rankMs: 0, selectMs: 0 };
+    try {
+      const parts = buildHookOutput(selected, 100, "general", null, null, stage, 550, phrenDir, undefined, "scratch index mtime");
+      expect(parts.some((p) => p.startsWith("fid:abcd1234 fb:k1 Hook change capture"))).toBe(true);
+      expect(parts.some((p) => p.includes("trace:"))).toBe(false);
+    } finally {
+      delete process.env.PHREN_CLANKER;
     }
   });
 });

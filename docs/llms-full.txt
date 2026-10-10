@@ -10,7 +10,7 @@ MCP Tools (76 across 16 catalog modules):
 
   Search and browse:
     search_knowledge(query, type?, limit?, project?, tag?, since?, status?, include_history?, synthesize?) - FTS5 search with synonym expansion, filterable by tag/date/lifecycle
-    get_memory_detail(id) - fetch full content of a memory by id (e.g. mem:project/filename)
+    get_memory_detail(id, offset?) - fetch full content by id: fid:/bid: returns one finding or task, mem:project/filename the document
     get_project_summary(name) - project summary card and file list
     list_projects(page?, page_size?) - all projects in active profile with pagination
     get_findings(project, limit?, include_superseded?, include_history?, status?) - read recent findings without a search query
@@ -184,6 +184,7 @@ CLI Commands:
     phren config telemetry [on|off]       - opt-in usage telemetry
     phren config machines                 - registered machines
     phren config profiles                 - profiles and projects
+    phren config clanker [on|off] - compact id/title/keyword rows from the hook and search/list tools; full text by id (on for new installs)
     phren config pull-interval [seconds|off] - machine-local periodic MCP remote checks (default off; 30–86400 or 0/off)
 
   Maintenance:
@@ -244,7 +245,8 @@ Environment Variables:
   PHREN_FEATURE_SEMANTIC_CONFLICT - set 1 to enable LLM-based contradiction detection
   PHREN_FEATURE_AUTO_CAPTURE    - set 1 to extract insights from conversation transcripts at session end
   PHREN_FEATURE_HYBRID_SEARCH   - TF-IDF cosine fallback (default: on, set 0 to disable)
-  PHREN_FEATURE_PROGRESSIVE_DISCLOSURE - compact memory index injection (set 1 to enable)
+  PHREN_CLANKER                 - clanker mode on/off: hook and search/list tools return id/title/keyword rows (overrides phren config clanker)
+  PHREN_FEATURE_PROGRESSIVE_DISCLOSURE - old name for PHREN_CLANKER, read when it is unset
   PHREN_FEATURE_GIT_CONTEXT_FILTER - git-context file relevance boost (set 'true' to enable)
   PHREN_MAX_INJECT_TOKENS       - hard cap on total injected tokens (default: 2000)
   PHREN_TASK_PRIORITY            - priorities to inject: high,medium,low (default: high,medium)

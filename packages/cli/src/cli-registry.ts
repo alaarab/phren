@@ -173,6 +173,7 @@ const CONFIG_SUBCOMMANDS: Subcommand[] = [
   { name: "profiles", usage: "phren config profiles", summary: "Profiles and projects" },
   { name: "telemetry", usage: "phren config telemetry [on|off]", summary: "Opt-in usage telemetry" },
   { name: "mcp-profile", usage: "phren config mcp-profile [core|full]", summary: "MCP tool surface: 10 core tools or all of them" },
+  { name: "clanker", usage: "phren config clanker [on|off]", summary: "Compact id/title/keyword rows from the hook and search/list tools; full text by id" },
   { name: "pull-interval", usage: "phren config pull-interval [seconds|off]", summary: "Periodic MCP remote checks (default: off; 0 disables)" },
 ];
 

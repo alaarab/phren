@@ -126,10 +126,11 @@ interface McpToolResult {
  * Convert an McpToolResult into the MCP SDK response format.
  * Single shared implementation — replaces the per-file jsonResponse() duplicates.
  * Responses over MCP_RESPONSE_MAX_CHARS are replaced by a shortened message;
- * `unbounded` opts out for payloads that only make sense whole (exports).
+ * `unbounded` opts out for payloads that only make sense whole (exports);
+ * `compact` drops the indentation (clanker mode, where whitespace is most of a row).
  */
-export function mcpResponse(payload: McpToolResult, opts: { unbounded?: boolean } = {}) {
-  const text = JSON.stringify(payload, null, 2);
+export function mcpResponse(payload: McpToolResult, opts: { unbounded?: boolean; compact?: boolean } = {}) {
+  const text = opts.compact ? JSON.stringify(payload) : JSON.stringify(payload, null, 2);
   if (opts.unbounded || text.length <= MCP_RESPONSE_MAX_CHARS) return { content: [{ type: "text" as const, text }] };
   // Last resort: a client rejects an oversized result outright, so send a
   // shortened message and say how to narrow the call instead.

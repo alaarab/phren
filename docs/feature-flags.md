@@ -82,24 +82,7 @@ export PHREN_FEATURE_DAILY_MAINTENANCE=0
 
 ## PHREN_FEATURE_PROGRESSIVE_DISCLOSURE
 
-**Default:** disabled
-
-When enabled, the `hook-prompt` lifecycle hook uses a 3-layer progressive disclosure strategy instead of injecting full memory snippets verbatim.
-
-**Layer 1 (always injected):** A compact memory index: one line per result with a `mem:project/filename` ID and a one-line summary (truncated at 80 chars). Injected into every hook-prompt response when 3 or more results are found.
-
-**Layer 2 (on-demand):** Full snippet injection. Still used automatically when 1-2 results are found (targeted queries don't need the index).
-
-**Layer 3 (by ID):** The `get_memory_detail` MCP tool fetches full content for any entry in the compact index by its `mem:project/filename` ID.
-
-**When to enable:**
-- If hook-prompt injections are consuming too many context tokens
-- In sessions where many knowledge entries match broad prompts
-- When you want Claude to decide which memories to expand rather than injecting all of them
-
-```bash
-export PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1
-```
+Replaced by clanker mode (`phren config clanker on|off`, or `PHREN_CLANKER`), which covers the prompt hook, `search_knowledge`, `get_tasks` and `get_findings`; see [Clanker mode](api-reference.md#clanker-mode). The old variable still works as an alias when `PHREN_CLANKER` is unset.
 
 ## PHREN_FEATURE_GIT_CONTEXT_FILTER
 
