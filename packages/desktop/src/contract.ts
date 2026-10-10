@@ -134,7 +134,7 @@ export interface TerminalSession {
  * Remote: node-pty spawn "ssh" with sshArgs(c, `phren-hook v1 terminal ${server}`, {tty:true}).
  * Local: herdr → `herdr session attach <server>`; a server named `tmux` → `tmux attach`;
  * `tmux-<name>` → `tmux -L <name> attach`. TERM=xterm-256color. */
-export type AttachTerminal = (c: Computer, server: string, cols: number, rows: number) => TerminalSession;
+export type AttachTerminal = (c: Computer, server: string, cols: number, rows: number, pane?: string) => TerminalSession;
 
 // ---------------------------------------------------------------- server.ts
 /** HTTP + WS server bound to 127.0.0.1:<port> (0 = any free port). Every request

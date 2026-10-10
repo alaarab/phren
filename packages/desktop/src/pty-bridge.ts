@@ -3,6 +3,7 @@ import { chmodSync, existsSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import os from "node:os";
+import { execFileSync } from "node:child_process";
 import * as pty from "node-pty";
 import { sshArgs } from "./hosts.js";
 import type { AttachTerminal, Computer, TerminalSession } from "./contract.js";
@@ -80,10 +81,28 @@ function wrap(p: pty.IPty): TerminalSession {
   };
 }
 
-export const attachTerminal: AttachTerminal = (c: Computer, server: string, cols: number, rows: number): TerminalSession => {
+/** Herdr pane ids ("w5Y:p1") and tmux pane ids ("%12"). */
+const PANE_RE = /^[A-Za-z0-9_][A-Za-z0-9_:%.-]{0,99}$/;
+
+/** The terminal a local Herdr pane runs, from `herdr pane get`. */
+function localPaneTerminal(server: string, pane: string): string {
+  const out = execFileSync("herdr", ["--session", server, "pane", "get", pane], { encoding: "utf8", timeout: 5_000, env: childEnv(true) });
+  const id = (JSON.parse(out) as { result?: { pane?: { terminal_id?: unknown } } }).result?.pane?.terminal_id;
+  if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,100}$/.test(id)) throw new Error("That pane is not open anymore.");
+  return id;
+}
+
+/** A whole Herdr or tmux server, or with `pane`, one Herdr pane's own terminal (the console view). */
+export const attachTerminal: AttachTerminal = (c: Computer, server: string, cols: number, rows: number, pane?: string): TerminalSession => {
   if (!SERVER_RE.test(server)) throw new Error(`invalid server name: ${server}`);
+  if (pane !== undefined && !PANE_RE.test(pane)) throw new Error(`invalid pane: ${pane}`);
   if (!c.local) {
-    return wrap(spawnPty("ssh", sshArgs(c, `phren-hook v1 terminal ${server}`, { tty: true }), cols, rows, false));
+    const command = pane === undefined ? `phren-hook v1 terminal ${server}` : `phren-hook v1 pane ${server} ${pane}`;
+    return wrap(spawnPty("ssh", sshArgs(c, command, { tty: true }), cols, rows, false));
+  }
+  if (pane !== undefined) {
+    if (server === "tmux" || server.startsWith("tmux-")) throw new Error("A single pane's console needs Herdr.");
+    return wrap(spawnPty("herdr", ["--session", server, "terminal", "attach", localPaneTerminal(server, pane)], cols, rows, true));
   }
   const { file, args } = localCommand(server);
   return wrap(spawnPty(file, args, cols, rows, true));
