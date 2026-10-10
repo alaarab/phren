@@ -13,6 +13,7 @@ import { setActiveSession } from "../keys.js";
 import { store, projectOf } from "../shell/store.js";
 import { createTiles } from "../shell/tiles.js";
 import { openLaunchSheet } from "../shell/launch.js";
+import { layoutTree } from "../shell/herdr-layout.js";
 
 const PANES = [["changes", "Changes"], ["files", "Files"], ["search", "Search"]];
 
@@ -46,6 +47,7 @@ export function mountAgents(root) {
           <button class="doc-sidebar-toggle" type="button" aria-label="Collapse sidebar">\u25e7</button>
           <button class="layout-btn layout-new" data-act="launch" type="button" title="Start an agent on any computer">+ New agent</button>
           <span class="spacer"></span>
+          <button class="layout-btn" data-act="mirror" type="button" title="Arrange tiles like this session's Herdr tab">Mirror tab</button>
           <button class="layout-btn" data-act="terminal" type="button" title="A shell in this project, in a new tile">Shell</button>
           <button class="layout-btn" data-act="split-right" type="button" title="Split side by side (\u2318\\)">Split \u2192</button>
           <button class="layout-btn" data-act="split-down" type="button" title="Split top and bottom (\u2318\u21e7\\)">Split \u2193</button>
@@ -340,6 +342,7 @@ export function mountAgents(root) {
     else if (act === "zoom") tabs.zoom();
     else if (act === "terminal") openTerminalDoc();
     else if (act === "launch") openLaunchSheet({ computer: session?.computer });
+    else if (act === "mirror") void mirrorHerdrTab();
   });
 
   // A file/diff tab closes through its handle so a dirty doc can prompt first:
@@ -445,6 +448,56 @@ export function mountAgents(root) {
     };
   }
 
+  /** One Herdr pane's own terminal as a tile (a pane that runs no agent). */
+  function consoleDoc(computer, server, pane) {
+    return {
+      id: `console:${computer}/${server}/${pane}`,
+      kind: "console",
+      title: `Pane ${pane}`,
+      subtitle: computer,
+      persist: { computer, server, pane },
+      mount: (el) => openTerminal(el, computer, server, { pane }),
+    };
+  }
+
+  /**
+   * Rebuild the tiles as the focused session's Herdr tab is laid out: each pane
+   * becomes its session's chat tile, or its console when no agent runs there.
+   */
+  async function mirrorHerdrTab() {
+    const target = session?.child?.target;
+    if (!session || !target?.pane) return;
+    const { computer } = session;
+    const query = new URLSearchParams({ computer, server: target.server, pane: target.pane });
+    let layout;
+    try {
+      const res = await fetch(`/api/layout?${query}`, { cache: "no-store" });
+      const body = await res.json();
+      if (!res.ok || !body.layout) throw new Error(body.error || "This computer's Hook cannot report pane layouts yet.");
+      layout = body.layout;
+    } catch (err) {
+      toastError(`Mirror tab: ${err.message}`);
+      return;
+    }
+    const rows = store.sessions().filter((row) => row.computer === computer);
+    const itemFor = (p) => {
+      const row = rows.find((r) => r.child.target?.pane === p.pane_id && r.child.target?.server === target.server);
+      return row ? { kind: "chat", computer, id: row.child.id } : { kind: "console", computer, server: target.server, pane: p.pane_id };
+    };
+    const tree = layoutTree(layout.panes ?? [], (panes) => ({
+      docs: panes.map(itemFor),
+      active: itemFor(panes.find((p) => p.focused) ?? panes[0]),
+      focused: panes.some((p) => p.pane_id === (layout.focused_pane_id ?? target.pane)),
+    }));
+    if (!tree) return;
+    for (const doc of tabs.list()) tabs.close(doc.id);
+    tabs.restore(tree, resolveSaved);
+  }
+
+  function toastError(message) {
+    import("../chat/talk.js").then(({ toast }) => toast(message, { tone: "danger" })).catch(() => {});
+  }
+
   /** A terminal tile: a login shell in a project folder, or a whole Herdr/tmux server. */
   function terminalDoc(computer, { server, folder }) {
     const name = folder ? folder.split("/").filter(Boolean).pop() || folder : server;
@@ -478,6 +531,7 @@ export function mountAgents(root) {
   // Rebuild last run's tiles once every computer they name has reported in.
   let pendingLayout = tabs.saved();
   function resolveSaved(item) {
+    if (item.kind === "console") return item.computer && item.server && item.pane ? consoleDoc(item.computer, item.server, item.pane) : null;
     if (item.kind === "terminal") return item.computer && (item.server || item.folder) ? terminalDoc(item.computer, { server: item.server, folder: item.folder }) : null;
     const row = store.find(item.computer, item.id);
     if (!row) return null;
@@ -528,6 +582,7 @@ export function mountAgents(root) {
     tiles: tabs,
     toggleConsole() { tabs.activeHandle()?.toggleMode?.(); },
     openTerminalDoc,
+    mirrorHerdrTab,
     nextTab: () => tabs.step(1),
     previousTab: () => tabs.step(-1),
     toggleZoom() { if (sideEl.hidden) showPane(bench.pane ?? "changes"); document.body.classList.toggle("bench-max"); },
