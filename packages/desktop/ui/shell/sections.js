@@ -1,22 +1,34 @@
-// Top-level sections (Home, Agents, Projects, ...) shown as pills in the
-// titlebar. Each section mounts once into its own container and stays mounted
-// while hidden, so open chats keep their sockets and drafts.
+// Top-level sections (Home, Agents, Projects, ...) shown in the titlebar. Each
+// section mounts once into its own container and stays mounted while hidden,
+// so open chats keep their sockets and drafts.
 //
-// registerSection(id, { label, order, mount(el, ctx) -> { show?(), hide?(), focus?() } })
+// registerSection(id, { label, order, group?, groupLabel?, icon?, mount(el, ctx) -> { show?(), hide?(), focus?() } })
+//
+// Sections that share a `group` get one pill (labelled by `groupLabel`) and a
+// row of sub-tabs beside it while the group is open; the pill reopens the
+// group's last section. An `icon` section (Settings) is a button at the end of
+// the titlebar instead of a pill.
 
 const sections = new Map();
 let current = null;
 let pillsEl = null;
+let subEl = null;
+let iconEl = null;
 let hostEl = null;
 const changeListeners = new Set();
+const lastInGroup = new Map(); // group -> section id
+
+const groupOf = (id) => sections.get(id)?.group ?? id;
 
 export function registerSection(id, def) {
   sections.set(id, { id, order: 100, ...def, el: null, handle: null });
   if (pillsEl) renderPills();
 }
 
-export function installSections(pills, host) {
+export function installSections(pills, host, { sub = null, icons = null } = {}) {
   pillsEl = pills;
+  subEl = sub;
+  iconEl = icons;
   hostEl = host;
   renderPills();
   window.addEventListener("hashchange", () => {
@@ -46,10 +58,8 @@ export function showSection(id, ctx = {}) {
   }
   current = id;
   if (location.hash !== `#/${id}`) history.replaceState(null, "", `#/${id}`);
-  for (const b of pillsEl?.querySelectorAll(".section-pill") ?? []) {
-    b.classList.toggle("selected", b.dataset.section === id);
-    b.setAttribute("aria-selected", String(b.dataset.section === id));
-  }
+  lastInGroup.set(groupOf(id), id);
+  markSelected();
   for (const fn of changeListeners) fn(id);
   return def.handle;
 }
@@ -77,31 +87,76 @@ export function sectionIds() {
   return [...sections.values()].sort((a, b) => a.order - b.order).map((s) => s.id);
 }
 
-function renderPills() {
-  pillsEl.replaceChildren();
-  pillsEl.setAttribute("role", "tablist");
+/** A section's own label ("Tasks"), for the palette. */
+export function sectionLabel(id) { return sections.get(id)?.label ?? id; }
+
+/** Groups in titlebar order: [{ key, label, ids }]. */
+function groups() {
+  const out = new Map();
   for (const id of sectionIds()) {
     const def = sections.get(id);
+    const key = groupOf(id);
+    if (!out.has(key)) out.set(key, { key, label: def.groupLabel ?? def.label, icon: def.icon, ids: [] });
+    out.get(key).ids.push(id);
+  }
+  return [...out.values()];
+}
+
+function renderPills() {
+  pillsEl.replaceChildren();
+  iconEl?.replaceChildren();
+  pillsEl.setAttribute("role", "tablist");
+  for (const group of groups()) {
     const b = document.createElement("button");
-    b.className = "section-pill";
-    b.dataset.section = id;
-    b.setAttribute("role", "tab");
-    b.textContent = def.label;
-    if (def.badge) {
+    b.className = group.icon ? "section-pill icon" : "section-pill";
+    b.dataset.group = group.key;
+    // A one-section pill keeps its section id, so it can be found by it.
+    if (group.ids.length === 1) b.dataset.section = group.ids[0];
+    if (group.icon) {
+      b.innerHTML = group.icon;
+      b.setAttribute("aria-label", group.label);
+      b.title = group.label;
+    } else {
+      b.setAttribute("role", "tab");
+      b.textContent = group.label;
+    }
+    if (group.ids.some((id) => sections.get(id).badge)) {
       const badge = document.createElement("span");
       badge.className = "section-badge";
       badge.hidden = true;
       b.append(badge);
     }
-    b.classList.toggle("selected", id === current);
+    b.addEventListener("click", () => showSection(lastInGroup.get(group.key) ?? group.ids[0]));
+    (group.icon && iconEl ? iconEl : pillsEl).append(b);
+  }
+  markSelected();
+}
+
+function markSelected() {
+  const open = current ? groupOf(current) : null;
+  for (const b of document.querySelectorAll(".section-pill[data-group]")) {
+    const on = b.dataset.group === open;
+    b.classList.toggle("selected", on);
+    b.setAttribute("aria-selected", String(on));
+  }
+  if (!subEl) return;
+  const group = groups().find((g) => g.key === open);
+  subEl.replaceChildren();
+  subEl.hidden = !group || group.ids.length < 2;
+  if (subEl.hidden) return;
+  for (const id of group.ids) {
+    const b = document.createElement("button");
+    b.className = `section-sub${id === current ? " selected" : ""}`;
+    b.dataset.section = id;
+    b.textContent = sections.get(id).label;
     b.addEventListener("click", () => showSection(id));
-    pillsEl.append(b);
+    subEl.append(b);
   }
 }
 
 /** Set a pill's count badge (0 hides it). */
 export function setSectionBadge(id, count) {
-  const badge = pillsEl?.querySelector(`.section-pill[data-section="${id}"] .section-badge`);
+  const badge = document.querySelector(`.section-pill[data-group="${groupOf(id)}"] .section-badge`);
   if (!badge) return;
   badge.hidden = !count;
   badge.textContent = count ? String(count) : "";

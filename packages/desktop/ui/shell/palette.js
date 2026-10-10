@@ -4,7 +4,7 @@
 // keys.js. Plain DOM only, never innerHTML with data.
 
 import { hookGet, hookPost, targetQuery } from "../api.js";
-import { sectionHandle, sectionIds, showSection } from "./sections.js";
+import { sectionHandle, sectionIds, sectionLabel, showSection } from "./sections.js";
 import { projectOf, store } from "./store.js";
 
 // ------------------------------------------------------------ commands
@@ -56,11 +56,6 @@ function kindOf(child) {
   return "idle";
 }
 
-function sectionLabel(id) {
-  const pill = document.querySelector(`#section-pills .section-pill[data-section="${id}"]`);
-  const text = pill && [...pill.childNodes].find((n) => n.nodeType === 3);
-  return (text ? text.nodeValue : id).trim();
-}
 
 // ------------------------------------------------------------ sources
 function sessionItems() {

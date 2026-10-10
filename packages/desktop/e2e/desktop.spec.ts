@@ -167,7 +167,7 @@ test("palette, settings and the three-segment tool panel", async ({ page }) => {
   await expect(page.locator(".doc-tab.selected")).toContainText("Ship release");
 
   // Settings: theme picker and Extensions page.
-  await page.locator(".section-pill", { hasText: "Settings" }).click();
+  await page.locator(".section-pill[data-section=\"settings\"]").click();
   await page.locator(".settings-tab", { hasText: "Appearance" }).click();
   await page.locator(".settings-theme", { hasText: "Slate" }).click();
   await expect(page.locator(".settings-theme.selected")).toHaveText("Slate");
@@ -312,7 +312,9 @@ test("the window opens on Home", async ({ page }) => {
 test("Home and Conductor agree on the running conductor", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
   await expect(page.locator(".home-conductor-title")).toHaveText("Conductor");
-  await page.locator('.section-pill[data-section="conductor"]').click();
+  await page.locator('.section-pill[data-group="fleet"]').click();
+  await expect(page.locator(".section-sub")).toHaveText(["Conductor", "Schedules", "Previews"]);
+  await page.locator('.section-sub[data-section="conductor"]').click();
   await expect(page.locator(".conductor-run-title")).toHaveText("Conductor");
   await expect(page.getByText("No conductor is running")).toHaveCount(0);
 });

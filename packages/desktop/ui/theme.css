@@ -690,3 +690,13 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .home-row { min-width: 0; }
 .home-row-sub { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .comp-head .settings-actions { min-width: 150px; justify-content: flex-end; }
+
+/* Grouped titlebar: a group's pages beside its pill, and the Settings gear. */
+.section-subs { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--border); }
+.section-subs[hidden] { display: none; }
+.section-sub { border: 0; background: transparent; color: var(--muted); font: 500 12.5px system-ui; padding: 4px 10px; border-radius: 999px; cursor: pointer; transition: background .18s ease, color .18s ease; }
+.section-sub:hover { color: var(--text-2); }
+.section-sub.selected { color: var(--text); background: var(--raised); }
+.section-icons { display: inline-flex; margin-left: 8px; }
+.section-pill.icon { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; }
+.section-pill.icon.selected { background: var(--raised); }
