@@ -681,6 +681,10 @@ export function settleClaudeUsage(usage: AccountUsage, now: number): AccountUsag
   return { ...usage, windows, message: `No usage report from Claude on this computer${since ? ` since ${since}` : ""}. It updates when Claude Code runs here.` };
 }
 
+/** `opencode stats` scans OpenCode's whole database, several CPU-seconds on a
+ *  busy machine, for a rolling seven-day cost that barely moves in a minute. */
+export const OPENCODE_STATS_REUSE_MS = 10 * 60_000;
+
 export class AccountUsageReader {
   private cached?: { at: number; value: AccountUsage };
   private pending?: Promise<AccountUsage>;
@@ -688,6 +692,8 @@ export class AccountUsageReader {
   private claudePending = new Map<string, Promise<AccountUsage | undefined>>();
   private spendingCached = new Map<string, { at: number; value: AccountUsage[] }>();
   private spendingPending = new Map<string, Promise<AccountUsage[]>>();
+  private openCodeCached?: { at: number; value: AccountUsage };
+  private openCodePending?: Promise<AccountUsage>;
   constructor(private readCodex = readCodexLimits, private now = Date.now,
               private readClaudeLive: (now: Date, home: ClaudeHome) => Promise<AccountUsage | undefined> = liveClaudeUsage,
               private readOpenCode: (now: Date) => Promise<AccountUsage> = now => readOpenCodeUsage("opencode", now),
@@ -726,7 +732,7 @@ export class AccountUsageReader {
     if (!cached || this.now() - cached.at >= 60_000) {
       const at = this.now();
       if (!this.spendingPending.has(key)) {
-        const pending = Promise.all([this.readOpenCode(new Date(at)), this.readOpenCodeGo(new Date(at)), this.readOpenRouter(new Date(at)),
+        const pending = Promise.all([this.openCode(at), this.readOpenCodeGo(new Date(at)), this.readOpenRouter(new Date(at)),
           includeCopilot ? this.readCopilot(new Date(at)) : Promise.resolve(undefined),
           includeElevenLabs ? this.readElevenLabs(new Date(at)).catch(() => undefined) : Promise.resolve(undefined)])
           .then(([openCode, openCodeGo, openRouter, copilot, elevenLabs]) => [openCode, openCodeGo, ...(openRouter ? [openRouter] : []), ...(copilot ? [copilot] : []), ...(elevenLabs ? [elevenLabs] : [])])
@@ -736,6 +742,14 @@ export class AccountUsageReader {
       }
     }
     return this.spendingPending.get(key) ?? cached!.value;
+  }
+  /** One `opencode stats` run serves every spending key for `OPENCODE_STATS_REUSE_MS`. */
+  private openCode(at: number): Promise<AccountUsage> {
+    if (this.openCodeCached && at - this.openCodeCached.at < OPENCODE_STATS_REUSE_MS) return Promise.resolve(this.openCodeCached.value);
+    this.openCodePending ??= this.readOpenCode(new Date(at))
+      .then(value => { this.openCodeCached = { at, value }; return value; })
+      .finally(() => { this.openCodePending = undefined; });
+    return this.openCodePending;
   }
   /** Live first, so the phone's minute-by-minute poll keeps Claude current
    *  even when Claude Code is not running; the local snapshot is the backup.

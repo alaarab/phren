@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AccountUsageReader,
+  OPENCODE_STATS_REUSE_MS,
   captureClaudeUsage,
   claudeOAuthUsage,
   claudeScopedWindows,
@@ -140,6 +141,15 @@ describe("account usage", () => {
     expect(calls).toBe(1);
     time = 59_999; await reader.read(); expect(calls).toBe(1);
     time = 60_000; await reader.read(); expect(calls).toBe(2);
+  });
+  it("runs opencode stats once per reuse window across every spending key", async () => {
+    let calls = 0, time = 0;
+    const reader = new AccountUsageReader(async () => codexUsage({ rateLimits: limits }, now), () => time,
+      async () => undefined, async date => { calls++; return openCode(date); }, noOpenRouter, noOpenCodeGo, noCopilot);
+    await Promise.all([reader.read(new Set(["opencode"])), reader.read(new Set(["opencode", "copilot"]))]);
+    expect(calls).toBe(1);
+    time = OPENCODE_STATS_REUSE_MS - 1; await reader.read(); expect(calls).toBe(1);
+    time = OPENCODE_STATS_REUSE_MS; await reader.read(new Set(["opencode", "elevenlabs"])); expect(calls).toBe(2);
   });
   it("reads Copilot's limited quotas, names unlimited ones and never passes a token on", async () => {
     const report = { copilot_plan: "enterprise", quota_reset_date_utc: "2026-10-01T00:00:00.000Z", token: "ghu_secret",
