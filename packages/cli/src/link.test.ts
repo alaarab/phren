@@ -115,7 +115,7 @@ describe("link", () => {
       expect(content).toContain("Valid Project");
     });
 
-    it("linkSkillsDir links flat .md skill files", async () => {
+    it("links a flat .md skill as <name>/SKILL.md, replacing an old flat link", async () => {
       setupProfile(["skill-project"]);
 
       const projectDir = path.join(tmpRoot, "projects", "skill-project");
@@ -128,12 +128,16 @@ describe("link", () => {
       fs.mkdirSync(skillsSrc, { recursive: true });
       fs.writeFileSync(path.join(skillsSrc, "deploy.md"), "# Deploy skill");
       fs.writeFileSync(path.join(phrenProject, "AGENTS.md"), "# Test");
+      // Claude Code never loaded links in this shape.
+      const oldLink = path.join(projectDir, ".claude", "skills", "deploy.md");
+      fs.mkdirSync(path.dirname(oldLink), { recursive: true });
+      fs.symlinkSync(path.join(skillsSrc, "deploy.md"), oldLink);
 
       await runLink(phrenPath, { machine: "test-machine", profile: "test" });
 
-      const linkedSkill = path.join(projectDir, ".claude", "skills", "deploy.md");
-      expect(fs.existsSync(linkedSkill)).toBe(true);
+      const linkedSkill = path.join(projectDir, ".claude", "skills", "deploy", "SKILL.md");
       expect(fs.readlinkSync(linkedSkill)).toBe(path.join(skillsSrc, "deploy.md"));
+      expect(fs.existsSync(oldLink)).toBe(false);
     });
 
     it("linkSkillsDir links subfolder/SKILL.md format", async () => {
@@ -293,7 +297,7 @@ describe("link", () => {
 
       expect(fs.existsSync(path.join(projectDir, "AGENTS.md"))).toBe(false);
       expect(fs.existsSync(path.join(projectDir, "FINDINGS.md"))).toBe(false);
-      expect(fs.existsSync(path.join(projectDir, ".claude", "skills", "deploy.md"))).toBe(false);
+      expect(fs.existsSync(path.join(projectDir, ".claude", "skills", "deploy"))).toBe(false);
     });
 
     it("linkProject creates REFERENCE.md and FINDINGS.md symlinks", async () => {
@@ -614,8 +618,8 @@ describe("link", () => {
       const projectMirror = path.join(projectDir, ".claude", "skills");
       const manifestPath = path.join(projectDir, ".claude", "skill-manifest.json");
       const agentsPath = path.join(projectDir, "AGENTS.md");
-      expect(fs.lstatSync(path.join(projectMirror, "humanize.md")).isSymbolicLink()).toBe(true);
-      expect(fs.lstatSync(path.join(projectMirror, "verify.md")).isSymbolicLink()).toBe(true);
+      expect(fs.lstatSync(path.join(projectMirror, "humanize", "SKILL.md")).isSymbolicLink()).toBe(true);
+      expect(fs.lstatSync(path.join(projectMirror, "verify", "SKILL.md")).isSymbolicLink()).toBe(true);
       expect(JSON.parse(fs.readFileSync(manifestPath, "utf8")).skills.some((skill: { name: string; source: string }) => skill.name === "humanize" && skill.source === "global")).toBe(true);
       expect(fs.lstatSync(agentsPath).isSymbolicLink()).toBe(true);
       expect(fs.readFileSync(agentsPath, "utf8")).toBe("# Test");

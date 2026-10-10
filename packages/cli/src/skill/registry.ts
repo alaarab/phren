@@ -5,6 +5,8 @@ import { getProjectDirs } from "../shared.js";
 import { parseSkillFrontmatter } from "../link/skills.js";
 import { readSkillEnabledState, type SkillEnabledResolver } from "./state.js";
 import { safeProjectPath } from "../utils.js";
+import { storeAwareProjectPath } from "../store-routing.js";
+import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
 
 export interface SkillEntry {
   name: string;
@@ -46,6 +48,15 @@ interface SkillManifestProblem {
   message: string;
   command?: string;
   skillIds?: string[];
+}
+
+/**
+ * Where a skill appears in an agent's skills folder. Claude Code only loads
+ * `<name>/SKILL.md`, so a flat `name.md` skill gets a folder of its own holding
+ * a SKILL.md link to the file; a folder skill is linked whole.
+ */
+export function skillMirrorPath(destDir: string, skill: Pick<SkillEntry, "name" | "format">): string {
+  return skill.format === "folder" ? path.join(destDir, skill.name) : path.join(destDir, skill.name, "SKILL.md");
 }
 
 export interface SkillManifest {
@@ -141,7 +152,8 @@ function getGlobalSkills(phrenPath: string, isEnabled: SkillEnabledResolver): Sk
 
 function getProjectLocalSkills(phrenPath: string, project: string, isEnabled: SkillEnabledResolver): SkillEntry[] {
   const seen = new Set<string>();
-  const projectDir = path.join(phrenPath, project);
+  // A project that lives in a team store keeps its skills there.
+  const projectDir = storeAwareProjectPath(phrenPath, project) ?? path.join(phrenPath, project);
   return collectSkills(isEnabled, path.join(projectDir, "skills"), project, "project", "canonical", seen);
 }
 
@@ -181,7 +193,6 @@ function buildResolvedSkills(raw: SkillEntry[], mirrorDir?: string): SkillManife
         path: candidate.path,
         sourceKind: candidate.sourceKind,
       }));
-    const destName = chosen.format === "folder" ? chosen.name : path.basename(chosen.path);
     skills.push({
       path: chosen.path,
       format: chosen.format,
@@ -197,7 +208,7 @@ function buildResolvedSkills(raw: SkillEntry[], mirrorDir?: string): SkillManife
       visibleToAgents: chosen.enabled,
       commandRegistered: true,
       overrides,
-      mirrorTargets: mirrorDir ? [path.join(mirrorDir, destName)] : [],
+      mirrorTargets: mirrorDir ? [skillMirrorPath(mirrorDir, chosen)] : [],
     });
     grouped.delete(key);
   }
@@ -281,8 +292,12 @@ export function getAllSkills(phrenPath: string, profile: string): SkillEntry[] {
   const skillState = readSkillEnabledState(phrenPath);
   const isEnabled = (scope: string, name: string) => skillState(scope, name) && skillEnabled(phrenPath, name, profile || undefined);
   const all = getGlobalSkills(phrenPath, isEnabled);
-  for (const dir of getProjectDirs(phrenPath, profile)) {
-    const source = path.basename(dir);
+  const projects = new Set(getProjectDirs(phrenPath, profile).map((dir) => path.basename(dir)));
+  for (const store of getNonPrimaryStores(phrenPath)) {
+    if (!fs.existsSync(store.path)) continue;
+    for (const dir of getStoreProjectDirs(store)) projects.add(path.basename(dir));
+  }
+  for (const source of projects) {
     if (source === "global") continue;
     all.push(...getProjectLocalSkills(phrenPath, source, isEnabled));
   }
