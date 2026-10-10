@@ -320,6 +320,9 @@ importers:
 
   packages/desktop:
     dependencies:
+      '@phren/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0
