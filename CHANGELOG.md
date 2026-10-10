@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The Hook's health check waits 8 seconds for a harness's `--version` instead of 3. On a busy computer a healthy OpenCode took 2.4 seconds just to start, so the check kept reporting it as not answering.
+
 ## [0.3.33] - 2026-10-06
 
 ### Fixed
