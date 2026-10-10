@@ -4,7 +4,11 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const ps = vi.hoisted(() => ({ rows: "" }));
 vi.mock("node:child_process", async original => ({ ...await original<typeof import("node:child_process")>(),
-  execFile: Object.assign(() => {}, { [Symbol.for("nodejs.util.promisify.custom")]: async (file: string) => ({ stdout: file === "ps" ? ps.rows : "" }) }),
+  // Callback callers (host-key lookup) must hear back too, or they wait forever.
+  execFile: Object.assign((file: string, ...rest: unknown[]) => {
+    const done = rest.at(-1);
+    if (typeof done === "function") done(null, file === "ps" ? ps.rows : "", "");
+  }, { [Symbol.for("nodejs.util.promisify.custom")]: async (file: string) => ({ stdout: file === "ps" ? ps.rows : "" }) }),
 }));
 import { briefArrival } from "./launch-brief.js";
 import type { PaneClient, PromptOptions } from "./opencode-pane-server.js";
