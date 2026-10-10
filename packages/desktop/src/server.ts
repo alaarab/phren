@@ -30,7 +30,7 @@ const UI_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../ui");
 const MAX_BODY = 12 * 1024 * 1024;
 const COOKIE = "phren_desktop";
 const HEARTBEAT_MS = 20_000;
-const VENDOR_PREFIXES = ["/vendor/xterm/", "/vendor/addon-fit/", "/vendor/addon-webgl/", "/vendor/monaco/"];
+const VENDOR_PREFIXES = ["/vendor/xterm/", "/vendor/addon-fit/", "/vendor/addon-webgl/", "/vendor/monaco/", "/vendor/kit/"];
 
 /** Requests may only name the bound loopback authority; the editor and
  * extension frames additionally use `<uuid>.localhost` on public GET routes. */
@@ -157,6 +157,11 @@ function vendorDirs(prefix: string): string[] {
   if (prefix === "/vendor/xterm/") {
     const dir = packageDir("@xterm/xterm");
     return dir ? [join(dir, "lib"), join(dir, "css")] : [];
+  }
+  if (prefix === "/vendor/kit/") {
+    // @phren/desktop-kit's compiled ES modules: transcripts, timeline, tool cards.
+    const dir = packageDir("@phren/desktop-kit");
+    return dir ? [join(dir, "dist")] : [];
   }
   if (prefix === "/vendor/monaco/") {
     // Monaco's prebuilt browser bundle (AMD loader, editor, workers, codicon font).
