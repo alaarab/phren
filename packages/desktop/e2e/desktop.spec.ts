@@ -171,3 +171,22 @@ test("palette, settings and the three-segment tool panel", async ({ page }) => {
   await page.locator(".settings-tab", { hasText: "Computers" }).click();
   await expect(page.locator(".settings-page-computers")).toContainText("This computer");
 });
+
+test("composer matches the phone's bar", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.evaluate(async () => {
+    const { createComposer } = await import("/chat/composer.js");
+    const host = document.createElement("div");
+    host.id = "composer-probe";
+    host.style.cssText = "position:fixed;left:40px;bottom:40px;width:620px;z-index:999;background:var(--bg);padding:16px";
+    document.body.append(host);
+    const c = createComposer({ computer: "This computer", target: { server: "default", workspace: "1", tab: "1", pane: "1", source: "claude", session: "sess-fix-login" }, provider: "claude",
+      onConsole() {}, onAgents() {}, onWorkers() {}, onDictate() {}, onTalk() {} });
+    host.append(c.el);
+    c.setStatus({ status: "working" });
+    c.setCounts({ agents: 2, workers: 6 });
+    c.setBackground([1, 2, 3, 4, 5, 6, 7].map((i) => ({ id: String(i), label: `job ${i}`, state: "running" })));
+  });
+  await page.waitForTimeout(300);
+  await page.locator("#composer-probe").screenshot({ path: test.info().outputPath("composer.png") });
+});
