@@ -7,6 +7,7 @@ import { sessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
 import { additionHunks, parsePatch } from "../patch.js";
 import { renderMarkdown } from "../chat/markdown.js";
+import { mountTrains } from "./trains.js";
 
 const CSS_ID = "review-css";
 const POLL_MS = 15_000;
@@ -22,6 +23,14 @@ function ensureCss() {
   link.rel = "stylesheet";
   link.href = "./sections/review.css";
   document.head.append(link);
+  // The Queue | Trains switch and the Trains view share trains.css.
+  if (!document.getElementById("trains-css")) {
+    const trains = document.createElement("link");
+    trains.id = "trains-css";
+    trains.rel = "stylesheet";
+    trains.href = "./sections/trains.css";
+    document.head.append(trains);
+  }
 }
 
 function el(tag, cls, text) {
@@ -94,15 +103,23 @@ export function mountReview(root) {
           <span class="review-title">Review</span>
           <span class="review-sub" data-sub></span>
         </div>
+        <div class="segments review-switch" data-mode role="tablist">
+          <button class="segment selected" role="tab" aria-selected="true" data-mode="queue">Queue</button>
+          <button class="segment" role="tab" aria-selected="false" data-mode="trains">Trains</button>
+        </div>
         <div class="review-queue-list" data-queue></div>
       </aside>
-      <section class="review-detail">
+      <section class="review-detail" data-detail>
         <div class="review-detail-head" data-head></div>
         <div class="review-detail-body" data-body></div>
         <div class="review-tray" data-tray></div>
       </section>
+      <section class="review-trains" data-trains hidden></section>
     </div>`;
 
+  const reviewEl = root.querySelector(".review");
+  const modeEl = root.querySelector("[data-mode]");
+  const trainsEl = root.querySelector("[data-trains]");
   const subEl = root.querySelector("[data-sub]");
   const queueEl = root.querySelector("[data-queue]");
   const headEl = root.querySelector("[data-head]");
@@ -124,6 +141,8 @@ export function mountReview(root) {
     visible: false,
     detailSig: "",
     error: "",
+    mode: "queue",         // "queue" | "trains"
+    trains: null,          // the Trains view's handle once mounted
   };
 
   const onlineComputers = () => (store.merged?.computers ?? []).filter((c) => c.state === "online");
@@ -233,6 +252,7 @@ export function mountReview(root) {
   // ---- data -----------------------------------------------------------
 
   async function poll() {
+    if (state.mode !== "queue") return;
     const results = await Promise.all(onlineComputers().map(async (c) => {
       const body = await hookGet(c.computer, "/v1/dispatch").catch(() => null);
       return [c.computer, Array.isArray(body?.dispatches) ? body.dispatches : []];
@@ -692,6 +712,7 @@ export function mountReview(root) {
 
   function onKeydown(event) {
     if (!state.visible) return;
+    if (state.mode !== "queue") return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     const tag = (document.activeElement?.tagName || "").toUpperCase();
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
@@ -721,6 +742,31 @@ export function mountReview(root) {
     }
   }
 
+  // ---- mode switch ----------------------------------------------------
+
+  function setMode(mode) {
+    if (state.mode === mode) return;
+    state.mode = mode;
+    reviewEl.classList.toggle("trains-mode", mode === "trains");
+    for (const button of modeEl.querySelectorAll(".segment")) {
+      const active = button.dataset.mode === mode;
+      button.classList.toggle("selected", active);
+      button.setAttribute("aria-selected", String(active));
+    }
+    trainsEl.hidden = mode !== "trains";
+    if (mode === "trains") {
+      if (!state.trains) state.trains = mountTrains(trainsEl);
+      state.trains?.show?.();
+    } else {
+      state.trains?.hide?.();
+      void poll();
+    }
+  }
+
+  for (const button of modeEl.querySelectorAll(".segment")) {
+    button.addEventListener("click", () => setMode(button.dataset.mode));
+  }
+
   // ---- wiring ---------------------------------------------------------
 
   let timer = null;
@@ -737,9 +783,9 @@ export function mountReview(root) {
   document.addEventListener("keydown", onKeydown);
 
   return {
-    show() { state.visible = true; startPoll(); void poll(); },
-    hide() { state.visible = false; stopPoll(); closeComment(); },
-    focus() { queueEl.querySelector(".review-row.selected")?.focus(); },
-    destroy() { stopPoll(); unsubscribe(); document.removeEventListener("keydown", onKeydown); closeComment(); },
+    show() { state.visible = true; startPoll(); if (state.mode === "trains") state.trains?.show?.(); else void poll(); },
+    hide() { state.visible = false; stopPoll(); closeComment(); state.trains?.hide?.(); },
+    focus() { if (state.mode === "trains") state.trains?.focus?.(); else queueEl.querySelector(".review-row.selected")?.focus(); },
+    destroy() { stopPoll(); unsubscribe(); document.removeEventListener("keydown", onKeydown); closeComment(); state.trains?.destroy?.(); },
   };
 }
