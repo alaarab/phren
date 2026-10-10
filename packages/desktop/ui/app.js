@@ -94,3 +94,13 @@ window.addEventListener("keydown", (ev) => {
     agents().showPane("search");
   }
 });
+
+// Desk first: while the owner types or moves the mouse here, approval alerts
+// wait before reaching the phone. Reported at most every 15 s, only while focused.
+let presenceAt = 0;
+function reportPresence() {
+  if (!document.hasFocus() || Date.now() - presenceAt < 15_000) return;
+  presenceAt = Date.now();
+  fetch("/api/presence", { method: "POST", headers: { "Content-Type": "application/json", "X-Phren-Desktop": "1" }, body: "{}" }).catch(() => {});
+}
+for (const type of ["keydown", "pointerdown", "pointermove", "wheel"]) window.addEventListener(type, reportPresence, { passive: true, capture: true });
