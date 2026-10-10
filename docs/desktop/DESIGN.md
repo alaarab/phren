@@ -1,8 +1,43 @@
 # Phren desktop: design
 
-Status: proposal, 2026-10-07. Research in [RESEARCH.md](RESEARCH.md).
-Nothing here is built. Sections marked **big build** are new work with no
-existing code behind them.
+Status: proposal 2026-10-07, built on branch `feat/desktop-spike` (draft PR
+#368) by 2026-10-10. Research in [RESEARCH.md](RESEARCH.md). Section 0 records
+what was built and the decisions taken since; the rest is the original
+proposal, with notes where a later decision replaced it. The user guide is
+`docs/desktop.md` on that branch.
+
+## 0. As built (2026-10-10)
+
+Decisions taken after the proposal, and how the build follows them:
+
+- **Direction: a conductor cockpit.** A three-reviewer analysis found the
+  spike was "an editor with chat beside it". The product is now a cockpit:
+  Home shows the conductor, who needs you, working agents and worker returns;
+  Review is the review station; the editor is a drill-down.
+- **Phone parity** (owner: "I need all the things my phone app has"). Every
+  phone screen has a desktop counterpart. The phone's chat logic (transcript
+  reader, timeline, tool cards) is ported from the Android kit into
+  `packages/desktop-kit`, with its tests.
+- **Extensions replace section 5's "no extension host".** VS Code extensions
+  run through monaco-vscode-api: web extensions in an isolated
+  `{{uuid}}.localhost` frame, and Node extensions in VS Code's own server
+  (REH) built from the editor's exact commit. Node extensions run as the owner
+  and could reach every linked computer, so they are opt-in (Settings ›
+  Extensions) until they run isolated.
+- **Tiles replace fixed zones** (owner: "custom arrangement of panes ... like
+  hyprland"). The centre is a split tree like Herdr's panes, with Herdr's key
+  names, a saved layout and "Mirror tab". Each session switches between its
+  chat and its pane's own console (owner: "swap my chat to the console
+  version").
+- **Desk first.** While the owner uses the desktop, approval alerts wait
+  before reaching the phone.
+- **Hook changes** (they ship with the next CLI release): per-client WebSocket
+  pools (`X-Phren-Client`), `phren-hook v1 pane`, `POST /v1/push/presence`,
+  `POST /v1/store/blobs`, `GET /v1/workspaces/layout`, and a per-file lock for
+  `files/write`.
+- **Reviewed.** A Codex Astra review of the whole branch found 12 defects,
+  all fixed: cookie isolation for previews, blob-id validation in the memory
+  mirror, Enter on a focused Deny, schedule edits and more.
 
 ## 1. What it is
 
@@ -191,7 +226,8 @@ existing routes; "new" means a route or component to build.
 
 Owner decision, 2026-10-09: a light built-in editor that feels like the
 owner's own VS Code, not a link-out and not an embedded VS Code server. Light
-means no extension host, no marketplace and no settings sprawl. VS Code-like
+means no extension host, no marketplace and no settings sprawl. (Replaced on
+2026-10-09: extensions now run through monaco-vscode-api; see section 0.) VS Code-like
 means the editor itself, the layout and the keys feel familiar, and it works
 on any computer's checkout as if it were local.
 
@@ -281,7 +317,7 @@ embedding an openvscode-server tile per project rather than forking.
   overview tick and `/v1/git/status`; a file-watch stream only if that is
   too slow.
 
-**Not in scope**: extensions, debugging, notebooks, settings sync, remote
+**Not in scope** (as proposed; extensions were added later, see section 0): debugging, notebooks, settings sync, remote
 containers. **LSP** (diagnostics, completion, rename) is phase 3 at the
 earliest: a Hook WebSocket that runs a language server per project and
 proxies its stdio, consumed by `monaco-languageclient`. It is a **big
