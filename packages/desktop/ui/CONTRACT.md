@@ -1,4 +1,76 @@
-# UI contract (phase 0 spike)
+# UI contract
+
+Read "Shell" first: it is how every new screen plugs in.
+
+# Shell (phase 1)
+
+`index.html` holds only the titlebar (`#section-pills`, `#needs-pill`,
+`#conn-count`) and `#sections`. `app.js` registers sections and wires keys,
+badge and notifications; nothing else lives there.
+
+## Store (`shell/store.js`)
+
+One `/api/overview` WebSocket for the whole app. Never open your own.
+
+```js
+import { store, connectStore, needsYou, sessions, projectOf } from "./shell/store.js";
+store.merged                 // MergedOverview (src/contract.ts) or null
+store.subscribe(fn)          // fn(merged) now and on every change; returns unsubscribe
+store.needsYou()             // [{ key, computer, group, child }] blocked, waiting or approval pending
+store.sessions()             // every agent row across computers, same shape
+store.find(computer, childId)
+await store.capabilities(computer) // the Hook's /v1/health `capabilities`, cached 5 min, reset on reconnect
+store.can(computer, "fileWrite")   // sync: true | false | undefined (not fetched yet)
+store.version(computer)            // Hook version string when known
+```
+
+Gate every control on a capability the Hook declares, never on a 404: an
+unsupported feature shows a disabled control with a reason ("Needs a newer
+Phren on Linuxbox").
+
+## Sections (`shell/sections.js`)
+
+Titlebar pills, in `order`. A section mounts once, on first show, and stays
+mounted while hidden. The URL hash is `#/<id>`.
+
+```js
+registerSection(id, { label, order, badge?: true, mount(el, ctx) -> { show?(), hide?(), focus?(), ... } })
+showSection(id)            // returns the section's handle
+sectionHandle(id)          // the handle, mounting the section hidden if needed
+setSectionBadge(id, count) // amber count on the pill; 0 hides it
+onSectionChange(fn)
+```
+
+New sections go in `sections/<id>.js` exporting `mount<Id>(el, deps)` and are
+registered in `app.js`. Today: `home` (sections/home.js) and `agents`
+(sections/agents.js, the sidebar, centre tabs and right panel).
+
+## Documents (`shell/tabs.js`)
+
+Centre tabs inside a section (Agents uses them for chats; files, diffs, a
+whole terminal server and settings pages come next).
+
+```js
+const tabs = createTabs(barEl, bodyEl, { onActivate(doc, handle), onEmpty(), onClose(doc) })
+tabs.open(doc, { background? })  // doc: { id, kind, title, subtitle?, mount(el) -> handle, persist? }
+tabs.activate(id); tabs.close(id?); tabs.step(±1); tabs.setTitle(id, title, subtitle)
+tabs.active(); tabs.activeHandle(); tabs.list(); tabs.has(id); tabs.saved()
+```
+
+A handle may implement `close()`, `focus()`, `show()`, `hide()`. `persist` is a
+small JSON value saved to localStorage so the tab reopens on relaunch.
+
+Agents' handle (via `sectionHandle("agents")`): `openSession(computer, child)`,
+`showPane(key)`, `closePanel()`, `closeTab()`, `nextTab()`, `previousTab()`,
+`toggleZoom()`, `currentSession()`.
+
+## Writes
+
+Every non-GET request to the daemon sends `Content-Type: application/json` and
+`X-Phren-Desktop: 1` (the daemon refuses anything else). Use `hookPost` from
+`api.js`.
+
+# Phase 0 spike (still current below)
 
 Plain browser ES modules, no bundler, no framework. Served by src/server.ts from
 this folder; xterm is at `/vendor/xterm/xterm.js` (ESM build `/vendor/xterm/xterm.mjs`),
@@ -35,12 +107,13 @@ export function openTerminal(el, computerName, server) // returns { close() }
   `raw.message.content` string or `[{type:"text",text}|{type:"tool_use",name,input}|{type:"tool_result",content}]`;
   Codex: `raw.type` "response_item" with `raw.payload.type` "message" and
   `raw.payload.role`, `raw.payload.content[{type:"input_text"|"output_text", text}]`).
-- `WS /hosts/<computer>/v1/status?<target as query>` → `{type:"agentStatus", status, pendingApproval?}` frames.
+- `WS /hosts/<computer>/v1/status?<target as query>` → `{agentStatus:{status, pendingApproval, pendingQuestions, terminalPrompt, passwordPrompt, compacting, suggestion, permissionMode, historyStalled, capabilities, settingsState, branch}}` frames (built in packages/cli/src/bridge/server-stream.ts).
 - `POST /hosts/<computer>/v1/prompt` body `{target, text, deliveryId}` (deliveryId: crypto.randomUUID()).
 - `POST /hosts/<computer>/v1/keys` body `{target, keys:["Escape"]}` to stop.
 - `POST /hosts/<computer>/v1/approvals/answer` body `{target, actionId, decision:"approve"|"deny"}`.
-- `WS /pty?computer=&server=&cols=&rows=` → raw terminal text both ways;
-  send `{"type":"resize","cols","rows"}` as JSON text to resize.
+- `WS /pty?computer=&server=&cols=&rows=` → terminal output as text frames;
+  send input as BINARY frames (UTF-8 bytes) and `{"type":"resize","cols","rows"}`
+  as a text frame. Text frames are never written to the terminal.
 
 ## Look (Phren Charcoal; use these CSS variables from theme.css only)
 
@@ -68,7 +141,7 @@ row shapes); VS Code supplies the desktop layout (file tree, editor tabs, side b
 side diff, ⌘P, ⌘S, dirty dots); Codex supplies review beside the conversation
 (comment on a line, send it to the agent working there).
 
-## Workbench (owned by the shell, app.js)
+## Workbench (owned by sections/agents.js)
 
 The right panel `#side` is the workbench: a segment control at its top with
 **Changes · Files · Terminal** (pill segments, raised background, selected

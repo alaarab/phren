@@ -181,8 +181,8 @@ function run(action, arg) {
     case "focus_pane_right": return focusColumn(1);
     case "cycle_pane_next": return focusColumn(1, true);
     case "zoom": return app.toggleZoom();
-    case "close_pane":
-    case "close_tab": return app.closePanel();
+    case "close_pane": return app.closePanel();
+    case "close_tab": return app.closeTab ? app.closeTab() : app.closePanel();
     case "new_tab":
     case "terminal": return app.showPane("terminal");
     case "palette": return showGoto();

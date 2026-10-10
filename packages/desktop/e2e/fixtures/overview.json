@@ -1,7 +1,11 @@
 {
   "type": "overview",
   "kind": "overview",
-  "mux": { "id": "default", "kind": "herdr", "session": "default" },
+  "mux": {
+    "id": "default",
+    "kind": "herdr",
+    "session": "default"
+  },
   "groups": [
     {
       "id": "1",
@@ -24,13 +28,37 @@
             "source": "claude",
             "session": "sess-fix-login"
           }
+        },
+        {
+          "id": "sess-release",
+          "label": "phren",
+          "title": "Ship release 0.3.34",
+          "agent": "codex",
+          "agentStatus": "blocked",
+          "approvalPending": true,
+          "cwd": "/Users/you/phren-release",
+          "branch": "release/0.3.34",
+          "lastChangedAt": "2026-10-10T12:01:00.000Z",
+          "target": {
+            "server": "default",
+            "workspace": "1",
+            "tab": "2",
+            "pane": "2",
+            "source": "codex",
+            "session": "sess-release"
+          }
         }
       ]
     }
   ],
   "phren": {
-    "computer": { "id": "test-computer", "name": "This computer" },
+    "computer": {
+      "id": "test-computer",
+      "name": "This computer"
+    },
     "version": "0.3.33",
-    "capabilities": { "overviewStream": true }
+    "capabilities": {
+      "overviewStream": true
+    }
   }
 }
