@@ -9,31 +9,36 @@ import {
   logImpact,
   extractFindingIdsFromSnippet,
 } from "../finding/impact.js";
-import { isFeatureEnabled, errorMessage } from "../utils.js";
+import { errorMessage } from "../utils.js";
+import { HOOK_TITLE_CHARS, clankerEnabled, docEntries, queryTerms, rowKeywords, rowTitle, termScore } from "../clanker.js";
 import { annotateStale } from "./hooks-citations.js";
 import type { SelectedSnippet, GitContext } from "../shared/retrieval.js";
 import { approximateTokens, fileRelevanceBoost, branchMatchBoost, SNIPPET_OVERHEAD_TOKENS } from "../shared/retrieval.js";
 import { logger } from "../logger.js";
 
-// ── Progressive disclosure helpers ────────────────────────────────────────────
+// ── Clanker mode: compact index ──────────────────────────────────────────────
 
-function buildOneLiner(snippet: string): string {
-  const lines = snippet.split("\n").map(l => l.trim()).filter(l => l.length > 0);
-  if (!lines.length) return "";
-  const first = lines[0].replace(/^[-*#>\s]+/, "").trim();
-  if (first.length <= 80) return first;
-  return first.slice(0, 79) + "\u2026";
-}
-
-function buildCompactIndex(selected: SelectedSnippet[], phrenPathLocal: string): string[] {
+function buildCompactIndex(selected: SelectedSnippet[], phrenPathLocal: string, terms: string[]): string[] {
   const lines: string[] = [];
   for (const { doc, snippet, key } of selected) {
-    const id = `mem:${getDocSourceKey(doc, phrenPathLocal)}`;
-    const summary = buildOneLiner(snippet);
+    // A snippet that is one finding or task gets that entry's own id, so
+    // expanding it returns the entry rather than the whole file.
+    // Snippets are cut at a character budget, which often drops the id
+    // comment at the end of a long bullet, so match the bullet in the doc.
+    const textLines = snippet.split("\n").filter((l) => l.trim() && !l.trim().startsWith("<!--"));
+    // The line that matched most of the prompt, skipping headings and table rules.
+    const candidates = textLines.filter((l) => !/^\s*(#|\|?[\s:|-]+\|?\s*$)/.test(l));
+    const firstLine = candidates.reduce<string | undefined>((best, l) => (best === undefined || termScore(l, terms) > termScore(best, terms) ? l : best), undefined) ?? textLines[0] ?? "";
+    const bullets = snippet.split("\n").filter((l) => /^-\s/.test(l));
+    const prefix = bullets.length === 1 ? bullets[0].replace(/…$/, "").slice(0, 120) : "";
+    const entry = prefix ? docEntries(doc.content).find((e) => e.line.startsWith(prefix)) : undefined;
+    const id = entry ? entry.id : `mem:${getDocSourceKey(doc, phrenPathLocal)}`;
+    const text = entry ? entry.line : firstLine;
+    const keywords = rowKeywords(text, terms);
     // The fb: key rides here too. memory_feedback's description promises it
     // appears in injected headers without qualification, and this path renders
-    // instead of the full one whenever progressive disclosure is enabled.
-    lines.push(`[${id}] fb:${key} ${doc.type}: ${summary}`);
+    // instead of the full one whenever clanker mode is on.
+    lines.push(`${id} fb:${key} ${rowTitle(text, HOOK_TITLE_CHARS)}${keywords.length ? ` [${keywords.join(", ")}]` : ""}`);
   }
   return lines;
 }
@@ -49,7 +54,8 @@ export function buildHookOutput(
   stage: Record<string, number>,
   tokenBudget: number,
   phrenPathLocal: string,
-  sessionId?: string
+  sessionId?: string,
+  keywords?: string,
 ): string[] {
   const projectLabel = detectedProject ? ` \u00b7 ${detectedProject}` : "";
   const resultLabel = selected.length === 1 ? "1 result" : `${selected.length} results`;
@@ -59,12 +65,11 @@ export function buildHookOutput(
   const impactEntries: Array<{ findingId: string; project: string; sessionId: string }> = [];
   const impactSessionId = sessionId ?? "none";
 
-  const useCompactIndex = isFeatureEnabled("PHREN_FEATURE_PROGRESSIVE_DISCLOSURE", false) && selected.length >= 3;
-
-  if (useCompactIndex) {
+  const clanker = clankerEnabled(phrenPathLocal);
+  if (clanker) {
     const indexEntries = selected.slice(0, 8);
-    const indexLines = buildCompactIndex(indexEntries, phrenPathLocal);
-    parts.push("Context index (use get_memory_detail to expand any entry):");
+    const indexLines = buildCompactIndex(indexEntries, phrenPathLocal, queryTerms(keywords ?? ""));
+    parts.push("Index (get_memory_detail id=<id> for full text):");
     for (const line of indexLines) {
       parts.push(line);
     }
@@ -150,6 +155,8 @@ export function buildHookOutput(
   logImpact(phrenPathLocal, impactEntries);
 
   parts.push("</phren-context>");
+  // The trace is for people reading the hook log; clanker mode spends no tokens on it.
+  if (clanker) return parts;
 
   const changedCount = gitCtx?.changedFiles.size ?? 0;
   if (gitCtx) {

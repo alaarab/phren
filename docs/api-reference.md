@@ -517,11 +517,11 @@ An uncertain result is never retried automatically.
 
 ### `get_memory_detail`
 
-Fetch the full content of a specific memory entry by its ID. This is Layer 3 of the progressive disclosure system: when `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1`, the hook-prompt injects a compact memory index instead of full snippets for 3+ results. Use this tool to expand any entry from that index, or a `search_knowledge` excerpt.
+Fetch the full content of a specific memory entry by its ID. Use it to expand a `search_knowledge` excerpt or a row from [clanker mode](#clanker-mode). A `fid:xxxxxxxx` (finding) or `bid:xxxxxxxx` (task) id returns that one entry with its continuation lines (citations, task Context) in `data.content`, plus `data.source`, the `mem:` id of the file it lives in.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `id` | string | yes | Memory ID in the format `mem:project/filename` (e.g. `mem:my-app/FINDINGS.md`). Returned by `search_knowledge` results and the hook-prompt compact index. |
+| `id` | string | yes | `fid:xxxxxxxx`, `bid:xxxxxxxx`, or `mem:project/filename` (e.g. `mem:my-app/FINDINGS.md`). Returned by `search_knowledge`, `get_findings`, `get_tasks` and the hook-prompt index. |
 | `offset` | number | no | Character offset to read from. Documents over 16,000 characters come back a page at a time: `data.total_chars` is the full length and `data.next_offset` is where the next page starts (`null` on the last page). |
 
 ---
@@ -545,6 +545,16 @@ Search the user's personal project store using FTS5 full-text search with synony
 A findings result carries the linked function, type or variable in its `symbol` field (and `symbols`) when the finding has a code link, so a client can show which code the finding is about.
 
 Each result is an excerpt around the match, not the whole document. Snippets share a budget of about 6,000 characters per response (at most 1,200 per result), so a response stays a few thousand tokens however long the matched lines are. A result has an `id` (`mem:project/filename`; absent for federated results) and `truncated: true` when the excerpt is not the whole document; pass the `id` to `get_memory_detail` for the full text.
+
+#### Clanker mode
+
+With clanker mode on (`phren config clanker on`, `PHREN_CLANKER=on`), `search_knowledge`, `get_findings` and `get_tasks` return rows instead of text, one per line in `message`:
+
+```
+fid:803b2823 Hook per-call change capture (bridge/changes.ts treeHash): never set the scratch index mt… [bridge, hook, per-call, bridge/changes.ts] 0.56
+```
+
+That is the id, a title of up to 90 characters (140 in the prompt hook, whose few rows arrive unasked), up to four keywords (up to two of the query's terms it matched, then the entry's own identifiers and longest words) and, for searches, the share of query terms the entry contains. A search returns one row per matching finding or task (at most three per document, at most twice `limit` in all) and one row per other document, prefixed with the project when no `project` filter was given; `data.ids` lists the ids. `get_findings` rows carry the date and a non-active status, `get_tasks` rows the section, priority and claim. `data` keeps counts and paging but not the rows. Pass an id to `get_memory_detail` for the full text. The prompt hook injects the same rows, with the `fb:` key, and drops its trace line.
 
 ### `get_project_summary`
 

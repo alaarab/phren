@@ -120,8 +120,8 @@ phren store subscribe team-store forge portal
 phren store unsubscribe team-store legacy-projects
 ```
 
-### Progressive disclosure
-Enable `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1` to get compact memory indices instead of full snippets. Call `get_memory_detail(id)` to expand only what you need.
+### Clanker mode
+`phren config clanker on` makes the prompt hook, `search_knowledge`, `get_tasks` and `get_findings` return one short row per hit (id, title, a few keywords, a score) instead of the text. The agent opens what it needs with `get_memory_detail(id)`; a `fid:` or `bid:` id returns just that finding or task. New installs start with it on; `phren config clanker off` turns it off.
 
 ### Semantic dedup & conflict detection
 Optional: enable LLM-based duplicate detection and contradiction flagging on `add_finding`. Prevents near-duplicate entries and catches "always use X" vs "never use X" contradictions.

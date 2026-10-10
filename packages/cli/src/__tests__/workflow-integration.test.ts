@@ -152,7 +152,8 @@ describe("workflow integration", () => {
       query: "workflow coverage repo-c",
     }));
     expect(searchRes.ok).toBe(true);
-    expect(JSON.stringify(searchRes.data.results)).toContain("Workflow coverage proves repo-c");
+    // A fresh init turns clanker mode on: the hit comes back as a row in the message.
+    expect(searchRes.message).toContain("Workflow coverage proves repo-c");
 
     fs.writeFileSync(
       path.join(phrenPath, "repo-c", "review.md"),
