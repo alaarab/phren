@@ -12,7 +12,7 @@ type ToolResult = { content: { type: string; text: string }[] };
 type ToolHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
 
 const EVICTION = "Redis eviction under memory pressure drops session keys first; set maxmemory-policy to volatile-lru so only keys with a TTL are evicted, and alert on evicted_keys above zero.";
-const POOL = "Postgres pool exhaustion shows as request timeouts, not errors: cap the pool at 20 per pod.";
+const POOL = "Postgres max_connections exhaustion shows as request timeouts, not errors: cap the pool at 20 per pod.";
 
 describe("clanker mode tools", () => {
   let tmp: { path: string; cleanup: () => void };
@@ -81,7 +81,9 @@ describe("clanker mode tools", () => {
     const findings = await call("get_findings", { project: "app" });
     expect(findings.json.data.total).toBe(2);
     expect(findings.json.message).toMatch(/fid:aaaa1111 \S+ Redis eviction/);
-    expect(findings.json.message).toContain("fid:bbbb2222");
+    // Identifiers survive the title cleanup.
+    expect(findings.json.message).toContain("fid:bbbb2222 ");
+    expect(findings.json.message).toContain("Postgres max_connections exhaustion");
     expect(findings.json.message).not.toContain("alert on evicted_keys above zero");
 
     const tasks = await call("get_tasks", { project: "app" });

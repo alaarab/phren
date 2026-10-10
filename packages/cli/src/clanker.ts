@@ -58,6 +58,8 @@ export interface ClankerRow {
 }
 
 const TITLE_CHARS = 90;
+/** Hook rows are few and arrive unasked, so they get room for the entry's point, not just its subject. */
+export const HOOK_TITLE_CHARS = 140;
 const KEYWORD_COUNT = 4;
 
 /** Query terms as the snippet extractor reads them: lowercase, no FTS operators. */
@@ -77,7 +79,9 @@ export function plainEntryText(line: string): string {
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/^\s*[-*]\s+(\[[ xX]\]\s+)?/, "")
     .replace(/^#+\s+/, "")
-    .replace(/[`*_]{1,3}/g, "")
+    // Backticks and bold only: underscores and single stars belong to
+    // identifiers and globs (PHREN_PATH, node_modules, **/*.ts).
+    .replace(/`|\*\*/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }

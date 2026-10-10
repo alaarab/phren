@@ -10,7 +10,7 @@ import {
   extractFindingIdsFromSnippet,
 } from "../finding/impact.js";
 import { errorMessage } from "../utils.js";
-import { clankerEnabled, docEntries, queryTerms, rowKeywords, rowTitle, termScore } from "../clanker.js";
+import { HOOK_TITLE_CHARS, clankerEnabled, docEntries, queryTerms, rowKeywords, rowTitle, termScore } from "../clanker.js";
 import { annotateStale } from "./hooks-citations.js";
 import type { SelectedSnippet, GitContext } from "../shared/retrieval.js";
 import { approximateTokens, fileRelevanceBoost, branchMatchBoost, SNIPPET_OVERHEAD_TOKENS } from "../shared/retrieval.js";
@@ -38,7 +38,7 @@ function buildCompactIndex(selected: SelectedSnippet[], phrenPathLocal: string, 
     // The fb: key rides here too. memory_feedback's description promises it
     // appears in injected headers without qualification, and this path renders
     // instead of the full one whenever clanker mode is on.
-    lines.push(`${id} fb:${key} ${rowTitle(text)}${keywords.length ? ` [${keywords.join(", ")}]` : ""}`);
+    lines.push(`${id} fb:${key} ${rowTitle(text, HOOK_TITLE_CHARS)}${keywords.length ? ` [${keywords.join(", ")}]` : ""}`);
   }
   return lines;
 }
