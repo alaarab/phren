@@ -603,6 +603,8 @@ export const startServer: StartServer = async (o) => {
         const project = url.searchParams.get("project");
         if (sub === "review" && req.method === "POST") {
           sendJson(res, await memory.reviewAction(computer, (await readJson(req)) as ReviewActionBody));
+        } else if (sub === "findings" && req.method === "POST") {
+          sendJson(res, await memory.addFinding(computer, (await readJson(req)) as { project?: unknown; text?: unknown }));
         } else if (sub === "projects") {
           sendJson(res, await memory.projects(computer));
         } else if (sub === "findings") {

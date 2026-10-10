@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import {
   FINDINGS_FILENAME,
+  addFinding,
   approveQueueItem,
   editQueueItem,
   parseFindingsContent,
@@ -139,6 +140,7 @@ export interface MemoryService {
   projects(computer: Computer): Promise<{ projects: Array<{ name: string; findings: number; tasks: number; review: number; notes: number }> }>;
   findings(computer: Computer, project: string | null): Promise<{ items: unknown[] }>;
   review(computer: Computer, project: string | null): Promise<{ items: Array<QueueItem | ProjectQueueItem> }>;
+  addFinding(computer: Computer, body: { project?: unknown; text?: unknown }): Promise<{ ok: true; uploaded?: unknown }>;
   notes(computer: Computer, project: string | null): Promise<{ items: unknown[] }>;
   topics(computer: Computer, project: string | null): Promise<{ topics: unknown[] }>;
   truths(computer: Computer, project: string | null): Promise<{ items: string[] }>;
@@ -432,6 +434,19 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
 
       if (computer.local) return { ok: true, message: result.data };
       return { ok: true, message: result.data, uploaded: await uploadChanges(computer, dir) };
+    },
+
+    async addFinding(computer, body) {
+      const project = typeof body.project === "string" ? body.project.trim() : "";
+      const text = typeof body.text === "string" ? body.text.replace(/\s+/g, " ").trim() : "";
+      if (!project || !text) throw new MemoryHttpError(400, "project and text are required.");
+      if (text.length > 4000) throw new MemoryHttpError(413, "That is too long for one finding.");
+      const dir = await storeDir(computer);
+      // The CLI's own writer: stable id, duplicate check, the file's conventions.
+      const result = addFinding(dir, project, text);
+      if (!result.ok) throw new MemoryHttpError(400, result.error);
+      if (computer.local) return { ok: true };
+      return { ok: true, uploaded: await uploadChanges(computer, dir) };
     },
 
     async graph(computer, project) {
