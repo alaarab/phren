@@ -47,6 +47,25 @@
             "source": "codex",
             "session": "sess-release"
           }
+        },
+        {
+          "id": "sess-conductor",
+          "label": "phren",
+          "title": "Conductor",
+          "agent": "codex",
+          "role": "conductor",
+          "agentStatus": "idle",
+          "cwd": "/Users/you/phren",
+          "branch": "main",
+          "lastChangedAt": "2026-10-10T11:59:00.000Z",
+          "target": {
+            "server": "default",
+            "workspace": "1",
+            "tab": "3",
+            "pane": "3",
+            "source": "codex",
+            "session": "sess-conductor"
+          }
         }
       ]
     }
