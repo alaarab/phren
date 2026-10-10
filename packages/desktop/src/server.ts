@@ -368,7 +368,13 @@ export const startServer: StartServer = async (o) => {
     const rows = intParam(url.searchParams.get("rows"), 32);
     let term: TerminalSession;
     try {
-      term = o.attachTerminal(computer, server, cols, rows, url.searchParams.get("pane") ?? undefined);
+      const folder = url.searchParams.get("folder");
+      if (folder !== null) {
+        if (!o.attachShell) throw new Error("shells are not available");
+        term = o.attachShell(computer, folder, cols, rows);
+      } else {
+        term = o.attachTerminal(computer, server, cols, rows, url.searchParams.get("pane") ?? undefined);
+      }
     } catch (err) {
       ws.close(1011, shortMessage(err));
       return;

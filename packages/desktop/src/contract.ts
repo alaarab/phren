@@ -162,6 +162,8 @@ export interface DesktopServerOptions {
   hookRequest: HookRequest;
   hookWebSocket: HookWebSocket;
   attachTerminal: AttachTerminal;
+  /** A login shell in a project folder (optional: older wiring has none). */
+  attachShell?: (c: Computer, folder: string, cols: number, rows: number) => TerminalSession;
 }
 export type StartServer = (o: DesktopServerOptions) => Promise<{ url: string; close(): Promise<void> }>;
 

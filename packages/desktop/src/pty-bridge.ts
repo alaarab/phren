@@ -92,6 +92,18 @@ function localPaneTerminal(server: string, pane: string): string {
   return id;
 }
 
+/** A login shell in a project folder: `phren-hook v1 shell` remotely, the owner's shell locally. */
+export function attachShell(c: Computer, folder: string, cols: number, rows: number): TerminalSession {
+  if (typeof folder !== "string" || !folder.startsWith("/") || folder.length > 4096 || /[\x00-\x1f\x7f]/.test(folder)) throw new Error("invalid folder");
+  if (!c.local) {
+    const encoded = Buffer.from(folder, "utf8").toString("base64url");
+    return wrap(spawnPty("ssh", sshArgs(c, `phren-hook v1 shell ${encoded}`, { tty: true }), cols, rows, false));
+  }
+  const shell = process.env.SHELL && process.env.SHELL.startsWith("/") ? process.env.SHELL : "/bin/zsh";
+  ensureSpawnHelper();
+  return wrap(pty.spawn(shell, ["-l"], { name: "xterm-256color", cols: clamp(cols, 2, 500), rows: clamp(rows, 2, 200), cwd: folder, env: childEnv(true) }));
+}
+
 /** A whole Herdr or tmux server, or with `pane`, one Herdr pane's own terminal (the console view). */
 export const attachTerminal: AttachTerminal = (c: Computer, server: string, cols: number, rows: number, pane?: string): TerminalSession => {
   if (!SERVER_RE.test(server)) throw new Error(`invalid server name: ${server}`);
