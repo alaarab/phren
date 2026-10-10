@@ -8,6 +8,7 @@ import { mountHome } from "./sections/home.js";
 import { mountProjects } from "./sections/projects.js";
 import { mountTasks } from "./sections/tasks.js";
 import { mountSchedules } from "./sections/schedules.js";
+import { mountPreviews } from "./sections/previews.js";
 import { initTheme } from "./shell/theme.js";
 import { mountSettings, notifyEnabled, badgeEnabled } from "./sections/settings.js";
 import { mountUsageRings } from "./shell/usage-rings.js";
@@ -29,6 +30,7 @@ registerSection("agents", { label: "Agents", order: 20, mount: (el) => mountAgen
 registerSection("projects", { label: "Projects", order: 30, mount: (el) => mountProjects(el) });
 registerSection("tasks", { label: "Tasks", order: 40, mount: (el) => mountTasks(el) });
 registerSection("schedules", { label: "Schedules", order: 50, mount: (el) => mountSchedules(el) });
+registerSection("previews", { label: "Previews", order: 60, mount: (el) => mountPreviews(el) });
 registerSection("settings", { label: "Settings", order: 90, mount: (el) => mountSettings(el) });
 
 installSections(document.getElementById("section-pills"), document.getElementById("sections"));

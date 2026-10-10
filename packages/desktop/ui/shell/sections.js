@@ -28,19 +28,21 @@ export function installSections(pills, host) {
 export function showSection(id, ctx = {}) {
   const def = sections.get(id);
   if (!def) return null;
+  let fresh = false;
   if (!def.el) {
     def.el = document.createElement("div");
     def.el.className = `section section-${id}`;
     hostEl.append(def.el);
     def.handle = def.mount(def.el, ctx) ?? {};
+    fresh = true;
   }
+  // A section mounted hidden (sectionHandle) or just now gets its first show().
+  if (fresh || def.el.hidden) { def.el.hidden = false; def.handle?.show?.(); }
   for (const s of sections.values()) {
-    if (!s.el) continue;
-    const active = s.id === id;
-    if (s.el.hidden === active) {
-      s.el.hidden = !active;
-      if (active) s.handle?.show?.(); else s.handle?.hide?.();
-    }
+    if (s.id === id) continue;
+    if (!s.el || s.el.hidden) continue;
+    s.el.hidden = true;
+    s.handle?.hide?.();
   }
   current = id;
   if (location.hash !== `#/${id}`) history.replaceState(null, "", `#/${id}`);

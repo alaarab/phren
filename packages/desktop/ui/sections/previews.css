@@ -1,0 +1,61 @@
+/* Previews: web servers opened in an embedded frame, and live simulators.
+   Phren Charcoal, desktop density. */
+
+.section-previews { height: 100%; overflow: hidden; }
+.pv { height: 100%; display: flex; flex-direction: column; }
+
+.pv-head { display: flex; align-items: center; gap: 12px; padding: 16px 24px; border-bottom: 1px solid var(--border); }
+.pv-title { margin: 0; font-size: 16px; font-weight: 600; color: var(--text); }
+.pv-spacer { flex: 1; }
+.pv-note { color: var(--muted); font-size: 12px; }
+.pv-error { margin: 12px 24px 0; padding: 8px 12px; border-radius: 10px; background: rgba(239, 152, 152, 0.14); color: var(--danger); font-size: 12.5px; }
+
+.pv-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 360px 1fr; }
+.pv-rail { min-height: 0; overflow-y: auto; border-right: 1px solid var(--border); padding: 12px 8px; }
+.pv-panel { margin-bottom: 16px; }
+.pv-panel .section-label { display: flex; align-items: center; gap: 8px; margin: 8px 8px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.pv-count { padding: 0 7px; border-radius: 999px; background: var(--raised); color: var(--text-2); font-size: 11px; letter-spacing: 0; }
+
+.pv-computer { margin: 10px 8px 4px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.pv-empty-row { margin: 2px 8px 8px; color: var(--muted); font-size: 12px; }
+.pv-warn { margin: 2px 8px 8px; color: var(--waiting); font-size: 12px; }
+
+/* Web server row */
+.pv-row { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 10px; border-radius: 10px; background: var(--surface); transition: background .18s ease; }
+.pv-row + .pv-row { margin-top: 4px; }
+.pv-row:hover { background: var(--card); }
+.pv-glyph { flex: none; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 6px; background: var(--raised); color: var(--muted); font-size: 12px; }
+.pv-row-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.pv-row-title { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-row-sub { color: var(--muted); font-size: 12px; font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Simulators */
+.pv-sim { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--surface); }
+.pv-sim + .pv-sim { margin-top: 6px; }
+.pv-sim-screen { flex: none; width: 44px; height: 92px; border-radius: 6px; overflow: hidden; background: var(--sunken); border: 1px solid var(--border); }
+.pv-sim-screen img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.pv-sim .pv-row-main { padding-top: 2px; }
+.pv-sim-actions { flex: none; display: flex; flex-direction: column; gap: 4px; }
+.pv-apps { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 0; }
+.pv-apps-note { color: var(--muted); font-size: 12px; }
+.pv-app { border: 1px solid var(--border-strong); border-radius: 999px; background: var(--raised); color: var(--text-2); font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; transition: background .18s ease, color .18s ease; }
+.pv-app:hover { color: var(--accent-hover); }
+
+/* Stage */
+.pv-stage { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--sunken); }
+.pv-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.pv-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.pv-frame-wrap { position: relative; flex: 1; min-height: 0; background: var(--sunken); }
+.pv-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; }
+.pv-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+
+/* Buttons */
+.pv-btn { height: 32px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--raised); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; transition: background .18s ease, color .18s ease; }
+.pv-btn.small { height: 26px; padding: 0 10px; font-size: 12px; }
+.pv-btn:hover { color: var(--accent-hover); }
+.pv-btn[disabled] { opacity: 0.4; cursor: default; }
+.pv-icon { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--raised); color: var(--muted); font-size: 15px; cursor: pointer; }
+.pv-icon[disabled] { opacity: 0.4; cursor: default; }
+
+@media (max-width: 1200px) { .pv-body { grid-template-columns: 300px 1fr; } }
+@media (prefers-reduced-motion: reduce) { .pv-row, .pv-btn, .pv-app { transition: none; } }
