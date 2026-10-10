@@ -12,7 +12,7 @@ import { bridgeRoot, closeMasters, loadComputers } from "./hosts.js";
 import { hookRequest, hookWebSocket } from "./hook-client.js";
 import { enrollDesktop, linkComputer, revokeComputer } from "./keys.js";
 import { createOverviewHub } from "./overview.js";
-import { attachTerminal } from "./pty-bridge.js";
+import { attachShell, attachTerminal } from "./pty-bridge.js";
 import { startServer } from "./server.js";
 
 const [command = "serve", ...rest] = process.argv.slice(2);
@@ -53,7 +53,7 @@ async function serve(): Promise<void> {
   const computers = await loadComputers();
   const hub = createOverviewHub(computers, hookWebSocket);
   hub.start();
-  const server = await startServer({ port, token, computers, hub, hookRequest, hookWebSocket, attachTerminal });
+  const server = await startServer({ port, token, computers, hub, hookRequest, hookWebSocket, attachTerminal, attachShell });
   process.stdout.write(`Phren desktop: ${server.url}\n`);
 
   // One array instance is shared with the server and the hub; reloads mutate it

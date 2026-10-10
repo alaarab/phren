@@ -44,7 +44,7 @@ export function mountAgents(root) {
         <div class="layout-bar">
           <button class="doc-sidebar-toggle" type="button" aria-label="Collapse sidebar">\u25e7</button>
           <span class="spacer"></span>
-          <button class="layout-btn" data-act="terminal" type="button" title="New terminal tile">Terminal</button>
+          <button class="layout-btn" data-act="terminal" type="button" title="A shell in this project, in a new tile">Shell</button>
           <button class="layout-btn" data-act="split-right" type="button" title="Split side by side (\u2318\\)">Split \u2192</button>
           <button class="layout-btn" data-act="split-down" type="button" title="Split top and bottom (\u2318\u21e7\\)">Split \u2193</button>
           <button class="layout-btn" data-act="zoom" type="button" title="Zoom the focused tile">Zoom</button>
@@ -442,21 +442,25 @@ export function mountAgents(root) {
     };
   }
 
-  /** A whole Herdr or tmux server as a terminal tile (the focused session's, by default). */
-  function terminalDoc(computer, server) {
+  /** A terminal tile: a login shell in a project folder, or a whole Herdr/tmux server. */
+  function terminalDoc(computer, { server, folder }) {
+    const name = folder ? folder.split("/").filter(Boolean).pop() || folder : server;
     return {
-      id: `terminal:${computer}/${server}/${Date.now().toString(36)}`,
+      id: `terminal:${computer}/${folder ?? server}/${Date.now().toString(36)}`,
       kind: "terminal",
-      title: `Terminal \u00b7 ${server}`,
+      title: folder ? `Shell \u00b7 ${name}` : `Terminal \u00b7 ${server}`,
       subtitle: computer,
-      persist: { computer, server },
-      mount: (el) => openTerminal(el, computer, server),
+      persist: { computer, ...(folder ? { folder } : { server }) },
+      mount: (el) => openTerminal(el, computer, server ?? "default", folder ? { folder } : {}),
     };
   }
 
-  function openTerminalDoc(computer = session?.computer, server = session?.child?.target?.server) {
-    if (!computer || !server) return;
-    tabs.open(terminalDoc(computer, server), { split: tabs.list().length ? "auto" : undefined });
+  /** A shell in the focused session's project, in a new split (or a whole server when `server` is given). */
+  function openTerminalDoc(computer = session?.computer, server) {
+    if (!computer) return;
+    const folder = server ? undefined : session?.child?.cwd;
+    if (!server && !folder) return;
+    tabs.open(terminalDoc(computer, { server, folder }), { split: tabs.list().length ? "auto" : undefined });
   }
 
   function openSession(computer, child, options) {
@@ -471,7 +475,7 @@ export function mountAgents(root) {
   // Rebuild last run's tiles once every computer they name has reported in.
   let pendingLayout = tabs.saved();
   function resolveSaved(item) {
-    if (item.kind === "terminal") return item.computer && item.server ? terminalDoc(item.computer, item.server) : null;
+    if (item.kind === "terminal") return item.computer && (item.server || item.folder) ? terminalDoc(item.computer, { server: item.server, folder: item.folder }) : null;
     const row = store.find(item.computer, item.id);
     if (!row) return null;
     if (item.kind === "chat") return chatDoc(row.computer, row.child, item.mode === "console" ? "console" : "chat");

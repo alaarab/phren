@@ -47,6 +47,7 @@ export function openTerminal(el, computerName, server, options = {}) {
     `?computer=${encodeURIComponent(computerName)}` +
     `&server=${encodeURIComponent(server)}` +
     (options.pane ? `&pane=${encodeURIComponent(options.pane)}` : "") +
+    (options.folder ? `&folder=${encodeURIComponent(options.folder)}` : "") +
     `&cols=${term.cols}&rows=${term.rows}`;
   const ws = new WebSocket(url);
 
