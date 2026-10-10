@@ -8,17 +8,14 @@
   <link rel="stylesheet" href="/vendor/xterm/xterm.css">
 </head>
 <body>
-  <header class="topbar">
+  <header class="topbar titlebar">
     <span class="wordmark">Phren</span>
-    <span class="sub">desktop</span>
+    <nav class="section-pills" id="section-pills" aria-label="Sections"></nav>
     <span class="spacer"></span>
+    <button class="needs-pill" id="needs-pill" hidden></button>
     <span class="conn" id="conn-count"></span>
   </header>
-  <div class="columns">
-    <aside id="sidebar" class="sidebar"></aside>
-    <main id="main" class="main"></main>
-    <section id="side" class="side" hidden></section>
-  </div>
+  <div class="sections" id="sections"></div>
   <script type="module" src="./app.js"></script>
 </body>
 </html>

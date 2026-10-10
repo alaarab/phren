@@ -48,8 +48,8 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 48px;
-  padding: 0 16px;
+  height: 40px;
+  padding: 0 12px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
@@ -60,7 +60,7 @@ body {
 
 .columns {
   display: flex;
-  height: calc(100vh - 48px);
+  height: 100%;
   min-height: 0;
 }
 .sidebar {
@@ -160,3 +160,43 @@ body {
 body.bench-max .side { width: auto !important; flex: 1; }
 body.bench-max .main { display: none; }
 @media (prefers-reduced-motion: reduce) { .segment { transition: none; } }
+
+/* Shell: titlebar section pills, sections, centre document tabs. */
+.section-pills { display: inline-flex; gap: 2px; padding: 3px; margin-left: 12px; background: var(--raised); border-radius: 999px; }
+.section-pill { position: relative; border: 0; background: transparent; color: var(--muted); font: 500 12.5px system-ui; padding: 4px 12px; border-radius: 999px; cursor: pointer; transition: background .18s ease, color .18s ease; }
+.section-pill:hover { color: var(--text-2); }
+.section-pill.selected { background: var(--card); color: var(--accent); }
+.section-badge { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--waiting); color: #1E1E1E; font-size: 11px; font-weight: 600; }
+.needs-pill { border: 0; border-radius: 999px; padding: 4px 10px; background: rgba(224,188,127,0.16); color: var(--waiting); font: 600 12px system-ui; cursor: pointer; }
+.needs-pill:hover { background: rgba(224,188,127,0.26); }
+.sections { height: calc(100vh - 40px); min-height: 0; position: relative; }
+.section { position: absolute; inset: 0; min-height: 0; }
+.section-home { overflow-y: auto; }
+
+.doc-bar { display: flex; flex: none; gap: 2px; padding: 6px 8px 0; overflow-x: auto; background: var(--sunken); border-bottom: 1px solid var(--border); scrollbar-width: none; }
+.doc-bar:empty { display: none; }
+.doc-tab { display: flex; align-items: center; gap: 6px; max-width: 220px; height: 30px; padding: 0 6px 0 12px; border-radius: 8px 8px 0 0; color: var(--muted); font-size: 12.5px; cursor: pointer; user-select: none; }
+.doc-tab:hover { color: var(--text-2); background: rgba(255,255,255,0.03); }
+.doc-tab.selected { background: var(--bg); color: var(--text); }
+.doc-tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-tab-close { flex: none; width: 20px; height: 20px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 14px; line-height: 1; cursor: pointer; opacity: 0; }
+.doc-tab:hover .doc-tab-close, .doc-tab.selected .doc-tab-close { opacity: 1; }
+.doc-tab-close:hover { background: var(--raised); color: var(--text); }
+.doc-body { flex: 1; min-height: 0; position: relative; display: flex; }
+.doc { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; }
+
+/* Home */
+.home { display: grid; gap: 24px; max-width: 880px; margin: 0 auto; padding: 28px 24px; }
+.home .section-label { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.home .count:not(:empty) { padding: 0 7px; border-radius: 999px; background: var(--raised); color: var(--text-2); }
+.home-list { display: grid; gap: 4px; }
+.home-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 6px 12px; border: 0; border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+button.home-row:hover { background: var(--card); }
+.home-row.tone-waiting { box-shadow: inset 3px 0 0 var(--waiting); }
+.home-row.tone-working { box-shadow: inset 3px 0 0 var(--working); }
+.home-row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-row-meta { display: flex; gap: 8px; flex: none; color: var(--muted); font-size: 12px; }
+.home-project { color: var(--accent); font-family: var(--mono); }
+.home-why { color: var(--waiting); }
+.home-computer.state-online .home-row-meta { color: var(--done); }
+.home-empty { padding: 10px 12px; color: var(--muted); }
