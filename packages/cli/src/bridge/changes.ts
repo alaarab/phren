@@ -93,9 +93,16 @@ async function treeHash(root: string, env: NodeJS.ProcessEnv, signal: AbortSigna
   const index = path.resolve(root, (await git(root, ["rev-parse", "--git-path", "index"], {}, signal)).trim());
   const temp = env.GIT_INDEX_FILE!;
   await unlink(temp).catch(() => undefined);
-  await copyFile(index, temp).catch(error => { if (error.code !== "ENOENT") throw error; });
-  // Force content checks for files rewritten to the same size in one instant.
-  await utimes(temp, 1, 1).catch(() => undefined);
+  // Keep the real index's mtime (a second early, for rounding): Git rechecks
+  // the content of entries as new as the index, so a file rewritten to the
+  // same size in one instant is still seen. Read before the copy, so an index
+  // replaced meanwhile only makes more entries racy. An epoch mtime instead
+  // made every tracked file racy, and rehashing them all overran the budget
+  // on a busy machine (about 3 s for 6,000 files).
+  const real = await stat(index).catch(error => { if (error.code !== "ENOENT") throw error; return undefined; });
+  if (real && await copyFile(index, temp).then(() => true, error => { if (error.code !== "ENOENT") throw error; return false; })) {
+    await utimes(temp, real.atimeMs / 1000, real.mtimeMs / 1000 - 1);
+  }
   await git(root, ["add", "-A", "--", "."], env, signal);
   return (await git(root, ["write-tree"], env, signal)).trim();
 }
