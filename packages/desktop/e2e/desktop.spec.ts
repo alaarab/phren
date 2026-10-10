@@ -253,3 +253,9 @@ test("projects section renders", async ({ page }) => {
   await page.screenshot({ path: test.info().outputPath("projects.png") });
   expect(errors).toEqual([]);
 });
+
+test("the graph renderer is served", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  const ok = await page.evaluate(async () => (await fetch("/vendor/phren-graph.js")).ok);
+  expect(ok).toBe(true);
+});

@@ -175,6 +175,12 @@ function vendorDirs(prefix: string): string[] {
 
 function resolveStatic(pathname: string): string | null {
   if (pathname === "/") return join(UI_DIR, "index.html");
+  if (pathname === "/vendor/phren-graph.js") {
+    // The CLI's 3D memory graph renderer (packages/cli/browser/graph), built by the CLI.
+    const dir = packageDir("@phren/cli");
+    const file = dir ? join(dir, "dist", "memory-ui-graph.runtime.js") : null;
+    return file && existsSync(file) ? file : null;
+  }
   const prefix = VENDOR_PREFIXES.find((p) => pathname.startsWith(p));
   if (prefix) {
     const rel = pathname.slice(prefix.length);
