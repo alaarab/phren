@@ -314,7 +314,7 @@ recorded with provenance `tool:gitboy`. Reply (`200`):
 URL from any host to `<store>/<project>/phren.project.yaml`:
 
 ```yaml
-remote: ssh://git@gitboy.lan/me/my-app.git
+remote: ssh://git@gitboy.example/me/my-app.git
 ```
 
 The `/memory` route returns it as `remote`. `https://`, `http://`, `ssh://`,
