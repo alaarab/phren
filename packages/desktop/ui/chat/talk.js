@@ -291,9 +291,10 @@ class PhrenPcmCapture extends AudioWorkletProcessor {
 registerProcessor("phren-pcm-capture", PhrenPcmCapture);`;
 }
 
-/** Open the microphone and an AudioWorklet that emits 16 kHz PCM16 frames.
- * Returns { context, node, stream }; `onFrame(ArrayBuffer)` is wired by the
- * caller. Throws a microphone Error when the device is denied or missing. */
+/** Open the microphone and emit 16 kHz PCM16 frames to `onFrame(ArrayBuffer)`.
+ * An AudioWorklet when the browser has one, else a ScriptProcessor that
+ * resamples on the main thread. Returns { context, node, stream, close() }.
+ * Throws a microphone Error when the device is denied or missing. */
 async function openMicrophone(onFrame) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("This browser has no microphone support.");
   let stream;
@@ -302,15 +303,30 @@ async function openMicrophone(onFrame) {
   } catch (error) { throw micError(error); }
   const context = new (window.AudioContext || window.webkitAudioContext)();
   if (context.state === "suspended") { try { await context.resume(); } catch { /* stays suspended */ } }
-  const url = URL.createObjectURL(new Blob([workletSource()], { type: "application/javascript" }));
-  try { await context.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
   const source = context.createMediaStreamSource(stream);
-  const node = new AudioWorkletNode(context, "phren-pcm-capture");
   const sink = context.createGain();
   sink.gain.value = 0;
+  const release = () => {
+    try { stream.getTracks().forEach((t) => t.stop()); } catch { /* already stopped */ }
+    try { context.close(); } catch { /* already closed */ }
+  };
+  if (context.audioWorklet) {
+    const url = URL.createObjectURL(new Blob([workletSource()], { type: "application/javascript" }));
+    try { await context.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+    const node = new AudioWorkletNode(context, "phren-pcm-capture");
+    source.connect(node).connect(sink).connect(context.destination);
+    node.port.onmessage = (event) => onFrame(event.data);
+    return { context, node, stream, close() { try { node.port.onmessage = null; } catch { /* detached */ } release(); } };
+  }
+  // No AudioWorklet (older WebViews): resample each block on the main thread.
+  const resampler = createPcmResampler(context.sampleRate, 16000);
+  const node = context.createScriptProcessor(4096, 1, 1);
+  node.onaudioprocess = (event) => {
+    const pcm = resampler.push(event.inputBuffer.getChannelData(0));
+    if (pcm.length) onFrame(pcm.buffer);
+  };
   source.connect(node).connect(sink).connect(context.destination);
-  node.port.onmessage = (event) => onFrame(event.data);
-  return { context, node, stream, close() { try { node.port.onmessage = null; } catch { /* detached */ } try { stream.getTracks().forEach((t) => t.stop()); } catch { /* already stopped */ } try { context.close(); } catch { /* already closed */ } } };
+  return { context, node, stream, close() { try { node.onaudioprocess = null; } catch { /* detached */ } release(); } };
 }
 
 /** A floating message for a failure or a status note; fades on its own. */
@@ -460,6 +476,171 @@ function speakSpeech({ computer, text, voice, formats, onWord }) {
   return { stop, done };
 }
 
+// ---------------------------------------------------------------- live voice
+
+/** Computers whose live voice is unsupported or failed this session: replies
+ * are read whole through /v1/speech instead, without trying the socket again. */
+const liveUnsupported = new Set();
+
+/**
+ * Voice `text` on the Hook's live socket (`WS /v1/speech/live`, capability
+ * `speechLive`), playing the audio as ElevenLabs streams it so the first
+ * words play before the rest is voiced. The whole reply goes up at once and
+ * is closed, which is what the desktop has; a text frame then `done`. `done`
+ * settles when playback ends, and rejects with a Speech error when the socket
+ * fails before any audio. Returns { stop(), done }.
+ */
+function speakLive({ computer, text, voice, onWord } = {}) {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const query = new URLSearchParams({ format: "pcm_24000" });
+  if (voice) query.set("voice", voice);
+  const ws = new WebSocket(`${proto}://${location.host}${host(computer)}/v1/speech/live?${query}`);
+  let context = null, sampleRate = 24000, stopped = false, ended = false, started = false, settled = false;
+  let playhead = 0, began = 0, frame = 0, lastWord = -1;
+  const sources = new Set();
+  const chars = [], starts = [], ends = [];
+  let resolveDone, rejectDone;
+  const done = new Promise((resolve, reject) => { resolveDone = resolve; rejectDone = reject; });
+  done.catch(() => { /* the caller handles failures through its own await */ });
+
+  const complete = () => {
+    if (settled) return;
+    settled = true;
+    cancelAnimationFrame(frame);
+    const closing = context;
+    context = null;
+    // Let the scheduled buffers ring out before the context is torn down.
+    if (closing) setTimeout(() => { try { closing.close(); } catch { /* already closed */ } }, 0);
+    resolveDone();
+  };
+  const fail = (error) => {
+    if (settled) return;
+    settled = true;
+    cancelAnimationFrame(frame);
+    try { if (context) context.close(); } catch { /* already closed */ }
+    context = null;
+    rejectDone(error);
+  };
+  const quiet = () => { if (ended && sources.size === 0) complete(); };
+
+  const play = (base64) => {
+    const bytes = decodeBase64(base64);
+    if (bytes.length < 2) return;
+    if (!context) {
+      context = new (window.AudioContext || window.webkitAudioContext)();
+      if (context.state === "suspended") { try { context.resume(); } catch { /* stays suspended */ } }
+      playhead = context.currentTime + 0.05;
+      began = playhead;
+      if (onWord) {
+        const tick = () => {
+          if (settled || !context) return;
+          const index = wordAt(alignmentWords({ characters: chars, starts, ends }), context.currentTime - began);
+          if (index !== lastWord) { lastWord = index; try { onWord(index); } catch { /* ignore */ } }
+          frame = requestAnimationFrame(tick);
+        };
+        frame = requestAnimationFrame(tick);
+      }
+    }
+    const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
+    const buffer = context.createBuffer(1, Math.max(1, pcm.length), sampleRate);
+    const channel = buffer.getChannelData(0);
+    for (let i = 0; i < pcm.length; i++) channel[i] = pcm[i] / 32768;
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    const at = Math.max(playhead, context.currentTime);
+    source.start(at);
+    playhead = at + buffer.duration;
+    sources.add(source);
+    source.onended = () => { sources.delete(source); quiet(); };
+  };
+
+  ws.onmessage = (event) => {
+    if (settled) return;
+    let message;
+    try { message = JSON.parse(event.data); } catch { return; }
+    if (message.type === "start") {
+      if (typeof message.sampleRate === "number") sampleRate = message.sampleRate;
+      return;
+    }
+    if (message.type === "audio") {
+      started = started || !!message.audio;
+      const alignment = message.alignment;
+      if (alignment && Array.isArray(alignment.characters) && Array.isArray(alignment.starts) && alignment.characters.length === alignment.starts.length) {
+        chars.push(...alignment.characters);
+        starts.push(...alignment.starts);
+        ends.push(...(alignment.ends || alignment.starts));
+      }
+      if (message.audio) play(message.audio);
+      return;
+    }
+    if (message.type === "done") { ended = true; quiet(); return; }
+    if (message.type === "error") {
+      // Audio already playing is kept: only a failure before the first sound
+      // sends the caller back to the whole-reply route.
+      if (started) { ended = true; quiet(); } else fail(speechError(message.code, message.error));
+    }
+  };
+  ws.onerror = () => { if (!started) fail(speechError("speech-unreachable")); };
+  ws.onclose = () => {
+    if (settled) return;
+    if (started) { ended = true; quiet(); } else fail(speechError("speech-failed"));
+  };
+  ws.onopen = () => {
+    if (stopped || ws.readyState !== 1) return;
+    if (text) ws.send(JSON.stringify({ text }));
+    ws.send(JSON.stringify({ done: true }));
+  };
+
+  return {
+    done,
+    get started() { return started; },
+    stop() {
+      stopped = true;
+      try { ws.close(); } catch { /* already closing */ }
+      complete();
+    },
+  };
+}
+
+/**
+ * Speak a reply the way the computer can: the live socket when its Hook
+ * advertises `speechLive`, else the whole-reply `/v1/speech`. A live socket
+ * that fails before it voices anything is remembered for the computer and the
+ * reply is read whole, silently. Returns { stop(), done } like speakSpeech.
+ */
+function speakReply({ computer, text, voice, onWord } = {}) {
+  let live = null, whole = null, stopped = false, settled = false;
+  let resolveDone, rejectDone;
+  const done = new Promise((resolve, reject) => { resolveDone = resolve; rejectDone = reject; });
+  done.catch(() => { /* the caller handles failures through its own await */ });
+  const settle = (error) => { if (!settled) { settled = true; if (error) rejectDone(error); else resolveDone(); } };
+  const readWhole = async () => {
+    whole = speakSpeech({ computer, text, voice, onWord });
+    try { await whole.done; settle(null); } catch (error) { settle(error); }
+  };
+  (async () => {
+    const caps = await store.capabilities(computer).catch(() => ({}));
+    if (stopped) return settle(null);
+    if (!caps.speechLive || liveUnsupported.has(computer)) return readWhole();
+    live = speakLive({ computer, text, voice, onWord });
+    try { await live.done; settle(null); }
+    catch (error) {
+      if (stopped) return settle(null);
+      liveUnsupported.add(computer);
+      await readWhole();
+    }
+  })();
+  return {
+    stop() {
+      stopped = true;
+      try { live && live.stop(); } catch { /* ignore */ }
+      try { whole && whole.stop(); } catch { /* ignore */ }
+    },
+    done,
+  };
+}
+
 /**
  * Read a reply aloud with the Hook's voice and highlight its words. `onWord`
  * receives each word's index (into the reply's words) as it is read, and -1
@@ -600,7 +781,7 @@ export function createTalkMode({ computer, target, provider, send, onState } = {
     stopSpeaking();
     agentText = text;
     render();
-    const player = speakSpeech({ computer, text });
+    const player = speakReply({ computer, text });
     playback = player;
     startBarge();
     player.done.then(() => {

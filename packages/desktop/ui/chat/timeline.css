@@ -63,6 +63,11 @@
 .ct-md-list { margin: 0; padding-left: 20px; }
 .ct-md-list li { line-height: 1.5; }
 .ct-md-code { padding: 1px 5px; border-radius: 4px; background: var(--raised); color: var(--path); font-family: var(--mono); font-size: .94em; }
+.ct-md-code-path { cursor: pointer; }
+.ct-md-code-path:hover { text-decoration: underline; }
+.ct-md-code-path:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ct-md-code-path.ct-path-resolving { opacity: .6; }
+.ct-md-code-path.ct-path-missing { color: var(--dim); text-decoration: none; }
 .ct-md-link { color: var(--link); text-decoration: none; }
 .ct-md-link:hover { text-decoration: underline; }
 .ct-md-pre { margin: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--sunken); }
@@ -242,3 +247,26 @@
 .ct-caret { color: var(--accent); animation: ct-blink 1s steps(1) infinite; }
 @keyframes ct-blink { 50% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .ct-caret { animation: none; } }
+
+/* Images -------------------------------------------------------------------- */
+.ct-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.ct-image {
+  padding: 0; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--sunken); overflow: hidden; cursor: default;
+  min-width: 96px; min-height: 64px;
+  max-width: min(320px, 100%); max-height: 240px;
+}
+.ct-image.loaded { cursor: zoom-in; min-width: 0; min-height: 0; }
+.ct-image:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ct-image-img { display: block; max-width: min(320px, 100%); max-height: 240px; object-fit: contain; }
+.ct-image-fail {
+  display: flex; align-items: center; justify-content: center;
+  width: 160px; height: 90px; padding: 0 10px;
+  color: var(--muted); font: 11.5px var(--mono); text-align: center;
+}
+.ct-lightbox {
+  position: fixed; inset: 0; z-index: 120; padding: 32px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .8); cursor: zoom-out;
+}
+.ct-lightbox-img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 24px 64px rgba(0, 0, 0, .6); }

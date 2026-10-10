@@ -83,10 +83,25 @@
 .tasks-launch-go { margin-top: 6px; background: var(--accent-solid); color: var(--text); text-align: center; }
 .tasks-launch-go:hover:not(:disabled) { background: var(--accent); color: #1E1E1E; }
 
+/* Responsibility + dependencies editor (tasks/update). */
+.tasks-contract { min-width: 244px; gap: 2px; }
+.tasks-seg { display: flex; gap: 1px; margin: 2px 6px 4px; padding: 2px; background: var(--sunken); border-radius: 10px; }
+.tasks-seg-item { flex: 1; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: 600 12px system-ui; padding: 6px 8px; cursor: pointer; transition: background .18s ease, color .18s ease; }
+.tasks-seg-item:hover { color: var(--text-2); }
+.tasks-seg-item.selected { background: var(--card); color: var(--accent); }
+.tasks-dep-chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 2px 6px 6px; min-height: 22px; }
+.tasks-dep-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 4px 2px 9px; border-radius: 999px; background: var(--raised); color: var(--text-2); font-size: 11.5px; }
+.tasks-dep-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tasks-dep-x { flex: none; width: 16px; height: 16px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; }
+.tasks-dep-x:hover { background: var(--card); color: var(--danger); }
+.tasks-dep-empty { color: var(--dim); font-size: 11.5px; }
+.tasks-contract .tasks-launch-select { width: calc(100% - 12px); margin: 0 6px; }
+.tasks-contract .tasks-launch-go { margin: 6px 6px 2px; }
+
 /* Transient notices. */
 .tasks-toasts { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 90; display: flex; flex-direction: column; gap: 6px; align-items: center; }
 .tasks-toast { padding: 8px 16px; border-radius: 999px; background: var(--raised); border: 1px solid var(--border-strong); color: var(--text); font: 13px system-ui; box-shadow: 0 12px 30px rgba(0,0,0,.4); }
 .tasks-toast.warn { color: var(--waiting); }
 .tasks-toast.error { color: var(--danger); }
 
-@media (prefers-reduced-motion: reduce) { .tasks-project, .tasks-create-input, .tasks-menu-item { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .tasks-project, .tasks-create-input, .tasks-menu-item, .tasks-seg-item { transition: none; } }

@@ -121,6 +121,10 @@ export function mountTasks(root) {
     const found = [];
     await Promise.all(computers.map(async (c) => {
       try {
+        // A Hook that serves the tasks module advertises taskDependencies; an
+        // older one answers nothing and contributes no store at all.
+        const caps = await store.capabilities(c.computer);
+        const contract = caps.taskDependencies === true;
         const body = await hookGet(c.computer, "/v1/tasks/stores");
         for (const s of body.stores ?? []) {
           if (!s.id || s.available === false || s.identityReady === false || s.ambiguous) continue;
@@ -132,6 +136,7 @@ export function mountTasks(root) {
             primary: !!s.primary,
             readonly: s.role === "readonly",
             metadataWritable: !!s.metadataWritable,
+            contract,
             projects: Array.isArray(s.projects) ? s.projects : [],
           });
         }
@@ -559,6 +564,7 @@ export function mountTasks(root) {
   function openMenu(rowEl, doc, item, section, perms) {
     closeMenu();
     const menu = el("div", "tasks-menu");
+    const source = activeSource();
     const launchable = item.responsibility !== "human" && !item.checked && section !== "Done"
       && item.readiness === "ready" && !!item.identity && !item.identityAmbiguous;
     menu.append(menuButton("Launch as agent", () => { closeMenu(); openLaunch(rowEl, doc, item); },
@@ -568,6 +574,11 @@ export function mountTasks(root) {
       menu.append(menuButton(target === "Queue" ? "Move to Backlog" : `Move to ${target}`,
         () => { closeMenu(); void moveTask(doc, item, section, target); }));
     }
+    const contractable = perms.canMeta && source?.contract === true;
+    menu.append(menuButton("Responsibility & dependencies", () => {
+      closeMenu();
+      openContract(rowEl, doc, item);
+    }, { disabled: !contractable, title: contractable ? "" : `Needs a newer Phren on ${source?.computer ?? "this computer"}.` }));
     menu.append(menuButton(item.pinned ? "Unpin" : "Pin", () => { closeMenu(); void pinTask(doc, item); },
       { disabled: !perms.canMeta }));
     menu.append(menuButton("Edit", () => {
@@ -620,6 +631,108 @@ export function mountTasks(root) {
     const go = menuButton("Launch", () => { closeMenu(); void launchTask(source, doc, item, computer.value, harness.value); });
     go.classList.add("tasks-launch-go");
     panel.append(el("label", "tasks-launch-field", "Computer"), computer, el("label", "tasks-launch-field", "Harness"), harness, go);
+    rowEl.append(panel);
+    openMenuEl = panel;
+    setTimeout(() => { document.addEventListener("click", closeMenu, { once: true }); }, 0);
+  }
+
+  /** Responsibility and "Depends on" for one task, saved through tasks/update.
+   * Dependencies are the same project's other tasks, chosen by their text. */
+  function openContract(rowEl, doc, item) {
+    const source = activeSource();
+    const stableId = item.stableId ?? item.id;
+    const key = (ref) => `${ref.storeId}/${ref.project}/${ref.stableId}`;
+    let responsibility = item.responsibility === "human" ? "human" : "agent";
+    let dependencies = (Array.isArray(item.dependencies) ? item.dependencies : [])
+      .map((ref) => ({ storeId: ref.storeId, project: ref.project, stableId: ref.stableId }));
+    const titles = new Map((item.prerequisites ?? []).map((p) => [key(p), p.title]));
+    let syncPicker = () => {};
+
+    const panel = el("div", "tasks-menu tasks-contract");
+    // Keep clicks inside the panel from reaching the outside-click close.
+    panel.addEventListener("click", (ev) => ev.stopPropagation());
+
+    panel.append(el("div", "tasks-launch-title", "Responsibility"));
+    const seg = el("div", "tasks-seg");
+    const drawSeg = () => {
+      seg.replaceChildren();
+      for (const [value, label] of [["agent", "Agent"], ["human", "Human"]]) {
+        const b = el("button", `tasks-seg-item${responsibility === value ? " selected" : ""}`, label);
+        b.type = "button";
+        b.setAttribute("aria-pressed", String(responsibility === value));
+        b.addEventListener("click", () => { responsibility = value; drawSeg(); });
+        seg.append(b);
+      }
+    };
+    drawSeg();
+    panel.append(seg);
+
+    panel.append(el("div", "tasks-launch-title", "Depends on"));
+    const chips = el("div", "tasks-dep-chips");
+    const drawChips = () => {
+      chips.replaceChildren();
+      if (!dependencies.length) { chips.append(el("span", "tasks-dep-empty", "No dependencies")); return; }
+      for (const ref of dependencies) {
+        const chip = el("span", "tasks-dep-chip");
+        chip.append(el("span", "tasks-dep-chip-text", titles.get(key(ref)) ?? ref.stableId));
+        const x = el("button", "tasks-dep-x", "\u00d7");
+        x.type = "button";
+        x.setAttribute("aria-label", "Remove dependency");
+        x.addEventListener("click", () => {
+          dependencies = dependencies.filter((r) => key(r) !== key(ref));
+          drawChips();
+          syncPicker();
+        });
+        chip.append(x);
+        chips.append(chip);
+      }
+    };
+    drawChips();
+    panel.append(chips);
+
+    const select = el("select", "tasks-launch-select");
+    select.setAttribute("aria-label", "Add a dependency");
+    const placeholder = el("option", undefined, "Add a task\u2026");
+    placeholder.value = "";
+    select.append(placeholder);
+    const candidates = [];
+    for (const section of ["Active", "Queue", "Done"]) {
+      for (const cand of doc.items?.[section] ?? []) {
+        if (!cand.identity || cand.identity.stableId === stableId) continue;
+        const option = el("option", undefined, stripTags(cand.line).slice(0, 90));
+        option.value = cand.identity.stableId;
+        candidates.push(cand);
+        select.append(option);
+      }
+    }
+    if (!candidates.length) select.disabled = true;
+    syncPicker = () => {
+      const chosen = new Set(dependencies.map((r) => r.stableId));
+      for (const option of select.options) if (option.value) option.disabled = chosen.has(option.value);
+    };
+    select.addEventListener("change", () => {
+      const cand = candidates.find((t) => t.identity.stableId === select.value);
+      if (cand) {
+        dependencies = [...dependencies, { ...cand.identity }];
+        titles.set(key(cand.identity), stripTags(cand.line));
+      }
+      select.value = "";
+      drawChips();
+      syncPicker();
+    });
+    syncPicker();
+    panel.append(select);
+
+    const save = menuButton("Save", () => {
+      closeMenu();
+      void write("update", source, {
+        storeId: source.id, project: doc.project, stableId,
+        updates: { responsibility, dependencies },
+      }).then((ok) => { if (ok) toast("Task updated"); });
+    });
+    save.classList.add("tasks-launch-go");
+    panel.append(save);
+
     rowEl.append(panel);
     openMenuEl = panel;
     setTimeout(() => { document.addEventListener("click", closeMenu, { once: true }); }, 0);

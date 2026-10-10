@@ -21,7 +21,7 @@ import {
   type ProjectQueueItem,
   type QueueItem,
 } from "@phren/cli/data/access";
-import { listNotes } from "@phren/cli/data/notes";
+import { listNotes, removeNote } from "@phren/cli/data/notes";
 import { readTasks } from "@phren/cli/data/tasks";
 import { readProjectTopics } from "@phren/cli/client/project-topics";
 import { buildGraph } from "@phren/cli/client/graph-data";
@@ -30,6 +30,7 @@ import type { Computer, HookRequest } from "./contract.js";
 
 const DEFAULT_SYNC_MS = 10_000;
 const STORE_FILE_ROUTE = "/v1/store/file";
+const STORE_DELETE_ROUTE = "/v1/store/delete";
 
 /** An HTTP-shaped failure the server maps to `{error}` with this status. */
 export class MemoryHttpError extends Error {
@@ -80,6 +81,18 @@ export function safeFolderName(name: string): string {
 
 function toPosix(value: string): string {
   return value.split(path.sep).join("/");
+}
+
+/** A memory row's store-relative path and current blob sha, for deletion. */
+async function storeFileInfo(dir: string, file: string): Promise<{ file: string; sha: string | null }> {
+  const rel = toPosix(path.relative(dir, file));
+  try { return { file: rel, sha: blobSha(await readFile(file)) }; }
+  catch { return { file: rel, sha: null }; }
+}
+
+/** The sha a delete must present to remove this file, or null when absent. */
+async function fileSha(file: string): Promise<string | null> {
+  try { return blobSha(await readFile(file)); } catch { return null; }
 }
 
 function expandHome(value: string, home: string): string {
@@ -151,6 +164,8 @@ export interface MemoryService {
   topics(computer: Computer, project: string | null): Promise<{ topics: unknown[] }>;
   truths(computer: Computer, project: string | null): Promise<{ items: string[] }>;
   reviewAction(computer: Computer, body: ReviewActionBody): Promise<{ ok: true; message: string; uploaded?: string[] }>;
+  deleteStoreFile(computer: Computer, path: string, expectedSha: string): Promise<{ ok: true }>;
+  removeNote(computer: Computer, body: { project?: unknown; id?: unknown }): Promise<{ ok: true; uploaded?: string[] }>;
   graph(computer: Computer, project: string | null): Promise<unknown>;
 }
 
@@ -418,7 +433,12 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
     async topics(computer, project) {
       const name = requiredProject(project);
       const dir = await storeDir(computer);
-      return { topics: readProjectTopics(dir, name).topics };
+      const topics = readProjectTopics(dir, name).topics;
+      const items = await Promise.all(topics.map(async (topic: { slug: string }) => {
+        const rel = path.posix.join(name, "reference", "topics", `${topic.slug}.md`);
+        return { ...topic, ...await storeFileInfo(dir, path.join(dir, rel)) };
+      }));
+      return { topics: items };
     },
 
     async truths(computer, project) {
@@ -465,6 +485,46 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
       if (!result.ok) throw new MemoryHttpError(400, result.error);
       if (computer.local) return { ok: true };
       return { ok: true, uploaded: await uploadChanges(computer, dir) };
+    },
+
+    /** Remove one note from its daily file with the CLI's own writer (never the
+     * whole day's file), then upload the changed file with the usual sha check. */
+    async removeNote(computer, body) {
+      const project = typeof body.project === "string" ? body.project.trim() : "";
+      const id = typeof body.id === "string" ? body.id.trim() : "";
+      if (!project || !id) throw new MemoryHttpError(400, "project and id are required.");
+      const dir = await storeDir(computer);
+      const result = removeNote(dir, project, id);
+      if (!result.ok) throw new MemoryHttpError(404, result.error);
+      if (computer.local) return { ok: true };
+      return { ok: true, uploaded: await uploadChanges(computer, dir) };
+    },
+
+    /**
+     * Delete one store file, compare-and-swapping on the sha the UI last saw.
+     * A 409 means the file changed on the computer since it was listed; the
+     * mirror is refreshed so the next read shows the newer content.
+     */
+    async deleteStoreFile(computer, storePath: string, expectedSha: string) {
+      const rel = safeStorePath(storePath);
+      const dir = await storeDir(computer);
+      if (computer.local) {
+        // No mirror to write through: apply the delete to the real store.
+        if (await fileSha(path.join(dir, rel)) !== expectedSha) throw new MemoryHttpError(409, "changed");
+        await rm(path.join(dir, rel), { force: true });
+        return { ok: true as const };
+      }
+      const res = await opts.hookRequest(computer, "POST", STORE_DELETE_ROUTE, { path: rel, sha: expectedSha });
+      if (res.status === 409) {
+        stateFor(computer.name).sha = null;
+        await ensureRemote(computer, true).catch(() => undefined);
+        throw new MemoryHttpError(409, "changed");
+      }
+      if (res.status !== 200) throw new MemoryHttpError(502, `Deleting ${rel} failed with ${res.status}.`);
+      // The store head moved: pick up the new tree before the next read.
+      stateFor(computer.name).sha = null;
+      await ensureRemote(computer, true);
+      return { ok: true as const };
     },
 
     /**

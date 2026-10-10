@@ -10,6 +10,7 @@ import { WebSocket } from "ws";
 import type { Computer, HookRequest, HookResponse, HookWebSocket, OpenHookPipe } from "./contract.js";
 import { channelPool } from "./channel-pool.js";
 import { bridgeRoot, sshArgs } from "./hosts.js";
+import { recordHttp, recordWebSocket } from "./trace.js";
 
 const MAX_BODY = 16 * 1024 * 1024;
 const REQUEST_TIMEOUT = 60_000;
@@ -75,6 +76,17 @@ function stderrLine(diagnostic: string): string {
 }
 
 export const hookRequest: HookRequest = async (c, method, requestPath, body) => {
+  try {
+    const response = await requestOnce(c, method, requestPath, body);
+    recordHttp(c, method, requestPath, body, response);
+    return response;
+  } catch (error) {
+    recordHttp(c, method, requestPath, body, null, error instanceof Error ? error.message : String(error));
+    throw error;
+  }
+};
+
+async function requestOnce(c: Computer, method: string, requestPath: string, body?: unknown): Promise<HookResponse> {
   const pipe = await openHookPipe(c);
   return new Promise<HookResponse>((resolve, reject) => {
     const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
@@ -104,7 +116,7 @@ export const hookRequest: HookRequest = async (c, method, requestPath, body) => 
     req.on("error", reject);
     req.end(payload);
   });
-};
+}
 
 function lowerHeaders(headers: IncomingHttpHeaders): Record<string, string> {
   const out: Record<string, string> = {};
@@ -120,6 +132,7 @@ export const hookWebSocket: HookWebSocket = async (c, requestPath) => {
     perMessageDeflate: false,
     headers: { Host: "phren.local", "X-Phren-Client": "desktop" },
   });
+  recordWebSocket(socket, c.name, requestPath);
   return new Promise((resolve, reject) => {
     // A Hook that accepts the connection but never answers the upgrade must not
     // hold an SSH channel (and its pool slot) forever.

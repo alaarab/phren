@@ -1,6 +1,7 @@
 /* Code: a project's code index at desktop scale. A rail of computers and
-   their projects beside What changed, Most used and Notes, with a dossier for
-   one function, type or variable. Phren Charcoal and the shell's CSS vars. */
+   their projects beside Files (a lazy tree and a file's outline), What
+   changed, Most used and Notes, with a dossier for one function, type or
+   variable. Phren Charcoal and the shell's CSS vars. */
 
 .section-code { overflow: hidden; }
 
@@ -95,6 +96,53 @@
 .cd-status.error { color: var(--waiting); }
 .cd-seg-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .cd-seg-row .spacer { flex: 1; }
+.cd-title-row .spacer { flex: 1; }
+
+/* the section's ⋯ menu */
+.cd-menu-wrap { position: relative; flex: none; }
+.cd-more {
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease;
+}
+.cd-more:hover { background: var(--raised); color: var(--text); }
+.cd-more[hidden] { display: none; }
+.cd-menu {
+  position: absolute;
+  top: 32px;
+  right: 0;
+  z-index: 40;
+  min-width: 210px;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  display: grid;
+  gap: 4px;
+}
+.cd-menu[hidden] { display: none; }
+.cd-menu-item {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.cd-menu-item:hover { background: var(--raised); color: var(--text); }
+.cd-menu-note { padding: 4px 6px 6px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.cd-menu-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .cd-sheet-head .spacer { flex: 1; }
 .cd-note-actions .cd-range { flex: 1; }
 
@@ -145,6 +193,85 @@
 .cd-section-label { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; }
 .cd-empty { padding: 24px 4px; color: var(--muted); font-size: 12.5px; }
 .cd-error { color: var(--danger); }
+.cd-body[hidden] { display: none; }
+
+/* --------------------------------------------------------------- files */
+.cd-split { flex: 1; min-height: 0; display: flex; }
+.cd-split[hidden] { display: none; }
+.cd-tree {
+  flex: none;
+  width: 38%;
+  max-width: 360px;
+  min-width: 200px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 0 24px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  outline: none;
+}
+.cd-tree:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.cd-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 30px;
+  padding: 3px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease;
+}
+.cd-tree-row:hover { background: var(--card); }
+.cd-tree-row.selected { background: var(--card); color: var(--accent); }
+.cd-tree-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cd-tree-chev { flex: none; width: 12px; display: inline-flex; align-items: center; justify-content: center; color: var(--dim); }
+.cd-chev { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; transition: transform .18s ease; }
+.cd-chev.open { transform: rotate(90deg); }
+.cd-glyph { flex: none; }
+.cd-glyph.file { fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linejoin: round; color: var(--link); }
+.cd-glyph.folder, .cd-glyph.folderOpen { color: var(--accent); }
+.cd-tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-tree-row .spacer { flex: 1; }
+.cd-tree-files, .cd-tree-counts { flex: none; color: var(--muted); font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+.cd-tree-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
+.cd-tree-dot[hidden] { display: none; }
+.cd-tree-note { padding: 4px 12px; color: var(--muted); font-size: 12px; }
+
+.cd-outline { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 14px 18px 40px; }
+.cd-outline-head { display: flex; align-items: center; gap: 10px; padding: 0 0 6px; }
+.cd-outline-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+.cd-outline-list { display: grid; gap: 2px; }
+.cd-outline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background .18s ease;
+}
+.cd-outline-row:hover { background: var(--card); }
+.cd-outline-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cd-outline-row .spacer { flex: 1; }
+.cd-outline-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.cd-outline-line { flex: none; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+
+.cd-btn.danger { border-color: transparent; background: rgba(239, 152, 152, 0.16); color: var(--danger); }
+.cd-btn.danger:hover { color: var(--danger); background: rgba(239, 152, 152, 0.26); }
 
 .cd-off {
   display: grid;

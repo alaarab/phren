@@ -1,9 +1,10 @@
 // Code: a project's code index in the desktop. A rail of every online
-// computer and the projects its store holds, then What changed (the
-// functions, types and variables today's sessions and the last commits
-// touched), Most used (a ranked, paged table) and Notes (findings linked to
-// code), with a dossier for one declaration and a form that remembers a note
-// through /v1/code/note. Reads the Hook's code routes through the daemon.
+// computer and the projects its store holds, then Files (a lazy tree of the
+// checkout beside one file's outline), What changed (the functions, types and
+// variables today's sessions and the last commits touched), Most used (a
+// ranked, paged table) and Notes (findings linked to code), with a dossier for
+// one declaration and a form that remembers a note through /v1/code/note.
+// Reads the Hook's code routes through the daemon.
 //
 // Opening a file at a line is done by handing the Agents section a file
 // document; see openAtLine below.
@@ -15,10 +16,14 @@ import { openEditorDoc } from "../editor.js";
 
 const CSS_ID = "code-css";
 const SEGMENTS = [
+  { id: "files", label: "Files" },
   { id: "changed", label: "What changed" },
   { id: "usage", label: "Most used" },
   { id: "notes", label: "Notes" },
 ];
+const SVG_NS = "http://www.w3.org/2000/svg";
+// The Hook batches change-counts and the tree at most 200 paths per call.
+const COUNT_BATCH = 200;
 const KIND_FILTERS = [
   { value: "", label: "Everything" },
   { value: "function", label: "Functions" },
@@ -42,6 +47,45 @@ function el(tag, cls, text) {
   if (cls) node.className = cls;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+function svgPath(d, fill = "currentColor") {
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", d);
+  path.setAttribute("fill", fill);
+  return path;
+}
+
+/** A folder, an open folder or a file, drawn as a 14 px inline SVG. */
+function glyph(kind) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add("cd-glyph", kind);
+  if (kind === "file") {
+    svg.append(svgPath("M4 1.5h5l3 3V14a.5.5 0 0 1-.5.5h-7A.5.5 0 0 1 4 14z", "none"));
+    svg.append(svgPath("M9 1.5v3h3", "none"));
+  } else {
+    svg.append(svgPath(kind === "folderOpen"
+      ? "M1.5 4.2c0-.6.5-1.1 1.1-1.1h3l1.2 1.3h6.5c.6 0 1.1.5 1.1 1.1v.8H4.2L2.3 13.6a.6.6 0 0 1-.8-.5z"
+      : "M1.5 3.7c0-.6.5-1.1 1.1-1.1h3.1l1.3 1.4h6.4c.6 0 1.1.5 1.1 1.1v7.2c0 .6-.5 1.1-1.1 1.1H2.6c-.6 0-1.1-.5-1.1-1.1z"));
+  }
+  return svg;
+}
+
+/** The disclosure triangle; `open` turns it a quarter turn. */
+function chevron(open) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "10");
+  svg.setAttribute("height", "10");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add("cd-chev");
+  if (open) svg.classList.add("open");
+  svg.append(svgPath("M6 3.5 10.5 8 6 12.5", "none"));
+  return svg;
 }
 
 async function parseResponse(res) {
@@ -105,6 +149,25 @@ function usedIn(uses) {
   return uses === 1 ? "Used in 1 place" : `Used in ${uses} places`;
 }
 
+/** The Files tab's tree, lazy-loaded directories and batched change counts. */
+function freshFiles() {
+  return {
+    dirs: new Map(),           // directory path "" or "src" -> { status, entries, error }
+    expanded: new Set(),       // directory paths the person opened
+    counts: new Map(),         // file path -> change-counts entry
+    countsPending: new Set(),  // file paths a batch is in flight for
+    selected: null,            // the highlighted path (file or folder)
+    outline: null,             // { path, entries, loading, error } for the open file
+  };
+}
+
+/** A change-counts entry: functions and types each {changed, added}. */
+function countTotals(entry) {
+  const f = (entry?.functions?.changed ?? 0) + (entry?.functions?.added ?? 0);
+  const t = (entry?.types?.changed ?? 0) + (entry?.types?.added ?? 0);
+  return { functions: f, types: t, recent: f + t };
+}
+
 export function mountCode(root) {
   ensureCss();
   root.innerHTML = `
@@ -126,10 +189,18 @@ export function mountCode(root) {
       </aside>
       <section class="cd-main">
         <div class="cd-head">
-          <div class="cd-title" data-title>Code</div>
+          <div class="cd-title-row">
+            <div class="cd-title" data-title>Code</div>
+            <span class="spacer"></span>
+            <div class="cd-menu-wrap">
+              <button class="cd-more" data-more type="button" aria-haspopup="true" aria-expanded="false" aria-label="More actions" hidden>&#8943;</button>
+              <div class="cd-menu" data-menu hidden></div>
+            </div>
+          </div>
           <div class="cd-seg-row" data-filters></div>
         </div>
         <div class="cd-body" data-body></div>
+        <div class="cd-split" data-split hidden></div>
       </section>
     </div>`;
 
@@ -142,6 +213,9 @@ export function mountCode(root) {
   const statusEl = root.querySelector("[data-status]");
   const filtersEl = root.querySelector("[data-filters]");
   const bodyEl = root.querySelector("[data-body]");
+  const splitEl = root.querySelector("[data-split]");
+  const moreBtn = root.querySelector("[data-more]");
+  const menuEl = root.querySelector("[data-menu]");
 
   const state = {
     computers: [],
@@ -159,6 +233,8 @@ export function mountCode(root) {
     usageFile: "",
     notes: [],
     reindexing: false,
+    disabling: false,
+    files: freshFiles(),
     generation: 0,
   };
 
@@ -213,6 +289,7 @@ export function mountCode(root) {
     state.notes = [];
     state.usageKind = "";
     state.usageFile = "";
+    state.files = freshFiles();
   }
 
   async function loadProjects() {
@@ -265,6 +342,8 @@ export function mountCode(root) {
 
   function renderHead() {
     titleEl.textContent = state.project || "Code";
+    moreBtn.hidden = !hasIndex();
+    if (!hasIndex()) closeMenu();
     renderStatus();
     renderFilters();
   }
@@ -349,6 +428,65 @@ export function mountCode(root) {
     }
   }
 
+  // ── ⋯ menu (Turn off code index) ────────────────────────────────────────
+  function renderMenu() {
+    menuEl.replaceChildren();
+    if (!state.project || !hasIndex()) { closeMenu(); return; }
+    const off = el("button", "cd-menu-item", "Turn off code index");
+    off.type = "button";
+    off.addEventListener("click", renderConfirm);
+    menuEl.append(off);
+  }
+
+  function renderConfirm() {
+    menuEl.replaceChildren();
+    menuEl.append(el("div", "cd-menu-note", `Turn off the code index for ${state.project}?`));
+    const row = el("div", "cd-menu-actions");
+    const cancel = el("button", "cd-btn", "Cancel");
+    cancel.type = "button";
+    cancel.addEventListener("click", renderMenu);
+    const off = el("button", "cd-btn danger", state.disabling ? "Turning off…" : "Turn off");
+    off.type = "button";
+    off.disabled = state.disabling;
+    off.addEventListener("click", () => void turnOffIndex());
+    row.append(cancel, off);
+    menuEl.append(row);
+  }
+
+  function openMenu() { renderMenu(); menuEl.hidden = false; moreBtn.setAttribute("aria-expanded", "true"); }
+  function closeMenu() { menuEl.hidden = true; moreBtn.setAttribute("aria-expanded", "false"); }
+  function toggleMenu() { if (menuEl.hidden) openMenu(); else closeMenu(); }
+
+  moreBtn.addEventListener("click", (ev) => { ev.stopPropagation(); toggleMenu(); });
+  document.addEventListener("mousedown", (ev) => {
+    if (!menuEl.hidden && !menuEl.contains(ev.target) && ev.target !== moreBtn) closeMenu();
+  });
+
+  async function turnOffIndex() {
+    if (!state.project || state.disabling) return;
+    const project = state.project;
+    state.disabling = true;
+    renderConfirm();
+    try {
+      await hookPost(state.computer, "/v1/code/disable", { project });
+      if (state.project !== project) return;
+      state.indexOff = true;
+      state.status = null;
+      state.statusError = null;
+      state.files = freshFiles();
+      closeMenu();
+      renderAll();
+    } catch (error) {
+      state.disabling = false;
+      renderConfirm();
+      setToast(error.status === 404
+        ? `Update Phren on ${state.computer} to turn the index off.`
+        : (error.message || "The index could not be turned off."));
+    } finally {
+      state.disabling = false;
+    }
+  }
+
   // ── Segments and filters ───────────────────────────────────────────────
   function renderFilters() {
     filtersEl.replaceChildren();
@@ -402,6 +540,11 @@ export function mountCode(root) {
     if (!state.project) { renderBody(); return; }
     if (!hasIndex()) { renderBody(); return; }
     paneEmpty("Loading index…");
+    if (state.segment === "files") {
+      renderBody();
+      if (!state.files.dirs.has("")) await ensureDir("");
+      return;
+    }
     if (state.segment === "changed") await loadChanged();
     else if (state.segment === "usage") await loadUsage();
     else await loadNotes();
@@ -470,6 +613,11 @@ export function mountCode(root) {
   }
 
   function renderBody() {
+    const files = state.segment === "files" && Boolean(state.computer) && Boolean(state.project) && hasIndex();
+    bodyEl.hidden = files;
+    splitEl.hidden = !files;
+    if (files) { renderFiles(); return; }
+    splitEl.replaceChildren();
     if (!state.computer) { paneEmpty("No computer is online."); return; }
     if (!state.project) { paneEmpty("Pick a project to browse its code."); return; }
     if (!hasIndex()) { renderOff(); return; }
@@ -673,6 +821,236 @@ export function mountCode(root) {
     toastEl.hidden = false;
     clearTimeout(setToast.timer);
     setToast.timer = setTimeout(() => { toastEl.hidden = true; }, 4500);
+  }
+
+  // ── Files (a lazy tree beside one file's outline) ──────────────────────
+  let navNodes = [];   // the visible rows, in order, for the keyboard
+  let countEls = new Map();
+  let dotEls = new Map();
+
+  function renderFiles() {
+    navNodes = [];
+    countEls = new Map();
+    dotEls = new Map();
+    const keepFocus = splitEl.contains(document.activeElement);
+    splitEl.replaceChildren();
+    const tree = el("div", "cd-tree");
+    tree.tabIndex = 0;
+    tree.setAttribute("role", "tree");
+    tree.setAttribute("aria-label", "Project files");
+    tree.addEventListener("keydown", onTreeKey);
+    renderTree(tree, "", 0);
+    const outline = el("div", "cd-outline");
+    renderOutline(outline);
+    splitEl.append(tree, outline);
+    if (!keepFocus) queueMicrotask(() => { if (!splitEl.hidden) tree.focus({ preventScroll: true }); });
+    void loadChangeCounts();
+  }
+
+  function renderTree(container, dir, depth) {
+    const entry = state.files.dirs.get(dir);
+    if (!entry) return;
+    const indent = 8 + depth * 14;
+    if (entry.status === "loading") {
+      const note = el("div", "cd-tree-note", "Loading…");
+      note.style.paddingLeft = `${indent + 22}px`;
+      container.append(note);
+      return;
+    }
+    if (entry.status === "error") {
+      const note = el("div", "cd-tree-note cd-error", entry.error?.message || "This folder could not be loaded.");
+      note.style.paddingLeft = `${indent + 22}px`;
+      container.append(note);
+      return;
+    }
+    for (const item of entry.entries) {
+      const row = treeRow(item, depth);
+      container.append(row);
+      navNodes.push({ path: item.path, directory: item.directory, row });
+      if (item.directory && state.files.expanded.has(item.path)) renderTree(container, item.path, depth + 1);
+    }
+  }
+
+  function treeRow(item, depth) {
+    const row = el("button", "cd-tree-row");
+    row.type = "button";
+    row.dataset.path = item.path;
+    row.style.paddingLeft = `${8 + depth * 14}px`;
+    row.setAttribute("role", "treeitem");
+    const open = item.directory && state.files.expanded.has(item.path);
+    if (item.directory) row.setAttribute("aria-expanded", String(open));
+    if (item.path === state.files.selected) row.classList.add("selected");
+    const chev = el("span", "cd-tree-chev");
+    if (item.directory) chev.append(chevron(open));
+    row.append(chev, glyph(item.directory ? (open ? "folderOpen" : "folder") : "file"));
+    row.append(el("span", "cd-tree-name", basename(item.path)));
+    row.append(el("span", "spacer"));
+    if (item.directory) {
+      row.append(el("span", "cd-tree-files", `${item.files}${item.files === 1 ? " file" : " files"}`));
+    } else {
+      const counts = el("span", "cd-tree-counts");
+      const dot = el("span", "cd-tree-dot");
+      dot.hidden = true;
+      countEls.set(item.path, counts);
+      dotEls.set(item.path, dot);
+      row.append(counts, dot);
+      applyCount(item.path);
+    }
+    const node = { path: item.path, directory: item.directory, row };
+    row.addEventListener("click", () => { selectNode(node); activateNode(node); });
+    return row;
+  }
+
+  function selectNode(node) {
+    if (!node) return;
+    state.files.selected = node.path;
+    for (const n of navNodes) n.row.classList.toggle("selected", n.path === node.path);
+    node.row.scrollIntoView({ block: "nearest" });
+  }
+
+  function activateNode(node) {
+    if (node.directory) toggleDir(node.path);
+    else void openFile(node.path);
+  }
+
+  function onTreeKey(ev) {
+    if (!navNodes.length) return;
+    const i = navNodes.findIndex((n) => n.path === state.files.selected);
+    const node = i < 0 ? navNodes[0] : navNodes[i];
+    if (ev.key === "ArrowDown") { ev.preventDefault(); selectNode(navNodes[i < 0 ? 0 : Math.min(navNodes.length - 1, i + 1)]); }
+    else if (ev.key === "ArrowUp") { ev.preventDefault(); selectNode(navNodes[i < 0 ? 0 : Math.max(0, i - 1)]); }
+    else if (ev.key === "ArrowRight") {
+      ev.preventDefault();
+      if (node.directory && !state.files.expanded.has(node.path)) toggleDir(node.path);
+      else if (node.directory) { const child = navNodes[i + 1]; if (child && child.path.startsWith(node.path + "/")) selectNode(child); }
+    } else if (ev.key === "ArrowLeft") {
+      ev.preventDefault();
+      if (node.directory && state.files.expanded.has(node.path)) toggleDir(node.path);
+      else { const slash = node.path.lastIndexOf("/"); if (slash > 0) selectNode(navNodes.find((n) => n.path === node.path.slice(0, slash))); }
+    } else if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); activateNode(node); }
+  }
+
+  function toggleDir(path) {
+    if (state.files.expanded.has(path)) {
+      state.files.expanded.delete(path);
+      renderBody();
+      void loadChangeCounts();
+      return;
+    }
+    state.files.expanded.add(path);
+    renderBody();
+    if (!state.files.dirs.has(path)) void ensureDir(path);
+    else void loadChangeCounts();
+  }
+
+  async function ensureDir(dir) {
+    if (state.files.dirs.has(dir)) return;
+    const computer = state.computer;
+    const project = state.project;
+    state.files.dirs.set(dir, { status: "loading", entries: [] });
+    renderBody();
+    try {
+      const query = { project };
+      if (dir) query.directory = dir;
+      const body = await hookGet(computer, "/v1/code/tree", query);
+      if (state.project !== project || state.computer !== computer) return;
+      state.files.dirs.set(dir, { status: "ready", entries: Array.isArray(body.entries) ? body.entries : [] });
+    } catch (error) {
+      if (state.project !== project || state.computer !== computer) return;
+      state.files.dirs.set(dir, { status: "error", entries: [], error });
+    }
+    if (state.segment === "files") renderBody();
+    void loadChangeCounts();
+  }
+
+  async function loadChangeCounts() {
+    if (state.segment !== "files" || !hasIndex() || !state.project) return;
+    const project = state.project;
+    const paths = [];
+    for (const node of navNodes) {
+      if (node.directory) continue;
+      if (state.files.counts.has(node.path) || state.files.countsPending.has(node.path)) continue;
+      paths.push(node.path);
+      if (paths.length >= COUNT_BATCH) break;
+    }
+    if (!paths.length) return;
+    for (const p of paths) state.files.countsPending.add(p);
+    let ok = false;
+    try {
+      const body = await hookGet(state.computer, "/v1/code/change-counts", { project, paths: JSON.stringify(paths) });
+      if (state.project !== project) return;
+      for (const entry of (body.entries ?? [])) if (entry?.path) state.files.counts.set(entry.path, entry);
+      ok = true;
+    } catch {
+      // The chips are an extra; a failure leaves the tree usable without numbers.
+    } finally {
+      for (const p of paths) state.files.countsPending.delete(p);
+      if (state.project === project) { for (const p of paths) applyCount(p); }
+      if (ok && paths.length >= COUNT_BATCH) void loadChangeCounts();
+    }
+  }
+
+  function applyCount(path) {
+    const countsEl = countEls.get(path);
+    if (!countsEl) return;
+    const dot = dotEls.get(path);
+    const entry = state.files.counts.get(path);
+    if (!entry) { countsEl.textContent = ""; if (dot) dot.hidden = true; return; }
+    const { functions, types, recent } = countTotals(entry);
+    const parts = [];
+    if (functions) parts.push(`${functions} fn`);
+    if (types) parts.push(`${types} ty`);
+    countsEl.textContent = parts.join(" · ");
+    if (dot) { dot.hidden = recent === 0; dot.title = recent ? `${recent} changed since the last commit` : ""; }
+  }
+
+  // The right half: one file's outline, in source order, its names open a dossier.
+  function renderOutline(pane) {
+    pane.replaceChildren();
+    const outline = state.files.outline;
+    const head = el("div", "cd-outline-head");
+    head.append(el("span", "section-label", "Outline"));
+    if (outline?.path) head.append(el("span", "cd-outline-path", outline.path));
+    pane.append(head);
+    if (!outline) { pane.append(el("div", "cd-empty", "Pick a file to see its functions, types and variables.")); return; }
+    if (outline.loading) { pane.append(el("div", "cd-empty", "Reading the outline…")); return; }
+    if (outline.error) { pane.append(el("div", "cd-empty cd-error", outline.error.message || "The outline could not be loaded.")); return; }
+    if (!outline.entries.length) { pane.append(el("div", "cd-empty", "No functions, types or variables in this file.")); return; }
+    const list = el("div", "cd-outline-list");
+    addOutline(list, outline.path, outline.entries, "", 0);
+    pane.append(list);
+  }
+
+  function addOutline(container, file, entries, parent, depth) {
+    for (const entry of entries) {
+      const row = el("button", "cd-outline-row");
+      row.type = "button";
+      row.style.paddingLeft = `${8 + depth * 14}px`;
+      row.append(el("span", "cd-outline-name", entry.name));
+      row.append(el("span", "cd-chip kind", kindWord(entry.kind)));
+      row.append(el("span", "spacer"));
+      row.append(el("span", "cd-outline-line", `line ${entry.line}`));
+      row.addEventListener("click", () => openDossier(qualified(file, parent, entry.name)));
+      container.append(row);
+      if (entry.children?.length) addOutline(container, file, entry.children, entry.name, depth + 1);
+    }
+  }
+
+  async function openFile(path) {
+    state.files.selected = path;
+    state.files.outline = { path, entries: [], loading: true, error: null };
+    renderBody();
+    const computer = state.computer;
+    const project = state.project;
+    try {
+      const body = await hookGet(computer, "/v1/code/outline", { project, path });
+      if (state.files.outline?.path !== path || state.project !== project || state.computer !== computer) return;
+      state.files.outline = { path, entries: Array.isArray(body.entries) ? body.entries : [], loading: false, error: null };
+    } catch (error) {
+      if (state.files.outline?.path !== path || state.project !== project || state.computer !== computer) return;
+      state.files.outline = { path, entries: [], loading: false, error };
+    }
+    if (state.segment === "files") renderBody();
   }
 
   // ── Dossier ────────────────────────────────────────────────────────────

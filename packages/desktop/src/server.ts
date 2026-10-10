@@ -14,6 +14,7 @@ import { ACTIONS, loadKeyConfig } from "./keys-config.js";
 import { linkComputer, revokeComputer } from "./keys.js";
 import { nodeExtensionsEnabled, rehStatus, setNodeExtensionsEnabled, stopReh } from "./reh.js";
 import { collectUsage } from "./usage.js";
+import { listTraces, startTrace, stopTrace, traceStatus } from "./trace.js";
 import { closeAllPreviews, closePreview, listPreviews, openPreview } from "./web-preview.js";
 import { MemoryHttpError, createMemoryService, type ReviewActionBody } from "./memory.js";
 import {
@@ -614,6 +615,13 @@ export const startServer: StartServer = async (o) => {
           sendJson(res, await memory.saveSchedule(computer, (await readJson(req)) as { project?: unknown; id?: unknown; schedule?: unknown; original?: unknown }));
         } else if (sub === "findings" && req.method === "POST") {
           sendJson(res, await memory.addFinding(computer, (await readJson(req)) as { project?: unknown; text?: unknown }));
+        } else if (sub === "notes/remove" && req.method === "POST") {
+          sendJson(res, await memory.removeNote(computer, (await readJson(req)) as { project?: unknown; id?: unknown }));
+        } else if (sub === "delete" && req.method === "POST") {
+          const body = (await readJson(req)) as { path?: unknown; sha?: unknown };
+          sendJson(res, await memory.deleteStoreFile(computer,
+            typeof body.path === "string" ? body.path : "",
+            typeof body.sha === "string" ? body.sha : ""));
         } else if (sub === "projects") {
           sendJson(res, await memory.projects(computer));
         } else if (sub === "findings") {
@@ -661,6 +669,43 @@ export const startServer: StartServer = async (o) => {
       const config = await loadKeyConfig();
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
       res.end(JSON.stringify({ ...config, actions: ACTIONS }));
+      return;
+    }
+
+    if (pathname === "/api/trace" && (req.method ?? "GET") === "GET") {
+      sendJson(res, { status: traceStatus(), traces: listTraces() });
+      return;
+    }
+
+    if (pathname === "/api/trace/start" && req.method === "POST") {
+      try {
+        const body = (await readJson(req)) as { computers?: unknown };
+        let computers: string[];
+        if (body.computers === undefined) {
+          computers = o.computers.map((c) => c.name);
+        } else if (Array.isArray(body.computers) && body.computers.every((n) => typeof n === "string")) {
+          computers = body.computers as string[];
+        } else {
+          throw new ExtensionError(400, "computers must be a list of computer names.");
+        }
+        const started = startTrace({ computers });
+        // Reopen the overview streams so the recording starts with each
+        // computer's session list; a replay without it would show nothing.
+        o.hub.reconnectAll();
+        sendJson(res, { ...started, status: traceStatus() });
+      } catch (err) {
+        sendError(res, err);
+      }
+      return;
+    }
+
+    if (pathname === "/api/trace/stop" && req.method === "POST") {
+      const stopped = stopTrace();
+      if (!stopped) {
+        sendJson(res, { error: "No recording is running." }, 409);
+        return;
+      }
+      sendJson(res, { file: stopped.file, status: traceStatus() });
       return;
     }
 

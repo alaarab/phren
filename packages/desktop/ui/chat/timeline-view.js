@@ -7,6 +7,7 @@
 import * as kit from "/vendor/kit/index.js";
 import { parsePatch, wordSegments } from "../patch.js";
 import { renderMarkdownInto } from "./markdown.js";
+import { hookGet } from "../api.js";
 
 let styleLinked = false;
 function ensureStyle() {
@@ -62,6 +63,54 @@ function pathButton(text, openFile, className = "") {
   return button;
 }
 
+// The same proxy prefix api.js builds, for binary reads that cannot go through
+// hookGet (which parses JSON).
+const hostBase = (computer) => `/hosts/${encodeURIComponent(computer)}`;
+
+// A code span names a file when it has a slash, or a known extension and a
+// base name. An optional trailing `:line` rides along to the opener.
+const KNOWN_EXTENSIONS = new Set(["ts", "tsx", "js", "jsx", "mjs", "cjs", "json", "jsonc", "md", "markdown",
+  "css", "scss", "less", "html", "htm", "xml", "svg", "py", "rb", "go", "rs", "java", "kt", "kts", "swift",
+  "c", "h", "cc", "cpp", "hpp", "cs", "php", "sh", "bash", "zsh", "fish", "yml", "yaml", "toml", "ini",
+  "cfg", "conf", "sql", "graphql", "gql", "proto", "txt", "lock"]);
+const CODE_REFERENCE = /^([\w.@+~-]+(?:\/[\w.@+~-]+)*)(?::(\d+))?$/;
+
+/** The file an inline code span names, or null when it is not one. */
+function fileReference(text) {
+  if (!text || text.length > 4096 || /[\s\\\u0000]/.test(text)) return null;
+  const match = CODE_REFERENCE.exec(text);
+  if (!match) return null;
+  const file = match[1];
+  if (!file.includes("/")) {
+    const dot = file.lastIndexOf(".");
+    if (dot <= 0 || !KNOWN_EXTENSIONS.has(file.slice(dot + 1).toLowerCase())) return null;
+  }
+  return { path: file, line: match[2] ? Number(match[2]) : null };
+}
+
+// One lightbox for the whole app, opened by clicking a loaded thumbnail.
+let lightboxEl = null;
+function lightboxKey(event) { if (event.key === "Escape") { event.preventDefault(); closeLightbox(); } }
+function closeLightbox() {
+  if (!lightboxEl) return;
+  lightboxEl.remove();
+  document.removeEventListener("keydown", lightboxKey, true);
+}
+function openLightbox(src, alt) {
+  if (!lightboxEl) {
+    lightboxEl = h("div", "ct-lightbox");
+    lightboxEl.setAttribute("role", "dialog");
+    lightboxEl.addEventListener("click", closeLightbox);
+    lightboxEl._img = h("img", "ct-lightbox-img");
+    lightboxEl.append(lightboxEl._img);
+  }
+  lightboxEl._img.src = src;
+  lightboxEl._img.alt = alt || "Image";
+  document.body.append(lightboxEl);
+  document.removeEventListener("keydown", lightboxKey, true);
+  document.addEventListener("keydown", lightboxKey, true);
+}
+
 /** The key that decides whether a row must be rebuilt. */
 function entryKey(entry) {
   if (entry.turnActivity) {
@@ -70,7 +119,7 @@ function entryKey(entry) {
   }
   if (entry.turnChanges) return `changes|${entry.turnChanges.ownerID}|${entry.turnChanges.files.map((f) => f.path + f.patch.length).join(",")}`;
   if (entry.pendingEcho) return `pending|${entry.pendingEcho.id}|${entry.pendingEcho.deliveryState}|${entry.pendingEcho.text}`;
-  const parts = entry.messages.map((m) => kit.renderKey(m));
+  const parts = entry.messages.map((m) => kit.renderKey(m) + `|i${(m.imageBlocks || []).length},${(m.resultImages || []).length},${(m.uploadImages || []).length}`);
   if (entry.isReadRun && entry.readRun) parts.push(entry.readRun.title, entry.readRun.preview);
   if (entry.phren) parts.push(`p:${entry.phren.verb}:${entry.phren.status}:${entry.phren.resultSummary ?? ""}`);
   if (entry.card) parts.push(`c:${entry.card.kind}:${JSON.stringify(entry.card.value ?? null)}`);
@@ -159,6 +208,107 @@ export function createTimelineView(container, ctx = {}) {
   });
   jump.addEventListener("click", () => { scrollToBottom(); updateJump(); });
 
+  // Images: transcript attachments and tool-result pictures, fetched through the
+  // daemon only once their row scrolls into view. Object URLs are revoked with
+  // the row that owns them.
+  const imageObserver = new IntersectionObserver((visible) => {
+    for (const entry of visible) if (entry.isIntersecting) {
+      imageObserver.unobserve(entry.target);
+      entry.target._load?.();
+    }
+  }, { root: scroll, rootMargin: "200px" });
+
+  function imageUrl(ref) {
+    if (ref.kind === "upload") return `${hostBase(ctx.computer)}/v1/uploads/image?${new URLSearchParams({ path: ref.path })}`;
+    const query = { ...(ctx.target || {}), line: String(ref.line), block: String(ref.block) };
+    if (ref.inner != null) query.inner = String(ref.inner);
+    return `${hostBase(ctx.computer)}/v1/transcripts/blob?${new URLSearchParams(query)}`;
+  }
+
+  function imageThumb(ref, cleanups) {
+    const button = h("button", "ct-image");
+    button.type = "button";
+    button.setAttribute("aria-label", "Image");
+    button._load = async () => {
+      try {
+        const response = await fetch(imageUrl(ref));
+        if (!response.ok) throw new Error(String(response.status));
+        const objectUrl = URL.createObjectURL(await response.blob());
+        cleanups.push(() => URL.revokeObjectURL(objectUrl));
+        const img = h("img", "ct-image-img");
+        img.alt = "Transcript image";
+        img.src = objectUrl;
+        // Bytes that are not a picture the browser can draw show as unavailable.
+        await img.decode();
+        button.replaceChildren(img);
+        button.classList.add("loaded");
+        button.addEventListener("click", () => openLightbox(objectUrl, img.alt));
+      } catch {
+        button.classList.add("failed");
+        button.replaceChildren(h("span", "ct-image-fail", "Image unavailable"));
+      }
+    };
+    imageObserver.observe(button);
+    cleanups.push(() => imageObserver.unobserve(button));
+    return button;
+  }
+
+  /** Thumbnails for the images across `messages`, or null when there are none. */
+  function buildImageStrip(messages) {
+    const refs = [];
+    const seen = new Set();
+    for (const message of messages || []) {
+      for (const block of message.imageBlocks || []) refs.push({ kind: "block", line: message.line, block, inner: null });
+      for (const ref of message.resultImages || []) refs.push({ kind: "block", line: message.line, block: ref.block, inner: ref.inner });
+      for (const path of message.uploadImages || []) refs.push({ kind: "upload", path });
+    }
+    const unique = refs.filter((ref) => {
+      const key = ref.kind === "upload" ? `u:${ref.path}` : `b:${ref.line}:${ref.block}:${ref.inner ?? ""}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (unique.length === 0) return null;
+    const strip = h("div", "ct-images");
+    const cleanups = [];
+    for (const ref of unique) strip.append(imageThumb(ref, cleanups));
+    strip._cleanup = () => { for (const fn of cleanups) fn(); };
+    return strip;
+  }
+
+  /** Rendered markdown, with path-like inline code made clickable. */
+  function renderMarkdown(el, text) {
+    renderMarkdownInto(el, text);
+    if (ctx.openFile) for (const code of el.querySelectorAll("code.ct-md-code")) linkCodePath(code);
+    return el;
+  }
+
+  /** Turn one path-like code span into a button that resolves before opening. */
+  function linkCodePath(code) {
+    const ref = fileReference(code.textContent);
+    if (!ref) return;
+    code.classList.add("ct-md-code-path");
+    code.setAttribute("role", "button");
+    code.tabIndex = 0;
+    const open = () => resolveFileReference(code, ref);
+    code.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); open(); });
+    code.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
+  }
+
+  async function resolveFileReference(code, ref) {
+    code.classList.add("ct-path-resolving");
+    try {
+      const resolved = await hookGet(ctx.computer, "/v1/files/resolve", { ...(ctx.target || {}), path: ref.path });
+      code.classList.remove("ct-path-resolving");
+      ctx.openFile(resolved.path, { line: ref.line });
+    } catch {
+      code.classList.remove("ct-path-resolving");
+      code.classList.add("ct-path-missing");
+      code.title = "Not found in this repository";
+      setTimeout(() => code.classList.remove("ct-path-missing"), 1_200);
+    }
+  }
+
   function reconcile(ordered) {
     const wanted = new Set(ordered);
     for (const child of [...column.children]) if (!wanted.has(child)) child.remove();
@@ -206,14 +356,17 @@ export function createTimelineView(container, ctx = {}) {
       let row = rows.get(id);
       if (!row || row.key !== key) {
         const built = buildEntry(entry);
-        if (row && row.el.parentNode) row.el.replaceWith(built.el);
+        if (row) {
+          row.cleanup?.();
+          if (row.el.parentNode) row.el.replaceWith(built.el);
+        }
         row = built;
         rows.set(id, row);
       }
       if (row.live) live.push(row.live);
       ordered.push(row.el);
     });
-    for (const [id, row] of [...rows]) if (!seen.has(id)) { row.el.remove(); rows.delete(id); }
+    for (const [id, row] of [...rows]) if (!seen.has(id)) { row.cleanup?.(); row.el.remove(); rows.delete(id); }
 
     if (previewRow) { previewRow.remove(); previewRow = null; }
     if (preview && preview.text) {
@@ -249,14 +402,14 @@ export function createTimelineView(container, ctx = {}) {
   function limitedMarkdown(text, lines = 40, characters = 6_000) {
     const wrap = h("div", "ct-md");
     const preview = new kit.ToolOutputPreview(text, lines, characters);
-    renderMarkdownInto(wrap, preview.text);
+    renderMarkdown(wrap, preview.text);
     if (!preview.truncated) return wrap;
     const more = h("button", "ct-more", "Show more");
     more.type = "button";
     let open = false;
     more.addEventListener("click", () => {
       open = !open;
-      renderMarkdownInto(wrap, open ? text : preview.text);
+      renderMarkdown(wrap, open ? text : preview.text);
       more.textContent = open ? "Show less" : "Show more";
     });
     const holder = h("div", "ct-md-wrap");
@@ -278,7 +431,8 @@ export function createTimelineView(container, ctx = {}) {
     else if (entry.isReadRun) el = buildReadRun(entry);
     else if (entry.isActivity) el = buildToolRow(entry.messages);
     else el = buildMessage(entry);
-    return { el, key: entryKey(entry), live };
+    const cleanup = () => { for (const strip of el.querySelectorAll(".ct-images")) strip._cleanup?.(); };
+    return { el, key: entryKey(entry), live, cleanup };
   }
 
   function buildMessage(entry) {
@@ -294,8 +448,10 @@ export function createTimelineView(container, ctx = {}) {
     const spoken = /^\s*\[voice\]/i.test(message.text);
     if (spoken) row.append(h("span", "ct-spoken", "mic"));
     const bubble = h("div", "ct-user-bubble");
-    renderMarkdownInto(bubble, kit.VoiceMarker.hidden(message.text));
+    renderMarkdown(bubble, kit.VoiceMarker.hidden(message.text));
     if (message.isQueued) bubble.append(h("div", "ct-queued", "Queued in the agent"));
+    const images = buildImageStrip([message]);
+    if (images) bubble.append(images);
     row.append(bubble);
     return row;
   }
@@ -303,6 +459,8 @@ export function createTimelineView(container, ctx = {}) {
   function buildAssistant(message) {
     const row = h("div", "ct-msg-row ct-assistant-row");
     row.append(limitedMarkdown(message.text));
+    const images = buildImageStrip([message]);
+    if (images) row.append(images);
     return row;
   }
 
@@ -385,7 +543,7 @@ export function createTimelineView(container, ctx = {}) {
     return wrap;
   }
 
-  function buildToolRow(messages) {
+  function buildToolRow(messages, withImages = true) {
     const summary = new kit.ChatToolSummary(messages);
     const box = h("div", "ct-toolbox");
     const button = h("button", "ct-toolrow");
@@ -404,6 +562,8 @@ export function createTimelineView(container, ctx = {}) {
     const detail = h("div", "ct-toolbox-body");
     detail.hidden = true;
     box.append(detail);
+    const images = withImages ? buildImageStrip(messages) : null;
+    if (images) box.append(images);
     let filled = false;
     button.addEventListener("click", () => {
       const open = detail.hidden;
@@ -432,6 +592,8 @@ export function createTimelineView(container, ctx = {}) {
     const body = h("div", "ct-toolbox-body");
     body.hidden = true;
     box.append(body);
+    const images = buildImageStrip(run.groups.flatMap((group) => group.messages || []));
+    if (images) box.append(images);
     let filled = false;
     button.addEventListener("click", () => {
       const open = body.hidden;
@@ -440,7 +602,7 @@ export function createTimelineView(container, ctx = {}) {
       if (open && !filled) {
         for (const group of run.groups) {
           if (group.card) body.append(buildToolCard(group));
-          else body.append(buildToolRow(group.messages));
+          else body.append(buildToolRow(group.messages, false));
         }
         filled = true;
       }
@@ -451,7 +613,7 @@ export function createTimelineView(container, ctx = {}) {
   function buildPreview(preview) {
     const row = h("div", "ct-msg-row ct-assistant-row ct-preview");
     const body = h("div", "ct-md ct-preview-md");
-    renderMarkdownInto(body, preview.text);
+    renderMarkdown(body, preview.text);
     body.append(h("span", "ct-caret", "▍"));
     row.append(body);
     return row;
@@ -501,7 +663,7 @@ export function createTimelineView(container, ctx = {}) {
   function buildPendingEcho(echo) {
     const row = h("div", "ct-msg-row ct-user-row ct-pending");
     const bubble = h("div", "ct-user-bubble");
-    renderMarkdownInto(bubble, kit.VoiceMarker.hidden(echo.text));
+    renderMarkdown(bubble, kit.VoiceMarker.hidden(echo.text));
     row.append(bubble);
     if (echo.deliveryState === "queued") bubble.append(h("div", "ct-queued", "Queued — sends when the agent is ready"));
     else if (echo.deliveryState === "blocked") row.append(pendingNote("Not delivered. Review and send again.", echo));
@@ -1037,7 +1199,10 @@ export function createTimelineView(container, ctx = {}) {
     onScrollTop(fn) { onTop.push(fn); },
     destroy() {
       clearInterval(tick);
+      imageObserver.disconnect();
+      for (const row of rows.values()) row.cleanup?.();
       rows.clear();
+      closeLightbox();
       container.classList.remove("ct-root");
       container.replaceChildren();
     },
