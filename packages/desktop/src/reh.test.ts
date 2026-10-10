@@ -3,11 +3,12 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { findTarball, rehRoot, rehStatus, stopReh } from "./reh.js";
+import { findTarball, nodeExtensionsEnabled, rehRoot, rehStatus, setNodeExtensionsEnabled, stopReh } from "./reh.js";
 
 const ORIGINAL_REH = process.env.PHREN_DESKTOP_REH;
 const ORIGINAL_TARBALL = process.env.PHREN_REH_TARBALL;
 const ORIGINAL_TIMEOUT = process.env.PHREN_REH_START_TIMEOUT_MS;
+const ORIGINAL_EXTENSIONS = process.env.PHREN_DESKTOP_EXTENSIONS;
 
 let work: string;
 let runsLog: string;
@@ -15,6 +16,10 @@ let runsLog: string;
 beforeEach(() => {
   work = mkdtempSync(path.join(tmpdir(), "phren-reh-"));
   process.env.PHREN_DESKTOP_REH = path.join(work, "reh");
+  // Node extensions are opt-in; these tests exercise the host itself.
+  process.env.PHREN_DESKTOP_EXTENSIONS = path.join(work, "extensions");
+  mkdirSync(process.env.PHREN_DESKTOP_EXTENSIONS, { recursive: true });
+  writeFileSync(path.join(process.env.PHREN_DESKTOP_EXTENSIONS, "node-extensions-enabled"), "on\n");
   runsLog = path.join(work, "runs.log");
 });
 
@@ -22,6 +27,7 @@ afterEach(() => {
   stopReh();
   restore("PHREN_DESKTOP_REH", ORIGINAL_REH);
   restore("PHREN_REH_TARBALL", ORIGINAL_TARBALL);
+  restore("PHREN_DESKTOP_EXTENSIONS", ORIGINAL_EXTENSIONS);
   restore("PHREN_REH_START_TIMEOUT_MS", ORIGINAL_TIMEOUT);
   rmSync(work, { recursive: true, force: true });
 });
@@ -119,3 +125,16 @@ describe("rehStatus", () => {
     expect(log).toContain("term");
   });
 });
+
+describe("node extensions opt-in", () => {
+  it("does not start the extension host until the owner turns Node extensions on", async () => {
+    await setNodeExtensionsEnabled(false);
+    expect(nodeExtensionsEnabled()).toBe(false);
+    const status = await rehStatus();
+    expect(status.available).toBe(false);
+    expect(String((status as { reason?: string }).reason)).toContain("Node extensions are off");
+    await setNodeExtensionsEnabled(true);
+    expect(nodeExtensionsEnabled()).toBe(true);
+  });
+});
+
