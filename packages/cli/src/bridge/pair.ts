@@ -8,6 +8,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { appendAuthorizedKey, publicComputerKey } from "./computers.js";
+import { localHostKeyLine } from "./host-key.js";
 import { forcedCommand, install } from "./install.js";
 import { BridgeError, bridgeRoot } from "./protocol.js";
 
@@ -49,8 +50,8 @@ export function keyFingerprint(publicKeyLine: string): string | undefined {
   return "SHA256:" + createHash("sha256").update(Buffer.from(blob, "base64")).digest("base64").replace(/=+$/, "");
 }
 
-export async function hostFingerprint(file = "/etc/ssh/ssh_host_ed25519_key.pub"): Promise<string | undefined> {
-  return keyFingerprint(await readFile(file, "utf8").catch(() => ""));
+export async function hostFingerprint(file?: string): Promise<string | undefined> {
+  return keyFingerprint((file ? await readFile(file, "utf8").catch(() => "") : await localHostKeyLine()) ?? "");
 }
 
 /** Addresses the phone can try, best first: Tailscale name and address, then LAN IPv4. */
