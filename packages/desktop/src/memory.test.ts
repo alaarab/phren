@@ -171,4 +171,19 @@ describe("remote mirror", () => {
     expect(Buffer.from(reviewPost!.content, "base64").toString("utf8")).not.toContain("pending item");
     expect(Buffer.from(findingsPost!.content, "base64").toString("utf8")).toContain("pending item");
   });
+
+  it("adds a finding with the CLI's writer and uploads FINDINGS.md with its old sha", async () => {
+    const initial = { "proj-a/FINDINGS.md": "# Findings\n" };
+    const store = fakeStore(initial);
+    const svc = service(store);
+    await svc.findings(B, "proj-a");
+
+    const result = await svc.addFinding(B, { project: "proj-a", text: "The relay must never share the daemon origin" });
+
+    expect(result.ok).toBe(true);
+    const post = store.posts.find((p) => p.path === "proj-a/FINDINGS.md");
+    expect(post?.sha).toBe(blobSha(Buffer.from("# Findings\n")));
+    expect(Buffer.from(post!.content, "base64").toString("utf8")).toContain("The relay must never share the daemon origin");
+    await expect(svc.addFinding(B, { project: "proj-a", text: "  " })).rejects.toThrow();
+  });
 });

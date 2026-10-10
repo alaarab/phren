@@ -673,3 +673,6 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .pause-btn.accent:hover { background: var(--accent); color: #1E1E1E; }
 .pause-btn.danger { color: var(--danger); }
 .pause-btn:disabled { opacity: .5; cursor: default; }
+
+/* The session's Chat/Console switch moves left of an open "Phren knows" drawer. */
+.session-doc:has(.knows-open) .session-switch { right: 356px; }

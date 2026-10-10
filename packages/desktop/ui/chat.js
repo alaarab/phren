@@ -13,6 +13,8 @@ import { createTimelineView } from "./chat/timeline-view.js";
 import { createComposer, contextPercent } from "./chat/composer.js";
 import { renderInteractions, renderSideAnswer, renderSudoRequests } from "./chat/cards.js";
 import { startDictation, createTalkMode } from "./chat/talk.js";
+import { openKnowsDrawer, installRememberSelection } from "./chat/knows.js";
+import { projectOf } from "./shell/store.js";
 
 const PROVIDERS = { claude: "Claude", codex: "Codex", copilot: "Copilot", phren: "Phren", opencode: "OpenCode" };
 
@@ -87,8 +89,11 @@ export function openChat(el, computerName, child, opts = {}) {
 
   const dot = node("div", "chat-status-dot");
   const contextRing = node("div", "chat-context-ring");
+  const knowsBtn = node("button", "chat-knows-btn", "Phren knows");
+  knowsBtn.type = "button";
+  knowsBtn.addEventListener("click", () => toggleKnows());
   const trailing = node("div", "chat-trailing");
-  trailing.append(contextRing, dot);
+  trailing.append(knowsBtn, contextRing, dot);
   const header = node("div", "chat-header");
   header.append(ring, headings, trailing);
 
@@ -155,6 +160,21 @@ export function openChat(el, computerName, child, opts = {}) {
     openFile: typeof opts.openFile === "function" ? opts.openFile : undefined,
     openSubagent: (id) => openSubagent(id),
     insert: (text) => composer.insert(text),
+  });
+
+  // ---- the "Phren knows" drawer and "Remember this" selection ----
+  const knowsProject = projectOf(child);
+  let knows = null;
+  function toggleKnows() {
+    if (knows) { knows.close(); return; }
+    knows = openKnowsDrawer(el, {
+      computer: computerName, project: knowsProject,
+      onClose: () => { knows = null; knowsBtn.classList.remove("on"); },
+    });
+    knowsBtn.classList.add("on");
+  }
+  const rememberSelection = installRememberSelection(timelineEl, {
+    computer: computerName, project: knowsProject,
   });
 
   const error = node("div", "chat-error");
@@ -632,6 +652,8 @@ export function openChat(el, computerName, child, opts = {}) {
       transcriptSocket.close();
       statusSocket.close();
       closeWork();
+      knows?.close?.();
+      rememberSelection.destroy?.();
       cardsHandle?.destroy?.();
       sideHandle?.destroy?.();
       sudoHandle?.destroy?.();
