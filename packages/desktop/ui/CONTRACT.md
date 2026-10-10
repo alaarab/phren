@@ -125,3 +125,33 @@ Errors are `Error` with `.status`, `.code` and `.body` (the Hook's JSON).
 - Footer: commit message field (sunken, radius 12) + "✓ Commit" button (--accent-solid at 0.35 when
   disabled, full when enabled) + "↑ Push N" pill when ahead > 0. "Stage all" replaces Commit when nothing is staged.
 - Words: "Changes", "Files", "Uncommitted changes", "Working tree clean", never "symbol" or "SCM".
+
+# Code index and search (phase 1c)
+
+## Which project's index
+
+The code index is per project, not per checkout. Resolve once per session:
+`GET /v1/projects/repos` → `{repos:[{directory, name, registered}]}`; the project is the
+`name` of the entry whose `directory` equals the Changes status `repository` (from
+`POST /v1/git/status`) and whose `registered` is true. Then `GET /v1/code/status?project=<name>`
+must answer 200 with `available: true`; otherwise the index is off for this session (no
+error UI beyond a quiet "No code index for <name>" note where the feature would be).
+All index paths are repository-relative, the same as editor paths.
+
+## Code index routes (GET, query `project=<name>`)
+
+- `/v1/code/file-references?path=<file>` → `{references:[{line, kind, name, symbol:"file::Name", file, targetLine, targetKind}]}`:
+  every resolved use in that file (no columns: match by line and the word's text).
+- `/v1/code/definition?name=<Name | file::Type.member>` → `{definition:{symbol:{name, kind, file, line, endLine, signature, doc, uses}, candidates, findings:[...]}}`.
+- `/v1/code/references?name=<…>&limit=200` → `{references:{symbol, groups:[{file, references:[{line, kind}]}], total}}`.
+- `/v1/code/outline?path=<file>` → `{entries:[{name, kind, line, endLine, signature, children:[…]}]}`.
+- `/v1/code/search?q=<text>&limit=50` → `{symbols:[{name, kind, file, line, signature, doc}]}`.
+Words in the UI: function, type, variable, method, class; never "symbol".
+
+## Find in files
+
+`POST /v1/files/search {target, query, regex?, caseSensitive?, wholeWord?, include?: string[], limit?}`
+→ `{matches:[{file, lines:[{line, column, text, offset?}]}], files, total, truncated}`.
+`column` is 1-based in the full line; `text` is at most 300 chars starting at `offset` (0 when absent).
+Errors: 400 code "search-invalid-regex", 413 code "search-too-broad". Hooks without
+`capabilities.fileSearch` answer 404: show "Update Phren on <computer> to search here."
