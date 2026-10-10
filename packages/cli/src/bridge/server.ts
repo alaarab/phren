@@ -1,3 +1,5 @@
+import { setChoiceReaders } from "./account-choice.js";
+import { AccountFailover } from "./account-failover.js";
 import { ownerInboxSources } from "./owner-inbox-sources.js";
 import { OwnerInbox } from "./owner-inbox.js";
 import { closeFinishedWorker } from "./worker-close.js";
@@ -83,6 +85,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const agentHooks = new AgentHooks(undefined, modules, path.join(bridgeRoot(), "deliveries.json"));
   // Follows what dispatched workers do and tells the dispatching agent.
   const returns: DispatchReturns | undefined = dispatches ? new DispatchReturns({
+    // Continue on another signed-in account when a Claude worker stops at its usage limit: opt-in, `phren config account-failover on`.
+    failover: new AccountFailover({ rooms: () => dispatches.claudeRooms(), dispatch: (input, origin, continues) => dispatches.dispatch(input, origin, continues) }),
     localWorkers: hookWorkers(agentHooks),
     close: async receipt => {
       const data = { target: receipt.target, dispatch: receipt.id, turn: receipt.closePending!.turn };
@@ -124,6 +128,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   }) : undefined;
   const contextUsage = new WorkspaceContextUsage();
   const accountUsage = options.accountUsage ?? new AccountUsageReader();
+  // A Claude launch that names no account runs under the one with the most room (account-choice.ts).
+  setChoiceReaders({ usage: () => accountUsage.limits(true) });
   const resources = new ResourceMonitor();
   const tabActivity = new TabActivityStore();
   const codexQuestions = new CodexQuestions(undefined, codexServers);

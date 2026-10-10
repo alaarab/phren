@@ -23,6 +23,12 @@ export interface InstallPreferences {
    * overrides it. See clanker.ts.
    */
   clanker?: boolean;
+  /**
+   * Whether a dispatched Claude worker that hits its usage limit continues on
+   * another signed-in account. On when unset; PHREN_ACCOUNT_FAILOVER
+   * overrides it. See bridge/account-choice.ts.
+   */
+  accountFailover?: boolean;
   hooksEnabled?: boolean;
   skillsScope?: "global" | "project";
   projectOwnershipDefault?: "phren-managed" | "detached" | "repo-managed";

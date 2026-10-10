@@ -130,6 +130,18 @@ export async function writeLaunchBrief(brief: LaunchBrief, now = Date.now(), lab
   return file;
 }
 
+/** The text of a brief this computer wrote, for the dispatch that continues its worker on another
+ * account (account-failover.ts); undefined once pruned or for an id it never wrote. */
+export async function readLaunchBrief(id: string): Promise<string | undefined> {
+  if (!briefId.safeParse(id).success) return undefined;
+  const file = path.join(briefDirectory(id), "brief.md");
+  try {
+    const info = await lstat(file);
+    if (!info.isFile() || info.size > 65_536) return undefined;
+    return await readFile(file, "utf8");
+  } catch { return undefined; }
+}
+
 const arrivalEvent = z.object({ at: z.string().datetime(), target: targetSchema }).strict();
 export const arrivalSchema = z.object({ started: arrivalEvent.optional(), accepted: arrivalEvent.optional() }).strict();
 export type BriefArrival = z.infer<typeof arrivalSchema>;
