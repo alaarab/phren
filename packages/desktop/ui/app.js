@@ -11,6 +11,7 @@ import { mountSchedules } from "./sections/schedules.js";
 import { mountPreviews } from "./sections/previews.js";
 import { mountMemory } from "./sections/memory.js";
 import { mountConductor } from "./sections/conductor.js";
+import { mountReview } from "./sections/review.js";
 import "./shell/launch.js"; // registers "Launch an agent…" in the palette
 import { registerPauseCommand } from "./shell/pause-all.js";
 registerPauseCommand();
@@ -32,6 +33,7 @@ registerSection("home", { label: "Home", order: 10, badge: true, mount: (el) => 
   openSession(computer, child) { showSection("agents"); agents().openSession(computer, child); },
 }) });
 registerSection("agents", { label: "Agents", order: 20, mount: (el) => mountAgents(el) });
+registerSection("review", { label: "Review", order: 22, mount: (el) => mountReview(el) });
 registerSection("conductor", { label: "Conductor", order: 25, mount: (el) => mountConductor(el) });
 registerSection("projects", { label: "Projects", order: 30, mount: (el) => mountProjects(el) });
 registerSection("tasks", { label: "Tasks", order: 40, mount: (el) => mountTasks(el) });
