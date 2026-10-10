@@ -12,6 +12,7 @@ import { openSearch } from "../search.js";
 import { setActiveSession } from "../keys.js";
 import { store, projectOf } from "../shell/store.js";
 import { createTiles } from "../shell/tiles.js";
+import { openLaunchSheet } from "../shell/launch.js";
 
 const PANES = [["changes", "Changes"], ["files", "Files"], ["search", "Search"]];
 
@@ -43,6 +44,7 @@ export function mountAgents(root) {
       <main id="main" class="main">
         <div class="layout-bar">
           <button class="doc-sidebar-toggle" type="button" aria-label="Collapse sidebar">\u25e7</button>
+          <button class="layout-btn layout-new" data-act="launch" type="button" title="Start an agent on any computer">+ New agent</button>
           <span class="spacer"></span>
           <button class="layout-btn" data-act="terminal" type="button" title="A shell in this project, in a new tile">Shell</button>
           <button class="layout-btn" data-act="split-right" type="button" title="Split side by side (\u2318\\)">Split \u2192</button>
@@ -337,6 +339,7 @@ export function mountAgents(root) {
     else if (act === "split-down") tabs.split("down");
     else if (act === "zoom") tabs.zoom();
     else if (act === "terminal") openTerminalDoc();
+    else if (act === "launch") openLaunchSheet({ computer: session?.computer });
   });
 
   // A file/diff tab closes through its handle so a dirty doc can prompt first:

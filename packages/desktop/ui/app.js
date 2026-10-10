@@ -9,6 +9,7 @@ import { mountProjects } from "./sections/projects.js";
 import { mountTasks } from "./sections/tasks.js";
 import { mountSchedules } from "./sections/schedules.js";
 import { mountPreviews } from "./sections/previews.js";
+import "./shell/launch.js"; // registers "Launch an agent…" in the palette
 import { initTheme } from "./shell/theme.js";
 import { mountSettings, notifyEnabled, badgeEnabled } from "./sections/settings.js";
 import { mountUsageRings } from "./shell/usage-rings.js";
