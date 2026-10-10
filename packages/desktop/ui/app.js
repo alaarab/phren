@@ -9,6 +9,8 @@ import { mountProjects } from "./sections/projects.js";
 import { mountTasks } from "./sections/tasks.js";
 import { mountSchedules } from "./sections/schedules.js";
 import { mountPreviews } from "./sections/previews.js";
+import { mountMemory } from "./sections/memory.js";
+import { mountConductor } from "./sections/conductor.js";
 import "./shell/launch.js"; // registers "Launch an agent…" in the palette
 import { initTheme } from "./shell/theme.js";
 import { mountSettings, notifyEnabled, badgeEnabled } from "./sections/settings.js";
@@ -28,8 +30,10 @@ registerSection("home", { label: "Home", order: 10, badge: true, mount: (el) => 
   openSession(computer, child) { showSection("agents"); agents().openSession(computer, child); },
 }) });
 registerSection("agents", { label: "Agents", order: 20, mount: (el) => mountAgents(el) });
+registerSection("conductor", { label: "Conductor", order: 25, mount: (el) => mountConductor(el) });
 registerSection("projects", { label: "Projects", order: 30, mount: (el) => mountProjects(el) });
 registerSection("tasks", { label: "Tasks", order: 40, mount: (el) => mountTasks(el) });
+registerSection("memory", { label: "Memory", order: 45, mount: (el) => mountMemory(el) });
 registerSection("schedules", { label: "Schedules", order: 50, mount: (el) => mountSchedules(el) });
 registerSection("previews", { label: "Previews", order: 60, mount: (el) => mountPreviews(el) });
 registerSection("settings", { label: "Settings", order: 90, mount: (el) => mountSettings(el) });

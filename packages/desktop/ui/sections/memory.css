@@ -1,0 +1,202 @@
+/* Memory: the phone's Memory screen at desktop density. Rail of computers
+   and projects on the left, findings/review/notes/truths/topics/graph on the
+   right. Colours come only from theme.css variables. */
+
+.mem { display: flex; height: 100%; min-height: 0; }
+
+/* ── Rail ─────────────────────────────────────────────────────────────── */
+.mem-rail {
+  flex: none;
+  width: 264px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 8px;
+  background: var(--sunken);
+  border-right: 1px solid var(--border);
+}
+.mem-computer { margin: 0 4px 12px; }
+.mem-computer-name { color: var(--text-2); font-size: 13px; font-weight: 600; }
+.mem-computer-host { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+.mem-computer-select {
+  width: 100%; height: 34px; padding: 0 8px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; color: var(--text); font: inherit; outline: none;
+}
+.mem-computer-select:focus { border-color: var(--accent); }
+.mem-rail-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px; }
+.mem-rail-count:not(:empty) {
+  padding: 0 7px; border-radius: 999px; background: var(--raised);
+  color: var(--text-2); font-size: 11px;
+}
+.mem-rail-note { margin: 8px 8px 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.mem-projects { display: grid; gap: 2px; }
+
+.mem-project {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; min-height: 40px; box-sizing: border-box;
+  padding: 6px 10px; border: 0; border-radius: var(--radius);
+  background: transparent; color: inherit; font: inherit;
+  text-align: left; cursor: pointer; transition: background .18s ease;
+}
+.mem-project:hover { background: var(--surface); }
+.mem-project.selected { background: var(--surface); box-shadow: inset 3px 0 0 var(--accent); }
+.mem-project-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--accent); font-family: var(--mono); font-size: 12.5px;
+}
+.mem-project-counts { flex: none; display: flex; align-items: center; gap: 4px; }
+.mem-count {
+  min-width: 18px; padding: 0 7px; border-radius: 999px;
+  background: var(--raised); color: var(--muted);
+  font-size: 11px; text-align: center; font-variant-numeric: tabular-nums;
+}
+.mem-count.review { background: rgba(224,188,127,.16); color: var(--waiting); font-weight: 600; }
+
+/* ── Main ─────────────────────────────────────────────────────────────── */
+.mem-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.mem-head {
+  flex: none; display: flex; flex-direction: column; gap: 10px;
+  padding: 14px 20px 12px; border-bottom: 1px solid var(--border);
+}
+.mem-title-row { display: flex; align-items: center; gap: 16px; }
+.mem-title {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text); font-size: 16px; font-weight: 600;
+}
+.mem-sub { color: var(--muted); font-size: 12px; }
+.mem-body { flex: 1; min-height: 0; position: relative; display: flex; }
+.mem-pane { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 16px 20px 28px; }
+.mem-inner { max-width: 900px; margin: 0 auto; }
+.mem-empty { padding: 24px 4px; color: var(--muted); font-size: 13.5px; }
+.mem-error { padding: 12px; color: var(--danger); font-size: 12.5px; }
+
+/* ── Findings toolbar ─────────────────────────────────────────────────── */
+.mem-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.mem-search {
+  flex: 1 1 220px; min-width: 140px; height: 34px; padding: 0 12px;
+  background: var(--sunken); border: 1px solid var(--border);
+  border-radius: 10px; color: var(--text); font: inherit; outline: none;
+}
+.mem-search:focus { border-color: var(--accent); }
+.mem-search::placeholder { color: var(--dim); }
+.mem-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mem-chip {
+  height: 24px; padding: 0 12px; border: 1px solid var(--border-strong);
+  border-radius: 999px; background: var(--raised); color: var(--muted);
+  font: 500 11.5px system-ui; text-transform: lowercase; cursor: pointer;
+  transition: color .18s ease, background .18s ease, border-color .18s ease;
+}
+.mem-chip:hover { color: var(--text-2); }
+.mem-chip.on { background: var(--card); border-color: var(--accent); color: var(--accent); }
+
+/* ── Rows ─────────────────────────────────────────────────────────────── */
+.mem-list { display: grid; gap: 4px; }
+.mem-row {
+  display: flex; flex-direction: column; gap: 6px;
+  min-height: 44px; box-sizing: border-box; padding: 9px 12px;
+  background: var(--surface); border-radius: var(--radius);
+}
+.mem-row.dim { opacity: .52; }
+.mem-row-text {
+  color: var(--text); font-size: 13px; line-height: 1.45;
+  overflow-wrap: anywhere; white-space: pre-wrap;
+}
+.mem-row-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11.5px; }
+.mem-tag {
+  padding: 1px 8px; border-radius: 999px; background: var(--raised);
+  color: var(--text-2); font-size: 11px; text-transform: lowercase;
+}
+.mem-tag.type { background: rgba(185,148,244,.16); color: var(--accent); }
+.mem-tag.life { background: rgba(239,152,152,.16); color: var(--danger); }
+.mem-tag.on { background: var(--accent-solid); color: #fff; }
+.mem-tag.conf { background: rgba(138,200,172,.16); color: var(--done); }
+.mem-tag.conf.low { background: rgba(224,188,127,.16); color: var(--waiting); }
+.mem-meta-dim { color: var(--muted); font-size: 11.5px; }
+.mem-date { margin-left: auto; color: var(--dim); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.mem-cite {
+  border: 0; background: transparent; padding: 0; cursor: pointer;
+  color: var(--path); font: 11.5px var(--mono); text-align: left;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%;
+}
+.mem-cite:hover { color: var(--accent-hover); text-decoration: underline; }
+
+.mem-section-label {
+  display: flex; align-items: center; gap: 8px;
+  margin: 16px 0 6px; font-size: 11px; font-weight: 600;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+}
+.mem-section-label:first-child { margin-top: 0; }
+.mem-section-count { padding: 0 6px; border-radius: 999px; background: var(--raised); color: var(--text-2); font-size: 10px; }
+
+/* ── Review actions ───────────────────────────────────────────────────── */
+.mem-review-row { position: relative; }
+.mem-review-row.on { box-shadow: 0 0 0 1px var(--accent); }
+.mem-review-row.risky { box-shadow: inset 3px 0 0 var(--waiting); }
+.mem-review-row.risky.on { box-shadow: inset 3px 0 0 var(--waiting), 0 0 0 1px var(--accent); }
+.mem-review-actions { display: flex; align-items: center; gap: 6px; }
+.mem-btn {
+  height: 26px; padding: 0 12px; border: 1px solid var(--border-strong);
+  border-radius: 999px; background: var(--raised); color: var(--text-2);
+  font: 600 11.5px system-ui; cursor: pointer; transition: color .18s ease, background .18s ease;
+}
+.mem-btn:hover { color: var(--accent-hover); }
+.mem-btn.approve { background: var(--accent-solid); border-color: transparent; color: #fff; }
+.mem-btn.approve:hover { background: var(--accent); color: #1E1E1E; }
+.mem-btn.reject:hover { color: var(--danger); }
+.mem-edit {
+  width: 100%; min-height: 72px; box-sizing: border-box; resize: vertical;
+  padding: 8px 10px; background: var(--sunken); border: 1px solid var(--accent);
+  border-radius: 10px; color: var(--text); font: 13px system-ui; outline: none;
+}
+.mem-edit-actions { display: flex; gap: 6px; justify-content: flex-end; }
+
+/* ── Topics ───────────────────────────────────────────────────────────── */
+.mem-topic-summary {
+  color: var(--text-2); font-size: 12.5px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+/* ── Graph ────────────────────────────────────────────────────────────── */
+.mem-graph { position: absolute; inset: 0; display: flex; }
+.mem-graph .graph-container { position: relative; flex: 1; min-width: 0; overflow: hidden; background: var(--bg); }
+.mem-graph #graph-canvas { width: 100%; height: 100%; }
+.mem-graph-controls {
+  position: absolute; top: 12px; right: 12px; z-index: 15;
+  display: flex; flex-direction: column; gap: 2px; padding: 3px;
+  background: rgba(40,42,44,.92); border: 1px solid var(--border-strong);
+  border-radius: 12px;
+}
+.mem-graph-controls button {
+  width: 30px; height: 30px; border: 0; border-radius: 9px;
+  background: transparent; color: var(--text-2); font-size: 15px; line-height: 1; cursor: pointer;
+}
+.mem-graph-controls button:hover { background: var(--raised); color: var(--accent); }
+.mem-graph-side {
+  position: absolute; top: 12px; left: 12px; z-index: 15;
+  width: 320px; max-width: calc(100% - 72px); max-height: calc(100% - 24px);
+  overflow-y: auto; padding: 14px;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,.5);
+}
+.mem-graph-side-head { display: flex; align-items: flex-start; gap: 8px; }
+.mem-graph-kind {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--accent);
+}
+.mem-graph-name { color: var(--text); font-size: 14px; font-weight: 600; margin-top: 3px; overflow-wrap: anywhere; }
+.mem-graph-close {
+  flex: none; margin-left: auto; width: 26px; height: 26px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer;
+}
+.mem-graph-close:hover { background: var(--raised); color: var(--text); }
+.mem-graph-sub { margin-top: 6px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.mem-graph-text { margin-top: 10px; color: var(--text-2); font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mem-graph-docs { display: grid; gap: 4px; margin-top: 10px; }
+.mem-graph-missing {
+  margin: auto; padding: 24px; max-width: 360px; text-align: center;
+  color: var(--muted); font-size: 13px; line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mem-project, .mem-chip, .mem-btn { transition: none; }
+}
