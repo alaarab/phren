@@ -17,16 +17,16 @@ function json(body: unknown): HookResponse {
 interface FakeStore {
   request: HookRequest;
   posts: Array<{ path: string; content: string; sha: string | null }>;
-  calls: { head: number; tree: number; blob: number; file: number };
+  calls: { head: number; tree: number; blob: number; file: number; blobs: number };
   change(next: Record<string, string | null>): void;
 }
 
 /** A Hook serving head/tree/blob/file over a mutable in-memory store. */
-function fakeStore(initial: Record<string, string>): FakeStore {
+function fakeStore(initial: Record<string, string>, { batch = false } = {}): FakeStore {
   const files = new Map<string, Buffer>();
   for (const [p, text] of Object.entries(initial)) files.set(p, Buffer.from(text));
   const posts: FakeStore["posts"] = [];
-  const calls = { head: 0, tree: 0, blob: 0, file: 0 };
+  const calls = { head: 0, tree: 0, blob: 0, file: 0, blobs: 0 };
   let head = "1".repeat(40);
   const bump = (token: string) => { head = blobSha(Buffer.from(`${head}:${token}`)); };
 
@@ -47,6 +47,14 @@ function fakeStore(initial: Record<string, string>): FakeStore {
       const buf = [...files.values()].find((value) => blobSha(value) === sha);
       if (!buf) return { status: 404, headers: {}, body: Buffer.from("{}") };
       return json({ sha, encoding: "base64", content: buf.toString("base64") });
+    }
+    if (batch && method === "POST" && url.pathname === "/v1/store/blobs") {
+      calls.blobs += 1;
+      const shas = (body as { shas: string[] }).shas;
+      return json({ blobs: shas.map((sha) => {
+        const buf = [...files.values()].find((value) => blobSha(value) === sha);
+        return buf ? { sha, encoding: "base64", content: buf.toString("base64") } : { sha, error: "unknown" };
+      }) });
     }
     if (method === "POST" && url.pathname === "/v1/store/file") {
       calls.file += 1;
@@ -117,6 +125,14 @@ describe("remote mirror", () => {
     expect(existsSync(path.join(mirror, "stores.yaml"))).toBe(true);
     expect(existsSync(path.join(mirror, "proj-a/README.md"))).toBe(false);
     expect(existsSync(path.join(cacheDir, "blobs", blobSha(Buffer.from("# Findings\n\n- alpha\n"))))).toBe(true);
+  });
+
+  it("fetches blobs in one batch when the Hook offers it", async () => {
+    const hook = fakeStore({ "app/FINDINGS.md": "# app\n- a\n", "app/tasks.md": "# tasks\n", "app/notes/2026-10-10.md": "note\n" }, { batch: true });
+    const { projects } = await service(hook).projects(B);
+    expect(projects.map((p) => p.name)).toContain("app");
+    expect(hook.calls.blobs).toBe(1);
+    expect(hook.calls.blob).toBe(0);
   });
 
   it("reuses cached blobs and drops files no longer in the tree", async () => {

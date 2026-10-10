@@ -131,6 +131,8 @@ interface RemoteState {
   syncedAt: number;
   /** mirror-relative path -> blob sha, the previous sha writes must present. */
   blobShas: Map<string, string>;
+  /** false once the Hook answered 404 to the batch route (an older Hook). */
+  batch?: boolean;
 }
 
 export interface MemoryService {
@@ -210,18 +212,49 @@ export function createMemoryService(opts: MemoryOptions): MemoryService {
       try { rel = safeStorePath(entry.path); } catch { continue; }
       if (!isMemoryPath(rel)) continue;
       next.set(rel, entry.sha);
-
-      const blobFile = path.join(blobsDir, entry.sha);
-      if (!existsSync(blobFile)) {
-        const blob = await hookJson(computer, `/v1/store/blob?sha=${entry.sha}`);
-        const content = Buffer.from(typeof blob.content === "string" ? blob.content : "", "base64");
-        await mkdir(blobsDir, { recursive: true });
-        await writeFile(blobFile, content);
+    }
+    // Fetch missing blobs eight at a time: each is one SSH channel, and the
+    // per-computer pool carries far more than that.
+    await mkdir(blobsDir, { recursive: true });
+    const missing = [...new Set(next.values())].filter((blobSha) => !existsSync(path.join(blobsDir, blobSha)));
+    // A Hook with memoryStoreBatch answers up to 256 blobs per request; older
+    // Hooks get one request per blob.
+    const single: string[] = [];
+    let batch = state.batch !== false;
+    let queue = missing;
+    while (batch && queue.length) {
+      const chunk = queue.slice(0, 200);
+      const res = await opts.hookRequest(computer, "POST", "/v1/store/blobs", { shas: chunk });
+      if (res.status === 404 || res.status === 405) { batch = false; state.batch = false; break; }
+      if (res.status !== 200) throw new MemoryHttpError(502, `This computer's Hook returned ${res.status}.`);
+      const answer = JSON.parse(res.body.toString("utf8")) as { blobs?: Array<{ sha?: string; content?: string; error?: string }> };
+      const later: string[] = [];
+      for (const blob of answer.blobs ?? []) {
+        if (typeof blob.sha !== "string" || !chunk.includes(blob.sha)) continue;
+        if (typeof blob.content === "string") await writeFile(path.join(blobsDir, blob.sha), Buffer.from(blob.content, "base64"));
+        else if (blob.error === "later") later.push(blob.sha);
       }
+      queue = [...later, ...queue.slice(chunk.length)];
+      if (later.length === chunk.length) { single.push(...later); queue = queue.slice(later.length); }
+    }
+    if (!batch) single.push(...queue);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < single.length) {
+        const blobSha = single[cursor++];
+        const blob = await hookJson(computer, `/v1/store/blob?sha=${blobSha}`);
+        const content = Buffer.from(typeof blob.content === "string" ? blob.content : "", "base64");
+        await writeFile(path.join(blobsDir, blobSha), content);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(8, single.length) }, worker));
+    for (const [rel, blobSha] of next) {
+      // Unknown or oversized blobs stay out of the mirror.
+      if (!existsSync(path.join(blobsDir, blobSha))) { next.delete(rel); continue; }
       const dest = path.join(dir, rel);
-      if (state.blobShas.get(rel) !== entry.sha || !existsSync(dest)) {
+      if (state.blobShas.get(rel) !== blobSha || !existsSync(dest)) {
         await mkdir(path.dirname(dest), { recursive: true });
-        await copyFile(blobFile, dest);
+        await copyFile(path.join(blobsDir, blobSha), dest);
       }
     }
     await removeMissing(dir, next);
