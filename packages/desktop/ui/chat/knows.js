@@ -109,11 +109,20 @@ async function loadTasks(computer, project) {
 /** The prose inside a store's marked "What phren knows" block, or "". */
 export function extractKnowsBlock(content) {
   const text = String(content || "");
-  const end = text.indexOf("<!-- phren:knows:end -->");
-  // The innermost block: a store can hold a newer start marker left unreplaced above an older one.
-  const start = end === -1 ? -1 : text.lastIndexOf("<!-- phren:knows:start", end);
-  if (start === -1 || end === -1 || end < start) return "";
-  const inner = text.slice(start, end).split("\n").slice(1).join("\n").trim();
+  const endMark = "<!-- phren:knows:end -->";
+  const startMark = "<!-- phren:knows:start";
+  const end = text.lastIndexOf(endMark);
+  if (end === -1) return "";
+  // A union merge can leave several start lines: read the newest (highest at=)
+  // copy, up to the next start marker or the end marker (as the CLI does).
+  const starts = [];
+  for (let i = text.indexOf(startMark); i !== -1 && i < end; i = text.indexOf(startMark, i + 1)) starts.push(i);
+  if (!starts.length) return "";
+  const stamp = (at) => (/at=([^ ]+)/.exec(text.slice(at, text.indexOf("-->", at))) || [])[1] || "";
+  let pick = starts[0];
+  for (const at of starts) if (stamp(at) > stamp(pick)) pick = at;
+  const stop = starts.find((at) => at > pick) ?? end;
+  const inner = text.slice(text.indexOf("\n", pick) + 1, stop).trim();
   return inner.replace(/^##\s+What phren knows\s*/i, "").trim();
 }
 
