@@ -5,6 +5,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.36] - 2026-10-10
+
 ### Added
 
 - Clanker mode, a compact keyword-first way to retrieve memory. With `phren config clanker on` (or `phren config set clanker on`, `phren init --clanker on`, `PHREN_CLANKER=on`), the prompt hook, `search_knowledge`, `get_tasks` and `get_findings` return one row per hit: an id, a title, a few keywords and, for searches, a 0–1 score. The agent fetches the full text by id with `get_memory_detail`, which now takes a finding's `fid:` or a task's `bid:` and returns just that entry instead of the file it lives in. On a copy of a real store this cut the prompt hook's injection by 49%, `search_knowledge` by 84% (60% counting one entry opened per search), and project task and finding lists by 80–90%. New installs start with it on; existing installs keep their current output until switched. It replaces `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE`, which still works as an alias.
