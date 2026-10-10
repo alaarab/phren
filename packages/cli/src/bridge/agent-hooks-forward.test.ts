@@ -94,9 +94,10 @@ describe.skipIf(process.platform === "win32")("a dispatched worker's approval, f
     expect(JSON.parse(await answer)).toMatchObject({ hookSpecificOutput: { decision: { behavior: "deny" } } });
   });
 
-  it("offers the dialog left in the terminal under a dialog- id that answers with the pane's keys", async () => {
-    hooks.leaseDispatch([lease]);
+  it("offers a dialog never held under a dialog- id that answers with the pane's keys", async () => {
+    // Unleased, the ask goes straight to the terminal; the lease comes after.
     expect(await ask()).toBe("{}");
+    hooks.leaseDispatch([lease]);
     await vi.waitFor(async () => {
       await hooks.observeWaitingPanes("default", [pane], async () => target);
       expect(hooks.workerApproval(target)).toBeDefined();
@@ -113,6 +114,54 @@ describe.skipIf(process.platform === "win32")("a dispatched worker's approval, f
     await hooks.answer(target, card.actionId, "approve");
     expect(keys()).toEqual([["1"]]);
     await expect(hooks.answer(target, card.actionId, "approve")).rejects.toThrow(/no longer pending|changed/);
+  });
+
+  it("keeps a held ask's id answerable after its hold ends with the dialog still on screen", async () => {
+    hooks.leaseDispatch([lease]);
+    const answer = ask();
+    await vi.waitFor(() => expect(hooks.workerApproval(target)).toBeDefined());
+    // The dispatcher read this id while the ask was held.
+    const { actionId } = hooks.workerApproval(target)!;
+    expect(actionId).not.toMatch(/^dialog-/);
+    expect(await answer).toBe("{}");
+    // Answered before any tick has read the pane, then again after one: the same id.
+    expect(hooks.workerApproval(target)?.actionId ?? actionId).toBe(actionId);
+    await hooks.observeWaitingPanes("default", [pane], async () => target);
+    expect(hooks.workerApproval(target)).toMatchObject({ actionId, terminal: true });
+    await hooks.answer(target, actionId, "approve");
+    expect(keys()).toEqual([["1"]]);
+    await expect(hooks.answer(target, actionId, "approve")).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("answers a released hold straight away, before the Hook's tick reads the pane", async () => {
+    hooks.leaseDispatch([lease]);
+    const answer = ask();
+    await vi.waitFor(() => expect(hooks.workerApproval(target)).toBeDefined());
+    const { actionId } = hooks.workerApproval(target)!;
+    await answer;
+    await hooks.answer(target, actionId, "deny");
+    expect(keys()).toEqual([["2"]]);
+  });
+
+  it("keeps a dialog answerable past the push window while its pane still shows it", async () => {
+    hooks.leaseDispatch([lease]);
+    await ask();
+    await vi.waitFor(async () => {
+      await hooks.observeWaitingPanes("default", [pane], async () => target);
+      expect(hooks.workerApproval(target)).toBeDefined();
+    });
+    const { actionId } = hooks.workerApproval(target)!;
+    const start = Date.now(), clock = vi.spyOn(Date, "now");
+    try {
+      // Hook ticks keep finding the pane waiting, minutes apart.
+      for (const minutes of [6, 12, 18]) {
+        clock.mockReturnValue(start + minutes * 60_000);
+        await hooks.observeWaitingPanes("default", [pane], async () => target);
+      }
+      expect(hooks.workerApproval(target)!.actionId).toBe(actionId);
+      await hooks.answer(target, actionId, "approve");
+    } finally { clock.mockRestore(); }
+    expect(keys()).toEqual([["1"]]);
   });
 
   it("answers a dialog once: a concurrent second answer gets a 409 and types no keys", async () => {
