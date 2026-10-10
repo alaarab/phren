@@ -4,6 +4,7 @@ import { openTerminal } from "./terminal.js";
 import { openChanges } from "./changes.js";
 import { openFiles } from "./editor.js";
 import { openSearch } from "./search.js";
+import { installKeys, setActiveSession } from "./keys.js";
 
 const sidebarEl = document.getElementById("sidebar");
 const mainEl = document.getElementById("main");
@@ -138,6 +139,7 @@ const handlers = {
       onTerminal: () => showPane("terminal"),
     });
     if (!sideEl.hidden) showPane("changes");
+    setActiveSession(computer, child);
   },
   onOpenTerminal(computer, server) {
     showPane("terminal", { computer, server });
@@ -191,6 +193,7 @@ function connect() {
     const msg = JSON.parse(ev.data);
     if (msg.type === "overview") {
       renderSidebar(sidebarEl, msg.merged, handlers);
+      if (session) setActiveSession(session.computer, session.child);
       updateCount(msg.merged);
       announce(msg.merged);
     }
@@ -203,6 +206,12 @@ function connect() {
 
 setEmpty();
 connect();
+installKeys({
+  showPane: (key) => showPane(key),
+  toggleZoom: () => { if (sideEl.hidden) showPane(bench.pane ?? "changes"); document.body.classList.toggle("bench-max"); },
+  closePanel: () => { sideEl.hidden = true; document.body.classList.remove("bench-max"); },
+  currentSession: () => session,
+});
 
 // ⇧⌘F opens Search for the open session, as in VS Code.
 window.addEventListener("keydown", (ev) => {

@@ -9,6 +9,7 @@ import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
 import type { MergedOverview, StartServer, TerminalSession } from "./contract.js";
+import { ACTIONS, loadKeyConfig } from "./keys-config.js";
 
 const require = createRequire(import.meta.url);
 // The compiled file lives in dist/src/, so the UI folder is two levels up.
@@ -290,6 +291,14 @@ export const startServer: StartServer = async (o) => {
     if (pathname === "/api/overview") {
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(o.hub.current()));
+      return;
+    }
+
+    if (pathname === "/api/keys") {
+      // Read on every request so "reload key settings" picks up edits.
+      const config = await loadKeyConfig();
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+      res.end(JSON.stringify({ ...config, actions: ACTIONS }));
       return;
     }
 
