@@ -162,13 +162,13 @@ describe("Linux password delivery to askpass's own listener", () => {
   const passing = { start: async () => "100", inode: async () => "4711", holders: async () => "asker" as const };
   const deliver = (d: AskpassDelivery, checks: Parameters<typeof deliverToListener>[5]) => deliverToListener(ASKPASS, "100", d, "4711", "hunter2", checks);
 
-  it("hands the nonce and password to the verified listener once it acknowledges", async () => {
+  it.skipIf(process.platform === "win32")("hands the nonce and password to the verified listener once it acknowledges", async () => {
     const l = await listener(() => "ok\n");
     expect(await deliver(delivery, { ...passing, connect: l.connect })).toEqual({ delivered: true });
     expect(l.received).toEqual([`${delivery.nonce}\nhunter2\n`]);
   });
 
-  it("sends nothing when the asker or its listener changed after the phone approved", async () => {
+  it.skipIf(process.platform === "win32")("sends nothing when the asker or its listener changed after the phone approved", async () => {
     for (const changed of [{ start: async () => "101" }, { start: async () => undefined }, { inode: async () => "4712" }, { inode: async () => undefined },
       { holders: async () => "other" as const }, { holders: async () => "unknown" as const }]) {
       const l = await listener(() => "ok\n");
@@ -178,7 +178,7 @@ describe("Linux password delivery to askpass's own listener", () => {
     }
   });
 
-  it("reports askpass gone when its listener is missing or never acknowledges", async () => {
+  it.skipIf(process.platform === "win32")("reports askpass gone when its listener is missing or never acknowledges", async () => {
     expect(await deliver(delivery, { ...passing, connect: () => createConnection({ path: path.join(dir, "missing.sock") }) }))
       .toEqual({ status: 410, error: "askpass went away." });
     const l = await listener(() => undefined);
