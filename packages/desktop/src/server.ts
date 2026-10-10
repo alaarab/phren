@@ -91,6 +91,11 @@ function resolveStatic(pathname: string): string | null {
     }
     return null;
   }
+  if (pathname.startsWith("/editor-host/")) {
+    // The Vite-built VS Code editor host (packages/desktop-editor).
+    const full = safeJoin(join(UI_DIR, "editor-host"), pathname.slice("/editor-host/".length));
+    return full && existsSync(full) ? full : null;
+  }
   if (!/^[\w.-]+\.(js|css|html|md)$/.test(pathname.slice(1))) return null;
   return safeJoin(UI_DIR, pathname.slice(1));
 }
@@ -105,6 +110,10 @@ function contentType(file: string): string {
     case ".json":
     case ".map": return "application/json; charset=utf-8";
     case ".ttf": return "font/ttf";
+    case ".woff": return "font/woff";
+    case ".woff2": return "font/woff2";
+    case ".wasm": return "application/wasm";
+    case ".png": return "image/png";
     case ".svg": return "image/svg+xml";
     default: return "application/octet-stream";
   }
