@@ -149,6 +149,7 @@ function sessionRow(row, handlers) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "sb-row";
+  button.dataset.session = `${computer}/${child.id}`;
   if (kind === "needs" || kind === "working") button.appendChild(span("sb-bar " + kind));
 
   const ring = span("sb-ring " + kind, providerLetter(child.target.source));
