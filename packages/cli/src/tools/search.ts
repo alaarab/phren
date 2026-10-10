@@ -43,6 +43,7 @@ import { rankResults, searchKnowledgeRows, applyTrustFilter, searchFederatedStor
 import { formatActorAttribution, parseScopeComment, parseSourceComment, collectSymbolCitations } from "../content/citation.js";
 import { resolveActiveSessionScope } from "./session.js";
 import { logger } from "../logger.js";
+import { CLANKER_FETCH_HINT, type ClankerRow, clankerEnabled, findEntry, formatRow, queryTerms, rowKeywords, rowTitle, rowsForDoc } from "../clanker.js";
 import { DETAIL_PAGE_CHARS, LIST_TEXT_MAX_CHARS, SUMMARY_MAX_CHARS, SUMMARY_MAX_TRUTHS, clipText, shrinkToBudget, snippetBudget } from "../response-budget.js";
 
 /**
@@ -163,6 +164,8 @@ async function handleGetMemoryDetail(ctx: McpContext, { id: rawId, offset }: { i
   } catch {
     return mcpResponse({ ok: false, error: `Invalid memory ID format: "${rawId}" contains malformed URL encoding.` });
   }
+  const entryId = rawId.trim().toLowerCase().match(/^(fid:[a-z0-9]{8}|bid:[a-f0-9]{8})$/)?.[1];
+  if (entryId) return handleGetEntryDetail(ctx, entryId);
   const match = id.match(/^mem:([^/]+)\/(.+)$/);
   if (!match) {
     return mcpResponse({ ok: false, error: `Invalid memory ID format "${rawId}". Expected mem:project/path/to/file.md.` });
@@ -228,6 +231,44 @@ async function handleGetMemoryDetail(ctx: McpContext, { id: rawId, offset }: { i
       relevance_score: undefined,
     },
   });
+}
+
+/** One finding (`fid:`) or task (`bid:`) with its continuation lines, found through the index. */
+function handleGetEntryDetail(ctx: McpContext, entryId: string) {
+  const db = ctx.db();
+  // Active files first, then the archive topics that keep a finding's fid.
+  const docs = queryDocRows(
+    db,
+    "SELECT project, filename, type, content, path FROM docs WHERE content LIKE ? ORDER BY CASE type WHEN 'findings' THEN 0 WHEN 'task' THEN 0 ELSE 1 END",
+    [`%${entryId}%`],
+  ) ?? [];
+  for (const doc of docs) {
+    // The file itself: the index drops comment lines such as citations.
+    let fileText = doc.content;
+    try { fileText = fs.readFileSync(doc.path, "utf8"); } catch (err: unknown) {
+      logger.debug("search", `get_memory_detail entry read: ${errorMessage(err)}`);
+    }
+    const entry = findEntry(fileText, entryId) ?? findEntry(doc.content, entryId);
+    if (!entry) continue;
+    const content = clipText(entry.text, DETAIL_PAGE_CHARS);
+    const source = getDocSourceKey(doc, ctx.phrenPath);
+    return mcpResponse({
+      ok: true,
+      message: `[${entryId}] ${source} (${doc.type})\n\n${content}`,
+      data: {
+        id: entryId,
+        project: doc.project,
+        filename: doc.filename,
+        type: doc.type,
+        source: `mem:${source}`,
+        title: rowTitle(entry.line),
+        keywords: rowKeywords(entry.line),
+        content,
+        path: doc.path,
+      },
+    }, { compact: true });
+  }
+  return mcpResponse({ ok: false, error: `Memory not found: ${entryId}` });
 }
 
 async function handleSearchKnowledge(
@@ -506,6 +547,29 @@ async function handleSearchKnowledge(
       logger.debug("search", `fragment query: ${errorMessage(err)}`);
     }
 
+    const fallbackNote = usedFallback ? " (keyword fallback)" : "";
+    const fragmentNote = relatedFragments.length > 0 ? `\n\nRelated fragments: ${relatedFragments.join(", ")}` : "";
+    if (clankerEnabled(phrenPath)) {
+      // One row per matching finding or task (fid:/bid:), else per document.
+      const terms = queryTerms(query);
+      const rowCap = maxResults * 2;
+      const clankerRows: ClankerRow[] = [];
+      for (const row of rows) {
+        if (clankerRows.length >= rowCap) break;
+        const federationSource = "federationSource" in row ? (row as FederatedDocRow).federationSource : undefined;
+        const docId = federationSource ? `${federationSource}:${row.project}/${row.filename}` : `mem:${getDocSourceKey(row, phrenPath)}`;
+        const bestLine = extractSnippet(row.content, query, 1, 400);
+        clankerRows.push(...rowsForDoc(row, docId, terms, bestLine, Math.min(3, rowCap - clankerRows.length)));
+      }
+      runCustomHooks(phrenPath, "post-search", { PHREN_QUERY: query, PHREN_RESULT_COUNT: String(clankerRows.length) });
+      return mcpResponse({
+        ok: true,
+        message: `${clankerRows.length} row(s) for "${query}"${fallbackNote}. ${CLANKER_FETCH_HINT}\n${clankerRows.map((row) => formatRow(row, !filterProject)).join("\n")}${fragmentNote}`,
+        // The rows are the message; data carries only the ids so they are not sent twice.
+        data: { query, count: clankerRows.length, ids: clankerRows.map((row) => row.id), fallback: usedFallback },
+      }, { compact: true });
+    }
+
     const formatted = results.map((r) => {
       const fedNote = r.federation_source ? ` [from: ${r.federation_source}]` : "";
       const more = r.truncated && r.id ? ` · excerpt; full text: get_memory_detail id="${r.id}"` : "";
@@ -548,8 +612,6 @@ async function handleSearchKnowledge(
       }
     }
 
-    const fallbackNote = usedFallback ? " (keyword fallback)" : "";
-    const fragmentNote = relatedFragments.length > 0 ? `\n\nRelated fragments: ${relatedFragments.join(", ")}` : "";
     const synthesisBlock = synthesis ? `\n\n${synthesis}\n\n---\n\n` : "\n\n";
     runCustomHooks(phrenPath, "post-search", { PHREN_QUERY: query, PHREN_RESULT_COUNT: String(results.length) });
     return mcpResponse({
@@ -781,6 +843,24 @@ async function handleGetFindings(
   const requested = limit ?? 50;
   const hiddenHistoryCount = includeHistory ? 0 : historyCount;
   const historyNote = hiddenHistoryCount > 0 ? ` (${hiddenHistoryCount} historical hidden)` : "";
+  if (clankerEnabled(phrenPath)) {
+    const page = filteredItems.slice(from, from + requested);
+    const rows = page.map((entry) => ({
+      id: entry.stableId ? `fid:${entry.stableId}` : entry.id,
+      date: entry.date,
+      title: rowTitle(entry.text),
+      keywords: rowKeywords(entry.text),
+      ...(entry.status !== "active" ? { status: entry.status } : {}),
+    }));
+    const nextOffset = from + page.length < filteredItems.length ? from + page.length : null;
+    const range = from > 0 ? `${from + 1}–${from + page.length} of ${filteredItems.length}` : `${page.length}/${filteredItems.length}`;
+    const lines = rows.map((row) => `${row.id} ${row.date} ${row.title} [${row.keywords.join(", ")}]${row.status ? ` (${row.status})` : ""}`);
+    return mcpResponse({
+      ok: true,
+      message: `Findings for ${project} (${range})${historyNote}. ${CLANKER_FETCH_HINT}\n${lines.join("\n")}${nextOffset !== null ? `\nMore: offset=${nextOffset}` : ""}`,
+      data: { project, total: filteredItems.length, offset: from, next_offset: nextOffset, status: status ?? null, include_history: includeHistory, historyCount: hiddenHistoryCount },
+    }, { compact: true });
+  }
   const buildPage = (size: number) => {
     const capped = filteredItems.slice(from, from + size).map(entry => ({
       ...entry,
@@ -872,12 +952,12 @@ export function register(server: McpServer, ctx: McpContext): void {
       title: "◆ phren · memory detail",
       description:
         "Fetch the full content of a specific memory entry by its ID. Use this to expand a search_knowledge " +
-        "excerpt or an entry from the hook-prompt compact memory index. Long documents are paged by offset. " +
-        "The id format is `mem:project/path/to/file.md` as shown in the memory index.",
+        "excerpt or a row from clanker mode's compact index. A `fid:` (finding) or `bid:` (task) id returns that one entry; " +
+        "a `mem:project/path/to/file.md` id returns the document, paged by offset.",
       inputSchema: z.object({
         id: z.string().describe(
-          "Memory ID in the format `mem:project/path/to/file.md` (e.g. `mem:my-app/reference/api/auth.md`). " +
-          "Returned by search_knowledge results and the hook-prompt compact index."
+          "`fid:xxxxxxxx`, `bid:xxxxxxxx`, or `mem:project/path/to/file.md` (e.g. `mem:my-app/reference/api/auth.md`). " +
+          "Returned by search_knowledge, get_findings, get_tasks and the hook-prompt index."
         ),
         offset: z.number().int().min(0).optional().describe(
           `Character offset to start reading from. Documents longer than ${DETAIL_PAGE_CHARS} characters are returned in pages; pass the previous response's next_offset.`

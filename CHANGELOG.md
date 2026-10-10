@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Clanker mode, a compact keyword-first way to retrieve memory. With `phren config clanker on` (or `phren config set clanker on`, `phren init --clanker on`, `PHREN_CLANKER=on`), the prompt hook, `search_knowledge`, `get_tasks` and `get_findings` return one row per hit: an id, a title, a few keywords and, for searches, a 0–1 score. The agent fetches the full text by id with `get_memory_detail`, which now takes a finding's `fid:` or a task's `bid:` and returns just that entry instead of the file it lives in. On a copy of a real store this cut the prompt hook's injection by 56%, `search_knowledge` by 84% (62% counting one entry opened per search), and project task and finding lists by 80–90%. New installs start with it on; existing installs keep their current output until switched. It replaces `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE`, which still works as an alias.
+
 ### Fixed
 
 - `phren bridge link` now works with an Asustor NAS. It used to read the host key only from /etc/ssh; it now asks `sshd -T` for the host keys and falls back to /etc/ssh, /usr/etc/ssh, /usr/local/etc/ssh and /opt/etc/ssh, and says plainly when a computer has no ed25519 host key. Remote commands also find an Entware phren in /opt/bin.

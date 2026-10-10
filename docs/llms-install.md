@@ -77,7 +77,7 @@ Destructive maintenance commands (`prune` and `consolidate`) should be run with 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
 | `search_knowledge` | `query`, `type?`, `limit?`, `project?`, `tag?`, `since?`, `status?`, `include_history?`, `synthesize?` | FTS5 full-text search across your project store. Supports AND, OR, NOT, phrase matching. Filter by tag, date, or lifecycle status. |
-| `get_memory_detail` | `id` | Fetch full content of a memory by id (e.g. `mem:project/filename`). |
+| `get_memory_detail` | `id` | Fetch full content by id: `fid:`/`bid:` returns one finding or task, `mem:project/filename` the document. |
 | `get_project_summary` | `name` | Returns a project's summary card, AGENTS.md path, and list of indexed files. |
 | `list_projects` | `page?`, `page_size?` | Lists all projects in the active profile with pagination. |
 | `get_findings` | `project`, `limit?`, `include_superseded?`, `include_history?`, `status?` | Read recent findings, filterable by lifecycle status. |
