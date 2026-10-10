@@ -467,7 +467,7 @@ export function diffPreview(patch: string): DiffPreview {
 }
 
 function toIntOrNull(s: string | undefined): number | null {
-  if (s === undefined) return null;
+  if (s === undefined || s.trim() === "") return null;
   const n = Number(s);
   return Number.isInteger(n) ? n : null;
 }

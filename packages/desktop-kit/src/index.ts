@@ -1,13 +1,15 @@
 export * from "./message.js";
 export * from "./transcript.js";
 export * from "./history.js";
+export * from "./timeline.js";
+export * from "./progress.js";
 
 export {
   ToolPresentation, SyntaxTokenizer, AgentToolClassification, toolOutputPreview,
   diffPreview, diffDocument, DiffWords, diffWords,
   type DiffPreview, type DiffLine, type DiffKind, type DiffRow,
   type DiffWordsResult, type WordRange,
-  type ToolOutputPreview, type SyntaxLanguage, type ToolKind, type JsonValue, type JsonObject,
+  type SyntaxLanguage, type ToolKind, type JsonValue, type JsonObject,
 } from "./tool-presentation.js";
 
 export {
