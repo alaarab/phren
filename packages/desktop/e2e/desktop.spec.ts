@@ -97,7 +97,7 @@ test("sidebar, chat and changes render against the fake Hook", async ({ page }) 
 
   await expect(page.locator(".chat-title")).toHaveText("Fix login");
 
-  await page.locator(".segments .segment", { hasText: "Changes" }).click();
+  await page.locator("#side .segments .segment", { hasText: "Changes" }).click();
 
   await expect(page.locator(".chg-name", { hasText: "app.ts" })).toBeVisible();
   await expect(page.locator(".chg-name", { hasText: "README.md" })).toBeVisible();
@@ -150,7 +150,7 @@ test("palette, settings and the three-segment tool panel", async ({ page }) => {
   await page.locator(".sb-row", { hasText: "Fix login" }).click();
 
   // The right panel has exactly Changes · Files · Search; Extensions moved to Settings.
-  await expect(page.locator(".segments .segment")).toHaveText(["Changes", "Files", "Search"]);
+  await expect(page.locator("#side .segments .segment")).toHaveText(["Changes", "Files", "Search"]);
 
   // ⌘K opens the palette; typing a session title and Enter opens it.
   await page.keyboard.press("Meta+k");
@@ -211,4 +211,33 @@ test("a changed file opens as a centre diff tab", async ({ page }) => {
   await page.locator(".doc-diff .monaco-editor, .doc-diff .monaco-diff-editor").first().waitFor({ timeout: 15000 }).catch(() => {});
   await expect(page.locator(".doc-diff .ed-banner")).toBeHidden();
   await page.screenshot({ path: test.info().outputPath("diff-tab.png") });
+});
+
+test("tiles split, move and swap like Herdr panes; a session switches to its console", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator(".sb-row", { hasText: "Fix login" }).click();
+  await page.locator(".sb-row", { hasText: "Ship release" }).click();
+  await expect(page.locator(".tile")).toHaveCount(1);
+
+  // Split side by side, then move the active session into the new tile.
+  await page.locator(".layout-btn", { hasText: "Split →" }).click();
+  await expect(page.locator(".tile")).toHaveCount(2);
+  await page.locator(".tile").first().locator(".doc-tab", { hasText: "Ship release" }).click();
+  await page.keyboard.press("Control+b");
+  await page.keyboard.press("Shift+L");
+  await expect(page.locator(".tile").nth(1).locator(".doc-tab")).toContainText(["Ship release"]);
+  await expect(page.locator(".tile").first().locator(".doc-tab")).toContainText(["Fix login"]);
+
+  // Chat <-> Console on the focused session.
+  await page.locator(".tile").nth(1).locator(".session-switch .segment", { hasText: "Console" }).click();
+  await expect(page.locator(".tile").nth(1).locator(".session-console")).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: test.info().outputPath("tiles.png") });
+  await page.locator(".tile").nth(1).locator(".session-switch .segment", { hasText: "Chat" }).click();
+
+  // Closing the last tab of a tile collapses it.
+  await page.locator(".tile").nth(1).locator(".doc-tab-close").click({ force: true });
+  await expect(page.locator(".tile")).toHaveCount(1);
 });

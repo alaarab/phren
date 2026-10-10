@@ -11,7 +11,7 @@ import { openFileTree, openEditorDoc } from "../editor.js";
 import { openSearch } from "../search.js";
 import { setActiveSession } from "../keys.js";
 import { store, projectOf } from "../shell/store.js";
-import { createTabs } from "../shell/tabs.js";
+import { createTiles } from "../shell/tiles.js";
 
 const PANES = [["changes", "Changes"], ["files", "Files"], ["search", "Search"]];
 
@@ -41,11 +41,15 @@ export function mountAgents(root) {
     <div class="columns">
       <aside id="sidebar" class="sidebar"></aside>
       <main id="main" class="main">
-        <div class="doc-bar-row">
+        <div class="layout-bar">
           <button class="doc-sidebar-toggle" type="button" aria-label="Collapse sidebar">\u25e7</button>
-          <div class="doc-bar"></div>
+          <span class="spacer"></span>
+          <button class="layout-btn" data-act="terminal" type="button" title="New terminal tile">Terminal</button>
+          <button class="layout-btn" data-act="split-right" type="button" title="Split side by side (\u2318\\)">Split \u2192</button>
+          <button class="layout-btn" data-act="split-down" type="button" title="Split top and bottom (\u2318\u21e7\\)">Split \u2193</button>
+          <button class="layout-btn" data-act="zoom" type="button" title="Zoom the focused tile">Zoom</button>
         </div>
-        <div class="doc-body"><div class="empty">Pick a session</div></div>
+        <div class="tiles-root"></div>
         <section id="terminal-panel" class="terminal-panel" hidden>
           <div class="terminal-handle" title="Resize terminal"></div>
           <div class="terminal-bar">
@@ -61,8 +65,7 @@ export function mountAgents(root) {
   const sidebarEl = root.querySelector("#sidebar");
   const sideEl = root.querySelector("#side");
   const mainEl = root.querySelector("#main");
-  const docBody = root.querySelector(".doc-body");
-  const emptyEl = docBody.querySelector(".empty");
+  const tilesRoot = root.querySelector(".tiles-root");
   const termPanel = root.querySelector("#terminal-panel");
   const termHandle = root.querySelector(".terminal-handle");
   const termTitle = root.querySelector(".terminal-title");
@@ -305,10 +308,10 @@ export function mountAgents(root) {
   root.querySelector(".terminal-close").addEventListener("click", closeTerminal);
 
   // ------------------------------------------------------------ documents
-  const tabs = createTabs(root.querySelector(".doc-bar"), docBody, {
+  const tabs = createTiles(tilesRoot, {
+    emptyText: "Pick a session, or press \u2318K.",
     onActivate(doc) {
-      emptyEl.hidden = true;
-      if (doc.kind !== "chat") return;
+      if (!doc.child) return;
       const key = `${doc.computer}/${doc.child.id}`;
       session = { computer: doc.computer, child: doc.child };
       setActiveSession(doc.computer, doc.child);
@@ -325,14 +328,20 @@ export function mountAgents(root) {
       resetBench();
       closePanel();
       closeTerminal();
-      emptyEl.hidden = false;
     },
-    onClose(doc) { fileHandles.delete(doc.id); },
+  });
+
+  root.querySelector(".layout-bar").addEventListener("click", (ev) => {
+    const act = ev.target instanceof Element ? ev.target.closest(".layout-btn")?.dataset.act : null;
+    if (act === "split-right") tabs.split("right");
+    else if (act === "split-down") tabs.split("down");
+    else if (act === "zoom") tabs.zoom();
+    else if (act === "terminal") openTerminalDoc();
   });
 
   // A file/diff tab closes through its handle so a dirty doc can prompt first:
   // intercept the tab's close button and middle-click before createTabs closes it.
-  const docBar = root.querySelector(".doc-bar");
+  const docBar = tilesRoot;
   const interceptClose = (ev) => {
     const target = ev.target instanceof Element ? ev.target : null;
     const id = target?.closest(".doc-tab")?.dataset.doc;
@@ -355,17 +364,99 @@ export function mountAgents(root) {
     tabs.close();
   }
 
-  function chatDoc(computer, child) {
-    return {
-      id: `chat:${computer}/${child.id}`,
+  /** A session tile: its chat, or its agent pane's own terminal (the console). */
+  function chatDoc(computer, child, mode = "chat") {
+    const id = `chat:${computer}/${child.id}`;
+    const doc = {
+      id,
       kind: "chat",
       computer,
       child,
       title: child.title || child.label || projectOf(child),
-      subtitle: `${projectOf(child)} · ${computer}`,
-      persist: { computer, id: child.id },
-      mount: (el) => openChat(el, computer, child, {}),
+      subtitle: `${projectOf(child)} \u00b7 ${computer}`,
+      persist: { computer, id: child.id, mode },
+      mount: (el) => mountSession(el, doc, mode),
     };
+    return doc;
+  }
+
+  function mountSession(el, doc, initialMode) {
+    const { computer, child } = doc;
+    el.classList.add("session-doc");
+    const bar = document.createElement("div");
+    bar.className = "session-switch segments";
+    const chatBtn = document.createElement("button");
+    chatBtn.className = "segment"; chatBtn.textContent = "Chat";
+    const consoleBtn = document.createElement("button");
+    consoleBtn.className = "segment"; consoleBtn.textContent = "Console";
+    bar.append(chatBtn, consoleBtn);
+    const chatEl = document.createElement("div");
+    chatEl.className = "session-pane";
+    const consoleEl = document.createElement("div");
+    consoleEl.className = "session-pane session-console";
+    consoleEl.hidden = true;
+    el.append(chatEl, consoleEl, bar);
+    const chat = openChat(chatEl, computer, child, { onConsole: () => setMode("console") });
+    let consoleHandle = null;
+    let mode = "chat";
+
+    function consoleAllowed() {
+      if (computer === "This computer") return true;
+      return store.can(computer, "paneTerminal") !== false;
+    }
+
+    function setMode(next) {
+      if (next === mode) return;
+      if (next === "console") {
+        if (!child.target?.pane || !child.target?.server) return;
+        if (!consoleAllowed()) {
+          consoleEl.textContent = `The console needs a newer Phren on ${computer}.`;
+        } else if (!consoleHandle) {
+          consoleHandle = openTerminal(consoleEl, computer, child.target.server, { pane: child.target.pane });
+        }
+      } else if (consoleHandle) {
+        // Detach the console when leaving it: it holds an SSH channel.
+        consoleHandle.close();
+        consoleHandle = null;
+        consoleEl.replaceChildren();
+      }
+      mode = next;
+      chatEl.hidden = mode !== "chat";
+      consoleEl.hidden = mode !== "console";
+      chatBtn.classList.toggle("selected", mode === "chat");
+      consoleBtn.classList.toggle("selected", mode === "console");
+      doc.persist = { ...doc.persist, mode };
+      if (mode === "console") consoleHandle?.focus?.(); else chat.focus?.();
+    }
+    chatBtn.addEventListener("click", () => setMode("chat"));
+    consoleBtn.addEventListener("click", () => setMode("console"));
+    chatBtn.classList.add("selected");
+    if (initialMode === "console") setMode("console");
+
+    return {
+      close() { chat.close(); consoleHandle?.close(); },
+      focus() { if (mode === "console") consoleHandle?.focus?.(); else chat.focus?.(); },
+      insert(text) { setMode("chat"); chat.insert?.(text); },
+      toggleMode() { setMode(mode === "chat" ? "console" : "chat"); },
+      setMode,
+    };
+  }
+
+  /** A whole Herdr or tmux server as a terminal tile (the focused session's, by default). */
+  function terminalDoc(computer, server) {
+    return {
+      id: `terminal:${computer}/${server}/${Date.now().toString(36)}`,
+      kind: "terminal",
+      title: `Terminal \u00b7 ${server}`,
+      subtitle: computer,
+      persist: { computer, server },
+      mount: (el) => openTerminal(el, computer, server),
+    };
+  }
+
+  function openTerminalDoc(computer = session?.computer, server = session?.child?.target?.server) {
+    if (!computer || !server) return;
+    tabs.open(terminalDoc(computer, server), { split: tabs.list().length ? "auto" : undefined });
   }
 
   function openSession(computer, child, options) {
@@ -377,8 +468,25 @@ export function mountAgents(root) {
     onOpenTerminal: (computer, server) => showPane("terminal", { computer, server }),
   };
 
-  // Reopen last run's chat, file and diff tabs once their sessions show up.
-  let restore = tabs.saved();
+  // Rebuild last run's tiles once every computer they name has reported in.
+  let pendingLayout = tabs.saved();
+  function resolveSaved(item) {
+    if (item.kind === "terminal") return item.computer && item.server ? terminalDoc(item.computer, item.server) : null;
+    const row = store.find(item.computer, item.id);
+    if (!row) return null;
+    if (item.kind === "chat") return chatDoc(row.computer, row.child, item.mode === "console" ? "console" : "chat");
+    if (item.kind === "file" || item.kind === "diff") {
+      const diff = item.kind === "diff";
+      return fileDoc(`${diff ? "diff" : "file"}:${row.computer}/${row.child.id}/${item.path}`, row.computer, row.child, item.path, { diff });
+    }
+    return null;
+  }
+  function savedComputers(node, out = new Set()) {
+    if (!node) return out;
+    if (node.a) { savedComputers(node.a, out); savedComputers(node.b, out); }
+    for (const item of node.docs ?? []) if (item.computer) out.add(item.computer);
+    return out;
+  }
   store.subscribe((merged) => {
     renderSidebar(sidebarEl, merged, handlers);
     // Compact rows show only the ring, so carry the title onto the row for hover.
@@ -388,23 +496,12 @@ export function mountAgents(root) {
     for (const row of sidebarEl.querySelectorAll(".sb-computer-row")) {
       row.title = row.querySelector(".sb-cname")?.textContent || "";
     }
-    if (session) setActiveSession(session.computer, session.child);
-    if (restore) {
-      const pending = [];
-      const online = (name) => merged.computers?.some((c) => c.computer === name && c.state === "online");
-      for (const item of restore.list) {
-        const row = store.find(item.computer, item.id);
-        if (row) {
-          if (item.kind === "chat") openSession(row.computer, row.child, { background: true });
-          else if (item.kind === "file" || item.kind === "diff") openFileDoc(row.computer, row.child, item.path, { diff: item.kind === "diff" });
-        } else if (!online(item.computer)) pending.push(item);
-      }
-      const activeId = restore.active;
-      if (activeId && tabs.has(activeId)) tabs.activate(activeId);
-      else if (!tabs.active()) { const first = tabs.list()[0]; if (first) tabs.activate(first.id); }
-      // Computers still connecting get another chance on later frames.
-      restore = pending.length ? { list: pending, active: activeId } : null;
+    if (pendingLayout) {
+      const states = new Map((merged.computers ?? []).map((c) => [c.computer, c.state]));
+      const waiting = [...savedComputers(pendingLayout)].some((name) => states.has(name) && states.get(name) === "connecting");
+      if (!waiting) { if (!tabs.list().length) tabs.restore(pendingLayout, resolveSaved); pendingLayout = null; }
     }
+    if (session) setActiveSession(session.computer, session.child);
   });
 
   window.addEventListener("resize", () => {
@@ -421,6 +518,9 @@ export function mountAgents(root) {
     showPane,
     closePanel,
     closeTab: closeActiveTab,
+    tiles: tabs,
+    toggleConsole() { tabs.activeHandle()?.toggleMode?.(); },
+    openTerminalDoc,
     nextTab: () => tabs.step(1),
     previousTab: () => tabs.step(-1),
     toggleZoom() { if (sideEl.hidden) showPane(bench.pane ?? "changes"); document.body.classList.toggle("bench-max"); },

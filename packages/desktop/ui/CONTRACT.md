@@ -64,6 +64,23 @@ Agents' handle (via `sectionHandle("agents")`): `openSession(computer, child)`,
 `showPane(key)`, `closePanel()`, `closeTab()`, `nextTab()`, `previousTab()`,
 `toggleZoom()`, `currentSession()`.
 
+## Tiles (`shell/tiles.js`)
+
+The Agents centre is a split tree like Herdr's panes: tiles side by side or
+stacked, each with its own tabs (`shell/tabs.js`, which can `detach`/`adopt`
+a mounted document, so moving never remounts a chat). Same API as tabs plus
+`split(side)`, `focusDir(dir)`, `moveDir(dir)`, `swapDir(dir)`, `resize(dir)`,
+`zoom()`, `moveDoc(id, tile, side?)`, `restore(layout, resolve)`, `saved()`.
+Drag a tab onto a tile's edge to split there, onto its centre or tab bar to
+move into it. Keys use Herdr's action names (focus_pane_*, split_vertical,
+split_horizontal, resize_pane_*, zoom, close_pane) plus Phren's move_pane_*,
+swap_pane_*, toggle_console; ⌘\ and ⌘⇧\ split. The layout is saved
+(`phren.desktop.layout`) and rebuilt once its computers report in.
+
+Document kinds: `chat` (a session: Chat or Console, the console being the
+agent pane's own terminal over `/pty?pane=`), `file`, `diff`, `terminal`
+(a whole Herdr/tmux server).
+
 ## Agents layout
 
 `#sidebar` (left, collapses to 64 px below 1440 px wide, toggle in the doc bar)
