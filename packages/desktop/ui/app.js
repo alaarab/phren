@@ -5,9 +5,11 @@ import { connectStore, store } from "./shell/store.js";
 import { installSections, registerSection, sectionHandle, setSectionBadge, showSection } from "./shell/sections.js";
 import { mountAgents } from "./sections/agents.js";
 import { mountHome } from "./sections/home.js";
+import { initTheme } from "./shell/theme.js";
 
 // The Electron shell exposes window.phrenDesktop; in a browser it is absent.
 const shell = window.phrenDesktop;
+void initTheme();
 if (shell) document.documentElement.classList.add("electron", `platform-${shell.platform}`);
 
 const countEl = document.getElementById("conn-count");

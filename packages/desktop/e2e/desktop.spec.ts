@@ -134,3 +134,12 @@ test("home lists who needs you, and sessions open as centre tabs", async ({ page
   await expect(page.locator(".doc-tab")).toHaveCount(1);
   await expect(page.locator(".doc-tab.selected")).toContainText("Fix login");
 });
+
+test("themes switch the phone's token sets at runtime", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  const bg = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg").trim().toUpperCase());
+  await expect.poll(bg).toBe("#1E1E1E");
+  await page.evaluate(async () => { const m = await import("/shell/theme.js"); await m.applyTheme("amethyst"); });
+  await expect.poll(bg).toBe("#17121F");
+  await page.evaluate(async () => { const m = await import("/shell/theme.js"); await m.applyTheme("midnight"); });
+});

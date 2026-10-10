@@ -183,7 +183,7 @@ function resolveStatic(pathname: string): string | null {
     return full && existsSync(full) ? full : null;
   }
   // UI files, including the shell/ and sections/ folders; safeJoin keeps them inside UI_DIR.
-  if (!/^(?:[\w-]+\/)*[\w.-]+\.(js|css|html|md)$/.test(pathname.slice(1))) return null;
+  if (!/^(?:[\w-]+\/)*[\w.-]+\.(js|css|html|md|json)$/.test(pathname.slice(1))) return null;
   return safeJoin(UI_DIR, pathname.slice(1));
 }
 
