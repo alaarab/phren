@@ -29,6 +29,8 @@ import { configureHooksIfEnabled } from "./init/init-configure.js";
 import { applyStarterTemplateUpdates, applyTemplate, getHookEntrypointCheck, repairPreexistingInstall } from "./init/setup.js";
 import { VERSION } from "./init/shared.js";
 import { collectNativeMemoryFiles } from "./shared.js";
+import { registeredStoreIdentity } from "./store-registry.js";
+import { taskFormatStatus } from "./data/task-format.js";
 
 describe("mcp mode configuration", () => {
   let tmpRoot: string;
@@ -572,6 +574,20 @@ describe("runInit walkthrough integration", () => {
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     expect(insideWorkTree).toBe("true");
+  });
+
+  it("fresh init starts with task metadata on, and re-running init leaves an existing store's choice alone", async () => {
+    const phrenPath = path.join(tmpRoot, "phren-task-format");
+    process.env.PHREN_PATH = phrenPath;
+
+    await suppressOutput(() => runInit({ yes: true }));
+
+    expect(registeredStoreIdentity(phrenPath)).toMatch(/^[a-f0-9]{8}$/);
+    expect(taskFormatStatus(phrenPath).enabled).toBe(true);
+
+    fs.unlinkSync(path.join(phrenPath, ".config", "task-format.json"));
+    await suppressOutput(() => runInit({ yes: true }));
+    expect(taskFormatStatus(phrenPath).enabled).toBe(false);
   });
 
   it("fresh init writes detached ownership as the clean-install default", async () => {

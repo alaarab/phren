@@ -10,6 +10,7 @@ import { getPhrenPath } from "../shared.js";
 import { atomicWriteText } from "../phren-paths.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 import { TASKS_FILENAME } from "../data/tasks.js";
+import { initializeTaskFormat } from "../data/task-format.js";
 import { isValidProjectName, getOptionValue, getPositionalArgs } from "../utils.js";
 import { addProjectToProfile, resolveActiveProfile } from "../profile-store.js";
 import {
@@ -92,6 +93,9 @@ async function handleTeamInit(args: string[]): Promise<void> {
     path.join(globalDir, FINDINGS_FILENAME),
     `# global findings\n`,
   );
+
+  // A new store has no old writers: give it an identity and start with task metadata on.
+  initializeTaskFormat(storePath);
 
   // Initialize git repo
   execFileSync("git", ["init"], {
