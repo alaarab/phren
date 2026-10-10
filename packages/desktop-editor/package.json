@@ -18,6 +18,7 @@
     "@codingame/monaco-vscode-log-service-override": "37.3.11",
     "@codingame/monaco-vscode-model-service-override": "37.3.11",
     "@codingame/monaco-vscode-quickaccess-service-override": "37.3.11",
+    "@codingame/monaco-vscode-remote-agent-service-override": "37.3.11",
     "@codingame/monaco-vscode-textmate-service-override": "37.3.11",
     "@codingame/monaco-vscode-theme-defaults-default-extension": "37.3.11",
     "@codingame/monaco-vscode-theme-service-override": "37.3.11",

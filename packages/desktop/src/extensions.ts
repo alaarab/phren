@@ -2,6 +2,7 @@
 // Installed at <config>/phren/desktop-extensions/<publisher>.<name>/ as the
 // unzipped extension/ folder plus a phren.json record.
 import { createHash } from "node:crypto";
+import { installIntoReh, rehExtensionsDir, uninstallFromReh } from "./reh.js";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -239,14 +240,34 @@ export async function installFromOpenVsx(
   if (!files.has("package.json")) throw new ExtensionError(502, "The extension has no package.json.");
 
   await writeExtension(id, meta.version || "0.0.0", files);
+  // Keep the verified package beside it: a Node-only extension's code runs in
+  // the Node extension host, which installs from the VSIX.
+  await writeFile(join(extensionDir(id), "package.vsix"), bytes, { mode: 0o600 });
   const ext = await readExtension(id);
   if (!ext) throw new ExtensionError(502, "The extension could not be installed.");
+  if (ext.kind === "node") await installIntoReh(join(extensionDir(id), "package.vsix")).catch(() => false);
   return ext;
+}
+
+/** Put every installed Node-only extension into the Node extension host
+ * (those installed before it was built). Returns the ids it added. */
+export async function syncNodeExtensions(): Promise<string[]> {
+  const present = existsSync(rehExtensionsDir()) ? (await readdir(rehExtensionsDir())).map(n => n.toLowerCase()) : [];
+  const added: string[] = [];
+  for (const ext of await listExtensions()) {
+    if (ext.kind !== "node" || !ext.enabled) continue;
+    if (present.some(n => n.startsWith(`${ext.id.toLowerCase()}-`))) continue;
+    const vsix = join(extensionDir(ext.id), "package.vsix");
+    if (!existsSync(vsix)) continue;
+    if (await installIntoReh(vsix).catch(() => false)) added.push(ext.id);
+  }
+  return added;
 }
 
 export async function uninstall(id: string): Promise<void> {
   const dir = extensionDir(id);
   if (!existsSync(dir)) throw new ExtensionError(404, `Unknown extension ${id}.`);
+  await uninstallFromReh(id);
   await rm(dir, { recursive: true, force: true });
 }
 
