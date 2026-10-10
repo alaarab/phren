@@ -14,7 +14,16 @@ const SEGMENTS = [
   { id: "topics", label: "Topics" },
   { id: "graph", label: "Graph" },
 ];
-const LIFECYCLE = new Set(["superseded", "retracted", "contradicted", "stale"]);
+const FINDING_TYPES = new Set(["pattern", "decision", "pitfall", "workaround", "bug", "context"]);
+const LIFECYCLE_CHIP = {
+  superseded: { label: "Superseded", cls: "life" },
+  retracted: { label: "Retracted", cls: "life" },
+  stale: { label: "Stale", cls: "life" },
+  contradicted: { label: "Contradicted", cls: "danger" },
+  invalid_citation: { label: "Invalid citation", cls: "danger" },
+};
+const DIM_STATES = new Set(["superseded", "retracted", "stale"]);
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const GRAPH_MISSING = "The graph needs a newer desktop build";
 
 function ensureCss() {
@@ -64,20 +73,55 @@ async function apiPost(computer, route, body) {
   return parseResponse(res);
 }
 
-/** A finding's `[type]` prefix, which FindingItem carries inside `text`. */
+/** A finding's type tag: `[pitfall]` in text or the parsed metadata type. */
 function findingTag(item) {
-  const raw = String(item?.type ?? "").trim();
-  if (raw) return raw.toLowerCase();
-  const match = String(item?.text ?? "").match(/^\[([A-Za-z][A-Za-z0-9 _-]{0,24})\]\s*/);
-  return match ? match[1].toLowerCase() : null;
+  const raw = String(item?.type ?? "").trim().toLowerCase();
+  if (FINDING_TYPES.has(raw)) return raw;
+  const match = String(item?.text ?? "").match(/\[([A-Za-z][A-Za-z0-9_-]*)\]/);
+  const tag = match ? match[1].toLowerCase() : null;
+  return tag && FINDING_TYPES.has(tag) ? tag : null;
 }
 
+/** Display text: HTML comments removed and the leading `[type]` tag stripped. */
 function findingBody(item) {
-  return String(item?.text ?? "").replace(/^\[[A-Za-z][A-Za-z0-9 _-]{0,24}\]\s*/, "").trim();
+  return String(item?.text ?? "")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/^\[[A-Za-z][A-Za-z0-9_-]*\]\s*/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** The parsed citation meta, from citationData or by reading the raw comment. */
+function citationData(item) {
+  if (item?.citationData && typeof item.citationData === "object") return item.citationData;
+  const match = String(item?.citation ?? "").match(/phren:cite\s+(\{[\s\S]*\})/);
+  if (!match) return null;
+  try { return JSON.parse(match[1]); } catch { return null; }
+}
+
+function citeInfo(item) {
+  const data = citationData(item);
+  const file = String(data?.file ?? "").trim();
+  const line = data?.line;
+  const commit = String(data?.commit ?? "").trim();
+  if (!file) return commit ? { label: commit.slice(0, 7), title: commit, copy: commit, commit: "" } : null;
+  const base = file.split("/").filter(Boolean).pop() || file;
+  const full = line != null ? `${file}:${line}` : file;
+  return { label: line != null ? `${base}:${line}` : base, title: full, copy: full, commit };
+}
+
+/** "Oct 7" from an ISO date or a YYYY-MM-DD heading date. */
+function shortDate(value) {
+  const match = String(value ?? "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return "";
+  return `${MONTHS[Number(match[2]) - 1] ?? "?"} ${Number(match[3])}`;
 }
 
 function itemText(item) {
-  return String(item?.text ?? item?.summary ?? item?.label ?? item?.memory ?? "").trim();
+  return String(item?.text ?? item?.summary ?? item?.label ?? item?.memory ?? "")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function topicLabel(item) {
@@ -366,7 +410,7 @@ export function mountMemory(root) {
       all.addEventListener("click", () => { state.type = null; renderFindings(); });
       chips.append(all);
       for (const tag of tags) {
-        const chip = el("button", `mem-chip${state.type === tag ? " on" : ""}`, tag);
+        const chip = el("button", `mem-chip tag-${tag}${state.type === tag ? " on" : ""}`, tag);
         chip.type = "button";
         chip.addEventListener("click", () => { state.type = state.type === tag ? null : tag; renderFindings(); });
         chips.append(chip);
@@ -395,22 +439,30 @@ export function mountMemory(root) {
 
   function findingRow(item) {
     const status = String(item.status ?? "active");
-    const row = el("div", `mem-row${LIFECYCLE.has(status) ? " dim" : ""}`);
-    row.append(el("div", "mem-row-text", findingBody(item) || item.text || ""));
+    const row = el("div", `mem-row${DIM_STATES.has(status) ? " dim" : ""}`);
+    row.append(el("div", "mem-row-text", findingBody(item)));
     const meta = el("div", "mem-row-meta");
     const tag = findingTag(item);
-    if (tag) meta.append(el("span", "mem-tag type", tag));
-    if (LIFECYCLE.has(status)) meta.append(el("span", "mem-tag life", status));
+    if (tag) meta.append(el("span", `mem-tag type ${tag}`, tag));
+    const life = LIFECYCLE_CHIP[status];
+    if (life) meta.append(el("span", `mem-tag ${life.cls}`, life.label));
     if (item.confidence != null) meta.append(confidenceTag(item.confidence));
     if (item.machine) meta.append(el("span", "mem-meta-dim", item.machine));
-    if (item.citation) {
-      const cite = el("button", "mem-cite", item.citation);
-      cite.type = "button";
-      cite.title = "Copy citation";
-      cite.addEventListener("click", () => copyText(item.citation));
-      meta.append(cite);
+    const cite = citeInfo(item);
+    if (cite) {
+      const chip = el("button", "mem-cite", cite.label);
+      chip.type = "button";
+      chip.title = cite.title;
+      chip.addEventListener("click", () => copyText(cite.copy));
+      meta.append(chip);
+      if (cite.commit) {
+        const commit = el("span", "mem-tag commit", cite.commit.slice(0, 7));
+        commit.title = cite.commit;
+        meta.append(commit);
+      }
     }
-    meta.append(el("span", "mem-date", String(item.date ?? "")));
+    const when = shortDate(item.date) || shortDate(citationData(item)?.created_at);
+    if (when) meta.append(el("span", "mem-date", when));
     row.append(meta);
     return row;
   }
