@@ -2,6 +2,7 @@
 // that index through the Hook, per "Code index and search (phase 1c)".
 
 import { hookGet, hookPost } from "./api.js";
+import { store } from "./shell/store.js";
 
 const projectCache = new Map(); // computer + "\0" + repository -> { project, available }
 
@@ -11,6 +12,9 @@ const projectCache = new Map(); // computer + "\0" + repository -> { project, av
  */
 export async function resolveProject(computer, target) {
   try {
+    // The code index is only reachable when the Hook declares the code module;
+    // without it no provider registers and the editor keeps its language kit.
+    if ((await store.capabilities(computer)).code !== true) return { project: null, available: false };
     const status = await hookPost(computer, "/v1/git/status", { target });
     const repository = status.repository;
     if (!repository) return { project: null, available: false };

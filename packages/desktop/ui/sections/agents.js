@@ -1,39 +1,95 @@
 // The Agents section: sessions on the left, open documents (chats now; files
-// and diffs next) as centre tabs, and the session's tools on the right
-// (Changes · Files · Search · Terminal · Extensions). The right panel follows
-// the active tab's session.
+// and diffs next) as centre tabs, the session's tools on the right
+// (Changes · Files · Search), and a bottom terminal panel toggled with ⌘J.
+// The right panel follows the active tab's session; the terminal attaches to
+// that session's server.
 import { renderSidebar } from "../sidebar.js";
 import { openChat } from "../chat.js";
 import { openTerminal } from "../terminal.js";
 import { openChanges } from "../changes.js";
 import { openFiles } from "../editor.js";
 import { openSearch } from "../search.js";
-import { openExtensions } from "../extensions.js";
 import { setActiveSession } from "../keys.js";
 import { store, projectOf } from "../shell/store.js";
 import { createTabs } from "../shell/tabs.js";
 
-const PANES = [["changes", "Changes"], ["files", "Files"], ["search", "Search"], ["terminal", "Terminal"], ["extensions", "Extensions"]];
+const PANES = [["changes", "Changes"], ["files", "Files"], ["search", "Search"]];
+
+const SIDE_WIDTH_KEY = "phren.desktop.side-width";
+const SIDE_DEFAULT = 360;
+const SIDE_MIN = 300;
+const TERM_HEIGHT_KEY = "phren.desktop.terminal-height";
+const TERM_DEFAULT = 280;
+const TERM_MIN = 120;
+// Below this width the sidebar collapses to rings; below 1200 CSS overlays the
+// right panel over the centre (see the media query in theme.css).
+const SIDEBAR_COLLAPSE = 1440;
+
+function readSize(key, fallback) {
+  try {
+    const value = Number(localStorage.getItem(key));
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  } catch { return fallback; }
+}
+
+function writeSize(key, value) {
+  try { localStorage.setItem(key, String(Math.round(value))); } catch { /* storage unavailable */ }
+}
 
 export function mountAgents(root) {
   root.innerHTML = `
     <div class="columns">
       <aside id="sidebar" class="sidebar"></aside>
       <main id="main" class="main">
-        <div class="doc-bar"></div>
+        <div class="doc-bar-row">
+          <button class="doc-sidebar-toggle" type="button" aria-label="Collapse sidebar">\u25e7</button>
+          <div class="doc-bar"></div>
+        </div>
         <div class="doc-body"><div class="empty">Pick a session</div></div>
+        <section id="terminal-panel" class="terminal-panel" hidden>
+          <div class="terminal-handle" title="Resize terminal"></div>
+          <div class="terminal-bar">
+            <span class="terminal-title">Terminal</span>
+            <span class="spacer"></span>
+            <button class="icon-button terminal-close" type="button" title="Close terminal" aria-label="Close terminal">\u00d7</button>
+          </div>
+          <div class="terminal-body"></div>
+        </section>
       </main>
       <section id="side" class="side" hidden></section>
     </div>`;
   const sidebarEl = root.querySelector("#sidebar");
   const sideEl = root.querySelector("#side");
+  const mainEl = root.querySelector("#main");
   const docBody = root.querySelector(".doc-body");
   const emptyEl = docBody.querySelector(".empty");
+  const termPanel = root.querySelector("#terminal-panel");
+  const termHandle = root.querySelector(".terminal-handle");
+  const termTitle = root.querySelector(".terminal-title");
+  const termBody = root.querySelector(".terminal-body");
+  const sidebarToggle = root.querySelector(".doc-sidebar-toggle");
 
   let session = null; // { computer, child } of the active tab
 
+  // ------------------------------------------------------------ sidebar
+  // Auto-collapse below SIDEBAR_COLLAPSE; the toggle pins a choice either way.
+  let sidebarPinned = false;
+  let sidebarCompact = window.innerWidth < SIDEBAR_COLLAPSE;
+  function renderSidebarState() {
+    sidebarEl.classList.toggle("compact", sidebarCompact);
+    const title = sidebarCompact ? "Expand sidebar" : "Collapse sidebar";
+    sidebarToggle.title = title;
+    sidebarToggle.setAttribute("aria-label", title);
+  }
+  sidebarToggle.addEventListener("click", () => {
+    sidebarPinned = true;
+    sidebarCompact = !sidebarCompact;
+    renderSidebarState();
+  });
+  renderSidebarState();
+
   // ------------------------------------------------------------ right panel
-  const bench = { pane: null, handles: {}, bodies: {}, terminalServer: null, terminalComputer: null, sessionKey: null };
+  const bench = { pane: null, handles: {}, bodies: {}, sessionKey: null };
   const benchBar = document.createElement("div");
   benchBar.className = "bench-bar";
   const segments = document.createElement("div");
@@ -57,15 +113,21 @@ export function mountAgents(root) {
   const handle = document.createElement("div");
   handle.className = "bench-handle";
   sideEl.append(handle, benchBar, benchBody);
+  sideEl.style.width = `${readSize(SIDE_WIDTH_KEY, SIDE_DEFAULT)}px`;
 
-  // Drag the left edge to resize: 280 px to 75 % of the window.
+  // Drag the left edge to resize: 300 px to 50 % of the window.
   handle.addEventListener("pointerdown", (down) => {
     handle.setPointerCapture(down.pointerId);
     const move = (ev) => {
-      const width = Math.min(Math.max(window.innerWidth - ev.clientX, 280), window.innerWidth * 0.75);
+      const max = window.innerWidth * 0.5;
+      const width = Math.min(Math.max(window.innerWidth - ev.clientX, SIDE_MIN), max);
       sideEl.style.width = `${width}px`;
     };
-    const up = () => { handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", up); };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      writeSize(SIDE_WIDTH_KEY, parseFloat(sideEl.style.width) || SIDE_DEFAULT);
+    };
     handle.addEventListener("pointermove", move);
     handle.addEventListener("pointerup", up);
   });
@@ -82,7 +144,7 @@ export function mountAgents(root) {
 
   function resetBench() {
     for (const h of Object.values(bench.handles)) { try { h.close(); } catch { /* already closed */ } }
-    bench.handles = {}; bench.bodies = {}; bench.terminalServer = null; bench.terminalComputer = null;
+    bench.handles = {}; bench.bodies = {};
     benchBody.replaceChildren();
   }
 
@@ -97,28 +159,16 @@ export function mountAgents(root) {
   }
 
   function showPane(key, terminalTarget) {
+    // terminal is no longer a right-panel segment: it toggles the bottom panel.
+    if (key === "terminal") return toggleTerminal(terminalTarget);
     sideEl.hidden = false;
     bench.pane = key;
     for (const [k] of PANES) segmentButtons[k].classList.toggle("selected", k === key);
     for (const [k, div] of Object.entries(bench.bodies)) div.hidden = k !== key;
     const el = body(key);
     el.hidden = false;
-    if (key === "terminal") {
-      const computer = terminalTarget?.computer ?? session?.computer;
-      const server = terminalTarget?.server ?? session?.child?.target?.server;
-      if (!computer || !server) { el.textContent = "Open a session first."; return; }
-      if (bench.handles.terminal && (bench.terminalServer !== server || bench.terminalComputer !== computer)) {
-        bench.handles.terminal.close(); delete bench.handles.terminal;
-      }
-      if (!bench.handles.terminal) {
-        bench.terminalServer = server; bench.terminalComputer = computer;
-        bench.handles.terminal = openTerminal(el, computer, server);
-        el.hidden = false;
-      }
-      return;
-    }
-    if (key !== "extensions" && !session?.child?.target) { el.textContent = "Open a session to see its changes and files."; return; }
-    const open = { changes: openChanges, files: openFiles, search: openSearch, extensions: openExtensions }[key];
+    if (!session?.child?.target) { el.textContent = "Open a session to see its changes and files."; return; }
+    const open = { changes: openChanges, files: openFiles, search: openSearch }[key];
     if (!bench.handles[key]) bench.handles[key] = open(el, benchContext());
     else if (key === "changes") bench.handles.changes.refresh?.();
     if (key === "search") bench.handles.search.focus?.();
@@ -128,6 +178,76 @@ export function mountAgents(root) {
     sideEl.hidden = true;
     document.body.classList.remove("bench-max");
   }
+
+  // ------------------------------------------------------------ bottom terminal
+  const terminal = { open: false, computer: null, server: null, handle: null };
+
+  function openTerminalPanel(computer, server) {
+    terminal.open = true;
+    termPanel.hidden = false;
+    if (!computer || !server) {
+      termTitle.textContent = "Terminal";
+      if (terminal.handle) { terminal.handle.close(); terminal.handle = null; }
+      terminal.computer = null; terminal.server = null;
+      if (!termBody.querySelector(".terminal-empty")) {
+        termBody.replaceChildren();
+        const note = document.createElement("div");
+        note.className = "terminal-empty";
+        note.textContent = "Open a session first.";
+        termBody.append(note);
+      }
+      return;
+    }
+    if (terminal.handle && (terminal.computer !== computer || terminal.server !== server)) {
+      terminal.handle.close(); terminal.handle = null;
+    }
+    terminal.computer = computer; terminal.server = server;
+    termTitle.textContent = `Terminal · ${server} on ${computer}`;
+    if (!terminal.handle) {
+      terminal.handle = openTerminal(termBody, computer, server);
+      termBody.querySelector(".xterm-helper-textarea")?.focus();
+    }
+  }
+
+  function closeTerminal() {
+    terminal.open = false;
+    termPanel.hidden = true;
+    if (terminal.handle) { terminal.handle.close(); terminal.handle = null; }
+    terminal.computer = null; terminal.server = null;
+  }
+
+  /** The sidebar's >_ passes a target: open and attach. ⌘J passes none: toggle. */
+  function toggleTerminal(target) {
+    if (target?.computer && target?.server) return openTerminalPanel(target.computer, target.server);
+    if (terminal.open) return closeTerminal();
+    openTerminalPanel(session?.computer, session?.child?.target?.server);
+  }
+
+  /** Re-attach the open terminal when the active tab's server or computer moves. */
+  function syncTerminal() {
+    if (terminal.open) openTerminalPanel(session?.computer, session?.child?.target?.server);
+  }
+
+  termPanel.style.height = `${readSize(TERM_HEIGHT_KEY, TERM_DEFAULT)}px`;
+  termHandle.addEventListener("pointerdown", (down) => {
+    down.preventDefault();
+    termHandle.setPointerCapture(down.pointerId);
+    const startY = down.clientY;
+    const startHeight = termPanel.getBoundingClientRect().height;
+    const move = (ev) => {
+      const max = mainEl.clientHeight * 0.7;
+      const height = Math.min(Math.max(startHeight + (startY - ev.clientY), TERM_MIN), max);
+      termPanel.style.height = `${height}px`;
+    };
+    const up = () => {
+      termHandle.removeEventListener("pointermove", move);
+      termHandle.removeEventListener("pointerup", up);
+      writeSize(TERM_HEIGHT_KEY, parseFloat(termPanel.style.height) || TERM_DEFAULT);
+    };
+    termHandle.addEventListener("pointermove", move);
+    termHandle.addEventListener("pointerup", up);
+  });
+  root.querySelector(".terminal-close").addEventListener("click", closeTerminal);
 
   // ------------------------------------------------------------ documents
   const tabs = createTabs(root.querySelector(".doc-bar"), docBody, {
@@ -140,14 +260,16 @@ export function mountAgents(root) {
       if (bench.sessionKey !== key) {
         bench.sessionKey = key;
         resetBench();
-        showPane(bench.pane && bench.pane !== "extensions" ? bench.pane : "changes");
+        showPane(bench.pane ?? "changes");
       }
+      syncTerminal();
     },
     onEmpty() {
       session = null;
       bench.sessionKey = null;
       resetBench();
       closePanel();
+      closeTerminal();
       emptyEl.hidden = false;
     },
   });
@@ -178,6 +300,13 @@ export function mountAgents(root) {
   let restore = tabs.saved();
   store.subscribe((merged) => {
     renderSidebar(sidebarEl, merged, handlers);
+    // Compact rows show only the ring, so carry the title onto the row for hover.
+    for (const row of sidebarEl.querySelectorAll(".sb-row")) {
+      row.title = row.querySelector(".sb-title")?.textContent || row.querySelector(".sb-project")?.textContent || "";
+    }
+    for (const row of sidebarEl.querySelectorAll(".sb-computer-row")) {
+      row.title = row.querySelector(".sb-cname")?.textContent || "";
+    }
     if (session) setActiveSession(session.computer, session.child);
     if (restore) {
       const pending = [];
@@ -192,6 +321,15 @@ export function mountAgents(root) {
       // Computers still connecting get another chance on later frames.
       restore = pending.length ? { list: pending, active: activeId } : null;
     }
+  });
+
+  window.addEventListener("resize", () => {
+    if (!sidebarPinned) {
+      sidebarCompact = window.innerWidth < SIDEBAR_COLLAPSE;
+      renderSidebarState();
+    }
+    const width = Math.min(parseFloat(sideEl.style.width) || SIDE_DEFAULT, window.innerWidth * 0.5);
+    sideEl.style.width = `${Math.max(width, SIDE_MIN)}px`;
   });
 
   return {

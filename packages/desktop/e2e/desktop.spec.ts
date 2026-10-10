@@ -143,3 +143,31 @@ test("themes switch the phone's token sets at runtime", async ({ page }) => {
   await expect.poll(bg).toBe("#17121F");
   await page.evaluate(async () => { const m = await import("/shell/theme.js"); await m.applyTheme("midnight"); });
 });
+
+test("palette, settings and the three-segment tool panel", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => localStorage.clear());
+  await page.locator(".sb-row", { hasText: "Fix login" }).click();
+
+  // The right panel has exactly Changes · Files · Search; Extensions moved to Settings.
+  await expect(page.locator(".segments .segment")).toHaveText(["Changes", "Files", "Search"]);
+
+  // ⌘K opens the palette; typing a session title and Enter opens it.
+  await page.keyboard.press("Meta+k");
+  await expect(page.locator(".palette-input")).toBeFocused();
+  await page.keyboard.type("Ship release");
+  await page.screenshot({ path: test.info().outputPath("desktop-palette.png") });
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".doc-tab.selected")).toContainText("Ship release");
+
+  // Settings: theme picker and Extensions page.
+  await page.locator(".section-pill", { hasText: "Settings" }).click();
+  await page.locator(".settings-tab", { hasText: "Appearance" }).click();
+  await page.locator(".settings-theme", { hasText: "Slate" }).click();
+  await expect(page.locator(".settings-theme.selected")).toHaveText("Slate");
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: test.info().outputPath("desktop-settings.png") });
+  await page.locator(".settings-theme", { hasText: "Charcoal" }).click();
+  await page.locator(".settings-tab", { hasText: "Computers" }).click();
+  await expect(page.locator(".settings-page-computers")).toContainText("This computer");
+});

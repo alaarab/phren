@@ -5,6 +5,7 @@
 import { hookPost, readRepoFile } from "./api.js";
 import { reverseApply } from "./patch.js";
 import { resolveProject, makeIndex } from "./codeindex.js";
+import { store } from "./shell/store.js";
 
 const MONO = '"JetBrains Mono", ui-monospace, Menlo, monospace';
 const THEME = "phren";
@@ -343,6 +344,10 @@ export function openFiles(el, ctx) {
   let index = null;
   let project = null;
   let indexAvailable = false;
+  // Declared by the Hook's /v1/health; default true so a control gates only
+  // once the answer is in.
+  let canWrite = true;
+  let canList = true;
 
   // ------------------------------------------------------- remote file URIs
   // When this computer runs a Node extension host, its languages servers only
@@ -378,6 +383,10 @@ export function openFiles(el, ctx) {
     contextReady = loadMonaco()
       .then(async (m) => {
         monaco = m;
+        // The Hook's own flags decide save and quick-open, not a 404.
+        const caps = await store.capabilities(computer);
+        canWrite = caps.fileWrite === true;
+        canList = caps.fileSearch === true;
         window.PhrenEditorHost?.setPhrenReader?.((path) => readRepoFile(computer, target, path).then((file) => file.text));
         // One save path: with the VS Code host up, its own save command would
         // write vscode-remote files through the REH filesystem, bypassing the
@@ -519,6 +528,13 @@ export function openFiles(el, ctx) {
     banner.style.display = "none";
     banner.innerHTML = "";
   }
+  // The read-only gate: Saving needs a Hook that declares fileWrite.
+  function showGate(feature) {
+    if (!needsNewer(banner, computer, feature)) return false;
+    banner.className = "ed-banner waiting";
+    banner.style.display = "flex";
+    return true;
+  }
 
   // ------------------------------------------------------------- tabs
   function renderTabs() {
@@ -607,7 +623,7 @@ export function openFiles(el, ctx) {
       diffContainer.style.display = "none";
       editorContainer.style.display = "block";
       // Read-only follows the shown tab, since one editor instance is reused.
-      editor.updateOptions({ readOnly: !!tab.binary });
+      editor.updateOptions({ readOnly: !!tab.binary || !canWrite });
       if (editor.getModel() !== tab.model) {
         editor.setModel(tab.model);
         if (tab.viewState) editor.restoreViewState(tab.viewState);
@@ -616,6 +632,7 @@ export function openFiles(el, ctx) {
     clearBanner();
     if (tab.binary) showBanner("waiting", "This file is not UTF-8 text, so it opens read-only.");
     else if (tab.note) showBanner("muted", tab.note);
+    else if (!canWrite) showGate("fileWrite");
     markActive(tab.path);
   }
 
@@ -759,6 +776,7 @@ export function openFiles(el, ctx) {
     // One keypress can reach both the host command and the document handler;
     // the guard drops the duplicate so only one write carries the version.
     if (!tab || tab.binary || tab.saving) return;
+    if (!canWrite) { showGate("fileWrite"); return; }
     tab.saving = true;
     const path = pathFromUri(tab.model.uri) || tab.path;
     const content = (tab.bom ? "\uFEFF" : "") + tab.model.getValue();
@@ -774,8 +792,6 @@ export function openFiles(el, ctx) {
       renderTabs();
     } catch (err) {
       if (err.status === 409) showChanged(tab);
-      // TODO(capabilities): replace this 404 probe with the Hook's file-write capability flag once the capabilities phase lands.
-      else if (err.status === 404) showBanner("muted", `Update Phren on ${computer} to save files here.`);
       else showBanner("danger", err.message || "Save failed.");
     } finally {
       tab.saving = false;
@@ -871,13 +887,15 @@ export function openFiles(el, ctx) {
   let listed = null; // { at, files } from /v1/files/list, reused for 30 s
   async function quickPaths() {
     const paths = new Set(knownPaths);
-    try {
+    // /v1/files/list needs fileSearch like any search; without it the tree and
+    // changed paths already loaded are all we can offer.
+    if (canList) try {
       if (!listed || Date.now() - listed.at > 30_000) {
         const reply = await hookPost(computer, "/v1/files/list", { target });
         listed = { at: Date.now(), files: reply.files || [] };
       }
       for (const f of listed.files) paths.add(f);
-    } catch { /* an older Hook has no file list: tree and changed paths still work */ }
+    } catch { /* a failed list still leaves the tree and changed paths */ }
     try {
       const status = await hookPost(computer, "/v1/git/status", { target });
       for (const f of status.files || []) paths.add(f.path);
@@ -988,4 +1006,29 @@ export function openFiles(el, ctx) {
   }
 
   return { openFile, close };
+}
+
+// ------------------------------------------------------------- capability gate
+const GATE_LABEL = { fileWrite: "Saving", fileSearch: "Find in files", code: "The code index" };
+
+/** The reason a control needs a newer Hook. The version clause is dropped when
+ * the computer has not reported one. */
+export function newerMessage(computer, feature) {
+  const version = store.version(computer);
+  return `${GATE_LABEL[feature] || "This feature"} needs a newer Phren on ${computer}${version ? ` (it runs ${version})` : ""}.`;
+}
+
+/**
+ * Whether `computer`'s Hook is missing `feature`. When missing, renders the
+ * shared reason into `el` and returns true; false when the Hook declares it
+ * (and before the first capabilities read, so a control gates only once the
+ * Hook has answered).
+ */
+export function needsNewer(el, computer, feature) {
+  if (store.can(computer, feature)) return false;
+  const note = document.createElement("div");
+  note.className = "gate-note";
+  note.textContent = newerMessage(computer, feature);
+  el.replaceChildren(note);
+  return true;
 }

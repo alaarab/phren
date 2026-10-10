@@ -10,7 +10,9 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
 import type { MergedOverview, StartServer, TerminalSession } from "./contract.js";
 import { ACTIONS, loadKeyConfig } from "./keys-config.js";
+import { linkComputer, revokeComputer } from "./keys.js";
 import { rehStatus, stopReh } from "./reh.js";
+import { collectUsage } from "./usage.js";
 import {
   ExtensionError,
   extensionFilePath,
@@ -468,9 +470,46 @@ export const startServer: StartServer = async (o) => {
       return;
     }
 
+    if (pathname === "/api/computers/link" && req.method === "POST") {
+      try {
+        const body = (await readJson(req)) as { host?: unknown; name?: unknown; server?: unknown };
+        if (typeof body.host !== "string" || !body.host.trim()) throw new ExtensionError(400, "An ssh host or user@host is required.");
+        if (body.name !== undefined && typeof body.name !== "string") throw new ExtensionError(400, "name must be a string.");
+        if (body.server !== undefined && typeof body.server !== "string") throw new ExtensionError(400, "server must be a string.");
+        const computer = await linkComputer(body.host.trim(), { name: body.name || undefined, server: body.server || undefined });
+        sendJson(res, computer);
+      } catch (err) {
+        sendError(res, err);
+      }
+      return;
+    }
+
+    if (pathname === "/api/computers/revoke" && req.method === "POST") {
+      try {
+        const body = (await readJson(req)) as { name?: unknown };
+        if (typeof body.name !== "string" || !body.name.trim()) throw new ExtensionError(400, "A computer name is required.");
+        const { remote } = await revokeComputer(body.name.trim());
+        sendJson(res, { remote });
+      } catch (err) {
+        sendError(res, err);
+      }
+      return;
+    }
+
     if (pathname === "/api/overview") {
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
       res.end(JSON.stringify(o.hub.current()));
+      return;
+    }
+
+    if (pathname === "/api/usage" && (req.method ?? "GET") === "GET") {
+      // The titlebar rings: every computer's account usage, merged by account
+      // and cached for a minute so a polling UI never storms the Hooks.
+      try {
+        sendJson(res, await collectUsage(o.computers, o.hookRequest));
+      } catch (err) {
+        sendError(res, err);
+      }
       return;
     }
 

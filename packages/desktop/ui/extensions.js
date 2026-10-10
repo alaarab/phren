@@ -10,7 +10,7 @@ function ensureStyle() {
   const style = document.createElement("style");
   style.id = STYLE_ID;
   style.textContent = `
-.ext { display: flex; flex-direction: column; height: 100%; min-height: 0; position: relative; }
+.ext { display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; height: 100%; min-height: 0; position: relative; }
 .ext-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--border); }
 .ext-search { flex: 1; min-width: 0; height: 34px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--sunken); color: var(--text); font: inherit; outline: none; }
 .ext-search::placeholder { color: var(--dim); }
@@ -176,12 +176,6 @@ async function withBusy(buttonEl, label, action) {
   }
 }
 
-/**
- * Open the Extensions pane in el.
- * @param {HTMLElement} el
- * @param {{ computer: string }} ctx
- * @returns {{ close(): void }}
- */
 /** The VS Code editor host, loaded on demand; undefined when it is not built. */
 async function editorHost() {
   if (!window.PhrenEditorHost) {
@@ -190,7 +184,14 @@ async function editorHost() {
   return window.PhrenEditorHost;
 }
 
-export function openExtensions(el, ctx) {
+/**
+ * Open the Extensions pane in el. Works as the workbench's Extensions segment
+ * and inside the Settings section, where it is given a bare page container.
+ * @param {HTMLElement} el
+ * @param {{ computer?: string }} [ctx]
+ * @returns {{ close(): void }}
+ */
+export function openExtensions(el, ctx = {}) {
   ensureStyle();
 
   let closed = false;

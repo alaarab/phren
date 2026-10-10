@@ -1,5 +1,7 @@
 // Find in files (phase 1c). A VS Code-like search view in Phren Charcoal.
 import { hookPost, readRepoFile } from "./api.js";
+import { store } from "./shell/store.js";
+import { needsNewer } from "./editor.js";
 
 const STYLE_ID = "search-style";
 
@@ -138,7 +140,6 @@ export function openSearch(el, ctx) {
   function errorText(error) {
     if (error.status === 400) return "That regular expression is not valid.";
     if (error.status === 413) return "Too many matches. Narrow the search.";
-    if (error.status === 404) return `Update Phren on ${ctx.computer} to search here.`;
     return error.message || "Search failed.";
   }
 
@@ -440,6 +441,12 @@ export function openSearch(el, ctx) {
   replaceAllBtn.addEventListener("click", askReplaceAll);
 
   el.replaceChildren(root);
+
+  // Find in files needs a Hook that declares fileSearch; without it the panel
+  // is only the reason, with no input.
+  store.capabilities(ctx.computer).then(() => {
+    if (!store.can(ctx.computer, "fileSearch")) needsNewer(el, ctx.computer, "fileSearch");
+  });
 
   return {
     focus() {
