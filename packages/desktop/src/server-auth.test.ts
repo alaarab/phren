@@ -100,6 +100,16 @@ describe("server host and auth", () => {
     expect(good.status).toBe(200);
   });
 
+  it("sets the session cookie only on localhost, never on 127.0.0.1 where previews live", async () => {
+    const h = await startHarness();
+    const viaIp = await rawRequest({ port: h.port, path: `/?token=${TOKEN}`, headers: { Host: `127.0.0.1:${h.port}` } });
+    expect(viaIp.status).toBe(302);
+    expect(viaIp.headers["set-cookie"]).toBeUndefined();
+    expect(viaIp.headers.location).toBe(`http://localhost:${h.port}/?token=${TOKEN}`);
+    const viaName = await rawRequest({ port: h.port, path: `/?token=${TOKEN}`, headers: { Host: `localhost:${h.port}` } });
+    expect(String(viaName.headers["set-cookie"])).toContain("phren_desktop=");
+  });
+
   it("refuses a cross-origin text/plain POST before it reaches the Hook", async () => {
     const h = await startHarness();
     const res = await fetch(`http://127.0.0.1:${h.port}/hosts/This%20computer/v1/prompt`, {

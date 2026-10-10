@@ -41,7 +41,7 @@ describe("openPreview", () => {
       expect(preview.computer).toBe("This computer");
       expect(preview.port).toBe(echo.port);
       expect(preview.localPort).toBeGreaterThan(0);
-      expect(preview.url).toBe(`http://localhost:${preview.localPort}/`);
+      expect(preview.url).toBe(`http://127.0.0.1:${preview.localPort}/`);
 
       expect(await roundTrip(preview.localPort, "hello preview\n")).toBe("hello preview\n");
       // A second connection is handled independently.

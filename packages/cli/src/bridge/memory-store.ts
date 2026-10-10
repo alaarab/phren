@@ -126,39 +126,53 @@ const BATCH_BYTES = 9 * 1024 * 1024;
 export async function storeBlobs(store: string, data: Json): Promise<Json> {
   const shas = z.array(z.string().regex(SHA)).min(1).max(BATCH_COUNT).parse(data.shas);
   const unique = [...new Set(shas)];
-  const child = spawn("git", ["-C", store, "cat-file", "--batch"], { stdio: ["pipe", "pipe", "ignore"] });
-  const chunks: Buffer[] = [];
-  let total = 0;
-  const done = new Promise<Buffer>((resolve, reject) => {
+  // Sizes first (no content), so the budget is applied before anything is read.
+  const sizes = new Map<string, { type: string; size: number }>();
+  for (const line of (await catFile(store, "--batch-check", unique)).toString("utf8").split("\n")) {
+    const [sha, type, size] = line.split(" ");
+    if (sha && type && type !== "missing") sizes.set(sha, { type, size: Number(size) });
+  }
+  const blobs: Json[] = [];
+  const wanted: string[] = [];
+  let budget = BATCH_BYTES;
+  for (const sha of unique) {
+    const info = sizes.get(sha);
+    if (!info || info.type !== "blob") { blobs.push({ sha, error: "unknown" }); continue; }
+    if (info.size > MAX_FILE) { blobs.push({ sha, error: "too-large", size: info.size }); continue; }
+    if (info.size > budget) { blobs.push({ sha, error: "later" }); continue; }
+    budget -= info.size;
+    wanted.push(sha);
+  }
+  if (wanted.length) {
+    const out = await catFile(store, "--batch", wanted);
+    let offset = 0;
+    for (const sha of wanted) {
+      const newline = out.indexOf(10, offset);
+      if (newline < 0) { blobs.push({ sha, error: "later" }); continue; }
+      const size = Number(out.subarray(offset, newline).toString("utf8").split(" ")[2]);
+      offset = newline + 1;
+      blobs.push({ sha, encoding: "base64", content: out.subarray(offset, offset + size).toString("base64") });
+      offset += size + 1;
+    }
+  }
+  return { blobs };
+}
+
+/** Run one `git cat-file --batch[-check]` over these ids; output capped near the batch budget. */
+function catFile(store: string, mode: "--batch" | "--batch-check", shas: string[]): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("git", ["-C", store, "cat-file", mode], { stdio: ["pipe", "pipe", "ignore"] });
+    const chunks: Buffer[] = [];
+    let total = 0;
     child.stdout.on("data", (chunk: Buffer) => {
       total += chunk.length;
-      if (total > BATCH_BYTES + BATCH_COUNT * 64 + MAX_FILE) { child.kill(); reject(new BridgeError(413, "The batch is too large.")); return; }
+      if (total > BATCH_BYTES + BATCH_COUNT * 128) { child.kill(); reject(new BridgeError(413, "The batch is too large.")); return; }
       chunks.push(chunk);
     });
     child.on("error", reject);
     child.on("close", () => resolve(Buffer.concat(chunks)));
+    child.stdin.end(shas.map(sha => `${sha}\n`).join(""));
   });
-  child.stdin.end(unique.map(sha => `${sha}\n`).join(""));
-  const out = await done;
-  const blobs: Json[] = [];
-  let offset = 0;
-  let budget = BATCH_BYTES;
-  for (const sha of unique) {
-    const newline = out.indexOf(10, offset);
-    if (newline < 0) break;
-    const header = out.subarray(offset, newline).toString("utf8").split(" ");
-    offset = newline + 1;
-    if (header[1] === "missing" || header.length < 3) { blobs.push({ sha, error: "unknown" }); continue; }
-    const size = Number(header[2]);
-    const content = out.subarray(offset, offset + size);
-    offset += size + 1;
-    if (header[1] !== "blob") { blobs.push({ sha, error: "unknown" }); continue; }
-    if (size > MAX_FILE) { blobs.push({ sha, error: "too-large", size }); continue; }
-    if (size > budget) { blobs.push({ sha, error: "later" }); continue; }
-    budget -= size;
-    blobs.push({ sha, encoding: "base64", content: content.toString("base64") });
-  }
-  return { blobs };
 }
 
 /** Resolve a store-relative path, refusing escapes, .git and symlinked parents. */

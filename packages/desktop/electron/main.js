@@ -70,11 +70,11 @@ function allowedSubframe(target, port) {
   if (target === "about:blank") return true;
   try {
     const parsed = new URL(target);
-    return (
-      parsed.protocol === "http:" &&
-      parsed.port === port &&
-      (parsed.hostname === "localhost" || parsed.hostname.endsWith(".localhost"))
-    );
+    if (parsed.protocol !== "http:") return false;
+    // Web previews: the daemon's relay ports on 127.0.0.1 (another host than the app's
+    // localhost, so they never see its cookie). They navigate freely inside their frame.
+    if (parsed.hostname === "127.0.0.1" && parsed.port && parsed.port !== port) return true;
+    return parsed.port === port && (parsed.hostname === "localhost" || parsed.hostname.endsWith(".localhost"));
   } catch {
     return false;
   }

@@ -22,7 +22,7 @@ interface FakeStore {
 }
 
 /** A Hook serving head/tree/blob/file over a mutable in-memory store. */
-function fakeStore(initial: Record<string, string>, { batch = false } = {}): FakeStore {
+function fakeStore(initial: Record<string, string>, { batch = false, extraTree = [] as Array<Record<string, unknown>> } = {}): FakeStore {
   const files = new Map<string, Buffer>();
   for (const [p, text] of Object.entries(initial)) files.set(p, Buffer.from(text));
   const posts: FakeStore["posts"] = [];
@@ -38,7 +38,7 @@ function fakeStore(initial: Record<string, string>, { batch = false } = {}): Fak
     }
     if (method === "GET" && url.pathname === "/v1/store/tree") {
       calls.tree += 1;
-      const tree = [...files.entries()].map(([p, buf]) => ({ path: p, type: "blob", sha: blobSha(buf), size: buf.length }));
+      const tree = [...files.entries()].map(([p, buf]) => ({ path: p, type: "blob", sha: blobSha(buf), size: buf.length } as Record<string, unknown>)).concat(extraTree);
       return json({ sha: head, truncated: false, tree });
     }
     if (method === "GET" && url.pathname === "/v1/store/blob") {
@@ -125,6 +125,16 @@ describe("remote mirror", () => {
     expect(existsSync(path.join(mirror, "stores.yaml"))).toBe(true);
     expect(existsSync(path.join(mirror, "proj-a/README.md"))).toBe(false);
     expect(existsSync(path.join(cacheDir, "blobs", blobSha(Buffer.from("# Findings\n\n- alpha\n"))))).toBe(true);
+  });
+
+  it("ignores blob ids that are not canonical shas and content that does not match its id", async () => {
+    const evil = "../../../../escaped-by-blob-id";
+    const store = fakeStore({ "app/FINDINGS.md": "# app\n" }, { extraTree: [{ path: "app/notes/x.md", type: "blob", sha: evil, size: 3 }] });
+    const { projects } = await service(store).projects(B);
+    expect(projects.map((p) => p.name)).toContain("app");
+    expect(store.calls.blob).toBe(1); // only the real blob was requested
+    expect(existsSync(path.join(dir, "cache", evil))).toBe(false);
+    expect(existsSync(path.resolve(dir, "cache", "blobs", evil))).toBe(false);
   });
 
   it("fetches blobs in one batch when the Hook offers it", async () => {

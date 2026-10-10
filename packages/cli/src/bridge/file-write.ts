@@ -15,7 +15,23 @@ import { BridgeError } from "./protocol.js";
  * when one is there. Updates go through a temp file in the same folder and a
  * rename, keeping the file's mode, so a reader never sees half a file.
  */
+/** One write at a time per file in this Hook, so two saves naming the same
+ * version cannot both pass the check and overwrite each other. */
+const fileLocks = new Map<string, Promise<unknown>>();
+async function serialized<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const previous = fileLocks.get(key) ?? Promise.resolve();
+  const run = previous.catch(() => undefined).then(work);
+  fileLocks.set(key, run);
+  try { return await run; }
+  finally { if (fileLocks.get(key) === run) fileLocks.delete(key); }
+}
+
 export async function writeRepoFile(root: string, requested: string, content: string, expectedVersion?: string) {
+  const key = `${await realpath(root).catch(() => root)}\u0000${requested}`;
+  return serialized(key, () => writeRepoFileNow(root, requested, content, expectedVersion));
+}
+
+async function writeRepoFileNow(root: string, requested: string, content: string, expectedVersion?: string) {
   if (typeof requested !== "string" || !requested || requested.length > 4096 || path.isAbsolute(requested)
       || /[\x00-\x1f\x7f\\]/.test(requested) || requested.split("/").some(part => part === ".." || part.toLowerCase() === ".git" || part === "")) {
     throw new BridgeError(400, "Invalid file path.");
