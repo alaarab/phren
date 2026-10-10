@@ -259,7 +259,13 @@ export function sweepProjectMirrors(phrenPath: string): void {
     if (fs.existsSync(skillsDir)) {
       try {
         for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
-          if (entry.isSymbolicLink()) removeMirror(path.join(".claude", "skills", entry.name));
+          const rel = path.join(".claude", "skills", entry.name);
+          if (entry.isSymbolicLink()) removeMirror(rel);
+          // A flat skill is linked as <name>/SKILL.md inside a folder phren made.
+          else if (entry.isDirectory() && fs.readdirSync(path.join(repo, rel)).join() === "SKILL.md") {
+            removeMirror(path.join(rel, "SKILL.md"));
+            if (fs.readdirSync(path.join(repo, rel)).length === 0) fs.rmdirSync(path.join(repo, rel));
+          }
         }
       } catch { /* skills dir unreadable — skip */ }
     }
