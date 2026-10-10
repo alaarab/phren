@@ -143,7 +143,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 }
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
-  terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
+  terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", deskPresence: true, herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
   files: true, repositoryFiles: true, fileResolution: true, fileWrite: true, fileSearch: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true };
 
@@ -692,6 +692,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = { ok: true, ...(outcome ? { outcome } : {}) };
         } else if (url.pathname === "/v1/push/answer") {
           await agentHooks.answerPush(z.string().uuid().parse(data.binding), data.decision); result = { ok: true };
+        } else if (url.pathname === "/v1/push/presence") {
+          // Phren desktop: the owner is at the desk, so approval alerts wait before reaching the phone.
+          agentHooks.push.markDesk(z.number().int().min(0).max(120_000).parse(data.activeForMs));
+          result = { ok: true, deskActive: agentHooks.push.deskActive };
         } else if (url.pathname === "/v1/push/target") {
           // A tapped notification opens its session; the binding stays unspent.
           const target = agentHooks.pushTarget(z.string().uuid().parse(data.binding));
