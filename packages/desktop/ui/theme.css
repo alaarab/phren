@@ -501,7 +501,7 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .home-conductor { display: grid; gap: 10px; padding: 14px; border-radius: 10px; background: var(--surface); box-shadow: inset 3px 0 0 var(--accent); }
 .home-conductor-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .home-conductor-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font: 600 14px system-ui; }
-.home-conductor-meta { flex: none; margin-left: auto; color: var(--muted); font-size: 12px; }
+.home-conductor-meta { flex: none; margin-left: auto; display: inline-flex; gap: 8px; color: var(--muted); font-size: 12px; }
 .home-conductor-state { color: var(--working); }
 .home-conductor-state.waiting { color: var(--waiting); }
 .home-conductor-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 12.5px; }
@@ -676,3 +676,9 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 
 /* The session's Chat/Console switch moves left of an open "Phren knows" drawer. */
 .session-doc:has(.knows-open) .session-switch { right: 356px; }
+
+/* Home: long return text and activity lines never widen the column. */
+.home { grid-template-columns: minmax(0, 1fr); width: 100%; }
+.home-list, .home-block { min-width: 0; }
+.home-row { min-width: 0; }
+.home-row-sub { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

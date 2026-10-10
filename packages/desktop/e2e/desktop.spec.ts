@@ -90,6 +90,7 @@ test.afterAll(async () => {
 
 test("sidebar, chat and changes render against the fake Hook", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click(); // the window opens on Home
 
   const session = page.locator(".sb-row", { hasText: "Fix login" });
   await expect(session).toBeVisible();
@@ -109,6 +110,7 @@ test("sidebar, chat and changes render against the fake Hook", async ({ page }) 
 
 test("home lists who needs you, and sessions open as centre tabs", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click(); // the window opens on Home
   await page.evaluate(() => localStorage.clear());
 
   await page.locator(".section-pill", { hasText: "Home" }).click();
@@ -139,6 +141,7 @@ test("home lists who needs you, and sessions open as centre tabs", async ({ page
 
 test("themes switch the phone's token sets at runtime", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click(); // the window opens on Home
   const bg = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--bg").trim().toUpperCase());
   await expect.poll(bg).toBe("#1E1E1E");
   await page.evaluate(async () => { const m = await import("/shell/theme.js"); await m.applyTheme("amethyst"); });
@@ -148,6 +151,7 @@ test("themes switch the phone's token sets at runtime", async ({ page }) => {
 
 test("palette, settings and the three-segment tool panel", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click(); // the window opens on Home
   await page.evaluate(() => localStorage.clear());
   await page.locator(".sb-row", { hasText: "Fix login" }).click();
 
@@ -176,6 +180,7 @@ test("palette, settings and the three-segment tool panel", async ({ page }) => {
 
 test("composer matches the phone's bar", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click(); // the window opens on Home
   await page.evaluate(async () => {
     const { createComposer } = await import("/chat/composer.js");
     const host = document.createElement("div");
@@ -195,6 +200,7 @@ test("composer matches the phone's bar", async ({ page }) => {
 
 test("the kit loads in the browser", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click(); // the window opens on Home
   const names = await page.evaluate(async () => Object.keys(await import("/vendor/kit/index.js")).length);
   expect(names).toBeGreaterThan(10);
 });
@@ -205,6 +211,7 @@ test("a changed file opens as a centre diff tab", async ({ page }) => {
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("response", (r) => { if (r.status() >= 400) errors.push(`${r.status()} ${r.url()}`); });
   await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click(); // the window opens on Home
   await page.evaluate(() => localStorage.clear());
   await page.locator(".sb-row", { hasText: "Fix login" }).click();
   await page.locator(".chg-name", { hasText: "app.ts" }).click();
@@ -217,6 +224,7 @@ test("a changed file opens as a centre diff tab", async ({ page }) => {
 
 test("tiles split, move and swap like Herdr panes; a session switches to its console", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click(); // the window opens on Home
   await page.evaluate(() => localStorage.clear());
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.locator(".sb-row", { hasText: "Fix login" }).click();
@@ -248,6 +256,7 @@ test("projects section renders", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click(); // the window opens on Home
   await page.locator(".section-pill", { hasText: "Projects" }).click();
   await page.waitForTimeout(1200);
   await page.screenshot({ path: test.info().outputPath("projects.png") });
@@ -256,12 +265,14 @@ test("projects section renders", async ({ page }) => {
 
 test("the graph renderer is served", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click(); // the window opens on Home
   const ok = await page.evaluate(async () => (await fetch("/vendor/phren-graph.js")).ok);
   expect(ok).toBe(true);
 });
 
 test("using the desktop reports desk presence to the Hooks", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click(); // the window opens on Home
   await page.bringToFront();
   await page.locator(".section-pill", { hasText: "Home" }).click();
   await page.keyboard.press("Shift");
@@ -272,6 +283,7 @@ test("using the desktop reports desk presence to the Hooks", async ({ page }) =>
 
 test("Enter on a focused Deny denies (it never approves)", async ({ page }) => {
   await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click(); // the window opens on Home
   const decisions: string[] = [];
   await page.route("**/v1/approvals/answer", async (route) => {
     decisions.push(JSON.parse(route.request().postData() ?? "{}").decision);
@@ -289,4 +301,10 @@ test("Enter on a focused Deny denies (it never approves)", async ({ page }) => {
   await deny.focus();
   await page.keyboard.press("Enter");
   await expect.poll(() => decisions).toEqual(["deny"]);
+});
+
+test("the window opens on Home", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".section-pill.selected")).toHaveAttribute("data-section", "home");
+  await expect(page).toHaveURL(/#\/home$/);
 });

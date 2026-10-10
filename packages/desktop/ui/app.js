@@ -83,9 +83,10 @@ store.subscribe(() => {
 connectStore();
 // Mount Agents first (keys.js binds to its sidebar), then open the section the
 // URL names, else Home: the window opens on what needs you.
-showSection("agents");
+// Read the hash first: showing a section rewrites it.
 const initial = location.hash.replace(/^#\/?/, "") || "home";
-if (initial !== "agents") showSection(initial);
+sectionHandle("agents"); // mounted hidden, without touching the hash
+showSection(initial);
 
 installKeys({
   showPane: (key) => { showSection("agents"); agents().showPane(key); },
