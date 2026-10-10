@@ -1,4 +1,5 @@
 // HTTP + WebSocket server for the Phren desktop phase 0 spike.
+import { execFile } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createReadStream, existsSync } from "node:fs";
 import { dirname, extname, join, resolve, sep } from "node:path";
@@ -517,6 +518,33 @@ export const startServer: StartServer = async (o) => {
         sendJson(res, { remote });
       } catch (err) {
         sendError(res, err);
+      }
+      return;
+    }
+
+    if (pathname === "/api/layout" && (req.method ?? "GET") === "GET") {
+      // A Herdr tab's pane layout around one pane: this computer asks Herdr
+      // directly, others through their Hook's /v1/workspaces/layout.
+      const computer = o.computers.find((c) => c.name === url.searchParams.get("computer"));
+      const server = url.searchParams.get("server") ?? "default";
+      const pane = url.searchParams.get("pane") ?? "";
+      if (!computer || !/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/.test(server) || !/^[A-Za-z0-9_:.-]{1,100}$/.test(pane)) {
+        sendJson(res, { error: "Invalid computer, server or pane." }, 400);
+        return;
+      }
+      try {
+        if (computer.local) {
+          const out = await new Promise<string>((resolveOut, rejectOut) => {
+            execFile("herdr", ["--session", server, "pane", "layout", "--pane", pane], { timeout: 5_000 }, (err, stdout) => err ? rejectOut(err) : resolveOut(stdout));
+          });
+          sendJson(res, { layout: (JSON.parse(out) as { result?: { layout?: unknown } }).result?.layout ?? null });
+        } else {
+          const r = await o.hookRequest(computer, "GET", `/v1/workspaces/layout?server=${encodeURIComponent(server)}&pane=${encodeURIComponent(pane)}`);
+          res.writeHead(r.status, { "Content-Type": "application/json; charset=utf-8" });
+          res.end(r.body);
+        }
+      } catch (err) {
+        sendJson(res, { error: shortMessage(err) }, 502);
       }
       return;
     }
