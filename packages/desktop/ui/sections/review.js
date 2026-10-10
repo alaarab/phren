@@ -17,6 +17,9 @@ const RECENT_MS = 3 * 86_400_000;
 // A reply that names a pull request ("PR #17", ".../pull/17").
 const PR_RE = /\bPR\s*#\d+|\/pull\/\d+/i;
 const REVIEWED_KEY = "phren.desktop.review.reviewed";
+const VIEWED_KEY = "phren.desktop.review.viewed";
+const VIEWED_CAP = 2000;
+const TRAY_HINT = "Click a line or + to comment · ⌘-click opens the file · v marks viewed · j/k items · n/p files";
 
 /** Add this section's stylesheet once (index.html does not load it). */
 function ensureCss() {
@@ -80,6 +83,35 @@ function saveReviewed(set) {
   try { localStorage.setItem(REVIEWED_KEY, JSON.stringify([...set].slice(-500))); } catch { /* storage is best effort */ }
 }
 
+/** A short stable string hash (djb2) of a file's diff text. */
+function hashText(text) {
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+/** The diff text a file's hash covers: its patches plus its added lines. */
+function fileHash(file) {
+  const patches = (file.sections ?? []).map((s) => s.patch ?? "").join("\n");
+  return hashText(`${patches}\n${(file.addedHunks ?? []).length}`);
+}
+
+/** A viewed file's stable key: item, path and the hash of its current diff. */
+function viewedKeyOf(item, file) {
+  return `${item.key}|${file.path}|${fileHash(file)}`;
+}
+
+function loadViewed() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(VIEWED_KEY) ?? "[]");
+    return new Set(Array.isArray(raw) ? raw.filter((v) => typeof v === "string") : []);
+  } catch { return new Set(); }
+}
+
+function saveViewed(set) {
+  try { localStorage.setItem(VIEWED_KEY, JSON.stringify([...set].slice(-VIEWED_CAP))); } catch { /* storage is best effort */ }
+}
+
 function stamp(receipt) {
   const at = receipt?.returned?.at ?? receipt?.updatedAt ?? receipt?.createdAt ?? "";
   const value = Date.parse(at);
@@ -135,6 +167,10 @@ export function mountReview(root) {
     selected: null,        // item key
     comments: new Map(),   // item key -> [{ path, line, side, text, comment }]
     reviewed: loadReviewed(),
+    viewed: loadViewed(),  // Set of `${item.key}|${path}|${hash}` marked viewed
+    folded: new Map(),     // `${item.key}|${path}` -> body collapsed
+    hint: null,            // transient tray hint, over the default
+    hintTimer: null,
     diffs: new Map(),      // key -> { loading, files, error }
     pulls: new Map(),      // key -> { loading, pulls, available, error }
     cursor: { file: 0, line: 0 },
@@ -257,6 +293,7 @@ export function mountReview(root) {
     state.selected = key;
     state.detailSig = "";
     state.cursor = { file: 0, line: 0 };
+    state.hint = null;
     closeComment();
     const item = selectedItem();
     if (item) void loadDiff(item);
@@ -460,7 +497,12 @@ export function mountReview(root) {
     const diffBox = el("section", "review-diff");
     const diffHead = el("h3", "review-section-label");
     diffHead.append(document.createTextNode("Changes"));
-    if (diff && !diff.loading && !diff.error && diff.files.length) diffHead.append(el("span", "review-section-count", String(diff.files.length)));
+    if (diff && !diff.loading && !diff.error && diff.files.length) {
+      diffHead.append(el("span", "review-section-count", String(diff.files.length)));
+      const viewedSpan = el("span", "review-section-viewed");
+      viewedSpan.dataset.viewedCount = "";
+      diffHead.append(viewedSpan);
+    }
     diffBox.append(diffHead);
 
     if (!diff || diff.loading) diffBox.append(el("div", "review-note", "Loading diff…"));
@@ -472,35 +514,46 @@ export function mountReview(root) {
       const fileList = el("div", "review-files-list");
       diff.files.forEach((file, index) => {
         const row = el("button", "review-files-row");
+        if (isViewed(item, file)) row.classList.add("viewed");
         const s = fileStatus(file.status);
         row.append(el("span", `review-status ${s.cls}`, s.letter), el("span", "review-file-name mono", file.path));
+        row.append(el("span", "review-files-check", "\u2713"));
         row.addEventListener("click", () => focusFile(index));
         fileList.append(row);
       });
       diffBox.append(fileList);
       const view = { files: [] };
       diff.files.forEach((file, index) => {
-        const rendered = renderFileDiff(file);
+        const rendered = renderFileDiff(file, item);
         // A file or folder with nothing to show stays in the list only.
         if (rendered.empty) fileList.children[index]?.classList.add("empty");
         else diffBox.append(rendered.wrap);
-        view.files.push({ path: file.path, el: rendered.wrap, lines: rendered.lines });
+        view.files.push({ path: file.path, file, el: rendered.wrap, row: fileList.children[index], lines: rendered.lines });
       });
       state.diffView = view;
+      updateViewedCount(item);
       applyFocus(false);
       markCommentedLines();
     }
     bodyEl.append(diffBox);
   }
 
-  function renderFileDiff(file) {
+  function renderFileDiff(file, item) {
     const wrap = el("div", "review-file");
     wrap.dataset.path = file.path;
+    const viewed = isViewed(item, file);
+    const folded = isFolded(item, file);
+    if (viewed) wrap.classList.add("viewed");
+    if (folded) wrap.classList.add("folded");
     const head = el("div", "review-file-head");
     const s = fileStatus(file.status);
     head.append(el("span", `review-status ${s.cls}`, s.letter), el("span", "review-file-path mono", file.path));
+    head.append(viewedButton(item, file, viewed));
+    // The head background folds the body; the buttons stop propagation.
+    head.addEventListener("click", () => toggleFold(item, file));
     wrap.append(head);
     const body = el("div", "review-file-body");
+    body.hidden = folded;
     const lines = [];
     const hunks = [];
     if (Array.isArray(file.addedHunks)) hunks.push(...file.addedHunks);
@@ -527,7 +580,17 @@ export function mountReview(root) {
         lineEl.dataset.line = String(lineNo);
         lineEl.dataset.side = side;
         lineEl.dataset.text = line.text;
-        lineEl.addEventListener("click", () => openComment(lineEl));
+        const add = el("button", "review-add", "+");
+        add.type = "button";
+        add.title = "Comment on this line";
+        add.setAttribute("aria-label", "Comment on this line");
+        add.addEventListener("click", (event) => { event.stopPropagation(); openComment(lineEl); });
+        lineEl.append(add);
+        lineEl.addEventListener("click", (event) => {
+          // ⌘-click (Ctrl-click on Linux) opens the file, not a comment.
+          if (event.metaKey || event.ctrlKey) { event.preventDefault(); openFileAtLine(item, file, lineNo); return; }
+          openComment(lineEl);
+        });
         body.append(lineEl);
         lines.push({ el: lineEl, path: file.path, line: lineNo, side, text: line.text });
       }
@@ -555,6 +618,92 @@ export function mountReview(root) {
       lineEl.classList.add("focused");
       if (scroll) lineEl.scrollIntoView({ block: "center" });
     }
+  }
+
+  // ---- viewed and folding ---------------------------------------------
+
+  const isViewed = (item, file) => Boolean(item) && state.viewed.has(viewedKeyOf(item, file));
+  const foldKeyOf = (item, file) => `${item.key}|${file.path}`;
+  // A viewed file starts folded; an explicit fold is kept until changed.
+  const isFolded = (item, file) => state.folded.has(foldKeyOf(item, file))
+    ? state.folded.get(foldKeyOf(item, file)) : isViewed(item, file);
+
+  /** Replace the tray's hint with a transient note for four seconds. */
+  function setHint(text) {
+    state.hint = text;
+    clearTimeout(state.hintTimer);
+    renderTray();
+    state.hintTimer = setTimeout(() => { state.hint = null; renderTray(); }, 4000);
+  }
+
+  function viewedButton(item, file, viewed) {
+    const button = el("button", `review-viewed${viewed ? " on" : ""}`);
+    button.type = "button";
+    button.title = viewed ? "Mark unviewed" : "Mark viewed";
+    button.setAttribute("aria-pressed", String(viewed));
+    button.append(el("span", "review-viewed-box"), el("span", "review-viewed-label", "Viewed"));
+    button.addEventListener("click", (event) => { event.stopPropagation(); toggleViewed(item, file); });
+    return button;
+  }
+
+  function toggleViewed(item, file) {
+    if (!item) return;
+    const key = viewedKeyOf(item, file);
+    const viewed = !state.viewed.has(key);
+    if (viewed) state.viewed.add(key); else state.viewed.delete(key);
+    saveViewed(state.viewed);
+    // Marking viewed collapses the body (and unmarking opens it).
+    state.folded.set(foldKeyOf(item, file), viewed);
+    syncViewed(item, file);
+  }
+
+  function toggleFold(item, file) {
+    if (!item) return;
+    const key = foldKeyOf(item, file);
+    state.folded.set(key, !isFolded(item, file));
+    const entry = state.diffView?.files.find((f) => f.path === file.path);
+    if (entry?.el) {
+      entry.el.classList.toggle("folded", state.folded.get(key));
+      const body = entry.el.querySelector(".review-file-body");
+      if (body) body.hidden = state.folded.get(key);
+    }
+  }
+
+  /** Refresh one file's in-place marks after a viewed toggle. */
+  function syncViewed(item, file) {
+    const viewed = isViewed(item, file);
+    const folded = isFolded(item, file);
+    const entry = state.diffView?.files.find((f) => f.path === file.path);
+    if (entry?.el) {
+      entry.el.classList.toggle("viewed", viewed);
+      entry.el.classList.toggle("folded", folded);
+      const body = entry.el.querySelector(".review-file-body");
+      if (body) body.hidden = folded;
+      const button = entry.el.querySelector(".review-viewed");
+      if (button) {
+        button.classList.toggle("on", viewed);
+        button.title = viewed ? "Mark unviewed" : "Mark viewed";
+        button.setAttribute("aria-pressed", String(viewed));
+      }
+    }
+    if (entry?.row) entry.row.classList.toggle("viewed", viewed);
+    updateViewedCount(item);
+  }
+
+  function updateViewedCount(item) {
+    const host = bodyEl.querySelector("[data-viewed-count]");
+    if (!host) return;
+    const files = state.diffView?.files ?? [];
+    const n = files.filter((f) => isViewed(item, f.file)).length;
+    host.textContent = n ? `· ${n} of ${files.length} viewed` : "";
+    host.hidden = !n;
+  }
+
+  /** ⌘-click opens the focused worker's file in the editor at that line. */
+  function openFileAtLine(item, file, line) {
+    const match = overviewChild(item?.receipt?.target);
+    if (match) sectionHandle("agents")?.openFileFor(match.computer, match.child, file.path, { line });
+    else setHint("That worker's session has closed, so its files can't be opened.");
   }
 
   // ---- line comments --------------------------------------------------
@@ -667,7 +816,7 @@ export function mountReview(root) {
     const item = selectedItem();
     const comments = commentsFor(item);
     if (!comments.length) {
-      trayEl.append(el("div", "review-tray-hint", "Click a diff line or press c to comment. j/k items · n/p files · Enter sends."));
+      trayEl.append(el("div", "review-tray-hint", state.hint || TRAY_HINT));
       return;
     }
     const list = el("div", "review-tray-list");
@@ -768,6 +917,11 @@ export function mountReview(root) {
       const lineEl = state.diffView?.files[state.cursor.file]?.lines[state.cursor.line]?.el;
       if (lineEl) { lineEl.scrollIntoView({ block: "center" }); openComment(lineEl); }
       event.preventDefault();
+    } else if (key === "v") {
+      const entry = state.diffView?.files[state.cursor.file];
+      const item = selectedItem();
+      if (entry?.file && item) toggleViewed(item, entry.file);
+      event.preventDefault();
     } else if (key === "Enter") {
       const item = selectedItem();
       if (item && commentsFor(item).length && canSend(item) && state.send?.status !== "sending") { void sendComments(item); event.preventDefault(); }
@@ -818,6 +972,6 @@ export function mountReview(root) {
     show() { state.visible = true; startPoll(); if (state.mode === "trains") state.trains?.show?.(); else void poll(); },
     hide() { state.visible = false; stopPoll(); closeComment(); state.trains?.hide?.(); },
     focus() { if (state.mode === "trains") state.trains?.focus?.(); else queueEl.querySelector(".review-row.selected")?.focus(); },
-    destroy() { stopPoll(); unsubscribe(); document.removeEventListener("keydown", onKeydown); closeComment(); state.trains?.destroy?.(); },
+    destroy() { stopPoll(); unsubscribe(); document.removeEventListener("keydown", onKeydown); closeComment(); clearTimeout(state.hintTimer); state.trains?.destroy?.(); },
   };
 }

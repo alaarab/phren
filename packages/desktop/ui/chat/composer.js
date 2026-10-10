@@ -2,11 +2,11 @@
 // Ports the phone's ChatComposerBar behaviour: a collapsible Background strip,
 // a multiline editor above one row of inline-SVG icon buttons, send with
 // delivery state, a local queue while the agent works, image attachments, the
-// slash-command menu, and a provider-glyph popover holding Model (with effort),
-// Permission mode, Fast (Claude only) and the context ring.
+// slash-command menu, and worded footer selectors (Permission, Model, Effort,
+// plus a context/Fast ring button), each opening its own small popover.
 //
-// createComposer({ computer, target, provider, onConsole, onAgents, onWorkers,
-//   onDictate, onTalk }) -> {
+// createComposer({ computer, target, provider, branch, onConsole, onAgents,
+//   onWorkers, onDictate, onTalk }) -> {
 //   el, focus(), insert(text), setStatus(agentStatus), setBackground(jobs),
 //   setCounts({ agents, workers }), onDelivery(fn), destroy()
 // }
@@ -243,29 +243,6 @@ const P = (d) => ["path", { d }];
 const L = (x1, y1, x2, y2) => ["line", { x1, y1, x2, y2 }];
 const C = (cx, cy, r) => ["circle", { cx, cy, r }];
 
-/** Claude's 12-ray starburst, drawn in its own orange. */
-function claudeGlyph(size) {
-  const rays = [];
-  for (let i = 0; i < 12; i++) {
-    const angle = (i * Math.PI) / 6;
-    const inner = 3.2, outer = 8.6;
-    rays.push(L(12 + Math.cos(angle) * inner, 12 + Math.sin(angle) * inner, 12 + Math.cos(angle) * outer, 12 + Math.sin(angle) * outer));
-  }
-  return svgIcon(rays, { size, color: "#D97757", width: 1.8 });
-}
-
-/** A simple monochrome glyph per harness; Claude is the starburst. */
-function providerGlyph(source, size) {
-  if (source === "claude") return claudeGlyph(size);
-  switch (source) {
-    case "codex": return svgIcon([["rect", { x: 4, y: 4, width: 16, height: 16, rx: 4 }], P("M9 10l2.5 2.5L9 15"), L(14, 15, 15.5, 15)], { size });
-    case "opencode": return svgIcon([P("M9 7l-4 5 4 5"), P("M15 7l4 5-4 5")], { size });
-    case "copilot": return svgIcon([C(9, 12, 4), C(15, 12, 4)], { size });
-    case "phren": return svgIcon([C(12, 12, 8), C(12, 12, 2.6)], { size });
-    default: return svgIcon([C(12, 12, 8), C(12, 12, 2.6)], { size });
-  }
-}
-
 const ICON = {
   plus: () => svgIcon([P("M12 5v14"), P("M5 12h14")]),
   console: () => svgIcon([P("M5 7l4.5 5L5 17"), L(12, 17, 19, 17)]),
@@ -274,6 +251,7 @@ const ICON = {
   mic: () => svgIcon([P("M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z"), P("M5 11a7 7 0 0 0 14 0"), L(12, 18, 12, 21)]),
   waveform: (size = 24) => svgIcon([L(4, 10, 4, 14), L(8, 7, 8, 17), L(12, 4, 12, 20), L(16, 8, 16, 16), L(20, 11, 20, 13)], { size, width: 1.8 }),
   chevron: () => svgIcon([P("M6 9l6 6 6-6")]),
+  sliders: () => svgIcon([L(4, 7, 20, 7), L(4, 12, 20, 12), L(4, 17, 20, 17)], { size: 16 }),
   history: () => svgIcon([P("M3 12a9 9 0 1 0 3-6.7L3 8"), P("M3 4v4h4"), P("M12 8v4l3 2")]),
   stop: () => svgIcon([["rect", { x: 7, y: 7, width: 10, height: 10, rx: 2 }]], { fill: "currentColor", width: 0 }),
   up: () => svgIcon([P("M12 20V5"), P("M5 12l7-7 7 7")], { width: 2 }),
@@ -281,12 +259,12 @@ const ICON = {
 
 /**
  * Build the chat composer card.
- * @param {{computer:string, target:object, provider:string,
+ * @param {{computer:string, target:object, provider:string, branch?:string,
  *   onConsole?:Function, onAgents?:Function, onWorkers?:Function,
  *   onDictate?:Function, onTalk?:Function}} options
  * @returns {{el:HTMLElement, focus:Function, insert:Function, setStatus:Function, setBackground:Function, setCounts:Function, onDelivery:Function, destroy:Function}}
  */
-export function createComposer({ computer, target, provider, onConsole, onAgents, onWorkers, onDictate, onTalk }) {
+export function createComposer({ computer, target, provider, branch, onConsole, onAgents, onWorkers, onDictate, onTalk }) {
   ensureStyles();
   const source = String(provider || (target && target.source) || "").toLowerCase();
   const name = providerLabel(source);
@@ -320,6 +298,16 @@ export function createComposer({ computer, target, provider, onConsole, onAgents
   backgroundEl.append(bgHead, bgList);
   wrap.append(backgroundEl, card);
 
+  // Where-it-runs line under the card: the computer on the left, its branch
+  // (when the caller knows one) on the right.
+  const where = node("div", "pc-where");
+  const whereComputer = node("span", "pc-where-computer");
+  whereComputer.append(node("span", "pc-where-icon", "\u2302"), node("span", "pc-where-name", computer || ""));
+  const whereBranch = node("span", "pc-where-branch");
+  if (branch) whereBranch.append(node("span", "pc-where-icon", "\u2387"), node("span", "pc-where-branch-name", branch));
+  where.append(whereComputer, whereBranch);
+  wrap.append(where);
+
   const fileInput = node("input"); fileInput.type = "file"; fileInput.accept = "image/*"; fileInput.multiple = true; fileInput.hidden = true;
 
   // ---- state ----
@@ -335,7 +323,9 @@ export function createComposer({ computer, target, provider, onConsole, onAgents
   let deliveryHandlers = [];
   let modelCache = null;
   let currentModel = "";
+  let currentEffort = "";
   let popover = null;
+  let popoverBuild = null;
   let slashRows = [];
   let slashIndex = -1;
   let destroyed = false;
@@ -606,12 +596,22 @@ export function createComposer({ computer, target, provider, onConsole, onAgents
     catch (error) { notice.textContent = (error && error.message) || "Stop failed"; }
   }
 
-  // ---- footer row of 28 px icon buttons ----
+  // ---- footer: icon buttons, worded selectors, mic, talk, primary ----
   function iconButton(title, icon) {
     const button = node("button", "pc-icon");
     button.title = title;
     button.append(icon);
     return button;
+  }
+  // A small worded selector: a label with a chevron, opening its own popover.
+  function selectButton(title) {
+    const button = node("button", "pc-select");
+    button.title = title;
+    const label = node("span", "pc-select-label");
+    const chevron = node("span", "pc-select-chevron");
+    chevron.append(ICON.chevron());
+    button.append(label, chevron);
+    return { button, label };
   }
   const attachBtn = iconButton("Add attachment", ICON.plus());
   const consoleBtn = onConsole ? iconButton("Console", ICON.console()) : null;
@@ -619,9 +619,14 @@ export function createComposer({ computer, target, provider, onConsole, onAgents
   const workersBtn = onWorkers ? iconButton("Workers", ICON.workers()) : null;
   const workerBadge = node("span", "pc-badge"); workerBadge.hidden = true;
   if (workersBtn) workersBtn.append(workerBadge);
-  const providerBtn = node("button", "pc-icon pc-provider");
-  providerBtn.title = `${name} settings`;
-  providerBtn.append(providerGlyph(source, 20));
+  const permissionSelect = selectButton("Permission mode");
+  const modelSelect = selectButton("Model");
+  const modelPlain = node("span", "pc-select-plain", name);
+  const effortSelect = selectButton("Effort");
+  effortSelect.button.hidden = true;
+  const extrasBtn = node("button", "pc-ring-btn");
+  extrasBtn.title = "Context and settings";
+  extrasBtn.hidden = true;
   const spacer = node("div", "pc-spacer");
   const micBtn = onDictate ? iconButton("Dictate message", ICON.mic()) : null;
   const talkBtn = onTalk ? node("button", "pc-talk") : null;
@@ -631,7 +636,9 @@ export function createComposer({ computer, target, provider, onConsole, onAgents
   if (consoleBtn) footer.append(consoleBtn);
   if (agentsBtn) footer.append(agentsBtn);
   if (workersBtn) footer.append(workersBtn);
-  footer.append(providerBtn, spacer);
+  footer.append(spacer, permissionSelect.button);
+  footer.append(supportsPicker ? modelSelect.button : modelPlain);
+  footer.append(effortSelect.button, extrasBtn);
   if (micBtn) footer.append(micBtn);
   if (talkBtn) footer.append(talkBtn);
   footer.append(primaryBtn, fileInput);
@@ -643,7 +650,10 @@ export function createComposer({ computer, target, provider, onConsole, onAgents
   if (workersBtn) workersBtn.addEventListener("click", () => onWorkers());
   if (micBtn) micBtn.addEventListener("click", () => onDictate());
   if (talkBtn) talkBtn.addEventListener("click", () => onTalk());
-  providerBtn.addEventListener("click", (event) => { event.stopPropagation(); openSettingsMenu(providerBtn); });
+  permissionSelect.button.addEventListener("click", (event) => { event.stopPropagation(); openPopover(permissionSelect.button, drawModes); });
+  modelSelect.button.addEventListener("click", (event) => { event.stopPropagation(); openModelsMenu(modelSelect.button); });
+  effortSelect.button.addEventListener("click", (event) => { event.stopPropagation(); openPopover(effortSelect.button, drawEfforts); });
+  extrasBtn.addEventListener("click", (event) => { event.stopPropagation(); openPopover(extrasBtn, drawExtras); });
   primaryBtn.addEventListener("click", () => { if (working && !hasDraft()) stop(); else send(); });
 
   function buildRing(percent) {
@@ -660,6 +670,49 @@ export function createComposer({ computer, target, provider, onConsole, onAgents
       svg.append(circle);
     }
     return svg;
+  }
+
+  /** The chosen model row from the loaded catalogue, when there is one. */
+  function chosenModel() {
+    return (modelCache && modelCache.find((m) => m.id === currentModel)) || null;
+  }
+
+  /** Whether this harness lets the popover toggle Fast. */
+  function fastAvailable() {
+    const settings = status.capabilities && status.capabilities.settings;
+    return source === "claude" && !!(settings && settings.fast);
+  }
+
+  /** The chosen model's effort: the last pick, its default, or "" for none. */
+  function currentEffortLevel() {
+    const chosen = chosenModel();
+    const levels = chosen && takesEffort ? effortLevels(chosen) : [];
+    if (!levels.length) return "";
+    if (currentEffort && levels.includes(currentEffort)) return currentEffort;
+    return chosen.defaultEffort || levels[0];
+  }
+
+  /** Worded footer labels, refreshed with status and after each switch. */
+  function updateSelectors() {
+    const modes = Array.isArray(status.permissionModes) ? status.permissionModes : [];
+    permissionSelect.button.hidden = modes.length === 0;
+    permissionSelect.label.textContent = permissionModeLabel(status.permissionMode);
+    permissionSelect.label.classList.toggle("warn", status.permissionMode === "bypassPermissions" || status.permissionMode === "auto");
+    if (supportsPicker) modelSelect.label.textContent = modelTitle(chosenModel() || (currentModel ? { id: currentModel } : null), source);
+    const chosen = chosenModel();
+    const levels = chosen && takesEffort ? effortLevels(chosen) : [];
+    effortSelect.button.hidden = levels.length === 0;
+    effortSelect.label.textContent = currentEffortLevel();
+  }
+
+  /** The tiny ring button: the context ring, else the Fast settings glyph. */
+  function renderExtras() {
+    const percent = contextPercent(status);
+    const show = percent !== null || fastAvailable();
+    extrasBtn.hidden = !show;
+    if (!show) return;
+    extrasBtn.replaceChildren(percent !== null ? buildRing(percent) : ICON.sliders());
+    extrasBtn.title = percent !== null ? `${Math.round(percent)}% of context used` : "Fast mode";
   }
 
   function updatePrimary() {
@@ -680,6 +733,8 @@ export function createComposer({ computer, target, provider, onConsole, onAgents
 
   function updateFooter() {
     updatePrimary();
+    updateSelectors();
+    renderExtras();
     if (workerBadge) {
       const running = counts.workers || 0;
       workerBadge.textContent = String(running);
@@ -740,6 +795,7 @@ export function createComposer({ computer, target, provider, onConsole, onAgents
     if (!popover) return;
     popover.remove();
     popover = null;
+    popoverBuild = null;
     document.removeEventListener("pointerdown", onOutside, true);
   }
   function openPopover(anchor, build) {
@@ -748,6 +804,7 @@ export function createComposer({ computer, target, provider, onConsole, onAgents
     pop.style.position = "fixed";
     document.body.append(pop);
     popover = pop;
+    popoverBuild = build;
     build(pop);
     const rect = anchor.getBoundingClientRect();
     pop.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - pop.offsetWidth - 8))}px`;
@@ -755,56 +812,62 @@ export function createComposer({ computer, target, provider, onConsole, onAgents
     setTimeout(() => document.addEventListener("pointerdown", onOutside, true), 0);
   }
 
-  /** The provider-glyph popover: Model (with effort), Permission mode, Fast,
-   * and the context ring, each shown only when the harness provides it. */
-  function drawSettings(pop) {
+  /** The model list, the current pick marked, or a load state. */
+  function drawModels(pop) {
     pop.replaceChildren();
-    pop.append(node("div", "pc-pop-head", `${name} settings`));
+    pop.append(node("div", "pc-pop-head", "Model"));
+    if (!modelCache) { pop.append(node("div", "pc-pop-sub", "Loading\u2026")); return; }
+    if (!modelCache.length) { pop.append(node("div", "pc-pop-sub", "This computer lists no models.")); return; }
+    for (const model of modelCache) {
+      const row = node("div", `pc-pop-row${model.id === currentModel ? " selected" : ""}`);
+      row.append(node("span", null, modelTitle(model, source)));
+      if (model.description) row.append(node("span", "pc-pop-sub", model.description));
+      row.addEventListener("click", () => { switchModel(model.id, model.defaultEffort); closePopover(); });
+      pop.append(row);
+    }
+  }
+
+  /** The effort levels the chosen model takes, the current one marked. */
+  function drawEfforts(pop) {
+    pop.replaceChildren();
+    pop.append(node("div", "pc-pop-head", "Effort"));
+    const chosen = chosenModel();
+    const levels = chosen && takesEffort ? effortLevels(chosen) : [];
+    if (!levels.length) { pop.append(node("div", "pc-pop-sub", "This model takes no effort levels.")); return; }
+    const active = currentEffortLevel();
+    const pills = node("div", "pc-pop-effort");
+    for (const level of levels) {
+      const pill = node("button", `pc-effort${level === active ? " on" : ""}`, level);
+      pill.addEventListener("click", () => { switchModel(chosen.id, level); closePopover(); });
+      pills.append(pill);
+    }
+    pop.append(pills);
+  }
+
+  /** The permission modes this session offers. */
+  function drawModes(pop) {
+    pop.replaceChildren();
+    pop.append(node("div", "pc-pop-head", "Permission mode"));
+    const modes = Array.isArray(status.permissionModes) ? status.permissionModes : [];
+    for (const mode of modes) {
+      const row = node("div", `pc-pop-row${mode === status.permissionMode ? " selected" : ""}`);
+      row.append(node("span", null, permissionModeLabel(mode)));
+      if (mode === "bypassPermissions") row.append(node("span", "pc-pop-sub", "Skips every prompt"));
+      row.addEventListener("click", () => { setPermissionMode(mode); closePopover(); });
+      pop.append(row);
+    }
+  }
+
+  /** The context ring and the Fast toggle, under the tiny ring button. */
+  function drawExtras(pop) {
+    pop.replaceChildren();
     const percent = contextPercent(status);
     if (percent !== null) {
       const row = node("div", "pc-pop-row");
       row.append(buildRing(percent), node("span", "pc-pop-sub", `${Math.round(percent)}% of context used`));
       pop.append(row);
     }
-    if (supportsPicker) {
-      pop.append(node("div", "pc-pop-head", "Model"));
-      if (!modelCache) pop.append(node("div", "pc-pop-sub", "Loading\u2026"));
-      else if (!modelCache.length) pop.append(node("div", "pc-pop-sub", "This computer lists no models."));
-      else {
-        for (const model of modelCache) {
-          const row = node("div", `pc-pop-row${model.id === currentModel ? " selected" : ""}`);
-          row.append(node("span", null, modelTitle(model, source)));
-          if (model.description) row.append(node("span", "pc-pop-sub", model.description));
-          row.addEventListener("click", () => { switchModel(model.id, model.defaultEffort); closePopover(); });
-          pop.append(row);
-        }
-        const chosen = modelCache.find((m) => m.id === currentModel);
-        const levels = chosen && takesEffort ? effortLevels(chosen) : [];
-        if (levels.length) {
-          pop.append(node("div", "pc-pop-head", "Effort"));
-          const pills = node("div", "pc-pop-effort");
-          for (const level of levels) {
-            const pill = node("button", `pc-effort${level === chosen.defaultEffort ? " on" : ""}`, level);
-            pill.addEventListener("click", () => { switchModel(chosen.id, level); closePopover(); });
-            pills.append(pill);
-          }
-          pop.append(pills);
-        }
-      }
-    }
-    const modes = Array.isArray(status.permissionModes) ? status.permissionModes : [];
-    if (modes.length) {
-      pop.append(node("div", "pc-pop-head", "Permission mode"));
-      for (const mode of modes) {
-        const row = node("div", `pc-pop-row${mode === status.permissionMode ? " selected" : ""}`);
-        row.append(node("span", null, permissionModeLabel(mode)));
-        if (mode === "bypassPermissions") row.append(node("span", "pc-pop-sub", "Skips every prompt"));
-        row.addEventListener("click", () => { setPermissionMode(mode); closePopover(); });
-        pop.append(row);
-      }
-    }
-    const settings = status.capabilities && status.capabilities.settings;
-    if (source === "claude" && settings && settings.fast) {
+    if (fastAvailable()) {
       const on = !!(status.settingsState && status.settingsState.fast === true);
       const row = node("div", `pc-pop-row${on ? " selected" : ""}`);
       row.append(node("span", null, "Fast mode"), node("span", "pc-pop-sub", on ? "On" : "Off"));
@@ -813,12 +876,12 @@ export function createComposer({ computer, target, provider, onConsole, onAgents
     }
   }
 
-  async function openSettingsMenu(anchor) {
-    openPopover(anchor, (pop) => drawSettings(pop));
+  async function openModelsMenu(anchor) {
+    openPopover(anchor, drawModels);
     if (supportsPicker && !modelCache) {
       try { modelCache = modelRows(source, await hookGet(computer, "/v1/models", { source })); }
       catch { modelCache = []; }
-      if (popover) drawSettings(popover);
+      if (popover && popoverBuild) popoverBuild(popover);
     }
   }
 
@@ -827,6 +890,7 @@ export function createComposer({ computer, target, provider, onConsole, onAgents
     try {
       await hookPost(computer, "/v1/model", modelBody(target, argument, effort));
       currentModel = argument;
+      currentEffort = effort || "";
       updateFooter();
     } catch (error) {
       notice.textContent = (error && error.body && error.body.error) || (error && error.message) || "Model switch failed";

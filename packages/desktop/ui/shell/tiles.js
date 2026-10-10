@@ -11,7 +11,7 @@ const LAYOUT_KEY = "phren.desktop.layout";
 const MIN_RATIO = 0.12;
 let nextLeaf = 1;
 
-export function createTiles(rootEl, { onActivate, onEmpty, emptyText = "Open a session, or press ⌘K." } = {}) {
+export function createTiles(rootEl, { onActivate, onEmpty } = {}) {
   rootEl.classList.add("tiles");
   let root = null;     // node: { kind: "leaf", id, el, bar, body, tabs } | { kind: "split", dir: "row"|"col", ratio, a, b, el, gutter }
   let focused = null;  // the leaf keyboard and new documents go to
@@ -30,7 +30,18 @@ export function createTiles(rootEl, { onActivate, onEmpty, emptyText = "Open a s
     leaf.body.className = "doc-body tile-body";
     const empty = document.createElement("div");
     empty.className = "empty tile-empty";
-    empty.textContent = emptyText;
+    const emptyTitle = document.createElement("div");
+    emptyTitle.className = "tile-empty-title";
+    emptyTitle.textContent = "What should we work on?";
+    const emptyHint = document.createElement("div");
+    emptyHint.className = "tile-empty-hint";
+    emptyHint.textContent = "Open a session from the left, press \u2318K to search, or start a new agent.";
+    const emptyBtn = document.createElement("button");
+    emptyBtn.type = "button";
+    emptyBtn.className = "tile-empty-btn";
+    emptyBtn.textContent = "New agent";
+    emptyBtn.addEventListener("click", () => document.dispatchEvent(new CustomEvent("phren:new-agent")));
+    empty.append(emptyTitle, emptyHint, emptyBtn);
     leaf.body.append(empty);
     leaf.el.append(leaf.bar, leaf.body);
     leaf.tabs = createTabs(leaf.bar, leaf.body, {

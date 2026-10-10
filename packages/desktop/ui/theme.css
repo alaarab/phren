@@ -711,3 +711,59 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 /* Home inbox: unread dot and the Scheduled tag. */
 .home-unread { flex: none; width: 7px; height: 7px; border-radius: 999px; background: var(--accent); align-self: center; }
 .home-tag { flex: none; padding: 0 7px; border-radius: 999px; background: var(--raised); color: var(--text-2); font-size: 11px; }
+/* Sidebar: spinner, unread, pinned, compact rows */
+.sb-ring.working::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--working);
+  animation: sb-spin 1.1s linear infinite;
+}
+@keyframes sb-spin { to { transform: rotate(360deg); } }
+
+.sb-unread { flex: none; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--accent); }
+
+/* Compact project-group header. */
+.sb-project-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 2px; color: var(--muted); font-size: 12px; }
+.sb-project-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-folder { flex: none; width: 12px; height: 12px; display: block; color: var(--dim); }
+.sb-folder svg { width: 12px; height: 12px; display: block; }
+
+/* Compact rows (Codex style): one 32 px line, host dot, title, status mark. */
+.rows-compact .sb-mode { display: none; }
+.rows-compact .sb-row { min-height: 32px; padding: 0 6px 0 8px; gap: 8px; }
+.rows-compact .sb-bar { display: none; }
+.rows-compact .sb-cdot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--host-color, var(--muted)); }
+.rows-compact .sb-title { flex: 1 1 auto; min-width: 0; color: var(--text-2); font-family: var(--prose); font-size: 13px; }
+.rows-compact .sb-cage { flex: none; color: var(--dim); font-size: 11.5px; }
+.rows-compact .sb-cmark { flex: none; color: var(--waiting); font-size: 12px; font-weight: 700; }
+.rows-compact .sb-cspin { flex: none; width: 12px; height: 12px; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--working); animation: sb-spin 1.1s linear infinite; }
+
+/* Unread title wins over the compact title colour (equal specificity, later). */
+.sb-title.unread { color: var(--text); font-weight: 600; }
+
+/* Collapsed sidebar in compact mode keeps only the host dot. */
+.sidebar.compact.rows-compact .sb-title,
+.sidebar.compact.rows-compact .sb-cage,
+.sidebar.compact.rows-compact .sb-cmark,
+.sidebar.compact.rows-compact .sb-cspin,
+.sidebar.compact.rows-compact .sb-unread,
+.sidebar.compact .sb-project-head { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-ring.working::after, .rows-compact .sb-cspin { animation: none; }
+}
+
+/* Empty centre tile (shell/tiles.js): global, it shows before any chat loads. */
+.tile-empty { margin: auto; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 24px; }
+.tile-empty-title { font: 600 22px var(--prose); color: var(--text); }
+.tile-empty-hint { font-size: 13px; color: var(--muted); max-width: 360px; }
+.tile-empty-btn {
+  margin-top: 6px; height: 32px; padding: 0 18px; border: none; border-radius: 999px;
+  background: var(--accent-solid); color: var(--text); font: 600 12.5px var(--prose); cursor: pointer;
+  transition: background 0.18s ease;
+}
+.tile-empty-btn:hover { background: var(--accent-hover); color: #1E1E1E; }
+.tile-empty-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

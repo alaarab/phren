@@ -13,6 +13,7 @@ import { hookGet } from "../api.js";
 registerPauseCommand();
 
 const TRANSCRIPT_KEY = "phren.desktop.transcriptSize";
+const SIDEBAR_ROWS_KEY = "phren.desktop.sidebarRows";
 const NOTIFY_KEY = "phren.desktop.notify";
 const BADGE_KEY = "phren.desktop.badge";
 const SIZES = [12, 13, 14];
@@ -39,6 +40,11 @@ function applyTranscriptSize(px) {
   document.documentElement.style.setProperty("--transcript-size", `${px}px`);
 }
 applyTranscriptSize(readTranscriptSize());
+
+function readSidebarRows() {
+  try { return localStorage.getItem(SIDEBAR_ROWS_KEY) === "compact" ? "compact" : "detailed"; }
+  catch { return "detailed"; }
+}
 
 // ------------------------------------------------------------ helpers
 async function api(path, options = {}) {
@@ -855,6 +861,32 @@ function buildAppearance(page) {
   });
   field.append(select);
   page.append(field);
+  page.append(el("div", "settings-group-label", "SIDEBAR ROWS"));
+  const rowField = el("div", "settings-field");
+  rowField.append(el("label", "settings-field-label", "Row style"));
+  const segs = el("div", "segments");
+  segs.setAttribute("role", "tablist");
+  segs.setAttribute("aria-label", "Sidebar row style");
+  for (const id of ["detailed", "compact"]) {
+    const on = readSidebarRows() === id;
+    const b = el("button", on ? "segment selected" : "segment", id === "detailed" ? "Detailed" : "Compact");
+    b.type = "button";
+    b.dataset.rows = id;
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(on));
+    b.addEventListener("click", () => {
+      try { localStorage.setItem(SIDEBAR_ROWS_KEY, id); } catch { /* private window: this session only */ }
+      for (const other of segs.children) {
+        const selected = other.dataset.rows === id;
+        other.classList.toggle("selected", selected);
+        other.setAttribute("aria-selected", String(selected));
+      }
+      document.dispatchEvent(new CustomEvent("phren:sidebar-rows"));
+    });
+    segs.append(b);
+  }
+  rowField.append(segs);
+  page.append(rowField);
   return null;
 }
 
