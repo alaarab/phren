@@ -53,6 +53,10 @@ packages/vscode/scratch/vscode-webview.html
 # Fan-out workers keep scratch files here
 .scratch/
 
+# Local git worktrees (and leftovers of removed ones). Unignored, every Hook
+# change capture rehashed their files before and after each shell call.
+.worktrees/
+
 packages/code/dist/
 packages/push-relay/dist/
 
