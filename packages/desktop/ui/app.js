@@ -12,6 +12,8 @@ import { mountPreviews } from "./sections/previews.js";
 import { mountMemory } from "./sections/memory.js";
 import { mountConductor } from "./sections/conductor.js";
 import "./shell/launch.js"; // registers "Launch an agent…" in the palette
+import { registerPauseCommand } from "./shell/pause-all.js";
+registerPauseCommand();
 import { initTheme } from "./shell/theme.js";
 import { mountSettings, notifyEnabled, badgeEnabled } from "./sections/settings.js";
 import { mountUsageRings } from "./shell/usage-rings.js";
