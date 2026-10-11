@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { blobSha, deleteStoreFile, githubStoreRepository, putStoreFile, storeBlob, storeHead, storeTree } from "./memory-store.js";
+import { blobSha, deleteStoreFile, githubStoreRepository, putStoreFile, storeBlob, storeBlobs, storeHead, storeTree } from "./memory-store.js";
 
 let root: string, store: string, index: string;
 beforeEach(async () => {
@@ -86,3 +86,31 @@ it("refuses paths outside the store, into .git, or through symlinks", async () =
   await expect(storeBlob(store, "not-a-sha")).rejects.toMatchObject({ status: 400 });
   await expect(storeTree(store, "0".repeat(40))).rejects.toMatchObject({ status: 404 });
 });
+
+it("serves many blobs in one batch and marks unknown ones", async () => {
+  await writeFile(path.join(store, "demo", "tasks.md"), "# tasks\n");
+  const { sha } = await storeHead(store, index);
+  const tree = (await storeTree(store, sha)).tree as { path: string; sha: string }[];
+  const wanted = tree.map(entry => entry.sha);
+  const missing = "0".repeat(40);
+  const { blobs } = await storeBlobs(store, { shas: [...wanted, missing, wanted[0]] }) as { blobs: { sha: string; content?: string; error?: string }[] };
+  expect(blobs).toHaveLength(wanted.length + 1);
+  for (const entry of tree) {
+    const blob = blobs.find(item => item.sha === entry.sha)!;
+    expect(Buffer.from(blob.content!, "base64").toString()).toBe(await readFile(path.join(store, entry.path), "utf8"));
+  }
+  expect(blobs.find(item => item.sha === missing)).toEqual({ sha: missing, error: "unknown" });
+  await expect(storeBlobs(store, { shas: ["not-a-sha"] })).rejects.toBeDefined();
+});
+
+it("defers blobs past the batch budget instead of refusing the batch", async () => {
+  const big = (n: number) => Buffer.alloc(4 * 1024 * 1024 - 16, 48 + n);
+  for (const n of [1, 2, 3]) await writeFile(path.join(store, "demo", `big${n}.md`), big(n));
+  const { sha } = await storeHead(store, index);
+  const tree = (await storeTree(store, sha)).tree as { path: string; sha: string }[];
+  const shas = tree.filter(entry => entry.path.startsWith("demo/big")).map(entry => entry.sha);
+  const { blobs } = await storeBlobs(store, { shas }) as { blobs: { sha: string; content?: string; error?: string }[] };
+  expect(blobs.filter(b => b.content)).toHaveLength(2);
+  expect(blobs.filter(b => b.error === "later")).toHaveLength(1);
+});
+

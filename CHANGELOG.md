@@ -8,6 +8,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Move a session to another agent. `move_session` (also `phren_admin` action `move_session`), `phren move` and the Hook's `POST /v1/sessions/move` hand a live session to Claude under another account, Codex, OpenCode or Copilot, with an optional model and effort. The agent writes a structured hand-off and exits with its own exit command, and the new agent starts in the same pane and folder with the hand-off as its first prompt. If the agent writes none in time, the hand-off is built from the transcript's tail, the git state and the original brief. Nothing is committed; the hand-off lists the uncommitted changes. Only harnesses signed in and usable on that computer are accepted. A dispatched worker keeps its dispatch id, and its receipt records each move under `moves`.
+- Hook: a client's Changes view can open a commit, switch and create branches, fetch and fast-forward. `POST /v1/git/show` returns one commit's message, author, parents, refs and every changed file with counts and its patch against the first parent. `POST /v1/git/checkout` switches to a local branch or creates one from HEAD or a local or remote branch (a remote one becomes its upstream); uncommitted tracked edits need `carryChanges: true`. `POST /v1/git/fetch` fetches the upstream remote with `--prune`, and `POST /v1/git/pull` fast-forwards only, never merging or rebasing. Git's refusals come back verbatim as `{ok: false, output}`. `/v1/git/pulls` `current` adds each check (`checkRuns`), the review decision and the merge state.
+- Hook: pull and merge requests come from one provider per git host: GitHub, GitLab or gitboy. The host is read from the remote's URL. A self-hosted domain is named with `git config remote.<name>.phrenHost github|gitlab|gitboy` or `git config --global phren.<domain>.host <kind>`. GitHub works fully through `gh`, including GitHub Enterprise via `GH_HOST`. GitLab and gitboy answer `reason: "unsupported"` until their providers are built. `/v1/git/pulls` and `/v1/git/pr` now carry `host` with the host's name and terms (pull request `#`, or merge request `!`).
+- Hook: `POST /v1/git/file` returns a file's text at HEAD, in the index or at a commit, so a diff editor can compare whole files. `POST /v1/git/apply` stages or unstages single hunks in the index only. `POST /v1/git/session-changes` lists one agent session's recorded edits by file with each edit's patch. The Hook declares the `gitReview` capability.
+
+### Fixed
+
+- The Hook's health check waits 8 seconds for a harness's `--version` instead of 3. On a busy computer a healthy OpenCode took 2.4 seconds just to start, so the check kept reporting it as not answering.
 
 ## [0.3.37] - 2026-10-10
 
