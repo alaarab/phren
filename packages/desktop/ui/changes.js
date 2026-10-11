@@ -3,15 +3,20 @@
 // CSS (injected once) and re-renders fully from module state.
 import { hookPost, readRepoFile } from "./api.js";
 import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
+import { branchProblem, checksSummary, localForRemote, pullStanding, syncAction, trackingText } from "./git-review.js";
+import { announceGitChange } from "./diff-doc.js";
 
 // The phone's Changes tabs, minus Working tree (the Files pane owns that here).
-const VIEWS = [["changes", "Uncommitted"], ["history", "History"], ["branches", "Branches"], ["pulls", "PRs"], ["worktrees", "Worktrees"]];
+// "Session" is what this agent changed, from the Hook's per-call capture.
+// Short labels so six fit the panel; each carries its full name as a title.
+const VIEWS = [["changes", "Changes", "Uncommitted changes"], ["session", "Session", "What this agent changed"], ["history", "History", "Commit history"],
+  ["branches", "Branches", "Branches"], ["pulls", "PRs", "Pull requests and checks"], ["worktrees", "Workers", "Other worktrees and the workers in them"]];
 
 const CSS = `
 .chg{display:flex;flex-direction:column;height:100%;min-height:0;color:var(--text-2);font:13px/1.45 system-ui,sans-serif}
 .chg-top{padding:12px 12px 8px;flex:none}
 .chg-segs{display:flex;gap:3px;background:var(--surface);border-radius:999px;padding:3px}
-.chg-seg{flex:1;border:none;background:none;color:var(--muted);font:12px system-ui,sans-serif;padding:5px 6px;border-radius:999px;cursor:pointer;white-space:nowrap;transition:background .18s ease,color .18s ease}
+.chg-seg{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;border:none;background:none;color:var(--muted);font:11.5px system-ui,sans-serif;padding:5px 4px;border-radius:999px;cursor:pointer;white-space:nowrap;transition:background .18s ease,color .18s ease}
 .chg-seg:hover{color:var(--text-2)}
 .chg-seg.sel{background:var(--card);color:var(--accent)}
 .chg-sub{margin-top:7px;font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -127,6 +132,45 @@ const CSS = `
 .chg-field input,.chg-field textarea{background:var(--sunken);border:1px solid var(--border);border-radius:10px;color:var(--text);font:13px/1.4 system-ui,sans-serif;padding:8px 10px;outline:none;resize:vertical}
 .chg-field input:focus,.chg-field textarea:focus{border-color:var(--border-strong)}
 .chg-sheet-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:2px}
+.chg-branchbar{display:flex;align-items:center;gap:8px;margin-top:8px;min-height:30px}
+.chg-bb-name{display:flex;align-items:center;gap:6px;min-width:0;flex:1;border:none;background:none;padding:0;cursor:pointer;color:var(--text);font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:12.5px}
+.chg-bb-name>span:first-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chg-bb-glyph{color:var(--accent)}
+.chg-bb-track{flex:none;font-size:11px;padding:1px 7px;border-radius:999px;background:var(--raised);color:var(--muted)}
+.chg-bb-track.unpushed{color:var(--waiting)}
+.chg-bb-btn{flex:none;border:1px solid var(--border);background:var(--raised);color:var(--text-2);border-radius:999px;font:600 11.5px system-ui,sans-serif;padding:4px 10px;cursor:pointer;white-space:nowrap}
+.chg-bb-btn:hover:not(:disabled){border-color:var(--border-strong);color:var(--text)}
+.chg-bb-btn:disabled{opacity:.4;cursor:default}
+.chg-bb-btn.pull{color:var(--waiting)}
+.chg-bb-pr{flex:none;font:600 11px "JetBrains Mono",ui-monospace,Menlo,monospace;padding:2px 8px;border-radius:999px;cursor:pointer;border:none}
+.chg-bb-pr.passing{background:rgba(138,200,172,.16);color:var(--done)}
+.chg-bb-pr.failing{background:rgba(239,152,152,.16);color:var(--danger)}
+.chg-bb-pr.pending{background:rgba(224,188,127,.16);color:var(--waiting)}
+.chg-bb-pr.none{background:var(--raised);color:var(--muted)}
+.chg-commit-head{padding:10px 6px 12px;border-bottom:1px solid var(--border)}
+.chg-back{border:none;background:none;color:var(--accent);font:600 12px system-ui,sans-serif;cursor:pointer;padding:0;margin-bottom:8px}
+.chg-commit-subject{font-size:14px;font-weight:600;color:var(--text);line-height:1.35}
+.chg-commit-body{margin-top:6px;white-space:pre-wrap;font-size:12.5px;color:var(--text-2)}
+.chg-commit-meta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin-top:8px;font-size:12px;color:var(--muted)}
+.chg-copy{border:1px solid var(--border);background:var(--raised);color:var(--accent);font:11.5px "JetBrains Mono",ui-monospace,Menlo,monospace;border-radius:999px;padding:1px 8px;cursor:pointer}
+.chg-log-row .chg-icon{opacity:0}
+.chg-log-row:hover .chg-icon{opacity:1}
+.chg-checks-list{margin:6px 0 10px;border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.chg-check{display:flex;align-items:center;gap:8px;padding:7px 10px;border-top:1px solid var(--border);font-size:12.5px;cursor:default}
+.chg-check:first-child{border-top:none}
+.chg-check.link{cursor:pointer}
+.chg-check.link:hover{background:var(--surface)}
+.chg-check-state{flex:none;width:16px;text-align:center;font-weight:700}
+.chg-check-state.failing{color:var(--danger)}.chg-check-state.pending{color:var(--waiting)}.chg-check-state.passing{color:var(--done)}.chg-check-state.skipped,.chg-check-state.neutral{color:var(--muted)}
+.chg-check-name{flex:1;min-width:0;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chg-check-wf{color:var(--muted);font-size:11.5px}
+.chg-pr-card{margin-top:12px;padding:10px;border:1px solid var(--border-strong);border-radius:12px;background:var(--surface)}
+.chg-pr-card-title{font-size:13.5px;font-weight:600;color:var(--text);cursor:pointer}
+.chg-pr-card-title:hover{color:var(--link)}
+.chg-pr-standing{margin-top:4px;font-size:12px;color:var(--waiting)}
+.chg-session-sum{margin-top:10px;font-size:12px;color:var(--muted)}
+.chg-edit-label{display:flex;align-items:center;gap:8px;padding:5px 10px;background:var(--sunken);font-size:11px;letter-spacing:.04em;color:var(--muted)}
+.chg-edit-label .chg-stat{margin-left:auto}
 `;
 
 export function openChanges(el, ctx) {
@@ -139,6 +183,7 @@ export function openChanges(el, ctx) {
     branches: null, pulls: null, worktrees: null,
     worktree: null, worktreeTitle: null,
     rowMenu: null, sheet: null, notice: null, copyToast: null, busy: null,
+    commit: null, session: null, sessionOpen: null,
   };
   let timer = null;
   let commitBtn = null;
@@ -190,7 +235,7 @@ export function openChanges(el, ctx) {
     if (state.view === key) return;
     state.view = key;
     state.expanded = null; state.rowMenu = null; state.error = ""; state.confirm = null;
-    if (key !== "history") state.logRef = null;
+    if (key !== "history") { state.logRef = null; state.commit = null; }
     refresh();
   }
 
@@ -216,11 +261,13 @@ export function openChanges(el, ctx) {
     if (!target) { state.error = "This session has no target."; render(); return; }
     try {
       if (state.view === "changes") await loadChanges();
-      else if (state.view === "history") await loadHistory();
-      else if (state.view === "branches") state.branches = await hookPost(computer, "/v1/git/branches", scopeBody());
-      else if (state.view === "pulls") state.pulls = await hookPost(computer, "/v1/git/pulls", scopeBody());
+      else if (state.view === "history") { await loadHistory(); if (state.commit && !state.commit.data) await loadCommit(state.commit.sha); }
+      else if (state.view === "session") { state.session = await hookPost(computer, "/v1/git/session-changes", scopeBody()); if (!state.status) await loadStatusQuiet(); }
+      else if (state.view === "branches") { state.branches = await hookPost(computer, "/v1/git/branches", scopeBody()); await loadStatusQuiet(); }
+      else if (state.view === "pulls") { state.pulls = await hookPost(computer, "/v1/git/pulls", scopeBody()); await loadStatusQuiet(); }
       else if (state.view === "worktrees") state.worktrees = await hookPost(computer, "/v1/git/worktrees", scopeBody());
       state.error = "";
+      loadPullsQuiet();
     } catch (e) {
       state.error = e.message || String(e);
     }
@@ -238,13 +285,25 @@ export function openChanges(el, ctx) {
     loadPullsQuiet();
   }
 
+  // The branch bar shows on every view; other views read status quietly.
+  async function loadStatusQuiet() {
+    try { state.status = await hookPost(computer, "/v1/git/status", scopeBody()); } catch { /* the bar just hides */ }
+  }
+
+  async function loadCommit(sha) {
+    state.commit = { sha, data: null, error: "" };
+    try { state.commit.data = await hookPost(computer, "/v1/git/show", scopeBody({ sha })); }
+    catch (e) { state.commit.error = e.status === 404 && /Unknown Phren Hook route/.test(e.message) ? "Update Phren on this computer to open commits." : e.message || String(e); }
+  }
+
   // The branch's pull request drives the footer's PR action; best effort.
   async function loadPullsQuiet() {
     if (pullsRequested) return;
     pullsRequested = true;
     try {
       state.pulls = await hookPost(computer, "/v1/git/pulls", scopeBody());
-      if (!typing() && state.view === "changes") render();
+      // The branch bar's pull request chip shows on every view.
+      if (!typing()) render();
     } catch { /* optional: the PRs tab reports its own failure */ }
   }
 
@@ -270,6 +329,7 @@ export function openChanges(el, ctx) {
     try {
       await fn();
       state.error = ""; state.confirm = null;
+      announce();
       await refresh();
     } catch (e) {
       state.confirm = null; state.error = e.message || String(e);
@@ -324,20 +384,110 @@ export function openChanges(el, ctx) {
     finally { state.busy = null; render(); }
   }
 
+  // Tell diff tabs the index moved; this pane's own listener skips its echo.
+  let announcedAt = 0;
+  function announce() { announcedAt = Date.now(); announceGitChange(computer, target); }
+
+  // ---- branch moves: fetch, pull, switch, create ----------------------------
+  async function sync(kind) {
+    if (state.busy) return;
+    state.busy = kind; render();
+    try {
+      const res = await hookPost(computer, `/v1/git/${kind}`, scopeBody({ expectedRepository: repo() }));
+      if (res && res.ok === false) state.notice = { title: kind === "pull" ? "The pull was refused" : "The fetch was refused", message: res.output || `git ${kind} failed.` };
+      else state.landed = kind === "pull" ? (res.commits ? `Pulled ${res.commits} commit${res.commits === 1 ? "" : "s"}` : "Already up to date") : `Fetched ${res.remote || "origin"}`;
+      pullsRequested = false;
+      announce();
+      await loadStatusQuiet();
+      await refresh();
+    } catch (e) { state.notice = { title: kind === "pull" ? "Could not pull" : "Could not fetch", message: newerHook(e, kind) }; }
+    finally { state.busy = null; render(); }
+  }
+
+  async function checkout(request) {
+    if (state.busy) return;
+    state.busy = "checkout"; state.confirm = null; render();
+    try {
+      const res = await hookPost(computer, "/v1/git/checkout", scopeBody({ branch: request.branch, ...(request.create ? { create: true } : {}),
+        ...(request.startPoint ? { startPoint: request.startPoint } : {}), ...(request.carry ? { carryChanges: true } : {}), expectedRepository: repo() }));
+      if (res && res.ok === false) state.notice = { title: "Git refused the switch", message: res.output || "git switch failed." };
+      else {
+        state.landed = res.created ? `Created and switched to ${res.branch}` : `Switched to ${res.branch}`;
+        if (res.carried) state.landed += ` with ${res.carried} uncommitted file${res.carried === 1 ? "" : "s"}`;
+        state.sheet = null; state.log = null; state.commit = null; pullsRequested = false; state.pulls = null;
+      }
+      announce();
+      await loadStatusQuiet();
+      await refresh();
+    } catch (e) {
+      if (e.status === 409 && e.code === "git-dirty") state.confirm = { kind: "carry", request, message: e.message };
+      else if (state.sheet && state.sheet.kind === "branch") state.sheet.error = newerHook(e, "checkout");
+      else state.notice = { title: "Could not switch branches", message: newerHook(e, "checkout") };
+    } finally { state.busy = null; render(); }
+  }
+
+  function newerHook(e, what) {
+    if (e && e.status === 404 && /Unknown Phren Hook route/.test(e.message || "")) {
+      return `Update Phren on ${computer} to ${what === "checkout" ? "switch branches" : what} from the desktop.`;
+    }
+    return (e && e.message) || String(e);
+  }
+
+  function openBranchSheet(startPoint) {
+    state.sheet = { kind: "branch", name: startPoint ? localForRemote(startPoint) : "", startPoint: startPoint || null, error: "" };
+    render();
+    el.querySelector(".chg-sheet input[data-key=name]")?.focus();
+  }
+
   // ---- header ---------------------------------------------------------------
   function renderTop() {
     const top = div("chg-top");
     const segs = div("chg-segs");
-    for (const [key, label] of VIEWS) {
-      if (key === "worktrees" && state.worktree) continue;
-      segs.appendChild(button(label, "chg-seg" + (state.view === key ? " sel" : ""), () => selectView(key)));
+    for (const [key, label, title] of VIEWS) {
+      if ((key === "worktrees" || key === "session") && state.worktree) continue;
+      const seg = button(label, "chg-seg" + (state.view === key ? " sel" : ""), () => selectView(key));
+      seg.title = title;
+      seg.dataset.view = key;
+      segs.appendChild(seg);
     }
     top.appendChild(segs);
+    if (state.status && !(state.view === "history" && state.commit)) top.appendChild(renderBranchBar(state.status));
     if (state.view === "changes" && state.status) top.appendChild(div("chg-sub", subline(state.status)));
     else if (state.view === "history" && state.logRef) top.appendChild(div("chg-sub", "History · " + state.logRef));
     else if (state.view === "worktrees" && state.worktrees) top.appendChild(div("chg-sub", worktreeCaption(state.worktrees)));
     if (state.worktree) top.appendChild(renderScope());
     return top;
+  }
+
+  function renderBranchBar(s) {
+    const bar = div("chg-branchbar");
+    const name = button("", "chg-bb-name", () => selectView("branches"));
+    name.title = "Branches";
+    name.appendChild(span("chg-bb-glyph", "⑂"));
+    name.appendChild(span("", s.branch || "detached HEAD"));
+    const track = trackingText(s);
+    if (track) name.appendChild(span("chg-bb-track" + (s.upstream ? "" : " unpushed"), track));
+    bar.appendChild(name);
+    const pr = state.pulls && state.pulls.current;
+    if (pr && pr.head === s.branch) {
+      const chip = button(`#${pr.number}`, "chg-bb-pr " + (pr.checks || "none"), () => selectView("pulls"));
+      chip.title = `Pull request #${pr.number}` + (pr.checks ? ` · checks ${pr.checks}` : "");
+      bar.appendChild(chip);
+    }
+    const act = syncAction(s);
+    if (act) {
+      const b = button(state.busy === act.kind ? (act.kind === "pull" ? "Pulling…" : "Fetching…") : act.label, "chg-bb-btn" + (act.kind === "pull" ? " pull" : ""), () => sync(act.kind));
+      b.disabled = !!state.busy;
+      b.dataset.act = act.kind;
+      b.title = act.kind === "pull" ? `Fast-forward ${s.branch} to ${s.upstream}` : `Fetch ${s.upstream ? s.upstream.split("/")[0] : "origin"} and update ahead/behind`;
+      bar.appendChild(b);
+    }
+    const nb = button("+ Branch", "chg-bb-btn", () => openBranchSheet(null));
+    nb.title = "Create a branch here and switch to it";
+    nb.disabled = !!state.busy;
+    nb.dataset.act = "new-branch";
+    bar.appendChild(nb);
+    return bar;
   }
 
   function renderScope() {
@@ -348,10 +498,10 @@ export function openChanges(el, ctx) {
   }
 
   function subline(s) {
+    // The branch bar above names the branch; this line counts the work.
     const n = s.totalFiles != null ? s.totalFiles : (s.files || []).length;
-    const branch = s.branch || "No branch";
-    if (!n) return branch;
-    let line = `${branch} · ${n} file${n === 1 ? "" : "s"}`;
+    if (!n) return "Nothing uncommitted";
+    let line = `${n} file${n === 1 ? "" : "s"} changed`;
     const counts = [];
     if (s.additions) counts.push("+" + s.additions);
     if (s.deletions) counts.push("−" + s.deletions);
@@ -366,7 +516,8 @@ export function openChanges(el, ctx) {
 
   // ---- body ----------------------------------------------------------------
   function renderBody() {
-    if (state.view === "history") return renderHistory();
+    if (state.view === "history") return state.commit ? renderCommit() : renderHistory();
+    if (state.view === "session") return renderSession();
     if (state.view === "branches") return renderBranches();
     if (state.view === "pulls") return renderPulls();
     if (state.view === "worktrees") return renderWorktrees();
@@ -565,10 +716,11 @@ export function openChanges(el, ctx) {
       const ta = document.createElement("textarea");
       ta.className = "chg-msg"; ta.placeholder = "Commit message"; ta.rows = 1; ta.value = state.draft;
       ta.addEventListener("input", () => { state.draft = ta.value; autosize(ta); updateCommitBtn(); });
+      ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && state.draft.trim()) { e.preventDefault(); doCommit(); } });
       row.appendChild(ta);
       commitBtn = button("✓ Commit", "chg-btn commit", doCommit);
       commitBtn.disabled = !state.draft.trim() || !!state.busy;
-      commitBtn.title = state.draft.trim() ? "Commit the staged files" : "Write a commit message first.";
+      commitBtn.title = state.draft.trim() ? "Commit the staged files (⌘Enter)" : "Write a commit message first.";
       row.appendChild(commitBtn);
       foot.appendChild(row);
     } else if (plan.stageAll > 0) {
@@ -660,8 +812,120 @@ export function openChanges(el, ctx) {
     }
     row.appendChild(mid);
     row.title = c.sha || "";
-    row.onclick = () => copy(c.short || c.sha, c.short || "");
+    row.onclick = async () => { await loadCommit(c.sha); render(); };
+    row.appendChild(icon("⧉", "Copy " + (c.short || ""), () => copy(c.sha, c.short || "")));
     return row;
+  }
+
+  // ---- commit detail ---------------------------------------------------------
+  function renderCommit() {
+    const body = div("chg-body");
+    const head = div("chg-commit-head");
+    head.appendChild(button("← History", "chg-back", () => { state.commit = null; render(); }));
+    const c = state.commit;
+    if (!c.data) { head.appendChild(div("chg-empty", c.error || "Loading commit…")); body.appendChild(head); return body; }
+    const d = c.data;
+    head.appendChild(div("chg-commit-subject", d.subject || ""));
+    if (d.body) head.appendChild(div("chg-commit-body", d.body));
+    const meta = div("chg-commit-meta");
+    meta.appendChild(button(d.short || d.sha.slice(0, 7), "chg-copy", () => copy(d.sha, d.short)));
+    meta.appendChild(span("", `${d.author || ""} · ${relTime(d.date)}`));
+    if (d.committer && d.committer !== d.author) meta.appendChild(span("", `committed by ${d.committer}`));
+    if ((d.parents || []).length > 1) meta.appendChild(span("chg-chip", `merge of ${d.parents.length}`));
+    const stat = div("chg-stat");
+    stat.appendChild(span("", `${d.totalFiles} file${d.totalFiles === 1 ? "" : "s"}`));
+    if (d.additions) stat.appendChild(span("chg-adds", "+" + d.additions));
+    if (d.deletions) stat.appendChild(span("chg-dels", "−" + d.deletions));
+    meta.appendChild(stat);
+    head.appendChild(meta);
+    const refs = (d.refs || []).filter((r) => r && r.name);
+    if (refs.length) {
+      const wrap = div("chg-refs");
+      for (const r of refs) wrap.appendChild(span("chg-ref " + (r.kind || ""), r.name));
+      head.appendChild(wrap);
+    }
+    body.appendChild(head);
+    const sec = div("chg-sec");
+    sec.appendChild(sectionHead("FILES", (d.files || []).length));
+    for (const f of d.files || []) {
+      const row = div("chg-row");
+      row.dataset.path = f.path;
+      row.appendChild(div("chg-tile " + tileClass(f.status), f.status));
+      const main = div("chg-main");
+      main.appendChild(div("chg-name", basename(f.path)));
+      const dir = f.oldPath && f.oldPath !== f.path ? `${f.oldPath} →` : dirname(f.path);
+      if (dir) main.appendChild(div("chg-folder", dir));
+      row.appendChild(main);
+      const st = div("chg-stat");
+      if (f.binary) st.appendChild(span("", "binary"));
+      else { if (f.additions) st.appendChild(span("chg-adds", "+" + f.additions)); if (f.deletions) st.appendChild(span("chg-dels", "−" + f.deletions)); }
+      row.appendChild(st);
+      row.onclick = () => ctx.openFile(f.path, { commit: { sha: d.sha, short: d.short, parent: (d.parents || [])[0] || null, oldPath: f.oldPath || f.path },
+        ...(state.worktree ? { worktree: state.worktree } : {}) });
+      sec.appendChild(row);
+    }
+    if (d.truncated) sec.appendChild(div("chg-note", `Showing ${(d.files || []).length} of ${d.totalFiles} files; some patches were cut short.`));
+    body.appendChild(sec);
+    return body;
+  }
+
+  // ---- this session -----------------------------------------------------------
+  function renderSession() {
+    const body = div("chg-body");
+    const res = state.session;
+    if (!res) { body.appendChild(div("chg-empty", state.error ? newerHook({ status: /Unknown Phren Hook route/.test(state.error) ? 404 : 0, message: state.error }, "review this session's changes") : "Loading…")); return body; }
+    const files = res.files || [];
+    if (!files.length) {
+      const empty = div("chg-empty");
+      empty.appendChild(div("chg-empty-icon", "◇"));
+      empty.appendChild(div("", "This session has not changed any files yet"));
+      empty.appendChild(div("chg-folder", "Edits and shell commands the agent runs are recorded here as they happen."));
+      body.appendChild(empty);
+      return body;
+    }
+    body.appendChild(div("chg-session-sum", `${res.calls} tool call${res.calls === 1 ? "" : "s"} changed ${res.totalFiles} file${res.totalFiles === 1 ? "" : "s"} · +${res.additions} −${res.deletions}` + (res.others ? ` · ${res.others} in other repositories` : "")));
+    const sec = div("chg-sec");
+    sec.appendChild(sectionHead("CHANGED BY THIS AGENT", files.length));
+    const uncommitted = new Set((state.status?.files || []).map((f) => f.path));
+    for (const f of files) {
+      const row = div("chg-row");
+      row.dataset.path = f.path;
+      row.appendChild(div("chg-tile " + tileClass(f.status), f.status));
+      const main = div("chg-main");
+      main.appendChild(div("chg-name", basename(f.path)));
+      main.appendChild(div("chg-folder", [dirname(f.path), `${f.edits.length} edit${f.edits.length === 1 ? "" : "s"}`, uncommitted.has(f.path) ? "uncommitted" : "committed"].filter(Boolean).join(" · ")));
+      row.appendChild(main);
+      const st = div("chg-stat");
+      if (f.added) st.appendChild(span("chg-adds", "+" + f.added));
+      if (f.removed) st.appendChild(span("chg-dels", "−" + f.removed));
+      row.appendChild(st);
+      const actions = div("chg-actions");
+      if (uncommitted.has(f.path) && f.status !== "D") actions.appendChild(icon("⇄", "Open the file's uncommitted diff", () => ctx.openFile(f.path, { diff: true })));
+      actions.appendChild(icon("↗", "Open file", () => ctx.openFile(f.path)));
+      row.appendChild(actions);
+      row.onclick = () => { state.sessionOpen = state.sessionOpen === f.path ? null : f.path; render(); };
+      sec.appendChild(row);
+      if (state.sessionOpen === f.path) {
+        const wrap = div("chg-diff");
+        if (f.redacted || f.binary) wrap.appendChild(div("chg-diff-label", f.binary ? "Binary file" : "Patch hidden: this looks like a secrets file."));
+        f.edits.forEach((e, i) => {
+          const box = div("chg-diff-sec");
+          const label = div("chg-edit-label");
+          label.appendChild(span("", `Edit ${i + 1} of ${f.edits.length}`));
+          const es = div("chg-stat");
+          if (e.added) es.appendChild(span("chg-adds", "+" + e.added));
+          if (e.removed) es.appendChild(span("chg-dels", "−" + e.removed));
+          label.appendChild(es);
+          box.appendChild(label);
+          if (e.patch) renderPatch(box, e.patch, f.path);
+          if (e.truncated) box.appendChild(div("chg-diff-label", "Patch truncated."));
+          wrap.appendChild(box);
+        });
+        sec.appendChild(wrap);
+      }
+    }
+    body.appendChild(sec);
+    return body;
   }
 
   // ---- branches ------------------------------------------------------------
@@ -677,6 +941,7 @@ export function openChanges(el, ctx) {
       body.appendChild(empty);
       return body;
     }
+    if (state.confirm && ["switch", "track", "carry"].includes(state.confirm.kind)) body.appendChild(renderBranchConfirm());
     if (local.length) {
       body.appendChild(sectionHead("LOCAL", local.length));
       for (const b of local) body.appendChild(renderBranchRow(b, res.current, false));
@@ -697,9 +962,40 @@ export function openChanges(el, ctx) {
     if (b.ahead > 0) track.appendChild(span("up", "↑" + b.ahead));
     if (b.behind > 0) track.appendChild(span("down", "↓" + b.behind));
     row.appendChild(track);
-    row.title = "Copy " + b.name;
-    row.onclick = () => copy(b.name, b.name);
-    if (!isRemote) row.appendChild(icon("⟲", "History of " + b.name, () => { state.logRef = b.name; state.view = "history"; refresh(); }));
+    row.dataset.branch = b.name;
+    const isCurrent = !isRemote && b.name === current;
+    if (isCurrent) row.title = `${b.name} is checked out`;
+    else if (isRemote) row.title = `Check out ${b.name} as a local branch`;
+    else row.title = `Switch to ${b.name}`;
+    row.onclick = () => {
+      if (isCurrent) return;
+      if (isRemote) {
+        const local = localForRemote(b.name);
+        const exists = (state.branches?.local || []).some((l) => l.name === local);
+        state.confirm = exists ? { kind: "switch", branch: local } : { kind: "track", branch: local, startPoint: b.name };
+      } else state.confirm = { kind: "switch", branch: b.name };
+      render();
+    };
+    row.appendChild(icon("⧉", "Copy " + b.name, () => copy(b.name, b.name)));
+    row.appendChild(icon("⟲", "History of " + b.name, () => { state.logRef = b.name; state.view = "history"; state.commit = null; refresh(); }));
+    if (!isRemote) row.appendChild(icon("+", "New branch from " + b.name, () => openBranchSheet(b.name)));
+    return row;
+  }
+
+  function renderBranchConfirm() {
+    const c = state.confirm;
+    const row = div("chg-confirm");
+    if (c.kind === "carry") {
+      row.appendChild(span("", c.message));
+      row.appendChild(button("Switch with changes", "chg-btn commit", () => checkout({ ...c.request, carry: true })));
+    } else if (c.kind === "track") {
+      row.appendChild(span("", `Check out ${c.startPoint} as ${c.branch}, tracking it?`));
+      row.appendChild(button("Check out", "chg-btn commit", () => checkout({ branch: c.branch, create: true, startPoint: c.startPoint })));
+    } else {
+      row.appendChild(span("", `Switch to ${c.branch}?`));
+      row.appendChild(button("Switch", "chg-btn commit", () => checkout({ branch: c.branch })));
+    }
+    row.appendChild(button("Cancel", "chg-btn stage", () => { state.confirm = null; render(); }));
     return row;
   }
 
@@ -727,15 +1023,48 @@ export function openChanges(el, ctx) {
       return body;
     }
     const pulls = res.pulls || [];
-    if (!pulls.length) {
+    if (res.current) body.appendChild(renderCurrentPull(res.current));
+    if (!pulls.length && !res.current) {
       const empty = div("chg-empty");
       empty.appendChild(div("chg-empty-icon", "⇄"));
       empty.appendChild(div("", "No open pull requests"));
       body.appendChild(empty);
       return body;
     }
-    for (const p of pulls) body.appendChild(renderPullRow(p, res.current));
+    const others = pulls.filter((p) => !res.current || p.number !== res.current.number);
+    if (res.current && others.length) body.appendChild(sectionHead("OPEN PULL REQUESTS", others.length));
+    for (const p of others) body.appendChild(renderPullRow(p, res.current));
     return body;
+  }
+
+  function renderCurrentPull(p) {
+    const card = div("chg-pr-card");
+    card.appendChild(div("chg-sec-h", "THIS BRANCH"));
+    const title = div("chg-pr-card-title", `#${p.number} ${p.title || ""}`);
+    title.onclick = () => { if (p.url) window.open(p.url, "_blank", "noopener"); };
+    card.appendChild(title);
+    const meta = div("chg-pr-meta");
+    meta.appendChild(span("chg-chip", (p.draft ? "draft · " : "") + String(p.state || "").toLowerCase()));
+    if (p.base) meta.appendChild(span("chg-chip", "→ " + p.base));
+    if (p.checks) meta.appendChild(span("chg-checks " + p.checks, checkLabel(p.checks)));
+    card.appendChild(meta);
+    const standing = pullStanding(p);
+    if (standing) card.appendChild(div("chg-pr-standing", standing));
+    const runs = p.checkRuns || [];
+    if (runs.length) {
+      card.appendChild(div("chg-log-meta", checksSummary(runs)));
+      const list = div("chg-checks-list");
+      for (const r of runs) {
+        const row = div("chg-check" + (r.url ? " link" : ""));
+        row.appendChild(span("chg-check-state " + r.state, { failing: "✕", pending: "●", passing: "✓", skipped: "–", neutral: "○" }[r.state] || "○"));
+        row.appendChild(span("chg-check-name", r.name));
+        if (r.workflow) row.appendChild(span("chg-check-wf", r.workflow));
+        if (r.url) { row.title = r.url; row.onclick = () => window.open(r.url, "_blank", "noopener"); }
+        list.appendChild(row);
+      }
+      card.appendChild(list);
+    } else if (p.checks == null) card.appendChild(div("chg-log-meta", "No checks reported for this pull request."));
+    return card;
   }
 
   function renderPullRow(p, current) {
@@ -843,8 +1172,43 @@ export function openChanges(el, ctx) {
     doPullRequest(draft, fields);
   }
 
+  function renderBranchSheet(sheet) {
+    const s = state.sheet;
+    const card = div("chg-sheet-card");
+    card.appendChild(div("chg-sheet-h", s.startPoint ? `New branch from ${s.startPoint}` : "New branch"));
+    const field = sheetField("Branch name", "name", s.name, false, "feature/name");
+    const input = field.querySelector("input");
+    const problem = div("chg-error", s.error || "");
+    const create = button(state.busy === "checkout" ? "Creating…" : "Create and switch", "chg-btn commit", () => submit());
+    const check = () => {
+      s.name = input.value.trim();
+      const why = s.name ? branchProblem(s.name) : "";
+      problem.textContent = why || s.error || "";
+      create.disabled = !s.name || !!why || !!state.busy;
+    };
+    const submit = () => { check(); if (!create.disabled) { s.error = ""; checkout({ branch: s.name, create: true, startPoint: s.startPoint || undefined }); } };
+    input.addEventListener("input", () => { s.error = ""; check(); });
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") { state.sheet = null; render(); } });
+    card.appendChild(field);
+    card.appendChild(problem);
+    card.appendChild(div("chg-log-meta", s.startPoint ? `Starts at ${s.startPoint}${s.startPoint.includes("/") && !(state.branches?.local || []).some((b) => b.name === s.startPoint) ? " and tracks it" : ""}.`
+      : "Starts at the current commit. Uncommitted changes come along."));
+    const actions = div("chg-sheet-actions");
+    actions.appendChild(button("Cancel", "chg-btn stage", () => { state.sheet = null; render(); }));
+    actions.appendChild(create);
+    card.appendChild(actions);
+    sheet.appendChild(card);
+    check();
+    return sheet;
+  }
+
   function renderSheet() {
     const s = state.sheet;
+    if (s.kind === "branch") {
+      const sheet = div("chg-sheet");
+      sheet.onclick = (e) => { if (e.target === sheet) { state.sheet = null; render(); } };
+      return renderBranchSheet(sheet);
+    }
     const sheet = div("chg-sheet");
     sheet.onclick = (e) => { if (e.target === sheet) { state.sheet = null; render(); } };
     const card = div("chg-sheet-card");
@@ -866,12 +1230,19 @@ export function openChanges(el, ctx) {
   function startTimer() { timer = setInterval(() => { if (canPoll()) refresh(); }, 10000); }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
 
+  // A diff tab staged a hunk or a file: re-read this pane when it is the same session.
+  const onGitChanged = (e) => {
+    if (Date.now() - announcedAt < 1000) return;
+    if (e.detail?.computer === computer && e.detail?.session === target?.session && !state.busy) refresh();
+  };
+  window.addEventListener("phren:git-changed", onGitChanged);
+
   startTimer();
   refresh();
 
   return {
     refresh,
-    close() { visible = false; stopTimer(); el.innerHTML = ""; },
+    close() { visible = false; stopTimer(); window.removeEventListener("phren:git-changed", onGitChanged); el.innerHTML = ""; },
   };
 }
 
