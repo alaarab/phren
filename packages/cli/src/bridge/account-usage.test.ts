@@ -19,7 +19,7 @@ const codex = (used: number, updatedAt = at(1)): AccountUsage => ({ source: "cod
   windows: [{ id: "codex:secondary", name: "7-day limit", usedPercent: used, resetsAt: later(90) }] });
 
 describe("account usage merged by account", () => {
-  it("merges one login across computers, keeps the freshest whole report, and names the account id per computer", () => {
+  it("merges one login across computers, takes each window from the newest report, and names the account id per computer", () => {
     const reports: ComputerUsage[] = [
       { computer: "Desk", accounts: [claude("claude:48e1529451f8", "default", at(10), 40)] },
       { computer: "Devbox", accounts: [claude("claude:48e1529451f8", "work", at(2), 55)] },
@@ -29,6 +29,26 @@ describe("account usage merged by account", () => {
     expect(accounts[0]).toMatchObject({ id: "claude|claude:48e1529451f8", harness: "claude", account: "sam@example.com", from: "Devbox", age: "2m", stale: false,
       leftPercent: 45, nearLimit: false, computers: [{ name: "Desk", account: "default" }, { name: "Devbox", account: "work" }] });
     expect(accounts[0].windows.map(w => [w.id, w.usedPercent, w.leftPercent])).toEqual([["five_hour", 10, 90], ["seven_day", 55, 45]]);
+  });
+
+  it("never drops a window the newest report lacks, and takes each window from the newest report that has it", () => {
+    const week: AccountUsage = { ...claude("claude:48e1529451f8", "default", at(30), 68), windows: [
+      { id: "five_hour", name: "5-hour limit", usedPercent: 40, resetsAt: later(1) }, { id: "seven_day", name: "7-day, all models", usedPercent: 68, resetsAt: later(40) }] };
+    const fiveOnly: AccountUsage = { ...claude("claude:48e1529451f8", "default", at(1), 0), windows: [{ id: "five_hour", name: "5-hour limit", usedPercent: 0 }] };
+    const [row] = mergeAccountUsage([{ computer: "Laptop", accounts: [fiveOnly] }, { computer: "Desk", accounts: [week] }], now).accounts;
+    expect(row.windows.map(w => [w.id, w.usedPercent, w.resetsAt])).toEqual([["five_hour", 0, undefined], ["seven_day", 68, later(40)]]);
+    expect(row).toMatchObject({ from: "Laptop", leftPercent: 32 });
+    // Equally new: the window with a reset time wins.
+    const same = { ...fiveOnly, updatedAt: at(30) };
+    expect(mergeAccountUsage([{ computer: "Laptop", accounts: [same] }, { computer: "Desk", accounts: [week] }], now).accounts[0].windows[0].resetsAt).toBe(later(1));
+  });
+
+  it("does not say an exhausted API credit comes back at its expiry", () => {
+    const credit: AccountUsage = { ...claude("claude:0123456789ab", "api", at(1), 0), windows: [{ id: "credit:abcd1234", name: "API credit, estimate", usedPercent: 100, usedUSD: 50, limitUSD: 50, resetsAt: later(200) }] };
+    const [row] = mergeAccountUsage([{ computer: "Desk", accounts: [credit] }], now).accounts;
+    expect(row.exhausted).toBe(true);
+    expect(row.availableIn).toBeUndefined();
+    expect(formatAccountUsage({ accounts: [row], noData: [], computers: ["Desk"], unreachable: [], notLinked: [], enrolled: 0 })).toContain("$50.00 of $50.00, about $0.00 left  expires 2026-10-07");
   });
 
   it("keeps two Claude logins with no identity apart, one per computer", () => {

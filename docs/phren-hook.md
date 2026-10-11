@@ -498,7 +498,8 @@ installed and usable on this computer, and each Claude account's sign-in state; 
 same list rides on `GET /v1/dispatch/capacity` as `harnesses`, next to `usage` (the
 room left on Codex and each Claude account, and whether it is exhausted, which `anywhere` uses to skip an account with no quota left). `phren bridge accounts`
 prints it, `phren bridge accounts add <slug> [--label <name>]` creates another Claude
-home, and `phren bridge accounts label <id> <label>` names one. See
+home, `phren bridge accounts label <id> <label>` names one, and
+`phren bridge accounts credit <id> --amount <usd>` enters an API credit to estimate. See
 [Accounts](accounts.md).
 
 `GET /v1/models?source=claude` reads Claude Code's own cached model catalogue,
