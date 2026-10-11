@@ -670,16 +670,41 @@ export function windowLeft(window: UsageWindow, now: number): number | undefined
   return typeof window.usedPercent === "number" ? Math.max(0, Math.min(100, Math.round(100 - window.usedPercent))) : undefined;
 }
 
+/** An API credit window (one grant of one Claude account). */
+const isCreditWindow = (window: UsageWindow): boolean => window.id.startsWith("credit:");
+
+/** The room in one account's API credits: the grants fund one balance together, so their limits and spend sum.
+ *  A credit that expired is not live so it cannot exhaust the pool, and an exhausted pool has no reset to name. */
+function creditPoolRoom(windows: readonly UsageWindow[], now: number): { left?: number; exhausted: boolean } {
+  const live = windows.filter(window => isCreditWindow(window) && windowLeft(window, now) !== undefined);
+  if (!live.length) return { exhausted: false };
+  const exhausted = live.every(window => windowExhausted(window, now));
+  const numbered = live.filter((window): window is UsageWindow & { usedUSD: number; limitUSD: number } =>
+    typeof window.usedUSD === "number" && Number.isFinite(window.usedUSD) && typeof window.limitUSD === "number" && Number.isFinite(window.limitUSD));
+  if (numbered.length === live.length) {
+    const limit = numbered.reduce((sum, window) => sum + window.limitUSD, 0);
+    const used = numbered.reduce((sum, window) => sum + window.usedUSD, 0);
+    return { left: limit > 0 ? Math.max(0, Math.min(100, Math.round((limit - used) / limit * 100))) : 0, exhausted };
+  }
+  const lefts = live.map(window => windowLeft(window, now)).filter((value): value is number => value !== undefined);
+  return { ...(lefts.length ? { left: Math.max(...lefts) } : {}), exhausted };
+}
+
 /** What a capacity probe says about room: each Codex and Claude account's least room left, and whether it has none
  *  (`exhausted`, with `until` the last reset that frees it). Claude rows add their 5-hour and weekly rooms, which
- *  launch and failover rank accounts by (account-choice.ts). */
+ *  launch and failover rank accounts by (account-choice.ts). API credits are pooled: separate grants that fund one
+ *  balance, so the account is out only when every live credit is, and a credit's expiry is never a reset. */
 export function capacityRoom(accounts: readonly AccountUsage[], now: number): Array<{ source: string; account?: string; leftPercent?: number; exhausted?: true; until?: string } & ReturnType<typeof accountWindows>> {
   return accounts.map(usage => {
-    const left = usage.windows.map(window => windowLeft(window, now)).filter((value): value is number => value !== undefined);
-    const out = usage.windows.filter(window => windowExhausted(window, now));
+    const pool = creditPoolRoom(usage.windows, now);
+    const direct = usage.windows.filter(window => !isCreditWindow(window));
+    const left = direct.map(window => windowLeft(window, now)).filter((value): value is number => value !== undefined);
+    if (pool.left !== undefined) left.push(pool.left);
+    const out = direct.filter(window => windowExhausted(window, now));
     const until = out.map(window => window.resetsAt).filter((value): value is string => Boolean(value)).sort().at(-1);
+    const exhausted = out.length > 0 || pool.exhausted;
     return { source: usage.source, ...(usage.account?.id ? { account: usage.account.id } : {}), ...(left.length ? { leftPercent: Math.min(...left) } : {}),
-      ...(out.length ? { exhausted: true as const, ...(until ? { until } : {}) } : {}), ...(usage.source === "claude" ? accountWindows(usage, now) : {}) };
+      ...(exhausted ? { exhausted: true as const, ...(until ? { until } : {}) } : {}), ...(usage.source === "claude" ? accountWindows(usage, now) : {}) };
   });
 }
 

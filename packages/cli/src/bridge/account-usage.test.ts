@@ -189,6 +189,23 @@ describe("usage as a dispatch tie-break", () => {
       { source: "codex", account: "default" }]);
   });
 
+  it("pools an account's API credits into one balance, and a normal spent window still exhausts on its own", () => {
+    const creditRow = (windows: AccountUsage["windows"]): AccountUsage =>
+      ({ source: "claude", updatedAt: at(1), account: { id: "api", label: "API", key: "claude:api" }, windows });
+    const credit = (id: string, usedUSD: number, limitUSD: number): AccountUsage["windows"][number] =>
+      ({ id: `credit:${id}`, name: "API credit, estimate", usedUSD, limitUSD, usedPercent: Math.round(usedUSD / limitUSD * 100), resetsAt: later(200) });
+    // A $20 promo fully spent and a $100 paid credit with $5 used still leave $95 of $120.
+    const [mixed] = capacityRoom([creditRow([credit("promo", 20, 20), credit("paid", 5, 100)])], now);
+    expect(mixed).toMatchObject({ leftPercent: 79 });
+    expect(mixed.exhausted).toBeUndefined();
+    // Every live credit spent: the pool is exhausted, and a credit's expiry is not a reset to name.
+    const [spent] = capacityRoom([creditRow([credit("promo", 20, 20), credit("paid", 100, 100)])], now);
+    expect(spent).toMatchObject({ leftPercent: 0, exhausted: true });
+    expect(spent.until).toBeUndefined();
+    // A normal window at 100% is still exhausted on its own.
+    expect(capacityRoom([codex(100)], now)[0]).toMatchObject({ leftPercent: 0, exhausted: true });
+  });
+
   it("rules out only the worker's account when it has no quota, never a low one", () => {
     const usage = [{ source: "codex", account: "default", leftPercent: 3 }, { source: "claude", account: "default", leftPercent: 0, exhausted: true, until: later(5) },
       { source: "claude", account: "work", leftPercent: 60 }];
