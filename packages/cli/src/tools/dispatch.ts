@@ -4,12 +4,14 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { hookRequest } from "../bridge/client.js";
 import { dispatchSchema } from "../bridge/dispatch.js";
-import { handOff, handOffSchema, listLiveSessions } from "../bridge/hand-off.js";
+import { handOff, handOffSchema, listLiveSessions, moveSession, moveSessionSchema } from "../bridge/hand-off.js";
 import { readAccountUsage, usageSummary } from "../bridge/account-usage.js";
 import { terminalPaneFromEnv } from "../bridge/terminal.js";
 import { dispatchIdFromEnv } from "../bridge/launch-brief.js";
 import { approvalDecisions } from "../bridge/protocol.js";
 import { mcpResponse } from "./types.js";
+
+const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
 export function register(server: McpServer): void {
   server.registerTool("dispatch", {
@@ -121,6 +123,21 @@ export function register(server: McpServer): void {
       return mcpResponse({ ok: true, data: result, message: one?.line ?? `${Array.isArray(result.projects) ? result.projects.length : 0} projects in the release authority policy.` });
     } catch (error) {
       return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not read the release authority policy." });
+    }
+  });
+  server.registerTool("move_session", {
+    title: "◆ phren · move session",
+    description: "Move a live session to another agent on its own computer: the agent writes a structured hand-off (goal, done, current state, decisions, next steps, open questions, key files), exits with its own exit command, and the target harness (claude with an optional account, codex, opencode or copilot, with an optional model and effort) starts in the same pane and folder with that hand-off as its first prompt. If the agent writes no hand-off in time, Phren builds one from the end of its transcript, the git state and the original brief. Nothing is committed; the hand-off lists the uncommitted changes. Only harnesses signed in and usable on that computer are accepted. A dispatched worker keeps its dispatch: its receipt follows the new agent and records the move under moves. Waits up to five minutes; pass id with status:true to check a move later.",
+    inputSchema: moveSessionSchema,
+  }, async input => {
+    try {
+      const result = await moveSession(input);
+      const move = result.move;
+      const message = move.state === "moved" ? `Moved to ${String(object(move.to).harness)} (${String(move.placement)}); hand-off at ${String(object(move.handoff).path)}.`
+        : move.state === "failed" ? `Move failed: ${String(move.error ?? "unknown error")}` : `Move ${String(move.id)} is ${String(move.state)}; check again with status:true.`;
+      return mcpResponse({ ok: result.ok, data: result, message });
+    } catch (error) {
+      return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not move the session." });
     }
   });
   server.registerTool("hand_off", {

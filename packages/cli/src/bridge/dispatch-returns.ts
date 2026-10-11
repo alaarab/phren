@@ -21,6 +21,7 @@ import { liveWork, runningTasks } from "./session-activity.js";
 import { terminalProvider } from "./terminal.js";
 import { childAgentTree, runningChildAgents } from "./transcripts.js";
 import { opencodeTurn, readTurn, TURN_REPLY_LIMIT, truncateUtf8, turnPhase, type TurnRecord } from "./turn-records.js";
+import { listMoves, moveFrom, movedWorker, moveToSchema, type MovedWorker, type MoveRecord } from "./session-move.js";
 import { awaitedInReply, recentUncommitted, sharedCheckout, unfinishedTurn, type Uncommitted } from "./worker-unfinished.js";
 
 export { truncateUtf8 } from "./turn-records.js";
@@ -60,6 +61,7 @@ const SNAPSHOT_AGE_MS = 5_000;
 // older Hook's target schema strips it, so it is safe to send to any peer.
 const workerTarget = z.union([targetSchema.extend({ dispatch: briefId.optional() }), startingTargetSchema.extend({ dispatch: briefId.optional() })]);
 export const workerRequestSchema = z.object({ targets: z.array(workerTarget).min(1).max(64) }).strict();
+type WorkerTarget = z.infer<typeof workerTarget>;
 
 /** What a worker pane shows right now, as its own computer reads it. */
 export interface WorkerObservation {
@@ -93,6 +95,10 @@ export interface WorkerObservation {
   unchecked?: true;
   /** Where a worker that hit its Claude usage limit was working, for the dispatch that continues it. */
   checkout?: { path: string; branch?: string };
+  /** The worker is being moved to another agent (session-move.ts): the move's id. */
+  moving?: string;
+  /** The worker was moved to another agent; the state above is the new agent's. */
+  moved?: MovedWorker;
 }
 
 export interface WorkerReaders {
@@ -117,6 +123,8 @@ export interface WorkerReaders {
   shared?: (directory: string, folders: readonly unknown[]) => Promise<boolean>;
   /** The branch checked out in a folder. */
   branch?: (directory: string) => Promise<string | undefined>;
+  /** This computer's session moves (session-move.ts), newest first. */
+  moves?: () => Promise<MoveRecord[]>;
 }
 
 const run = promisify(execFile);
@@ -254,7 +262,7 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
   const { targets } = workerRequestSchema.parse(input);
   const snapshots = new Map<string, Promise<Json>>();
   const freshSnapshots = new Map<string, Promise<Json>>();
-  const workers = await Promise.all(targets.map(async (target): Promise<WorkerObservation> => {
+  const observeOne = async (target: WorkerTarget): Promise<WorkerObservation> => {
     let s: Json;
     try {
       if (!snapshots.has(target.server)) snapshots.set(target.server, readers.snapshot(target.server));
@@ -310,10 +318,23 @@ export async function workerStates(input: unknown, readers: WorkerReaders = defa
     const seen: WorkerObservation = { state, session, completed: turn?.completed === true, ...(end?.background ? { background: end.background } : {}), ...(turn?.error ? { error: turn.error } : {}),
       ...(turn?.interrupted ? { interrupted: true as const } : {}), ...replyFields(turn?.lastAssistant) };
     return { ...seen, ...await unfinished(seen, paneDirectory(pane), readers, s, pane), ...await limitCheckout(seen, paneDirectory(pane), readers) };
+  };
+  // A worker moved to another agent (session-move.ts) is followed to it: the
+  // old pane's conversation is gone, and the dispatching Hook is told where it went.
+  const moves = await (readers.moves ?? listMoves)().catch(() => [] as MoveRecord[]);
+  const effective = [...targets];
+  const workers = await Promise.all(targets.map(async (target, index): Promise<WorkerObservation> => {
+    const move = moveFrom(moves, { ...target, session: "session" in target ? target.session : undefined });
+    // Its hand-off turn is part of the move, never a return of its own.
+    if (move && move.state !== "moved" && move.state !== "failed") return { state: "working", moving: move.id };
+    const moved = move ? movedWorker(move) : undefined;
+    if (!moved) return observeOne(target);
+    effective[index] = { ...moved.target, ...(target.dispatch ? { dispatch: target.dispatch } : {}) };
+    return { ...await observeOne(effective[index]), moved };
   }));
   // Only a conversation this dispatch named can be answered; a starting target has no session yet.
   return { workers: workers.map((seen, index) => {
-    const { dispatch: _dispatch, ...target } = targets[index];
+    const { dispatch: _dispatch, ...target } = effective[index];
     const full = "session" in target ? targetSchema.safeParse(target) : undefined;
     const approval = full?.success && seen.state !== "gone" && seen.state !== "closed" && seen.state !== "unavailable" ? readers.approval?.(full.data) : undefined;
     return approval ? { ...seen, approval } : seen;
@@ -330,7 +351,31 @@ const observationSchema = z.object({
   stalled: z.boolean().optional(), stalledSince: z.string().datetime().optional(), stallFor: z.number().nonnegative().optional(),
   interrupted: z.boolean().optional(), approval: z.unknown().optional(), unfinished: z.string().max(200).optional(), unchecked: z.boolean().optional(),
   checkout: z.object({ path: z.string().max(4096), branch: z.string().max(256).optional() }).strict().optional(),
+  moved: z.unknown().optional(),
 }).passthrough();
+
+const movedSchema = z.object({
+  id: z.string().uuid(), at: z.string().datetime(), handoff: z.string().max(4096).optional(),
+  from: z.object({ harness: z.enum(["codex", "claude", "copilot", "phren", "opencode"]), account: z.string().max(64).optional() }).strict(),
+  to: moveToSchema, target: z.union([targetSchema, startingTargetSchema]),
+}).strict();
+
+/** The worker moved to another agent: the receipt now follows that agent, and keeps the move. */
+function observeMove(receipt: Receipt, value: unknown): boolean {
+  const parsed = movedSchema.safeParse(value);
+  if (!parsed.success || receipt.moves?.some(move => move.id === parsed.data.id)) return false;
+  const { target, ...move } = parsed.data;
+  receipt.target = target;
+  receipt.harness = move.to.harness;
+  if (move.to.account) receipt.account = move.to.account; else delete receipt.account;
+  if (move.to.model) receipt.model = move.to.model; else delete receipt.model;
+  if (move.to.effort) receipt.effort = move.to.effort; else delete receipt.effort;
+  delete receipt.accountChoice;
+  // The new agent's turns are its own: the old one's state and pending approval are not carried over.
+  delete receipt.worker; delete receipt.approval;
+  receipt.moves = [...(receipt.moves ?? []), move].slice(-16);
+  return true;
+}
 
 /** A worker's forwarded permission request as its Hook sent it; an invalid one is ignored, not a reason to drop the state. */
 const approvalObservation = z.object({
@@ -356,12 +401,13 @@ function turnKey(value: string | undefined): string | undefined {
 export function observe(receipt: Receipt, value: unknown, now: number): boolean {
   const parsed = observationSchema.safeParse(value);
   if (receipt.closedAt) return false;
-  if (!parsed.success || parsed.data.state === "unavailable" || parsed.data.state === "unknown") return false;
+  const moved = parsed.success && parsed.data.moved !== undefined && observeMove(receipt, parsed.data.moved);
+  if (!parsed.success || parsed.data.state === "unavailable" || parsed.data.state === "unknown") return moved;
   if (parsed.data.state === "closed") { receipt.closedAt = new Date(now).toISOString(); return true; }
   if (parsed.data.state === "gone" && receipt.brief === "launch" && !receipt.worker?.sawWorking && !receipt.returned
-    && now - Date.parse(receipt.createdAt) < LAUNCH_GRACE_MS) return false;
+    && now - Date.parse(receipt.createdAt) < LAUNCH_GRACE_MS) return moved;
   const state = observeState(receipt, parsed.data, now);
-  return observeApproval(receipt, parsed.data.approval, now) || state;
+  return observeApproval(receipt, parsed.data.approval, now) || state || moved;
 }
 
 /** Follow the request the worker is waiting on: a new one is a fresh unread
@@ -500,7 +546,7 @@ export function returnRow(receipt: Receipt): Json {
       ...(receipt.approval.terminal ? { terminal: true } : {}) } } : {}),
     ...(receipt.account ? { account: receipt.account } : {}), ...(receipt.accountChoice ? { accountChoice: receipt.accountChoice } : {}),
     ...(receipt.continued ? { continued: receipt.continued } : {}), ...(receipt.continues ? { continues: receipt.continues } : {}),
-    ...(receipt.target ? { target: receipt.target } : {}) };
+    ...(receipt.moves ? { moves: receipt.moves } : {}), ...(receipt.target ? { target: receipt.target } : {}) };
 }
 
 export interface DispatchReturnsOptions {

@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { hookRequest } from "./client.js";
 import { hookPeers, optionalHookPeers, peerRequest } from "./peers.js";
-import { handOff, listLiveSessions, notLinkedComputers } from "./hand-off.js";
+import { handOff, listLiveSessions, moveSession, notLinkedComputers } from "./hand-off.js";
 
 vi.mock("./client.js", () => ({ hookRequest: vi.fn() }));
 // This computer's names are synthetic so the real hostname never matters.
@@ -28,6 +28,16 @@ it("resolves an existing session and delivers one prompt through its live target
   expect(vi.mocked(hookRequest).mock.calls).toEqual([
     ["/v1/workspaces", undefined], ["/v1/hand-off", { target, text: "Review the tests", deliveryId: expect.any(String) }],
   ]);
+});
+
+it("moves the session in a pane named as the terminal shows it, by its live target", async () => {
+  const target = { server: "default", workspace: "wC9", tab: "wC9:t1", pane: "wC9:p1", source: "claude",
+    session: "aaaaaaaa-1111-4111-8111-111111111111" };
+  const other = { ...target, pane: "wC9:p2", session: "bbbbbbbb-1111-4111-8111-111111111111" };
+  const move = { id: "50000000-0000-4000-8000-000000000005", state: "handing-off" };
+  vi.mocked(hookRequest).mockResolvedValueOnce({ groups: [{ children: [{ target: other }, { target }] }] }).mockResolvedValueOnce({ ok: true, move });
+  expect(await moveSession({ pane: "wC9:p1", harness: "codex", model: "gpt-6.1-sol", wait: false })).toEqual({ ok: true, move, settled: false });
+  expect(vi.mocked(hookRequest).mock.calls[1]).toEqual(["/v1/sessions/move", { target, to: { harness: "codex", model: "gpt-6.1-sol" } }]);
 });
 
 it("names the target by its project folder, from the overview it already read", async () => {
