@@ -139,7 +139,7 @@ describe("remote mirror", () => {
   });
 
   it("edits one schedule with the CLI's format, keeps list prompts intact, and refuses a stale edit", async () => {
-    const sched = { id: "a1b2c3d4", name: "Nightly", enabled: true, computer: "Linuxbox", harness: "claude", every: "daily", at: "02:00",
+    const sched = { id: "a1b2c3d4", name: "Nightly", enabled: true, computer: "Devbox", harness: "claude", every: "daily", at: "02:00",
       prompt: "Do this:\n- first\n- second", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" };
     const yamlText = dump({ version: 1, schedules: [sched, { ...sched, id: "e5f6a7b8", name: "Other" }] });
     const store = fakeStore({ "proj-a/FINDINGS.md": "# Findings\n", "proj-a/schedules.yaml": yamlText });

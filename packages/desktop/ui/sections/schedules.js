@@ -321,7 +321,7 @@ export function mountSchedules(root) {
   function computers() { return store.merged?.computers ?? []; }
 
   function ownerName(schedule) { return schedule.computer; }
-  /** The desktop's own name for a schedule's computer ("omarchy" shows as "Linuxbox"). */
+  /** The desktop's own name for a schedule's computer ("omarchy" shows as "Devbox"). */
   function displayName(name) {
     const want = canonical(name);
     const match = computers().find((c) => [c.computer, c.overview?.phren?.computer?.name].filter(Boolean).map(canonical).includes(want));
@@ -369,7 +369,7 @@ export function mountSchedules(root) {
       }
     }
     // A schedule names its computer by the Hook's own name ("omarchy"), which can
-    // differ from the desktop's name for it ("Linuxbox"): match either, and trust
+    // differ from the desktop's name for it ("Devbox"): match either, and trust
     // the Hook that says it owns the schedule.
     const aliases = (c) => [c.computer, c.overview?.phren?.computer?.name].filter(Boolean).map(canonical);
     const knownNames = new Set(computers().flatMap(aliases));

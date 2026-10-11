@@ -101,11 +101,11 @@ describe("ToolPresentationTests", () => {
   });
 
   it("shellEditsNameThePathsTheyTouch", () => {
-    const cmd = "python3 - <<'PY'\nfrom pathlib import Path\np=Path('/Users/me/.phren/objectstudio/reference/live-midi')\n(p/'source-inputs.json').write_text('{}')\n" +
+    const cmd = "python3 - <<'PY'\nfrom pathlib import Path\np=Path('/Users/me/.phren/ledger/reference/live-midi')\n(p/'source-inputs.json').write_text('{}')\n" +
       "with (p/'WORK.md').open('a') as f: f.write('x')\nprint('see https://example.org/docs/x', open('/dev/null'))\nPY\ngit diff --check";
     const shell = ToolPresentation.of("exec_command", `{"cmd":${JSON.stringify(cmd)}}`);
     expect(shell.editsFiles).toBe(true);
-    expect(shell.editedPaths).toEqual(["/Users/me/.phren/objectstudio/reference/live-midi", "/dev/null"]);
+    expect(shell.editedPaths).toEqual(["/Users/me/.phren/ledger/reference/live-midi", "/dev/null"]);
     expect(ToolPresentation.of("Bash", "{\"command\":\"sed -i '' 's/a/b/' ~/work/app/README.md\"}").editedPaths).toEqual(["~/work/app/README.md"]);
     expect(ToolPresentation.of("Bash", "{\"command\":\"touch ./notes/today.md\"}").editsFiles).toBe(true);
     expect(ToolPresentation.of("Bash", "{\"command\":\"touch ./notes/today.md\"}").editedPaths).toEqual(["./notes/today.md"]);
