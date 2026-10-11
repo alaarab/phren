@@ -70,15 +70,17 @@ export async function writeHostToken(domain: string, kind: TokenHostKind, token:
 }
 
 /** The environment variables each host's own tools read. GITLAB_TOKEN is
- * glab's; it applies to gitlab.com, or to the domain GITLAB_HOST names. */
+ * glab's; it applies to gitlab.com, or to the domain GITLAB_HOST names.
+ * GITBOY_TOKEN applies only to the domain GITBOY_HOST names. */
 function fromEnv(kind: TokenHostKind, domain: string, env: NodeJS.ProcessEnv): string | undefined {
   if (kind === "gitlab") {
     const named = clean(env.GITLAB_HOST)?.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
     if (domain === "gitlab.com" ? !named || named === "gitlab.com" : named === domain) return clean(env.GITLAB_TOKEN) ?? clean(env.GL_TOKEN);
     return undefined;
   }
+  // gitboy runs on any domain, so its token goes only to the one GITBOY_HOST names.
   const named = clean(env.GITBOY_HOST)?.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
-  return !named || named === domain ? clean(env.GITBOY_TOKEN) : undefined;
+  return named && named === domain ? clean(env.GITBOY_TOKEN) : undefined;
 }
 
 /** glab's stored token for a domain, when glab is installed and signed in. */

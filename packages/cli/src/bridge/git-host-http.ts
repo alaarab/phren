@@ -11,10 +11,13 @@ export class HostApiError extends Error {
   constructor(public reason: HostFailure, message: string, public status = 0) { super(message); }
 }
 
-/** The API root for a domain: `git config phren.<domain>.api` when set (a
- * self-hosted server on another port or path), else the host's default. */
+/** The API root for a domain: `git config --global phren.<domain>.api` when
+ * set (a self-hosted server on another port or path), else the host's
+ * default. Only the user's global config counts: a repository's own config is
+ * writable by whatever runs in the checkout, and must never be able to send
+ * a stored token to another server. */
 export async function apiRoot(root: string, domain: string, fallback: string): Promise<string> {
-  const configured = (await git(root, "config", "--get", `phren.${domain}.api`).catch(() => "")).trim();
+  const configured = (await git(root, "config", "--global", "--get", `phren.${domain}.api`).catch(() => "")).trim();
   return (configured || fallback).replace(/\/+$/, "");
 }
 
