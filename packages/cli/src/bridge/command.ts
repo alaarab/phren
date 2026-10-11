@@ -19,8 +19,10 @@ import { ARCHIVE_MAX_FOLDERS, archiveFinishedFanouts, FANOUTS_ARCHIVE_USAGE, par
 import { harnessInventory } from "./harnesses.js";
 import { addClaudeAccount } from "./claude-account-setup.js";
 import { setAccountLabel } from "./claude-accounts.js";
+import { addClaudeCredit, claudeCredits, removeClaudeCredit } from "./claude-credits.js";
 import { ModelCatalog, type AgentModel } from "./models.js";
 
+const CREDIT_USAGE = "Usage: phren bridge accounts credit <id> [--amount <usd> [--expires <yyyy-mm-dd>] [--since <yyyy-mm-dd>] [--label <name>] | --remove <credit>]";
 const LINK_USAGE = "Usage: phren bridge link <ssh-host> [--name <its name here>] [--as <this computer's name there>] [--back-address <address it dials>] [--yes]";
 
 export async function runBridge(args: string[], version: string): Promise<number> {
@@ -49,7 +51,19 @@ export async function runBridge(args: string[], version: string): Promise<number
       } else if (args[1] === "label" && args.length >= 4) {
         await setAccountLabel(args[2], args.slice(3).join(" "));
         console.log(`Labeled ${args[2]} "${args.slice(3).join(" ").trim()}".`);
-      } else throw new Error("Usage: phren bridge accounts [add <slug> [--label <name>] | label <id> <label>]");
+      } else if (args[1] === "credit" && args[2] && !args[2].startsWith("-")) {
+        const flag = (name: string) => { const at = args.indexOf(name); if (at !== -1 && (!args[at + 1] || args[at + 1].startsWith("--"))) throw new Error(CREDIT_USAGE); return at === -1 ? undefined : args[at + 1]; };
+        const amount = flag("--amount"), remove = flag("--remove");
+        if (remove) console.log(await removeClaudeCredit(args[2], remove) ? `Removed credit ${remove} from ${args[2]}.` : `No credit ${remove} on ${args[2]}.`);
+        else if (amount) {
+          const credit = await addClaudeCredit(args[2], { amount, expires: flag("--expires"), since: flag("--since"), label: flag("--label") });
+          console.log(`Credit ${credit.id} on ${args[2]}: $${credit.amountUSD.toFixed(2)} from ${credit.since.slice(0, 10)}${credit.expiresAt ? `, expires ${credit.expiresAt.slice(0, 10)}` : ""}. Usage shows the estimated balance.`);
+        } else {
+          const credits = claudeCredits(args[2]);
+          if (!credits.length) console.log(`No credits on ${args[2]}. ${CREDIT_USAGE}`);
+          for (const credit of credits) console.log(`${credit.id}  $${credit.amountUSD.toFixed(2)}  from ${credit.since.slice(0, 10)}${credit.expiresAt ? `  expires ${credit.expiresAt.slice(0, 10)}` : ""}${credit.label ? `  ${credit.label}` : ""}`);
+        }
+      } else throw new Error("Usage: phren bridge accounts [add <slug> [--label <name>] | label <id> <label> | credit <id> [--amount <usd> [--expires <date>] [--since <date>] [--label <name>] | --remove <credit>]]");
       break;
     }
     case "discover": {

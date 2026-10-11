@@ -12,9 +12,10 @@ import { codexExecutable } from "./codex-binary.js";
 import { readSpeechKey } from "./speech-key.js";
 import { resolveSpeechRegion, SPEECH_REGIONS } from "./speech-voice.js";
 import { accountWindows } from "./account-choice.js";
-import { CODEX_ACCOUNT, claudeAccountSubscription, claudeAccountEmail, claudeAccountRef, claudeHomeOfEnv, claudeHomes, type AccountRef, type ClaudeHome } from "./claude-accounts.js";
+import { CODEX_ACCOUNT, claudeAccountSubscription, claudeAccountEmail, claudeAccountRef, claudeAuthStatus, claudeHomeOfEnv, claudeHomes, claudePlanUnknown, type AccountRef, type AuthStatus, type ClaudeHome } from "./claude-accounts.js";
+import { claudeCredits, creditWindows, homeSessionCosts, recordSessionCost } from "./claude-credits.js";
 
-import { planName, subscriptionDate, type Subscription } from "./subscription.js";
+import { claudePlan, planName, subscriptionDate, type Subscription } from "./subscription.js";
 export type { Subscription } from "./subscription.js";
 
 const exec = promisify(execFile);
@@ -703,7 +704,8 @@ export class AccountUsageReader {
               private readOpenCodeGo: (now: Date) => Promise<AccountUsage> = readOpenCodeGoUsage,
               private readCopilot: (now: Date) => Promise<AccountUsage> = readCopilotUsage,
               private platform: NodeJS.Platform = process.platform,
-              private readElevenLabs: (now: Date) => Promise<AccountUsage | undefined> = liveElevenLabsUsage) {}
+              private readElevenLabs: (now: Date) => Promise<AccountUsage | undefined> = liveElevenLabsUsage,
+              private readAuth: (home: ClaudeHome) => Promise<AuthStatus> = home => claudeAuthStatus(home)) {}
   /** `allAccounts`: one Claude row per home. Otherwise only the default home's, as
    *  before accounts existed, since older phones refuse two rows of one source. */
   async read(sources?: Set<string>, allAccounts = false): Promise<{ accounts: AccountUsage[] }> {
@@ -720,9 +722,17 @@ export class AccountUsageReader {
     // Every home, default first; the labels and keys are read once per poll.
     const homes = allAccounts ? claudeHomes() : claudeHomes().slice(0, 1);
     const claudeRow = async (home: ClaudeHome): Promise<AccountUsage> => {
+      const now = new Date(this.now());
       const email = claudeAccountEmail(home);
-      const subscription = claudeAccountSubscription(home, new Date(this.now()));
-      return { ...settleClaudeUsage(await this.claude(home), this.now()), ...(subscription ? { subscription } : {}), account: { ...claudeAccountRef(home), ...(email ? { email } : {}) } };
+      const credits = claudeCredits(home.id);
+      // Claude Code's own answer only when the profile can't name the plan, or a credit asks whether this is a Console login.
+      const auth = credits.length || claudePlanUnknown(home) ? await this.readAuth(home).catch(() => undefined) : undefined;
+      const fallback = auth?.console ? "Console" : auth?.plan ? claudePlan({ subscriptionType: auth.plan }) : undefined;
+      const subscription = claudeAccountSubscription(home, now, fallback);
+      const usage = settleClaudeUsage(await this.claude(home), this.now());
+      const credit = credits.length ? creditWindows(credits, homeSessionCosts(home), now) : [];
+      const withCredit = credit.length ? { ...usage, windows: [...usage.windows, ...credit], message: undefined, updatedAt: usage.updatedAt ?? now.toISOString() } : usage;
+      return { ...withCredit, ...(subscription ? { subscription } : {}), account: { ...claudeAccountRef(home), ...(email ? { email } : {}) } };
     };
     const [codexValue, claude, subscription] = await Promise.all([codex, Promise.all(homes.map(claudeRow)), readCodexSubscription(undefined, new Date(this.now()))]);
     return [{ ...codexValue, ...(subscription ? { subscription } : {}), account: CODEX_ACCOUNT }, ...claude];
@@ -833,6 +843,7 @@ export async function captureClaudeUsage(original: string): Promise<void> {
       used_percentage: w.usedPercent, resets_at: w.resetsAt ? Date.parse(w.resetsAt) / 1000 : undefined,
     }]));
     await atomicInPrivateDir(claudeFile(home), JSON.stringify({ rate_limits, updatedAt: snapshot.updatedAt }));
+    await recordSessionCost(home, JSON.parse(input)).catch(() => undefined);
   } catch { /* Status line rendering must survive unavailable usage storage. */ }
   const previous = object(JSON.parse(Buffer.from(original, "base64").toString()));
   if (typeof previous.command === "string") {

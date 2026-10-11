@@ -3080,11 +3080,13 @@ schedules:
       expect(view.notLinked).toEqual([{ name: "Studio" }]);
       const claude = view.accounts.filter(row => row.harness === "claude");
       expect(claude, JSON.stringify(view.accounts)).toHaveLength(1);
-      // The remote's report is the only timed one, so it stands whole; the passed window says reset.
+      // The remote's report is the only timed one, so its windows lead; the passed window says reset,
+      // and the window only this Hook reported is kept after them.
       expect(claude[0]).toMatchObject({ id: expect.stringMatching(/^claude\|claude:[0-9a-f]{12}$/), account: "sam@example.com", from: "Devbox",
         computers: [{ name: hostname(), account: "default" }, { name: "Devbox", account: "default" }], leftPercent: 15, nearLimit: true, exhausted: false, stale: true });
       expect(claude[0].windows).toEqual([{ id: "five_hour", name: "5-hour limit", reset: true },
-        expect.objectContaining({ id: "seven_day", usedPercent: 85, leftPercent: 15, resetsIn: expect.any(String) })]);
+        expect.objectContaining({ id: "seven_day", usedPercent: 85, leftPercent: 15, resetsIn: expect.any(String) }),
+        { id: "fixture", name: "Fixture", usedPercent: 0, leftPercent: 100 }]);
       // The capacity probe carries each account's room for anywhere's tie-break.
       const capacity = await api("/v1/dispatch/capacity");
       expect(capacity.status, JSON.stringify(capacity.data)).toBe(200);

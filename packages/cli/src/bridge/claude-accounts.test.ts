@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { accountLabel, claudeAccountKey, claudeAccountRef, claudeHome, claudeHomeOfEnv, claudeHomeOfPath, claudeHomes, claudeLaunchEnv, clearAccountCaches, parseAuthStatus, setAccountLabel } from "./claude-accounts.js";
+import { accountLabel, claudeAccountKey, claudeAccountSubscription, claudePlanUnknown, claudeAccountRef, claudeHome, claudeHomeOfEnv, claudeHomeOfPath, claudeHomes, claudeLaunchEnv, clearAccountCaches, parseAuthStatus, setAccountLabel } from "./claude-accounts.js";
 
 let home = "";
 beforeEach(() => {
@@ -66,7 +66,31 @@ it("keys an account by a hash of its accountUuid, else by its home", () => {
   expect(claudeAccountRef(claudeHome("work")!)).toEqual({ id: "work", label: "Work", key });
 });
 
+it("keys one login in two organizations as two accounts, and the same login and organization as one", () => {
+  account(".claude-team", { oauthAccount: { accountUuid: "abc-123", emailAddress: "x@y.z", organizationUuid: "org-team" } });
+  account(".claude-max", { oauthAccount: { accountUuid: "abc-123", emailAddress: "x@y.z", organizationUuid: "org-personal" } });
+  account(".claude-again", { oauthAccount: { accountUuid: "abc-123", emailAddress: "x@y.z", organizationUuid: "org-team" } });
+  account(".claude-email", { oauthAccount: { emailAddress: "x@y.z", organizationUuid: "org-team" } });
+  const key = (id: string) => claudeAccountKey(claudeHome(id)!);
+  expect(key("team")).not.toBe(key("max"));
+  expect(key("team")).toBe(key("again"));
+  expect(key("email")).toMatch(/^claude:[0-9a-f]{12}$/);
+  expect(key("team")).not.toContain("org-team");
+});
+
+it("dates a Claude subscription by the profile fetch and falls back to Claude Code's plan", () => {
+  account(".claude-team", { oauthAccount: { accountUuid: "a", organizationType: "claude_team", organizationRateLimitTier: "default_raven", profileFetchedAt: Date.parse("2026-10-01T00:00:00Z") } });
+  account(".claude-bare", { oauthAccount: { accountUuid: "b" } });
+  const now = new Date("2026-10-11T00:00:00Z");
+  expect(claudeAccountSubscription(claudeHome("team")!, now)).toEqual({ plan: "Team", checkedAt: "2026-10-01T00:00:00.000Z" });
+  expect(claudePlanUnknown(claudeHome("team")!)).toBe(false);
+  expect(claudePlanUnknown(claudeHome("bare")!)).toBe(true);
+  expect(claudeAccountSubscription(claudeHome("bare")!, now)).toBeUndefined();
+  expect(claudeAccountSubscription(claudeHome("bare")!, now, "Console")).toEqual({ plan: "Console", checkedAt: now.toISOString() });
+});
+
 it("parses claude auth status output", () => {
+  expect(parseAuthStatus('{"loggedIn":true,"authMethod":"console"}')).toEqual({ signedIn: true, console: true });
   expect(parseAuthStatus('{"loggedIn":true,"subscriptionType":"max","email":"x"}')).toEqual({ signedIn: true, plan: "max" });
   expect(parseAuthStatus('{"loggedIn":true}')).toEqual({ signedIn: true });
   expect(parseAuthStatus('{"loggedIn":false}')).toMatchObject({ signedIn: false, reason: "Not signed in" });

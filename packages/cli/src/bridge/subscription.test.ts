@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeAccountSubscription, claudeHomes, clearAccountCaches } from "./claude-accounts.js";
 import { codexSubscription, readCodexSubscription, elevenLabsUsage, fetchElevenLabsUsage, copilotUsage, openCodeGoUsage, AccountUsageReader } from "./usage.js";
-import { monthlyAnniversary } from "./subscription.js";
+import { claudePlan, monthlyAnniversary } from "./subscription.js";
 import { mergeAccountUsage, readAccountUsage, formatAccountUsage } from "./account-usage.js";
 
 const now = new Date("2026-09-29T20:00:00Z");
@@ -59,6 +59,19 @@ describe("subscription metadata", () => {
     expect(first[1].subscription).toMatchObject({ plan: "Pro", renewsEstimated: true });
     expect((await reader.limits())[0].subscription).toEqual(first[0].subscription);
     expect(quotaCalls).toBe(1);
+  });
+  it("names Claude plans as Claude does and never shows an internal tier code", () => {
+    expect(claudePlan({ organizationType: "claude_team", seatTier: "team_standard", organizationRateLimitTier: "default_raven" })).toBe("Team");
+    expect(claudePlan({ organizationType: "claude_team", seatTier: "team_premium" })).toBe("Team Premium");
+    expect(claudePlan({ organizationType: "claude_enterprise" })).toBe("Enterprise");
+    expect(claudePlan({ organizationType: "claude_max", organizationRateLimitTier: "default_claude_max_20x" })).toBe("Max 20x");
+    expect(claudePlan({ organizationType: "claude_max", organizationRateLimitTier: "default_claude_max_5x" })).toBe("Max 5x");
+    // The organization type outranks a rate tier left over from an earlier plan.
+    expect(claudePlan({ organizationType: "claude_pro", organizationRateLimitTier: "default_claude_max_20x" })).toBe("Pro");
+    expect(claudePlan({ organizationRateLimitTier: "default_claude_ai" })).toBe("Pro");
+    expect(claudePlan({ organizationRateLimitTier: "default_raven", billingType: "stripe_subscription" })).toBeUndefined();
+    expect(claudePlan({ subscriptionType: "team" })).toBe("Team");
+    expect(claudePlan({})).toBeUndefined();
   });
   it("clamps month ends without drifting, handles leap years and advances at the anniversary", () => {
     expect(monthlyAnniversary("2024-01-31T10:00:00Z", new Date("2024-02-01"))).toBe("2024-02-29T10:00:00.000Z");
