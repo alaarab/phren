@@ -640,6 +640,51 @@ A request that ends in the worker's terminal (answered there, or its hold ran
 out) clears `approval`; answering one that is gone returns 409.
 
 
+## Move a session to another agent
+
+`move_session` (or `phren move <computer|local> --session <id> --to <harness>`)
+hands a live session to another harness on the same computer: Claude under
+another signed-in account, Codex, OpenCode or Copilot, with an optional model
+and effort. The Hook:
+
+1. Checks the target harness and account are signed in and usable there, and
+   refuses a conductor pane, a pane already moving, or a move to the same place.
+2. Asks the agent, through the same queue `hand_off` uses, to reply with a
+   hand-off between two marker lines: goal, done, current state, decisions,
+   next steps, open questions and key files. A reply never waits on a
+   permission prompt, which writing a file outside the checkout would in a
+   supervised session. The Hook reads the reply from the transcript.
+3. If no hand-off arrives within four minutes (`handoffTimeoutMs` on the route),
+   builds one from the last messages of the transcript and the original
+   dispatch brief, the same way an account failover continuation does.
+4. Appends what it saw itself: the branch, HEAD, every uncommitted change, and
+   the processes the agent had running. Nothing is committed, stashed or reset.
+5. Writes the hand-off to `<bridge>/briefs/<move-id>/handoff.md`, whole.
+6. Types the agent's own exit command (`/exit`, or `/quit` for Codex). An agent
+   still there after 20 seconds gets two Ctrl-C; one still there after that is
+   sent SIGTERM, then SIGKILL. The pane's shell is never signalled.
+7. Starts the target in the same pane and folder. Its first prompt is the
+   hand-off and "continue from here"; a hand-off over 32768 characters is read
+   from its file instead. Herdr gives a pane its variables only when it is
+   created, so a Claude account the pane's shell does not already carry starts
+   in a new tab of the same workspace and the old pane is closed. tmux always
+   uses the same pane.
+
+Each move is recorded in `<bridge>/moves/<id>.json`: `state` (`handing-off`,
+`exiting`, `launching`, `moved`, `failed`), `from`, `to`, `handoff` (`path`,
+`source` `agent` or `fallback`, `reason`), `exit` (`clean`, `interrupted`,
+`killed`), `placement` (`same-pane`, `adjacent-pane`), the new `target`,
+`movedAt` and `error`. A failure after the old agent exited says so and names
+the hand-off file, so the owner can start the new agent by hand.
+
+A dispatched worker keeps its dispatch. The new agent gets the same
+`PHREN_DISPATCH_ID`. While the move runs, the worker reads as working, so the
+hand-off turn is never returned as done. Afterwards `/v1/dispatch/workers`
+answers for the new agent with `moved`, and the dispatching Hook updates the
+receipt: `target`, `harness`, `account`, `model` and `effort` become the new
+agent's, and `moves` records each move with `from`, `to`, `at` and the hand-off
+path. `dispatch_returns` rows carry `moves`.
+
 ## Queued hand-off and stalled workers
 
 `hand_off` uses the receiving Hook's durable queue. A busy worker returns

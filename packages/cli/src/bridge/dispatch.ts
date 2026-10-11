@@ -46,6 +46,16 @@ export const dispatchSchema = z.object({
   parentTarget: targetSchema.optional().describe("Complete live target for the explicit parent."),
 }).strict();
 export type DispatchInput = z.infer<typeof dispatchSchema>;
+/** Where a session moves to (session-move.ts): a harness with its account, model and effort, as a dispatch names them. */
+export const moveToSchema = z.object({
+  harness: z.enum(DISPATCH_HARNESSES).describe("Harness to continue in: claude, codex, opencode or copilot."),
+  account: z.string().refine(isAccountSlug, "Account must be default or a lowercase slug.").optional()
+    .describe("Claude account id (default, or a slug from `phren bridge accounts`); only for claude."),
+  model: text(200).optional().describe("Model for the new agent, otherwise the harness default."),
+  effort: z.enum(launchEfforts).optional().describe("Reasoning effort for the new agent, otherwise the harness default."),
+}).strict().superRefine((value, context) => {
+  if (value.account && value.harness !== "claude") context.addIssue({ code: "custom", message: "Only a Claude target takes an account." });
+});
 const remoteTarget = z.union([targetSchema, startingTargetSchema]);
 /** The local pane that asked for the dispatch, where return notices go. */
 export const originPaneSchema = z.object({ server: serverName, workspace: id, tab: id, pane: id }).strict();
@@ -65,6 +75,9 @@ const receiptSchema = dispatchSchema.omit({ prompt: true }).extend({
     at: timestamp, error: z.string().max(500).optional() }).strict().optional()
     .describe("The worker hit its Claude usage limit: the dispatch that continues it on another account, or why none could."),
   continues: z.string().uuid().optional().describe("The dispatch this one continues after its worker hit its usage limit."),
+  moves: z.array(z.object({ id: z.string().uuid(), at: timestamp, handoff: z.string().max(4096).optional(),
+    from: z.object({ harness: provider, account: z.string().max(64).optional() }).strict(), to: moveToSchema }).strict()).max(16).optional()
+    .describe("Each move of this worker to another agent (session-move.ts): from, to, when, and the hand-off file on the worker's computer. `target`, `harness`, `account`, `model` and `effort` are the current agent's."),
   granted: z.string().max(200).optional().describe("Scope of the conductor grant that allowed this call."),
   authority: z.string().max(600).optional().describe("The release authority policy's line for this project, as a conductor quotes it."),
   authorityConfirmed: z.string().datetime().optional().describe("When the owner confirmed the ask-first release actions this agent dispatch used."),

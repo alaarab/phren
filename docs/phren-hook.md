@@ -918,6 +918,19 @@ The overview and `/v1/dispatch/workers` observations carry `stalled:true`,
 `stalledSince` (ISO time) and `stallFor` (seconds) when both the screen and
 transcript are unchanged while working for `PHREN_STALL_MS`.
 
+### Session moves
+
+With capability `sessionMove`, `POST /v1/sessions/move` takes
+`{target, to: {harness, account?, model?, effort?}, id?, handoffTimeoutMs?}`
+and answers once the move is checked and recorded, with `{ok, move}`. The
+hand-off, exit and relaunch continue after the answer. `GET
+/v1/sessions/move?id=<uuid>` returns `{move}`, and `GET /v1/sessions/moves`
+the 50 most recent moves on this computer. A harness or account that is not
+usable here is refused with 409 `harness_unavailable` or `account_unavailable`;
+a pane already moving with 409 `move_in_progress`. The phone and desktop offer
+only harnesses `/v1/harnesses` reports as usable, and follow a move by polling
+its id. The record's fields and the steps are in docs/conductor.md.
+
 ### Worker report and finish contract
 
 With the conductor module enabled, health capabilities `queuedHandOff`,

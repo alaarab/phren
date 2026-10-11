@@ -271,6 +271,11 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./bridge/dispatch-command.js")).runHandOff(args),
   },
   {
+    name: "move", topic: "core", usage: "phren move <computer|local> --session <id> --to <claude|codex|opencode|copilot> [--account <id>] [--model <model>] [--effort <effort>] [--no-wait]",
+    summary: "Move a live agent session to another harness: it writes a hand-off and exits, and the new agent continues in its pane",
+    run: async args => (await import("./bridge/dispatch-command.js")).runMove(args),
+  },
+  {
     name: "canary", topic: "core", usage: "phren canary [--daily on|off]",
     summary: "Exercise launch, schedules, transcripts and peers through Phren Hook; saves canary.json",
     run: async args => (await import("./bridge/canary.js")).runCanaryCommand(args),

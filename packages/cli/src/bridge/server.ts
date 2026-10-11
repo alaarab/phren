@@ -33,7 +33,7 @@ import { DispatchReturns, hookWorkers } from "./dispatch-returns.js";
 import { findPane, paneChatState, paneIdentity, recentServers, sharedSnapshot, snapshot, validateTarget } from "./herdr.js";
 import { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
-import { BridgeError, bridgeRoot, objects, PROTOCOL, provider, socketPath, targetSchema } from "./protocol.js";
+import { BridgeError, bridgeRoot, objects, PROTOCOL, provider, socketPath, targetSchema, type Target } from "./protocol.js";
 import { CodexQuestions } from "./questions.js";
 import { TabActivityStore } from "./tab-activity.js";
 import { childAgentTree } from "./transcripts.js";
@@ -52,6 +52,14 @@ import { typedMuxRequest } from "./mux-wire.js";
 import { overviewStream } from "./server-overview.js";
 import { transcriptStreams } from "./server-stream.js";
 import { launchSession } from "./server-launch.js";
+import { SessionMover, transcriptTail } from "./session-move.js";
+import { harnessInventoryWithin, launchCheckOff } from "./harnesses.js";
+import { paneAccount, paneAccountKey } from "./pane-accounts.js";
+import { readTurn } from "./turn-records.js";
+import { readLaunchBrief } from "./launch-brief.js";
+import { conductorPane } from "./conductor-role.js";
+import { terminalKind, terminalProvider } from "./terminal.js";
+import { targetTranscriptPath } from "./transcripts.js";
 import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { CodexAuthKeeper, codexAuthRefreshEnabled } from "./codex-auth-refresh.js";
 import { localNames } from "./computer-names.js";
@@ -115,6 +123,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const settingsSwitcher = new SettingsSwitcher(agentHooks);
   const permissionModeSwitcher = new PermissionModeSwitcher(agentHooks);
   const sideQuestions = new SideQuestions();
+  const sendPrompt = async (target: Target, text: string, deliveryId: string, typing: () => Promise<void>) => await paneRouteOnce({ agentHooks, modelSwitcher, settingsSwitcher, permissionModeSwitcher, codexQuestions, sideQuestions },
+    new URL("http://phren.local/v1/prompt"), { target, text, deliveryId, hookQueued: true }, {} as never, typing) as Record<string, unknown>;
   const handOffs = dispatches ? new HandOffQueue({
     validate: target => validateTarget(target, false, true),
     current: async target => {
@@ -123,9 +133,26 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
       return pane && session ? { session, terminal: pane.terminal_id } : undefined;
     },
     notify: (target, text, deliveryId, computer) => handOff({ computer, target, text, deliveryId }, { notifySender: false }),
-    send: async (target, text, deliveryId, typing) => await paneRouteOnce({ agentHooks, modelSwitcher, settingsSwitcher, permissionModeSwitcher, codexQuestions, sideQuestions },
-      new URL("http://phren.local/v1/prompt"), { target, text, deliveryId, hookQueued: true }, {} as never, typing) as Record<string, unknown>,
+    send: sendPrompt,
   }) : undefined;
+  // Moving a session to another agent (session-move.ts): its hand-off request
+  // takes the hand_off path, and the new agent starts through the launch path.
+  const mover = new SessionMover({
+    snapshot: server => snapshot(server),
+    identity: (server, pane) => paneIdentity(server, pane, true),
+    terminal: terminalProvider(),
+    deliver: (target, text, deliveryId) => handOffs ? handOffs.enqueue({ target, text, deliveryId }) : sendPrompt(target, text, deliveryId, async () => {}),
+    // The new agent starts in the folder an agent already ran in, so it is trusted for the new harness too.
+    launch: (server, data, options) => launches.run(() => launchSession(server, data, { trustFolder: true, ...options })),
+    inventory: () => launchCheckOff() ? Promise.resolve(undefined) : harnessInventoryWithin(2_500),
+    transcript: async target => transcriptTail(await targetTranscriptPath(target)),
+    paneAccount: (server, pane) => paneAccount(paneAccountKey(server, pane.pane_id), typeof pane.terminal_id === "string" ? pane.terminal_id : undefined)?.id,
+    paneDispatch: async (server, pane) => (await readTurn(server, String(pane.pane_id)))?.dispatch,
+    brief: readLaunchBrief,
+    isConductor: async (server, pane) => (await conductorPane(server, await snapshot(server)))?.pane_id === pane.pane_id,
+    envAtStart: server => terminalKind(server) === "tmux",
+    afterExit: async (server, pane) => { const entry = codexServers.forPane(server, pane); if (entry) await codexServers.stop(entry); },
+  });
   const contextUsage = new WorkspaceContextUsage();
   const accountUsage = options.accountUsage ?? new AccountUsageReader();
   // A Claude launch that names no account runs under the one with the most room (account-choice.ts).
@@ -191,7 +218,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   });
   const http = createServer(createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
     journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, permissionModeSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
-    fanoutMessages, canary, streams, returns, handOffs, inbox }));
+    fanoutMessages, canary, streams, returns, handOffs, inbox, mover }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;
   const ws = new WebSocketServer({ noServer: true, maxPayload: 65_536, perMessageDeflate: false });
   http.on("upgrade", (request, socket, head) => {
