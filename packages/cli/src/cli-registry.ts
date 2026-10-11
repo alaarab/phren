@@ -204,8 +204,8 @@ const TEAM_SUBCOMMANDS: Subcommand[] = [
 
 export const REGISTRY: Command[] = [
   {
-    name: "pair", topic: "setup", usage: "phren pair [--minutes <1-30>] [--port <n>] [--no-install]",
-    summary: "Connect your phone: show a pairing QR code and authorize the phone that scans it",
+    name: "pair", topic: "setup", usage: "phren pair [--minutes <1-30>] [--port <n>] [--no-install] | phren pair --scope gitboy-read|gitboy-write --key <public-key-file|->",
+    summary: "Connect your phone with a pairing QR code, or authorize a scoped key for gitboy (gitboy-read: project memory; gitboy-write: save findings)",
     run: async args => {
       const { runPair } = await import("./bridge/pair.js");
       const { VERSION } = await import("./package-metadata.js");
