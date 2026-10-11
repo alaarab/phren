@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { desktopKeyLine, removePeer, upsertPeer } from "./keys.js";
 
-const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOk6rp5mZR9NnYyyPgxvdi6cGYXJqjcnO5YtupyDMgcQ";
+const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg";
 const peer = (name: string, address = "box") => ({ name, address, username: "me", port: 22, hostKey: KEY, server: "default" });
 
 describe("desktopKeyLine", () => {
