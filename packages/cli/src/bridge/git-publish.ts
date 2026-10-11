@@ -4,6 +4,7 @@ import { BridgeError, type Json } from "./protocol.js";
 import { git, gitRoot } from "./projects.js";
 import { countGit } from "./metrics.js";
 import { defaultBranch, invalidateTree } from "./git.js";
+import { detectHost, providerFor, unknownHost } from "./git-hosts.js";
 
 /** Finishing a session from the phone: commit what is staged, push the
  * current branch, open a pull request. Each acts on the repository the
@@ -15,20 +16,19 @@ import { defaultBranch, invalidateTree } from "./git.js";
 const MAX_OUTPUT = 65_536;
 const COMMIT_TIMEOUT_MS = 110_000;
 const PUSH_TIMEOUT_MS = 110_000;
-const PR_TIMEOUT_MS = 60_000;
 const MAX_MESSAGE = 20_000;
 
 interface Run { code: number | null; output: string; missing: boolean; timedOut: boolean }
 
 /** One process with stdout and stderr interleaved in arrival order, bounded,
  * never attached to a terminal and never prompting. */
-export function runCombined(command: string, args: string[], cwd: string, timeout: number): Promise<Run> {
+export function runCombined(command: string, args: string[], cwd: string, timeout: number, extraEnv: NodeJS.ProcessEnv = {}): Promise<Run> {
   return new Promise(resolve => {
     let output = "", truncated = false, timedOut = false, settled = false;
     const finish = (run: Run) => { if (!settled) { settled = true; resolve(run); } };
     const child = spawn(command, args, {
       cwd, stdio: ["ignore", "pipe", "pipe"],
-      env: nonInteractiveGitEnv({ ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_EDITOR: "true", GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", NO_COLOR: "1" }),
+      env: nonInteractiveGitEnv({ ...process.env, ...extraEnv, GIT_CONFIG_NOSYSTEM: "1", GIT_EDITOR: "true", GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", NO_COLOR: "1" }),
     });
     const append = (chunk: Buffer) => {
       if (truncated) return;
@@ -115,26 +115,17 @@ export async function gitPush(cwd: string, confirmDefault: unknown): Promise<Jso
   return { ok: true, branch, remote, upstream: `${remote}/${destination}`, setUpstream: !tracked, output: run.output };
 }
 
-const PULL_URL = /https:\/\/[^\s"'<>]+\/pull\/\d+/;
-
-/** `gh pr create --fill` for the current branch. A missing or signed-out gh
- * is `{ ok: false, reason: "missing" | "auth" }`; gh's own refusal is
- * `reason: "failed"` with its output. A pull request that already exists for
- * the branch comes back as success with `existing: true`. */
+/** Open a pull or merge request for the current branch on the remote's host
+ * (git-hosts.ts). GitHub's: `gh pr create --fill`; a missing or signed-out
+ * CLI is `{ ok: false, reason: "missing" | "auth" }`, the host's own refusal
+ * `reason: "failed"` with its output, and a request that already exists for
+ * the branch is success with `existing: true`. A stubbed host is
+ * `reason: "unsupported"`, an unrecognised one `reason: "unknown-host"`. */
 export async function gitPullRequest(cwd: string, draft: unknown): Promise<Json> {
   const root = await repository(cwd);
   const branch = await currentBranch(root);
-  const version = await runCombined("gh", ["--version"], root, 10_000);
-  if (version.missing || version.code !== 0) {
-    return { ok: false, reason: "missing", message: "The GitHub CLI (gh) is not installed on this computer. Install it, then run gh auth login there." };
-  }
-  const auth = await runCombined("gh", ["auth", "status"], root, 15_000);
-  if (auth.code !== 0) {
-    return { ok: false, reason: "auth", message: "The GitHub CLI is not signed in on this computer. Run gh auth login there.", output: auth.output };
-  }
-  const run = await runCombined("gh", ["pr", "create", "--fill", "--head", branch, ...(draft === true ? ["--draft"] : [])], root, PR_TIMEOUT_MS);
-  const url = PULL_URL.exec(run.output)?.[0];
-  if (run.code === 0 && url) return { ok: true, url, branch, draft: draft === true };
-  if (url && /already exists/i.test(run.output)) return { ok: true, url, branch, existing: true };
-  return { ok: false, reason: "failed", output: run.timedOut ? `${run.output}\n[gh did not finish within ${PR_TIMEOUT_MS / 1000} seconds]`.trim() : run.output || "gh pr create failed." };
+  const host = await detectHost(root, branch);
+  const provider = providerFor(host);
+  if (!provider) { const { reason, message } = unknownHost(host); return { ok: false, reason, message, host }; }
+  return { ...await provider.open(root, branch, draft === true, host), host };
 }

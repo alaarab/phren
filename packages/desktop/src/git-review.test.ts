@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   branchProblem, checksSummary, diffModes, diffSides, hunkAt, hunkPatch, lineChangeTotals, localForRemote,
-  pullStanding, splitHunks, stepChange, syncAction, trackingText,
+  capitalize, hostTerms, pullStanding, splitHunks, stepChange, syncAction, trackingText,
 // @ts-expect-error git-review.js is plain JavaScript without type declarations
 } from "../ui/git-review.js";
 
@@ -125,5 +125,16 @@ describe("change navigation", () => {
     expect(stepChange(changes, 10, -1)).toBe(0);
     expect(stepChange(changes, 1, -1)).toBe(2);
     expect(stepChange([], 1, 1)).toBe(-1);
+  });
+});
+
+describe("host terms", () => {
+  it("names requests the way the remote's host does, and stays generic until it is known", () => {
+    expect(hostTerms({ kind: "gitlab", name: "GitLab", terms: { short: "MR", long: "merge request", ref: "!" }, supported: false }))
+      .toEqual({ short: "MR", long: "merge request", ref: "!", name: "GitLab", supported: false });
+    expect(hostTerms({ kind: "github", name: "GitHub", terms: { short: "PR", long: "pull request", ref: "#" }, supported: true }).name).toBe("GitHub");
+    expect(hostTerms(undefined)).toEqual({ short: "PR", long: "pull request", ref: "#", name: "the git host", supported: false });
+    expect(hostTerms({ kind: null, name: "the git host", terms: { short: "PR", long: "pull request", ref: "#" } }).name).toBe("the git host");
+    expect(capitalize("merge request")).toBe("Merge request");
   });
 });
