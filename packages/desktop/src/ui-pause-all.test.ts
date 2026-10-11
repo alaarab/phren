@@ -9,8 +9,8 @@ describe("pause all: working sessions", () => {
     const sessions = [
       row("Desk", { id: "a", agentStatus: "working", target: { server: "default" } }),
       row("Desk", { id: "b", agentStatus: "idle", target: { server: "default" } }),
-      row("Linuxbox", { id: "c", agentStatus: "working" }),
-      row("Linuxbox", { id: "d", agentStatus: "working", target: { server: "default" } }),
+      row("Devbox", { id: "c", agentStatus: "working" }),
+      row("Devbox", { id: "d", agentStatus: "working", target: { server: "default" } }),
     ];
     expect(workingSessions(sessions).map((s) => s.child.id)).toEqual(["a", "d"]);
   });
@@ -24,7 +24,7 @@ describe("pause all: working sessions", () => {
 
 describe("pause all: wording", () => {
   it("counts agents and computers in the confirm", () => {
-    const sessions = [row("Desk", { id: "a" }), row("Desk", { id: "b" }), row("Linuxbox", { id: "c" })];
+    const sessions = [row("Desk", { id: "a" }), row("Desk", { id: "b" }), row("Devbox", { id: "c" })];
     expect(pausePrompt(sessions)).toBe("Pause 3 agents on 2 computers?");
     expect(pausePrompt([row("Desk", { id: "a" })])).toBe("Pause 1 agent on 1 computer?");
     expect(pausePrompt([])).toBe("No agents are working.");

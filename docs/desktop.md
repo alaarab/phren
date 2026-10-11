@@ -41,8 +41,8 @@ conductor's dispatch key. It is revocable per computer.
 
 ```bash
 node packages/desktop/dist/src/main.js enroll                  # create the key, print its authorized_keys line
-node packages/desktop/dist/src/main.js link user@host --name Linuxbox
-node packages/desktop/dist/src/main.js revoke Linuxbox
+node packages/desktop/dist/src/main.js link user@host --name Devbox
+node packages/desktop/dist/src/main.js revoke Devbox
 node packages/desktop/dist/src/main.js list
 ```
 

@@ -26,7 +26,7 @@ store.version(computer)            // Hook version string when known
 
 Gate every control on a capability the Hook declares, never on a 404: an
 unsupported feature shows a disabled control with a reason ("Needs a newer
-Phren on Linuxbox").
+Phren on Devbox").
 
 ## Sections (`shell/sections.js`)
 
