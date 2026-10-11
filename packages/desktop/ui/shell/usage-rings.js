@@ -91,7 +91,9 @@ function windowLine(w, now) {
   const value = document.createElement("span");
   value.className = "usage-window-value";
   const used = typeof w.usedPercent === "number" ? w.usedPercent : null;
-  value.textContent = w.reset ? "reset" : used !== null ? `${used}%` : w.usedUSD !== undefined ? `$${w.usedUSD.toFixed(2)}` : "";
+  const credit = w.id?.startsWith("credit:") && w.usedUSD !== undefined && w.limitUSD !== undefined;
+  value.textContent = credit ? `$${w.usedUSD.toFixed(2)} of $${w.limitUSD.toFixed(2)}`
+    : w.reset ? "reset" : used !== null ? `${used}%` : w.usedUSD !== undefined ? `$${w.usedUSD.toFixed(2)}` : "";
   const bar = document.createElement("span");
   bar.className = "usage-bar";
   const fill = document.createElement("span");
@@ -102,7 +104,8 @@ function windowLine(w, now) {
   const reset = document.createElement("span");
   reset.className = "usage-window-reset";
   const until = w.resetsIn || (w.resetsAt ? resetsIn(w.resetsAt, now) : "");
-  reset.textContent = until ? `resets in ${until}` : "";
+  // A credit's date is its expiry; a 5-hour window with no reset time has not started.
+  reset.textContent = until ? `${credit ? "expires" : "resets"} in ${until}` : w.id === "five_hour" && !w.reset ? "not started" : "";
   row.append(label, value, bar, reset);
   return row;
 }
