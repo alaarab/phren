@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phren</title>
+  <link rel="stylesheet" href="./theme.css">
+  <link rel="stylesheet" href="/vendor/xterm/xterm.css">
+</head>
+<body>
+  <header class="topbar titlebar">
+    <span class="wordmark">Phren</span>
+    <span class="nav-arrows">
+      <button class="nav-arrow" id="nav-back" title="Back (⌘[)" aria-label="Back">‹</button>
+      <button class="nav-arrow" id="nav-forward" title="Forward (⌘])" aria-label="Forward">›</button>
+    </span>
+    <nav class="section-pills" id="section-pills" aria-label="Sections"></nav>
+    <nav class="section-subs" id="section-sub" aria-label="Pages" hidden></nav>
+    <span class="spacer"></span>
+    <div id="usage-rings"></div>
+    <button class="needs-pill" id="needs-pill" hidden></button>
+    <span class="conn" id="conn-count"></span>
+    <span class="section-icons" id="section-icons"></span>
+  </header>
+  <div class="sections" id="sections"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

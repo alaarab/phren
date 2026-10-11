@@ -1,0 +1,121 @@
+/* Schedules: the Tonight strip, schedules grouped by computer then project,
+   a run history drawer and the schedule editor sheet. Phren Charcoal. */
+
+.section-schedules { overflow-y: auto; }
+
+.sch { display: grid; gap: 20px; max-width: 960px; margin: 0 auto; padding: 24px; }
+
+.sch-head { display: flex; align-items: center; gap: 12px; }
+.sch-title { margin: 0; font-size: 18px; font-weight: 600; color: var(--text); }
+.sch-spacer { flex: 1; }
+.sch-note { color: var(--muted); font-size: 12px; }
+.sch-error { color: var(--danger); font-size: 12.5px; padding: 8px 12px; border-radius: 10px; background: rgba(239, 152, 152, 0.14); }
+
+/* Tonight */
+.sch-tonight { display: grid; gap: 8px; }
+.sch-tonight .section-label { display: flex; align-items: center; gap: 8px; }
+.sch-tonight-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.sch-tonight-card { flex: none; min-width: 148px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.sch-tonight-time { font-family: var(--mono); font-size: 14px; color: var(--accent); }
+.sch-tonight-name { margin-top: 4px; font-size: 12.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-tonight-host { margin-top: 2px; font-size: 11px; color: var(--muted); }
+
+/* Groups */
+.sch-list { display: grid; gap: 16px; }
+.sch-computer-label { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.sch-computer-label .sch-count, .sch-project-label .sch-count { padding: 0 7px; border-radius: 999px; background: var(--raised); color: var(--text-2); font-size: 11px; letter-spacing: 0; }
+.sch-project-label { display: flex; align-items: center; gap: 8px; margin: 8px 0 4px; color: var(--text-2); font-size: 12px; }
+.sch-project-label .sch-count { color: var(--muted); }
+.sch-rows { display: grid; gap: 4px; }
+
+/* Row */
+.sch-row { position: relative; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 6px 12px; border-radius: 10px; background: var(--surface); transition: background .18s ease; }
+.sch-row:hover { background: var(--card); }
+.sch-dot { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--dim); }
+.sch-dot.ok { background: var(--done); }
+.sch-dot.failed { background: var(--danger); }
+.sch-dot.running { background: var(--working); }
+.sch-dot.blocked { background: var(--waiting); }
+.sch-row-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.sch-row-title { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-row-sub { display: flex; gap: 6px; align-items: baseline; min-width: 0; color: var(--muted); font-size: 12px; }
+.sch-row-sub .sch-timing { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-row-sub .sch-harness { color: var(--text-2); }
+.sch-row-sub .sch-model { font-family: var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-row-meta { flex: none; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.sch-next { color: var(--text-2); }
+.sch-next.offline { color: var(--danger); }
+.sch-chip { padding: 2px 8px; border-radius: 999px; font-size: 11px; background: var(--raised); color: var(--muted); }
+.sch-chip.ok { background: rgba(138, 200, 172, 0.16); color: var(--done); }
+.sch-chip.failed { background: rgba(239, 152, 152, 0.16); color: var(--danger); }
+.sch-chip.running { background: rgba(185, 148, 244, 0.16); color: var(--working); }
+.sch-chip.blocked, .sch-chip.needs { background: rgba(224, 188, 127, 0.16); color: var(--waiting); }
+.sch-age { color: var(--dim); }
+
+.sch-actions { flex: none; display: flex; gap: 2px; opacity: 0; pointer-events: none; transition: opacity .18s ease; }
+.sch-row:hover .sch-actions, .sch-row:focus-within .sch-actions { opacity: 1; pointer-events: auto; }
+.sch-action { border: 0; background: transparent; color: var(--muted); border-radius: 8px; padding: 5px 8px; font: 500 12px system-ui; cursor: pointer; transition: background .18s ease, color .18s ease; }
+.sch-action:hover { background: var(--raised); color: var(--text); }
+.sch-action[disabled] { color: var(--dim); cursor: default; }
+.sch-action[disabled]:hover { background: transparent; }
+.sch-action.danger:hover { color: var(--danger); }
+
+.sch-empty { padding: 32px; text-align: center; color: var(--muted); }
+
+/* Overlays: history drawer and editor sheet */
+.sch-overlay { position: fixed; inset: 0; z-index: 80; display: flex; background: rgba(0, 0, 0, 0.5); }
+.sch-overlay.sheet { align-items: flex-start; justify-content: center; padding-top: 8vh; }
+.sch-overlay.drawer { justify-content: flex-end; }
+.sch-sheet { width: min(620px, 92vw); max-height: 84vh; overflow: auto; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 18px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5); }
+.sch-drawer { width: min(520px, 92vw); height: 100%; display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border-strong); }
+.sch-sheet-head { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.sch-sheet-title { font-size: 15px; font-weight: 600; color: var(--text); }
+.sch-sheet-body { display: grid; gap: 16px; padding: 16px 20px; }
+.sch-sheet-body.scroll { overflow-y: auto; }
+
+.sch-field { display: grid; gap: 6px; }
+.sch-field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.sch-input, .sch-textarea, .sch-select { width: 100%; background: var(--sunken); border: 1px solid var(--border-strong); border-radius: 10px; color: var(--text); font: inherit; font-size: 13px; padding: 8px 10px; }
+.sch-textarea { min-height: 120px; resize: vertical; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; }
+.sch-input:focus, .sch-textarea:focus, .sch-select:focus { outline: none; border-color: var(--accent); }
+.sch-fields-2 { display: flex; gap: 12px; }
+.sch-fields-2 > * { flex: 1; min-width: 0; }
+.sch-hint { color: var(--muted); font-size: 12px; }
+.sch-invalid { color: var(--danger); font-size: 12px; }
+
+.sch-segments { display: inline-flex; gap: 2px; padding: 3px; background: var(--raised); border-radius: 999px; }
+.sch-segment { border: 0; background: transparent; color: var(--muted); font: 500 12.5px system-ui; padding: 5px 14px; border-radius: 999px; cursor: pointer; transition: background .18s ease, color .18s ease; }
+.sch-segment:hover { color: var(--text-2); }
+.sch-segment.selected { background: var(--card); color: var(--accent); }
+.sch-days { display: flex; flex-wrap: wrap; gap: 4px; }
+.sch-day { min-width: 44px; height: 30px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--raised); color: var(--text-2); font-size: 12px; cursor: pointer; }
+.sch-day.on { background: var(--accent-solid); border-color: transparent; color: #fff; }
+
+.sch-btn { height: 32px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--raised); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; transition: background .18s ease, color .18s ease; }
+.sch-btn:hover { color: var(--accent-hover); }
+.sch-btn.primary { background: var(--accent-solid); border-color: transparent; color: #fff; }
+.sch-btn.primary:hover { background: var(--accent); color: #fff; }
+.sch-btn.danger { color: var(--danger); }
+.sch-btn[disabled] { opacity: 0.4; cursor: default; }
+
+/* History */
+.sch-runs { display: grid; padding: 4px 20px 20px; }
+.sch-run { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.sch-run:last-child { border-bottom: 0; }
+.sch-run-rail { flex: none; width: 3px; border-radius: 2px; background: var(--muted); }
+.sch-run-rail.ok { background: var(--done); }
+.sch-run-rail.failed { background: var(--danger); }
+.sch-run-rail.running { background: var(--working); }
+.sch-run-rail.blocked, .sch-run-rail.needs { background: var(--waiting); }
+.sch-run-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.sch-run-top { display: flex; align-items: baseline; gap: 8px; }
+.sch-run-when { color: var(--text); font-size: 13px; }
+.sch-run-duration { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sch-run-status { color: var(--text-2); font-size: 12px; }
+.sch-run-status.failed { color: var(--danger); }
+.sch-run-status.blocked, .sch-run-status.needs { color: var(--waiting); }
+.sch-run-note { color: var(--muted); font-size: 11.5px; }
+.sch-run-open { align-self: flex-start; border: 0; background: transparent; color: var(--link); font: inherit; font-size: 12px; cursor: pointer; padding: 0; }
+.sch-run-open:hover { color: var(--accent-hover); }
+
+@media (prefers-reduced-motion: reduce) { .sch-row, .sch-actions, .sch-action, .sch-segment, .sch-btn { transition: none; } }

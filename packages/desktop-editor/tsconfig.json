@@ -1,0 +1,1 @@
+{ "compilerOptions": { "target": "ESNext", "module": "ESNext", "moduleResolution": "Bundler", "strict": true, "skipLibCheck": true, "lib": ["ESNext", "DOM", "DOM.Iterable", "WebWorker"], "types": [] }, "include": ["src"] }

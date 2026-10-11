@@ -1,0 +1,126 @@
+/* Interaction cards: the phone's approval, question, plan, secret, sudo and
+   side-answer cards, drawn with the desktop's Charcoal variables. */
+
+.cards { display: flex; flex-direction: column; gap: 12px; }
+.cards:empty { display: none; }
+
+.interaction-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  outline: none;
+}
+.interaction-card:focus-visible { border-color: var(--accent); }
+.interaction-card.approval,
+.interaction-card.plan,
+.interaction-card.sudo,
+.interaction-card.secret { border-left: 3px solid var(--waiting); }
+
+.card-head { display: flex; align-items: baseline; gap: 8px; color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.card-head .card-count { margin-left: auto; color: var(--muted); font-weight: 500; letter-spacing: 0; text-transform: none; }
+.card-title { color: var(--text); font-size: 13px; font-weight: 600; }
+.card-explain { color: var(--text-2); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.card-mono { padding: 8px 10px; background: var(--sunken); border-radius: 8px; color: var(--muted); font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.card-meta { color: var(--muted); font-size: 12px; }
+.card-details { color: var(--muted); font-size: 12px; }
+.card-details summary { cursor: pointer; color: var(--dim); }
+.card-details .card-mono { margin-top: 8px; }
+
+.card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.card-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--raised);
+  color: var(--text);
+  font: 500 13px system-ui;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease, border-color .18s ease;
+}
+.card-btn:hover:not(:disabled) { color: var(--accent-hover); }
+.card-btn.primary { border-color: transparent; background: var(--accent-solid); color: #fff; }
+.card-btn.primary:hover:not(:disabled) { background: var(--accent); color: #1E1E1E; }
+.card-btn.danger:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
+.card-btn:disabled { opacity: .5; cursor: default; }
+
+.card-error { display: flex; align-items: center; gap: 10px; color: var(--waiting); font-size: 12.5px; }
+.card-error .card-btn { min-height: 30px; padding: 0 12px; font-size: 12px; }
+.card-receipt { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
+.card-receipt .tick { color: var(--done); }
+
+.spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 999px; animation: card-spin .7s linear infinite; }
+@keyframes card-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+/* Question cards: bordered radio/checkbox rows, an Other input, one Send. */
+.q-block { display: flex; flex-direction: column; gap: 6px; }
+.q-block + .q-block { margin-top: 10px; }
+.q-question { color: var(--text); font-size: 13px; font-weight: 600; }
+.q-header { color: var(--accent); font-weight: 600; }
+.q-options { display: flex; flex-direction: column; gap: 6px; }
+.q-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .18s ease, background .18s ease;
+}
+.q-option:hover { border-color: var(--accent); }
+.q-option.selected { border-color: var(--accent); background: var(--card); }
+.q-option:disabled { opacity: .5; cursor: default; }
+.q-option-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.q-option-text > span:first-child { color: var(--text); }
+.q-mark { flex: none; width: 16px; height: 16px; margin-top: 2px; border: 2px solid var(--muted); border-radius: 999px; }
+.q-mark.check { border-radius: 5px; }
+.q-option.selected .q-mark { border-color: var(--accent); }
+.q-option.selected .q-mark::after { content: ""; display: block; width: 8px; height: 8px; margin: 2px; border-radius: 999px; background: var(--accent); }
+.q-option.selected .q-mark.check::after { width: 8px; height: 5px; margin: 1px 3px; border-radius: 0; border-left: 2px solid var(--accent); border-bottom: 2px solid var(--accent); transform: rotate(-45deg); }
+
+.card-input {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font: 13px var(--mono);
+  outline: none;
+}
+.card-input:focus { border-color: var(--accent); }
+.card-input::placeholder { color: var(--dim); }
+.card-check { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; cursor: pointer; }
+
+/* Plan card: markdown-ish headings, lists and code, built as nodes. */
+.plan-body { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+.plan-body .md-h { color: var(--text); font-weight: 600; }
+.plan-body .md-h1 { font-size: 15px; }
+.plan-body .md-h2 { font-size: 14px; }
+.plan-body .md-h3 { font-size: 13px; }
+.plan-body .md-p { color: var(--text-2); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.plan-body .md-li { display: flex; gap: 8px; color: var(--text-2); font-size: 12.5px; }
+.plan-body .md-li .bullet { color: var(--accent); }
+.plan-body .md-code { padding: 1px 5px; border-radius: 4px; background: var(--raised); color: var(--path); font-family: var(--mono); font-size: 12px; }
+.plan-body .md-pre { margin: 0; padding: 8px 10px; background: var(--sunken); border-radius: 8px; color: var(--text-2); font-family: var(--mono); font-size: 12px; overflow-x: auto; white-space: pre; }
+
+/* Sudo and side-answer cards. */
+.card-countdown { color: var(--waiting); font-family: var(--mono); font-size: 12px; }
+.side-card .side-question { color: var(--text); font-size: 13px; font-weight: 600; }
+.side-answer-text { max-height: 240px; overflow-y: auto; }
+.side-card .side-note { color: var(--muted); font-size: 12px; }
