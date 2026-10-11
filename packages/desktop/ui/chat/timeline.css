@@ -1,0 +1,272 @@
+/* The desktop chat timeline, drawn with the Charcoal variables. Rows are the
+   phone's, the density is the desktop's. */
+
+.ct-root { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.ct-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.ct-column {
+  display: flex; flex-direction: column; gap: 14px;
+  max-width: 760px; margin: 0 auto; padding: 10px 16px 24px;
+  font-size: var(--transcript-size, 13px);
+}
+.ct-empty { display: none; }
+
+/* The fold over older turns: one quiet line at the top of the column. */
+.ct-fold {
+  padding: 4px 0;
+  margin-bottom: 10px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font: 500 12.5px var(--prose);
+  text-align: left;
+  cursor: pointer;
+  transition: color .18s ease;
+}
+.ct-fold:hover { color: var(--text-2); }
+.ct-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.ct-jump {
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  padding: 6px 14px; border: 1px solid var(--border-strong); border-radius: 999px;
+  background: var(--raised); color: var(--text-2); font: 500 12px var(--mono);
+  cursor: pointer; box-shadow: 0 4px 14px rgba(0, 0, 0, .4);
+}
+.ct-jump:hover { color: var(--accent); border-color: var(--accent); }
+
+/* Messages ------------------------------------------------------------------ */
+.ct-msg-row { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.ct-user-row { justify-content: flex-end; }
+.ct-spoken { color: var(--dim); font-size: 11px; align-self: flex-start; padding-top: 8px; }
+.ct-user-bubble {
+  max-width: 80%; padding: 10px 14px; background: var(--card); border-radius: 14px;
+  color: var(--text); font-family: var(--prose); line-height: 1.5; overflow-wrap: anywhere;
+}
+.ct-user-bubble .ct-md > * + * { margin-top: 8px; }
+/* Prose in a reading face (owner, 2026-10-10, after the Codex app); code,
+   paths, commands and tool cards stay monospace. */
+.ct-assistant-row { display: block; font-family: var(--prose); font-size: calc(var(--transcript-size, 13px) + 1.5px); }
+.ct-assistant { font-family: var(--prose); color: var(--text); }
+.ct-queued { margin-top: 6px; color: var(--dim); font-size: 11px; }
+.ct-pending { opacity: .5; }
+.ct-pending-note { max-width: 80%; margin-top: 4px; text-align: right; }
+.ct-pending-warning { color: var(--waiting); font-size: 11.5px; }
+.ct-pending-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 2px; }
+
+/* Markdown ------------------------------------------------------------------ */
+.ct-md > * + * { margin-top: 8px; }
+.ct-md-p { margin: 0; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ct-md-h { margin: 0; color: var(--text); font-weight: 600; }
+.ct-md-h1 { font-size: 1.18em; }
+.ct-md-h2 { font-size: 1.1em; }
+.ct-md-h3 { font-size: 1.02em; }
+.ct-md-list { margin: 0; padding-left: 20px; }
+.ct-md-list li { line-height: 1.5; }
+.ct-md-code { padding: 1px 5px; border-radius: 4px; background: var(--raised); color: var(--path); font-family: var(--mono); font-size: .94em; }
+.ct-md-code-path { cursor: pointer; }
+.ct-md-code-path:hover { text-decoration: underline; }
+.ct-md-code-path:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ct-md-code-path.ct-path-resolving { opacity: .6; }
+.ct-md-code-path.ct-path-missing { color: var(--dim); text-decoration: none; }
+.ct-md-link { color: var(--link); text-decoration: none; }
+.ct-md-link:hover { text-decoration: underline; }
+.ct-md-pre { margin: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--sunken); }
+.ct-md-pre-bar { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: rgba(255, 255, 255, .03); border-bottom: 1px solid var(--border); }
+.ct-md-lang { color: var(--dim); font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.ct-md-copy { margin-left: auto; padding: 2px 8px; border: none; border-radius: 6px; background: transparent; color: var(--muted); font: 500 11px system-ui; cursor: pointer; }
+.ct-md-copy:hover { color: var(--accent); background: var(--raised); }
+.ct-md-pre pre { margin: 0; padding: 10px 12px; overflow-x: auto; }
+.ct-md-pre code { font-family: var(--mono); font-size: 12px; color: var(--text-2); white-space: pre; }
+.ct-md-table-wrap { overflow-x: auto; }
+.ct-md-table { border-collapse: collapse; font-family: var(--prose); font-size: 12.5px; }
+.ct-md-table th, .ct-md-table td { padding: 4px 10px; border: 1px solid var(--border); text-align: left; white-space: nowrap; }
+.ct-md-table th { background: rgba(255, 255, 255, .03); color: var(--text); font-weight: 600; }
+.ct-md-table td { color: var(--text-2); }
+.ct-more { margin-top: 6px; padding: 2px 0; border: none; background: transparent; color: var(--accent); font: 500 12px system-ui; cursor: pointer; }
+
+/* System rows --------------------------------------------------------------- */
+.ct-command { display: flex; gap: 8px; align-items: baseline; font-family: var(--mono); font-size: 12px; padding: 2px 0; }
+.ct-command-icon { width: 14px; color: var(--dim); }
+.ct-command-text { color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ct-narration { display: block; width: 100%; padding: 2px 0; border: none; background: transparent; text-align: left; font: italic 13px var(--prose); color: var(--muted); cursor: pointer; }
+.ct-narration-label { font-style: italic; font-weight: 500; }
+.ct-narration-text { white-space: pre-wrap; }
+.ct-narration.open .ct-narration-text { white-space: pre-wrap; }
+.ct-note-row { display: flex; align-items: center; gap: 7px; width: 100%; padding: 4px 0; border: none; background: transparent; color: var(--muted); font: 12.5px var(--mono); cursor: pointer; text-align: left; }
+.ct-note-mark { color: var(--accent); }
+.ct-note-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-note-body { margin-top: 6px; }
+.ct-compaction { width: 100%; border: none; background: transparent; color: var(--muted); font: 12px var(--mono); cursor: pointer; }
+.ct-compaction-box > .ct-note-body { text-align: left; }
+
+/* Tool pills ---------------------------------------------------------------- */
+.ct-toolbox, .ct-changes { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.ct-toolrow, .ct-changes-row, .ct-card-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  min-height: 28px; padding: 0 10px; border: none; background: transparent;
+  color: var(--text-2); font: 12px var(--mono); cursor: pointer; text-align: left;
+}
+.ct-card-head { min-height: 34px; padding: 6px 10px; }
+.ct-toolrow:hover, .ct-changes-row:hover, .ct-card-toggle:hover { background: rgba(255, 255, 255, .03); }
+.ct-icon { flex: none; width: 16px; color: var(--dim); text-align: center; }
+.ct-toolrow-title, .ct-changes-title, .ct-card-title { flex: none; color: var(--text); font-weight: 600; white-space: nowrap; }
+.ct-toolrow-count { color: var(--dim); }
+.ct-toolrow-preview, .ct-card-summary { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-toolrow-preview.is-path { color: var(--path); }
+.ct-card-summary.accent { color: var(--accent); }
+.ct-card-summary.warning { color: var(--waiting); }
+.ct-card-summary.danger, .ct-card-note.danger, .ct-pre.danger { color: var(--danger); }
+.ct-toolbox-body, .ct-changes-body, .ct-card-body { padding: 4px 10px 10px; display: flex; flex-direction: column; gap: 8px; }
+.ct-detail-label { color: var(--dim); font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.ct-pre { margin: 0; padding: 8px 10px; background: var(--sunken); border-radius: 8px; color: var(--text-2); font: 12px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto; }
+.ct-link-btn { align-self: flex-start; padding: 2px 0; border: none; background: transparent; color: var(--link); font: 500 11.5px system-ui; cursor: pointer; }
+.ct-link-btn:hover { text-decoration: underline; }
+.ct-link-btn.accent { color: var(--accent); }
+.ct-status { flex: none; width: 14px; text-align: center; font-weight: 700; }
+.ct-status-running { color: var(--working); }
+.ct-status-done { color: var(--done); }
+.ct-status-failed { color: var(--danger); width: auto; font-size: 11px; }
+.ct-chevron { flex: none; color: var(--dim); transition: transform .18s ease; }
+.ct-chevron.open { transform: rotate(180deg); }
+.ct-changes-row { min-height: 34px; }
+.ct-changes-row .ct-chevron { transform: none; }
+.ct-changes-row .ct-chevron.open { transform: rotate(90deg); }
+.ct-path-btn { padding: 0; border: none; background: transparent; color: var(--path); font: 12px var(--mono); cursor: pointer; }
+.ct-path-btn:hover { text-decoration: underline; }
+.ct-badge { flex: none; font-weight: 700; }
+.ct-badge-M { color: var(--waiting); }
+.ct-badge-A { color: var(--done); }
+.ct-badge-D { color: var(--danger); }
+
+/* Diffs --------------------------------------------------------------------- */
+.ct-diff { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--sunken); }
+.ct-diff-hunk { padding: 3px 10px; color: var(--accent); font: 11.5px var(--mono); border-bottom: 1px solid var(--border); }
+.ct-diff-line { display: flex; font: 11.5px var(--mono); white-space: pre; }
+.ct-diff-num { flex: none; width: 38px; padding: 0 6px; text-align: right; color: var(--dim); user-select: none; }
+.ct-diff-text { flex: 1; min-width: 0; padding-right: 8px; overflow-x: auto; color: var(--text-2); }
+.ct-diff-sign { display: inline-block; width: 12px; color: var(--dim); }
+.ct-diff-add { background: rgba(138, 200, 172, .14); }
+.ct-diff-del { background: rgba(239, 152, 152, .14); }
+.ct-diff-add .ct-diff-changed { background: rgba(138, 200, 172, .32); }
+.ct-diff-del .ct-diff-changed { background: rgba(239, 152, 152, .32); }
+.ct-diff-cut { padding: 4px 10px; color: var(--dim); font-size: 11px; }
+.ct-diff-file { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px; }
+.ct-diff-file .ct-counts { margin-left: auto; }
+.ct-counts { display: inline-flex; gap: 6px; font-family: var(--mono); font-size: 11px; }
+.ct-added { color: var(--done); }
+.ct-removed { color: var(--danger); }
+
+/* Turn activity ------------------------------------------------------------- */
+.ct-activity { display: flex; align-items: center; gap: 8px; min-height: 22px; color: var(--muted); font: 12.5px var(--mono); }
+.ct-activity-arc { color: var(--working); animation: ct-spin .9s linear infinite; }
+@keyframes ct-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ct-activity-arc { animation: none; } }
+.ct-activity-verb { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-activity-time { color: var(--dim); }
+.ct-activity-note { font-style: italic; color: var(--muted); }
+
+/* Cards --------------------------------------------------------------------- */
+.ct-card { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); overflow: hidden; }
+.ct-card-title { font-size: 12.5px; }
+.ct-card-tag { flex: none; color: var(--muted); font-size: 11px; }
+.ct-card-url { color: var(--muted); font: 11.5px var(--mono); overflow-wrap: anywhere; }
+.ct-card-note { color: var(--muted); font: 12px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ct-mascot { flex: none; color: var(--accent); }
+.ct-chip { flex: none; padding: 1px 7px; border-radius: 999px; background: rgba(185, 148, 244, .12); color: var(--accent); font: 500 10.5px var(--mono); }
+.ct-field { display: flex; gap: 8px; font: 11.5px var(--mono); }
+.ct-field-name { flex: none; color: var(--muted); }
+.ct-field-value { color: var(--text-2); overflow-wrap: anywhere; }
+.ct-items { display: flex; flex-direction: column; gap: 3px; font: 12px var(--mono); }
+.ct-item { display: flex; gap: 8px; }
+.ct-item-index { flex: none; width: 16px; text-align: right; color: var(--accent); }
+.ct-item-text { color: var(--text-2); overflow-wrap: anywhere; }
+.ct-raw summary { color: var(--muted); font: 500 11.5px system-ui; cursor: pointer; }
+.ct-raw-name { color: var(--text); font: 11.5px var(--mono); margin: 6px 0; }
+
+/* Todos and plan ------------------------------------------------------------ */
+.ct-todo-item { display: flex; align-items: baseline; gap: 8px; padding: 3px 6px; border-radius: 6px; font: 12.5px var(--mono); }
+.ct-todo-item.is-active { background: rgba(185, 148, 244, .12); }
+.ct-todo-glyph { flex: none; width: 16px; color: var(--dim); }
+.ct-todo-item.is-active .ct-todo-glyph { color: var(--accent); }
+.ct-todo-item.is-done .ct-todo-glyph { color: var(--done); }
+.ct-todo-text { color: var(--text-2); }
+.ct-todo-item.is-done .ct-todo-text { color: var(--muted); text-decoration: line-through; }
+.ct-todo-item.is-active .ct-todo-text { color: var(--text); font-weight: 500; }
+.ct-card-note { line-height: 1.5; }
+
+/* Phren detail rows and usage ---------------------------------------------- */
+.ct-rows, .ct-conductor { display: flex; flex-direction: column; gap: 5px; }
+.ct-rows-header { color: var(--muted); font: 600 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.ct-rows-row, .ct-return-row { display: flex; flex-direction: column; gap: 2px; font: 12px var(--mono); }
+.ct-rows-top { display: flex; gap: 8px; align-items: baseline; }
+.ct-rows-title { flex: 1; min-width: 0; color: var(--text); }
+.ct-rows-trailing { flex: none; color: var(--muted); }
+.ct-rows-detail { color: var(--text-2); }
+.ct-conductor-row { display: flex; gap: 6px; align-items: baseline; font: 12px var(--mono); }
+.ct-conductor-name { color: var(--accent); font-weight: 500; }
+.ct-conductor-title { flex: 1; min-width: 0; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-conductor-idle { color: var(--muted); }
+.ct-dot { flex: none; width: 7px; height: 7px; border-radius: 999px; background: var(--muted); align-self: center; }
+.ct-dot-working { background: var(--working); }
+.ct-dot-done { background: var(--done); }
+.ct-dot-needs-you, .ct-dot-blocked { background: var(--waiting); }
+.ct-dot-failed { background: var(--danger); }
+.ct-return-state { flex: none; font-weight: 500; }
+.ct-return-state.is-done { color: var(--done); }
+.ct-return-state.is-needs-you, .ct-return-state.is-blocked { color: var(--waiting); }
+.ct-return-state.is-failed { color: var(--danger); }
+.ct-return-excerpt { color: var(--text-2); font: 11.5px var(--mono); }
+.ct-usage-account { display: flex; flex-direction: column; gap: 3px; }
+.ct-usage-head { display: flex; gap: 8px; align-items: baseline; font: 12px var(--mono); }
+.ct-usage-name { color: var(--text); font-weight: 600; }
+.ct-usage-sub { color: var(--muted); }
+.ct-usage-out { color: var(--danger); }
+.ct-usage-row { display: flex; align-items: center; gap: 8px; font: 11.5px var(--mono); }
+.ct-usage-window { flex: none; width: 108px; color: var(--text-2); }
+.ct-usage-bar { flex: 1; height: 6px; border-radius: 999px; background: var(--raised); overflow: hidden; }
+.ct-usage-fill { display: block; height: 100%; background: var(--accent); }
+.ct-usage-fill.warning { background: var(--waiting); }
+.ct-usage-fill.danger { background: var(--danger); }
+.ct-usage-percent { flex: none; min-width: 34px; text-align: right; color: var(--text); }
+.ct-usage-reset { flex: none; min-width: 44px; text-align: right; color: var(--muted); }
+
+/* Background jobs tray ------------------------------------------------------ */
+.ct-jobs { position: sticky; top: 0; z-index: 2; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--card); overflow: hidden; }
+.ct-jobs-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 10px; border: none; background: transparent; color: var(--text-2); font: 12px var(--mono); cursor: pointer; }
+.ct-jobs-title { font-weight: 600; color: var(--text); }
+.ct-jobs-count { margin-left: auto; color: var(--dim); }
+.ct-jobs-list { display: flex; flex-direction: column; gap: 6px; padding: 4px 10px 10px; }
+.ct-job { display: flex; flex-direction: column; gap: 3px; }
+.ct-job-top { display: flex; align-items: baseline; gap: 6px; font: 12px var(--mono); }
+.ct-job-title { flex: 1; min-width: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-job-status { color: var(--dim); }
+.ct-job-command { color: var(--muted); font: 11.5px var(--mono); }
+
+/* Live reply preview -------------------------------------------------------- */
+.ct-preview { opacity: .96; }
+.ct-caret { color: var(--accent); animation: ct-blink 1s steps(1) infinite; }
+@keyframes ct-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ct-caret { animation: none; } }
+
+/* Images -------------------------------------------------------------------- */
+.ct-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.ct-image {
+  padding: 0; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--sunken); overflow: hidden; cursor: default;
+  min-width: 96px; min-height: 64px;
+  max-width: min(320px, 100%); max-height: 240px;
+}
+.ct-image.loaded { cursor: zoom-in; min-width: 0; min-height: 0; }
+.ct-image:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ct-image-img { display: block; max-width: min(320px, 100%); max-height: 240px; object-fit: contain; }
+.ct-image-fail {
+  display: flex; align-items: center; justify-content: center;
+  width: 160px; height: 90px; padding: 0 10px;
+  color: var(--muted); font: 11.5px var(--mono); text-align: center;
+}
+.ct-lightbox {
+  position: fixed; inset: 0; z-index: 120; padding: 32px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .8); cursor: zoom-out;
+}
+.ct-lightbox-img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 24px 64px rgba(0, 0, 0, .6); }

@@ -17,6 +17,18 @@ export interface InstallPreferences {
    * PHREN_MCP_PROFILE overrides it. See mcp/profile.ts.
    */
   mcpProfile?: "core" | "full";
+  /**
+   * Clanker mode: the prompt hook and the search/list tools return compact
+   * id/title/keyword rows and agents fetch full text by id. PHREN_CLANKER
+   * overrides it. See clanker.ts.
+   */
+  clanker?: boolean;
+  /**
+   * Whether a dispatched Claude worker that hits its usage limit continues on
+   * another signed-in account. Off when unset; PHREN_ACCOUNT_FAILOVER
+   * overrides it. See bridge/account-choice.ts.
+   */
+  accountFailover?: boolean;
   hooksEnabled?: boolean;
   skillsScope?: "global" | "project";
   projectOwnershipDefault?: "phren-managed" | "detached" | "repo-managed";

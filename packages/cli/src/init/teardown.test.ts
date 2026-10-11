@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { makeTempDir, suppressOutput } from "../test-helpers.js";
+import { initTestPhrenRoot, makeTempDir, suppressOutput } from "../test-helpers.js";
 import * as fs from "fs";
 import * as path from "path";
-import { generatedRootMemoryPath, removeGeneratedHomeFiles, removeGitExcludes, removePhrenHomeSymlinks, removePhrenWrappers } from "./teardown.js";
+import { generatedRootMemoryPath, removeGeneratedHomeFiles, removeGitExcludes, removePhrenHomeSymlinks, removePhrenWrappers, sweepProjectMirrors } from "./teardown.js";
 
 describe("teardown helpers", () => {
   let tmpRoot: string;
@@ -62,6 +62,32 @@ describe("teardown helpers", () => {
     expect(fs.existsSync(link)).toBe(false);
     expect(fs.existsSync(userFile)).toBe(true);
     expect(fs.readFileSync(userFile, "utf8")).toContain("my own instructions");
+  });
+
+  it("sweepProjectMirrors removes a flat skill's SKILL.md folder but keeps the user's own skills", () => {
+    const phrenPath = path.join(tmpRoot, "phren");
+    const repo = path.join(tmpRoot, "repo");
+    initTestPhrenRoot(phrenPath);
+    const src = path.join(phrenPath, "demo", "skills", "deploy.md");
+    fs.mkdirSync(path.dirname(src), { recursive: true });
+    fs.writeFileSync(src, "---\nname: deploy\ndescription: d\n---\n");
+    fs.writeFileSync(path.join(phrenPath, "demo", "phren.project.yaml"), `ownership: phren-managed\nsourcePath: ${repo}\n`);
+    const skills = path.join(repo, ".claude", "skills");
+    fs.mkdirSync(path.join(skills, "deploy"), { recursive: true });
+    fs.symlinkSync(src, path.join(skills, "deploy", "SKILL.md"));
+    fs.mkdirSync(path.join(skills, "mine"), { recursive: true });
+    fs.writeFileSync(path.join(skills, "mine", "SKILL.md"), "# mine\n");
+    const origPhrenPath = process.env.PHREN_PATH;
+    process.env.PHREN_PATH = phrenPath;
+    try {
+      suppressOutput(() => sweepProjectMirrors(phrenPath));
+    } finally {
+      if (origPhrenPath === undefined) delete process.env.PHREN_PATH;
+      else process.env.PHREN_PATH = origPhrenPath;
+    }
+
+    expect(fs.existsSync(path.join(skills, "deploy"))).toBe(false);
+    expect(fs.readFileSync(path.join(skills, "mine", "SKILL.md"), "utf8")).toBe("# mine\n");
   });
 
   it("removePhrenWrappers removes only phren-marked wrappers", () => {

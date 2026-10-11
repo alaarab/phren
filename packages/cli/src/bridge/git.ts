@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
 import { BridgeError, type Json } from "./protocol.js";
 import { git, gitHead, gitRoot, withGitReadDeadline } from "./projects.js";
+import { detectHost, providerFor, unknownHost } from "./git-hosts.js";
+export { checkRollup, checkRuns } from "./git-hosts.js";
 
-const exec = promisify(execFile);
 
 /** A status code from `--name-status`: the letter alone, with `T` (type change)
  * shown as an edit and anything unrecognized treated as one. */
@@ -17,7 +16,7 @@ function statusLetter(code: string): string {
 
 interface Counts { additions: number; deletions: number; binary: boolean; countsComplete: boolean }
 /** NUL records preserve tabs/newlines in names and both sides of renames. */
-function parseNumstat(out: string): Map<string, Counts> {
+export function parseNumstat(out: string): Map<string, Counts> {
   const map = new Map<string, Counts>();
   const tokens = out.split("\0");
   for (let index = 0; index < tokens.length; index++) {
@@ -240,66 +239,21 @@ export async function gitBranches(cwd: string): Promise<Json> {
   return { current, local, remote };
 }
 
-const ghEnv = () => ({ ...process.env, GIT_CONFIG_NOSYSTEM: "1", GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1" });
-
-/** A check rollup as one word: any failure fails, anything unfinished is
- * pending, and only finished successes (or skips) pass. No checks is null. */
-export function checkRollup(items: unknown): "passing" | "failing" | "pending" | null {
-  if (!Array.isArray(items) || !items.length) return null;
-  let pending = false;
-  for (const raw of items) {
-    const item = raw && typeof raw === "object" ? raw as Json : {};
-    const conclusion = String(item.conclusion ?? "").toUpperCase(), state = String(item.state ?? "").toUpperCase();
-    const status = String(item.status ?? "").toUpperCase();
-    if (["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(conclusion) || ["FAILURE", "ERROR"].includes(state)) return "failing";
-    // A commit status has a state; a check run has a status and, once
-    // completed, a conclusion.
-    if (state && !status) { if (state !== "SUCCESS") pending = true; }
-    else if (status !== "COMPLETED") pending = true;
-  }
-  return pending ? "pending" : "passing";
-}
-
-/** The checked-out branch's pull request in any state, with its checks, or
- * null when the branch has none (or gh cannot say). */
-async function currentPull(root: string, branch: string): Promise<Json | null> {
-  try {
-    const { stdout } = await exec("gh", ["pr", "view", "--json", "number,title,url,state,isDraft,headRefName,baseRefName,statusCheckRollup"], {
-      cwd: root, timeout: 15_000, maxBuffer: 4_194_304, env: ghEnv(),
-    });
-    const pull = JSON.parse(stdout || "null");
-    if (!pull || typeof pull !== "object" || typeof pull.number !== "number" || pull.headRefName !== branch) return null;
-    return { number: pull.number, title: String(pull.title ?? ""), url: String(pull.url ?? ""), head: branch,
-      base: String(pull.baseRefName ?? ""), draft: pull.isDraft === true, state: String(pull.state ?? ""), checks: checkRollup(pull.statusCheckRollup) };
-  } catch { return null; }
-}
-
-/** Open pull requests through `gh`, or `{ available: false }` when the tool is
- * missing or not signed in. A failure is a normal answer, never an error.
- * `current` is the checked-out branch's own pull request in any state (open,
- * draft, merged or closed) with its checks, which the session card shows. */
+/** Open pull or merge requests and the checked-out branch's own (any state)
+ * with its checks, from whichever host the remote is on (git-hosts.ts). A
+ * host that cannot answer (a missing CLI, a stubbed provider, an unknown
+ * domain) is `{ available: false, reason, message }`, never an error. */
 export async function gitPulls(cwd: string): Promise<Json> {
   const root = await repository(cwd);
   const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
-  try {
-    const [{ stdout }, current] = await Promise.all([
-      exec("gh", ["pr", "list", "--json", "number,title,headRefName,baseRefName,author,url,isDraft,state,updatedAt", "--limit", "50"], {
-        cwd: root, timeout: 15_000, maxBuffer: 4_194_304, env: ghEnv(),
-      }),
-      branch ? currentPull(root, branch) : Promise.resolve(null),
-    ]);
-    const parsed = JSON.parse(stdout || "[]");
-    const pulls = (Array.isArray(parsed) ? parsed : []).map((pull: Json) => {
-      const author = pull.author && typeof pull.author === "object" ? pull.author as Json : {};
-      return { number: pull.number, title: pull.title, head: pull.headRefName, base: pull.baseRefName,
-        author: String(author.login ?? author.name ?? ""), url: pull.url, draft: pull.isDraft === true, state: pull.state, updated: pull.updatedAt };
-    });
-    return { available: true, pulls, branch: branch || null, current };
-  } catch { return { available: false, pulls: [], branch: branch || null, current: null }; }
+  const host = await detectHost(root, branch);
+  const provider = providerFor(host);
+  const list = provider ? await provider.list(root, branch, host) : unknownHost(host);
+  return { ...list, branch: branch || null, host };
 }
 
 /** A repo-relative tree path, or the repository root for `""`. */
-async function repositoryPath(root: string, raw: unknown, allowRoot = false): Promise<string> {
+export async function repositoryPath(root: string, raw: unknown, allowRoot = false): Promise<string> {
   if (typeof raw !== "string" || raw.length > 4096 || raw.includes("\0") || path.isAbsolute(raw) || path.win32.isAbsolute(raw) || raw.startsWith("\\")) throw new BridgeError(400, "Invalid path.");
   const segments = raw.split(/[\\/]/);
   if (segments.includes("..") || segments.includes(".git")) throw new BridgeError(400, "Invalid path.");
@@ -516,4 +470,69 @@ export async function gitDiscard(cwd: string, paths: unknown): Promise<Json> {
     }
     return { ok: true };
   } finally { treeCache.delete(root); }
+}
+
+/** The empty tree's id in this repository's hash, the parent a root commit is
+ * compared with. */
+async function emptyTree(root: string): Promise<string> {
+  return (await git(root, "hash-object", "-t", "tree", "/dev/null")).trim();
+}
+
+const MAX_SHOW_FILES = 300, MAX_SHOW_PATCH = 1_000_000, MAX_FILE_PATCH = 200_000;
+
+/** One commit as the phone's commit screen shows it: message, author and
+ * committer, parents and refs, and every file it changed against its first
+ * parent (what GitHub shows for a merge) with counts and a bounded patch in
+ * the same section shape `/v1/diff` uses. */
+export function gitShow(cwd: string, sha: unknown): Promise<Json> {
+  return withGitReadDeadline(() => readGitShow(cwd, sha));
+}
+
+async function readGitShow(cwd: string, sha: unknown): Promise<Json> {
+  if (typeof sha !== "string" || !/^[0-9a-fA-F]{4,64}$/.test(sha)) throw new BridgeError(400, "Name a commit by its hash.");
+  const root = await repository(cwd);
+  let commit: string;
+  try { commit = (await git(root, "rev-parse", "--verify", "--end-of-options", `${sha}^{commit}`)).trim(); }
+  catch { throw new BridgeError(404, "This repository has no such commit.", { code: "git-unknown-commit" }); }
+  const meta = await git(root, "show", "-s", "--decorate=short", "--format=%H%x00%h%x00%an%x00%ae%x00%aI%x00%cn%x00%cI%x00%P%x00%D%x00%B", commit);
+  const [full, short, author, authorEmail, date, committer, committed, parentList, spec, ...message] = meta.split("\0");
+  const body = message.join("\0").replace(/\n+$/, "");
+  const newline = body.indexOf("\n");
+  const subject = newline < 0 ? body : body.slice(0, newline);
+  const parents = (parentList ?? "").split(" ").filter(Boolean);
+  const base = parents[0] ?? await emptyTree(root);
+  const range = [base, commit];
+  const [names, counts] = await Promise.all([
+    git(root, "diff-tree", "-r", "-z", "-M", "--no-commit-id", "--name-status", ...range),
+    git(root, "diff-tree", "-r", "-z", "-M", "--no-commit-id", "--numstat", ...range),
+  ]);
+  const stats = parseNumstat(counts);
+  const tokens = names.split("\0");
+  const files: Json[] = [];
+  let totalFiles = 0, truncated = false, remaining = MAX_SHOW_PATCH, additions = 0, deletions = 0;
+  for (let index = 0; index < tokens.length; index++) {
+    const code = tokens[index]; if (!code) continue;
+    const renamed = /^[RC]/.test(code);
+    const oldPath = renamed ? tokens[++index] : undefined, file = tokens[++index];
+    if (!file) break;
+    totalFiles++;
+    const count = stats.get(file) ?? { additions: 0, deletions: 0, binary: false, countsComplete: false };
+    additions += count.additions; deletions += count.deletions;
+    if (files.length >= MAX_SHOW_FILES) { truncated = true; continue; }
+    const status = statusLetter(code);
+    let section: Json;
+    if (remaining <= 0 || count.binary) {
+      section = { id: `commit:${file}`, kind: "commit", binary: count.binary, loadState: "loaded", patch: "", truncated: !count.binary };
+      truncated ||= !count.binary;
+    } else {
+      const patch = await git(root, ...NO_DIFF, "-M", ...range, "--", ...[file, ...(oldPath ? [oldPath] : [])].map(name => `:(literal)${name}`));
+      const limit = Math.min(MAX_FILE_PATCH, remaining), clipped = patch.length > limit;
+      section = { id: `commit:${file}`, kind: "commit", binary: /^(?:Binary files |GIT binary patch)/m.test(patch), loadState: "loaded", patch: patch.slice(0, limit), truncated: clipped };
+      remaining -= Math.min(patch.length, limit); truncated ||= clipped;
+    }
+    files.push({ path: file, ...(oldPath ? { oldPath } : {}), status, additions: count.additions, deletions: count.deletions,
+      binary: count.binary, countsComplete: count.countsComplete, sections: [section] });
+  }
+  return { sha: full, short, subject, body: newline < 0 ? "" : body.slice(newline + 1).replace(/^\n+/, ""), author, authorEmail, date,
+    committer, committed, parents, refs: refEntries(spec ?? "", await remotes(root)), files, totalFiles, additions, deletions, truncated };
 }

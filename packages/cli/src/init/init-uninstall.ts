@@ -126,8 +126,17 @@ function sweepSkillSymlinks(phrenPath: string): void {
       continue;
     }
     for (const entry of entries) {
-      if (!entry.isSymbolicLink()) continue;
-      const fullPath = path.join(dir, entry.name);
+      // A flat skill is linked as <name>/SKILL.md inside a folder phren made.
+      const wrapper = entry.isDirectory() ? path.join(dir, entry.name) : null;
+      if (wrapper) {
+        try {
+          const children = fs.readdirSync(wrapper);
+          if (children.length !== 1 || children[0] !== "SKILL.md" || !fs.lstatSync(path.join(wrapper, "SKILL.md")).isSymbolicLink()) continue;
+        } catch {
+          continue;
+        }
+      } else if (!entry.isSymbolicLink()) continue;
+      const fullPath = wrapper ? path.join(wrapper, "SKILL.md") : path.join(dir, entry.name);
       try {
         const target = fs.realpathSync(fullPath);
         if (target.startsWith(resolvedPhren + path.sep) || target === resolvedPhren) {
@@ -142,6 +151,9 @@ function sweepSkillSymlinks(phrenPath: string): void {
         } catch (err2: unknown) {
           debugLog(`sweepSkillSymlinks: could not remove broken symlink ${fullPath}: ${errorMessage(err2)}`);
         }
+      }
+      if (wrapper) {
+        try { if (fs.readdirSync(wrapper).length === 0) fs.rmdirSync(wrapper); } catch { /* already gone */ }
       }
     }
 

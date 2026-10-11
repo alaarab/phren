@@ -7,6 +7,7 @@ import { logger } from "../logger.js";
 import { keywordFallbackSearch } from "../core/search.js";
 import { recordLookupEvents } from "../shared/governance.js";
 import { bestFindingNodeId } from "../finding-graph-id.js";
+import { snippetBudget } from "../response-budget.js";
 
 export interface SearchOptions {
   query: string;
@@ -321,10 +322,13 @@ export async function runSearch(
     }
 
     const hits: Array<{ project: string; filename: string; type: string; snippet: string; path?: string; content: string }> = [];
+    // Same per-result budget as search_knowledge: store lines can run to many KB.
+    const perResultChars = snippetBudget(rows.length);
     for (const row of rows) {
-      const snippet = extractSnippet(row.content, opts.query, 7);
+      const snippet = extractSnippet(row.content, opts.query, 7, perResultChars);
       lines.push(`[${row.project}/${row.filename}] (${row.type})`);
       lines.push(snippet);
+      if (row.path && snippet !== extractSnippet(row.content, opts.query, 7)) lines.push(`  (shortened; full text: ${row.path})`);
       lines.push("");
       hits.push({ project: row.project, filename: row.filename, type: row.type, snippet, path: row.path, content: row.content });
     }

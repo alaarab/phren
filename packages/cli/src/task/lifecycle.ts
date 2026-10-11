@@ -11,6 +11,7 @@ import { getProactivityLevelForTask, shouldAutoCaptureTaskForLevel, hasExecution
 import { getWorkflowPolicy } from "../shared/governance.js";
 import { debugLog, sessionMarker } from "../shared.js";
 import { errorMessage } from "../utils.js";
+import { clankerEnabled, rowTitle } from "../clanker.js";
 
 export type TaskMode = "off" | "manual" | "suggest" | "auto";
 
@@ -456,7 +457,8 @@ export function handleTaskPromptLifecycle(args: {
     mode,
     noticeLines: [
       "<phren-notice>",
-      `${section === "active" ? "Active" : "Queued"} task (${args.project}): ${resolved.data.line}`,
+      // Clanker mode names the task by id and title; get_tasks or get_memory_detail has the rest.
+      `${section === "active" ? "Active" : "Queued"} task (${args.project}): ${clankerEnabled(args.phrenPath) && resolved.data.stableId ? `bid:${resolved.data.stableId} ${rowTitle(resolved.data.line)}` : resolved.data.line}`,
       "<phren-notice>",
     ],
   };

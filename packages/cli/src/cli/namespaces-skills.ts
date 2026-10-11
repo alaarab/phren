@@ -10,7 +10,7 @@ import {
 import { isValidProjectName, errorMessage, getOptionValue } from "../utils.js";
 import { logger } from "../logger.js";
 import { readInstallPreferences, writeInstallPreferences, type InstallPreferences } from "../init/preferences.js";
-import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills } from "../skill/registry.js";
+import { buildSkillManifest, findLocalSkill, findSkill, getAllSkills, skillMirrorPath } from "../skill/registry.js";
 import { detectSkillCollisions } from "../link/skills.js";
 import { setSkillEnabledAndSync, syncSkillLinksForScope } from "../skill/files.js";
 import { findProjectDir } from "../project-locator.js";
@@ -105,7 +105,7 @@ function printSkillDoctor(scope: string, manifest: ReturnType<typeof buildSkillM
       problems.push(`Missing generated command registry: ${path.join(parentDir, "skill-commands.json")}`);
     }
     for (const skill of manifest.skills.filter((entry) => entry.visibleToAgents)) {
-      const dest = path.join(destDir, skill.format === "folder" ? skill.name : path.basename(skill.path));
+      const dest = skillMirrorPath(destDir, skill);
       try {
         if (!fs.existsSync(dest) || fs.realpathSync(dest) !== fs.realpathSync(skill.root)) {
           problems.push(`Mirror drift for ${skill.name}: expected ${dest} -> ${skill.root}`);

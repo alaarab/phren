@@ -97,7 +97,8 @@ export class PhrenClient {
       // This client calls tools by their full names (complete_task, session_start,
       // list_skills, …). The server's default `core` profile folds those behind
       // composites for agents; a first-party client asks for the full surface.
-      env: { ...process.env, PHREN_MCP_PROFILE: "full" },
+      // It also renders the tools' structured data, which clanker mode leaves out.
+      env: { ...process.env, PHREN_MCP_PROFILE: "full", PHREN_CLANKER: "off" },
     });
 
     child.stdout.on("data", (chunk: Buffer | string) => {

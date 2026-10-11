@@ -42,6 +42,7 @@ import {
 import { writeSkillMd, isManagedSymlink } from "./skills.js";
 import { resolveManagementCapabilities, type ManagementCapabilities } from "../init/management-preset.js";
 import { syncScopeSkillsToDir } from "../skill/files.js";
+import { teamStoreProjectCheckouts } from "./refresh.js";
 import { findProjectDir } from "../project-locator.js";
 import {
   getProjectOwnershipMode,
@@ -550,6 +551,13 @@ export async function runLink(phrenPath: string, opts: LinkOptions = {}) {
   linkGlobal(phrenPath, detectedTools, caps);
   for (const p of projects) {
     if (p !== "global") linkProject(phrenPath, p, detectedTools, caps);
+  }
+  if (caps.repoMirroring) {
+    for (const { project, target, skills } of teamStoreProjectCheckouts(phrenPath)) {
+      if (!skills) continue;
+      syncScopeSkillsToDir(phrenPath, project, path.join(target, ".claude", "skills"));
+      log(`  ${project} -> ${target} (team store skills)`);
+    }
   }
   // Remove stale phren__<project>__* MCP entries for removed projects
   pruneStaleProjectMcpServers(projects.filter(p => p !== "global"));
