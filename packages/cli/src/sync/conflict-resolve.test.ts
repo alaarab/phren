@@ -153,6 +153,22 @@ describe("store sync conflict resolution with two clones and a bare remote", () 
     expect((await recoverPushConflict(local)).ok).toBe(true);
   });
 
+  it("heals a topic whose block an earlier union merge left with two start lines", async () => {
+    const doubled = (now: string, bullets: string[]) => topic(now, bullets)
+      .replace(`<!-- phren:now:start at=${now}`, `<!-- phren:now:start at=2026-09-01T00:00:00Z hash=abc123abc123 -->\n<!-- phren:now:start at=${now}`);
+    const { local, writer, commit } = fixture({ "demo/reference/topics/sync.md": doubled("2026-09-20T00:00:00Z", ["- Base bullet"]) });
+    commit(local, { "demo/reference/topics/sync.md": doubled("2026-09-21T00:00:00Z", ["- Base bullet", "- Local bullet"]) }, "local work");
+    commit(writer, { "demo/reference/topics/sync.md": topic("2026-09-22T00:00:00Z", ["- Base bullet", "- Remote bullet"]) }, "remote work");
+    git(writer, "push");
+
+    const result = await pullAtSessionStart(local);
+
+    expect(result.ok).toBe(true);
+    const merged = read(local, "demo/reference/topics/sync.md");
+    expect(merged.match(/phren:now:start/g)).toHaveLength(1);
+    for (const bullet of ["- Base bullet", "- Local bullet", "- Remote bullet"]) expect(merged).toContain(bullet);
+  });
+
   it("aborts on any other conflicted file and logs every conflicted path", async () => {
     const { local, writer, commit } = fixture({ "demo/tasks.md": tasks([A, B]), "demo/notes.md": "base\n" });
     commit(local, { "demo/tasks.md": tasks([task("a1a1a1a1", "Ship it (local)"), B]), "demo/notes.md": "local\n" }, "local");

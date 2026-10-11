@@ -20,7 +20,7 @@ import { debugLog, EXEC_TIMEOUT_MS } from "../shared.js";
 import { errorMessage } from "../utils.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { mergeFindings, mergeTask } from "../content/validate.js";
-import { KNOWS_END, KNOWS_START, NOW_END, NOW_START, upsertBlock } from "../content/summarize.js";
+import { cleanBlock, KNOWS_END, KNOWS_START, NOW_END, NOW_START, upsertBlock } from "../content/summarize.js";
 import { mergeTasksByBid } from "./task-merge.js";
 
 export interface ConflictResolution { resolved: string[]; unresolved: string[] }
@@ -51,13 +51,11 @@ function stage(cwd: string, n: 1 | 2 | 3, relFile: string): string | null {
   try { return git(cwd, ["show", `:${n}:${relFile}`]); } catch { return null; }
 }
 
-const BLOCK_RE = (start: string, end: string) =>
-  new RegExp(`${start.replace("-->", "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[^\\n]*-->[\\s\\S]*?${end.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n*`);
-
 function splitBlock(content: string, start: string, end: string): { rest: string; block: string | null } {
-  const match = BLOCK_RE(start, end).exec(content);
-  if (!match) return { rest: content, block: null };
-  return { rest: content.slice(0, match.index) + content.slice(match.index + match[0].length), block: match[0].replace(/\n+$/, "") };
+  // The whole span, first start to last end, rebuilt as one copy: an earlier
+  // union merge may have left two start lines (and two bodies) behind.
+  const clean = cleanBlock(content, start, end);
+  return clean ?? { rest: content, block: null };
 }
 
 /** A line-level three-way merge through `git merge-file`; null when lines still conflict. */

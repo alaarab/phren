@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.38] - 2026-10-10
+
+### Added
+
+- Hook routes for Phren desktop, each advertised in `/v1/health` so an older Hook shows a disabled control instead of an error:
+  - `POST /v1/files/write` saves a repository file with a revision check (409 when it changed since it was read), one write per file at a time; `POST /v1/files/search` is find-in-files over Git (literal or regular expression, case and whole-word switches, include patterns); `GET /v1/files/list` lists a checkout (`fileWrite`, `fileSearch`).
+  - `phren-hook v1 pane` attaches one Herdr pane's own terminal over SSH (`paneTerminal`).
+  - `GET /v1/workspaces/layout` returns a Herdr tab's split layout (`paneLayout`).
+  - `POST /v1/push/presence` reports that the owner is at the desk: approval alerts then wait, and reach the phone only if still pending after 60 seconds of desk idle (`deskPresence`).
+  - `POST /v1/store/blobs` returns many store blobs in one request, checking sizes before reading (`memoryStoreBatch`).
+- A client that sends `X-Phren-Client` gets its own pool of Hook sockets, so the desktop and the phone never evict each other's connections.
+- `phren bridge install` writes `~/.local/share/phren/bridge/enroll`, which adds one phone's restricted key to `authorized_keys` (the same line `phren pair` writes) and prints one JSON line. The phone runs it once over an SSH session the user signed into with a password, then connects with the key. It is never the phone key's forced command, so a phone key cannot add more keys.
+- `@phren/cli` exports `./client/*` entry points for clients built on the CLI's parsers.
+
+### Fixed
+
+- Summaries survive the store's union merges. When two computers each wrote a `## Now` or "What phren knows" block, the merge left duplicate start markers and a doubled block; readers now take the newest copy, and writers and the sync conflict resolver replace the whole span with one clean block.
+- A `.git` path is refused whatever its case (`.GIT/config`) on case-insensitive file systems.
+- The Hook's health check waits 8 seconds for a harness's `--version` instead of 3. On a busy computer a healthy OpenCode took 2.4 seconds just to start, so the check kept reporting it as not answering.
+
 ## [0.3.37] - 2026-10-10
 
 ### Added

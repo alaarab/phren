@@ -12,8 +12,8 @@ Linux uses a systemd user service; macOS uses a LaunchAgent in your signed-in
 user session. Without Herdr the Hook uses tmux; see [Without Herdr: tmux](#without-herdr-tmux).
 
 ```sh
-npx --yes @phren/cli@0.3.37 bridge install
-npx --yes @phren/cli@0.3.37 bridge doctor
+npx --yes @phren/cli@0.3.38 bridge install
+npx --yes @phren/cli@0.3.38 bridge doctor
 ```
 
 Keep Tailscale connected on the iPhone and computer for remote access. Funnel and
@@ -42,9 +42,30 @@ minutes (`--minutes` up to 30). SSH itself must be on: Remote Login on macOS,
 `sshd` on Linux.
 
 The manual route still works: in Phren, choose **Enter details** under Add
-computer, copy the SSH authorization line into that user's
-`~/.ssh/authorized_keys`, then verify the computer's SSH fingerprint. Existing
-Phren device keys are migrated with a backup by the installer.
+computer and type the address, port and user. Then choose how this phone gets in:
+
+- **Password**: after you confirm the computer's SSH fingerprint, the phone
+  signs in once with your password and runs `~/.local/share/phren/bridge/enroll`,
+  which adds the same restricted `phren-iphone` line `phren pair` adds. From
+  then on the phone connects with that key. The password is not kept unless you
+  choose to save it, and then only in the phone's Keychain. The computer must
+  allow SSH password sign-in; keyboard-interactive prompts such as one-time
+  codes are not supported.
+- **This phone's key**: copy the SSH authorization line into that user's
+  `~/.ssh/authorized_keys`, then verify the computer's SSH fingerprint.
+
+A computer the phone can't reach directly can sit behind a jump host
+(**Advanced → Connect through a jump host**, like ProxyJump). The phone checks
+the jump host's SSH fingerprint, then the computer's, and reaches the computer
+by running `nc <computer> <port>` on the jump host. The jump host needs `nc` but
+not Phren Hook. Its `authorized_keys` line for the phone only runs that `nc`
+command: `restrict,command="nc <computer> <port>" ssh-ed25519 … phren-iphone-jump`.
+Sign in to the jump host with its password once to add the line, or copy it from
+the form.
+
+Either way, Phren Hook must already be installed (`npx -y @phren/cli@latest pair`
+or `phren bridge install`). Existing Phren device keys are migrated with a
+backup by the installer.
 
 ### Memory without GitHub
 
@@ -551,10 +572,10 @@ alone.
 ## Maintain and diagnose
 
 ```sh
-npx --yes @phren/cli@0.3.37 bridge status
-npx --yes @phren/cli@0.3.37 bridge update
-npx --yes @phren/cli@0.3.37 bridge rollback
-npx --yes @phren/cli@0.3.37 bridge uninstall
+npx --yes @phren/cli@0.3.38 bridge status
+npx --yes @phren/cli@0.3.38 bridge update
+npx --yes @phren/cli@0.3.38 bridge rollback
+npx --yes @phren/cli@0.3.38 bridge uninstall
 ```
 
 `update` installs the version of the CLI you invoke; choose an explicit newer
