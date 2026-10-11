@@ -8,7 +8,7 @@ import type { DialogAnswer, DialogQuestion } from "./claude-question-dialog.js";
 import { gitBranches, gitDiscard, gitLog, gitPulls, gitShow, gitStage, gitStatus, gitTree, gitUnstage } from "./git.js";
 import { fanoutWorktrees } from "./fanouts.js";
 import { gitWorktrees, resolveWorktree, type WorktreeWorker } from "./git-worktrees.js";
-import { gitCommit, gitPullRequest, gitPush } from "./git-publish.js";
+import { gitCommit, gitHostToken, gitMergeRequest, gitPullRequest, gitPush } from "./git-publish.js";
 import { gitCheckout, gitFetch, gitPull } from "./git-sync.js";
 import { gitApply, gitFile, sessionChanges } from "./git-review.js";
 import { findPane, paneAgentName, paneChatState, paneIdentity, snapshot, startingPane, trustedDirectory, validateStartingTarget, validateTarget } from "./herdr.js";
@@ -587,7 +587,7 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     // Git routes read the pane's repository, or a spawned child's own
     // worktree, exactly as /v1/diff resolves it.
     let cwd = await gitRepository(pane, target, data.child, data.worktree);
-    if (["stage", "unstage", "discard", "commit", "push", "pr", "checkout", "fetch", "pull", "apply"].some(action => url.pathname === `/v1/git/${action}`)
+    if (["stage", "unstage", "discard", "commit", "push", "pr", "pr/merge", "host-token", "checkout", "fetch", "pull", "apply"].some(action => url.pathname === `/v1/git/${action}`)
       && data.expectedRepository !== undefined) {
       const expected = z.string().min(1).max(4096).refine(value => path.isAbsolute(value) && !value.includes("\0"), "Expected an absolute repository path.").parse(data.expectedRepository);
       const root = await gitRoot(cwd);
@@ -606,6 +606,8 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     else if (url.pathname === "/v1/git/commit") result = await gitCommit(cwd, data.message);
     else if (url.pathname === "/v1/git/push") result = await gitPush(cwd, data.confirmDefault);
     else if (url.pathname === "/v1/git/pr") result = await gitPullRequest(cwd, data.draft);
+    else if (url.pathname === "/v1/git/pr/merge") result = await gitMergeRequest(cwd, data);
+    else if (url.pathname === "/v1/git/host-token") result = await gitHostToken(cwd, data);
     else if (url.pathname === "/v1/git/show") result = await gitShow(cwd, data.sha);
     else if (url.pathname === "/v1/git/checkout") result = await gitCheckout(cwd, data);
     else if (url.pathname === "/v1/git/fetch") result = await gitFetch(cwd);
