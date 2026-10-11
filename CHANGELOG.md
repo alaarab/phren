@@ -8,6 +8,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Move a session to another agent. `move_session` (also `phren_admin` action `move_session`), `phren move` and the Hook's `POST /v1/sessions/move` hand a live session to Claude under another account, Codex, OpenCode or Copilot, with an optional model and effort. The agent writes a structured hand-off and exits with its own exit command, and the new agent starts in the same pane and folder with the hand-off as its first prompt. If the agent writes none in time, the hand-off is built from the transcript's tail, the git state and the original brief. Nothing is committed; the hand-off lists the uncommitted changes. Only harnesses signed in and usable on that computer are accepted. A dispatched worker keeps its dispatch id, and its receipt records each move under `moves`.
+- `phren bridge accounts credit <id> --amount <usd> [--expires <date>] [--label <name>]`: an opt-in API credit estimate for Claude homes signed in with a Console login, shown on the account's usage as remaining balance from Claude Code's own per-session cost.
+
+### Fixed
+
+- Claude usage: one login in two organizations (a personal plan and a Team seat) is two accounts, keyed by login and organization. Merging an account across computers keeps each window from the newest report that has it, so the weekly window is never dropped. Plan names come from the organization type (Pro, Max 5x, Max 20x, Team, Enterprise) instead of internal tier codes, with `claude auth status` as the fallback, and the newest fetched profile wins when computers disagree.
 
 ## [0.3.38] - 2026-10-10
 

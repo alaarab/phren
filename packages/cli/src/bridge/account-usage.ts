@@ -15,7 +15,8 @@ export { NEAR_LIMIT_LEFT };
  * unreachable and unlinked computers listed apart.
  *
  * The merge follows the phone's cards: one account is one allowance whichever
- * computers report it, so the freshest whole report stands. Claude and Codex
+ * computers report it, so each window comes from the newest report that has
+ * it (`mergedWindows`). Claude and Codex
  * rows merge by their account key; a Claude login with no identity
  * (`claude:home:<id>`) stays per computer, since two unknown logins are not
  * one account. A window whose reset time has passed says `reset` and has no
@@ -164,15 +165,15 @@ export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.
     const subscriptions = group.filter(item => item.usage.subscription);
     const subscription = subscriptions.sort((a, b) =>
       (date(b.usage.subscription?.checkedAt) || date(b.usage.updatedAt) || 0) - (date(a.usage.subscription?.checkedAt) || date(a.usage.updatedAt) || 0))[0]?.usage.subscription;
-    // One allowance: the freshest report with windows stands whole, never mixed with another read.
     const withWindows = reporting.filter(item => item.usage.windows.length);
     const standing = (withWindows.length ? withWindows : reporting).reduce(newer);
-    const windows = standing.usage.windows.map(window => settleWindow(window, now));
+    const windows = mergedWindows(withWindows).map(window => settleWindow(window, now));
     const spend = mergedSpend(source, reporting);
     const updated = date(standing.usage.updatedAt);
     const leftPercent = roomLeft(windows);
     const exhausted = windows.filter(w => w.exhausted);
-    const availableAt = exhausted.map(w => w.resetsAt).filter((value): value is string => Boolean(value)).sort().at(-1);
+    // A credit's date is when it expires, not when it comes back.
+    const availableAt = exhausted.filter(w => !w.id.startsWith("credit:")).map(w => w.resetsAt).filter((value): value is string => Boolean(value)).sort().at(-1);
     const availableIn = availableAt ? resetsIn(availableAt, now) : undefined;
     const name = accountName(standing.usage);
     const computers = reporting.map(item => ({ name: item.computer, ...(source === "claude" && item.usage.account?.id ? { account: item.usage.account.id } : {}) }))
@@ -197,6 +198,26 @@ export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.
     .map(([source, entry]) => ({ harness: source, name: HARNESS_NAMES[source] ?? source, computers: entry.computers, ...(entry.messages[0] ? { message: entry.messages[0] } : {}) }))
     .sort((a, b) => order(a.harness) - order(b.harness));
   return { accounts, noData };
+}
+
+/**
+ * One account's windows across computers. Each window is taken from the
+ * newest report that has it, so a computer that has only seen the 5-hour
+ * window never hides the weekly one another computer reported. Between
+ * equally new reports the one with a reset time wins. The newest report's
+ * order leads; windows only older reports carry follow.
+ */
+function mergedWindows(reports: Array<{ usage: AccountUsage }>): UsageWindow[] {
+  const sorted = [...reports].sort((a, b) => (date(b.usage.updatedAt) || 0) - (date(a.usage.updatedAt) || 0));
+  const chosen = new Map<string, { window: UsageWindow; at: number }>();
+  for (const { usage } of sorted) {
+    const at = date(usage.updatedAt) || 0;
+    for (const window of usage.windows) {
+      const seen = chosen.get(window.id);
+      if (!seen || seen.at === at && !seen.window.resetsAt && window.resetsAt) chosen.set(window.id, { window, at });
+    }
+  }
+  return [...chosen.values()].map(item => item.window);
 }
 
 /** OpenCode's ledgers are per computer and add up; OpenRouter is one key seen from several, counted once per key. */
@@ -309,6 +330,10 @@ export function formatAccountUsage(view: AccountUsageView): string {
       lines.push(`  ${[sub.plan, sub.startedAt ? `since ${sub.startedAt.slice(0, 10)}` : "", sub.renewsAt ? `renews ${sub.renewsEstimated ? "about " : ""}${sub.renewsAt.slice(0, 10)}` : ""].filter(Boolean).join(" · ")}`);
     }
     for (const w of row.windows) {
+      if (w.id.startsWith("credit:") && w.usedUSD !== undefined && w.limitUSD !== undefined) {
+        lines.push(`  ${w.name.padEnd(30)} $${w.usedUSD.toFixed(2)} of $${w.limitUSD.toFixed(2)}, about $${Math.max(0, w.limitUSD - w.usedUSD).toFixed(2)} left${w.resetsAt ? `  expires ${w.resetsAt.slice(0, 10)}` : ""}`);
+        continue;
+      }
       const used = w.reset ? "reset, no new report" : w.usedPercent !== undefined ? `${w.usedPercent}% used${w.leftPercent !== undefined ? `, ${w.leftPercent}% left` : ""}` : w.usedUSD !== undefined ? `$${w.usedUSD.toFixed(2)}${w.limitUSD !== undefined ? ` of $${w.limitUSD.toFixed(2)}` : ""}` : "";
       lines.push(`  ${w.name.padEnd(30)} ${used.padEnd(22)}${w.limited ? "limited now  " : ""}${w.resetsIn ? `resets in ${w.resetsIn}${w.resetsAt ? ` (${w.resetsAt.slice(0, 16).replace("T", " ")} UTC)` : ""}` : ""}`.trimEnd());
     }
