@@ -756,6 +756,28 @@ end with the phone (automated tests drive a real tmux with stand-in agents), and
 the phone's terminal attach over SSH. `PHREN_TMUX=off` keeps the Hook on Herdr
 alone.
 
+## Pull and merge requests: GitHub, GitLab and gitboy
+
+The Changes screen shows the branch's pull or merge request with its checks or
+pipeline, review and merge state, and can open and merge it. The Hook reads the
+host from the remote's URL; name a self-hosted one with
+`git config remote.origin.phrenHost gitlab|gitboy|github`.
+
+- **GitHub** uses the GitHub CLI's sign-in: `gh auth login` on the computer.
+- **GitLab** uses `GITLAB_TOKEN`, glab's sign-in, or a token you connect.
+- **gitboy** uses a personal access token with `read:repo` and `write:repo`.
+
+Connect GitLab or gitboy from the desktop's Changes pane, or on the computer:
+
+```sh
+phren bridge git-host set gitlab.example.com gitlab   # paste the token when asked
+phren bridge git-host list
+phren bridge git-host remove gitlab.example.com
+```
+
+The token is checked with the host first and stays on that computer, in the
+Hook's own folder (mode 600), never in your Phren store.
+
 ## Maintain and diagnose
 
 ```sh
