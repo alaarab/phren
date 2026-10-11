@@ -32,6 +32,8 @@ export interface FakeHookOptions {
   overviewFrames?: unknown[];
   /** Backlog entries sent on every transcript connection. */
   transcriptFrames?: unknown[];
+  /** Text files `/v1/files/range` serves, by repository path (default: src/app.ts). */
+  files?: Record<string, string>;
 }
 
 export interface FakeHook {
@@ -82,7 +84,7 @@ function defaultHealth() {
     version: VERSION,
     computer: { id: "test-computer", name: "This computer" },
     capabilities: {
-      fileWrite: true, fileSearch: true, files: true, fileResolution: true, repositoryFiles: true,
+      fileWrite: true, fileSearch: true, gitReview: true, files: true, fileResolution: true, repositoryFiles: true,
       transcript: true, prompt: true, diff: true, overviewStream: true, resources: true,
     },
   };
@@ -273,9 +275,9 @@ export async function startFakeHook(options: FakeHookOptions): Promise<FakeHook>
   const transcriptFrames = options.transcriptFrames ?? defaultTranscript();
 
   // One text file the editor can read and save; version bumps on every write.
-  const files = new Map<string, { content: string; version: string }>([
-    [APP_PATH, { content: "export const app = \"new\";\nexport const ready = true;\n", version: "v1" }],
-  ]);
+  const files = new Map<string, { content: string; version: string }>(options.files
+    ? Object.entries(options.files).map(([path, content]) => [path, { content, version: "v1" }])
+    : [[APP_PATH, { content: "export const app = \"new\";\nexport const ready = true;\n", version: "v1" }]]);
 
   const defaults: Record<string, FakeHookHandler> = {
     "GET /v1/health": () => ({ status: 200, json: defaultHealth() }),

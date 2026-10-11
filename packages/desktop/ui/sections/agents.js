@@ -152,8 +152,9 @@ export function mountAgents(root) {
   }
 
   function fileDoc(id, computer, child, path, options = {}) {
-    const diff = !!options.diff;
-    const title = basename(path);
+    const diff = !!options.diff || !!options.commit;
+    const commit = options.commit || null;
+    const title = basename(path) + (commit ? ` @ ${commit.short || commit.sha.slice(0, 7)}` : "");
     const subtitle = docSubtitle(path, child);
     return {
       id,
@@ -163,12 +164,14 @@ export function mountAgents(root) {
       path,
       title,
       subtitle,
-      persist: { computer, id: child.id, path, diff },
+      persist: { computer, id: child.id, path, diff, ...(commit ? { commit } : {}), ...(options.worktree ? { worktree: options.worktree } : {}) },
       mount: (el) => {
         const handle = openEditorDoc(el, {
           computer, child, path,
           line: options.line,
           diff,
+          commit,
+          worktree: options.worktree,
           openFile: (p, o) => openFileDoc(computer, child, p, o),
           ask: (text) => askSession(computer, child, text),
           onDirty: (dirty) => tabs.setTitle(id, (dirty ? "\u25cf " : "") + title, subtitle),
@@ -182,8 +185,9 @@ export function mountAgents(root) {
 
   /** Open or activate a file/diff as a centre-tab document; reveal `line`. */
   function openFileDoc(computer, child, path, options = {}) {
-    const diff = !!options.diff;
-    const id = `${diff ? "diff" : "file"}:${computer}/${child.id}/${path}`;
+    const diff = !!options.diff || !!options.commit;
+    const scope = (options.commit ? `@${options.commit.sha}` : "") + (options.worktree ? `#${options.worktree}` : "");
+    const id = `${diff ? "diff" : "file"}:${computer}/${child.id}/${path}${scope}`;
     const handle = tabs.open(fileDoc(id, computer, child, path, options));
     if (options.line != null) handle?.reveal?.(options.line);
     return handle;
@@ -558,7 +562,9 @@ export function mountAgents(root) {
     if (item.kind === "chat") return chatDoc(row.computer, row.child, item.mode === "console" ? "console" : "chat");
     if (item.kind === "file" || item.kind === "diff") {
       const diff = item.kind === "diff";
-      return fileDoc(`${diff ? "diff" : "file"}:${row.computer}/${row.child.id}/${item.path}`, row.computer, row.child, item.path, { diff });
+      const scope = (item.commit?.sha ? `@${item.commit.sha}` : "") + (item.worktree ? `#${item.worktree}` : "");
+      return fileDoc(`${diff ? "diff" : "file"}:${row.computer}/${row.child.id}/${item.path}${scope}`, row.computer, row.child, item.path,
+        { diff, ...(item.commit?.sha ? { commit: item.commit } : {}), ...(item.worktree ? { worktree: item.worktree } : {}) });
     }
     return null;
   }
