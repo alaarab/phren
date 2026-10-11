@@ -3,6 +3,7 @@ import { resolveHostToken } from "./git-host-auth.js";
 import { fillFromCommits } from "./git-host-gitlab.js";
 import { apiRoot, HostApiError, hostJson, safeLink } from "./git-host-http.js";
 import type { Json } from "./protocol.js";
+import { git } from "./projects.js";
 
 /** gitboy, the self-hosted forge, over its REST API (/api/v1). gitboy names a
  * pull request by `index`, and an older gitboy has no draft state, no aggregate review decision
@@ -62,6 +63,30 @@ async function context(root: string, host: GitHost): Promise<Ctx | RequestList> 
 
 function call<T = unknown>(ctx: Ctx, path: string, init: { method?: "GET" | "POST"; body?: Json } = {}) {
   return hostJson<T>(`${ctx.api}/repos/${ctx.repo}${path}`, { token: ctx.token, scheme: "bearer", ...init });
+}
+
+/** Whether a pull request's head lives in this repository rather than a fork
+ * with a branch of the same name. gitboy names it in `head_repository`
+ * (owner_username, name); a row without one is taken as this repository's. */
+export function sameRepository(ctx: Pick<Ctx, "repo">, pull: Json): boolean {
+  const head = obj(pull.head_repository);
+  if (typeof head.owner_username !== "string" || typeof head.name !== "string") return true;
+  return `${head.owner_username}/${head.name}`.toLowerCase() === ctx.repo.toLowerCase();
+}
+
+/** Whether the branch was pushed: its remote-tracking ref, read locally so an
+ * error path never waits on the network or a credential prompt. */
+async function remoteHasBranch(root: string, remote: string, branch: string): Promise<boolean> {
+  return git(root, "show-ref", "--verify", "--quiet", `refs/remotes/${remote}/${branch}`).then(() => true, () => false);
+}
+
+/** gitboy's reasons it will not merge: a 409's `details`, else the message. */
+export function refusalReasons(error: HostApiError): string {
+  const body = obj(error.body);
+  const details = Array.isArray(body.details) ? body.details.map(item => String(item).slice(0, 300)).filter(Boolean).slice(0, 10) : [];
+  const message = error.message.replace(/^.*? answered \d+:? ?/, "");
+  if (details.length) return `${message && message !== "Pull request cannot be merged" ? `${message}: ` : ""}${details.join("; ")}`;
+  return message || "gitboy says it can't be merged yet.";
 }
 
 function pullUrl(ctx: Ctx, pull: Json): string {
@@ -154,7 +179,7 @@ async function currentRequest(ctx: Ctx, branch: string): Promise<Json | null> {
   if (!branch) return null;
   // gitboy can't filter by head branch: read the newest and pick this branch's.
   const { json } = await call<unknown>(ctx, `/pulls?state=all&limit=100&head_branch=${encodeURIComponent(branch)}`);
-  const mine = rows(json).filter(pull => pull.head_branch === branch && !pull.head_repository_fork)
+  const mine = rows(json).filter(pull => pull.head_branch === branch && sameRepository(ctx, pull))
     .sort((a, b) => Number(stateOf(b) === "OPEN") - Number(stateOf(a) === "OPEN") || String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")))[0];
   const index = mine?.index ?? mine?.number;
   if (index === undefined) return null;
@@ -223,8 +248,11 @@ export const gitboy: GitHostProvider = {
       const pull = obj(json);
       return { ok: true, url: pullUrl(ctx, pull), number: (pull.index ?? pull.number) as number, branch, draft };
     } catch (error) {
-      if (error instanceof HostApiError && error.status === 400 && /no changes|nothing to compare/i.test(error.message)) return { ok: false, reason: "failed", message: `${branch} has no changes against the default branch.` };
-      if (error instanceof HostApiError && error.status === 404 && /branch/i.test(error.message)) return { ok: false, reason: "not-found", message: `Push ${branch} to gitboy first, then open the pull request.` };
+      if (error instanceof HostApiError && error.status === 400 && /no changes|nothing to compare|no mergeable changes|choose different source and target/i.test(error.message)) return { ok: false, reason: "failed", message: `${branch} has no changes against the default branch.` };
+      // gitboy answers 500 (not 404) for a branch it doesn't have yet; ask git.
+      if (error instanceof HostApiError && (error.status === 404 || error.status === 500) && !await remoteHasBranch(root, host.remote ?? "origin", branch)) {
+        return { ok: false, reason: "not-found", message: `Push ${branch} to gitboy first, then open the pull request.` };
+      }
       const result = failed(error, ctx.domain);
       return { ok: false, reason: result.reason ?? "failed", message: result.message ?? "gitboy refused the pull request." };
     }
@@ -234,13 +262,17 @@ export const gitboy: GitHostProvider = {
     const ctx = await context(root, host);
     if (!("api" in ctx)) return { ok: false, reason: ctx.reason, message: ctx.message };
     try {
+      // gitboy needs both heads for a rebase; the base guard is harmless for the others.
+      const { json: detail } = await call<Json>(ctx, `/pulls/${request.number}`).catch(() => ({ json: {} as Json }));
+      const baseSha = typeof obj(detail).base_sha === "string" ? obj(detail).base_sha as string : undefined;
       const { json } = await call<Json>(ctx, `/pulls/${request.number}/merge`, { method: "POST", body: {
-        method: request.method, ...(request.expectedHeadSha ? { expected_head_sha: request.expectedHeadSha } : {}) } });
+        method: request.method, ...(request.expectedHeadSha ? { expected_head_sha: request.expectedHeadSha } : {}),
+        ...(baseSha ? { expected_base_sha: baseSha } : {}) } });
       const result = obj(json);
       return { ok: true, number: request.number, method: request.method, ...(typeof result.merge_commit_sha === "string" ? { mergeCommit: result.merge_commit_sha } : {}) };
     } catch (error) {
       if (error instanceof HostApiError && (error.status === 409 || error.status === 422 || error.status === 400)) {
-        return { ok: false, reason: "blocked", message: error.message.replace(/^.*? answered \d+:? ?/, "") || "gitboy says it can't be merged yet." };
+        return { ok: false, reason: "blocked", message: refusalReasons(error) };
       }
       if (error instanceof HostApiError && error.status === 403) return { ok: false, reason: "auth", message: "The gitboy token can read but not merge here; it needs write:repo, and your account needs merge rights on the branch." };
       const result = failed(error, ctx.domain);

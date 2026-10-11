@@ -190,7 +190,8 @@ describe("GitLab and gitboy providers", () => {
         if (p === "/api/v1/repos/sam/app/pulls?state=open&limit=100&head_branch=feature") return { json: open };
         if (p === "/api/v1/repos/sam/app") return { json: { default_branch: "main" } };
         if (method === "POST" && p === "/api/v1/repos/sam/app/pulls") return { status: 201, json: pull };
-        if (method === "POST" && p === "/api/v1/repos/sam/app/pulls/7/merge") return { status: 409, json: { error: "1 approval(s) required for main" } };
+        if (method === "POST" && p === "/api/v1/repos/sam/app/pulls/7/merge") return { status: 409, json: { error: "Pull request cannot be merged", details: ["1 approval(s) required for main", "CI must pass"] } };
+        if (method === "GET" && p === "/api/v1/repos/sam/app/pulls/7") return { json: { ...pull, base_sha: "b".repeat(40) } };
         return undefined;
       });
       const repo = await repository("git@gitboy.example.com:sam/app.git", "gitboy.example.com", `${host.origin}/api/v1`);
@@ -208,8 +209,9 @@ describe("GitLab and gitboy providers", () => {
       open = [pull];
       expect(await gitPullRequest(repo, false)).toMatchObject({ ok: true, number: 7, existing: true });
 
-      expect(await gitMergeRequest(repo, { number: 7, method: "rebase", expectedHeadSha: head })).toMatchObject({ ok: false, reason: "blocked", message: "1 approval(s) required for main" });
-      expect(host.seen.at(-1)?.body).toEqual({ method: "rebase", expected_head_sha: head });
+      // gitboy's own reasons come through, and a rebase carries both guards.
+      expect(await gitMergeRequest(repo, { number: 7, method: "rebase", expectedHeadSha: head })).toMatchObject({ ok: false, reason: "blocked", message: "1 approval(s) required for main; CI must pass" });
+      expect(host.seen.at(-1)?.body).toEqual({ method: "rebase", expected_head_sha: head, expected_base_sha: "b".repeat(40) });
     });
   });
 
@@ -240,5 +242,19 @@ describe("GitLab and gitboy providers", () => {
 
     expect(await gitHostToken(repo, { token: "" })).toMatchObject({ ok: true, disconnected: true });
     expect(await gitPulls(repo)).toMatchObject({ available: false, reason: "auth" });
+  });
+});
+
+describe("gitboy provider helpers", () => {
+  it("keeps a fork's same-named branch out and reads 409 details", async () => {
+    const { sameRepository, refusalReasons } = await import("./git-host-gitboy.js");
+    const { HostApiError } = await import("./git-host-http.js");
+    expect(sameRepository({ repo: "sam/app" }, { head_repository: { owner_username: "Sam", name: "App" } })).toBe(true);
+    expect(sameRepository({ repo: "sam/app" }, { head_repository: { owner_username: "robin", name: "app" } })).toBe(false);
+    expect(sameRepository({ repo: "sam/app" }, {})).toBe(true);
+    const refused = new HostApiError("failed", "gitboy.example.com answered 409: Pull request cannot be merged", 409,
+      { error: "Pull request cannot be merged", details: ["Draft pull requests cannot be merged", "2 discussions unresolved"] });
+    expect(refusalReasons(refused)).toBe("Draft pull requests cannot be merged; 2 discussions unresolved");
+    expect(refusalReasons(new HostApiError("failed", "gitboy.example.com answered 409: Target branch moved", 409, { error: "Target branch moved" }))).toBe("Target branch moved");
   });
 });

@@ -8,7 +8,8 @@ import { git } from "./projects.js";
 export type HostFailure = "auth" | "not-found" | "unreachable" | "failed";
 
 export class HostApiError extends Error {
-  constructor(public reason: HostFailure, message: string, public status = 0) { super(message); }
+  /** `body` is the host's own JSON for a refusal (gitboy's `details`, say). */
+  constructor(public reason: HostFailure, message: string, public status = 0, public body: unknown = null) { super(message); }
 }
 
 /** The API root for a domain: `git config --global phren.<domain>.api` when
@@ -57,7 +58,7 @@ export async function hostJson<T = unknown>(url: string, request: HostRequest): 
   if (response.status === 404) throw new HostApiError("not-found", "The host has no such repository, or the token cannot see it.", 404);
   if (response.status >= 400) {
     const message = json && typeof json === "object" ? (json as Json).message ?? (json as Json).error : undefined;
-    throw new HostApiError("failed", `${new URL(url).host} answered ${response.status}${message ? `: ${typeof message === "string" ? message : JSON.stringify(message)}` : ""}`.slice(0, 500), response.status);
+    throw new HostApiError("failed", `${new URL(url).host} answered ${response.status}${message ? `: ${typeof message === "string" ? message : JSON.stringify(message)}` : ""}`.slice(0, 500), response.status, json);
   }
   return { status: response.status, json: json as T, headers: response.headers };
 }
