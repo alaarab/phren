@@ -1,0 +1,36 @@
+{
+  "name": "@phren/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Phren desktop: a client of every computer's Phren Hook (phase 0 spike)",
+  "type": "module",
+  "bin": {
+    "phren-desktop": "./dist/src/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/main.js",
+    "lint": "biome lint --config-path ../../biome.json src/",
+    "app": "electron electron/main.js"
+  },
+  "dependencies": {
+    "@phren/cli": "workspace:*",
+    "@phren/desktop-kit": "workspace:*",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-webgl": "^0.19.0",
+    "@xterm/xterm": "^6.0.0",
+    "fflate": "^0.8.3",
+    "js-yaml": "^5.4.2",
+    "monaco-editor": "^0.57.0",
+    "node-pty": "^1.1.0",
+    "smol-toml": "^1.9.0",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/ws": "^8.18.1",
+    "electron": "^44.7.0"
+  },
+  "license": "MIT",
+  "main": "electron/main.js"
+}

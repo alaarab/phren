@@ -1,0 +1,16 @@
+{
+  "name": "@phren/desktop-kit",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Phren's client logic in TypeScript (transcripts, timeline, tool presentation), ported from the phone's kit. No DOM, no Node: runs in the desktop UI and daemon.",
+  "type": "module",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./*": { "types": "./dist/*.d.ts", "default": "./dist/*.js" }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "biome lint --config-path ../../biome.json src/"
+  },
+  "license": "MIT"
+}

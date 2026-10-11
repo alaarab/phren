@@ -1,0 +1,124 @@
+/* Conductor section: the running conductor, its dispatches, the owner inbox,
+   grants, linked sets and release authority. Phren Charcoal tokens only. */
+.conductor { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+
+/* Header: title, sub, refresh, then the conductor card. */
+.conductor-head { flex: none; padding: 16px 20px 10px; }
+.conductor-headtop { display: flex; align-items: baseline; gap: 10px; }
+.conductor-title { margin: 0; color: var(--text); font: 600 16px system-ui; }
+.conductor-sub { color: var(--muted); font: 12px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conductor-spacer { flex: 1; }
+
+.conductor-btn { height: 28px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--raised); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; transition: color .18s ease, background .18s ease; }
+.conductor-btn:hover { color: var(--accent-hover); }
+.conductor-btn.ghost { background: transparent; border-color: var(--border); color: var(--muted); }
+.conductor-btn.ghost:hover { color: var(--text); background: var(--raised); }
+.conductor-btn.accent { background: var(--accent-solid); border-color: transparent; color: var(--text); }
+.conductor-btn.accent:hover { background: var(--accent); color: #1E1E1E; }
+.conductor-btn.danger { color: var(--danger); border-color: rgba(239,152,152,0.35); }
+.conductor-btn.danger:hover { background: rgba(239,152,152,0.14); color: var(--danger); }
+.conductor-btn:disabled { opacity: .5; cursor: default; }
+
+.conductor-card { margin-top: 12px; }
+.conductor-run { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--surface); border-radius: 10px; box-shadow: inset 3px 0 0 var(--accent); }
+.conductor-dot { flex: none; width: 10px; height: 10px; border-radius: 999px; background: var(--muted); }
+.conductor-dot.working { background: var(--working); }
+.conductor-run-main { flex: 1; min-width: 0; }
+.conductor-run-title { color: var(--text); font: 600 14px system-ui; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conductor-run-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 3px; color: var(--muted); font-size: 12px; }
+.conductor-session { color: var(--text-2); }
+.conductor-run-actions { flex: none; display: flex; align-items: center; gap: 8px; }
+.conductor-state { color: var(--muted); }
+.conductor-state.working { color: var(--working); }
+.conductor-state.waiting { color: var(--waiting); }
+.conductor-role { color: var(--accent); }
+.conductor-confirm { display: inline-flex; align-items: center; gap: 6px; }
+.conductor-ask { color: var(--muted); font-size: 12px; }
+
+.conductor-none { padding: 12px 14px; background: var(--surface); border-radius: 10px; }
+.conductor-none-title { color: var(--text-2); font: 600 13.5px system-ui; }
+.conductor-none-note { margin-top: 6px; color: var(--muted); font-size: 12px; }
+.conductor-none-label { margin: 12px 0 6px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.conductor-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.conductor-field-label { color: var(--muted); font-size: 12px; }
+.conductor-field-note { color: var(--muted); font-size: 12px; }
+.conductor-select { height: 32px; padding: 0 8px; background: var(--sunken); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font: 12.5px system-ui; outline: none; }
+.conductor-select:focus { border-color: var(--accent); }
+.conductor-promote { display: grid; gap: 2px; max-height: 180px; overflow-y: auto; }
+.conductor-promote-row { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font: 12.5px system-ui; text-align: left; cursor: pointer; }
+.conductor-promote-row:hover:not(:disabled) { background: var(--card); color: var(--text); }
+.conductor-promote-row:disabled { opacity: .5; cursor: default; }
+.conductor-promote-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conductor-promote-host { flex: none; color: var(--muted); font: 11.5px var(--mono); }
+
+/* Tabs: pill segments with counts. */
+.conductor-tabs { flex: none; align-self: flex-start; display: inline-flex; gap: 2px; margin: 0 20px 12px; padding: 3px; background: var(--raised); border-radius: 999px; }
+.conductor-tab { border: 0; background: transparent; color: var(--muted); font: 500 12.5px system-ui; padding: 5px 14px; border-radius: 999px; cursor: pointer; transition: background .18s ease, color .18s ease; }
+.conductor-tab:hover { color: var(--text-2); }
+.conductor-tab.selected { background: var(--card); color: var(--accent); }
+.conductor-tab-count { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: rgba(255,255,255,0.08); color: var(--text-2); font-size: 10.5px; }
+
+.conductor-error { flex: none; margin: 0 20px 10px; padding: 8px 12px; border-radius: 10px; background: rgba(239,152,152,0.14); color: var(--danger); font-size: 12.5px; }
+
+.conductor-panels { flex: 1; min-height: 0; position: relative; }
+.conductor-panel { position: absolute; inset: 0; overflow-y: auto; padding: 0 20px 28px; display: flex; flex-direction: column; gap: 4px; }
+
+/* Rows: 44 px list rows, a title/meta stack and right-aligned actions. */
+.conductor-row, .conductor-card-row { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 8px 12px; background: var(--surface); border-radius: 10px; }
+.conductor-row.clickable { cursor: pointer; }
+.conductor-row.clickable:hover { background: var(--card); }
+.conductor-row-main { flex: 1; min-width: 0; }
+.conductor-row-title { color: var(--text); font: 13.5px system-ui; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conductor-row-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 3px; color: var(--muted); font-size: 12px; }
+.conductor-row-sub { margin-top: 3px; color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conductor-row-actions { flex: none; display: flex; align-items: center; gap: 6px; }
+.conductor-project { color: var(--accent); font-family: var(--mono); }
+.conductor-harness { color: var(--text-2); }
+.conductor-host { color: var(--muted); font-family: var(--mono); }
+.conductor-age { color: var(--dim); font-family: var(--mono); }
+
+.conductor-chip { padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--raised); color: var(--muted); }
+.conductor-chip.done { background: rgba(138,200,172,0.16); color: var(--done); }
+.conductor-chip.needs { background: rgba(224,188,127,0.16); color: var(--waiting); }
+.conductor-chip.failed { background: rgba(239,152,152,0.16); color: var(--danger); }
+.conductor-chip.working { background: rgba(185,148,244,0.16); color: var(--working); }
+.conductor-chip.gone { background: var(--raised); color: var(--dim); }
+.conductor-chip.action { color: var(--text-2); background: rgba(255,255,255,0.06); }
+.conductor-chip.host { color: var(--muted); background: rgba(255,255,255,0.04); }
+.conductor-chip.lead, .conductor-chip.local { color: var(--accent); }
+
+.conductor-empty { padding: 12px; color: var(--muted); font-size: 12.5px; }
+.conductor-note { padding: 8px 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.conductor-panel-head { display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.conductor-panel-on { text-transform: none; letter-spacing: 0; font-weight: 500; font-family: var(--mono); font-size: 12px; }
+
+/* Add-grant form. */
+.conductor-form { display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--card); border-radius: 10px; }
+.conductor-form-fields { display: flex; flex-direction: column; gap: 8px; }
+.conductor-form-label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 11.5px; }
+.conductor-form-row { display: flex; align-items: center; gap: 12px; }
+.conductor-form-note { color: var(--muted); font-size: 12px; }
+.conductor-form-actions { display: flex; gap: 8px; }
+.conductor-check { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12.5px; }
+.conductor-input { height: 32px; padding: 0 10px; background: var(--sunken); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font: 12.5px system-ui; outline: none; }
+.conductor-input:focus { border-color: var(--accent); }
+
+/* Linked sets. */
+.conductor-set { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; padding: 12px; background: var(--surface); border-radius: 10px; }
+.conductor-set-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.conductor-set-title { color: var(--text); font: 600 13px system-ui; }
+.conductor-set-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 30px; padding: 4px 0; border-top: 1px solid var(--border); }
+.conductor-set-name { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-2); font: 12.5px var(--mono); }
+.conductor-set-meta { display: flex; gap: 6px; margin-left: auto; }
+.conductor-set-row .conductor-row-sub { flex-basis: 100%; }
+.conductor-rename { display: flex; align-items: center; gap: 6px; }
+.conductor-rename .conductor-input { height: 28px; max-width: 180px; }
+
+@media (prefers-reduced-motion: reduce) { .conductor-tab, .conductor-btn { transition: none; } }
+.conductor-panel > * { flex: none; }
+
+/* One centred column like Home and Schedules; panels keep their scrollbar at the window edge. */
+.conductor { --conductor-gutter: max(20px, calc((100% - 1040px) / 2)); }
+.conductor-head, .conductor-panel { padding-left: var(--conductor-gutter); padding-right: var(--conductor-gutter); }
+.conductor-tabs, .conductor-error { margin-left: var(--conductor-gutter); margin-right: var(--conductor-gutter); }
+.conductor-error { align-self: stretch; }

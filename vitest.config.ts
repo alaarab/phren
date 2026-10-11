@@ -38,6 +38,8 @@ export default defineConfig({
     include: [
       "packages/cli/src/**/*.test.ts",
       "packages/code/src/**/*.test.ts",
+      "packages/desktop/src/**/*.test.ts",
+      "packages/desktop-kit/src/**/*.test.ts",
       "packages/push-relay/src/**/*.test.ts",
       "packages/vscode/test/**/*.test.ts",
       // packages/agent (@phren/agent) is not listed: its suite runs under its

@@ -1447,6 +1447,31 @@ is `{path, size, contentType, version}`, with a repository-relative path that
 can be passed to `/v1/files/range` with the same target/worktree. No file bytes
 or absolute server paths are returned. Hook advertises `fileResolution`.
 
+`POST /v1/files/write` saves one text file in the session's repository for the
+desktop editor. It takes the full session target, optional `child` or `worktree`
+(as the Git routes), a repository-relative `path`, the file's UTF-8 `content`
+(at most 4 MiB) and the `version` that `/v1/files/range` returned when the
+editor read it. The write goes through a temp file and a rename in the same
+folder and keeps the file's mode. A `version` that no longer matches answers
+409 with `code: "file-changed"` and leaves the file alone. Leaving `version`
+out creates a new file, refused with `code: "file-exists"` when one is there.
+Absolute paths, `..`, `.git`, symbolic links on the way and missing folders
+are refused. The reply is `{path, version, size, created}`. Hook advertises
+`fileWrite`; it is part of the `git` module.
+
+`POST /v1/files/search` is find in files for the desktop editor. It takes the
+full session target (optional `child` or `worktree`), a one-line `query` (at most
+200 characters), optional `regex` (extended), `caseSensitive`, `wholeWord`, up to
+eight `include` path patterns (a bare `*.ts` matches in every folder) and `limit`
+(1 to 1000, default 300). It runs `git grep` over tracked and untracked text files,
+so ignored and binary files are skipped. The reply is
+`{matches: [{file, lines: [{line, column, text, offset?}]}], files, total, truncated}`
+with at most 50 matches per file; `text` is at most 300 characters starting at
+`offset`. An invalid expression answers 400 `search-invalid-regex`, output past
+4 MiB 413 `search-too-broad`. Hook advertises `fileSearch`. `POST /v1/files/list`
+(same target) returns `{files, total, truncated}`: every tracked and untracked,
+not ignored, file path in the repository (at most 20,000), for quick open.
+
 `POST /v1/git/tree` takes the session's full target, optional `child` or
 `worktree`, relative `path` and optional `ignored: true`. It returns one directory
 with descendant file counts and a snapshot version; with `ignored`, the level's
@@ -1667,6 +1692,13 @@ limit. Larger blobs return HTTP 413 with `code: "store-file-too-large"`,
 clients can name oversized files before requesting them and continue syncing
 other files. An incomplete pull must retain its previous successful head and
 retry after the file is archived or shortened on the computer.
+
+`POST /v1/store/blobs { shas: [...] }` (capability `memoryStoreBatch`, at most
+256 shas) answers `{ blobs: [{ sha, encoding: "base64", content } | { sha,
+error }] }` from one `git cat-file --batch`. `error` is `unknown`,
+`too-large` (over 4 MiB, with `size`) or `later` (past the 9 MiB per-answer
+budget: ask again). Phren desktop's store mirror uses it instead of one
+request per blob.
 
 ### `GET /v1/usage`
 

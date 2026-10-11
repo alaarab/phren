@@ -1,0 +1,21 @@
+{
+  "repository": "/Users/you/phren",
+  "observedAt": "2026-10-10T12:00:00.000Z",
+  "truncated": false,
+  "countsComplete": true,
+  "totalFiles": 2,
+  "branch": "main",
+  "upstream": "origin/main",
+  "ahead": 0,
+  "behind": 0,
+  "staged": 0,
+  "unstaged": 1,
+  "untracked": 1,
+  "additions": 3,
+  "deletions": 1,
+  "defaultBranch": "main",
+  "files": [
+    { "path": "src/app.ts", "status": "M", "staged": false, "additions": 3, "deletions": 1 },
+    { "path": "README.md", "status": "?", "staged": false, "additions": 0, "deletions": 0 }
+  ]
+}

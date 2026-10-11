@@ -58,6 +58,8 @@ describe("Phren preview dispatcher", () => {
     "phren-hook v1 web /tmp/agent.sock 80", "phren-hook v1 web 127.0.0.1 /tmp/agent.sock",
     "phren-hook v1 web 127.0.0.1 80; id", "phren-hook v1 web 127.0.0.1 80\n", "phren-hook v1 web 127.0.0.1 80 extra",
     "phren-hook v1 terminal default\n",
+    "phren-hook v1 pane default", "phren-hook v1 pane default w1:p1; id", "phren-hook v1 pane default w1:p1 extra",
+    "phren-hook v1 pane default w1:p1\n", "phren-hook v1 pane ../x w1:p1", "phren-hook v1 pane default w1/p1", "phren-hook v1 pane default $(id)",
     "phren-hook v1 shell", "phren-hook v1 shell L3RtcA== claude", "phren-hook v1 shell L3RtcA claude; id",
     "phren-hook v1 shell L3RtcA sh", "phren-hook v1 shell L3RtcA claude extra", "phren-hook v1 shell L3RtcA phren agent", "phren-hook v1 shell L3RtcA phren-agent", "phren-hook v1 shell L3RtcA\n",
     "phren-hook v1 shell " + Buffer.from("relative/dir").toString("base64url"),
@@ -67,6 +69,10 @@ describe("Phren preview dispatcher", () => {
     ...process.platform === "win32" ? [] : ["phren-hook v1 shell " + Buffer.from("/usr/bin").toString("base64url") + " claude"],
   ])("rejects destination or command injection: %j", async command => {
     await expect(dispatch(command)).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("attaches a single pane only on a PTY", async () => {
+    await expect(dispatch("phren-hook v1 pane default w1:p1")).rejects.toThrow("Request an SSH terminal first.");
   });
 
   it("decodes only canonical base64url absolute folders for project shells", () => {

@@ -718,6 +718,9 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
             foreground_processes: [{ pid: foregroundPID }, ...helperPIDs.map(pid => ({ pid }))] } }
           : req.method === "agent.read" ? readPane(req.params.target)
           : req.method === "pane.read" ? readPane(req.params.pane_id)
+          : req.method === "pane.layout" ? { type: "pane_layout", layout: { tab_id: "w1:t1", workspace_id: "w1", focused_pane_id: req.params.pane_id, zoomed: false,
+            area: { x: 0, y: 0, width: 200, height: 50 }, splits: [{ direction: "vertical", ratio: 0.5 }],
+            panes: [{ pane_id: "w1:p1", focused: true, rect: { x: 0, y: 0, width: 100, height: 50 } }, { pane_id: "w1:p2", focused: false, rect: { x: 100, y: 0, width: 100, height: 50 } }] } }
           : req.method === "agent.prompt" ? { type: "agent_prompted", agent: agentInfo(panes().find(p => p.pane_id === agentTarget || agentNames.get(String(p.pane_id)) === agentTarget)!) }
           : { type: "ok" }) }) + "\n");
         if (holdSnapshot && req.method === "session.snapshot") { holdSnapshot = false; releaseSnapshot = answer; }
@@ -1410,6 +1413,16 @@ schedules:
       expect(enters()).toBe(before + 1);
     }, 20_000);
 
+    it("serves a Herdr tab's pane layout for the desktop's mirror", async () => {
+      const answer = await new Promise<any>((resolve, reject) => {
+        const req = request({ socketPath: path.join(root, "bridge/hook.sock"), path: `/v1/workspaces/layout?server=default&pane=w1:p1`, method: "GET", headers: { Host: "phren.local" } }, res => {
+          let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve({ status: res.statusCode, ...JSON.parse(data) }));
+        }); req.on("error", reject); req.end();
+      });
+      expect(answer.status).toBe(200);
+      expect(answer.layout.panes.map((p: any) => p.pane_id)).toEqual(["w1:p1", "w1:p2"]);
+    });
+
     it("reports a compacting conversation and clears it when the new context starts", async () => {
       const post = (event: string) => new Promise<any>((resolve, reject) => {
         const payload = JSON.stringify({ target, event, source: "compact" });
@@ -1430,6 +1443,24 @@ schedules:
       expect((await status()).compacting).toBe(true);
       expect(await post("SessionStart")).toEqual({ status: 200 });
       expect((await status()).compacting).toBe(false);
+    });
+
+    it("keeps the desktop's sockets in their own pool so they never evict the phone's", async () => {
+      const open = async (desktop: boolean) => {
+        const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/overview`,
+          desktop ? { headers: { "X-Phren-Client": "desktop" } } : {});
+        socket.on("error", () => undefined);
+        await once(socket, "open");
+        return socket;
+      };
+      const phone = await open(false);
+      const desktop: WebSocket[] = [];
+      for (let i = 0; i < 17; i += 1) desktop.push(await open(true));
+      // The 17th desktop socket evicts the oldest desktop socket, not the phone's.
+      await waitFor(() => desktop[0].readyState === WebSocket.CLOSED, 2_000);
+      expect(phone.readyState).toBe(WebSocket.OPEN);
+      expect(desktop[16].readyState).toBe(WebSocket.OPEN);
+      for (const socket of [phone, ...desktop]) socket.terminate();
     });
 
     it("presses keys for a prompt the Hook remembered even when Herdr reads the pane as working", async () => {

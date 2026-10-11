@@ -65,3 +65,5 @@ packages/push-relay/dist/
 
 # claude plugin eval output
 evals/results/
+packages/desktop/dist/
+packages/desktop-kit/dist/

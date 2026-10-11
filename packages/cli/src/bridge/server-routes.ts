@@ -36,7 +36,7 @@ import { resolveFilePath } from "./file-resolve.js";
 import { storeRoute } from "./memory-store.js";
 import { memoryForFiles, memorySearch, PROJECT_MEMORY_ROUTE, projectMemory, saveFinding, tasksForBranch } from "./project-memory.js";
 import { liveBackground, markBackground, paneRecord, recordTitle } from "./session-activity.js";
-import { paneAccountField, paneChatState, panes, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
+import { paneAccountField, paneChatState, panes, rpc, servers, snapshot, validateTarget, workspaceSnapshot } from "./herdr.js";
 import type { LaunchLimiter } from "./limits.js";
 import { locateProject } from "./locate.js";
 import { gitStatus } from "./git.js";
@@ -144,9 +144,9 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 }
 
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
-  terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
+  terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, projectMemory: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true };
+  files: true, repositoryFiles: true, fileResolution: true, fileWrite: true, fileSearch: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, memoryStoreBatch: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, projectMemory: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -534,6 +534,16 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             result = muxReplyForClient(await readWorkspaces(server, await snapshot(server), url.searchParams.get("watchApprovals") === "1"), typedMuxRequest(url));
             break;
           }
+          case "/v1/workspaces/layout": {
+            // A Herdr tab's split layout (pane rects and splits) around one of its panes, for
+            // Phren desktop's mirror of a Herdr tab. Herdr only: tmux has no such query here.
+            const server = selectedServer(url);
+            if (terminalKind(server) !== "herdr") throw new BridgeError(501, "Pane layouts need Herdr.");
+            const pane = z.string().regex(/^[A-Za-z0-9_:.-]{1,100}$/).parse(url.searchParams.get("pane"));
+            const answer = await rpc(server, "pane.layout", { pane_id: pane });
+            result = { layout: object(answer).layout ?? null };
+            break;
+          }
           case "/v1/workspaces/panes": result = muxReplyForClient(await panes(selectedServer(url), url.searchParams.get("groupId") || "", url.searchParams.get("childId") || ""), typedMuxRequest(url)); break;
           case "/v1/transcripts/blob": {
             const target = targetFromURL(url); await validateTarget(target);
@@ -706,6 +716,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = { ok: true, ...(outcome ? { outcome } : {}) };
         } else if (url.pathname === "/v1/push/answer") {
           await agentHooks.answerPush(z.string().uuid().parse(data.binding), data.decision); result = { ok: true };
+        } else if (url.pathname === "/v1/push/presence") {
+          // Phren desktop: the owner is at the desk, so approval alerts wait before reaching the phone.
+          agentHooks.push.markDesk(z.number().int().min(0).max(120_000).parse(data.activeForMs));
+          result = { ok: true, deskActive: agentHooks.push.deskActive };
         } else if (url.pathname === "/v1/push/target") {
           // A tapped notification opens its session; the binding stays unspent.
           const target = agentHooks.pushTarget(z.string().uuid().parse(data.binding));

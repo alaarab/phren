@@ -1,0 +1,158 @@
+/* Phren desktop chat composer. Charcoal tokens from ../theme.css only.
+   The 22 px card: a collapsible Background strip above it, the editor on top,
+   then one row of inline-SVG icon buttons. */
+
+.pc-wrap { display: flex; flex-direction: column; }
+
+.pc-card {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px 6px; background: var(--card);
+  border: 1px solid var(--border); border-radius: 22px;
+}
+.pc-card.pc-drag { border-color: var(--accent); }
+
+/* Attachments: image thumbnails with a remove cross. */
+.pc-attachments { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 2px 0; }
+.pc-attach { position: relative; width: 56px; height: 56px; border-radius: 10px; overflow: hidden; background: var(--surface); border: 1px solid var(--border); }
+.pc-attach img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pc-attach-x {
+  position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border: none;
+  border-radius: 999px; background: rgba(0,0,0,0.65); color: var(--text); font-size: 11px;
+  line-height: 18px; padding: 0; cursor: pointer;
+}
+.pc-attach-x:hover { background: var(--danger); color: #1E1E1E; }
+
+/* Pending strip: sent-but-unconfirmed messages and their state. */
+.pc-pending { display: flex; flex-direction: column; gap: 4px; }
+.pc-pending-row { display: flex; align-items: baseline; gap: 8px; padding: 4px 6px; border-radius: 8px; background: var(--surface); font-size: 12px; }
+.pc-pending-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-family: var(--mono); }
+.pc-pending-state { flex: 0 0 auto; color: var(--muted); }
+.pc-pending-state.queued { color: var(--waiting); }
+.pc-pending-state.failed { color: var(--danger); }
+.pc-pending-x { border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; padding: 0 2px; }
+.pc-pending-x:hover { color: var(--danger); }
+
+/* Slash command menu. */
+.pc-slash { display: flex; flex-direction: column; max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.pc-slash-row { display: flex; align-items: baseline; gap: 10px; padding: 7px 10px; cursor: pointer; }
+.pc-slash-row:hover, .pc-slash-row.selected { background: var(--raised); }
+.pc-slash-name { font-family: var(--mono); font-size: 12.5px; color: var(--text); }
+.pc-slash-detail { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--muted); }
+
+/* Editor and ghost text. */
+.pc-input {
+  width: 100%; min-height: 34px; max-height: 180px; resize: none; border: none; outline: none;
+  background: transparent; color: var(--text); font-family: var(--mono); font-size: 13px; line-height: 1.5;
+  padding: 4px 6px;
+}
+.pc-input::placeholder { color: var(--dim); }
+.pc-ghost { padding: 4px 6px; color: var(--text-2); opacity: 0.75; font-family: var(--mono); font-size: 13px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc-ghost-hint { color: var(--dim); }
+
+/* Footer: one row of 28 px icon buttons, a white talk circle and the primary. */
+.pc-footer { display: flex; align-items: center; gap: 18px; padding: 4px 2px 2px; }
+.pc-spacer { flex: 1; }
+.pc-icon svg { width: 20px; height: 20px; }
+.pc-icon {
+  position: relative; width: 32px; height: 32px; padding: 0; border: none; border-radius: 8px;
+  background: transparent; color: var(--text-2); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.pc-icon:hover { background: var(--raised); color: var(--text); }
+.pc-badge {
+  position: absolute; top: -5px; right: -5px; min-width: 15px; height: 15px; padding: 0 3px;
+  border-radius: 999px; background: var(--accent); color: #1E1E1E; font-size: 10px; font-weight: 700; line-height: 15px; text-align: center;
+}
+.pc-talk {
+  width: 44px; height: 44px; border: none; border-radius: 999px; background: #FFFFFF; color: #1E1E1E;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.pc-talk:hover { background: var(--text-2); }
+.pc-primary {
+  width: 44px; height: 44px; border: none; border-radius: 999px; background: var(--accent); color: #1E1E1E;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background 0.18s ease;
+}
+.pc-primary:hover { background: var(--accent-hover); }
+.pc-primary[disabled] { background: var(--accent-solid); color: rgba(255,255,255,0.55); cursor: default; opacity: 0.7; }
+.pc-primary.stop { background: var(--accent); color: #1E1E1E; }
+.pc-primary.stop:hover { background: var(--accent-hover); }
+
+.pc-notice { padding: 2px 6px; font-size: 11.5px; color: var(--waiting); }
+.pc-notice:empty { display: none; }
+.pc-draft-error { padding: 2px 6px; font-size: 11.5px; color: var(--waiting); }
+.pc-draft-error:empty { display: none; }
+
+/* Context ring inside the popover. */
+.pc-ring { flex: 0 0 auto; }
+.pc-ring-bg { fill: none; stroke: var(--raised); stroke-width: 3; }
+.pc-ring-fg { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; transition: stroke-dashoffset 0.18s ease; }
+
+/* Popover: Model, Permission mode, Fast, the context ring. */
+.pc-popover {
+  position: fixed; z-index: 40; min-width: 240px; max-width: 360px; max-height: 360px; overflow-y: auto;
+  background: var(--raised); border: 1px solid var(--border-strong); border-radius: 10px; padding: 4px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.pc-pop-head { padding: 6px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.pc-pop-row { display: flex; align-items: baseline; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 12.5px; color: var(--text); }
+.pc-pop-row:hover { background: var(--surface); }
+.pc-pop-row.selected { color: var(--accent); }
+.pc-pop-sub { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; }
+.pc-pop-effort { display: flex; gap: 4px; padding: 4px 8px; flex-wrap: wrap; }
+.pc-effort { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: 11px; cursor: pointer; }
+.pc-effort.on { border-color: var(--accent-solid); color: var(--accent); }
+
+/* Background strip above the card. */
+.pc-background { display: flex; flex-direction: column; margin: 0 2px 4px; }
+.pc-bg-head {
+  display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px;
+  border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--text); cursor: pointer; font: 600 13px system-ui;
+}
+.pc-bg-head:hover { background: var(--raised); }
+.pc-bg-title { flex: 1; text-align: left; }
+.pc-bg-count { color: var(--muted); }
+.pc-bg-chevron { display: flex; color: var(--muted); transition: transform 0.18s ease; }
+.pc-bg-chevron.open { transform: rotate(180deg); }
+.pc-bg-list { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.pc-bg-row { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 12px; border-top: 1px solid var(--border); }
+.pc-bg-row:first-child { border-top: none; }
+.pc-bg-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--muted); flex: 0 0 auto; }
+.pc-bg-dot.working { background: var(--working); }
+.pc-bg-dot.done { background: var(--done); }
+.pc-bg-dot.failed { background: var(--danger); }
+.pc-bg-main { flex: 1; min-width: 0; }
+.pc-bg-label { color: var(--text); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc-bg-detail { color: var(--muted); font-size: 11.5px; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc-bg-state { flex: 0 0 auto; color: var(--muted); font-size: 11.5px; }
+
+/* Worded footer selectors (Permission, Model, Effort) and the ring button. */
+.pc-select {
+  display: inline-flex; align-items: center; gap: 2px; border: none; background: transparent;
+  color: var(--muted); font: 500 12px var(--prose); padding: 4px 8px; border-radius: 6px; cursor: pointer;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+.pc-select:hover { background: var(--raised); color: var(--text-2); }
+.pc-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pc-select-label { color: var(--muted); transition: color 0.18s ease; }
+.pc-select:hover .pc-select-label { color: var(--text-2); }
+.pc-select-label.warn, .pc-select:hover .pc-select-label.warn { color: var(--waiting); }
+.pc-select-chevron { display: flex; color: inherit; opacity: 0.7; }
+.pc-select-chevron svg { width: 12px; height: 12px; }
+.pc-select-plain { color: var(--muted); font: 500 12px var(--prose); padding: 4px 8px; }
+.pc-ring-btn {
+  width: 28px; height: 28px; padding: 0; border: none; border-radius: 8px; background: transparent;
+  color: var(--text-2); cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.pc-ring-btn:hover { background: var(--raised); }
+.pc-ring-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pc-ring-btn svg { width: 16px; height: 16px; }
+
+/* Where-it-runs line under the composer card. */
+.pc-where {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding: 6px 14px 0; font: 12px var(--prose); color: var(--dim);
+}
+.pc-where-computer, .pc-where-branch { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
+.pc-where-icon { color: var(--muted); }
+.pc-where-branch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
