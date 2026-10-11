@@ -57,6 +57,7 @@ describe("computers surface", () => {
         { source: "claude", windows: [{ id: "five_hour", name: "5-hour limit", usedPercent: 45 }], updatedAt: "2026-09-26T11:59:00Z" },
         { source: "opencode", windows: [], spend: { amountUSD: 2.25, period: "rolling_7_days" } },
         { source: "copilot", windows: [], message: "Could not read Copilot usage." },
+        { source: "codex", windows: [{ id: "codex:primary", name: "5-hour limit", usedPercent: 100 }], updatedAt: "2026-09-26T11:58:00Z", credits: { hasCredits: true, balance: 320, inUse: true } },
       ] as never }] };
     } });
     const local = report.computers[0].harnesses!;
@@ -68,6 +69,7 @@ describe("computers surface", () => {
     const combined = Object.fromEntries(report.combined.map(h => [h.source, h]));
     expect(combined.claude.windows[0].usedPercent).toBe(45);
     expect(combined.opencode.spend).toEqual({ amountUSD: 3.75, period: "rolling_7_days" });
+    expect(combined.codex.credits).toEqual({ hasCredits: true, balance: 320, inUse: true });
     expect(combined.copilot.message).toBe("Could not read Copilot usage.");
     expect(combineUsage([])).toHaveLength(6);
   });

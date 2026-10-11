@@ -154,6 +154,10 @@ ElevenLabs uses `tier` and `next_invoice.next_payment_attempt_unix` from the exi
 
 Account usage cards show a muted line under the title, for example `Pro · since Jul 13 · renews Oct 6`; estimated dates read `renews about Oct 13`. Missing dates simply leave out that part of the line.
 
+### Codex credits
+
+Codex reports a purchased credit balance beside its windows in the same `account/rateLimits/read` answer the Hook already reads. The Codex row carries it as `credits: { hasCredits, unlimited?, balance?, inUse? }`: `balance` is in Codex's own credit unit, not dollars, and `inUse` is set when credits are enabled and a plan window is spent (at 100%, or Codex says the rate limit is reached), so further work draws on the balance. `account_usage` keeps the newest report's credits for the account. Nothing is estimated: a row without `credits` means Codex sent none.
+
 ### API credits (estimate)
 
 A Claude home signed in with a Console (API billing) login has no 5-hour or weekly window. To see roughly what is left of a prepaid or promotional credit, enter it once:

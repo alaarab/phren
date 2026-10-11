@@ -59,6 +59,22 @@ describe("account usage", () => {
     expect(value.windows).toHaveLength(2);
     expect(value.windows.map(w => w.id)).toEqual(["codex:primary", "codex:secondary"]);
   });
+  it("reads Codex credits beside the windows, and says they are in use once a plan window is spent", () => {
+    const credits = { hasCredits: true, unlimited: false, balance: "1250.505" };
+    expect(codexUsage({ rateLimits: { ...limits, credits } }, now).credits).toEqual({ hasCredits: true, balance: 1250.51 });
+    const spent = { ...limits, primary: { ...limits.primary, usedPercent: 100 }, credits };
+    expect(codexUsage({ rateLimits: spent }, now).credits).toEqual({ hasCredits: true, balance: 1250.51, inUse: true });
+    expect(codexUsage({ rateLimits: { ...limits, credits, rateLimitReachedType: "rate_limit_reached" } }, now).credits?.inUse).toBe(true);
+    // No credits on the account: nothing is in use, whatever the windows say.
+    expect(codexUsage({ rateLimits: { ...spent, credits: { hasCredits: false, unlimited: false, balance: null } } }, now).credits).toEqual({ hasCredits: false });
+    expect(codexUsage({ rateLimits: { ...limits, credits: { hasCredits: true, unlimited: true, balance: null } } }, now).credits).toEqual({ hasCredits: true, unlimited: true });
+    // The account's balance comes from the buckets Codex budgets by, never from Spark.
+    expect(codexUsage({ rateLimits: limits, rateLimitsByLimitId: { spark: { limitName: "Spark", credits, rateLimitReachedType: "rate_limit_reached" }, codex: limits } }, now).credits).toBeUndefined();
+    for (const balance of ["-5", "1e9", "12 credits", 40]) {
+      expect(codexUsage({ rateLimits: { ...limits, credits: { hasCredits: true, balance } } }, now).credits).toEqual({ hasCredits: true });
+    }
+    expect(codexUsage({ rateLimits: limits }, now).credits).toBeUndefined();
+  });
   it("rejects malformed values and never converts missing limits into zero usage", () => {
     for (const used of [null, true, "50", -1, 101, Infinity, NaN]) {
       expect(codexUsage({ rateLimits: { primary: { usedPercent: used } } }).windows).toEqual([]);
