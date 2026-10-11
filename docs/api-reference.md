@@ -1580,6 +1580,22 @@ stderr interleaved, at most 64 KiB). Input errors are ordinary 400/409 errors.
 | `POST /v1/git/push` | `confirmDefault?: true` | `{ok, branch, remote, upstream, setUpstream, output}`. Pushes the current branch to its upstream, or to `origin` with the upstream set. Never forced. The default branch (the remote's `HEAD`, else `main`/`master`) is 409 without `confirmDefault`; a detached HEAD or missing remote is 409. |
 | `POST /v1/git/pr` | `draft?: true` | `{ok, url, branch, draft?, existing?}` through `gh pr create --fill`. `{ok: false, reason: "missing" \| "auth", message}` when gh is not installed or not signed in; `reason: "failed"` with gh's `output` otherwise. |
 
+### Commit detail, branches and sync
+
+`POST /v1/git/show` reads, so it takes no `expectedRepository`; the other three
+are writes and accept it. All four take `child` or `worktree` like the routes above.
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `POST /v1/git/show` | `sha` (4 to 64 hex characters) | `{sha, short, subject, body, author, authorEmail, date, committer, committed, parents, refs, files, totalFiles, additions, deletions, truncated}`. Each file is `{path, oldPath?, status, additions, deletions, binary, countsComplete, sections: [{id, kind: "commit", binary, loadState, patch, truncated}]}`, compared with the first parent (the empty tree for a root commit), renames detected. At most 300 files carry a patch, 200 KB per file and 1 MB in all; past that `truncated` is true. An unknown commit is 404. |
+| `POST /v1/git/checkout` | `branch`, `create?: true`, `startPoint?`, `carryChanges?: true` | `{ok, branch, previous, changed, created?, upstream?, carried?}` through `git switch --no-guess`. With `create`, a new branch from `startPoint` (a local or remote-tracking branch; a remote one becomes its upstream) or HEAD; 409 `git-branch-exists` when it exists. Without it, an existing local branch; 404 otherwise. Uncommitted tracked edits are 409 `git-dirty` (with `changes`) unless `carryChanges` is true, and Git still refuses anything it would overwrite (`{ok: false, output}`). |
+| `POST /v1/git/fetch` | none | `{ok, remote, output?}`. `git fetch --prune --no-tags` of the current branch's upstream remote, else `origin`; 409 `git-no-remote` without one. |
+| `POST /v1/git/pull` | none | `{ok, branch, upstream, commits, output?}`. `git pull --ff-only --no-rebase` from the upstream; `commits` is how many arrived. A branch without an upstream or a detached HEAD is 409; a diverged branch is Git's refusal as `{ok: false, output}`. Never a merge commit or a rebase. |
+
+`/v1/git/pulls` `current` also carries `checkRuns: [{name, state, workflow?, url?}]`
+(state `failing`, `pending`, `passing`, `skipped` or `neutral`; failing first, at
+most 100) and, when GitHub reports them, `reviewDecision` and `mergeState`.
+
 `POST /v1/git/pulls` also returns `branch` and `current`: the checked-out
 branch's pull request in any state, `{number, title, url, head, base, draft,
 state, checks}`, where `checks` is `passing`, `failing`, `pending` or null.
