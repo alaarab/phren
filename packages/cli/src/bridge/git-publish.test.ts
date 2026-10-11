@@ -212,10 +212,13 @@ describe("git publish routes", () => {
     await writeFile(path.join(stub, "view.json"), JSON.stringify({
       number: 51, title: "Finish", url: "https://github.com/sam/phren/pull/51", state: "OPEN", isDraft: true,
       headRefName: "feature/pr", baseRefName: "main",
-      statusCheckRollup: [{ __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS" }, { __typename: "StatusContext", state: "SUCCESS" }],
+      statusCheckRollup: [{ __typename: "CheckRun", name: "build", status: "COMPLETED", conclusion: "SUCCESS" }, { __typename: "StatusContext", context: "ci", state: "SUCCESS" }],
+      reviewDecision: "CHANGES_REQUESTED", mergeStateStatus: "BLOCKED",
     }));
     expect((await gitPulls(root)).current).toEqual({ number: 51, title: "Finish", url: "https://github.com/sam/phren/pull/51",
-      head: "feature/pr", base: "main", draft: true, state: "OPEN", checks: "passing" });
+      head: "feature/pr", base: "main", draft: true, state: "OPEN", checks: "passing",
+      checkRuns: [{ name: "build", state: "passing" }, { name: "ci", state: "passing" }], reviewDecision: "CHANGES_REQUESTED", mergeState: "BLOCKED" });
+    expect(await readFile(path.join(stub, "calls.log"), "utf8")).toContain("statusCheckRollup,reviewDecision,mergeStateStatus");
     // A pull request for another head (gh's fallback) is not this branch's.
     await git("checkout", "-q", "-b", "elsewhere");
     expect((await gitPulls(root)).current).toBeNull();

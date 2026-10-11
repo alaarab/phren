@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Hook: a client's Changes view can open a commit, switch and create branches, fetch and fast-forward. `POST /v1/git/show` returns one commit's message, author, parents, refs and every changed file with counts and its patch against the first parent. `POST /v1/git/checkout` switches to a local branch or creates one from HEAD or a local or remote branch (a remote one becomes its upstream); uncommitted tracked edits need `carryChanges: true`. `POST /v1/git/fetch` fetches the upstream remote with `--prune`, and `POST /v1/git/pull` fast-forwards only, never merging or rebasing. Git's refusals come back verbatim as `{ok: false, output}`. `/v1/git/pulls` `current` adds each check (`checkRuns`), the review decision and the merge state.
+
 ### Fixed
 
 - The Hook's health check waits 8 seconds for a harness's `--version` instead of 3. On a busy computer a healthy OpenCode took 2.4 seconds just to start, so the check kept reporting it as not answering.

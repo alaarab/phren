@@ -17,7 +17,7 @@ function statusLetter(code: string): string {
 
 interface Counts { additions: number; deletions: number; binary: boolean; countsComplete: boolean }
 /** NUL records preserve tabs/newlines in names and both sides of renames. */
-function parseNumstat(out: string): Map<string, Counts> {
+export function parseNumstat(out: string): Map<string, Counts> {
   const map = new Map<string, Counts>();
   const tokens = out.split("\0");
   for (let index = 0; index < tokens.length; index++) {
@@ -260,17 +260,45 @@ export function checkRollup(items: unknown): "passing" | "failing" | "pending" |
   return pending ? "pending" : "passing";
 }
 
+/** Each check as the phone lists it: a name, the workflow that ran it, one
+ * state word and its page. Check runs and commit statuses read alike; failing
+ * checks first, then pending, then the rest, at most 100. */
+export function checkRuns(items: unknown): Json[] {
+  if (!Array.isArray(items)) return [];
+  const order = { failing: 0, pending: 1, passing: 2, skipped: 3, neutral: 4 } as const;
+  const runs = items.map(raw => {
+    const item = raw && typeof raw === "object" ? raw as Json : {};
+    const conclusion = String(item.conclusion ?? "").toUpperCase(), state = String(item.state ?? "").toUpperCase();
+    const status = String(item.status ?? "").toUpperCase();
+    let word: keyof typeof order;
+    if (["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(conclusion) || ["FAILURE", "ERROR"].includes(state)) word = "failing";
+    else if (state && !status) word = state === "SUCCESS" ? "passing" : "pending";
+    else if (status !== "COMPLETED") word = "pending";
+    else if (conclusion === "SKIPPED") word = "skipped";
+    else if (conclusion === "NEUTRAL" || conclusion === "STALE") word = "neutral";
+    else word = "passing";
+    const name = String(item.name ?? item.context ?? "").slice(0, 200) || "Check";
+    const workflow = typeof item.workflowName === "string" && item.workflowName ? item.workflowName.slice(0, 200) : undefined;
+    const url = String(item.detailsUrl ?? item.targetUrl ?? "");
+    return { name, state: word, ...(workflow ? { workflow } : {}), ...(/^https:\/\//.test(url) ? { url: url.slice(0, 2048) } : {}) };
+  });
+  return runs.sort((a, b) => order[a.state] - order[b.state]).slice(0, 100);
+}
+
 /** The checked-out branch's pull request in any state, with its checks, or
  * null when the branch has none (or gh cannot say). */
 async function currentPull(root: string, branch: string): Promise<Json | null> {
   try {
-    const { stdout } = await exec("gh", ["pr", "view", "--json", "number,title,url,state,isDraft,headRefName,baseRefName,statusCheckRollup"], {
+    const { stdout } = await exec("gh", ["pr", "view", "--json", "number,title,url,state,isDraft,headRefName,baseRefName,statusCheckRollup,reviewDecision,mergeStateStatus"], {
       cwd: root, timeout: 15_000, maxBuffer: 4_194_304, env: ghEnv(),
     });
     const pull = JSON.parse(stdout || "null");
     if (!pull || typeof pull !== "object" || typeof pull.number !== "number" || pull.headRefName !== branch) return null;
     return { number: pull.number, title: String(pull.title ?? ""), url: String(pull.url ?? ""), head: branch,
-      base: String(pull.baseRefName ?? ""), draft: pull.isDraft === true, state: String(pull.state ?? ""), checks: checkRollup(pull.statusCheckRollup) };
+      base: String(pull.baseRefName ?? ""), draft: pull.isDraft === true, state: String(pull.state ?? ""), checks: checkRollup(pull.statusCheckRollup),
+      checkRuns: checkRuns(pull.statusCheckRollup),
+      ...(typeof pull.reviewDecision === "string" && pull.reviewDecision ? { reviewDecision: pull.reviewDecision } : {}),
+      ...(typeof pull.mergeStateStatus === "string" && pull.mergeStateStatus ? { mergeState: pull.mergeStateStatus } : {}) };
   } catch { return null; }
 }
 
@@ -516,4 +544,69 @@ export async function gitDiscard(cwd: string, paths: unknown): Promise<Json> {
     }
     return { ok: true };
   } finally { treeCache.delete(root); }
+}
+
+/** The empty tree's id in this repository's hash, the parent a root commit is
+ * compared with. */
+async function emptyTree(root: string): Promise<string> {
+  return (await git(root, "hash-object", "-t", "tree", "/dev/null")).trim();
+}
+
+const MAX_SHOW_FILES = 300, MAX_SHOW_PATCH = 1_000_000, MAX_FILE_PATCH = 200_000;
+
+/** One commit as the phone's commit screen shows it: message, author and
+ * committer, parents and refs, and every file it changed against its first
+ * parent (what GitHub shows for a merge) with counts and a bounded patch in
+ * the same section shape `/v1/diff` uses. */
+export function gitShow(cwd: string, sha: unknown): Promise<Json> {
+  return withGitReadDeadline(() => readGitShow(cwd, sha));
+}
+
+async function readGitShow(cwd: string, sha: unknown): Promise<Json> {
+  if (typeof sha !== "string" || !/^[0-9a-fA-F]{4,64}$/.test(sha)) throw new BridgeError(400, "Name a commit by its hash.");
+  const root = await repository(cwd);
+  let commit: string;
+  try { commit = (await git(root, "rev-parse", "--verify", "--end-of-options", `${sha}^{commit}`)).trim(); }
+  catch { throw new BridgeError(404, "This repository has no such commit.", { code: "git-unknown-commit" }); }
+  const meta = await git(root, "show", "-s", "--decorate=short", "--format=%H%x00%h%x00%an%x00%ae%x00%aI%x00%cn%x00%cI%x00%P%x00%D%x00%B", commit);
+  const [full, short, author, authorEmail, date, committer, committed, parentList, spec, ...message] = meta.split("\0");
+  const body = message.join("\0").replace(/\n+$/, "");
+  const newline = body.indexOf("\n");
+  const subject = newline < 0 ? body : body.slice(0, newline);
+  const parents = (parentList ?? "").split(" ").filter(Boolean);
+  const base = parents[0] ?? await emptyTree(root);
+  const range = [base, commit];
+  const [names, counts] = await Promise.all([
+    git(root, "diff-tree", "-r", "-z", "-M", "--no-commit-id", "--name-status", ...range),
+    git(root, "diff-tree", "-r", "-z", "-M", "--no-commit-id", "--numstat", ...range),
+  ]);
+  const stats = parseNumstat(counts);
+  const tokens = names.split("\0");
+  const files: Json[] = [];
+  let totalFiles = 0, truncated = false, remaining = MAX_SHOW_PATCH, additions = 0, deletions = 0;
+  for (let index = 0; index < tokens.length; index++) {
+    const code = tokens[index]; if (!code) continue;
+    const renamed = /^[RC]/.test(code);
+    const oldPath = renamed ? tokens[++index] : undefined, file = tokens[++index];
+    if (!file) break;
+    totalFiles++;
+    const count = stats.get(file) ?? { additions: 0, deletions: 0, binary: false, countsComplete: false };
+    additions += count.additions; deletions += count.deletions;
+    if (files.length >= MAX_SHOW_FILES) { truncated = true; continue; }
+    const status = statusLetter(code);
+    let section: Json;
+    if (remaining <= 0 || count.binary) {
+      section = { id: `commit:${file}`, kind: "commit", binary: count.binary, loadState: "loaded", patch: "", truncated: !count.binary };
+      truncated ||= !count.binary;
+    } else {
+      const patch = await git(root, ...NO_DIFF, "-M", ...range, "--", ...[file, ...(oldPath ? [oldPath] : [])].map(name => `:(literal)${name}`));
+      const limit = Math.min(MAX_FILE_PATCH, remaining), clipped = patch.length > limit;
+      section = { id: `commit:${file}`, kind: "commit", binary: /^(?:Binary files |GIT binary patch)/m.test(patch), loadState: "loaded", patch: patch.slice(0, limit), truncated: clipped };
+      remaining -= Math.min(patch.length, limit); truncated ||= clipped;
+    }
+    files.push({ path: file, ...(oldPath ? { oldPath } : {}), status, additions: count.additions, deletions: count.deletions,
+      binary: count.binary, countsComplete: count.countsComplete, sections: [section] });
+  }
+  return { sha: full, short, subject, body: newline < 0 ? "" : body.slice(newline + 1).replace(/^\n+/, ""), author, authorEmail, date,
+    committer, committed, parents, refs: refEntries(spec ?? "", await remotes(root)), files, totalFiles, additions, deletions, truncated };
 }
