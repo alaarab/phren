@@ -1,5 +1,9 @@
 import type { DialogQuestion } from "../../claude-question-dialog.js";
 
+/** Claude Code 2.1.284 draws a question that has a line break or is wider
+ * than 80 columns inside a dimmed left border, on its tab and in the review. */
+const gutter = (question: string) => question.includes("\n") || question.length > 80;
+
 /** Claude Code's question dialog as observed: a digit picks a single-select
  * row and moves on, toggles a multi-select box, and Tab leaves a
  * multi-select question (or moves from its typed row to Next). */
@@ -63,7 +67,9 @@ export class FakeClaude {
     if (this.tab >= this.questions.length) {
       return [bar, "", "Review your answers", "", ...this.questions.flatMap((q, i) => {
         const value = this.value(i);
-        return [` ● ${q.question}`, ...(value?.length ? [`   → ${Array.isArray(value) ? value.join(", ") : value}`] : [])];
+        const [first, ...rest] = q.question.split("\n");
+        const lines = gutter(q.question) ? [` │ ● ${first}`, ...rest.map(line => ` │   ${line}`)] : [` ● ${q.question}`];
+        return [...lines, ...(value?.length ? [`   → ${Array.isArray(value) ? value.join(", ") : value}`] : [])];
       }), "", "Ready to submit your answers?", "", "❯ 1. Submit answers", "  2. Cancel"].join("\n");
     }
     const q = this.questions[this.tab], n = q.options.length, mark = (row: number | "next") => this.cursor === row ? "❯" : " ";
@@ -73,7 +79,8 @@ export class FakeClaude {
     const typed = this.typed[this.tab];
     const other = q.multiSelect ? [`${mark(n + 1)} ${n + 1}. [${this.typedOn[this.tab] ? "✔" : " "}] ${typed || "Type something"}`, `${mark("next")}    Next`]
       : [`${mark(n + 1)} ${n + 1}. ${typed || "Type something."}`];
-    return [bar, "", q.question, "", ...rows, ...other, "─".repeat(40), `  ${n + 2}. Chat about this`, "",
+    const title = gutter(q.question) ? q.question.split("\n").map(line => `│ ${line}`.trimEnd()) : [q.question];
+    return [bar, "", ...title, "", ...rows, ...other, "─".repeat(40), `  ${n + 2}. Chat about this`, "",
       "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"].join("\n");
   }
   /** `redrawMs`: a busy computer, where the pane keeps showing the old
