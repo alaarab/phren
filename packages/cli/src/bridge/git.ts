@@ -327,7 +327,7 @@ export async function gitPulls(cwd: string): Promise<Json> {
 }
 
 /** A repo-relative tree path, or the repository root for `""`. */
-async function repositoryPath(root: string, raw: unknown, allowRoot = false): Promise<string> {
+export async function repositoryPath(root: string, raw: unknown, allowRoot = false): Promise<string> {
   if (typeof raw !== "string" || raw.length > 4096 || raw.includes("\0") || path.isAbsolute(raw) || path.win32.isAbsolute(raw) || raw.startsWith("\\")) throw new BridgeError(400, "Invalid path.");
   const segments = raw.split(/[\\/]/);
   if (segments.includes("..") || segments.includes(".git")) throw new BridgeError(400, "Invalid path.");

@@ -10,6 +10,7 @@ import { fanoutWorktrees } from "./fanouts.js";
 import { gitWorktrees, resolveWorktree, type WorktreeWorker } from "./git-worktrees.js";
 import { gitCommit, gitPullRequest, gitPush } from "./git-publish.js";
 import { gitCheckout, gitFetch, gitPull } from "./git-sync.js";
+import { gitApply, gitFile, sessionChanges } from "./git-review.js";
 import { findPane, paneAgentName, paneChatState, paneIdentity, snapshot, startingPane, trustedDirectory, validateStartingTarget, validateTarget } from "./herdr.js";
 import { agentNotReady, terminalProvider } from "./terminal.js";
 import { AppServerRpcError } from "./codex-app-server.js";
@@ -586,7 +587,7 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     // Git routes read the pane's repository, or a spawned child's own
     // worktree, exactly as /v1/diff resolves it.
     let cwd = await gitRepository(pane, target, data.child, data.worktree);
-    if (["stage", "unstage", "discard", "commit", "push", "pr", "checkout", "fetch", "pull"].some(action => url.pathname === `/v1/git/${action}`)
+    if (["stage", "unstage", "discard", "commit", "push", "pr", "checkout", "fetch", "pull", "apply"].some(action => url.pathname === `/v1/git/${action}`)
       && data.expectedRepository !== undefined) {
       const expected = z.string().min(1).max(4096).refine(value => path.isAbsolute(value) && !value.includes("\0"), "Expected an absolute repository path.").parse(data.expectedRepository);
       const root = await gitRoot(cwd);
@@ -609,6 +610,14 @@ export async function paneRouteOnce(ctx: PaneRouteContext, url: URL, data: Json,
     else if (url.pathname === "/v1/git/checkout") result = await gitCheckout(cwd, data);
     else if (url.pathname === "/v1/git/fetch") result = await gitFetch(cwd);
     else if (url.pathname === "/v1/git/pull") result = await gitPull(cwd);
+    else if (url.pathname === "/v1/git/file") result = await gitFile(cwd, data.ref, data.path);
+    else if (url.pathname === "/v1/git/apply") result = await gitApply(cwd, data.patch, data.reverse);
+    else if (url.pathname === "/v1/git/session-changes") {
+      // This conversation's own recorded edits, in the repository the route resolved.
+      const root = await gitRoot(cwd);
+      if (!root) throw new BridgeError(409, "This pane is not in a Git repository.", { code: "git-not-repository" });
+      result = sessionChanges(root, await agentHooks.changes.history(`${target.source}:${target.session}`));
+    }
     else throw new BridgeError(404, "Unknown Phren Hook route.");
   }
   else if (url.pathname === "/v1/approvals/answer") {
