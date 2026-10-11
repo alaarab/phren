@@ -106,7 +106,11 @@ the MCP server checks a process-owned snapshot of file and directory metadata
 at most once per second. External summary, document, store attachment and
 profile-membership changes refresh the live index even with pull interval zero
 and without a commit. Concurrent requests share one refresh through the write
-queue. A busy index writer causes a retryable error; active tool calls retain
+queue. Only tools that read the index (the `search` and `graph` modules) run
+this check; the rest work on store files and never wait for a rebuild. When
+another process holds the rebuild lock, the refresh retries with backoff for
+up to `PHREN_INDEX_BUSY_WAIT_MS` (5 s), then the call answers from the last
+good index and the next call tries again. Active tool calls retain
 their old database handles until they finish. No Hook restart is involved.
 
 ## MCP Server Modules

@@ -1,6 +1,7 @@
 import * as path from "path";
 import { debugLog } from "./shared.js";
 import { logger } from "./logger.js";
+import { clipText, focusText } from "./response-budget.js";
 
 export type SqlValue = string | number | null | Uint8Array;
 export type DbRow = SqlValue[];
@@ -129,7 +130,12 @@ export function queryDocBySourceKey(db: SqlJsDatabase, phrenPath: string, source
   return rows.find((row) => getDocSourceKey(row, phrenPath) === sourceKey) ?? null;
 }
 
-export function extractSnippet(content: string, query: string, lines: number = 5): string {
+/**
+ * Pick the lines of `content` that best match `query`. With `maxChars`, the
+ * result is also held to that many characters: store lines can run to several
+ * KB, so a few lines alone do not bound a snippet.
+ */
+export function extractSnippet(content: string, query: string, lines: number = 5, maxChars?: number): string {
   const terms = query.replace(/\b(AND|OR|NOT|NEAR)\b/gi, "")
     .replace(/['"]/g, "")
     .split(/\s+/)
@@ -137,7 +143,8 @@ export function extractSnippet(content: string, query: string, lines: number = 5
     .map((term) => term.toLowerCase());
 
   if (terms.length === 0) {
-    return content.split("\n").slice(0, lines).join("\n");
+    const head = content.split("\n").slice(0, lines);
+    return maxChars === undefined ? head.join("\n") : fitSnippetLines(head, -1, terms, maxChars);
   }
 
   const contentLines = content.split("\n");
@@ -201,5 +208,17 @@ export function extractSnippet(content: string, query: string, lines: number = 5
 
   const start = Math.max(0, bestIdx - 1);
   const end = Math.min(contentLines.length, bestIdx + lines - 1);
-  return contentLines.slice(start, end).join("\n");
+  const picked = contentLines.slice(start, end);
+  return maxChars === undefined ? picked.join("\n") : fitSnippetLines(picked, bestIdx - start, terms, maxChars);
+}
+
+/** Give the matched line most of the budget, centred on the match; clip the context lines. */
+function fitSnippetLines(picked: string[], bestIdx: number, terms: string[], maxChars: number): string {
+  const joined = picked.join("\n");
+  if (joined.length <= maxChars) return joined;
+  const others = picked.length - (bestIdx >= 0 ? 1 : 0);
+  const bestBudget = bestIdx >= 0 ? (others > 0 ? Math.ceil(maxChars * 0.6) : maxChars) : 0;
+  const otherBudget = others > 0 ? Math.max(40, Math.floor((maxChars - bestBudget - picked.length) / others)) : 0;
+  const fitted = picked.map((line, i) => i === bestIdx ? focusText(line, terms, bestBudget) : clipText(line, otherBudget));
+  return clipText(fitted.join("\n"), maxChars);
 }

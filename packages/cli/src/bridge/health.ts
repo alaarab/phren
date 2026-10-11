@@ -7,6 +7,7 @@ import { assessSyncOutage, FAILED_PUSH_STATUSES, getRuntimeHealth } from "../gov
 import { getProjectDirs } from "../phren-paths.js";
 import { resolveAllStores } from "../store-registry.js";
 import { publicComputerKey } from "./computers.js";
+import { localHostKeyLine } from "./host-key.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { BridgeError, bridgeRoot, errorCode, type Json } from "./protocol.js";
 import { canonicalComputer, latestScheduleBatch, readScheduleDocument, readScheduleRuns, scheduleRunsFile } from "./schedules.js";
@@ -190,7 +191,8 @@ export async function lastScheduledRun(store: string, runsFile = scheduleRunsFil
 
 /** This computer's public SSH host key, the pin a peer's hooks.yaml holds for it. */
 export async function ownHostKey(): Promise<string | undefined> {
-  try { return publicComputerKey(await readFile("/etc/ssh/ssh_host_ed25519_key.pub", "utf8")); } catch { return undefined; }
+  const line = await localHostKeyLine();
+  try { return line ? publicComputerKey(line) : undefined; } catch { return undefined; }
 }
 
 /** Whether this computer's hooks.yaml lists the caller, by pinned host key or by name. */

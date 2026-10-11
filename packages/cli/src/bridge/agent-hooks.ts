@@ -221,8 +221,10 @@ export class AgentHooks {
   private pushBindings = new PushBindingStore();
   /** Held asks that were pushed: action -> when the notification expires. */
   private pushedHolds = new Map<string, number>();
-  /** Pushed asks whose hold ended with the request left in the terminal. */
-  private releasedHolds = new Map<string, { action: string; expiresAt: number }>();
+  /** Held asks whose hold ended with the request left in the terminal, by
+   * pane: the action keeps answering the pane's dialog, so a phone card,
+   * notification or dispatcher holding it is not left with a dead id. */
+  private releasedHolds = new Map<string, { action: string; expiresAt: number; pushed: boolean }>();
   /** Terminal dialogs pushed to phones: by pane, the dialog last pushed; by
    * action, what an answer from the notification types. */
   private dialogPushes = new Map<string, { action: string; title: string }>();
@@ -913,8 +915,10 @@ export class AgentHooks {
     this.opencode.delete(id); this.pushBindings.dropAction(id);
   }
   async answer(target: Target, id: string, decision: unknown, updatedInput?: unknown) {
-    // A terminal dialog offered to a dispatching Hook (`workerApproval`) or pushed: answered with the pane's own keys.
-    if (id.startsWith("dialog-")) {
+    // A terminal dialog offered to a dispatching Hook (`workerApproval`) or
+    // pushed, or a held ask whose hold ended with its dialog still on screen:
+    // answered with the pane's own keys.
+    if (id.startsWith("dialog-") || (!this.pending.has(id) && await this.releasedHoldDialog(id))) {
       const dialog = this.dialogActions.get(id);
       if (!dialog || JSON.stringify(dialog.target) !== JSON.stringify(target)) throw new BridgeError(409, "This approval is no longer pending.");
       if (updatedInput !== undefined || !["approve", "deny"].includes(String(decision))) throw new BridgeError(400, "The approval answer is not valid.");
@@ -1013,15 +1017,7 @@ export class AgentHooks {
     if (forwarded) { this.forwardedPushes.delete(linked.action); await forwarded(decision as "approve" | "deny"); return; }
     const pending = this.pending.get(linked.action);
     if (pending) { await this.answer(pending.target, linked.action, decision); return; }
-    const released = [...this.releasedHolds].find(([, hold]) => hold.action === linked.action);
-    if (released && !this.dialogActions.has(linked.action)) {
-      // The hold just ended: read the pane now rather than wait for the tick.
-      const target = JSON.parse(released[0]) as Target;
-      await this.syncTerminalDialog(target, true).catch(() => {});
-      const entry = this.terminalPrompts.get(released[0]);
-      if (entry?.choice?.title) this.adoptReleasedHold(released[0], target, entry.choice, entry.choice.title);
-    }
-    if (this.dialogActions.has(linked.action)) { await this.answerDialog(linked.action, decision as "approve" | "deny"); return; }
+    if (await this.releasedHoldDialog(linked.action)) { await this.answerDialog(linked.action, decision as "approve" | "deny"); return; }
     const held = this.opencode.get(linked.action);
     // The binding is the single-use proof for a worker's ask, whose parent
     // may not be in any pane the Hook can see.
@@ -1030,6 +1026,19 @@ export class AgentHooks {
     if (held?.served) { await this.answerServed(linked.action, held, decision); return; }
     if (held?.target) { await this.answer(held.target, linked.action, decision); return; }
     throw new BridgeError(409, "This approval is no longer pending.");
+  }
+  /** Whether this action now answers a terminal dialog: a released hold's
+   * pane is read at once rather than at the next tick, and its dialog
+   * adopted under the hold's own action. */
+  private async releasedHoldDialog(action: string): Promise<boolean> {
+    const released = [...this.releasedHolds].find(([, hold]) => hold.action === action);
+    if (released && !this.dialogActions.has(action)) {
+      const target = JSON.parse(released[0]) as Target;
+      await this.syncTerminalDialog(target, true).catch(() => {});
+      const entry = this.terminalPrompts.get(released[0]);
+      if (entry?.choice?.title) this.adoptReleasedHold(released[0], target, entry.choice, entry.choice.title);
+    }
+    return this.dialogActions.has(action);
   }
   /** Where a pushed ask lives, without answering it: the phone opens that
    * session's details when the notification itself is tapped. */
@@ -1079,6 +1088,16 @@ export class AgentHooks {
       void this.push.notify({ binding, provider: target.source, question: entry.tool === "AskUserQuestion", expiresAt: new Date(expiresAt).toISOString(),
         ...projectField(cwd), computer: this.computerName, ...summary })
         .then(delivered => { if (!delivered) this.dropDialogPush(key); }).catch(() => this.dropDialogPush(key));
+    }
+    // A dialog stays answerable for as long as its pane shows it.
+    const horizon = Date.now() + DIALOG_PUSH_MS;
+    for (const key of waiting) {
+      const hold = this.releasedHolds.get(key);
+      if (hold && hold.expiresAt > Date.now()) hold.expiresAt = Math.max(hold.expiresAt, horizon);
+      for (const action of [this.dialogPushes.get(key)?.action, this.forwardedDialogs.get(key)?.action]) {
+        const dialog = action ? this.dialogActions.get(action) : undefined;
+        if (dialog && dialog.expiresAt > Date.now()) dialog.expiresAt = Math.max(dialog.expiresAt, horizon);
+      }
     }
     for (const [key, hold] of this.releasedHolds) {
       // Answered in the terminal, or expired: the notification can no longer act.
@@ -1132,10 +1151,12 @@ export class AgentHooks {
     const key = JSON.stringify(target), entry = this.terminalPrompts.get(key);
     const title = entry && (entry.dialog || entry.released) ? entry.choice?.title : undefined;
     if (!entry?.choice || !title) return undefined;
+    // The ask was offered while held: keep offering it under the same id.
+    this.adoptReleasedHold(key, target, entry.choice, title);
     const pushedDialog = this.dialogPushes.get(key);
     // A dialog is the same one only with the same title and command: Claude and Codex share generic titles.
     const pushedAction = pushedDialog && this.dialogActions.get(pushedDialog.action);
-    let action = pushedDialog?.title === title && pushedAction && pushedAction.choice.body === entry.choice.body ? pushedDialog.action : undefined;
+    let action = pushedDialog?.title === title && pushedAction && pushedAction.choice.body === entry.choice.body && pushedAction.expiresAt > Date.now() ? pushedDialog.action : undefined;
     if (!action) {
       const known = this.forwardedDialogs.get(key);
       if (known?.title === title && known.body === entry.choice.body && (this.dialogActions.get(known.action)?.expiresAt ?? 0) > Date.now()) action = known.action;
@@ -1172,13 +1193,22 @@ export class AgentHooks {
       ...(summary.requestKind ? { requestKind: summary.requestKind } : {}) })
       .then(delivered => { if (!delivered) drop(); }).catch(drop);
   }
+  /** Moves a released hold onto the dialog its pane now draws, under the
+   * hold's action: as the pushed dialog when its notification is on the
+   * phone, else as the dialog offered to a dispatching Hook. True when the
+   * hold was pushed, so the dialog needs no second notification. */
   private adoptReleasedHold(key: string, target: Target, choice: TerminalChoice, title: string): boolean {
     const hold = this.releasedHolds.get(key);
+    if (!hold) return false;
     this.releasedHolds.delete(key);
-    if (!hold || hold.expiresAt <= Date.now()) return false;
-    this.dialogPushes.set(key, { action: hold.action, title });
+    if (hold.expiresAt <= Date.now()) { this.dropPushBindings(hold.action); return false; }
     this.dialogActions.set(hold.action, { target, choice, expiresAt: hold.expiresAt });
-    return true;
+    if (hold.pushed) this.dialogPushes.set(key, { action: hold.action, title });
+    else {
+      this.dropForwardedDialog(key);
+      this.forwardedDialogs.set(key, { action: hold.action, title, body: choice.body });
+    }
+    return hold.pushed;
   }
   private dropDialogPush(key: string) {
     const pushed = this.dialogPushes.get(key);
@@ -1428,7 +1458,9 @@ export class AgentHooks {
         let released = false;
         const timer = setTimeout(() => {
           released = true; this.pending.delete(action); this.rememberTerminalPrompt(target, body);
-          if (this.pushedHolds.has(action)) this.releasedHolds.set(JSON.stringify(target), { action, expiresAt: this.pushedHolds.get(action)! });
+          // The id was already handed out (phone card, push, dispatcher): it keeps answering the dialog.
+          const pushed = this.pushedHolds.get(action);
+          this.releasedHolds.set(JSON.stringify(target), { action, expiresAt: pushed ?? Date.now() + DIALOG_PUSH_MS, pushed: pushed !== undefined });
           this.pushedHolds.delete(action);
           res.end("{}");
         }, APPROVAL_HOLD_MS);

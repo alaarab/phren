@@ -1,4 +1,7 @@
-import { OwnerInbox, inboxTargetSchema } from "./owner-inbox.js";
+import { setChoiceReaders } from "./account-choice.js";
+import { AccountFailover } from "./account-failover.js";
+import { ownerInboxSources } from "./owner-inbox-sources.js";
+import { OwnerInbox } from "./owner-inbox.js";
 import { closeFinishedWorker } from "./worker-close.js";
 import { isLocalComputer } from "./dispatch-hosts.js";
 import { hookPeers, peerRequest } from "./peers.js";
@@ -82,6 +85,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const agentHooks = new AgentHooks(undefined, modules, path.join(bridgeRoot(), "deliveries.json"));
   // Follows what dispatched workers do and tells the dispatching agent.
   const returns: DispatchReturns | undefined = dispatches ? new DispatchReturns({
+    // Continue on another signed-in account when a Claude worker stops at its usage limit: opt-in, `phren config account-failover on`.
+    failover: new AccountFailover({ rooms: () => dispatches.claudeRooms(), dispatch: (input, origin, continues) => dispatches.dispatch(input, origin, continues) }),
     localWorkers: hookWorkers(agentHooks),
     close: async receipt => {
       const data = { target: receipt.target, dispatch: receipt.id, turn: receipt.closePending!.turn };
@@ -104,27 +109,7 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   if ("approvalPush" in activeCapabilities) {
     Object.defineProperty(activeCapabilities, "approvalPush", { enumerable: true, get: () => approvalPushCapability(agentHooks.push.status) });
   }
-  const inbox = dispatches ? new OwnerInbox(async () => {
-    const items = [];
-    for (const server of await recentServers()) {
-      const name = String(server.session), state = await sharedSnapshot(name, 4000);
-      for (const pane of objects(state.panes)) {
-        const chat = await paneChatState(name, pane, { tokenWhenIdentified: false }).catch(() => ({} as Record<string, unknown>));
-        const parsed = inboxTargetSchema.safeParse({ server: name, workspace: pane.workspace_id, tab: pane.tab_id, pane: pane.pane_id, source: pane.agent,
-          ...(chat.sessionId ? { session: chat.sessionId } : { starting: true, startingToken: chat.startingToken }) });
-        if (!parsed.success) continue;
-        const target = parsed.data, approval = "session" in target ? agentHooks.workerApproval(target) : undefined,
-          question = "session" in target ? agentHooks.servedQuestion(target) : undefined, terminal = "session" in target ? agentHooks.terminalPrompt(target) : undefined;
-        const request = approval?.request ?? (question ? "The worker has a question for the owner." : undefined) ?? terminal?.message
-          ?? (["blocked", "waiting"].includes(String(pane.agent_status)) ? `${pane.agent} needs terminal input.` : undefined);
-        if (!request) continue;
-        const source = `prompt:${JSON.stringify(target)}:${approval?.actionId ?? JSON.stringify(question ?? terminal)}`;
-        items.push({ source, kind: "blocked" as const, title: String(request).replace(/[\x00-\x1f\x7f]+/g, " ").slice(0, 500), target,
-          ...(approval?.actionId ? { actionId: approval.actionId } : {}) });
-      }
-    }
-    return items;
-  }) : undefined;
+  const inbox = dispatches ? new OwnerInbox(() => ownerInboxSources(agentHooks)) : undefined;
   const modelCatalog = options.modelCatalog ?? new ModelCatalog();
   const modelSwitcher = new ModelSwitcher(agentHooks, modelCatalog);
   const settingsSwitcher = new SettingsSwitcher(agentHooks);
@@ -143,6 +128,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   }) : undefined;
   const contextUsage = new WorkspaceContextUsage();
   const accountUsage = options.accountUsage ?? new AccountUsageReader();
+  // A Claude launch that names no account runs under the one with the most room (account-choice.ts).
+  setChoiceReaders({ usage: () => accountUsage.limits(true) });
   const resources = new ResourceMonitor();
   const tabActivity = new TabActivityStore();
   const codexQuestions = new CodexQuestions(undefined, codexServers);
@@ -202,7 +189,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     resources: () => resources.read(),
     sudo: agentHooks.sudo,
   });
-  const http = createServer(createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
+  // 256 KiB: gitboy's /memory/files asks about up to 500 paths in one query string.
+  const http = createServer({ maxHeaderSize: 256 * 1024 }, createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
     journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, permissionModeSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
     fanoutMessages, canary, streams, returns, handOffs, inbox }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;

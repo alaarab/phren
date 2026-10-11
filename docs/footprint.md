@@ -64,7 +64,8 @@ These are re-created every SessionStart under `managed` (self-heal). Under
 ### Project repos (managed only: and only for `phren-managed` ownership)
 - `<repo>/AGENTS.md`, `<repo>/REFERENCE.md`, `<repo>/FINDINGS.md`,
   `<repo>/CLAUDE.md` (Claude compatibility), and `<repo>/CLAUDE-*.md`, symlinks/managed files.
-- `<repo>/.claude/skills/*`, project skill symlinks.
+- `<repo>/.claude/skills/*`, project skill symlinks. A single-file skill (`skills/ql.md`)
+  gets a folder holding a `SKILL.md` link to it, the only shape Claude Code loads.
 - `<repo>/.git/info/exclude`, phren-managed mirror filenames, under a
   `# phren-managed` marker.
 
@@ -257,7 +258,8 @@ synced into the memory store.
 Conductor finish supervision also writes `<bridge>/worker-reports/*.json`
 (PR evidence bound to turns), `<bridge>/closed-workers/*.json` (intentional
 closure tombstones), `<bridge>/integrator.json` (the chosen session target), and
-`<bridge>/owner-inbox.json` (open and resolved owner items). These private,
+`<bridge>/owner-inbox.json` (open and resolved owner items, with a transient
+`.lock` file and temporary file for locked atomic updates). These private,
 local files do not sync into the memory store.
 
 Dispatched and scheduled workers are tracked in `<bridge>/jobs.json`: one
@@ -269,7 +271,7 @@ whose lease has passed. The file is private and does not sync either.
 
 ## Task responsibility metadata
 
-Task writers preserve versioned `Task:` continuations in each project's `tasks.md` and archived task records in `.config/task-archive/<project>.md`. Explicit owner activation writes `.config/task-format.json`; it stays disabled until compatible writers are adopted. Canonical identity registration writes the primary entry in synced `stores.yaml`. Task graph mutations lock `.runtime/task-dependencies` in the writable participating stores before locking the task document. Task-bound launch writes a durable Active claim and history to `tasks.md` before invoking the ordinary launcher; its brief uses the existing Hook brief directory. Failed or uncertain launch keeps the claim for explicit review. Revision tokens are derived on read, with no extra state file. Directory discovery does not create identities or migrate attachments. See [Task responsibility](task-responsibility.md).
+Task writers preserve versioned `Task:` continuations in each project's `tasks.md` and archived task records in `.config/task-archive/<project>.md`. `.config/task-format.json` is written when phren creates a store, or by explicit owner activation on an existing store; an existing store stays disabled until compatible writers are adopted. Canonical identity registration writes the primary entry in synced `stores.yaml`. Task graph mutations lock `.runtime/task-dependencies` in the writable participating stores before locking the task document. Task-bound launch writes a durable Active claim and history to `tasks.md` before invoking the ordinary launcher; its brief uses the existing Hook brief directory. Failed or uncertain launch keeps the claim for explicit review. Revision tokens are derived on read, with no extra state file. Directory discovery does not create identities or migrate attachments. See [Task responsibility](task-responsibility.md).
 
 ### Command approval policy
 

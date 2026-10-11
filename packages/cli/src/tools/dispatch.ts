@@ -7,6 +7,7 @@ import { dispatchSchema } from "../bridge/dispatch.js";
 import { handOff, handOffSchema, listLiveSessions } from "../bridge/hand-off.js";
 import { readAccountUsage, usageSummary } from "../bridge/account-usage.js";
 import { terminalPaneFromEnv } from "../bridge/terminal.js";
+import { dispatchIdFromEnv } from "../bridge/launch-brief.js";
 import { approvalDecisions } from "../bridge/protocol.js";
 import { mcpResponse } from "./types.js";
 
@@ -33,13 +34,15 @@ export function register(server: McpServer): void {
     try {
       const origin = await terminalPaneFromEnv();
       if (!origin) throw new Error("Run dispatch_report inside the worker's terminal pane.");
-      const result = await hookRequest("/v1/dispatch/report", { ...input, origin });
+      // The launch's dispatch id lets the Hook accept a report whose turn it did not record (worker-reports.ts).
+      const dispatch = dispatchIdFromEnv();
+      const result = await hookRequest("/v1/dispatch/report", { ...input, origin, ...(dispatch ? { dispatch } : {}) });
       return mcpResponse({ ok: result.ok === true, data: result, message: "PR evidence recorded for this turn's done return." });
     } catch (error) { return mcpResponse({ ok: false, error: error instanceof Error ? error.message : "Could not report PR evidence." }); }
   });
   server.registerTool("owner_inbox", {
     title: "◆ phren · owner inbox",
-    description: "One owner inbox on this conductor's Hook: list open needs-you returns, blocked prompts and manual items; add a title and optional project; resolve an id with an optional resolution. Reading returns does not resolve inbox items. Resolving an inbox item does not answer or approve a worker prompt. Use operation add, list or resolve (also through phren_admin action owner_inbox). includeResolved lists history. Keep an id on retried adds.",
+    description: "One owner inbox on this conductor's Hook: list open needs-you returns, blocked prompts and manual items; add a title and optional project; resolve an id with an optional resolution. Automatic items are deduplicated by pane, session and question, and resolve when their source stops waiting or disappears; only verified live automatic items are listed. Manual items remain until resolved. Reading returns does not resolve inbox items. Resolving an inbox item does not answer or approve a worker prompt. Use operation add, list or resolve (also through phren_admin action owner_inbox). includeResolved lists history. Keep an id on retried adds.",
     inputSchema: ownerInboxSchema.omit({ action: true }).extend({ operation: ownerInboxSchema.shape.action }),
   }, async input => {
     try {
@@ -50,7 +53,7 @@ export function register(server: McpServer): void {
   });
   server.registerTool("dispatch_returns", {
     title: "◆ phren · dispatch returns",
-    description: "List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), failed (the harness ended the turn on an error such as a usage limit, with the error), is blocked on terminal input, or its pane is gone. A blocked row with an `approval` field (actionId, tool, request) is a permission request the worker is waiting on, forwarded from its computer: answer it with dispatch_approve. A worker that ended its turn with background tasks pending is waited on for up to two hours; a row has `waited` (the most tasks it waited on) or, if some were still running after that, `background`. A stalled row flags an unchanged working screen and transcript. A done row can include structured prs and integratorDelivery. Reading a done return closes its finished pane unless closeOnFinish:false was specified, after rechecking new and queued work. Each row has the dispatch id, computer, project, label and the worker's target for hand_off.",
+    description: "List unread returns from dispatched workers and mark them read: the worker finished (done, with its final reply), finished by asking the owner something (needs-you, with the question), failed (the harness ended the turn on an error such as a usage limit, with the error), is blocked on terminal input, or its pane is gone. A blocked row with an `approval` field (actionId, tool, request) is a permission request the worker is waiting on, forwarded from its computer: answer it with dispatch_approve. A worker that ended its turn with background tasks pending is waited on for up to two hours; a row has `waited` (the most tasks it waited on) or, if some were still running after that, `background`. A stalled row flags an unchanged working screen and transcript. A done row can include structured prs and integratorDelivery. Reading a done return closes its finished pane unless closeOnFinish:false was specified, after rechecking new and queued work. Each row has the dispatch id, computer, project, label and the worker's target for hand_off. When the owner has turned on `phren config account-failover on` (off by default), a Claude worker that stopped at its usage limit is continued on another signed-in account with room (same computer first, never the same login before its window resets): its row comes back with continued (the new dispatch id, computer and account, or why none could) and the error says \"Continued on account X\".",
     inputSchema: {},
   }, async () => {
     try {
@@ -80,7 +83,7 @@ export function register(server: McpServer): void {
   });
   server.registerTool("live_sessions", {
     title: "◆ phren · live sessions",
-    description: "List the live agent sessions on this computer and every enrolled computer: computer, project, harness, status (working, with backgroundTasks, while background work runs after the main turn ended), idleFor (seconds since the tab last changed), role and the target hand_off takes. Computers that could not be reached are listed separately, and computers registered in the store but not linked in hooks.yaml come back in notLinked: their sessions are unknown, not absent.",
+    description: "List the live agent sessions on this computer and every enrolled computer: computer, project, harness, status (working, with backgroundTasks, while background work runs after the main turn ended), idleFor (seconds since the tab last changed), role, the target hand_off takes, and for Claude sessions quota (the account's 5-hour and weekly percent left and reset time). claudeAccounts lists every signed-in Claude account per computer with the same room. Computers that could not be reached are listed separately, and computers registered in the store but not linked in hooks.yaml come back in notLinked: their sessions are unknown, not absent.",
     inputSchema: {},
   }, async () => {
     try {

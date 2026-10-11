@@ -154,9 +154,11 @@ function withLifecycleMutation<T>(
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-async function handleAddFinding(
+export async function handleAddFinding(
   ctx: McpContext,
   params: {
+    /** Provenance `tool:` for a caller other than an MCP client (the Hook's gitboy route). */
+    tool?: string;
     project: string;
     finding: string | string[];
     citation?: { file?: string; line?: number; repo?: string; commit?: string; name?: string; symbol?: string; supersedes?: string; task_item?: string };
@@ -194,6 +196,7 @@ async function handleAddFinding(
     machine: getMachineName(),
     actor: getCurrentActor(),
     session_id: sessionId,
+    ...(params.tool ? { tool: params.tool } : {}),
   };
 
   const normalizedScope = normalizeMemoryScope(scope ?? "shared");
@@ -664,16 +667,22 @@ export async function syncTeamStores(phrenPath: string): Promise<TeamStoreSyncRe
       };
 
       try {
-        if (!runStoreGit(["status", "--porcelain"])) continue;
-
-        // Stage each team-safe pathspec individually — a single no-match
-        // (e.g. no */truths.md in this store) used to abort the whole add.
-        for (const spec of TEAM_STORE_PATHSPECS) {
-          try { runStoreGit(["add", "--sparse", "--", spec]); } catch { /* best-effort */ }
+        if (runStoreGit(["status", "--porcelain"])) {
+          // Stage each team-safe pathspec individually — a single no-match
+          // (e.g. no */truths.md in this store) used to abort the whole add.
+          for (const spec of TEAM_STORE_PATHSPECS) {
+            try { runStoreGit(["add", "--sparse", "--", spec]); } catch { /* best-effort */ }
+          }
+          if (runStoreGit(["diff", "--cached", "--name-only"])) {
+            const actor = process.env.PHREN_ACTOR || process.env.USER || "unknown";
+            runStoreGit(["commit", "-m", storeCommitMessage(`phren: ${actor} team sync`)]);
+          }
         }
-        if (!runStoreGit(["diff", "--cached", "--name-only"])) continue;
-        const actor = process.env.PHREN_ACTOR || process.env.USER || "unknown";
-        runStoreGit(["commit", "-m", storeCommitMessage(`phren: ${actor} team sync`)]);
+        // A clean tree can still hold commits the remote lacks: the session-start
+        // pull commits local writes before merging, and nothing else pushed them.
+        let ahead = 1;
+        try { ahead = Number(runStoreGit(["rev-list", "--count", "@{u}..HEAD"])); } catch { /* no upstream: let push decide */ }
+        if (ahead === 0) continue;
 
         try {
           runStoreGit(["push"], { timeout: 15000 });

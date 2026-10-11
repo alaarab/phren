@@ -3,6 +3,8 @@ import { listMachines as listMachinesStore, listProfiles as listProfilesStore } 
 import { setTelemetryEnabled, getTelemetrySummary, resetTelemetry } from "../telemetry.js";
 import { readInstallPreferences, updateInstallPreferences } from "../init/preferences.js";
 import { resolveMcpProfile } from "../mcp/profile.js";
+import { resolveClanker } from "../clanker.js";
+import { resolveAccountFailover } from "../bridge/account-choice.js";
 import { parsePullInterval, resolvePullInterval, periodicPullEnabled } from "../sync/pull.js";
 import * as path from "path";
 import { buildConfigView, type ConfigView } from "../config/resolve.js";
@@ -131,6 +133,17 @@ export async function handleConfig(args: string[]) {
       return handleConfigTelemetry(rest);
     case "mcp-profile":
       return handleConfigMcpProfile(rest);
+    case "clanker":
+      return handleConfigClanker(rest);
+    case "account-failover":
+      return handleConfigAccountFailover(rest);
+    case "set":
+      // `phren config set clanker on` reads naturally.
+      if (rest[0] === "clanker") return handleConfigClanker(rest.slice(1));
+      if (rest[0] === "account-failover") return handleConfigAccountFailover(rest.slice(1));
+      console.error("phren config set takes: clanker on|off, account-failover on|off. Other settings have their own subcommand (phren config).");
+      process.exitCode = 1;
+      return;
     case "pull-interval":
       return handleConfigPullInterval(rest);
     case "proactivity":
@@ -181,6 +194,11 @@ Subcommands:
                                         Manage project learned synonyms
   phren config machines                 Registered machines and profiles
   phren config profiles                 All profiles and their projects
+  phren config clanker [on|off]         Compact keyword-first retrieval: hook, search and
+                                        lists return id/title/keyword rows; full text by id
+  phren config account-failover [on|off]
+                                        Continue on another signed-in account when a dispatched
+                                        Claude worker stops at its usage limit (default: off)
   phren config pull-interval [seconds|off]
                                         Periodic MCP remote checks (default: off)
   phren config telemetry [on|off|reset] Local usage stats (opt-in, no external reporting)`);
@@ -264,6 +282,42 @@ function handleConfigMcpProfile(args: string[]) {
   console.log(current === "core"
     ? "10 tools: search_knowledge, get_memory_detail, get_project_summary, add_finding, revise_finding, get_tasks, add_task, manage_task, session, phren_admin."
     : "Every tool by name. `phren config mcp-profile core` for the compact surface.");
+}
+
+function handleConfigClanker(args: string[]) {
+  const phrenPath = getPhrenPath();
+  const want = args[0]?.trim().toLowerCase();
+  if (want === "on" || want === "off") {
+    updateInstallPreferences(phrenPath, () => ({ clanker: want === "on" }));
+    console.log(`Clanker mode ${want}. It applies from the next prompt and tool call.`);
+  } else if (want) {
+    console.error(`Unknown value "${want}". Use on or off.`);
+    process.exitCode = 1;
+    return;
+  }
+  const { on, source } = resolveClanker(phrenPath);
+  console.log(`Clanker mode: ${on ? "on" : "off"} (${source})`);
+  console.log(on
+    ? "The prompt hook, search_knowledge, get_tasks and get_findings return id, title, keyword and score rows; get_memory_detail fetches an entry by id."
+    : "The prompt hook and tools return text snippets. `phren config clanker on` for compact rows.");
+}
+
+function handleConfigAccountFailover(args: string[]) {
+  const phrenPath = getPhrenPath();
+  const want = args[0]?.trim().toLowerCase();
+  if (want === "on" || want === "off") {
+    updateInstallPreferences(phrenPath, () => ({ accountFailover: want === "on" }));
+    console.log(`Account failover ${want}. The Hook reads it on its next returns poll.`);
+  } else if (want) {
+    console.error(`Unknown value "${want}". Use on or off.`);
+    process.exitCode = 1;
+    return;
+  }
+  const { on, source } = resolveAccountFailover(process.env, phrenPath);
+  console.log(`Account failover: ${on ? "on" : "off"} (${source})`);
+  console.log(on
+    ? "A dispatched Claude worker that stops at its usage limit continues on another of your signed-in accounts with room, on its computer or another; never on the same login before its window resets."
+    : "A dispatched Claude worker that stops at its usage limit returns failed and stays stopped. `phren config account-failover on` continues it on another signed-in account.");
 }
 
 function handleConfigTelemetry(args: string[]) {

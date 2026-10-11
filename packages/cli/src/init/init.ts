@@ -91,6 +91,7 @@ import {
   applyProjectStorageBindings,
   warmSemanticSearch,
   runProjectLocalInit,
+  enableTaskMetadataForNewStore,
 } from "./init-configure.js";
 import { runWalkthrough, createWalkthroughPrompts, createWalkthroughStyle } from "./init-walkthrough.js";
 import { assertNoGlobalWiringConflict } from "./guard-globals.js";
@@ -179,6 +180,8 @@ export interface InitOptions {
   profile?: string;
   mcp?: McpMode;
   hooks?: McpMode;
+  /** Clanker mode (compact id/title/keyword retrieval). New installs default to on. */
+  clanker?: McpMode;
   projectOwnershipDefault?: ProjectOwnershipMode;
   /** Management preset controlling phren's machine footprint (managed | assisted | manual). */
   managementPreset?: ManagementPreset;
@@ -437,6 +440,11 @@ export async function runInit(opts: InitOptions = {}) {
   // On re-runs of existing installs, preserve the existing syncIntent unless the user provided a new clone URL.
   const existingSyncIntent = hasExistingInstall ? readInstallPreferences(phrenPath).syncIntent : undefined;
   const syncIntent: "sync" | "local" = opts._walkthroughCloneUrl ? "sync" : (existingSyncIntent ?? "local");
+  // Clanker mode is on for a machine's first init (a cloned store included);
+  // a machine that ran init before keeps what it has (unset means off),
+  // unless --clanker says otherwise.
+  const priorPrefs = readInstallPreferences(phrenPath);
+  const clanker = opts.clanker ? opts.clanker === "on" : (priorPrefs.clanker ?? (priorPrefs.installedVersion ? undefined : true));
 
   // Resolve the management preset for this run: explicit flag/walkthrough answer,
   // else the stored preset on existing installs, else the default (managed).
@@ -591,6 +599,7 @@ export async function runInit(opts: InitOptions = {}) {
       log(`  Management preset: ${managementPreset} — ${presetSummaryLines(managementPreset)}`);
       log(`  MCP mode: ${mcpLabel}`);
       log(`  Hooks mode: ${hooksLabel}`);
+      log(`  Clanker mode: ${clanker ? "on" : "off"} (phren config clanker on|off)`);
       log(`  Default project ownership: ${ownershipDefault}`);
       if (moduleEnabled(phrenPath, "tasks")) log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
       log(`  Git repo: ${existingGitRepo.detail}`);
@@ -614,7 +623,7 @@ export async function runInit(opts: InitOptions = {}) {
           log(`  No starter template updates were applied (starter files not found).`);
         }
       }
-      writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION, syncIntent });
+      writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION, syncIntent, clanker });
       if (repaired.removedLegacyProjects > 0) {
         log(`  Removed ${repaired.removedLegacyProjects} legacy starter project entr${repaired.removedLegacyProjects === 1 ? "y" : "ies"} from profiles.`);
       }
@@ -790,6 +799,7 @@ export async function runInit(opts: InitOptions = {}) {
   persistMachineName(effectiveMachine);
   updateMachinesYaml(phrenPath, effectiveMachine, opts.profile);
   ensureGovernanceFiles(phrenPath);
+  enableTaskMetadataForNewStore(phrenPath);
   setManagementPresetPreference(phrenPath, managementPreset);
   const repaired = repairPreexistingInstall(phrenPath, { caps: managementCaps, preset: managementPreset });
   applyOnboardingPreferences(phrenPath, opts);
@@ -798,6 +808,7 @@ export async function runInit(opts: InitOptions = {}) {
   log(`  Management preset: ${managementPreset} — ${presetSummaryLines(managementPreset)}`);
   log(`  MCP mode: ${mcpLabel}`);
   log(`  Hooks mode: ${hooksLabel}`);
+  log(`  Clanker mode: ${clanker ? "on" : "off"} (phren config clanker on|off)`);
   log(`  Default project ownership: ${ownershipDefault}`);
   if (moduleEnabled(phrenPath, "tasks")) log(`  Task mode: ${getWorkflowPolicy(phrenPath).taskMode}`);
   log(`  Git repo: ${localGitRepo.detail}`);
@@ -814,7 +825,7 @@ export async function runInit(opts: InitOptions = {}) {
   configureHooksIfEnabled(phrenPath, hooksEnabled, "Configured", managementCaps);
   await reconcileModuleHooks(phrenPath);
 
-  writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION, syncIntent });
+  writeInstallPreferences(phrenPath, { mcpEnabled, hooksEnabled, skillsScope, installedVersion: VERSION, syncIntent, clanker });
 
   // Post-init verification
   log(`\nVerifying setup...`);

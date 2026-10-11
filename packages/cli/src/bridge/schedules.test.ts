@@ -542,6 +542,21 @@ describe("a scheduled turn that finished", () => {
     expect(finalTurnFromLines(succeeded, "codex")).toEqual({ completed: true, lastAssistant: "Reviewed." });
   });
 
+  it("reads a Claude subscription limit as the turn's error, keeping the reply before it as the last reply", () => {
+    const user = (text: string) => JSON.stringify({ type: "user", message: { role: "user", content: text } });
+    // Mid-turn: the worker said where it was, then its next request hit the limit.
+    const reply = JSON.stringify({ type: "assistant", message: { role: "assistant", stop_reason: "tool_use", content: [{ type: "text", text: "Tokenizer fixed; grammar next." }] } });
+    // The synthetic row Claude Code 2.1 writes when the subscription refuses the request, then its turn_duration.
+    const limited = JSON.stringify({ type: "assistant", isApiErrorMessage: true, error: "rate_limit",
+      message: { role: "assistant", model: "<synthetic>", stop_reason: "stop_sequence", content: [{ type: "text", text: "You've hit your session limit · resets 3pm (UTC)" }] } });
+    const duration = JSON.stringify({ type: "system", subtype: "turn_duration" });
+    expect(finalTurnFromLines([user("Fix the parser."), reply, limited, duration], "claude")).toEqual({
+      completed: true, lastAssistant: "Tokenizer fixed; grammar next.", error: "Claude usage limit: You've hit your session limit · resets 3pm (UTC)" });
+    // Other API errors, and a transient rate limit Claude Code words differently, are not a usage limit.
+    const lost = JSON.stringify({ type: "assistant", isApiErrorMessage: true, error: "server_error", message: { role: "assistant", content: [{ type: "text", text: "API Error: Connection lost." }] } });
+    expect(finalTurnFromLines([user("Go."), lost], "claude").error).toBeUndefined();
+  });
+
   it("records a Codex run that hit its usage limit as failed, with the limit as the reason", async () => {
     const outcome = await watchHerdrRun("default", target, new AbortController().signal, { source: "codex", startedAt: 0 }, {
       pause: async () => {},

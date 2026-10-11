@@ -21,8 +21,10 @@ the shared cache cannot hide changes from an older live database. Tool calls
 check known file and directory stats at most once per second. Unchanged checks
 perform no glob, document read or database reload. Changes coalesce into one
 refresh through the existing write queue; no extra polling timer or remote
-Git check is introduced. A busy rebuild lock leaves the baseline dirty and
-returns a retryable error. File fingerprints include change time and inode as
+Git check is introduced. A busy rebuild lock is waited out for up to
+`PHREN_INDEX_BUSY_WAIT_MS` (5 s) with jittered backoff, outside the write
+queue; after that the call is served from the last good index and the
+baseline stays dirty. A lock whose owning pid is gone counts as free. File fingerprints include change time and inode as
 well as mtime and size, so atomic replacements that preserve mtime still update.
 
 ### When Full Rebuilds Happen
