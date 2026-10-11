@@ -173,3 +173,75 @@ export function hostTerms(host) {
 
 /** "Pull request" → sentence case for titles. */
 export function capitalize(text) { return text ? text[0].toUpperCase() + text.slice(1) : text; }
+
+const RUN_ORDER = { failing: 0, pending: 1, passing: 2, neutral: 3, skipped: 4 };
+
+/** The pipeline bar: one segment per state that has runs, failing first,
+ * each with its share of the bar. */
+export function pipelineSegments(runs) {
+  const counts = {};
+  for (const run of runs || []) if (run && RUN_ORDER[run.state] != null) counts[run.state] = (counts[run.state] || 0) + 1;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  return Object.keys(RUN_ORDER).filter((state) => counts[state]).map((state) => ({ state, count: counts[state], share: counts[state] / total }));
+}
+
+/** Checks grouped by stage or workflow, the group with the worst run first
+ * and runs failing first inside each; runs without one share an unnamed group. */
+export function groupRuns(runs) {
+  const groups = new Map();
+  for (const run of runs || []) {
+    const key = run.workflow || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(run);
+  }
+  const worst = (list) => Math.min(...list.map((run) => RUN_ORDER[run.state] ?? 9));
+  return [...groups.entries()]
+    .map(([name, list]) => ({ name, runs: [...list].sort((a, b) => (RUN_ORDER[a.state] ?? 9) - (RUN_ORDER[b.state] ?? 9)) }))
+    .sort((a, b) => worst(a.runs) - worst(b.runs));
+}
+
+/** The merge methods a host lets a client choose. GitLab merges or rebases by
+ * the project's own setting, so it offers merge and squash. */
+export function mergeMethods(host) {
+  const kind = host && host.kind;
+  if (kind === "gitlab") return [["merge", "Merge"], ["squash", "Squash and merge"]];
+  return [["merge", "Create a merge commit"], ["squash", "Squash and merge"], ["rebase", "Rebase and merge"]];
+}
+
+/** Whether a Merge button belongs on the request, and why not when it doesn't.
+ * The host has the final say; this only hides it where merging can't apply. */
+export function mergeAvailability(pull) {
+  if (!pull) return { show: false };
+  if (pull.state && pull.state !== "OPEN") return { show: false };
+  if (pull.draft || pull.mergeState === "DRAFT") return { show: true, enabled: false, why: "Mark it ready first" };
+  if (pull.mergeState === "DIRTY") return { show: true, enabled: false, why: "Resolve the conflicts first" };
+  return { show: true, enabled: true, ready: pull.mergeState === "CLEAN" && pull.checks !== "failing" && pull.checks !== "pending" };
+}
+
+/** Where to make a token for Connect, on the remote's own domain. */
+export function tokenPage(host) {
+  if (!host || !host.domain) return null;
+  if (host.kind === "gitlab") return `https://${host.domain}/-/user_settings/personal_access_tokens?name=Phren%20Hook&scopes=api`;
+  if (host.kind === "gitboy") return `https://${host.domain}/settings/tokens`;
+  return null;
+}
+
+/** "1m 30s", "45s", "2h 5m" for a run's duration; "" without one. */
+export function durationText(seconds) {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return "";
+  const s = Math.round(seconds);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ""}`;
+  return `${Math.floor(s / 3600)}h${Math.floor((s % 3600) / 60) ? ` ${Math.floor((s % 3600) / 60)}m` : ""}`;
+}
+
+/** "just now", "5m ago", "3h ago", "2d ago" from an ISO time; "" without one. */
+export function relativeTime(iso, now = Date.now()) {
+  const at = Date.parse(iso || "");
+  if (!Number.isFinite(at)) return "";
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}

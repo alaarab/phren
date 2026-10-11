@@ -30,9 +30,11 @@ export interface FakeGit {
  * GitLab, as the Hook's providers answer them. */
 export function createFakeGit(options: { host?: "github" | "gitlab" } = {}): FakeGit {
   const host = options.host === "gitlab"
-    ? { kind: "gitlab", name: "GitLab", domain: "gitlab.example.com", webUrl: "https://gitlab.example.com/team/phren", remote: "origin", source: "remote-override", terms: { short: "MR", long: "merge request", ref: "!" }, supported: false }
+    ? { kind: "gitlab", name: "GitLab", domain: "gitlab.example.com", webUrl: "https://gitlab.example.com/team/phren", remote: "origin", source: "remote-override", terms: { short: "MR", long: "merge request", ref: "!" }, supported: true }
     : { kind: "github", name: "GitHub", domain: "github.com", webUrl: "https://github.com/sam/phren", remote: "origin", source: "url", terms: { short: "PR", long: "pull request", ref: "#" }, supported: true };
   let stagedHunks = 0;
+  let gitlabConnected = false;
+  let gitlabMerged = false;
   let readmeStaged = false;
   let branch = "main";
   const branches = new Map<string, { upstream?: string; ahead: number; behind: number }>([
@@ -195,9 +197,37 @@ export function createFakeGit(options: { host?: "github" | "gitlab" } = {}): Fak
       if (t) t.behind = 0;
       return ok({ ok: true, branch, upstream: t?.upstream, commits: commitsIn });
     },
-    "POST /v1/git/pulls": () => options.host === "gitlab" ? ok({
-      available: false, reason: "unsupported", message: "GitLab merge requests and their checks are not supported yet. The rest of Changes works as usual.",
-      pulls: [], current: null, branch, host,
+    "POST /v1/git/host-token": (_req, body) => {
+      record("host-token", body);
+      const token = String((body as { token?: string } | undefined)?.token ?? "");
+      if (token !== "glpat-good") return ok({ ok: false, reason: "auth", message: "GitLab refused that token.", host });
+      gitlabConnected = true;
+      return ok({ ok: true, user: "sam", kind: "gitlab", domain: host.domain, host });
+    },
+    "POST /v1/git/pr/merge": (_req, body) => {
+      record("pr/merge", body);
+      if (options.host === "gitlab") { gitlabMerged = true; return ok({ ok: true, number: 12, method: (body as { method?: string }).method, state: "MERGED", host }); }
+      return ok({ ok: false, reason: "blocked", message: "Required status check \"unit (ubuntu)\" is failing.", host });
+    },
+    "POST /v1/git/pulls": () => options.host === "gitlab" ? ok(!gitlabConnected ? {
+      available: false, reason: "auth", message: "Phren has no GitLab token for gitlab.example.com.", pulls: [], current: null, branch, host,
+    } : {
+      available: true, branch, host, account: { source: "file", user: "sam" },
+      pulls: gitlabMerged ? [] : [{ number: 12, title: "Login: keep the signed-in user", head: branch, base: "main", author: "sam", url: "https://gitlab.example.com/team/phren/-/merge_requests/12", draft: false, state: "OPEN", updated: ago(2) }],
+      current: {
+        number: 12, title: "Login: keep the signed-in user", url: "https://gitlab.example.com/team/phren/-/merge_requests/12", head: branch, base: "main", author: "sam",
+        draft: false, state: gitlabMerged ? "MERGED" : "OPEN", updated: ago(2), headSha: "9f3c2a1b7e", comments: 2,
+        ...(gitlabMerged ? { checks: "passing", checkRuns: [] } : {
+          checks: "pending", reviewDecision: "REVIEW_REQUIRED", approvals: { given: 0, required: 1 }, mergeState: "BLOCKED", mergeDetail: "Waiting for the pipeline to pass",
+          pipeline: { id: 77, state: "pending", url: "https://gitlab.example.com/team/phren/-/pipelines/77" },
+          checkRuns: [
+            { name: "unit", workflow: "test", state: "pending", url: "https://gitlab.example.com/team/phren/-/jobs/3" },
+            { name: "lint", workflow: "test", state: "passing", url: "https://gitlab.example.com/team/phren/-/jobs/1", seconds: 42 },
+            { name: "compile", workflow: "build", state: "passing", url: "https://gitlab.example.com/team/phren/-/jobs/2", seconds: 95 },
+            { name: "review-app", workflow: "deploy", state: "neutral" },
+          ],
+        }),
+      },
     }) : ok({
       available: true, branch, host,
       pulls: [

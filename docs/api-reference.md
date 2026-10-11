@@ -1578,7 +1578,7 @@ stderr interleaved, at most 64 KiB). Input errors are ordinary 400/409 errors.
 | --- | --- | --- |
 | `POST /v1/git/commit` | `message` (required, at most 20,000 characters) | `{ok, sha, short, subject, branch, output?}`. Commits the index only; 409 when nothing is staged. Hooks always run (never `--no-verify`), and a hook's refusal is `{ok: false, output}`. |
 | `POST /v1/git/push` | `confirmDefault?: true` | `{ok, branch, remote, upstream, setUpstream, output}`. Pushes the current branch to its upstream, or to `origin` with the upstream set. Never forced. The default branch (the remote's `HEAD`, else `main`/`master`) is 409 without `confirmDefault`; a detached HEAD or missing remote is 409. |
-| `POST /v1/git/pr` | `draft?: true` | `{ok, url, branch, draft?, existing?}` through `gh pr create --fill`. `{ok: false, reason: "missing" \| "auth", message}` when gh is not installed or not signed in; `reason: "failed"` with gh's `output` otherwise. |
+| `POST /v1/git/pr` | `draft?: true` | `{ok, url, branch, number?, draft?, existing?}` on the remote's host (see Git hosts): `gh pr create --fill` on GitHub; on GitLab and gitboy a title and body from the commits as `--fill` does. `{ok: false, reason: "missing" \| "auth", message}` when gh is missing or a host isn't signed in; `reason: "failed"` with the host's `output` or `message` otherwise. |
 
 ### Commit detail, branches and sync
 
@@ -1615,14 +1615,35 @@ git config --global phren.git.example.com.host gitboy   # every repository on a 
 
 Both answers carry `host: {kind, name, domain, webUrl, remote, source, terms: {short, long, ref}, supported}`.
 `source` is `url`, `remote-override`, `domain-override` or `none`. `terms` is `PR`/`pull request`/`#`,
-or `MR`/`merge request`/`!` on GitLab. GitHub is fully supported through `gh`, with `GH_HOST` set
-to the remote's domain, so GitHub Enterprise works. GitLab and gitboy are stubs for now. They answer
-`{available: false, reason: "unsupported", message}`, and `/v1/git/pr` answers `{ok: false, reason: "unsupported"}`.
-A domain the Hook cannot place answers `reason: "unknown-host"`, with the override command in `message`.
+or `MR`/`merge request`/`!` on GitLab. A domain the Hook cannot place answers `reason: "unknown-host"`,
+with the override command in `message`. The Hook declares the `gitHosts` capability.
 
-`/v1/git/pulls` `current` also carries `checkRuns: [{name, state, workflow?, url?}]`
-(state `failing`, `pending`, `passing`, `skipped` or `neutral`; failing first, at
-most 100) and, when GitHub reports them, `reviewDecision` and `mergeState`.
+- **GitHub** goes through `gh`, with `GH_HOST` set to the remote's domain, so GitHub Enterprise works.
+- **GitLab** (gitlab.com or self-hosted) uses its REST API (v4). The token is `GITLAB_TOKEN`
+  (for gitlab.com, or the domain `GITLAB_HOST` names), the Hook's stored one, or glab's own sign-in.
+  Pipeline jobs are the checks, with the stage as `workflow`; an allowed failure or a manual job is `neutral`.
+- **gitboy** uses its REST API (`/api/v1`) with a `gbp_` personal access token: `read:repo` to read,
+  `write:repo` to open and merge. The token is `GITBOY_TOKEN` for the domain `GITBOY_HOST` names, or the stored one. gitboy has no draft
+  state, so a draft opens with a `Draft:` title on GitLab and gitboy alike.
+- A self-hosted API on another address: `git config --global phren.<domain>.api <url>`.
+
+Without a token, `/v1/git/pulls` answers `reason: "auth"` with how to connect. Other reasons are
+`not-found`, `unreachable` and `failed`, each with a `message`; with a token, `account: {source, user?}`
+says where it came from (`environment`, `file` or `cli`) and who it signs in as.
+
+`/v1/git/pulls` `current` also carries `checkRuns: [{name, state, workflow?, url?, seconds?, detail?}]`
+(state `failing`, `pending`, `passing`, `skipped` or `neutral`; failing first, at most 100) and, when the
+host reports them: `reviewDecision` (`APPROVED`, `REVIEW_REQUIRED` or `CHANGES_REQUESTED`), `mergeState`
+(GitHub's words: `CLEAN`, `BLOCKED`, `DIRTY`, `BEHIND`, `DRAFT`, `UNSTABLE`, `UNKNOWN`) with `mergeDetail`
+(one sentence) and `blockers` (gitboy's reasons), `pipeline: {id, state, url?}`, `approvals: {given, required?}`,
+`comments`, `ahead`, `behind`, `conflicts`, `author`, `updated` and `headSha`.
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `POST /v1/git/pr/merge` | `number`, `method?` (`merge`, `squash` or `rebase`; default `merge`), `expectedHeadSha?`, `deleteBranch?`, `expectedRepository?` | `{ok: true, number, method, ...}`, or `{ok: false, reason, message}`. `reason: "blocked"` is the host's own refusal: failing checks, missing approvals, conflicts, or a head that moved past `expectedHeadSha`. GitHub merges with `gh pr merge --match-head-commit` and never deletes the local branch; GitLab merges by the project's own method (squash per request). |
+| `POST /v1/git/host-token` | `token` (empty disconnects), `expectedRepository?` | `{ok, kind, domain, user?}`. Connects this repository's GitLab or gitboy host: the token is checked against the host's current-user API, then stored with that account in the Hook's `git-hosts.json` (mode 600, never the store). A token the host refuses is `{ok: false, reason: "auth"}`; GitHub answers `reason: "unsupported"` (it uses `gh auth login`). |
+
+`phren bridge git-host [list | set <domain> gitlab|gitboy | remove <domain>]` does the same from a shell, reading the token from stdin.
 
 `POST /v1/git/pulls` also returns `branch` and `current`: the checked-out
 branch's pull request in any state, `{number, title, url, head, base, draft,
