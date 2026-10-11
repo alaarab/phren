@@ -8,6 +8,7 @@ import { hookPost, readRepoFile } from "./api.js";
 import { reverseApply } from "./patch.js";
 import { resolveProject, makeIndex } from "./codeindex.js";
 import { store } from "./shell/store.js";
+import { openDiffDoc } from "./diff-doc.js";
 
 const MONO = '"JetBrains Mono", ui-monospace, Menlo, monospace';
 const THEME = "phren";
@@ -622,11 +623,40 @@ export function openFileTree(el, ctx) {
   return { close() { el.replaceChildren(); } };
 }
 
+/** What a diff document borrows from the editor: the shared Monaco, language
+ * lookup, the same editor options and the Ask action. */
+function diffEnv(opts) {
+  let monaco = null;
+  return {
+    loadMonaco: () => loadMonaco().then((m) => { monaco = m; return m; }),
+    languageFor,
+    options: () => ({
+      ...(usingHost ? {} : { theme: THEME }),
+      fontFamily: MONO, fontSize: 13, minimap: { enabled: false }, automaticLayout: true,
+      scrollBeyondLastLine: false, renderLineHighlight: "line", padding: { top: 8 },
+    }),
+    askAction: (ed) => ({
+      id: "phren.ask",
+      label: "Ask the agent about this",
+      contextMenuGroupId: "9_cutcopypaste",
+      contextMenuOrder: 1,
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyA],
+      run: () => {
+        const m = ed.getModel(), sel = ed.getSelection();
+        if (!m || !sel) return;
+        const at = opts.commit ? `${opts.path}@${opts.commit.short || opts.commit.sha.slice(0, 7)}` : opts.path;
+        opts.ask?.(`${at}:${sel.startLineNumber}-${sel.endLineNumber}\n\`\`\`\n${m.getValueInRange(sel)}\n\`\`\`\n`);
+      },
+    }),
+  };
+}
+
 // ------------------------------------------------------------- editor document
 /** One centre-tab document: a Monaco / VS Code editor for one file or diff.
  * Returns { close, focus, show, hide, reveal(line), isDirty, tryClose, save }. */
 export function openEditorDoc(el, opts) {
   injectStyle();
+  if (opts.diff) return openDiffDoc(el, opts, diffEnv(opts));
 
   const computer = opts.computer;
   const child = opts.child;
