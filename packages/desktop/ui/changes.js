@@ -1162,7 +1162,7 @@ export function openChanges(el, ctx) {
     const one = div("chg-connect-step");
     one.appendChild(span("chg-connect-n", "1"));
     const oneBody = div("chg-connect-body");
-    oneBody.appendChild(span("", host.kind === "gitlab" ? "Create a personal access token with the api scope" : "Create a personal access token with read:repo and write:repo"));
+    oneBody.appendChild(span("", host.kind === "gitlab" ? "Create a personal access token with the api scope" : "Create a token with gitboy's Phren Hook preset (read:user, read:repo, write:repo)"));
     if (page) oneBody.appendChild(button("Open token page ↗", "chg-host-btn", () => window.open(page, "_blank", "noopener")));
     one.appendChild(oneBody);
     steps.appendChild(one);

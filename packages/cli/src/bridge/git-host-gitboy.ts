@@ -5,13 +5,16 @@ import { apiRoot, HostApiError, hostJson, safeLink } from "./git-host-http.js";
 import type { Json } from "./protocol.js";
 
 /** gitboy, the self-hosted forge, over its REST API (/api/v1). gitboy names a
- * pull request by `index`, has no draft state, no aggregate review decision
+ * pull request by `index`, and an older gitboy has no draft state, no aggregate review decision
  * and no web links in its answers, so this provider derives them: web pages
  * are `<origin>/<owner>/<repo>/pulls/<n>` and `/pipelines/<iid>?job=<id>`, a
  * review decision counts approvals on the head commit, and a newer gitboy
  * that sends `html_url`, `draft` or `review_decision` is taken at its word.
  * The token is GITBOY_TOKEN (for the domain GITBOY_HOST names) or the Hook's stored one, a gbp_ personal access
- * token with read:repo (write:repo to open or merge). */
+ * token with read:user and read:repo (write:repo to open or merge); gitboy's
+ * "Phren Hook" token preset grants exactly those. A gitboy with head_branch and
+ * sha filters gets them; an older one ignores them and the client filters below
+ * still pick the right rows. */
 
 export const PULL_TERMS: HostTerms = { short: "PR", long: "pull request", ref: "#" };
 
@@ -46,7 +49,7 @@ function stateOf(pull: Json): string {
 interface Ctx { api: string; web: string; repo: string; token: string; domain: string; account: { source: string; user?: string } }
 
 const SIGN_IN = (domain: string) =>
-  `Phren has no gitboy token for ${domain}. Connect it from the desktop's Changes pane, or run phren bridge git-host set ${domain} gitboy on this computer with a personal access token that has read:repo (write:repo to open and merge).`;
+  `Phren has no gitboy token for ${domain}. Connect it from the desktop's Changes pane, or run phren bridge git-host set ${domain} gitboy on this computer with a personal access token that has read:user and read:repo (write:repo to open and merge); gitboy's Settings → Access tokens has a "Phren Hook" preset.`;
 
 async function context(root: string, host: GitHost): Promise<Ctx | RequestList> {
   const repo = host.webUrl?.replace(/^https?:\/\/[^/]+\//, "") ?? "";
@@ -110,7 +113,7 @@ async function jobsFor(ctx: Ctx, pull: Json): Promise<{ runs: Json[]; pipeline?:
   const sha = String(pull.head_sha ?? "");
   const branch = String(pull.head_branch ?? "");
   if (!sha || !branch) return { runs: [] };
-  const { json } = await call<unknown>(ctx, `/pipelines?branch=${encodeURIComponent(branch)}&limit=20`).catch(() => ({ json: [] as unknown }));
+  const { json } = await call<unknown>(ctx, `/pipelines?branch=${encodeURIComponent(branch)}&sha=${encodeURIComponent(sha)}&limit=20`).catch(() => ({ json: [] as unknown }));
   const pipeline = rows(json).filter(p => p.sha === sha).sort((a, b) => Number(b.iid ?? 0) - Number(a.iid ?? 0))[0];
   if (!pipeline || pipeline.iid === undefined) return { runs: [] };
   const { json: detail } = await call<Json>(ctx, `/pipelines/${pipeline.iid}`).catch(() => ({ json: {} as Json }));
@@ -150,7 +153,7 @@ function rollup(runs: Json[]): "passing" | "failing" | "pending" | null {
 async function currentRequest(ctx: Ctx, branch: string): Promise<Json | null> {
   if (!branch) return null;
   // gitboy can't filter by head branch: read the newest and pick this branch's.
-  const { json } = await call<unknown>(ctx, `/pulls?state=all&limit=100`);
+  const { json } = await call<unknown>(ctx, `/pulls?state=all&limit=100&head_branch=${encodeURIComponent(branch)}`);
   const mine = rows(json).filter(pull => pull.head_branch === branch && !pull.head_repository_fork)
     .sort((a, b) => Number(stateOf(b) === "OPEN") - Number(stateOf(a) === "OPEN") || String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")))[0];
   const index = mine?.index ?? mine?.number;
@@ -180,6 +183,13 @@ function failed(error: unknown, domain: string): RequestList {
   return { available: false, reason: "failed", message: error instanceof Error ? error.message : String(error), pulls: [], current: null };
 }
 
+/** Whether this gitboy has draft pull requests: any pull request it lists
+ * carries a `draft` key. */
+async function hasDraftState(ctx: Ctx, listed: unknown): Promise<boolean> {
+  const sample = rows(listed).length ? rows(listed) : rows((await call<unknown>(ctx, "/pulls?state=all&limit=1").catch(() => ({ json: [] }))).json);
+  return sample.some(pull => typeof pull.draft === "boolean");
+}
+
 export const gitboy: GitHostProvider = {
   kind: "gitboy",
   name: "gitboy",
@@ -199,15 +209,17 @@ export const gitboy: GitHostProvider = {
     const ctx = await context(root, host);
     if (!("api" in ctx)) return { ok: false, reason: ctx.reason, message: ctx.message };
     try {
-      const { json: open } = await call<unknown>(ctx, "/pulls?state=open&limit=100");
+      const { json: open } = await call<unknown>(ctx, `/pulls?state=open&limit=100&head_branch=${encodeURIComponent(branch)}`);
       const existing = rows(open).find(pull => pull.head_branch === branch);
       if (existing) return { ok: true, url: pullUrl(ctx, existing), number: existing.index as number, branch, existing: true };
       const { json: repo } = await call<Json>(ctx, "");
       const target = String(obj(repo).default_branch ?? "main");
       const fill = await fillFromCommits(root, `${host.remote ?? "origin"}/${target}`, branch);
-      // gitboy has no draft state; the title says it, as GitLab's convention does.
-      const title = draft && !/^draft:/i.test(fill.title) ? `Draft: ${fill.title}` : fill.title;
-      const { json } = await call<Json>(ctx, "/pulls", { method: "POST", body: { head_branch: branch, base_branch: target, title, body: fill.body } });
+      // A gitboy with draft pull requests sends `draft` on every one; an older
+      // one has none, and the title says it, as GitLab's convention does.
+      const native = draft && await hasDraftState(ctx, open);
+      const title = draft && !native && !/^draft:/i.test(fill.title) ? `Draft: ${fill.title}` : fill.title;
+      const { json } = await call<Json>(ctx, "/pulls", { method: "POST", body: { head_branch: branch, base_branch: target, title, body: fill.body, ...(native ? { draft: true } : {}) } });
       const pull = obj(json);
       return { ok: true, url: pullUrl(ctx, pull), number: (pull.index ?? pull.number) as number, branch, draft };
     } catch (error) {

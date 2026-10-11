@@ -170,7 +170,7 @@ describe("pull and merge request presentation", () => {
 
   it("links Connect to the host's own token page, and reads durations and ages", () => {
     expect(tokenPage({ kind: "gitlab", domain: "gitlab.example.com" })).toBe("https://gitlab.example.com/-/user_settings/personal_access_tokens?name=Phren%20Hook&scopes=api");
-    expect(tokenPage({ kind: "gitboy", domain: "gitboy.example.com" })).toBe("https://gitboy.example.com/settings/tokens");
+    expect(tokenPage({ kind: "gitboy", domain: "gitboy.example.com" })).toBe("https://gitboy.example.com/settings/tokens?preset=phren-hook");
     expect(tokenPage({ kind: "github", domain: "github.com" })).toBeNull();
     expect([durationText(45), durationText(90), durationText(3600), durationText(7500), durationText(undefined)]).toEqual(["45s", "1m 30s", "1h", "2h 5m", ""]);
     const now = Date.parse("2026-10-10T12:00:00Z");

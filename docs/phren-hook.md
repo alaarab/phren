@@ -765,7 +765,7 @@ host from the remote's URL; name a self-hosted one with
 
 - **GitHub** uses the GitHub CLI's sign-in: `gh auth login` on the computer.
 - **GitLab** uses `GITLAB_TOKEN`, glab's sign-in, or a token you connect.
-- **gitboy** uses a personal access token with `read:repo` and `write:repo`.
+- **gitboy** uses a personal access token with `read:user`, `read:repo` and `write:repo` (the "Phren Hook" preset in gitboy's Settings → Access tokens).
 
 Connect GitLab or gitboy from the desktop's Changes pane, or on the computer:
 

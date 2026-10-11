@@ -222,7 +222,7 @@ export function mergeAvailability(pull) {
 export function tokenPage(host) {
   if (!host || !host.domain) return null;
   if (host.kind === "gitlab") return `https://${host.domain}/-/user_settings/personal_access_tokens?name=Phren%20Hook&scopes=api`;
-  if (host.kind === "gitboy") return `https://${host.domain}/settings/tokens`;
+  if (host.kind === "gitboy") return `https://${host.domain}/settings/tokens?preset=phren-hook`;
   return null;
 }
 
