@@ -4,7 +4,7 @@ import { terminalPaneFromEnv } from "./terminal.js";
 import { z } from "zod";
 import { computerName } from "./computers.js";
 import { hookRequest } from "./client.js";
-import { projectName } from "./dispatch.js";
+import { moveToSchema, projectName } from "./dispatch.js";
 import { paneProject } from "./approval-summary.js";
 import { isAccountSlug } from "./claude-accounts.js";
 import { accountWindows, type WindowRoom } from "./account-choice.js";
@@ -12,7 +12,7 @@ import { resetsIn } from "../computers/read.js";
 import type { AccountUsage } from "./usage.js";
 import { grantLabel, findGrant } from "./grants.js";
 import { hookPeers, optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
-import { BridgeError, errorCode, object, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
+import { BridgeError, errorCode, id, object, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
 import { findPhrenPath } from "../phren-paths.js";
 import { listMachines } from "../profile-store.js";
 import { localNames } from "./computer-names.js";
@@ -69,26 +69,24 @@ async function targetFromOverview(request: Request, session: string, server?: st
 
 /** A stable delivery id names a message on the receiving Hook. The Hook
  * queues busy targets and retains outcomes across restarts. */
+/** The Hook of `computer` (this one when undefined): its request function, and its peer when it is another computer. */
+async function hookFor(computer: string | undefined): Promise<{ request: Request; peer?: HookPeer }> {
+  if (computer === undefined) return { request: (route, body) => hookRequest(route, body) };
+  // No hooks.yaml only matters when the name turns out to be another computer.
+  let peersError: unknown;
+  const peers = await hookPeers().catch(error => { peersError = error; return [] as HookPeer[]; });
+  // An alias or hostname (`Mac`, `Desk.local`) names the same computer as its hooks.yaml name.
+  const named = peers.some(candidate => candidate.name === computer) ? undefined : await linkedComputer(computer).catch(() => undefined);
+  if (named && "local" in named) return { request: (route, body) => hookRequest(route, body) };
+  if (peersError) throw peersError;
+  const found = peers.find(candidate => candidate.name === (named && "peer" in named ? named.peer : computer));
+  if (!found) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
+  return { peer: found, request: (route, body) => peerRequest(found, route, body) };
+}
+
 export async function handOff(input: unknown, options: { deliveryId?: string; notifySender?: boolean } = {}): Promise<{ ok: boolean; delivered: boolean; target: Target; queued?: boolean; deliveryId?: string; state?: string; deliveryUncertain?: boolean; unsubmitted?: boolean; label?: string; granted?: string }> {
   const data = handOffSchema.parse(input);
-  let request: Request;
-  let peer: HookPeer | undefined;
-  if (data.computer === undefined) request = (route, body) => hookRequest(route, body);
-  else {
-    // No hooks.yaml only matters when the name turns out to be another computer.
-    let peersError: unknown;
-    const peers = await hookPeers().catch(error => { peersError = error; return [] as HookPeer[]; });
-    // An alias or hostname (`Mac`, `Desk.local`) names the same computer as its hooks.yaml name.
-    const named = peers.some(candidate => candidate.name === data.computer) ? undefined : await linkedComputer(data.computer).catch(() => undefined);
-    if (named && "local" in named) request = (route, body) => hookRequest(route, body);
-    else {
-      if (peersError) throw peersError;
-      const found = peers.find(candidate => candidate.name === (named && "peer" in named ? named.peer : data.computer));
-      if (!found) throw new BridgeError(404, "Unknown computer. Add its verified connection to hooks.yaml.");
-      peer = found;
-      request = (route, body) => peerRequest(found, route, body);
-    }
-  }
+  const { request, peer } = await hookFor(data.computer);
   const resolved = data.target ? undefined : await targetFromOverview(request, data.session!, peer?.server, data.account);
   const target = data.target ?? resolved!.target;
   if (peer && target.server !== peer.server) throw new BridgeError(400, "The target belongs to a different Herdr server on that computer.");
@@ -118,6 +116,61 @@ export async function handOff(input: unknown, options: { deliveryId?: string; no
     ...(!delivered && !queued && (result.ok === true || result.deliveryUncertain === true) ? { deliveryUncertain: true } : {}),
     ...(result.unsubmitted === true ? { unsubmitted: true } : {}),
     ...(label ? { label } : {}), ...(grant ? { granted: grantLabel(grant) } : {}) };
+}
+
+export const moveSessionSchema = z.object({
+  computer: computerName.optional().describe("Enrolled computer the session runs on. Omit for this computer."),
+  target: targetSchema.optional().describe("Complete live target of the session to move."),
+  session: sessionId.optional().describe("Session id to resolve through the Hook workspace overview."),
+  pane: id.optional().describe("Pane id (as Herdr or tmux shows it, e.g. wC9:p1) of the session to move, resolved through the Hook workspace overview."),
+  harness: moveToSchema.shape.harness,
+  account: moveToSchema.shape.account,
+  model: moveToSchema.shape.model,
+  effort: moveToSchema.shape.effort,
+  id: z.string().uuid().optional().describe("Move id: keep it on a retry, or pass it with status:true to read where the move is."),
+  status: z.boolean().optional().describe("Read the move's state without starting one; requires id."),
+  wait: z.boolean().optional().describe("Wait (up to five minutes) until the move finished or failed. Defaults to true."),
+}).strict().superRefine((value, context) => {
+  if (!value.status && [value.target, value.session, value.pane].filter(item => item !== undefined).length !== 1) context.addIssue({ code: "custom", message: "Provide exactly one of target, session or pane." });
+  if (value.status && !value.id) context.addIssue({ code: "custom", message: "A status query requires id." });
+});
+
+const MOVE_WAIT_MS = 5 * 60_000;
+
+/** The live session in a pane, by the pane id the terminal shows. */
+async function paneTarget(request: Request, pane: string, server?: string): Promise<Target> {
+  const found = await findInOverview(request, target => target.pane === pane, server);
+  if (!found) throw new BridgeError(404, "No live session in that pane appears in the workspace overview.");
+  return found.target;
+}
+
+/**
+ * Moves a live session to another harness on its own computer (session-move.ts):
+ * the agent writes a hand-off and exits, and the new agent starts in its pane
+ * with it. Answers with the move record; a dispatched worker's receipt follows
+ * the move on its next poll.
+ */
+export async function moveSession(input: unknown, options: { waitMs?: number; pollMs?: number } = {}): Promise<{ ok: boolean; move: Json; settled: boolean }> {
+  const data = moveSessionSchema.parse(input);
+  const { request, peer } = await hookFor(data.computer);
+  const read = async (id: string) => object((await request(`/v1/sessions/move?id=${encodeURIComponent(id)}`)).move);
+  const settled = (move: Json) => move.state === "moved" || move.state === "failed";
+  let move: Json;
+  if (data.status) move = await read(data.id!);
+  else {
+    const target = data.target ?? (data.session ? (await targetFromOverview(request, data.session, peer?.server)).target : await paneTarget(request, data.pane!, peer?.server));
+    if (peer && target.server !== peer.server) throw new BridgeError(400, "The target belongs to a different Herdr server on that computer.");
+    const to = { harness: data.harness, ...(data.account ? { account: data.account } : {}), ...(data.model ? { model: data.model } : {}), ...(data.effort ? { effort: data.effort } : {}) };
+    move = object((await request("/v1/sessions/move", { target, to: moveToSchema.parse(to), ...(data.id ? { id: data.id } : {}) })).move);
+    if (data.wait !== false && typeof move.id === "string") {
+      const until = Date.now() + (options.waitMs ?? MOVE_WAIT_MS);
+      while (!settled(move) && Date.now() < until) {
+        await new Promise(resolve => setTimeout(resolve, options.pollMs ?? 3_000));
+        move = await read(String(move.id)).catch(() => move);
+      }
+    }
+  }
+  return { ok: move.state !== "failed", move, settled: settled(move) };
 }
 
 /** One live agent pane, on this computer or an enrolled one. */
