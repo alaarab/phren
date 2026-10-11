@@ -3312,6 +3312,16 @@ schedules:
       expect(created.data).toMatchObject({ ok: true, branch: "next", previous: "main" });
       expect((await api("/v1/git/fetch", { target })).status).toBe(409);
       expect((await api("/v1/git/pull", { target })).status).toBe(409);
+      const head = await api("/v1/git/file", { target, ref: "HEAD", path: "base.txt" });
+      expect(head.status, JSON.stringify(head.data)).toBe(200);
+      expect(head.data).toMatchObject({ text: "one\n" });
+      await writeFile(path.join(root, "base.txt"), "one\ntwo\n");
+      const patch = (await git("diff", "base.txt")).stdout;
+      expect((await api("/v1/git/apply", { target, patch, expectedRepository: repository })).data).toMatchObject({ ok: true, staged: true });
+      expect((await api("/v1/git/file", { target, ref: "INDEX", path: "base.txt" })).data.text).toBe("one\ntwo\n");
+      const session = await api("/v1/git/session-changes", { target });
+      expect(session.status, JSON.stringify(session.data)).toBe(200);
+      expect(session.data).toMatchObject({ files: [], calls: 0 });
     });
 
     it("lists the repository's other worktrees and scopes git routes, the diff and files to a listed one", async () => {

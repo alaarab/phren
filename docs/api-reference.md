@@ -1592,6 +1592,10 @@ are writes and accept it. All four take `child` or `worktree` like the routes ab
 | `POST /v1/git/fetch` | none | `{ok, remote, output?}`. `git fetch --prune --no-tags` of the current branch's upstream remote, else `origin`; 409 `git-no-remote` without one. |
 | `POST /v1/git/pull` | none | `{ok, branch, upstream, commits, output?}`. `git pull --ff-only --no-rebase` from the upstream; `commits` is how many arrived. A branch without an upstream or a detached HEAD is 409; a diverged branch is Git's refusal as `{ok: false, output}`. Never a merge commit or a rebase. |
 
+| `POST /v1/git/file` | `ref` (`HEAD`, `INDEX` or a commit hash), `path` | `{path, ref, size, text}`; `missing: true` when that side has no such file, `binary: true` for bytes with a NUL, `tooLarge: true` past 2 MB, each with empty `text`. A diff editor compares whole files with it. |
+| `POST /v1/git/apply` | `patch` (one file's text hunks), `reverse?: true`, `expectedRepository?` | `{ok, path, staged}`. `git apply --cached` (with `reverse`, `-R`): stages or unstages those hunks in the index only, never the working tree. Rename, mode and binary patches and patches spanning files are 400; a hunk that no longer applies is `{ok: false, output}`. |
+| `POST /v1/git/session-changes` | none | `{root, calls, files, totalFiles, others, additions, deletions}`: this conversation's recorded edits in its repository, newest file first, each `{path, status, added, removed, redacted, binary, edits: [{toolUseId, status, added, removed, patch, truncated?}]}` (50 edits and 200 KB per patch at most). `others` counts edits in other repositories. |
+
 `/v1/git/pulls` `current` also carries `checkRuns: [{name, state, workflow?, url?}]`
 (state `failing`, `pending`, `passing`, `skipped` or `neutral`; failing first, at
 most 100) and, when GitHub reports them, `reviewDecision` and `mergeState`.

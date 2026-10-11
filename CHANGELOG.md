@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Hook: a client's Changes view can open a commit, switch and create branches, fetch and fast-forward. `POST /v1/git/show` returns one commit's message, author, parents, refs and every changed file with counts and its patch against the first parent. `POST /v1/git/checkout` switches to a local branch or creates one from HEAD or a local or remote branch (a remote one becomes its upstream); uncommitted tracked edits need `carryChanges: true`. `POST /v1/git/fetch` fetches the upstream remote with `--prune`, and `POST /v1/git/pull` fast-forwards only, never merging or rebasing. Git's refusals come back verbatim as `{ok: false, output}`. `/v1/git/pulls` `current` adds each check (`checkRuns`), the review decision and the merge state.
+- Hook: `POST /v1/git/file` returns a file's text at HEAD, in the index or at a commit, so a diff editor can compare whole files. `POST /v1/git/apply` stages or unstages single hunks in the index only. `POST /v1/git/session-changes` lists one agent session's recorded edits by file with each edit's patch. The Hook declares the `gitReview` capability.
 
 ### Fixed
 
