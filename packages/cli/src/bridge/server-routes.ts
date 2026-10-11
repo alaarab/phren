@@ -1,3 +1,4 @@
+import { listMoves, readMove, type SessionMover } from "./session-move.js";
 import { getTaskRoute, getTaskDirectoryRoute, updateTaskRoute, createTaskRoute, saveTaskRoute, launchTaskRoute } from "./task-routes.js";
 import { ownerInboxView } from "./owner-inbox-view.js";
 import type { OwnerInbox } from "./owner-inbox.js";
@@ -101,6 +102,7 @@ export interface RouteContext {
   returns?: DispatchReturns;
   handOffs?: HandOffQueue;
   inbox?: OwnerInbox;
+  mover?: SessionMover;
   agentHooks: AgentHooks;
   journal: ActivityJournal;
   tabActivity: TabActivityStore;
@@ -145,7 +147,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -370,6 +372,13 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           case "/v1/owner-inbox": result = await ownerInboxView(ctx.inbox!, { action: "list", includeResolved: url.searchParams.get("includeResolved") === "true" }, url.searchParams.get("local") === "1"); break;
           case "/v1/conductor/integrator": result = { integrator: await readIntegrator() ?? null }; break;
           case "/v1/dispatch": result = { dispatches: await dispatchStatus() }; break;
+          // A session move (session-move.ts) by its id, or this computer's recent moves.
+          case "/v1/sessions/move": {
+            const move = await readMove(z.string().uuid().parse(url.searchParams.get("id")));
+            if (!move) throw new BridgeError(404, "No move with that id on this computer.");
+            result = { move }; break;
+          }
+          case "/v1/sessions/moves": result = { moves: (await listMoves()).slice(0, 50) }; break;
           // Receiving side of a launched brief: what the worker's hooks reported for it.
           case "/v1/dispatch/arrival": result = { arrival: await briefArrival(briefId.parse(url.searchParams.get("id"))) ?? null }; break;
           // Asked by the dispatching Hook when this computer's worker hit its usage limit and continues on another account.
@@ -617,6 +626,10 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
             return dispatches.dispatch({ computer: "anywhere", project: note.project,
               harness: note.target && "harness" in note.target ? note.target.harness : "codex", prompt, label: `Code note: ${note.symbol}`.slice(0, 200) });
           } : undefined);
+        } else if (url.pathname === "/v1/sessions/move") {
+          // Answers once the move is checked and recorded; the hand-off and relaunch run on, and GET says where it is.
+          if (!ctx.mover) throw new BridgeError(503, "This Hook cannot move sessions.");
+          result = { ok: true, move: await ctx.mover.start(data) };
         } else if (url.pathname === "/v1/sessions/rename") {
           result = await renameSession(selectedServer(url), data);
         } else if (url.pathname === "/v1/jobs/cleanup") {

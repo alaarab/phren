@@ -250,6 +250,14 @@ export interface LaunchOptions {
    * scheduled project's source folder), so it may be marked trusted for the
    * harness before the launch. Never set for a folder the phone chose. */
   trustFolder?: boolean;
+  /** Start the agent in this existing pane, at its shell prompt, instead of a
+   * new one: a session moved to another harness (session-move.ts). Herdr
+   * gives a pane its variables only when it is created, so the caller uses
+   * this only where the pane's shell already has what the agent needs. */
+  into?: { workspaceId: string; tabId: string; paneId: string };
+  /** The `PHREN_DISPATCH_ID` the agent gets when it is not the brief's own id:
+   * a moved worker keeps the dispatch it was launched for. */
+  dispatchId?: string;
 }
 
 /**
@@ -310,6 +318,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   if (agentFolder && (role !== "agent" || data.project !== undefined || (data.cwd !== undefined && data.cwd !== "") || data.worktree != null)) {
     throw new BridgeError(400, "An agent folder is for a projectless agent without cwd or worktree.");
   }
+  if (options.into && (role !== "agent" || agentFolder || data.worktree != null)) throw new BridgeError(400, "Only a worker starts in an existing pane, in that pane's folder.");
   const projectDirectory = agentFolder ? undefined
     : z.string().min(1).max(4096).refine(t => path.isAbsolute(t) && !/[\x00-\x1f\x7f]/.test(t)).parse(data.cwd);
   const worktreeRequest = data.worktree === undefined || data.worktree === null ? undefined : launchWorktreeSchema.parse(data.worktree);
@@ -379,7 +388,8 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const briefFile = brief && (launchesWithBrief(kind) || structured || served) ? await writeLaunchBrief(brief, Date.now(), label) : undefined;
   const briefLaunch = brief && briefFile && launchesWithBrief(kind) ? briefArgs(kind, briefFile) : undefined;
   // sudo -A in the new agent asks the phone for the password (sudo.ts).
-  const variables = { ...askpassEnv(), ...(brief ? { [DISPATCH_ID_ENV]: brief.id } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
+  const dispatchId = options.dispatchId ?? brief?.id;
+  const variables = { ...askpassEnv(), ...(dispatchId ? { [DISPATCH_ID_ENV]: dispatchId } : {}), ...served?.env, ...(home ? claudeLaunchEnv(home) : {}) };
   const env = Object.keys(variables).length ? variables : undefined;
   if (workspace && !objects(before.workspaces).some(w => w.workspace_id === workspace)) throw new BridgeError(409, "The workspace changed.");
   const knownWorkspaces = new Set(objects(before.workspaces).map(w => w.workspace_id));
@@ -407,9 +417,11 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   // agent too; a folder the Hook picked or just created is trusted up front.
   if (scratch || worktree || options.trustFolder) await pretrustFolder(kind, cwd, scratch ? "new agent folder" : worktree ? `new worktree for ${worktree.branch}` : "project folder",
     home ? { ...process.env, ...claudeLaunchEnv(home) } : process.env);
-  try { await terminalProvider().create(server, { workspace, label, cwd, ...(env ? { env } : {}) }); }
-  catch (error) { await worktree?.discard(); if (scratch) await rmdir(scratch).catch(() => undefined); throw error; }
-  let created: { workspaceId: string; tabId: string; paneId: string } | undefined;
+  if (!options.into) {
+    try { await terminalProvider().create(server, { workspace, label, cwd, ...(env ? { env } : {}) }); }
+    catch (error) { await worktree?.discard(); if (scratch) await rmdir(scratch).catch(() => undefined); throw error; }
+  }
+  let created: { workspaceId: string; tabId: string; paneId: string } | undefined = options.into;
   for (let attempt = 0; attempt < 25 && !created; attempt++) {
     const s = await snapshot(server);
     const fresh = objects(s.tabs).filter(t => !knownTabs.has(t.tab_id)
@@ -459,6 +471,7 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
     const host = terminalName(server);
     const reason = error instanceof BridgeError && error.status === 504 ? "it did not become ready in time"
       : error instanceof BridgeError && error.message.startsWith(`${host}: `) ? error.message.slice(host.length + 2) : `${host} reported an error`;
+    if (options.into) throw new BridgeError(409, `${host} couldn't start ${kind} in the "${label}" pane (${reason}). The pane is still open at its shell prompt.`);
     throw new BridgeError(409, `${host} couldn't start ${kind} in the new "${label}" pane (${reason}). The workspace was created and is still open on the computer — open it from ${host === "Herdr" ? "Herdr workspaces" : "its tmux session"}.`);
     }
   }

@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- Move a session to another agent. `move_session` (also `phren_admin` action `move_session`), `phren move` and the Hook's `POST /v1/sessions/move` hand a live session to Claude under another account, Codex, OpenCode or Copilot, with an optional model and effort. The agent writes a structured hand-off and exits with its own exit command, and the new agent starts in the same pane and folder with the hand-off as its first prompt. If the agent writes none in time, the hand-off is built from the transcript's tail, the git state and the original brief. Nothing is committed; the hand-off lists the uncommitted changes. Only harnesses signed in and usable on that computer are accepted. A dispatched worker keeps its dispatch id, and its receipt records each move under `moves`.
+
 ## [0.3.37] - 2026-10-10
 
 ### Added
