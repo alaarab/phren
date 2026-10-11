@@ -1,12 +1,15 @@
-// Electron 44 shell: spawn the daemon on the system Node (native node-pty is
-// built for Node, not Electron) and show its UI in a BrowserWindow.
-import { app, BrowserWindow, Menu, Notification, ipcMain, session, shell } from "electron";
+// Electron 44 shell: spawn the daemon and show its UI in a BrowserWindow. From
+// a checkout the daemon runs on the system Node; the installed app runs it on
+// Electron's own Node (ELECTRON_RUN_AS_NODE), which loads node-pty's N-API
+// binary too, so an install needs no Node of its own.
+import { app, BrowserWindow, Menu, Notification, dialog, ipcMain, session, shell } from "electron";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { startUpdates } from "./updates.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const daemonPath = path.resolve(here, "../dist/src/main.js");
@@ -125,6 +128,7 @@ function showErrorInWindow(reason, detail) {
 }
 
 function findNode() {
+  if (app.isPackaged) return Promise.resolve(process.execPath);
   if (process.env.PHREN_NODE) return Promise.resolve(process.env.PHREN_NODE);
   const candidates = [
     "/opt/homebrew/bin/node",
@@ -155,7 +159,8 @@ function loginShellNode() {
 /** An app started from the Dock gets a bare PATH; the daemon still needs ssh,
  * herdr and tmux, so put node's own folder and the usual tool folders first. */
 function daemonPath_(nodePath) {
-  const extra = [path.dirname(nodePath), "/opt/homebrew/bin", "/usr/local/bin", path.join(homedir(), ".local/bin"), "/usr/bin", "/bin"];
+  const nodeDir = app.isPackaged ? [] : [path.dirname(nodePath)];
+  const extra = [...nodeDir, "/opt/homebrew/bin", "/usr/local/bin", path.join(homedir(), ".local/bin"), "/usr/bin", "/bin"];
   const current = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
   return [...new Set([...extra, ...current])].join(path.delimiter);
 }
@@ -171,6 +176,8 @@ function spawnDaemon(nodePath) {
         // The token goes over fd 3 (pipe), never the environment, so a child
         // process cannot read it by dumping env.
         PHREN_DESKTOP_TOKEN_FD: "3",
+        // The daemon drops this at startup so its terminals do not inherit it.
+        ...(app.isPackaged ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
       },
       stdio: ["ignore", "pipe", "pipe", "pipe"],
     });
@@ -301,6 +308,7 @@ async function start() {
     const url = await spawnDaemon(nodePath);
     registerPermissions(new URL(url).port);
     createWindow(url);
+    startUpdates({ app, dialog, shell, parentWindow: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null) });
   } catch (err) {
     createErrorWindow(err.message, daemonStderr);
     daemon = null;
