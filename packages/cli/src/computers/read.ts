@@ -33,6 +33,7 @@ export interface HarnessUsage {
   harness: string;
   windows: Array<UsageWindow & { resetsIn?: string }>;
   spend?: AccountUsage["spend"];
+  credits?: AccountUsage["credits"];
   updatedAt?: string;
   /** What the harness said, or why it gave nothing. Never a guess. */
   message?: string;
@@ -146,8 +147,15 @@ function harness(account: AccountUsage, now: number): HarnessUsage {
       return window;
     }),
     ...(account.spend ? { spend: account.spend } : {}),
+    ...(account.credits ? { credits: account.credits } : {}),
     ...(account.updatedAt ? { updatedAt: account.updatedAt } : {}),
     ...(account.message ? { message: account.message } : !account.windows.length && !account.spend ? { message: "No usage data reported." } : {}) };
+}
+
+/** "1,250 credits, in use" or "unlimited credits". */
+export function creditsText(credits: NonNullable<AccountUsage["credits"]>): string {
+  const amount = credits.unlimited ? "unlimited credits" : credits.balance !== undefined ? `${credits.balance.toLocaleString("en-US", { maximumFractionDigits: 2 })} credits` : "credits";
+  return credits.inUse ? `${amount}, in use` : amount;
 }
 
 const NOT_REPORTED = "This computer's Hook did not report this harness; it may predate it (phren bridge update).";

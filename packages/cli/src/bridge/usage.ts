@@ -39,6 +39,14 @@ export interface UsageWindow {
   /** The window's reset time passed after its report: no percent is known, so none is sent. */
   reset?: boolean;
 }
+/**
+ * Codex credits: a purchased balance on top of the plan's limits, from the
+ * `credits` Codex reports beside its windows. `balance` is in Codex's own
+ * credit unit, not dollars. `inUse` is derived: credits are enabled and a plan
+ * window is spent (at 100%, or Codex says the rate limit is reached), so
+ * further work draws on the balance.
+ */
+export interface UsageCredits { hasCredits: boolean; unlimited?: true; balance?: number; inUse?: true }
 export interface UsageSpend { amountUSD: number; period: "rolling_7_days" | "rolling_30_days" | "calendar_week" }
 export interface AccountUsage {
   source: "codex" | "claude" | "opencode" | "opencode-go" | "openrouter" | "copilot" | "elevenlabs";
@@ -47,6 +55,8 @@ export interface AccountUsage {
   message?: string;
   spend?: UsageSpend;
   subscription?: Subscription;
+  /** Codex's credit balance, when Codex reports one. */
+  credits?: UsageCredits;
   /** Opaque key identity used only to avoid counting one OpenRouter key twice. */
   accountId?: string;
   /** Which Claude report fed this account: the status-line rate_limits payload
@@ -75,11 +85,12 @@ export function codexUsage(value: unknown, now = new Date()): AccountUsage {
   const buckets = Object.keys(multiple).length
     ? Object.entries(multiple).sort(([a], [b]) => a === "codex" ? -1 : b === "codex" ? 1 : a.localeCompare(b)).slice(0, 16)
     : [["codex", result.rateLimits]];
-  const windows: UsageWindow[] = [];
+  const windows: UsageWindow[] = [], kept: Json[] = [];
   for (const [key, raw] of buckets) {
     const bucket = object(raw), name = safeText(bucket.limitName);
     // Spark is a separate, lightweight lane nobody budgets by; leave it out.
     if (/spark/i.test(String(key)) || /spark/i.test(name ?? "")) continue;
+    kept.push(bucket);
     for (const field of ["primary", "secondary"]) {
       const item = object(bucket[field]);
       const label = duration(item.windowDurationMins, field === "primary" ? "Primary limit" : "Secondary limit");
@@ -87,8 +98,21 @@ export function codexUsage(value: unknown, now = new Date()): AccountUsage {
       if (entry) windows.push(entry);
     }
   }
-  return { source: "codex", windows, updatedAt: now.toISOString(),
+  const credits = codexCredits(kept, windows);
+  return { source: "codex", windows, updatedAt: now.toISOString(), ...(credits ? { credits } : {}),
     ...(!windows.length ? { message: "Codex has not reported account limits. Sign in with your ChatGPT account in Codex on this computer." } : {}) };
+}
+
+/** The account's credits from the first bucket that reports them; Codex sends the same balance on each. */
+function codexCredits(buckets: Json[], windows: UsageWindow[]): UsageCredits | undefined {
+  const bucket = buckets.find(item => typeof object(item.credits).hasCredits === "boolean");
+  if (!bucket) return undefined;
+  const raw = object(bucket.credits), hasCredits = raw.hasCredits === true;
+  const amount = typeof raw.balance === "string" && /^\d{1,12}(?:\.\d{1,12})?$/.test(raw.balance.trim()) ? Number(raw.balance.trim()) : undefined;
+  const spent = windows.some(w => (w.usedPercent ?? 0) >= 100) || buckets.some(item => item.rateLimitReachedType === "rate_limit_reached");
+  return { hasCredits, ...(raw.unlimited === true ? { unlimited: true as const } : {}),
+    ...(amount !== undefined ? { balance: Math.round(amount * 100) / 100 } : {}),
+    ...(hasCredits && spent ? { inUse: true as const } : {}) };
 }
 
 /** Display metadata from the ID token's claims only, never an authentication decision. */
