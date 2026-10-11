@@ -10,7 +10,7 @@ import type { Json } from "./protocol.js";
  * are `<origin>/<owner>/<repo>/pulls/<n>` and `/pipelines/<iid>?job=<id>`, a
  * review decision counts approvals on the head commit, and a newer gitboy
  * that sends `html_url`, `draft` or `review_decision` is taken at its word.
- * The token is GITBOY_TOKEN or the Hook's stored one, a gbp_ personal access
+ * The token is GITBOY_TOKEN (for the domain GITBOY_HOST names) or the Hook's stored one, a gbp_ personal access
  * token with read:repo (write:repo to open or merge). */
 
 export const PULL_TERMS: HostTerms = { short: "PR", long: "pull request", ref: "#" };

@@ -37,7 +37,7 @@ async function fakeHost(route: Route) {
 describe("GitLab and gitboy providers", () => {
   let created: string | undefined;
   let host: Awaited<ReturnType<typeof fakeHost>> | undefined;
-  const saved = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, PHREN_BRIDGE_HOME: process.env.PHREN_BRIDGE_HOME, GITLAB_TOKEN: process.env.GITLAB_TOKEN, GITLAB_HOST: process.env.GITLAB_HOST, GITBOY_TOKEN: process.env.GITBOY_TOKEN };
+  const saved = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, PHREN_BRIDGE_HOME: process.env.PHREN_BRIDGE_HOME, GITLAB_TOKEN: process.env.GITLAB_TOKEN, GITLAB_HOST: process.env.GITLAB_HOST, GITBOY_TOKEN: process.env.GITBOY_TOKEN, GITBOY_HOST: process.env.GITBOY_HOST };
   afterEach(async () => {
     for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
     await host?.close(); host = undefined;
@@ -52,7 +52,7 @@ describe("GitLab and gitboy providers", () => {
     const root = created = await realpath(await mkdtemp(path.join(tmpdir(), "phren-host-providers-")));
     process.env.GIT_CONFIG_GLOBAL = path.join(root, "global.gitconfig");
     process.env.PHREN_BRIDGE_HOME = path.join(root, "bridge");
-    for (const key of ["GITLAB_TOKEN", "GITLAB_HOST", "GITBOY_TOKEN"]) delete process.env[key];
+    for (const key of ["GITLAB_TOKEN", "GITLAB_HOST", "GITBOY_TOKEN", "GITBOY_HOST"]) delete process.env[key];
     const repo = path.join(root, "repo");
     const git = async (...args: string[]) => (await execFileAsync("git", ["-C", repo, ...args])).stdout;
     await execFileAsync("git", ["init", "-q", "-b", "main", repo]);
@@ -167,7 +167,7 @@ describe("GitLab and gitboy providers", () => {
         return undefined;
       });
       const repo = await repository("git@gitboy.example.com:sam/app.git", "gitboy.example.com", `${host.origin}/api/v1`);
-      process.env.GITBOY_TOKEN = "gbp_test";
+      process.env.GITBOY_HOST = "gitboy.example.com"; process.env.GITBOY_TOKEN = "gbp_test";
 
       const list = await gitPulls(repo);
       expect(list).toMatchObject({ available: true, host: { kind: "gitboy", terms: { short: "PR", ref: "#" } } });
@@ -194,7 +194,7 @@ describe("GitLab and gitboy providers", () => {
         return undefined;
       });
       const repo = await repository("git@gitboy.example.com:sam/app.git", "gitboy.example.com", `${host.origin}/api/v1`);
-      process.env.GITBOY_TOKEN = "gbp_test";
+      process.env.GITBOY_HOST = "gitboy.example.com"; process.env.GITBOY_TOKEN = "gbp_test";
 
       expect(await gitPullRequest(repo, false)).toMatchObject({ ok: true, number: 7, url: `${host.origin}/sam/app/pulls/7` });
       expect(host.seen.find(s => s.method === "POST")?.body).toEqual({ head_branch: "feature", base_branch: "main", title: "Cache the stats run", body: "One run serves every key." });
@@ -204,6 +204,15 @@ describe("GitLab and gitboy providers", () => {
       expect(await gitMergeRequest(repo, { number: 7, method: "rebase", expectedHeadSha: head })).toMatchObject({ ok: false, reason: "blocked", message: "1 approval(s) required for main" });
       expect(host.seen.at(-1)?.body).toEqual({ method: "rebase", expected_head_sha: head });
     });
+  });
+
+  it("never sends a token to an API address a repository's own config names", async () => {
+    host = await fakeHost(() => ({ json: [] }));
+    const repo = await repository("git@gitlab.example.com:team/app.git", "gitlab.example.com", "https://gitlab.invalid/api/v4");
+    await execFileAsync("git", ["-C", repo, "config", "phren.gitlab.example.com.api", `${host.origin}/api/v4`]);
+    process.env.GITLAB_HOST = "gitlab.example.com"; process.env.GITLAB_TOKEN = "glpat-test";
+    expect(await gitPulls(repo)).toMatchObject({ available: false, reason: "unreachable" });
+    expect(host.seen).toEqual([]);
   });
 
   it("connects a host only with a token it accepts, stores it privately with the account, and disconnects", async () => {

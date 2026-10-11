@@ -1623,7 +1623,7 @@ with the override command in `message`. The Hook declares the `gitHosts` capabil
   (for gitlab.com, or the domain `GITLAB_HOST` names), the Hook's stored one, or glab's own sign-in.
   Pipeline jobs are the checks, with the stage as `workflow`; an allowed failure or a manual job is `neutral`.
 - **gitboy** uses its REST API (`/api/v1`) with a `gbp_` personal access token: `read:repo` to read,
-  `write:repo` to open and merge. The token is `GITBOY_TOKEN` or the stored one. gitboy has no draft
+  `write:repo` to open and merge. The token is `GITBOY_TOKEN` for the domain `GITBOY_HOST` names, or the stored one. gitboy has no draft
   state, so a draft opens with a `Draft:` title on GitLab and gitboy alike.
 - A self-hosted API on another address: `git config --global phren.<domain>.api <url>`.
 
