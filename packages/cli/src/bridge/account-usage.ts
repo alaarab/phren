@@ -1,10 +1,10 @@
 import { findPhrenPath } from "../phren-paths.js";
-import { HARNESS_NAMES, resetsIn, USAGE_SOURCES } from "../computers/read.js";
+import { creditsText, HARNESS_NAMES, resetsIn, USAGE_SOURCES } from "../computers/read.js";
 import { hookRequest } from "./client.js";
 import { notLinkedFrom, type NotLinkedComputer } from "./hand-off.js";
 import { optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { errorCode, object, type Json } from "./protocol.js";
-import { NEAR_LIMIT_LEFT, windowExhausted, windowLeft, type AccountUsage, type Subscription, type UsageWindow } from "./usage.js";
+import { NEAR_LIMIT_LEFT, windowExhausted, windowLeft, type AccountUsage, type Subscription, type UsageCredits, type UsageWindow } from "./usage.js";
 
 export { NEAR_LIMIT_LEFT };
 
@@ -68,6 +68,8 @@ export interface AccountUsageRow {
   availableIn?: string;
   spend?: { amountUSD: number; period: string };
   subscription?: Subscription;
+  /** Codex's credit balance from the newest report that has one. */
+  credits?: UsageCredits;
   updatedAt?: string;
   /** How old the standing report is, as "4m" or "2d 3h". */
   age?: string;
@@ -95,7 +97,7 @@ export interface AccountUsageView {
 export interface ComputerUsage { computer: string; accounts: AccountUsage[] }
 
 const date = (value: string | undefined) => value ? Date.parse(value) : NaN;
-const hasData = (usage: AccountUsage) => usage.windows.length > 0 || Boolean(usage.spend) || Boolean(usage.subscription);
+const hasData = (usage: AccountUsage) => usage.windows.length > 0 || Boolean(usage.spend) || Boolean(usage.subscription) || Boolean(usage.credits);
 const newer = <T extends { usage: AccountUsage }>(a: T, b: T): T => (date(b.usage.updatedAt) || 0) > (date(a.usage.updatedAt) || 0) ? b : a;
 
 export function ageText(ms: number): string {
@@ -169,6 +171,8 @@ export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.
     const standing = (withWindows.length ? withWindows : reporting).reduce(newer);
     const windows = mergedWindows(withWindows).map(window => settleWindow(window, now));
     const spend = mergedSpend(source, reporting);
+    const withCredits = reporting.filter(item => item.usage.credits);
+    const credits = withCredits.length ? withCredits.reduce(newer).usage.credits : undefined;
     const updated = date(standing.usage.updatedAt);
     const leftPercent = roomLeft(windows);
     const exhausted = windows.filter(w => w.exhausted);
@@ -185,6 +189,7 @@ export function mergeAccountUsage(reports: readonly ComputerUsage[], now = Date.
       exhausted: exhausted.length > 0, ...(availableIn ? { availableIn } : {}),
       ...(spend ? { spend } : {}),
       ...(subscription ? { subscription } : {}),
+      ...(credits ? { credits } : {}),
       ...(standing.usage.updatedAt ? { updatedAt: standing.usage.updatedAt } : {}),
       ...(Number.isFinite(updated) ? { age: ageText(now - updated) } : {}),
       stale: !Number.isFinite(updated) || now - updated > STALE_AFTER_MS || windows.some(w => w.reset),
@@ -337,6 +342,7 @@ export function formatAccountUsage(view: AccountUsageView): string {
       const used = w.reset ? "reset, no new report" : w.usedPercent !== undefined ? `${w.usedPercent}% used${w.leftPercent !== undefined ? `, ${w.leftPercent}% left` : ""}` : w.usedUSD !== undefined ? `$${w.usedUSD.toFixed(2)}${w.limitUSD !== undefined ? ` of $${w.limitUSD.toFixed(2)}` : ""}` : "";
       lines.push(`  ${w.name.padEnd(30)} ${used.padEnd(22)}${w.limited ? "limited now  " : ""}${w.resetsIn ? `resets in ${w.resetsIn}${w.resetsAt ? ` (${w.resetsAt.slice(0, 16).replace("T", " ")} UTC)` : ""}` : ""}`.trimEnd());
     }
+    if (row.credits?.hasCredits) lines.push(`  credits${" ".repeat(24)}${creditsText(row.credits)}`);
     if (row.spend) lines.push(`  spend ${row.spend.period.replace(/_/g, " ").padEnd(24)} $${row.spend.amountUSD.toFixed(2)}`);
     if (row.message) lines.push(`  ${row.message}`);
   }

@@ -51,6 +51,17 @@ describe("account usage merged by account", () => {
     expect(formatAccountUsage({ accounts: [row], noData: [], computers: ["Desk"], unreachable: [], notLinked: [], enrolled: 0 })).toContain("$50.00 of $50.00, about $0.00 left  expires 2026-10-07");
   });
 
+  it("carries Codex credits from the newest report that has them, and prints them", () => {
+    const older = { ...codex(30, at(20)), credits: { hasCredits: true, balance: 900 } };
+    const newer = { ...codex(100, at(2)), credits: { hasCredits: true, balance: 1250.5, inUse: true as const } };
+    const [row] = mergeAccountUsage([{ computer: "Desk", accounts: [older] }, { computer: "Laptop", accounts: [newer] }], now).accounts;
+    expect(row.credits).toEqual({ hasCredits: true, balance: 1250.5, inUse: true });
+    expect(formatAccountUsage({ accounts: [row], noData: [], computers: ["Desk", "Laptop"], unreachable: [], notLinked: [], enrolled: 0 })).toContain("1,250.5 credits, in use");
+    // A report with only a credit balance still makes a card.
+    const balanceOnly: AccountUsage = { source: "codex", updatedAt: at(1), windows: [], credits: { hasCredits: true, balance: 40 } };
+    expect(mergeAccountUsage([{ computer: "Desk", accounts: [balanceOnly] }], now).accounts[0].credits?.balance).toBe(40);
+  });
+
   it("keeps two Claude logins with no identity apart, one per computer", () => {
     const reports: ComputerUsage[] = [
       { computer: "Desk", accounts: [claude("claude:home:default", "default", at(1), 20)] },
