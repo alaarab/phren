@@ -18,12 +18,16 @@ import { FAST_HOOK_SOURCE, fastHookPath } from "./hook-fast.js";
 import { installAskpass, removeAskpass } from "./sudo.js";
 import { readStoredVoice, SPEECH_VOICE_ENV, writeSpeechVoice } from "./speech-voice.js";
 import { carryCodexHookTrust } from "./codex-hook-trust.js";
+import type { GatewayScope } from "./scoped-gateway.js";
 import { type CodexServerEntry, serversInService } from "./codex-servers.js";
 
 const exec = promisify(execFile);
 const label = "com.phren.hook";
 const unit = "phren-hook.service";
 export const forcedCommand = 'command="sh ~/.local/share/phren/bridge/dispatch"';
+/** A scoped key's forced command. A separate script, so a key added before
+ * the Hook can serve its scope fails closed instead of reaching `dispatch`. */
+export const scopedForcedCommand = (scope: GatewayScope) => `command="sh ~/.local/share/phren/bridge/dispatch-scoped ${scope}"`;
 function keyOptions(line: string): { options: string[]; rest: string } | undefined {
   const options: string[] = [];
   let quoted = false, start = 0;
@@ -136,6 +140,22 @@ export PHREN_PATH=${quote(store)}
 export PHREN_PROFILE=${quote(profile)}
 ${pipe}exec ${quote(node)} ${quote(bundle)} ssh
 `; }
+
+/** The scoped keys' forced command: always the node gateway (never the raw
+ *  socat/nc pipe), told which scope the key holds. An unknown scope or an older
+ *  bundle without `ssh-scoped` refuses. */
+export function scopedGatewayScript(environment: Omit<GatewayEnvironment, "socket" | "timing">): string {
+  const { root, herdr, store, profile, node, bundle } = environment;
+  return `#!/bin/sh
+# Phren Hook scoped gateway for keys limited to one route set (phren pair --scope).
+export PHREN_BRIDGE_HOME=${quote(root)}
+export PHREN_HERDR_HOME=${quote(herdr)}
+export PHREN_PATH=${quote(store)}
+export PHREN_PROFILE=${quote(profile)}
+exec ${quote(node)} ${quote(bundle)} ssh-scoped "$1"
+`; }
+
+export const scopedGatewayPath = (root = bridgeRoot()) => path.join(root, "dispatch-scoped");
 
 async function activate(version: string) {
   const root = bridgeRoot();
@@ -251,6 +271,9 @@ export async function install(version: string, noService = false, force = false)
     root, herdr, store: modules.store, profile: modules.profile, node: process.execPath,
     bundle: path.join(root, "current/bridge-hook.mjs"), socket: socketPath(), timing: path.join(root, "gateway.json"),
   }), 0o700);
+  await atomic(scopedGatewayPath(root), scopedGatewayScript({
+    root, herdr, store: modules.store, profile: modules.profile, node: process.execPath, bundle: path.join(root, "current/bridge-hook.mjs"),
+  }), 0o700);
   await installAskpass(process.execPath, path.join(root, "current/bridge-hook.mjs"));
   const environmentPath = [path.dirname(process.execPath), path.join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin"].join(":");
   const program = path.join(root, "current/bridge-hook.mjs");
@@ -337,7 +360,7 @@ export async function uninstall() {
   await applyOpencodePlugin(true);
   await removeAskpass();
   // Preserve journal, settings, uploaded images, rollback version and SSH backups.
-  console.log("Phren Hook stopped and its background service removed. Remove phren-iphone, phren-android and phren-computer keys from authorized_keys to revoke device access. Local data remains in " + bridgeRoot());
+  console.log("Phren Hook stopped and its background service removed. Remove phren-iphone, phren-android, phren-computer, phren-gitboy and phren-gitboy-write keys from authorized_keys to revoke device access. Local data remains in " + bridgeRoot());
 }
 
 interface SettingsEdit { file: string; before?: string; after: string }

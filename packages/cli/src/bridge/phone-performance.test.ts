@@ -12,8 +12,8 @@ import { serve } from "./server.js";
 const fixture = vi.hoisted(() => ({ snapshot: {} as Record<string, unknown>, branchDelay: 0, active: 0, peak: 0, listener: undefined as any, ready: undefined as (() => void) | undefined }));
 vi.mock("node:http", async importOriginal => {
   const actual = await importOriginal<typeof import("node:http")>();
-  return { ...actual, createServer: (listener: any) => {
-    fixture.listener = listener;
+  return { ...actual, createServer: (...args: any[]) => {
+    fixture.listener = args.at(-1);
     const server = actual.createServer();
     server.listen = ((file: string, callback: () => void) => {
       void writeFile(file, "").then(() => { callback(); fixture.ready?.(); });
