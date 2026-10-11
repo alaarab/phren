@@ -3,7 +3,7 @@
 // CSS (injected once) and re-renders fully from module state.
 import { hookPost, readRepoFile } from "./api.js";
 import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
-import { branchProblem, capitalize, checksSummary, hostTerms, localForRemote, pullStanding, syncAction, trackingText } from "./git-review.js";
+import { branchProblem, capitalize, checksSummary, durationText, groupRuns, hostTerms, localForRemote, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, syncAction, tokenPage, trackingText } from "./git-review.js";
 import { announceGitChange } from "./diff-doc.js";
 
 // The phone's Changes tabs, minus Working tree (the Files pane owns that here).
@@ -172,6 +172,79 @@ const CSS = `
 .chg-session-sum{margin-top:10px;font-size:12px;color:var(--muted)}
 .chg-edit-label{display:flex;align-items:center;gap:8px;padding:5px 10px;background:var(--sunken);font-size:11px;letter-spacing:.04em;color:var(--muted)}
 .chg-edit-label .chg-stat{margin-left:auto}
+.chg-mark{display:inline-flex;flex:none;align-items:center;justify-content:center}
+.chg-mark.github{color:var(--text)}.chg-mark.gitlab{color:#FC6D26}.chg-mark.gitboy{color:var(--accent)}.chg-mark.none{color:var(--muted)}
+.chg-host{display:flex;align-items:center;gap:10px;margin-top:10px;padding:8px 10px;border:1px solid var(--border);border-radius:12px;background:linear-gradient(180deg,var(--surface),transparent)}
+.chg-host-who{flex:1;min-width:0}
+.chg-host-name{font-weight:600;color:var(--text);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chg-host-sub{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chg-host-link{border:none;background:none;padding:0 0 0 8px;color:var(--muted);font:11.5px system-ui,sans-serif;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.chg-host-link:hover{color:var(--danger)}
+.chg-host-btn{border:1px solid var(--border);background:none;color:var(--text-2);font:12px system-ui,sans-serif;border-radius:999px;padding:4px 10px;cursor:pointer;white-space:nowrap}
+.chg-host-btn:hover{color:var(--text);border-color:var(--border-strong)}
+.chg-connect{margin-top:12px;padding:14px;border:1px solid var(--border-strong);border-radius:14px;background:radial-gradient(120% 140% at 0% 0%,rgba(185,148,244,.10),transparent 60%),var(--surface)}
+.chg-connect-h{display:flex;gap:12px;align-items:center}
+.chg-connect-title{font-size:15px;font-weight:650;color:var(--text)}
+.chg-connect-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.chg-connect-steps{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+.chg-connect-step{display:flex;align-items:flex-start;gap:10px;font-size:12.5px;color:var(--text-2)}
+.chg-connect-body{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding-top:1px}
+.chg-connect-body.row{flex-direction:row;align-items:center;flex-wrap:wrap}
+.chg-connect-n{flex:none;width:20px;height:20px;border-radius:50%;background:var(--card);color:var(--accent);font:600 11px system-ui,sans-serif;display:inline-flex;align-items:center;justify-content:center}
+.chg-connect-input{flex:1;min-width:160px;background:var(--sunken);border:1px solid var(--border-strong);border-radius:10px;padding:8px 10px;color:var(--text);font:12.5px "JetBrains Mono",ui-monospace,Menlo,monospace;outline:none}
+.chg-connect-input:focus{border-color:var(--accent)}
+.chg-connect-foot{margin-top:10px;font-size:11px;color:var(--muted)}
+.chg-req{position:relative;margin:12px 0 14px;padding:12px 12px 10px;border:1px solid var(--border-strong);border-radius:14px;background:var(--surface);overflow:hidden}
+.chg-req::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--border)}
+.chg-req.passing::before{background:var(--done)}.chg-req.failing::before{background:var(--danger)}
+.chg-req.pending::before{background:linear-gradient(90deg,transparent,var(--waiting),transparent);background-size:200% 100%;animation:chg-sweep 1.6s linear infinite}
+@keyframes chg-sweep{from{background-position:200% 0}to{background-position:-200% 0}}
+.chg-req-top{display:flex;align-items:center;gap:8px}
+.chg-req-state{font:600 11px system-ui,sans-serif;border-radius:999px;padding:2px 9px}
+.chg-req-state.open{background:rgba(138,200,172,.16);color:var(--done)}
+.chg-req-state.draft{background:var(--raised);color:var(--muted)}
+.chg-req-state.merged{background:rgba(185,148,244,.18);color:var(--accent)}
+.chg-req-state.closed{background:rgba(239,152,152,.14);color:var(--danger)}
+.chg-req-num{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;color:var(--muted);font-size:12px}
+.chg-req-age{margin-left:auto;font-size:11.5px;color:var(--muted)}
+.chg-req-title{margin-top:6px;font-size:15px;line-height:1.3;font-weight:650;color:var(--text);cursor:pointer}
+.chg-req-title:hover{color:var(--link)}
+.chg-req-route{display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap}
+.chg-req-arrow{color:var(--muted)}
+.chg-req-by{font-size:11.5px;color:var(--muted)}
+.chg-req-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.chg-pill{font-size:11.5px;border-radius:999px;padding:2px 9px;background:var(--raised);color:var(--text-2)}
+.chg-pill.ok{background:rgba(138,200,172,.16);color:var(--done)}.chg-pill.bad{background:rgba(239,152,152,.16);color:var(--danger)}.chg-pill.wait{background:rgba(224,188,127,.16);color:var(--waiting)}
+.chg-pipe{margin-top:10px}
+.chg-pipe .chg-checks-list{margin:6px 0 0}
+.chg-pipe-h{display:flex;align-items:baseline;gap:8px}
+.chg-pipe-word{flex:none;font-weight:600;font-size:12.5px;color:var(--text);white-space:nowrap}
+.chg-pipe-word.passing{color:var(--done)}.chg-pipe-word.failing{color:var(--danger)}.chg-pipe-word.pending{color:var(--waiting)}
+.chg-pipe-word.link{cursor:pointer}.chg-pipe-word.link:hover{text-decoration:underline}
+.chg-pipe-sum{font-size:11.5px;color:var(--muted)}
+.chg-pipe-bar{display:flex;gap:2px;height:6px;margin:6px 0 4px;border-radius:999px;overflow:hidden}
+.chg-pipe-seg{flex-basis:0;min-width:6px}
+.chg-pipe-seg.passing{background:var(--done)}.chg-pipe-seg.failing{background:var(--danger)}.chg-pipe-seg.skipped,.chg-pipe-seg.neutral{background:var(--raised)}
+.chg-pipe-seg.pending{background:repeating-linear-gradient(-45deg,var(--waiting) 0 6px,rgba(224,188,127,.45) 6px 12px);background-size:17px 17px;animation:chg-stripes .8s linear infinite}
+@keyframes chg-stripes{from{background-position:0 0}to{background-position:17px 0}}
+.chg-check-group{padding:5px 10px;background:var(--sunken);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.chg-check-state.pending::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--waiting);animation:chg-pulse 1.2s ease-in-out infinite}
+@keyframes chg-pulse{0%,100%{opacity:.35;transform:scale(.8)}50%{opacity:1;transform:scale(1)}}
+.chg-check-detail{font-size:11px;color:var(--danger);max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chg-check-go{color:var(--muted);font-size:11px;opacity:0}
+.chg-check.link:hover .chg-check-go{opacity:1}
+.chg-merge-banner{margin-top:10px;padding:8px 10px;border-radius:10px;background:var(--raised);font-size:12.5px;color:var(--text-2)}
+.chg-merge-banner.ok{background:rgba(138,200,172,.12);color:var(--done)}.chg-merge-banner.bad{background:rgba(239,152,152,.12);color:var(--danger)}.chg-merge-banner.wait{background:rgba(224,188,127,.12);color:var(--waiting)}
+.chg-merge-banner ul{margin:4px 0 0 16px;padding:0;color:var(--text-2);font-size:12px}
+.chg-merge-word{font-weight:600}
+.chg-merge{margin-top:10px}
+.chg-merge-row{display:flex;gap:8px;align-items:center}
+.chg-merge-method{flex:1;min-width:0;background:var(--sunken);color:var(--text);border:1px solid var(--border-strong);border-radius:10px;padding:8px;font:12.5px system-ui,sans-serif}
+.chg-merge-ask{margin-bottom:8px;font-size:12.5px;color:var(--text)}
+.chg-btn.merge{background:var(--raised);color:var(--text)}
+.chg-btn.merge.ready{background:var(--done);color:var(--bg);box-shadow:0 0 0 0 rgba(138,200,172,.5);animation:chg-ready 2.4s ease-out infinite}
+@keyframes chg-ready{0%{box-shadow:0 0 0 0 rgba(138,200,172,.45)}70%{box-shadow:0 0 0 8px rgba(138,200,172,0)}100%{box-shadow:0 0 0 0 rgba(138,200,172,0)}}
+@media (prefers-reduced-motion:reduce){.chg-req.pending::before,.chg-pipe-seg.pending,.chg-check-state.pending::before,.chg-btn.merge.ready{animation:none}}
 `;
 
 export function openChanges(el, ctx) {
@@ -185,6 +258,7 @@ export function openChanges(el, ctx) {
     worktree: null, worktreeTitle: null,
     rowMenu: null, sheet: null, notice: null, copyToast: null, busy: null,
     commit: null, session: null, sessionOpen: null,
+    connect: null, merge: null,
   };
   let timer = null;
   let commitBtn = null;
@@ -206,8 +280,10 @@ export function openChanges(el, ctx) {
   const changedPaths = () => [...new Set((state.status?.files || []).filter((f) => !f.staged).map((f) => f.path))];
   // Only this pane's own commit box counts: the chat composer beside it is a
   // textarea too, and is focused most of the time.
-  const typing = () => { const a = document.activeElement; return !!a && a.tagName === "TEXTAREA" && el.contains(a); };
-  const canPoll = () => visible && document.visibilityState === "visible" && !state.confirm && !state.sheet && !typing();
+  const typing = () => { const a = document.activeElement; return !!a && (a.tagName === "TEXTAREA" || a.tagName === "INPUT" || a.tagName === "SELECT") && el.contains(a); };
+  // A half-typed token or an open merge confirmation must survive the 10-second re-read.
+  const canPoll = () => visible && document.visibilityState === "visible" && !state.confirm && !state.sheet && !typing()
+    && !(state.connect && state.connect.token) && !(state.merge && state.merge.confirm);
 
   function render() {
     el.innerHTML = "";
@@ -1017,17 +1093,18 @@ export function openChanges(el, ctx) {
     return "var(--muted)";
   }
 
-  function checkLabel(c) { return c === "passing" ? "checks pass" : c === "failing" ? "checks fail" : c === "pending" ? "checks pending" : ""; }
 
   function renderPulls() {
     const body = div("chg-body");
     const res = state.pulls;
     if (!res) { body.appendChild(div("chg-empty", state.error ? state.error : "Loading…")); return body; }
+    body.appendChild(renderHostBar(res));
     if (res.available === false) {
+      // GitLab and gitboy sign in with a token this computer stores; the rest
+      // say why in the host's own terms (a missing CLI, an unplaced remote).
+      if (res.reason === "auth" && res.host && (res.host.kind === "gitlab" || res.host.kind === "gitboy")) { body.appendChild(renderConnect(res)); return body; }
       const empty = div("chg-empty");
-      empty.appendChild(div("chg-empty-icon", "⇄"));
-      // The Hook says why in the host's own terms: a missing CLI, a host not
-      // built yet, or a remote it cannot place (with the override to set).
+      empty.appendChild(hostMark(res.host && res.host.kind, 28));
       const t = hostTerms(res.host);
       empty.appendChild(div("", `${capitalize(t.long)}s are not available here`));
       empty.appendChild(div("chg-folder", res.message || `${t.name} did not answer on this computer.`));
@@ -1035,64 +1112,237 @@ export function openChanges(el, ctx) {
       return body;
     }
     const pulls = res.pulls || [];
-    if (res.current) body.appendChild(renderCurrentPull(res.current));
+    if (res.current) body.appendChild(renderCurrentPull(res.current, res.host));
     if (!pulls.length && !res.current) {
       const empty = div("chg-empty");
-      empty.appendChild(div("chg-empty-icon", "⇄"));
+      empty.appendChild(hostMark(res.host && res.host.kind, 28));
       empty.appendChild(div("", `No open ${terms().long}s`));
       body.appendChild(empty);
       return body;
     }
     const others = pulls.filter((p) => !res.current || p.number !== res.current.number);
-    if (res.current && others.length) body.appendChild(sectionHead(`OPEN ${terms().long.toUpperCase()}S`, others.length));
-    for (const p of others) body.appendChild(renderPullRow(p, res.current));
+    if (others.length) body.appendChild(sectionHead(`OPEN ${terms().long.toUpperCase()}S`, others.length));
+    for (const p of others) body.appendChild(renderPullRow(p));
     return body;
   }
 
-  function renderCurrentPull(p) {
-    const card = div("chg-pr-card");
-    card.appendChild(div("chg-sec-h", "THIS BRANCH"));
-    const t = terms();
-    const title = div("chg-pr-card-title", `${t.ref}${p.number} ${p.title || ""}`);
-    title.onclick = () => { if (p.url) window.open(p.url, "_blank", "noopener"); };
-    card.appendChild(title);
-    const meta = div("chg-pr-meta");
-    meta.appendChild(span("chg-chip", (p.draft ? "draft · " : "") + String(p.state || "").toLowerCase()));
-    if (p.base) meta.appendChild(span("chg-chip", "→ " + p.base));
-    if (p.checks) meta.appendChild(span("chg-checks " + p.checks, checkLabel(p.checks)));
-    card.appendChild(meta);
-    const standing = pullStanding(p);
-    if (standing) card.appendChild(div("chg-pr-standing", standing));
-    const runs = p.checkRuns || [];
-    if (runs.length) {
-      card.appendChild(div("chg-log-meta", checksSummary(runs)));
-      const list = div("chg-checks-list");
-      for (const r of runs) {
-        const row = div("chg-check" + (r.url ? " link" : ""));
-        row.appendChild(span("chg-check-state " + r.state, { failing: "✕", pending: "●", passing: "✓", skipped: "–", neutral: "○" }[r.state] || "○"));
-        row.appendChild(span("chg-check-name", r.name));
-        if (r.workflow) row.appendChild(span("chg-check-wf", r.workflow));
-        if (r.url) { row.title = r.url; row.onclick = () => window.open(r.url, "_blank", "noopener"); }
-        list.appendChild(row);
-      }
-      card.appendChild(list);
-    } else if (p.checks == null) card.appendChild(div("chg-log-meta", `No checks reported for this ${t.long}.`));
+  // The remote's host, who this computer reads it as, and a way out to its site.
+  function renderHostBar(res) {
+    const host = res.host || {};
+    const bar = div("chg-host");
+    bar.appendChild(hostMark(host.kind, 18));
+    const who = div("chg-host-who");
+    who.appendChild(div("chg-host-name", host.kind ? `${host.name}${host.domain && !/^(github|gitlab)\.com$/.test(host.domain) ? ` · ${host.domain}` : ""}` : "No git host"));
+    const account = res.account;
+    const via = account ? { environment: "from the environment", file: "connected here", cli: "via glab" }[account.source] || "" : host.kind === "github" ? "via gh" : "";
+    const line = account && account.user ? `@${account.user}${via ? ` · ${via}` : ""}` : via;
+    if (line || (account && account.source === "file")) {
+      const sub = div("chg-host-sub", line);
+      if (account && account.source === "file") { const out = button("Disconnect", "chg-host-link", () => doConnect("")); sub.appendChild(out); }
+      who.appendChild(sub);
+    }
+    bar.appendChild(who);
+    if (host.webUrl) bar.appendChild(button(`Open on ${host.kind ? host.name : "the host"} ↗`, "chg-host-btn", () => window.open(host.webUrl, "_blank", "noopener")));
+    return bar;
+  }
+
+  function renderConnect(res) {
+    const host = res.host;
+    const c = state.connect || (state.connect = { token: "", error: "" });
+    const card = div("chg-connect");
+    const head = div("chg-connect-h");
+    head.appendChild(hostMark(host.kind, 30));
+    const words = div("");
+    words.appendChild(div("chg-connect-title", `Connect ${host.name}`));
+    words.appendChild(div("chg-connect-sub", `See ${hostTerms(host).long}s, pipelines and reviews for ${host.domain} here, and merge from this pane.`));
+    head.appendChild(words);
+    card.appendChild(head);
+    const steps = div("chg-connect-steps");
+    const page = tokenPage(host);
+    const one = div("chg-connect-step");
+    one.appendChild(span("chg-connect-n", "1"));
+    const oneBody = div("chg-connect-body");
+    oneBody.appendChild(span("", host.kind === "gitlab" ? "Create a personal access token with the api scope" : "Create a personal access token with read:repo and write:repo"));
+    if (page) oneBody.appendChild(button("Open token page ↗", "chg-host-btn", () => window.open(page, "_blank", "noopener")));
+    one.appendChild(oneBody);
+    steps.appendChild(one);
+    const two = div("chg-connect-step");
+    two.appendChild(span("chg-connect-n", "2"));
+    const twoBody = div("chg-connect-body row");
+    two.appendChild(twoBody);
+    const input = document.createElement("input");
+    input.type = "password"; input.className = "chg-connect-input"; input.placeholder = host.kind === "gitlab" ? "glpat-…" : "gbp_…";
+    input.autocomplete = "off"; input.spellcheck = false; input.value = c.token;
+    input.oninput = () => { c.token = input.value; c.error = ""; };
+    input.onkeydown = (e) => { if (e.key === "Enter") doConnect(c.token); };
+    twoBody.appendChild(input);
+    twoBody.appendChild(button(state.busy === "connect" ? "Checking…" : "Connect", "chg-btn commit", () => doConnect(c.token)));
+    steps.appendChild(two);
+    card.appendChild(steps);
+    if (c.error) card.appendChild(div("chg-error", c.error));
+    card.appendChild(div("chg-connect-foot", `The token is checked with ${host.name}, then stored only on that computer (mode 600), never in your Phren store. You can also run: phren bridge git-host set ${host.domain} ${host.kind}`));
     return card;
   }
 
-  function renderPullRow(p, current) {
+  async function doConnect(token) {
+    if (state.busy) return;
+    state.busy = "connect"; render();
+    try {
+      const res = await hookPost(computer, "/v1/git/host-token", scopeBody({ token: String(token || "").trim(), expectedRepository: repo() }));
+      if (res && res.ok) {
+        state.connect = null;
+        toast(res.disconnected ? `Disconnected ${res.domain}` : `Connected${res.user ? ` as @${res.user}` : ""}`);
+        state.pulls = await hookPost(computer, "/v1/git/pulls", scopeBody());
+      } else (state.connect || (state.connect = { token: "" })).error = (res && res.message) || "The host refused that token.";
+    } catch (e) { (state.connect || (state.connect = { token: "" })).error = newerHook(e, "host-token"); }
+    finally { state.busy = null; render(); }
+  }
+
+  function renderCurrentPull(p, host) {
+    const t = terms();
+    const card = div("chg-req " + (p.checks || "none"));
+    const top = div("chg-req-top");
+    top.appendChild(span("chg-req-state " + reqState(p), reqStateLabel(p)));
+    top.appendChild(span("chg-req-num", `${t.ref}${p.number}`));
+    if (p.updated) top.appendChild(span("chg-req-age", relativeTime(p.updated)));
+    card.appendChild(top);
+    const title = div("chg-req-title", p.title || "");
+    title.title = p.url || "";
+    title.onclick = () => { if (p.url) window.open(p.url, "_blank", "noopener"); };
+    card.appendChild(title);
+    const route = div("chg-req-route");
+    route.appendChild(span("chg-chip", p.head || ""));
+    route.appendChild(span("chg-req-arrow", "→"));
+    route.appendChild(span("chg-chip", p.base || ""));
+    if (p.author) route.appendChild(span("chg-req-by", `by @${p.author}`));
+    if (typeof p.ahead === "number" && p.ahead) route.appendChild(span("chg-req-by", `${p.ahead} ahead`));
+    if (typeof p.behind === "number" && p.behind) route.appendChild(span("chg-req-by", `${p.behind} behind`));
+    card.appendChild(route);
+
+    const chips = div("chg-req-chips");
+    const review = { APPROVED: ["Approved", "ok"], CHANGES_REQUESTED: ["Changes requested", "bad"], REVIEW_REQUIRED: ["Review required", "wait"] }[p.reviewDecision];
+    if (review) chips.appendChild(span("chg-pill " + review[1], review[0] + (p.approvals ? ` · ${p.approvals.given}${p.approvals.required ? `/${p.approvals.required}` : ""}` : "")));
+    else if (p.approvals && p.approvals.given) chips.appendChild(span("chg-pill ok", `${p.approvals.given} approval${p.approvals.given === 1 ? "" : "s"}`));
+    if (typeof p.comments === "number" && p.comments) chips.appendChild(span("chg-pill", `${p.comments} comment${p.comments === 1 ? "" : "s"}`));
+    if (p.conflicts) chips.appendChild(span("chg-pill bad", "Conflicts"));
+    if (chips.childNodes.length) card.appendChild(chips);
+
+    const runs = p.checkRuns || [];
+    if (runs.length || p.pipeline) card.appendChild(renderPipeline(p, runs));
+    else if (p.checks == null) card.appendChild(div("chg-log-meta", `No checks reported for this ${t.long}.`));
+
+    const merge = mergeAvailability(p);
+    if (p.mergeState || (p.blockers && p.blockers.length)) card.appendChild(renderMergeBanner(p));
+    if (merge.show) card.appendChild(renderMergeBar(p, host, merge));
+    return card;
+  }
+
+  function reqState(p) { return p.state === "MERGED" ? "merged" : p.state === "CLOSED" ? "closed" : p.draft ? "draft" : "open"; }
+  function reqStateLabel(p) { return { merged: "Merged", closed: "Closed", draft: "Draft", open: "Open" }[reqState(p)]; }
+
+  function renderPipeline(p, runs) {
+    const box = div("chg-pipe");
+    const head = div("chg-pipe-h");
+    // GitHub reports checks; GitLab and gitboy run a pipeline.
+    const what = state.pulls && state.pulls.host && state.pulls.host.kind !== "github" ? "Pipeline" : "Checks";
+    const word = { failing: `${what} failing`, pending: `${what} running`, passing: `${what} passed` }[p.checks] || "Checks";
+    const label = span("chg-pipe-word " + (p.checks || ""), word);
+    if (p.pipeline && p.pipeline.url) { label.classList.add("link"); label.onclick = () => window.open(p.pipeline.url, "_blank", "noopener"); label.title = p.pipeline.url; }
+    head.appendChild(label);
+    if (runs.length) head.appendChild(span("chg-pipe-sum", checksSummary(runs)));
+    box.appendChild(head);
+    const bar = div("chg-pipe-bar");
+    for (const seg of pipelineSegments(runs)) {
+      const s = div("chg-pipe-seg " + seg.state);
+      s.style.flexGrow = String(seg.count);
+      s.title = `${seg.count} ${seg.state}`;
+      bar.appendChild(s);
+    }
+    if (runs.length) box.appendChild(bar);
+    for (const group of groupRuns(runs)) {
+      const list = div("chg-checks-list");
+      if (group.name) list.appendChild(div("chg-check-group", group.name));
+      for (const r of group.runs) {
+        const row = div("chg-check" + (r.url ? " link" : ""));
+        row.appendChild(span("chg-check-state " + r.state, { failing: "✕", pending: "", passing: "✓", skipped: "–", neutral: "○" }[r.state] ?? "○"));
+        const name = span("chg-check-name", r.name);
+        if (r.detail) name.title = r.detail;
+        row.appendChild(name);
+        if (r.detail && r.state === "failing") row.appendChild(span("chg-check-detail", r.detail));
+        const d = durationText(r.seconds);
+        if (d) row.appendChild(span("chg-check-wf", d));
+        if (r.url) { row.title = r.url; row.onclick = () => window.open(r.url, "_blank", "noopener"); row.appendChild(span("chg-check-go", "↗")); }
+        list.appendChild(row);
+      }
+      box.appendChild(list);
+    }
+    return box;
+  }
+
+  function renderMergeBanner(p) {
+    const tone = p.mergeState === "CLEAN" ? "ok" : p.mergeState === "DIRTY" ? "bad" : p.mergeState === "UNKNOWN" ? "" : "wait";
+    const banner = div("chg-merge-banner " + tone);
+    banner.appendChild(div("chg-merge-word", p.mergeDetail || pullStanding({ mergeState: p.mergeState }) || "Merge state unknown"));
+    const extra = (p.blockers || []).filter((b) => b !== p.mergeDetail);
+    if (extra.length) { const ul = document.createElement("ul"); for (const b of extra) { const li = document.createElement("li"); li.textContent = b; ul.appendChild(li); } banner.appendChild(ul); }
+    return banner;
+  }
+
+  function renderMergeBar(p, host, avail) {
+    const m = state.merge && state.merge.number === p.number ? state.merge : (state.merge = { number: p.number, method: mergeMethods(host)[0][0], confirm: false });
+    const bar = div("chg-merge");
+    if (!avail.enabled) { bar.appendChild(div("chg-log-meta", avail.why)); return bar; }
+    if (m.confirm) {
+      const sha = p.headSha ? p.headSha.slice(0, 7) : "";
+      const label = (mergeMethods(host).find(([k]) => k === m.method) || [, "Merge"])[1];
+      bar.appendChild(div("chg-merge-ask", `${label} ${terms().ref}${p.number}${sha ? ` at ${sha}` : ""} into ${p.base || "its base"}?`));
+      const row = div("chg-merge-row");
+      row.appendChild(button("Cancel", "chg-btn stage", () => { m.confirm = false; render(); }));
+      row.appendChild(button(state.busy === "merge" ? "Merging…" : "Confirm merge", "chg-btn merge", () => doMerge(p)));
+      bar.appendChild(row);
+      return bar;
+    }
+    const row = div("chg-merge-row");
+    const select = document.createElement("select");
+    select.className = "chg-merge-method";
+    for (const [key, label] of mergeMethods(host)) { const o = document.createElement("option"); o.value = key; o.textContent = label; if (key === m.method) o.selected = true; select.appendChild(o); }
+    select.onchange = () => { m.method = select.value; };
+    row.appendChild(select);
+    row.appendChild(button(avail.ready ? "Merge" : "Merge…", "chg-btn merge" + (avail.ready ? " ready" : ""), () => { m.confirm = true; render(); }));
+    bar.appendChild(row);
+    if (!avail.ready) bar.appendChild(div("chg-log-meta", `${host && host.kind ? host.name : "The host"} decides; it will refuse while checks or reviews block it.`));
+    return bar;
+  }
+
+  async function doMerge(p) {
+    if (state.busy) return;
+    state.busy = "merge"; render();
+    const m = state.merge;
+    try {
+      const res = await hookPost(computer, "/v1/git/pr/merge", scopeBody({ number: p.number, method: m.method, ...(p.headSha ? { expectedHeadSha: p.headSha } : {}), expectedRepository: repo() }));
+      if (res && res.ok) { state.merge = null; toast(`Merged ${terms().ref}${p.number}`); state.landed = `merged-${p.number}`; }
+      else state.notice = { title: res && res.reason === "blocked" ? `${terms().ref}${p.number} can't be merged yet` : "The merge was refused", message: (res && res.message) || "The host refused the merge." };
+      m.confirm = false;
+      state.pulls = await hookPost(computer, "/v1/git/pulls", scopeBody());
+    } catch (e) { state.notice = { title: "Could not merge", message: newerHook(e, "pr/merge") }; }
+    finally { state.busy = null; render(); }
+  }
+
+  function renderPullRow(p) {
     const row = div("chg-pr-row");
     const dot = div("chg-dot");
     dot.style.background = pullColor(p);
     row.appendChild(dot);
     const mid = div("chg-main");
-    mid.appendChild(div("chg-pr-title", `${terms().ref}${p.number} ${p.title || ""}`));
+    const title = div("chg-pr-title");
+    title.appendChild(span("chg-req-num", `${terms().ref}${p.number}`));
+    title.appendChild(document.createTextNode(" " + (p.title || "")));
+    mid.appendChild(title);
     const meta = div("chg-pr-meta");
+    if (p.draft) meta.appendChild(span("chg-req-state draft", "Draft"));
     if (p.head) meta.appendChild(span("chg-chip", p.head));
-    if (p.base) meta.appendChild(span("chg-chip", "→ " + p.base));
-    if (p.author) meta.appendChild(span("chg-chip", p.author));
-    if (p.draft) meta.appendChild(span("chg-chip", "draft"));
-    if (current && current.number === p.number && current.checks) meta.appendChild(span("chg-checks " + current.checks, checkLabel(current.checks)));
+    if (p.author) meta.appendChild(span("chg-req-by", `@${p.author}`));
+    if (p.updated) meta.appendChild(span("chg-req-by", relativeTime(p.updated)));
     mid.appendChild(meta);
     row.appendChild(mid);
     row.title = p.url || "";
@@ -1269,6 +1519,20 @@ function injectStyle() {
 }
 
 // ---- helpers ---------------------------------------------------------------
+/** A small mark for the remote's host: GitHub's pull-request glyph, GitLab's
+ * fox, gitboy's handheld, or a neutral branch for an unknown host. */
+function hostMark(kind, size = 18) {
+  const paths = {
+    github: '<circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><circle cx="18" cy="18" r="2.4"/><path d="M6 8.4v7.2M18 15.6V10a3 3 0 0 0-3-3h-4m0 0 2.5-2.5M11 7l2.5 2.5" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+    gitlab: '<path d="M12 21.2 3.3 13.6l1.6-7.9 2.6 6.1h9l2.6-6.1 1.6 7.9z" stroke="none"/>',
+    gitboy: '<rect x="5" y="2.5" width="14" height="19" rx="3" fill="none" stroke-width="1.8"/><rect x="8" y="5.5" width="8" height="6" rx="1" stroke="none"/><path d="M9 15v4M7 17h4" fill="none" stroke-width="1.6" stroke-linecap="round"/><circle cx="15.5" cy="16" r="1.1" stroke="none"/><circle cx="17" cy="18.4" r="1.1" stroke="none"/>',
+  };
+  const mark = document.createElement("span");
+  mark.className = "chg-mark " + (kind || "none");
+  mark.innerHTML = `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" fill="currentColor" stroke="currentColor">${paths[kind] || '<circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 8.2v7.6M18 10.2c0 4-6 3-11 6" fill="none" stroke-width="1.7"/>'}</svg>`;
+  return mark;
+}
+
 function div(cls, text) {
   const d = document.createElement("div");
   if (cls) d.className = cls;

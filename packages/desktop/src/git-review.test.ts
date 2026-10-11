@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   branchProblem, checksSummary, diffModes, diffSides, hunkAt, hunkPatch, lineChangeTotals, localForRemote,
-  capitalize, hostTerms, pullStanding, splitHunks, stepChange, syncAction, trackingText,
+  capitalize, durationText, groupRuns, hostTerms, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, splitHunks, stepChange,
+  syncAction, tokenPage, trackingText,
 // @ts-expect-error git-review.js is plain JavaScript without type declarations
 } from "../ui/git-review.js";
 
@@ -136,5 +137,44 @@ describe("host terms", () => {
     expect(hostTerms(undefined)).toEqual({ short: "PR", long: "pull request", ref: "#", name: "the git host", supported: false });
     expect(hostTerms({ kind: null, name: "the git host", terms: { short: "PR", long: "pull request", ref: "#" } }).name).toBe("the git host");
     expect(capitalize("merge request")).toBe("Merge request");
+  });
+});
+
+describe("pull and merge request presentation", () => {
+  const runs = [
+    { name: "lint", state: "passing", workflow: "test" }, { name: "deploy", state: "neutral", workflow: "deploy" },
+    { name: "unit", state: "failing", workflow: "test" }, { name: "build", state: "pending", workflow: "build" }, { name: "docs", state: "passing" },
+  ];
+
+  it("sizes the pipeline bar by state, failing first", () => {
+    expect(pipelineSegments(runs)).toEqual([
+      { state: "failing", count: 1, share: 0.2 }, { state: "pending", count: 1, share: 0.2 }, { state: "passing", count: 2, share: 0.4 }, { state: "neutral", count: 1, share: 0.2 },
+    ]);
+    expect(pipelineSegments([])).toEqual([]);
+  });
+
+  it("groups checks by stage with the worst stage and run first", () => {
+    expect(groupRuns(runs).map((g: { name: string; runs: { name: string }[] }) => [g.name, g.runs.map((r) => r.name)]))
+      .toEqual([["test", ["unit", "lint"]], ["build", ["build"]], ["", ["docs"]], ["deploy", ["deploy"]]]);
+  });
+
+  it("offers Merge only on an open request, disabled with a reason for drafts and conflicts", () => {
+    expect(mergeAvailability({ state: "MERGED" })).toEqual({ show: false });
+    expect(mergeAvailability({ state: "OPEN", draft: true })).toMatchObject({ show: true, enabled: false });
+    expect(mergeAvailability({ state: "OPEN", mergeState: "DIRTY" })).toMatchObject({ enabled: false, why: "Resolve the conflicts first" });
+    expect(mergeAvailability({ state: "OPEN", mergeState: "CLEAN", checks: "passing" })).toMatchObject({ enabled: true, ready: true });
+    expect(mergeAvailability({ state: "OPEN", mergeState: "BLOCKED", checks: "failing" })).toMatchObject({ enabled: true, ready: false });
+    expect(mergeMethods({ kind: "gitlab" }).map(([m]: [string]) => m)).toEqual(["merge", "squash"]);
+    expect(mergeMethods({ kind: "gitboy" }).map(([m]: [string]) => m)).toEqual(["merge", "squash", "rebase"]);
+  });
+
+  it("links Connect to the host's own token page, and reads durations and ages", () => {
+    expect(tokenPage({ kind: "gitlab", domain: "gitlab.example.com" })).toBe("https://gitlab.example.com/-/user_settings/personal_access_tokens?name=Phren%20Hook&scopes=api");
+    expect(tokenPage({ kind: "gitboy", domain: "gitboy.example.com" })).toBe("https://gitboy.example.com/settings/tokens");
+    expect(tokenPage({ kind: "github", domain: "github.com" })).toBeNull();
+    expect([durationText(45), durationText(90), durationText(3600), durationText(7500), durationText(undefined)]).toEqual(["45s", "1m 30s", "1h", "2h 5m", ""]);
+    const now = Date.parse("2026-10-10T12:00:00Z");
+    expect([relativeTime("2026-10-10T11:59:30Z", now), relativeTime("2026-10-10T11:55:00Z", now), relativeTime("2026-10-08T12:00:00Z", now), relativeTime("", now)])
+      .toEqual(["just now", "5m ago", "2d ago", ""]);
   });
 });
