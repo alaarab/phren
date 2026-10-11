@@ -39,7 +39,8 @@ function json(response: { body: Buffer }): Record<string, unknown> {
   return JSON.parse(response.body.toString("utf8")) as Record<string, unknown>;
 }
 
-describe("trace redaction", () => {
+// Each test starts a bridge on a Unix socket, which Windows cannot listen on by path.
+describe.skipIf(process.platform === "win32")("trace redaction", () => {
   it("redacts nested sensitive keys and private-key or bearer strings", () => {
     const value = redactValue({
       ok: true,
@@ -76,7 +77,7 @@ describe("trace redaction", () => {
   });
 });
 
-describe("trace replay", () => {
+describe.skipIf(process.platform === "win32")("trace replay", () => {
   it("replays a recorded HTTP exchange with the same body", async () => {
     startTrace({ computers: ["This computer"] });
     await hookRequest(LOCAL, "GET", "/v1/health");
