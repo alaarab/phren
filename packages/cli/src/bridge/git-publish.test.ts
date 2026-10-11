@@ -82,6 +82,8 @@ describe("git publish routes", () => {
     await run(root, "remote", "add", "origin", remote);
     await run(root, "push", "-q", "-u", "origin", "main");
     await run(root, "remote", "set-head", "origin", "main");
+    // A bare remote on disk has no host in its URL; name it, as a self-hosted remote would be.
+    await run(root, "config", "remote.origin.phrenHost", "github");
     const git = (...args: string[]) => run(root, ...args);
     const remoteGit = (...args: string[]) => run(remote, ...args);
     return { root, remote, git, remoteGit };
@@ -193,7 +195,8 @@ describe("git publish routes", () => {
     await writeFile(path.join(stub, "signed-in"), "");
     await writeFile(path.join(stub, "create.out"), "Creating pull request for feature/pr into main in sam/phren\n\nhttps://github.com/sam/phren/pull/51\n");
     await writeFile(path.join(stub, "create.code"), "0");
-    expect(await gitPullRequest(root, true)).toEqual({ ok: true, url: "https://github.com/sam/phren/pull/51", branch: "feature/pr", draft: true });
+    expect(await gitPullRequest(root, true)).toMatchObject({ ok: true, url: "https://github.com/sam/phren/pull/51", branch: "feature/pr", draft: true,
+      host: { kind: "github", name: "GitHub", source: "remote-override", terms: { short: "PR" } } });
     expect(await readFile(path.join(stub, "calls.log"), "utf8")).toContain("pr create --fill --head feature/pr --draft");
 
     await writeFile(path.join(stub, "create.out"), "a pull request for branch \"feature/pr\" into branch \"main\" already exists:\nhttps://github.com/sam/phren/pull/51\n");
@@ -201,14 +204,14 @@ describe("git publish routes", () => {
     expect(await gitPullRequest(root, false)).toMatchObject({ ok: true, existing: true, url: "https://github.com/sam/phren/pull/51" });
 
     await writeFile(path.join(stub, "create.out"), "aborted: you must first push the current branch to a remote, or use the --head flag");
-    expect(await gitPullRequest(root, false)).toEqual({ ok: false, reason: "failed", output: "aborted: you must first push the current branch to a remote, or use the --head flag" });
+    expect(await gitPullRequest(root, false)).toMatchObject({ ok: false, reason: "failed", output: "aborted: you must first push the current branch to a remote, or use the --head flag" });
   });
 
   // The fake gh is a /bin/sh script, which Windows cannot execute.
   it.skipIf(process.platform === "win32")("carries the current branch's pull request and its checks in the pulls data", async () => {
     const { root, git } = await clone();
     await git("checkout", "-q", "-b", "feature/pr");
-    expect(await gitPulls(root)).toEqual({ available: true, pulls: [], branch: "feature/pr", current: null });
+    expect(await gitPulls(root)).toMatchObject({ available: true, pulls: [], branch: "feature/pr", current: null, host: { kind: "github", supported: true } });
     await writeFile(path.join(stub, "view.json"), JSON.stringify({
       number: 51, title: "Finish", url: "https://github.com/sam/phren/pull/51", state: "OPEN", isDraft: true,
       headRefName: "feature/pr", baseRefName: "main",

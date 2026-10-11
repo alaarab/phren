@@ -1596,6 +1596,30 @@ are writes and accept it. All four take `child` or `worktree` like the routes ab
 | `POST /v1/git/apply` | `patch` (one file's text hunks), `reverse?: true`, `expectedRepository?` | `{ok, path, staged}`. `git apply --cached` (with `reverse`, `-R`): stages or unstages those hunks in the index only, never the working tree. Rename, mode and binary patches and patches spanning files are 400; a hunk that no longer applies is `{ok: false, output}`. |
 | `POST /v1/git/session-changes` | none | `{root, calls, files, totalFiles, others, additions, deletions}`: this conversation's recorded edits in its repository, newest file first, each `{path, status, added, removed, redacted, binary, edits: [{toolUseId, status, added, removed, patch, truncated?}]}` (50 edits and 200 KB per patch at most). `others` counts edits in other repositories. |
 
+#### Git hosts
+
+`/v1/git/pulls` and `/v1/git/pr` go through one provider per git host: **GitHub**,
+**GitLab** and **gitboy**. The Hook picks the provider from the URL of the
+branch's upstream remote, falling back to `origin`.
+
+- `github.com`, `*.ghe.com` and a domain whose first label is `github` mean GitHub.
+- `gitlab.com` and `gitlab.*` mean GitLab.
+- `gitboy.*` means gitboy.
+
+Any other domain needs an override in git config:
+
+```sh
+git config remote.origin.phrenHost gitlab               # one remote
+git config --global phren.git.example.com.host gitboy   # every repository on a domain
+```
+
+Both answers carry `host: {kind, name, domain, webUrl, remote, source, terms: {short, long, ref}, supported}`.
+`source` is `url`, `remote-override`, `domain-override` or `none`. `terms` is `PR`/`pull request`/`#`,
+or `MR`/`merge request`/`!` on GitLab. GitHub is fully supported through `gh`, with `GH_HOST` set
+to the remote's domain, so GitHub Enterprise works. GitLab and gitboy are stubs for now. They answer
+`{available: false, reason: "unsupported", message}`, and `/v1/git/pr` answers `{ok: false, reason: "unsupported"}`.
+A domain the Hook cannot place answers `reason: "unknown-host"`, with the override command in `message`.
+
 `/v1/git/pulls` `current` also carries `checkRuns: [{name, state, workflow?, url?}]`
 (state `failing`, `pending`, `passing`, `skipped` or `neutral`; failing first, at
 most 100) and, when GitHub reports them, `reviewDecision` and `mergeState`.

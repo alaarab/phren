@@ -26,7 +26,12 @@ export interface FakeGit {
   calls: { route: string; body: Record<string, unknown> }[];
 }
 
-export function createFakeGit(): FakeGit {
+/** The host the fake remote is on: GitHub (fully answered) or a stubbed
+ * GitLab, as the Hook's providers answer them. */
+export function createFakeGit(options: { host?: "github" | "gitlab" } = {}): FakeGit {
+  const host = options.host === "gitlab"
+    ? { kind: "gitlab", name: "GitLab", domain: "gitlab.example.com", webUrl: "https://gitlab.example.com/team/phren", remote: "origin", source: "remote-override", terms: { short: "MR", long: "merge request", ref: "!" }, supported: false }
+    : { kind: "github", name: "GitHub", domain: "github.com", webUrl: "https://github.com/sam/phren", remote: "origin", source: "url", terms: { short: "PR", long: "pull request", ref: "#" }, supported: true };
   let stagedHunks = 0;
   let readmeStaged = false;
   let branch = "main";
@@ -190,8 +195,11 @@ export function createFakeGit(): FakeGit {
       if (t) t.behind = 0;
       return ok({ ok: true, branch, upstream: t?.upstream, commits: commitsIn });
     },
-    "POST /v1/git/pulls": () => ok({
-      available: true, branch,
+    "POST /v1/git/pulls": () => options.host === "gitlab" ? ok({
+      available: false, reason: "unsupported", message: "GitLab merge requests and their checks are not supported yet. The rest of Changes works as usual.",
+      pulls: [], current: null, branch, host,
+    }) : ok({
+      available: true, branch, host,
       pulls: [
         { number: 42, title: "Login: keep the signed-in user", head: "feat/login", base: "main", author: "sam", url: "https://github.com/sam/phren/pull/42", draft: false, state: "OPEN", updated: ago(1) },
         { number: 37, title: "Draft: parser rewrite", head: "agent/parser", base: "main", author: "codex", url: "https://github.com/sam/phren/pull/37", draft: true, state: "OPEN", updated: ago(5) },

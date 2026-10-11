@@ -29,11 +29,12 @@ let hub: OverviewHub;
 let closeServer: (() => Promise<void>) | undefined;
 let url: string;
 
-test.beforeEach(async () => {
+test.beforeEach(async ({}, info) => {
   if (!existsSync(UI_LINK)) { symlinkSync(UI_SOURCE, UI_LINK, "dir"); linkedUi = true; }
   dir = await mkdtemp(path.join(tmpdir(), "desktop-git-"));
   process.env.PHREN_BRIDGE_HOME = dir;
-  git = createFakeGit();
+  // A test titled "on GitLab" runs against a GitLab remote (a stubbed provider).
+  git = createFakeGit({ host: /on GitLab/.test(info.title) ? "gitlab" : "github" });
   hook = await startFakeHook({ dir, routes: git.routes, files: { "src/app.ts": FAKE_GIT_WORKING_APP } });
   hub = createOverviewHub([LOCAL], hookWebSocket);
   const ready = new Promise<void>((resolve) => { hub.on("change", (merged: MergedOverview) => { if (merged.computers[0]?.overview) resolve(); }); });
@@ -220,4 +221,23 @@ test("the Session view lists what this agent changed, edit by edit", async ({ pa
   await row.locator('.chg-icon[title="Open the file\'s uncommitted diff"]').click();
   await expect(page.locator(".dd-doc .monaco-diff-editor")).toBeVisible({ timeout: 20_000 });
   expect(errors).toEqual([]);
+});
+
+test("on GitLab the requests are merge requests, and the stubbed provider says so", async ({ page }) => {
+  const errors = await openSession(page);
+  await expect(page.locator('.chg-seg[data-view="pulls"]')).toHaveText("MRs");
+  await expect(page.locator(".chg-actions-row")).toContainText("Create MR");
+  await page.locator('.chg-seg[data-view="pulls"]').click();
+  await expect(page.locator(".chg-empty")).toContainText("Merge requests are not available here");
+  await expect(page.locator(".chg-empty")).toContainText("GitLab merge requests and their checks are not supported yet");
+  await shot(page, "gitlab-stub.png");
+  // The rest of Changes works as usual.
+  await page.locator('.chg-seg[data-view="history"]').click();
+  await expect(page.locator(".chg-log-row .chg-sha")).toHaveCount(3);
+  expect(errors).toEqual([]);
+});
+
+test("on GitHub the pull request chip and links name the host's own terms", async ({ page }) => {
+  await openSession(page);
+  await expect(page.locator('.chg-seg[data-view="pulls"]')).toHaveText("PRs");
 });

@@ -3,7 +3,7 @@
 // CSS (injected once) and re-renders fully from module state.
 import { hookPost, readRepoFile } from "./api.js";
 import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
-import { branchProblem, checksSummary, localForRemote, pullStanding, syncAction, trackingText } from "./git-review.js";
+import { branchProblem, capitalize, checksSummary, hostTerms, localForRemote, pullStanding, syncAction, trackingText } from "./git-review.js";
 import { announceGitChange } from "./diff-doc.js";
 
 // The phone's Changes tabs, minus Working tree (the Files pane owns that here).
@@ -11,6 +11,7 @@ import { announceGitChange } from "./diff-doc.js";
 // Short labels so six fit the panel; each carries its full name as a title.
 const VIEWS = [["changes", "Changes", "Uncommitted changes"], ["session", "Session", "What this agent changed"], ["history", "History", "Commit history"],
   ["branches", "Branches", "Branches"], ["pulls", "PRs", "Pull requests and checks"], ["worktrees", "Workers", "Other worktrees and the workers in them"]];
+// The pulls label follows the remote's host ("MRs" on GitLab) once /v1/git/pulls answers.
 
 const CSS = `
 .chg{display:flex;flex-direction:column;height:100%;min-height:0;color:var(--text-2);font:13px/1.45 system-ui,sans-serif}
@@ -200,8 +201,12 @@ export function openChanges(el, ctx) {
     return b;
   };
   const repo = () => (state.status && state.status.repository) || undefined;
+  // What the remote's host calls its requests; generic until /v1/git/pulls says.
+  const terms = () => hostTerms(state.pulls && state.pulls.host);
   const changedPaths = () => [...new Set((state.status?.files || []).filter((f) => !f.staged).map((f) => f.path))];
-  const typing = () => document.activeElement && document.activeElement.tagName === "TEXTAREA";
+  // Only this pane's own commit box counts: the chat composer beside it is a
+  // textarea too, and is focused most of the time.
+  const typing = () => { const a = document.activeElement; return !!a && a.tagName === "TEXTAREA" && el.contains(a); };
   const canPoll = () => visible && document.visibilityState === "visible" && !state.confirm && !state.sheet && !typing();
 
   function render() {
@@ -376,11 +381,12 @@ export function openChanges(el, ctx) {
     try {
       const body = scopeBody({ draft: !!draft, ...(fields || {}) });
       const res = await hookPost(computer, "/v1/git/pr", body);
-      if (res && res.ok && res.url) state.notice = { title: res.existing ? "This branch already has a pull request" : "Pull request opened", message: res.url, url: res.url };
-      else state.notice = { title: "Could not open a pull request", message: res.message || res.output || "gh pr create failed." };
+      const t = hostTerms(res && res.host);
+      if (res && res.ok && res.url) state.notice = { title: res.existing ? `This branch already has a ${t.long}` : `${capitalize(t.long)} opened`, message: res.url, url: res.url, site: t.name };
+      else state.notice = { title: `Could not open a ${t.long}`, message: res.message || res.output || `The ${t.long} was not created.` };
       state.sheet = null;
       await refresh();
-    } catch (e) { state.notice = { title: "Could not open a pull request", message: e.message || String(e) }; }
+    } catch (e) { state.notice = { title: `Could not open a ${terms().long}`, message: e.message || String(e) }; }
     finally { state.busy = null; render(); }
   }
 
@@ -443,10 +449,11 @@ export function openChanges(el, ctx) {
   function renderTop() {
     const top = div("chg-top");
     const segs = div("chg-segs");
+    const t = terms();
     for (const [key, label, title] of VIEWS) {
       if ((key === "worktrees" || key === "session") && state.worktree) continue;
-      const seg = button(label, "chg-seg" + (state.view === key ? " sel" : ""), () => selectView(key));
-      seg.title = title;
+      const seg = button(key === "pulls" ? t.short + "s" : label, "chg-seg" + (state.view === key ? " sel" : ""), () => selectView(key));
+      seg.title = key === "pulls" ? `${capitalize(t.long)}s and checks` : title;
       seg.dataset.view = key;
       segs.appendChild(seg);
     }
@@ -470,8 +477,9 @@ export function openChanges(el, ctx) {
     bar.appendChild(name);
     const pr = state.pulls && state.pulls.current;
     if (pr && pr.head === s.branch) {
-      const chip = button(`#${pr.number}`, "chg-bb-pr " + (pr.checks || "none"), () => selectView("pulls"));
-      chip.title = `Pull request #${pr.number}` + (pr.checks ? ` · checks ${pr.checks}` : "");
+      const t = terms();
+      const chip = button(`${t.ref}${pr.number}`, "chg-bb-pr " + (pr.checks || "none"), () => selectView("pulls"));
+      chip.title = `${capitalize(t.long)} ${t.ref}${pr.number}` + (pr.checks ? ` · checks ${pr.checks}` : "");
       bar.appendChild(chip);
     }
     const act = syncAction(s);
@@ -732,12 +740,13 @@ export function openChanges(el, ctx) {
     if (!plan.push) push.title = pushReason(s) || "Nothing to push.";
     actions.appendChild(push);
     const existing = plan.pull && plan.pull.existing;
-    const prBtn = button(existing ? `PR #${existing}` : "Create PR", "chg-btn stage", () => {
+    const t = terms();
+    const prBtn = button(existing ? `${t.short} ${t.ref}${existing}` : `Create ${t.short}`, "chg-btn stage", () => {
       if (existing) window.open(plan.pull.url, "_blank", "noopener");
       else if (plan.pull && plan.pull.open) openPrSheet(s);
     });
     prBtn.disabled = !plan.pull || !!state.busy;
-    if (!plan.pull) prBtn.title = prReason(s);
+    if (!plan.pull) prBtn.title = prReason(s, t.long);
     actions.appendChild(prBtn);
     foot.appendChild(actions);
     if (state.landed) foot.appendChild(div("chg-note", state.landed));
@@ -1017,8 +1026,11 @@ export function openChanges(el, ctx) {
     if (res.available === false) {
       const empty = div("chg-empty");
       empty.appendChild(div("chg-empty-icon", "⇄"));
-      empty.appendChild(div("", "GitHub CLI is not signed in on this computer"));
-      empty.appendChild(div("chg-folder", "Install gh, then run gh auth login there."));
+      // The Hook says why in the host's own terms: a missing CLI, a host not
+      // built yet, or a remote it cannot place (with the override to set).
+      const t = hostTerms(res.host);
+      empty.appendChild(div("", `${capitalize(t.long)}s are not available here`));
+      empty.appendChild(div("chg-folder", res.message || `${t.name} did not answer on this computer.`));
       body.appendChild(empty);
       return body;
     }
@@ -1027,12 +1039,12 @@ export function openChanges(el, ctx) {
     if (!pulls.length && !res.current) {
       const empty = div("chg-empty");
       empty.appendChild(div("chg-empty-icon", "⇄"));
-      empty.appendChild(div("", "No open pull requests"));
+      empty.appendChild(div("", `No open ${terms().long}s`));
       body.appendChild(empty);
       return body;
     }
     const others = pulls.filter((p) => !res.current || p.number !== res.current.number);
-    if (res.current && others.length) body.appendChild(sectionHead("OPEN PULL REQUESTS", others.length));
+    if (res.current && others.length) body.appendChild(sectionHead(`OPEN ${terms().long.toUpperCase()}S`, others.length));
     for (const p of others) body.appendChild(renderPullRow(p, res.current));
     return body;
   }
@@ -1040,7 +1052,8 @@ export function openChanges(el, ctx) {
   function renderCurrentPull(p) {
     const card = div("chg-pr-card");
     card.appendChild(div("chg-sec-h", "THIS BRANCH"));
-    const title = div("chg-pr-card-title", `#${p.number} ${p.title || ""}`);
+    const t = terms();
+    const title = div("chg-pr-card-title", `${t.ref}${p.number} ${p.title || ""}`);
     title.onclick = () => { if (p.url) window.open(p.url, "_blank", "noopener"); };
     card.appendChild(title);
     const meta = div("chg-pr-meta");
@@ -1063,7 +1076,7 @@ export function openChanges(el, ctx) {
         list.appendChild(row);
       }
       card.appendChild(list);
-    } else if (p.checks == null) card.appendChild(div("chg-log-meta", "No checks reported for this pull request."));
+    } else if (p.checks == null) card.appendChild(div("chg-log-meta", `No checks reported for this ${t.long}.`));
     return card;
   }
 
@@ -1073,7 +1086,7 @@ export function openChanges(el, ctx) {
     dot.style.background = pullColor(p);
     row.appendChild(dot);
     const mid = div("chg-main");
-    mid.appendChild(div("chg-pr-title", `#${p.number} ${p.title || ""}`));
+    mid.appendChild(div("chg-pr-title", `${terms().ref}${p.number} ${p.title || ""}`));
     const meta = div("chg-pr-meta");
     if (p.head) meta.appendChild(span("chg-chip", p.head));
     if (p.base) meta.appendChild(span("chg-chip", "→ " + p.base));
@@ -1140,7 +1153,7 @@ export function openChanges(el, ctx) {
     if (n.message) box.appendChild(div("", n.message));
     if (n.url) {
       const a = document.createElement("a");
-      a.className = "chg-notice-link"; a.href = n.url; a.textContent = "View on GitHub";
+      a.className = "chg-notice-link"; a.href = n.url; a.textContent = `View on ${n.site || "the git host"}`;
       a.target = "_blank"; a.rel = "noopener";
       box.appendChild(a);
     }
@@ -1212,15 +1225,16 @@ export function openChanges(el, ctx) {
     const sheet = div("chg-sheet");
     sheet.onclick = (e) => { if (e.target === sheet) { state.sheet = null; render(); } };
     const card = div("chg-sheet-card");
-    card.appendChild(div("chg-sheet-h", "Open a pull request"));
+    const t = terms();
+    card.appendChild(div("chg-sheet-h", `Open a ${t.long}`));
     card.appendChild(sheetField("Title", "title", s.title, false, "Derived from the commits"));
     card.appendChild(sheetField("Body", "body", s.body, true, "Derived from the commits"));
     card.appendChild(sheetField("Base", "base", s.base, false, "Default branch"));
-    card.appendChild(div("chg-log-meta", "Phren opens this with gh --fill on the computer."));
+    card.appendChild(div("chg-log-meta", `The computer opens this on ${t.name}, titled from the commits.`));
     const actions = div("chg-sheet-actions");
     actions.appendChild(button("Cancel", "chg-btn stage", () => { state.sheet = null; render(); }));
     actions.appendChild(button("Open as draft", "chg-btn stage", () => submitPr(card, true)));
-    actions.appendChild(button(state.busy === "pr" ? "Opening…" : "Open pull request", "chg-btn commit", () => submitPr(card, false)));
+    actions.appendChild(button(state.busy === "pr" ? "Opening…" : `Open ${t.long}`, "chg-btn commit", () => submitPr(card, false)));
     card.appendChild(actions);
     sheet.appendChild(card);
     return sheet;
@@ -1346,9 +1360,10 @@ export function pushReason(status) {
   return "";
 }
 
-/** Why the pull request action is disabled, or "" when it is possible. */
-export function prReason(status) {
-  if (!status || !status.branch) return "No branch to open a pull request from.";
+/** Why the pull request action is disabled, or "" when it is possible.
+ * `term` is the host's word for it ("merge request" on GitLab). */
+export function prReason(status, term = "pull request") {
+  if (!status || !status.branch) return `No branch to open a ${term} from.`;
   if (isDefaultBranch(status)) return "This is the default branch.";
   if (!status.upstream) return "Push the branch first.";
   if (status.ahead > 0) return "Push " + status.ahead + " commit" + (status.ahead === 1 ? "" : "s") + " first.";

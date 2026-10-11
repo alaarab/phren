@@ -155,3 +155,21 @@ export function stepChange(changes, line, delta) {
   for (let i = changes.length - 1; i >= 0; i--) if (start(changes[i]) < line) return i;
   return changes.length - 1;
 }
+
+/** How the remote's host names its requests, from the Hook's `host` answer:
+ * GitHub and gitboy say pull request (#42), GitLab merge request (!42). An
+ * unknown or not yet loaded host reads as a generic "pull request" on "the
+ * git host", never as any one product. */
+export function hostTerms(host) {
+  const terms = host && host.terms ? host.terms : {};
+  return {
+    short: terms.short || "PR",
+    long: terms.long || "pull request",
+    ref: terms.ref || "#",
+    name: (host && host.kind && host.name) || "the git host",
+    supported: !!(host && host.supported),
+  };
+}
+
+/** "Pull request" → sentence case for titles. */
+export function capitalize(text) { return text ? text[0].toUpperCase() + text.slice(1) : text; }
