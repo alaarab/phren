@@ -396,6 +396,22 @@ export function buildOutline(rows: SymbolHit[]): OutlineEntry[] {
   return roots;
 }
 
+/**
+ * The file each cited name resolves to, as a finding citation resolves it,
+ * with one database open. Names that resolve to nothing are left out.
+ */
+export async function resolveSymbolFiles(store: string, project: string, names: string[]): Promise<QueryResult<Record<string, string>>> {
+  const result = await withCodeDb(store, project, db => {
+    const files: Record<string, string> = {};
+    for (const name of new Set(names)) {
+      const file = resolveSymbol(db, name).chosen?.file;
+      if (file) files[name] = file;
+    }
+    return files;
+  });
+  return { available: result.available, databasePath: result.databasePath, value: result.value ?? {} };
+}
+
 export async function outline(
   store: string,
   project: string,

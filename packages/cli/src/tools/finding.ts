@@ -154,9 +154,11 @@ function withLifecycleMutation<T>(
 
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
-async function handleAddFinding(
+export async function handleAddFinding(
   ctx: McpContext,
   params: {
+    /** Provenance `tool:` for a caller other than an MCP client (the Hook's gitboy route). */
+    tool?: string;
     project: string;
     finding: string | string[];
     citation?: { file?: string; line?: number; repo?: string; commit?: string; name?: string; symbol?: string; supersedes?: string; task_item?: string };
@@ -194,6 +196,7 @@ async function handleAddFinding(
     machine: getMachineName(),
     actor: getCurrentActor(),
     session_id: sessionId,
+    ...(params.tool ? { tool: params.tool } : {}),
   };
 
   const normalizedScope = normalizeMemoryScope(scope ?? "shared");
