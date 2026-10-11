@@ -17,6 +17,9 @@ pnpm workspace with turborepo. Shipped packages:
 | `@phren/cli` | `packages/cli/` | Published | CLI, MCP server, data layer |
 | `@phren/agent` | `packages/agent/` | Published, version-locked to `@phren/cli` | phren's coding agent. Optional like `@phren/code`: `phren agent` lazy-loads it (`packages/cli/src/modules/agent-package.ts`) and spawns its `phren-agent` binary, which also works on its own. It pins the exact CLI version (its `workspace:*` dependency is rewritten by `pnpm pack` in `release.yml`, which publishes it right after the CLI); `validate-docs` fails if the two versions drift. Its suite runs under its own vitest config in the CI `agent-test` job (`pnpm exec turbo run test --filter=@phren/agent`), not the root `pnpm test`. |
 | `@phren/vscode` | `packages/vscode/` | VS Code Marketplace | VS Code extension. Versions separately from the CLI (`packages/vscode/CHANGELOG.md`, shown on the Marketplace listing) and releases through the `Release VS Code extension` workflow. It is a thin client calling MCP tools by name, so it starts its server in the `full` tool profile, and a test in `packages/cli` fails if the CLI stops registering a tool it calls. |
+| `@phren/desktop` | `packages/desktop/` | Private, unreleased | Phren desktop (owner-only): a daemon that is an SSH client of every computer's Hook with its own desktop key, a plain-ESM UI (`ui/`, contract in `ui/CONTRACT.md`) and an Electron shell. Guide: `docs/desktop.md`. Smoke tests: `pnpm exec playwright test -c packages/desktop/playwright.config.ts` against `src/testing/fake-hook.ts`. |
+| `@phren/desktop-kit` | `packages/desktop-kit/` | Private | Client logic ported from the Android kit (transcript reader, chat timeline, tool presentation) with the Kotlin tests ported; served to the desktop UI at `/vendor/kit/`. |
+| `@phren/desktop-editor` | `packages/desktop-editor/` | Private | VS Code's editor and extension host (monaco-vscode-api) built with Vite into `packages/desktop/ui/editor-host`; `scripts/build-reh.sh` builds the matching VS Code server for Node extensions. |
 
 Outside the pnpm workspace:
 
@@ -57,6 +60,8 @@ Outside the pnpm workspace:
 | `packages/cli/src/bridge/code-routes.ts` | Registered-store Code routes: tree, symbol and filename search, outlines and batched counts, a file's resolved references, definitions with findings, references, paged usage, what changed, per-file change counts and reindex; debounced refresh after recorded file changes. |
 | `packages/cli/src/bridge/code-note.ts` | Validates a dossier line, saves a finding linked to that function, type or variable, then optionally hands off to the chosen session or dispatches a worker; delivery failure is separate from save success. |
 | `packages/cli/src/bridge/files.ts` | Read-only `/v1/projects/files` browser for discovered checkouts: relative paths, no symlinks or `.git`, 2 MiB files and at most 500 directory entries. |
+| `packages/cli/src/bridge/project-memory.ts` | gitboy's Hook routes: `GET /v1/projects/:project/memory` (findings, truths, tasks, `remote:`), `/memory/files` (findings by cited file or code-index symbol), `/memory/search` (findings and truths ranked with the retrieval tokenizer and chunk matcher), `/tasks?branch=` and `POST /findings` (through `handleAddFinding`). Capped, credential-bearing text withheld. |
+| `packages/cli/src/bridge/scoped-gateway.ts` | The scoped SSH gateway (`dispatch-scoped`, `ssh-scoped`) for keys paired with `phren pair --scope gitboy-read|gitboy-write`: admits only the scope's routes, validates path, query and body against `gitboy-contract.ts`, rebuilds the Hook request itself, answers everything else with a refusal. |
 | `packages/cli/src/bridge/file-resolve.ts` | `GET /v1/files/resolve`: resolve chat references against the selected pane or worker cwd, then its Git root; return a safe repository-relative path and metadata using the file-range reader. |
 | `packages/cli/src/bridge/transcript-preview.ts` | Ephemeral live reply previews from Claude pane text and Codex/OpenCode deltas, capped at two updates per second and cleared by completed entries. |
 | `packages/cli/src/bridge/terminal.ts` | `TerminalProvider`: what the Hook needs from a terminal multiplexer (snapshot in the Hook's pane shape, list panes, processes, read screen, send keys, prompt, create, start an agent, focus, rename/close, ping). Identity and status stay out of it except as optional hints. `terminalProvider()` returns a router that sends each call to its server's provider (`terminalKind`: `tmux` / `tmux-<socket>` are tmux unless Herdr has that session, everything else Herdr); tests swap in a fake with `setTerminalProvider`. |
@@ -109,7 +114,7 @@ pnpm lint          # lint all packages
 
 ## Current Version
 
-`@phren/cli` 0.3.33 (see `packages/cli/package.json`).
+`@phren/cli` 0.3.37 (see `packages/cli/package.json`).
 
 ## Reference Documentation
 

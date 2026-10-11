@@ -120,8 +120,8 @@ phren store subscribe team-store forge portal
 phren store unsubscribe team-store legacy-projects
 ```
 
-### Progressive disclosure
-Enable `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1` to get compact memory indices instead of full snippets. Call `get_memory_detail(id)` to expand only what you need.
+### Clanker mode
+`phren config clanker on` makes the prompt hook, `search_knowledge`, `get_tasks` and `get_findings` return one short row per hit (id, title, a few keywords, a score) instead of the text. The agent opens what it needs with `get_memory_detail(id)`; a `fid:` or `bid:` id returns just that finding or task. New installs start with it on; `phren config clanker off` turns it off.
 
 ### Semantic dedup & conflict detection
 Optional: enable LLM-based duplicate detection and contradiction flagging on `add_finding`. Prevents near-duplicate entries and catches "always use X" vs "never use X" contradictions.
@@ -139,7 +139,7 @@ A project's `schedules.yaml` runs an agent on an assigned computer at a local ti
 One conversation reads the project's tasks and sends independent briefs to enrolled computers with `phren dispatch`, which places a first prompt over pinned SSH and returns a durable receipt instead of a completion claim ([docs/conductor.md](docs/conductor.md)).
 
 ### iOS app
-[phren for iOS](https://alaarab.github.io/phren/ios.html) is a closed-source app for project memory and running agents; its source is not in this repository. GitHub sync keeps findings, notes, tasks and skills on your phone. Phren Hook adds Codex, Claude Code, Copilot and OpenCode chat, terminals, repository changes, the Code index and local app previews over pinned SSH/Tailscale. Steer working agents, remember notes about a function and send them to its agent, and reach a conductor through Siri or the Action button. Memory offers map and list views; local schedule and approval notifications need no relay. [Set up Phren Hook](https://alaarab.github.io/phren/phren-hook.html) on each computer with `npx --yes @phren/cli@0.3.33 bridge install`.
+[phren for iOS](https://alaarab.github.io/phren/ios.html) is a closed-source app for project memory and running agents; its source is not in this repository. GitHub sync keeps findings, notes, tasks and skills on your phone. Phren Hook adds Codex, Claude Code, Copilot and OpenCode chat, terminals, repository changes, the Code index and local app previews over pinned SSH/Tailscale. Steer working agents, remember notes about a function and send them to its agent, and reach a conductor through Siri or the Action button. Memory offers map and list views; local schedule and approval notifications need no relay. [Set up Phren Hook](https://alaarab.github.io/phren/phren-hook.html) on each computer with `npx --yes @phren/cli@0.3.37 bridge install`.
 
 ---
 

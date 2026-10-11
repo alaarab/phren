@@ -11,6 +11,7 @@ import { stripTerminal } from "../terminal-text.js";
 import { codexExecutable } from "./codex-binary.js";
 import { readSpeechKey } from "./speech-key.js";
 import { resolveSpeechRegion, SPEECH_REGIONS } from "./speech-voice.js";
+import { accountWindows } from "./account-choice.js";
 import { CODEX_ACCOUNT, claudeAccountSubscription, claudeAccountEmail, claudeAccountRef, claudeHomeOfEnv, claudeHomes, type AccountRef, type ClaudeHome } from "./claude-accounts.js";
 
 import { planName, subscriptionDate, type Subscription } from "./subscription.js";
@@ -645,14 +646,15 @@ export function windowLeft(window: UsageWindow, now: number): number | undefined
 }
 
 /** What a capacity probe says about room: each Codex and Claude account's least room left, and whether it has none
- *  (`exhausted`, with `until` the last reset that frees it). */
-export function capacityRoom(accounts: readonly AccountUsage[], now: number): Array<{ source: string; account?: string; leftPercent?: number; exhausted?: true; until?: string }> {
+ *  (`exhausted`, with `until` the last reset that frees it). Claude rows add their 5-hour and weekly rooms, which
+ *  launch and failover rank accounts by (account-choice.ts). */
+export function capacityRoom(accounts: readonly AccountUsage[], now: number): Array<{ source: string; account?: string; leftPercent?: number; exhausted?: true; until?: string } & ReturnType<typeof accountWindows>> {
   return accounts.map(usage => {
     const left = usage.windows.map(window => windowLeft(window, now)).filter((value): value is number => value !== undefined);
     const out = usage.windows.filter(window => windowExhausted(window, now));
     const until = out.map(window => window.resetsAt).filter((value): value is string => Boolean(value)).sort().at(-1);
     return { source: usage.source, ...(usage.account?.id ? { account: usage.account.id } : {}), ...(left.length ? { leftPercent: Math.min(...left) } : {}),
-      ...(out.length ? { exhausted: true as const, ...(until ? { until } : {}) } : {}) };
+      ...(out.length ? { exhausted: true as const, ...(until ? { until } : {}) } : {}), ...(usage.source === "claude" ? accountWindows(usage, now) : {}) };
   });
 }
 
@@ -681,6 +683,10 @@ export function settleClaudeUsage(usage: AccountUsage, now: number): AccountUsag
   return { ...usage, windows, message: `No usage report from Claude on this computer${since ? ` since ${since}` : ""}. It updates when Claude Code runs here.` };
 }
 
+/** `opencode stats` scans OpenCode's whole database, several CPU-seconds on a
+ *  busy machine, for a rolling seven-day cost that barely moves in a minute. */
+export const OPENCODE_STATS_REUSE_MS = 10 * 60_000;
+
 export class AccountUsageReader {
   private cached?: { at: number; value: AccountUsage };
   private pending?: Promise<AccountUsage>;
@@ -688,6 +694,8 @@ export class AccountUsageReader {
   private claudePending = new Map<string, Promise<AccountUsage | undefined>>();
   private spendingCached = new Map<string, { at: number; value: AccountUsage[] }>();
   private spendingPending = new Map<string, Promise<AccountUsage[]>>();
+  private openCodeCached?: { at: number; value: AccountUsage };
+  private openCodePending?: Promise<AccountUsage>;
   constructor(private readCodex = readCodexLimits, private now = Date.now,
               private readClaudeLive: (now: Date, home: ClaudeHome) => Promise<AccountUsage | undefined> = liveClaudeUsage,
               private readOpenCode: (now: Date) => Promise<AccountUsage> = now => readOpenCodeUsage("opencode", now),
@@ -726,7 +734,7 @@ export class AccountUsageReader {
     if (!cached || this.now() - cached.at >= 60_000) {
       const at = this.now();
       if (!this.spendingPending.has(key)) {
-        const pending = Promise.all([this.readOpenCode(new Date(at)), this.readOpenCodeGo(new Date(at)), this.readOpenRouter(new Date(at)),
+        const pending = Promise.all([this.openCode(at), this.readOpenCodeGo(new Date(at)), this.readOpenRouter(new Date(at)),
           includeCopilot ? this.readCopilot(new Date(at)) : Promise.resolve(undefined),
           includeElevenLabs ? this.readElevenLabs(new Date(at)).catch(() => undefined) : Promise.resolve(undefined)])
           .then(([openCode, openCodeGo, openRouter, copilot, elevenLabs]) => [openCode, openCodeGo, ...(openRouter ? [openRouter] : []), ...(copilot ? [copilot] : []), ...(elevenLabs ? [elevenLabs] : [])])
@@ -736,6 +744,14 @@ export class AccountUsageReader {
       }
     }
     return this.spendingPending.get(key) ?? cached!.value;
+  }
+  /** One `opencode stats` run serves every spending key for `OPENCODE_STATS_REUSE_MS`. */
+  private openCode(at: number): Promise<AccountUsage> {
+    if (this.openCodeCached && at - this.openCodeCached.at < OPENCODE_STATS_REUSE_MS) return Promise.resolve(this.openCodeCached.value);
+    this.openCodePending ??= this.readOpenCode(new Date(at))
+      .then(value => { this.openCodeCached = { at, value }; return value; })
+      .finally(() => { this.openCodePending = undefined; });
+    return this.openCodePending;
   }
   /** Live first, so the phone's minute-by-minute poll keeps Claude current
    *  even when Claude Code is not running; the local snapshot is the backup.

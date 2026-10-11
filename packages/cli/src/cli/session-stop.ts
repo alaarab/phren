@@ -643,6 +643,15 @@ export async function handleBackgroundSync() {
         unsyncedCommits,
       }, failDetail);
     });
+    // Team stores are separate repos; without this their commits only left the
+    // machine when an agent called push_changes.
+    const { syncTeamStores } = await import("../tools/finding.js");
+    for (const result of await syncTeamStores(phrenPathLocal)) {
+      logSyncOutcome(phrenPathLocal, "team-sync", {
+        ok: result.pushed,
+        detail: result.pushed ? `pushed ${result.store}` : `${result.store}: ${result.error ?? "push failed"}`,
+      });
+    }
   } catch (err: unknown) {
     logSyncOutcome(phrenPathLocal, "background-sync", { ok: false, detail: errorMessage(err) });
     throw err;

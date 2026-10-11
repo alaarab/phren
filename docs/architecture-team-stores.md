@@ -246,19 +246,18 @@ function resolveWriteStore(project: string): StoreEntry {
 
 ### Git Sync Per Store
 
-Stop hook iterates stores:
+Session start pulls every attached store; a pull commits the store's local writes before merging. The primary store is pushed by the background sync the Stop hook schedules. The same background sync then commits each team store's team-safe paths and pushes any team store that is dirty or ahead of its upstream, and session start schedules it whenever a pull leaves a team store ahead. `push_changes` runs the same team-store sync. Readonly stores are only pulled.
 
 ```
-Stop Hook
-├─ For each store where role == primary:
-│   ├─ git add -A && commit && push (current behavior)
-├─ For each store where role == team:
-│   ├─ git add journal/ only (append-only files)
-│   ├─ git commit -m "phren: $PHREN_ACTOR findings"
-│   └─ fetch, merge with union-safe store files, then push
-├─ For each store where role == readonly:
-│   └─ fetch and fast-forward or merge
-└─ Update health.json per store
+Session start
+├─ For each attached store: pull (commit local writes, merge, never rewrite)
+└─ Any team store ahead → schedule background sync
+
+Background sync (scheduled by Stop or session start)
+├─ Primary store: push, merge and retry on rejection
+└─ For each team store:
+    ├─ git add the team-safe pathspecs, commit if staged
+    └─ push when ahead of upstream (merge and retry on rejection)
 ```
 
 ### Provenance in Findings
@@ -279,7 +278,7 @@ Team stores can have `skills/` directories. Resolution order:
 2. Team store skills (read-only, inherited)
 3. Global skills
 
-No mirroring/copying — skills are loaded from their source store at runtime.
+No copying: a team-store project's skills stay in the team store. `phren link` and the post-pull refresh symlink them into `<repo>/.claude/skills` for every team-store project with a checkout on this machine (its `sourcePath`, else a folder of the same name under the usual project roots), whether or not the machine's profile lists the project. Profiles filter the primary store only; a team store narrows itself with its own `projects` subscription.
 
 ### Consolidation
 

@@ -24,7 +24,7 @@ import { validateTaskFormat, validateFindingsFormat } from "../shared/content.js
 import { commandExists, detectInstalledTools, isEphemeralNpxPath, findStaleHookEntrypoints } from "../hooks.js";
 import { validateSkillFrontmatter, validateSkillsDir } from "./skills.js";
 import { verifyFileChecksums, updateFileChecksums } from "./checksums.js";
-import { buildSkillManifest } from "../skill/registry.js";
+import { buildSkillManifest, skillMirrorPath } from "../skill/registry.js";
 import { inspectTaskHygiene } from "../task/hygiene.js";
 import { resolveTaskFilePath, TASK_FILE_ALIASES } from "../data/tasks.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
@@ -241,7 +241,7 @@ function pushSkillMirrorChecks(
   });
 
   for (const skill of manifest.skills.filter((entry) => entry.visibleToAgents)) {
-    const dest = path.join(destDir, skill.format === "folder" ? skill.name : path.basename(skill.path));
+    const dest = skillMirrorPath(destDir, skill);
     let ok = false;
     try {
       ok = fs.existsSync(dest) && fs.realpathSync(dest) === fs.realpathSync(skill.root);

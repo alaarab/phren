@@ -7,6 +7,7 @@ import { assessSyncOutage, FAILED_PUSH_STATUSES, getRuntimeHealth } from "../gov
 import { getProjectDirs } from "../phren-paths.js";
 import { resolveAllStores } from "../store-registry.js";
 import { publicComputerKey } from "./computers.js";
+import { localHostKeyLine } from "./host-key.js";
 import { hookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { BridgeError, bridgeRoot, errorCode, type Json } from "./protocol.js";
 import { canonicalComputer, latestScheduleBatch, readScheduleDocument, readScheduleRuns, scheduleRunsFile } from "./schedules.js";
@@ -96,12 +97,14 @@ export interface HealthOptions {
   push?: { configured: boolean; devices: number };
 }
 
-const VERSION_TIMEOUT_MS = 3_000;
+// A busy computer can take seconds just to start a Node harness (OpenCode took
+// 2.4 s on a 20-core box at load 17), so 3 s reported healthy installs as broken.
+const VERSION_TIMEOUT_MS = 8_000;
 const VERSION_CACHE_MS = 5 * 60_000;
 const PEER_TIMEOUT_MS = 5_000;
 const versionCache = new Map<string, { at: number; value: Promise<ToolVersion> }>();
 
-/** `<tool> --version`, bounded to 3 seconds and remembered for 5 minutes. `args` come
+/** `<tool> --version`, bounded to 8 seconds and remembered for 5 minutes. `args` come
  * before `--version` for a tool behind a subcommand (`phren agent --version`). */
 export function toolVersion(tool: string, executable = tool, args: string[] = []): Promise<ToolVersion> {
   const cached = versionCache.get(tool);
@@ -110,7 +113,7 @@ export function toolVersion(tool: string, executable = tool, args: string[] = []
     let out = "", done = false;
     const child = spawn(executable, [...args, "--version"], { cwd: homedir(), stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_COLOR: "1" } });
     const finish = (result: ToolVersion) => { if (!done) { done = true; clearTimeout(timer); resolve(result); } };
-    const timer = setTimeout(() => { child.kill("SIGKILL"); finish({ tool, status: "error", detail: "--version did not answer within 3 seconds" }); }, VERSION_TIMEOUT_MS);
+    const timer = setTimeout(() => { child.kill("SIGKILL"); finish({ tool, status: "error", detail: `--version did not answer within ${VERSION_TIMEOUT_MS / 1000} seconds` }); }, VERSION_TIMEOUT_MS);
     const collect = (chunk: Buffer) => { if (out.length < 4_096) out += chunk.toString(); };
     child.stdout.on("data", collect); child.stderr.on("data", collect);
     child.on("error", (error: NodeJS.ErrnoException) => finish(error.code === "ENOENT" ? { tool, status: "missing" }
@@ -188,7 +191,8 @@ export async function lastScheduledRun(store: string, runsFile = scheduleRunsFil
 
 /** This computer's public SSH host key, the pin a peer's hooks.yaml holds for it. */
 export async function ownHostKey(): Promise<string | undefined> {
-  try { return publicComputerKey(await readFile("/etc/ssh/ssh_host_ed25519_key.pub", "utf8")); } catch { return undefined; }
+  const line = await localHostKeyLine();
+  try { return line ? publicComputerKey(line) : undefined; } catch { return undefined; }
 }
 
 /** Whether this computer's hooks.yaml lists the caller, by pinned host key or by name. */

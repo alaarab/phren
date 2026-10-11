@@ -21,6 +21,8 @@ A composite takes `action` plus the target tool's own parameters, validated agai
 
 Most tools return structured JSON: `{ ok, message, data?, error? }`. The five code query tools return compact text.
 
+Responses are held well under the roughly 25,000-token limit Claude Code puts on a tool result. Search, task, findings and summary tools size their own output (see each tool). As a last resort, any response over 60,000 characters is replaced by its message cut short plus `data: { truncated: true, originalChars }` and a note on how to narrow the call. `export_project` is exempt, since an export is only useful whole.
+
 Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration, topic summaries, code index, dispatch and hand-off.
 
 ## Cross-computer dispatch
@@ -515,11 +517,12 @@ An uncertain result is never retried automatically.
 
 ### `get_memory_detail`
 
-Fetch the full content of a specific memory entry by its ID. This is Layer 3 of the progressive disclosure system: when `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1`, the hook-prompt injects a compact memory index instead of full snippets for 3+ results. Use this tool to expand any entry from that index.
+Fetch the full content of a specific memory entry by its ID. Use it to expand a `search_knowledge` excerpt or a row from [clanker mode](#clanker-mode). A `fid:xxxxxxxx` (finding) or `bid:xxxxxxxx` (task) id returns that one entry with its continuation lines (citations, task Context) in `data.content`, plus `data.source`, the `mem:` id of the file it lives in.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `id` | string | yes | Memory ID in the format `mem:project/filename` (e.g. `mem:my-app/FINDINGS.md`). Returned by the hook-prompt compact index. |
+| `id` | string | yes | `fid:xxxxxxxx`, `bid:xxxxxxxx`, or `mem:project/filename` (e.g. `mem:my-app/FINDINGS.md`). Returned by `search_knowledge`, `get_findings`, `get_tasks` and the hook-prompt index. |
+| `offset` | number | no | Character offset to read from. Documents over 16,000 characters come back a page at a time: `data.total_chars` is the full length and `data.next_offset` is where the next page starts (`null` on the last page). |
 
 ---
 
@@ -541,9 +544,21 @@ Search the user's personal project store using FTS5 full-text search with synony
 
 A findings result carries the linked function, type or variable in its `symbol` field (and `symbols`) when the finding has a code link, so a client can show which code the finding is about.
 
+Each result is an excerpt around the match, not the whole document. Snippets share a budget of about 6,000 characters per response (at most 1,200 per result), so a response stays a few thousand tokens however long the matched lines are. A result has an `id` (`mem:project/filename`; absent for federated results) and `truncated: true` when the excerpt is not the whole document; pass the `id` to `get_memory_detail` for the full text.
+
+#### Clanker mode
+
+With clanker mode on (`phren config clanker on`, `PHREN_CLANKER=on`), `search_knowledge`, `get_findings` and `get_tasks` return rows instead of text, one per line in `message`:
+
+```
+fid:803b2823 Hook per-call change capture (bridge/changes.ts treeHash): never set the scratch index mt… [bridge, hook, per-call, bridge/changes.ts] 0.56
+```
+
+That is the id, a title of up to 90 characters (140 in the prompt hook, whose few rows arrive unasked), up to four keywords (up to two of the query's terms it matched, then the entry's own identifiers and longest words) and, for searches, the share of query terms the entry contains. A search returns one row per matching finding or task (at most three per document, at most twice `limit` in all) and one row per other document, prefixed with the project when no `project` filter was given; `data.ids` lists the ids. `get_findings` rows carry the date and a non-active status, `get_tasks` rows the section, priority and claim. `data` keeps counts and paging but not the rows. Pass an id to `get_memory_detail` for the full text. The prompt hook injects the same rows, with the `fb:` key, and drops its trace line.
+
 ### `get_project_summary`
 
-Get a project's summary card and list of indexed documents.
+Get a project's summary card and list of indexed documents. The summary is cut at 6,000 characters (`data.summaryTruncated`) and the truths list at 20 entries of 300 characters; the message names the `get_memory_detail` id for the full text.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -565,7 +580,8 @@ List recent findings for a project without requiring a search query.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
-| `limit` | number | no | Max rows to return (1-200, default 50). |
+| `limit` | number | no | Max rows to return (1-200, default 50). Fewer come back when the rows would not fit the response budget; the message then names the offset to continue from. |
+| `offset` | number | no | Skip the first N rows. `data.next_offset` is the offset of the next page (`null` when none remain). |
 | `include_superseded` | boolean | no | Include superseded findings (legacy compatibility flag). |
 | `include_history` | boolean | no | Include historical findings (`superseded`, `retracted`). |
 | `status` | enum | no | Filter by lifecycle status: `active`, `superseded`, `contradicted`, `stale`, `invalid_citation`, `retracted`. |
@@ -643,6 +659,8 @@ Get tasks for a project (or all projects). Supports progressive disclosure: use 
 | `done_limit` | number | no | Max Done items to return, most recent first (1-200, default 5). Done sections are capped tightly by default to avoid large responses. |
 | `offset` | number | no | Skip the first N items in each section before applying limit. Use with `limit` for pagination (e.g. offset:20, limit:20 for page 2). |
 | `status` | enum | no | Filter by section: `all`, `active`, `queue`, `done`, `active+queue` (default). |
+
+List views show only the latest 300 characters of a long Context (marked `contextTruncated: true`); look up one task by `project` and `id` for its full context. A list that would still be too large for one response comes back with fewer items per section and a note saying so. Across all projects, when even one item per section does not fit, the response is the `summary` view; summary responses carry counts and previews but no item rows in `data`.
 
 ### `add_task`
 
@@ -1429,6 +1447,31 @@ is `{path, size, contentType, version}`, with a repository-relative path that
 can be passed to `/v1/files/range` with the same target/worktree. No file bytes
 or absolute server paths are returned. Hook advertises `fileResolution`.
 
+`POST /v1/files/write` saves one text file in the session's repository for the
+desktop editor. It takes the full session target, optional `child` or `worktree`
+(as the Git routes), a repository-relative `path`, the file's UTF-8 `content`
+(at most 4 MiB) and the `version` that `/v1/files/range` returned when the
+editor read it. The write goes through a temp file and a rename in the same
+folder and keeps the file's mode. A `version` that no longer matches answers
+409 with `code: "file-changed"` and leaves the file alone. Leaving `version`
+out creates a new file, refused with `code: "file-exists"` when one is there.
+Absolute paths, `..`, `.git`, symbolic links on the way and missing folders
+are refused. The reply is `{path, version, size, created}`. Hook advertises
+`fileWrite`; it is part of the `git` module.
+
+`POST /v1/files/search` is find in files for the desktop editor. It takes the
+full session target (optional `child` or `worktree`), a one-line `query` (at most
+200 characters), optional `regex` (extended), `caseSensitive`, `wholeWord`, up to
+eight `include` path patterns (a bare `*.ts` matches in every folder) and `limit`
+(1 to 1000, default 300). It runs `git grep` over tracked and untracked text files,
+so ignored and binary files are skipped. The reply is
+`{matches: [{file, lines: [{line, column, text, offset?}]}], files, total, truncated}`
+with at most 50 matches per file; `text` is at most 300 characters starting at
+`offset`. An invalid expression answers 400 `search-invalid-regex`, output past
+4 MiB 413 `search-too-broad`. Hook advertises `fileSearch`. `POST /v1/files/list`
+(same target) returns `{files, total, truncated}`: every tracked and untracked,
+not ignored, file path in the repository (at most 20,000), for quick open.
+
 `POST /v1/git/tree` takes the session's full target, optional `child` or
 `worktree`, relative `path` and optional `ignored: true`. It returns one directory
 with descendant file counts and a snapshot version; with `ignored`, the level's
@@ -1536,6 +1579,50 @@ stderr interleaved, at most 64 KiB). Input errors are ordinary 400/409 errors.
 | `POST /v1/git/commit` | `message` (required, at most 20,000 characters) | `{ok, sha, short, subject, branch, output?}`. Commits the index only; 409 when nothing is staged. Hooks always run (never `--no-verify`), and a hook's refusal is `{ok: false, output}`. |
 | `POST /v1/git/push` | `confirmDefault?: true` | `{ok, branch, remote, upstream, setUpstream, output}`. Pushes the current branch to its upstream, or to `origin` with the upstream set. Never forced. The default branch (the remote's `HEAD`, else `main`/`master`) is 409 without `confirmDefault`; a detached HEAD or missing remote is 409. |
 | `POST /v1/git/pr` | `draft?: true` | `{ok, url, branch, draft?, existing?}` through `gh pr create --fill`. `{ok: false, reason: "missing" \| "auth", message}` when gh is not installed or not signed in; `reason: "failed"` with gh's `output` otherwise. |
+
+### Commit detail, branches and sync
+
+`POST /v1/git/show` reads, so it takes no `expectedRepository`; the other three
+are writes and accept it. All four take `child` or `worktree` like the routes above.
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `POST /v1/git/show` | `sha` (4 to 64 hex characters) | `{sha, short, subject, body, author, authorEmail, date, committer, committed, parents, refs, files, totalFiles, additions, deletions, truncated}`. Each file is `{path, oldPath?, status, additions, deletions, binary, countsComplete, sections: [{id, kind: "commit", binary, loadState, patch, truncated}]}`, compared with the first parent (the empty tree for a root commit), renames detected. At most 300 files carry a patch, 200 KB per file and 1 MB in all; past that `truncated` is true. An unknown commit is 404. |
+| `POST /v1/git/checkout` | `branch`, `create?: true`, `startPoint?`, `carryChanges?: true` | `{ok, branch, previous, changed, created?, upstream?, carried?}` through `git switch --no-guess`. With `create`, a new branch from `startPoint` (a local or remote-tracking branch; a remote one becomes its upstream) or HEAD; 409 `git-branch-exists` when it exists. Without it, an existing local branch; 404 otherwise. Uncommitted tracked edits are 409 `git-dirty` (with `changes`) unless `carryChanges` is true, and Git still refuses anything it would overwrite (`{ok: false, output}`). |
+| `POST /v1/git/fetch` | none | `{ok, remote, output?}`. `git fetch --prune --no-tags` of the current branch's upstream remote, else `origin`; 409 `git-no-remote` without one. |
+| `POST /v1/git/pull` | none | `{ok, branch, upstream, commits, output?}`. `git pull --ff-only --no-rebase` from the upstream; `commits` is how many arrived. A branch without an upstream or a detached HEAD is 409; a diverged branch is Git's refusal as `{ok: false, output}`. Never a merge commit or a rebase. |
+
+| `POST /v1/git/file` | `ref` (`HEAD`, `INDEX` or a commit hash), `path` | `{path, ref, size, text}`; `missing: true` when that side has no such file, `binary: true` for bytes with a NUL, `tooLarge: true` past 2 MB, each with empty `text`. A diff editor compares whole files with it. |
+| `POST /v1/git/apply` | `patch` (one file's text hunks), `reverse?: true`, `expectedRepository?` | `{ok, path, staged}`. `git apply --cached` (with `reverse`, `-R`): stages or unstages those hunks in the index only, never the working tree. Rename, mode and binary patches and patches spanning files are 400; a hunk that no longer applies is `{ok: false, output}`. |
+| `POST /v1/git/session-changes` | none | `{root, calls, files, totalFiles, others, additions, deletions}`: this conversation's recorded edits in its repository, newest file first, each `{path, status, added, removed, redacted, binary, edits: [{toolUseId, status, added, removed, patch, truncated?}]}` (50 edits and 200 KB per patch at most). `others` counts edits in other repositories. |
+
+#### Git hosts
+
+`/v1/git/pulls` and `/v1/git/pr` go through one provider per git host: **GitHub**,
+**GitLab** and **gitboy**. The Hook picks the provider from the URL of the
+branch's upstream remote, falling back to `origin`.
+
+- `github.com`, `*.ghe.com` and a domain whose first label is `github` mean GitHub.
+- `gitlab.com` and `gitlab.*` mean GitLab.
+- `gitboy.*` means gitboy.
+
+Any other domain needs an override in git config:
+
+```sh
+git config remote.origin.phrenHost gitlab               # one remote
+git config --global phren.git.example.com.host gitboy   # every repository on a domain
+```
+
+Both answers carry `host: {kind, name, domain, webUrl, remote, source, terms: {short, long, ref}, supported}`.
+`source` is `url`, `remote-override`, `domain-override` or `none`. `terms` is `PR`/`pull request`/`#`,
+or `MR`/`merge request`/`!` on GitLab. GitHub is fully supported through `gh`, with `GH_HOST` set
+to the remote's domain, so GitHub Enterprise works. GitLab and gitboy are stubs for now. They answer
+`{available: false, reason: "unsupported", message}`, and `/v1/git/pr` answers `{ok: false, reason: "unsupported"}`.
+A domain the Hook cannot place answers `reason: "unknown-host"`, with the override command in `message`.
+
+`/v1/git/pulls` `current` also carries `checkRuns: [{name, state, workflow?, url?}]`
+(state `failing`, `pending`, `passing`, `skipped` or `neutral`; failing first, at
+most 100) and, when GitHub reports them, `reviewDecision` and `mergeState`.
 
 `POST /v1/git/pulls` also returns `branch` and `current`: the checked-out
 branch's pull request in any state, `{number, title, url, head, base, draft,
@@ -1650,6 +1737,13 @@ clients can name oversized files before requesting them and continue syncing
 other files. An incomplete pull must retain its previous successful head and
 retry after the file is archived or shortened on the computer.
 
+`POST /v1/store/blobs { shas: [...] }` (capability `memoryStoreBatch`, at most
+256 shas) answers `{ blobs: [{ sha, encoding: "base64", content } | { sha,
+error }] }` from one `git cat-file --batch`. `error` is `unknown`,
+`too-large` (over 4 MiB, with `size`) or `later` (past the 9 MiB per-answer
+budget: ask again). Phren desktop's store mirror uses it instead of one
+request per blob.
+
 ### `GET /v1/usage`
 
 Account limits and spend for the phone's Account usage screen: `{accounts: [...]}`, each account carrying `source` (`codex`, `claude`, `opencode`, `opencode-go`, `openrouter`, `copilot`, `elevenlabs`), `windows`, optional `updatedAt`, `message`, `spend`, `accountName`, `accountId`, for Claude `origin`, and `account: {id, label, key}` on Claude and Codex rows (Claude rows add `email` when the login names one). A Claude window whose reset passed after its report is sent as `reset: true` without `usedPercent`, and Claude windows reported over three days ago are dropped. By default there is one `claude` row, the default home; `?accounts=all` adds one row per extra Claude home (`~/.claude-<id>`), default first, since a phone built before accounts refuses two rows of one source. Extra homes have no live read on macOS and use the status-line snapshot (`usage/claude-<id>.json`) plus their own `.claude.json`. The optional `?sources=` comma list names the sources the phone understands; an older phone that sends none gets the original four so it never meets a source it cannot read. `elevenlabs` appears only on a computer with the ElevenLabs key spoken replies use (`phren bridge speech-key set`): the Hook reads `GET /v1/user/subscription` on the `speech-region` endpoint (`api.elevenlabs.io` by default) with that key, sent only there, and reports one `elevenlabs:characters` window with `usedPercent`, `usedCharacters`, `limitCharacters` and `resetsAt`; the key never reaches the phone. `copilot` is GitHub Copilot's own quota report read through the GitHub CLI's sign-in (`gh api /copilot_internal/user`): one window per limited quota (premium requests) with its monthly reset, unlimited quotas named in `message`; the token never reaches Phren. OpenCode Go's windows come from Go's own account report (`GET https://opencode.ai/zen/go/v1/usage`, with the local Go key sent only there): `opencode-go:plan:5h|7d|30d` with `usedPercent`, `resetsAt` and `limited: true` while Go refuses requests on that window. They are account-wide, so they already count every computer. They carry no dollar amounts, and are sent only with `?goPlan=1`, since older phones reject a Go window with a percentage and no dollar limit. The Go account's `message` says which limit is reached and how many requests OpenCode's own log shows refused with "usage limit exceeded" in the last day. The log is read incrementally; the first read covers at most its last 64 MB. With `?peers=1` the answer adds `computer` and `peers: [{name, computer, accounts} | {name, error, code?}]`, each linked computer's own answer over its pinned SSH pipe.
@@ -1716,7 +1810,12 @@ to `list`; optional `includeResolved` shows history. `add` requires `title`, wit
 optional `project` and stable UUID `id`. `resolve` requires `id`, with optional
 `resolution` and `computer` (the listed item's `inboxComputer`, omitted for
 local). A resolve does not answer or approve a prompt. Lists include local and
-linked computers' inboxes plus `unreachable` entries.
+linked computers' inboxes plus `unreachable` entries. Automatic items are
+deduplicated by pane, session and question and shown only while verified live.
+Answered or disappeared sources resolve automatically on reads or the five-second
+Hook tick; manual items require explicit resolution. The first reconciliation
+after upgrade resolves legacy stale automatic rows with `stale: source gone`.
+Unreachable workers are hidden as unverified without resolving their items.
 
 Dispatch additions: optional `closeOnFinish` defaults to true, closing a
 verified finished pane after reading its done return; false keeps it open.

@@ -24,7 +24,7 @@ import { herdrAgentName, streamCloseReason } from "./server.js";
 import { historicalImage, phrenStoreRoot, TranscriptReader, transcriptPath, visibleEvent } from "./transcripts.js";
 import { readDeltaPreview, TranscriptPreviewStream } from "./transcript-preview.js";
 import { dispatch } from "./transport.js";
-import { askpassScript } from "./sudo.js";
+import { askpassScript, newDelivery } from "./sudo.js";
 import { enrollComputer, publicComputerKey } from "./computers.js";
 import { FakeClaude } from "./__fixtures__/claude-questions/fake-claude.js";
 
@@ -718,6 +718,9 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
             foreground_processes: [{ pid: foregroundPID }, ...helperPIDs.map(pid => ({ pid }))] } }
           : req.method === "agent.read" ? readPane(req.params.target)
           : req.method === "pane.read" ? readPane(req.params.pane_id)
+          : req.method === "pane.layout" ? { type: "pane_layout", layout: { tab_id: "w1:t1", workspace_id: "w1", focused_pane_id: req.params.pane_id, zoomed: false,
+            area: { x: 0, y: 0, width: 200, height: 50 }, splits: [{ direction: "vertical", ratio: 0.5 }],
+            panes: [{ pane_id: "w1:p1", focused: true, rect: { x: 0, y: 0, width: 100, height: 50 } }, { pane_id: "w1:p2", focused: false, rect: { x: 100, y: 0, width: 100, height: 50 } }] } }
           : req.method === "agent.prompt" ? { type: "agent_prompted", agent: agentInfo(panes().find(p => p.pane_id === agentTarget || agentNames.get(String(p.pane_id)) === agentTarget)!) }
           : { type: "ok" }) }) + "\n");
         if (holdSnapshot && req.method === "session.snapshot") { holdSnapshot = false; releaseSnapshot = answer; }
@@ -914,6 +917,44 @@ socket.on('close', () => process.exit(0));
       expect(Buffer.concat(chunks).toString()).toContain('"product":"phren-hook"');
       const sample = JSON.parse(await readFile(path.join(root, "bridge/gateway.json"), "utf8"));
       expect(sample.ms).toBeGreaterThanOrEqual(0);
+    });
+
+    it("serves only their own routes through gitboy-read and gitboy-write scoped keys", async () => {
+      const scoped = async (request: string, command = "phren-hook v1 pipe", scope = "gitboy-read") => {
+        const child = spawn(process.execPath, [hookBundle, "ssh-scoped", scope], {
+          env: { ...process.env, PHREN_BRIDGE_HOME: path.join(root, "bridge"), PHREN_HERDR_HOME: path.join(root, "herdr"),
+            PHREN_PATH: path.join(root, ".phren"), SSH_ORIGINAL_COMMAND: command },
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        const chunks: Buffer[] = []; child.stdout.on("data", bytes => chunks.push(bytes));
+        child.stdin.write(request);
+        const [code] = await once(child, "exit");
+        child.stdin.destroy();
+        return { code, reply: Buffer.concat(chunks).toString() };
+      };
+      // This fixture's Hook runs with memory off, so the route itself answers
+      // that (an unrouted path would say "Unknown Phren Hook route").
+      const memory = await scoped("GET /v1/projects/gitboy-demo/memory HTTP/1.1\r\nHost: phren.local\r\nConnection: close\r\n\r\n");
+      expect(memory.code).toBe(0);
+      expect(memory.reply).toMatch(/^HTTP\/1\.1 404 /);
+      expect(memory.reply).toMatch(/X-Phren-Protocol: 1/i);
+      expect(memory.reply).toContain("module memory is disabled");
+      const refused = await scoped("POST /v1/dispatch HTTP/1.1\r\nHost: phren.local\r\nContent-Length: 0\r\n\r\n");
+      expect(refused.reply).toMatch(/^HTTP\/1\.1 403 /);
+      expect(refused.reply).not.toMatch(/X-Phren-Protocol/i);
+      const health = await scoped("GET /v1/health HTTP/1.1\r\nHost: phren.local\r\n\r\n");
+      expect(health.reply).toMatch(/^HTTP\/1\.1 403 /);
+      expect((await scoped("", "phren-hook v1 terminal main")).code).not.toBe(0);
+      const search = await scoped("GET /v1/projects/gitboy-demo/memory/search?q=boom HTTP/1.1\r\nHost: phren.local\r\n\r\n");
+      expect(search.reply).toMatch(/X-Phren-Protocol: 1/i);
+      // The write key reaches only its own route; the read key never reaches it.
+      const body = JSON.stringify({ text: "Save this fix" });
+      const save = `POST /v1/projects/gitboy-demo/findings HTTP/1.1\r\nHost: phren.local\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\n\r\n${body}`;
+      const written = await scoped(save, "phren-hook v1 pipe", "gitboy-write");
+      expect(written.reply).toMatch(/X-Phren-Protocol: 1/i);
+      expect(written.reply).toContain("module memory is disabled");
+      expect((await scoped(save)).reply).toMatch(/^HTTP\/1\.1 403 /);
+      expect((await scoped("GET /v1/projects/gitboy-demo/memory HTTP/1.1\r\nHost: phren.local\r\n\r\n", "phren-hook v1 pipe", "gitboy-write")).reply).toMatch(/^HTTP\/1\.1 403 /);
     });
 
     it.each([false, true])("returns an intact upload reply through the SSH gateway (stdin EOF: %s)", async endInput => {
@@ -1372,6 +1413,16 @@ schedules:
       expect(enters()).toBe(before + 1);
     }, 20_000);
 
+    it("serves a Herdr tab's pane layout for the desktop's mirror", async () => {
+      const answer = await new Promise<any>((resolve, reject) => {
+        const req = request({ socketPath: path.join(root, "bridge/hook.sock"), path: `/v1/workspaces/layout?server=default&pane=w1:p1`, method: "GET", headers: { Host: "phren.local" } }, res => {
+          let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve({ status: res.statusCode, ...JSON.parse(data) }));
+        }); req.on("error", reject); req.end();
+      });
+      expect(answer.status).toBe(200);
+      expect(answer.layout.panes.map((p: any) => p.pane_id)).toEqual(["w1:p1", "w1:p2"]);
+    });
+
     it("reports a compacting conversation and clears it when the new context starts", async () => {
       const post = (event: string) => new Promise<any>((resolve, reject) => {
         const payload = JSON.stringify({ target, event, source: "compact" });
@@ -1392,6 +1443,24 @@ schedules:
       expect((await status()).compacting).toBe(true);
       expect(await post("SessionStart")).toEqual({ status: 200 });
       expect((await status()).compacting).toBe(false);
+    });
+
+    it("keeps the desktop's sockets in their own pool so they never evict the phone's", async () => {
+      const open = async (desktop: boolean) => {
+        const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/overview`,
+          desktop ? { headers: { "X-Phren-Client": "desktop" } } : {});
+        socket.on("error", () => undefined);
+        await once(socket, "open");
+        return socket;
+      };
+      const phone = await open(false);
+      const desktop: WebSocket[] = [];
+      for (let i = 0; i < 17; i += 1) desktop.push(await open(true));
+      // The 17th desktop socket evicts the oldest desktop socket, not the phone's.
+      await waitFor(() => desktop[0].readyState === WebSocket.CLOSED, 2_000);
+      expect(phone.readyState).toBe(WebSocket.OPEN);
+      expect(desktop[16].readyState).toBe(WebSocket.OPEN);
+      for (const socket of [phone, ...desktop]) socket.terminate();
     });
 
     it("presses keys for a prompt the Hook remembered even when Herdr reads the pane as working", async () => {
@@ -2597,17 +2666,20 @@ schedules:
       expect(Date.parse(asked.expiresAt) - Date.parse(asked.askedAt)).toBe(120_000);
       expect((await api("/v1/sudo")).data).toEqual({ requests: [asked] });
       // Another process that names the waiting askpass's pid gets nothing. On
-      // Linux the Hook writes the password into the asker's own stdout instead,
-      // so there is no connection to check.
-      if (process.platform !== "linux") {
+      // Linux it names its own listener as the delivery socket, which the
+      // asker does not hold.
+      {
         const [askerPid] = (await promisify(execFile)("pgrep", ["-f", `${hookBundle} askpass`])).stdout.trim().split("\n").map(Number);
+        const mine = newDelivery(), decoy = process.platform === "linux" ? createNetServer() : undefined;
+        if (decoy) await new Promise<void>(resolve => decoy.listen({ path: `\0${mine.socket}` }, resolve));
         const spoof = await new Promise<{ status: number; body: string }>((resolve, reject) => {
-          const payload = JSON.stringify({ pid: askerPid });
+          const payload = JSON.stringify({ pid: askerPid, ...(decoy ? { delivery: mine } : {}) });
           const req = request({ socketPath: path.join(root, "bridge/agent.sock"), path: "/sudo", method: "POST", headers: { "Content-Length": Buffer.byteLength(payload) } }, res => {
             let body = ""; res.on("data", b => body += b); res.on("end", () => resolve({ status: res.statusCode!, body }));
           });
           req.on("error", reject); req.end(payload);
         });
+        decoy?.close();
         expect(spoof).toEqual({ status: 400, body: JSON.stringify({ error: "Only askpass itself may ask for its password." }) });
         expect((await api("/v1/sudo")).data).toEqual({ requests: [asked] });
       }
@@ -2714,6 +2786,26 @@ schedules:
       expect((await api("/v1/owner-inbox", { action: "resolve", id, resolution: "Restarted" })).data.item).toMatchObject({ state: "resolved" });
       expect((await api("/v1/owner-inbox?local=1")).data.items.filter((row: any) => row.id === id)).toHaveLength(0);
       expect((await api("/v1/owner-inbox?local=1&includeResolved=true")).data.items).toMatchObject([{ id, resolution: "Restarted" }]);
+    });
+
+    it("reconciles the phone inbox with live panes on both GET and POST list routes", async () => {
+      await api("/v1/owner-inbox", { action: "add", title: "Manual owner decision" });
+      agentStatus = "blocked";
+      const first = await api("/v1/owner-inbox?local=1");
+      expect(first.status, JSON.stringify(first.data)).toBe(200);
+      expect(first.data.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "blocked", live: true, target })]));
+      agentStatus = "working";
+      const answered = await api("/v1/owner-inbox", { action: "list" });
+      expect(answered.data.items).toEqual([expect.objectContaining({ kind: "manual" })]);
+      agentStatus = "blocked";
+      expect((await api("/v1/owner-inbox?local=1")).data.items).toHaveLength(2);
+      mainClosed = true;
+      expect((await api("/v1/owner-inbox?local=1")).data.items).toEqual([expect.objectContaining({ kind: "manual" })]);
+      const history = await api("/v1/owner-inbox?local=1&includeResolved=true");
+      expect(history.data.items.filter((item: any) => item.kind === "blocked")).toEqual([
+        expect.objectContaining({ state: "resolved", live: false, resolution: "stale: source gone" }),
+        expect.objectContaining({ state: "resolved", live: false, resolution: "stale: source gone" }),
+      ]);
     });
 
     it("reports PRs, queues the integrator, closes after a read and suppresses gone in a real Hook", async () => {
@@ -3202,6 +3294,34 @@ schedules:
       expect(Array.isArray(tree.data.entries)).toBe(true);
       expect((await api("/v1/git/stage", { target, paths: ["../x"] })).status).toBe(400);
       expect((await api("/v1/git/stage", { target, paths: ["/etc/passwd"] })).status).toBe(400);
+    });
+
+    it("opens a commit, switches branches and checks the repository precondition through the routes", async () => {
+      const git = (...args: string[]) => execFileAsync("git", ["-c", "user.name=t", "-c", "user.email=t@x", "-C", root, ...args]);
+      await git("init", "-q", "-b", "main"); await writeFile(path.join(root, "base.txt"), "one\n");
+      await git("add", "base.txt"); await git("commit", "-qm", "start");
+      const sha = (await git("rev-parse", "HEAD")).stdout.trim();
+      const show = await api("/v1/git/show", { target, sha });
+      expect(show.status, JSON.stringify(show.data)).toBe(200);
+      expect(show.data).toMatchObject({ sha, subject: "start", files: [expect.objectContaining({ path: "base.txt", status: "A" })] });
+      expect((await api("/v1/git/show", { target, sha: "HEAD" })).status).toBe(400);
+      const repository = (await api("/v1/git/status", { target })).data.repository;
+      expect((await api("/v1/git/checkout", { target, branch: "next", create: true, expectedRepository: "/elsewhere" })).status).toBe(409);
+      const created = await api("/v1/git/checkout", { target, branch: "next", create: true, expectedRepository: repository });
+      expect(created.status, JSON.stringify(created.data)).toBe(200);
+      expect(created.data).toMatchObject({ ok: true, branch: "next", previous: "main" });
+      expect((await api("/v1/git/fetch", { target })).status).toBe(409);
+      expect((await api("/v1/git/pull", { target })).status).toBe(409);
+      const head = await api("/v1/git/file", { target, ref: "HEAD", path: "base.txt" });
+      expect(head.status, JSON.stringify(head.data)).toBe(200);
+      expect(head.data).toMatchObject({ text: "one\n" });
+      await writeFile(path.join(root, "base.txt"), "one\ntwo\n");
+      const patch = (await git("diff", "base.txt")).stdout;
+      expect((await api("/v1/git/apply", { target, patch, expectedRepository: repository })).data).toMatchObject({ ok: true, staged: true });
+      expect((await api("/v1/git/file", { target, ref: "INDEX", path: "base.txt" })).data.text).toBe("one\ntwo\n");
+      const session = await api("/v1/git/session-changes", { target });
+      expect(session.status, JSON.stringify(session.data)).toBe(200);
+      expect(session.data).toMatchObject({ files: [], calls: 0 });
     });
 
     it("lists the repository's other worktrees and scopes git routes, the diff and files to a listed one", async () => {

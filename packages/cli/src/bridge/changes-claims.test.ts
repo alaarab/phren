@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { execFile } from "node:child_process";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 // /tmp keeps POSIX paths short; Windows has no /tmp.
@@ -79,6 +79,20 @@ it("claims only structured paths, never words of a command line", () => {
   expect(claimedPaths({ path: "~/notes.md" }, "/work", "/home/sam")).toEqual([path.join("/home/sam", "notes.md")]);
 });
 
+
+it("sees a same-size rewrite made in the instant the index last read the file", async () => {
+  // The file and the index share one timestamp, and ctime is not trusted, so
+  // only Git's racy-entry content check can tell the rewrite apart.
+  const readme = path.join(repo, "README.md"), at = Math.floor(Date.now() / 1000) - 100;
+  await exec("git", ["-C", repo, "config", "core.trustctime", "false"]);
+  await utimes(readme, at, at);
+  await exec("git", ["-C", repo, "status", "--porcelain"]);
+  await utimes(path.join(repo, ".git/index"), at + 0.5, at + 0.5);
+  await changes.before("codex:a", "rewrite", repo, "sed -i s/h/j/ README.md");
+  await writeFile(readme, "jello\n"); await utimes(readme, at, at);
+  await changes.after("codex:a", "rewrite");
+  expect(await files("codex:a", "rewrite")).toEqual(["README.md"]);
+});
 
 it("surfaces a failed post-tool Git read instead of recording a clean result", async () => {
   await changes.before("codex:a", "broken", repo, "format");

@@ -42,6 +42,8 @@ import { normalizeMemoryScope } from "../shared.js";
 import { permissionDeniedError } from "../governance/rbac.js";
 import { getMachineName } from "../machine-identity.js";
 import { claimTaskSynced } from "../sync/task-claim.js";
+import { CLANKER_FETCH_HINT, clankerEnabled, rowKeywords, rowTitle } from "../clanker.js";
+import { LIST_RESPONSE_MAX_CHARS, LIST_TEXT_MAX_CHARS, clipTail, shrinkToBudget } from "../response-budget.js";
 
 type TaskStatus = "all" | "active" | "queue" | "done" | "active+queue";
 
@@ -95,6 +97,12 @@ function buildTaskView(doc: TaskDoc, status?: TaskStatus, limit?: number, doneLi
     } else {
       items[section] = sliced;
     }
+    // Context is an append-only log that can run to many KB; lists show its
+    // latest notes and a single-task lookup returns it whole.
+    items[section] = items[section].map((item) =>
+      item.context && item.context.length > LIST_TEXT_MAX_CHARS
+        ? { ...item, context: clipTail(item.context, LIST_TEXT_MAX_CHARS), contextTruncated: true }
+        : item);
   }
 
   const totalItems = TASK_SECTION_ORDER.reduce((sum, section) => sum + items[section].length, 0);
@@ -129,6 +137,22 @@ function buildTaskSummary(doc: TaskDoc, includedSections: TaskSection[], base: s
   return lines.join("\n");
 }
 
+/** Clanker mode: one line per task (id, title, keywords, priority, claim). */
+function buildClankerTaskRows(doc: TaskDoc, includedSections: TaskSection[]): string[] {
+  const lines: string[] = [`## ${doc.project}`];
+  for (const section of includedSections) {
+    const items = doc.items[section];
+    if (!items.length) continue;
+    lines.push(`${section}:`);
+    for (const item of items) {
+      const id = item.stableId ? `bid:${item.stableId}` : item.id;
+      const tags = [item.priority, item.claim ? `claimed: ${item.claim.computer}` : undefined].filter(Boolean);
+      lines.push(`${id} ${rowTitle(item.line)} [${rowKeywords(item.line).join(", ")}]${tags.length ? ` (${tags.join("; ")})` : ""}`);
+    }
+  }
+  return lines;
+}
+
 export function register(server: McpServer, ctx: McpContext): void {
   const { phrenPath, profile, updateFileInIndex } = ctx;
   const withWriteQueue = (fn: () => Promise<ReturnType<typeof mcpResponse>>) => ctx.withWriteQueue(async () => {
@@ -143,7 +167,7 @@ export function register(server: McpServer, ctx: McpContext): void {
     "get_tasks",
     {
       title: "◆ phren · tasks",
-      description: "Get tasks. Defaults to Active and Queue sections only. Pass status='all' to include Done items.",
+      description: "Get tasks. Defaults to Active and Queue sections only. Pass status='all' to include Done items. Lists show the latest part of a long Context (contextTruncated: true); look up one task by project and id for its full context.",
       inputSchema: z.object({
         project: z.string().optional().describe("Project name. Omit to get all projects."),
         id: z.string().optional().describe("Task ID like A1, Q3, D2. Requires project."),
@@ -202,7 +226,8 @@ export function register(server: McpServer, ctx: McpContext): void {
         const result = readTasks(resolvedPath, project);
         if (!result.ok) return mcpResponse({ ok: false, error: result.error });
         const doc = result.data;
-        const view = buildTaskView(filterTaskDoc(phrenPath, doc, { responsibility, readiness }), status, limit, done_limit, offset);
+        const filtered = filterTaskDoc(phrenPath, doc, { responsibility, readiness });
+        const view = buildTaskView(filtered, status, limit, done_limit, offset);
         if (!fs.existsSync(doc.path)) {
           return mcpResponse({
             ok: true,
@@ -217,41 +242,88 @@ export function register(server: McpServer, ctx: McpContext): void {
             data: { project, counts: taskCounts(phrenPath, doc), includedSections: view.includedSections, totalItems: view.totalItems, summary: true },
           });
         }
-        const sectionCounts = view.includedSections
-          .map((s) => `${s}: ${view.doc.items[s].length}/${doc.items[s].length}`)
-          .join(", ");
-        const paginationNote = view.truncated
-          ? `\n\n_${sectionCounts} (offset ${offset ?? 0}). Use offset/limit to page._`
-          : (offset ? `\n\n_Page offset: ${offset}. ${sectionCounts}._` : "");
-        return mcpResponse({
-          ok: true,
-          message: `## ${project}\n${taskMarkdown(view.doc)}${paginationNote}`,
-          data: { project, counts: taskCounts(phrenPath, doc), items: Object.fromEntries(TASK_SECTION_ORDER.map(section => [section, view.doc.items[section].map(entry => taskView(phrenPath, doc, entry))])), issues: doc.issues, includedSections: view.includedSections, totalItems: view.totalItems, totalUnpaged: view.totalUnpaged, offset: offset ?? 0, truncated: view.truncated },
-        });
+        const requested = limit ?? DEFAULT_TASK_LIMIT;
+        const counts = taskCounts(phrenPath, doc);
+        if (clankerEnabled(phrenPath)) {
+          const buildRows = (size: number) => {
+            const page = size < requested ? buildTaskView(filtered, status, size, Math.min(done_limit ?? DEFAULT_DONE_LIMIT, size), offset) : view;
+            const more = page.truncated ? `\nMore: offset=${(offset ?? 0) + size}` : "";
+            return {
+              ok: true,
+              message: `${buildClankerTaskRows(page.doc, page.includedSections).join("\n")}${more}\n${CLANKER_FETCH_HINT}`,
+              data: { project, counts, includedSections: page.includedSections, totalItems: page.totalItems, totalUnpaged: page.totalUnpaged, offset: offset ?? 0, truncated: page.truncated },
+            };
+          };
+          return mcpResponse(shrinkToBudget(requested, buildRows).payload, { compact: true });
+        }
+        const buildPage = (size: number) => {
+          const page = size < requested ? buildTaskView(filtered, status, size, Math.min(done_limit ?? DEFAULT_DONE_LIMIT, size), offset) : view;
+          const sectionCounts = page.includedSections
+            .map((s) => `${s}: ${page.doc.items[s].length}/${doc.items[s].length}`)
+            .join(", ");
+          const budgetNote = size < requested ? ` Cut to ${size} per section to fit the response budget.` : "";
+          const paginationNote = page.truncated
+            ? `\n\n_${sectionCounts} (offset ${offset ?? 0}).${budgetNote} Use offset/limit to page._`
+            : (offset ? `\n\n_Page offset: ${offset}. ${sectionCounts}._` : "");
+          return {
+            ok: true,
+            message: `## ${project}\n${taskMarkdown(page.doc)}${paginationNote}`,
+            data: { project, counts, items: Object.fromEntries(TASK_SECTION_ORDER.map(section => [section, page.doc.items[section].map(entry => taskView(phrenPath, doc, entry))])), issues: doc.issues, includedSections: page.includedSections, totalItems: page.totalItems, totalUnpaged: page.totalUnpaged, offset: offset ?? 0, truncated: page.truncated },
+          };
+        };
+        return mcpResponse(shrinkToBudget(requested, buildPage).payload);
       }
 
       // All projects
       const docs = readTasksAcrossProjects(phrenPath, profile);
       if (!docs.length) return mcpResponse({ ok: true, message: "No tasks found.", data: { projects: [] } });
-      const views = docs.map((doc) => ({ project: doc.project, doc, view: buildTaskView(filterTaskDoc(phrenPath, doc, { responsibility, readiness }), status, limit, done_limit, offset), issues: doc.issues }));
-      const anyTruncated = views.some(({ view }) => view.truncated);
-      let parts: string[];
-      if (summary) {
-        parts = views.map(({ view, doc }) => buildTaskSummary(view.doc, view.includedSections, phrenPath, doc));
-      } else {
-        parts = views.map(({ project, view }) => `## ${project}\n${taskMarkdown(view.doc)}`);
+      const filteredDocs = docs.map((doc) => ({ doc, filtered: filterTaskDoc(phrenPath, doc, { responsibility, readiness }) }));
+      const requested = limit ?? DEFAULT_TASK_LIMIT;
+      const buildPage = (size: number, asSummary: boolean, note = "") => {
+        const doneCap = size < requested ? Math.min(done_limit ?? DEFAULT_DONE_LIMIT, size) : done_limit ?? DEFAULT_DONE_LIMIT;
+        const views = filteredDocs.map(({ doc, filtered }) => ({ project: doc.project, doc, view: buildTaskView(filtered, status, size, doneCap, offset), issues: doc.issues }));
+        const anyTruncated = views.some(({ view }) => view.truncated);
+        let parts: string[];
+        if (asSummary) {
+          parts = views.map(({ view, doc }) => buildTaskSummary(view.doc, view.includedSections, phrenPath, doc));
+        } else {
+          parts = views.map(({ project, view }) => `## ${project}\n${taskMarkdown(view.doc)}`);
+        }
+        const budgetNote = size < requested ? " Cut to fit the response budget; pass project to see one project's tasks." : "";
+        const truncationNote = anyTruncated && !asSummary ? `\n\n_Results capped (Active/Queue: ${size}, Done: ${doneCap}).${budgetNote} Pass limit/done_limit to see more._` : "";
+        // Summaries are counts and titles only, so they carry no item rows.
+        const projectData = views.map(({ project, doc, view, issues }) => ({
+          project,
+          counts: taskCounts(phrenPath, doc),
+          ...(asSummary ? {} : { items: Object.fromEntries(TASK_SECTION_ORDER.map(section => [section, view.doc.items[section].map(entry => taskView(phrenPath, doc, entry))])) }),
+          issues,
+          includedSections: view.includedSections,
+          totalItems: view.totalItems,
+          truncated: view.truncated,
+        }));
+        return { ok: true, message: parts.join("\n\n") + truncationNote + note, data: { projects: projectData, summary: asSummary } };
+      };
+      if (summary) return mcpResponse(buildPage(requested, true));
+      if (clankerEnabled(phrenPath)) {
+        const buildRows = (size: number) => {
+          const built = filteredDocs.map(({ doc, filtered }) => {
+            const view = buildTaskView(filtered, status, size, Math.min(done_limit ?? DEFAULT_DONE_LIMIT, size), offset);
+            return { project: doc.project, view, lines: buildClankerTaskRows(view.doc, view.includedSections) };
+          });
+          const anyTruncated = built.some(({ view }) => view.truncated);
+          return {
+            ok: true,
+            message: `${built.map(({ lines }) => lines.join("\n")).join("\n\n")}${anyTruncated ? "\nSome lists are capped; pass project, limit or offset for more." : ""}\n${CLANKER_FETCH_HINT}`,
+            data: { projects: built.map(({ project, view }) => ({ project, includedSections: view.includedSections, totalItems: view.totalItems, truncated: view.truncated })) },
+          };
+        };
+        // Every project at once is an overview: keep it smaller than one project's list.
+        return mcpResponse(shrinkToBudget(requested, buildRows, LIST_RESPONSE_MAX_CHARS / 4).payload, { compact: true });
       }
-      const truncationNote = anyTruncated && !summary ? `\n\n_Results capped (Active/Queue: ${limit ?? DEFAULT_TASK_LIMIT}, Done: ${done_limit ?? DEFAULT_DONE_LIMIT}). Pass limit/done_limit to see more._` : "";
-      const projectData = views.map(({ project, doc, view, issues }) => ({
-        project,
-        counts: taskCounts(phrenPath, doc),
-        items: Object.fromEntries(TASK_SECTION_ORDER.map(section => [section, view.doc.items[section].map(entry => taskView(phrenPath, doc, entry))])),
-        issues,
-        includedSections: view.includedSections,
-        totalItems: view.totalItems,
-        truncated: view.truncated,
-      }));
-      return mcpResponse({ ok: true, message: parts.join("\n\n") + truncationNote, data: { projects: projectData, summary: summary || false } });
+      const fitted = shrinkToBudget(requested, (size) => buildPage(size, false));
+      if (JSON.stringify(fitted.payload, null, 2).length <= LIST_RESPONSE_MAX_CHARS) return mcpResponse(fitted.payload);
+      // Too many projects to list in full: fall back to per-project summaries.
+      return mcpResponse(buildPage(requested, true, "\n\n_Every project's full task list does not fit one response, so this is the summary. Pass project for a project's tasks._"));
     }
   );
 

@@ -3,10 +3,12 @@ import * as path from "node:path";
 import { atomicWriteText } from "../phren-paths.js";
 import { withFileLock } from "../governance/locks.js";
 import { permissionDeniedError } from "../governance/rbac.js";
-import { registeredStoreIdentity } from "../store-registry.js";
+import { registeredStoreIdentity, registerStoreIdentity } from "../store-registry.js";
 
 const file = (base: string) => path.join(base, ".config", "task-format.json");
-export const taskFormatMigrationHint = "Task metadata is not enabled for this store. Upgrade every CLI, MCP, Hook, sync and app writer first; an owner can then run phren task format enable --all-writers-compatible. Existing writers must be replaced through the coordinated adoption workflow.";
+/** The oldest writers that keep task metadata when they rewrite a task. */
+export const taskFormatCurrentWriters = "Phren CLI, MCP and Hook 0.3.30, iOS build 177, Android 1.0.5";
+export const taskFormatMigrationHint = `Task metadata is off for this store. Once every app and tool that writes it is current (${taskFormatCurrentWriters} or later), an owner can turn it on with phren task format enable --all-writers-compatible.`;
 
 /** An explicit store-owner acknowledgement, not inferred from one serving Hook.
  * It cannot fence an old binary that ignores this file: coordinated adoption of
@@ -41,8 +43,17 @@ export function enableTaskFormat(base: string, allWritersCompatible: boolean): v
   const denied = permissionDeniedError(base, "manage_config");
   if (denied) throw new Error(denied);
   if (allWritersCompatible !== true) throw new Error(taskFormatMigrationHint);
-  const storeId = registeredStoreIdentity(base);
-  if (!storeId) throw new Error("Register a portable store identity with phren store identity --create before enabling task metadata.");
+  // Enabling is the owner's explicit act on this store, so a legacy store
+  // without a portable identity gets one here instead of needing a second command.
+  writeTaskFormat(base, registerStoreIdentity(base));
+}
+
+/** A store phren has just created has no old writers, so metadata starts on. */
+export function initializeTaskFormat(base: string): void {
+  writeTaskFormat(base, registerStoreIdentity(base));
+}
+
+function writeTaskFormat(base: string, storeId: string): void {
   fs.mkdirSync(path.dirname(file(base)), { recursive: true });
   withFileLock(file(base), () => {
     if (taskFormatStatus(base).enabled) return;
