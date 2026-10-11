@@ -190,6 +190,8 @@ export async function runBridge(args: string[], version: string): Promise<number
       break;
     }
     case "ssh": await dispatch(process.env.SSH_ORIGINAL_COMMAND || ""); break;
+    // Run by <bridge>/enroll over a password SSH session, never by the forced command.
+    case "enroll-device": return (await import("./device-enroll.js")).runEnrollDevice(args.slice(1), version);
     case "ssh-scoped": {
       const { scopedDispatch } = await import("./scoped-gateway.js");
       await scopedDispatch(args[1] ?? "", process.env.SSH_ORIGINAL_COMMAND || "", { input: process.stdin, output: process.stdout, socket: socketPath() });
