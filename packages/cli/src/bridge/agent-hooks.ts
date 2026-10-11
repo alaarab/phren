@@ -260,6 +260,8 @@ export class AgentHooks {
   readonly sudo: SudoBroker;
   constructor(readonly push = new ApprovalPushService(), private modules?: ModuleSnapshot, deliveriesFile?: string) {
     this.deliveries = new PromptDeliveries(deliveriesFile);
+    // A push held while the owner was at the desktop is sent only if still unanswered.
+    push.stillPending = binding => this.pushTarget(binding) !== undefined;
     void computerDisplayName().then(name => { this.computerName = name; }, () => {});
     this.sudo = new SudoBroker({ computer: () => this.computerName, push, label: briefLabel,
       describe: async place => {

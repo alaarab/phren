@@ -188,3 +188,51 @@ describe("push honesty", () => {
     expect(relayCiphertext(key, { aps: { alert: { title: "t", body: "b" } } })).not.toBe(relayCiphertext(key, { aps: { alert: { title: "t", body: "b" } } }));
   });
 });
+
+describe("desk-first approvals", () => {
+  const value = { binding: "8b2f1c3e-0d6a-4f4e-9a7b-2c1d5e6f7a80", provider: "claude", question: false,
+    expiresAt: new Date(Date.now() + 3_600_000).toISOString(), title: "Bash", summary: "pnpm test", project: "phren", computer: "Mini" };
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("sends at once when nobody is at the desk", async () => {
+    const push = new ApprovalPushService();
+    const now = vi.spyOn(push as any, "notifyNow").mockResolvedValue(true);
+    await push.notify(value as any);
+    expect(now).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds the alert while the desk is active and sends it once the desk goes quiet", async () => {
+    vi.useFakeTimers();
+    const push = new ApprovalPushService();
+    const now = vi.spyOn(push as any, "notifyNow").mockResolvedValue(true);
+    push.markDesk(60_000);
+    await push.notify(value as any);
+    expect(now).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30_000);
+    push.markDesk(60_000); // still typing: the hold extends
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(now).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(now).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a held alert answered at the desk", async () => {
+    vi.useFakeTimers();
+    const push = new ApprovalPushService();
+    const now = vi.spyOn(push as any, "notifyNow").mockResolvedValue(true);
+    let pending = true;
+    push.stillPending = () => pending;
+    push.markDesk(60_000);
+    await push.notify(value as any);
+    pending = false;
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(now).not.toHaveBeenCalled();
+  });
+
+  it("caps a presence report at two minutes", () => {
+    const push = new ApprovalPushService();
+    push.markDesk(10 * 60_000);
+    expect((push as any).deskUntil - Date.now()).toBeLessThanOrEqual(120_000);
+  });
+});
+

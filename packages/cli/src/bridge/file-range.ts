@@ -19,7 +19,8 @@ export function fileContentType(file: string): string {
     ? "text/plain" : "application/octet-stream");
 }
 
-function version(stat: Stats): string {
+/** A file's identity and content stamp; any write, rename or replacement changes it. */
+export function fileVersion(stat: Stats): string {
   return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
 }
 
@@ -55,10 +56,10 @@ export async function readFileRange(root: string, requested: string, offset: num
     try {
       const current = await handle.stat();
       // Recheck the name after opening, including parent directory replacements.
-      if (!current.isFile() || version(current) !== version(metadata) || await realpath(file) !== resolved) {
+      if (!current.isFile() || fileVersion(current) !== fileVersion(metadata) || await realpath(file) !== resolved) {
         throw new BridgeError(409, "The file changed. Open it again.");
       }
-      const revision = version(current);
+      const revision = fileVersion(current);
       if (expectedVersion !== undefined && expectedVersion !== revision) throw new BridgeError(409, "The file changed. Open it again.");
       if (offset > current.size) throw new BridgeError(416, "The offset is past the end of this file.");
       const bytes = Buffer.alloc(Math.min(length, current.size - offset));
@@ -68,7 +69,7 @@ export async function readFileRange(root: string, requested: string, offset: num
         if (!next.bytesRead) break;
         read += next.bytesRead;
       }
-      if (version(await handle.stat()) !== revision || read !== bytes.length) throw new BridgeError(409, "The file changed. Open it again.");
+      if (fileVersion(await handle.stat()) !== revision || read !== bytes.length) throw new BridgeError(409, "The file changed. Open it again.");
       return { path: requested, offset, length: read, total: current.size, contentType: fileContentType(file),
         version: revision, eof: offset + read === current.size, data: bytes.toString("base64") };
     } finally { await handle.close(); }

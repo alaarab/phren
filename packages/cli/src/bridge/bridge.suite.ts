@@ -718,6 +718,9 @@ describeAll.skipIf(process.platform === "win32")("standalone Phren service", () 
             foreground_processes: [{ pid: foregroundPID }, ...helperPIDs.map(pid => ({ pid }))] } }
           : req.method === "agent.read" ? readPane(req.params.target)
           : req.method === "pane.read" ? readPane(req.params.pane_id)
+          : req.method === "pane.layout" ? { type: "pane_layout", layout: { tab_id: "w1:t1", workspace_id: "w1", focused_pane_id: req.params.pane_id, zoomed: false,
+            area: { x: 0, y: 0, width: 200, height: 50 }, splits: [{ direction: "vertical", ratio: 0.5 }],
+            panes: [{ pane_id: "w1:p1", focused: true, rect: { x: 0, y: 0, width: 100, height: 50 } }, { pane_id: "w1:p2", focused: false, rect: { x: 100, y: 0, width: 100, height: 50 } }] } }
           : req.method === "agent.prompt" ? { type: "agent_prompted", agent: agentInfo(panes().find(p => p.pane_id === agentTarget || agentNames.get(String(p.pane_id)) === agentTarget)!) }
           : { type: "ok" }) }) + "\n");
         if (holdSnapshot && req.method === "session.snapshot") { holdSnapshot = false; releaseSnapshot = answer; }
@@ -1410,6 +1413,16 @@ schedules:
       expect(enters()).toBe(before + 1);
     }, 20_000);
 
+    it("serves a Herdr tab's pane layout for the desktop's mirror", async () => {
+      const answer = await new Promise<any>((resolve, reject) => {
+        const req = request({ socketPath: path.join(root, "bridge/hook.sock"), path: `/v1/workspaces/layout?server=default&pane=w1:p1`, method: "GET", headers: { Host: "phren.local" } }, res => {
+          let data = ""; res.on("data", bytes => data += bytes); res.on("end", () => resolve({ status: res.statusCode, ...JSON.parse(data) }));
+        }); req.on("error", reject); req.end();
+      });
+      expect(answer.status).toBe(200);
+      expect(answer.layout.panes.map((p: any) => p.pane_id)).toEqual(["w1:p1", "w1:p2"]);
+    });
+
     it("reports a compacting conversation and clears it when the new context starts", async () => {
       const post = (event: string) => new Promise<any>((resolve, reject) => {
         const payload = JSON.stringify({ target, event, source: "compact" });
@@ -1430,6 +1443,24 @@ schedules:
       expect((await status()).compacting).toBe(true);
       expect(await post("SessionStart")).toEqual({ status: 200 });
       expect((await status()).compacting).toBe(false);
+    });
+
+    it("keeps the desktop's sockets in their own pool so they never evict the phone's", async () => {
+      const open = async (desktop: boolean) => {
+        const socket = new WebSocket(`ws+unix:${root}/bridge/hook.sock:/v1/overview`,
+          desktop ? { headers: { "X-Phren-Client": "desktop" } } : {});
+        socket.on("error", () => undefined);
+        await once(socket, "open");
+        return socket;
+      };
+      const phone = await open(false);
+      const desktop: WebSocket[] = [];
+      for (let i = 0; i < 17; i += 1) desktop.push(await open(true));
+      // The 17th desktop socket evicts the oldest desktop socket, not the phone's.
+      await waitFor(() => desktop[0].readyState === WebSocket.CLOSED, 2_000);
+      expect(phone.readyState).toBe(WebSocket.OPEN);
+      expect(desktop[16].readyState).toBe(WebSocket.OPEN);
+      for (const socket of [phone, ...desktop]) socket.terminate();
     });
 
     it("presses keys for a prompt the Hook remembered even when Herdr reads the pane as working", async () => {
@@ -3263,6 +3294,34 @@ schedules:
       expect(Array.isArray(tree.data.entries)).toBe(true);
       expect((await api("/v1/git/stage", { target, paths: ["../x"] })).status).toBe(400);
       expect((await api("/v1/git/stage", { target, paths: ["/etc/passwd"] })).status).toBe(400);
+    });
+
+    it("opens a commit, switches branches and checks the repository precondition through the routes", async () => {
+      const git = (...args: string[]) => execFileAsync("git", ["-c", "user.name=t", "-c", "user.email=t@x", "-C", root, ...args]);
+      await git("init", "-q", "-b", "main"); await writeFile(path.join(root, "base.txt"), "one\n");
+      await git("add", "base.txt"); await git("commit", "-qm", "start");
+      const sha = (await git("rev-parse", "HEAD")).stdout.trim();
+      const show = await api("/v1/git/show", { target, sha });
+      expect(show.status, JSON.stringify(show.data)).toBe(200);
+      expect(show.data).toMatchObject({ sha, subject: "start", files: [expect.objectContaining({ path: "base.txt", status: "A" })] });
+      expect((await api("/v1/git/show", { target, sha: "HEAD" })).status).toBe(400);
+      const repository = (await api("/v1/git/status", { target })).data.repository;
+      expect((await api("/v1/git/checkout", { target, branch: "next", create: true, expectedRepository: "/elsewhere" })).status).toBe(409);
+      const created = await api("/v1/git/checkout", { target, branch: "next", create: true, expectedRepository: repository });
+      expect(created.status, JSON.stringify(created.data)).toBe(200);
+      expect(created.data).toMatchObject({ ok: true, branch: "next", previous: "main" });
+      expect((await api("/v1/git/fetch", { target })).status).toBe(409);
+      expect((await api("/v1/git/pull", { target })).status).toBe(409);
+      const head = await api("/v1/git/file", { target, ref: "HEAD", path: "base.txt" });
+      expect(head.status, JSON.stringify(head.data)).toBe(200);
+      expect(head.data).toMatchObject({ text: "one\n" });
+      await writeFile(path.join(root, "base.txt"), "one\ntwo\n");
+      const patch = (await git("diff", "base.txt")).stdout;
+      expect((await api("/v1/git/apply", { target, patch, expectedRepository: repository })).data).toMatchObject({ ok: true, staged: true });
+      expect((await api("/v1/git/file", { target, ref: "INDEX", path: "base.txt" })).data.text).toBe("one\ntwo\n");
+      const session = await api("/v1/git/session-changes", { target });
+      expect(session.status, JSON.stringify(session.data)).toBe(200);
+      expect(session.data).toMatchObject({ files: [], calls: 0 });
     });
 
     it("lists the repository's other worktrees and scopes git routes, the diff and files to a listed one", async () => {
