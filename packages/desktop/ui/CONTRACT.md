@@ -94,7 +94,7 @@ the centre below 1200 px). Extensions live in Settings.
 
 - `shell/theme.js`: `initTheme()`, `applyTheme(id)`, `currentTheme()`, `themes()`; the phone's five token sets in `tokens.json`. Extension themes colour the editor and terminal only.
 - `shell/palette.js`: `openPalette()`, `registerCommand({ id, title, keys?, run })`, `fuzzyScore(query, text)`. ⌘K.
-- `shell/usage-rings.js`: `mountUsageRings(el)` over the daemon's `GET /api/usage` (merged across computers with the CLI's `mergeAccountUsage`).
+- `shell/usage-rings.js`: `mountUsageRings(el)` over the daemon's `GET /api/usage` (merged across computers with the CLI's `mergeAccountUsage`)). The popover lays accounts out like the phone's Account usage cards: title by email (plus the plan when one email has two), plan line, computers and age, every window with its reset ("not started" for a 5-hour window without one), API credits as dollars with their expiry, and Codex credits. Its text helpers (`accountTitles`, `subscriptionSummary`, `metaLine`, `windowText`, `creditsValue`) are exported for `src/ui-usage.test.ts`.
 - `sections/settings.js`: Computers (link and revoke via `POST /api/computers/link|revoke`), Keys, Extensions, Appearance, Notifications; `notifyEnabled()`, `badgeEnabled()`.
 
 ## Writes

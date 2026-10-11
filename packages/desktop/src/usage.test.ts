@@ -42,6 +42,12 @@ describe("fetchUsage", () => {
     expect(merged.computers.map(c => c.name)).toEqual(["A", "B"]);
   });
 
+  it("keeps Codex credits and the plan on the merged account", async () => {
+    const withCredits = { ...codex(100, "2026-01-01T00:00:00.000Z"), credits: { hasCredits: true, balance: 320, inUse: true }, subscription: { plan: "Pro" } };
+    const snapshot = await fetchUsage([A], fakeHook({ A: report([withCredits]) }).request, Date.parse("2026-01-01T00:01:00.000Z"));
+    expect(snapshot.accounts[0]).toMatchObject({ credits: { hasCredits: true, balance: 320, inUse: true }, subscription: { plan: "Pro" } });
+  });
+
   it("counts nothing for a computer that answers with no accounts", async () => {
     const hook = fakeHook({ A: report([]) });
     const snapshot = await fetchUsage([A], hook.request, Date.now());
