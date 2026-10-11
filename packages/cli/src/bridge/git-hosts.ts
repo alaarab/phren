@@ -3,6 +3,8 @@ import { promisify } from "node:util";
 import type { Json } from "./protocol.js";
 import { git } from "./projects.js";
 import { runCombined } from "./git-publish.js";
+import { gitboy } from "./git-host-gitboy.js";
+import { gitlab } from "./git-host-gitlab.js";
 
 const exec = promisify(execFile);
 
@@ -37,7 +39,9 @@ export interface GitHost {
   supported: boolean;
 }
 
-export interface RequestList { available: boolean; reason?: string; message?: string; pulls: Json[]; current: Json | null }
+export interface RequestList { available: boolean; reason?: string; message?: string; pulls: Json[]; current: Json | null;
+  /** Where the token came from and who it signs in as, when the host says. */
+  account?: { source: string; user?: string } }
 
 export interface GitHostProvider {
   readonly kind: HostKind;
@@ -48,10 +52,18 @@ export interface GitHostProvider {
   list(root: string, branch: string, host: GitHost): Promise<RequestList>;
   /** Open a request from `branch` into the default branch, titled from its commits. */
   open(root: string, branch: string, draft: boolean, host: GitHost): Promise<Json>;
+  /** Merge request `number`, only while its head is still `expectedHeadSha`
+   * when one is given. The host's own refusal (checks, approvals, conflicts)
+   * comes back as `{ ok: false, reason: "blocked", message }`. */
+  merge(root: string, request: MergeRequest, host: GitHost): Promise<Json>;
+  /** Who a token signs in as, for Connect; HTTP hosts only. */
+  whoami?(root: string, host: GitHost, token: string): Promise<{ user: string }>;
 }
 
+export type MergeMethod = "merge" | "squash" | "rebase";
+export interface MergeRequest { number: number; method: MergeMethod; expectedHeadSha?: string; deleteBranch?: boolean }
+
 const PULL_TERMS: HostTerms = { short: "PR", long: "pull request", ref: "#" };
-const MERGE_TERMS: HostTerms = { short: "MR", long: "merge request", ref: "!" };
 
 /** `git@host:owner/repo.git`, `ssh://git@host:2222/owner/repo.git`,
  * `https://user@host/owner/repo` → the domain and the repository path. */
@@ -198,7 +210,7 @@ const github: GitHostProvider = {
     const current = async (): Promise<Json | null> => {
       if (!branch) return null;
       try {
-        const { stdout } = await run(["pr", "view", "--json", "number,title,url,state,isDraft,headRefName,baseRefName,statusCheckRollup,reviewDecision,mergeStateStatus"]);
+        const { stdout } = await run(["pr", "view", "--json", "number,title,url,state,isDraft,headRefName,headRefOid,baseRefName,statusCheckRollup,reviewDecision,mergeStateStatus,author,updatedAt"]);
         const pull = JSON.parse(stdout || "null");
         // gh falls back to another head's pull request; only this branch's counts.
         if (!pull || typeof pull !== "object" || typeof pull.number !== "number" || pull.headRefName !== branch) return null;
@@ -206,7 +218,10 @@ const github: GitHostProvider = {
           base: String(pull.baseRefName ?? ""), draft: pull.isDraft === true, state: String(pull.state ?? ""), checks: checkRollup(pull.statusCheckRollup),
           checkRuns: checkRuns(pull.statusCheckRollup),
           ...(typeof pull.reviewDecision === "string" && pull.reviewDecision ? { reviewDecision: pull.reviewDecision } : {}),
-          ...(typeof pull.mergeStateStatus === "string" && pull.mergeStateStatus ? { mergeState: pull.mergeStateStatus } : {}) };
+          ...(typeof pull.mergeStateStatus === "string" && pull.mergeStateStatus ? { mergeState: pull.mergeStateStatus } : {}),
+          ...(typeof pull.headRefOid === "string" && pull.headRefOid ? { headSha: pull.headRefOid } : {}),
+          ...(pull.author && typeof pull.author === "object" && typeof pull.author.login === "string" ? { author: pull.author.login } : {}),
+          ...(typeof pull.updatedAt === "string" ? { updated: pull.updatedAt } : {}) };
       } catch { return null; }
     };
     try {
@@ -243,23 +258,20 @@ const github: GitHostProvider = {
     if (url && /already exists/i.test(result.output)) return { ok: true, url, branch, existing: true };
     return { ok: false, reason: "failed", output: result.timedOut ? `${result.output}\n[gh did not finish within 60 seconds]`.trim() : result.output || "gh pr create failed." };
   },
+
+  async merge(root, request, host) {
+    // No --delete-branch: gh would also delete and leave the local branch,
+    // which may be an agent's checkout.
+    const args = ["pr", "merge", String(request.number), `--${request.method}`,
+      ...(request.expectedHeadSha ? ["--match-head-commit", request.expectedHeadSha] : [])];
+    const result = await runCombined("gh", args, root, 60_000, ghEnv(host));
+    if (result.missing) return { ok: false, reason: "missing", message: "The GitHub CLI (gh) is not installed on this computer." };
+    if (result.code === 0) return { ok: true, number: request.number, method: request.method };
+    const output = result.output.trim();
+    if (/not mergeable|required status|review|protected|blocked|head branch was modified|match-head-commit|conflict/i.test(output)) return { ok: false, reason: "blocked", message: output.slice(0, 1000) };
+    if (/auth|login|401|403/i.test(output)) return { ok: false, reason: "auth", message: "The GitHub CLI is not signed in on this computer, or the account can't merge here. Run gh auth login there." };
+    return { ok: false, reason: "failed", message: output.slice(0, 1000) || "gh pr merge failed." };
+  },
 };
-
-// ---------------------------------------------------------------- stubs
-
-/** A host Phren names but cannot read yet: every call says so plainly. */
-function stub(kind: HostKind, name: string, terms: HostTerms): GitHostProvider {
-  const message = `${name} ${terms.long}s and their checks are not supported yet. The rest of Changes works as usual.`;
-  return {
-    kind, name, terms, supported: false,
-    async list() { return { available: false, reason: "unsupported", message, pulls: [], current: null }; },
-    async open() { return { ok: false, reason: "unsupported", message }; },
-  };
-}
-
-// GitLab: to build, read `glab mr list/view -F json` and the head pipeline's jobs.
-const gitlab = stub("gitlab", "GitLab", MERGE_TERMS);
-// gitboy: self-hosted; to build, read its REST API at the remote's domain.
-const gitboy = stub("gitboy", "gitboy", PULL_TERMS);
 
 export const PROVIDERS: Record<HostKind, GitHostProvider> = { github, gitlab, gitboy };
