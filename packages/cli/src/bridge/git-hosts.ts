@@ -210,7 +210,7 @@ const github: GitHostProvider = {
     const current = async (): Promise<Json | null> => {
       if (!branch) return null;
       try {
-        const { stdout } = await run(["pr", "view", "--json", "number,title,url,state,isDraft,headRefName,baseRefName,statusCheckRollup,reviewDecision,mergeStateStatus"]);
+        const { stdout } = await run(["pr", "view", "--json", "number,title,url,state,isDraft,headRefName,headRefOid,baseRefName,statusCheckRollup,reviewDecision,mergeStateStatus,author,updatedAt"]);
         const pull = JSON.parse(stdout || "null");
         // gh falls back to another head's pull request; only this branch's counts.
         if (!pull || typeof pull !== "object" || typeof pull.number !== "number" || pull.headRefName !== branch) return null;
@@ -218,7 +218,10 @@ const github: GitHostProvider = {
           base: String(pull.baseRefName ?? ""), draft: pull.isDraft === true, state: String(pull.state ?? ""), checks: checkRollup(pull.statusCheckRollup),
           checkRuns: checkRuns(pull.statusCheckRollup),
           ...(typeof pull.reviewDecision === "string" && pull.reviewDecision ? { reviewDecision: pull.reviewDecision } : {}),
-          ...(typeof pull.mergeStateStatus === "string" && pull.mergeStateStatus ? { mergeState: pull.mergeStateStatus } : {}) };
+          ...(typeof pull.mergeStateStatus === "string" && pull.mergeStateStatus ? { mergeState: pull.mergeStateStatus } : {}),
+          ...(typeof pull.headRefOid === "string" && pull.headRefOid ? { headSha: pull.headRefOid } : {}),
+          ...(pull.author && typeof pull.author === "object" && typeof pull.author.login === "string" ? { author: pull.author.login } : {}),
+          ...(typeof pull.updatedAt === "string" ? { updated: pull.updatedAt } : {}) };
       } catch { return null; }
     };
     try {
