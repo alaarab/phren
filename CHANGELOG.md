@@ -8,6 +8,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - Move a session to another agent. `move_session` (also `phren_admin` action `move_session`), `phren move` and the Hook's `POST /v1/sessions/move` hand a live session to Claude under another account, Codex, OpenCode or Copilot, with an optional model and effort. The agent writes a structured hand-off and exits with its own exit command, and the new agent starts in the same pane and folder with the hand-off as its first prompt. If the agent writes none in time, the hand-off is built from the transcript's tail, the git state and the original brief. Nothing is committed; the hand-off lists the uncommitted changes. Only harnesses signed in and usable on that computer are accepted. A dispatched worker keeps its dispatch id, and its receipt records each move under `moves`.
+
+## [0.3.38] - 2026-10-10
+
+### Added
+
+- Hook routes for Phren desktop, each advertised in `/v1/health` so an older Hook shows a disabled control instead of an error:
+  - `POST /v1/files/write` saves a repository file with a revision check (409 when it changed since it was read), one write per file at a time; `POST /v1/files/search` is find-in-files over Git (literal or regular expression, case and whole-word switches, include patterns); `GET /v1/files/list` lists a checkout (`fileWrite`, `fileSearch`).
+  - `phren-hook v1 pane` attaches one Herdr pane's own terminal over SSH (`paneTerminal`).
+  - `GET /v1/workspaces/layout` returns a Herdr tab's split layout (`paneLayout`).
+  - `POST /v1/push/presence` reports that the owner is at the desk: approval alerts then wait, and reach the phone only if still pending after 60 seconds of desk idle (`deskPresence`).
+  - `POST /v1/store/blobs` returns many store blobs in one request, checking sizes before reading (`memoryStoreBatch`).
+- A client that sends `X-Phren-Client` gets its own pool of Hook sockets, so the desktop and the phone never evict each other's connections.
+- `phren bridge install` writes `~/.local/share/phren/bridge/enroll`, which adds one phone's restricted key to `authorized_keys` (the same line `phren pair` writes) and prints one JSON line. The phone runs it once over an SSH session the user signed into with a password, then connects with the key. It is never the phone key's forced command, so a phone key cannot add more keys.
+- `@phren/cli` exports `./client/*` entry points for clients built on the CLI's parsers.
 - Hook: a client's Changes view can open a commit, switch and create branches, fetch and fast-forward. `POST /v1/git/show` returns one commit's message, author, parents, refs and every changed file with counts and its patch against the first parent. `POST /v1/git/checkout` switches to a local branch or creates one from HEAD or a local or remote branch (a remote one becomes its upstream); uncommitted tracked edits need `carryChanges: true`. `POST /v1/git/fetch` fetches the upstream remote with `--prune`, and `POST /v1/git/pull` fast-forwards only, never merging or rebasing. Git's refusals come back verbatim as `{ok: false, output}`. `/v1/git/pulls` `current` adds each check (`checkRuns`), the review decision and the merge state.
 - Hook: pull and merge requests come from one provider per git host: GitHub, GitLab or gitboy. The host is read from the remote's URL. A self-hosted domain is named with `git config remote.<name>.phrenHost github|gitlab|gitboy` or `git config --global phren.<domain>.host <kind>`. GitHub works through `gh`, including GitHub Enterprise via `GH_HOST`. GitLab (REST v4; `GITLAB_TOKEN`, a stored token or glab's sign-in) and gitboy (REST `/api/v1`; a `gbp_` token) list requests and read the branch's own with its pipeline jobs as checks, approvals, review decision and merge state, and open requests. `/v1/git/pulls` and `/v1/git/pr` now carry `host` with the host's name and terms (pull request `#`, or merge request `!`).
 - Hook: merge from a client. `POST /v1/git/pr/merge` merges a pull or merge request on GitHub, GitLab or gitboy, only at the head commit the client showed (`expectedHeadSha`); the host's own refusal comes back as `reason: "blocked"` with its words. `POST /v1/git/host-token` connects a GitLab or gitboy host with a token checked against the host and kept in the Hook's `git-hosts.json` (mode 600), and `phren bridge git-host set <domain> gitlab|gitboy` does it from a shell. The Hook declares the `gitHosts` capability.
@@ -16,6 +30,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Summaries survive the store's union merges. When two computers each wrote a `## Now` or "What phren knows" block, the merge left duplicate start markers and a doubled block; readers now take the newest copy, and writers and the sync conflict resolver replace the whole span with one clean block.
+- A `.git` path is refused whatever its case (`.GIT/config`) on case-insensitive file systems.
 - The Hook's health check waits 8 seconds for a harness's `--version` instead of 3. On a busy computer a healthy OpenCode took 2.4 seconds just to start, so the check kept reporting it as not answering.
 
 ## [0.3.37] - 2026-10-10
