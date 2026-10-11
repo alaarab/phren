@@ -189,7 +189,8 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
     resources: () => resources.read(),
     sudo: agentHooks.sudo,
   });
-  const http = createServer(createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
+  // 256 KiB: gitboy's /memory/files asks about up to 500 paths in one query string.
+  const http = createServer({ maxHeaderSize: 256 * 1024 }, createRouteHandler({ version, modules, info, computerID, scheduleStore, scheduler, dispatches, agentHooks,
     journal, tabActivity, contextUsage, modelCatalog, modelSwitcher, settingsSwitcher, permissionModeSwitcher, sideQuestions, accountUsage, resources, codexQuestions, launches, locatedDirectories,
     fanoutMessages, canary, streams, returns, handOffs, inbox }));
   http.requestTimeout = 20_000; http.headersTimeout = 10_000; http.maxHeadersCount = 32;

@@ -32,6 +32,18 @@ Generic SSH forwarding is disabled. The dispatcher accepts only:
   port** from 1 through 65535. This is not limited to discovered HTTP servers;
   the key holder can reach other services listening on those ports.
 
+A scoped key (`phren pair --scope gitboy-read|gitboy-write`, comment
+`phren-gitboy` / `phren-gitboy-write`) uses `restrict` without `pty` and its own
+forced command, `sh ~/.local/share/phren/bridge/dispatch-scoped <scope>`, which
+always runs the node gateway (`ssh-scoped`, `scoped-gateway.ts`). It accepts
+only `phren-hook v1 pipe`, reads one request, admits only that scope's routes
+(read: `GET /v1/projects/<project>/memory`, `/memory/files`, `/memory/search`,
+`/tasks`; write: `POST /v1/projects/<project>/findings` with a JSON body of at
+most 8 KiB), validates path, query and body against `gitboy-contract.ts`, and
+sends the Hook a request it builds itself; everything else gets an HTTP error
+written by the gateway and never reaches `hook.sock`. See
+[phren-hook.md](../../../../docs/phren-hook.md#gitboy-read-only-memory).
+
 Server names use `^(?!\.\.?$)[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$` and are encoded
 in binding paths. The dispatcher and service pin the same `PHREN_BRIDGE_HOME`
 and `PHREN_HERDR_HOME`. The service sets umask 0077; launchd also sets `Umask` 63.

@@ -30,6 +30,10 @@ const TAB_BAR = /^\s*(?:←\s+)?((?:[☐☒]\s+\S[^☐☒✔→]*?\s*)+)(?:✔\s
 const ROW = /^\s*(❯)?\s*(\d)\.\s+(?:\[([ ✔])\]\s+)?(.*?)\s*$/;
 const NEXT = /^\s*(❯)?\s+(?:Next|Submit)\s*$/;
 const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
+/** Claude Code (2.1.284) draws a question that has a line break or is wider
+ * than 80 columns inside a dimmed left border, "│ " before each line, on its
+ * tab and in the review. The border is not part of the question. */
+const GUTTER = /^(\s*)│(?: |$)/;
 
 /** The question dialog the pane is drawing now, or undefined when the last
  * lines are not one: the last tab bar anchors it, and an active dialog ends
@@ -41,7 +45,7 @@ export function claudeQuestionDialog(text: string): ClaudeDialogScreen | undefin
   if (bar < 0) return undefined;
   const tabs = [...lines[bar].matchAll(/[☐☒]\s+([^☐☒✔→]+?)(?=\s{2,}|\s*[☐☒✔→]|\s*$)/g)].map(match => match[1].trim());
   const body = lines.slice(bar + 1);
-  const content = body.map(line => line.trim()).filter(line => line && !/^─+$/.test(line));
+  const content = body.map(line => line.replace(GUTTER, "$1").trim()).filter(line => line && !/^─+$/.test(line));
   if (content[0] === "Review your answers") {
     if (!body.some(line => /^\s*❯?\s*1\.\s+Submit answers\s*$/.test(line))) return undefined;
     const answers: { question: string; answer: string }[] = [];
@@ -58,7 +62,7 @@ export function claudeQuestionDialog(text: string): ClaudeDialogScreen | undefin
   if (!content.some(line => /Esc to cancel/.test(line))) return undefined;
   const first = body.findIndex(line => ROW.test(line));
   if (first < 0) return undefined;
-  const title = normalize(body.slice(0, first).filter(line => line.trim()).join(" "));
+  const title = normalize(body.slice(0, first).map(line => line.replace(GUTTER, "$1")).filter(line => line.trim()).join(" "));
   const rows: Row[] = [];
   let cursor: number | "next" | undefined, chat = false;
   for (const line of body.slice(first)) {
