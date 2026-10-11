@@ -3,7 +3,7 @@ import { prsSchema } from "./return-contract.js";
 import { parseArgs } from "node:util";
 import { hookRequest } from "./client.js";
 import { dispatchSchema } from "./dispatch.js";
-import { handOff } from "./hand-off.js";
+import { handOff, moveSession } from "./hand-off.js";
 import { terminalPaneFromEnv } from "./terminal.js";
 import { dispatchIdFromEnv } from "./launch-brief.js";
 import { addGrant, grantSchema, listNamedGrants, removeGrant } from "./grants.js";
@@ -66,6 +66,24 @@ export async function runHandOff(args: string[]): Promise<number> {
   if (positionals.length !== 1 || !values.session || (!values.status && !values.text) || (values.status && !values["delivery-id"])) throw new Error("Usage: phren hand-off <computer|local> --session <id> --text <prompt> [--project <slug>] [--account <id>]");
   const computer = positionals[0] === "local" ? undefined : positionals[0];
   const result = await handOff({ ...(computer ? { computer } : {}), project: values.project, ...(values.account ? { account: values.account } : {}), session: sessionId.parse(values.session), ...(values.status ? { status: true } : { text: values.text }), ...(values["delivery-id"] ? { deliveryId: values["delivery-id"] } : {}) });
+  console.log(JSON.stringify(result, null, 2));
+  return result.ok ? 0 : 1;
+}
+
+const MOVE_USAGE = "Usage: phren move <computer|local> --session <id> --to <claude|codex|opencode|copilot> [--account <id>] [--model <model>] [--effort <effort>] [--no-wait] | phren move <computer|local> --status <move-id>";
+
+/** `phren move`: a live session to another agent, through its computer's Hook (session-move.ts). */
+export async function runMove(args: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
+    session: { type: "string" }, to: { type: "string" }, account: { type: "string" }, model: { type: "string" }, effort: { type: "string" },
+    status: { type: "string" }, id: { type: "string" }, "no-wait": { type: "boolean" },
+  } });
+  if (positionals.length !== 1 || (!values.status && (!values.session || !values.to))) throw new Error(MOVE_USAGE);
+  const computer = positionals[0] === "local" ? undefined : positionals[0];
+  const result = await moveSession(values.status ? { ...(computer ? { computer } : {}), status: true, id: values.status }
+    : { ...(computer ? { computer } : {}), session: sessionId.parse(values.session), harness: values.to, ...(values.account ? { account: values.account } : {}),
+      ...(values.model ? { model: values.model } : {}), ...(values.effort ? { effort: values.effort } : {}), ...(values.id ? { id: values.id } : {}),
+      ...(values["no-wait"] ? { wait: false } : {}) });
   console.log(JSON.stringify(result, null, 2));
   return result.ok ? 0 : 1;
 }

@@ -1,6 +1,6 @@
 # MCP API Reference
 
-Phren exposes 76 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
+Phren exposes 77 MCP tools across 16 modules in the bundled implementation catalog, through two presentation profiles. Runtime availability is controlled by the seven built-in [Modules](modules.md). **`core`**, the default, exposes the seven memory tools plus enabled modules' core additions; tasks adds `get_tasks`, `add_task` and `manage_task`, preserving the default ten. **`full`** exposes only enabled modules' handlers and composites. `phren_admin` and other composites cannot call disabled tools. Switch presentation with `phren config mcp-profile core|full` or `PHREN_MCP_PROFILE`; use `phren modules enable|disable <name>` for enablement and restart the client afterwards.
 
 ## Core profile
 
@@ -235,6 +235,31 @@ exposes `hand_off` directly. Supply exactly one of `target` or `session`.
 
 Returns `{ ok, delivered, target, granted }`. CLI equivalent:
 `phren hand-off local --session <id> --text 'Continue with the review'`.
+
+### `move_session`
+
+Move a live session to another agent on its own computer. The agent writes a
+structured hand-off, exits with its own exit command, and the target harness
+starts in the same pane and folder with the hand-off as its first prompt. In
+the core profile use `phren_admin(action: "move_session", ...)`. Supply exactly
+one of `target` or `session`, or `id` with `status: true`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `computer` | string | no | Enrolled computer the session runs on. Omit for the local Hook. |
+| `target` | object | one of | Complete live Hook target. |
+| `session` | string | one of | Session id resolved through the selected Hook's workspace overview. |
+| `harness` | string | yes | `claude`, `codex`, `opencode` or `copilot`. |
+| `account` | string | no | Claude account id; only for `claude`. Without it a Claude target keeps the pane's account. |
+| `model` | string | no | Model for the new agent. |
+| `effort` | string | no | Reasoning effort for the new agent. |
+| `id` | string | no | Move id. Keep it on a retry; with `status: true`, read the move. |
+| `wait` | boolean | no | Wait up to five minutes for the move to finish. Defaults to true. |
+
+Returns `{ ok, settled, move }`, where `move` is the record described in
+docs/conductor.md. A harness or account that is not usable on that computer is
+refused with 409 `harness_unavailable` or `account_unavailable` before anything
+is typed. CLI equivalent: `phren move local --session <id> --to codex`.
 
 ### Standing grants
 

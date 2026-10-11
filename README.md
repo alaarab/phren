@@ -194,7 +194,7 @@ All use the same phren store. No vendor lock-in.
 
 | Package | Description |
 |---------|-------------|
-| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (75 commands; 10 MCP tools by default, 76 implementation tools gated by enabled modules; FTS5, hooks), the interactive shell and terminal graph, the web UI |
+| [`@phren/cli`](packages/cli) | CLI, MCP server, data layer (76 commands; 10 MCP tools by default, 77 implementation tools gated by enabled modules; FTS5, hooks), the interactive shell and terminal graph, the web UI |
 | [`phren-vscode`](packages/vscode) | VS Code extension (sidebar, graph, onboarding) |
 | [`integrations/herdr`](integrations/herdr) | Herdr plugin: keybinding → `phren shell --here` in a pane |
 | [`integrations/omarchy`](integrations/omarchy) | Omarchy plugin: bar widget + app launcher entries for the shell and web viewer |

@@ -5,7 +5,7 @@ Install: npm install -g @phren/cli && phren init
 Key features:
 - Optional phren-agent coding harness: discovered provider catalogs, searchable model/effort picker, shared Codex and API-key connectors (docs/agent-providers.md)
 - Automatic context injection into every prompt via lifecycle hooks
-- 76 MCP tools across 16 catalog modules (search, tasks, findings, notes, memory, data, graph, sessions, ops/review, skills, hooks, extraction, configuration)
+- 77 MCP tools across 16 catalog modules (search, tasks, findings, notes, memory, data, graph, sessions, ops/review, skills, hooks, extraction, configuration)
 - Daily notes are explicitly searchable lightweight scratch context with CRUD and promote-to-finding; they are not automatically injected
 - Finding lifecycle tooling (`supersede_finding`, `retract_finding`, `resolve_contradiction`, `get_contradictions`) with provenance and impact scoring
 - Session continuity via cross-session task checkpoints + `session_history`

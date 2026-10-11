@@ -220,7 +220,11 @@ nothing to that checkout.
   scheduled run), `<bridge>/briefs/<id>/` holds its brief (`brief.md`, 0600)
   and what the worker's hooks reported (`arrival.json`), kept seven days and
   at most 256. A brief is written in `<bridge>/briefs-staging/` first and
-  renamed into `briefs/`, so that folder is empty between launches;
+  renamed into `briefs/`, so that folder is empty between launches. A session
+  moved to another agent gets a brief folder of its own, named by the move id,
+  which also holds the full hand-off (`handoff.md`); the move's record
+  (`<bridge>/moves/<id>.json`: the old and new targets, harnesses, hand-off
+  path and outcome, no prompt text) is kept seven days and at most 256;
   `<bridge>/codex-servers/<id>/` (0700) holds one Codex pane's Phren-owned
   app-server: its socket (`app.sock`), its registry record (`server.json`: the
   pane, process id, thread id, folder and last turn state, no prompt text) and
