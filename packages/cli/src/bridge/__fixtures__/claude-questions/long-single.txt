@@ -1,0 +1,20 @@
+❯ Call the AskUserQuestion tool exactly once with exactly this input JSON, verbatim, and do nothing else: {"questions":[{"header":"Prod
+  deploy","multiSelect":false,"question":"Staging is green: migrations applied, smoke tests passed, and the build is tagged v2.3.1 (the \"release candidate\")
+  — it's ready for production.\n\nConfirm prod deploy?","options":[{"label":"Yes, deploy prod now","description":"Run the production deploy workflow right
+  away."},{"label":"Not yet","description":"Hold; I'll check the dashboards first."}]}]}
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Prod deploy
+
+│ Staging is green: migrations applied, smoke tests passed, and the build is tagged v2.3.1 (the "release candidate") — it's ready for production.
+│
+│ Confirm prod deploy?
+
+❯ 1. Yes, deploy prod now
+     Run the production deploy workflow right away.
+  2. Not yet
+     Hold; I'll check the dashboards first.
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
