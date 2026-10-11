@@ -1,0 +1,27 @@
+❯ Call the AskUserQuestion tool exactly once with exactly this input JSON, verbatim, and do nothing
+  else: {"questions":[{"header":"Prod deploy","multiSelect":false,"question":"Staging is green:
+  migrations applied, smoke tests passed, and the build is tagged v2.3.1 (the \"release
+  candidate\") — it's ready for production. Confirm prod deploy?","options":[{"label":"Yes, deploy
+  prod now","description":"Run the production deploy workflow right away."},{"label":"Not
+  yet","description":"Hold; I'll check the dashboards
+  first."}]},{"header":"Notify","multiSelect":true,"question":"Who should hear about the deploy
+  once it finishes, given that the on-call rotation changed this week and the release channel is
+  muted?","options":[{"label":"On-call","description":"Page the current
+  on-call."},{"label":"Release channel","description":"Post in the release channel."}]}]}
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Prod deploy  ☒ Notify  ✔ Submit  →
+
+Review your answers
+
+ │ ● Staging is green: migrations applied, smoke tests passed, and the build is tagged v2.3.1 (the
+ │   "release candidate") — it's ready for production. Confirm prod deploy?
+   → Yes, deploy prod now
+ │ ● Who should hear about the deploy once it finishes, given that the on-call rotation changed this
+ │   week and the release channel is muted?
+   → On-call
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel

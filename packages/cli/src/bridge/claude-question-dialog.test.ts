@@ -42,6 +42,18 @@ describe("reading Claude's question dialog", () => {
     expect(claudeQuestionDialog(pane("single-multi"))).toMatchObject({ tabs: ["Tools"], title: "Which tools?", multiSelect: true });
     expect(claudeQuestionDialog(pane("answered"))).toBeUndefined();
   });
+
+  it("reads a long question's title and review rows out of Claude's left border", () => {
+    // Claude Code 2.1.284 boxes a question wider than 80 columns or with a
+    // line break; the border is not part of the question the phone sends.
+    expect(claudeQuestionDialog(pane("long-single"))).toMatchObject({ tabs: ["Prod deploy"], multiSelect: false,
+      title: "Staging is green: migrations applied, smoke tests passed, and the build is tagged v2.3.1 (the \"release candidate\") — it's ready for production. Confirm prod deploy?",
+      options: [{ label: "Yes, deploy prod now" }, { label: "Not yet" }] });
+    expect(claudeQuestionDialog(pane("long-set-review"))).toEqual({ kind: "review", tabs: ["Prod deploy", "Notify"], answers: [
+      { question: "Staging is green: migrations applied, smoke tests passed, and the build is tagged v2.3.1 (the \"release candidate\") — it's ready for production. Confirm prod deploy?", answer: "Yes, deploy prod now" },
+      { question: "Who should hear about the deploy once it finishes, given that the on-call rotation changed this week and the release channel is muted?", answer: "On-call" },
+    ] });
+  });
 });
 
 const set: DialogQuestion[] = [
@@ -80,6 +92,16 @@ describe("answering Claude's question dialog", () => {
     await answerClaudeQuestionDialog(claude.io({ redrawMs: 3_000 }), one, [{ options: [1] }]);
     expect(claude.sent).toEqual([["2"]]);
     expect(claude.result).toEqual({ "Which color?": "Green" });
+  });
+
+  it("answers and submits long questions drawn inside Claude's border", async () => {
+    const long: DialogQuestion[] = [
+      { question: "Staging is green and the build is tagged.\n\nConfirm prod deploy?", options: [{ label: "Yes, deploy prod now" }, { label: "Not yet" }] },
+      { question: "Who should hear about the deploy once it finishes, given that the on-call rotation changed this week?", multiSelect: true, options: [{ label: "On-call" }, { label: "Release channel" }] },
+    ];
+    const claude = new FakeClaude(long);
+    await answerClaudeQuestionDialog(claude.io(), long, [{ options: [0] }, { options: [1] }]);
+    expect(claude.result).toEqual({ [long[0].question]: "Yes, deploy prod now", [long[1].question]: ["Release channel"] });
   });
 
   it("answers a lone single-select question with its digit alone", async () => {
