@@ -1,4 +1,4 @@
-import { combineUsage, describe, findComputer, type HarnessUsage, pickComputer, type PlatformChoice, readComputers, readUsage } from "./read.js";
+import { combineUsage, creditsText, describe, findComputer, type HarnessUsage, pickComputer, type PlatformChoice, readComputers, readUsage } from "./read.js";
 import type { ComputerResources } from "../bridge/resources.js";
 
 /**
@@ -54,6 +54,7 @@ export function formatHarness(h: HarnessUsage): string[] {
     const used = w.usedPercent !== undefined ? `${w.usedPercent}% used` : w.usedUSD !== undefined ? `$${w.usedUSD.toFixed(2)}${w.limitUSD !== undefined ? ` of $${w.limitUSD.toFixed(2)}` : ""}` : "";
     lines.push(`    ${w.name.padEnd(30)} ${used.padEnd(18)}${w.resetsIn ? `resets in ${w.resetsIn}` : ""}`);
   }
+  if (h.credits?.hasCredits) lines.push(`    credits${" ".repeat(24)}${creditsText(h.credits)}`);
   if (h.spend) lines.push(`    spend ${h.spend.period.replace(/_/g, " ").padEnd(24)} $${h.spend.amountUSD.toFixed(2)}`);
   if (h.message) lines.push(`    ${h.message}`);
   return lines;

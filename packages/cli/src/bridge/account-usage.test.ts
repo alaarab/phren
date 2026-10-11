@@ -51,6 +51,17 @@ describe("account usage merged by account", () => {
     expect(formatAccountUsage({ accounts: [row], noData: [], computers: ["Desk"], unreachable: [], notLinked: [], enrolled: 0 })).toContain("$50.00 of $50.00, about $0.00 left  expires 2026-10-07");
   });
 
+  it("carries Codex credits from the newest report that has them, and prints them", () => {
+    const older = { ...codex(30, at(20)), credits: { hasCredits: true, balance: 900 } };
+    const newer = { ...codex(100, at(2)), credits: { hasCredits: true, balance: 1250.5, inUse: true as const } };
+    const [row] = mergeAccountUsage([{ computer: "Desk", accounts: [older] }, { computer: "Laptop", accounts: [newer] }], now).accounts;
+    expect(row.credits).toEqual({ hasCredits: true, balance: 1250.5, inUse: true });
+    expect(formatAccountUsage({ accounts: [row], noData: [], computers: ["Desk", "Laptop"], unreachable: [], notLinked: [], enrolled: 0 })).toContain("1,250.5 credits, in use");
+    // A report with only a credit balance still makes a card.
+    const balanceOnly: AccountUsage = { source: "codex", updatedAt: at(1), windows: [], credits: { hasCredits: true, balance: 40 } };
+    expect(mergeAccountUsage([{ computer: "Desk", accounts: [balanceOnly] }], now).accounts[0].credits?.balance).toBe(40);
+  });
+
   it("keeps two Claude logins with no identity apart, one per computer", () => {
     const reports: ComputerUsage[] = [
       { computer: "Desk", accounts: [claude("claude:home:default", "default", at(1), 20)] },
@@ -176,6 +187,23 @@ describe("usage as a dispatch tie-break", () => {
       { source: "claude", account: "work", leftPercent: 0, exhausted: true, until: later(72),
         fiveHour: { leftPercent: 90, resetsAt: later(2) }, week: { leftPercent: 0, resetsAt: later(72) } },
       { source: "codex", account: "default" }]);
+  });
+
+  it("pools an account's API credits into one balance, and a normal spent window still exhausts on its own", () => {
+    const creditRow = (windows: AccountUsage["windows"]): AccountUsage =>
+      ({ source: "claude", updatedAt: at(1), account: { id: "api", label: "API", key: "claude:api" }, windows });
+    const credit = (id: string, usedUSD: number, limitUSD: number): AccountUsage["windows"][number] =>
+      ({ id: `credit:${id}`, name: "API credit, estimate", usedUSD, limitUSD, usedPercent: Math.round(usedUSD / limitUSD * 100), resetsAt: later(200) });
+    // A $20 promo fully spent and a $100 paid credit with $5 used still leave $95 of $120.
+    const [mixed] = capacityRoom([creditRow([credit("promo", 20, 20), credit("paid", 5, 100)])], now);
+    expect(mixed).toMatchObject({ leftPercent: 79 });
+    expect(mixed.exhausted).toBeUndefined();
+    // Every live credit spent: the pool is exhausted, and a credit's expiry is not a reset to name.
+    const [spent] = capacityRoom([creditRow([credit("promo", 20, 20), credit("paid", 100, 100)])], now);
+    expect(spent).toMatchObject({ leftPercent: 0, exhausted: true });
+    expect(spent.until).toBeUndefined();
+    // A normal window at 100% is still exhausted on its own.
+    expect(capacityRoom([codex(100)], now)[0]).toMatchObject({ leftPercent: 0, exhausted: true });
   });
 
   it("rules out only the worker's account when it has no quota, never a low one", () => {

@@ -1,8 +1,9 @@
 // The titlebar usage rings. The daemon's /api/usage has already merged every
 // computer's account reports; this draws one small ring per account (filled by
-// its tightest window) and opens a popover listing every account and window.
-// The helper semantics mirror @phren/cli/client/account-usage, reimplemented
-// here because the browser imports nothing from the CLI.
+// its tightest window) and opens a popover listing every account and window,
+// laid out like the phone's Account usage cards. The helper semantics mirror
+// @phren/cli/client/account-usage, reimplemented here because the browser
+// imports nothing from the CLI.
 
 const POLL_MS = 60_000;
 const SIZE = 18;
@@ -18,11 +19,6 @@ const ageText = (ms) => {
   return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
 };
 
-const roomLeft = (windows) => {
-  const known = (windows ?? []).map((w) => w.leftPercent).filter((v) => v !== undefined);
-  return known.length ? Math.min(...known) : undefined;
-};
-
 const resetsIn = (iso, now = Date.now()) => {
   const ms = Date.parse(iso) - now;
   if (!Number.isFinite(ms) || ms <= 0) return "";
@@ -33,6 +29,91 @@ const resetsIn = (iso, now = Date.now()) => {
 };
 
 const title = (row) => (row.account ? `${row.name} · ${row.account}` : row.name);
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "Oct 7": a subscription date in UTC, as the phone writes it. */
+const dayUTC = (iso) => {
+  const d = new Date(iso);
+  return Number.isFinite(d.getTime()) ? `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}` : "";
+};
+/** "Oct 7": a credit's expiry in local time. */
+const dayLocal = (iso) => {
+  const d = new Date(iso);
+  return Number.isFinite(d.getTime()) ? `${MONTHS[d.getMonth()]} ${d.getDate()}` : "";
+};
+const dollars = (value) => `$${value.toFixed(2)}`;
+const isCredit = (w) => typeof w.id === "string" && w.id.startsWith("credit:");
+
+/**
+ * Card titles by account id, as the phone names them: the provider, then the
+ * email or label. One email on two plans (a personal plan and a Team seat)
+ * adds the plan, and two or more unnamed accounts of one provider become
+ * "Account 2" by their place, so two cards never read the same.
+ */
+export function accountTitles(accounts) {
+  const titles = new Map();
+  const bySource = new Map();
+  for (const row of accounts ?? []) bySource.set(row.harness, [...(bySource.get(row.harness) ?? []), row]);
+  for (const group of bySource.values()) {
+    const unnamed = group.filter((row) => !row.account).length;
+    group.forEach((row, index) => {
+      let label = row.account;
+      const plan = row.subscription?.plan;
+      if (label && plan && group.some((other) => other !== row && other.account === label)) label = `${label} · ${plan}`;
+      if (!label && unnamed > 1) label = `Account ${index + 1}`;
+      titles.set(row.id, label ? `${row.name} · ${label}` : row.name);
+    });
+  }
+  return titles;
+}
+
+/** "Max 20x · since Jul 13 · renews about Oct 13", dates in UTC. */
+export function subscriptionSummary(sub) {
+  if (!sub?.plan) return "";
+  const parts = [sub.plan];
+  if (sub.startedAt && dayUTC(sub.startedAt)) parts.push(`since ${dayUTC(sub.startedAt)}`);
+  if (sub.renewsAt && dayUTC(sub.renewsAt)) parts.push(`renews ${sub.renewsEstimated ? "about " : ""}${dayUTC(sub.renewsAt)}`);
+  return parts.join(" · ");
+}
+
+/** "Mini, Workstation · updated 1m ago": where the card came from and how old it is, on one line. */
+export function metaLine(row, now = Date.now()) {
+  const parts = [];
+  const names = [...new Set((row.computers ?? []).map((c) => c.name))];
+  if (names.length) parts.push(names.join(", "));
+  const updated = Date.parse(row.updatedAt ?? "");
+  if (Number.isFinite(updated)) parts.push(`updated ${ageText(now - updated)} ago`);
+  return parts.join(" · ");
+}
+
+/** "1,250.5 credits", "Unlimited", or "" when the account has no Codex credits. */
+export function creditsValue(credits) {
+  if (!credits?.hasCredits) return "";
+  if (credits.unlimited) return "Unlimited";
+  return typeof credits.balance === "number" ? credits.balance.toLocaleString("en-US", { maximumFractionDigits: 2 }) : "Available";
+}
+
+/**
+ * What one window says: the value on the right ("23%", "$3.10 of $10.00",
+ * "reset") and the caption under its bar. An API credit's date is its expiry;
+ * a 5-hour window with no reset time has not started.
+ */
+export function windowText(w, now = Date.now()) {
+  const used = typeof w.usedPercent === "number" ? w.usedPercent : null;
+  const credit = isCredit(w);
+  const value = (credit || used === null) && w.usedUSD !== undefined
+    ? `${dollars(w.usedUSD)}${w.limitUSD !== undefined ? ` of ${dollars(w.limitUSD)}` : ""}`
+    : w.reset ? "reset" : used !== null ? `${Math.round(used * 10) / 10}%` : "";
+  let when = "";
+  if (credit) {
+    if (w.resetsAt && dayLocal(w.resetsAt)) when = `${Date.parse(w.resetsAt) > now ? "expires" : "expired"} ${dayLocal(w.resetsAt)}`;
+  } else if (!w.reset) {
+    const until = w.resetsIn || (w.resetsAt ? resetsIn(w.resetsAt, now) : "");
+    when = until ? `resets in ${until}` : w.id === "five_hour" && !w.resetsAt ? "not started" : "";
+  }
+  const caption = [w.limited ? "Limit reached" : "", when].filter(Boolean).join(" · ");
+  return { value, caption, used };
+}
 
 /** The one-line answer the tooltip and popover header show. */
 function usageSummary(view) {
@@ -83,6 +164,7 @@ function drawRing(used) {
 }
 
 function windowLine(w, now) {
+  const text = windowText(w, now);
   const row = document.createElement("div");
   row.className = "usage-window";
   const label = document.createElement("span");
@@ -90,54 +172,79 @@ function windowLine(w, now) {
   label.textContent = w.name;
   const value = document.createElement("span");
   value.className = "usage-window-value";
-  const used = typeof w.usedPercent === "number" ? w.usedPercent : null;
-  const credit = w.id?.startsWith("credit:") && w.usedUSD !== undefined && w.limitUSD !== undefined;
-  value.textContent = credit ? `$${w.usedUSD.toFixed(2)} of $${w.limitUSD.toFixed(2)}`
-    : w.reset ? "reset" : used !== null ? `${used}%` : w.usedUSD !== undefined ? `$${w.usedUSD.toFixed(2)}` : "";
+  if (w.reset) value.classList.add("muted");
+  if (w.limited) value.classList.add("danger");
+  value.textContent = text.value;
   const bar = document.createElement("span");
   bar.className = "usage-bar";
   const fill = document.createElement("span");
   fill.className = "usage-bar-fill";
-  fill.style.width = `${used === null ? 0 : Math.max(0, Math.min(100, used))}%`;
-  fill.style.background = tone(used);
+  fill.style.width = `${text.used === null ? 0 : Math.max(0, Math.min(100, text.used))}%`;
+  fill.style.background = w.limited ? "var(--danger)" : tone(text.used);
   bar.append(fill);
-  const reset = document.createElement("span");
-  reset.className = "usage-window-reset";
-  const until = w.resetsIn || (w.resetsAt ? resetsIn(w.resetsAt, now) : "");
-  // A credit's date is its expiry; a 5-hour window with no reset time has not started.
-  reset.textContent = until ? `${credit ? "expires" : "resets"} in ${until}` : w.id === "five_hour" && !w.reset ? "not started" : "";
-  row.append(label, value, bar, reset);
+  row.append(label, value, bar);
+  if (text.caption) {
+    const caption = document.createElement("span");
+    caption.className = "usage-window-reset";
+    if (w.limited) caption.classList.add("danger");
+    caption.textContent = text.caption;
+    row.append(caption);
+  }
   return row;
 }
 
-function accountBlock(row, now) {
+/** Codex credits: a line like a window's, without a bar, since a balance has no limit. */
+function creditsLine(credits) {
+  const row = document.createElement("div");
+  row.className = "usage-window usage-credits";
+  const label = document.createElement("span");
+  label.className = "usage-window-name";
+  label.textContent = "Credits";
+  const value = document.createElement("span");
+  value.className = "usage-window-value";
+  value.textContent = creditsValue(credits);
+  row.append(label, value);
+  if (credits.inUse) {
+    const caption = document.createElement("span");
+    caption.className = "usage-window-reset";
+    caption.textContent = "in use: a plan limit is spent";
+    row.append(caption);
+  }
+  return row;
+}
+
+function line(className, text) {
+  const node = document.createElement("div");
+  node.className = className;
+  node.textContent = text;
+  return node;
+}
+
+function accountBlock(row, cardTitle, now) {
   const block = document.createElement("div");
   block.className = "usage-account";
+  // Compact, as on the phone: the meta lines tight under the title, a small gap, then the bars.
   const head = document.createElement("div");
   head.className = "usage-account-head";
-  const name = document.createElement("span");
-  name.className = "usage-account-name";
-  name.textContent = title(row);
-  const meta = document.createElement("span");
-  meta.className = "usage-account-meta";
-  const age = row.updatedAt ? `reported ${ageText(now - Date.parse(row.updatedAt))} ago` : "";
-  const left = roomLeft(row.windows);
-  meta.textContent = [row.harness, left !== undefined ? `${left}% left` : "", age].filter(Boolean).join(" · ");
-  head.append(name, meta);
+  head.append(line("usage-account-name", cardTitle));
+  const plan = subscriptionSummary(row.subscription);
+  if (plan) head.append(line("usage-account-meta", plan));
+  // A window that reset since its report already says so on its own line.
+  if (row.stale && row.age && !(row.windows ?? []).some((w) => w.reset)) head.append(line("usage-account-meta warn", `snapshot from ${row.age} ago`));
+  const meta = metaLine(row, now);
+  if (meta) head.append(line("usage-account-meta", meta));
   block.append(head);
-  for (const w of row.windows ?? []) block.append(windowLine(w, now));
-  if (row.spend) {
-    const spend = document.createElement("div");
-    spend.className = "usage-account-note";
-    spend.textContent = `$${row.spend.amountUSD.toFixed(2)} ${row.spend.period.replace(/_/g, " ")}`;
-    block.append(spend);
+  const windows = row.windows ?? [];
+  const showCredits = Boolean(creditsValue(row.credits));
+  if (windows.length || showCredits) {
+    const list = document.createElement("div");
+    list.className = "usage-windows";
+    for (const w of windows) list.append(windowLine(w, now));
+    if (showCredits) list.append(creditsLine(row.credits));
+    block.append(list);
   }
-  if (row.message) {
-    const note = document.createElement("div");
-    note.className = "usage-account-note";
-    note.textContent = row.message;
-    block.append(note);
-  }
+  if (row.spend) block.append(line("usage-account-note", `$${row.spend.amountUSD.toFixed(2)} ${row.spend.period.replace(/_/g, " ")}`));
+  if (row.message) block.append(line("usage-account-note", row.message));
   return block;
 }
 
@@ -179,7 +286,8 @@ export function mountUsageRings(el) {
     header.className = "usage-pop-summary";
     header.textContent = usageSummary(snapshot);
     pop.append(header);
-    for (const account of snapshot?.accounts ?? []) pop.append(accountBlock(account, Date.now()));
+    const titles = accountTitles(snapshot?.accounts);
+    for (const account of snapshot?.accounts ?? []) pop.append(accountBlock(account, titles.get(account.id) ?? title(account), Date.now()));
     for (const item of snapshot?.noData ?? []) {
       const note = document.createElement("div");
       note.className = "usage-pop-nodata";
@@ -192,6 +300,7 @@ export function mountUsageRings(el) {
     row.replaceChildren();
     const accounts = snapshot?.accounts ?? [];
     el.classList.toggle("empty", accounts.length === 0);
+    const titles = accountTitles(accounts);
     for (const account of accounts) {
       const button = document.createElement("button");
       button.type = "button";
@@ -201,7 +310,7 @@ export function mountUsageRings(el) {
       button.append(drawRing(used));
       if (account.stale) button.style.opacity = "0.4";
       const reset = tight?.resetsIn || (tight?.resetsAt ? resetsIn(tight.resetsAt) : "");
-      button.title = `${title(account)} · ${used === null ? "no limit" : `${used}% used`}${reset ? `, resets in ${reset}` : ""}`;
+      button.title = `${titles.get(account.id) ?? title(account)} · ${used === null ? "no limit" : `${used}% used`}${reset ? `, resets in ${reset}` : ""}`;
       button.addEventListener("click", (ev) => { ev.stopPropagation(); if (pop.hidden) openPopover(); else closePopover(); });
       row.append(button);
     }
