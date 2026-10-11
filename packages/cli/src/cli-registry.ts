@@ -271,7 +271,7 @@ export const REGISTRY: Command[] = [
     run: async args => (await import("./bridge/dispatch-command.js")).runHandOff(args),
   },
   {
-    name: "move", topic: "core", usage: "phren move <computer|local> --session <id> --to <claude|codex|opencode|copilot> [--account <id>] [--model <model>] [--effort <effort>] [--no-wait]",
+    name: "move", topic: "core", usage: "phren move <session-or-pane> --to <claude|codex|opencode|copilot> [--model <model>] [--effort <effort>] [--account <id>] [--computer <name>] [--no-wait]",
     summary: "Move a live agent session to another harness: it writes a hand-off and exits, and the new agent continues in its pane",
     run: async args => (await import("./bridge/dispatch-command.js")).runMove(args),
   },

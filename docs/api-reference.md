@@ -242,13 +242,14 @@ Move a live session to another agent on its own computer. The agent writes a
 structured hand-off, exits with its own exit command, and the target harness
 starts in the same pane and folder with the hand-off as its first prompt. In
 the core profile use `phren_admin(action: "move_session", ...)`. Supply exactly
-one of `target` or `session`, or `id` with `status: true`.
+one of `target`, `session` or `pane`, or `id` with `status: true`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `computer` | string | no | Enrolled computer the session runs on. Omit for the local Hook. |
 | `target` | object | one of | Complete live Hook target. |
 | `session` | string | one of | Session id resolved through the selected Hook's workspace overview. |
+| `pane` | string | one of | Pane id as the terminal shows it (`wC9:p1`), resolved the same way. |
 | `harness` | string | yes | `claude`, `codex`, `opencode` or `copilot`. |
 | `account` | string | no | Claude account id; only for `claude`. Without it a Claude target keeps the pane's account. |
 | `model` | string | no | Model for the new agent. |
@@ -259,7 +260,7 @@ one of `target` or `session`, or `id` with `status: true`.
 Returns `{ ok, settled, move }`, where `move` is the record described in
 docs/conductor.md. A harness or account that is not usable on that computer is
 refused with 409 `harness_unavailable` or `account_unavailable` before anything
-is typed. CLI equivalent: `phren move local --session <id> --to codex`.
+is typed. CLI equivalent: `phren move <session-or-pane> --to codex [--model M] [--effort E] [--account A] [--computer <name>]`.
 
 ### Standing grants
 

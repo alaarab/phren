@@ -1664,7 +1664,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         </div>
 
         <div class="ref-card">
-          <div class="ref-card-name">phren move &lt;computer|local&gt; --session &lt;id&gt; --to &lt;harness&gt;</div>
+          <div class="ref-card-name">phren move &lt;session-or-pane&gt; --to &lt;harness&gt; [--model M] [--effort E] [--account A]</div>
           <div class="ref-card-desc">Move a live session to another harness: it writes a hand-off and exits, and the new agent continues in its pane.</div>
         </div>
 
@@ -1886,7 +1886,7 @@ phren hooks add-custom Stop "curl -s http://localhost:9090/notify"</code></pre>
         <details class="ref-card"><summary><span class="ref-card-name">hand_off</span><span class="ref-card-desc">Queue a prompt at a busy session, confirm delivery by id</span></summary><div class="ref-card-details"><div class="ref-card-params">(computer?, target?, session?, project?, text?, deliveryId?, status?)</div></div></details>
 
         <details class="ref-card"><summary><span class="ref-card-name">dispatch_report</span><span class="ref-card-desc">PR evidence for the done return and integrator queue</span></summary><div class="ref-card-details"><div class="ref-card-params">(prs: [{url,repo,branch,tests,notes?}])</div></div></details>
-        <details class="ref-card"><summary><span class="ref-card-name">move_session</span><span class="ref-card-desc">Move a live session to another harness with a hand-off</span></summary><div class="ref-card-details"><div class="ref-card-params">(computer?, target?, session?, harness, account?, model?, effort?, id?, status?, wait?)</div></div></details>
+        <details class="ref-card"><summary><span class="ref-card-name">move_session</span><span class="ref-card-desc">Move a live session to another harness with a hand-off</span></summary><div class="ref-card-details"><div class="ref-card-params">(computer?, target?, session?, pane?, harness, account?, model?, effort?, id?, status?, wait?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">owner_inbox</span><span class="ref-card-desc">List, add or resolve what waits on the owner</span></summary><div class="ref-card-details"><div class="ref-card-params">(operation?, title?, project?, id?, resolution?, includeResolved?, computer?)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">dispatch_approve</span><span class="ref-card-desc">Answer a dispatched worker's permission request</span></summary><div class="ref-card-details"><div class="ref-card-params">(id, decision, actionId)</div></div></details>
         <details class="ref-card"><summary><span class="ref-card-name">authority</span><span class="ref-card-desc">Read the owner's release authority policy</span></summary><div class="ref-card-details"><div class="ref-card-params">(project?)</div></div></details>

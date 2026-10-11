@@ -70,20 +70,26 @@ export async function runHandOff(args: string[]): Promise<number> {
   return result.ok ? 0 : 1;
 }
 
-const MOVE_USAGE = "Usage: phren move <computer|local> --session <id> --to <claude|codex|opencode|copilot> [--account <id>] [--model <model>] [--effort <effort>] [--no-wait] | phren move <computer|local> --status <move-id>";
+const MOVE_USAGE = "Usage: phren move <session-or-pane> --to <claude|codex|opencode|copilot> [--model <model>] [--effort <effort>] [--account <id>] [--computer <name>] [--no-wait] | phren move --status <move-id> [--computer <name>]";
 
-/** `phren move`: a live session to another agent, through its computer's Hook (session-move.ts). */
+/** `phren move`: a live session, named by its session id or its pane id (`wC9:p1`), to another agent, through its computer's Hook (session-move.ts). */
 export async function runMove(args: string[]): Promise<number> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
-    session: { type: "string" }, to: { type: "string" }, account: { type: "string" }, model: { type: "string" }, effort: { type: "string" },
+    to: { type: "string" }, account: { type: "string" }, model: { type: "string" }, effort: { type: "string" }, computer: { type: "string" },
     status: { type: "string" }, id: { type: "string" }, "no-wait": { type: "boolean" },
   } });
-  if (positionals.length !== 1 || (!values.status && (!values.session || !values.to))) throw new Error(MOVE_USAGE);
-  const computer = positionals[0] === "local" ? undefined : positionals[0];
-  const result = await moveSession(values.status ? { ...(computer ? { computer } : {}), status: true, id: values.status }
-    : { ...(computer ? { computer } : {}), session: sessionId.parse(values.session), harness: values.to, ...(values.account ? { account: values.account } : {}),
-      ...(values.model ? { model: values.model } : {}), ...(values.effort ? { effort: values.effort } : {}), ...(values.id ? { id: values.id } : {}),
-      ...(values["no-wait"] ? { wait: false } : {}) });
+  const computer = values.computer ? { computer: values.computer } : {};
+  if (values.status) {
+    if (positionals.length) throw new Error(MOVE_USAGE);
+    const result = await moveSession({ ...computer, status: true, id: values.status });
+    console.log(JSON.stringify(result, null, 2));
+    return result.ok ? 0 : 1;
+  }
+  if (positionals.length !== 1 || !values.to) throw new Error(MOVE_USAGE);
+  const named = sessionId.safeParse(positionals[0]).success ? { session: positionals[0] } : { pane: positionals[0] };
+  const result = await moveSession({ ...computer, ...named, harness: values.to, ...(values.account ? { account: values.account } : {}),
+    ...(values.model ? { model: values.model } : {}), ...(values.effort ? { effort: values.effort } : {}), ...(values.id ? { id: values.id } : {}),
+    ...(values["no-wait"] ? { wait: false } : {}) });
   console.log(JSON.stringify(result, null, 2));
   return result.ok ? 0 : 1;
 }
