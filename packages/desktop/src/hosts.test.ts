@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadComputers, masterExitArgs, sshArgs } from "./hosts.js";
 
-const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOk6rp5mZR9NnYyyPgxvdi6cGYXJqjcnO5YtupyDMgcQ";
+const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg";
 let root: string;
 const previous = process.env.PHREN_BRIDGE_HOME;
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "desktop-hosts-")); process.env.PHREN_BRIDGE_HOME = root; });
