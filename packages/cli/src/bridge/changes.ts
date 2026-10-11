@@ -366,6 +366,10 @@ export class ToolChanges {
     if (size + Buffer.byteLength(line) <= 16_777_216) await appendFile(file, line, { mode: 0o600 });
     this.onRecord?.(files);
   }
+  /** Every change this conversation's tool calls recorded, oldest first. */
+  async history(conversation: string): Promise<{ toolUseId: string; files: ChangedFile[] }[]> {
+    return [...(await this.load(conversation)).files.entries()].filter(([, files]) => files.length).map(([toolUseId, files]) => ({ toolUseId, files }));
+  }
   async recordedPaths(conversation: string): Promise<string[]> {
     return [...new Set([...(await this.load(conversation)).files.values()].flatMap(files => files.flatMap(file => [file.root, path.resolve(file.root, file.path)])))];
   }

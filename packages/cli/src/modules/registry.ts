@@ -118,9 +118,9 @@ export const BUILTIN_MODULES: readonly ModuleManifest[] = [
     hookRoutes: [...routes("GET", ["/v1/git/status"]), ...routes("POST", [
       "/v1/diff", "/v1/web-servers/session", "/v1/git/status", "/v1/git/log", "/v1/git/branches", "/v1/git/pulls",
       "/v1/git/tree", "/v1/git/worktrees", "/v1/git/stage", "/v1/git/unstage", "/v1/git/discard",
-      "/v1/git/commit", "/v1/git/push", "/v1/git/pr", "/v1/files/write", "/v1/files/search", "/v1/files/list",
+      "/v1/git/commit", "/v1/git/push", "/v1/git/pr", "/v1/git/show", "/v1/git/checkout", "/v1/git/fetch", "/v1/git/pull", "/v1/git/file", "/v1/git/apply", "/v1/git/session-changes", "/v1/files/write", "/v1/files/search", "/v1/files/list",
     ])],
-    capabilities: ["git", "diff", "fileWrite", "fileSearch"], storeFiles: [], localFiles: ["<bridge>/changes/**", "<bridge>/changes-scratch/**"],
+    capabilities: ["git", "diff", "fileWrite", "fileSearch", "gitReview"], storeFiles: [], localFiles: ["<bridge>/changes/**", "<bridge>/changes-scratch/**"],
     phoneScreens: [{ screen: "AgentChangesView", capability: "git" }], skills: [],
   },
   {

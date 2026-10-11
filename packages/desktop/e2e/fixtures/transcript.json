@@ -1,0 +1,146 @@
+[
+  {
+    "raw": {
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": "Fix the login flow"
+      },
+      "uuid": "u1",
+      "timestamp": "2026-10-10T12:00:00.000Z"
+    }
+  },
+  {
+    "raw": {
+      "type": "assistant",
+      "message": {
+        "content": [
+          {
+            "type": "text",
+            "text": "On it. The session token is dropped before the guard runs."
+          }
+        ],
+        "role": "assistant"
+      },
+      "uuid": "a1",
+      "timestamp": "2026-10-10T12:00:05.000Z"
+    }
+  },
+  {
+    "raw": {
+      "type": "assistant",
+      "uuid": "a2",
+      "timestamp": "2026-10-10T12:00:08.000Z",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "t1",
+            "name": "Bash",
+            "input": {
+              "command": "pnpm test -- auth",
+              "description": "Run the auth tests"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "raw": {
+      "type": "user",
+      "uuid": "r1",
+      "timestamp": "2026-10-10T12:00:12.000Z",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "t1",
+            "content": "12 passed"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "raw": {
+      "type": "assistant",
+      "uuid": "a3",
+      "timestamp": "2026-10-10T12:00:15.000Z",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "t2",
+            "name": "Edit",
+            "input": {
+              "file_path": "/Users/you/phren/src/app.ts",
+              "old_string": "export const app = \"old\";",
+              "new_string": "export const app = \"new\";\nexport const ready = true;"
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "raw": {
+      "type": "user",
+      "uuid": "r2",
+      "timestamp": "2026-10-10T12:00:16.000Z",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "t2",
+            "content": "The file was updated."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "raw": {
+      "type": "assistant",
+      "uuid": "a4",
+      "timestamp": "2026-10-10T12:00:20.000Z",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "Fixed. The guard now runs **after** the token is restored, and `pnpm test` passes."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "raw": {
+      "type": "user",
+      "uuid": "u9",
+      "timestamp": "2026-10-10T12:00:30.000Z",
+      "message": {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "This is what the login page shows now"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "media_type": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGPYOeXLfxBmgDEAcq4NAdKXL0AAAAAASUVORK5CYII="
+            }
+          }
+        ]
+      }
+    }
+  }
+]
