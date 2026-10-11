@@ -5,6 +5,7 @@ packages:
 allowBuilds:
   '@vscode/vsce-sign': true
   electron: true
+  electron-winstaller: false
   esbuild: true
   node-pty: true
 

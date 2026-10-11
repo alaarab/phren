@@ -1,0 +1,50 @@
+# Installers for Phren desktop. scripts/package.mjs stages a self-contained
+# copy of this package (pnpm deploy, hoisted node_modules) and runs
+# electron-builder on it with this file; it also sets electronVersion from the
+# installed electron.
+appId: com.alaarab.phren.desktop
+productName: Phren
+copyright: Copyright © Ala Arab
+# Stable names, so releases/latest/download/<name> is a permanent link.
+artifactName: Phren-${os}-${arch}.${ext}
+directories:
+  buildResources: build
+files:
+  - package.json
+  - electron/**
+  - dist/src/**
+  - "!dist/src/testing/**/*.d.ts"
+  - ui/**
+  - "!ui/CONTRACT.md"
+# The daemon runs on Electron's own Node (ELECTRON_RUN_AS_NODE) and reads its
+# UI and vendor files from disk, and node-pty needs its native helper on disk.
+asar: false
+# node-pty 1.x is N-API, so the binary pnpm installed loads in Electron too.
+npmRebuild: false
+mac:
+  target:
+    - target: dmg
+      arch: arm64
+    # The zip is what electron-updater installs on macOS once the app is
+    # signed with a Developer ID.
+    - target: zip
+      arch: arm64
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSMicrophoneUsageDescription: Phren uses the microphone for dictation and talk mode.
+linux:
+  # The default comes from the scoped npm name, which is not a valid file name.
+  executableName: phren-desktop
+  target:
+    - target: AppImage
+      arch: x64
+  category: Development
+  synopsis: The owner's cockpit for every computer running a Phren Hook
+publish:
+  provider: generic
+  # Desktop releases are the repository's latest release, so this always
+  # serves the newest latest-mac.yml / latest-linux.yml.
+  url: https://github.com/alaarab/phren/releases/latest/download

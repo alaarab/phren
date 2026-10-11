@@ -1,3 +1,5 @@
 dist/
 .scratch/
 ui/editor-host/
+.stage/
+release/
