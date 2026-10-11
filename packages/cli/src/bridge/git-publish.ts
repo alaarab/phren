@@ -4,7 +4,10 @@ import { BridgeError, type Json } from "./protocol.js";
 import { git, gitRoot } from "./projects.js";
 import { countGit } from "./metrics.js";
 import { defaultBranch, invalidateTree } from "./git.js";
+import { z } from "zod";
 import { detectHost, providerFor, unknownHost } from "./git-hosts.js";
+import { writeHostToken } from "./git-host-auth.js";
+import { HostApiError } from "./git-host-http.js";
 
 /** Finishing a session from the phone: commit what is staged, push the
  * current branch, open a pull request. Each acts on the repository the
@@ -128,4 +131,47 @@ export async function gitPullRequest(cwd: string, draft: unknown): Promise<Json>
   const provider = providerFor(host);
   if (!provider) { const { reason, message } = unknownHost(host); return { ok: false, reason, message, host }; }
   return { ...await provider.open(root, branch, draft === true, host), host };
+}
+
+const MergeBody = z.object({
+  number: z.number().int().positive(),
+  method: z.enum(["merge", "squash", "rebase"]).default("merge"),
+  expectedHeadSha: z.string().regex(/^[0-9a-f]{7,64}$/i).optional(),
+  deleteBranch: z.boolean().optional(),
+});
+
+/** Merge one pull or merge request on the remote's host. The host decides:
+ * its refusal (checks, approvals, conflicts, a head that moved past
+ * `expectedHeadSha`) is `{ ok: false, reason: "blocked", message }`. */
+export async function gitMergeRequest(cwd: string, data: unknown): Promise<Json> {
+  const request = MergeBody.parse(data);
+  const root = await repository(cwd);
+  const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
+  const host = await detectHost(root, branch);
+  const provider = providerFor(host);
+  if (!provider) { const { reason, message } = unknownHost(host); return { ok: false, reason, message, host }; }
+  return { ...await provider.merge(root, request, host), host };
+}
+
+/** Connect (or, with an empty token, disconnect) this repository's GitLab or
+ * gitboy host: the token is checked against the host first and stored in the
+ * Hook's git-hosts.json with the account it signs in as. GitHub keeps gh's. */
+export async function gitHostToken(cwd: string, data: unknown): Promise<Json> {
+  const { token } = z.object({ token: z.string().max(4096) }).parse(data);
+  const root = await repository(cwd);
+  const branch = (await git(root, "branch", "--show-current").catch(() => "")).trim();
+  const host = await detectHost(root, branch);
+  const provider = providerFor(host);
+  if (!provider || !host.domain || !host.kind) { const { reason, message } = unknownHost(host); return { ok: false, reason, message, host }; }
+  if (host.kind === "github" || !provider.whoami) return { ok: false, reason: "unsupported", message: "GitHub uses the GitHub CLI's sign-in: run gh auth login on this computer.", host };
+  const kind = host.kind;
+  if (!token.trim()) { await writeHostToken(host.domain, kind, ""); return { ok: true, disconnected: true, domain: host.domain, host }; }
+  try {
+    const { user } = await provider.whoami(root, host, token.trim());
+    await writeHostToken(host.domain, kind, token.trim(), user || undefined);
+    return { ok: true, domain: host.domain, kind, ...(user ? { user } : {}), host };
+  } catch (error) {
+    if (error instanceof HostApiError) return { ok: false, reason: error.reason, message: error.reason === "auth" ? `${host.name} refused that token.` : error.message, host };
+    throw error;
+  }
 }

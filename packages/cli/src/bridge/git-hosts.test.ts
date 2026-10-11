@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { detectHost, kindFromDomain, parseRemoteUrl, PROVIDERS } from "./git-hosts.js";
+import { detectHost, kindFromDomain, parseRemoteUrl } from "./git-hosts.js";
 import { gitPulls } from "./git.js";
 import { gitPullRequest } from "./git-publish.js";
 
@@ -12,9 +12,9 @@ const execFileAsync = promisify(execFile);
 
 describe("git hosts", () => {
   let created: string | undefined;
-  const saved = process.env.GIT_CONFIG_GLOBAL;
+  const saved = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, PHREN_BRIDGE_HOME: process.env.PHREN_BRIDGE_HOME, GITLAB_TOKEN: process.env.GITLAB_TOKEN, GITBOY_TOKEN: process.env.GITBOY_TOKEN };
   afterEach(async () => {
-    if (saved === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = saved;
+    for (const [key, value] of Object.entries(saved)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
     if (created) await rm(created, { recursive: true, force: true });
     created = undefined;
   });
@@ -23,6 +23,8 @@ describe("git hosts", () => {
   async function repository(url: string) {
     const root = created = await realpath(await mkdtemp(path.join(tmpdir(), "phren-hosts-")));
     process.env.GIT_CONFIG_GLOBAL = path.join(root, "global.gitconfig");
+    process.env.PHREN_BRIDGE_HOME = path.join(root, "bridge");
+    delete process.env.GITLAB_TOKEN; delete process.env.GITBOY_TOKEN;
     const git = async (...args: string[]) => (await execFileAsync("git", ["-C", root, ...args])).stdout;
     await git("init", "-q", "-b", "feature");
     await git("remote", "add", "origin", url);
@@ -70,29 +72,20 @@ describe("git hosts", () => {
     expect(await detectHost(root, "other")).toMatchObject({ kind: "github", remote: "origin" });
   });
 
-  it("answers plainly for stubbed and unknown hosts without running any CLI", async () => {
+  it("answers plainly for unknown hosts, and tells an unconnected GitLab or gitboy how to connect", async () => {
     const { root, git } = await repository("git@git.example.com:team/app.git");
     const unknown = await gitPulls(root);
     expect(unknown).toMatchObject({ available: false, reason: "unknown-host", pulls: [], current: null, branch: "feature" });
     expect(String(unknown.message)).toContain("git config remote.origin.phrenHost github|gitlab|gitboy");
     expect(await gitPullRequest(root, false)).toMatchObject({ ok: false, reason: "unknown-host" });
 
-    await git("config", "remote.origin.phrenHost", "gitlab");
-    const gitlab = await gitPulls(root);
-    expect(gitlab).toMatchObject({ available: false, reason: "unsupported", host: { kind: "gitlab", supported: false } });
-    expect(String(gitlab.message)).toMatch(/GitLab merge requests .* not supported yet/);
-    expect(await gitPullRequest(root, true)).toMatchObject({ ok: false, reason: "unsupported", host: { kind: "gitlab" } });
-
-    await git("config", "remote.origin.phrenHost", "gitboy");
-    expect(await gitPulls(root)).toMatchObject({ available: false, reason: "unsupported", host: { kind: "gitboy", terms: { short: "PR" } } });
-  });
-
-  it("gives every provider the same interface, and only GitHub is built", () => {
-    expect(Object.keys(PROVIDERS).sort()).toEqual(["gitboy", "github", "gitlab"]);
-    for (const provider of Object.values(PROVIDERS)) {
-      expect(typeof provider.list).toBe("function");
-      expect(typeof provider.open).toBe("function");
+    // GitLab and gitboy are read over HTTP: with no token anywhere they say how to connect.
+    for (const kind of ["gitlab", "gitboy"] as const) {
+      await git("config", "remote.origin.phrenHost", kind);
+      const list = await gitPulls(root);
+      expect(list).toMatchObject({ available: false, reason: "auth", host: { kind, supported: true } });
+      expect(String(list.message)).toContain(`phren bridge git-host set git.example.com ${kind}`);
     }
-    expect(Object.values(PROVIDERS).filter((p) => p.supported).map((p) => p.kind)).toEqual(["github"]);
   });
+
 });
