@@ -31,7 +31,8 @@ function nextMessage(socket: WebSocket): Promise<Record<string, any>> {
   return new Promise((resolve) => socket.once("message", (data) => resolve(JSON.parse(data.toString()))));
 }
 
-describe("startFakeHook", () => {
+// The fake Hook listens on a Unix socket in a private directory: POSIX only.
+describe.skipIf(process.platform === "win32")("startFakeHook", () => {
   it("answers /v1/health with capabilities", async () => {
     const response = await hookRequest(LOCAL, "GET", "/v1/health");
     expect(response.status).toBe(200);
