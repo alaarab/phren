@@ -148,7 +148,8 @@ describe("gitboy-write scope admission", () => {
   });
 });
 
-describe("scoped SSH session", () => {
+// A Unix socket stands in for the Hook; Windows cannot listen on one by path.
+describe.skipIf(process.platform === "win32")("scoped SSH session", () => {
   let dir: string, socket: string, server: Server, received: string[];
   beforeEach(async () => {
     dir = await mkdtemp(path.join(tmpdir(), "scoped-gw-"));

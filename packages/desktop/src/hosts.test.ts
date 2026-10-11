@@ -45,7 +45,8 @@ function controlPath(args: string[]): string {
   return option;
 }
 
-describe("sshArgs", () => {
+// OpenSSH ControlMaster sockets and key paths: POSIX only.
+describe.skipIf(process.platform === "win32")("sshArgs", () => {
   it("pins the host key, uses the computer's key and passes the command as one argument", async () => {
     await writeFile(path.join(root, "desktop.yaml"), peers("Desk"));
     const [, desk] = await loadComputers();
@@ -79,7 +80,7 @@ describe("sshArgs", () => {
   });
 });
 
-describe("masterExitArgs", () => {
+describe.skipIf(process.platform === "win32")("masterExitArgs", () => {
   it("targets one slot's ControlMaster", async () => {
     await writeFile(path.join(root, "desktop.yaml"), peers("Desk"));
     const [, desk] = await loadComputers();

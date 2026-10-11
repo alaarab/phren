@@ -18,7 +18,8 @@ describe("writeRepoFile", () => {
     await chmod(path.join(root, "src/a.ts"), 0o755);
     const saved = await writeRepoFile(root, "src/a.ts", "new\n", await versionOf("src/a.ts"));
     expect(await readFile(path.join(root, "src/a.ts"), "utf8")).toBe("new\n");
-    expect((await stat(path.join(root, "src/a.ts"))).mode & 0o777).toBe(0o755);
+    // Windows has no POSIX mode bits to keep.
+    if (process.platform !== "win32") expect((await stat(path.join(root, "src/a.ts"))).mode & 0o777).toBe(0o755);
     expect(saved).toMatchObject({ path: "src/a.ts", size: 4, created: false, version: await versionOf("src/a.ts") });
   });
 
