@@ -137,6 +137,21 @@ export PHREN_PROFILE=${quote(profile)}
 ${pipe}exec ${quote(node)} ${quote(bundle)} ssh
 `; }
 
+/** The enroll script, for an SSH session the user signed into with a password
+ *  (the phone's "Password" sign-in): it adds one restricted phone key, then the
+ *  phone connects with that key. It is never the forced command, so a phone key
+ *  cannot use it to add more keys. */
+export function enrollScript(environment: Pick<GatewayEnvironment, "root" | "herdr" | "store" | "profile" | "node" | "bundle">): string {
+  const { root, herdr, store, profile, node, bundle } = environment;
+  return `#!/bin/sh
+# Phren Hook enroll: adds this phone's restricted key to authorized_keys.
+export PHREN_BRIDGE_HOME=${quote(root)}
+export PHREN_HERDR_HOME=${quote(herdr)}
+export PHREN_PATH=${quote(store)}
+export PHREN_PROFILE=${quote(profile)}
+exec ${quote(node)} ${quote(bundle)} enroll-device "$@"
+`; }
+
 async function activate(version: string) {
   const root = bridgeRoot();
   const next = path.join(root, `current-${process.pid}`);
@@ -250,6 +265,9 @@ export async function install(version: string, noService = false, force = false)
   await atomic(path.join(root, "dispatch"), gatewayScript(gateway, {
     root, herdr, store: modules.store, profile: modules.profile, node: process.execPath,
     bundle: path.join(root, "current/bridge-hook.mjs"), socket: socketPath(), timing: path.join(root, "gateway.json"),
+  }), 0o700);
+  await atomic(path.join(root, "enroll"), enrollScript({
+    root, herdr, store: modules.store, profile: modules.profile, node: process.execPath, bundle: path.join(root, "current/bridge-hook.mjs"),
   }), 0o700);
   await installAskpass(process.execPath, path.join(root, "current/bridge-hook.mjs"));
   const environmentPath = [path.dirname(process.execPath), path.join(homedir(), ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin"].join(":");

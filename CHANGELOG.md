@@ -16,6 +16,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - `POST /v1/push/presence` reports that the owner is at the desk: approval alerts then wait, and reach the phone only if still pending after 60 seconds of desk idle (`deskPresence`).
   - `POST /v1/store/blobs` returns many store blobs in one request, checking sizes before reading (`memoryStoreBatch`).
 - A client that sends `X-Phren-Client` gets its own pool of Hook sockets, so the desktop and the phone never evict each other's connections.
+- `phren bridge install` writes `~/.local/share/phren/bridge/enroll`, which adds one phone's restricted key to `authorized_keys` (the same line `phren pair` writes) and prints one JSON line. The phone runs it once over an SSH session the user signed into with a password, then connects with the key. It is never the phone key's forced command, so a phone key cannot add more keys.
 - `@phren/cli` exports `./client/*` entry points for clients built on the CLI's parsers.
 
 ### Fixed
