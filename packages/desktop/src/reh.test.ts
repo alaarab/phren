@@ -69,7 +69,8 @@ describe("findTarball", () => {
   });
 });
 
-describe("rehStatus", () => {
+// The remote extension host is a POSIX tarball with a shell launcher.
+describe.skipIf(process.platform === "win32")("rehStatus", () => {
   it("unpacks the tarball, starts the server and reports authority, token and version", async () => {
     process.env.PHREN_REH_TARBALL = buildTarball("vscode-reh-test-any-1.0.0.tar.gz", listeningBody());
 

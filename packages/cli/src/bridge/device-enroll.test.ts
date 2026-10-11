@@ -32,7 +32,8 @@ it("adds the phone's restricted line once and reports the computer", async () =>
   expect(await keys()).toBe(line + "\n");
 });
 
-it("labels an Android key and keeps other keys", async () => {
+// These set up ~/.ssh with `mkdir -m 700`, which Windows refuses.
+it.skipIf(process.platform === "win32")("labels an Android key and keeps other keys", async () => {
   await rm(ssh(), { recursive: true, force: true });
   execFileSync("mkdir", ["-m", "700", ssh()]);
   await writeFile(path.join(ssh(), "authorized_keys"), "ssh-ed25519 AAAAexisting someone", { mode: 0o600 });
@@ -42,7 +43,7 @@ it("labels an Android key and keeps other keys", async () => {
   expect(text.trimEnd().endsWith(" phren-android")).toBe(true);
 });
 
-it("refuses junk, option prefixes, and the same key with other options", async () => {
+it.skipIf(process.platform === "win32")("refuses junk, option prefixes, and the same key with other options", async () => {
   expect(await enroll("not a key")).toMatchObject({ ok: false, code: "bad-key" });
   expect(await enroll(`command="sh" ${publicKey}`)).toMatchObject({ ok: false, code: "bad-key" });
   execFileSync("mkdir", ["-m", "700", ssh()]);
