@@ -150,7 +150,7 @@ describe("GitLab and gitboy providers", () => {
     it("finds the branch's pull request and reads reviews on the head commit, the newest job attempts and the merge blockers", async () => {
       host = await fakeHost(({ path: p }) => {
         if (p === "/api/v1/repos/sam/app/pulls?state=open&limit=50") return { json: [pull] };
-        if (p === "/api/v1/repos/sam/app/pulls?state=all&limit=100") return { json: [{ ...pull, index: 3, head_branch: "older", state: "closed" }, pull] };
+        if (p === "/api/v1/repos/sam/app/pulls?state=all&limit=100&head_branch=feature") return { json: [{ ...pull, index: 3, head_branch: "older", state: "closed" }, pull] };
         if (p === "/api/v1/repos/sam/app/pulls/7") return { json: { ...pull, comment_count: 2, commits_behind: 1,
           merge_blockers: ["A successful pipeline is required"],
           reviews: [
@@ -158,7 +158,7 @@ describe("GitLab and gitboy providers", () => {
             { reviewer_username: "lin", state: "approved", commit_sha: head, created_at: "2026-10-10T00:00:00Z" },
             { reviewer_username: "sam", state: "approved", commit_sha: head, created_at: "2026-10-10T00:01:00Z" },
           ] } };
-        if (p === "/api/v1/repos/sam/app/pipelines?branch=feature&limit=20") return { json: [{ iid: 4, sha: "old" }, { iid: 5, sha: head, status: "failed" }] };
+        if (p === `/api/v1/repos/sam/app/pipelines?branch=feature&sha=${head}&limit=20`) return { json: [{ iid: 4, sha: "old" }, { iid: 5, sha: head, status: "failed" }] };
         if (p === "/api/v1/repos/sam/app/pipelines/5") return { json: { iid: 5, status: "failed", jobs: [
           { id: "j1", name: "test", stage: "test", status: "failed", attempt: 1, failure_reason: "exit 1" },
           { id: "j2", name: "test", stage: "test", status: "success", attempt: 2, started_at: "2026-10-10T00:00:00Z", finished_at: "2026-10-10T00:01:30Z" },
@@ -184,10 +184,10 @@ describe("GitLab and gitboy providers", () => {
       expect(host.seen.every(s => s.headers.authorization === "Bearer gbp_test")).toBe(true);
     });
 
-    it("opens a pull request unless the branch has one, and merges with gitboy's own refusal passed on", async () => {
+    it("opens a pull request unless the branch has one, as a real draft where gitboy has them, and merges with gitboy's own refusal passed on", async () => {
       let open: unknown[] = [];
       host = await fakeHost(({ method, path: p }) => {
-        if (p === "/api/v1/repos/sam/app/pulls?state=open&limit=100") return { json: open };
+        if (p === "/api/v1/repos/sam/app/pulls?state=open&limit=100&head_branch=feature") return { json: open };
         if (p === "/api/v1/repos/sam/app") return { json: { default_branch: "main" } };
         if (method === "POST" && p === "/api/v1/repos/sam/app/pulls") return { status: 201, json: pull };
         if (method === "POST" && p === "/api/v1/repos/sam/app/pulls/7/merge") return { status: 409, json: { error: "1 approval(s) required for main" } };
@@ -198,6 +198,13 @@ describe("GitLab and gitboy providers", () => {
 
       expect(await gitPullRequest(repo, false)).toMatchObject({ ok: true, number: 7, url: `${host.origin}/sam/app/pulls/7` });
       expect(host.seen.find(s => s.method === "POST")?.body).toEqual({ head_branch: "feature", base_branch: "main", title: "Cache the stats run", body: "One run serves every key." });
+      // A gitboy that lists `draft` gets a real draft; an older one a "Draft:" title.
+      open = [{ ...pull, index: 5, head_branch: "other", draft: false }];
+      expect(await gitPullRequest(repo, true)).toMatchObject({ ok: true, draft: true });
+      expect(host.seen.filter(s => s.method === "POST").at(-1)?.body).toMatchObject({ title: "Cache the stats run", draft: true });
+      open = [{ ...pull, index: 5, head_branch: "other" }];
+      await gitPullRequest(repo, true);
+      expect(host.seen.filter(s => s.method === "POST").at(-1)?.body).toEqual({ head_branch: "feature", base_branch: "main", title: "Draft: Cache the stats run", body: "One run serves every key." });
       open = [pull];
       expect(await gitPullRequest(repo, false)).toMatchObject({ ok: true, number: 7, existing: true });
 

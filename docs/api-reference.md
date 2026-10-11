@@ -1622,9 +1622,10 @@ with the override command in `message`. The Hook declares the `gitHosts` capabil
 - **GitLab** (gitlab.com or self-hosted) uses its REST API (v4). The token is `GITLAB_TOKEN`
   (for gitlab.com, or the domain `GITLAB_HOST` names), the Hook's stored one, or glab's own sign-in.
   Pipeline jobs are the checks, with the stage as `workflow`; an allowed failure or a manual job is `neutral`.
-- **gitboy** uses its REST API (`/api/v1`) with a `gbp_` personal access token: `read:repo` to read,
-  `write:repo` to open and merge. The token is `GITBOY_TOKEN` for the domain `GITBOY_HOST` names, or the stored one. gitboy has no draft
-  state, so a draft opens with a `Draft:` title on GitLab and gitboy alike.
+- **gitboy** uses its REST API (`/api/v1`) with a `gbp_` personal access token: `read:user` and `read:repo` to read (gitboy's "Phren Hook" token preset),
+  `write:repo` to open and merge. The token is `GITBOY_TOKEN` for the domain `GITBOY_HOST` names, or the stored one. A gitboy with draft pull requests
+  (gitboy #19 onward) opens a real draft; GitLab and an older gitboy get a `Draft:` title. The provider sends
+  gitboy's `head_branch` and `sha` filters, which older servers ignore.
 - A self-hosted API on another address: `git config --global phren.<domain>.api <url>`.
 
 Without a token, `/v1/git/pulls` answers `reason: "auth"` with how to connect. Other reasons are
