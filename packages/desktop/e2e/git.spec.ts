@@ -33,7 +33,7 @@ test.beforeEach(async ({}, info) => {
   if (!existsSync(UI_LINK)) { symlinkSync(UI_SOURCE, UI_LINK, "dir"); linkedUi = true; }
   dir = await mkdtemp(path.join(tmpdir(), "desktop-git-"));
   process.env.PHREN_BRIDGE_HOME = dir;
-  // A test titled "on GitLab" runs against a GitLab remote (a stubbed provider).
+  // A test titled "on GitLab" runs against a GitLab remote, not yet connected.
   git = createFakeGit({ host: /on GitLab/.test(info.title) ? "gitlab" : "github" });
   hook = await startFakeHook({ dir, routes: git.routes, files: { "src/app.ts": FAKE_GIT_WORKING_APP } });
   hub = createOverviewHub([LOCAL], hookWebSocket);
@@ -173,10 +173,12 @@ test("branches switch with a confirmation, carry edits only when told, and a new
   // The branch's pull request with its checks, failing first.
   await expect(page.locator(".chg-bb-pr.failing")).toHaveText("#42");
   await page.locator(".chg-bb-pr").click();
-  const card = page.locator(".chg-pr-card");
-  await expect(card).toContainText("Changes requested · Merge blocked");
+  const card = page.locator(".chg-req");
+  await expect(card.locator(".chg-pill.bad")).toHaveText("Changes requested");
+  await expect(card.locator(".chg-merge-banner")).toContainText("Merge blocked");
   await expect(card).toContainText("1 failing · 1 pending · 1 passing · 1 skipped");
   await expect(card.locator(".chg-check").first()).toContainText("unit (ubuntu)");
+  await expect(page.locator(".chg-host")).toContainText("via gh");
   await shot(page, "pr-checks.png");
 
   // A new branch: Git's naming rules are checked while typing.
@@ -223,17 +225,39 @@ test("the Session view lists what this agent changed, edit by edit", async ({ pa
   expect(errors).toEqual([]);
 });
 
-test("on GitLab the requests are merge requests, and the stubbed provider says so", async ({ page }) => {
+test("on GitLab, Connect checks the token, then the merge request shows its pipeline by stage and merges at the head it showed", async ({ page }) => {
   const errors = await openSession(page);
   await expect(page.locator('.chg-seg[data-view="pulls"]')).toHaveText("MRs");
   await expect(page.locator(".chg-actions-row")).toContainText("Create MR");
   await page.locator('.chg-seg[data-view="pulls"]').click();
-  await expect(page.locator(".chg-empty")).toContainText("Merge requests are not available here");
-  await expect(page.locator(".chg-empty")).toContainText("GitLab merge requests and their checks are not supported yet");
-  await shot(page, "gitlab-stub.png");
-  // The rest of Changes works as usual.
-  await page.locator('.chg-seg[data-view="history"]').click();
-  await expect(page.locator(".chg-log-row .chg-sha")).toHaveCount(3);
+
+  // No token yet: the pane offers Connect, and a token GitLab refuses is not kept.
+  const connect = page.locator(".chg-connect");
+  await expect(connect).toContainText("Connect GitLab");
+  await connect.locator("input").fill("glpat-wrong");
+  await connect.getByRole("button", { name: "Connect" }).click();
+  await expect(connect.locator(".chg-error")).toContainText("GitLab refused that token.");
+  await shot(page, "gitlab-connect.png");
+  await connect.locator("input").fill("glpat-good");
+  await connect.getByRole("button", { name: "Connect" }).click();
+
+  const card = page.locator(".chg-req");
+  await expect(card.locator(".chg-req-num")).toHaveText("!12");
+  await expect(page.locator(".chg-host")).toContainText("@sam · connected here");
+  await expect(card.locator(".chg-pipe-word")).toHaveText("Pipeline running");
+  await expect(card.locator(".chg-check-group")).toHaveText(["test", "build", "deploy"]);
+  await expect(card.locator(".chg-pill.wait")).toHaveText("Review required · 0/1");
+  await expect(card.locator(".chg-merge-banner")).toContainText("Waiting for the pipeline to pass");
+  await shot(page, "gitlab-mr.png");
+
+  // Merge asks first, naming the head commit, and sends it as the guard.
+  await card.locator(".chg-merge-method").selectOption("squash");
+  await card.getByRole("button", { name: "Merge…" }).click();
+  await expect(card.locator(".chg-merge-ask")).toHaveText("Squash and merge !12 at 9f3c2a1 into main?");
+  await card.getByRole("button", { name: "Confirm merge" }).click();
+  await expect(page.locator(".chg-req-state")).toHaveText("Merged");
+  const merge = git.calls.filter((c) => c.route === "pr/merge").at(-1)?.body;
+  expect(merge).toMatchObject({ number: 12, method: "squash", expectedHeadSha: "9f3c2a1b7e" });
   expect(errors).toEqual([]);
 });
 

@@ -9,6 +9,8 @@ import { askpass } from "./sudo.js";
 import { object, provider, socketPath, type Json } from "./protocol.js";
 import { apnsSetupSteps } from "./push.js";
 import { speechKeyFile, speechKeyStatus, writeSpeechKey } from "./speech-key.js";
+import { gitHostsFile, listHostTokens, writeHostToken } from "./git-host-auth.js";
+import { hostInfo, PROVIDERS } from "./git-hosts.js";
 import { clearSpeechModel, clearSpeechVoice, DEFAULT_SPEECH_MODEL, FALLBACK_SPEECH_MODEL, resolveSpeechModel, resolveSpeechRegion, resolveSpeechVoice, SPEECH_REGIONS, speechModelId, speechRegion, speechVoiceFile, voiceId, writeSpeechModel, writeSpeechRegion, writeSpeechVoice } from "./speech-voice.js";
 import { AccountUsageReader, captureClaudeUsage, type AccountUsage } from "./usage.js";
 import { acceptComputer, enrollComputer } from "./computers.js";
@@ -97,6 +99,28 @@ export async function runBridge(args: string[], version: string): Promise<number
       if (args[1] !== "set" || args.length !== 2) throw new Error(SPEECH_KEY_USAGE);
       await writeSpeechKey(await readSecret("ElevenLabs API key: "));
       console.log(`Stored the ElevenLabs key in ${speechKeyFile()} (mode 600).`);
+      break;
+    }
+    case "git-host": {
+      // Tokens for GitLab and gitboy, which the Hook reads over HTTP; GitHub keeps gh's sign-in.
+      const [, action = "list", domain, kind] = args;
+      if (action === "list" && args.length <= 2) {
+        const hosts = await listHostTokens();
+        if (hosts === "unsafe") throw new Error(`${gitHostsFile()} is readable by other users; run chmod 600 on it.`);
+        if (!hosts.length) console.log("No GitLab or gitboy tokens stored. Add one with phren bridge git-host set <domain> gitlab|gitboy.");
+        for (const host of hosts) console.log(`${host.domain}  ${host.kind}${host.user ? `  @${host.user}` : ""}`);
+      } else if (action === "set" && domain && (kind === "gitlab" || kind === "gitboy") && args.length === 4) {
+        // The token comes from stdin, never argv, so it stays out of ps and shell history.
+        const token = (await readSecret(`${kind === "gitlab" ? "GitLab" : "gitboy"} token for ${domain}: `)).trim();
+        if (!token) throw new Error("No token given.");
+        const host = hostInfo(kind, { domain: domain.toLowerCase(), webUrl: null, remote: null, source: "none" });
+        const { user } = await PROVIDERS[kind].whoami!(process.cwd(), host, token);
+        await writeHostToken(domain, kind, token, user || undefined);
+        console.log(`Connected ${domain} (${kind})${user ? ` as @${user}` : ""}. Stored in ${gitHostsFile()} (mode 600).`);
+      } else if (action === "remove" && domain && args.length === 3) {
+        await writeHostToken(domain, "gitlab", "");
+        console.log(`Forgot the token for ${domain}.`);
+      } else throw new Error(GIT_HOST_USAGE);
       break;
     }
     case "speech-voice": {
@@ -192,7 +216,7 @@ export async function runBridge(args: string[], version: string): Promise<number
       if (push.warning) console.error(`warning: ${push.warning}`);
       break;
     }
-    default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall|enroll-computer|accounts|discover|link|fanouts archive|speech-key set|speech-voice|speech-model|speech-region>");
+    default: throw new Error("Usage: phren bridge <install|status|doctor|usage|update|rollback|uninstall|enroll-computer|accounts|discover|link|fanouts archive|git-host|speech-key set|speech-voice|speech-model|speech-region>");
   }
   return 0;
 }
@@ -209,6 +233,7 @@ export function approvalPushCheck(helper: Json): { configured: boolean; warning?
 const SPEECH_VOICE_USAGE = "Usage: phren bridge speech-voice [show | set <elevenlabs-voice-id> | clear]";
 const SPEECH_MODEL_USAGE = "Usage: phren bridge speech-model [show | set <elevenlabs-model-id> | clear]";
 const SPEECH_REGION_USAGE = "Usage: phren bridge speech-region [show | us | global]";
+const GIT_HOST_USAGE = "Usage: phren bridge git-host [list | set <domain> gitlab|gitboy | remove <domain>]  (set reads the token from stdin)";
 const SPEECH_KEY_USAGE = "Usage: phren bridge speech-key set  (paste the key when asked, or pipe it on stdin)";
 
 /** One line from stdin: piped as is, or typed at a prompt without echo. */
