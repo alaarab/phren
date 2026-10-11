@@ -36,6 +36,8 @@ mac:
   extendInfo:
     NSMicrophoneUsageDescription: Phren uses the microphone for dictation and talk mode.
 linux:
+  # The default comes from the scoped npm name, which is not a valid file name.
+  executableName: phren-desktop
   target:
     - target: AppImage
       arch: x64
