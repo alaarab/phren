@@ -642,7 +642,8 @@ out) clears `approval`; answering one that is gone returns 409.
 
 ## Move a session to another agent
 
-`move_session` (or `phren move <computer|local> --session <id> --to <harness>`)
+`move_session` (or `phren move <session-or-pane> --to <harness>`, for example
+`phren move wC9:p1 --to codex --model gpt-6.1-sol`; `--computer <name>` for another computer)
 hands a live session to another harness on the same computer: Claude under
 another signed-in account, Codex, OpenCode or Copilot, with an optional model
 and effort. The Hook:

@@ -332,7 +332,7 @@ Conductor: hand_off queues busy workers durably; keep deliveryId, query status:t
 dispatch_report(prs): record this worker's turn-bound PR evidence, each row
 {url,repo,branch,tests,notes?}; the done return carries it to the configured
 integrator through queued hand_off. phren dispatch report --prs <JSON>.
-move_session(computer?,target?|session?,harness,account?,model?,effort?,id?,status?,wait?): the agent writes a hand-off and exits; the target harness starts in the same pane with it. Falls back to the transcript tail, git state and original brief. Refuses unusable harnesses. phren move <computer|local> --session <id> --to <harness>.
+move_session(computer?,target?|session?|pane?,harness,account?,model?,effort?,id?,status?,wait?): the agent writes a hand-off and exits; the target harness starts in the same pane with it. Falls back to the transcript tail, git state and original brief. Refuses unusable harnesses. phren move <session-or-pane> --to <harness> [--model M] [--effort E] [--account A] [--computer C].
 owner_inbox(operation?,title?,project?,id?,resolution?,includeResolved?,computer?):
 list, add or resolve owner work across linked computers. Reading returns does
 not dismiss it; resolving does not approve or answer a prompt. Automatic items

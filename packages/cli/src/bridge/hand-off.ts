@@ -12,7 +12,7 @@ import { resetsIn } from "../computers/read.js";
 import type { AccountUsage } from "./usage.js";
 import { grantLabel, findGrant } from "./grants.js";
 import { hookPeers, optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
-import { BridgeError, errorCode, object, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
+import { BridgeError, errorCode, id, object, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
 import { findPhrenPath } from "../phren-paths.js";
 import { listMachines } from "../profile-store.js";
 import { localNames } from "./computer-names.js";
@@ -122,6 +122,7 @@ export const moveSessionSchema = z.object({
   computer: computerName.optional().describe("Enrolled computer the session runs on. Omit for this computer."),
   target: targetSchema.optional().describe("Complete live target of the session to move."),
   session: sessionId.optional().describe("Session id to resolve through the Hook workspace overview."),
+  pane: id.optional().describe("Pane id (as Herdr or tmux shows it, e.g. wC9:p1) of the session to move, resolved through the Hook workspace overview."),
   harness: moveToSchema.shape.harness,
   account: moveToSchema.shape.account,
   model: moveToSchema.shape.model,
@@ -130,11 +131,18 @@ export const moveSessionSchema = z.object({
   status: z.boolean().optional().describe("Read the move's state without starting one; requires id."),
   wait: z.boolean().optional().describe("Wait (up to five minutes) until the move finished or failed. Defaults to true."),
 }).strict().superRefine((value, context) => {
-  if (!value.status && (value.target === undefined) === (value.session === undefined)) context.addIssue({ code: "custom", message: "Provide exactly one of target or session." });
+  if (!value.status && [value.target, value.session, value.pane].filter(item => item !== undefined).length !== 1) context.addIssue({ code: "custom", message: "Provide exactly one of target, session or pane." });
   if (value.status && !value.id) context.addIssue({ code: "custom", message: "A status query requires id." });
 });
 
 const MOVE_WAIT_MS = 5 * 60_000;
+
+/** The live session in a pane, by the pane id the terminal shows. */
+async function paneTarget(request: Request, pane: string, server?: string): Promise<Target> {
+  const found = await findInOverview(request, target => target.pane === pane, server);
+  if (!found) throw new BridgeError(404, "No live session in that pane appears in the workspace overview.");
+  return found.target;
+}
 
 /**
  * Moves a live session to another harness on its own computer (session-move.ts):
@@ -150,7 +158,7 @@ export async function moveSession(input: unknown, options: { waitMs?: number; po
   let move: Json;
   if (data.status) move = await read(data.id!);
   else {
-    const target = data.target ?? (await targetFromOverview(request, data.session!, peer?.server)).target;
+    const target = data.target ?? (data.session ? (await targetFromOverview(request, data.session, peer?.server)).target : await paneTarget(request, data.pane!, peer?.server));
     if (peer && target.server !== peer.server) throw new BridgeError(400, "The target belongs to a different Herdr server on that computer.");
     const to = { harness: data.harness, ...(data.account ? { account: data.account } : {}), ...(data.model ? { model: data.model } : {}), ...(data.effort ? { effort: data.effort } : {}) };
     move = object((await request("/v1/sessions/move", { target, to: moveToSchema.parse(to), ...(data.id ? { id: data.id } : {}) })).move);
