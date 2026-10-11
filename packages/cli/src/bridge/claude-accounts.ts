@@ -11,7 +11,7 @@ import { dump, load } from "js-yaml";
 import { claudeConfigDir, homeDir } from "../home-paths.js";
 import { atomic, bridgeRoot } from "./protocol.js";
 
-import { monthlyAnniversary, planName, subscriptionDate, type Subscription } from "./subscription.js";
+import { claudePlan, monthlyAnniversary, subscriptionDate, type Subscription } from "./subscription.js";
 
 export const DEFAULT_ACCOUNT = "default";
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
@@ -121,9 +121,10 @@ export async function setAccountLabel(id: string, label: string): Promise<void> 
 
 // ── identity (.claude.json oauthAccount, no tokens) ─────────────────────────
 
-const identityCache = new Map<string, { mtimeMs: number; size: number; uuid?: string; email?: string; plan?: string; startedAt?: string }>();
+interface OauthIdentity { uuid?: string; email?: string; organization?: string; plan?: string; startedAt?: string; checkedAt?: string }
+const identityCache = new Map<string, OauthIdentity & { mtimeMs: number; size: number }>();
 
-function oauthIdentity(configFile: string): { uuid?: string; email?: string; plan?: string; startedAt?: string } {
+function oauthIdentity(configFile: string): OauthIdentity {
   try {
     const stat = statSync(configFile);
     if (!stat.isFile() || stat.size > 16_777_216) return {};
@@ -131,32 +132,48 @@ function oauthIdentity(configFile: string): { uuid?: string; email?: string; pla
     if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached;
     const config = JSON.parse(readFileSync(configFile, "utf8")) as Record<string, unknown>;
     const account = config.oauthAccount && typeof config.oauthAccount === "object" ? config.oauthAccount as Record<string, unknown> : {};
-    const uuid = typeof account.accountUuid === "string" && account.accountUuid ? account.accountUuid : undefined;
+    const id = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9-]{1,64}$/.test(value) ? value : undefined;
     const email = typeof account.emailAddress === "string" && /^[^\s@]{1,64}@[^\s@]{1,190}$/.test(account.emailAddress) ? account.emailAddress : undefined;
-    const tier = planName(account.organizationRateLimitTier);
-    const billing = typeof account.billingType === "string" && /^(?:claude_)?(?:pro|max|team|enterprise)(?:_subscription)?$/.test(account.billingType)
-      ? planName(account.billingType.replace(/_subscription$/, "")) : undefined;
-    const value = { mtimeMs: stat.mtimeMs, size: stat.size, uuid, email, plan: tier ?? billing, startedAt: subscriptionDate(account.subscriptionCreatedAt) };
+    const fetched = typeof account.profileFetchedAt === "number" ? subscriptionDate(Math.floor(account.profileFetchedAt / 1000)) : undefined;
+    const value = { mtimeMs: stat.mtimeMs, size: stat.size, uuid: id(account.accountUuid), email, organization: id(account.organizationUuid),
+      plan: claudePlan(account), startedAt: subscriptionDate(account.subscriptionCreatedAt), checkedAt: fetched };
     identityCache.set(configFile, value);
     return value;
   } catch { return {}; }
 }
 
-/** Stable across computers for one subscription; home-scoped when unknown. */
+/**
+ * Stable across computers for one subscription; home-scoped when unknown.
+ * One login can belong to several organizations (a personal plan and a Team
+ * seat), each its own allowance, so the organization is part of the key.
+ */
 export function claudeAccountKey(home: ClaudeHome): string {
-  const { uuid } = oauthIdentity(home.configFile);
-  return uuid ? "claude:" + createHash("sha256").update(uuid).digest("hex").slice(0, 12) : `claude:home:${home.id}`;
+  const { uuid, email, organization } = oauthIdentity(home.configFile);
+  const login = uuid ?? email;
+  if (!login) return `claude:home:${home.id}`;
+  return "claude:" + createHash("sha256").update(organization ? `${login}|${organization}` : login).digest("hex").slice(0, 12);
 }
 
 /** The login's email, so the phone can name a card merged across computers. Usage rows only. */
 export function claudeAccountEmail(home: ClaudeHome): string | undefined { return oauthIdentity(home.configFile).email; }
 
-/** The account home's own subscription, independent of the quota snapshot's age. */
-export function claudeAccountSubscription(home: ClaudeHome, now = new Date()): Subscription | undefined {
-  const { plan, startedAt } = oauthIdentity(home.configFile);
+/** A login is recorded but its profile names no plan Phren knows. */
+export function claudePlanUnknown(home: ClaudeHome): boolean {
+  const identity = oauthIdentity(home.configFile);
+  return Boolean(identity.uuid ?? identity.email) && !identity.plan;
+}
+
+/**
+ * The account home's own subscription, independent of the quota snapshot's
+ * age. `checkedAt` is when Claude Code last fetched the profile, so the
+ * newest profile wins when computers disagree about a plan that changed.
+ */
+export function claudeAccountSubscription(home: ClaudeHome, now = new Date(), fallbackPlan?: string): Subscription | undefined {
+  const { plan: profilePlan, startedAt, checkedAt } = oauthIdentity(home.configFile);
+  const plan = profilePlan ?? fallbackPlan;
   if (!plan) return undefined;
-  const renewsAt = startedAt ? monthlyAnniversary(startedAt, now) : undefined;
-  return { plan, ...(startedAt ? { startedAt } : {}), ...(renewsAt ? { renewsAt, renewsEstimated: true } : {}), checkedAt: now.toISOString() };
+  const renewsAt = startedAt && profilePlan ? monthlyAnniversary(startedAt, now) : undefined;
+  return { plan, ...(startedAt && profilePlan ? { startedAt } : {}), ...(renewsAt ? { renewsAt, renewsEstimated: true } : {}), checkedAt: checkedAt ?? now.toISOString() };
 }
 
 export function claudeAccountRef(home: ClaudeHome, labels = readLabels()): AccountRef {
@@ -171,7 +188,7 @@ export function clearAccountCaches(): void { identityCache.clear(); authCache.cl
 // ── sign-in state (`claude auth status --json`, cached) ─────────────────────
 
 /** `unknown`: Claude gave no answer (timeout, crash, unparseable), which must not block a launch. */
-export interface AuthStatus { signedIn: boolean; unknown?: boolean; plan?: string; reason?: string }
+export interface AuthStatus { signedIn: boolean; unknown?: boolean; plan?: string; reason?: string; /** Signed in with a Console (API billing) login. */ console?: boolean }
 const AUTH_CACHE_MS = 5 * 60_000;
 const AUTH_TIMEOUT_MS = 10_000;
 const SIGNED_OUT_CACHE_MS = 30_000;
@@ -183,7 +200,7 @@ export function parseAuthStatus(output: string): AuthStatus {
     const value = JSON.parse(output) as Record<string, unknown>;
     if (value.loggedIn !== true) return { signedIn: false, reason: "Not signed in" };
     const plan = typeof value.subscriptionType === "string" && /^[a-z0-9_-]{1,32}$/i.test(value.subscriptionType) ? value.subscriptionType : undefined;
-    return { signedIn: true, ...(plan ? { plan } : {}) };
+    return { signedIn: true, ...(plan ? { plan } : {}), ...(value.authMethod === "console" ? { console: true } : {}) };
   } catch { return { signedIn: false, unknown: true, reason: "Claude did not report its sign-in state" }; }
 }
 
