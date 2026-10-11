@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,7 @@ import { reportWorker } from "./worker-reports.js";
 import { DispatchReturns, observe, workerStates } from "./dispatch-returns.js";
 import { dispatchStatus, type Receipt } from "./dispatch.js";
 import { noteTurn } from "./turn-records.js";
+import { recordBriefArrival } from "./launch-brief.js";
 import { handOff } from "./hand-off.js";
 import { recentUncommitted } from "./worker-unfinished.js";
 import { setTerminalProvider, type TerminalProvider } from "./terminal.js";
@@ -44,6 +45,21 @@ describe("finished worker lifecycle", () => {
     const observation = (await workerStates({ targets: [{ ...target, dispatch }] })).workers[0];
     expect(observation).toMatchObject({ state: "done", prs });
     const value = receipt(); observe(value, observation, Date.now()); expect(value.returned).toMatchObject({ state: "done", prs });
+    await event("UserPromptSubmit"); await event("Stop");
+    expect((await workerStates({ targets: [target] })).workers[0]).not.toHaveProperty("prs");
+  });
+  it("accepts PR evidence from a dispatched worker whose turn a nested agent in its pane replaced", async () => {
+    // A `claude -p` the worker ran from its own shell inherits the pane's variables: its hooks replace the
+    // pane's turn record with its own conversation, so the worker's submitted turn is no longer recorded.
+    const nested = (event: string) => noteTurn(target.server, target.pane, { event, terminal: "term1", source: "claude", session: "33333333-3333-4333-8333-333333333333" });
+    const origin = { server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane };
+    await event("UserPromptSubmit"); await nested("SessionStart"); await nested("UserPromptSubmit"); await nested("Stop");
+    await expect(reportWorker({ origin, prs, dispatch })).rejects.toThrow(/not recorded/);
+    await mkdir(path.join(root, "briefs", dispatch), { recursive: true }); await recordBriefArrival(dispatch, "UserPromptSubmit", target);
+    await expect(reportWorker({ origin, prs, dispatch: "44444444-4444-4444-8444-444444444444" })).rejects.toThrow(/not recorded/);
+    await reportWorker({ origin, prs, dispatch });
+    await event("Stop");
+    expect((await workerStates({ targets: [{ ...target, dispatch }] })).workers[0]).toMatchObject({ state: "done", prs });
     await event("UserPromptSubmit"); await event("Stop");
     expect((await workerStates({ targets: [target] })).workers[0]).not.toHaveProperty("prs");
   });

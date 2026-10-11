@@ -33,6 +33,8 @@ import {
 import { TASKS_FILENAME } from "../data/tasks.js";
 import { FINDINGS_FILENAME } from "../data/access.js";
 import { readInstallPreferences } from "../init/preferences.js";
+import { resolveManagementCapabilities } from "../init/management-preset.js";
+import { storeAwareProjectPath } from "../store-routing.js";
 import { logger } from "../logger.js";
 import {
   type SessionState,
@@ -41,7 +43,7 @@ import {
   writeSessionStateFile,
 } from "../session/utils.js";
 import { runBestEffortGit, countUnsyncedCommits, pullAtSessionStart } from "./session-git.js";
-import { scheduleBackgroundMaintenance } from "./session-background.js";
+import { scheduleBackgroundMaintenance, scheduleBackgroundSync } from "./session-background.js";
 import { runDoctor } from "./hooks-context.js";
 import { readClaudeHookPayload, registerUnmanagedClaude } from "./claude-unmanaged.js";
 
@@ -49,7 +51,8 @@ const SESSION_START_ONBOARDING_MARKER = "session-start-onboarding-v1";
 const SYNC_WARN_MARKER = "sync-broken-warned-v1";
 
 function projectHasBootstrapSignals(phrenPath: string, project: string): boolean {
-  const projectDir = path.join(phrenPath, project);
+  // A team-store project keeps its findings and tasks in that store.
+  const projectDir = storeAwareProjectPath(phrenPath, project) ?? path.join(phrenPath, project);
   const findingsPath = path.join(projectDir, FINDINGS_FILENAME);
   if (fs.existsSync(findingsPath)) {
     const findings = fs.readFileSync(findingsPath, "utf8");
@@ -225,14 +228,18 @@ export async function handleHookSessionStart() {
   try {
     const { getNonPrimaryStores } = await import("../store-registry.js");
     const otherStores = getNonPrimaryStores(phrenPath);
+    let teamStoreAhead = false;
     for (const store of otherStores) {
       if (!fs.existsSync(store.path) || !fs.existsSync(path.join(store.path, ".git"))) continue;
       try {
-        await pullAtSessionStart(store.path);
+        const storePull = await pullAtSessionStart(store.path);
+        if (store.role === "team" && (storePull.counts?.ahead ?? 0) > 0) teamStoreAhead = true;
       } catch (err: unknown) {
         debugLog(`session-start store-pull ${store.name}: ${errorMessage(err)}`);
       }
     }
+    // The pull commits local writes; the background sync pushes them.
+    if (teamStoreAhead && resolveManagementCapabilities(phrenPath).lifecycleAutomations) scheduleBackgroundSync(phrenPath);
   } catch {
     // store-registry not available or no stores — skip silently
   }

@@ -9,6 +9,56 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - The Hook's health check waits 8 seconds for a harness's `--version` instead of 3. On a busy computer a healthy OpenCode took 2.4 seconds just to start, so the check kept reporting it as not answering.
 
+## [0.3.37] - 2026-10-10
+
+### Added
+
+- Claude account choice at launch, and an opt-in to continue on another signed-in account. A Claude launch, dispatch or schedule that names no account, on a computer with more than one signed-in Claude account, runs under the one with the most room: the most left on the 5-hour window, then on the weekly window. A named account always wins. The Hook logs the choice and why, and a dispatch receipt carries it as `accountChoice`. A dispatched Claude worker that stops at its usage limit now returns failed with that limit as its error (Claude Code's `rate_limit` error row is read like Codex's). With `phren config account-failover on` (or `PHREN_ACCOUNT_FAILOVER=on`), off by default, the dispatching Hook then continues it on another signed-in account with room, on the same computer first, else on another connected computer. The new worker gets a brief with the original brief, the stopped worker's last reply and its checkout and branch. The stopped return comes back in `dispatch_returns` with `continued` and "Continued on account X". The login that reached its limit is not chosen again, on any computer, until its window resets. Every account runs only the official Claude Code, signed in through its own /login in its own home. Phren reads, stores and forwards no token, and runs no proxy.
+- `account_usage` lists each Claude account's 5-hour and weekly room with its reset time. `live_sessions` adds `quota` to each Claude session and `claudeAccounts` for every signed-in account per computer.
+
+## [0.3.36] - 2026-10-10
+
+### Added
+
+- Clanker mode, a compact keyword-first way to retrieve memory. With `phren config clanker on` (or `phren config set clanker on`, `phren init --clanker on`, `PHREN_CLANKER=on`), the prompt hook, `search_knowledge`, `get_tasks` and `get_findings` return one row per hit: an id, a title, a few keywords and, for searches, a 0–1 score. The agent fetches the full text by id with `get_memory_detail`, which now takes a finding's `fid:` or a task's `bid:` and returns just that entry instead of the file it lives in. On a copy of a real store this cut the prompt hook's injection by 49%, `search_knowledge` by 84% (60% counting one entry opened per search), and project task and finding lists by 80–90%. New installs start with it on; existing installs keep their current output until switched. It replaces `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE`, which still works as an alias.
+- Gitboy integration: `phren pair --scope gitboy-read --key <file|->` authorizes a `phren-gitboy` SSH key whose forced command (`dispatch-scoped`) admits only gitboy's read routes; every other SSH command and route is refused by the gateway, which rebuilds each admitted request (canonical query, re-serialized body) before it reaches the Hook.
+- Phren Hook `GET /v1/projects/:project/memory`: a project's findings (status, type, citation), truths and tasks in a fixed read-only JSON contract, capped (500 findings, 200 Active/Queue, 50 Done) with `truncated`; `/v1/health` advertises `projectMemory`.
+- `GET /v1/projects/:project/memory/files?path=…` (up to 500 paths): findings citing those files, or citing a function, type or variable the code index places in them (`match: "file" | "symbol"`). `@phren/code` gains `resolveSymbolFiles`; the Hook accepts request heads up to 256 KiB for this.
+- `GET /v1/projects/:project/memory/search?q=&limit=`: the project's findings and truths ranked against an error excerpt with the retrieval tokenizer and chunk matcher, with a 0 to 1 `score`.
+- `GET /v1/projects/:project/tasks?branch=`: open tasks naming the branch or the issue number in it.
+- `phren pair --scope gitboy-write` authorizes a separate `phren-gitboy-write` key for `POST /v1/projects/:project/findings` (JSON body up to 8 KiB, validated in the gateway), saved through the `add_finding` path with provenance `tool:gitboy`.
+- `phren.project.yaml` takes an optional `remote:` clone URL from any host, returned by the memory route (credentials stripped) so a Git server can match a repository to its project.
+
+### Fixed
+
+- `phren bridge link` now works with an Asustor NAS. It used to read the host key only from /etc/ssh; it now asks `sshd -T` for the host keys and falls back to /etc/ssh, /usr/etc/ssh, /usr/local/etc/ssh and /opt/etc/ssh, and says plainly when a computer has no ed25519 host key. Remote commands also find an Entware phren in /opt/bin.
+- Shell tool cards show "Changes unavailable" less often when several agents run shell commands at once. All of the Hook's change captures shared two Git slots, one Git process at a time, so under load every waiting capture finished late and all of them overran the 2.5 s budget together (16 at once: all 16 failed). Each capture now holds one slot for all of its Git work, so captures finish in turn and only those at the end of a long queue miss the budget.
+- The phren repository ignores `.worktrees/`. Leftover folders there that aren't Git worktrees were rehashed by every change capture before and after each shell call, about 2 s of the 2.5 s budget on a busy machine.
+- `dispatch_report` no longer refuses a dispatched worker with "The Hook has not recorded this worker's submitted turn yet" after the worker runs `claude -p` (or another Claude) from its own shell. The nested run inherits the pane's variables, so its hooks replaced the pane's turn record with its own conversation. The tool now sends the worker's dispatch id, and the Hook accepts the report when that brief arrived in the same pane and conversation, binding it to the current turn.
+- MCP tool calls no longer fail with "Could not refresh the local index; retry shortly." while another process rebuilds the index. With many agents writing at once, every other session's server and every hook's background reindex kept re-taking the shared rebuild lock, and any call that found it held failed at once, including tools that never read the index (`account_usage`, `live_sessions`, `manage_task`). Now only tools that answer from the index (search, summaries, findings lists, the fragment graph) refresh it; they wait up to 5 seconds for the other rebuild (`PHREN_INDEX_BUSY_WAIT_MS`), sharing one wait per server, and then answer from the last good index. A rebuild lock left by a process that died mid-rebuild is cleared at once instead of blocking for 30 seconds.
+- Projects in an attached team store work in their repositories. The session hook recognises the folder (it used to say "This project directory is not tracked by phren yet" unless the machine's profile happened to list the project), and `phren link` and post-pull refreshes link the project's skills into `<repo>/.claude/skills`. Skills were only ever read from the primary store, so a skill like `personal-conf/safety/skills/ql.md` never reached Claude Code.
+- Single-file skills (`skills/<name>.md`) load in Claude Code. They were linked into `.claude/skills` as `<name>.md`, which Claude Code ignores; it only loads `<name>/SKILL.md`. Each now gets a `<name>/` folder holding a `SKILL.md` link to the file, and the next `phren link` or refresh replaces the old links. Folder skills are unchanged.
+- SessionStart no longer says a team-store project's memory is empty when its findings and tasks are in the team store.
+- Team-store commits reach the remote without `push_changes`. The session-start pull commits a team store's local writes, and nothing then pushed them, so a store could sit dozens of commits ahead. Background sync now pushes every team store that is dirty or ahead, and session start schedules it when a team store is ahead. `push_changes` also pushes a team store whose tree is clean but ahead.
+
+- `phren uninstall` removes the links it made in a project repository (AGENTS.md, CLAUDE.md, skills) when the store sits behind a symlink (on macOS, any store under /var or /tmp). It compared each link's resolved target with the store's unresolved path, so it kept them.
+
+## [0.3.35] - 2026-10-10
+
+### Fixed
+
+- A shell tool card no longer shows "Changes unavailable: Git change capture failed or timed out" in a large repository on a busy machine. Each capture made Git rehash every tracked file, about 3 s for 6,000 files under load, past the 2.5 s hook budget; it now rechecks only the files Git itself would (about 100 ms).
+
+## [0.3.34] - 2026-10-09
+
+### Fixed
+
+- `search_knowledge` no longer returns results too large for the client. Snippets were five lines, but task Context lines and consolidated reference lines run to several KB, so a `limit: 6` search could come back at 85 KB and Claude Code rejected it. Each snippet is now an excerpt around the match within a shared budget (about 6,000 characters per response), and each result carries an `id` and `truncated` flag for `get_memory_detail`. `phren search` uses the same budget.
+- `get_tasks` lists show the latest 300 characters of each task's Context and shrink their page size to fit one response; across all projects, a list that cannot fit becomes the summary view. `get_tasks` with no project was over 1.7 MB on a large store.
+- `get_memory_detail` pages documents over 16,000 characters (`offset`, `next_offset`), `get_findings` shrinks its page to fit and takes `offset`, and `get_project_summary` cuts a long summary and truths list.
+- Any MCP response over 60,000 characters is replaced by a shortened message saying how to narrow the call, so a tool call no longer fails outright on size. `export_project` is exempt.
+- The Hook runs `opencode stats` at most once every ten minutes and shares the result across every spending key. It used to run it on every 60-second usage refresh, once per key, and each run scans OpenCode's whole database (about 5 CPU-seconds on a large one), so a phone polling usage kept a core busy.
+
 ## [0.3.33] - 2026-10-06
 
 ### Fixed

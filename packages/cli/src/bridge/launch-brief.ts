@@ -32,6 +32,12 @@ export type LaunchBrief = z.infer<typeof launchBriefSchema>;
 /** The variable a launched agent's hooks read its brief id from. */
 export const DISPATCH_ID_ENV = "PHREN_DISPATCH_ID";
 
+/** The dispatch this process's agent was launched for, when its environment names a valid one. */
+export function dispatchIdFromEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const id = env[DISPATCH_ID_ENV];
+  return id && briefId.safeParse(id).success ? id : undefined;
+}
+
 /** Briefs older than this are removed when the next one is written; a worker
  * may re-read its brief after a compaction, so it is not removed on arrival. */
 const KEEP_MS = 7 * 24 * 60 * 60 * 1000;
@@ -122,6 +128,18 @@ export async function writeLaunchBrief(brief: LaunchBrief, now = Date.now(), lab
     await fill(directory);
   }
   return file;
+}
+
+/** The text of a brief this computer wrote, for the dispatch that continues its worker on another
+ * account (account-failover.ts); undefined once pruned or for an id it never wrote. */
+export async function readLaunchBrief(id: string): Promise<string | undefined> {
+  if (!briefId.safeParse(id).success) return undefined;
+  const file = path.join(briefDirectory(id), "brief.md");
+  try {
+    const info = await lstat(file);
+    if (!info.isFile() || info.size > 65_536) return undefined;
+    return await readFile(file, "utf8");
+  } catch { return undefined; }
 }
 
 const arrivalEvent = z.object({ at: z.string().datetime(), target: targetSchema }).strict();

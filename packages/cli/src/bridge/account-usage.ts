@@ -272,11 +272,24 @@ export function usageSummary(view: AccountUsageView): string {
   if (near.length) parts.push(`Low but usable: ${near.map(row => `${title(row)} (${row.leftPercent ?? 0}% left${tightest(row)?.resetsIn ? `, resets in ${tightest(row)!.resetsIn}` : ""})`).join("; ")}.`);
   const limitedRows = view.accounts.filter(row => row.leftPercent !== undefined || row.exhausted);
   if (limitedRows.length && limitedRows.every(row => row.exhausted)) parts.push("Every account with limits is out of quota: tell the owner before dispatching.");
+  const claude = view.accounts.filter(row => row.harness === "claude" && claudeRoom(row));
+  if (claude.length) parts.push(`Claude room: ${claude.map(row => `${title(row)} ${claudeRoom(row)}`).join("; ")}.`);
   const stale = view.accounts.filter(row => row.stale);
   if (stale.length) parts.push(`Stale: ${stale.map(row => `${title(row)} (${row.windows.some(w => w.reset) ? "a window reset since its report" : `reported ${row.age ? ago(row.age) : "at an unknown time"}`})`).join("; ")}.`);
   if (view.unreachable.length) parts.push(`Unreachable: ${view.unreachable.map(item => item.computer).join(", ")}.`);
   if (view.notLinked.length) parts.push(`Not linked, so not checked: ${view.notLinked.map(item => item.name).join(", ")}.`);
   return parts.join(" ");
+}
+
+/** "5-hour 82% left (resets in 2h 10m), weekly 64% left (resets in 3d 4h)": what launch and failover rank Claude accounts by. */
+export function claudeRoom(row: Pick<AccountUsageRow, "windows">): string {
+  const part = (id: string, name: string) => {
+    const w = row.windows.find(item => item.id === id);
+    if (!w) return "";
+    if (w.reset) return `${name} reset`;
+    return w.leftPercent === undefined ? "" : `${name} ${w.leftPercent}% left${w.resetsIn ? ` (resets in ${w.resetsIn})` : ""}`;
+  };
+  return [part("five_hour", "5-hour"), part("seven_day", "weekly")].filter(Boolean).join(", ");
 }
 
 function tightest(row: AccountUsageRow): AccountWindow | undefined {
@@ -296,8 +309,8 @@ export function formatAccountUsage(view: AccountUsageView): string {
       lines.push(`  ${[sub.plan, sub.startedAt ? `since ${sub.startedAt.slice(0, 10)}` : "", sub.renewsAt ? `renews ${sub.renewsEstimated ? "about " : ""}${sub.renewsAt.slice(0, 10)}` : ""].filter(Boolean).join(" · ")}`);
     }
     for (const w of row.windows) {
-      const used = w.reset ? "reset, no new report" : w.usedPercent !== undefined ? `${w.usedPercent}% used` : w.usedUSD !== undefined ? `$${w.usedUSD.toFixed(2)}${w.limitUSD !== undefined ? ` of $${w.limitUSD.toFixed(2)}` : ""}` : "";
-      lines.push(`  ${w.name.padEnd(30)} ${used.padEnd(22)}${w.limited ? "limited now  " : ""}${w.resetsIn ? `resets in ${w.resetsIn}` : ""}`.trimEnd());
+      const used = w.reset ? "reset, no new report" : w.usedPercent !== undefined ? `${w.usedPercent}% used${w.leftPercent !== undefined ? `, ${w.leftPercent}% left` : ""}` : w.usedUSD !== undefined ? `$${w.usedUSD.toFixed(2)}${w.limitUSD !== undefined ? ` of $${w.limitUSD.toFixed(2)}` : ""}` : "";
+      lines.push(`  ${w.name.padEnd(30)} ${used.padEnd(22)}${w.limited ? "limited now  " : ""}${w.resetsIn ? `resets in ${w.resetsIn}${w.resetsAt ? ` (${w.resetsAt.slice(0, 16).replace("T", " ")} UTC)` : ""}` : ""}`.trimEnd());
     }
     if (row.spend) lines.push(`  spend ${row.spend.period.replace(/_/g, " ").padEnd(24)} $${row.spend.amountUSD.toFixed(2)}`);
     if (row.message) lines.push(`  ${row.message}`);

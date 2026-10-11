@@ -129,6 +129,22 @@ function turnError(raw: Json, source: ScheduleHarness): string | undefined {
   return message ? message.slice(0, 500) : undefined;
 }
 
+/** How a Claude usage-limit error starts, so dispatch can tell it from any other failure (account-failover.ts). */
+export const CLAUDE_USAGE_LIMIT = "Claude usage limit:";
+export const isClaudeUsageLimit = (error: string | undefined): boolean => !!error?.startsWith(CLAUDE_USAGE_LIMIT);
+
+/** Claude Code's own record of a subscription limit ending the turn: a synthetic assistant row
+ * (`isApiErrorMessage`, `error: "rate_limit"`) whose text says which limit and when it resets,
+ * as "You've hit your session limit · resets 3pm". A transient 429 Claude Code retries by itself never ends the turn. */
+function claudeUsageLimit(raw: Json): string | undefined {
+  if (raw.type !== "assistant" || raw.isApiErrorMessage !== true || raw.error !== "rate_limit") return undefined;
+  const content = object(raw.message).content;
+  const text = (typeof content === "string" ? content : objects(content).filter(block => block.type === "text").map(block => String(block.text ?? "")).join(" "))
+    .replace(/\s+/g, " ").trim();
+  if (!/\b(?:hit your|usage limit|limit reached|out of (?:extra )?usage)\b/i.test(text) && !raw.quotaLimits) return undefined;
+  return `${CLAUDE_USAGE_LIMIT} ${text || "the subscription refused the request"}`.slice(0, 500);
+}
+
 /** The owner stopping a turn: Claude's interruption marker, Codex's aborted turn, Copilot's abort. */
 function turnInterrupted(raw: Json, source: ScheduleHarness): boolean {
   if (source === "codex") return raw.type === "event_msg" && object(raw.payload).type === "turn_aborted";
@@ -216,10 +232,14 @@ export function finalTurnFromLines(lines: readonly string[], source: ScheduleHar
       : source === "copilot" ? raw.type === "user.message"
       : raw.type === "user/message";
     if (userTurn) { completed = false; lastAssistant = undefined; error = undefined; interrupted = false; copilotFinal = false; continue; }
+    // The limit ends the turn; its own text is the error, not the worker's last reply.
+    const limit = source === "claude" ? claudeUsageLimit(raw) : undefined;
+    if (limit) { completed = true; interrupted = false; error = limit; continue; }
     const text = publicAssistant(raw, source);
-    if (text) { lastAssistant = text; completed = false; interrupted = false; }
+    if (text) { lastAssistant = text; completed = false; interrupted = false; error = undefined; }
     if (source === "copilot" && raw.type === "assistant.message" && !raw.agentId) copilotFinal = object(raw.data).phase === "final_answer";
-    if (turnEnded(raw, source, copilotFinal)) { completed = true; interrupted = false; error = turnError(raw, source); copilotFinal = false; }
+    // Claude's turn_duration after its limit row keeps that error.
+    if (turnEnded(raw, source, copilotFinal)) { completed = true; interrupted = false; error = turnError(raw, source) ?? (source === "claude" ? error : undefined); copilotFinal = false; }
   }
   return { completed, ...(lastAssistant ? { lastAssistant } : {}), ...(completed && error ? { error } : {}),
     ...(interrupted ? { interrupted: true } : {}), ...(completed && running.size ? { background: running.size } : {}),

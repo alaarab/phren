@@ -16,67 +16,30 @@ import {
   readRootManifest,
 } from "../shared.js";
 /**
- * Cached store project dirs to avoid repeated dynamic imports in sync code paths.
- * Populated by `refreshStoreProjectDirs()`, consumed by `getAllStoreProjectDirs()`.
- */
-let _cachedStoreProjectDirs: string[] | null = null;
-let _cachedStorePhrenPath: string | null = null;
-
-/**
  * Gather project directories from the primary store AND all non-primary stores.
- * This enables the FTS5 index to include team store projects alongside personal ones.
- * Uses a sync cache populated by the async buildIndex path.
+ * This enables the FTS5 index and project detection to include team store
+ * projects alongside personal ones. The profile filters the primary store only:
+ * profiles list the primary's projects, and a team store narrows its own with
+ * its subscription list, matching `listAllProjects` and `resolveProject`.
  */
 function getAllStoreProjectDirs(phrenPath: string, profile?: string): string[] {
   const dirs = [...getProjectDirs(phrenPath, profile)];
-  if (_cachedStoreProjectDirs && _cachedStorePhrenPath === phrenPath) {
-    dirs.push(..._cachedStoreProjectDirs);
+  try {
+    for (const store of getNonPrimaryStores(phrenPath)) {
+      if (fs.existsSync(store.path)) dirs.push(...getStoreProjectDirs(store));
+    }
+  } catch (err: unknown) {
+    debugLog(`getAllStoreProjectDirs: ${errorMessage(err)}`);
   }
   return dirs;
 }
-
-/**
- * Refresh the store project dirs cache. Called from async contexts (buildIndex, etc.)
- * before sync code paths that need getAllStoreProjectDirs.
- */
-async function refreshStoreProjectDirs(phrenPath: string, profile?: string): Promise<void> {
-  try {
-    const { getNonPrimaryStores, getStoreProjectDirs } = await import("../store-registry.js");
-    const otherStores = getNonPrimaryStores(phrenPath);
-    let dirs: string[] = [];
-    for (const store of otherStores) {
-      if (!fs.existsSync(store.path)) continue;
-      dirs.push(...getStoreProjectDirs(store));
-    }
-    // Filter by active profile's project list, matching getProjectDirs behavior
-    if (profile) {
-      const profilePath = path.join(phrenPath, "profiles", `${profile}.yaml`);
-      if (fs.existsSync(profilePath)) {
-        try {
-          const yaml = await import("js-yaml");
-          const data = yaml.load(fs.readFileSync(profilePath, "utf-8"), { schema: yaml.CORE_SCHEMA }) as Record<string, unknown> | undefined;
-          const projects = data?.projects;
-          if (Array.isArray(projects)) {
-            const allowed = new Set(projects.map(String));
-            dirs = dirs.filter(dir => allowed.has(path.basename(dir)));
-          }
-        } catch {
-          // Profile parse error — include all dirs as fallback
-        }
-      }
-    }
-    _cachedStoreProjectDirs = dirs;
-    _cachedStorePhrenPath = phrenPath;
-  } catch {
-    _cachedStoreProjectDirs = [];
-    _cachedStorePhrenPath = phrenPath;
-  }
-}
 import { getIndexPolicy, withFileLock } from "./governance.js";
+import { tryFileLock } from "../governance/locks.js";
 import { stripTaskDoneSection } from "./content.js";
 import { isInactiveFindingLine } from "../finding/lifecycle.js";
 import { invalidateDfCache } from "./search-fallback.js";
 import { errorMessage } from "../utils.js";
+import { getNonPrimaryStores, getStoreProjectDirs } from "../store-registry.js";
 import { logger } from "../logger.js";
 import { formatActorAttribution, parseSourceComment } from "../content/citation.js";
 import {
@@ -1052,7 +1015,6 @@ export async function captureIndexInputs(phrenPath: string, profile?: string): P
       throw error;
     }
   };
-  await refreshStoreProjectDirs(phrenPath, profile);
   const { resolveAllStores } = await import("../store-registry.js");
   const projectDirs = getAllStoreProjectDirs(phrenPath, profile);
   const globalDir = path.join(phrenPath, "global");
@@ -1365,7 +1327,6 @@ function mergeManualLinks(db: SqlJsDatabase, phrenPath: string): void {
 
 async function buildIndexImpl(phrenPath: string, profile?: string): Promise<SqlJsDatabase> {
   const t0 = Date.now();
-  await refreshStoreProjectDirs(phrenPath, profile);
   const projectDirs = getAllStoreProjectDirs(phrenPath, profile);
   beginUserFragmentBuildCache(phrenPath, projectDirs.map(dir => path.basename(dir)));
   beginTopicBuildCache();
@@ -1753,17 +1714,52 @@ function createEmptyIndexDb(SQL: SqlJsStatic): SqlJsDatabase {
   return db;
 }
 
-function isRebuildLockHeld(phrenPath: string): boolean {
-  const lockTarget = runtimeFile(phrenPath, "index-rebuild");
-  const lockPath = lockTarget + ".lock";
+/** Thrown by a `requireFresh` build while another process holds the rebuild lock. */
+export class IndexBusyError extends Error {
+  readonly code = "PHREN_INDEX_BUSY";
+  constructor(message = "Index rebuild is busy; retry shortly.") { super(message); this.name = "IndexBusyError"; }
+}
+
+export function isIndexBusyError(error: unknown): boolean {
+  return error instanceof IndexBusyError
+    || (error as { code?: unknown } | null)?.code === "PHREN_INDEX_BUSY";
+}
+
+/**
+ * Whether another process is rebuilding right now. A lock younger than the
+ * stale threshold still counts as free when the pid written into it is gone:
+ * a rebuild killed mid-way (a hook timed out, a detached reindex OOM-killed)
+ * never unlinks its lock, and without the pid check every fresh-required
+ * refresh in every MCP server failed for up to 30 s after it.
+ */
+export function isRebuildLockHeld(phrenPath: string): boolean {
+  const lockPath = runtimeFile(phrenPath, "index-rebuild") + ".lock";
+  let contents: string;
+  let mtimeMs: number;
   try {
-    const stat = fs.statSync(lockPath);
-    const staleThreshold = Number.parseInt((process.env.PHREN_FILE_LOCK_STALE_MS) || "30000", 10) || 30000;
-    return Date.now() - stat.mtimeMs <= staleThreshold;
-  } catch (err: unknown) {
-    logger.debug("isRebuildLockHeld stat", errorMessage(err));
-    return false;
+    mtimeMs = fs.statSync(lockPath).mtimeMs;
+    contents = fs.readFileSync(lockPath, "utf8");
+  } catch {
+    return false; // absent is the normal case
   }
+  const staleThreshold = Number.parseInt((process.env.PHREN_FILE_LOCK_STALE_MS) || "30000", 10) || 30000;
+  if (Date.now() - mtimeMs > staleThreshold) return false;
+  const pid = Number.parseInt(contents.split("\n")[0], 10);
+  // Empty or unparseable: the owner may be between create and write. Trust age.
+  if (!(pid > 0)) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== "ESRCH") return true; // EPERM: alive, not ours
+  }
+  try {
+    if (fs.readFileSync(lockPath, "utf8") === contents) fs.unlinkSync(lockPath);
+    debugLog(`Removed rebuild lock left by dead pid ${pid}`);
+  } catch {
+    // Someone else already replaced or removed it.
+  }
+  return false;
 }
 
 async function loadIndexSnapshotOrEmpty(
@@ -1990,7 +1986,6 @@ export async function loadIndexForHook(phrenPath: string, profile?: string): Pro
   // Resolve team stores the same way buildIndex does. Without this the hook's
   // file set (and therefore its hash) can never match the one buildIndex sealed,
   // so every prompt would miss the cache and spawn a redundant reindex.
-  await refreshStoreProjectDirs(phrenPath, profile);
   const projectDirs = getAllStoreProjectDirs(phrenPath, profile);
   // Skip the glob when the sentinel proves nothing changed (see the sentinel
   // block above): ~20x cheaper than re-globbing, and yields the same hash.
@@ -2061,26 +2056,38 @@ export async function loadIndexForHook(phrenPath: string, profile?: string): Pro
 async function _buildIndexGuarded(phrenPath: string, profile?: string, requireFresh = false): Promise<SqlJsDatabase> {
   const lockTarget = runtimeFile(phrenPath, "index-rebuild");
   if (isRebuildLockHeld(phrenPath)) {
-    if (requireFresh) throw new Error("Index rebuild is busy; retry shortly.");
+    if (requireFresh) throw new IndexBusyError();
     return loadIndexSnapshotOrEmpty(phrenPath, profile);
   }
 
-  try {
-    return await withFileLock(lockTarget, async () => {
-      let timer: ReturnType<typeof setTimeout>;
-      const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("buildIndex timed out after 30s")), 30000);
-      });
-      try {
-        return await Promise.race([buildIndexImpl(phrenPath, profile), timeout]);
-      } finally {
-        clearTimeout(timer!);
-      }
+  const timedBuild = async () => {
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("buildIndex timed out after 30s")), 30000);
     });
+    try {
+      return await Promise.race([buildIndexImpl(phrenPath, profile), timeout]);
+    } finally {
+      clearTimeout(timer!);
+    }
+  };
+
+  if (requireFresh) {
+    // A caller that must not settle for a snapshot (the MCP server) waits
+    // asynchronously in its own bounded retry instead of withFileLock's
+    // synchronous spin, which would freeze the server's event loop for up to
+    // 5 s while another process finishes its rebuild.
+    const release = tryFileLock(lockTarget);
+    if (!release) throw new IndexBusyError();
+    try { return await timedBuild(); }
+    finally { release(); }
+  }
+
+  try {
+    return await withFileLock(lockTarget, timedBuild);
   } catch (err: unknown) {
     const message = errorMessage(err);
     if (message.includes("could not acquire lock")) {
-      if (requireFresh) throw err;
       debugLog(`FTS rebuild skipped because another process holds the rebuild lock: ${message}`);
       return loadIndexSnapshotOrEmpty(phrenPath, profile);
     }

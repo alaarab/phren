@@ -147,6 +147,12 @@ export async function runInitCommand(args: string[]): Promise<number> {
     console.error(`Invalid --hooks value "${hooksArg}". Use "on" or "off".`);
     return 1;
   }
+  const clankerArg = getOptionValue(args, "--clanker");
+  const clankerMode = parseMcpMode(clankerArg ?? "");
+  if (clankerArg && !clankerMode) {
+    console.error(`Invalid --clanker value "${clankerArg}". Use "on" or "off".`);
+    return 1;
+  }
   const cloneUrl = getOptionValue(args, "--clone-url");
   try {
     await runInit({
@@ -155,6 +161,7 @@ export async function runInitCommand(args: string[]): Promise<number> {
       profile: profileIdx !== -1 ? args[profileIdx + 1] : undefined,
       mcp: mcpMode,
       hooks: hooksMode,
+      clanker: clankerMode,
       projectOwnershipDefault: ownershipMode,
       managementPreset,
       taskMode,

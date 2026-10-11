@@ -20,7 +20,11 @@ export const changedFileSchema = z.object({ root: z.string(), path: z.string(), 
 export type ChangedFile = z.infer<typeof changedFileSchema>;
 const changeRowSchema = z.object({ toolUseId: z.string(), files: z.array(changedFileSchema) });
 export const secretName = (file: string): boolean => /^(?:\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx|keychain-db|tfstate)|id_rsa.*|id_ed25519.*|(?:.*\.)?credentials\.json|\.netrc|\.npmrc|\.pypirc)$/i.test(path.basename(file));
-const gitPool = new ProcessPool(2);
+/** Two captures at a time, each holding its slot for all of its Git work. A
+ * slot per Git process interleaved every waiting capture, so under load they
+ * all finished late together and every one overran the budget; now they finish
+ * in turn and only the end of a long queue misses it. */
+const capturePool = new ProcessPool(2);
 
 /** Tools whose filesystem changes are captured around the lifecycle callback. */
 export const SHELL_TOOLS = new Set(["Bash", "bash", "shell", "Shell", "exec_command", "shell_command", "local_shell", "write_stdin"]);
@@ -48,10 +52,12 @@ export function namedPaths(command: string, input: Json = {}): string[] {
   return [...found].slice(0, 48);
 }
 
+/** Only inside a `capturePool` slot. */
 async function git(cwd: string, args: string[], extra: NodeJS.ProcessEnv = {}, signal?: AbortSignal): Promise<string> {
-  return gitPool.run(signal, async () => (countGit("changes"), await exec("git", ["-C", cwd, "--no-pager", ...args], {
+  countGit("changes");
+  return (await exec("git", ["-C", cwd, "--no-pager", ...args], {
     signal, timeout: 10_000, maxBuffer: 8_388_608, env: { ...checkoutGitEnv(), ...extra },
-  })).stdout);
+  })).stdout;
 }
 
 /** The repository holding `target` (a file, a folder, or something not yet
@@ -93,9 +99,16 @@ async function treeHash(root: string, env: NodeJS.ProcessEnv, signal: AbortSigna
   const index = path.resolve(root, (await git(root, ["rev-parse", "--git-path", "index"], {}, signal)).trim());
   const temp = env.GIT_INDEX_FILE!;
   await unlink(temp).catch(() => undefined);
-  await copyFile(index, temp).catch(error => { if (error.code !== "ENOENT") throw error; });
-  // Force content checks for files rewritten to the same size in one instant.
-  await utimes(temp, 1, 1).catch(() => undefined);
+  // Keep the real index's mtime (a second early, for rounding): Git rechecks
+  // the content of entries as new as the index, so a file rewritten to the
+  // same size in one instant is still seen. Read before the copy, so an index
+  // replaced meanwhile only makes more entries racy. An epoch mtime instead
+  // made every tracked file racy, and rehashing them all overran the budget
+  // on a busy machine (about 3 s for 6,000 files).
+  const real = await stat(index).catch(error => { if (error.code !== "ENOENT") throw error; return undefined; });
+  if (real && await copyFile(index, temp).then(() => true, error => { if (error.code !== "ENOENT") throw error; return false; })) {
+    await utimes(temp, real.atimeMs / 1000, real.mtimeMs / 1000 - 1);
+  }
   await git(root, ["add", "-A", "--", "."], env, signal);
   return (await git(root, ["write-tree"], env, signal)).trim();
 }
@@ -233,7 +246,7 @@ export class ToolChanges {
     const snapshot: Snapshot = { at: Date.now(), conversation, own: new Set(claimed), trees: new Map(), taking: true };
     this.snapshots.set(key, snapshot);
     try {
-      await this.budget(async signal => {
+      await this.budget(signal => capturePool.run(signal, async () => {
         await realpath(cwd); // A vanished checkout must not resolve to its parent repository.
         const roots = new Set<string>();
         for (const target of [cwd, phrenStoreRoot(), ...namedPaths(command, input)]) {
@@ -245,7 +258,7 @@ export class ToolChanges {
           snapshot.trees.set(root, await scratchTree(root, signal));
         }
         signal.throwIfAborted();
-      });
+      }));
       snapshot.taking = false;
       if (snapshot.dropped) { await this.discard(snapshot); return; }
       if (!snapshot.trees.size) { this.snapshots.delete(key); return; }
@@ -295,10 +308,13 @@ export class ToolChanges {
   private async compute(snapshot: Snapshot): Promise<ChangedFile[]> {
     try {
       return await this.budget(async signal => {
-        const files: ChangedFile[] = [];
-        for (const [root, before] of snapshot.trees) {
-          files.push(...await treeDiff(root, before.hash, await treeHash(root, before.env, signal), before.env, signal));
-        }
+        const files = await capturePool.run(signal, async () => {
+          const found: ChangedFile[] = [];
+          for (const [root, before] of snapshot.trees) {
+            found.push(...await treeDiff(root, before.hash, await treeHash(root, before.env, signal), before.env, signal));
+          }
+          return found;
+        });
         // A file another agent's edit named during this call is its change,
         // not this call's, even though it landed inside the same window.
         // A call that names its files (an Edit, a Write, a patch) changed

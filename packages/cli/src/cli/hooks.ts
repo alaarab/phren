@@ -378,7 +378,7 @@ export async function handleHookPrompt() {
       debugLog(`hook-prompt lookup-events: ${errorMessage(err)}`);
     }
 
-    const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, getPhrenPath(), sessionId);
+    const parts = buildHookOutput(budgetSelected, budgetUsedTokens, intent, gitCtx, detectedProject, stage, safeTokenBudget, getPhrenPath(), sessionId, keywords);
     const taskLevel = resolvedConfig.proactivity.tasks
       ?? resolvedConfig.proactivity.base
       ?? getProactivityLevelForTask(getPhrenPath());

@@ -58,7 +58,7 @@ describe("removeSkillPath", () => {
       writeFile(skillPath, "---\nname: helper\ndescription: test\n---\nbody\n");
 
       syncSkillLinksForScope(phrenPath, "global");
-      const linked = path.join(tmp.path, ".claude", "skills", "helper.md");
+      const linked = path.join(tmp.path, ".claude", "skills", "helper", "SKILL.md");
       expect(fs.lstatSync(linked).isSymbolicLink()).toBe(true);
 
       setSkillEnabledAndSync(phrenPath, "global", "helper", false);
@@ -94,8 +94,8 @@ describe("removeSkillPath", () => {
       writeFile(path.join(phrenPath, "demo", "skills", "verify.md"), "---\nname: verify\ndescription: local\n---\nbody\n");
 
       const manifest = syncSkillLinksForScope(phrenPath, "demo");
-      const linkedGlobal = path.join(projectDir, ".claude", "skills", "humanize.md");
-      const linkedLocal = path.join(projectDir, ".claude", "skills", "verify.md");
+      const linkedGlobal = path.join(projectDir, ".claude", "skills", "humanize", "SKILL.md");
+      const linkedLocal = path.join(projectDir, ".claude", "skills", "verify", "SKILL.md");
       const manifestPath = path.join(projectDir, ".claude", "skill-manifest.json");
       const commandsPath = path.join(projectDir, ".claude", "skill-commands.json");
 

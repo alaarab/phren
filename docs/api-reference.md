@@ -21,6 +21,8 @@ A composite takes `action` plus the target tool's own parameters, validated agai
 
 Most tools return structured JSON: `{ ok, message, data?, error? }`. The five code query tools return compact text.
 
+Responses are held well under the roughly 25,000-token limit Claude Code puts on a tool result. Search, task, findings and summary tools size their own output (see each tool). As a last resort, any response over 60,000 characters is replaced by its message cut short plus `data: { truncated: true, originalChars }` and a note on how to narrow the call. `export_project` is exempt, since an export is only useful whole.
+
 Module layout: search, tasks, findings, daily notes, memory quality, data management, fragment graph, sessions, operations/review, skills, hooks, extraction, configuration, topic summaries, code index, dispatch and hand-off.
 
 ## Cross-computer dispatch
@@ -515,11 +517,12 @@ An uncertain result is never retried automatically.
 
 ### `get_memory_detail`
 
-Fetch the full content of a specific memory entry by its ID. This is Layer 3 of the progressive disclosure system: when `PHREN_FEATURE_PROGRESSIVE_DISCLOSURE=1`, the hook-prompt injects a compact memory index instead of full snippets for 3+ results. Use this tool to expand any entry from that index.
+Fetch the full content of a specific memory entry by its ID. Use it to expand a `search_knowledge` excerpt or a row from [clanker mode](#clanker-mode). A `fid:xxxxxxxx` (finding) or `bid:xxxxxxxx` (task) id returns that one entry with its continuation lines (citations, task Context) in `data.content`, plus `data.source`, the `mem:` id of the file it lives in.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `id` | string | yes | Memory ID in the format `mem:project/filename` (e.g. `mem:my-app/FINDINGS.md`). Returned by the hook-prompt compact index. |
+| `id` | string | yes | `fid:xxxxxxxx`, `bid:xxxxxxxx`, or `mem:project/filename` (e.g. `mem:my-app/FINDINGS.md`). Returned by `search_knowledge`, `get_findings`, `get_tasks` and the hook-prompt index. |
+| `offset` | number | no | Character offset to read from. Documents over 16,000 characters come back a page at a time: `data.total_chars` is the full length and `data.next_offset` is where the next page starts (`null` on the last page). |
 
 ---
 
@@ -541,9 +544,21 @@ Search the user's personal project store using FTS5 full-text search with synony
 
 A findings result carries the linked function, type or variable in its `symbol` field (and `symbols`) when the finding has a code link, so a client can show which code the finding is about.
 
+Each result is an excerpt around the match, not the whole document. Snippets share a budget of about 6,000 characters per response (at most 1,200 per result), so a response stays a few thousand tokens however long the matched lines are. A result has an `id` (`mem:project/filename`; absent for federated results) and `truncated: true` when the excerpt is not the whole document; pass the `id` to `get_memory_detail` for the full text.
+
+#### Clanker mode
+
+With clanker mode on (`phren config clanker on`, `PHREN_CLANKER=on`), `search_knowledge`, `get_findings` and `get_tasks` return rows instead of text, one per line in `message`:
+
+```
+fid:803b2823 Hook per-call change capture (bridge/changes.ts treeHash): never set the scratch index mt… [bridge, hook, per-call, bridge/changes.ts] 0.56
+```
+
+That is the id, a title of up to 90 characters (140 in the prompt hook, whose few rows arrive unasked), up to four keywords (up to two of the query's terms it matched, then the entry's own identifiers and longest words) and, for searches, the share of query terms the entry contains. A search returns one row per matching finding or task (at most three per document, at most twice `limit` in all) and one row per other document, prefixed with the project when no `project` filter was given; `data.ids` lists the ids. `get_findings` rows carry the date and a non-active status, `get_tasks` rows the section, priority and claim. `data` keeps counts and paging but not the rows. Pass an id to `get_memory_detail` for the full text. The prompt hook injects the same rows, with the `fb:` key, and drops its trace line.
+
 ### `get_project_summary`
 
-Get a project's summary card and list of indexed documents.
+Get a project's summary card and list of indexed documents. The summary is cut at 6,000 characters (`data.summaryTruncated`) and the truths list at 20 entries of 300 characters; the message names the `get_memory_detail` id for the full text.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -565,7 +580,8 @@ List recent findings for a project without requiring a search query.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `project` | string | yes | Project name. |
-| `limit` | number | no | Max rows to return (1-200, default 50). |
+| `limit` | number | no | Max rows to return (1-200, default 50). Fewer come back when the rows would not fit the response budget; the message then names the offset to continue from. |
+| `offset` | number | no | Skip the first N rows. `data.next_offset` is the offset of the next page (`null` when none remain). |
 | `include_superseded` | boolean | no | Include superseded findings (legacy compatibility flag). |
 | `include_history` | boolean | no | Include historical findings (`superseded`, `retracted`). |
 | `status` | enum | no | Filter by lifecycle status: `active`, `superseded`, `contradicted`, `stale`, `invalid_citation`, `retracted`. |
@@ -643,6 +659,8 @@ Get tasks for a project (or all projects). Supports progressive disclosure: use 
 | `done_limit` | number | no | Max Done items to return, most recent first (1-200, default 5). Done sections are capped tightly by default to avoid large responses. |
 | `offset` | number | no | Skip the first N items in each section before applying limit. Use with `limit` for pagination (e.g. offset:20, limit:20 for page 2). |
 | `status` | enum | no | Filter by section: `all`, `active`, `queue`, `done`, `active+queue` (default). |
+
+List views show only the latest 300 characters of a long Context (marked `contextTruncated: true`); look up one task by `project` and `id` for its full context. A list that would still be too large for one response comes back with fewer items per section and a note saying so. Across all projects, when even one item per section does not fit, the response is the `summary` view; summary responses carry counts and previews but no item rows in `data`.
 
 ### `add_task`
 
@@ -1748,7 +1766,12 @@ to `list`; optional `includeResolved` shows history. `add` requires `title`, wit
 optional `project` and stable UUID `id`. `resolve` requires `id`, with optional
 `resolution` and `computer` (the listed item's `inboxComputer`, omitted for
 local). A resolve does not answer or approve a prompt. Lists include local and
-linked computers' inboxes plus `unreachable` entries.
+linked computers' inboxes plus `unreachable` entries. Automatic items are
+deduplicated by pane, session and question and shown only while verified live.
+Answered or disappeared sources resolve automatically on reads or the five-second
+Hook tick; manual items require explicit resolution. The first reconciliation
+after upgrade resolves legacy stale automatic rows with `stale: source gone`.
+Unreachable workers are hidden as unverified without resolving their items.
 
 Dispatch additions: optional `closeOnFinish` defaults to true, closing a
 verified finished pane after reading its done return; false keeps it open.

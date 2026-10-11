@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { existsSync, readlinkSync } from "node:fs";
 import { open, readdir, readFile, readlink, unlink } from "node:fs/promises";
 import { request, type IncomingMessage, type ServerResponse } from "node:http";
+import { createConnection, createServer, type Socket } from "node:net";
 import path from "node:path";
 import { promisify } from "node:util";
 import { userInfo } from "node:os";
@@ -26,9 +27,13 @@ import { briefId } from "./launch-brief.js";
  * running as root (euid 0, which no process of the owner's can fake), and the
  * asker's stdout is a pipe no other process of the owner's reads. The
  * connection is bound to that process too: on macOS its other end must be
- * held by the asker alone; on Linux the Hook writes the password straight into
- * the asker's stdout (`/proc/<pid>/fd/1`), so a connection that names another
- * process's pid gets nothing. It reads
+ * held by the asker alone. On Linux, where no unprivileged process can see a
+ * socket's peer, askpass listens on a fresh abstract socket and names it in
+ * its request; the listener must be held by the asker alone, and the Hook
+ * hands the password to that listener (with a one-time nonce askpass chose),
+ * which prints it to its own stdout. So a connection that names another
+ * process's pid gets nothing. (sudo creates askpass's stdout pipe as root,
+ * 0600, so the Hook cannot open `/proc/<pid>/fd/1` there.) It reads
  * that sudo's command line itself and pushes the request to the phone; `GET /v1/sudo` and the overview socket's `sudo` frame
  * list it. `POST /v1/sudo/answer` writes the password into the held
  * connection and forgets the request: the password is never logged, stored,
@@ -72,8 +77,8 @@ export interface SudoRequestView {
   id: string; computer: string; command: string; account?: string; user?: string; cwd?: string; session?: SudoSession;
   askedAt: string; expiresAt: string;
 }
-/** What askpass gets: the password to print, word that the Hook wrote it into
- * askpass's stdout itself (Linux), or why not. */
+/** What askpass gets: the password to print, word that the Hook handed it to
+ * askpass's delivery socket or wrote it into askpass's stdout (Linux), or why not. */
 export type SudoReply = { password: string } | { delivered: true } | { error: string; status: number };
 
 /** sudo's options that take a value, short and long. */
@@ -164,6 +169,30 @@ export async function readProcess(pid: number): Promise<ProcessRecord | undefine
   } catch { return undefined; }
 }
 
+/** Linux: whether any process of the owner's other than `exclude` holds a
+ * descriptor that links to `target` (`pipe:[n]`, `socket:[n]`). */
+async function heldElsewhere(target: string, exclude: number[]): Promise<boolean> {
+  const holders = (await readdir("/proc")).map(Number).filter(holder => Number.isInteger(holder) && !exclude.includes(holder));
+  let next = 0, other = false;
+  // Busy machines can have thousands of descriptors. Bound the process
+  // concurrency while checking every visible descriptor of each holder.
+  await Promise.all(Array.from({ length: Math.min(16, holders.length) }, async () => {
+    while (!other && next < holders.length) {
+      const holder = holders[next++];
+      const fds = await readdir(`/proc/${holder}/fd`).catch(() => [] as string[]);
+      // procfs links are kernel metadata, without disk I/O. Reading a
+      // holder's links directly avoids thousands of thread-pool jobs;
+      // the directory awaits above still yield between holders.
+      for (const fd of fds) {
+        try {
+          if (readlinkSync(`/proc/${holder}/fd/${fd}`) === target) { other = true; break; }
+        } catch { /* The descriptor closed or its process exited. */ }
+      }
+    }
+  }));
+  return other;
+}
+
 /** Whether `pid`'s stdout is a pipe that no process of the owner's other than
  * `allowed` holds. sudo, running as root, is never visible here. */
 export async function stdoutReaders(pid: number, allowed: number[]): Promise<"sudo" | "other" | "unknown"> {
@@ -171,26 +200,7 @@ export async function stdoutReaders(pid: number, allowed: number[]): Promise<"su
     if (process.platform === "linux") {
       const target = await readlink(`/proc/${pid}/fd/1`);
       if (!/^pipe:\[\d+\]$/.test(target)) return "other";
-      const holders = (await readdir("/proc")).map(Number)
-        .filter(holder => Number.isInteger(holder) && holder !== pid && !allowed.includes(holder));
-      let next = 0, other = false;
-      // Busy machines can have thousands of descriptors. Bound the process
-      // concurrency while checking every visible descriptor of each holder.
-      await Promise.all(Array.from({ length: Math.min(16, holders.length) }, async () => {
-        while (!other && next < holders.length) {
-          const holder = holders[next++];
-          const fds = await readdir(`/proc/${holder}/fd`).catch(() => [] as string[]);
-          // procfs links are kernel metadata, without disk I/O. Reading a
-          // holder's links directly avoids thousands of thread-pool jobs;
-          // the directory awaits above still yield between holders.
-          for (const fd of fds) {
-            try {
-              if (readlinkSync(`/proc/${holder}/fd/${fd}`) === target) { other = true; break; }
-            } catch { /* The descriptor closed or its process exited. */ }
-          }
-        }
-      }));
-      return other ? "other" : "sudo";
+      return await heldElsewhere(target, [pid, ...allowed]) ? "other" : "sudo";
     }
     // macOS: each pipe end has its own address, and `n->` names the other end.
     const own = await exec("lsof", ["-nP", "-a", "-p", String(pid), "-d", "1", "-F", "tdn"], { timeout: 5_000, maxBuffer: 65_536 });
@@ -231,8 +241,68 @@ export async function processStart(pid: number): Promise<string | undefined> {
   return stat?.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
 }
 
-/** Linux: the password written into the asker's stdout, the pipe verified to
- * reach sudo alone, if the asker is still the process that was verified. */
+/** Linux: the abstract socket askpass listens on for its password, and the
+ * nonce the Hook must send first. Both are random and chosen by askpass. */
+export interface AskpassDelivery { socket: string; nonce: string }
+const DELIVERY_SOCKET = /^phren-askpass-[0-9a-f]{32}$/, DELIVERY_NONCE = /^[0-9a-f]{64}$/;
+export function deliveryFrom(value: unknown): AskpassDelivery | undefined {
+  const item = object(value);
+  return typeof item.socket === "string" && DELIVERY_SOCKET.test(item.socket) && typeof item.nonce === "string" && DELIVERY_NONCE.test(item.nonce)
+    ? { socket: item.socket, nonce: item.nonce } : undefined;
+}
+export function newDelivery(): AskpassDelivery {
+  return { socket: `phren-askpass-${randomBytes(16).toString("hex")}`, nonce: randomBytes(32).toString("hex") };
+}
+
+/** Linux: the inode of the listening abstract socket `name`, from
+ * `/proc/net/unix` (`Num RefCount Protocol Flags Type St Inode Path`; a
+ * listener has `__SO_ACCEPTCON`, 0x10000, in Flags). */
+export async function listeningInode(name: string, table: () => Promise<string> = () => readFile("/proc/net/unix", "utf8")): Promise<string | undefined> {
+  const text = await table().catch(() => "");
+  const found = text.split("\n").slice(1).map(row => row.trim().split(/\s+/))
+    .filter(cols => cols.length >= 8 && cols[7] === `@${name}` && (Number.parseInt(cols[3], 16) & 0x10000) !== 0 && /^\d+$/.test(cols[6]));
+  return found.length === 1 ? found[0][6] : undefined;
+}
+
+/** Linux: whether the listening socket `inode` is held by `pid` and no other
+ * process of the owner's. */
+export async function listenerHolders(pid: number, inode: string): Promise<"asker" | "other" | "unknown"> {
+  try {
+    const target = `socket:[${inode}]`;
+    const own = await readdir(`/proc/${pid}/fd`);
+    if (!own.some(fd => { try { return readlinkSync(`/proc/${pid}/fd/${fd}`) === target; } catch { return false; } })) return "other";
+    return await heldElsewhere(target, [pid]) ? "other" : "asker";
+  } catch { return "unknown"; }
+}
+
+/** Linux: the password handed to askpass's own listener, if askpass is still
+ * the process that was verified and its listener is still the one checked.
+ * The check runs after connecting: a name is bound to one listener at a time,
+ * so while the asker still holds that listener, this connection reached it. */
+export async function deliverToListener(pid: number, start: string, delivery: AskpassDelivery, inode: string, password: string,
+  checks: { start?: typeof processStart; inode?: typeof listeningInode; holders?: typeof listenerHolders; connect?: (path: string) => Socket } = {}): Promise<SudoReply> {
+  const gone: SudoReply = { status: 410, error: "askpass went away." };
+  const socket = (checks.connect ?? (target => createConnection({ path: target })))(`\0${delivery.socket}`);
+  try {
+    await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); setTimeout(() => reject(new Error("connect timeout")), 3_000).unref(); });
+    if (await (checks.start ?? processStart)(pid) !== start) return gone;
+    if (await (checks.inode ?? listeningInode)(delivery.socket) !== inode) return gone;
+    if (await (checks.holders ?? listenerHolders)(pid, inode) !== "asker") return gone;
+    const ack = new Promise<boolean>(resolve => {
+      let text = "";
+      socket.on("data", chunk => { text += chunk.toString(); if (text.includes("\n")) resolve(text.startsWith("ok\n")); if (text.length > 64) resolve(false); });
+      socket.once("close", () => resolve(false)); socket.once("error", () => resolve(false));
+      setTimeout(() => resolve(false), 5_000).unref();
+    });
+    socket.write(`${delivery.nonce}\n${password}\n`);
+    return await ack ? { delivered: true } : gone;
+  } catch { return gone; } finally { socket.destroy(); }
+}
+
+/** Linux, an askpass that names no delivery socket (one from before it did):
+ * the password written into the asker's stdout, the pipe verified to reach
+ * sudo alone. Works only where that pipe is the owner's, not sudo's root-owned
+ * one. */
 async function writeToAsker(pid: number, start: string, password: string): Promise<SudoReply> {
   if (await processStart(pid) !== start) return { status: 410, error: "askpass went away." };
   try {
@@ -286,7 +356,7 @@ export interface SudoBrokerOptions {
   /** Reads a process, to see whether sudo is still running; tests replace it. */
   processes?: (pid: number) => Promise<ProcessRecord | undefined>;
   /** The askpass chain check and how the password then reaches it; tests replace it. */
-  verify?: (pid: number, hookFd: number | undefined) => Promise<Verified | { refused: string }>;
+  verify?: (pid: number, hookFd: number | undefined, delivery?: AskpassDelivery) => Promise<Verified | { refused: string }>;
   holdMs?: number;
   outcomeMs?: number;
   /** Whose password sudo asks for; this Hook's user. */
@@ -304,18 +374,23 @@ function placeFrom(value: unknown) {
 
 export interface Verified { sudo: ProcessRecord; sudoPid: number; deliver: (password: string) => Promise<SudoReply> }
 /** The chain check against this Hook's own node, bundle and script. */
-async function defaultVerify(pid: number, hookFd: number | undefined): Promise<Verified | { refused: string }> {
+async function defaultVerify(pid: number, hookFd: number | undefined, delivery?: AskpassDelivery): Promise<Verified | { refused: string }> {
   const linux = process.platform === "linux";
   const running = process.argv[1] ? [path.resolve(process.argv[1])] : [];
   const start = linux ? await processStart(pid) : undefined;
+  const inode = linux && delivery ? await listeningInode(delivery.socket) : undefined;
   const result = await verifyAsker(pid, { processes: readProcess, stdout: stdoutReaders, node: process.execPath, script: askpassPath(),
     bundles: [...new Set([path.join(bridgeRoot(), "current/bridge-hook.mjs"), ...running])],
-    // On Linux the password goes to the asker's stdout, not this connection.
-    connection: linux ? async () => start ? "asker" : "unknown" : asker => connectionHolders(asker, hookFd),
+    // On Linux the password goes to the asker's own listener (or, for an
+    // askpass that names none, its stdout), not this connection.
+    connection: linux
+      ? async asker => !start ? "unknown" : !delivery ? "asker" : !inode ? "other" : listenerHolders(asker, inode)
+      : asker => connectionHolders(asker, hookFd),
     // The real-Hook tests stand a copy of bash named sudo in for sudo, which cannot run as root.
     unprivilegedSudo: process.env.NODE_ENV === "test" && process.env.PHREN_SUDO_TEST_PARENT === "1" });
   if ("refused" in result) return result;
-  return { sudo: result.sudo, sudoPid: result.sudoPid, deliver: linux ? password => writeToAsker(pid, start!, password) : async password => ({ password }) };
+  return { sudo: result.sudo, sudoPid: result.sudoPid, deliver: !linux ? async password => ({ password })
+    : delivery && inode ? password => deliverToListener(pid, start!, delivery, inode, password) : password => writeToAsker(pid, start!, password) };
 }
 
 export class SudoBroker {
@@ -342,7 +417,7 @@ export class SudoBroker {
    * an answer, a timeout, or `cancel` (the caller went away). */
   async ask(body: Json, respond: (reply: SudoReply) => void, hookFd?: number): Promise<{ cancel: () => void }> {
     const none = { cancel: () => {} };
-    const verified = await (this.options.verify ?? defaultVerify)(Number(body.pid), hookFd);
+    const verified = await (this.options.verify ?? defaultVerify)(Number(body.pid), hookFd, deliveryFrom(body.delivery));
     if ("refused" in verified) { respond({ status: 400, error: verified.refused }); return none; }
     const sudo = verified.sudo, pushable = this.options.push?.available === true;
     // A second ask from the same sudo means it refused the last password,
@@ -463,8 +538,50 @@ export class SudoAnswerError extends Error { constructor() { super("Send an id a
 export async function askpass(prompt: string | undefined, env: NodeJS.ProcessEnv = process.env): Promise<number> {
   const place = await terminalPaneFromEnv(env).catch(() => undefined);
   const dispatchId = env.PHREN_DISPATCH_ID && briefId.safeParse(env.PHREN_DISPATCH_ID).success ? env.PHREN_DISPATCH_ID : undefined;
+  // Linux: listen for the password before asking, so the Hook can check
+  // that this process alone holds the listener.
+  const listener = process.platform === "linux" ? await deliveryListener().catch(() => undefined) : undefined;
+  if (process.platform === "linux" && !listener) { process.stderr.write("phren askpass: could not open its delivery socket.\n"); return 1; }
+  try {
+    return await ask(prompt, place, dispatchId, listener);
+  } finally { listener?.close(); }
+}
+
+interface DeliveryListener { delivery: AskpassDelivery; printed: () => boolean; close: () => void }
+/** An abstract socket that takes one password from a connection that sends
+ * the nonce first, prints it to stdout, and acknowledges. Any other
+ * connection is dropped without an answer. */
+function deliveryListener(): Promise<DeliveryListener> {
+  const delivery = newDelivery(), expected = Buffer.from(delivery.nonce);
+  let printed = false;
+  const server = createServer(socket => {
+    let text = "";
+    socket.setTimeout(10_000, () => socket.destroy());
+    socket.on("error", () => {});
+    socket.on("data", chunk => {
+      if (printed) { socket.destroy(); return; }
+      text += chunk.toString();
+      if (text.length > 2_200) { socket.destroy(); return; }
+      const lines = text.split("\n");
+      if (lines.length < 3) return;
+      const nonce = Buffer.from(lines[0]);
+      if (nonce.length !== expected.length || !timingSafeEqual(nonce, expected) || !lines[1]) { socket.destroy(); return; }
+      printed = true;
+      process.stdout.write(`${lines[1]}\n`);
+      text = "";
+      socket.end("ok\n");
+      server.close();
+    });
+  });
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen({ path: `\0${delivery.socket}` }, () => resolve({ delivery, printed: () => printed, close: () => server.close() }));
+  });
+}
+
+async function ask(prompt: string | undefined, place: unknown, dispatchId: string | undefined, listener: DeliveryListener | undefined): Promise<number> {
   const data = JSON.stringify({ pid: process.pid, cwd: process.cwd(), ...(prompt ? { prompt: prompt.slice(0, 200) } : {}),
-    ...(place ? { place } : {}), ...(dispatchId ? { dispatchId } : {}) });
+    ...(place ? { place } : {}), ...(dispatchId ? { dispatchId } : {}), ...(listener ? { delivery: listener.delivery } : {}) });
   const reply = await new Promise<{ status: number; body: Json }>(resolve => {
     const req = request({ socketPath: localSocket(), path: "/sudo", method: "POST", timeout: SUDO_HOLD_MS + 15_000,
       headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, res => {
@@ -477,7 +594,8 @@ export async function askpass(prompt: string | undefined, env: NodeJS.ProcessEnv
     req.end(data);
   });
   if (reply.status === 200 && typeof reply.body.password === "string") { process.stdout.write(`${reply.body.password}\n`); return 0; }
-  // Linux: the Hook already wrote it into this process's stdout.
+  // Linux: the Hook handed it to the listener, which printed it (or, an
+  // older Hook, wrote it into this process's stdout itself).
   if (reply.status === 200 && reply.body.delivered === true) return 0;
   process.stderr.write(`phren askpass: ${typeof reply.body.error === "string" ? reply.body.error : "sudo was not approved."}\n`);
   return 1;

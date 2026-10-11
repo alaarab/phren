@@ -173,6 +173,7 @@ const CONFIG_SUBCOMMANDS: Subcommand[] = [
   { name: "profiles", usage: "phren config profiles", summary: "Profiles and projects" },
   { name: "telemetry", usage: "phren config telemetry [on|off]", summary: "Opt-in usage telemetry" },
   { name: "mcp-profile", usage: "phren config mcp-profile [core|full]", summary: "MCP tool surface: 10 core tools or all of them" },
+  { name: "clanker", usage: "phren config clanker [on|off]", summary: "Compact id/title/keyword rows from the hook and search/list tools; full text by id" },
   { name: "pull-interval", usage: "phren config pull-interval [seconds|off]", summary: "Periodic MCP remote checks (default: off; 0 disables)" },
 ];
 
@@ -203,8 +204,8 @@ const TEAM_SUBCOMMANDS: Subcommand[] = [
 
 export const REGISTRY: Command[] = [
   {
-    name: "pair", topic: "setup", usage: "phren pair [--minutes <1-30>] [--port <n>] [--no-install]",
-    summary: "Connect your phone: show a pairing QR code and authorize the phone that scans it",
+    name: "pair", topic: "setup", usage: "phren pair [--minutes <1-30>] [--port <n>] [--no-install] | phren pair --scope gitboy-read|gitboy-write --key <public-key-file|->",
+    summary: "Connect your phone with a pairing QR code, or authorize a scoped key for gitboy (gitboy-read: project memory; gitboy-write: save findings)",
     run: async args => {
       const { runPair } = await import("./bridge/pair.js");
       const { VERSION } = await import("./package-metadata.js");

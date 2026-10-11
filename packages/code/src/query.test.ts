@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { makeTempDir } from "../../cli/src/test-helpers.js";
 import { indexProject } from "./indexer.js";
-import { definition, fileReferences, outline, references, search, usage } from "./query.js";
+import { definition, fileReferences, outline, references, resolveSymbolFiles, search, usage } from "./query.js";
 import { openCodeDatabase, rowsOf } from "./store.js";
 
 const FIXTURES = path.join(__dirname, "__fixtures__");
@@ -117,6 +117,16 @@ describe("code definition", () => {
     const result = await definition(store, "fixture", "NoSuchSymbol");
     expect(result.available).toBe(true);
     expect(result.value).toBeUndefined();
+  });
+});
+
+describe("cited names to files", () => {
+  it("resolves each cited name the way a definition does, in one open", async () => {
+    const [point, greet] = await Promise.all([definition(store, "fixture", "Point.length"), definition(store, "fixture", "greet()")]);
+    const result = await resolveSymbolFiles(store, "fixture", ["Point.length", "greet()", "NoSuchSymbol", "greet()"]);
+    expect(result.available).toBe(true);
+    expect(result.value).toEqual({ "Point.length": point.value!.symbol.file, "greet()": greet.value!.symbol.file });
+    expect((await resolveSymbolFiles(store, "missing", ["greet()"])).available).toBe(false);
   });
 });
 

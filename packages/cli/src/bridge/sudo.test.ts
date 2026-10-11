@@ -7,8 +7,9 @@ import { WebSocket } from "ws";
 import type { Json } from "./protocol.js";
 import { sudoPushPayload } from "./push.js";
 import { overviewStream, type OverviewClient } from "./server-overview.js";
-import { askpassEnv, askpassPath, askpassScript, installAskpass, MAX_SUDO_PENDING, removeAskpass, SudoBroker, sudoAnswer, sudoCommand, verifyAsker,
-  type ProcessRecord, type SudoReply, type SudoRequestView } from "./sudo.js";
+import { createConnection, createServer, type Server } from "node:net";
+import { askpassEnv, askpassPath, askpassScript, deliverToListener, deliveryFrom, installAskpass, listeningInode, MAX_SUDO_PENDING, newDelivery, removeAskpass, SudoBroker,
+  sudoAnswer, sudoCommand, verifyAsker, type AskpassDelivery, type ProcessRecord, type SudoReply, type SudoRequestView } from "./sudo.js";
 import { headlessEnv } from "./schedule-launch.js";
 
 const ASKPASS = 4242, SCRIPT = 4241, SUDO = 4240;
@@ -118,6 +119,78 @@ describe("askpass chain", () => {
   });
   it("refuses a vanished process", async () => {
     expect(await verifyAsker(99, check())).toEqual({ refused: "phren askpass only answers sudo -A." });
+  });
+});
+
+describe("Linux password delivery to askpass's own listener", () => {
+  const delivery = newDelivery();
+  it("takes only a well-formed socket name and nonce", () => {
+    expect(deliveryFrom(delivery)).toEqual(delivery);
+    expect(delivery.socket).toMatch(/^phren-askpass-[0-9a-f]{32}$/);
+    expect(delivery.nonce).toMatch(/^[0-9a-f]{64}$/);
+    for (const bad of [undefined, {}, { socket: "phren-askpass-x", nonce: delivery.nonce }, { socket: delivery.socket, nonce: "short" },
+      { socket: "../agent.sock", nonce: delivery.nonce }, { socket: delivery.socket, nonce: 42 }]) expect(deliveryFrom(bad)).toBeUndefined();
+  });
+
+  it("finds the one listening abstract socket by name in /proc/net/unix", async () => {
+    const header = "Num       RefCount Protocol Flags    Type St Inode Path\n";
+    const row = (flags: string, inode: string, name: string) => `0000000000000000: 00000002 00000000 ${flags} 0001 01 ${inode} ${name}\n`;
+    const table = (...rows: string[]) => async () => header + rows.join("");
+    expect(await listeningInode(delivery.socket, table(row("00010000", "4711", `@${delivery.socket}`), row("00010000", "99", "@other")))).toBe("4711");
+    // A connected (not listening) socket with the name, or none, is no listener.
+    expect(await listeningInode(delivery.socket, table(row("00000000", "4711", `@${delivery.socket}`)))).toBeUndefined();
+    expect(await listeningInode(delivery.socket, table(row("00010000", "99", "@other")))).toBeUndefined();
+    // A filesystem socket with the same text is not the abstract one.
+    expect(await listeningInode(delivery.socket, table(row("00010000", "4711", `/tmp/@${delivery.socket}`)))).toBeUndefined();
+    expect(await listeningInode(delivery.socket, async () => { throw new Error("no procfs"); })).toBeUndefined();
+  });
+
+  // A stand-in for askpass's listener, on a filesystem socket so it runs on macOS too.
+  let dir: string, server: Server | undefined;
+  beforeEach(async () => { dir = await mkdtemp(path.join(tmpdir(), "phren-askpass-")); });
+  afterEach(async () => { server?.close(); server = undefined; await rm(dir, { recursive: true, force: true }); });
+  async function listener(answer: (text: string) => string | undefined) {
+    const received: string[] = [], file = path.join(dir, "l.sock");
+    server = createServer(socket => {
+      let text = "";
+      socket.on("data", chunk => { text += chunk.toString(); if (text.split("\n").length >= 3) { received.push(text); const reply = answer(text); if (reply) socket.end(reply); else socket.destroy(); } });
+      socket.on("error", () => {});
+    });
+    await new Promise<void>(resolve => server!.listen(file, resolve));
+    return { received, connect: () => createConnection({ path: file }) };
+  }
+  const passing = { start: async () => "100", inode: async () => "4711", holders: async () => "asker" as const };
+  const deliver = (d: AskpassDelivery, checks: Parameters<typeof deliverToListener>[5]) => deliverToListener(ASKPASS, "100", d, "4711", "hunter2", checks);
+
+  it.skipIf(process.platform === "win32")("hands the nonce and password to the verified listener once it acknowledges", async () => {
+    const l = await listener(() => "ok\n");
+    expect(await deliver(delivery, { ...passing, connect: l.connect })).toEqual({ delivered: true });
+    expect(l.received).toEqual([`${delivery.nonce}\nhunter2\n`]);
+  });
+
+  it.skipIf(process.platform === "win32")("sends nothing when the asker or its listener changed after the phone approved", async () => {
+    for (const changed of [{ start: async () => "101" }, { start: async () => undefined }, { inode: async () => "4712" }, { inode: async () => undefined },
+      { holders: async () => "other" as const }, { holders: async () => "unknown" as const }]) {
+      const l = await listener(() => "ok\n");
+      expect(await deliver(delivery, { ...passing, ...changed, connect: l.connect })).toEqual({ status: 410, error: "askpass went away." });
+      expect(l.received).toEqual([]);
+      server!.close(); server = undefined;
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("reports askpass gone when its listener is missing or never acknowledges", async () => {
+    expect(await deliver(delivery, { ...passing, connect: () => createConnection({ path: path.join(dir, "missing.sock") }) }))
+      .toEqual({ status: 410, error: "askpass went away." });
+    const l = await listener(() => undefined);
+    expect(await deliver(delivery, { ...passing, connect: l.connect })).toEqual({ status: 410, error: "askpass went away." });
+  });
+
+  it("passes the request's delivery socket to the chain check", async () => {
+    const seen: unknown[] = [];
+    const value = new SudoBroker({ computer: () => "Mini", holdMs: 60_000, verify: async (pid, _fd, d) => { seen.push(d); return { refused: "no" }; } });
+    await value.ask({ pid: ASKPASS, delivery }, () => {});
+    await value.ask({ pid: ASKPASS, delivery: { socket: "x", nonce: "y" } }, () => {});
+    expect(seen).toEqual([delivery, undefined]);
   });
 });
 

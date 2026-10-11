@@ -49,6 +49,12 @@ export interface ProjectConfig {
   sourcePath?: string;
   /** Per-machine source folders, keyed by `getMachineName()`. Wins over `sourcePath`. */
   sourcePaths?: Record<string, string>;
+  /**
+   * The repository's clone URL on any host (`https://…`, `ssh://…`,
+   * `git@host:owner/repo.git`). Lets a Git server such as gitboy match one of
+   * its repositories to this project. Optional; never used to fetch.
+   */
+  remote?: string;
   skills?: boolean;
   hooks?: {
     enabled?: boolean;
@@ -191,6 +197,26 @@ export function getProjectSourcePath(
     : undefined;
   const raw = typeof perMachine === "string" && perMachine.trim() ? perMachine : resolved.sourcePath;
   return typeof raw === "string" && raw.trim() ? path.resolve(raw) : undefined;
+}
+
+/**
+ * The project's `remote:` clone URL, safe to hand to another program: a
+ * string of a known clone form, with any password (and, for http(s), the user
+ * name) removed. Anything else, including local paths, reads as null.
+ */
+export function getProjectRemote(phrenPath: string, project: string, config?: ProjectConfig): string | null {
+  const raw = (config ?? readProjectConfig(phrenPath, project)).remote;
+  if (typeof raw !== "string") return null;
+  const value = raw.trim();
+  if (!value || value.length > 2048 || /[\s\x00-\x1f\x7f]/.test(value)) return null;
+  // scp form: [user@]host:path, where host is not a single drive letter.
+  if (!/^file:/i.test(value) && /^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9.-]{2,}:(?!\/\/)[^:]+$/.test(value)) return value;
+  let url: URL;
+  try { url = new URL(value); } catch { return null; }
+  if (!["https:", "http:", "ssh:", "git:"].includes(url.protocol) || !url.hostname || url.search || url.hash) return null;
+  url.password = "";
+  if (url.protocol === "https:" || url.protocol === "http:") url.username = "";
+  return url.toString();
 }
 
 /**

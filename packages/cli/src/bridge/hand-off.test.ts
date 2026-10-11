@@ -62,7 +62,7 @@ it.skipIf(process.platform === "win32")("lists local sessions and says why enrol
   vi.stubEnv("PHREN_BRIDGE_HOME", root);
   try {
     await writeFile(path.join(root, "hooks.yaml"), "version: 2\ncomputers: []\n", { mode: 0o600 });
-    vi.mocked(hookRequest).mockResolvedValueOnce({ computer: { name: "Desk" } }).mockResolvedValueOnce({ groups: [] });
+    vi.mocked(hookRequest).mockResolvedValueOnce({ computer: { name: "Desk" } }).mockResolvedValueOnce({ groups: [] }).mockRejectedValueOnce(new Error("No usage."));
     const live = await listLiveSessions({ store: null });
     expect(live).toMatchObject({ sessions: [], unreachable: [], notLinked: [], enrolled: 0 });
     expect(live.peerError).toMatch(/^hooks\.yaml is invalid at version: /);
@@ -80,9 +80,18 @@ it("lists registered computers that are not linked and how long each session has
     const target = { server: "default", workspace: "w1", tab: "t1", pane: "p1", source: "claude", session: "aaaaaaaa-1111-4111-8111-111111111111" };
     vi.mocked(hookRequest).mockResolvedValueOnce({ computer: { name: "Desk" } }).mockResolvedValueOnce({ groups: [{ label: "phren",
       children: [{ agent: "claude", agentStatus: "idle", cwd: "/home/sam/phren", target, lastChangedAt: "2026-09-22T11:55:00.000Z" },
-        { agent: "claude", agentStatus: "working", backgroundTasks: 5, cwd: "/home/sam/phren", target }] }] });
+        { agent: "claude", agentStatus: "working", backgroundTasks: 5, cwd: "/home/sam/phren", target, account: { id: "work" } }] }] })
+      .mockResolvedValueOnce({ accounts: [
+        { source: "claude", account: { id: "default", label: "Personal", key: "claude:a" }, windows: [{ id: "five_hour", name: "5-hour", usedPercent: 100, resetsAt: "2026-09-22T14:00:00.000Z" }] },
+        { source: "claude", account: { id: "work", label: "Work", key: "claude:b" }, windows: [{ id: "five_hour", name: "5-hour", usedPercent: 30, resetsAt: "2026-09-22T13:30:00.000Z" },
+          { id: "seven_day", name: "7-day", usedPercent: 60, resetsAt: "2026-09-25T12:00:00.000Z" }] }] });
     const live = await listLiveSessions({ store });
     expect(live.sessions).toMatchObject([{ computer: "Desk", project: "phren", status: "idle", idleFor: 300 }, { status: "working", backgroundTasks: 5 }]);
+    // Each Claude session shows its own account's room; every account on the computer is listed too.
+    expect(live.sessions.map(session => session.quota)).toEqual([
+      { fiveHour: { leftPercent: 0, resetsAt: "2026-09-22T14:00:00.000Z", resetsIn: "2h 0m" } },
+      { fiveHour: { leftPercent: 70, resetsAt: "2026-09-22T13:30:00.000Z", resetsIn: "1h 30m" }, week: { leftPercent: 40, resetsAt: "2026-09-25T12:00:00.000Z", resetsIn: "3d 0h" } }]);
+    expect(live.claudeAccounts?.map(row => [row.computer, row.account, row.label])).toEqual([["Desk", "default", "Personal"], ["Desk", "work", "Work"]]);
     expect(live.sessions[0]).not.toHaveProperty("backgroundTasks");
     expect(live.notLinked).toEqual([{ name: "Devbox" }]);
     expect(live.enrolled).toBe(0);
@@ -96,7 +105,7 @@ it("names workers in the conductor's workspace by their own tab, never as the co
     const tab = (id: string, extra: Record<string, unknown>) => ({ id, agent: "claude", cwd: "/home/sam/Projects", ...extra });
     vi.mocked(hookRequest).mockResolvedValueOnce({ computer: { name: "Desk" } }).mockResolvedValueOnce({ groups: [{ label: "Conductor", children: [
       tab("w2:t1", { label: "1", role: "conductor" }), tab("w2:t2", { label: "phone-fixes" }), tab("w2:t3", { label: "3" }),
-    ] }, { label: "Workers", children: [tab("w3:t1", { label: "1" })] }] });
+    ] }, { label: "Workers", children: [tab("w3:t1", { label: "1" })] }]  }).mockResolvedValueOnce({ accounts: [] });
     const live = await listLiveSessions({ store: null });
     expect(live.sessions.map(session => [session.label, session.role])).toEqual([
       ["Conductor", "conductor"], ["phone-fixes", undefined], [undefined, undefined], ["Workers", undefined],

@@ -8,6 +8,7 @@ import { findPhrenPath } from "../phren-paths.js";
 import { computerLabel } from "./hand-off.js";
 import { localNames } from "./computer-names.js";
 import { acceptComputer, computerName, enrollComputer, publicComputerKey } from "./computers.js";
+import { hostKeyLine, hostKeyScript, localHostKeyLine, noHostKey } from "./host-key.js";
 import { addHookPeer, optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { BridgeError, bridgeRoot, object } from "./protocol.js";
 
@@ -18,8 +19,8 @@ import { BridgeError, bridgeRoot, object } from "./protocol.js";
  */
 
 const exec = promisify(execFile);
-// A non-login ssh shell often lacks Homebrew's node (macOS) or ~/.local/bin.
-const REMOTE_PATH = 'PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"';
+// A non-login ssh shell often lacks Homebrew's node (macOS), Entware's /opt/bin (NAS) or ~/.local/bin.
+const REMOTE_PATH = 'PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/opt/bin:$PATH"';
 const GIT_HOSTS = /(^|\.)(github\.com|gitlab\.com|bitbucket\.org)$/i;
 
 /** Concrete Host aliases from an ssh config: no patterns, no Git hosting services. */
@@ -113,8 +114,12 @@ export async function linkComputer(host: string, options: { name?: string; as?: 
   // The address the Hook dials skips ~/.ssh/config, so resolve the alias the way ssh does.
   const resolved = Object.fromEntries((await exec("ssh", ["-G", "--", host], { timeout: 5_000 })).stdout.split("\n")
     .map(line => line.split(" ")).filter(parts => parts.length >= 2).map(([key, ...rest]) => [key, rest.join(" ")]));
-  const remoteHostKey = publicComputerKey((await ssh(host, "cat /etc/ssh/ssh_host_ed25519_key.pub")).trim().split(/\s+/).slice(0, 2).join(" "));
-  const localHostKey = publicComputerKey((await readFile("/etc/ssh/ssh_host_ed25519_key.pub", "utf8")).trim().split(/\s+/).slice(0, 2).join(" "));
+  const remoteKeyLine = hostKeyLine(await ssh(host, hostKeyScript()));
+  if (!remoteKeyLine) throw noHostKey(host);
+  const localLine = await localHostKeyLine();
+  if (!localLine) throw noHostKey("This computer");
+  const remoteHostKey = publicComputerKey(remoteKeyLine.split(/\s+/).slice(0, 2).join(" "));
+  const localHostKey = publicComputerKey(localLine.split(/\s+/).slice(0, 2).join(" "));
 
   const remoteLine = (await ssh(host, `${REMOTE_PATH} phren bridge enroll-computer ${name}`)).trim();
   await ssh(host, `f=$(mktemp) && cat > "$f" && ${REMOTE_PATH} phren bridge enroll-computer ${as} --accept "$f"; s=$?; rm -f "$f"; exit $s`, await enrollComputer(as));

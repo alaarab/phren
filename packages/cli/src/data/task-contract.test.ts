@@ -46,7 +46,7 @@ describe("task responsibility and prerequisites (RC source, unrun)", () => {
     const ref = { storeId: "11111111", project: "core", stableId: a.stableId! };
     expect(getTaskRoute(base, url).metadataWritable).toBe(false);
     expect((await getTaskDirectoryRoute(base)).stores[0].metadataWritable).toBe(false);
-    expect(() => updateTaskRoute(base, { ...ref, updates: { responsibility: "human" } })).toThrow(/not enabled/);
+    expect(() => updateTaskRoute(base, { ...ref, updates: { responsibility: "human" } })).toThrow(/Task metadata is off/);
     expect(updateTask(base, "core", a.stableId!, { responsibility: "human" }).ok).toBe(false);
     expect(fs.readFileSync(file, "utf8")).toBe(before);
     expect(() => enableTaskFormat(base, false)).toThrow();

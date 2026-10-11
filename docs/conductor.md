@@ -684,7 +684,9 @@ Before ending its turn, a worker calls `dispatch_report(prs)` or
 `phren dispatch report --prs '<JSON array>'`. Each entry has `url` (HTTPS),
 `repo` (`owner/name`), `branch`, `tests` (summary) and optional `notes`.
 At most 16 PRs and 24000 UTF-8 bytes are accepted. The report belongs to that
-submitted turn and terminal. It is evidence supplied by the worker, not a
+submitted turn and terminal. If the Hook lost the turn record (a nested
+`claude -p` run in the worker's pane replaces it), a worker whose brief arrived
+in that pane still reports, and the report belongs to its current turn. It is evidence supplied by the worker, not a
 verification by the Hook.
 
 Configure the default integrator on the dispatching Hook with
@@ -714,10 +716,17 @@ phren owner-inbox list --all
 phren owner-inbox resolve <id> --computer <name> --resolution "Restarted"
 ```
 
-Reading dispatch returns does not resolve inbox items. Sources that disappear
-remain open with `live:false` until resolved. Resolving does not approve or
-answer an agent, and the same source stays resolved on later polls; a new
-question creates a new item. The phone UI is a follow-up using the contract in
+Reading dispatch returns does not resolve inbox items. Automatic items resolve
+when their pane or session disappears or stops waiting, or their question is
+answered, checked on inbox reads and the Hook’s five-second tick. Manual items
+remain until the owner resolves them. Repeated observations update one item per
+pane, session and question. `live:true` requires a current source; unverified
+remote items are hidden during outages, without being resolved. Resolving does
+not approve or answer an agent; a dismissed wait stays dismissed until it ends.
+The first read after upgrade retires legacy stale automatic items with
+`stale: source gone` and collapses duplicates. History remains available with
+`--all`. Inbox writes use a file lock and atomic rename across processes.
+The phone UI uses the contract in
 [Phren Hook](phren-hook.md#owner-inbox-phone-contract).
 
 ## Owner command approval rules (stricter-only slice)

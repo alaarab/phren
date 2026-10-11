@@ -7,6 +7,9 @@ import { hookRequest } from "./client.js";
 import { projectName } from "./dispatch.js";
 import { paneProject } from "./approval-summary.js";
 import { isAccountSlug } from "./claude-accounts.js";
+import { accountWindows, type WindowRoom } from "./account-choice.js";
+import { resetsIn } from "../computers/read.js";
+import type { AccountUsage } from "./usage.js";
 import { grantLabel, findGrant } from "./grants.js";
 import { hookPeers, optionalHookPeers, peerRequest, type HookPeer } from "./peers.js";
 import { BridgeError, errorCode, object, objects, sessionId, targetSchema, type Json, type Target } from "./protocol.js";
@@ -128,6 +131,32 @@ export interface LiveSession {
   /** Set when the main turn ended and this many background tasks keep the session `working`. */
   backgroundTasks?: number;
   stalled?: boolean; stallFor?: number; stalledSince?: string;
+  /** A Claude session's account room: its 5-hour and weekly windows. */
+  quota?: ClaudeQuota;
+}
+
+/** One window's room as live_sessions shows it. */
+export type QuotaWindow = WindowRoom & { resetsIn?: string };
+export interface ClaudeQuota { fiveHour?: QuotaWindow; week?: QuotaWindow }
+/** One signed-in Claude account on one computer, with its room. */
+export interface ClaudeAccountRoom extends ClaudeQuota { computer: string; account: string; label?: string; email?: string }
+
+const CLAUDE_USAGE_ROUTE = "/v1/usage?sources=claude&accounts=all";
+
+/** Each Claude account's room in one computer's usage answer. */
+export function claudeAccountRooms(answer: Json, computer: string, now = Date.now()): ClaudeAccountRoom[] {
+  const window = (room: WindowRoom | undefined): QuotaWindow | undefined => {
+    if (!room) return undefined;
+    const until = room.resetsAt ? resetsIn(room.resetsAt, now) : undefined;
+    return { ...room, ...(until ? { resetsIn: until } : {}) };
+  };
+  return objects(answer.accounts).filter(row => row.source === "claude" && Array.isArray(row.windows)).map(row => {
+    const usage = row as unknown as AccountUsage;
+    const { fiveHour, week } = accountWindows(usage, now);
+    const five = window(fiveHour), seven = window(week);
+    return { computer, account: usage.account?.id ?? "default", ...(usage.account?.label ? { label: usage.account.label } : {}),
+      ...(usage.account?.email ? { email: usage.account.email } : {}), ...(five ? { fiveHour: five } : {}), ...(seven ? { week: seven } : {}) };
+  });
 }
 
 function sessionsFrom(overview: Json, computer: string, local: boolean, now = Date.now()): LiveSession[] {
@@ -181,6 +210,8 @@ export interface LiveSessions {
   /** Registered in the store but not linked in hooks.yaml: unknown, not idle. */
   notLinked: NotLinkedComputer[];
   enrolled: number;
+  /** Every signed-in Claude account on each computer that answered, with its 5-hour and weekly room. */
+  claudeAccounts?: ClaudeAccountRoom[];
   peerError?: string;
 }
 
@@ -190,7 +221,9 @@ export interface LiveSessions {
 export async function listLiveSessions(options: { store?: string | null } = {}): Promise<LiveSessions> {
   const health = await hookRequest("/v1/health");
   const here = typeof object(health.computer).name === "string" ? String(object(health.computer).name) : "this computer";
-  const sessions = sessionsFrom(await hookRequest("/v1/workspaces"), here, true);
+  const [overview, localUsage] = await Promise.all([hookRequest("/v1/workspaces"), hookRequest(CLAUDE_USAGE_ROUTE, undefined, undefined, 10_000).catch(() => undefined)]);
+  const sessions = sessionsFrom(overview, here, true);
+  const claudeAccounts: ClaudeAccountRoom[] = localUsage ? claudeAccountRooms(localUsage, here) : [];
   const { peers, peerError } = await optionalHookPeers();
   const unreachable: LiveSessions["unreachable"] = [];
   // Names each peer answers to (its hostname, Bonjour name), so a computer
@@ -199,8 +232,10 @@ export async function listLiveSessions(options: { store?: string | null } = {}):
   await Promise.all(peers.map(async peer => {
     try {
       const route = peer.server && peer.server !== "default" ? `/v1/workspaces?server=${encodeURIComponent(peer.server)}` : "/v1/workspaces";
-      const [overview, health] = await Promise.all([peerRequest(peer, route), peerRequest(peer, "/v1/health").catch(() => ({}))]);
+      const [overview, health, usage] = await Promise.all([peerRequest(peer, route), peerRequest(peer, "/v1/health").catch(() => ({})),
+        peerRequest(peer, CLAUDE_USAGE_ROUTE, undefined, 10_000).catch(() => undefined)]);
       sessions.push(...sessionsFrom(overview, peer.name, false));
+      if (usage) claudeAccounts.push(...claudeAccountRooms(usage, peer.name));
       const computer = object(object(health).computer);
       peerNames.set(peer.name, [computer.name, ...(Array.isArray(computer.aliases) ? computer.aliases : [])].filter((name): name is string => typeof name === "string"));
     } catch (error) {
@@ -210,5 +245,12 @@ export async function listLiveSessions(options: { store?: string | null } = {}):
   }));
   const store = options.store !== undefined ? options.store : findPhrenPath();
   const notLinked = notLinkedFrom(store, here, peers.map(peer => ({ name: peer.name, address: peer.address, names: peerNames.get(peer.name) })));
-  return { sessions, unreachable, notLinked, enrolled: peers.length, ...(peerError ? { peerError } : {}) };
+  // Each Claude session carries its account's room, so the conductor and phone see how long it can keep working.
+  for (const session of sessions) {
+    if (session.agent !== "claude") continue;
+    const room = claudeAccounts.find(item => item.computer === session.computer && item.account === (session.account ?? "default"));
+    if (room?.fiveHour || room?.week) session.quota = { ...(room.fiveHour ? { fiveHour: room.fiveHour } : {}), ...(room.week ? { week: room.week } : {}) };
+  }
+  claudeAccounts.sort((a, b) => a.computer.localeCompare(b.computer) || a.account.localeCompare(b.account));
+  return { sessions, unreachable, notLinked, enrolled: peers.length, ...(claudeAccounts.length ? { claudeAccounts } : {}), ...(peerError ? { peerError } : {}) };
 }
