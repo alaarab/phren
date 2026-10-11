@@ -9,13 +9,53 @@ It is a client of each computer's Phren Hook, like the phone. Nothing new
 listens on the other computers: the desktop reaches them over SSH with its own
 key.
 
-Status: owner-only and unreleased (branch `feat/desktop-spike`). Several
-features need Hook changes that ship with the next CLI release; see
+Status: owner-only. Installers are on GitHub releases. Several features need
+Hook changes that ship with the next CLI release; see
 [What needs the next CLI release](#what-needs-the-next-cli-release).
 
-## Run it
+## Install
 
-From this checkout:
+Download the newest build from the
+[latest release](https://github.com/alaarab/phren/releases/latest):
+
+- macOS, Apple Silicon:
+  [Phren-mac-arm64.dmg](https://github.com/alaarab/phren/releases/latest/download/Phren-mac-arm64.dmg).
+  Open it and drag Phren to Applications.
+- Linux, x86-64:
+  [Phren-linux-x86_64.AppImage](https://github.com/alaarab/phren/releases/latest/download/Phren-linux-x86_64.AppImage).
+  `chmod +x` it and run it. AppImages need FUSE 2 (`fuse2` on Arch).
+
+The app brings its own Node. It needs this computer's Hook (the `phren` CLI
+with its Hook running), plus `ssh` for other computers and Herdr or tmux for
+consoles.
+
+The macOS build is not signed with a Developer ID yet, so macOS blocks the
+first open. Open it once, then choose **Open Anyway** in System Settings ›
+Privacy & Security (on macOS 14 and earlier, Control-click the app and choose
+Open). Or clear the quarantine flag:
+`xattr -dr com.apple.quarantine /Applications/Phren.app`.
+
+Updates: the AppImage downloads a new release in the background and installs
+it when you restart. The macOS app checks every six hours and offers the
+download; it will update itself once the builds are signed.
+`PHREN_DESKTOP_UPDATES=off` turns the check off.
+
+### Release it
+
+Bump `version` in `packages/desktop/package.json`, then push a
+`desktop-v<version>` tag or run the **Release desktop app** workflow with that
+version. It builds both installers and publishes them, with the
+`latest-mac.yml` / `latest-linux.yml` files the updater reads, as the
+repository's latest release. To build locally after building the packages
+below: `node packages/desktop/scripts/package.mjs --mac` (or `--linux`); the
+files land in `packages/desktop/release/`.
+
+macOS signing and notarization turn on when the repository has these secrets:
+`MAC_CSC_LINK` (a base64 `.p12` of a Developer ID Application certificate),
+`MAC_CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and
+`APPLE_TEAM_ID`. Without them the app is signed ad hoc.
+
+## Run it from a checkout
 
 ```bash
 pnpm install

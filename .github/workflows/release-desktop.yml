@@ -1,0 +1,126 @@
+name: Release desktop app
+
+# Phren desktop versions on its own, from packages/desktop/package.json. Push a
+# desktop-v<version> tag, or dispatch with the version you expect. Builds the
+# macOS (Apple Silicon) .dmg and the Linux AppImage and publishes them, with the
+# latest-*.yml files the app's updater reads, as the repository's latest
+# release, so releases/latest/download/<file> always serves the newest build.
+# A pull request that touches the packaging builds both installers without
+# publishing them.
+on:
+  push:
+    tags:
+      - "desktop-v*"
+  pull_request:
+    paths:
+      - .github/workflows/release-desktop.yml
+      - packages/desktop/electron/**
+      - packages/desktop/electron-builder.yml
+      - packages/desktop/scripts/package.mjs
+      - packages/desktop/build/**
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release (must match packages/desktop/package.json)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: --mac
+          - os: ubuntu-latest
+            target: --linux
+    runs-on: ${{ matrix.os }}
+    env:
+      # The dispatch input and the tag reach bash as data, never spliced into the script.
+      INPUT_VERSION: ${{ github.event.inputs.version }}
+      REF_NAME: ${{ github.ref_name }}
+      EVENT_NAME: ${{ github.event_name }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6.1.0
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 26
+
+      - name: Ensure the version matches packages/desktop/package.json
+        if: github.event_name != 'pull_request'
+        run: |
+          PKG_VERSION=$(node -p "require('./packages/desktop/package.json').version")
+          if [ "$EVENT_NAME" = "push" ]; then WANT="${REF_NAME#desktop-v}"; else WANT="$INPUT_VERSION"; fi
+          if [ "$PKG_VERSION" != "$WANT" ]; then
+            echo "Version mismatch: packages/desktop/package.json=$PKG_VERSION, requested=$WANT"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm exec turbo run build --filter=@phren/desktop... --filter=@phren/desktop-editor
+
+      # Signing and notarization turn on when these secrets exist; without
+      # them the app is signed ad hoc and macOS asks to confirm the first open.
+      - name: Package
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: node packages/desktop/scripts/package.mjs ${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-${{ runner.os }}
+          path: |
+            packages/desktop/release/*.dmg
+            packages/desktop/release/*.zip
+            packages/desktop/release/*.AppImage
+            packages/desktop/release/*.blockmap
+            packages/desktop/release/latest*.yml
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      INPUT_VERSION: ${{ github.event.inputs.version }}
+      REF_NAME: ${{ github.ref_name }}
+      EVENT_NAME: ${{ github.event_name }}
+    steps:
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: desktop-*
+          path: release
+          merge-multiple: true
+
+      - name: Publish the GitHub release
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then VERSION="${REF_NAME#desktop-v}"; else VERSION="$INPUT_VERSION"; fi
+          TAG="desktop-v$VERSION"
+          ls -la release
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+          else
+            gh release create "$TAG" release/* --target "$GITHUB_SHA" --latest \
+              --title "Phren desktop $VERSION" \
+              --notes "Phren desktop $VERSION. Install: https://github.com/$GH_REPO/blob/main/docs/desktop.md#install"
+          fi
