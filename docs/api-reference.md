@@ -1580,6 +1580,50 @@ stderr interleaved, at most 64 KiB). Input errors are ordinary 400/409 errors.
 | `POST /v1/git/push` | `confirmDefault?: true` | `{ok, branch, remote, upstream, setUpstream, output}`. Pushes the current branch to its upstream, or to `origin` with the upstream set. Never forced. The default branch (the remote's `HEAD`, else `main`/`master`) is 409 without `confirmDefault`; a detached HEAD or missing remote is 409. |
 | `POST /v1/git/pr` | `draft?: true` | `{ok, url, branch, draft?, existing?}` through `gh pr create --fill`. `{ok: false, reason: "missing" \| "auth", message}` when gh is not installed or not signed in; `reason: "failed"` with gh's `output` otherwise. |
 
+### Commit detail, branches and sync
+
+`POST /v1/git/show` reads, so it takes no `expectedRepository`; the other three
+are writes and accept it. All four take `child` or `worktree` like the routes above.
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `POST /v1/git/show` | `sha` (4 to 64 hex characters) | `{sha, short, subject, body, author, authorEmail, date, committer, committed, parents, refs, files, totalFiles, additions, deletions, truncated}`. Each file is `{path, oldPath?, status, additions, deletions, binary, countsComplete, sections: [{id, kind: "commit", binary, loadState, patch, truncated}]}`, compared with the first parent (the empty tree for a root commit), renames detected. At most 300 files carry a patch, 200 KB per file and 1 MB in all; past that `truncated` is true. An unknown commit is 404. |
+| `POST /v1/git/checkout` | `branch`, `create?: true`, `startPoint?`, `carryChanges?: true` | `{ok, branch, previous, changed, created?, upstream?, carried?}` through `git switch --no-guess`. With `create`, a new branch from `startPoint` (a local or remote-tracking branch; a remote one becomes its upstream) or HEAD; 409 `git-branch-exists` when it exists. Without it, an existing local branch; 404 otherwise. Uncommitted tracked edits are 409 `git-dirty` (with `changes`) unless `carryChanges` is true, and Git still refuses anything it would overwrite (`{ok: false, output}`). |
+| `POST /v1/git/fetch` | none | `{ok, remote, output?}`. `git fetch --prune --no-tags` of the current branch's upstream remote, else `origin`; 409 `git-no-remote` without one. |
+| `POST /v1/git/pull` | none | `{ok, branch, upstream, commits, output?}`. `git pull --ff-only --no-rebase` from the upstream; `commits` is how many arrived. A branch without an upstream or a detached HEAD is 409; a diverged branch is Git's refusal as `{ok: false, output}`. Never a merge commit or a rebase. |
+
+| `POST /v1/git/file` | `ref` (`HEAD`, `INDEX` or a commit hash), `path` | `{path, ref, size, text}`; `missing: true` when that side has no such file, `binary: true` for bytes with a NUL, `tooLarge: true` past 2 MB, each with empty `text`. A diff editor compares whole files with it. |
+| `POST /v1/git/apply` | `patch` (one file's text hunks), `reverse?: true`, `expectedRepository?` | `{ok, path, staged}`. `git apply --cached` (with `reverse`, `-R`): stages or unstages those hunks in the index only, never the working tree. Rename, mode and binary patches and patches spanning files are 400; a hunk that no longer applies is `{ok: false, output}`. |
+| `POST /v1/git/session-changes` | none | `{root, calls, files, totalFiles, others, additions, deletions}`: this conversation's recorded edits in its repository, newest file first, each `{path, status, added, removed, redacted, binary, edits: [{toolUseId, status, added, removed, patch, truncated?}]}` (50 edits and 200 KB per patch at most). `others` counts edits in other repositories. |
+
+#### Git hosts
+
+`/v1/git/pulls` and `/v1/git/pr` go through one provider per git host: **GitHub**,
+**GitLab** and **gitboy**. The Hook picks the provider from the URL of the
+branch's upstream remote, falling back to `origin`.
+
+- `github.com`, `*.ghe.com` and a domain whose first label is `github` mean GitHub.
+- `gitlab.com` and `gitlab.*` mean GitLab.
+- `gitboy.*` means gitboy.
+
+Any other domain needs an override in git config:
+
+```sh
+git config remote.origin.phrenHost gitlab               # one remote
+git config --global phren.git.example.com.host gitboy   # every repository on a domain
+```
+
+Both answers carry `host: {kind, name, domain, webUrl, remote, source, terms: {short, long, ref}, supported}`.
+`source` is `url`, `remote-override`, `domain-override` or `none`. `terms` is `PR`/`pull request`/`#`,
+or `MR`/`merge request`/`!` on GitLab. GitHub is fully supported through `gh`, with `GH_HOST` set
+to the remote's domain, so GitHub Enterprise works. GitLab and gitboy are stubs for now. They answer
+`{available: false, reason: "unsupported", message}`, and `/v1/git/pr` answers `{ok: false, reason: "unsupported"}`.
+A domain the Hook cannot place answers `reason: "unknown-host"`, with the override command in `message`.
+
+`/v1/git/pulls` `current` also carries `checkRuns: [{name, state, workflow?, url?}]`
+(state `failing`, `pending`, `passing`, `skipped` or `neutral`; failing first, at
+most 100) and, when GitHub reports them, `reviewDecision` and `mergeState`.
+
 `POST /v1/git/pulls` also returns `branch` and `current`: the checked-out
 branch's pull request in any state, `{number, title, url, head, base, draft,
 state, checks}`, where `checks` is `passing`, `failing`, `pending` or null.

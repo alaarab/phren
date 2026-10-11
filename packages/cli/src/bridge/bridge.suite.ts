@@ -3296,6 +3296,34 @@ schedules:
       expect((await api("/v1/git/stage", { target, paths: ["/etc/passwd"] })).status).toBe(400);
     });
 
+    it("opens a commit, switches branches and checks the repository precondition through the routes", async () => {
+      const git = (...args: string[]) => execFileAsync("git", ["-c", "user.name=t", "-c", "user.email=t@x", "-C", root, ...args]);
+      await git("init", "-q", "-b", "main"); await writeFile(path.join(root, "base.txt"), "one\n");
+      await git("add", "base.txt"); await git("commit", "-qm", "start");
+      const sha = (await git("rev-parse", "HEAD")).stdout.trim();
+      const show = await api("/v1/git/show", { target, sha });
+      expect(show.status, JSON.stringify(show.data)).toBe(200);
+      expect(show.data).toMatchObject({ sha, subject: "start", files: [expect.objectContaining({ path: "base.txt", status: "A" })] });
+      expect((await api("/v1/git/show", { target, sha: "HEAD" })).status).toBe(400);
+      const repository = (await api("/v1/git/status", { target })).data.repository;
+      expect((await api("/v1/git/checkout", { target, branch: "next", create: true, expectedRepository: "/elsewhere" })).status).toBe(409);
+      const created = await api("/v1/git/checkout", { target, branch: "next", create: true, expectedRepository: repository });
+      expect(created.status, JSON.stringify(created.data)).toBe(200);
+      expect(created.data).toMatchObject({ ok: true, branch: "next", previous: "main" });
+      expect((await api("/v1/git/fetch", { target })).status).toBe(409);
+      expect((await api("/v1/git/pull", { target })).status).toBe(409);
+      const head = await api("/v1/git/file", { target, ref: "HEAD", path: "base.txt" });
+      expect(head.status, JSON.stringify(head.data)).toBe(200);
+      expect(head.data).toMatchObject({ text: "one\n" });
+      await writeFile(path.join(root, "base.txt"), "one\ntwo\n");
+      const patch = (await git("diff", "base.txt")).stdout;
+      expect((await api("/v1/git/apply", { target, patch, expectedRepository: repository })).data).toMatchObject({ ok: true, staged: true });
+      expect((await api("/v1/git/file", { target, ref: "INDEX", path: "base.txt" })).data.text).toBe("one\ntwo\n");
+      const session = await api("/v1/git/session-changes", { target });
+      expect(session.status, JSON.stringify(session.data)).toBe(200);
+      expect(session.data).toMatchObject({ files: [], calls: 0 });
+    });
+
     it("lists the repository's other worktrees and scopes git routes, the diff and files to a listed one", async () => {
       const git = (...args: string[]) => execFileAsync("git", ["-c", "user.name=t", "-c", "user.email=t@x", "-C", root, ...args]);
       await git("init", "-q"); await writeFile(path.join(root, "base.txt"), "one\n");
