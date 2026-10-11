@@ -20,6 +20,10 @@ import { attachShell, attachTerminal } from "./pty-bridge.js";
 import { startServer } from "./server.js";
 import { startFakeHook } from "./testing/fake-hook.js";
 
+// The installed app runs this daemon on Electron's Node; the shells and agents
+// it starts must not inherit that switch.
+delete process.env.ELECTRON_RUN_AS_NODE;
+
 const [command = "serve", ...rest] = process.argv.slice(2);
 
 function flag(name: string): string | undefined {

@@ -1,17 +1,25 @@
 {
   "name": "@phren/desktop",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
-  "description": "Phren desktop: a client of every computer's Phren Hook (phase 0 spike)",
+  "description": "Phren desktop: a client of every computer's Phren Hook",
   "type": "module",
   "bin": {
     "phren-desktop": "./dist/src/main.js"
   },
+  "files": [
+    "dist/src",
+    "electron",
+    "ui",
+    "build",
+    "electron-builder.yml"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/main.js",
     "lint": "biome lint --config-path ../../biome.json src/",
-    "app": "electron electron/main.js"
+    "app": "electron electron/main.js",
+    "package": "node scripts/package.mjs"
   },
   "dependencies": {
     "@phren/cli": "workspace:*",
@@ -19,6 +27,7 @@
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-webgl": "^0.19.0",
     "@xterm/xterm": "^6.0.0",
+    "electron-updater": "^6.8.9",
     "fflate": "^0.8.3",
     "js-yaml": "^5.4.2",
     "monaco-editor": "^0.57.0",
@@ -29,8 +38,11 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/ws": "^8.18.1",
-    "electron": "^44.7.0"
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3"
   },
   "license": "MIT",
-  "main": "electron/main.js"
+  "main": "electron/main.js",
+  "author": "Ala Arab",
+  "homepage": "https://github.com/alaarab/phren"
 }
