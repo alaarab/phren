@@ -5,6 +5,7 @@
 //   openChat(el, computerName, child, opts) -> { close(), focus(), insert(text) }
 //   opts: { onConsole?() }   // the session tile's switch to its console
 
+import { isShown, watchShown } from "./shown.js";
 import {
   readTranscriptFrame, AgentChatHistory, ChatTranscriptPreparation, chatActivityContext, chatPendingEcho, ElapsedTime,
 } from "/vendor/kit/index.js";
@@ -199,6 +200,8 @@ export function openChat(el, computerName, child, opts = {}) {
   let workMessagesLoad = null;
   let loadingOlder = false;
   let lastSubagentsAt = 0;
+  // A fetch skipped while the chat was off screen runs when it comes back.
+  let subagentsSkipped = false;
   let lastSudoAt = 0;
   let closed = false;
 
@@ -551,7 +554,7 @@ export function openChat(el, computerName, child, opts = {}) {
   }
 
   function startMessagesPoll(childId, list) {
-    const load = () => hookGet(computerName, "/v1/subagents/messages", { ...target, child: childId }).then((res) => {
+    const load = () => isShown(el) && hookGet(computerName, "/v1/subagents/messages", { ...target, child: childId }).then((res) => {
       renderMessages(list, Array.isArray(res && res.messages) ? res.messages : []);
     }).catch((err) => {
       if (err && err.status === 404) flagNewer();
@@ -578,6 +581,7 @@ export function openChat(el, computerName, child, opts = {}) {
   }
 
   function maybeFetchSubagents(force = false) {
+    if (!isShown(el)) { subagentsSkipped = true; return; }
     if (!force && Date.now() - lastSubagentsAt < 3000) return;
     lastSubagentsAt = Date.now();
     hookGet(computerName, "/v1/subagents", target).then((res) => {
@@ -844,12 +848,19 @@ export function openChat(el, computerName, child, opts = {}) {
   composer.setCounts({ agents: 0, workers: 0 });
   render();
 
+  const stopWatchingShown = watchShown(el, () => {
+    if (!subagentsSkipped) return;
+    subagentsSkipped = false;
+    maybeFetchSubagents(true);
+  });
+
   return {
     /** Append review text (a diff line, a selection) to the draft and focus it, without sending. */
     insert(text) { composer.insert(text); },
     focus() { composer.focus(); },
     close() {
       closed = true;
+      stopWatchingShown();
       dictation?.stop(); talk?.stop();
       transcriptSocket.close();
       statusSocket.close();
