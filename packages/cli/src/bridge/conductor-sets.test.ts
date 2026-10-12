@@ -9,8 +9,11 @@ import { BridgeError, type Json } from "./protocol.js";
 
 const mocks = vi.hoisted(() => ({ peers: [] as Json[], request: vi.fn() }));
 vi.mock("./herdr.js", async importOriginal => ({ ...await importOriginal<typeof import("./herdr.js")>(), servers: async () => [] }));
-vi.mock("./peers.js", async importOriginal => ({ ...await importOriginal<typeof import("./peers.js")>(),
-  hookPeers: async () => mocks.peers, optionalHookPeers: async () => ({ peers: mocks.peers }), peerRequest: mocks.request }));
+// No importOriginal: loading the real peers.js runs computers -> install ->
+// usage -> account-choice -> harnesses -> health -> peers, and health.ts
+// would then hold the unmocked hookPeers (listsCaller saw no peers).
+vi.mock("./peers.js", () => ({
+  hookPeers: async () => mocks.peers, optionalHookPeers: async () => ({ peers: mocks.peers }), peerRequest: mocks.request, addHookPeer: vi.fn() }));
 
 const hostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEp8VWGvSO7U7OMdQo3CQgkVv41Gw2cztUk5uiefMuhg";
 const peer = (name: string) => ({ name, address: `${name.toLowerCase()}.example`, username: "sam", port: 22, server: "default", hostKey });
