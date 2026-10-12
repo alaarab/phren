@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - `POST /v1/sets/link` (capability `setLink`): the phone links a computer its set lists as indirect or one-way with one tap. The Hook runs the owner's `phren bridge link <name>` over its own ssh login, one link at a time, and refuses calls from agents.
 
+### Fixed
+
+- `GET /v1/projects/repos` ran one `git rev-parse` per activity event, one after another, so a folder where git stalls (macOS can hold `~/Downloads` from a background process) cost its 5 s timeout every time it appeared. On one MacBook that was 81 s, past the desktop's 60 s Hook timeout, which left the file editor blank. Each folder is now looked up once, eight at a time: 5 s there.
+
 ## [0.3.39] - 2026-10-11
 
 The first published release since 0.3.37: it also ships everything under 0.3.38, which was never published to npm.
