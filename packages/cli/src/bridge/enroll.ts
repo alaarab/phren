@@ -90,10 +90,25 @@ export async function candidateRepos(activity: Json[], env: NodeJS.ProcessEnv = 
     }
     try { countGit("enroll"); return (await exec("git", ["-C", existing, "rev-parse", "--show-toplevel"], { env: nonInteractiveGitEnv(), timeout: 5_000 })).stdout.trim() || undefined; } catch { return undefined; }
   };
+  // The journal repeats a few folders hundreds of times: one git call each.
+  const roots = new Map<string, Promise<string | undefined>>();
+  const rootOf = (directory: string) => {
+    let root = roots.get(directory);
+    if (!root) { root = toplevel(directory); roots.set(directory, root); }
+    return root;
+  };
+  const activityDirectory = (event: Json) =>
+    typeof event.directory === "string" && path.isAbsolute(event.directory) ? event.directory : undefined;
+  // Look the folders up eight at a time: a folder where git stalls (macOS can
+  // hold ~/Downloads from a background process) costs its 5 s timeout once.
+  const pending = [...new Set(activity.map(activityDirectory).filter((d): d is string => !!d))];
+  await Promise.all(Array.from({ length: Math.min(8, pending.length) }, async () => {
+    for (let directory = pending.shift(); directory !== undefined; directory = pending.shift()) await rootOf(directory);
+  }));
   for (const event of [...activity].reverse()) {
-    const directory = typeof event.directory === "string" ? event.directory : undefined;
-    if (!directory || !path.isAbsolute(directory)) continue;
-    const root = await toplevel(directory);
+    const directory = activityDirectory(event);
+    if (!directory) continue;
+    const root = await rootOf(directory);
     if (root) await offer(root, "activity", typeof event.at === "string" ? event.at : undefined);
   }
   try {
@@ -101,7 +116,7 @@ export async function candidateRepos(activity: Json[], env: NodeJS.ProcessEnv = 
     for (const match of JSON.stringify(session).matchAll(/"cwd":\s*"((?:\\.|[^"\\])*)"/g)) {
       const directory = JSON.parse(`"${match[1]}"`) as string;
       if (!path.isAbsolute(directory)) continue;
-      const root = await toplevel(directory);
+      const root = await rootOf(directory);
       if (root) await offer(root, "herdr");
     }
   } catch { /* no saved session */ }
