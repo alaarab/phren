@@ -64,7 +64,7 @@ import { loadCodePackage, loadedFrom } from "../modules/code-package.js";
 import { gitRepository, paneRoute, uploadBody } from "./server-pane-routes.js";
 import { renameSession } from "./session-rename.js";
 import { launchSession, makeConductor, stopConductor, workspaceAction } from "./server-launch.js";
-import { conductorAnswer, nameSet, readSets } from "./conductor-sets.js";
+import { conductorAnswer, linkSetMember, nameSet, readSets } from "./conductor-sets.js";
 import { conductorPane } from "./conductor-role.js";
 import type { TranscriptStreams } from "./server-stream.js";
 import { hookMetrics } from "./metrics.js";
@@ -148,7 +148,7 @@ async function childActivity(source: Provider, session: string): Promise<ChildAc
 export const capabilities = { transcript: true, progress: true, images: true, prompt: true, stop: true,
   terminal: "ssh-pty", shell: "ssh-pty", paneTerminal: "ssh-pty", paneLayout: true, deskPresence: true, herdr: true, sessionRename: true, diff: true, webServers: true, webPreview: "ssh-exec", activity: true,
   approvals: true, questions: false, accountUsage: true, providers: ["codex", "claude", "copilot", "opencode"],
-  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true };
+  files: true, repositoryFiles: true, fileResolution: true, subagents: true, sideQuestions: true, dispatch: true, conductorSets: true, setLink: true, ownerInbox: true, workerReports: true, queuedHandOff: true, approvalPush: "direct-apns", simulators: process.platform === "darwin", code: true, codeFiles: true, overviewStream: true, speech: true, speechTimestamps: true, speechTimestampStream: true, speechLive: true, speechVoices: true, speechFormats: [...SPEECH_FORMATS], transcribe: true, memoryStore: true, promptOnce: true, promptStatus: true, deliveryFrames: true, paneDeliveries: true, resources: true, sudo: true, sudoOutcome: true, previewDeltas: true, quickChat: true, agentFolder: true, launchPermissionMode: true, sessionMove: true, projectMemory: true, fileWrite: true, fileSearch: true, gitReview: true, memoryStoreBatch: true, gitHosts: true };
 
 export function capabilitiesForModules(snapshot: ModuleSnapshot): Record<string, unknown> {
   const allowed = new Set(snapshot.modules.flatMap(module => module.capabilities));
@@ -714,6 +714,8 @@ export function createRouteHandler(ctx: RouteContext): (request: IncomingMessage
           result = await launches.run(async () => stopConductor(data));
         } else if (url.pathname === "/v1/sets/name") {
           result = await nameSet(data);
+        } else if (url.pathname === "/v1/sets/link") {
+          result = await linkSetMember(data) as unknown as Json;
         } else if (url.pathname === "/v1/push/register") {
           // Registration is kept for when a key is added; the reply says whether push works now.
           await agentHooks.push.register(data); result = { ok: true, configured: agentHooks.push.status.configured };

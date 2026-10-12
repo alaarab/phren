@@ -65,8 +65,9 @@ conductor, although the owner runs several separate groups of computers.
     name with a timestamp and sends it to each reachable member; a Hook keeps
     the newest name it has seen, and the view shows the newest among members.
     The set id is `set:` plus the smallest computer id among its members.
-11. **Linking stays with `phren bridge link`.** The set view points to it; it
-    does not link or unlink.
+11. **Linking runs `phren bridge link`.** The set view points to it, and the
+    phone can run it on the computer that lists a member as indirect or
+    one-way with `POST /v1/sets/link`. Nothing unlinks from the set view.
 
 ## Hook routes
 
@@ -79,6 +80,7 @@ All under the `conductor` module.
 | `POST /v1/conductor/make` | `{ workspaceId?, tabId?, paneId }` (and `?mux=`): make that live agent pane this computer's conductor. 409 with `computer` and `target` when the set already has one; making the current conductor again is a no-op. |
 | `POST /v1/conductor/stop` | Ends this computer's conductor role. Optional `{ paneId }` must match. Returns `{ ok, stopped }`. |
 | `POST /v1/sets/name` | `{ name }` (1 to 60 characters, or `null` to clear). Returns `{ ok, name, told, unreachable }`. |
+| `POST /v1/sets/link` | `{ name }`: the owner's `phren bridge link <name>` on this computer, over its own ssh login. Returns the link result (`name`, `as`, `local`, `remote`, `reachable`, `error`). 403 for an agent's call, 409 while another link runs, 409 or 503 with the reason when ssh or the other Hook refuses. |
 
 `GET /v1/sets`:
 
@@ -154,6 +156,10 @@ phren conductor sets name "Home"    # or --clear
   bounded by 8 seconds). Known names skip this round. A missing or offline
   identity directory retains the name-only view.
 - Rename set: `POST /v1/sets/name` on any reachable member of that set.
+- Link: for an `indirect` or `one-way` member, when that computer's Hook has
+  `capabilities.setLink`, offer Link and post `/v1/sets/link` with the
+  member's name as that Hook reported it, to the Hook that reported it. It can
+  take up to a minute; then reload `/v1/sets`.
 - Session menu: "Make conductor" posts `/v1/conductor/make` to the session's
   computer with its workspace, tab and pane ids; a 409 shows the message and
   offers to open the existing conductor from `target`. "Stop being conductor"
