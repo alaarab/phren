@@ -1,6 +1,7 @@
 // Changes workbench pane: working tree, history, branches, pull requests and
 // worktrees, each scoped to the session (or a worker's worktree). Owns its own
 // CSS (injected once) and re-renders fully from module state.
+import { isShown, watchShown } from "./shown.js";
 import { hookPost, readRepoFile } from "./api.js";
 import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
 import { branchProblem, capitalize, checksSummary, durationText, groupRuns, hostTerms, localForRemote, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, syncAction, tokenPage, trackingText } from "./git-review.js";
@@ -282,7 +283,7 @@ export function openChanges(el, ctx) {
   // textarea too, and is focused most of the time.
   const typing = () => { const a = document.activeElement; return !!a && (a.tagName === "TEXTAREA" || a.tagName === "INPUT" || a.tagName === "SELECT") && el.contains(a); };
   // A half-typed token or an open merge confirmation must survive the 10-second re-read.
-  const canPoll = () => visible && document.visibilityState === "visible" && !state.confirm && !state.sheet && !typing()
+  const canPoll = () => visible && document.visibilityState === "visible" && isShown(el) && !state.confirm && !state.sheet && !typing()
     && !(state.connect && state.connect.token) && !(state.merge && state.merge.confirm);
 
   function render() {
@@ -1491,8 +1492,11 @@ export function openChanges(el, ctx) {
   }
 
   // ---- lifecycle -----------------------------------------------------------
-  function startTimer() { timer = setInterval(() => { if (canPoll()) refresh(); }, 10000); }
+  // A re-read skipped while the pane was off screen runs when it comes back.
+  let skipped = false;
+  function startTimer() { timer = setInterval(() => { if (canPoll()) refresh(); else if (!isShown(el)) skipped = true; }, 10000); }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
+  const stopWatchingShown = watchShown(el, () => { if (skipped && canPoll()) { skipped = false; refresh(); } });
 
   // A diff tab staged a hunk or a file: re-read this pane when it is the same session.
   const onGitChanged = (e) => {
@@ -1506,7 +1510,7 @@ export function openChanges(el, ctx) {
 
   return {
     refresh,
-    close() { visible = false; stopTimer(); window.removeEventListener("phren:git-changed", onGitChanged); el.innerHTML = ""; },
+    close() { visible = false; stopTimer(); stopWatchingShown(); window.removeEventListener("phren:git-changed", onGitChanged); el.innerHTML = ""; },
   };
 }
 
