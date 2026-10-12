@@ -208,6 +208,17 @@ export function createTimelineView(container, ctx = {}) {
   });
   jump.addEventListener("click", () => { scrollToBottom(); updateJump(); });
 
+  // Content that grows after a render (an image loading, a card opening) or a
+  // pane shown again keeps a reader who was at the bottom there, instead of
+  // leaving them a "Jump to latest" they never scrolled away from.
+  const follow = new ResizeObserver(() => {
+    if (!atBottom) return;
+    scrollToBottom();
+    jump.hidden = true;
+  });
+  follow.observe(column);
+  follow.observe(scroll);
+
   // Images: transcript attachments and tool-result pictures, fetched through the
   // daemon only once their row scrolls into view. Object URLs are revoked with
   // the row that owns them.
@@ -324,7 +335,8 @@ export function createTimelineView(container, ctx = {}) {
     lastPreview = preview;
     const entries = (preparation && preparation.entries) || [];
     const jobs = (preparation && preparation.jobs) || [];
-    const stick = isAtBottom();
+    // Where the reader last was, not where growth since then left the view.
+    const stick = atBottom || isAtBottom();
     const beforeHeight = scroll.scrollHeight;
     const beforeTop = scroll.scrollTop;
 
@@ -1199,6 +1211,7 @@ export function createTimelineView(container, ctx = {}) {
     onScrollTop(fn) { onTop.push(fn); },
     destroy() {
       clearInterval(tick);
+      follow.disconnect();
       imageObserver.disconnect();
       for (const row of rows.values()) row.cleanup?.();
       rows.clear();

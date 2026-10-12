@@ -109,7 +109,8 @@
 .conductor-set-title { color: var(--text); font: 600 13px system-ui; }
 .conductor-set-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 30px; padding: 4px 0; border-top: 1px solid var(--border); }
 .conductor-set-name { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-2); font: 12.5px var(--mono); }
-.conductor-set-meta { display: flex; gap: 6px; margin-left: auto; }
+.conductor-set-meta { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.conductor-set-meta .conductor-chip { flex: none; }
 .conductor-set-row .conductor-row-sub { flex-basis: 100%; }
 .conductor-rename { display: flex; align-items: center; gap: 6px; }
 .conductor-rename .conductor-input { height: 28px; max-width: 180px; }

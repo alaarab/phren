@@ -67,12 +67,13 @@ export function accountTitles(accounts) {
   return titles;
 }
 
-/** "Max 20x · since Jul 13 · renews about Oct 13", dates in UTC. */
-export function subscriptionSummary(sub) {
+/** "Max 20x · since Jul 13 · renews about Oct 13", dates in UTC. A renewal
+ * already past is left out: the plan renewed or lapsed, the report cannot say. */
+export function subscriptionSummary(sub, now = Date.now()) {
   if (!sub?.plan) return "";
   const parts = [sub.plan];
   if (sub.startedAt && dayUTC(sub.startedAt)) parts.push(`since ${dayUTC(sub.startedAt)}`);
-  if (sub.renewsAt && dayUTC(sub.renewsAt)) parts.push(`renews ${sub.renewsEstimated ? "about " : ""}${dayUTC(sub.renewsAt)}`);
+  if (sub.renewsAt && dayUTC(sub.renewsAt) && Date.parse(sub.renewsAt) > now) parts.push(`renews ${sub.renewsEstimated ? "about " : ""}${dayUTC(sub.renewsAt)}`);
   return parts.join(" · ");
 }
 
@@ -227,7 +228,7 @@ function accountBlock(row, cardTitle, now) {
   const head = document.createElement("div");
   head.className = "usage-account-head";
   head.append(line("usage-account-name", cardTitle));
-  const plan = subscriptionSummary(row.subscription);
+  const plan = subscriptionSummary(row.subscription, now);
   if (plan) head.append(line("usage-account-meta", plan));
   // A window that reset since its report already says so on its own line.
   if (row.stale && row.age && !(row.windows ?? []).some((w) => w.reset)) head.append(line("usage-account-meta warn", `snapshot from ${row.age} ago`));

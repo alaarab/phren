@@ -589,6 +589,13 @@ export function mountAgents(root) {
       if (!waiting) { if (!tabs.list().length) tabs.restore(pendingLayout, resolveSaved); pendingLayout = null; }
     }
     if (session) setActiveSession(session.computer, session.child);
+    // A session renamed since its tab opened (the Hook titles it from the first prompt).
+    for (const doc of tabs.list()) {
+      if (doc.kind !== "chat") continue;
+      const row = store.find(doc.computer, doc.child.id);
+      const title = row && (row.child.title || row.child.label || projectOf(row.child));
+      if (title && title !== doc.title) { doc.title = title; tabs.setTitle(doc.id, title, doc.subtitle); }
+    }
   });
 
   window.addEventListener("resize", () => {

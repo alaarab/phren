@@ -200,6 +200,11 @@ export function openChat(el, computerName, child, opts = {}) {
   let workMessagesLoad = null;
   let loadingOlder = false;
   let lastSubagentsAt = 0;
+  // The Hook has no subagent push: poll every 3 s while the tree changes,
+  // doubling to 30 s while it stays the same, and back to 3 s when the
+  // agent starts or stops working or the work popover is open.
+  let subagentsInterval = 3000;
+  let lastSubagentsJson = "";
   // A fetch skipped while the chat was off screen runs when it comes back.
   let subagentsSkipped = false;
   let lastSudoAt = 0;
@@ -334,6 +339,7 @@ export function openChat(el, computerName, child, opts = {}) {
       : frame && frame.type === "agentStatus" ? frame : null;
     if (!next) return;
     const finished = agentStatus.status === "working" && next.status !== "working";
+    if (next.status !== agentStatus.status) subagentsInterval = 3000;
     agentStatus = next;
     if (finished) feedTalkReply();
     applyStatusColor(next.status);
@@ -582,10 +588,14 @@ export function openChat(el, computerName, child, opts = {}) {
 
   function maybeFetchSubagents(force = false) {
     if (!isShown(el)) { subagentsSkipped = true; return; }
-    if (!force && Date.now() - lastSubagentsAt < 3000) return;
+    const interval = workPopover ? 3000 : subagentsInterval;
+    if (!force && Date.now() - lastSubagentsAt < interval) return;
     lastSubagentsAt = Date.now();
     hookGet(computerName, "/v1/subagents", target).then((res) => {
       agentsTree = Array.isArray(res && res.agents) ? res.agents : [];
+      const json = JSON.stringify(agentsTree);
+      if (json === lastSubagentsJson) subagentsInterval = Math.min(30000, subagentsInterval * 2);
+      else { subagentsInterval = 3000; lastSubagentsJson = json; }
       composer.setCounts(countWork(agentsTree));
       // Keep a redraw from wiping a message the reader is typing.
       const active = document.activeElement;

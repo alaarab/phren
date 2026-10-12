@@ -69,6 +69,8 @@ function number(value: unknown, where: string): number {
 }
 
 const written = new Map<string, string>();
+const WINDOWS = process.platform === "win32";
+const NULL_DEVICE = WINDOWS ? "NUL" : "/dev/null";
 
 /** OpenSSH argv (no leading "ssh") to run a remote command under a pinned key. */
 export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
@@ -88,12 +90,15 @@ export const sshArgs: SshArgs = (c, remoteCommand, opts) => {
     written.set(c.name, c.hostKey);
   }
   return [
-    "-F", "/dev/null",
-    "-o", "ControlMaster=auto",
-    "-o", "ControlPersist=60",
-    "-o", `ControlPath=${controlPath(c, opts?.slot ?? 0)}`,
+    "-F", NULL_DEVICE,
+    // Windows' OpenSSH has no connection sharing: each request opens its own connection there.
+    ...(WINDOWS ? [] : [
+      "-o", "ControlMaster=auto",
+      "-o", "ControlPersist=60",
+      "-o", `ControlPath=${controlPath(c, opts?.slot ?? 0)}`,
+    ]),
     "-o", `UserKnownHostsFile=${knownHosts}`,
-    "-o", "GlobalKnownHostsFile=/dev/null",
+    "-o", `GlobalKnownHostsFile=${NULL_DEVICE}`,
     "-o", "StrictHostKeyChecking=yes",
     "-o", "HostKeyAlgorithms=ssh-ed25519",
     "-o", "UpdateHostKeys=no",
@@ -128,7 +133,7 @@ export function masterExitArgs(c: Computer, slot: number): string[] {
 
 /** Best-effort teardown of every master slot for `c`; failures are ignored. */
 export async function closeMasters(c: Computer): Promise<void> {
-  if (c.local) return;
+  if (c.local || WINDOWS) return;
   try {
     await Promise.all([0, 1, 2, 3].map(slot =>
       exec("ssh", masterExitArgs(c, slot), { timeout: 5_000 }).then(() => undefined, () => undefined)));

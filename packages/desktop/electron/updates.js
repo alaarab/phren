@@ -1,6 +1,7 @@
 // Updates from the repository's latest GitHub release, through the
-// latest-mac.yml / latest-linux.yml files electron-builder publishes there.
-// The AppImage downloads an update and installs it on restart. macOS installs
+// latest-mac.yml / latest-linux.yml / latest.yml files electron-builder
+// publishes there. The AppImage and the Windows (NSIS) install download an
+// update and install it on restart. macOS installs
 // only an update signed with a Developer ID (Squirrel.Mac checks), so an
 // unsigned build offers the release page instead.
 import { execFile } from "node:child_process";
@@ -24,8 +25,9 @@ function developerIdSigned() {
 export async function startUpdates({ app, dialog, shell, parentWindow }) {
   if (!app.isPackaged || process.env.PHREN_DESKTOP_UPDATES === "off") return;
   if (process.platform === "linux" && !process.env.APPIMAGE) return;
-  if (process.platform !== "linux" && process.platform !== "darwin") return;
-  const install = process.platform === "linux" || (await developerIdSigned());
+  if (!["linux", "darwin", "win32"].includes(process.platform)) return;
+  // NSIS checks a signature only when the build names a publisher, which an unsigned one does not.
+  const install = process.platform === "linux" || process.platform === "win32" || (await developerIdSigned());
   const { autoUpdater } = require("electron-updater");
   autoUpdater.autoDownload = install;
   autoUpdater.autoInstallOnAppQuit = install;
