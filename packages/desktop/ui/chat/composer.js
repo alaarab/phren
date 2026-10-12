@@ -791,12 +791,25 @@ export function createComposer({ computer, target, provider, branch, onConsole, 
 
   // ---- popovers ----
   function onOutside(event) { if (popover && !popover.contains(event.target)) closePopover(); }
+  function onPopoverKey(event) { if (event.key === "Escape" && popover) { event.stopPropagation(); closePopover(); } }
+  let popoverAnchor = null;
   function closePopover() {
     if (!popover) return;
     popover.remove();
     popover = null;
     popoverBuild = null;
+    popoverAnchor = null;
     document.removeEventListener("pointerdown", onOutside, true);
+    document.removeEventListener("keydown", onPopoverKey, true);
+  }
+  /** Above the anchor, inside the window. Again after a redraw: the model
+   * list arrives after the popover opens and makes it taller. */
+  function placePopover() {
+    if (!popover || !popoverAnchor) return;
+    const rect = popoverAnchor.getBoundingClientRect();
+    popover.style.maxHeight = `${Math.max(120, Math.min(360, rect.top - 14))}px`;
+    popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - popover.offsetWidth - 8))}px`;
+    popover.style.top = `${Math.max(8, rect.top - popover.offsetHeight - 6)}px`;
   }
   function openPopover(anchor, build) {
     closePopover();
@@ -805,11 +818,11 @@ export function createComposer({ computer, target, provider, branch, onConsole, 
     document.body.append(pop);
     popover = pop;
     popoverBuild = build;
+    popoverAnchor = anchor;
     build(pop);
-    const rect = anchor.getBoundingClientRect();
-    pop.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - pop.offsetWidth - 8))}px`;
-    pop.style.top = `${Math.max(8, rect.top - pop.offsetHeight - 6)}px`;
+    placePopover();
     setTimeout(() => document.addEventListener("pointerdown", onOutside, true), 0);
+    document.addEventListener("keydown", onPopoverKey, true);
   }
 
   /** The model list, the current pick marked, or a load state. */
@@ -881,7 +894,7 @@ export function createComposer({ computer, target, provider, branch, onConsole, 
     if (supportsPicker && !modelCache) {
       try { modelCache = modelRows(source, await hookGet(computer, "/v1/models", { source })); }
       catch { modelCache = []; }
-      if (popover && popoverBuild) popoverBuild(popover);
+      if (popover && popoverBuild) { popoverBuild(popover); placePopover(); }
     }
   }
 

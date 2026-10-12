@@ -21,6 +21,12 @@ Download the newest build from the
 - macOS, Apple Silicon:
   [Phren-mac-arm64.dmg](https://github.com/alaarab/phren/releases/latest/download/Phren-mac-arm64.dmg).
   Open it and drag Phren to Applications.
+- Windows, x64:
+  [Phren-win-x64.exe](https://github.com/alaarab/phren/releases/latest/download/Phren-win-x64.exe).
+  Run it; it installs for your user. The build is not code-signed yet, so
+  SmartScreen asks first: choose **More info**, then **Run anyway**. Uses
+  Windows' own OpenSSH client, which has no connection sharing, so each Hook
+  request opens its own connection.
 - Linux, x86-64:
   [Phren-linux-x86_64.AppImage](https://github.com/alaarab/phren/releases/latest/download/Phren-linux-x86_64.AppImage).
   `chmod +x` it and run it. AppImages need FUSE 2 (`fuse2` on Arch).
@@ -35,8 +41,8 @@ Privacy & Security (on macOS 14 and earlier, Control-click the app and choose
 Open). Or clear the quarantine flag:
 `xattr -dr com.apple.quarantine /Applications/Phren.app`.
 
-Updates: the AppImage downloads a new release in the background and installs
-it when you restart. The macOS app checks every six hours and offers the
+Updates: the AppImage and the Windows install download a new release in the
+background and install it when you restart. The macOS app checks every six hours and offers the
 download; it will update itself once the builds are signed.
 `PHREN_DESKTOP_UPDATES=off` turns the check off.
 

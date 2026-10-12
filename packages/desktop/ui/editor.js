@@ -410,18 +410,23 @@ async function createWorkspace(computer, child, root) {
     return null;
   }
 
-  const resolved = await resolveProject(computer, target);
-  const index = resolved.available && resolved.project ? makeIndex(computer, resolved.project) : null;
-  if (index) ensureProviders(monaco);
-
-  return {
+  const ws = {
     computer, child, target, monaco, canWrite, canList, repoRoot, useRemote,
-    uriFor, pathFromUri, index, project: resolved.project, indexAvailable: resolved.available,
+    uriFor, pathFromUri, index: null, project: null, indexAvailable: false,
   };
+  // Files open without waiting for the project lookup (a slow Hook can take a
+  // minute); go-to-definition and references join once it answers.
+  ws.indexReady = resolveProject(computer, target).then((resolved) => {
+    ws.project = resolved.project;
+    ws.indexAvailable = resolved.available;
+    ws.index = resolved.available && resolved.project ? makeIndex(computer, resolved.project) : null;
+    if (ws.index) ensureProviders(monaco);
+  });
+  return ws;
 }
 
 function ownerFor(ws, path) {
-  return { path, index: ws.index, uriFor: ws.uriFor, pathFromUri: ws.pathFromUri };
+  return { path, get index() { return ws.index; }, uriFor: ws.uriFor, pathFromUri: ws.pathFromUri };
 }
 
 // One model per workspace+path, reference-counted so a file tab and its diff
@@ -827,6 +832,8 @@ export function openEditorDoc(el, opts) {
     ready = true;
     renderCrumb();
     applyPendingLine();
+    // "No code index" waits for the lookup.
+    ws.indexReady.then(() => { if (model) renderCrumb(); });
   }
 
   function setUpEditor() {

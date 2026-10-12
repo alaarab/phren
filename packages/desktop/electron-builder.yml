@@ -53,6 +53,14 @@ linux:
       arch: x64
   category: Development
   synopsis: The owner's cockpit for every computer running a Phren Hook
+win:
+  target:
+    - target: nsis
+      arch: x64
+  # The NSIS installer and latest.yml are what electron-updater reads on Windows.
+nsis:
+  oneClick: true
+  perMachine: false
 publish:
   provider: generic
   # Desktop releases are the repository's latest release, so this always
