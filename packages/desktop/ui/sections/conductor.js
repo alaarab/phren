@@ -116,6 +116,9 @@ export function mountConductor(root) {
     inbox: null,            // { items, unreachable }
     grants: null,           // [grant]
     sets: null,             // { sets, unlinked, peerError }
+    canLink: false,         // the sets' Hook takes POST /v1/sets/link
+    linking: null,          // the member being linked
+    linkNotes: new Map(),   // member -> what the last link left undone
     authority: null,        // { source, projects, confirmations }
     error: "",
     loading: false,
@@ -554,9 +557,48 @@ export function mountConductor(root) {
     const link = LINK_BADGE[computer.link] ?? "";
     meta.append(el("span", `conductor-chip ${link}`, LINK_WORD[computer.link] ?? "Unknown"));
     if (computer.reachable === false) meta.append(el("span", "conductor-chip failed", "unreachable"));
+    if (state.canLink && (computer.link === "one-way" || computer.link === "indirect")) meta.append(linkButton(computer.name));
     row.append(meta);
-    if (computer.hint || computer.error) row.append(el("div", "conductor-row-sub", computer.error || computer.hint));
+    const linkNote = state.linkNotes.get(computer.name);
+    if (linkNote) row.append(el("div", "conductor-row-sub", linkNote));
+    else if (computer.hint || computer.error) row.append(el("div", "conductor-row-sub", computer.error || computer.hint));
     return row;
+  }
+
+  /** Link, as on the phone: the Hook these sets came from runs
+   * `phren bridge link <name>` over its own ssh login. Asks inline first. */
+  function linkButton(name) {
+    const wrap = el("span", "conductor-confirm");
+    const host = activeComputer();
+    if (state.linking === name) { wrap.append(el("span", "conductor-ask", "Linking\u2026")); return wrap; }
+    const link = button("Link", "conductor-btn", () => {
+      wrap.replaceChildren(el("span", "conductor-ask", `Link ${host} and ${name} both ways?`),
+        button("Link", "conductor-btn accent", () => { void linkMember(name); }),
+        button("Cancel", "conductor-btn ghost", () => wrap.replaceChildren(link)));
+    });
+    link.disabled = !!state.linking;
+    link.title = `${host} and ${name} link both ways, so each can list and start agents on the other. This can take a minute.`;
+    wrap.append(link);
+    return wrap;
+  }
+
+  async function linkMember(name) {
+    const computer = activeComputer();
+    if (!computer || state.linking) return;
+    state.linking = name;
+    state.linkNotes.delete(name);
+    renderSets();
+    try {
+      const reply = await hookPost(computer, "/v1/sets/link", { name });
+      // The phone's wording (SetLinkReply.problem): linked, but a side did not answer.
+      if (!reply.reachable) state.linkNotes.set(name, `${reply.name ?? name} was linked but didn't answer: ${reply.error ?? "no reply"}.`);
+      else if (reply.remote && reply.remote.reachable === false) state.linkNotes.set(name, `${reply.name ?? name} was linked but can't reach back: ${reply.remote.error ?? "no reply"}.`);
+    } catch (err) {
+      state.linkNotes.set(name, `Could not link: ${err?.body?.error || err?.message || err}`);
+    } finally {
+      state.linking = null;
+    }
+    await loadSets();
   }
 
   function renderSets() {
@@ -586,7 +628,9 @@ export function mountConductor(root) {
       for (const row of snapshot.unlinked) {
         const item = el("div", "conductor-set-row");
         item.append(el("span", "conductor-set-name", row.name));
-        item.append(el("div", "conductor-set-meta", el("span", "conductor-chip", "unlinked")));
+        const meta = el("div", "conductor-set-meta");
+        meta.append(el("span", "conductor-chip", "unlinked"));
+        item.append(meta);
         item.append(el("div", "conductor-row-sub", `Run phren bridge link ${row.name} on a linked computer.`));
         nodes.push(item);
       }
@@ -638,7 +682,9 @@ export function mountConductor(root) {
       for (const confirmation of pending) {
         const row = el("div", "conductor-set-row");
         row.append(el("span", "conductor-set-name", confirmation.project));
-        row.append(el("div", "conductor-set-meta", el("span", "conductor-chip needs", (confirmation.actions ?? []).join(", "))));
+        const meta = el("div", "conductor-set-meta");
+        meta.append(el("span", "conductor-chip needs", (confirmation.actions ?? []).join(", ")));
+        row.append(meta);
         row.append(el("div", "conductor-row-sub", `Expires ${new Date(confirmation.expiresAt).toLocaleString()}`));
         nodes.push(row);
       }
@@ -723,7 +769,8 @@ export function mountConductor(root) {
     const computer = activeComputer();
     if (!computer) { state.sets = { sets: [], unlinked: [] }; state.loaded.sets = true; renderSets(); renderTabs(); return; }
     try {
-      const body = await hookGet(computer, "/v1/sets");
+      const [body, caps] = await Promise.all([hookGet(computer, "/v1/sets"), store.capabilities(computer).catch(() => ({}))]);
+      state.canLink = caps?.setLink === true;
       state.sets = { sets: Array.isArray(body.sets) ? body.sets : [], unlinked: Array.isArray(body.unlinked) ? body.unlinked : [], peerError: body.peerError };
     } catch (err) {
       state.sets = { sets: [], unlinked: [] };

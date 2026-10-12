@@ -19,8 +19,10 @@ describe("usage popover text", () => {
   });
 
   it("writes the plan line and one meta line like the phone", () => {
-    expect(subscriptionSummary({ plan: "Max 20x", startedAt: "2026-07-13T00:00:00Z", renewsAt: "2026-10-13T00:00:00Z", renewsEstimated: true }))
+    expect(subscriptionSummary({ plan: "Max 20x", startedAt: "2026-07-13T00:00:00Z", renewsAt: "2026-10-13T00:00:00Z", renewsEstimated: true }, now))
       .toBe("Max 20x · since Jul 13 · renews about Oct 13");
+    expect(subscriptionSummary({ plan: "Plus", startedAt: "2026-07-13T00:00:00Z", renewsAt: "2026-10-06T00:00:00Z" }, now))
+      .toBe("Plus · since Jul 13");
     expect(subscriptionSummary(undefined)).toBe("");
     expect(metaLine({ computers: [{ name: "Mini" }, { name: "Mini", account: "work" }, { name: "Workstation" }], updatedAt: new Date(now - 60_000).toISOString() }, now))
       .toBe("Mini, Workstation · updated 1m ago");
