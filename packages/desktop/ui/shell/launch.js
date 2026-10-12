@@ -688,11 +688,13 @@ async function doLaunch(ui) {
   state.launching = true;
   state.status = `Starting ${HARNESS_LABELS[kind] ?? kind}\u2026`;
   refreshLaunch(ui);
+  // A new agent in a folder that already has one must not match that one.
+  const before = new Set(allSessions(store.merged).filter((row) => row.computer === state.computer).map((row) => row.child.id));
   try {
     const result = await hookPost(state.computer, "/v1/workspaces/launch", body);
     state.status = result.reused ? "Joining the launch already in flight\u2026" : "Waiting for the session to appear\u2026";
     refreshLaunch(ui);
-    const match = await waitForSession(state.computer, result, 20_000);
+    const match = await waitForSession(state.computer, result, before, 20_000);
     if (match) { openInAgents(match.computer, match.child); ui.close(); return; }
     state.launching = false;
     state.status = "";
@@ -706,11 +708,12 @@ async function doLaunch(ui) {
   }
 }
 
-function waitForSession(computer, reply, timeout) {
+function waitForSession(computer, reply, before, timeout) {
   return new Promise((resolve) => {
     const deadline = Date.now() + timeout;
     const check = () => {
-      const found = allSessions(store.merged).find((row) => row.computer === computer && matchesRow(row, reply));
+      const found = allSessions(store.merged).find((row) => row.computer === computer
+        && (reply.reused || !before.has(row.child.id)) && matchesRow(row, reply));
       if (found) { resolve(found); return; }
       if (Date.now() >= deadline) { resolve(null); return; }
       setTimeout(check, 700);
@@ -725,6 +728,8 @@ function matchesRow(row, reply) {
     return target.server === reply.target.server && target.workspace === reply.target.workspace
       && target.tab === reply.target.tab && target.pane === reply.target.pane;
   }
+  // No session yet (the agent is still starting): the pane the Hook created.
+  if (reply.paneId && target) return target.pane === reply.paneId;
   if (reply.cwd && row.child.cwd === reply.cwd) return true;
   return Boolean(reply.label) && projectOf(row.child) === reply.label;
 }
