@@ -293,7 +293,10 @@ unlinked }`: each set's `id`, `name`, `computers` (`name`, `id`, `reachable`,
 `{ workspaceId?, tabId?, paneId }` (and `?mux=`) for a pane already running an
 agent; a second conductor in the set is refused with 409. `POST
 /v1/conductor/stop` takes an optional `paneId`. `POST /v1/sets/name` takes
-`{ name }` (1 to 60 characters, or `null`) and tells every reachable member.
+`{ name }` (1 to 60 characters, or `null`) and tells every reachable member. `POST
+/v1/sets/link` takes `{ name }` and runs the owner's `phren bridge link
+<name>` on this computer (one at a time; agents' calls are refused); the Hook
+lists `setLink` among its capabilities.
 Peer-reported names with the local computer id fold into `self`, using the
 friendly peer name for display and keeping its conductor. The `self` row has
 no link hint; clients should key computers by `id` when present. Unresolved

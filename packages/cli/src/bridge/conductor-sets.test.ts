@@ -2,8 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { conductorAnswer, nameSet, readSets } from "./conductor-sets.js";
 import { readSetName, resetRoleState } from "./conductor-role.js";
+import { conductorAnswer, linkSetMember, nameSet, readSets } from "./conductor-sets.js";
 import { formatSets } from "./dispatch-command.js";
 import { BridgeError, type Json } from "./protocol.js";
 
@@ -84,6 +84,29 @@ describe("POST /v1/sets/name", () => {
     expect(mocks.request).not.toHaveBeenCalled();
     await expect(nameSet({ name: "x".repeat(61) })).rejects.toThrow();
     await expect(nameSet({ name: "Bad\nname" })).rejects.toThrow();
+  });
+});
+
+describe("POST /v1/sets/link", () => {
+  const linked = { name: "Server", as: "Workstation", local: { added: true }, remote: { added: true, reachable: true }, reachable: true };
+
+  it("links the named computer from the owner's call, one link at a time", async () => {
+    let finish!: () => void;
+    const link = vi.fn(async () => { await new Promise<void>(resolve => { finish = resolve; }); return linked; });
+    const first = linkSetMember({ name: " Server " }, link);
+    await expect(linkSetMember({ name: "Desk" }, link)).rejects.toMatchObject({ status: 409 });
+    finish();
+    expect(await first).toEqual(linked);
+    expect(link).toHaveBeenCalledWith("Server");
+    expect(link).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an agent's call and anything that is not a host name", async () => {
+    const link = vi.fn(async () => linked);
+    await expect(linkSetMember({ name: "Server", origin: { paneId: "w1:p1" } }, link)).rejects.toMatchObject({ status: 403 });
+    await expect(linkSetMember({ name: "-oProxyCommand=x" }, link)).rejects.toThrow();
+    await expect(linkSetMember({ name: "a b" }, link)).rejects.toThrow();
+    expect(link).not.toHaveBeenCalled();
   });
 });
 
