@@ -16,6 +16,16 @@ files:
   - "!dist/src/testing/**/*.d.ts"
   - ui/**
   - "!ui/CONTRACT.md"
+  # Never read at runtime: the server serves Monaco's min/ build (the editor
+  # host is a Vite bundle), the CLI loads sql.js's sql-wasm build only, and
+  # nothing reads source maps or type declarations.
+  - "!**/node_modules/monaco-editor/{dev,esm}/**"
+  - "!**/node_modules/sql.js-fts5/dist/{sql-asm*,*-debug.*,worker.*}"
+  - "!**/*.map"
+  - "!**/*.d.ts"
+# Electron's own UI strings: the app is English only.
+electronLanguages:
+  - en
 # The daemon runs on Electron's own Node (ELECTRON_RUN_AS_NODE) and reads its
 # UI and vendor files from disk, and node-pty needs its native helper on disk.
 asar: false
