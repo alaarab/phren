@@ -28,6 +28,14 @@ if (!existsSync(path.join(pkgDir, "ui/editor-host"))) {
   console.warn("No ui/editor-host: the app will open files in plain Monaco. Build @phren/desktop-editor to include VS Code's editor.");
 }
 
+// The release workflow passes every signing secret, set or not, and an unset
+// one arrives as an empty string. electron-builder takes an empty CSC_LINK as
+// a certificate path, resolves it to the project folder and fails ("not a
+// file"); dropped, the build signs ad hoc as intended.
+for (const name of ["CSC_LINK", "CSC_KEY_PASSWORD", "CSC_NAME", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID"]) {
+  if (process.env[name] === "") delete process.env[name];
+}
+
 const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, stdio: "inherit", shell: process.platform === "win32" });
 
 rmSync(stage, { recursive: true, force: true });
