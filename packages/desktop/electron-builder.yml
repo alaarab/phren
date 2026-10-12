@@ -20,7 +20,7 @@ files:
   # host is a Vite bundle), the CLI loads sql.js's sql-wasm build only, and
   # nothing reads source maps or type declarations.
   - "!**/node_modules/monaco-editor/{dev,esm}/**"
-  - "!**/node_modules/sql.js-fts5/dist/{*asm*,*debug*,worker.*}"
+  - "!**/node_modules/sql.js-fts5/dist/{sql-asm*,*-debug.*,worker.*}"
   - "!**/*.map"
   - "!**/*.d.ts"
 # Electron's own UI strings: the app is English only.
