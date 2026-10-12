@@ -1,11 +1,12 @@
 import { z } from "zod";
-import { askPeers, buildSets, indirectMembers, localCaller } from "./conductor-group.js";
-import { readSetName, saveSetName } from "./conductor-role.js";
 import { type Computer, computerLabel, readComputers } from "./computer-identity.js";
 import { localNames } from "./computer-names.js";
+import { askPeers, buildSets, indirectMembers, localCaller } from "./conductor-group.js";
+import { readSetName, saveSetName } from "./conductor-role.js";
 import { listsCaller } from "./health.js";
+import { type LinkResult, linkComputer } from "./link.js";
 import { optionalHookPeers, peerRequest } from "./peers.js";
-import { object, type Json } from "./protocol.js";
+import { BridgeError, type Json, object } from "./protocol.js";
 import { localConductor } from "./server-launch.js";
 
 /** The Hook routes for linked computer sets (docs/conductor-sets.md). */
@@ -70,4 +71,18 @@ export async function nameSet(data: Json): Promise<Json> {
     catch (error) { unreachable.push({ computer: answer.peer.name, error: error instanceof Error ? error.message.slice(0, 300) : "Unreachable." }); }
   }));
   return { ok: true, name: input.name, namedAt, told: told.sort(), unreachable: unreachable.sort((a, b) => a.computer.localeCompare(b.computer)) };
+}
+
+const linkInput = z.object({ name: z.string().trim().regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,252}$/, "A computer name or ssh host.") }).strict();
+let linking: string | undefined;
+
+/** `POST /v1/sets/link`: the phone's one-tap `phren bridge link <name>`. Runs
+ * on the computer whose set lists `name` as indirect or one-way, over this
+ * computer's own ssh login, one link at a time. */
+export async function linkSetMember(data: Json, link: typeof linkComputer = linkComputer): Promise<LinkResult> {
+  if (data && typeof data === "object" && "origin" in data) throw new BridgeError(403, "Only the owner links computers, from the phone or `phren bridge link` in their own terminal.");
+  const { name } = linkInput.parse(data);
+  if (linking) throw new BridgeError(409, `Already linking ${linking}. Try again when it finishes.`);
+  linking = name;
+  try { return await link(name); } finally { linking = undefined; }
 }

@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- `POST /v1/sets/link` (capability `setLink`): the phone links a computer its set lists as indirect or one-way with one tap. The Hook runs the owner's `phren bridge link <name>` over its own ssh login, one link at a time, and refuses calls from agents.
+
 ## [0.3.39] - 2026-10-11
 
 The first published release since 0.3.37: it also ships everything under 0.3.38, which was never published to npm.
