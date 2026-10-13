@@ -5,6 +5,8 @@
 // the phone's Projects screen is the base, drawn with the desktop's variables.
 import { extractKnowsBlock } from "../chat/knows.js";
 import { hookGet, hookPost } from "../api.js";
+import { hostMark } from "../changes.js";
+import { capitalize, hostTerms } from "../git-review.js";
 import { projectOf, sessions as allSessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
 
@@ -59,6 +61,9 @@ function decodeBase64(text) {
 }
 
 /** A short age: "now", "5m", "3h", "2d". */
+// Open pull requests shown on a project before "N more on <host>".
+const FORGE_PULLS = 8;
+
 function age(iso) {
   const at = Date.parse(iso ?? "");
   if (!Number.isFinite(at)) return "";
@@ -506,11 +511,30 @@ export function mountProjects(root) {
     const last = sessions.map((row) => row.child.lastChangedAt).filter(Boolean).sort().pop() || project.lastSeen;
     if (last) stats.append(el("span", "pj-stat", `active ${age(last)}`));
     card.append(stats);
-    card.addEventListener("click", () => { state.view = "detail"; state.detail = { computer: project.computer, name: project.name }; loadDetailFiles(); render(); });
+    card.addEventListener("click", () => { state.view = "detail"; state.detail = { computer: project.computer, name: project.name }; loadDetailFiles(); loadForge(); render(); });
     return card;
   }
 
   // ------------------------------------------------------------- detail
+
+  /** The project's host, branch and open pull requests with checks, from its
+   *  checkout on that computer. A Hook without the route hides the block. */
+  async function loadForge() {
+    const detail = state.detail;
+    const project = detail && state.data.get(detail.computer)?.projects.get(detail.name);
+    if (!project || project.forge?.loading) return;
+    project.forge = { loading: true };
+    renderDetail();
+    try {
+      project.forge = { data: await hookGet(detail.computer, `/v1/projects/${encodeURIComponent(project.name)}/git`) };
+    } catch (err) {
+      const code = err?.body?.code;
+      if (code === "no-checkout") project.forge = { missing: true };
+      else if (err?.status === 404) project.forge = { hidden: true };
+      else project.forge = { error: err?.message ?? String(err) };
+    }
+    if (state.detail === detail) renderDetail();
+  }
 
   async function loadDetailFiles({ force = false } = {}) {
     const detail = state.detail;
@@ -576,6 +600,9 @@ export function mountProjects(root) {
     work.append(chips);
     scope.append(work);
 
+    const forge = forgeBlock(project);
+    if (forge) scope.append(forge);
+
     const sessionRows = sessionsFor(detail.computer, detail.name);
     const sessionsBlock = el("section", "pj-block");
     const sh = el("h2", "section-label", "Sessions");
@@ -592,6 +619,70 @@ export function mountProjects(root) {
 
     scope.append(skillsBlock(project));
     scope.append(knobsBlock(project));
+  }
+
+  function forgeBlock(project) {
+    const forge = project.forge;
+    if (!forge || forge.hidden) return null;
+    const block = el("section", "pj-block pj-forge");
+    const head = el("div", "pj-block-head");
+    const res = forge.data;
+    const host = res?.host;
+    const label = el("h2", "section-label", "Code");
+    if (host?.kind) label.append(hostMark(host.kind, 14), el("span", "pj-forge-host", host.domain && !/^(github|gitlab)\.com$/.test(host.domain) ? `${host.name} · ${host.domain}` : host.name));
+    head.append(label, el("span", "pj-spacer"));
+    if (host?.webUrl) {
+      const open = el("button", "pj-btn", `Open on ${host.name} \u2197`);
+      open.addEventListener("click", () => window.open(host.webUrl, "_blank", "noopener"));
+      head.append(open);
+    }
+    const refresh = el("button", "pj-btn", "Refresh");
+    refresh.disabled = !!forge.loading;
+    refresh.addEventListener("click", () => loadForge());
+    head.append(refresh);
+    block.append(head);
+    const list = el("div", "pj-list");
+    block.append(list);
+    if (forge.loading) { list.append(el("div", "pj-empty slim", "Reading the checkout\u2026")); return block; }
+    if (forge.missing) { list.append(el("div", "pj-empty slim", "No checkout of this project on this computer.")); return block; }
+    if (forge.error) { list.append(el("div", "pj-empty slim danger", forge.error)); return block; }
+    const terms = hostTerms(host);
+    const branch = el("div", "pj-forge-branch");
+    branch.append(el("span", "pj-chip pj-mono", res.branch || "detached"));
+    if (res.current) branch.append(el("span", "pj-row-sub", `${terms.ref}${res.current.number} ${res.current.state === "OPEN" || !res.current.state ? "open" : String(res.current.state).toLowerCase()}`), checksPill(res.current.checks));
+    list.append(branch);
+    if (res.available === false) {
+      list.append(el("div", "pj-empty slim", res.message || `${capitalize(terms.long)}s are not available from this computer.`));
+      return block;
+    }
+    const pulls = Array.isArray(res.pulls) ? res.pulls : [];
+    if (!pulls.length) { list.append(el("div", "pj-empty slim", `No open ${terms.long}s.`)); return block; }
+    for (const pull of pulls.slice(0, FORGE_PULLS)) list.append(pullRow(pull, terms));
+    if (pulls.length > FORGE_PULLS) list.append(el("div", "pj-empty slim", `${pulls.length - FORGE_PULLS} more on ${host?.name || "the host"}.`));
+    return block;
+  }
+
+  function pullRow(pull, terms) {
+    const row = el("button", "pj-row");
+    const main = el("div", "pj-row-main");
+    main.append(el("span", "pj-row-title", `${terms.ref}${pull.number} ${pull.title || ""}`));
+    const sub = el("span", "pj-row-sub");
+    sub.textContent = [pull.draft ? "Draft" : "", pull.head || "", pull.author ? `@${pull.author}` : ""].filter(Boolean).join(" \u00b7 ");
+    main.append(sub);
+    const meta = el("span", "pj-row-meta");
+    const pill = checksPill(pull.checks);
+    if (pill) meta.append(pill);
+    const when = age(pull.updated);
+    if (when) meta.append(el("span", "", when));
+    row.append(main, meta);
+    row.title = pull.url || "";
+    row.addEventListener("click", () => { if (pull.url) window.open(pull.url, "_blank", "noopener"); });
+    return row;
+  }
+
+  function checksPill(checks) {
+    if (!["passing", "failing", "pending"].includes(checks)) return "";
+    return el("span", `pj-checks ${checks}`, { passing: "Checks pass", failing: "Checks fail", pending: "Checks running" }[checks]);
   }
 
   function sessionRow(row) {

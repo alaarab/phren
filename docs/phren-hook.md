@@ -476,6 +476,14 @@ computer's own git credentials, never a token from the phone. Either way it is
 the store has a remote, a pull and push so the phone can fetch the new project.
 The reply says `store: pushed | committed | unchanged | error`.
 
+`GET /v1/projects/:project/git` answers like `POST /v1/git/pulls` (host,
+branch, open pull requests with checks, the branch's own request) plus
+`project` and `directory`, for a project rather than a pane: it reads the
+checkout this computer recorded for the project, else the first folder
+`/v1/projects/locate` finds. With no checkout here it is `404` with
+`code: "no-checkout"`. It needs the `git` module. Phren desktop's Projects page
+shows it as the project's Code block.
+
 The `code` module serves the phone's indexed file tree, search, outlines,
 definitions with linked findings, where each function or type is used, what
 changed, the full most-used ranking and per-file change chips. Code opens from the project, a session's Changes band or chat

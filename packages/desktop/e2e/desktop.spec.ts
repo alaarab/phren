@@ -55,6 +55,8 @@ test.beforeAll(async () => {
       "POST /v1/git/status": () => ({ status: 200, json: gitStatus }),
       "POST /v1/diff": () => ({ status: 200, json: diff }),
       "GET /v1/transcripts/blob": () => ({ status: 200, body: TINY_PNG, contentType: "application/octet-stream" }),
+      "GET /v1/projects/repos": () => ({ status: 200, json: { repos: [{ name: "phren", directory: "/Users/you/phren", source: "activity", registered: true }] } }),
+      "GET /v1/projects/phren/git": () => ({ status: 200, json: FORGE }),
     },
   });
 
@@ -77,6 +79,18 @@ test.beforeAll(async () => {
   url = server.url;
   closeServer = server.close;
 });
+
+// A gitboy-hosted project: the checked-out branch's own request and two open ones.
+const FORGE = {
+  project: "phren", directory: "/Users/you/phren", branch: "feat/login", available: true,
+  host: { kind: "gitboy", name: "gitboy", domain: "git.example.com", webUrl: "https://git.example.com/you/phren", remote: "origin", source: "url",
+    terms: { short: "PR", long: "pull request", ref: "#" }, supported: true },
+  current: { number: 42, title: "Keep the session through the guard", url: "https://git.example.com/you/phren/pulls/42", head: "feat/login", base: "main", draft: false, state: "OPEN", checks: "failing" },
+  pulls: [
+    { number: 42, title: "Keep the session through the guard", url: "https://git.example.com/you/phren/pulls/42", head: "feat/login", author: "you", updated: new Date(Date.now() - 3_600_000).toISOString(), checks: "failing" },
+    { number: 41, title: "Faster store sync", url: "https://git.example.com/you/phren/pulls/41", head: "perf/sync", author: "you", draft: true, updated: new Date(Date.now() - 86_400_000).toISOString(), checks: "passing" },
+  ],
+};
 
 const TINY_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGPYOeXLfxBmgDEAcq4NAdKXL0AAAAAASUVORK5CYII=", "base64");
 
@@ -263,6 +277,15 @@ test("projects section renders", async ({ page }) => {
   await page.locator(".section-pill", { hasText: "Projects" }).click();
   await page.waitForTimeout(1200);
   await page.screenshot({ path: test.info().outputPath("projects.png") });
+  // A project's Code block: host, branch with its own request's checks, open requests.
+  await page.locator(".pj-card", { hasText: "phren" }).first().click();
+  const forge = page.locator(".pj-forge");
+  await expect(forge).toContainText("gitboy · git.example.com");
+  await expect(forge.locator(".pj-forge-branch")).toContainText("feat/login");
+  await expect(forge.locator(".pj-forge-branch .pj-checks.failing")).toBeVisible();
+  await expect(forge.locator(".pj-row")).toHaveCount(2);
+  await expect(forge.locator(".pj-row", { hasText: "#41 Faster store sync" })).toContainText("Checks pass");
+  await page.screenshot({ path: test.info().outputPath("project-forge.png") });
   expect(errors).toEqual([]);
 });
 
