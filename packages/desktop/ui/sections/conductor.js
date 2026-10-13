@@ -5,11 +5,10 @@
 import { hookGet, hookPost } from "../api.js";
 import { sessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
+import { readAhead } from "../shell/read-ahead.js";
 
 const CSS_ID = "conductor-css";
 const POLL_MS = 15_000;
-// A read started by hovering the pill this recently is what the click shows.
-const PREFETCH_FRESH_MS = 5_000;
 const MAX_DISPATCHES = 60;
 const HARNESSES = [["codex", "Codex"], ["claude", "Claude"], ["opencode", "OpenCode"]];
 const TABS = [
@@ -931,20 +930,19 @@ export function mountConductor(root) {
   root.querySelector("[data-refresh]").addEventListener("click", () => { void poll(); });
 
   let timer = null;
-  let prefetchedAt = 0;
   function startPoll() { if (!timer) timer = setInterval(() => { void poll(); }, POLL_MS); }
   function stopPoll() { if (timer) { clearInterval(timer); timer = null; } }
 
   const unsubscribe = store.subscribe(() => { conductorCard(); });
 
   selectTab("dispatches");
+  const ahead = readAhead(poll);
   // The first poll comes from show(), which the section shell calls right after
   // mounting a visible section (and a hidden one waits for it).
 
   return {
-    // Hovering the pill reads ahead; the click then shows that read instead of starting another.
-    prefetch() { prefetchedAt = Date.now(); void poll(); },
-    show() { startPoll(); if (Date.now() - prefetchedAt > PREFETCH_FRESH_MS) void poll(); prefetchedAt = 0; },
+    prefetch: ahead.prefetch,
+    show() { startPoll(); ahead.show(); },
     hide() { stopPoll(); },
     destroy() { stopPoll(); unsubscribe(); },
   };
