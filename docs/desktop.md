@@ -43,12 +43,16 @@ Open). Or clear the quarantine flag:
 
 Updates: the AppImage and the Windows install download a new release in the
 background and install it when you restart. The macOS app checks every six hours and offers the
-download; it will update itself once the builds are signed.
+download; it will update itself once the builds are signed. A new version
+shows as a chip in the titlebar: click it for What's new (that version's
+section of `packages/desktop/CHANGELOG.md`) and Download or Restart to update.
 `PHREN_DESKTOP_UPDATES=off` turns the check off.
 
 ### Release it
 
-Bump `version` in `packages/desktop/package.json`, then push a
+Bump `version` in `packages/desktop/package.json` and add its section to
+`packages/desktop/CHANGELOG.md` (the release notes and the app's What's new;
+the workflow fails without one), then push a
 `desktop-v<version>` tag or run the **Release desktop app** workflow with that
 version. It builds both installers and publishes them, with the
 `latest-mac.yml` / `latest-linux.yml` files the updater reads, as the
