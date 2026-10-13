@@ -265,7 +265,12 @@ function symlinkFile(src: string, dest: string, managedRoot: string): boolean {
       const currentTarget = fs.readlinkSync(dest);
       const resolvedTarget = path.resolve(path.dirname(dest), currentTarget);
       if (resolvedTarget === path.resolve(src)) return true;
-      if (!isManagedSymlink(dest, managedRoot)) {
+      // A dangling link into the retired ~/.cortex store is ours too: nothing
+      // else can resolve it, and leaving it fails doctor on every machine
+      // that predates the rename.
+      const legacyDangling = !fs.existsSync(dest)
+        && resolvedTarget.split(path.sep).includes(".cortex");
+      if (!legacyDangling && !isManagedSymlink(dest, managedRoot)) {
         log(`  preserve existing symlink: ${dest}`);
         return false;
       }
