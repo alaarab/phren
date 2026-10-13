@@ -2,7 +2,7 @@
 // the sessions that need you (a chosen row comes back as phren:open-session,
 // handled with notifications in needs-notify.js). On a Mac,
 // closing the window while the icon is on only hides it, so this keeps running.
-import { store } from "./store.js";
+import { projectOf, store } from "./store.js";
 
 const KEY = "phren.desktop.tray";
 const MAX_ROWS = 12;
@@ -23,7 +23,7 @@ function reason(child) {
 export function trayState(rows, enabled) {
   if (!enabled) return { enabled: false };
   const shown = rows.slice(0, MAX_ROWS).map(({ key, computer, child }) => {
-    const project = (child.cwd ?? "").split("/").filter(Boolean).pop() ?? child.label ?? "";
+    const project = projectOf(child);
     const name = child.title ?? child.label ?? "Session";
     return { key, title: project && project !== name ? `${project}: ${name}` : name, sub: `${computer} · ${reason(child)}` };
   });

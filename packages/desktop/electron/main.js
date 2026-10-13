@@ -419,11 +419,7 @@ async function start() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
-  });
+  app.on("second-instance", showWindow);
   app.on("window-all-closed", () => app.quit());
   app.on("will-quit", () => globalShortcut.unregisterAll());
   app.on("activate", showWindow);

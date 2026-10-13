@@ -641,15 +641,6 @@ function speakReply({ computer, text, voice, onWord } = {}) {
   };
 }
 
-/**
- * Read a reply aloud with the Hook's voice and highlight its words. `onWord`
- * receives each word's index (into the reply's words) as it is read, and -1
- * when done. Returns { stop(), done }.
- */
-export function readAloud({ computer, text, voice, onWord } = {}) {
-  return speakSpeech({ computer, text, voice, onWord });
-}
-
 // ---------------------------------------------------------------- talk mode
 
 const PROVIDERS = { claude: "Claude", codex: "Codex", copilot: "Copilot", phren: "Phren", opencode: "OpenCode" };

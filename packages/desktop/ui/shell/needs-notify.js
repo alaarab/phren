@@ -2,14 +2,13 @@
 // that session; on a Mac, one for an agent that finished its turn and waits on
 // you takes a typed reply, sent to its pane as the next prompt.
 import { hookPost } from "../api.js";
-import { store } from "./store.js";
+import { projectOf, store } from "./store.js";
 
 /** What the shell shows for a needs-you row. Only a plain wait takes a reply:
  * an approval or a blocked agent needs its own card, not more text. */
 export function needsNotice({ key, computer, child }) {
-  const project = (child.cwd ?? child.label ?? "").split("/").filter(Boolean).pop() ?? child.label;
   return {
-    title: `${project} needs you`,
+    title: `${projectOf(child)} needs you`,
     body: `${child.title ?? child.label} · ${computer}${child.lastReply ? `\n${child.lastReply}` : ""}`,
     key,
     reply: child.agentStatus === "waiting" && !child.approvalPending && !!child.target,
