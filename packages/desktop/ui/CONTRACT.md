@@ -37,6 +37,8 @@ mounted while hidden. The URL hash is `#/<id>`.
 registerSection(id, { label, order, badge?: true, mount(el, ctx) -> { show?(), hide?(), focus?(), ... } })
 showSection(id)            // returns the section's handle
 sectionHandle(id)          // the handle, mounting the section hidden if needed
+showPillAt(index)          // open the titlebar pill at index (0-based) as a click would; false past the last. app.js binds ⌘1–⌘9 / Ctrl+1–9 to it
+pillShortcut(index)        // "⌘3" / "Ctrl+3", shown in each pill's tooltip and aria-keyshortcuts; "" past nine
 setSectionBadge(id, count) // amber count on the pill; 0 hides it
 onSectionChange(fn)
 ```
