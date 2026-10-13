@@ -437,7 +437,10 @@ export function mountProjects(root) {
       header.append(back, title, host, spacer);
       const knobsBtn = el("button", "pj-btn", "Knobs");
       knobsBtn.addEventListener("click", () => openKnobs(state.detail));
-      header.append(knobsBtn, launch);
+      // Ask phren about this project from its memory, without tools.
+      const chat = el("button", "pj-btn", "Quick chat");
+      chat.addEventListener("click", () => openLaunchSheet({ chat: true, project: state.detail.name, computer: state.detail.computer, title: `Quick chat about ${state.detail.name}` }));
+      header.append(knobsBtn, chat, launch);
       return;
     }
     const title = el("h1", "pj-title", "Projects");

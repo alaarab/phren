@@ -818,3 +818,46 @@ test("a session continues in another agent from the sidebar menu", async ({ page
   expect(moves[0]).toMatchObject({ target: { session: "sess-fix-login" }, to: { harness: "codex" } });
   await expect(sheet.locator(".launch-status")).toHaveText("Moved", { timeout: 10_000 });
 });
+
+test("Quick chat starts phren's agent in chat mode on the project", async ({ page }) => {
+  await page.route("**/v1/health", (route) => route.fulfill({ json: { version: "0.3.45", capabilities: { quickChat: true } } }));
+  await page.route("**/v1/dispatch/capacity", (route) => route.fulfill({ status: 404, json: { error: "not here" } }));
+  await page.route("**/v1/harnesses", (route) => route.fulfill({ json: { harnesses: [
+    { source: "claude", installed: true, usable: true }, { source: "codex", installed: true, usable: true }, { source: "phren", installed: true, usable: true },
+  ] } }));
+  const launches: Array<Record<string, unknown>> = [];
+  await page.route("**/v1/workspaces/launch", async (route) => {
+    launches.push(route.request().postDataJSON());
+    await route.fulfill({ status: 500, json: { error: "stopped by the test" } });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator(".section-pill", { hasText: "Projects" }).click();
+  await page.locator(".pj-card", { hasText: "phren" }).first().click();
+  await page.getByRole("button", { name: "Quick chat" }).click();
+  const sheet = page.locator(".launch-sheet");
+  await expect(sheet.locator(".launch-title")).toHaveText("Quick chat about phren");
+  const fieldNamed = (name: string) => sheet.locator(".launch-field").filter({ has: page.locator(".launch-label", { hasText: new RegExp(`^${name}$`) }) });
+  await expect(fieldNamed("Harness").locator(".launch-seg")).toHaveText(["Phren"]);
+  await expect(fieldNamed("Role")).toBeHidden();
+  const go = sheet.getByRole("button", { name: "Start quick chat" });
+  await expect(go).toBeEnabled();
+  await page.waitForTimeout(200);
+  await sheet.screenshot({ path: test.info().outputPath("desktop-quick-chat.png") });
+  await go.click();
+  await expect.poll(() => launches.length).toBe(1);
+  expect(launches[0]).toMatchObject({ kind: "phren", mode: "chat", project: "phren" });
+});
+
+test("Quick chat stays off on a Hook without it", async ({ page }) => {
+  await page.route("**/v1/health", (route) => route.fulfill({ json: { version: "0.3.20", capabilities: {} } }));
+  await page.route("**/v1/harnesses", (route) => route.fulfill({ json: { harnesses: [{ source: "phren", installed: true, usable: true }] } }));
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator("#needs-pill").waitFor();
+  await page.keyboard.press("Meta+k");
+  await page.keyboard.type(">quick chat");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".launch-sheet .launch-title")).toHaveText("Quick chat");
+  await page.locator(".launch-input").first().fill("phren");
+  await expect(page.locator(".launch-sheet").getByRole("button", { name: "Start quick chat" })).toBeDisabled();
+  await expect(page.locator(".launch-sheet .launch-error")).toContainText("older than quick chat");
+});
