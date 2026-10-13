@@ -70,9 +70,9 @@ export function mountHome(root, { openSession, openPulls } = {}) {
         <p class="home-keys">Up/Down select &middot; <kbd>Enter</kbd> approve &middot; <kbd>P</kbd> allow for this project &middot; <kbd>D</kbd> deny &middot; <kbd>O</kbd> open</p>
         <div class="home-list"></div>
       </section>
-      <section class="home-block" data-block="away" hidden>
-        <h2 class="section-label">Since you left <span class="count"></span><span class="home-away-for"></span></h2>
-        <button class="home-away-dismiss" type="button">Dismiss</button>
+      <section class="home-block" data-block="finished">
+        <h2 class="section-label">Finished <span class="count"></span><span class="home-away-for"></span></h2>
+        <button class="home-away-dismiss" type="button" hidden>Dismiss</button>
         <div class="home-list"></div>
       </section>
       <section class="home-block" data-block="working">
@@ -82,10 +82,6 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       <section class="home-block" data-block="checks" hidden>
         <h2 class="section-label">Checks <span class="count"></span></h2>
         <div class="home-checks"></div>
-      </section>
-      <section class="home-block" data-block="returns">
-        <h2 class="section-label">Recent returns <span class="count"></span></h2>
-        <div class="home-list"></div>
       </section>
       <section class="home-block" data-block="computers">
         <h2 class="section-label">Computers <span class="count"></span></h2>
@@ -230,12 +226,28 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   // ---- since you left -------------------------------------------------
 
   const NOW_WORD = { working: "working again", waiting: "waiting", blocked: "blocked" };
-  function renderAway() {
-    const scope = block("away");
+  // One "Finished" block (pitch): what ended while you were away first (turns
+  // and checks, until dismissed), then worker returns and scheduled runs.
+  let awayRows = [];
+  let returnRows = [];
+  let returnTotal = 0;
+  function renderFinished() {
+    const scope = block("finished");
     const summary = away.current();
-    scope.hidden = !summary;
-    if (!summary) return;
-    scope.querySelector(".home-away-for").textContent = ` · away ${age(new Date(summary.since).toISOString())}`;
+    scope.querySelector(".home-away-for").textContent = summary ? ` · away ${age(new Date(summary.since).toISOString())}` : "";
+    scope.querySelector(".home-away-dismiss").hidden = !summary;
+    fill("finished", [...awayRows, ...returnRows], "Nothing finished yet.");
+    scope.querySelector(".count").textContent = awayRows.length + returnTotal ? String(awayRows.length + returnTotal) : "";
+    if (returnTotal > MAX_RETURNS) {
+      const more = el("button", "home-more", `All ${returnTotal} returns in Review`);
+      more.addEventListener("click", () => showSection("review"));
+      scope.querySelector(".home-list").append(more);
+    }
+  }
+
+  function renderAway() {
+    const summary = away.current();
+    if (!summary) { awayRows = []; renderFinished(); return; }
     const checkRows = (summary.checks ?? []).map((pull) => {
       const failed = pull.checks === "failing";
       const shell = rowShell({ tone: failed ? "failed" : "done" });
@@ -248,7 +260,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       shell.button.addEventListener("click", () => openPrs(pull.computer, store.find(pull.computer, pull.child.id)?.child ?? pull.child));
       return shell.button;
     });
-    fill("away", [...checkRows, ...summary.rows.map((entry) => {
+    awayRows = [...checkRows, ...summary.rows.map((entry) => {
       // The row as it is now, when the session is still there.
       const live = store.find(entry.computer, entry.child.id);
       const child = live?.child ?? entry.child;
@@ -263,9 +275,10 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       shell.button.disabled = !live;
       shell.button.addEventListener("click", () => { if (live) open(entry.computer, live.child); });
       return shell.button;
-    })], "");
+    })];
+    renderFinished();
   }
-  block("away").querySelector(".home-away-dismiss").addEventListener("click", () => away.dismiss());
+  block("finished").querySelector(".home-away-dismiss").addEventListener("click", () => away.dismiss());
   const unsubscribeAway = away.subscribe(renderAway);
 
   // ---- recent returns -------------------------------------------------
@@ -368,13 +381,9 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     for (const list of receipts.values()) for (const entry of list) if (entry.receipt?.returned) rows.push({ kind: "return", at: String(entry.receipt.returned.at), entry });
     for (const list of runs.values()) for (const entry of list) rows.push({ kind: "run", at: entry.at, entry });
     rows.sort((a, b) => b.at.localeCompare(a.at));
-    fill("returns", rows.slice(0, MAX_RETURNS).map((row) => row.kind === "run" ? runRow(row.entry) : returnRow(row.entry)), "No returns yet.");
-    block("returns").querySelector(".count").textContent = rows.length ? String(rows.length) : "";
-    if (rows.length > MAX_RETURNS) {
-      const more = el("button", "home-more", `All ${rows.length} in Review`);
-      more.addEventListener("click", () => showSection("review"));
-      block("returns").querySelector(".home-list").append(more);
-    }
+    returnRows = rows.slice(0, MAX_RETURNS).map((row) => row.kind === "run" ? runRow(row.entry) : returnRow(row.entry));
+    returnTotal = rows.length;
+    renderFinished();
   }
 
   // ---- computers ------------------------------------------------------

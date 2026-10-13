@@ -544,7 +544,7 @@ test("Home lists the turns that ended since you left", async ({ page }) => {
   await page.clock.fastForward(120_000);
   await page.evaluate(() => { document.hasFocus = () => true; window.dispatchEvent(new Event("focus")); });
 
-  const awayBlock = page.locator('[data-block="away"]');
+  const awayBlock = page.locator('[data-block="finished"]');
   await expect(awayBlock).toBeVisible();
   await expect(awayBlock.locator(".home-away-for")).toHaveText(" · away 2m");
   const row = awayBlock.locator(".home-row", { hasText: "Fix login" });
@@ -557,7 +557,8 @@ test("Home lists the turns that ended since you left", async ({ page }) => {
   await expect(page.locator(".doc-tab.selected")).toContainText("Fix login");
   await page.locator('.section-pill[data-section="home"]').click();
   await awayBlock.locator(".home-away-dismiss").click();
-  await expect(awayBlock).toBeHidden();
+  await expect(awayBlock.locator(".home-away-dismiss")).toBeHidden();
+  await expect(awayBlock.locator(".home-row", { hasText: "Fix login" })).toHaveCount(0);
   hook.pushOverview(overview);
 });
 
@@ -742,7 +743,7 @@ test("Since you left lists pull requests whose checks settled while away", async
   await page.clock.fastForward(121_000);
   await expect(page.locator(".home-check.failing", { hasText: "#42" })).toBeVisible();
   await page.evaluate(() => { document.hasFocus = () => true; window.dispatchEvent(new Event("focus")); });
-  const awayBlock = page.locator('[data-block="away"]');
+  const awayBlock = page.locator('[data-block="finished"]');
   const row = awayBlock.locator(".home-row", { hasText: "#42 Keep the session through the guard" });
   await expect(row).toContainText("checks failed");
   await page.waitForTimeout(300);
