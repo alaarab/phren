@@ -6,6 +6,7 @@ import { hookGet, hookPost, targetQuery } from "../api.js";
 import { needsYou, projectOf, sessions, store } from "../shell/store.js";
 import { showSection } from "../shell/sections.js";
 import { checksStrip, followChecks } from "../shell/ci-watch.js";
+import { checksWord } from "../git-review.js";
 import { away } from "../shell/away.js";
 import { hookDrift, hookVersion, updateCommand } from "../shell/hook-drift.js";
 import { stallLabel, stalledMinutes } from "../shell/stalls.js";
@@ -24,7 +25,6 @@ function loadSeen() {
 function saveSeen(seen) {
   try { localStorage.setItem(SEEN_KEY, JSON.stringify([...seen].slice(-1000))); } catch { /* private window */ }
 }
-const CHECKS_WORD = { failing: "Failing", pending: "Running", passing: "Passing" };
 const RETURN_STATE = { "done": "done", "needs-you": "needs you", "failed": "failed", "blocked": "blocked", "gone": "gone", "stalled": "stalled" };
 
 function el(tag, cls, text) {
@@ -237,11 +237,11 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     scope.querySelector(".home-away-for").textContent = ` · away ${age(new Date(summary.since).toISOString())}`;
     const checkRows = (summary.checks ?? []).map((pull) => {
       const failed = pull.checks === "failing";
-      const shell = rowShell({ tone: failed ? "waiting" : "done" });
+      const shell = rowShell({ tone: failed ? "failed" : "done" });
       shell.title.textContent = `${pull.ref}${pull.number} ${pull.title}`;
       const meta = el("span", "home-row-meta");
       meta.append(el("span", "home-project", pull.project), el("span", "home-host", pull.computer),
-        el("span", failed ? "home-why" : "home-passed", failed ? "checks failed" : "checks passed"),
+        el("span", failed ? "home-failed" : "home-passed", failed ? "checks failed" : "checks passed"),
         el("span", "home-age", age(new Date(pull.at).toISOString())));
       shell.button.append(meta);
       shell.button.addEventListener("click", () => openPrs(pull.computer, store.find(pull.computer, pull.child.id)?.child ?? pull.child));
@@ -279,7 +279,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     scope.querySelector(".count").textContent = list.length ? String(list.length) : "";
     scope.querySelector(".home-checks").replaceChildren(...list.map((pull) => {
       const chip = el("button", `home-check ${pull.checks || "none"}`);
-      chip.title = `${CHECKS_WORD[pull.checks] ?? "No checks"} · ${pull.ref}${pull.number} ${pull.title} · ${pull.computer}`;
+      chip.title = `${checksWord(pull.checks) || "No checks"} · ${pull.ref}${pull.number} ${pull.title} · ${pull.computer}`;
       chip.append(el("span", "home-check-dot"), el("span", "home-check-ref", `${pull.ref}${pull.number}`),
         el("span", "home-check-title", pull.title), el("span", "home-project", pull.project));
       chip.addEventListener("click", () => openPrs(pull.computer, store.find(pull.computer, pull.child.id)?.child ?? pull.child));

@@ -7,7 +7,7 @@ import { extractKnowsBlock } from "../chat/knows.js";
 import { hookGet, hookPost } from "../api.js";
 import { hostMark } from "../changes.js";
 import { loadBranchTasks, renderBranchTasks } from "../branch-tasks.js";
-import { capitalize, fixItPrompt, hostTerms } from "../git-review.js";
+import { capitalize, checksWord, fixItPrompt, hostTerms } from "../git-review.js";
 import { openLaunchSheet } from "../shell/launch.js";
 import { projectOf, sessions as allSessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
@@ -705,7 +705,7 @@ export function mountProjects(root) {
 
   function checksPill(checks) {
     if (!["passing", "failing", "pending"].includes(checks)) return "";
-    return el("span", `pj-checks ${checks}`, { passing: "Checks pass", failing: "Checks fail", pending: "Checks running" }[checks]);
+    return el("span", `pj-checks ${checks}`, checksWord(checks));
   }
 
   function sessionRow(row) {
