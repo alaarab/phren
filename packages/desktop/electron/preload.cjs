@@ -8,5 +8,7 @@ contextBridge.exposeInMainWorld("phrenDesktop", {
   setSummonKey: (accel) => ipcRenderer.invoke("phren:summon-key", String(accel ?? "")),
   onSummon: (fn) => ipcRenderer.on("phren:summon", () => fn()),
   setTray: (state) => ipcRenderer.send("phren:tray", state),
+  onUpdate: (fn) => ipcRenderer.on("phren:update", (_event, state) => fn(state)),
+  updateAction: (kind) => ipcRenderer.send("phren:update-action", String(kind)),
   onOpenSession: (fn) => ipcRenderer.on("phren:open-session", (_event, key) => fn(String(key))),
 });

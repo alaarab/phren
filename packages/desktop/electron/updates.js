@@ -3,7 +3,9 @@
 // publishes there. The AppImage and the Windows (NSIS) install download an
 // update and install it on restart. macOS installs
 // only an update signed with a Developer ID (Squirrel.Mac checks), so an
-// unsigned build offers the release page instead.
+// unsigned build offers the release page instead. With a window open the
+// offer is the titlebar's update chip (`showInUi`), with the release notes
+// (packages/desktop/CHANGELOG.md's section) as What's new; without one, a dialog.
 import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -22,7 +24,27 @@ function developerIdSigned() {
   });
 }
 
-export async function startUpdates({ app, dialog, shell, parentWindow }) {
+/** The release notes as plain lines: electron-updater hands over the GitHub
+ * release body as HTML (or a list of notes); tags, the install line and blanks go. */
+export function noteLines(notes) {
+  const text = Array.isArray(notes) ? notes.map((n) => n?.note ?? "").join("\n") : String(notes ?? "");
+  return text
+    .replace(/<li[^>]*>/gi, "\n- ")
+    .replace(/<\/(p|li|h\d|ul|ol)>|<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !/^Install:/i.test(line))
+    .slice(0, 12);
+}
+
+let applyUpdate = () => {};
+
+/** The update chip's button: "restart" installs a downloaded update, "download" opens the release page. */
+export function runUpdateAction(kind) { applyUpdate(kind); }
+
+export async function startUpdates({ app, dialog, shell, parentWindow, showInUi = () => false }) {
   if (!app.isPackaged || process.env.PHREN_DESKTOP_UPDATES === "off") return;
   if (process.platform === "linux" && !process.env.APPIMAGE) return;
   if (!["linux", "darwin", "win32"].includes(process.platform)) return;
@@ -32,6 +54,10 @@ export async function startUpdates({ app, dialog, shell, parentWindow }) {
   autoUpdater.autoDownload = install;
   autoUpdater.autoInstallOnAppQuit = install;
   let offered = null;
+  applyUpdate = (kind) => {
+    if (kind === "restart" && install) autoUpdater.quitAndInstall();
+    else if (kind === "download") shell.openExternal(RELEASES);
+  };
 
   const ask = (options) => {
     const win = parentWindow();
@@ -41,6 +67,7 @@ export async function startUpdates({ app, dialog, shell, parentWindow }) {
   autoUpdater.on("update-available", async (info) => {
     if (install || offered === info.version) return;
     offered = info.version;
+    if (showInUi({ version: info.version, current: app.getVersion(), notes: noteLines(info.releaseNotes), action: "download" })) return;
     const { response } = await ask({
       type: "info",
       message: `Phren ${info.version} is available`,
@@ -54,6 +81,7 @@ export async function startUpdates({ app, dialog, shell, parentWindow }) {
   autoUpdater.on("update-downloaded", async (info) => {
     if (offered === info.version) return;
     offered = info.version;
+    if (showInUi({ version: info.version, current: app.getVersion(), notes: noteLines(info.releaseNotes), action: "restart" })) return;
     const { response } = await ask({
       type: "info",
       message: `Phren ${info.version} is ready`,

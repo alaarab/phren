@@ -26,6 +26,7 @@ import { startSummon } from "./shell/summon.js";
 import { startTray } from "./shell/tray.js";
 import { startNeedsNotify } from "./shell/needs-notify.js";
 import { startAway } from "./shell/away.js";
+import { startUpdateChip } from "./shell/update-chip.js";
 
 // The Electron shell exposes window.phrenDesktop; in a browser it is absent.
 const shell = window.phrenDesktop;
@@ -93,6 +94,7 @@ startNeedsNotify(shell, { enabled: notifyEnabled, openSession });
 startTray(shell);
 
 startAway();
+startUpdateChip(shell, document.getElementById("usage-rings"));
 connectStore();
 // Mount Agents first (keys.js binds to its sidebar), then open the section the
 // URL names, else Home: the window opens on what needs you.
