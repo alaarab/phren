@@ -609,6 +609,12 @@ export function mountAgents(root) {
 
   return {
     openSession,
+    /** Open a session with its Changes pane on pull requests and checks. */
+    openPulls(computer, child) {
+      openSession(computer, child);
+      showPane("changes");
+      bench.handles.changes?.showView?.("pulls");
+    },
     showPane,
     closePanel,
     closeTab: closeActiveTab,

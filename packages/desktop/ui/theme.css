@@ -218,6 +218,19 @@ button.home-row:hover { background: var(--card); }
 .home-why { color: var(--waiting); }
 .home-computer.state-online .home-row-meta { color: var(--done); }
 .home-empty { padding: 10px 12px; color: var(--muted); }
+/* Checks: the open pull requests of working and recent sessions, failing first. */
+.home-checks { display: flex; flex-wrap: wrap; gap: 6px; }
+.home-check { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; min-height: 32px; padding: 4px 12px 4px 10px; border: 0; border-radius: 999px; background: var(--surface); color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; }
+.home-check:hover { background: var(--card); }
+.home-check-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+.home-check.failing { box-shadow: inset 0 0 0 1px rgba(239,152,152,0.45); }
+.home-check.failing .home-check-dot { background: var(--danger); }
+.home-check.pending .home-check-dot { background: var(--waiting); animation: home-check-pulse 1.6s ease-in-out infinite; }
+.home-check.passing .home-check-dot { background: var(--done); }
+.home-check-ref { flex: none; color: var(--muted); font-family: var(--mono); }
+.home-check-title { min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes home-check-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .home-check.pending .home-check-dot { animation: none; } }
 
 /* Capability gate: a control or pane whose Hook is too old to serve it. */
 .gate-note { display: flex; align-items: center; gap: 8px; padding: 12px; background: rgba(224,188,127,0.14); color: var(--waiting); font: 12.5px system-ui; }

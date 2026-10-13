@@ -1,7 +1,8 @@
 // CI watch: a native notification when the pull request of a session's branch
-// turns failing or passing. One /v1/git/pulls per repository every two
-// minutes, only for sessions working now or active in the last two hours.
-// Plain browser ES module.
+// turns failing or passing, and the last look for Home's Checks strip. One
+// /v1/git/pulls per repository every two minutes, only for sessions working
+// now or active in the last two hours, and only while notifications are on or
+// a view is showing the strip. Plain browser ES module.
 
 import { hookPost } from "../api.js";
 import { projectOf, store } from "./store.js";
@@ -22,7 +23,7 @@ export function watchedSessions(rows, now = Date.now()) {
     if (!project || seen.has(key)) continue;
     if (row.child.agentStatus !== "working" && now - recent(row) > ACTIVE_MS) continue;
     seen.add(key);
-    picked.push({ key, computer: row.computer, project, target: row.child.target });
+    picked.push({ key, computer: row.computer, project, target: row.child.target, child: row.child });
     if (picked.length === MAX_WATCHED) break;
   }
   return picked;
@@ -40,16 +41,49 @@ export function ciTransitions(previous, current) {
   return settled;
 }
 
-/** Start watching; `notify(title, body)` is the shell's, `enabled()` the setting. */
+// Which sessions are watched, regardless of their recency order.
+const keysOf = (watched) => watched.map((w) => w.key).sort().join("\n");
+
+const CHECK_ORDER = { failing: 0, pending: 1, passing: 2 };
+
+/** The open requests of the last look, failing first, then running, then
+ *  passing, then those with no checks; newest number first within each. */
+export function checksStrip(pulls) {
+  const rank = (pull) => CHECK_ORDER[pull.checks] ?? 3;
+  return [...pulls].sort((a, b) => rank(a) - rank(b) || b.number - a.number);
+}
+
+// The last look, shared with Home; `null` until the first tick finishes.
+let lastLook = null;
+const listeners = new Set();
+let interest = 0;
+let wake = null;
+
+/** Follow the last look: `fn(pulls)` now and after each tick. While anyone
+ *  follows, the watch polls even with notifications off. Returns the stop. */
+export function followChecks(fn) {
+  listeners.add(fn);
+  interest += 1;
+  fn(lastLook);
+  wake?.();
+  return () => { if (listeners.delete(fn)) interest -= 1; };
+}
+
+/** Start watching; `notify(title, body)` is the shell's (absent in a browser),
+ *  `enabled()` the notification setting. */
 export function startCiWatch({ notify, enabled }) {
   let previous = new Map();
   let running = false;
+  let watchedKeys = "";
+  const notifying = () => !!notify && enabled();
   async function tick() {
-    if (running || !enabled()) return;
+    if (running || !(notifying() || interest > 0)) return;
     running = true;
     try {
       const current = new Map();
-      await Promise.all(watchedSessions(store.sessions()).map(async (w) => {
+      const watched = watchedSessions(store.sessions());
+      watchedKeys = keysOf(watched);
+      await Promise.all(watched.map(async (w) => {
         const body = await hookPost(w.computer, "/v1/git/pulls", { target: w.target }).catch(() => null);
         // A failed read keeps what was known, so a passing blip never re-announces.
         if (!body) { for (const [key, known] of previous) if (known.key === w.key) current.set(key, known); return; }
@@ -58,15 +92,22 @@ export function startCiWatch({ notify, enabled }) {
         current.set(`${w.key}\u0000${pull.number}`, { ...w, number: pull.number, title: pull.title || "", checks: pull.checks ?? null,
           ref: body.host?.terms?.ref || "#" });
       }));
-      for (const pull of ciTransitions(previous, current)) {
+      if (notifying()) for (const pull of ciTransitions(previous, current)) {
         notify(`${pull.project}: checks ${pull.checks === "failing" ? "failed" : "passed"}`, `${pull.ref}${pull.number} ${pull.title} · ${pull.computer}`);
       }
       previous = current;
+      lastLook = [...current.values()];
+      for (const fn of listeners) fn(lastLook);
     } finally {
       running = false;
     }
   }
   const timer = setInterval(() => { void tick(); }, CI_WATCH_MS);
+  // Look early when the watched sessions change (the first look usually runs
+  // before the overview has arrived) or a first follower arrives.
+  const changed = () => keysOf(watchedSessions(store.sessions())) !== watchedKeys;
+  wake = () => { if (lastLook === null || changed()) void tick(); };
+  const unsubscribe = store.subscribe(() => { if (changed()) void tick(); });
   void tick();
-  return { stop() { clearInterval(timer); } };
+  return { stop() { clearInterval(timer); unsubscribe(); wake = null; } };
 }
