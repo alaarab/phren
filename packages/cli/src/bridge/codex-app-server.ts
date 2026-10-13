@@ -122,6 +122,12 @@ export interface SpawnAppServerOptions {
   scope?: string;
 }
 
+/** This codex build cannot listen on a unix socket (0.113 accepts only stdio://
+ * and ws://). Typing into the pane still works, so callers treat it as "no
+ * app-server here", not as a failure to report on every launch. */
+export class AppServerUnsupportedError extends Error {}
+const unixListenUnsupported = new Map<string, string>();
+
 /** Start one `codex app-server --listen unix://<socketPath>` and wait until its
  * socket accepts WebSocket connections. The server is the worker's; `stop()`
  * is the only owner. Extra `env` is layered over the current process's. */
@@ -129,6 +135,8 @@ export async function spawnAppServer(options: SpawnAppServerOptions): Promise<Ap
   const env = { ...(options.replaceEnv ? {} : process.env), ...(options.env ?? {}), ...(options.codexHome ? { CODEX_HOME: options.codexHome } : {}) };
   // The merged environment's PATH, so a caller's partial `env` still finds codex.
   const codexBin = options.codexBin ?? codexExecutable(env);
+  const known = unixListenUnsupported.get(codexBin);
+  if (known) throw new AppServerUnsupportedError(known);
   await mkdir(path.dirname(options.socketPath), { recursive: true, mode: 0o700 });
   // A socket file left by a dead server would pass the stat below and block the bind.
   await rm(options.socketPath, { force: true });
@@ -160,6 +168,12 @@ export async function spawnAppServer(options: SpawnAppServerOptions): Promise<Ap
   while (true) {
     if (failure) throw new Error(`codex app-server could not start: ${failure.message}`);
     if (child.exitCode !== null || child.signalCode !== null) {
+      const detail = await why();
+      if (/unsupported --listen URL/.test(detail)) {
+        const message = `this codex build cannot listen on a unix socket (needs a newer codex)${detail}`;
+        unixListenUnsupported.set(codexBin, message);
+        throw new AppServerUnsupportedError(message);
+      }
       throw new Error(`codex app-server exited before ${options.socketPath} was ready (${child.exitCode ?? child.signalCode})${await why()}`);
     }
     if (await socketAccepts(options.socketPath)) break;

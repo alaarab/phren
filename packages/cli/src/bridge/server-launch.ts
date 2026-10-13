@@ -23,7 +23,7 @@ import { pickClaudeAccount } from "./account-choice.js";
 import { harnessInventoryWithin, hasUsable, launchCheckOff, type HarnessInventory } from "./harnesses.js";
 import { paneAccountKey, recordPaneAccount } from "./pane-accounts.js";
 import { optionalHookPeers } from "./peers.js";
-import { AppServerRpcError } from "./codex-app-server.js";
+import { AppServerRpcError, AppServerUnsupportedError } from "./codex-app-server.js";
 import { codexAppServerEnabled, codexServers } from "./codex-servers.js";
 import { logger } from "../logger.js";
 import { JobRegistry } from "./job-registry.js";
@@ -439,7 +439,8 @@ async function startSession(server: string, data: Json, options: LaunchOptions):
   const structuredLaunch = structured ? await codexServers.launch({ server, ...place }, { cwd, ...(model ? { model } : {}),
     ...(data.effort === undefined ? {} : { effort }), env: { ...(terminalProvider().paneEnv?.(server, place) ?? {}), ...(env ?? {}) },
     ...(brief ? { dispatchId: brief.id } : {}), startThread: !!brief, ...(permissionMode ? { remoteArgs: codexModeFlags(permissionMode) } : {}) }).catch(error => {
-    logger.warn("launch", `Codex app-server unavailable, typing instead: ${error instanceof Error ? error.message : String(error)}`);
+    const note = `Codex app-server unavailable, typing instead: ${error instanceof Error ? error.message : String(error)}`;
+    if (error instanceof AppServerUnsupportedError) logger.debug("launch", note); else logger.warn("launch", note);
     return undefined;
   }) : undefined;
   const appServer = structuredLaunch?.entry;
