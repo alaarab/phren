@@ -1,4 +1,4 @@
-// Settings › Notifications: what notifies, quiet hours and the menu bar icon.
+// Settings › Notifications: what notifies, quiet hours, and where the needs-you count shows.
 import { quietSettings, saveQuietSettings } from "../../shell/quiet.js";
 import { setTrayEnabled, trayAvailable, trayEnabled } from "../../shell/tray.js";
 import { el, heading, toggleRow } from "./ui.js";
@@ -8,17 +8,23 @@ import { BADGE_KEY, CI_KEY, NOTIFY_KEY, STALL_KEY, badgeEnabled, ciNotifyEnabled
 
 export function buildNotifications(page) {
   const [head] = heading("Notifications");
-  const list = el("div", "settings-list");
-  list.append(toggleRow("Notify when an agent needs me", notifyEnabled(), (on) => writeFlag(NOTIFY_KEY, on)));
-  list.append(toggleRow("Show the needs-you count on the dock icon", badgeEnabled(), (on) => writeFlag(BADGE_KEY, on)));
-  list.append(toggleRow("Notify when a session's pull request checks pass or fail", ciNotifyEnabled(), (on) => writeFlag(CI_KEY, on)));
-  list.append(toggleRow("Notify when an agent stalls", stallNotifyEnabled(), (on) => writeFlag(STALL_KEY, on)));
-  list.append(quietRow());
+  // Three groups: what notifies, when it stays quiet, and where the needs-you count shows.
+  const notify = el("div", "settings-list");
+  notify.append(toggleRow("An agent needs me", notifyEnabled(), (on) => writeFlag(NOTIFY_KEY, on)));
+  notify.append(toggleRow("An agent stalls", stallNotifyEnabled(), (on) => writeFlag(STALL_KEY, on)));
+  notify.append(toggleRow("A session's pull request checks pass or fail", ciNotifyEnabled(), (on) => writeFlag(CI_KEY, on)));
+  const quiet = el("div", "settings-list");
+  quiet.append(quietRow());
+  const show = el("div", "settings-list");
+  show.append(toggleRow("On the dock icon", badgeEnabled(), (on) => writeFlag(BADGE_KEY, on)));
   if (trayAvailable()) {
     const where = window.phrenDesktop.platform === "darwin" ? "menu bar" : "system tray";
-    list.append(toggleRow(`Show who needs you in the ${where}`, trayEnabled(), setTrayEnabled));
+    show.append(toggleRow(`In the ${where}, with who it is`, trayEnabled(), setTrayEnabled));
   }
-  page.append(head, list);
+  page.append(head,
+    el("div", "settings-group-label", "Notify me when"), notify,
+    el("div", "settings-group-label", "Quiet hours"), quiet,
+    el("div", "settings-group-label", "Show the needs-you count"), show);
   return null;
 }
 
@@ -28,7 +34,7 @@ function quietRow() {
   const q = quietSettings();
   const wrap = el("div", "settings-quiet");
   const times = el("div", `settings-quiet-times${q.on ? "" : " off"}`);
-  const toggle = toggleRow("Quiet hours: no notifications", q.on, (on) => { saveQuietSettings({ on }); times.classList.toggle("off", !on); });
+  const toggle = toggleRow("No notifications during these hours", q.on, (on) => { saveQuietSettings({ on }); times.classList.toggle("off", !on); });
   const time = (value, label, key) => {
     const field = document.createElement("input");
     field.type = "time";
