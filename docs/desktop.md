@@ -151,7 +151,9 @@ finished meanwhile and the pull requests whose checks passed or failed. Home's C
 one older than the newest seen, with its update command to copy. A working
 session that has shown no output for five minutes reads "stalled" on Home and
 in the sidebar, with a notification. Settings › Notifications sets quiet
-hours, when no notifications are shown (the badge and the menu bar still count). The launch sheet
+hours, when no notifications are shown (the badge and the menu bar still count).
+A session's sidebar menu has Continue in…, which hands it to another harness or
+Claude account in the same pane with a written hand-off (Hook `sessionMove`). The launch sheet
 ("+ New agent") recommends a computer from its load and account quota.
 
 ## Chats, consoles and tiles
