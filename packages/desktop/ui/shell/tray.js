@@ -1,0 +1,59 @@
+// The menu bar (tray) icon: the Electron shell draws it, this module feeds it
+// the sessions that need you and opens the one chosen from its menu. On a Mac,
+// closing the window while the icon is on only hides it, so this keeps running.
+import { store } from "./store.js";
+
+const KEY = "phren.desktop.tray";
+const MAX_ROWS = 12;
+
+export function trayEnabled() {
+  try { return localStorage.getItem(KEY) !== "0"; } catch { return true; }
+}
+
+/** Why a row needs you, in the words of its menu line. */
+function reason(child) {
+  if (child.approvalPending) return "wants approval";
+  if (child.agentStatus === "blocked") return "is blocked";
+  return "is waiting for you";
+}
+
+/** What the shell draws: up to twelve rows (oldest first, as store.needsYou()
+ * lists them) and how many more there are. */
+export function trayState(rows, enabled) {
+  if (!enabled) return { enabled: false };
+  const shown = rows.slice(0, MAX_ROWS).map(({ key, computer, child }) => {
+    const project = (child.cwd ?? "").split("/").filter(Boolean).pop() ?? child.label ?? "";
+    const name = child.title ?? child.label ?? "Session";
+    return { key, title: project && project !== name ? `${project}: ${name}` : name, sub: `${computer} · ${reason(child)}` };
+  });
+  return { enabled: true, rows: shown, more: Math.max(0, rows.length - shown.length) };
+}
+
+let push = () => {};
+
+/** Turn the icon on or off from Settings. */
+export function setTrayEnabled(on) {
+  try { localStorage.setItem(KEY, on ? "1" : "0"); } catch { /* private window: this session only */ }
+  push();
+}
+
+/** Whether this window has a shell that can draw the icon (Electron, not a browser). */
+export function trayAvailable() { return !!window.phrenDesktop?.setTray; }
+
+export function startTray(shell, openSession) {
+  if (!shell?.setTray || !shell.onOpenSession) return;
+  let last = "";
+  push = () => {
+    const state = trayState(store.needsYou(), trayEnabled());
+    const json = JSON.stringify(state);
+    if (json === last) return;
+    last = json;
+    shell.setTray(state);
+  };
+  store.subscribe(push);
+  push();
+  shell.onOpenSession((key) => {
+    const row = store.sessions().find((s) => s.key === key);
+    if (row) openSession(row.computer, row.child);
+  });
+}

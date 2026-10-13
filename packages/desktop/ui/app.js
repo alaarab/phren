@@ -23,6 +23,7 @@ import { startCiWatch } from "./shell/ci-watch.js";
 import { startMergeWhenGreen } from "./shell/merge-when-green.js";
 import { mountUsageRings } from "./shell/usage-rings.js";
 import { startSummon } from "./shell/summon.js";
+import { startTray } from "./shell/tray.js";
 
 // The Electron shell exposes window.phrenDesktop; in a browser it is absent.
 const shell = window.phrenDesktop;
@@ -94,6 +95,7 @@ store.subscribe(() => {
 startCiWatch({ notify: shell ? (title, body) => shell.notify(title, body) : null, enabled: () => notifyEnabled() && ciNotifyEnabled() });
 startMergeWhenGreen({ notify: shell ? (title, body) => shell.notify(title, body) : null });
 startSummon(shell);
+startTray(shell, (computer, child) => { showSection("agents"); agents().openSession(computer, child); });
 
 connectStore();
 // Mount Agents first (keys.js binds to its sidebar), then open the section the
