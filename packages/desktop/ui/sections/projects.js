@@ -6,6 +6,7 @@
 import { extractKnowsBlock } from "../chat/knows.js";
 import { hookGet, hookPost } from "../api.js";
 import { hostMark } from "../changes.js";
+import { loadBranchTasks, renderBranchTasks } from "../branch-tasks.js";
 import { capitalize, hostTerms } from "../git-review.js";
 import { projectOf, sessions as allSessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
@@ -527,12 +528,21 @@ export function mountProjects(root) {
     renderDetail();
     try {
       project.forge = { data: await hookGet(detail.computer, `/v1/projects/${encodeURIComponent(project.name)}/git`) };
+      void loadForgeTasks(detail, project, project.forge);
     } catch (err) {
       const code = err?.body?.code;
       if (code === "no-checkout") project.forge = { missing: true };
       else if (err?.status === 404) project.forge = { hidden: true };
       else project.forge = { error: err?.message ?? String(err) };
     }
+    if (state.detail === detail) renderDetail();
+  }
+
+  /** The open tasks that name the checkout's branch, under the Code block. */
+  async function loadForgeTasks(detail, project, forge) {
+    const tasks = await loadBranchTasks(detail.computer, project.name, forge.data?.branch);
+    if (!tasks?.length || project.forge !== forge) return;
+    forge.tasks = { tasks, done: new Set(), busy: null, error: "" };
     if (state.detail === detail) renderDetail();
   }
 
@@ -651,6 +661,7 @@ export function mountProjects(root) {
     branch.append(el("span", "pj-chip pj-mono", res.branch || "detached"));
     if (res.current) branch.append(el("span", "pj-row-sub", `${terms.ref}${res.current.number} ${res.current.state === "OPEN" || !res.current.state ? "open" : String(res.current.state).toLowerCase()}`), checksPill(res.current.checks));
     list.append(branch);
+    if (forge.tasks) list.append(renderBranchTasks({ computer: state.detail.computer, project: project.name, branch: res.branch, state: forge.tasks, rerender: renderDetail }));
     if (res.available === false) {
       list.append(el("div", "pj-empty slim", res.message || `${capitalize(terms.long)}s are not available from this computer.`));
       return block;
