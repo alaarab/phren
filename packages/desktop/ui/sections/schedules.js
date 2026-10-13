@@ -792,6 +792,7 @@ export function mountSchedules(root) {
       account: schedule?.account,
       notify: schedule?.notify,
       projects: schedule?.projects,
+      session: schedule?.session,
       enabled: schedule?.enabled ?? true,
       every: schedule?.every ?? "daily",
       at: schedule?.at ?? "07:30",
@@ -856,6 +857,18 @@ export function mountSchedules(root) {
 
     const whenFields = el("div", "sch-field");
     body.append(whenFields);
+
+    // `session: reuse`: each firing goes to the schedule's last session while it is open and idle.
+    const sessionRow = el("div", "sch-field");
+    const sessionLabel = el("label", "sch-hint");
+    const sessionInput = document.createElement("input");
+    sessionInput.type = "checkbox";
+    sessionInput.checked = form.session === "reuse";
+    sessionInput.addEventListener("change", () => { form.session = sessionInput.checked ? "reuse" : undefined; refresh(); });
+    sessionLabel.append(sessionInput, document.createTextNode(" Continue the same session"));
+    sessionLabel.title = "Send each run to the session the last run used, while it is open and idle. A busy session skips the run; a closed one starts a new session.";
+    sessionRow.append(sessionLabel);
+    body.append(sessionRow);
 
     const enabledRow = el("div", "sch-field");
     const enabledLabel = el("label", "sch-hint");
@@ -996,6 +1009,7 @@ export function mountSchedules(root) {
     if (form.account) schedule.account = form.account;
     if (Array.isArray(form.projects) && form.projects.length) schedule.projects = form.projects;
     if (Array.isArray(form.notify) && form.notify.length) schedule.notify = form.notify;
+    if (form.session) schedule.session = form.session;
     if (form.every === "interval") schedule.interval = form.interval;
     else if (form.every === "daily") schedule.at = form.at;
     else if (form.every === "weekly") { schedule.at = form.at; schedule.days = form.days; }

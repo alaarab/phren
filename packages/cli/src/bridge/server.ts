@@ -165,7 +165,9 @@ export async function serve(version: string, options: { modelCatalog?: ModelCata
   const scheduler = modules.has("schedules") ? new Scheduler({ now: () => new Date(), store: scheduleStore, runsFile: scheduleRunsFile(),
     aliases: [computerID],
     // A schedule starts in its project's folder, which the Hook resolved itself.
-    launch: createScheduleLauncher((server, data) => launchSession(server, data, { trustFolder: true }), scheduleStore),
+    launch: createScheduleLauncher((server, data) => launchSession(server, data, { trustFolder: true }), scheduleStore,
+      // `session: reuse` continues a session through the same queue a hand-off takes.
+      (target, text, deliveryId) => handOffs ? handOffs.enqueue({ target, text, deliveryId }) : sendPrompt(target, text, deliveryId, async () => {})),
     push: { notify: value => agentHooks.push.notifySchedule(value) },
     locateProject: async project => (await locateProject(project, await journal.recent()))[0]?.directory }) : undefined;
   const fanoutMessages = new FanoutMessages({ ...process.env, PHREN_PATH: scheduleStore }, {

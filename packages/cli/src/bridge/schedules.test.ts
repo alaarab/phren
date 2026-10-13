@@ -17,6 +17,7 @@ import {
   resumeScheduleRun,
   readScheduleRuns,
   readScheduleDocument,
+  reusableLaunch,
   type ScheduleLaunchContext,
   scheduleSessionRoute,
   watchHerdrRun,
@@ -29,7 +30,8 @@ import {
   type StartupWatchEnv,
 } from "./schedules.js";
 import type { SchedulePush } from "./push.js";
-import { headlessEnv } from "./schedule-launch.js";
+import { continueSession, headlessEnv, type ScheduleDeliver } from "./schedule-launch.js";
+import type { Json, Target } from "./protocol.js";
 
 const originalTimezone = process.env.TZ;
 const temporary: string[] = [];
@@ -839,4 +841,83 @@ describe("multi-project schedules", () => {
     "rejects invalid target sets %#", ({ projects }) => {
       expect(() => parseSchedule({ ...schedule(), projects })).toThrow();
     });
+});
+
+describe("a schedule that continues its session", () => {
+  const session = "aaaaaaaa-1111-4111-8111-111111111111";
+  const earlier: ScheduleRun = { id: "run-earlier", scheduleId: "7f3a2c1d", project: "demo", scheduleProject: "demo", batchId: "b0",
+    startedAt: "2026-09-20T08:00:00.000Z", finishedAt: "2026-09-20T08:20:00.000Z", status: "finished",
+    launch: { mode: "herdr", server: "default", workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p1", sessionId: session } };
+  const pane = (status: string) => ({ workspace_id: "w1", tab_id: "w1:t1", pane_id: "w1:p1", agent: "codex", agent_status: status });
+
+  /** The Hook's launcher at its Herdr and hand-off edges: `panes` is what
+   * Herdr shows on each look, `deliveries` what reached the hand-off queue. */
+  async function fire(panes: Json[][], at = "2026-09-20T09:00:00.000Z") {
+    const fixture = await storeFixture(schedule({ every: "interval", at: undefined, interval: "1h", session: "reuse", createdAt: "2026-09-20T07:00:00.000Z" }));
+    await writeScheduleRuns(fixture.runs, [earlier]);
+    const deliveries: { target: Target; text: string }[] = [], fresh: ScheduleLaunchContext[] = [];
+    let look = 0, transcript = 100;
+    // The transcript grows only while the agent works on a turn.
+    const view = async () => {
+      const shown = panes[Math.min(look++, panes.length - 1)];
+      if (shown.some(item => item.agent_status === "working")) transcript += 50;
+      return shown;
+    };
+    const deliver: ScheduleDeliver = async (target, text, deliveryId) => {
+      deliveries.push({ target, text });
+      return { ok: true, delivered: true, deliveryId, state: "delivered", target };
+    };
+    const controller = new AbortController(); temporary.push(fixture.store);
+    const scheduler = new Scheduler({ now: () => new Date(at), store: fixture.store, runsFile: fixture.runs, computer: "desk",
+      launch: async context => {
+        const continued = context.reuse && await continueSession(context, context.reuse, deliver, controller.signal, {
+          panes: view, transcriptStamp: async () => ({ size: transcript, mtimeMs: 1 }),
+          watch: (server, target, signal, startup) => watchHerdrRun(server, target, signal, startup, {
+            pause: async () => {}, panes: view, transcriptStamp: async () => ({ size: transcript, mtimeMs: 1 }), finalTurn: async () => undefined }) });
+        if (continued) return continued;
+        fresh.push(context);
+        return { launch: { mode: "herdr", server: "default", workspaceId: "w2", tabId: "w2:t1", paneId: "w2:p1", sessionId: "bbbbbbbb-2222-4222-8222-222222222222" } };
+      } });
+    await scheduler.tick();
+    return { scheduler, deliveries, fresh, looks: () => look };
+  }
+
+  it("types the next firing into the live idle session and follows that turn to its end", async () => {
+    // Herdr still shows the old turn's idle right after the send, then the new turn working, then idle again.
+    const run = await fire([[pane("idle")], [pane("idle")], [pane("working")], [pane("idle")]]);
+    expect(run.fresh).toEqual([]);
+    expect(run.deliveries).toEqual([{ target: { server: "default", workspace: "w1", tab: "w1:t1", pane: "w1:p1", source: "codex", session }, text: "Run the tests." }]);
+    const finished = await waitForStatus(run.scheduler, "finished");
+    expect(finished).toMatchObject({ launch: { mode: "herdr", paneId: "w1:p1", sessionId: session, reused: true } });
+    expect(finished.id).not.toBe(earlier.id);
+    // Finished on the idle after the working turn, not the stale idle right after the send.
+    expect(run.looks()).toBe(4);
+  });
+
+  it("starts a new session when the old pane is gone, and the next firing continues that one", async () => {
+    const run = await fire([[]]);
+    expect(run.deliveries).toEqual([]);
+    expect(run.fresh).toHaveLength(1);
+    const history = await run.scheduler.history();
+    expect(history[0]).toMatchObject({ status: "running", launch: { paneId: "w2:p1" } });
+    expect(reusableLaunch([...history].reverse())).toMatchObject({ paneId: "w2:p1" });
+  });
+
+  it("skips a firing while the session is still working, sending nothing and starting nothing", async () => {
+    const run = await fire([[pane("working")]]);
+    expect(run.deliveries).toEqual([]);
+    expect(run.fresh).toEqual([]);
+    const [skipped] = await run.scheduler.history();
+    expect(skipped).toMatchObject({ status: "skipped", reason: "The session this schedule continues is still working, so this firing was skipped.",
+      launch: { paneId: "w1:p1", reused: true } });
+    // The occurrence is consumed: the next one is an hour on, not another try now.
+    await run.scheduler.tick();
+    expect(await run.scheduler.history()).toHaveLength(2);
+  });
+
+  it("keeps the session option through parsing and rejects an unknown one", () => {
+    expect(schedule({ session: "reuse" }).session).toBe("reuse");
+    expect(schedule().session).toBeUndefined();
+    expect(() => schedule({ session: "always" as never })).toThrow();
+  });
 });
