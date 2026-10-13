@@ -20,7 +20,7 @@ GitHub release notes, and the app shows them when that version is available.
 - One name for starting an agent everywhere: New agent (⌘K, project pages, the menu bar).
 - Launching Phren again brings back a window the menu bar icon hid.
 - Projects opens faster: cards show as soon as the list is known, and a store file shared by several computers is read once (78 Hook requests down to 32 with three computers).
-- Previews no longer re-reads every computer's servers and simulators on each agent update, only every 15 seconds or when a computer comes or goes.
+- Previews and Review's trains no longer re-read every computer on each agent update, only on their own timer or when a computer comes or goes.
 
 ## [0.1.6] - 2026-10-13
 

@@ -501,7 +501,15 @@ export function mountTrains(container) {
   function startPoll() { if (!timer) timer = setInterval(() => { void poll(); }, POLL_MS); }
   function stopPoll() { if (timer) { clearInterval(timer); timer = null; } }
 
-  const unsubscribe = store.subscribe(() => { if (state.visible) void poll(); });
+  // Overview frames arrive on every agent change; only a computer coming or going
+  // needs a poll ahead of the timer.
+  let onlineKey = "";
+  const unsubscribe = store.subscribe(() => {
+    const key = [...onlineComputers()].sort().join("\n");
+    if (key === onlineKey) return;
+    onlineKey = key;
+    if (state.visible) void poll();
+  });
 
   return {
     show() { state.visible = true; startPoll(); void poll(); },
