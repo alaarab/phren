@@ -81,11 +81,11 @@ A Herdr launch that does stall anyway is recorded rather than left silent. The H
 
 ## Continuing one session
 
-With `session: reuse`, a firing first looks for the session the target's last run used: the newest run in this computer's history whose Herdr pane and session id are recorded. Nothing else is stored; a run that continued a session, or skipped because it was busy, records that same pane, so the chain carries on.
+With `session: reuse`, a firing first looks for the schedule's session among the Herdr panes this computer's history records for the target (the last eight distinct panes, newest first). A pane whose conversation id was never recorded is asked for it. Nothing else is stored; a run that continued a session, or skipped because it was busy, records that same pane, so the chain carries on.
 
-- **Still open and idle** (its pane exists and still runs the schedule's harness, Herdr shows `idle` or `done`): the prompt goes to it through the Hook's hand-off queue, the same path `hand_off` takes, with the run id as its delivery id. The run gets its own history row with `launch.reused: true` and is followed to its end as any Herdr run is (`finished`, `needs-you` or `failed`). The pane still shows the previous turn's idle right after the send, so idle counts as the end only once Herdr showed the pane busy or the transcript grew; a session that has not taken up the prompt after two minutes is `failed`. A Claude `/clear` in the same terminal is followed to the new conversation.
+- **Still open and idle** (the newest of those panes that still exists and still runs the schedule's harness, Herdr shows `idle` or `done`): the prompt goes to it through the Hook's hand-off queue, the same path `hand_off` takes, with the run id as its delivery id. The run gets its own history row with `launch.reused: true` and is followed to its end as any Herdr run is (`finished`, `needs-you` or `failed`). The pane still shows the previous turn's idle right after the send, so idle counts as the end only once Herdr showed the pane busy or the transcript grew; a session that has not taken up the prompt after two minutes is `failed`. A Claude `/clear` in the same terminal is followed to the new conversation. Before typing into a Claude pane the Hook looks at its screen: Claude's optional "Teach auto mode about your environment?" dialog would take the prompt as its answer, so the Hook sends Esc and checks again; a pane where the dialog stays passes the firing to the next older pane. Once a pane has taken the firing, the schedule's older panes that are `idle` or `done` are closed (working ones are left alone).
 - **Busy** (`working`, `starting`, or `blocked`/`waiting` on the owner): the firing is recorded as `skipped` with the reason (`The session this schedule continues is still working, so this firing was skipped.`), nothing is typed, and the next occurrence is computed from it as usual. Prompts never stack up behind each other.
-- **Gone** (the pane closed, the agent exited, the conversation was replaced, or the hand-off refused the target): a new session starts exactly as for `session: new`, and the next firing continues that one.
+- **Gone** (no pane is left: they closed, the agents exited, the conversations were replaced, or the hand-off refused every target): a new session starts exactly as for `session: new`, and the next firing continues that one.
 
 The overlap rule still applies first: while the schedule's own run is `launched`, `running` or `blocked`, the schedule does not fire at all. Reuse needs Herdr; a headless run always starts fresh. The continued session keeps the model and account it started with, so a schedule edit to either takes effect once that session is gone.
 
@@ -115,7 +115,7 @@ All schedule routes are JSON `POST` requests on the authenticated Hook connectio
 
 | Route | Result |
 | --- | --- |
-| `/v1/schedules` | All store schedules with project, local `nextRun`, aggregated latest batch as `lastRun`, its child rows as `lastRuns`, and running state across all children. `nextRun` is null for schedules owned by another computer. |
+| `/v1/schedules` | All store schedules with project, local `nextRun`, aggregated latest batch as `lastRun`, its child rows as `lastRuns`, and running state across all children. `nextRun` is null for schedules owned by another computer. `problems` (when present) says why a schedule can never fire: a computer that is not in `machines.yaml`, or, on the owning computer, a target project with no source directory or one that is gone. `phren schedule list` prints them with `!`, and `phren schedule add` refuses a schedule with one. |
 | `/v1/schedules/run` | Runs `{ project, id, expectedUpdatedAt? }` now. Returns `{ ok, run, runs }`, with `run` the first child for older clients and `runs` in target order. HTTP 200 with `ok: false` exposes partial or total launch failures through each child's `status` and `reason`. Returns 404 for an unknown owner/schedule/target and 409 for overlap, another computer, or unavailable sources. |
 | `/v1/schedules/history` | Returns newest-first local runs. Accepts optional `project`, `id`, and `limit` (default 50, maximum 500). Each row carries its status (including `needs-you` with the owner question as `reason`) and, when the run was recorded blocked at startup, the `blockedStartupPrompt` text the pane showed. |
 
@@ -131,7 +131,8 @@ After saving a schedule, clients can pass its `updatedAt` as `expectedUpdatedAt`
 in `/v1/schedules/run`. This optional ISO 8601 timestamp must include a time zone;
 fractional seconds and offsets are accepted. The Hook compares parsed instants
 inside schedule admission, before recording or launching any child. A mismatch
-returns HTTP 409 with a wait-for-store-sync message, leaving the schedule and run
-history unchanged. This prevents an immediate Run now from firing an older
+waits up to 30 seconds for the store to sync the edit (a copy older than the app's, or none yet) and then returns
+HTTP 409 with a wait-for-store-sync message, leaving the schedule and run
+history unchanged. A copy newer than the app's is refused at once. This prevents an immediate Run now from firing an older
 single-target definition while a multi-target edit is still syncing. Equivalent
 timestamp spellings match; omitting the field retains legacy behavior.

@@ -14,6 +14,7 @@ import { atomicInPrivateDir, BridgeError, object, objects, type Json, type Targe
 import { defaultPhrenPath } from "../shared.js";
 import type { Schedule, ScheduleLauncher, ScheduleLaunchContext, ScheduleLaunchRecord, ScheduleLaunchResult, ScheduleRun, ScheduleRunOutcome } from "./schedule-format.js";
 import { realTranscriptStamp, watchHerdrRun } from "./schedule-watch.js";
+import { claudeTeachAutoModeDialog } from "./pane-status.js";
 
 /** Starting a scheduled run: in a Herdr pane when a server is live, otherwise
  * as a headless job under the fan-out root. */
@@ -44,6 +45,13 @@ export interface ContinueEnv {
   panes?: (server: string) => Promise<Json[]>;
   transcriptStamp?: typeof realTranscriptStamp;
   watch?: typeof watchHerdrRun;
+  /** The conversation a pane runs, for a record that never learned its id. */
+  identity?: (server: string, pane: Json) => Promise<string | undefined>;
+  /** The pane's visible lines, to see a dialog that would swallow the prompt. */
+  screen?: (server: string, pane: string) => Promise<string>;
+  keys?: (server: string, pane: string, keys: string[]) => Promise<void>;
+  /** Closes a finished pane of this schedule once a newer one has taken the firing. */
+  close?: (server: string, pane: Json) => Promise<void>;
 }
 
 function busyReason(status: string): string {
@@ -51,42 +59,83 @@ function busyReason(status: string): string {
   return `The session this schedule continues ${state}, so this firing was skipped.`;
 }
 
+const finishedPane = (pane: Json) => pane.agent_status === "idle" || pane.agent_status === "done";
+
+/** Claude's optional "Teach auto mode about your environment?" dialog takes a typed prompt as an answer. */
+async function dismissAutoModeDialog(server: string, pane: string, env: ContinueEnv): Promise<boolean> {
+  const screen = env.screen ?? ((name: string, id: string) => terminalProvider().readScreen(name, id, { scope: "pane", source: "visible", lines: 120, stripAnsi: true, timeoutMs: 1000 }));
+  const keys = env.keys ?? ((name: string, id: string, pressed: string[]) => terminalProvider().sendKeys(name, id, pressed));
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const shown = await screen(server, pane).then(text => claudeTeachAutoModeDialog(text), () => false);
+    if (!shown) return true;
+    await keys(server, pane, ["esc"]).catch(() => undefined);
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  return !await screen(server, pane).then(text => claudeTeachAutoModeDialog(text), () => false);
+}
+
 /**
- * `session: reuse`: types the prompt into the session the target's last run
- * used, while its pane still runs that harness. A busy session is skipped
- * rather than given a second prompt. Undefined when the session is gone (the
- * pane closed, its agent exited, its conversation was replaced), so the caller
- * starts a new one, which the next firing continues.
+ * `session: reuse`: types the prompt into the newest session of this schedule
+ * whose pane still runs its harness (`previous`, newest first). A busy newest
+ * session is skipped rather than given a second prompt; a pane whose prompt
+ * cannot be delivered (a dialog that will not dismiss, a refused delivery)
+ * passes the firing to the next older one. Once a pane has taken the firing,
+ * the schedule's older finished panes are closed. Undefined when no session is
+ * left (the panes closed, their agents exited, their conversations were
+ * replaced), so the caller starts a new one, which the next firing continues.
  */
-export async function continueSession(context: ScheduleLaunchContext, previous: ScheduleLaunchRecord, deliver: ScheduleDeliver, signal: AbortSignal,
+export async function continueSession(context: ScheduleLaunchContext, previous: ScheduleLaunchRecord[], deliver: ScheduleDeliver, signal: AbortSignal,
   env: ContinueEnv = {}): Promise<ScheduleLaunchResult | undefined> {
-  const { server, workspaceId, tabId, paneId, sessionId } = previous, source = context.schedule.harness;
-  if (!server || !workspaceId || !tabId || !paneId || !sessionId) return undefined;
+  const source = context.schedule.harness;
   const panes = env.panes ?? (async (name: string) => objects((await snapshot(name)).panes));
-  const pane = findPane({ panes: await panes(server).catch(() => []) }, { workspace: workspaceId, tab: tabId, pane: paneId, source });
-  if (!pane) return undefined;
-  const launch: ScheduleLaunchRecord = { mode: "herdr", server, workspaceId, tabId, paneId, sessionId, reused: true };
-  const status = String(pane.agent_status ?? "");
-  if (status !== "idle" && status !== "done") return { launch, skipped: busyReason(status) };
-  const transcript = await (env.transcriptStamp ?? realTranscriptStamp)(source, sessionId).catch(() => undefined);
-  let result: Json;
-  try {
-    result = await deliver({ server, workspace: workspaceId, tab: tabId, pane: paneId, source, session: sessionId },
-      context.schedule.prompt, `schedule-${context.runId.replaceAll("-", "")}`);
-  } catch (error) {
-    // The pane or its conversation went away between the look and the send.
-    if (error instanceof BridgeError && (error.status === 404 || error.status === 409)) return undefined;
-    throw error;
+  const looked = new Map<string, Json[]>(), live: { record: ScheduleLaunchRecord; pane: Json }[] = [];
+  for (const record of previous) {
+    const { server, workspaceId, tabId, paneId } = record;
+    if (!server || !workspaceId || !tabId || !paneId) continue;
+    if (!looked.has(server)) looked.set(server, await panes(server).catch(() => []));
+    const pane = findPane({ panes: looked.get(server) }, { workspace: workspaceId, tab: tabId, pane: paneId, source });
+    if (pane) live.push({ record, pane });
   }
-  if (result.state === "failed") return undefined;
-  if (result.delivered !== true && result.queued !== true) {
-    throw new Error(`The prompt to the session this schedule continues was not confirmed${typeof result.error === "string" ? `: ${result.error}` : "."}`);
+  if (!live.length) return undefined;
+  const recordOf = (item: { record: ScheduleLaunchRecord }, sessionId: string | undefined): ScheduleLaunchRecord =>
+    ({ mode: "herdr", server: item.record.server, workspaceId: item.record.workspaceId, tabId: item.record.tabId, paneId: item.record.paneId, ...(sessionId ? { sessionId } : {}), reused: true });
+  const newest = live[0];
+  if (!finishedPane(newest.pane)) return { launch: recordOf(newest, newest.record.sessionId), skipped: busyReason(String(newest.pane.agent_status ?? "")) };
+  for (const item of live) {
+    if (!finishedPane(item.pane)) continue;
+    const { server, workspaceId, tabId, paneId } = item.record as Required<ScheduleLaunchRecord>;
+    const sessionId = item.record.sessionId ?? await (env.identity ?? ((name, pane) => paneIdentity(name, pane)))(server, item.pane).catch(() => undefined);
+    if (!sessionId) continue;
+    if (source === "claude" && !await dismissAutoModeDialog(server, paneId, env)) continue;
+    const transcript = await (env.transcriptStamp ?? realTranscriptStamp)(source, sessionId).catch(() => undefined);
+    let result: Json;
+    try {
+      result = await deliver({ server, workspace: workspaceId, tab: tabId, pane: paneId, source, session: sessionId },
+        context.schedule.prompt, `schedule-${context.runId.replaceAll("-", "")}`);
+    } catch (error) {
+      // The pane or its conversation went away between the look and the send.
+      if (error instanceof BridgeError && (error.status === 404 || error.status === 409)) continue;
+      throw error;
+    }
+    if (result.state === "failed") continue;
+    if (result.delivered !== true && result.queued !== true) {
+      throw new Error(`The prompt to the session this schedule continues was not confirmed${typeof result.error === "string" ? `: ${result.error}` : "."}`);
+    }
+    // A Claude /clear in the same terminal moves the delivery to the new conversation.
+    const session = typeof object(result.target).session === "string" ? String(object(result.target).session) : sessionId;
+    const close = env.close ?? closeFinishedPane;
+    for (const other of live) if (other !== item && finishedPane(other.pane)) await close(String(other.record.server), other.pane).catch(() => undefined);
+    return { launch: recordOf(item, session),
+      completion: (env.watch ?? watchHerdrRun)(server, { workspaceId, tabId, paneId }, signal,
+        { source, startedAt: Date.now(), sessionId: session, continued: { transcript } }) };
   }
-  // A Claude /clear in the same terminal moves the delivery to the new conversation.
-  const session = typeof object(result.target).session === "string" ? String(object(result.target).session) : sessionId;
-  return { launch: { ...launch, sessionId: session },
-    completion: (env.watch ?? watchHerdrRun)(server, { workspaceId, tabId, paneId }, signal,
-      { source, startedAt: Date.now(), sessionId: session, continued: { transcript } }) };
+  return undefined;
+}
+
+async function closeFinishedPane(server: string, pane: Json): Promise<void> {
+  const { markPaneClosed } = await import("./worker-close.js");
+  await markPaneClosed(server, pane).catch(() => undefined);
+  await terminalProvider().closePane(server, String(pane.pane_id));
 }
 
 /**

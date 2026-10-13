@@ -17,7 +17,7 @@ import {
   resumeScheduleRun,
   readScheduleRuns,
   readScheduleDocument,
-  reusableLaunch,
+  reusableLaunches,
   type ScheduleLaunchContext,
   scheduleSessionRoute,
   watchHerdrRun,
@@ -30,7 +30,7 @@ import {
   type StartupWatchEnv,
 } from "./schedules.js";
 import type { SchedulePush } from "./push.js";
-import { continueSession, headlessEnv, type ScheduleDeliver } from "./schedule-launch.js";
+import { continueSession, headlessEnv, type ContinueEnv, type ScheduleDeliver } from "./schedule-launch.js";
 import type { Json, Target } from "./protocol.js";
 
 const originalTimezone = process.env.TZ;
@@ -742,17 +742,46 @@ describe("multi-project schedules", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("says why a schedule can never fire: an unknown computer, or a missing source on the owning one", async () => {
+    const fixture = await targets(schedule({ projects: ["alpha", "beta"], computer: "Desk", notify: [] }));
+    await writeFile(path.join(fixture.store, "machines.yaml"), "Desk: default\nLaptop: default\n");
+    await rm(path.join(fixture.store, ".source-beta"), { recursive: true });
+    const other = schedule({ id: "8a4b3d2e", name: "Elsewhere", computer: "Nowhere", notify: [] });
+    await writeScheduleDocument(path.join(fixture.store, "alpha"), [other]);
+    const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", launch: async () => ({ launch: { mode: "headless" } }) });
+    const shown = (await scheduler.statuses()).schedules;
+    expect(shown.find(item => item.id === "7f3a2c1d")?.problems).toEqual([expect.stringContaining('Source directory for project "beta" is unavailable')]);
+    expect(shown.find(item => item.id === "8a4b3d2e")?.problems).toEqual([expect.stringContaining('Computer "Nowhere" is not a machine in this store')]);
+  });
+
   it("refuses an unsynced revision before launching the old owner-only schedule or consuming once", async () => {
     const fixture = await storeFixture(schedule({ every: "once", once: "2026-09-20T09:00:00", notify: [] }));
     let launches = 0;
     const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00Z"), store: fixture.store, runsFile: fixture.runs,
-      computer: "Desk", launch: async () => { launches++; return { launch: { mode: "headless" } }; } });
+      computer: "Desk", revisionWaitMs: 50, launch: async () => { launches++; return { launch: { mode: "headless" } }; } });
     await expect(scheduler.launchNow("demo", "7f3a2c1d", false, "2026-09-20T09:59:00.125Z"))
       .rejects.toMatchObject({ status: 409, message: expect.stringContaining("Wait for store sync") });
     expect(launches).toBe(0);
     expect(await scheduler.history()).toEqual([]);
     expect((await readScheduleDocument(fixture.project)).schedules[0]).toMatchObject({ enabled: true,
       updatedAt: "2026-03-07T16:00:00.000Z" });
+  });
+
+  it("waits for the store to sync an edit the app just made instead of refusing Run now", async () => {
+    const fixture = await storeFixture(schedule({ notify: [] }));
+    const launched: string[] = [];
+    const scheduler = new Scheduler({ now: () => new Date("2026-09-20T10:00:00Z"), store: fixture.store, runsFile: fixture.runs,
+      computer: "Desk", revisionWaitMs: 5_000, launch: async context => { launched.push(context.schedule.prompt); return { launch: { mode: "headless" } }; } });
+    const edited = "2026-09-20T09:59:00.125Z";
+    // The edit reaches this computer's copy of the store a moment after Run now arrives.
+    setTimeout(async () => {
+      const file = await readScheduleDocument(fixture.project);
+      await writeScheduleDocument(fixture.project, file.schedules.map(item => ({ ...item, prompt: "Edited prompt.", updatedAt: edited })), file.document);
+    }, 150);
+    const runs = await scheduler.launchNow("demo", "7f3a2c1d", false, edited);
+    expect(runs).toMatchObject([{ status: "running" }]);
+    expect(launched).toEqual(["Edited prompt."]);
   });
 
   it.each(["2026-03-07T16:00:00.125Z", "2026-03-07T16:00:00.125000Z", "2026-03-07T09:00:00.125-07:00"])(
@@ -852,10 +881,10 @@ describe("a schedule that continues its session", () => {
 
   /** The Hook's launcher at its Herdr and hand-off edges: `panes` is what
    * Herdr shows on each look, `deliveries` what reached the hand-off queue. */
-  async function fire(panes: Json[][], at = "2026-09-20T09:00:00.000Z") {
-    const fixture = await storeFixture(schedule({ every: "interval", at: undefined, interval: "1h", session: "reuse", createdAt: "2026-09-20T07:00:00.000Z" }));
-    await writeScheduleRuns(fixture.runs, [earlier]);
-    const deliveries: { target: Target; text: string }[] = [], fresh: ScheduleLaunchContext[] = [];
+  async function fire(panes: Json[][], at = "2026-09-20T09:00:00.000Z", extra: { earlier?: ScheduleRun[]; env?: ContinueEnv; harness?: Schedule["harness"] } = {}) {
+    const fixture = await storeFixture(schedule({ ...(extra.harness ? { harness: extra.harness } : {}), every: "interval", at: undefined, interval: "1h", session: "reuse", createdAt: "2026-09-20T07:00:00.000Z" }));
+    await writeScheduleRuns(fixture.runs, extra.earlier ?? [earlier]);
+    const deliveries: { target: Target; text: string }[] = [], fresh: ScheduleLaunchContext[] = [], closed: string[] = [];
     let look = 0, transcript = 100;
     // The transcript grows only while the agent works on a turn.
     const view = async () => {
@@ -871,15 +900,16 @@ describe("a schedule that continues its session", () => {
     const scheduler = new Scheduler({ now: () => new Date(at), store: fixture.store, runsFile: fixture.runs, computer: "desk",
       launch: async context => {
         const continued = context.reuse && await continueSession(context, context.reuse, deliver, controller.signal, {
+          screen: async () => "", keys: async () => {}, close: async (_server, pane) => { closed.push(String(pane.pane_id)); },
           panes: view, transcriptStamp: async () => ({ size: transcript, mtimeMs: 1 }),
           watch: (server, target, signal, startup) => watchHerdrRun(server, target, signal, startup, {
-            pause: async () => {}, panes: view, transcriptStamp: async () => ({ size: transcript, mtimeMs: 1 }), finalTurn: async () => undefined }) });
+            pause: async () => {}, panes: view, transcriptStamp: async () => ({ size: transcript, mtimeMs: 1 }), finalTurn: async () => undefined }), ...extra.env });
         if (continued) return continued;
         fresh.push(context);
         return { launch: { mode: "herdr", server: "default", workspaceId: "w2", tabId: "w2:t1", paneId: "w2:p1", sessionId: "bbbbbbbb-2222-4222-8222-222222222222" } };
       } });
     await scheduler.tick();
-    return { scheduler, deliveries, fresh, looks: () => look };
+    return { scheduler, deliveries, fresh, closed, looks: () => look };
   }
 
   it("types the next firing into the live idle session and follows that turn to its end", async () => {
@@ -900,7 +930,7 @@ describe("a schedule that continues its session", () => {
     expect(run.fresh).toHaveLength(1);
     const history = await run.scheduler.history();
     expect(history[0]).toMatchObject({ status: "running", launch: { paneId: "w2:p1" } });
-    expect(reusableLaunch([...history].reverse())).toMatchObject({ paneId: "w2:p1" });
+    expect(reusableLaunches([...history].reverse())[0]).toMatchObject({ paneId: "w2:p1" });
   });
 
   it("skips a firing while the session is still working, sending nothing and starting nothing", async () => {
@@ -913,6 +943,48 @@ describe("a schedule that continues its session", () => {
     // The occurrence is consumed: the next one is an hour on, not another try now.
     await run.scheduler.tick();
     expect(await run.scheduler.history()).toHaveLength(2);
+  });
+
+  const open = { watch: (() => new Promise<never>(() => {})) as ContinueEnv["watch"] };
+  const at = (id: number, status: string, agent = "codex") => ({ workspace_id: "w1", tab_id: "w1:t1", pane_id: `w1:p${id}`, agent, agent_status: status });
+  const ranIn = (id: number, day: number): ScheduleRun => ({ ...earlier, id: `run-${id}`, batchId: `b${id}`, startedAt: `2026-09-${day}T08:00:00.000Z`,
+    launch: { ...earlier.launch, paneId: `w1:p${id}`, sessionId: `${id}`.repeat(8) + "-1111-4111-8111-111111111111" } });
+
+  it("continues the newest live pane of the schedule and closes its older finished panes", async () => {
+    // Three panes from three firings; the newest closed on its own, so the middle one is the newest live.
+    const run = await fire([[at(1, "done"), at(2, "idle")]], undefined, { earlier: [ranIn(1, 18), ranIn(2, 19), ranIn(3, 20)], env: open });
+    expect(run.fresh).toEqual([]);
+    expect(run.deliveries.map(item => item.target.pane)).toEqual(["w1:p2"]);
+    expect(run.closed).toEqual(["w1:p1"]);
+  });
+
+  it("keeps older panes that are still working when the newest takes the firing", async () => {
+    const run = await fire([[at(1, "working"), at(2, "idle")]], undefined, { earlier: [ranIn(1, 19), ranIn(2, 20)], env: open });
+    expect(run.deliveries.map(item => item.target.pane)).toEqual(["w1:p2"]);
+    expect(run.closed).toEqual([]);
+  });
+
+  it("finds the conversation of a pane whose run never recorded one", async () => {
+    const unnamed = ranIn(2, 20); delete unnamed.launch.sessionId;
+    const run = await fire([[at(2, "idle")]], undefined, { earlier: [unnamed], env: { ...open, identity: async () => session } });
+    expect(run.fresh).toEqual([]);
+    expect(run.deliveries[0].target).toMatchObject({ pane: "w1:p2", session });
+  });
+
+  it("dismisses Claude's auto mode dialog with Esc before typing the prompt", async () => {
+    const screens = ["Teach auto mode about your environment?\n1. Yes", "❯ "], pressed: string[][] = [];
+    const run = await fire([[at(1, "idle", "claude")]], undefined, { earlier: [ranIn(1, 20)], harness: "claude", env: { ...open,
+      screen: async () => screens.shift() ?? "❯ ", keys: async (_server, _pane, keys) => { pressed.push(keys); } } });
+    expect(pressed).toEqual([["esc"]]);
+    expect(run.fresh).toEqual([]);
+    expect(run.deliveries).toHaveLength(1);
+  });
+
+  it("starts a new session when the dialog will not dismiss and no other pane can take the firing", async () => {
+    const run = await fire([[at(1, "idle", "claude")]], undefined, { earlier: [ranIn(1, 20)], harness: "claude", env: { ...open,
+      screen: async () => "Teach auto mode about your environment?" } });
+    expect(run.deliveries).toEqual([]);
+    expect(run.fresh).toHaveLength(1);
   });
 
   it("keeps the session option through parsing and rejects an unknown one", () => {
