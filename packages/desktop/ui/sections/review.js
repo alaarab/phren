@@ -310,12 +310,16 @@ export function mountReview(root) {
 
   // ---- data -----------------------------------------------------------
 
+  // Polls overlap (timer, hover read-ahead, computers changing); only the latest one started may land.
+  let pollGeneration = 0;
   async function poll() {
     if (state.mode !== "queue") return;
+    const mine = ++pollGeneration;
     const results = await Promise.all(onlineComputers().map(async (c) => {
       const body = await hookGet(c.computer, "/v1/dispatch").catch(() => null);
       return [c.computer, Array.isArray(body?.dispatches) ? body.dispatches : []];
     }));
+    if (mine !== pollGeneration) return;
     state.receipts = new Map(results.map(([computer, list]) =>
       [computer, list.map((receipt) => ({ receipt, computer: receipt.computer || computer }))]));
     render();

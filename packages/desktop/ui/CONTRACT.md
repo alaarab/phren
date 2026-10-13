@@ -39,6 +39,7 @@ showSection(id)            // returns the section's handle
 sectionHandle(id)          // the handle, mounting the section hidden if needed
 showPillAt(index)          // open the titlebar pill at index (0-based) as a click would; false past the last. app.js binds ⌘1–⌘9 / Ctrl+1–9 to it
 pillShortcut(index)        // "⌘3" / "Ctrl+3", shown in each pill's tooltip and aria-keyshortcuts; "" past nine
+prefetchSection(id)        // read a section ahead (titlebar pill hover, 120 ms): only sections registered with readAhead: true are mounted hidden and their prefetch() called. shell/read-ahead.js readAhead(read) gives a section { prefetch(), show() } that skips the show() read when a read ahead for the same online computers is under 5 s old
 setSectionBadge(id, count) // amber count on the pill; 0 hides it
 onSectionChange(fn)
 ```
