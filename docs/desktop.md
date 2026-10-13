@@ -140,7 +140,9 @@ palette open; change or turn off that key in Settings › Keys. A menu bar icon
 them; choose one to open it. On a Mac, closing the window while the icon is on
 keeps Phren running there. Turn it off in Settings › Notifications. Clicking a "needs you"
 notification opens that session; on a Mac, one for an agent that finished and
-waits on you takes a typed reply, sent as its next prompt. The launch sheet
+waits on you takes a typed reply, sent as its next prompt. Come back after a
+minute or more away and Home's "Since you left" lists the turns agents
+finished meanwhile. The launch sheet
 ("+ New agent") recommends a computer from its load and account quota.
 
 ## Chats, consoles and tiles
