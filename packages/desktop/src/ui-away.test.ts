@@ -36,4 +36,19 @@ describe("away", () => {
     away.back();
     expect(away.current()).toBeNull();
   });
+
+  it("adds pull requests whose checks settled while away, latest result per request", () => {
+    const c = clock();
+    const away = createAway({ now: c.now });
+    const pull = (checks: string) => ({ computer: "mini", project: "phren", number: 42, title: "Guard", ref: "#", checks, child: { id: "a" } });
+    away.noteChecks(pull("failing")); // here: not counted
+    away.leave();
+    away.noteChecks(pull("failing"));
+    away.noteChecks(pull("passing"));
+    c.tick(MIN_AWAY_MS);
+    away.back();
+    expect(away.current()?.rows).toEqual([]);
+    expect(away.current()?.checks.map((p) => p.checks)).toEqual(["passing"]);
+  });
 });
+
