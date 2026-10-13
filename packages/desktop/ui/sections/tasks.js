@@ -5,6 +5,7 @@
 // desktop shell's CSS.
 import { hookGet, hookPost } from "../api.js";
 import { projectOf, sessions, store } from "../shell/store.js";
+import { skeleton } from "../shell/skeleton.js";
 import { sectionHandle } from "../shell/sections.js";
 
 const CSS_ID = "tasks-css";
@@ -264,7 +265,7 @@ export function mountTasks(root) {
     projectCountEl.textContent = source?.projects?.length ? String(source.projects.length) : "";
     if (!source) return;
     if (state.loading && !state.docs.size) {
-      projectsEl.append(el("div", "tasks-empty", "Loading projects…"));
+      projectsEl.append(skeleton({ count: 7, itemClass: "tasks-project", widths: [["58%"], ["72%"], ["46%"], ["64%"], ["52%"]], label: "Loading projects…" }));
       return;
     }
     const names = [...source.projects].sort((a, b) => {
