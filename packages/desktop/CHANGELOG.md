@@ -4,6 +4,15 @@ Phren desktop versions on its own (`packages/desktop/package.json`). The
 Release desktop app workflow publishes a version's section here as its
 GitHub release notes, and the app shows them when that version is available.
 
+## [0.1.7] - unreleased
+
+- A new version shows as a chip in the titlebar with What's new, and Download or Restart to update.
+- Home's Computers rows show each Hook's version; one behind the newest gets its update command to copy.
+- A session waiting on you shows what the agent said last in the Agents sidebar.
+- ⌘K lists the projects on every computer and opens one's page.
+- A working session with no output for five minutes reads "stalled" on Home and in the sidebar, with a notification.
+- Launching Phren again brings back a window the menu bar icon hid.
+
 ## [0.1.6] - 2026-10-13
 
 - Summon Phren with ⌘K open from any app: ⌘⇧Space (Ctrl+Shift+Space on Linux and Windows), changed in Settings › Keys.
