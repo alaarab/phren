@@ -22,6 +22,22 @@ const UI_SOURCE = path.resolve(SPEC_DIR, "../ui");
 const UI_LINK = path.resolve(SPEC_DIR, "../../../packages/ui");
 let linkedUi = false;
 
+// Two findings cite src/app.ts and one cites a function the code index places
+// in it; /memory/files answers only for the paths asked.
+const FINDINGS = [
+  { id: "fid:a1", text: "The login form must keep the signed-in user when the session store reloads, or the phone drops back to sign-in.", type: "pitfall", status: "active", created: "2026-10-01", citation: { file: "src/app.ts", line: 12, commit: null, name: null }, match: "file" },
+  { id: "fid:a2", text: "Export `ready` only after the store has loaded.", type: "decision", status: "active", created: "2026-09-20", citation: { file: "./src/app.ts", line: null, commit: null, name: null }, match: "file" },
+  { id: "fid:a3", text: "startApp() retries once before failing.", type: "pattern", status: "active", created: "2026-09-02", citation: { file: null, line: null, commit: null, name: "startApp" }, match: "symbol" },
+];
+let memoryPaths: string[][] = [];
+const MEMORY_ROUTES = {
+  "GET /v1/projects/phren/memory/files": (_req: unknown, _body: unknown, url: URL) => {
+    const paths = url.searchParams.getAll("path");
+    memoryPaths.push(paths);
+    return { status: 200, json: { project: "phren", store_id: null, symbols: "indexed", truncated: false, findings: paths.includes("src/app.ts") ? FINDINGS : [] } };
+  },
+};
+
 let dir: string;
 let hook: FakeHook;
 let git: FakeGit;
@@ -32,10 +48,11 @@ let url: string;
 test.beforeEach(async ({}, info) => {
   if (!existsSync(UI_LINK)) { symlinkSync(UI_SOURCE, UI_LINK, "dir"); linkedUi = true; }
   dir = await mkdtemp(path.join(tmpdir(), "desktop-git-"));
+  memoryPaths = [];
   process.env.PHREN_BRIDGE_HOME = dir;
   // A test titled "on GitLab" runs against a GitLab remote, not yet connected.
   git = createFakeGit({ host: /on GitLab/.test(info.title) ? "gitlab" : "github" });
-  hook = await startFakeHook({ dir, routes: git.routes, files: { "src/app.ts": FAKE_GIT_WORKING_APP } });
+  hook = await startFakeHook({ dir, routes: { ...git.routes, ...MEMORY_ROUTES }, files: { "src/app.ts": FAKE_GIT_WORKING_APP } });
   hub = createOverviewHub([LOCAL], hookWebSocket);
   const ready = new Promise<void>((resolve) => { hub.on("change", (merged: MergedOverview) => { if (merged.computers[0]?.overview) resolve(); }); });
   hub.start();
@@ -264,4 +281,28 @@ test("on GitLab, Connect checks the token, then the merge request shows its pipe
 test("on GitHub the pull request chip and links name the host's own terms", async ({ page }) => {
   await openSession(page);
   await expect(page.locator('.chg-seg[data-view="pulls"]')).toHaveText("PRs");
+});
+
+test("Phren remembers lists the findings about the changed files, and a file's badge narrows it to that file", async ({ page }) => {
+  const errors = await openSession(page);
+  const card = page.locator(".chg-knows");
+  await expect(card).toContainText("3 findings about these files");
+  expect(memoryPaths[0]).toEqual(["README.md", "src/app.ts"]);
+  // Only findings citing the file itself count on its row.
+  const badge = page.locator(".chg-row", { hasText: "app.ts" }).first().locator(".chg-knows-badge");
+  await expect(badge).toHaveText("◆ 2");
+  await expect(page.locator(".chg-row", { hasText: "README.md" }).locator(".chg-knows-badge")).toHaveCount(0);
+  await shot(page, "knows-collapsed.png");
+  await card.locator(".chg-knows-h").click();
+  await expect(card.locator(".chg-knows-item")).toHaveCount(3);
+  await expect(card.locator(".chg-knows-cite", { hasText: "startApp" })).toBeVisible();
+  await shot(page, "knows-open.png");
+  await badge.click();
+  await expect(card.locator(".chg-knows-item")).toHaveCount(2);
+  await expect(card.locator(".chg-knows-filter")).toContainText("app.ts");
+  await card.locator(".chg-knows-cite", { hasText: "app.ts:12" }).click();
+  await expect(page.locator(".doc-tab.selected")).toContainText("app.ts");
+  // Opening and filtering the card never asks the Hook again.
+  expect(memoryPaths).toHaveLength(1);
+  expect(errors).toEqual([]);
 });
