@@ -18,7 +18,7 @@ export function needsNotice({ key, computer, child }) {
 
 /** The notification for a session that just stalled. */
 export function stalledNotice({ key, computer, child }) {
-  return { title: `${projectOf(child)} looks stuck`, body: `No output for ${stalledMinutes(child)} min · ${child.title ?? child.label} · ${computer}`, key };
+  return { title: `${projectOf(child)} stalled`, body: `No output for ${stalledMinutes(child)} min · ${child.title ?? child.label} · ${computer}`, key };
 }
 
 /** Send a notification's reply to its session. Resolves to an error line, or "" once the Hook took it. */
