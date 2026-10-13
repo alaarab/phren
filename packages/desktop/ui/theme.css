@@ -508,6 +508,7 @@ button.settings-summon-key.recording { color: var(--text); border-color: var(--a
 .sb-project { flex: 0 1 auto; min-width: 72px; color: var(--accent); font-family: var(--mono); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-computer { flex: 0 1000 auto; min-width: 36px; max-width: 120px; padding: 0 7px; border-radius: 999px; background: color-mix(in srgb, var(--host-color, var(--muted)) 20%, transparent); color: var(--host-color, var(--muted)); font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-age { margin-left: auto; flex: none; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.sb-reply { display: block; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
 .sb-title { flex: 1 1 auto; min-width: 0; color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-branch { flex: 0 1000 auto; min-width: 44px; max-width: 50%; color: var(--muted); font-family: var(--mono); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-pr { flex: none; padding: 0 6px; border-radius: 999px; background: rgba(127,182,240,.16); color: var(--path); font: 11px var(--mono); }

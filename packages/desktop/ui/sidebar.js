@@ -459,7 +459,7 @@ function makeRow(sb, desc) {
 function rowSig(sb, desc) {
   const c = desc.child;
   const approval = sb.approvals.get(keyOf(desc.computer, c));
-  return [desc.computer, c.id, kindOf(c), c.title, c.cwd, c.branch, c.lastChangedAt,
+  return [desc.computer, c.id, kindOf(c), c.title, c.cwd, c.branch, c.lastChangedAt, c.lastReply ?? "",
     c.approvalPending === true, desc.pr, approval?.actionId || "", sb.rows,
     isPinned(sb, keyOf(desc.computer, c)) ? "p" : "",
     isUnread(sb, desc.computer, c, kindOf(c)) ? "u" : ""].join("|");
@@ -501,6 +501,12 @@ function rowContent(sb, node, desc) {
   if (child.branch) bottom.append(el("span", "sb-branch", child.branch));
   if (desc.pr != null) bottom.append(el("span", "sb-pr", "#" + desc.pr));
   main.append(bottom);
+  // A session waiting on you says what it asked: its last reply (Hook 0.3.45+), one line.
+  if (kind === "needs" && !child.approvalPending && child.lastReply) {
+    const reply = el("span", "sb-reply", child.lastReply);
+    reply.title = child.lastReply;
+    main.append(reply);
+  }
   out.push(main);
 
   // Hidden terminal trigger: keys.js's 't' clicks `.sb-term`.
