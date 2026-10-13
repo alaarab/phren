@@ -10,7 +10,7 @@ import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
-import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
+import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { findPane, knownPanes, paneIdentity, paneForCodexSession, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
 import { terminalProvider } from "./terminal.js";
 import { readPaneText } from "./pane-text.js";
