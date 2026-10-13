@@ -11,6 +11,7 @@ import { capitalize, checksWord, fixItPrompt, hostTerms } from "../git-review.js
 import { openLaunchSheet } from "../shell/launch.js";
 import { projectOf, sessions as allSessions, store } from "../shell/store.js";
 import { sectionHandle, showSection } from "../shell/sections.js";
+import { storeBlobText, storeTree } from "../store-cache.js";
 
 // The five per-project knobs the CLI reads from <project>/phren.project.yaml,
 // under the file's top-level `config:` mapping (packages/cli/src/project-config.ts).
@@ -43,11 +44,6 @@ function installStyles() {
   link.rel = "stylesheet";
   link.href = new URL("projects.css", import.meta.url).href;
   document.head.append(link);
-}
-
-function decodeBase64(text) {
-  const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
-  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 
 /** A short age: "now", "5m", "3h", "2d". */
@@ -299,34 +295,32 @@ export function mountProjects(root) {
 
   // ------------------------------------------------------------- loading
 
-  async function readBlob(computer, sha) {
-    const body = await hookGet(computer, "/v1/store/blob", { sha });
-    return decodeBase64(body.content ?? "");
-  }
+  const readBlob = storeBlobText;
 
-  /** One project's card facts: the summary line, the counts, the file index. */
-  async function hydrate(computer, project, tree) {
-    const files = projectFiles(tree, project.name);
-    project.files = files;
-    project.counts = { findings: null, tasks: null };
+  /** One project's card facts: the summary line, the counts. Assigned together, so a render mid-read keeps the last values. */
+  async function hydrate(computer, project) {
+    const files = project.files;
+    const counts = { findings: null, tasks: null };
+    let knowsText = null, summaryLine;
     const summaryNode = files.get("summary.md");
     if (summaryNode) {
       try {
         const summary = await readBlob(computer, summaryNode.sha);
         const knows = parseKnows(summary);
-        project.knows = knows?.text ?? null;
-        project.summaryLine = knows?.summaryLine || firstLine(summary);
-        if (knows?.counts.findings !== null) project.counts.findings = knows.counts.findings;
-        if (knows?.counts.tasks !== null && knows?.counts.tasks !== undefined) project.counts.tasks = knows.counts.tasks;
+        knowsText = knows?.text ?? null;
+        summaryLine = knows?.summaryLine || firstLine(summary);
+        if (knows?.counts.findings !== null && knows?.counts.findings !== undefined) counts.findings = knows.counts.findings;
+        if (knows?.counts.tasks !== null && knows?.counts.tasks !== undefined) counts.tasks = knows.counts.tasks;
       } catch { /* summary is optional detail */ }
     }
     const tasks = files.get("tasks.md"), findings = files.get("FINDINGS.md");
-    if (project.counts.tasks === null && tasks) {
-      try { project.counts.tasks = countOpenTasks(await readBlob(computer, tasks.sha)); } catch { /* stays unknown */ }
-    }
-    if (project.counts.findings === null && findings) {
-      try { project.counts.findings = countActiveFindings(await readBlob(computer, findings.sha)); } catch { /* stays unknown */ }
-    }
+    const [taskText, findingText] = await Promise.all([
+      counts.tasks === null && tasks ? readBlob(computer, tasks.sha).catch(() => null) : null,
+      counts.findings === null && findings ? readBlob(computer, findings.sha).catch(() => null) : null,
+    ]);
+    if (taskText !== null) counts.tasks = countOpenTasks(taskText);
+    if (findingText !== null) counts.findings = countActiveFindings(findingText);
+    Object.assign(project, { knows: knowsText, summaryLine, counts, hydrated: true });
     return project;
   }
 
@@ -366,8 +360,7 @@ export function mountProjects(root) {
       if (caps.memoryStore) {
         try {
           const head = await hookGet(computer, "/v1/store/head");
-          const listing = await hookGet(computer, "/v1/store/tree", { sha: head.sha });
-          tree = Array.isArray(listing.tree) ? listing.tree : [];
+          tree = await storeTree(computer, head.sha);
           for (const node of tree) {
             if (node.type !== "blob") continue;
             // A project is a top-level folder of the store; skip loose files and dot folders.
@@ -382,9 +375,17 @@ export function mountProjects(root) {
         } catch { /* the store is unavailable; repos remain */ }
       }
       const wasDetail = state.detail && state.detail.computer === computer ? state.detail.name : null;
-      await Promise.all([...projects.values()].map((project) => hydrate(computer, project, tree)));
+      // Show the cards as soon as the list is known; summaries and counts fill in after.
+      const previous = state.data.get(computer)?.projects;
+      for (const project of projects.values()) {
+        const before = previous?.get(project.name);
+        if (before?.hydrated) Object.assign(project, { summaryLine: before.summaryLine, knows: before.knows, counts: before.counts });
+        project.files = projectFiles(tree, project.name);
+      }
       state.data.set(computer, { projects, tree, at: Date.now() });
       if (wasDetail) state.detail = { computer, name: wasDetail };
+      render();
+      await Promise.all([...projects.values()].map((project) => hydrate(computer, project)));
     } catch (err) {
       state.failures.set(computer, err?.message ?? String(err));
     } finally {
@@ -504,7 +505,7 @@ export function mountProjects(root) {
     else if (sessions.some((row) => row.child.agentStatus === "blocked" || row.child.approvalPending)) head.append(el("span", "pj-dot waiting"));
     card.append(head);
     card.append(el("div", "pj-card-sub muted", project.computer));
-    const summary = el("div", "pj-card-summary", project.summaryLine || "No summary yet.");
+    const summary = el("div", "pj-card-summary", project.summaryLine || (project.hydrated ? "No summary yet." : "\u00a0"));
     card.append(summary);
     const stats = el("div", "pj-card-stats");
     if (typeof project.counts?.findings === "number") stats.append(el("span", "pj-stat", `${project.counts.findings} findings`));
