@@ -576,3 +576,30 @@ test("⌘K lists the watched pull requests and opens one on its session's PRs", 
   await expect(page.locator('.chg-seg.sel[data-view="pulls"]')).toBeVisible();
   ciChecks = "pending";
 });
+
+test("Home flags a computer whose Hook is older than the newest seen", async ({ page }) => {
+  // A second, older computer added to the overview the page receives.
+  await page.routeWebSocket(/\/api\/overview$/, (ws) => {
+    const server = ws.connectToServer();
+    server.onMessage((message) => {
+      const msg = JSON.parse(String(message));
+      if (msg.type === "overview" && msg.merged?.computers?.[0]) {
+        const [local] = msg.merged.computers;
+        local.overview = { ...local.overview, phren: { ...local.overview?.phren, version: "0.3.45" } };
+        msg.merged.computers.push({ computer: "Build box", state: "online", overview: { groups: [], phren: { version: "0.3.44" } } });
+      }
+      ws.send(JSON.stringify(msg));
+    });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  const computers = page.locator('[data-block="computers"]');
+  await expect(computers.locator(".home-computer", { hasText: "This computer" }).locator(".home-hook")).toHaveText("Hook 0.3.45");
+  const box = computers.locator(".home-computer", { hasText: "Build box" });
+  await expect(box.locator(".home-hook.behind")).toHaveText("Hook 0.3.44");
+  await page.waitForTimeout(300);
+  await computers.screenshot({ path: test.info().outputPath("desktop-hook-drift.png") });
+  await box.locator(".home-hook-update").click();
+  await expect(box.locator(".home-hook-update")).toHaveText("command copied");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("npx --yes @phren/cli@0.3.45 bridge update");
+});

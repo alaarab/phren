@@ -7,6 +7,7 @@ import { needsYou, projectOf, sessions, store } from "../shell/store.js";
 import { showSection } from "../shell/sections.js";
 import { checksStrip, followChecks } from "../shell/ci-watch.js";
 import { away } from "../shell/away.js";
+import { hookDrift, hookVersion, updateCommand } from "../shell/hook-drift.js";
 
 // Receipts drive both the conductor's latest line and the recent-returns list.
 const RETURN_POLL_MS = 30_000;
@@ -310,10 +311,29 @@ export function mountHome(root, { openSession, openPulls } = {}) {
 
   // ---- computers ------------------------------------------------------
 
-  function computerRow(c) {
+  /** The Hook's version, and when it is older than the newest seen, a chip that copies its update command. */
+  function hookMeta(c, drift) {
+    const version = hookVersion(c);
+    if (!version) return [];
+    const behind = drift.behind.has(c.computer);
+    const label = el("span", `home-hook${behind ? " behind" : ""}`, `Hook ${version}`);
+    if (!behind) return [label];
+    const command = updateCommand(drift.newest);
+    const chip = el("button", "home-hook-update", `update to ${drift.newest}`);
+    chip.type = "button";
+    chip.title = `Copy: ${command}`;
+    chip.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(command); chip.textContent = "command copied"; }
+      catch { chip.textContent = command; }
+    });
+    return [label, chip];
+  }
+
+  function computerRow(c, drift) {
     const row = el("div", `home-row home-computer state-${c.state}`);
     row.append(el("span", "home-computer-name", c.computer));
     const meta = el("span", "home-computer-meta");
+    meta.append(...hookMeta(c, drift));
     const r = c.resources && typeof c.resources === "object" ? c.resources : null;
     if (c.state === "online") meta.append(el("span", null, "Online"));
     else {
@@ -342,7 +362,9 @@ export function mountHome(root, { openSession, openPulls } = {}) {
   }
 
   function renderComputers() {
-    fill("computers", (merged?.computers ?? []).map(computerRow), "No computers linked.");
+    const computers = merged?.computers ?? [];
+    const drift = hookDrift(computers);
+    fill("computers", computers.map((c) => computerRow(c, drift)), "No computers linked.");
   }
 
   // ---- conductor ------------------------------------------------------
