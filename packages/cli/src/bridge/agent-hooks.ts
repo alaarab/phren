@@ -1,11 +1,10 @@
 import { approvalRuleContext, approvalRuleEffect } from "./approval-rules.js";
 import { recordedConductor } from "./conductor-role.js";
 import { conductorBrief, conductorContext } from "./conductor-context.js";
-import { defaultPhrenPath } from "../shared.js";
 import { disabledHint } from "../modules/registry.js";
-import { activateModules as moduleSnapshot, type ModuleSnapshot } from "../modules/runtime.js";
+import type { ModuleSnapshot } from "../modules/runtime.js";
 import { logger } from "../logger.js";
-import { request, createServer, type Server, type ServerResponse } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
 import { mkdir, readFile, chmod, unlink, lstat } from "node:fs/promises";
 import { watch, type FSWatcher } from "node:fs";
 import path from "node:path";
@@ -13,11 +12,7 @@ import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { atomicInPrivateDir, BridgeError, bridgeRoot, object, objects, provider, targetSchema, type Json, type Provider, type Target } from "./protocol.js";
 import { findPane, knownPanes, paneIdentity, paneForCodexSession, servers, snapshot, trustedDirectory, validateTarget } from "./herdr.js";
-import { hookOutput, TOOL_HOOK_BUDGET_MS } from "./hook-fast.js";
-import { underCodexDaemon } from "./codex-daemon.js";
-import { codexAutoReview } from "./codex-review-mode.js";
-import { claudeHeadlessThread, codexForeignThread } from "./thread-origin.js";
-import { terminalPaneFromEnv, terminalProvider } from "./terminal.js";
+import { terminalProvider } from "./terminal.js";
 import { readPaneText } from "./pane-text.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
 import { phrenStoreRoot } from "./transcripts.js";
@@ -38,14 +33,17 @@ import { eventStatus, notePaneStatus, settleBlockedPane } from "./pane-status.js
 import { noteTurn as recordTurn } from "./turn-records.js";
 import { PromptDeliveries } from "./prompt-deliveries.js";
 import { countTick } from "./metrics.js";
-import { briefId, briefIdInPrompt, briefLabel, DISPATCH_ID_ENV, recordBriefArrival } from "./launch-brief.js";
+import { briefId, briefIdInPrompt, briefLabel, recordBriefArrival } from "./launch-brief.js";
+import { appServerApproval, appServerDecision, conductorCall, OPENCODE_APPROVAL_OPTIONS, opencodePermissionReply, type ConductorCall } from "./agent-hook-asks.js";
 import { SudoBroker } from "./sudo.js";
 import type { AppServerRequestId, PendingServerRequest } from "./codex-app-server.js";
-import { CODEX_SERVER_ENV, codexServerId, codexServers } from "./codex-servers.js";
+import { codexServers } from "./codex-servers.js";
 import { paneClient, paneKey, PaneServerWatcher, rootSession, servedPane, type PaneAsks } from "./opencode-panes.js";
 import type { OpenCodeQuestion, PaneClient, PaneServerEntry } from "./opencode-pane-server.js";
 
 export { permissionPrompt, terminalChoice, visibleTerminalChoice, type TerminalChoice, type TerminalQuestion } from "./terminal-choice.js";
+export { appServerApproval, appServerDecision, conductorCall, OPENCODE_APPROVAL_OPTIONS, opencodePermissionReply } from "./agent-hook-asks.js";
+export { agentHook, stopFacts, withinToolBudget } from "./agent-hook-callback.js";
 export { ApprovalWatchLeases, PushBindingStore, recordedSession } from "./agent-hook-stores.js";
 
 const APPROVAL_SWEEP_MS = 2_000;
@@ -86,66 +84,21 @@ export function watchHangUp(res: ServerResponse): () => boolean {
 }
 
 interface HeldReply { end(body: string): unknown; readonly destroyed: boolean }
-interface Pending { target: Target; response: HeldReply; tool: string; input: unknown; message: string; request: string; requestKind: RequestKind; title?: string; choice?: TerminalChoice; expiresAt: string; timer?: NodeJS.Timeout; conductor?: { action: "dispatch" | "hand_off"; project?: string; computer?: string };
+interface Pending { target: Target; response: HeldReply; tool: string; input: unknown; message: string; request: string; requestKind: RequestKind; title?: string; choice?: TerminalChoice; expiresAt: string; timer?: NodeJS.Timeout; conductor?: ConductorCall;
   /** A server request of the Hook's own Codex app-server: answered over RPC, never held on a timer. */
   appServer?: { requestId: AppServerRequestId; answer: (result: Json) => void } }
-
-/** The approval card's tool and input for an app-server request, in the
- * shapes `approvalSummary` and the phone already read for Codex's hook.
- * Undefined for questions (`item/tool/requestUserInput`) and MCP
- * elicitations, which stay in the pane. */
-export function appServerApproval(request: PendingServerRequest): { tool: string; input: Json } | undefined {
-  const params = request.params;
-  const reason = typeof params.reason === "string" && params.reason ? { reason: params.reason } : {};
-  if (request.method === "item/commandExecution/requestApproval") {
-    return { tool: "Bash", input: { ...(typeof params.command === "string" ? { command: params.command } : {}),
-      ...(typeof params.cwd === "string" ? { cwd: params.cwd } : {}), ...reason } };
-  }
-  if (request.method === "item/fileChange/requestApproval") {
-    const changes = objects(params.changes);
-    const verb = (change: Json) => object(change.kind).type === "add" ? "Add" : object(change.kind).type === "delete" ? "Delete" : "Update";
-    const patch = changes.filter(change => typeof change.path === "string").map(change => `*** ${verb(change)} File: ${change.path}`).join("\n");
-    return { tool: "apply_patch", input: { ...(patch ? { patch } : {}), ...(typeof params.grantRoot === "string" ? { grantRoot: params.grantRoot } : {}), ...reason } };
-  }
-  if (request.method === "item/permissions/requestApproval") return { tool: "Permissions", input: { permissions: params.permissions ?? {}, ...reason } };
-  return undefined;
-}
-
-/** The app-server's answer for the phone's allow or deny (T3's
- * CodexSessionRuntime shapes: accept / decline, a permission grant or none). */
-export function appServerDecision(request: PendingServerRequest, allow: boolean): Json {
-  if (request.method === "item/permissions/requestApproval") return { permissions: allow ? object(request.params.permissions) : {}, scope: "turn" };
-  return { decision: allow ? "accept" : "decline" };
-}
 
 /** What a dispatched worker's Hook tells the dispatching Hook it is waiting on:
  * a card without the request's full message or details, which can run to 32 KB
  * and cross SSH on every poll. */
 export interface ForwardedApproval { actionId: string; tool: string; title?: string; request?: string; requestKind?: RequestKind; expiresAt?: string;
   /** The pane is drawing this as a terminal dialog; the answer types its keys. */
-  terminal?: true; conductor?: Pending["conductor"];
+  terminal?: true; conductor?: ConductorCall;
   /** This Hook already pushed the request to a phone, so the dispatching Hook does not push it again. */
   pushed?: true }
 
 /** How long a dispatching Hook's poll keeps a worker pane's permission asks held. */
 const DISPATCH_LEASE_MS = 45_000;
-
-/** A conductor `dispatch` or `hand_off` permission ask the Hook can answer
- * itself under a standing grant, or offer the phone two grant-writing answers. */
-export function conductorCall(tool: string, input: unknown): Pending["conductor"] | undefined {
-  // MCP tool names vary by harness: `dispatch`, `phren.dispatch`,
-  // `mcp__phren__dispatch`; phren_admin carries the action in its fields.
-  const tail = /(?:^|[.:/]|__)(dispatch|hand_off|phren_admin)$/.exec(tool.replace(/^mcp_phren_/, ""))?.[1];
-  const fields = object(input);
-  let action: "dispatch" | "hand_off" | undefined;
-  if (tail === "dispatch") action = "dispatch";
-  else if (tail === "hand_off") action = "hand_off";
-  else if (tail === "phren_admin" && (fields.action === "dispatch" || fields.action === "hand_off")) action = fields.action;
-  if (!action) return undefined;
-  const project = typeof fields.project === "string" ? fields.project : undefined;
-  const computer = typeof fields.computer === "string" ? fields.computer : undefined;
-  return { action, ...(project ? { project } : {}), ...(computer ? { computer } : {}) };
-}
 
 /** An opencode permission ask the plugin wrote to disk, held here so it can be
  * pushed and answered by binding like a Claude request the Hook holds itself.
@@ -157,29 +110,6 @@ interface OpencodeHeld { target?: Target; request: Json; requestLine: string; ex
   served?: { key: string; server: string; pane: string } }
 /** A structured question a served OpenCode pane is asking. */
 interface ServedQuestion { key: string; server: string; pane: string; target?: Target; question: OpenCodeQuestion; questions: TerminalQuestion[]; at: number }
-
-/** The decisions an OpenCode permission ask offers the phone. OpenCode's
- * `always` covers the current session, so both grant answers reply `always`;
- * `allow-everywhere` additionally writes an allow rule into the user's
- * OpenCode config. Advertised as the approval card's `options`, the same
- * shape the phone already renders for a provider-supplied option list. */
-export const OPENCODE_APPROVAL_OPTIONS: Json[] = [
-  { label: "Allow once", decision: "approve" },
-  { label: "Allow for this project", decision: "allow-project" },
-  { label: "Allow everywhere", decision: "allow-everywhere" },
-  { label: "Deny", decision: "deny" },
-];
-
-/** The OpenCode permission reply a card decision maps to: both grant scopes
- * are `always`, a plain approve is `once`, a deny is `reject`. Undefined for
- * anything else. */
-export function opencodePermissionReply(decision: unknown): "once" | "always" | "reject" | undefined {
-  if (decision === "approve") return "once";
-  if (decision === "deny") return "reject";
-  if (decision === "allow-project" || decision === "allow-everywhere") return "always";
-  return undefined;
-}
-
 
 /** This socket is deliberately separate from the phone's HTTP pipe. Only local
  * agent callbacks can register identities or create an approval request. */
@@ -1541,89 +1471,4 @@ export class AgentHooks {
     if (this.fanoutArchiveTimer) clearInterval(this.fanoutArchiveTimer);
     this.fanoutSeen.clear();
   }
-}
-
-/** What a Stop payload says about the turn it ends: the harness's last
- * assistant message (Claude, Codex) and, from Claude Code, the background
- * tasks still in flight, which will wake the conversation again when they
- * finish. Absent fields are left out, so the Hook falls back to the transcript. */
-export function stopFacts(value: Json): { background?: number; reply?: string } {
-  const tasks = Array.isArray(value.background_tasks)
-    ? value.background_tasks.filter(task => !["completed", "failed", "killed", "stopped"].includes(String(object(task).status))) : undefined;
-  return { ...(tasks ? { background: tasks.length } : {}),
-    ...(typeof value.last_assistant_message === "string" && value.last_assistant_message.trim() ? { reply: value.last_assistant_message.slice(0, 16_384) } : {}) };
-}
-
-/** One agent callback, run as `hook <source>`. Resolves "abandoned" when a
- * tool call's callback ran out of its budget: the caller then exits at once,
- * since a socket or a process read still pending would hold the agent. */
-export async function agentHook(source: Provider, elapsed: () => number = () => performance.now()): Promise<void | "abandoned"> {
-  provider.parse(source);
-  // A missing helper must never prevent the coding agent from running.
-  // Inside Herdr only Herdr's pane counts; elsewhere a tmux pane does.
-  const place = await terminalPaneFromEnv();
-  if (!place) return;
-  let input = "";
-  for await (const chunk of process.stdin) { input += chunk.toString(); if (input.length > 1_048_576) return; }
-  const value = object(JSON.parse(input));
-  if (value.agent_id || value.agentId || value.isSidechain || value.is_sidechain) return;
-  // A `codex exec` or a subagent inside a Codex pane is not the pane's conversation.
-  if (source === "codex" && await codexForeignThread(value.transcript_path).catch(() => false)) return;
-  // So is a headless `claude -p` run inside a Claude pane.
-  if (source === "claude" && await claudeHeadlessThread(value.transcript_path).catch(() => false)) return;
-  const target = targetSchema.parse({ server: place.server, workspace: place.workspace, tab: place.tab,
-    pane: place.pane, source, session: value.session_id || value.sessionId });
-  const event = String(value.hook_event_name || "SessionStart");
-  return withinToolBudget(event, left => forwardHook(source, target, event, value, left), elapsed);
-}
-
-/**
- * Runs a callback's work. A PreToolUse or PostToolUse callback gets what is
- * left of TOOL_HOOK_BUDGET_MS since its process started (hook-fast.ts says
- * why): "abandoned" once that runs out, and the caller exits without an
- * answer so the tool runs. Every other event runs to its own timeouts.
- */
-export async function withinToolBudget<T>(event: string, work: (left: () => number) => Promise<T>,
-  elapsed: () => number = () => performance.now(), budgetMs = TOOL_HOOK_BUDGET_MS): Promise<T | "abandoned"> {
-  if (!event.endsWith("ToolUse")) return work(() => Infinity);
-  const left = () => Math.floor(budgetMs - elapsed());
-  if (left() <= 0) return "abandoned";
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<"abandoned">(resolve => { timer = setTimeout(() => resolve("abandoned"), left()); });
-  try { return await Promise.race([work(left), expired]); } finally { clearTimeout(timer); }
-}
-
-async function forwardHook(source: Provider, target: Target, event: string, value: Json, left: () => number): Promise<void> {
-  const modules = moduleSnapshot(defaultPhrenPath(), undefined, true);
-  if (!modules.has("hook") || (event.endsWith("ToolUse") && !modules.has("git"))) return;
-  // Codex 0.157 runs hooks inside its shared app-server daemon, whose pane
-  // variables belong to whichever pane first started it.
-  // The Hook's own per-pane app-server (codex-servers.ts) runs its hooks
-  // with that pane's variables, so they are trusted like a pane's own.
-  const ownServer = source === "codex" && codexServerId.safeParse(process.env[CODEX_SERVER_ENV]).success;
-  const daemon = source === "codex" && !ownServer && await underCodexDaemon().catch(() => false);
-  // Codex asks this hook before its automatic reviewer: say when that
-  // reviewer, not the owner, will decide.
-  const autoReview = source === "codex" && event === "PermissionRequest" && await codexAutoReview(value.transcript_path);
-  // A worker the Hook launched with its brief carries that dispatch's id. A
-  // daemon's variables belong to another pane, so it sends none.
-  const dispatchId = !daemon && (event === "SessionStart" || event === "UserPromptSubmit") && briefId.safeParse(process.env[DISPATCH_ID_ENV]).success
-    ? process.env[DISPATCH_ID_ENV] : undefined;
-  const data = JSON.stringify({ target, event, ...(daemon ? { daemon: true } : {}), ...(autoReview ? { autoReview: true } : {}), ...(dispatchId ? { dispatchId } : {}),
-    ...(source === "claude" && typeof value.transcript_path === "string" ? { transcript: value.transcript_path.slice(0, 4096) } : {}),
-    tool: value.tool_name, input: value.tool_input, toolUseId: value.tool_use_id, cwd: value.cwd,
-    ...(event === "UserPromptSubmit" && typeof value.prompt === "string" ? { prompt: value.prompt.slice(0, 65_536) } : {}),
-    ...(event === "Stop" ? stopFacts(value) : {}) });
-  await new Promise<void>(resolve => {
-    const req = request({ socketPath: localSocket(), path: "/hook", method: "POST", timeout: event === "PermissionRequest" ? 58_000 : event.endsWith("ToolUse") ? Math.max(1, left()) : 12_000,
-      headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) } }, res => {
-      let result = "";
-      res.on("data", chunk => { result += chunk.toString(); if (result.length > 16_384) req.destroy(); });
-      // Forward approval/refusal decisions and validated turn context.
-      // Tool callbacks stay silent, and an empty reply says nothing.
-      res.on("end", () => { if (res.statusCode === 200) process.stdout.write(hookOutput(event, result)); resolve(); });
-      res.on("error", () => resolve());
-    });
-    req.on("error", () => resolve()); req.on("timeout", () => { req.destroy(); resolve(); }); req.end(data);
-  });
 }
