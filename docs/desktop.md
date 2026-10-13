@@ -143,7 +143,8 @@ keeps Phren running there. Turn it off in Settings › Notifications. Clicking a
 notification opens that session; on a Mac, one for an agent that finished and
 waits on you takes a typed reply, sent as its next prompt. Come back after a
 minute or more away and Home's "Since you left" lists the turns agents
-finished meanwhile. The launch sheet
+finished meanwhile. Home's Computers rows show each Hook's version and flag
+one older than the newest seen, with its update command to copy. The launch sheet
 ("+ New agent") recommends a computer from its load and account quota.
 
 ## Chats, consoles and tiles

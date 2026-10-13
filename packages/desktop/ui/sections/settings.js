@@ -7,6 +7,7 @@ import { openExtensions } from "../extensions.js";
 import { applyTheme, currentTheme, themes as themeList } from "../shell/theme.js";
 import { registerPauseCommand } from "../shell/pause-all.js";
 import { hookGet, hookPost } from "../api.js";
+import { hookDrift, updateCommand } from "../shell/hook-drift.js";
 import { setTrayEnabled, trayAvailable, trayEnabled } from "../shell/tray.js";
 import { DEFAULT_SUMMON, acceleratorFromEvent, formatAccelerator, setSummonKey, summonAvailable, summonKey } from "../shell/summon.js";
 
@@ -453,7 +454,12 @@ function computerCard(initial, meta, rerender) {
     dot.className = `settings-dot state-${c.state}`;
     stateText.textContent = c.error && c.state !== "online" ? `${c.state}: ${c.error}` : c.state;
     const v = store.version(c.computer);
-    version.textContent = v ? `v${v}` : "";
+    // Older than the newest Hook this desktop sees: say so, with the command in the tooltip.
+    const drift = hookDrift(store.merged?.computers ?? []);
+    const behind = drift.behind.has(c.computer);
+    version.textContent = v ? `v${v}${behind ? ` · update to ${drift.newest}` : ""}` : "";
+    version.classList.toggle("behind", behind);
+    version.title = behind ? updateCommand(drift.newest) : "";
     version.hidden = !v;
     addrText.textContent = info.address ? `${info.username ? info.username + "@" : ""}${info.address}${info.port && Number(info.port) !== 22 ? ":" + info.port : ""}` : (info.local ? "local socket" : "");
     store.capabilities(c.computer).then((caps) => {
