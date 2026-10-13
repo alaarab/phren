@@ -292,7 +292,6 @@ button.pj-row:hover { background: var(--card); }
 }
 .pj-input:focus { border-color: var(--accent); }
 .pj-input.mono { font-family: var(--mono); }
-.pj-toggle { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); cursor: pointer; }
 .pj-notice { color: var(--muted); font-size: 12.5px; }
 .pj-notice.danger { color: var(--danger); }
 .pj-forge .section-label .chg-mark { display: inline-flex; color: var(--text); }

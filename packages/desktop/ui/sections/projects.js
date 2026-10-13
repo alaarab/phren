@@ -23,18 +23,6 @@ const KNOBS = {
   taskMode: { label: "Task mode", caption: "How new tasks are filed", options: ["off", "manual", "suggest", "auto"] },
 };
 
-// Claude and Codex take a permission mode on launch; the Hook refuses it for
-// every other harness (docs/api-reference.md, "Hook workspace launch fields").
-const PERMISSION_MODES = [
-  ["", "Harness default"],
-  ["supervised", "Supervised"],
-  ["auto-edits", "Auto edits"],
-  ["auto", "Auto"],
-  ["full-access", "Full access"],
-];
-
-const HARNESS_LABELS = { claude: "Claude", codex: "Codex", opencode: "OpenCode", copilot: "Copilot", phren: "Phren" };
-
 const STYLE_ID = "projects-styles";
 
 // ---------------------------------------------------------------- helpers
@@ -436,7 +424,7 @@ export function mountProjects(root) {
       const host = el("span", "pj-host", state.detail.computer);
       const spacer = el("span", "pj-spacer");
       const launch = el("button", "pj-btn accent", "Launch agent");
-      launch.addEventListener("click", () => openLaunch(state.detail.computer, state.detail.name));
+      launch.addEventListener("click", () => openLaunchSheet({ project: state.detail.name, computer: state.detail.computer, title: `Launch an agent in ${state.detail.name}` }));
       header.append(back, title, host, spacer);
       const knobsBtn = el("button", "pj-btn", "Knobs");
       knobsBtn.addEventListener("click", () => openKnobs(state.detail));
@@ -930,125 +918,6 @@ export function mountProjects(root) {
     computer.addEventListener("change", loadRepos);
     void loadRepos();
     autoFocus(pathInput);
-  }
-
-  function pollForSession(computer, target, name) {
-    let tries = 0;
-    const timer = setInterval(async () => {
-      tries++;
-      const rows = allSessions(state.merged).filter((row) => row.computer === computer);
-      const match = target
-        ? rows.find((row) => row.child.target && row.child.target.server === target.server && row.child.target.workspace === target.workspace && row.child.target.tab === target.tab && row.child.target.pane === target.pane)
-        : rows.find((row) => projectOf(row.child) === name);
-      if (match) { clearInterval(timer); openInAgents(match.computer, match.child); return; }
-      if (tries >= 30) clearInterval(timer);
-    }, 700);
-  }
-
-  async function openLaunch(computer, name) {
-    const hosts = onlineComputers();
-    const { bodyEl, footer } = openSheet(`Launch an agent in ${name}`, { width: 480 });
-    const computerSelect = selectEl(hosts.map((c) => [c.computer, c.computer]), computer);
-
-    const harnessSelect = selectEl([["", "Loading\u2026"]]);
-    harnessSelect.disabled = true;
-    const modelSelect = selectEl([["", "Harness default"]]);
-    const permWrap = el("div", "pj-field");
-    const permSelect = selectEl(PERMISSION_MODES);
-    permWrap.append(el("span", "pj-field-label", "Permission mode"), permSelect);
-    permWrap.hidden = true;
-
-    const worktreeToggle = document.createElement("input");
-    worktreeToggle.type = "checkbox";
-    const worktreeLabel = el("label", "pj-toggle");
-    worktreeLabel.append(worktreeToggle, el("span", null, "Start in a new worktree"));
-    const branchInput = document.createElement("input");
-    branchInput.type = "text";
-    branchInput.className = "pj-input mono";
-    branchInput.placeholder = "branch name";
-    branchInput.value = `${name}-agent`;
-    const worktreeField = field("New branch", branchInput);
-    worktreeField.hidden = true;
-    worktreeToggle.addEventListener("change", () => { worktreeField.hidden = !worktreeToggle.checked; });
-
-    bodyEl.append(field("Computer", computerSelect), field("Harness", harnessSelect), field("Model", modelSelect), permWrap, worktreeLabel, worktreeField);
-    const notice = noticeBox();
-    bodyEl.append(notice);
-    const launch = el("button", "pj-btn accent", "Launch");
-    footer.append(launch);
-
-    let harnesses = [];
-    async function loadHarnesses() {
-      try {
-        const inventory = await hookGet(computerSelect.value, "/v1/harnesses");
-        if (inventory.pending) throw new Error("This computer is still checking its harnesses. Try again in a moment.");
-        harnesses = (inventory.harnesses ?? []).filter((entry) => entry.installed && entry.usable);
-        if (!harnesses.length) throw new Error("No usable harness on this computer.");
-        clear(harnessSelect);
-        for (const entry of harnesses) {
-          const option = el("option", null, `${HARNESS_LABELS[entry.source] ?? entry.source}${entry.version ? ` ${entry.version}` : ""}`);
-          option.value = entry.source;
-          harnessSelect.append(option);
-        }
-        harnessSelect.disabled = false;
-        await loadModels();
-      } catch (err) {
-        clear(harnessSelect);
-        harnessSelect.append(el("option", null, "Unavailable"));
-        setNotice(notice, err?.message ?? String(err), true);
-      }
-    }
-
-    async function loadModels() {
-      clear(modelSelect);
-      const fallback = el("option", null, "Harness default");
-      fallback.value = "";
-      modelSelect.append(fallback);
-      const source = harnessSelect.value;
-      try {
-        const catalogue = await hookGet(computerSelect.value, "/v1/models", { source });
-        for (const model of catalogue.models ?? []) {
-          const option = el("option", null, model.name || model.id);
-          option.value = model.id;
-          modelSelect.append(option);
-        }
-      } catch { /* the harness default is always an option */ }
-    }
-
-    function syncPermission() {
-      const source = harnessSelect.value;
-      permWrap.hidden = !(source === "claude" || source === "codex") || !store.can(computerSelect.value, "launchPermissionMode");
-    }
-
-    harnessSelect.addEventListener("change", () => { syncPermission(); void loadModels(); });
-    computerSelect.addEventListener("change", () => { void loadHarnesses(); });
-
-    launch.addEventListener("click", async () => {
-      const kind = harnessSelect.value;
-      if (!kind) { setNotice(notice, "Choose a harness.", true); return; }
-      const body = { project: name, kind, label: name };
-      if (modelSelect.value) body.model = modelSelect.value;
-      if (!permWrap.hidden && permSelect.value) body.permissionMode = permSelect.value;
-      const branch = branchInput.value.trim();
-      if (worktreeToggle.checked) {
-        if (!branch) { setNotice(notice, "Name the worktree's branch.", true); return; }
-        body.worktree = { branch };
-      }
-      launch.disabled = true;
-      setNotice(notice, `Starting ${HARNESS_LABELS[kind] ?? kind} on ${computerSelect.value}\u2026`);
-      try {
-        const result = await hookPost(computerSelect.value, "/v1/workspaces/launch", body);
-        setNotice(notice, result.reused ? "Joining the launch already in flight\u2026" : "Waiting for the session to appear\u2026");
-        pollForSession(computerSelect.value, result.target, name);
-        setTimeout(closeSheet, 600);
-      } catch (err) {
-        setNotice(notice, err?.message ?? String(err), true);
-        launch.disabled = false;
-      }
-    });
-
-    await store.capabilities(computerSelect.value);
-    void loadHarnesses();
   }
 
   function encodeBase64(text) {
