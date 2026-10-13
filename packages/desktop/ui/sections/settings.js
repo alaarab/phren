@@ -7,6 +7,7 @@ import { openExtensions } from "../extensions.js";
 import { applyTheme, currentTheme, themes as themeList } from "../shell/theme.js";
 import { registerPauseCommand } from "../shell/pause-all.js";
 import { hookGet, hookPost } from "../api.js";
+import { setTrayEnabled, trayAvailable, trayEnabled } from "../shell/tray.js";
 import { DEFAULT_SUMMON, acceleratorFromEvent, formatAccelerator, setSummonKey, summonAvailable, summonKey } from "../shell/summon.js";
 
 // The "Pause all agents" palette command is app-wide: register it once, at
@@ -1047,6 +1048,10 @@ function buildNotifications(page) {
   list.append(toggleRow("Notify when an agent needs me", notifyEnabled(), (on) => writeFlag(NOTIFY_KEY, on)));
   list.append(toggleRow("Show the needs-you count on the dock icon", badgeEnabled(), (on) => writeFlag(BADGE_KEY, on)));
   list.append(toggleRow("Notify when a session's pull request checks pass or fail", ciNotifyEnabled(), (on) => writeFlag(CI_KEY, on)));
+  if (trayAvailable()) {
+    const where = window.phrenDesktop.platform === "darwin" ? "menu bar" : "system tray";
+    list.append(toggleRow(`Show who needs you in the ${where}`, trayEnabled(), setTrayEnabled));
+  }
   page.append(head, list);
   return null;
 }
