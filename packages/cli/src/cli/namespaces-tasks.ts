@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getPhrenPath } from "../shared.js";
+import { findProjectNameCaseInsensitive, getPhrenPath } from "../shared.js";
 import { resolveRuntimeProfile } from "../runtime-profile.js";
 import { enableTaskFormat, taskFormatStatus, taskFormatMigrationHint, taskFormatCurrentWriters } from "../data/task-format.js";
 import { resolveAllStores, type StoreEntry } from "../store-registry.js";
@@ -430,5 +430,14 @@ export async function handleTaskListArgs(args: string[], defaultProfile: string)
   // project of the active profile lists just that project instead of an empty profile.
   const { readTasksAcrossProjects } = await import("../data/access.js");
   const project = profiles[0] && readTasksAcrossProjects(getPhrenPath(), defaultProfile).some(doc => doc.project.toLowerCase() === profiles[0].toLowerCase()) ? profiles[0] : undefined;
+  if (profiles[0] && !project) {
+    const { listProfiles } = await import("../profile-store.js");
+    const known = listProfiles(getPhrenPath());
+    const isProfile = known.ok && known.data.some(p => p.name === profiles[0]);
+    if (!isProfile && !findProjectNameCaseInsensitive(getPhrenPath(), profiles[0])) {
+      console.error(`"${profiles[0]}" is neither a profile nor a project.`);
+      process.exit(1);
+    }
+  }
   return handleTaskView(project ? defaultProfile : profiles[0] || defaultProfile, filter.data, project);
 }
