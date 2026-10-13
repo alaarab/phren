@@ -59,6 +59,8 @@ const APPROVAL_HOLD_MS = (() => {
   return Number.isFinite(value) && value >= 50 && value <= 60_000 ? Math.floor(value) : 55_000;
 })();
 /** A pane's terminal dialog is read at most once per this window. */
+/** Lines read to find Claude's question dialog: its tab bar sits above the whole question. */
+const QUESTION_READ_LINES = 120;
 const DIALOG_READ_MS = intervalFromEnv("PHREN_DIALOG_THROTTLE_MS", 3_000);
 /** How long a pushed terminal dialog can be answered from its notification. */
 const DIALOG_PUSH_MS = 10 * 60_000;
@@ -642,13 +644,17 @@ export class AgentHooks {
     this.dialogReads.set(key, now);
     while (this.dialogReads.size > 128) this.dialogReads.delete(this.dialogReads.keys().next().value!);
     const text = await this.paneLines(target);
+    // A tall question has its tab bar above the 40 lines: look further up, for it only.
+    const tall = target.source === "claude" && /Chat about this/.test(text) && !claudeQuestionDialog(text)
+      ? await this.paneLines(target, true, QUESTION_READ_LINES).catch(() => "") : "";
+    const asking = target.source === "claude" && !!(claudeQuestionDialog(text) || (tall && claudeQuestionDialog(tall)));
     this.passwords.set(key, passwordLine(text));
     while (this.passwords.size > 128) this.passwords.delete(this.passwords.keys().next().value!);
     // Claude's AskUserQuestion dialog is answered from the question itself
     // (the held request, the remembered one, or the transcript's), never as
     // a numbered dialog: its digits advance on their own and a trailing
     // Enter would land on the next tab.
-    if (target.source === "claude" && claudeQuestionDialog(text)) {
+    if (asking) {
       if (entry && !question) this.terminalPrompts.delete(key);
       return;
     }
@@ -746,7 +752,8 @@ export class AgentHooks {
   async answerClaudeQuestions(target: Target, questions: DialogQuestion[], answers: DialogAnswer[], options: { from?: number; submit?: boolean } = {}): Promise<void> {
     const key = JSON.stringify(target);
     await answerClaudeQuestionDialog({
-      read: () => this.paneLines(target),
+      // A tall question (long text, many options) pushes its tab bar out of 40 lines.
+      read: () => this.paneLines(target, true, QUESTION_READ_LINES),
       keys: async keys => {
         if (!keys.length) return;
         await validateTarget(target, false, true);
@@ -802,8 +809,8 @@ export class AgentHooks {
     return readPaneText(target.server, target.pane, { scope: "agent", source: "visible", lines: 40, stripAnsi: false, format: "ansi", timeoutMs: 2_000 });
   }
   /** Read what the pane draws, stripping ANSI unless placeholder styling is needed. */
-  paneLines(target: Target, stripAnsi = true): Promise<string> {
-    return readPaneText(target.server, target.pane, { scope: "agent", source: "visible", lines: 40, stripAnsi, timeoutMs: 2_000 });
+  paneLines(target: Target, stripAnsi = true, lines = 40): Promise<string> {
+    return readPaneText(target.server, target.pane, { scope: "agent", source: "visible", lines, stripAnsi, timeoutMs: 2_000 });
   }
   /** After the phone walks Codex's /permissions menu onto Full Access, the
    * agent draws a second "Enable full access?" confirmation. Watch the pane's
