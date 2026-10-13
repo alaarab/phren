@@ -224,6 +224,9 @@ body.bench-max .main { display: none; }
 button.home-row:hover { background: var(--card); }
 .home-row.tone-waiting { box-shadow: inset 3px 0 0 var(--waiting); }
 .home-row.tone-working { box-shadow: inset 3px 0 0 var(--working); }
+/* A working session the Hook sees no output from (stalled). */
+.home-row.tone-stalled { box-shadow: inset 3px 0 0 var(--danger); }
+.home-stalled, .sb-stalled { color: var(--danger); font-size: 12px; white-space: nowrap; }
 .home-row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .home-row-meta { display: flex; gap: 8px; flex: none; color: var(--muted); font-size: 12px; }
 .home-project { color: var(--accent); font-family: var(--mono); }
