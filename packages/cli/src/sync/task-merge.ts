@@ -45,6 +45,53 @@ function parse(content: string): Section[] {
   return sections;
 }
 
+/**
+ * The copy of a repeated task to keep: a completed copy, then the Active one,
+ * then the one with the most text. A section move that left the old record
+ * behind (or a hand-resolved conflict that kept both sides) is how one id
+ * ends up twice in a file.
+ */
+function richer(a: TaskEntry, b: TaskEntry): TaskEntry {
+  if (completed(a) !== completed(b)) return completed(a) ? a : b;
+  if ((a.section === "Active") !== (b.section === "Active")) return a.section === "Active" ? a : b;
+  return b.lines.join("\n").length > a.lines.join("\n").length ? b : a;
+}
+
+/** Leaves one record per task id, in place of the copy it keeps. Returns how many it dropped. */
+function dedupeSections(sections: Section[]): number {
+  const keep = new Map<string, TaskEntry>();
+  for (const section of sections) for (const row of section.rows) {
+    if (row.kind !== "task" || !row.entry.key.startsWith("bid:")) continue;
+    const kept = keep.get(row.entry.key);
+    keep.set(row.entry.key, kept ? richer(kept, row.entry) : row.entry);
+  }
+  let dropped = 0;
+  for (const section of sections) {
+    section.rows = section.rows.filter((row) => {
+      if (row.kind !== "task" || !row.entry.key.startsWith("bid:") || keep.get(row.entry.key) === row.entry) return true;
+      dropped++;
+      return false;
+    });
+  }
+  return dropped;
+}
+
+function render(sections: Section[]): string {
+  const out: string[] = [];
+  for (const section of sections) {
+    if (section.heading !== null) out.push(section.heading);
+    for (const row of section.rows) out.push(...(row.kind === "task" ? row.entry.lines : [row.text]));
+  }
+  return out.join("\n");
+}
+
+/** A tasks file with each repeated task id collapsed to its richest record; unchanged text when none repeat. */
+export function dedupeTaskIds(content: string): { content: string; dropped: number } {
+  const sections = parse(content);
+  const dropped = dedupeSections(sections);
+  return dropped ? { content: render(sections), dropped } : { content, dropped: 0 };
+}
+
 function index(sections: Section[]): Map<string, TaskEntry> {
   const map = new Map<string, TaskEntry>();
   for (const section of sections) {
@@ -103,24 +150,16 @@ function mergeContract(base: TaskEntry | undefined, ours: TaskEntry | undefined,
  * added on both sides.
  */
 export function mergeTasksByBid(base: string, ours: string, theirs: string): string {
+  // A repeated id on any side is collapsed to its richest record first.
+  // Refusing instead aborted every later sync of the store: a duplicate that
+  // reached the remote kept every computer diverged until someone noticed.
+  const baseSections = parse(base);
   const oursSections = parse(ours);
   const theirsSections = parse(theirs);
-  const b = index(parse(base));
+  for (const sections of [baseSections, oursSections, theirsSections]) dedupeSections(sections);
+  const b = index(baseSections);
   const o = index(oursSections);
   const t = index(theirsSections);
-
-  // A duplicated identity cannot be reconciled by first-win indexing. Leave
-  // the sync conflict unresolved, retaining both original files for repair.
-  for (const sections of [parse(base), oursSections, theirsSections]) {
-    const seen = new Set<string>();
-    for (const section of sections) for (const row of section.rows) {
-      if (row.kind !== "task" || !row.entry.key.startsWith("bid:")) continue;
-      if (seen.has(row.entry.key) || [...row.entry.lines[0].matchAll(/<!--\s*bid:([a-f0-9]{8})\b[^>]*-->/g)].length !== 1) {
-        throw new Error("Task merge requires unique, unambiguous stable IDs; repair the conflicting records first.");
-      }
-      seen.add(row.entry.key);
-    }
-  }
 
   const chosen = new Map<string, TaskEntry>();
   for (const key of new Set([...b.keys(), ...o.keys(), ...t.keys()])) {

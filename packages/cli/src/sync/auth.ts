@@ -4,6 +4,7 @@ import { atomicWriteText, runtimeFile } from "../phren-paths.js";
 import { tryFileLock, withFileLock } from "../governance/locks.js";
 import { runGit } from "../utils-helpers.js";
 import type { RunStoreGit } from "./store-merge.js";
+import { healStoreAuth } from "./auth-heal.js";
 
 export const AUTH_BACKOFF_INITIAL_MS = 60 * 60 * 1000;
 export const AUTH_BACKOFF_MAX_MS = 24 * AUTH_BACKOFF_INITIAL_MS;
@@ -95,17 +96,28 @@ export function withStoreAuthBackoff(git: RunStoreGit, now: () => number = Date.
     try {
       const previous = readStoreAuthFailure(cwd);
       const sameRemote = previous?.remote === remote.remote && previous.remoteName === remote.remoteName;
+      let healDetail = "";
       if (sameRemote && authBackoffActive(previous, now())) {
-        return { ok: false, output: "", error: storeAuthDetail(previous) };
+        // A GitHub SSH remote may still heal through gh (rate-limited on its own).
+        const healed = await healStoreAuth(cwd, remote.remoteName, remote.remote, git, now());
+        if (!healed.healed) return { ok: false, output: "", error: `${storeAuthDetail(previous)}${healed.detail ? `. ${healed.detail}` : ""}` };
+        healDetail = healed.detail;
       }
-      const result = await git(cwd, args);
+      let result = await git(cwd, args);
+      if (!result.ok && isGitAuthFailure(result.error) && !healDetail) {
+        const healed = await healStoreAuth(cwd, remote.remoteName, remote.remote, git, now());
+        healDetail = healed.detail;
+        // The remote now points somewhere else, so any old block no longer applies.
+        if (healed.healed) result = await git(cwd, args);
+      }
       // A push-only permission failure must not disable otherwise readable stores.
-      if (args[0] === "push") return result;
+      if (args[0] === "push") return !result.ok && healDetail ? { ...result, error: `${result.error ?? "push failed"}\n${healDetail}` } : result;
       if (result.ok) {
         if (sameRemote) clearStoreAuthFailure(cwd);
       } else if (isGitAuthFailure(result.error)) {
-        const state = recordStoreAuthFailure(cwd, remote.remoteName, remote.remote, now());
-        return { ...result, error: storeAuthDetail(state) };
+        const current = storeSyncRemote(cwd, remote.remoteName) ?? remote;
+        const state = recordStoreAuthFailure(cwd, current.remoteName, current.remote, now());
+        return { ...result, error: `${storeAuthDetail(state)}${healDetail ? `. ${healDetail}` : ""}` };
       } else if (sameRemote) {
         // The last failure was not authentication; do not age it toward removal.
         clearStoreAuthFailure(cwd);

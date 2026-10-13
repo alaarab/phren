@@ -11,7 +11,12 @@ export interface StoreMergeResult {
   detail: string;
   conflicts?: string[];
   committedLocalWrites?: boolean;
+  /** Where the pre-merge HEAD was kept when local and remote had both moved. */
+  backupRef?: string;
 }
+
+/** Pre-merge HEADs, one ref per diverged merge, named by the time it was taken (store-cleanup.ts prunes them). */
+export const BACKUP_REF_PREFIX = "refs/phren/backup/";
 
 export interface StoreMergeOptions {
   git: RunStoreGit;
@@ -109,14 +114,24 @@ export async function mergeStoreUpstream(cwd: string, options: StoreMergeOptions
   }
 
   const canFastForward = (await git(cwd, ["merge-base", "--is-ancestor", "HEAD", target.output])).ok;
+  // Both sides moved: keep the local history reachable before merging into it.
+  let backupRef: string | undefined;
+  if (!canFastForward) {
+    const ref = `${BACKUP_REF_PREFIX}${Date.now()}`;
+    if (!(await git(cwd, ["update-ref", ref, "HEAD"])).ok) {
+      return { status: "error", detail: "Cannot keep a backup of the store's history before merging.", committedLocalWrites };
+    }
+    backupRef = ref;
+  }
   const merged = await git(cwd, canFastForward
     ? ["merge", "--ff-only", target.output]
-    : ["merge", "--no-edit", target.output]);
+    : ["-c", "commit.gpgsign=false", "merge", "--no-edit", target.output]);
   if (merged.ok) {
     return {
       status: "updated",
       detail: canFastForward ? "Store fast-forwarded to the remote." : "Store merged with the remote.",
       committedLocalWrites,
+      ...(backupRef ? { backupRef } : {}),
     };
   }
 
@@ -136,6 +151,7 @@ export async function mergeStoreUpstream(cwd: string, options: StoreMergeOptions
         detail: `Store merged with the remote; resolved conflicts in ${initialConflicts.join(", ")}.`,
         conflicts: initialConflicts,
         committedLocalWrites,
+        ...(backupRef ? { backupRef } : {}),
       };
     }
   }
