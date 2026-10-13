@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { appendFile, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, rename, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { TranscriptReader } from "./transcripts.js";
@@ -84,8 +84,10 @@ describe("indexed transcript pages", () => {
     await writeFile(file, row("Before") + "\n");
     const reader = new TranscriptReader(file, "codex");
     await reader.read();
-    await new Promise(resolve => setTimeout(resolve, 5));
     await writeFile(file, row("Edited") + "\n");
+    // Coarse filesystem clocks can give both writes the same mtime; make the rewrite's visible.
+    const later = new Date(Date.now() + 5_000);
+    await utimes(file, later, later);
     expect(JSON.stringify((await reader.read()).entries)).toContain("Edited");
     await writeFile(file + ".new", row("New inode") + "\n");
     await rename(file + ".new", file);
