@@ -74,6 +74,7 @@ jobs:
         uses: actions/upload-artifact@v7.0.1
         with:
           name: phren-vscode-${{ github.event.inputs.version }}
+          retention-days: 7
           path: packages/vscode/*.vsix
           if-no-files-found: error
 
