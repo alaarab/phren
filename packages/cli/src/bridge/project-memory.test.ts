@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initTestPhrenRoot, makeTempDir } from "../test-helpers.js";
 import { clearProjectConfigCache, getProjectRemote } from "../project-config.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { MEMORY_LIMITS, memoryForFiles, memorySearch, projectMemory, saveFinding, tasksForBranch } from "./project-memory.js";
+import { MEMORY_LIMITS, memoryForFiles, memorySearch, projectMemory, saveFinding, completeProjectTask, tasksForBranch } from "./project-memory.js";
 
 // The code index is a separate package; the files route only needs its symbol resolver.
 const codeIndex = vi.hoisted(() => ({ files: {} as Record<string, string>, calls: 0 }));
@@ -206,6 +206,23 @@ describe("GET /v1/projects/:project/tasks?branch=", () => {
     expect(tasksForBranch(store, "app", "main").tasks).toEqual([]);
     expect((await hookGet("/v1/projects/app/tasks?branch=feature%2Flogin-fix")).body.tasks).toHaveLength(1);
     expect((await hookGet("/v1/projects/app/tasks?branch=a..b")).status).toBe(400);
+  });
+});
+
+describe("POST /v1/projects/:project/tasks/complete", () => {
+  beforeEach(() => { write("app/tasks.md", "# app tasks\n\n## Active\n\n- [ ] Fix login <!-- bid:cccc0001 -->\n\n## Queue\n\n- [ ] other-work task <!-- bid:cccc0002 -->\n\n## Done\n\n- [x] Old <!-- bid:cccc0003 -->\n"); });
+
+  it("completes one task by exact id, reports repeats, and refuses unknown ids and loose text", async () => {
+    expect(completeProjectTask(store, "app", { id: "bid:cccc0001" })).toEqual({ project: "app", id: "bid:cccc0001", status: "completed" });
+    expect(completeProjectTask(store, "app", { id: "bid:cccc0001" }).status).toBe("already-done");
+    expect(completeProjectTask(store, "app", { id: "bid:cccc0003" }).status).toBe("already-done");
+    expect(tasksForBranch(store, "app", "fix/login").tasks).toEqual([]);
+    expect(() => completeProjectTask(store, "app", { id: "bid:ffff0000" })).toThrowError(expect.objectContaining({ status: 404 }));
+    expect(() => completeProjectTask(store, "app", { id: "Other work" })).toThrow();
+    expect(() => completeProjectTask(store, "app", { id: "bid:cccc0002", extra: 1 })).toThrow();
+    expect(tasksForBranch(store, "app", "other-work").tasks.map(t => t.id)).toEqual(["bid:cccc0002"]);
+    expect((await hookGet("/v1/projects/app/tasks/complete", "GET")).status).toBe(405);
+    expect((await hookGet("/v1/projects/app/tasks/complete", "POST", true, { id: "bid:cccc0002" })).body).toMatchObject({ status: "completed" });
   });
 });
 

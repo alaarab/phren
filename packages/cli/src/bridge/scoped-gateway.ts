@@ -3,7 +3,7 @@ import type { Readable, Writable } from "node:stream";
 import type { ZodType } from "zod";
 import { BridgeError } from "./protocol.js";
 import {
-  findingWriteSchema, isBranchName, isRepoPath, isSearchText, MAX_FILE_PATHS, MAX_FINDING_BODY, PROJECT_NAME,
+  findingWriteSchema, taskCompleteSchema, isBranchName, isRepoPath, isSearchText, MAX_FILE_PATHS, MAX_FINDING_BODY, PROJECT_NAME,
 } from "./gitboy-contract.js";
 
 // A scoped SSH key reaches the Hook through this gateway instead of the full
@@ -64,13 +64,14 @@ const RULES: Record<GatewayScope, Rule[]> = {
     } },
   ],
   "gitboy-write": [
+    { method: "POST", path: new RegExp(`^/v1/projects/${PROJECT}/tasks/complete$`), body: { max: 256, schema: taskCompleteSchema } },
     { method: "POST", path: new RegExp(`^/v1/projects/${PROJECT}/findings$`), body: { max: MAX_FINDING_BODY, schema: findingWriteSchema } },
   ],
 };
 
 const DESCRIBE: Record<GatewayScope, string> = {
   "gitboy-read": "GET /v1/projects/<project>/memory, /memory/files, /memory/search and /tasks",
-  "gitboy-write": "POST /v1/projects/<project>/findings",
+  "gitboy-write": "POST /v1/projects/<project>/findings and /tasks/complete",
 };
 
 export function isGatewayScope(value: string): value is GatewayScope {

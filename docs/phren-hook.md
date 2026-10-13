@@ -153,7 +153,7 @@ scoped to these routes:
 | Scope | Key comment | Routes |
 |---|---|---|
 | `gitboy-read` | `phren-gitboy` | `GET /v1/projects/:project/memory`, `/memory/files`, `/memory/search`, `/tasks` |
-| `gitboy-write` | `phren-gitboy-write` | `POST /v1/projects/:project/findings` |
+| `gitboy-write` | `phren-gitboy-write` | `POST /v1/projects/:project/findings`, `POST /v1/projects/:project/tasks/complete` |
 
 Each scope is its own key with its own forced command, so a read key can never
 write and the write key reads nothing.
