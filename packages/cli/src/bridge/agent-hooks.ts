@@ -16,7 +16,7 @@ import { findPane, knownPanes, paneIdentity, paneForCodexSession, servers, snaps
 import { hookOutput, TOOL_HOOK_BUDGET_MS } from "./hook-fast.js";
 import { underCodexDaemon } from "./codex-daemon.js";
 import { codexAutoReview } from "./codex-review-mode.js";
-import { codexForeignThread } from "./codex-thread-origin.js";
+import { claudeHeadlessThread, codexForeignThread } from "./codex-thread-origin.js";
 import { terminalPaneFromEnv, terminalProvider } from "./terminal.js";
 import { readPaneText } from "./pane-text.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
@@ -1562,6 +1562,8 @@ export async function agentHook(source: Provider, elapsed: () => number = () => 
   if (value.agent_id || value.agentId || value.isSidechain || value.is_sidechain) return;
   // A `codex exec` or a subagent inside a Codex pane is not the pane's conversation.
   if (source === "codex" && await codexForeignThread(value.transcript_path).catch(() => false)) return;
+  // So is a headless `claude -p` run inside a Claude pane.
+  if (source === "claude" && await claudeHeadlessThread(value.transcript_path).catch(() => false)) return;
   const target = targetSchema.parse({ server: place.server, workspace: place.workspace, tab: place.tab,
     pane: place.pane, source, session: value.session_id || value.sessionId });
   const event = String(value.hook_event_name || "SessionStart");

@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { codexForeignThread, foreignMeta } from "./codex-thread-origin.js";
+import { claudeHeadlessThread, codexForeignThread, foreignMeta, headlessEntrypoint } from "./codex-thread-origin.js";
 
 const meta = (fields: string) => `{"timestamp":"2026-10-04T18:38:33Z","type":"session_meta","payload":{"id":"01a10973","cwd":"/tmp/x",${fields},"base_instructions":"${"x".repeat(8000)}"}}\n`;
 
@@ -27,6 +27,23 @@ describe("Codex callbacks from threads that are not the pane's conversation", ()
       expect(await codexForeignThread(path.join(root, "rollout-missing.jsonl"))).toBe(false);
       expect(await codexForeignThread(path.join(root, "notes.jsonl"))).toBe(false);
       expect(await codexForeignThread(undefined)).toBe(false);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+});
+
+describe("Claude callbacks from headless runs inside a pane", () => {
+  it("are told apart by the transcript's entrypoint; an unreadable transcript counts as the pane's own", async () => {
+    expect(headlessEntrypoint('{"type":"user","entrypoint":"sdk-cli","version":"2"}')).toBe(true);
+    expect(headlessEntrypoint('{"type":"user","entrypoint":"cli","version":"2"}')).toBe(false);
+    const root = await mkdtemp(path.join(tmpdir(), "phren-claude-"));
+    try {
+      const headless = path.join(root, "a.jsonl"), tui = path.join(root, "b.jsonl");
+      await writeFile(headless, '{"type":"user","entrypoint":"sdk-cli"}\n');
+      await writeFile(tui, '{"type":"user","entrypoint":"cli"}\n');
+      expect(await claudeHeadlessThread(headless)).toBe(true);
+      expect(await claudeHeadlessThread(tui)).toBe(false);
+      expect(await claudeHeadlessThread(path.join(root, "missing.jsonl"))).toBe(false);
+      expect(await claudeHeadlessThread(undefined)).toBe(false);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 });
