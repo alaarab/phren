@@ -881,3 +881,29 @@ test("⌘K's ? search offers to ask the question in a quick chat", async ({ page
   await expect(page.locator(".launch-sheet .launch-title")).toHaveText("Quick chat about phren");
   await expect(page.getByRole("textbox", { name: "First prompt" })).toHaveValue("why does login drop the session");
 });
+
+test("Home replies to an agent that is waiting on you", async ({ page }) => {
+  await page.routeWebSocket(/\/api\/overview$/, (ws) => {
+    const server = ws.connectToServer();
+    server.onMessage((message) => {
+      const msg = JSON.parse(String(message));
+      for (const c of msg.merged?.computers ?? []) for (const g of c.overview?.groups ?? []) for (const child of g.children ?? []) {
+        if (child.id === "sess-fix-login") Object.assign(child, { agentStatus: "waiting", lastReply: "Tests pass. Want me to open a PR?" });
+      }
+      ws.send(JSON.stringify(msg));
+    });
+  });
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  const needs = page.locator('[data-block="needs"]');
+  const box = needs.locator(".home-reply-row", { hasText: "Fix login" }).locator(".home-reply-input");
+  await expect(box).toBeVisible();
+  await expect(needs.locator(".home-reply-row", { hasText: "Ship release" })).toHaveCount(0);
+  const before = hook.calls.filter((c) => c.path === "/v1/prompt").length;
+  await box.fill("Yes, open it as a draft");
+  await page.waitForTimeout(200);
+  await needs.screenshot({ path: test.info().outputPath("desktop-home-reply.png") });
+  await box.press("Enter");
+  await expect(needs.locator(".home-reply-note")).toHaveText("Sent");
+  await expect.poll(() => hook.calls.filter((c) => c.path === "/v1/prompt").length).toBe(before + 1);
+  expect(hook.calls.filter((c) => c.path === "/v1/prompt").at(-1)!.body).toMatchObject({ text: "Yes, open it as a draft", target: { session: "sess-fix-login" } });
+});
