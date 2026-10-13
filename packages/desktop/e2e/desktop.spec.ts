@@ -949,3 +949,19 @@ test("⌘K continues the open session in another agent", async ({ page }) => {
   await page.keyboard.press("Enter");
   await expect(page.locator(".move-sheet .launch-seg.selected")).toHaveText("Codex");
 });
+
+test("⌘1–⌘9 open the titlebar's pills in order", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  // Chromium keeps ⌘+digit for its own tabs, so press Ctrl, which the handler also takes.
+  const mod = "Control";
+  await expect(page.locator('.section-pill[data-section="home"]')).toHaveAttribute("title", /Home \((⌘|Ctrl\+)1\)/);
+  await page.keyboard.press(`${mod}+2`);
+  await expect(page.locator('.section-pill[data-section="agents"]')).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press(`${mod}+4`); // the Projects group opens its first section
+  await expect(page.locator('.section-pill[data-group="work"]')).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".section-projects")).toBeVisible();
+  await page.keyboard.press(`${mod}+1`);
+  await expect(page.locator('.section-pill[data-section="home"]')).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press(`${mod}+9`); // no ninth pill: nothing changes
+  await expect(page.locator('.section-pill[data-section="home"]')).toHaveAttribute("aria-selected", "true");
+});
