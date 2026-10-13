@@ -142,7 +142,7 @@ projects on every computer, files, commands). From any other app,
 ⌘⇧Space (Ctrl+Shift+Space on Linux and Windows) brings Phren forward with the
 palette open; change or turn off that key in Settings › Keys. A menu bar icon
 (system tray on Linux and Windows) shows how many sessions need you and lists
-them; choose one to open it. On a Mac, closing the window while the icon is on
+them; choose one to open it, or Allow / Deny an approval from its submenu. On a Mac, closing the window while the icon is on
 keeps Phren running there. Turn it off in Settings › Notifications. Clicking a "needs you"
 notification opens that session; on a Mac, one for an agent that finished and
 waits on you takes a typed reply, sent as its next prompt. Come back after a

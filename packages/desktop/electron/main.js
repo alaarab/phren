@@ -350,10 +350,18 @@ function updateTray(state) {
     const key = text(row?.key, 200);
     const title = text(row?.title, 80);
     const sub = text(row?.sub, 80);
+    const open = () => { if (showWindow()) mainWindow.webContents.send("phren:open-session", key); };
+    const approval = text(row?.approval, 120);
+    const answer = (decision) => () => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("phren:tray-answer", { key, decision });
+    };
     items.push({
       label: mac ? title : `${title} · ${sub}`,
       ...(mac ? { sublabel: sub } : {}),
-      click: () => { if (showWindow()) mainWindow.webContents.send("phren:open-session", key); },
+      // An approval Home is watching: what it asks, then Allow / Deny without opening the window.
+      ...(approval
+        ? { submenu: [{ label: approval, enabled: false }, { type: "separator" }, { label: "Allow", click: answer("approve") }, { label: "Deny", click: answer("deny") }, { type: "separator" }, { label: "Open", click: open }] }
+        : { click: open }),
     });
   }
   if (more) items.push({ label: `and ${more} more`, enabled: false });

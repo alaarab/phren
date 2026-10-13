@@ -11,6 +11,7 @@ GitHub release notes, and the app shows them when that version is available.
 - A session waiting on you shows what the agent said last in the Agents sidebar.
 - ⌘K lists the projects on every computer and opens one's page.
 - A working session with no output for five minutes reads "stalled" on Home and in the sidebar, with a notification.
+- Allow or Deny an approval from the menu bar icon's menu.
 - Launching Phren again brings back a window the menu bar icon hid.
 
 ## [0.1.6] - 2026-10-13
