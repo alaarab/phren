@@ -435,6 +435,9 @@ button.home-row:hover { background: var(--card); }
 .palette-icon.needs { color: var(--waiting); }
 .palette-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
 .palette-title mark { background: transparent; color: var(--accent); font-weight: 600; }
+/* Memory rows (`?`) keep two lines of a finding and its type and match share. */
+.palette-row.wrap { min-height: 52px; padding-top: 7px; padding-bottom: 7px; }
+.palette-row.wrap .palette-title { flex: 1; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.4; }
 .palette-meta { display: flex; align-items: center; gap: 6px; min-width: 0; margin-left: 10px; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .palette-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .palette-dot.working { background: var(--working); }
