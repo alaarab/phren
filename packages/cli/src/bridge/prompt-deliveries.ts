@@ -20,6 +20,8 @@ export const DELIVERY_RETENTION_MS = 24 * 3_600_000;
  * idle this long without taking it has dropped it. */
 export const DELIVERY_GIVE_UP_MS = 30_000;
 const MAX_RECORDS = 512;
+/** How often a message still held by a working agent is looked for in its transcript. */
+const LANDED_CHECK_MS = 3_000;
 
 /** What the agent hands its UserPromptSubmit hook is the terminal's pasted
  * form of what Phren typed; compare the words, not the wrapping. Claude Code
@@ -39,7 +41,7 @@ const recordSchema = z.object({
   terminal: z.string().max(200).optional(), state: z.enum(["typed", "queued", "delivered", "failed"]),
   reason: z.string().max(500).optional(), at: z.number(), settledAt: z.number().optional(), stoppedAt: z.number().optional(),
 }).strict();
-type Record = z.infer<typeof recordSchema> & { idleSince?: number };
+type Record = z.infer<typeof recordSchema> & { idleSince?: number; checkedAt?: number };
 interface Waiter { resolve?: (outcome: DeliveryOutcome) => void; timer?: ReturnType<typeof setTimeout>; late?: (outcome: DeliveryOutcome) => void }
 
 /** One message per record, bound to the pane it was typed into (server, pane,
@@ -224,7 +226,16 @@ export class PromptDeliveries {
         record.reason = pane ? "The agent in this pane restarted before it took the message." : "The agent's pane closed before it took the message.";
         continue;
       }
-      if (!["idle", "done"].includes(String(pane.agent_status))) { record.idleSince = undefined; continue; }
+      if (!["idle", "done"].includes(String(pane.agent_status))) {
+        record.idleSince = undefined;
+        // A message the agent took into its running turn (Claude's mid-turn steer) never reaches
+        // its UserPromptSubmit hook; its transcript is the only place that says so.
+        if (record.checkedAt === undefined || now - record.checkedAt >= LANDED_CHECK_MS) {
+          record.checkedAt = now;
+          if (await this.landed(record).catch(() => false)) { record.state = "delivered"; record.settledAt = now; changed = true; this.release(record, "delivered"); }
+        }
+        continue;
+      }
       record.idleSince ??= now;
       if (record.stoppedAt === undefined || now - Math.max(record.idleSince, record.stoppedAt) < DELIVERY_GIVE_UP_MS) continue;
       if (await this.landed(record).catch(() => false)) { record.state = "delivered"; record.settledAt = now; changed = true; this.release(record, "delivered"); continue; }
@@ -263,6 +274,9 @@ export function userTexts(row: Json): string[] {
     else for (const block of objects(content)) if (typeof block.text === "string") texts.push(block.text);
   };
   if (row.type === "user" && !row.isMeta) blocks(object(row.message).content);
+  // Claude Code takes a message typed mid-turn out of its queue into the running turn:
+  // `enqueue` when typed, then `remove` (not `dequeue`, which starts a turn of its own) with the same words.
+  if (row.type === "queue-operation" && row.operation === "remove" && typeof row.content === "string") texts.push(row.content);
   const payload = object(row.payload);
   if (payload.type === "user_message" && typeof payload.message === "string") texts.push(payload.message);
   if (payload.type === "message" && payload.role === "user") blocks(payload.content);
