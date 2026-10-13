@@ -411,6 +411,10 @@ button.settings-summon-key.recording { color: var(--text); border-color: var(--a
 
 .settings-toggle { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 12px; background: var(--surface); border-radius: 10px; cursor: pointer; }
 .settings-toggle-label { color: var(--text); font-size: 13px; }
+.settings-quiet { display: grid; gap: 2px; }
+.settings-quiet-times { display: flex; align-items: center; gap: 8px; padding: 2px 12px 8px; }
+.settings-quiet-times.off { opacity: .5; }
+.settings-time { padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--raised); color: var(--text); font: 12px var(--mono); }
 .settings-switch { position: relative; flex: none; width: 40px; height: 22px; }
 .settings-switch input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
 .settings-switch .track { position: absolute; inset: 0; border-radius: 999px; background: var(--raised); transition: background .18s ease; }

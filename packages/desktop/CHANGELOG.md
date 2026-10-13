@@ -13,6 +13,7 @@ GitHub release notes, and the app shows them when that version is available.
 - A working session with no output for five minutes reads "stalled" on Home and in the sidebar, with a notification.
 - Allow or Deny an approval from the menu bar icon's menu.
 - Since you left also lists the pull requests whose checks passed or failed while you were away.
+- Quiet hours in Settings › Notifications, and a separate switch for stuck-agent notifications.
 - Launching Phren again brings back a window the menu bar icon hid.
 
 ## [0.1.6] - 2026-10-13
