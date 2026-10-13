@@ -225,7 +225,13 @@ export function mountPreviews(root) {
   backBtn.addEventListener("click", () => { try { frame.contentWindow.history.back(); } catch { /* cross-origin */ } });
   forwardBtn.addEventListener("click", () => { try { frame.contentWindow.history.forward(); } catch { /* cross-origin */ } });
 
-  const unsubscribe = store.subscribe(() => {
+  // Overview frames arrive on every agent change; only a computer coming or going
+  // needs the lists again (the 15 s poll covers servers and simulators changing).
+  let onlineKey = "";
+  const unsubscribe = store.subscribe((merged) => {
+    const key = (merged?.computers ?? []).filter((c) => c.state === "online").map((c) => c.computer).sort().join("\n");
+    if (key === onlineKey) return;
+    onlineKey = key;
     if (state.visible) void refreshLists();
   });
 
