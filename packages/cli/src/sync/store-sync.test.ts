@@ -43,7 +43,9 @@ function stores() {
   git(root, "init", "--bare", "--initial-branch=main", remote);
   const clone = (name: string) => {
     const dir = path.join(root, name);
-    git(root, "clone", "--quiet", remote, dir);
+    // Windows runners default core.autocrlf to true, which checks the merged
+    // LF files out as CRLF on the other clone.
+    git(root, "clone", "--quiet", "-c", "core.autocrlf=false", remote, dir);
     git(dir, "config", "user.email", "sync-test@example.com");
     git(dir, "config", "user.name", "Sync test");
     return dir;
