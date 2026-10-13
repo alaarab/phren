@@ -582,6 +582,14 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .home-keys kbd { padding: 1px 5px; border-radius: 5px; background: var(--raised); color: var(--text-2); font: 11px "JetBrains Mono", ui-monospace, monospace; }
 
 .home-row { align-items: flex-start; }
+/* A waiting row's reply box sits under it. */
+.home-reply-row { display: grid; gap: 0; background: var(--surface); border-radius: 10px; }
+.home-reply-row > .home-row { background: transparent; }
+.home-reply { display: flex; align-items: center; gap: 8px; padding: 0 12px 8px; }
+.home-reply-input { flex: 1 1 auto; min-width: 0; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--raised); color: var(--text); font: inherit; font-size: 13px; }
+.home-reply-input:focus { outline: none; border-color: var(--accent); }
+.home-reply-note { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.home-reply-note.error { color: var(--danger); white-space: normal; }
 .home-row-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .home-row-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
 /* What the agent said last: up to two lines. */

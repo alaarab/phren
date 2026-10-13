@@ -41,7 +41,7 @@ export interface StoreSync {
 
 
 export interface LastScheduledRun {
-  name?: string; project: string; status: string; reason?: string; startedAt: string; finishedAt?: string;
+  name?: string; paused?: boolean; project: string; status: string; reason?: string; startedAt: string; finishedAt?: string;
 }
 
 export interface PeerHealth {
@@ -222,10 +222,14 @@ export async function lastScheduledRun(store: string, runsFile = scheduleRunsFil
   const matching = runs.filter(run => (run.scheduleProject ?? run.project) === owner && run.scheduleId === newest.scheduleId
     && (newest.batchId ? run.batchId === newest.batchId : run.id === newest.id));
   const last = latestScheduleBatch(matching).lastRun!;
-  let name: string | undefined;
+  let name: string | undefined, paused = false;
   const directory = getProjectDirs(store).find(dir => path.basename(dir).toLowerCase() === owner.toLowerCase());
-  if (directory) name = (await readScheduleDocument(directory).catch(() => undefined))?.schedules.find(item => item.id === last.scheduleId)?.name;
-  return { ...(name ? { name } : {}), project: owner, status: last.status, ...(last.reason ? { reason: plainError(last.reason) } : {}),
+  if (directory) {
+    const found = (await readScheduleDocument(directory).catch(() => undefined))?.schedules.find(item => item.id === last.scheduleId);
+    name = found?.name;
+    paused = found?.enabled === false;
+  }
+  return { ...(name ? { name } : {}), ...(paused ? { paused } : {}), project: owner, status: last.status, ...(last.reason ? { reason: plainError(last.reason) } : {}),
     startedAt: last.startedAt, ...(last.finishedAt ? { finishedAt: last.finishedAt } : {}) };
 }
 
@@ -336,7 +340,7 @@ export function formatHealth(health: HealthDetails, color: { dim: string; reset:
     if (store.error) lines.push(`           ${store.degraded ? red : yellow}! ${store.error}${reset}`);
   }
   const run = health.schedules.lastRun;
-  lines.push(`  ${dim}schedule${reset} ${run ? `${run.name ?? "a schedule"} in ${run.project}: ${run.status === "failed" ? `${red}failed${reset}` : run.status} ${dim}${run.startedAt}${reset}${run.reason ? ` · ${run.reason}` : ""}` : `${dim}no runs yet${reset}`}`);
+  lines.push(`  ${dim}schedule${reset} ${run ? `${run.name ?? "a schedule"} in ${run.project}: ${run.status === "failed" ? `${red}failed${reset}` : run.status} ${dim}${run.startedAt}${reset}${run.reason ? ` · ${run.reason}` : ""}${run.paused ? ` ${dim}(schedule is paused)${reset}` : ""}` : `${dim}no runs yet${reset}`}`);
   if (!health.peers.configured) lines.push(`  ${dim}peers${reset}    ${dim}none enrolled${reset}`);
   else if (health.peers.error) lines.push(`  ${dim}peers${reset}    ${red}${health.peers.error}${reset}`);
   for (const peer of health.peers.computers) {
