@@ -135,4 +135,14 @@ describe("answering Claude's question dialog", () => {
     expect(claude.sent).toEqual([]);
     expect(claude.gone).toBe(false);
   });
+
+  it("tells a refusal before any key from one after keys were sent", async () => {
+    const before = new FakeClaude(set);
+    await expect(answerClaudeQuestionDialog(before.io(), set.slice(0, 2), [{ options: [0] }, { options: [0] }]))
+      .rejects.toMatchObject({ status: 409, details: { code: "question-not-shown" }, message: expect.stringContaining("Nothing was sent") });
+    const after = new FakeClaude(set);
+    await expect(answerClaudeQuestionDialog(after.io(), [set[0], { ...set[1], question: "Which tool?" }, set[2]], [{ options: [0] }, { options: [0] }]))
+      .rejects.toMatchObject({ status: 409, details: { code: "question-unconfirmed" }, message: expect.stringContaining("already sent") });
+    expect(after.sent.length).toBeGreaterThan(0);
+  });
 });
