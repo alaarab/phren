@@ -115,6 +115,11 @@ The titlebar pills:
 | Previews | Every computer's local web servers and simulators |
 | Settings | Computers and their health, keys, extensions, themes, notifications |
 
+Changes shows a **Phren remembers** card over the changed files, like
+gitboy's pull request card: the findings that cite those files or a function
+in them, with a count on each file that has some. A citation opens the file at
+that line.
+
 ⌘K opens the palette (sessions, files, commands). The launch sheet
 ("+ New agent") recommends a computer from its load and account quota.
 

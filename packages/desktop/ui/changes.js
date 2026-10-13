@@ -2,7 +2,8 @@
 // worktrees, each scoped to the session (or a worker's worktree). Owns its own
 // CSS (injected once) and re-renders fully from module state.
 import { isShown, watchShown } from "./shown.js";
-import { hookPost, readRepoFile } from "./api.js";
+import { hookGet, hookPost, readRepoFile } from "./api.js";
+import { projectOf } from "./shell/store.js";
 import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
 import { branchProblem, capitalize, checksSummary, durationText, groupRuns, hostTerms, localForRemote, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, syncAction, tokenPage, trackingText } from "./git-review.js";
 import { announceGitChange } from "./diff-doc.js";
@@ -12,6 +13,8 @@ import { announceGitChange } from "./diff-doc.js";
 // Short labels so six fit the panel; each carries its full name as a title.
 const VIEWS = [["changes", "Changes", "Uncommitted changes"], ["session", "Session", "What this agent changed"], ["history", "History", "Commit history"],
   ["branches", "Branches", "Branches"], ["pulls", "PRs", "Pull requests and checks"], ["worktrees", "Workers", "Other worktrees and the workers in them"]];
+// gitboy's /memory/files contract takes up to 500 paths; a working tree past that is a bulk change.
+const KNOWS_MAX_PATHS = 200;
 // The pulls label follows the remote's host ("MRs" on GitLab) once /v1/git/pulls answers.
 
 const CSS = `
@@ -245,6 +248,26 @@ const CSS = `
 .chg-btn.merge{background:var(--raised);color:var(--text)}
 .chg-btn.merge.ready{background:var(--done);color:var(--bg);box-shadow:0 0 0 0 rgba(138,200,172,.5);animation:chg-ready 2.4s ease-out infinite}
 @keyframes chg-ready{0%{box-shadow:0 0 0 0 rgba(138,200,172,.45)}70%{box-shadow:0 0 0 8px rgba(138,200,172,0)}100%{box-shadow:0 0 0 0 rgba(138,200,172,0)}}
+.chg-knows{margin-top:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);overflow:hidden}
+.chg-knows-h{display:flex;align-items:center;gap:8px;width:100%;border:none;background:none;padding:9px 10px;color:var(--text);font:600 12.5px system-ui,sans-serif;cursor:pointer;text-align:left}
+.chg-knows-h:hover{background:var(--raised)}
+.chg-knows-mark{flex:none;color:var(--accent);font-size:11px}
+.chg-knows-sub{flex:1;min-width:0;color:var(--muted);font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chg-knows-chev{flex:none;color:var(--muted);transition:transform .18s ease}
+.chg-knows.open .chg-knows-chev{transform:rotate(90deg)}
+.chg-knows-filter{display:flex;align-items:center;gap:6px;padding:0 10px 6px;font-size:12px;color:var(--muted)}
+.chg-knows-list{border-top:1px solid var(--border)}
+.chg-knows-item{padding:8px 10px;border-top:1px solid var(--border);cursor:pointer}
+.chg-knows-item:first-child{border-top:none}
+.chg-knows-item:hover{background:var(--raised)}
+.chg-knows-text{color:var(--text-2);font-size:12.5px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.chg-knows-item.full .chg-knows-text{display:block}
+.chg-knows-meta{display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap}
+.chg-knows-cite{border:none;background:var(--raised);color:var(--link);font-family:"JetBrains Mono",ui-monospace,Menlo,monospace;font-size:11px;border-radius:999px;padding:1px 7px;cursor:pointer}
+.chg-knows-cite:hover{color:var(--accent)}
+.chg-knows-badge{flex:none;border:none;background:rgba(138,170,220,.14);color:var(--accent);font:600 11px system-ui,sans-serif;border-radius:999px;padding:2px 7px;cursor:pointer}
+.chg-knows-badge:hover{background:var(--raised)}
+@media (prefers-reduced-motion:reduce){.chg-knows-chev{transition:none}}
 @media (prefers-reduced-motion:reduce){.chg-req.pending::before,.chg-pipe-seg.pending,.chg-check-state.pending::before,.chg-btn.merge.ready{animation:none}}
 `;
 
@@ -260,6 +283,8 @@ export function openChanges(el, ctx) {
     rowMenu: null, sheet: null, notice: null, copyToast: null, busy: null,
     commit: null, session: null, sessionOpen: null,
     connect: null, merge: null,
+    // Phren findings about the changed files: `key` is the project and paths asked for.
+    knows: { key: "", findings: [], open: false, file: null, full: null },
   };
   let timer = null;
   let commitBtn = null;
@@ -365,6 +390,28 @@ export function openChanges(el, ctx) {
       else await loadDiff(f);
     }
     loadPullsQuiet();
+    loadKnowsQuiet();
+  }
+
+  // gitboy's "Phren remembers": findings citing the files being changed, or a
+  // function in them. Asked again only when the set of files changes; best effort.
+  async function loadKnowsQuiet() {
+    const project = ctx.child ? projectOf(ctx.child) : "";
+    const paths = [...new Set((state.status?.files || []).map((f) => f.path))].sort().slice(0, KNOWS_MAX_PATHS);
+    const key = project + "\u0000" + paths.join("\u0000");
+    if (key === state.knows.key) return;
+    state.knows.key = key;
+    state.knows.findings = [];
+    if (state.knows.file && !paths.includes(state.knows.file)) state.knows.file = null;
+    if (!project || !paths.length) return;
+    let findings = [];
+    try {
+      const body = await hookGet(computer, `/v1/projects/${encodeURIComponent(project)}/memory/files`, paths.map((p) => ["path", p]));
+      findings = Array.isArray(body?.findings) ? body.findings : [];
+    } catch { /* an older Hook or a project outside the store: no card */ }
+    if (state.knows.key !== key) return;
+    state.knows.findings = findings;
+    if (findings.length && !typing()) render();
   }
 
   // The branch bar shows on every view; other views read status quietly.
@@ -621,9 +668,62 @@ export function openChanges(el, ctx) {
       body.appendChild(empty);
       return body;
     }
+    if (state.knows.findings.length) body.appendChild(renderKnows());
     if (staged.length) body.appendChild(renderSection("STAGED", staged));
     if (changed.length) body.appendChild(renderSection("CHANGES", changed));
     return body;
+  }
+
+  const citedFile = (item) => (item.citation && item.citation.file ? item.citation.file.replace(/^\.\//, "") : "");
+  const knowsFor = (path) => state.knows.findings.filter((item) => item.match !== "symbol" && citedFile(item) === path);
+
+  function renderKnows() {
+    const k = state.knows;
+    const card = div("chg-knows" + (k.open ? " open" : ""));
+    const head = button("", "chg-knows-h", () => { k.open = !k.open; if (!k.open) k.file = null; render(); });
+    head.setAttribute("aria-expanded", String(k.open));
+    const files = new Set(k.findings.map(citedFile).filter(Boolean));
+    const count = k.findings.length;
+    head.append(span("chg-knows-mark", "◆"), span("", "Phren remembers"),
+      span("chg-knows-sub", `${count} ${count === 1 ? "finding" : "findings"} about ${files.size > 1 ? `${files.size} of these files` : "these files"}`),
+      span("chg-knows-chev", "›"));
+    card.appendChild(head);
+    if (!k.open) return card;
+    const shown = k.file ? knowsFor(k.file) : k.findings;
+    if (k.file) {
+      const filter = div("chg-knows-filter");
+      filter.append(span("", "In"), span("chg-chip", basename(k.file)));
+      filter.appendChild(button("Show all", "chg-knows-cite", () => { k.file = null; render(); }));
+      card.appendChild(filter);
+    }
+    const list = div("chg-knows-list");
+    for (const item of shown) list.appendChild(renderKnowsItem(item));
+    card.appendChild(list);
+    return card;
+  }
+
+  function renderKnowsItem(item) {
+    const k = state.knows;
+    const row = div("chg-knows-item" + (k.full === item.id ? " full" : ""));
+    row.title = k.full === item.id ? "" : "Show the whole finding";
+    row.onclick = () => { k.full = k.full === item.id ? null : item.id; render(); };
+    row.appendChild(div("chg-knows-text", item.text || ""));
+    const meta = div("chg-knows-meta");
+    if (item.type) meta.appendChild(span("chg-chip", item.type));
+    const file = citedFile(item);
+    const where = item.citation && item.citation.name ? item.citation.name : file ? basename(file) + (item.citation.line ? `:${item.citation.line}` : "") : "";
+    if (where) {
+      const cite = button(where, "chg-knows-cite", (e) => {
+        e.stopPropagation();
+        if (file) ctx.openFile(file, item.citation.line ? { line: item.citation.line } : {});
+      });
+      cite.title = file ? `Open ${file}` : where;
+      meta.appendChild(cite);
+    }
+    const when = relativeTime(item.created);
+    if (when) meta.appendChild(span("chg-pr-num", when));
+    row.appendChild(meta);
+    return row;
   }
 
   function renderSection(title, files) {
@@ -658,6 +758,12 @@ export function openChanges(el, ctx) {
     if (f.additions) stat.appendChild(span("chg-adds", "+" + f.additions));
     if (f.deletions) stat.appendChild(span("chg-dels", "−" + f.deletions));
     row.appendChild(stat);
+    const known = knowsFor(f.path).length;
+    if (known) {
+      const badge = button("◆ " + known, "chg-knows-badge", (e) => { e.stopPropagation(); state.knows.open = true; state.knows.file = f.path; render(); });
+      badge.title = `${known} Phren ${known === 1 ? "finding" : "findings"} about this file`;
+      row.appendChild(badge);
+    }
     const actions = div("chg-actions");
     actions.appendChild(icon("↗", "Open file", () => ctx.openFile(f.path)));
     if (f.status !== "?" && f.status !== "D") actions.appendChild(icon("⇄", "Open side-by-side diff", () => ctx.openFile(f.path, { diff: true })));
