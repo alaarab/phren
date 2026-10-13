@@ -7,7 +7,6 @@ import { extractKnowsBlock } from "../chat/knows.js";
 import { hookGet, hookPost } from "../api.js";
 import { hostMark } from "../changes.js";
 import { loadBranchTasks, renderBranchTasks } from "../branch-tasks.js";
-import { capitalize, hostTerms } from "../git-review.js";
 import { capitalize, fixItPrompt, hostTerms } from "../git-review.js";
 import { openLaunchSheet } from "../shell/launch.js";
 import { projectOf, sessions as allSessions, store } from "../shell/store.js";

@@ -120,12 +120,13 @@ gitboy's pull request card: the findings that cite those files or a function
 in them, with a count on each file that has some. A citation opens the file at
 that line. A failing check on the branch's pull request shows **Seen this
 before**: the findings and truths that match it, with **Ask the agent** to
-put the failure and the finding in the chat. The current pull request, and
-the project page's Code block for the checkout's branch, list the open Phren
-tasks that name that branch or its issue number, with **Done** to complete one. **Fix it** (there and on the
+put the failure and the finding in the chat. **Fix it** (there and on the
 project page's Code block) opens the launch sheet for a new agent with a first
 prompt you can edit: the request, its branch, each failing check with its
-message and link, and what Phren remembers about them.
+message and link, and what Phren remembers about them. The current pull
+request, and the project page's Code block for the checkout's branch, list the
+open Phren tasks that name that branch or its issue number, with **Done** to
+complete one.
 
 The desktop also notifies you when the pull request of a working (or recently
 active) session's branch turns failing or passing. It asks each project's Hook
