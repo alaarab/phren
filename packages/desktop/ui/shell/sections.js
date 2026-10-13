@@ -129,12 +129,26 @@ function groups() {
   return [...out.values()];
 }
 
+/** Open the titlebar's pill at `index` (0-based), as a click would; false when there is none. */
+export function showPillAt(index) {
+  const group = groups()[index];
+  if (!group) return false;
+  showSection(lastInGroup.get(group.key) ?? group.ids[0]);
+  return true;
+}
+
+/** "⌘3" on a Mac, "Ctrl+3" elsewhere: the shortcut for the pill at `index`, or "" past nine. */
+export function pillShortcut(index, mac = /Mac/.test(globalThis.navigator?.platform ?? "")) {
+  return index < 9 ? `${mac ? "\u2318" : "Ctrl+"}${index + 1}` : "";
+}
+
 function renderPills() {
   pillsEl.replaceChildren();
   iconEl?.replaceChildren();
   pillsEl.setAttribute("role", "tablist");
-  for (const group of groups()) {
+  for (const [index, group] of groups().entries()) {
     const b = document.createElement("button");
+    const shortcut = pillShortcut(index);
     b.className = group.icon ? "section-pill icon" : "section-pill";
     b.dataset.group = group.key;
     // A one-section pill keeps its section id, so it can be found by it.
@@ -142,11 +156,12 @@ function renderPills() {
     if (group.icon) {
       b.innerHTML = group.icon;
       b.setAttribute("aria-label", group.label);
-      b.title = group.label;
     } else {
       b.setAttribute("role", "tab");
       b.textContent = group.label;
     }
+    b.title = shortcut ? `${group.label} (${shortcut})` : group.label;
+    if (shortcut) b.setAttribute("aria-keyshortcuts", shortcut.replace("\u2318", "Meta+").replace("Ctrl+", "Control+"));
     if (group.ids.some((id) => sections.get(id).badge)) {
       const badge = document.createElement("span");
       badge.className = "section-badge";
