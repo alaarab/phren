@@ -1,7 +1,8 @@
 // ⌘K command palette: one ranked list across sessions (every computer), the
 // active session's repository files, registered commands and top-level
-// sections, operated entirely by keyboard. Opened by the `palette` action in
-// keys.js. Plain DOM only, never innerHTML with data.
+// sections, operated entirely by keyboard; `?` asks the active session's
+// project memory instead. Opened by the `palette` action in keys.js. Plain DOM
+// only, never innerHTML with data.
 
 import { hookGet, hookPost, targetQuery } from "../api.js";
 import { sectionHandle, sectionIds, sectionLabel, showSection } from "./sections.js";
@@ -20,6 +21,16 @@ export function registerCommand(cmd) {
 const PROVIDER = { claude: "C", codex: "X", opencode: "O", copilot: "G", phren: "P" };
 const GROUP_ORDER = { Sessions: 0, "Go to": 1, Commands: 2, Files: 3 };
 const MAX_ROWS = 200;
+const MEMORY_LIMIT = 20;
+const MEMORY_DEBOUNCE_MS = 180;
+
+/** What the typed text asks for: `>` commands only, `?` the project's memory. */
+export function paletteMode(raw) {
+  const text = raw ?? "";
+  if (text.startsWith(">")) return { mode: "commands", query: text.slice(1).trim() };
+  if (text.startsWith("?")) return { mode: "memory", query: text.slice(1).trim() };
+  return { mode: "all", query: text.trim() };
+}
 
 // ------------------------------------------------------------ matching
 /** Subsequence match with bonuses for consecutive runs and word starts.
@@ -120,6 +131,69 @@ function fileItems(files) {
   });
 }
 
+// ------------------------------------------------------------ memory
+/** Palette rows for `/memory/search` results, in the Hook's ranked order. */
+export function memoryItems(results, { computer, project }) {
+  return (results ?? []).map((hit, i) => {
+    const truth = hit.kind === "truth";
+    const type = hit.finding?.type;
+    return {
+      id: `memory:${hit.finding?.id ?? `${hit.kind}:${i}`}`,
+      group: "Memory",
+      kind: "idle",
+      wrap: true,
+      icon: truth ? "★" : "◆",
+      title: hit.text,
+      meta: [truth ? "truth" : type || "finding", `${Math.round((hit.score ?? 0) * 100)}%`].join(" · "),
+      run() {
+        showSection("memory");
+        sectionHandle("memory")?.open?.({ computer, project, segment: truth ? "truths" : "findings", search: truth ? "" : hit.text.slice(0, 80) });
+      },
+    };
+  });
+}
+
+// The last memory answer: `key` is computer, project and query.
+let memory = { key: "", state: "idle", items: [], timer: null };
+
+/** Where `?` searches: the active session's project on its computer. */
+function memoryScope() {
+  const session = activeSession();
+  const project = session?.child ? projectOf(session.child) : "";
+  return project ? { computer: session.computer, project } : null;
+}
+
+function askMemory(sources, query) {
+  const scope = memoryScope();
+  const key = scope && query ? `${scope.computer}\u0000${scope.project}\u0000${query}` : "";
+  if (key === memory.key) return;
+  clearTimeout(memory.timer);
+  memory = { key, state: key ? "loading" : "idle", items: [], timer: null };
+  if (!key) return;
+  memory.timer = setTimeout(async () => {
+    let next;
+    try {
+      const body = await hookGet(scope.computer, `/v1/projects/${encodeURIComponent(scope.project)}/memory/search`, { q: query, limit: String(MEMORY_LIMIT) });
+      next = { state: "done", items: memoryItems(body.results, scope) };
+    } catch (err) {
+      next = { state: "error", items: [], error: err?.message || "Memory search failed." };
+    }
+    if (memory.key !== key || !overlayEl) return;
+    Object.assign(memory, next);
+    render(sources);
+  }, MEMORY_DEBOUNCE_MS);
+}
+
+/** The line shown when `?` mode has no rows to list. */
+function memoryNote(query) {
+  const scope = memoryScope();
+  if (!scope) return "Open a session to ask its project's memory.";
+  if (!query) return `Ask what Phren remembers about ${scope.project}.`;
+  if (memory.state === "loading") return `Searching ${scope.project}…`;
+  if (memory.state === "error") return memory.error;
+  return `Phren has nothing on that in ${scope.project}.`;
+}
+
 // ------------------------------------------------------------ file list
 const fileCache = new Map(); // "computer/child" -> { at, files }
 const FILE_TTL = 60_000;
@@ -205,7 +279,7 @@ export function openPalette({ sources = [] } = {}) {
   listEl.setAttribute("role", "listbox");
 
   const foot = el("div", "palette-foot");
-  foot.append(el("span", "", "↑↓ move"), el("span", "", "↵ open"), el("span", "", "esc close"), el("span", "", "> commands"));
+  foot.append(el("span", "", "↑↓ move"), el("span", "", "↵ open"), el("span", "", "esc close"), el("span", "", "> commands"), el("span", "", "? memory"));
 
   card.append(inputEl, listEl, foot);
   backdrop.append(card);
@@ -234,6 +308,8 @@ export function closePalette() {
   overlayEl?.remove();
   overlayEl = null; inputEl = null; listEl = null;
   items = []; rowEls = []; selected = 0; lastQuery = ""; filePool = [];
+  clearTimeout(memory.timer);
+  memory = { key: "", state: "idle", items: [], timer: null };
 }
 
 function collect(sources, query, commandsOnly) {
@@ -249,10 +325,16 @@ function collect(sources, query, commandsOnly) {
 }
 
 function render(sources) {
-  const raw = inputEl?.value ?? "";
-  const commandsOnly = raw.startsWith(">");
-  const query = (commandsOnly ? raw.slice(1) : raw).trim();
+  const { mode, query } = paletteMode(inputEl?.value);
+  const commandsOnly = mode === "commands";
   lastQuery = query;
+  if (mode === "memory") {
+    askMemory(sources, query);
+    items = memory.items;
+    if (selected >= items.length) selected = Math.max(0, items.length - 1);
+    paint(memoryNote(query));
+    return;
+  }
 
   const scored = [];
   for (const item of collect(sources, query, commandsOnly)) {
@@ -269,14 +351,14 @@ function render(sources) {
   paint();
 }
 
-function paint() {
+function paint(emptyText = "No matches.") {
   if (!listEl) return;
   rowEls = [];
   const nodes = [];
   let group = null;
   items.forEach((item, i) => {
     if (item.group !== group) { group = item.group; nodes.push(el("div", "palette-group", group)); }
-    const row = el("div", `palette-row${i === selected ? " on" : ""}`);
+    const row = el("div", `palette-row${item.wrap ? " wrap" : ""}${i === selected ? " on" : ""}`);
     row.setAttribute("role", "option");
     row.append(el("span", `palette-icon ${item.kind || "idle"}`, item.icon || ""));
     row.append(highlight("palette-title", item.title, lastQuery));
@@ -289,7 +371,7 @@ function paint() {
     rowEls.push(row);
     nodes.push(row);
   });
-  if (!items.length) nodes.push(el("div", "palette-empty", "No matches."));
+  if (!items.length) nodes.push(el("div", "palette-empty", emptyText));
   listEl.replaceChildren(...nodes);
 }
 
