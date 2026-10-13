@@ -33,13 +33,13 @@ export async function sendReply(key, text, { find = (k) => store.sessions().find
   }
 }
 
-export function startNeedsNotify(shell, { enabled, openSession }) {
+export function startNeedsNotify(shell, { enabled, stallsEnabled = enabled, openSession }) {
   if (!shell) return;
   let notified = null; // keys already announced; null until the first frame
   let stalled = null; // keys already reported stalled; null until the first frame
   store.subscribe((merged) => {
     const all = sessions(merged);
-    if (stalled && enabled()) {
+    if (stalled && stallsEnabled()) {
       for (const row of newlyStalled(all, stalled)) {
         const { title, body, key } = stalledNotice(row);
         shell.notify(title, body, { key });
