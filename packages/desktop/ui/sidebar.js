@@ -1,7 +1,7 @@
 // Sessions sidebar: the phone's Live sessions list at desktop density.
 // See CONTRACT.md: export renderSidebar(el, merged, handlers). The row keeps
 // the `.sb-row` / data-session="<computer>/<childId>" shape keys.js relies on.
-import { stallLabel, stalledMinutes } from "./shell/stalls.js";
+import { backgroundLabel, stallLabel, stalledMinutes } from "./shell/stalls.js";
 import { openMoveSheet } from "./shell/move.js";
 import { showSection } from "./shell/sections.js";
 import { hookPost, targetQuery } from "./api.js";
@@ -461,7 +461,7 @@ function makeRow(sb, desc) {
 function rowSig(sb, desc) {
   const c = desc.child;
   const approval = sb.approvals.get(keyOf(desc.computer, c));
-  return [desc.computer, c.id, kindOf(c), c.title, c.cwd, c.branch, c.lastChangedAt, c.lastReply ?? "", c.stalled ? c.stalledSince : "",
+  return [desc.computer, c.id, kindOf(c), c.title, c.cwd, c.branch, c.lastChangedAt, c.lastReply ?? "", c.stalled ? c.stalledSince : "", c.backgroundTasks ?? "",
     c.approvalPending === true, desc.pr, approval?.actionId || "", sb.rows,
     isPinned(sb, keyOf(desc.computer, c)) ? "p" : "",
     isUnread(sb, desc.computer, c, kindOf(c)) ? "u" : ""].join("|");
@@ -501,6 +501,8 @@ function rowContent(sb, node, desc) {
 
   const bottom = el("span", "sb-line");
   bottom.append(el("span", unread ? "sb-title unread" : "sb-title", child.title || ""));
+  const background = backgroundLabel(child);
+  if (background) bottom.append(el("span", "sb-background", background));
   if (child.branch) bottom.append(el("span", "sb-branch", child.branch));
   if (desc.pr != null) bottom.append(el("span", "sb-pr", "#" + desc.pr));
   main.append(bottom);

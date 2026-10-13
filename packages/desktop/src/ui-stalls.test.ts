@@ -25,3 +25,13 @@ describe("stalled sessions", () => {
     expect(stalledNotice(rows[0]).title).toBe("phren looks stuck");
   });
 });
+
+describe("background work", () => {
+  it("names the work a finished turn left running, only on working rows", async () => {
+    const { backgroundLabel } = await import("../ui/shell/stalls.js");
+    expect(backgroundLabel({ agentStatus: "working", backgroundTasks: 3 })).toBe("3 background tasks");
+    expect(backgroundLabel({ agentStatus: "working", backgroundTasks: 1 })).toBe("1 background task");
+    expect(backgroundLabel({ agentStatus: "working" })).toBe("");
+    expect(backgroundLabel({ agentStatus: "idle", backgroundTasks: 2 })).toBe("");
+  });
+});

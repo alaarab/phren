@@ -15,6 +15,14 @@ export function stallLabel(minutes) {
   return minutes >= 60 ? `stalled ${Math.round(minutes / 60)}h` : `stalled ${minutes}m`;
 }
 
+/** "3 background tasks" for a session working only because work it started
+ * still runs (the Hook's `backgroundTasks`: sub-agents, background shells). */
+export function backgroundLabel(child) {
+  const n = Number(child?.backgroundTasks);
+  if (!(n > 0) || child.agentStatus !== "working") return "";
+  return `${n} background task${n === 1 ? "" : "s"}`;
+}
+
 /** Rows that turned stalled since the last look (`seen`: keys already stalled). */
 export function newlyStalled(rows, seen) {
   return rows.filter((row) => stalledMinutes(row.child) !== null && !seen.has(row.key));
