@@ -528,3 +528,34 @@ test("a reply typed into a notification reaches the session as its next prompt",
   await page.evaluate(() => (window as unknown as { __reply: (r: { key: string; text: string }) => void }).__reply({ key: "nowhere/0", text: "hi" }));
   await expect.poll(() => page.evaluate(() => (window as unknown as { __notes: unknown[][] }).__notes.at(-1))).toEqual(["Reply not sent", "That session is gone."]);
 });
+
+test("Home lists the turns that ended since you left", async ({ page }) => {
+  await page.clock.install();
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await expect(page.locator('[data-block="working"] .home-row', { hasText: "Fix login" })).toBeVisible();
+  const overview = await fixture("overview.json") as { groups: Array<{ children: Array<{ title: string; agentStatus: string }> }> };
+  const idle = structuredClone(overview);
+  for (const g of idle.groups) for (const c of g.children) if (c.title === "Fix login") c.agentStatus = "idle";
+
+  // Leave, the agent finishes, come back two minutes later.
+  await page.evaluate(() => { document.hasFocus = () => false; window.dispatchEvent(new Event("blur")); });
+  hook.pushOverview(idle);
+  await expect(page.locator('[data-block="working"] .home-row', { hasText: "Fix login" })).toBeHidden();
+  await page.clock.fastForward(120_000);
+  await page.evaluate(() => { document.hasFocus = () => true; window.dispatchEvent(new Event("focus")); });
+
+  const awayBlock = page.locator('[data-block="away"]');
+  await expect(awayBlock).toBeVisible();
+  await expect(awayBlock.locator(".home-away-for")).toHaveText(" · away 2m");
+  const row = awayBlock.locator(".home-row", { hasText: "Fix login" });
+  await expect(row).toContainText("done 2m");
+  await page.waitForTimeout(300);
+  await page.locator(".home").screenshot({ path: test.info().outputPath("desktop-since-you-left.png") });
+
+  await row.click();
+  await expect(page.locator(".doc-tab.selected")).toContainText("Fix login");
+  await page.locator('.section-pill[data-section="home"]').click();
+  await awayBlock.locator(".home-away-dismiss").click();
+  await expect(awayBlock).toBeHidden();
+  hook.pushOverview(overview);
+});
