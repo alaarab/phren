@@ -119,6 +119,12 @@ jobs:
       REF_NAME: ${{ github.ref_name }}
       EVENT_NAME: ${{ github.event_name }}
     steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: packages/desktop/CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
       - uses: actions/download-artifact@v8.0.2
         with:
           pattern: desktop-*
@@ -129,11 +135,15 @@ jobs:
         run: |
           if [ "$EVENT_NAME" = "push" ]; then VERSION="${REF_NAME#desktop-v}"; else VERSION="$INPUT_VERSION"; fi
           TAG="desktop-v$VERSION"
+          # This version's section of packages/desktop/CHANGELOG.md, which the app shows as What's new.
+          awk -v v="$VERSION" 'index($0, "## [" v "]") == 1 { on = 1; next } /^## \[/ { on = 0 } on' packages/desktop/CHANGELOG.md > notes.md
+          grep -q '^- ' notes.md || { echo "packages/desktop/CHANGELOG.md has no section for $VERSION"; exit 1; }
+          printf '\nInstall: https://github.com/%s/blob/main/docs/desktop.md#install\n' "$GH_REPO" >> notes.md
           ls -la release
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" release/* --clobber
           else
             gh release create "$TAG" release/* --target "$GITHUB_SHA" --latest \
               --title "Phren desktop $VERSION" \
-              --notes "Phren desktop $VERSION. Install: https://github.com/$GH_REPO/blob/main/docs/desktop.md#install"
+              --notes-file notes.md
           fi

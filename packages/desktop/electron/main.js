@@ -9,7 +9,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { startUpdates } from "./updates.js";
+import { runUpdateAction, startUpdates } from "./updates.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const daemonPath = path.resolve(here, "../dist/src/main.js");
@@ -291,6 +291,9 @@ function registerIpc() {
     if (liveNotes.size > 50) liveNotes.delete(liveNotes.values().next().value);
     note.show();
   });
+  ipcMain.on("phren:update-action", (event, kind) => {
+    if (fromMainWindow(event) && (kind === "restart" || kind === "download")) runUpdateAction(kind);
+  });
   ipcMain.on("phren:tray", (event, state) => {
     if (fromMainWindow(event)) updateTray(state);
   });
@@ -409,7 +412,19 @@ async function start() {
     const url = await spawnDaemon(nodePath);
     registerPermissions(new URL(url).port);
     createWindow(url);
-    startUpdates({ app, dialog, shell, parentWindow: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null) });
+    startUpdates({
+      app, dialog, shell,
+      parentWindow: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
+      // The titlebar's update chip; false (no window) falls back to a dialog.
+      showInUi: (state) => {
+        if (!mainWindow || mainWindow.isDestroyed()) return false;
+        const { webContents } = mainWindow;
+        // A check that answers before the page has loaded waits for it, or the chip never hears.
+        if (webContents.isLoading()) webContents.once("did-finish-load", () => webContents.send("phren:update", state));
+        else webContents.send("phren:update", state);
+        return true;
+      },
+    });
   } catch (err) {
     createErrorWindow(err.message, daemonStderr);
     daemon = null;

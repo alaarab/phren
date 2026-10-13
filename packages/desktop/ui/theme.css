@@ -185,6 +185,18 @@ body.bench-max .main { display: none; }
 .section-pill:hover { color: var(--text-2); }
 .section-pill.selected { background: var(--card); color: var(--accent); }
 .section-badge { margin-left: 6px; padding: 0 6px; border-radius: 999px; background: var(--waiting); color: #1E1E1E; font-size: 11px; font-weight: 600; }
+/* Update chip and its What's new popover (Electron only). */
+.update-chip { border: 1px solid var(--accent); border-radius: 999px; padding: 3px 10px; background: none; color: var(--accent); font: 600 12px system-ui; cursor: pointer; }
+.update-chip:hover { background: var(--raised); }
+.update-wrap { position: relative; display: inline-flex; -webkit-app-region: no-drag; }
+.update-pop { position: absolute; top: calc(100% + 10px); right: 0; z-index: 50; width: 340px; max-height: 70vh; overflow-y: auto; padding: 14px; display: grid; gap: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); -webkit-app-region: no-drag; user-select: text; }
+.update-title { color: var(--text); font: 600 14px system-ui; }
+.update-sub { color: var(--muted); font-size: 12px; }
+.update-notes { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 4px; color: var(--text-2); font-size: 13px; line-height: 1.4; }
+.update-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.update-actions button { border: 0; border-radius: 8px; padding: 6px 12px; font: 600 12px system-ui; cursor: pointer; }
+.update-later { background: var(--raised); color: var(--text-2); }
+.update-go { background: var(--accent-solid); color: var(--text); }
 .needs-pill { border: 0; border-radius: 999px; padding: 4px 10px; background: rgba(224,188,127,0.16); color: var(--waiting); font: 600 12px system-ui; cursor: pointer; }
 .needs-pill:hover { background: rgba(224,188,127,0.26); }
 .sections { height: calc(100vh - 40px); min-height: 0; position: relative; }
