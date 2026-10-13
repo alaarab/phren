@@ -11,7 +11,7 @@ GitHub release notes, and the app shows them when that version is available.
 - A session waiting on you shows what the agent said last in the Agents sidebar.
 - ⌘K lists the projects on every computer and opens one's page.
 - A working session with no output for five minutes reads "stalled" on Home and in the sidebar, with a notification.
-- Allow or Deny an approval from the menu bar icon's menu.
+- Allow or Deny an approval from the menu bar icon's menu, or start a new agent from it.
 - Since you left also lists the pull requests whose checks passed or failed while you were away.
 - Quiet hours in Settings › Notifications, and a separate switch for stuck-agent notifications.
 - Continue a session in another agent (Codex, Claude on another account, OpenCode, Copilot) from its sidebar menu: it writes a hand-off and the new agent picks up in the same folder.
