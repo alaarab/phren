@@ -861,3 +861,23 @@ test("Quick chat stays off on a Hook without it", async ({ page }) => {
   await expect(page.locator(".launch-sheet").getByRole("button", { name: "Start quick chat" })).toBeDisabled();
   await expect(page.locator(".launch-sheet .launch-error")).toContainText("older than quick chat");
 });
+
+test("⌘K's ? search offers to ask the question in a quick chat", async ({ page }) => {
+  await page.route("**/memory/search**", (route) => route.fulfill({ json: { results: [
+    { kind: "finding", text: "The session guard drops the cookie on refresh.", score: 0.82, finding: { id: "fid:1", type: "pitfall" } },
+  ] } }));
+  await page.route("**/v1/health", (route) => route.fulfill({ json: { version: "0.3.45", capabilities: { quickChat: true } } }));
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator('.section-pill[data-section="agents"]').click();
+  await page.locator(".sb-row", { hasText: "Fix login" }).click();
+  await page.keyboard.press("Meta+k");
+  await page.keyboard.type("?why does login drop the session");
+  const ask = page.locator(".palette-row", { hasText: "Ask in a quick chat: why does login drop the session" });
+  await expect(ask).toContainText("phren · This computer");
+  await expect(page.locator(".palette-row", { hasText: "session guard drops the cookie" })).toBeVisible();
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: test.info().outputPath("desktop-palette-ask.png"), clip: { x: 380, y: 130, width: 680, height: 260 } });
+  await ask.click();
+  await expect(page.locator(".launch-sheet .launch-title")).toHaveText("Quick chat about phren");
+  await expect(page.getByRole("textbox", { name: "First prompt" })).toHaveValue("why does login drop the session");
+});
