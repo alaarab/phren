@@ -71,7 +71,9 @@ function loadParts(resources) {
 
 // ---------------------------------------------------------------- command
 /** Open the launch sheet. `project` and `computer` prefill the choices, `role`
- * starts it as a worker ("agent") or a conductor. */
+ * starts it as a worker ("agent") or a conductor. `prompt` adds an editable
+ * first prompt, sent as the launch's brief; `title` and `label` name the sheet
+ * and the session. */
 export function openLaunchSheet(options = {}) {
   installStyles();
   return open(options);
@@ -109,7 +111,7 @@ function option(value, label) {
   return node;
 }
 
-async function open({ project = "", computer = "", role = "agent" } = {}) {
+async function open({ project = "", computer = "", role = "agent", prompt = "", title: heading = "", label = "" } = {}) {
   const state = {
     project: (project ?? "").trim(),
     computer: computer ?? "",
@@ -132,12 +134,16 @@ async function open({ project = "", computer = "", role = "agent" } = {}) {
     error: "",
     status: "",
     autoComputer: !computer,
+    prompt: role === "conductor" ? "" : prompt,
+    withPrompt: role !== "conductor" && !!prompt,
+    heading: heading || "Launch an agent",
+    label: (label ?? "").trim(),
   };
 
   const backdrop = el("div", "launch-backdrop");
   const sheet = el("div", "launch-sheet");
   const head = el("div", "launch-head");
-  const title = el("h2", "launch-title", "Launch an agent");
+  const title = el("h2", "launch-title", state.heading);
   const closeBtn = el("button", "launch-close", "\u00d7");
   closeBtn.setAttribute("aria-label", "Close");
   closeBtn.style.marginLeft = "auto";
@@ -193,9 +199,17 @@ async function open({ project = "", computer = "", role = "agent" } = {}) {
   branchInput.setAttribute("aria-label", "Worktree branch");
   const worktreeField = field("Worktree", worktreeLabel, branchInput);
 
+  const promptInput = document.createElement("textarea");
+  promptInput.className = "launch-input launch-prompt";
+  promptInput.rows = 7;
+  promptInput.value = state.prompt;
+  promptInput.setAttribute("aria-label", "First prompt");
+  promptInput.addEventListener("input", () => { state.prompt = promptInput.value; refreshLaunch(ui); });
+  const promptField = field("First prompt", promptInput);
+
   const errorEl = el("div", "launch-error");
   const noteEl = el("div", "launch-note", "Creates a workspace on the computer, starts the agent in it, and opens the chat here. Starting can take up to a minute.");
-  body.append(projectField, computerField, harnessField, modelField, effortField, permField, worktreeField, accountField, roleField, errorEl, noteEl);
+  body.append(projectField, promptField, computerField, harnessField, modelField, effortField, permField, worktreeField, accountField, roleField, errorEl, noteEl);
 
   const foot = el("div", "launch-foot");
   const statusEl = el("div", "launch-status");
@@ -214,7 +228,7 @@ async function open({ project = "", computer = "", role = "agent" } = {}) {
     state, close, title, projectInput, datalist, computerList, computerHint, roleRow, roleField,
     harnessRow, harnessNote, harnessField, modelSelect, modelField, effortRow, effortField,
     permRow, permField, accountSelect, accountField, worktreeToggle, worktreeField, branchInput,
-    errorEl, statusEl, launchBtn, noteEl,
+    errorEl, statusEl, launchBtn, noteEl, promptField,
   };
 
   let unsubscribe = null;
@@ -362,7 +376,7 @@ function renderRole(ui) {
 function rolePresentation(ui, value) {
   ui.state.role = value;
   const conductor = value === "conductor";
-  ui.title.textContent = conductor ? "Start the conductor" : "Launch an agent";
+  ui.title.textContent = conductor ? "Start the conductor" : ui.state.heading;
   ui.noteEl.textContent = conductor
     ? "Starts the store\u2019s conductor on the computer you choose; it sends work into any project from there."
     : "Creates a workspace on the computer, starts the agent in it, and opens the chat here. Starting can take up to a minute.";
@@ -370,6 +384,7 @@ function rolePresentation(ui, value) {
 
 function renderWorktree(ui) {
   ui.worktreeField.hidden = ui.state.role === "conductor";
+  ui.promptField.hidden = !ui.state.withPrompt || ui.state.role === "conductor";
 }
 
 function renderHarness(ui) {
@@ -675,8 +690,9 @@ async function doLaunch(ui) {
   if (!launchReady(ui)) return;
   state.error = "";
   const kind = state.harness;
-  const label = state.role === "conductor" ? "Conductor" : state.project;
+  const label = state.role === "conductor" ? "Conductor" : state.label || state.project;
   const body = { kind, label, launchId: crypto.randomUUID() };
+  if (state.role !== "conductor" && state.prompt.trim()) body.brief = { id: crypto.randomUUID(), text: state.prompt.trim() };
   if (state.role === "conductor") body.role = "conductor";
   else body.project = state.project;
   if (state.model && supportsModel(kind)) body.model = state.model;

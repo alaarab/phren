@@ -94,7 +94,8 @@ const FORGE = {
   project: "phren", directory: "/Users/you/phren", branch: "feat/login", available: true,
   host: { kind: "gitboy", name: "gitboy", domain: "git.example.com", webUrl: "https://git.example.com/you/phren", remote: "origin", source: "url",
     terms: { short: "PR", long: "pull request", ref: "#" }, supported: true },
-  current: { number: 42, title: "Keep the session through the guard", url: "https://git.example.com/you/phren/pulls/42", head: "feat/login", base: "main", draft: false, state: "OPEN", checks: "failing" },
+  current: { number: 42, title: "Keep the session through the guard", url: "https://git.example.com/you/phren/pulls/42", head: "feat/login", base: "main", draft: false, state: "OPEN", checks: "failing",
+    checkRuns: [{ name: "test", state: "failing", detail: "3 failed", url: "https://git.example.com/you/phren/actions/7" }, { name: "lint", state: "passing" }] },
   pulls: [
     { number: 42, title: "Keep the session through the guard", url: "https://git.example.com/you/phren/pulls/42", head: "feat/login", author: "you", updated: new Date(Date.now() - 3_600_000).toISOString(), checks: "failing" },
     { number: 41, title: "Faster store sync", url: "https://git.example.com/you/phren/pulls/41", head: "perf/sync", author: "you", draft: true, updated: new Date(Date.now() - 86_400_000).toISOString(), checks: "passing" },
@@ -302,6 +303,12 @@ test("projects section renders", async ({ page }) => {
   await tasks.getByRole("button", { name: "Done" }).click();
   await expect(tasks.locator(".bt-item.done")).toHaveCount(1);
   expect(completed).toEqual(["bid:1a2b3c4d"]);
+  // Fix it on the failing request opens the launch sheet with its failures as the first prompt.
+  await forge.locator(".pj-fixit").click();
+  await expect(page.locator(".launch-title")).toHaveText("Fix #42");
+  await expect(page.getByRole("textbox", { name: "First prompt" })).toHaveValue(/branch feat\/login[\s\S]*- test: 3 failed \(https:\/\/git\.example\.com\/you\/phren\/actions\/7\)\n\n/);
+  await page.screenshot({ path: test.info().outputPath("project-fix-it.png") });
+  await page.locator(".launch-close").click();
   expect(errors).toEqual([]);
 });
 

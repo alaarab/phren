@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   branchProblem, checksSummary, diffModes, diffSides, hunkAt, hunkPatch, lineChangeTotals, localForRemote,
-  capitalize, durationText, groupRuns, hostTerms, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, splitHunks, stepChange,
+  capitalize, durationText, fixItPrompt, groupRuns, hostTerms, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, splitHunks, stepChange,
   syncAction, tokenPage, trackingText,
 // @ts-expect-error git-review.js is plain JavaScript without type declarations
 } from "../ui/git-review.js";
@@ -176,5 +176,20 @@ describe("pull and merge request presentation", () => {
     const now = Date.parse("2026-10-10T12:00:00Z");
     expect([relativeTime("2026-10-10T11:59:30Z", now), relativeTime("2026-10-10T11:55:00Z", now), relativeTime("2026-10-08T12:00:00Z", now), relativeTime("", now)])
       .toEqual(["just now", "5m ago", "2d ago", ""]);
+  });
+});
+
+describe("fixItPrompt", () => {
+  it("names the request, each failing check with its message and link, and what Phren remembers", () => {
+    const text = fixItPrompt({
+      ref: "#", number: 42, title: "Keep the session", head: "feat/login", url: "https://example.com/pull/42",
+      failing: [{ name: "unit (ubuntu)", detail: "2 tests failed", url: "https://example.com/run/1" }, { name: "lint" }],
+      remembered: [{ text: "unit (ubuntu) fails when TZ is unset." }, { text: "" }],
+    });
+    expect(text).toContain('CI is failing on #42 "Keep the session", branch feat/login (https://example.com/pull/42).');
+    expect(text).toContain("- unit (ubuntu): 2 tests failed (https://example.com/run/1)\n- lint\n");
+    expect(text).toContain("Phren remembers:\n- unit (ubuntu) fails when TZ is unset.\n\n");
+    expect(text).toMatch(/push to feat\/login\./);
+    expect(fixItPrompt({ number: 7, head: "fix/x", failing: [{ name: "ci" }] })).not.toContain("Phren remembers");
   });
 });

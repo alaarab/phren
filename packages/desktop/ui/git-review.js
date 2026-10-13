@@ -124,6 +124,22 @@ export function checksSummary(runs) {
   return ["failing", "pending", "passing", "skipped"].filter((k) => counts[k]).map((k) => `${counts[k]} ${k}`).join(" · ");
 }
 
+/** The first prompt for a worker sent to fix a request's failing checks: the
+ * request, its branch, each failing check with its message and link, and what
+ * Phren remembers about them (the "Seen this before" hits). */
+export function fixItPrompt({ ref = "#", number, title = "", head, url = "", failing = [], remembered = [] }) {
+  const lines = [
+    `CI is failing on ${ref}${number}${title ? ` "${title}"` : ""}, branch ${head}${url ? ` (${url})` : ""}.`,
+    "",
+    "Failing checks:",
+    ...failing.map((run) => `- ${run.name}${run.detail ? `: ${run.detail}` : ""}${run.url ? ` (${run.url})` : ""}`),
+  ];
+  const hits = remembered.map((hit) => hit && hit.text).filter(Boolean);
+  if (hits.length) lines.push("", "Phren remembers:", ...hits.map((text) => `- ${text}`));
+  lines.push("", `Work on branch ${head}: switch to it here if this checkout is clean, otherwise in a new git worktree. Read the failing logs, find the cause, fix it, run the failing checks locally where you can, and push to ${head}. Save what you learn with Phren.`);
+  return lines.join("\n");
+}
+
 /** The review decision and merge state as one short line, or "". */
 export function pullStanding(pull) {
   if (!pull) return "";

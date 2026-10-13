@@ -342,6 +342,15 @@ test("a failing check shows what Phren has seen before, and Ask the agent puts i
   // Only the failing check is asked about, once.
   expect(searches).toEqual(["unit (ubuntu)"]);
   await shot(page, "seen-before.png");
+  // Fix it opens the launch sheet with the failure and what Phren remembers as the first prompt.
+  await page.locator(".chg-req .chg-fixit").getByRole("button", { name: "Fix it" }).click();
+  await expect(page.locator(".launch-title")).toHaveText("Fix #42");
+  const prompt = page.getByRole("textbox", { name: "First prompt" });
+  await expect(prompt).toHaveValue(/CI is failing on #42 .*branch feat\/login/);
+  await expect(prompt).toHaveValue(/- unit \(ubuntu\)/);
+  await expect(prompt).toHaveValue(/Phren remembers:\n- unit \(ubuntu\) fails when TZ is unset/);
+  await shot(page, "fix-it-sheet.png");
+  await page.locator(".launch-close").click();
   await seen.getByRole("button", { name: "Ask the agent" }).click();
   const composer = page.locator(".pc-input").first();
   await expect(composer).toHaveValue(/CI is failing on this branch: unit \(ubuntu\)\./);
