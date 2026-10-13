@@ -854,3 +854,11 @@ button.sb-computer-row:focus-visible { outline: 2px solid var(--accent); outline
 .comp-shared-size { flex: none; color: var(--dim); font: 11.5px var(--mono); }
 .comp-shared-row .settings-actions { opacity: 0; transition: opacity .18s ease; }
 .comp-shared-row:hover .settings-actions, .comp-shared-row:focus-within .settings-actions { opacity: 1; }
+
+/* Loading placeholders (shell/skeleton.js). */
+.skel { display: block; height: 10px; max-width: 100%; border-radius: 5px; background: var(--raised); animation: skel-pulse 1.4s ease-in-out infinite; }
+.skel-wrap { display: flex; flex-direction: column; gap: 6px; }
+.skel-item { pointer-events: none; }
+.skel-item .skel:first-child { height: 12px; }
+@keyframes skel-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none; opacity: .75; } }

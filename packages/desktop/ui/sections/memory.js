@@ -4,6 +4,7 @@
 // Reads the daemon's /api/memory and /api/graph routes; review counts are
 // the only writes here, and only through POST /api/memory/<computer>/review.
 import { store } from "../shell/store.js";
+import { skeleton } from "../shell/skeleton.js";
 
 const CSS_ID = "memory-css";
 const SEGMENTS = [
@@ -362,7 +363,7 @@ export function mountMemory(root) {
     if (!state.project || !state.computer) { renderBody(); return; }
     if (state.segment === "graph") { void renderGraph(); return; }
     const inner = pane();
-    inner.append(el("div", "mem-empty", "Loading…"));
+    inner.append(skeleton({ count: 5, itemClass: "mem-row", widths: [["92%", "30%"], ["76%", "38%"], ["86%", "26%"]], label: "Loading…" }));
     try {
       if (state.segment === "findings") {
         const body = await apiGet(state.computer, "/findings", { project: state.project });
