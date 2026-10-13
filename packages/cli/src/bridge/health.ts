@@ -13,6 +13,7 @@ import { BridgeError, bridgeRoot, errorCode, type Json } from "./protocol.js";
 import { canonicalComputer, latestScheduleBatch, readScheduleDocument, readScheduleRuns, scheduleRunsFile } from "./schedules.js";
 import { countGit } from "./metrics.js";
 import { tmuxHealth, type TmuxHealth } from "./terminal-tmux.js";
+import { lastSyncedAt, STORE_STALE_MS, storeWarning } from "../sync/store-sync.js";
 
 const exec = promisify(execFile);
 
@@ -23,10 +24,21 @@ export interface StoreSync {
   name: string; role: string; available: boolean;
   branch?: string; upstream?: string; ahead?: number; behind?: number;
   lastPushStatus?: string; lastPushAt?: string; lastSuccessfulPushAt?: string; consecutiveFailures?: number;
+  lastSuccessfulPullAt?: string;
+  /** The newest successful pull or push. */
+  lastSyncedAt?: string;
+  /** Both the store and its remote have commits the other lacks. */
+  diverged?: boolean;
+  /** No successful sync for over STORE_STALE_MS while the store has a remote. */
+  stale?: boolean;
   /** The last sync failure in plain words, only while the store is failing. */
   error?: string;
+  /** One line a computer list shows as is when the store needs attention. */
+  warning?: string;
   degraded: boolean;
 }
+
+
 
 export interface LastScheduledRun {
   name?: string; project: string; status: string; reason?: string; startedAt: string; finishedAt?: string;
@@ -165,12 +177,40 @@ export async function storeSync(store: string): Promise<StoreSync[]> {
     if (sync?.lastPushAt) result.lastPushAt = sync.lastPushAt;
     if (sync?.lastSuccessfulPushAt) result.lastSuccessfulPushAt = sync.lastSuccessfulPushAt;
     if (sync?.consecutiveFailures) result.consecutiveFailures = sync.consecutiveFailures;
+    if (sync?.lastSuccessfulPullAt) result.lastSuccessfulPullAt = sync.lastSuccessfulPullAt;
+    const synced = lastSyncedAt(sync);
+    if (synced) result.lastSyncedAt = synced;
     const failing = sync?.lastPushStatus !== undefined && FAILED_PUSH_STATUSES.has(sync.lastPushStatus);
     const pullFailed = sync?.lastPullStatus === "error";
-    if (failing || pullFailed) result.error = plainError(sync?.lastPushDetail || sync?.lastPullDetail) ?? `Last sync: ${sync?.lastPushStatus ?? "pull failed"}`;
-    result.degraded = assessSyncOutage(sync).degraded;
+    if (failing || pullFailed) result.error = plainError(sync?.lastError || sync?.lastPushDetail || sync?.lastPullDetail) ?? `Last sync: ${sync?.lastPushStatus ?? "pull failed"}`;
+    if (upstream) {
+      result.diverged = (result.ahead ?? 0) > 0 && (result.behind ?? 0) > 0;
+      result.stale = !synced || Date.now() - Date.parse(synced) > STORE_STALE_MS;
+    }
+    result.degraded = assessSyncOutage(sync).degraded || result.diverged === true || result.stale === true;
+    const warning = storeWarning(result);
+    if (warning && result.degraded) result.warning = warning;
     return result;
   }));
+}
+
+const warningCache = new Map<string, { at: number; value: string[]; refreshing?: Promise<void> }>();
+
+/**
+ * The degraded stores' warnings for the overview: the last answer at once,
+ * refreshed in the background once a minute old, so the overview never
+ * waits on Git.
+ */
+export function cachedStoreWarnings(store: string, now = Date.now()): string[] {
+  const entry = warningCache.get(store) ?? { at: 0, value: [] };
+  warningCache.set(store, entry);
+  if (now - entry.at > 60_000 && !entry.refreshing) {
+    entry.refreshing = storeSync(store)
+      .then(stores => { entry.value = stores.flatMap(item => item.warning ? [item.warning] : []); entry.at = Date.now(); })
+      .catch(() => { entry.at = Date.now(); })
+      .finally(() => { entry.refreshing = undefined; });
+  }
+  return entry.value;
 }
 
 /** The newest run in schedule-runs.jsonl, with its schedule's name when the project still has it. */

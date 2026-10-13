@@ -21,11 +21,11 @@ import { errorMessage } from "../utils.js";
 import { nonInteractiveGitEnv } from "../utils-helpers.js";
 import { mergeFindings, mergeTask } from "../content/validate.js";
 import { cleanBlock, KNOWS_END, KNOWS_START, NOW_END, NOW_START, upsertBlock } from "../content/summarize.js";
-import { mergeTasksByBid } from "./task-merge.js";
+import { dedupeTaskIds, mergeTasksByBid } from "./task-merge.js";
 
 export interface ConflictResolution { resolved: string[]; unresolved: string[] }
 
-type Strategy = "tasks" | "findings" | "archive" | "topic" | "summary" | "union" | null;
+type Strategy = "tasks" | "findings" | "archive" | "topic" | "summary" | "union" | "theirs" | null;
 
 export function conflictStrategy(relFile: string): Strategy {
   const file = relFile.replace(/\\/g, "/");
@@ -35,14 +35,18 @@ export function conflictStrategy(relFile: string): Strategy {
   if (/^\.config\/task-archive\/[^/]+\.md$/i.test(file)) return "archive";
   if (/(^|\/)reference\/topics\/[^/]+\.md$/i.test(file)) return "topic";
   if (name === "summary.md") return "summary";
-  if (name === "review.md") return "union";
+  if (name === "review.md" || name === "truths.md") return "union";
+  // Coordination state Phren rewrites itself (maintenance-writer.ts): the remote's copy holds.
+  if (file === ".config/maintenance-writer.json") return "theirs";
   if (/(^|\/)(notes|journal)\/[^/]+\.md$/i.test(file)) return "union";
   return null;
 }
 
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, {
-    env: nonInteractiveGitEnv(), cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_MS,
+    // The default 1 MiB buffer failed on a task archive that had outgrown it,
+    // and an unreadable side left the whole merge unresolved.
+    env: nonInteractiveGitEnv(), cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: EXEC_TIMEOUT_MS, maxBuffer: 256 * 1024 * 1024,
   });
 }
 
@@ -66,7 +70,7 @@ function mergeText(base: string, ours: string, theirs: string): string | null {
   try {
     const [o, b, t] = ["ours", "base", "theirs"].map((name) => path.join(dir, name));
     fs.writeFileSync(o, ours); fs.writeFileSync(b, base); fs.writeFileSync(t, theirs);
-    const result = spawnSync("git", ["merge-file", "-p", o, b, t], { encoding: "utf8", env: nonInteractiveGitEnv(), timeout: EXEC_TIMEOUT_MS });
+    const result = spawnSync("git", ["merge-file", "-p", o, b, t], { encoding: "utf8", env: nonInteractiveGitEnv(), timeout: EXEC_TIMEOUT_MS, maxBuffer: 256 * 1024 * 1024 });
     return result.status === 0 ? result.stdout : null;
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -83,7 +87,7 @@ function unionText(base: string, ours: string, theirs: string): string | null {
   try {
     const [o, b, t] = ["ours", "base", "theirs"].map((name) => path.join(dir, name));
     fs.writeFileSync(o, ours); fs.writeFileSync(b, base); fs.writeFileSync(t, theirs);
-    const result = spawnSync("git", ["merge-file", "--union", "-p", o, b, t], { encoding: "utf8", env: nonInteractiveGitEnv(), timeout: EXEC_TIMEOUT_MS });
+    const result = spawnSync("git", ["merge-file", "--union", "-p", o, b, t], { encoding: "utf8", env: nonInteractiveGitEnv(), timeout: EXEC_TIMEOUT_MS, maxBuffer: 256 * 1024 * 1024 });
     return result.status === 0 ? result.stdout : null;
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
@@ -104,18 +108,31 @@ function mergeWithGeneratedBlock(base: string, ours: string, theirs: string, sta
   return upsertBlock(rest, start, end, block, where);
 }
 
+const dedupe = (content: string | null): string | null => content === null ? null : dedupeTaskIds(content).content;
+
+function orUnion(merge: () => string | null, base: string, ours: string, theirs: string, after: (content: string | null) => string | null = (c) => c): string | null {
+  try {
+    const merged = merge();
+    if (merged !== null) return merged;
+  } catch (err: unknown) { debugLog(`store merge fell back to a line union: ${errorMessage(err)}`); }
+  return after(unionText(base, ours, theirs));
+}
+
 function resolveContent(strategy: Exclude<Strategy, null>, base: string, ours: string, theirs: string): string | null {
   switch (strategy) {
-    case "tasks": return mergeTasksByBid(base, ours, theirs);
-    case "findings": return mergeFindings(ours, theirs);
+    // When a smarter merge refuses, a line union still keeps every record of
+    // both sides (repeated task ids collapsed): a knowledge file never blocks a sync.
+    case "tasks": return orUnion(() => mergeTasksByBid(base, ours, theirs), base, ours, theirs, dedupe);
+    case "findings": return orUnion(() => mergeFindings(ours, theirs), base, ours, theirs);
     // Archived tasks only accumulate: keep both sides, the incoming version of any duplicate.
-    case "archive": return mergeTask(theirs, ours);
+    case "archive": return dedupe(orUnion(() => mergeTask(theirs, ours), base, ours, theirs));
     case "topic": return mergeWithGeneratedBlock(base, ours, theirs, NOW_START, NOW_END, "top");
     // Summaries are regenerated from the store: when the hand-written part
     // doesn't merge cleanly, take the incoming file whole and let the next
     // summarize pass fold in anything only this machine had.
     case "summary": return mergeWithGeneratedBlock(base, ours, theirs, KNOWS_START, KNOWS_END, "bottom", mergeText) ?? theirs;
     case "union": return unionText(base, ours, theirs);
+    case "theirs": return theirs;
   }
 }
 

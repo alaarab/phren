@@ -433,7 +433,15 @@ export async function handleHookStop() {
         : { ...previousSync, lastPushAt: now, lastPushDetail: detail, unsyncedCommits: pending },
     });
     appendAuditLog(phrenPath, "hook_stop", `status=${inSync ? "clean" : "clean-unsynced"} pending=${pending}`);
-    if (!inSync) warnIfSyncDegraded(phrenPath);
+    if (!inSync) {
+      // Retry what an earlier turn failed to push (otherwise it waits for the
+      // next write), at most every ten minutes.
+      const retry = runtimeFile(phrenPath, "sync-retry");
+      let last = 0;
+      try { last = fs.statSync(retry).mtimeMs; } catch { /* first retry */ }
+      if (Date.now() - last > 600_000 && scheduleBackgroundSync(phrenPath)) fs.writeFileSync(retry, `${now}\n`);
+      warnIfSyncDegraded(phrenPath);
+    }
     return;
   }
 

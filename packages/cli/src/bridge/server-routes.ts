@@ -58,7 +58,7 @@ import { type AccountUsageReader, capacityRoom, usageForCaller } from "./usage.j
 import type { ResourceMonitor } from "./resources.js";
 import type { Scheduler } from "./schedules.js";
 import { readFinalTurn } from "./schedule-watch.js";
-import { healthDetails, listsCaller } from "./health.js";
+import { cachedStoreWarnings, healthDetails, listsCaller } from "./health.js";
 import { defaultPhrenPath } from "../shared.js";
 import { loadCodePackage, loadedFrom } from "../modules/code-package.js";
 import { gitRepository, paneRoute, uploadBody } from "./server-pane-routes.js";
@@ -316,7 +316,9 @@ export function workspacesReader(ctx: Pick<RouteContext, "modules" | "info" | "a
     await Promise.race([enrich, budget]);
     expired = true; clearTimeout(timer);
     const mux = terminalMux(server);
-    return { ...workspaces, kind: mux.kind, mux, phren: info };
+    // A diverged or long-unsynced store, for the computer list (health.ts storeWarning).
+    const storeWarnings = cachedStoreWarnings(defaultPhrenPath());
+    return { ...workspaces, kind: mux.kind, mux, phren: info, ...(storeWarnings.length ? { storeWarnings } : {}) };
   };
 }
 

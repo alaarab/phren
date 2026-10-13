@@ -213,7 +213,8 @@ export async function handleHookSessionStart() {
       lastPullAt: startedAt,
       lastPullStatus: pull.ok ? "ok" : "error",
       lastPullDetail: pull.ok ? (pull.output || "pull ok") : (pull.error || "pull failed"),
-      lastSuccessfulPullAt: pull.ok && hasRemote ? startedAt : undefined,
+      // A failed pull keeps the last success: it is how long the store has been stuck.
+      ...(pull.ok && hasRemote ? { lastSuccessfulPullAt: startedAt } : {}),
       unsyncedCommits,
       ...("counts" in pull && pull.counts ? pull.counts : {}),
     },
@@ -244,20 +245,24 @@ export async function handleHookSessionStart() {
     // store-registry not available or no stores — skip silently
   }
 
-  // Sync intent warning: if the user intended sync but remote is missing or pull failed, warn once
+  // A store that cannot reach or merge with its remote is said at session
+  // start (the one hook whose output the agent reads), at most once a day.
   try {
     const syncPrefs = readInstallPreferences(phrenPath);
-    const syncBroken = syncPrefs.syncIntent === "sync" && (!hasRemote || !pull.ok);
-    if (syncBroken) {
+    const noRemote = syncPrefs.syncIntent === "sync" && !hasRemote;
+    if (noRemote || (hasRemote && !pull.ok)) {
       const syncWarnPath = sessionMarker(phrenPath, SYNC_WARN_MARKER);
-      if (!fs.existsSync(syncWarnPath)) {
-        const reason = !hasRemote
-          ? "no git remote is connected"
-          : `pull failed: ${pull.error || "unknown error"}`;
+      let warnedAt = Number.NaN;
+      try { warnedAt = Date.parse(fs.readFileSync(syncWarnPath, "utf8").trim()); } catch { /* never warned */ }
+      if (Number.isNaN(warnedAt) || Date.now() - warnedAt > 86_400_000) {
         process.stdout.write([
           "<phren-notice>",
-          `Sync is configured but ${reason}. Your phren data is local-only.`,
-          `To fix: cd ${phrenPath} && git remote add origin <YOUR_REPO_URL> && git push -u origin main`,
+          noRemote
+            ? "Sync is configured but no git remote is connected. Your phren data is local-only."
+            : `The phren store did not sync with its remote: ${(pull.error || "unknown error").split("\n")[0]}`,
+          noRemote
+            ? `To fix: cd ${phrenPath} && git remote add origin <YOUR_REPO_URL> && git push -u origin main`
+            : "Tell the user. `phren doctor --fix` reconciles the store and says what it could not resolve.",
           "<phren-notice>",
           "",
         ].join("\n"));

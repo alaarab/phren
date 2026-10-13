@@ -859,6 +859,36 @@ through the peer that asked it. The same `code` appears on unreachable rows in
 | `peer-key-not-enrolled` | The peer refused this computer's dispatch key. |
 | `peer-host-key-mismatch` | The peer's SSH host key does not match its pin. |
 
+### Store sync
+
+The Hook reconciles every store this computer has with its remote every five
+minutes (the first pass a minute after it starts; `PHREN_STORE_SYNC_SECONDS`
+changes it, `0` turns it off; the manual preset and project-local installs never
+sync), so schedules, tasks and findings converge on a computer nobody is typing
+on. Each pass removes abandoned state (a Git index lock older than ten minutes,
+a merge or rebase untouched for an hour, Phren lock files whose process has
+exited, backup refs older than 14 days, worktree records whose folders are
+gone), commits pending store writes, merges the remote and pushes. A readonly or
+pull-only store only pulls.
+
+When both sides moved, the pre-merge HEAD is kept as `refs/phren/backup/<ms>`
+and the merge resolves knowledge files without losing either side: tasks by
+task id (a repeated id collapses to its completed, then Active, then longest
+record), findings, truths, notes, journals and the review queue as a union,
+task archives by task id. Generated parts take the remote's copy and are
+regenerated: summary.md's "What phren knows" block and the topic `## Now`
+blocks. Only a file a person writes (AGENTS.md, CLAUDE.md, a skill) changed on
+both sides stops the merge; it is aborted, named in the store's health, the
+sync log and the next session's start, and `phren doctor --fix` retries. One
+computer at a time, the holder of `.config/maintenance-writer.json` (renewed
+daily, taken over after three idle days), rewrites generated files in
+background maintenance, so two computers do not regenerate the same lines.
+
+If GitHub refuses this computer's SSH key for a `git@github.com:` remote and
+`gh` is signed in, the store switches that remote to HTTPS with `gh` as its
+credential helper and says so in `background-sync.log`; when `gh` cannot help
+either, the store's health names both failures.
+
 ### Health and the canary
 
 `GET /v1/health/details` answers whether phren is healthy on this computer, and
@@ -869,8 +899,14 @@ It reports:
 - `versions`: Phren Hook, Herdr, Claude Code, Codex, Copilot and OpenCode, each
   from `--version` (3 second limit, cached 5 minutes), or `missing` when absent.
 - `stores`: each registered store's branch and ahead/behind against its upstream
-  as last fetched (nothing is fetched), the last push outcome background sync
-  recorded, and the failure while it is failing.
+  as last fetched (nothing is fetched here), the last push outcome,
+  `lastSuccessfulPullAt` and `lastSyncedAt` (newest successful pull or push),
+  `diverged` (both sides have commits the other lacks), `stale` (a store with a
+  remote that has not synced for over an hour), the failure while it is
+  failing, and `warning`, one line to show as is whenever the store is
+  `degraded`. The overview socket and `GET /v1/workspaces` carry the same lines
+  as `storeWarnings` (absent when every store is fine), so a computer list can
+  flag the computer without asking for health.
 - `schedules`: whether the scheduler is ticking and the newest run in
   `schedule-runs.jsonl` (schedule name, project, status, reason, time).
 - `peers`: every computer in `hooks.yaml`, probed through its verified Hook with a
