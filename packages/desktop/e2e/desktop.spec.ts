@@ -638,6 +638,21 @@ test("an available update shows in the titlebar with What's new", async ({ page 
   await page.evaluate(() => localStorage.removeItem("phren.desktop.update-skipped"));
 });
 
+test("⌘K lists projects and opens one's page", async ({ page }) => {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await page.locator("#needs-pill").waitFor();
+  await page.keyboard.press("Meta+k");
+  await page.keyboard.type("phren");
+  // The first open loads the Projects list, then the row fills in.
+  const row = page.locator(".palette-row", { hasText: "Project · This computer" });
+  await expect(row).toContainText("phren");
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: test.info().outputPath("desktop-palette-projects.png") });
+  await row.click();
+  await expect(page.locator(".section-pill.selected")).toHaveText(/Projects/);
+  await expect(page.locator(".pj-forge")).toContainText("gitboy · git.example.com");
+});
+
 test("a sidebar row waiting on you shows what the agent said last", async ({ page }) => {
   // The working session turns to waiting with a last reply, in the overview the page receives.
   await page.routeWebSocket(/\/api\/overview$/, (ws) => {
