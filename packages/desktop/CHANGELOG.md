@@ -19,6 +19,7 @@ GitHub release notes, and the app shows them when that version is available.
 - Quick chat: ask phren about a project from its memory, without tools, from the project page or ⌘K; ⌘K's `?` search offers to ask the question in one.
 - One name for starting an agent everywhere: New agent (⌘K, project pages, the menu bar).
 - Launching Phren again brings back a window the menu bar icon hid.
+- Sections no longer wait on a Hook health check before their first read, and Tasks shows the project you were on (or the one an agent is working in) as soon as its tasks arrive, with the rest filling in.
 
 ## [0.1.6] - 2026-10-13
 
