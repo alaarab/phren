@@ -8,7 +8,7 @@ import { showSection } from "../shell/sections.js";
 import { checksStrip, followChecks } from "../shell/ci-watch.js";
 import { away } from "../shell/away.js";
 import { hookDrift, hookVersion, updateCommand } from "../shell/hook-drift.js";
-import { stallLabel, stalledMinutes } from "../shell/stalls.js";
+import { backgroundLabel, stallLabel, stalledMinutes } from "../shell/stalls.js";
 import { sendReply } from "../shell/needs-notify.js";
 
 // Receipts drive both the conductor's latest line and the recent-returns list.
@@ -220,7 +220,8 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     const rows = sessions(merged).filter((r) => r.child.agentStatus === "working" && !needKeys.has(r.key));
     fill("working", rows.map((row) => {
       // The overview's current step is the agent's activity verb ("Editing server.ts").
-      const activity = row.child.currentStep || row.child.activity || row.child.activityVerb;
+      // A turn that ended with work still running says so instead.
+      const activity = row.child.currentStep || row.child.activity || row.child.activityVerb || backgroundLabel(row.child);
       const sub = activity ? el("span", "home-row-sub activity", String(activity)) : undefined;
       return sessionRow(row, { tone: stalledMinutes(row.child) !== null ? "stalled" : "working", sub });
     }), "No agent is working.");
