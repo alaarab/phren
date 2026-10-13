@@ -118,6 +118,7 @@ Files and owners:
 - `index.html`, `theme.css`, `app.js`, `terminal.js`: the shell (layout, data flow, terminal tile).
 - `sidebar.js`: the sessions sidebar.
 - `chat.js`: the chat pane.
+- `chat/recall.js`: the composer's recall strip. Once a prompt has three words, a typing pause asks the session's project memory (`GET /v1/projects/:project/memory/search`, 6 results) and shows up to three confident hits (score 0.3 or more) as chips above the editor; a click appends `Phren remembers: <text>` to the prompt, × hides them until the prompt is sent. `recallQuery`, `recallHits` and `withRecall` are exported for `src/ui-recall.test.ts`.
 
 ## Exports
 

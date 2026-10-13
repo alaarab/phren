@@ -5,7 +5,7 @@
 // slash-command menu, and worded footer selectors (Permission, Model, Effort,
 // plus a context/Fast ring button), each opening its own small popover.
 //
-// createComposer({ computer, target, provider, branch, onConsole, onAgents,
+// createComposer({ computer, target, provider, branch, project, onConsole, onAgents,
 //   onWorkers, onDictate, onTalk }) -> {
 //   el, focus(), insert(text), setStatus(agentStatus), setBackground(jobs),
 //   setCounts({ agents, workers }), onDelivery(fn), destroy()
@@ -16,6 +16,7 @@
 // The pure helpers below carry no DOM so they import and test in Node.
 
 import { hookPost, hookGet } from "../api.js";
+import { createRecall } from "./recall.js";
 
 const PROVIDERS = { claude: "Claude", codex: "Codex", copilot: "Copilot", phren: "Phren", opencode: "OpenCode" };
 
@@ -264,7 +265,7 @@ const ICON = {
  *   onDictate?:Function, onTalk?:Function}} options
  * @returns {{el:HTMLElement, focus:Function, insert:Function, setStatus:Function, setBackground:Function, setCounts:Function, onDelivery:Function, destroy:Function}}
  */
-export function createComposer({ computer, target, provider, branch, onConsole, onAgents, onWorkers, onDictate, onTalk }) {
+export function createComposer({ computer, target, provider, branch, project, onConsole, onAgents, onWorkers, onDictate, onTalk }) {
   ensureStyles();
   const source = String(provider || (target && target.source) || "").toLowerCase();
   const name = providerLabel(source);
@@ -284,7 +285,9 @@ export function createComposer({ computer, target, provider, branch, onConsole, 
   const draftError = node("div", "pc-draft-error");
   const notice = node("div", "pc-notice");
   const footer = node("div", "pc-footer");
-  card.append(attachmentsEl, slashEl, pendingEl, ghostEl, input, draftError, notice, footer);
+  // Findings about what is being typed, from the session's project.
+  const recall = createRecall({ computer, project, draft: () => input.value, attach: (text) => { input.value = text; onInput(); input.focus(); } });
+  card.append(attachmentsEl, slashEl, pendingEl, ghostEl, recall.el, input, draftError, notice, footer);
 
   // Background strip above the card: folded by default, remembered per target.
   const wrap = node("div", "pc-wrap");
@@ -450,6 +453,7 @@ export function createComposer({ computer, target, provider, branch, onConsole, 
     updateSlash();
     updateGhost();
     updateFooter();
+    recall.update();
   }
 
   input.addEventListener("input", onInput);
@@ -538,7 +542,7 @@ export function createComposer({ computer, target, provider, branch, onConsole, 
     attachments = [];
     slashEl.hidden = true;
     renderAttachments();
-    grow(); saveDraft(); updateSlash(); updateFooter(); updateGhost();
+    grow(); saveDraft(); updateSlash(); updateFooter(); updateGhost(); recall.update();
     setPending(id, text || "[image]", "pending");
     await deliver(id, text, sending, 1);
   }
@@ -969,6 +973,7 @@ export function createComposer({ computer, target, provider, branch, onConsole, 
     },
     destroy() {
       destroyed = true;
+      recall.destroy();
       for (const entry of pendings.values()) if (entry.timer) clearTimeout(entry.timer);
       pendings.clear();
       closePopover();

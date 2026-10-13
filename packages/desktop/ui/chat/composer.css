@@ -46,6 +46,14 @@
   padding: 4px 6px;
 }
 .pc-input::placeholder { color: var(--dim); }
+.pc-recall { display: flex; align-items: center; gap: 6px; padding: 2px 4px 6px; min-width: 0; }
+.pc-recall-label { flex: 0 0 auto; color: var(--muted); font-size: 11.5px; }
+.pc-recall-chip { flex: 0 1 auto; min-width: 0; max-width: 60%; display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text-2); font-size: 12px; cursor: pointer; }
+.pc-recall-chip:hover { border-color: var(--accent); color: var(--text); }
+.pc-recall-icon { flex: 0 0 auto; color: var(--accent); font-size: 10px; }
+.pc-recall-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-recall-x { flex: 0 0 auto; margin-left: auto; border: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; padding: 0 4px; }
+.pc-recall-x:hover { color: var(--text); }
 .pc-ghost { padding: 4px 6px; color: var(--text-2); opacity: 0.75; font-family: var(--mono); font-size: 13px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pc-ghost-hint { color: var(--dim); }
 
