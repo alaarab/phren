@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, plainTitle, recordedBackground, sessionTitle } from "./session-activity.js";
+import { BACKGROUND_STALE_MS, isBriefTitle, liveBackground, markBackground, meaningfulLabel, ownRecord, plainTitle, recordedBackground, replyExcerpt, sessionTitle } from "./session-activity.js";
 import { nextTurn, type TurnRecord } from "./turn-records.js";
 
 const session = "00000001-1111-4111-8111-111111111111";
@@ -160,5 +160,27 @@ describe("session titles", () => {
     // A pane has no label until someone sets one, and Herdr's bare numbering is not a name.
     expect(sessionTitle({ ...base, dispatched: true, dispatchLabel: "parser checks", paneLabel: undefined })).toBe("parser checks");
     expect(sessionTitle({ ...base, dispatched: false, paneLabel: "2" })).toBe("Fix the parser");
+  });
+});
+
+describe("last reply on a session row", () => {
+  const ended = (reply: string) => nextTurn(nextTurn(undefined, { event: "UserPromptSubmit", terminal: "term_a", source: "claude", session })!,
+    { event: "Stop", terminal: "term_a", source: "claude", session, reply })!;
+
+  it("is the ended turn's reply as one plain line", () => {
+    expect(replyExcerpt(ended("## Done\n\nI fixed **login** in `auth.ts`.\n\n```ts\nconst x = 1;\n```\n- Should I open a PR?"))).toBe("Done I fixed login in auth.ts. Should I open a PR?");
+  });
+
+  it("is cut to a short line", () => {
+    const line = replyExcerpt(ended("word ".repeat(200)))!;
+    expect(line).toHaveLength(240);
+    expect(line.endsWith("…")).toBe(true);
+  });
+
+  it("is absent while a new turn runs or when the Stop had no reply", () => {
+    const working = nextTurn(ended("Done."), { event: "UserPromptSubmit", terminal: "term_a", source: "claude", session });
+    expect(replyExcerpt(working)).toBeUndefined();
+    expect(replyExcerpt(record())).toBeUndefined();
+    expect(replyExcerpt(undefined)).toBeUndefined();
   });
 });

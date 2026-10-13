@@ -208,6 +208,7 @@ back:
 | Fast memory sync | `POST /v1/store/blobs` | `memoryStoreBatch` |
 | Mirror tab on other computers | `GET /v1/workspaces/layout` | `paneLayout` |
 | Safe concurrent saves | per-file write lock in `file-write.ts` | — |
+| What an agent said last on Home rows and notifications | `lastReply` on overview rows | — (absent field) |
 
 ## Packages
 

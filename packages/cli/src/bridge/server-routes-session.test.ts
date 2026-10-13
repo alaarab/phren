@@ -90,6 +90,15 @@ describe("session rows on a computer with background work and dispatched workers
     expect(tabOf(await read(snapshot), "w13:p2", snapshot)).toMatchObject({ agentStatus: "working", backgroundTasks: 1 });
   });
 
+  it("carries what a finished turn said last, and nothing while a turn runs", async () => {
+    const snapshot = structuredClone(recorded);
+    const pane = objects(snapshot.panes).find(p => p.pane_id === "w1P:p2")!;
+    await turn("w1P:p2", String(pane.terminal_id), [["UserPromptSubmit"], ["Stop", { reply: "Tests pass. **Merge** it?" }]]);
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot).lastReply).toBe("Tests pass. Merge it?");
+    await turn("w1P:p2", String(pane.terminal_id), [["UserPromptSubmit"]]);
+    expect(tabOf(await read(snapshot), "w1P:p2", snapshot)).not.toHaveProperty("lastReply");
+  });
+
   it("shows a renamed session under its pane label, ahead of a dispatch label and the harness title", async () => {
     const snapshot = structuredClone(recorded);
     const pane = objects(snapshot.panes).find(p => p.pane_id === "w1P:p2")!;
