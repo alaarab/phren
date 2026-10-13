@@ -135,7 +135,10 @@ Notifications.
 
 ⌘K opens the palette (sessions, files, commands). From any other app,
 ⌘⇧Space (Ctrl+Shift+Space on Linux and Windows) brings Phren forward with the
-palette open; change or turn off that key in Settings › Keys. The launch sheet
+palette open; change or turn off that key in Settings › Keys. A menu bar icon
+(system tray on Linux and Windows) shows how many sessions need you and lists
+them; choose one to open it. On a Mac, closing the window while the icon is on
+keeps Phren running there. Turn it off in Settings › Notifications. The launch sheet
 ("+ New agent") recommends a computer from its load and account quota.
 
 ## Chats, consoles and tiles
