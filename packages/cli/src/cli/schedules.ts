@@ -6,6 +6,7 @@ import {
   SCHEDULE_HARNESSES,
   SCHEDULE_SESSIONS,
   WEEKDAYS,
+  computerMatches,
   canonicalComputer,
   newScheduleId,
   parseSchedule,
@@ -20,6 +21,8 @@ import {
 import { object, socketPath, type Json } from "../bridge/protocol.js";
 import { listMachines } from "../profile-store.js";
 import { getProjectDirs } from "../shared.js";
+import { scheduleProblems } from "../bridge/schedule-problems.js";
+import { localNames } from "../bridge/computer-names.js";
 
 function option(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -27,6 +30,11 @@ function option(args: string[], name: string): string | undefined {
   const value = args[index + 1];
   if (!value || value.startsWith("--")) throw new Error(`${name} needs a value.`);
   return value;
+}
+
+/** Whether this computer is the one the schedule names. */
+function ownsHere(schedule: Schedule): boolean {
+  return localNames().some(name => computerMatches(schedule.computer, name));
 }
 
 function projectDirectory(store: string, name: string): string {
@@ -52,6 +60,8 @@ async function list(store: string, projectName?: string): Promise<void> {
       count++;
       console.log(`${project}  ${schedule.id}  ${schedule.enabled ? "enabled " : "paused  "}  ${schedule.name}`);
       if (schedule.projects) console.log(`  targets: ${schedule.projects.join(", ")}`);
+      const problems = await scheduleProblems(schedule, project, { store, owned: ownsHere(schedule) });
+      for (const problem of problems) console.log(`  ! ${problem}`);
       console.log(`  ${schedule.computer} · ${schedule.harness}${schedule.model ? `/${schedule.model}` : ""} · ${scheduleDescription(schedule)}${schedule.session === "reuse" ? " · continues one session" : ""}`);
     }
   }
@@ -90,6 +100,9 @@ async function add(store: string, args: string[]): Promise<void> {
   };
   if (schedule.days?.some(day => !WEEKDAYS.includes(day))) throw new Error(`--days accepts: ${WEEKDAYS.join(", ")}.`);
   const validated = parseSchedule(schedule);
+  // Refuse what could never fire: the owning computer is this one, so its source paths can be checked now.
+  const problems = await scheduleProblems(validated, path.basename(directory), { store, owned: ownsHere(validated) });
+  if (problems.length) throw new Error(`This schedule could not run: ${problems.join(" ")}`);
   await writeScheduleDocument(directory, [...file.schedules, validated], file.document);
   console.log(`Added schedule ${validated.id} to ${path.basename(directory)}.`);
 }

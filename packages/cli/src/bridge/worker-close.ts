@@ -7,6 +7,7 @@ import { validateTarget, paneChatState } from "./herdr.js";
 import { terminalProvider } from "./terminal.js";
 import { paneTurn, workerStates, workerTurnKey } from "./dispatch-returns.js";
 import type { HandOffQueue } from "./hand-off-queue.js";
+import { originPaneSchema } from "./dispatch.js";
 type ClosedTarget = Target | StartingTarget;
 const closedTargetSchema = z.union([targetSchema, startingTargetSchema]);
 const file = (target: ClosedTarget) => path.join(bridgeRoot(), "closed-workers", `${createHash("sha256").update(JSON.stringify([target.server, target.workspace, target.tab, target.pane, target.source, "session" in target ? target.session : target.startingToken])).digest("hex")}.json`);
@@ -58,4 +59,19 @@ export async function closeFinishedWorker(input: unknown, queue?: HandOffQueue):
     throw error;
   }
   return { ok: true, closed: true };
+}
+
+/** An agent closing the pane it runs in, once its work is committed and reported:
+ * the sanctioned form of `herdr pane close`, which an agent's auto mode refuses.
+ * Only the caller's own pane (named by its terminal variables) is ever closed, and
+ * after the reply, so the agent's `phren` call still returns. */
+export async function closeOwnPane(input: unknown, delayMs = 500): Promise<Json> {
+  const data = z.object({ origin: originPaneSchema }).strict().parse(input);
+  const { snapshot, findPane } = await import("./herdr.js");
+  const pane = findPane(await snapshot(data.origin.server), data.origin);
+  if (!pane) return { ok: true, closed: false, reason: "The pane is already gone." };
+  await markPaneClosed(data.origin.server, pane);
+  const timer = setTimeout(() => { void terminalProvider().closePane(data.origin.server, data.origin.pane).catch(() => undefined); }, delayMs);
+  timer.unref();
+  return { ok: true, closed: true, pane: data.origin.pane };
 }

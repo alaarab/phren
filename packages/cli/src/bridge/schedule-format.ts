@@ -96,8 +96,8 @@ export interface ScheduleLaunchContext {
   projectDir: string;
   cwd: string;
   runId: string;
-  /** With `session: reuse`, the session this target's last run used, to continue if it is still open. */
-  reuse?: ScheduleLaunchRecord;
+  /** With `session: reuse`, the panes this target's earlier runs used, newest first: the newest still open is continued. */
+  reuse?: ScheduleLaunchRecord[];
   blockedStartup?: (promptText: string) => void | Promise<void>;
 }
 
@@ -116,6 +116,8 @@ export interface ScheduleStatus extends Schedule {
   running: boolean;
   /** Whether this computer owns the schedule: it runs it and answers Run now. */
   owned: boolean;
+  /** Why this schedule can never fire, when something is wrong with its computer or source paths. */
+  problems?: string[];
 }
 
 interface ScheduleDocument {
@@ -334,13 +336,20 @@ export function latestScheduleBatch(runs: ScheduleRun[]): { lastRun: ScheduleRun
   return { lastRun: { ...representative, finishedAt }, lastRuns };
 }
 
-/** The newest Herdr session among a target's runs, which `session: reuse` continues. */
-export function reusableLaunch(runs: readonly ScheduleRun[]): ScheduleLaunchRecord | undefined {
-  for (let index = runs.length - 1; index >= 0; index--) {
+/** Max panes of one schedule `session: reuse` looks through, and tidies. */
+const REUSE_PANES = 8;
+
+/** The distinct Herdr panes a target's runs used, newest first, which `session: reuse` continues (the newest still open) and tidies (the older finished ones). */
+export function reusableLaunches(runs: readonly ScheduleRun[]): ScheduleLaunchRecord[] {
+  const seen = new Set<string>(), found: ScheduleLaunchRecord[] = [];
+  for (let index = runs.length - 1; index >= 0 && found.length < REUSE_PANES; index--) {
     const launch = runs[index].launch;
-    if (launch.mode === "herdr" && launch.server && launch.workspaceId && launch.tabId && launch.paneId && launch.sessionId) return launch;
+    if (launch.mode !== "herdr" || !launch.server || !launch.workspaceId || !launch.tabId || !launch.paneId) continue;
+    const key = [launch.server, launch.workspaceId, launch.tabId, launch.paneId].join("\0");
+    if (seen.has(key)) continue;
+    seen.add(key); found.push(launch);
   }
-  return undefined;
+  return found;
 }
 
 export async function readScheduleRuns(file: string): Promise<ScheduleRun[]> {

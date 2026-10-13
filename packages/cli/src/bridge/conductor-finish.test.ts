@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Json, type Target, atomicInPrivateDir } from "./protocol.js";
 import { snapshot, sharedSnapshot, paneIdentity, validateTarget } from "./herdr.js";
-import { closeFinishedWorker, markWorkerClosed } from "./worker-close.js";
+import { closeFinishedWorker, closeOwnPane, markWorkerClosed } from "./worker-close.js";
 import { reportWorker } from "./worker-reports.js";
 import { DispatchReturns, observe, workerStates } from "./dispatch-returns.js";
 import { dispatchStatus, type Receipt } from "./dispatch.js";
@@ -38,6 +38,23 @@ beforeEach(async () => {
   await event("UserPromptSubmit"); await event("Stop");
 });
 afterEach(async () => { restore(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
+
+describe("an agent closing its own pane", () => {
+  const origin = { server: target.server, workspace: target.workspace, tab: target.tab, pane: target.pane };
+  it("answers first, then closes only that pane", async () => {
+    restore(); restore = setTerminalProvider({ closePane, processes: async () => ({ foregroundPids: [] }) } as unknown as TerminalProvider);
+    const result = await closeOwnPane({ origin }, 20);
+    expect(result).toMatchObject({ ok: true, closed: true, pane: target.pane });
+    expect(closePane).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(closePane).toHaveBeenCalledWith(target.server, target.pane));
+  });
+  it("does nothing for a pane that is already gone and refuses a body naming anything else", async () => {
+    panes = [];
+    expect(await closeOwnPane({ origin }, 20)).toMatchObject({ ok: true, closed: false });
+    await expect(closeOwnPane({ origin, pane: "p2" }, 20)).rejects.toThrow();
+    expect(closePane).not.toHaveBeenCalled();
+  });
+});
 
 describe("finished worker lifecycle", () => {
   it("keeps PR evidence bound to the submitted turn and carries it through the done return", async () => {
