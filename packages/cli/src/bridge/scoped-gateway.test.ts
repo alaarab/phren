@@ -58,6 +58,16 @@ describe("gitboy-read scope admission", () => {
     }
   });
 
+  it("admits only an exact-id task completion on the write scope", () => {
+    const body = JSON.stringify({ id: "bid:cccc0001" });
+    const line = "POST /v1/projects/app/tasks/complete HTTP/1.1";
+    const headers = ["Host: x", "Content-Type: application/json", `Content-Length: ${Buffer.byteLength(body)}`];
+    expect(admit(line, headers, body, "gitboy-write")).toMatchObject({ ok: true });
+    expect(admit(line, headers, body, "gitboy-read")).toMatchObject({ ok: false, status: 403 });
+    const loose = JSON.stringify({ id: "Fix login" });
+    expect(admit(line, ["Host: x", "Content-Type: application/json", `Content-Length: ${Buffer.byteLength(loose)}`], loose, "gitboy-write")).toMatchObject({ ok: false });
+  });
+
   it("refuses dispatch, store writes, sudo, files and other unregistered routes", () => {
     for (const line of [
       "POST /v1/dispatch HTTP/1.1", "POST /v1/store/file HTTP/1.1", "POST /v1/store/delete HTTP/1.1", "POST /v1/sudo/answer HTTP/1.1",
