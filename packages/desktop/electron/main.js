@@ -2,7 +2,7 @@
 // a checkout the daemon runs on the system Node; the installed app runs it on
 // Electron's own Node (ELECTRON_RUN_AS_NODE), which loads node-pty's N-API
 // binary too, so an install needs no Node of its own.
-import { app, BrowserWindow, Menu, Notification, dialog, ipcMain, session, shell } from "electron";
+import { app, BrowserWindow, Menu, Notification, dialog, globalShortcut, ipcMain, session, shell } from "electron";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -20,6 +20,7 @@ let daemon = null;
 let daemonExited = false;
 let daemonStderr = "";
 let quitting = false;
+let summonKey = null;
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -269,6 +270,34 @@ function registerIpc() {
     });
     note.show();
   });
+  ipcMain.handle("phren:summon-key", (event, accel) => {
+    if (!fromMainWindow(event) || typeof accel !== "string" || accel.length > 64) return false;
+    return setSummon(accel);
+  });
+}
+
+/** The summon hotkey: bring the window to the front and tell the UI to open ⌘K. */
+function summon() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  app.focus({ steal: true });
+  mainWindow.focus();
+  mainWindow.webContents.send("phren:summon");
+}
+
+/** Replace the summon accelerator; "" turns it off. False when the system refuses it (another app holds it). */
+function setSummon(accel) {
+  if (summonKey) globalShortcut.unregister(summonKey);
+  summonKey = null;
+  if (!accel) return true;
+  try {
+    if (!globalShortcut.register(accel, summon)) return false;
+  } catch {
+    return false;
+  }
+  summonKey = accel;
+  return true;
 }
 
 /** Only the app's own loopback origin (localhost or 127.0.0.1 at its port) is
@@ -324,6 +353,7 @@ if (!app.requestSingleInstanceLock()) {
     mainWindow.focus();
   });
   app.on("window-all-closed", () => app.quit());
+  app.on("will-quit", () => globalShortcut.unregisterAll());
   app.on("before-quit", () => {
     quitting = true;
     killDaemon();
