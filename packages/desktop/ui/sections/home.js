@@ -1,9 +1,11 @@
 // Home: the cockpit. Top to bottom, the conductor card, who needs you (with
-// keyboard answers), what is working (with each agent's activity line), recent
-// returns from dispatched workers, and how every computer is doing.
+// keyboard answers), what is working (with each agent's activity line), the
+// checks on those sessions' pull requests, recent returns from dispatched
+// workers, and how every computer is doing.
 import { hookGet, hookPost, targetQuery } from "../api.js";
 import { needsYou, projectOf, sessions, store } from "../shell/store.js";
 import { showSection } from "../shell/sections.js";
+import { checksStrip, followChecks } from "../shell/ci-watch.js";
 
 // Receipts drive both the conductor's latest line and the recent-returns list.
 const RETURN_POLL_MS = 30_000;
@@ -18,6 +20,7 @@ function loadSeen() {
 function saveSeen(seen) {
   try { localStorage.setItem(SEEN_KEY, JSON.stringify([...seen].slice(-1000))); } catch { /* private window */ }
 }
+const CHECKS_WORD = { failing: "Failing", pending: "Running", passing: "Passing" };
 const RETURN_STATE = { "done": "done", "needs-you": "needs you", "failed": "failed", "blocked": "blocked", "gone": "gone", "stalled": "stalled" };
 
 function el(tag, cls, text) {
@@ -50,8 +53,9 @@ function gb(bytes) {
   return `${(Number(bytes) / 1_073_741_824).toFixed(1)} GB`;
 }
 
-export function mountHome(root, { openSession } = {}) {
+export function mountHome(root, { openSession, openPulls } = {}) {
   const open = typeof openSession === "function" ? openSession : () => {};
+  const openPrs = typeof openPulls === "function" ? openPulls : open;
   root.innerHTML = `
     <div class="home">
       <section class="home-block" data-block="conductor">
@@ -65,6 +69,10 @@ export function mountHome(root, { openSession } = {}) {
       <section class="home-block" data-block="working">
         <h2 class="section-label">Working <span class="count"></span></h2>
         <div class="home-list"></div>
+      </section>
+      <section class="home-block" data-block="checks" hidden>
+        <h2 class="section-label">Checks <span class="count"></span></h2>
+        <div class="home-checks"></div>
       </section>
       <section class="home-block" data-block="returns">
         <h2 class="section-label">Recent returns <span class="count"></span></h2>
@@ -152,6 +160,31 @@ export function mountHome(root, { openSession } = {}) {
   }
 
   // ---- recent returns -------------------------------------------------
+
+  // The open requests the CI watch saw on working and recent sessions.
+  let pulls = null;
+  let stopChecks = null;
+  function renderChecks() {
+    const scope = block("checks");
+    const list = checksStrip(pulls ?? []);
+    scope.hidden = !list.length;
+    scope.querySelector(".count").textContent = list.length ? String(list.length) : "";
+    scope.querySelector(".home-checks").replaceChildren(...list.map((pull) => {
+      const chip = el("button", `home-check ${pull.checks || "none"}`);
+      chip.title = `${CHECKS_WORD[pull.checks] ?? "No checks"} · ${pull.ref}${pull.number} ${pull.title} · ${pull.computer}`;
+      chip.append(el("span", "home-check-dot"), el("span", "home-check-ref", `${pull.ref}${pull.number}`),
+        el("span", "home-check-title", pull.title), el("span", "home-project", pull.project));
+      chip.addEventListener("click", () => openPrs(pull.computer, store.find(pull.computer, pull.child.id)?.child ?? pull.child));
+      return chip;
+    }));
+  }
+  function followPulls() {
+    stopChecks ??= followChecks((look) => { pulls = look; renderChecks(); });
+  }
+  function unfollowPulls() {
+    stopChecks?.();
+    stopChecks = null;
+  }
 
   function overviewChild(target) {
     if (!target) return null;
@@ -468,6 +501,7 @@ export function mountHome(root, { openSession } = {}) {
     renderConductor();
     renderNeeds();
     renderWorking();
+    renderChecks();
     renderReturns();
     renderComputers();
   }
@@ -507,12 +541,14 @@ export function mountHome(root, { openSession } = {}) {
   document.addEventListener("keydown", onKeydown);
   visible = true;
   startPolling();
+  followPulls();
 
   return {
-    show() { visible = true; startPolling(); },
-    hide() { visible = false; stopPolling(); },
+    show() { visible = true; startPolling(); followPulls(); },
+    hide() { visible = false; stopPolling(); unfollowPulls(); },
     destroy() {
       stopPolling();
+      unfollowPulls();
       unsubscribe();
       document.removeEventListener("keydown", onKeydown);
       for (const ws of watchers.values()) { try { ws.close(); } catch { /* already closing */ } }

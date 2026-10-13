@@ -35,6 +35,7 @@ const agents = () => sectionHandle("agents");
 const GEAR = '<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M8 5.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6Zm0 4.2a1.4 1.4 0 1 1 0-2.8 1.4 1.4 0 0 1 0 2.8Zm6.1-2.3-1.2-.2a5 5 0 0 0-.5-1.2l.7-1a.7.7 0 0 0-.1-.9l-.8-.8a.7.7 0 0 0-.9-.1l-1 .7a5 5 0 0 0-1.2-.5L8.9 1.9A.7.7 0 0 0 8.2 1.3H7.8a.7.7 0 0 0-.7.6l-.2 1.2a5 5 0 0 0-1.2.5l-1-.7a.7.7 0 0 0-.9.1l-.8.8a.7.7 0 0 0-.1.9l.7 1a5 5 0 0 0-.5 1.2l-1.2.2a.7.7 0 0 0-.6.7v.4c0 .3.3.6.6.7l1.2.2c.1.4.3.8.5 1.2l-.7 1a.7.7 0 0 0 .1.9l.8.8c.2.2.6.3.9.1l1-.7c.4.2.8.4 1.2.5l.2 1.2c.1.3.4.6.7.6h.4c.3 0 .6-.3.7-.6l.2-1.2c.4-.1.8-.3 1.2-.5l1 .7c.3.2.7.1.9-.1l.8-.8c.2-.2.3-.6.1-.9l-.7-1c.2-.4.4-.8.5-1.2l1.2-.2c.3-.1.6-.4.6-.7v-.4a.7.7 0 0 0-.6-.7Z"/></svg>';
 registerSection("home", { label: "Home", order: 10, badge: true, mount: (el) => mountHome(el, {
   openSession(computer, child) { showSection("agents"); agents().openSession(computer, child); },
+  openPulls(computer, child) { showSection("agents"); agents().openPulls(computer, child); },
 }) });
 registerSection("agents", { label: "Agents", order: 20, mount: (el) => mountAgents(el) });
 registerSection("review", { label: "Review", order: 22, mount: (el) => mountReview(el) });
@@ -86,8 +87,9 @@ store.subscribe(() => {
   notified = keys;
 });
 
-// Native notifications when a session branch's pull request checks settle.
-if (shell) startCiWatch({ notify: (title, body) => shell.notify(title, body), enabled: () => notifyEnabled() && ciNotifyEnabled() });
+// Native notifications when a session branch's pull request checks settle,
+// and the last look behind Home's Checks strip.
+startCiWatch({ notify: shell ? (title, body) => shell.notify(title, body) : null, enabled: () => notifyEnabled() && ciNotifyEnabled() });
 
 connectStore();
 // Mount Agents first (keys.js binds to its sidebar), then open the section the
