@@ -25,6 +25,7 @@ GitHub release notes, and the app shows them when that version is available.
 - Projects and Tasks load in the background a few seconds after Phren starts, so the first visit opens instantly; Tasks re-reads on open only when its last read is over 30 seconds old.
 - Projects, Tasks and Memory show placeholder cards and rows shaped like their content while they load, instead of a Loading line.
 - ⌘1–⌘9 (Ctrl+1–9 on Linux) open the titlebar's sections in order; each pill's tooltip shows its shortcut.
+- Schedules and Conductor read once when first opened (they read up to three times), and resting the pointer on Review, Projects, Fleet or their sections starts their first read before the click.
 
 ## [0.1.6] - 2026-10-13
 
