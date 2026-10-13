@@ -1,7 +1,8 @@
 // "Since you left": the turns agents finished while this window was hidden or
 // in the background. Away starts when the window loses focus or is hidden;
-// coming back after at least a minute away with finished turns publishes
-// them to Home until dismissed (or the next time away).
+// coming back after at least a minute away with finished turns or settled
+// checks publishes them to Home until dismissed (or the next time away).
+import { onChecksSettled } from "./ci-watch.js";
 import { sessions, store } from "./store.js";
 
 export const MIN_AWAY_MS = 60_000;
@@ -16,6 +17,7 @@ export function endedTurns(before, rows) {
 export function createAway({ now = Date.now } = {}) {
   let awaySince = null;
   let finished = new Map(); // key -> { key, computer, child, at }
+  let checks = new Map(); // computer/project/number -> the CI watch's pull, with `at`
   let statuses = new Map();
   let summary = null; // { since, back, rows } once back
   const listeners = new Set();
@@ -29,6 +31,11 @@ export function createAway({ now = Date.now } = {}) {
       }
       statuses = new Map(rows.map((row) => [row.key, row.child.agentStatus]));
     },
+    /** A pull request whose checks settled (the CI watch's look); kept only while away, latest wins. */
+    noteChecks(pull) {
+      if (awaySince === null) return;
+      checks.set(`${pull.computer}/${pull.project}/${pull.number}`, { ...pull, at: now() });
+    },
     leave() {
       if (awaySince === null) awaySince = now();
     },
@@ -37,9 +44,11 @@ export function createAway({ now = Date.now } = {}) {
       const since = awaySince;
       awaySince = null;
       const rows = [...finished.values()].sort((a, b) => b.at - a.at).slice(0, MAX_ROWS);
+      const settled = [...checks.values()].sort((a, b) => b.at - a.at).slice(0, MAX_ROWS);
       finished = new Map();
-      if (now() - since < MIN_AWAY_MS || !rows.length) return;
-      summary = { since, back: now(), rows };
+      checks = new Map();
+      if (now() - since < MIN_AWAY_MS || (!rows.length && !settled.length)) return;
+      summary = { since, back: now(), rows, checks: settled };
       emit();
     },
     dismiss() {
@@ -63,5 +72,6 @@ export function startAway() {
   window.addEventListener("focus", update);
   document.addEventListener("visibilitychange", update);
   store.subscribe((merged) => away.observe(sessions(merged)));
+  onChecksSettled((pull) => away.noteChecks(pull));
   update();
 }

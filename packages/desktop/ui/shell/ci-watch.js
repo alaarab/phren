@@ -59,6 +59,14 @@ const listeners = new Set();
 let interest = 0;
 let wake = null;
 
+const settledListeners = new Set();
+
+/** Hear each request whose checks just turned failing or passing (Since you left). Returns the stop. */
+export function onChecksSettled(fn) {
+  settledListeners.add(fn);
+  return () => settledListeners.delete(fn);
+}
+
 /** The last look without following it (no extra polling); `null` before the first. */
 export function lastChecks() { return lastLook; }
 
@@ -95,7 +103,9 @@ export function startCiWatch({ notify, enabled }) {
         current.set(`${w.key}\u0000${pull.number}`, { ...w, number: pull.number, title: pull.title || "", checks: pull.checks ?? null,
           ref: body.host?.terms?.ref || "#" });
       }));
-      if (notifying()) for (const pull of ciTransitions(previous, current)) {
+      const settled = ciTransitions(previous, current);
+      for (const fn of settledListeners) for (const pull of settled) fn(pull);
+      if (notifying()) for (const pull of settled) {
         notify(`${pull.project}: checks ${pull.checks === "failing" ? "failed" : "passed"}`, `${pull.ref}${pull.number} ${pull.title} · ${pull.computer}`);
       }
       previous = current;

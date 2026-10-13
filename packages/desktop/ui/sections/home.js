@@ -183,7 +183,19 @@ export function mountHome(root, { openSession, openPulls } = {}) {
     scope.hidden = !summary;
     if (!summary) return;
     scope.querySelector(".home-away-for").textContent = ` · away ${age(new Date(summary.since).toISOString())}`;
-    fill("away", summary.rows.map((entry) => {
+    const checkRows = (summary.checks ?? []).map((pull) => {
+      const failed = pull.checks === "failing";
+      const shell = rowShell({ tone: failed ? "waiting" : "done" });
+      shell.title.textContent = `${pull.ref}${pull.number} ${pull.title}`;
+      const meta = el("span", "home-row-meta");
+      meta.append(el("span", "home-project", pull.project), el("span", "home-host", pull.computer),
+        el("span", failed ? "home-why" : "home-passed", failed ? "checks failed" : "checks passed"),
+        el("span", "home-age", age(new Date(pull.at).toISOString())));
+      shell.button.append(meta);
+      shell.button.addEventListener("click", () => openPrs(pull.computer, store.find(pull.computer, pull.child.id)?.child ?? pull.child));
+      return shell.button;
+    });
+    fill("away", [...checkRows, ...summary.rows.map((entry) => {
       // The row as it is now, when the session is still there.
       const live = store.find(entry.computer, entry.child.id);
       const child = live?.child ?? entry.child;
@@ -198,7 +210,7 @@ export function mountHome(root, { openSession, openPulls } = {}) {
       shell.button.disabled = !live;
       shell.button.addEventListener("click", () => { if (live) open(entry.computer, live.child); });
       return shell.button;
-    }), "");
+    })], "");
   }
   block("away").querySelector(".home-away-dismiss").addEventListener("click", () => away.dismiss());
   const unsubscribeAway = away.subscribe(renderAway);
