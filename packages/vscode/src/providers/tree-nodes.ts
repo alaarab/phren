@@ -43,6 +43,7 @@ export function buildTreeItem(element: PhrenNode, dateFilter: DateFilter | undef
       const taskBadge: string[] = [];
       if (element.activeCount && element.activeCount > 0) taskBadge.push(`${element.activeCount} active`);
       if (element.queueCount && element.queueCount > 0) taskBadge.push(`${element.queueCount} queued`);
+      if (taskBadge.length === 0 && element.openCount && element.openCount > 0) taskBadge.push(`${element.openCount} open`);
       if (taskBadge.length > 0) reviewBadge.push(taskBadge.join(" · "));
       const reviewBadgeText = reviewBadge.join(" · ");
       if (element.active) {

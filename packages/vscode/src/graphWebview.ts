@@ -634,6 +634,7 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
 
   // Parallel per-project fetches (including topic configs). A project whose
   // calls fail is logged and dropped so it cannot blank every other project.
+  const projectErrors = new Map<string, string>();
   const perProjectResults = (
     await Promise.all(
       projects.map(async (p) => {
@@ -646,12 +647,17 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
           ]);
           return { projectName: p.name, summary, findings, tasks, topicConfig, store: p.store };
         } catch (error) {
-          logGraphError(`Could not load project ${p.name}: ${toErrorMessage(error)}`);
+          projectErrors.set(p.name, toErrorMessage(error));
           return null;
         }
       }),
     )
   ).filter((result): result is NonNullable<typeof result> => result !== null);
+
+  // Diagnose in project order so the "first error" is deterministic regardless
+  // of which parallel fetch rejected first.
+  const failedProjects = projects.filter((p) => projectErrors.has(p.name));
+  for (const p of failedProjects) logGraphError(`Could not load project ${p.name}: ${projectErrors.get(p.name)}`);
 
   // Fragment graph
   const entities = await fetchEntities(client);
@@ -838,7 +844,20 @@ export async function loadGraphData(client: PhrenClient): Promise<GraphPayload> 
 
   const payload: GraphPayload = { nodes, edges: uniqueEdges, summaries: summaryMap, scores, topics: allTopics };
   if (nodes.length === 0) {
-    payload.emptyReason = `No findings or tasks yet for the ${projects.length} project${projects.length === 1 ? "" : "s"} in ${resolveStorePath()}.`;
+    const storePath = resolveStorePath();
+    const total = projects.length;
+    const count = failedProjects.length;
+    const plural = total === 1 ? "" : "s";
+    if (count === total) {
+      // Every project failed to load — an empty answer here is a failure, not
+      // an empty store, so say so instead of "no findings or tasks yet".
+      const first = failedProjects[0];
+      payload.emptyReason = `Could not load memory for ${total} project${plural} in ${storePath}; see Phren: Show Log. First error (${first.name}): ${projectErrors.get(first.name)}`;
+    } else if (count > 0) {
+      payload.emptyReason = `Could not load memory for ${count} of ${total} project${plural} in ${storePath}; the rest have no findings or tasks. See Phren: Show Log.`;
+    } else {
+      payload.emptyReason = `No findings or tasks yet for the ${total} project${plural} in ${storePath}.`;
+    }
   }
   return payload;
 }

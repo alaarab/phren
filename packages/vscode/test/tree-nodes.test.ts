@@ -85,8 +85,18 @@ describe("buildTreeItem: project", () => {
     expect(withReview.description).toBe("2 review · 3 active");
   });
 
+  it("shows an open total when the source gives no active/queue split", () => {
+    const item = buildTreeItem({ kind: "project", projectName: "app", openCount: 12 }, undefined);
+    expect(item.description).toBe("12 open");
+  });
+
+  it("prefers the active/queue split over an open total", () => {
+    const item = buildTreeItem({ kind: "project", projectName: "app", activeCount: 3, queueCount: 5, openCount: 8 }, undefined);
+    expect(item.description).toBe("3 active · 5 queued");
+  });
+
   it("omits zero-valued task counts so an empty project stays clean", () => {
-    const item = buildTreeItem({ kind: "project", projectName: "app", activeCount: 0, queueCount: 0, brief: "app" }, undefined);
+    const item = buildTreeItem({ kind: "project", projectName: "app", activeCount: 0, queueCount: 0, openCount: 0, brief: "app" }, undefined);
     expect(item.description).toBe("app");
   });
 });
