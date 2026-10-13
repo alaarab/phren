@@ -18,7 +18,8 @@ import "./shell/launch.js"; // registers "Launch an agent…" in the palette
 import { registerPauseCommand } from "./shell/pause-all.js";
 registerPauseCommand();
 import { initTheme } from "./shell/theme.js";
-import { mountSettings, notifyEnabled, badgeEnabled } from "./sections/settings.js";
+import { mountSettings, notifyEnabled, badgeEnabled, ciNotifyEnabled } from "./sections/settings.js";
+import { startCiWatch } from "./shell/ci-watch.js";
 import { mountUsageRings } from "./shell/usage-rings.js";
 
 // The Electron shell exposes window.phrenDesktop; in a browser it is absent.
@@ -84,6 +85,9 @@ store.subscribe(() => {
   }
   notified = keys;
 });
+
+// Native notifications when a session branch's pull request checks settle.
+if (shell) startCiWatch({ notify: (title, body) => shell.notify(title, body), enabled: () => notifyEnabled() && ciNotifyEnabled() });
 
 connectStore();
 // Mount Agents first (keys.js binds to its sidebar), then open the section the
