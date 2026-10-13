@@ -857,6 +857,16 @@ export function mountMemory(root) {
     hide() { if (state.segment === "graph") destroyGraph(); },
     focus() { /* the rail owns first focus */ },
     reload() { void loadProjects(); },
+    /** Show one project's findings (or another segment) filtered to `search`. */
+    open({ computer, project, segment = "findings", search = "" }) {
+      if (state.segment === "graph") destroyGraph();
+      const switching = computer && computer !== state.computer && state.computers.includes(computer);
+      if (switching) { state.computer = computer; state.projects = []; }
+      Object.assign(state, { project, segment, search, type: null, reviewIndex: 0, editingLine: null, findings: [], review: [] });
+      renderSegments();
+      if (switching || !state.projects.some((p) => p.name === project)) void loadProjects();
+      else { renderRail(); void loadSegment(); }
+    },
   };
 }
 
