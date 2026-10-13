@@ -1,5 +1,5 @@
 // ⌘K command palette: one ranked list across sessions (every computer), the
-// active session's repository files, registered commands and top-level
+// open pull requests the CI watch last saw, the active session's repository files, registered commands and top-level
 // sections, operated entirely by keyboard; `?` asks the active session's
 // project memory instead. Opened by the `palette` action in keys.js. Plain DOM
 // only, never innerHTML with data.
@@ -7,6 +7,7 @@
 import { hookGet, hookPost, targetQuery } from "../api.js";
 import { sectionHandle, sectionIds, sectionLabel, showSection } from "./sections.js";
 import { projectOf, store } from "./store.js";
+import { checksStrip, lastChecks } from "./ci-watch.js";
 
 // ------------------------------------------------------------ commands
 const commands = new Map(); // id -> { id, title, keys?, run, group?, meta? }
@@ -19,7 +20,9 @@ export function registerCommand(cmd) {
 }
 
 const PROVIDER = { claude: "C", codex: "X", opencode: "O", copilot: "G", phren: "P" };
-const GROUP_ORDER = { Sessions: 0, "Go to": 1, Commands: 2, Files: 3 };
+const GROUP_ORDER = { Sessions: 0, "Pull requests": 1, "Go to": 2, Commands: 3, Files: 4 };
+const CHECK_ICON = { failing: "✕", pending: "●", passing: "✓" };
+const CHECK_WORD = { failing: "Checks failing", pending: "Checks running", passing: "Checks passing" };
 const MAX_ROWS = 200;
 const MEMORY_LIMIT = 20;
 const MEMORY_DEBOUNCE_MS = 180;
@@ -88,6 +91,26 @@ function sessionItems() {
       },
     };
   });
+}
+
+/** Palette rows for the open requests the CI watch last saw (failing first);
+ * Enter opens the session's Changes › PRs. No Hook call of its own. */
+export function pullItems(pulls, openPulls) {
+  return checksStrip(pulls ?? []).map((pull) => ({
+    id: `pull:${pull.computer}:${pull.project}:${pull.number}`,
+    group: "Pull requests",
+    kind: pull.checks === "failing" ? "needs" : "idle",
+    boost: pull.checks === "failing" ? 400 : 0,
+    icon: CHECK_ICON[pull.checks] ?? "#",
+    title: `${pull.ref}${pull.number} ${pull.title}`,
+    meta: [CHECK_WORD[pull.checks] ?? "No checks", pull.project, pull.computer].filter(Boolean).join(" · "),
+    run() { openPulls(pull.computer, store.find(pull.computer, pull.child.id)?.child ?? pull.child); },
+  }));
+}
+
+function openPullsTab(computer, child) {
+  showSection("agents");
+  sectionHandle("agents")?.openPulls(computer, child);
 }
 
 function sectionItems() {
@@ -314,7 +337,7 @@ export function closePalette() {
 
 function collect(sources, query, commandsOnly) {
   const all = [];
-  if (!commandsOnly) all.push(...sessionItems(), ...sectionItems());
+  if (!commandsOnly) all.push(...sessionItems(), ...pullItems(lastChecks(), openPullsTab), ...sectionItems());
   all.push(...commandItems());
   for (const src of sources) {
     if (!src || typeof src.items !== "function") continue;

@@ -560,3 +560,19 @@ test("Home lists the turns that ended since you left", async ({ page }) => {
   await expect(awayBlock).toBeHidden();
   hook.pushOverview(overview);
 });
+
+test("⌘K lists the watched pull requests and opens one on its session's PRs", async ({ page }) => {
+  ciChecks = "failing";
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  // Home follows the CI watch, so its first look fills the palette too.
+  await expect(page.locator(".home-check", { hasText: "#42" })).toBeVisible();
+  await page.keyboard.press("Meta+k");
+  await page.keyboard.type("42");
+  const row = page.locator(".palette-row", { hasText: "#42 Keep the session through the guard" });
+  await expect(row).toContainText("Checks failing");
+  await page.screenshot({ path: test.info().outputPath("desktop-palette-prs.png") });
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".section-pill.selected")).toHaveText("Agents");
+  await expect(page.locator('.chg-seg.sel[data-view="pulls"]')).toBeVisible();
+  ciChecks = "pending";
+});
