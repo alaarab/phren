@@ -22,6 +22,7 @@ import { mountSettings, notifyEnabled, badgeEnabled, ciNotifyEnabled } from "./s
 import { startCiWatch } from "./shell/ci-watch.js";
 import { startMergeWhenGreen } from "./shell/merge-when-green.js";
 import { mountUsageRings } from "./shell/usage-rings.js";
+import { startSummon } from "./shell/summon.js";
 
 // The Electron shell exposes window.phrenDesktop; in a browser it is absent.
 const shell = window.phrenDesktop;
@@ -92,6 +93,7 @@ store.subscribe(() => {
 // and the last look behind Home's Checks strip.
 startCiWatch({ notify: shell ? (title, body) => shell.notify(title, body) : null, enabled: () => notifyEnabled() && ciNotifyEnabled() });
 startMergeWhenGreen({ notify: shell ? (title, body) => shell.notify(title, body) : null });
+startSummon(shell);
 
 connectStore();
 // Mount Agents first (keys.js binds to its sidebar), then open the section the
