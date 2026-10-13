@@ -16,7 +16,7 @@ import { findPane, knownPanes, paneIdentity, paneForCodexSession, servers, snaps
 import { hookOutput, TOOL_HOOK_BUDGET_MS } from "./hook-fast.js";
 import { underCodexDaemon } from "./codex-daemon.js";
 import { codexAutoReview } from "./codex-review-mode.js";
-import { claudeHeadlessThread, codexForeignThread } from "./codex-thread-origin.js";
+import { claudeHeadlessThread, codexForeignThread } from "./thread-origin.js";
 import { terminalPaneFromEnv, terminalProvider } from "./terminal.js";
 import { readPaneText } from "./pane-text.js";
 import { capturesChanges, ToolChanges } from "./changes.js";
@@ -1387,7 +1387,7 @@ export class AgentHooks {
         // `/new` or `/resume` in a pane on the Hook's own Codex server: follow
         // the TUI to its new thread. Only a callback trusted to name its pane.
         // A prompt or a turn's end also moves a server a nested `codex exec`
-        // had taken (before codex-thread-origin.ts) back to the TUI's thread.
+        // had taken (before thread-origin.ts) back to the TUI's thread.
         if (["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event)) && target.source === "codex" && !daemon) codexServers.follow(target.server, target.pane, target.session);
         if (body.event === "PreCompact") { this.startCompacting(target); res.end("{}"); return; }
         if (["SessionStart", "UserPromptSubmit", "Stop"].includes(String(body.event))) this.stopCompacting(target);
