@@ -5,9 +5,10 @@ import { isShown, watchShown } from "./shown.js";
 import { hookGet, hookPost, readRepoFile } from "./api.js";
 import { projectOf } from "./shell/store.js";
 import { ADDED_FILE_MAX_LINES, additionHunks, parsePatch, wordSegments } from "./patch.js";
-import { branchProblem, capitalize, checksSummary, durationText, groupRuns, hostTerms, localForRemote, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, syncAction, tokenPage, trackingText } from "./git-review.js";
+import { branchProblem, capitalize, checksSummary, durationText, fixItPrompt, groupRuns, hostTerms, localForRemote, mergeAvailability, mergeMethods, pipelineSegments, pullStanding, relativeTime, syncAction, tokenPage, trackingText } from "./git-review.js";
 import { announceGitChange } from "./diff-doc.js";
 import { loadBranchTasks, renderBranchTasks } from "./branch-tasks.js";
+import { openLaunchSheet } from "./shell/launch.js";
 
 // The phone's Changes tabs, minus Working tree (the Files pane owns that here).
 // "Session" is what this agent changed, from the Hook's per-call capture.
@@ -269,6 +270,9 @@ const CSS = `
 .chg-knows-badge{flex:none;border:none;background:rgba(138,170,220,.14);color:var(--accent);font:600 11px system-ui,sans-serif;border-radius:999px;padding:2px 7px;cursor:pointer}
 .chg-knows-badge:hover{background:var(--raised)}
 @media (prefers-reduced-motion:reduce){.chg-knows-chev{transition:none}}
+.chg-fixit{display:flex;align-items:center;gap:10px;margin:8px 0 0}
+.chg-fixit .chg-btn{flex:none}
+.chg-fixit-sub{min-width:0;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chg-seen{margin:8px 0 0;border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow:hidden}
 .chg-seen-h{display:flex;align-items:center;gap:8px;padding:7px 10px;color:var(--text);font:600 12.5px system-ui,sans-serif}
 .chg-seen-item{padding:8px 10px;border-top:1px solid var(--border)}
@@ -1400,6 +1404,7 @@ export function openChanges(el, ctx) {
     const failing = runs.filter((r) => r.state === "failing");
     if (failing.length) {
       void loadSeen(p, failing);
+      if (ctx.child && p.head) box.appendChild(renderFixIt(p, failing));
       if (state.seen.results.length) box.appendChild(renderSeen(failing));
     }
     return box;
@@ -1436,6 +1441,22 @@ export function openChanges(el, ctx) {
     if (state.seen.key !== key) return;
     state.seen.results = results;
     if (results.length && !typing()) render();
+  }
+
+  // A new worker on this branch with the failures and what Phren remembers,
+  // through the launch sheet so the harness and computer can still change.
+  function renderFixIt(p, failing) {
+    const row = div("chg-fixit");
+    const go = button("Fix it", "chg-btn commit", () => {
+      const t = terms();
+      openLaunchSheet({
+        project: projectOf(ctx.child), computer, title: `Fix ${t.ref}${p.number}`, label: `Fix ${t.ref}${p.number}`,
+        prompt: fixItPrompt({ ref: t.ref, number: p.number, title: p.title, head: p.head, url: p.url, failing, remembered: state.seen.results }),
+      });
+    });
+    go.title = "Launch an agent on this branch with the failing checks";
+    row.append(go, span("chg-fixit-sub", `Launch an agent on ${p.head} with ${failing.length === 1 ? "the failure" : `the ${failing.length} failures`}${state.seen.results.length ? " and what Phren remembers" : ""}`));
+    return row;
   }
 
   function renderSeen(failing) {
