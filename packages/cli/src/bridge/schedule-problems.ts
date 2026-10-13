@@ -16,6 +16,10 @@ export async function scheduleProblems(schedule: Schedule, project: string, opti
   store: string; owned: boolean; locate?: (project: string) => Promise<string | undefined>;
 }): Promise<string[]> {
   const problems: string[] = [];
+  // A heredoc slip once saved the prompt ">" and the schedule fired an empty brief every hour.
+  if ((schedule.prompt.match(/[\p{L}\p{N}]/gu) ?? []).length < 3) {
+    problems.push("The prompt has no words in it, so every run would start with an empty brief. Set a prompt with --prompt or --prompt-file.");
+  }
   const machines = listMachines(options.store);
   if (!options.owned && machines.ok && !Object.keys(machines.data).some(name => canonicalComputer(name) === canonicalComputer(schedule.computer))) {
     problems.push(`Computer "${schedule.computer}" is not a machine in this store, so no Hook will run this schedule.`);
